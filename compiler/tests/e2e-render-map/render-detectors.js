@@ -99,6 +99,19 @@ export const CONTENT_CANDIDATE_SELECTOR = [
   "img", "picture", "video", "audio", "svg", "canvas", "iframe", "object", "embed",
 ].join(",");
 
+/**
+ * ⛑ S426 fix round (finding 3) — THE SELECTORS TWO READERS SHARE, HOISTED SO THE SHARING IS
+ * STRUCTURAL RATHER THAN DOCUMENTARY.
+ *
+ * `elementCarriesContent` asks these of a PARENT ("does this element hold content?") and
+ * `CONSUMED_CHILD_SELECTOR` asks the same strings of a region's CHILD nodes ("did the each
+ * produce the rows this parent consumes?"). They were hand-copied, with a comment saying
+ * they must stay in step and nothing enforcing it — which is this very bug's own shape
+ * (a definition duplicated, then one copy updated). One constant, two readers.
+ */
+const OPTION_SELECTOR = "option";
+const MEDIA_SOURCE_SELECTOR = "source[src], source[srcset], img[src], img[srcset]";
+
 function attr(el, name) {
   return el && typeof el.getAttribute === "function" ? el.getAttribute(name) : null;
 }
@@ -196,7 +209,7 @@ export function elementCarriesContent(el) {
     case "textarea":
       return nonEmpty(el.value) || nonEmpty(el.textContent);
     case "select":
-      return typeof el.querySelector === "function" && el.querySelector("option") != null;
+      return typeof el.querySelector === "function" && el.querySelector(OPTION_SELECTOR) != null;
     case "progress":
     case "meter":
       return nonEmpty(attr(el, "value"));
@@ -209,7 +222,7 @@ export function elementCarriesContent(el) {
         nonEmpty(attr(el, "src")) ||
         nonEmpty(attr(el, "srcset")) ||
         (typeof el.querySelector === "function" &&
-          el.querySelector("source[src], source[srcset], img[src], img[srcset]") != null)
+          el.querySelector(MEDIA_SOURCE_SELECTOR) != null)
       );
     case "svg":
       return el.children != null && el.children.length > 0;
@@ -226,26 +239,70 @@ export function elementCarriesContent(el) {
 }
 
 /**
- * ⛑ S426 (g-d6-region-content-ignores-the-parent-that-confers-content-…) — THE SELECTOR
- * EACH CONFERRING ANCESTOR APPLIES TO ITS DESCENDANTS.
+ * ⛑ S426 (g-d6-region-content-ignores-the-parent-that-confers-content-…) — THE CHILD EACH
+ * CONSUMING ANCESTOR EXISTS TO HOLD.
  *
- * Three arms of `elementCarriesContent` make an element content-bearing because of what
- * it CONTAINS, not because of its own attributes: `select` (`:querySelector("option")`),
- * `picture`/`video`/`audio` (a `<source>`/`<img>` with `src`/`srcset`) and `svg` (any
- * element child). These are copied from there and MUST stay in step with it — this table
- * is the same definition read from the descendant's side, not a second opinion about what
- * counts as content.
+ * ⚑ THE FIRST VERSION OF THIS TABLE STATED ITS INVARIANT AS "mirror the definition that
+ * makes the parent content-bearing at BODY scope", AND THAT WAS WRONG, NOT MERELY
+ * INCOMPLETE. It was read off a sample of five (`select`, `picture`, `video`, `audio`,
+ * `svg`) in which two different questions happen to coincide. `<datalist>` separates them
+ * and proves which one is the principle:
+ *   - `elementCarriesContent(<datalist>)` is **false** — there is no arm for it, so there is
+ *     nothing to "mirror from the descendant's side";
+ *   - a body holding ONLY a `<datalist>` of options has `hasRenderedContent` **false**, and
+ *     THAT IS CORRECT AND MUST STAY FALSE: a datalist is an autocomplete source, not page
+ *     content. Giving it a `CONTENT_CANDIDATE_SELECTOR` entry or an `elementCarriesContent`
+ *     arm would score a datalist-only page as a rendered page. (Pinned by test.)
+ * Yet an `<each>` inside a `<datalist>` that produced its `<option>` rows plainly DID ITS
+ * JOB, and reddening it is the same false positive as the other five.
  *
- * `svg` is deliberately absent: its conferring test is "any element child", which is not a
- * selector but a node-kind, and it is applied separately in
- * `confersContentToConferringAncestor`.
+ * SO THE QUESTION THIS TABLE ANSWERS IS NOT "does this node make its ancestor content-
+ * bearing at body scope?" BUT:
+ *
+ *     **is this node the kind of child its ancestor CONSUMES — i.e. did the each produce
+ *     the rows that parent exists to hold?**
+ *
+ * For `select`/`picture`/`video`/`audio`/`svg` that coincides with `elementCarriesContent`,
+ * which is why the weaker reading survived a five-element sample. For `datalist`, `map`,
+ * `colgroup` and `<track>` there is deliberately NO body-scope counterpart, and there must
+ * not be one: BODY scope asks "did the page show anything?" (a datalist shows nothing)
+ * while REGION scope asks "did this each produce its rows?" (it did). Two different
+ * questions, two different answers, no contradiction — and region scope is only ever
+ * consulted when the body is already non-empty (`runDetectors`: `bodyEmpty ? null : …`).
+ *
+ * ⚑ A `Map`, NOT AN OBJECT LITERAL, AND THAT IS LOAD-BEARING. An object literal is read
+ * through `Object.prototype`, so a region whose parent's tag name collides with a prototype
+ * member returns a truthy non-selector and this detector THROWS instead of classifying —
+ * which the file header says must never happen. MEASURED on the object-literal version:
+ * `<constructor>` threw from `matches()` (`'function Object() { [native code] }' is not a
+ * valid selector`) and `<__proto__>` threw from `querySelectorAll()` (`'[object Object]'`).
+ * Exactly those two and no others, because the lookup lowercases the tag first, so only the
+ * all-lowercase members of `Object.prototype` survive as keys. A Map has no prototype chain
+ * to fall through and is immune to the whole class by construction, not by enumeration.
+ *
+ * `svg` is deliberately absent: its conferring test is "any element child", a node-kind and
+ * not a selector, applied separately in `confersContentToConsumingAncestor`.
  */
-const CONFERRED_CONTENT_SELECTOR = {
-  select: "option",
-  picture: "source[src], source[srcset], img[src], img[srcset]",
-  video: "source[src], source[srcset], img[src], img[srcset]",
-  audio: "source[src], source[srcset], img[src], img[srcset]",
-};
+const CONSUMED_CHILD_SELECTOR = new Map([
+  // Mirrors an `elementCarriesContent` arm (shared constant, finding 3).
+  ["select", OPTION_SELECTOR],
+  ["picture", MEDIA_SOURCE_SELECTOR],
+  // ⚑ `track[src]` has NO body-scope counterpart — `elementCarriesContent` counts only
+  // `source`/`img` for a `<video>`, and must keep doing so (a subtitle track is not a
+  // reason to call a src-less video "content"). But `<track>` is named in the content model
+  // of `<video>`/`<audio>`, an each over a list of subtitle languages is ordinary scrml, and
+  // such an each plainly produced its rows. Attribute-filtered like its `source` siblings
+  // because a `<track>` with no `src` loads nothing.
+  ["video", `${MEDIA_SOURCE_SELECTOR}, track[src]`],
+  ["audio", `${MEDIA_SOURCE_SELECTOR}, track[src]`],
+  // Region scope ONLY — see the datalist argument above. Each of these parents has a content
+  // model that is WHOLLY these text-free children, and none of them renders page content of
+  // its own. Unfiltered, exactly like `select`'s own `"option"`: the question is whether the
+  // each produced rows, not whether each row is individually useful.
+  ["datalist", OPTION_SELECTOR],
+  ["map", "area"],
+  ["colgroup", "col"],
+]);
 
 /** Is `el`, or a RENDERED descendant of it, a match for `selector`? */
 function matchesSelfOrRenderedDescendant(el, selector) {
@@ -259,23 +316,58 @@ function matchesSelfOrRenderedDescendant(el, selector) {
 }
 
 /**
- * ⛑ S426 — DOES THIS REGION NODE SUPPLY THE CONTENT THAT MAKES A CONFERRING ANCESTOR
- * CONTENT-BEARING?
+ * ⛑ S426 — DID THIS REGION NODE PRODUCE THE ROWS A CONSUMING ANCESTOR EXISTS TO HOLD?
  *
  * THE DEFECT: `regionScopedEmptiness` asks `nodesHaveRenderedContent(region.nodes)`, which
  * decides content from the region's OWN nodes — but `emitEachMountHtml` places the fence at
- * the each's SOURCE position, so for an `<each>` inside a `<select>` / `<picture>` /
- * `<video>` / `<audio>` / `<svg>` the rows land INSIDE that parent while the element that
- * COUNTS them sits OUTSIDE the region. Neither `option` nor `source` is in
- * `CONTENT_CANDIDATE_SELECTOR`, and a `<circle>` is not either — so the region measured
- * EMPTY while the page rendered correctly and D6 scored `renders-empty-with-data`: a RED
- * against the compiler on a CORRECT render. Reproduced on `f8317399` for all three shapes.
+ * the each's SOURCE position, so for an `<each>` inside a `<select>` / `<datalist>` /
+ * `<picture>` / `<video>` / `<audio>` / `<svg>` / `<map>` / `<colgroup>` the rows land INSIDE
+ * that parent while the element that CONSUMES them sits OUTSIDE the region. Neither `option`
+ * nor `source` is in `CONTENT_CANDIDATE_SELECTOR`, and `circle` / `area` / `col` / `track`
+ * are not either — so the region measured EMPTY while the page rendered correctly and D6
+ * scored `renders-empty-with-data`: a RED against the compiler on a CORRECT render.
+ * Reproduced on `f8317399`, and `datalist` reproduced again on the first landed fix.
  *
- * ⚠ THE FIX IS **NOT** TO ADD `option` / `source` TO `CONTENT_CANDIDATE_SELECTOR`. That list
- * is consumed by `hasRenderedContent` at BODY scope too, so widening it would make a bare
- * `<option value="1"></option>` count as a whole page's rendered content — re-opening the
- * S419 one-definition-of-"not rendered" class from the other side. This mirrors the parent's
- * own definition at REGION scope instead, so body scope is untouched.
+ * ⚠ THE FIX IS **NOT** TO ADD `option` / `source` / `area` TO `CONTENT_CANDIDATE_SELECTOR`.
+ * That list is consumed by `hasRenderedContent` at BODY scope too, so widening it would make
+ * a bare `<option value="1"></option>` — or a `<datalist>`-only page — count as a rendered
+ * page, re-opening the S419 one-definition-of-"not rendered" class from the other side. The
+ * question is asked at REGION scope only, so body scope is untouched (pinned by test).
+ *
+ * ⚑ THE POPULATION WAS ENUMERATED ONCE, BY EXECUTION, RATHER THAN DISCOVERED ONE INSTANCE AT
+ * A TIME (six were found that way: select, picture, video, audio, svg, datalist). The search:
+ * every HTML parent whose content model is wholly ELEMENT children that carry no text of
+ * their own AND are not in `CONTENT_CANDIDATE_SELECTOR` — because a text-bearing child is
+ * already saved by the text half, and a candidate child by the candidate half. 22 shapes were
+ * built and measured; the disposals are recorded so the next reader does not re-run them:
+ *   COVERED  select>option · datalist>option · picture/video/audio>source,img · video/audio>
+ *            track[src] · svg>any element · map>area · colgroup>col
+ *   DISPOSED optgroup — covered TRANSITIVELY by this ancestor walk when inside a select or
+ *              datalist (measured green); standalone it is invalid HTML no browser renders.
+ *            table>col without a colgroup — MEASURED UNREACHABLE: the parser hoists the
+ *              `<col>` OUT of the table (`<col><table><!--fence--><!--/fence-->…`), so the
+ *              region really is empty and the red is correct.
+ *            object>param — `<param>` is obsolete, removed from the HTML Living Standard.
+ *            iframe/embed — element children are FALLBACK content, never rendered when the
+ *              resource loads; they are not consumed rows.
+ *            slot — shadow-DOM only, and scrml emits no shadow roots; fallback children are
+ *              ordinary content the existing halves already handle.
+ *            link/meta in body — not page content in any sense, and `regionScopedEmptiness`
+ *              only ever walks the BODY, so `<head>` is out of reach regardless.
+ *            template — MEASURED: no region is collected at all (children live in `.content`),
+ *              and it is already in UNRENDERED_CONTAINER_TAGS.
+ *            fieldset · form · ruby · dl · figure · details · math>mi/mn — MEASURED ALREADY
+ *              GREEN: their children carry text or are content candidates.
+ *   ⚠ THE ONE CONTESTABLE CALL: `math` with a TEXT-FREE child (`<mspace>`) measures as a
+ *     false red and is deliberately NOT covered. MathML that carries meaning carries text
+ *     (`<mn>2</mn>`, already green); an each producing only spacers renders nothing a reader
+ *     could see, so the red is defensible. Revisit if a corpus app ever emits one.
+ *
+ * ⚠ AND IT NEVER ASKS `elementCarriesContent(ancestor)`, WHICH IS THE FAIL-OPEN FORM. The
+ * placeholder `<option value="">Choose…</option>` that real corpus selects carry sits
+ * OUTSIDE the region and already makes the `<select>` content-bearing BEFORE any seed — so
+ * "is the ancestor content-bearing?" would score a GENUINELY EMPTY fence inside such a
+ * `<select>` as green. The question is only ever whether the REGION'S OWN NODES produced.
  *
  * ⚠ AND IT NEVER ASKS `elementCarriesContent(ancestor)`, WHICH IS THE FAIL-OPEN FORM. The
  * placeholder `<option value="">Choose…</option>` that real corpus selects carry sits
@@ -285,7 +377,7 @@ function matchesSelfOrRenderedDescendant(el, selector) {
  *
  * ⚑ THE WALK IS OVER ANCESTORS, NOT THE PARENT, and that is measured rather than assumed.
  * The dispatching hypothesis said `node.parentNode`; `select` and `picture`/`video`/`audio`
- * confer via `querySelector`, which is a DESCENDANT query, so the conferring element can be
+ * consume via `querySelector`, which is a DESCENDANT query, so the consuming element can be
  * any ancestor. Each of these scored RED on a correct render with a parent-only rule, i.e.
  * the parent-only fix re-creates its own class one wrapper away:
  *   `<select><optgroup>…each…</optgroup></select>`
@@ -303,12 +395,14 @@ function matchesSelfOrRenderedDescendant(el, selector) {
  * red on a correct render, which is this same defect one level down; the definition's intent
  * is "a non-empty drawing", and a `<circle>` inside a `<g>` is drawing.
  */
-function confersContentToConferringAncestor(node) {
+function confersContentToConsumingAncestor(node) {
   if (!node || node.nodeType !== ELEMENT_NODE) return false;
   for (let a = node.parentElement; a; a = a.parentElement) {
     const tag = String(a.tagName ?? "").toLowerCase();
     if (tag === "foreignobject") return false;
-    const selector = CONFERRED_CONTENT_SELECTOR[tag];
+    // `.get` on a Map — never `table[tag]`, which reads through Object.prototype and hands
+    // a non-selector to `matches()`/`querySelectorAll()`. See CONSUMED_CHILD_SELECTOR.
+    const selector = CONSUMED_CHILD_SELECTOR.get(tag);
     if (selector && matchesSelfOrRenderedDescendant(node, selector)) return true;
     // `svg`: any element child is a non-empty drawing (elementCarriesContent `case "svg"`).
     // The node is already known to be an element and already known to be rendered.
@@ -455,7 +549,8 @@ function collectCommentNodes(root) {
  * ⛑ S426 — THERE IS A THIRD HALF, AND IT IS NOT ABOUT THE REGION'S OWN SUBTREE. A region
  * node can be content by CONFERRING it on an ancestor that lies outside the region — an
  * `<option>` inside a `<select>`, a `<source>` inside a `<picture>`/`<video>`/`<audio>`, a
- * shape inside an `<svg>`. See `confersContentToConferringAncestor`.
+ * shape inside an `<svg>`, an `<option>` inside a `<datalist>`. See
+ * `confersContentToConsumingAncestor`.
  */
 function nodesHaveRenderedContent(nodes) {
   if (!Array.isArray(nodes)) return false;
@@ -477,11 +572,11 @@ function nodesHaveRenderedContent(nodes) {
     ) {
       return true;
     }
-    // ⛑ S426 — the node may instead be what CONFERS content on an ancestor that the region
-    // does not contain (an `<option>` inside `<select>`, a `<source>` inside `<video>`, a
-    // shape inside `<svg>`). Asked BEFORE the descendant-candidate loop so it is reached
-    // even for a node with no `querySelectorAll`.
-    if (confersContentToConferringAncestor(n)) return true;
+    // ⛑ S426 — the node may instead be a row that an ancestor OUTSIDE the region consumes
+    // (an `<option>` inside `<select>`/`<datalist>`, a `<source>`/`<track>` inside
+    // `<video>`, a shape inside `<svg>`, an `<area>` inside `<map>`). Asked BEFORE the
+    // descendant-candidate loop so it is reached even for a node with no `querySelectorAll`.
+    if (confersContentToConsumingAncestor(n)) return true;
     if (typeof n.querySelectorAll !== "function") continue;
     const els = n.querySelectorAll(CONTENT_CANDIDATE_SELECTOR);
     for (let j = 0; j < els.length; j++) {

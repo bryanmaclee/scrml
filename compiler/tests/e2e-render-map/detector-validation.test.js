@@ -952,6 +952,33 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
       markup: '<svg viewBox="0 0 10 10"><circle cx="9" cy="9" r="1"></circle>{R}</svg>',
       rows: '<circle cx="1" cy="1" r="1"></circle><circle cx="5" cy="5" r="1"></circle>',
     },
+
+    // ===== FIX ROUND — the parents with NO body-scope counterpart, deliberately. =====
+    // These four are why the table's invariant had to be restated (see
+    // CONSUMED_CHILD_SELECTOR): `elementCarriesContent` has no arm for `datalist`, `map` or
+    // `colgroup`, and counts no `<track>` for a `<video>` — and it MUST NOT, which the
+    // BODY-SCOPE pins at the end of this block enforce. The each still did its job.
+    //
+    // ⚑ Each of these markups carries its own CHROME, because the parent is not itself
+    // content-bearing: without chrome the body renders nothing, D6 answers at `body` scope
+    // and the fail-open control below would prove nothing about region scope. That is the
+    // same mistake this block already made once, recorded above.
+    "an each of <option>s inside a <datalist>": {
+      markup: '<h1>Search</h1><input list="cities"><datalist id="cities">{R}</datalist>',
+      rows: '<option value="Paris"></option><option value="Rome"></option>',
+    },
+    "an each of <area>s inside a <map>": {
+      markup: '<img src="a.png" usemap="#m"><map name="m">{R}</map>',
+      rows: '<area shape="rect" coords="0,0,1,1" href="/a">',
+    },
+    "an each of <col>s inside a <colgroup>": {
+      markup: "<table><colgroup>{R}</colgroup><tbody><tr><td>x</td></tr></tbody></table>",
+      rows: '<col span="2">',
+    },
+    "an each of <track>s inside a <video>": {
+      markup: '<video><source src="fallback.mp4">{R}</video>',
+      rows: '<track src="en.vtt" kind="captions"><track src="fr.vtt" kind="captions">',
+    },
   };
   for (const [label, { markup, rows }] of Object.entries(CONFERRING_PARENTS)) {
     test(`S426: D6 is QUIET when ${label} rendered rows`, () => {
@@ -1100,6 +1127,95 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     });
   }
 
+  // ⚑ THE ENUMERATION'S DISPOSALS, PINNED. The population was enumerated once by execution
+  // rather than discovered one instance at a time (six were found that way). Every shape
+  // below was measured, judged OUT of scope, and must therefore STILL FIRE — so the
+  // enumeration is a gate and not a paragraph. If a later round decides one of these really
+  // is a consumed row, the test that reds names it precisely.
+  const ENUMERATED_AND_DISPOSED = {
+    // Element children of a `<slot>` are shadow-DOM fallback content, and scrml emits no
+    // shadow roots. An each of empty `<span>`s is an empty render.
+    "empty <span>s inside a <slot>": { markup: "<h1>App</h1><slot>{R}</slot>", rows: "<span></span>" },
+    // `<iframe>`/`<embed>` element children are FALLBACK content, never rendered when the
+    // resource loads. Not consumed rows.
+    "fallback content inside an <iframe>": { markup: "<h1>App</h1><iframe>{R}</iframe>", rows: "<span></span>" },
+    // `<param>` is obsolete — removed from the HTML Living Standard.
+    "<param>s inside an <object>": {
+      markup: '<h1>App</h1><object data="a.swf">{R}</object>', rows: '<param name="q" value="1">',
+    },
+    // Head metadata is not page content in any sense. (`regionScopedEmptiness` only ever
+    // walks the BODY, so a real `<head>` each is out of reach regardless.)
+    "<link>/<meta> in the body": {
+      markup: "<h1>App</h1>{R}", rows: '<link rel="stylesheet" href="a.css"><meta name="x" content="1">',
+    },
+    // ⚠ THE ONE CONTESTABLE DISPOSAL, recorded as such. MathML that carries meaning carries
+    // TEXT (`<math><mn>2</mn>` measures green already, via the text half); an each producing
+    // only spacers renders nothing a reader could see. Revisit if a corpus app emits one.
+    "text-free <mspace> inside <math>": {
+      markup: "<h1>App</h1><math>{R}</math>", rows: '<mspace width="1em"></mspace>',
+    },
+    // MEASURED UNREACHABLE, and this one is a parser fact, not a judgement: a `<col>` with no
+    // `<colgroup>` is HOISTED OUT of the table by the HTML parser, leaving the fence genuinely
+    // empty — so the red is CORRECT. `<colgroup><col>` is covered above; this is not.
+    "a <col> inside a <table> with NO <colgroup>": {
+      markup: "<table>{R}<tbody><tr><td>x</td></tr></tbody></table>", rows: '<col span="2">',
+    },
+    // A standalone `<optgroup>` is invalid HTML no browser renders. Inside a `<select>` or
+    // `<datalist>` it is covered TRANSITIVELY by the ancestor walk (pinned separately).
+    "an <option> inside a standalone <optgroup>": {
+      markup: '<h1>App</h1><optgroup label="g">{R}</optgroup>', rows: '<option value="1"></option>',
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(ENUMERATED_AND_DISPOSED)) {
+    test(`S426 enumeration: OUT of scope, still FIRES — ${label}`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      expect(seededDetect(filled).state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // `<optgroup>` inside a `<datalist>`, the transitive case the disposal above relies on.
+  test("S426 enumeration: <optgroup> is covered TRANSITIVELY inside a <datalist>", () => {
+    const markup = `<h1>Search</h1><datalist id="c"><optgroup label="g">${FENCE("a_1", '<option value="1"></option>')}</optgroup></datalist>`;
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+    expect(seededDetect(markup).state).toBe("renders-clean");
+  });
+
+  // ⛑ FIX ROUND (finding 2) — A HOSTILE TAG NAME MADE THE DETECTOR **THROW** INSTEAD OF
+  // CLASSIFY, which this file's header forbids outright ("these detectors CLASSIFY a failure;
+  // they NEVER hide one"). The table was an object literal, so the tag lookup read through
+  // `Object.prototype` and handed a truthy NON-selector to `matches()`/`querySelectorAll()`.
+  // MEASURED before the fix: `<constructor>` threw `'function Object() { [native code] }' is
+  // not a valid selector` from `matches`, and `<__proto__>` threw `'[object Object]'` from
+  // `querySelectorAll` — a SECOND instance the review did not name, and from a different call
+  // site. Exactly those two of the eight below, because the lookup lowercases the tag first,
+  // so only the all-lowercase members of `Object.prototype` survive as keys.
+  // The table is a `Map` now, which has no prototype chain to fall through: immune by
+  // construction rather than by enumerating the hostile names. This test proves the class is
+  // closed, and it is the one assertion here that a `Object.hasOwn` patch would also pass —
+  // which is fine; what must never regress is that NONE of these throws.
+  test("S426 finding 2: a prototype-colliding tag name CLASSIFIES, never throws", () => {
+    for (const tag of [
+      "constructor", "__proto__", "toString", "valueOf",
+      "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "prototype",
+    ]) {
+      const markup = `<h1>App</h1><${tag}>${FENCE("a_1", "<b></b>")}</${tag}>`;
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      // The assertion is that this RETURNS rather than throwing...
+      const verdict = regionScopedEmptiness(body);
+      // ...and that it returns the CORRECT answer: `<b></b>` is an empty row under a tag that
+      // consumes nothing, so the region is empty and D6 fires. A `return false` guard that
+      // accidentally suppressed the whole region would pass a throws-check and fail this.
+      expect(verdict.allLeavesEmpty).toBe(true);
+      expect(seededDetect(markup).state).toBe("renders-empty-with-data");
+    }
+  });
+
   // ⚑ THE PINS THAT FORBID THE EASY FIX. Widening `CONTENT_CANDIDATE_SELECTOR` with
   // `option` / `source` would green every QUIET case above AND make each of these bodies
   // count as a rendered page, which is the S419 class
@@ -1112,6 +1228,24 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     "an <option> alone inside an empty-rendering wrapper": '<div><option value="1"></option></div>',
     "a select with no options (the seeded options loop rendered nothing)": "<select></select>",
     "a src-less video holding a src-less source": "<video><source></video>",
+    // ⚑ FIX ROUND — THE PIN THAT STOPS THE NEXT PERSON "FIXING" DATALIST THE WRONG WAY.
+    // A `<datalist>` is an autocomplete SOURCE, not page content: a page whose entire output
+    // is a datalist of options shows the reader nothing, so this MUST stay false. That is
+    // precisely why datalist gets no `CONTENT_CANDIDATE_SELECTOR` entry and no
+    // `elementCarriesContent` arm, and why the region-scope question had to be restated as
+    // "did the each produce the rows this parent consumes?" rather than "does this node make
+    // its parent content-bearing?". Both answers are right at their own scope.
+    "a datalist holding options (an autocomplete source, not page content)":
+      '<datalist id="cities"><option value="Paris"></option><option value="Rome"></option></datalist>',
+    "a map holding areas (referenced by usemap, renders nothing itself)":
+      '<map name="m"><area shape="rect" coords="0,0,1,1" href="/a"></map>',
+    "a colgroup holding cols (layout only, no content of its own)":
+      '<table><colgroup><col span="2"></colgroup></table>',
+    "a video whose only child is a track (a subtitle file is not media)":
+      '<video><track src="en.vtt" kind="captions"></video>',
+    "a bare area": '<area shape="rect" coords="0,0,1,1" href="/a">',
+    "a bare col": '<col span="2">',
+    "a bare track": '<track src="en.vtt" kind="captions">',
   };
   for (const [label, markup] of Object.entries(BODY_SCOPE_RENDERS_NOTHING)) {
     test(`S426: BODY scope unchanged — ${label} still renders nothing`, () => {
