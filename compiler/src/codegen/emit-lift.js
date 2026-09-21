@@ -42,6 +42,35 @@ function currentLiftReconcileCtx() {
   return n > 0 ? _scrml_lift_reconcile_ctx_stack[n - 1] : null;
 }
 
+// s427-lift-body-lowering — two more module-level stacks (same single-threaded
+// codegen pattern as the reconcile ctx stack above).
+//
+// 1. The DECLARED-NAME scope of the logic body a lift is emitted from. A logic
+//    block inside lifted markup (`lift <li>${ let c = 0; for (…) { c = c + 1 … } }</li>`)
+//    is lowered by emitCreateElementFromMarkup, which has no options channel back to
+//    the body that contains the lift; without the enclosing scope a keywordless
+//    `c = c + 1` (a `tilde-decl`) cannot be told from a declaration and lowers to a
+//    fresh `const c = c + 1` — a TDZ ReferenceError at boot. The emitter of a lift
+//    pushes its scope's set; a markup logic block seeds its own copy from the top.
+// 2. NON-KEYED mode. While set, every reactive `for … lift` lowers as the plain
+//    loop instead of a keyed reconcile — see forLiftTreeHasImpureLoop and the Step
+//    4b mixed-hoist guard in emit-reactive-wiring.ts. A counter, not a flag, so
+//    nested pushes compose.
+const _scrml_lift_scope_names_stack = [];
+export function pushLiftScopeNames(set) { _scrml_lift_scope_names_stack.push(set ?? null); }
+export function popLiftScopeNames() { _scrml_lift_scope_names_stack.pop(); }
+/** A fresh block-scoped copy of the innermost pushed scope (empty when none). */
+export function liftScopeNamesCopy() {
+  const n = _scrml_lift_scope_names_stack.length;
+  const top = n > 0 ? _scrml_lift_scope_names_stack[n - 1] : null;
+  return new Set(top ?? []);
+}
+
+let _scrml_lift_non_keyed_depth = 0;
+export function pushLiftNonKeyed() { _scrml_lift_non_keyed_depth++; }
+export function popLiftNonKeyed() { _scrml_lift_non_keyed_depth--; }
+export function liftNonKeyedActive() { return _scrml_lift_non_keyed_depth > 0; }
+
 // S293 — item-derived-local REPLAY prelude for per-item effect / handler wraps.
 //
 // The S288 render path (emitForStmtWithContainer) re-resolves ancestor items by
@@ -1836,6 +1865,9 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // children were silently dropped, causing `lift <ul>${ for (r of rows) {
         // lift <li>${r.name}/ }}</ul>` to emit a bare <ul> with NO <li> children.
         if (child.body) {
+          // s427-lift-body-lowering — the block's declared-name scope, seeded from
+          // the body that emits this lift (see pushLiftScopeNames).
+          const _blockNames = liftScopeNamesCopy();
           for (const logicChild of child.body) {
             if (!logicChild) continue;
             // Phase 4d Step 8: ExprNode-only (bare-expr.expr deleted)
@@ -1878,21 +1910,21 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
               }
             } else if (logicChild.kind === "lift-expr") {
               // Nested ${ lift <inner/> } inside markup — route to current element
-              const code = emitLiftExpr(logicChild, { containerVar: elVar });
+              const code = emitLiftExpr(logicChild, { containerVar: elVar, declaredNames: _blockNames });
               if (code) lines.push(code);
             } else if (logicChild.kind === "for-stmt") {
               // ${ for (r of @rows) { lift <li>...</li> } } — route inner lifts to elVar
-              const code = emitForStmtWithContainer(logicChild, elVar);
+              const code = emitForStmtWithContainer(logicChild, elVar, { declaredNames: _blockNames });
               if (code) lines.push(code);
             } else if (logicChild.kind === "if-stmt") {
               // ${ if (cond) { lift <inner/> } } — recurse with elVar as container.
               // Walk consequent/alternate, routing lift-expr/for-stmt to elVar;
               // emit a JS if/else around the result.
-              const code = emitIfStmtWithContainer(logicChild, elVar);
+              const code = emitIfStmtWithContainer(logicChild, elVar, { declaredNames: _blockNames });
               if (code) lines.push(code);
             } else {
               // Bare statement (e.g. `const x = f()` inside ${...}) — pass through
-              const code = emitLogicNode(logicChild, {});
+              const code = emitLogicNode(logicChild, { declaredNames: _blockNames });
               if (code) lines.push(code);
             }
           }
@@ -2173,6 +2205,21 @@ function splitChildTagSegments(content) {
 export function hasFragmentedLiftBody(body) {
   if (!body || body.length < 2) return false;
   const hasLift = body.some(n => n && n.kind === "lift-expr");
+  // s427-lift-body-lowering — emitConsolidatedLift, when the FIRST lift carries a
+  // complete markup AST, emits the statements BEFORE that lift and the lift itself,
+  // and nothing after it. A complete markup lift has no fragments by definition, so
+  // anything after it is a real statement (`n = n + 1`, a second `lift`, a call).
+  // Routing such a body to the consolidated path dropped those statements silently
+  // at exit 0 (`lift <li>${n}</li>; n = n + 1` rendered `0` on every row). The
+  // general body path lowers every statement, so it is the only correct route.
+  const firstLiftIdx = body.findIndex(n => n && n.kind === "lift-expr");
+  const firstLift = firstLiftIdx === -1 ? null : body[firstLiftIdx];
+  if (
+    firstLift && firstLift.expr && firstLift.expr.kind === "markup" && firstLift.expr.node &&
+    body.slice(firstLiftIdx + 1).some(n => n)
+  ) {
+    return false;
+  }
   // Pattern 1: html-fragment node (Phase 4) or legacy bare-expr with HTML chars
   const hasBareHtmlFragment = body.some(n => n && (
     n.kind === "html-fragment" ||
@@ -2186,6 +2233,155 @@ export function hasFragmentedLiftBody(body) {
   const hasTildeDeclFragment = body.some(n => n && n.kind === "tilde-decl" &&
     typeof n.name === "string" && /^[a-z][a-z0-9\-_:]*$/.test(n.name));
   return hasLift && (hasBareHtmlFragment || hasTildeDeclFragment);
+}
+
+// ---------------------------------------------------------------------------
+// s427-lift-body-lowering — keyed reconciliation needs a PURE per-item body
+// ---------------------------------------------------------------------------
+
+/**
+ * A reactive `for (… of @list) { … lift … }` is lowered to a keyed reconcile:
+ * the body becomes a per-item factory that `_scrml_reconcile_list` calls ONLY for
+ * keys it has not seen, in whatever order the diff needs. That is the same program
+ * as the source loop only when each item's output is a function of the item alone.
+ *
+ * A body that WRITES a binding declared outside it — the running counter
+ * `let n = 0; for (…) { n = n + 1; lift <li>${n}</li> }`, or `n += 1`, `n++`, at
+ * any depth of the body's own control flow — is not: the source re-runs the whole
+ * block on every change (`n` restarts at 0 and every row gets its ordinal), while
+ * the factory runs once per NEW key against a shared `n` that never restarts, and
+ * the row text effects re-read that shared `n` after the loop has finished (every
+ * row showed the final count, measured `2:a|2:b`). Such a loop is lowered as the
+ * plain loop instead, which the enclosing lift group re-runs whole — the source's
+ * semantics.
+ *
+ * The same holds for a loop NESTED anywhere in the body — directly, in an `if`, or
+ * in a logic block inside lifted markup: a nested loop that writes a binding
+ * declared outside IT can only be reproduced by re-running the block that
+ * declares that binding, so the whole tree is lowered plain (the caller pushes
+ * non-keyed mode for the tree's emission) and the enclosing lift group re-runs it.
+ *
+ * `outerDeclared` is the enclosing scope's declared-name set; a keywordless
+ * `x = …` (a `tilde-decl`) is a write only when it names a binding visible there —
+ * otherwise it is a fresh body-local declaration. Writes inside markup ATTRIBUTE
+ * values (event handlers run later, not during the render) and inside nested
+ * function / lambda bodies are not render-time writes and are not counted. `@`
+ * cell writes are not local-binding writes and are out of this predicate.
+ *
+ * Over-reporting is the safe direction (the plain loop is correct, only not
+ * keyed); under-reporting keeps the stale shared value.
+ */
+export function forLiftTreeHasImpureLoop(forNode, outerDeclared) {
+  if (_forLoopWritesOuterBinding(forNode, outerDeclared)) return true;
+  // Names visible to a nested loop: the enclosing scope plus every name the tree
+  // declares (an over-approximation of lexical scope — safe direction).
+  const known = new Set(outerDeclared ?? []);
+  for (const n of _liftTreeDeclaredNames(forNode)) known.add(n);
+  let impure = false;
+  _walkLiftTree(forNode.body, (n) => {
+    if (!impure && n.kind === "for-stmt" && _forLoopWritesOuterBinding(n, known)) impure = true;
+  });
+  return impure;
+}
+
+/** Visit every statement-level node of a lift loop body, descending into control
+ *  flow and into logic blocks of lifted markup (children only — never attribute
+ *  values), but not into function / lambda bodies. */
+function _walkLiftTree(root, cb) {
+  const visit = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (n.kind === "function-decl" || n.kind === "lambda") return;
+    if (n.kind === "lift-expr") { if (n.expr && n.expr.kind === "markup") visit(n.expr.node); return; }
+    if (n.kind === "markup") { visit(n.node ?? n.children); return; }
+    if (typeof n.kind === "string") cb(n);
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(root);
+}
+
+function _liftTreeDeclaredNames(forNode) {
+  const out = new Set();
+  const addBind = (name) => {
+    if (typeof name === "string" && name) out.add(name);
+    else if (isDestructurePattern(name)) for (const b of _iterDestructureBindNames(name)) out.add(b);
+  };
+  _walkLiftTree(forNode.body, (n) => {
+    if (n.kind === "let-decl" || n.kind === "const-decl" || n.kind === "lin-decl") addBind(n.name);
+  });
+  return out;
+}
+
+function _forLoopWritesOuterBinding(forNode, outerDeclared) {
+  const local = new Set();
+  const writes = new Set();
+  const addBind = (name) => {
+    if (typeof name === "string" && name) local.add(name);
+    else if (isDestructurePattern(name)) for (const b of _iterDestructureBindNames(name)) local.add(b);
+  };
+  const addForVar = (n) => {
+    addBind(n.variable);
+    const it = typeof n.iterable === "string" ? n.iterable : "";
+    const m = it.match(/^\(\s*(?:let|const|var)\s+([A-Za-z_$][\w$]*)/);
+    if (m) local.add(m[1]);
+  };
+  addForVar(forNode);
+  const BARE_WRITE = /^\s*(?:(?:\+\+|--)\s*([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*(?:\+\+|--|(?:\*\*|>>>|>>|<<|&&|\|\||\?\?|[-+*/%&|^])?=(?!=)))/;
+  const visit = (n) => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    switch (n.kind) {
+      case "lift-expr":
+        if (n.expr && n.expr.kind === "markup") visit(n.expr.node);
+        return;
+      case "markup":
+        visit(n.node ?? n.children);
+        return;
+      case "function-decl":
+      case "lambda":
+        return;
+      case "let-decl":
+      case "const-decl":
+      case "lin-decl":
+        addBind(n.name);
+        break;
+      case "tilde-decl":
+        if (typeof n.name === "string" && n.name) {
+          if (!local.has(n.name) && outerDeclared && outerDeclared.has(n.name)) writes.add(n.name);
+          else local.add(n.name);
+        }
+        break;
+      case "for-stmt":
+        addForVar(n);
+        break;
+      case "assign":
+        if (n.target && n.target.kind === "ident") writes.add(n.target.name);
+        break;
+      case "unary":
+        if ((n.op === "++" || n.op === "--") && n.argument && n.argument.kind === "ident") writes.add(n.argument.name);
+        break;
+      case "bare-expr":
+        if (!n.exprNode && typeof n.expr === "string") {
+          const m = n.expr.match(BARE_WRITE);
+          if (m) writes.add(m[1] || m[2]);
+        }
+        break;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(forNode.body);
+  for (const w of writes) {
+    if (typeof w === "string" && w && !w.startsWith("@") && w !== "~" && !local.has(w)) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -2220,12 +2416,19 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     varName = (typeof forNode.variable === "string" && forNode.variable) || forNode.name || 'item';
   }
   let iterable = forNode.iterable ?? forNode.collection ?? '[]';
+  // s427-lift-body-lowering — the enclosing scope's declared names. The loop body
+  // is a block scope: it gets its own COPY (inherits the enclosing names, discards
+  // its own on exit — the blockScopedDeclaredNames contract in emit-logic.ts).
+  // Before this every body statement was emitted with NO set, so a keywordless
+  // `c = c + 1` after `let c` lowered to `const c = c + 1` (TDZ at runtime) and a
+  // `let m = 0; m = m + 1` pair in the body to a duplicate declaration.
+  const outerNames = opts.declaredNames != null ? opts.declaredNames : liftScopeNamesCopy();
 
   if (typeof iterable === 'string') {
     // C-style for loop: pass through to emitLogicNode (containerVar not needed for C-style)
     const cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
     if (cStyleMatch) {
-      return emitLogicNode(forNode, opts.continueBehavior ? { continueBehavior: opts.continueBehavior } : {});
+      return emitLogicNode(forNode, opts.continueBehavior ? { continueBehavior: opts.continueBehavior, declaredNames: outerNames } : { declaredNames: outerNames });
     }
     // Match "( [let|const|var] VAR of EXPR )" or "( VAR of EXPR )"
     const forOfMatch = iterable.match(/^\(\s*(?:(?:let|const|var)\s+)?(\w+)\s+of\s+(.*)\s*\)$/s);
@@ -2336,7 +2539,12 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   // data-loop (no `lift`, e.g. `for (t of @tasks) { total = total + t }`) is a
   // plain snapshot loop, not a reconcile_list. Fall through to the plain-loop
   // path when the body does not render.
-  if ((iterIsReactive || _iterRefsOuterItem) && forBodyLiftsMarkup(body)) {
+  //
+  // s427-lift-body-lowering — …and only when the per-item body is pure (see
+  // forLiftTreeHasImpureLoop). An impure loop is emitted plain, with non-keyed
+  // mode held for its nested loops; the enclosing lift group re-runs it.
+  const _impure = !liftNonKeyedActive() && forBodyLiftsMarkup(body) && forLiftTreeHasImpureLoop(forNode, outerNames);
+  if ((iterIsReactive || _iterRefsOuterItem) && forBodyLiftsMarkup(body) && !liftNonKeyedActive() && !_impure) {
     const wrapperVar = genVar('list_wrapper');
     const renderFn = genVar('render_list');
     const createFnVar = genVar('create_item');
@@ -2353,26 +2561,27 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     const keyVar = genVar('item_key');
     lines.push(`  const ${keyVar} = ${varName}?.id != null ? ${varName}.id : _scrml_idx;`);
     pushLiftReconcileCtx(buildLiftReconcileCtx(wrapperVar, keyVar, varName, body));
+    const bodyNames = new Set(outerNames);
 
     for (const child of body) {
       if (!child) continue;
       if (child.kind === 'lift-expr') {
-        const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx, scopeVar: varName });
+        const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx, scopeVar: varName, declaredNames: bodyNames });
         if (code) {
           for (const line of code.split('\n')) lines.push('  ' + line);
         }
       } else if (child.kind === 'for-stmt') {
-        const code = emitForStmtWithContainer(child, tmpContainerVar, { ...opts, continueBehavior: "return" });
+        const code = emitForStmtWithContainer(child, tmpContainerVar, { ...opts, continueBehavior: "return", declaredNames: bodyNames });
         if (code) {
           for (const line of code.split('\n')) lines.push('  ' + line);
         }
       } else if (child.kind === 'if-stmt') {
-        const code = emitIfStmtWithContainer(child, tmpContainerVar, { ...opts, continueBehavior: "return", scopeVar: varName });
+        const code = emitIfStmtWithContainer(child, tmpContainerVar, { ...opts, continueBehavior: "return", scopeVar: varName, declaredNames: bodyNames });
         if (code) {
           for (const line of code.split('\n')) lines.push('  ' + line);
         }
       } else {
-        const code = emitLogicNode(child, { continueBehavior: "return" });
+        const code = emitLogicNode(child, { continueBehavior: "return", declaredNames: bodyNames });
         if (code) lines.push('  ' + code);
       }
     }
@@ -2428,29 +2637,35 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   // Non-reactive path — plain for loop (pre-S96 behavior, preserved).
   lines.push(`for (const ${varName} of ${rewrittenIterable}) {`);
 
-  for (const child of body) {
-    if (!child) continue;
-    if (child.kind === 'lift-expr') {
-      // Route inner lift to the container element — NOT to _scrml_lift() globally
-      const code = emitLiftExpr(child, { containerVar: containerElVar, engineCtx, scopeVar: varName });
-      if (code) {
-        for (const line of code.split('\n')) lines.push('  ' + line);
+  const bodyNames = new Set(outerNames);
+  if (_impure) pushLiftNonKeyed();
+  try {
+    for (const child of body) {
+      if (!child) continue;
+      if (child.kind === 'lift-expr') {
+        // Route inner lift to the container element — NOT to _scrml_lift() globally
+        const code = emitLiftExpr(child, { containerVar: containerElVar, engineCtx, scopeVar: varName, declaredNames: bodyNames });
+        if (code) {
+          for (const line of code.split('\n')) lines.push('  ' + line);
+        }
+      } else if (child.kind === 'for-stmt') {
+        // Doubly-nested for-of with inner lift — route to same container
+        const code = emitForStmtWithContainer(child, containerElVar, { ...opts, declaredNames: bodyNames });
+        if (code) {
+          for (const line of code.split('\n')) lines.push('  ' + line);
+        }
+      } else if (child.kind === 'if-stmt') {
+        const code = emitIfStmtWithContainer(child, containerElVar, { ...opts, scopeVar: varName, declaredNames: bodyNames });
+        if (code) {
+          for (const line of code.split('\n')) lines.push('  ' + line);
+        }
+      } else {
+        const code = emitLogicNode(child, opts.continueBehavior ? { continueBehavior: opts.continueBehavior, declaredNames: bodyNames } : { declaredNames: bodyNames });
+        if (code) lines.push('  ' + code);
       }
-    } else if (child.kind === 'for-stmt') {
-      // Doubly-nested for-of with inner lift — route to same container
-      const code = emitForStmtWithContainer(child, containerElVar, opts);
-      if (code) {
-        for (const line of code.split('\n')) lines.push('  ' + line);
-      }
-    } else if (child.kind === 'if-stmt') {
-      const code = emitIfStmtWithContainer(child, containerElVar, { ...opts, scopeVar: varName });
-      if (code) {
-        for (const line of code.split('\n')) lines.push('  ' + line);
-      }
-    } else {
-      const code = emitLogicNode(child, opts.continueBehavior ? { continueBehavior: opts.continueBehavior } : {});
-      if (code) lines.push('  ' + code);
     }
+  } finally {
+    if (_impure) popLiftNonKeyed();
   }
 
   lines.push('}');
@@ -2485,19 +2700,23 @@ export function emitIfStmtWithContainer(ifNode, containerElVar, opts = {}) {
   const emitBody = (body) => {
     const out = [];
     const arr = Array.isArray(body) ? body : (body ? [body] : []);
+    // s427-lift-body-lowering — each branch body is a block scope (see
+    // emitForStmtWithContainer).
+    const names = opts.declaredNames != null ? new Set(opts.declaredNames) : liftScopeNamesCopy();
+    const bodyOpts = { ...opts, declaredNames: names };
     for (const child of arr) {
       if (!child) continue;
       if (child.kind === 'lift-expr') {
-        const code = emitLiftExpr(child, { containerVar: containerElVar, engineCtx, scopeVar: opts.scopeVar ?? null });
+        const code = emitLiftExpr(child, { containerVar: containerElVar, engineCtx, scopeVar: opts.scopeVar ?? null, declaredNames: names });
         if (code) for (const line of code.split('\n')) out.push('  ' + line);
       } else if (child.kind === 'for-stmt') {
-        const code = emitForStmtWithContainer(child, containerElVar, opts);
+        const code = emitForStmtWithContainer(child, containerElVar, bodyOpts);
         if (code) for (const line of code.split('\n')) out.push('  ' + line);
       } else if (child.kind === 'if-stmt') {
-        const code = emitIfStmtWithContainer(child, containerElVar, opts);
+        const code = emitIfStmtWithContainer(child, containerElVar, bodyOpts);
         if (code) for (const line of code.split('\n')) out.push('  ' + line);
       } else {
-        const code = emitLogicNode(child, opts.continueBehavior ? { continueBehavior: opts.continueBehavior } : {});
+        const code = emitLogicNode(child, opts.continueBehavior ? { continueBehavior: opts.continueBehavior, declaredNames: names } : { declaredNames: names });
         if (code) out.push('  ' + code);
       }
     }
@@ -2551,12 +2770,17 @@ export function emitConsolidatedLift(body, opts = {}) {
   // child as a generic element when scopeVar is null.
   const scopeVar = opts.scopeVar ?? null;
 
-  // Pre-statements (before the lift)
+  // Pre-statements (before the lift). s427-lift-body-lowering — they share ONE
+  // declared-name set (the body's own scope, seeded from the enclosing scope), so a
+  // keywordless `n = n + 1` after a `let n` — in this body or an enclosing one — is
+  // lowered as the assignment it is, not a fresh `const n = n + 1` (a TDZ
+  // ReferenceError at runtime, or a duplicate-declaration codegen error).
   const preStatements = [];
+  const preOpts = { ...opts, declaredNames: new Set(opts.declaredNames ?? []) };
   for (let i = 0; i < liftIdx; i++) {
     const child = body[i];
     if (!child) continue;
-    const code = emitLogicNode(child, opts);
+    const code = emitLogicNode(child, preOpts);
     if (code) preStatements.push(code);
   }
 
@@ -2763,11 +2987,11 @@ export function emitConsolidatedLift(body, opts = {}) {
             // FIX (b2-nested-lift): route inner for-loop's lift-exprs to the current
             // parent element instead of emitting _scrml_lift() globally. Without this,
             // lift <span> inside for (item of group.items) targets document.body, not <li>.
-            const code = emitForStmtWithContainer(logicChild, parent);
+            const code = emitForStmtWithContainer(logicChild, parent, { declaredNames: preOpts.declaredNames });
             if (code) lines.push(code);
           } else {
             // Other nodes (if-stmt, while-stmt, function-decl) — emit via emitLogicNode
-            const code = emitLogicNode(logicChild, opts);
+            const code = emitLogicNode(logicChild, preOpts);
             if (code) lines.push(code);
           }
         }
@@ -2950,14 +3174,14 @@ export function emitConsolidatedLift(body, opts = {}) {
       // currentParent() returns that element. Route lift-exprs there, not globally.
       const parent = currentParent();
       if (parent) {
-        const code = emitForStmtWithContainer(child, parent, { engineCtx });
+        const code = emitForStmtWithContainer(child, parent, { engineCtx, declaredNames: preOpts.declaredNames });
         if (code) lines.push(code);
       } else {
-        const code = emitLogicNode(child, opts);
+        const code = emitLogicNode(child, preOpts);
         if (code) lines.push(code);
       }
     } else if (child.kind === "if-stmt" || child.kind === "while-stmt") {
-      const code = emitLogicNode(child, opts);
+      const code = emitLogicNode(child, preOpts);
       if (code) lines.push(code);
     }
   }
@@ -3014,7 +3238,16 @@ export function emitLiftExpr(node, opts = {}) {
   if (liftExpr.kind === "markup" && liftExpr.node) {
     // Full markup AST node — walk recursively and emit createElement chains
     const lines = [];
-    const rootVar = emitCreateElementFromMarkup(liftExpr.node, lines, engineCtx, scopeVar);
+    // s427-lift-body-lowering — a logic block inside the markup sees this body's
+    // declared names (inherit the enclosing scope when the caller has none).
+    const _pushedNames = opts.declaredNames != null;
+    if (_pushedNames) pushLiftScopeNames(opts.declaredNames);
+    let rootVar;
+    try {
+      rootVar = emitCreateElementFromMarkup(liftExpr.node, lines, engineCtx, scopeVar);
+    } finally {
+      if (_pushedNames) popLiftScopeNames();
+    }
     const factoryBody = lines.join("\n  ");
     if (containerVar) {
       return `${containerVar}.appendChild((() => {\n  ${factoryBody}\n  return ${rootVar};\n})());`;

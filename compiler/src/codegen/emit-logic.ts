@@ -3175,7 +3175,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           return `let ${tVar} = ${liftRhs};`;
         }
       }
-      return emitLiftExpr(node);
+      // s427-lift-body-lowering — a logic block inside the lifted markup resolves
+      // keywordless assignments against THIS scope's declared names.
+      return emitLiftExpr(node, opts.declaredNames != null ? { declaredNames: opts.declaredNames } : {});
     }
 
     case "foreign": {

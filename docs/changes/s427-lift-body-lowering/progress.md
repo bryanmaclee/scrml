@@ -1,2 +1,4 @@
 - 2026-09-21T19:55:50Z brief written (PA, S427)
 2026-09-21T13:56:47-06:00 start at /c/Users/pjoli/Documents/GitHub/scrml/.claude/worktrees/agent-aaf63ddeb01809ce1, base b497b892
+2026-09-21T14:01:06-06:00 baselines on b497b892: unit+conformance 20417 pass/47 skip/6 todo/1 fail (GITI-035 edge 3 node --check timeout 5004ms); top-level 6384 pass/14 skip/0 fail; e2e-render-map 259 pass/0 fail
+2026-09-21T14:15:01-06:00 SPEC: §7.2 (logic content is JS; all Bun-valid JS valid in ${}) admits destructuring decls -> render, not reject; §50.7/§50.9 assignment compiles to direct JS assignment passthrough. Locus: refined — 4 root causes (Step 4b no declaredNames; lift body emitters drop declaredNames; hasFragmentedLiftBody misroutes post-lift stmts to consolidated which drops them; keyed reconcile of impure body; mixed-hoist strands block decls). Fix implemented; probe matrix green except pending-ruling if= remount counter (documented ORDER ruling) and pre-existing '#' drop.
