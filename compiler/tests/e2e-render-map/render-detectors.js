@@ -487,11 +487,12 @@ export function hasRenderedContent(body) {
 //     25-triage's OUTER each renders 446 chars of column chrome, so the conjunction
 //     over ALL regions is false while the three inner regions are empty.
 //   * "ANY surviving empty mount slot" FALSE-FIRES. Measured by mounting 25-triage
-//     with the CORRECTED seed the fixture-fix arc will land (`column:"Inbox"`/
-//     `"Doing"` instead of the current non-matching `"todo"`): two columns render
-//     their task, the third is LEGITIMATELY empty, and that rule scores a correct
-//     board `renders-empty-with-data`. It is safe today only by accident of a
-//     fixture everyone agrees is broken.
+//     with the CORRECTED seed (`column:"Inbox"`/`"Doing"` instead of the old
+//     non-matching `"todo"`): two columns render their task, the third is
+//     LEGITIMATELY empty, and that rule scores a correct board
+//     `renders-empty-with-data`. ⛑ S427 — that corrected seed is now the committed
+//     fixture, so `25-triage-board#populated` renders this exact DOM on every run
+//     and must stay `renders-clean`.
 //
 // The leaf conjunction is the only candidate correct on both. It keeps the
 // load-bearing insight — a non-empty OUTER range must not veto empty inner mounts —
@@ -791,14 +792,14 @@ export function signatureGained(before, after) {
 /**
  * Was a seed actually DELIVERED to a cell of the app?
  *
- * `obs.seeded` is only `seed != null` — a fixture was REGISTERED. Two of the four
- * corpus fixtures write nothing at all (`examples/06-kanban-board` names a DERIVED
- * cell; `examples/16-remote-data` names a cell the app does not have — the reason
- * codes limb 1 added), and both still carry `seeded:true`. Scoring such a cell red
- * for an empty render would blame the compiler for a broken fixture. They cannot
- * false-fire TODAY only because those two apps happen to render a non-empty body —
- * a property of those apps, not of this detector, and the fixtures are scheduled to
- * be corrected.
+ * `obs.seeded` is only `seed != null` — a fixture was REGISTERED. A registered fixture
+ * can write nothing (it names a DERIVED cell, or a cell the app does not have — the
+ * `derived-cell` / `no-such-cell` reason codes limb 1 added) and still carry
+ * `seeded:true`; scoring such a cell red for an empty render would blame the compiler
+ * for a broken fixture. Until S427 two of the four corpus fixtures were exactly that
+ * (06-kanban named a derived cell, 16-remote-data a non-existent one) and escaped only
+ * because those apps happened to render a non-empty body. All four now write (S427);
+ * the gate stays because the next fixture added can repeat the mistake.
  *
  * BACK-COMPATIBLE BY CONSTRUCTION: an observation that carries NO seed report (every
  * direct `runDetectors` call, including all of `detector-validation.test.js`) is
@@ -831,13 +832,15 @@ function seedWasDelivered(obs) {
  *
  * ⚠ THE MEASURE IS "GAINED", NOT "CHANGED", AND THAT DISTINCTION IS LOAD-BEARING — the
  * obvious `domChanged` reading is WRONG IN BOTH DIRECTIONS, measured on the real corpus:
- *   - `examples/25-triage-board#populated` — `domChanged` is TRUE. The app's own initial
- *     `<tasks>` renders four tasks; the seed replaces them with rows whose `column` matches
- *     no column, so the render MOVES by SHRINKING to nothing. Gating on "did not change"
- *     would make D6 dark on the one cell it exists for.
+ *   - `examples/25-triage-board#populated`, as it was until S427 — `domChanged` was TRUE.
+ *     The app's own initial `<tasks>` renders four tasks; the (then-wrong) seed replaced
+ *     them with rows whose `column` matched no column, so the render MOVED by SHRINKING to
+ *     nothing. Gating on "did not change" would have made D6 dark on that cell. (S427
+ *     corrected the fixture; the shrink shape stays pinned synthetically and by
+ *     `fixtures/d6-nested-each-empty-with-data.scrml`.)
  *   - the D6 fixture with its bug seed — `domChanged` is FALSE (its `<tasks>` starts empty,
  *     so an all-empty render stays all-empty), yet it is exactly the bug.
- * A pure LOSS is not a gain, so both land correctly: 25-triage gains nothing and fires;
+ * A pure LOSS is not a gain, so both land correctly: the pre-S427 25-triage seed gained nothing and fired;
  * `03-contact-book` gains "Ada Lovelace" and goes quiet; the fixture's matching seed gains
  * "Alpha"/"Beta" and goes quiet.
  *
@@ -937,8 +940,9 @@ export function isServerAbsenceMessage(msg) {
  *      guard now carries F4's loudness on the mount path; it is not a backstop any more.
  *
  * ⚠ THE CARVE-OUT IS PRESERVED BY CONSTRUCTION, and it is why this reads `errors` rather
- * than "any write that did not land": `derived-cell` and `no-such-cell` are the KNOWN, TABLED
- * fixture bugs (SEED_OBSERVABILITY in e2e-render-map.test.js). `applySeed` pushes NOTHING into
+ * than "any write that did not land": `derived-cell` and `no-such-cell` are FIXTURE
+ * defects, not emit regressions (S427: no corpus fixture resolves to either any more, and
+ * SEED_OBSERVABILITY in e2e-render-map.test.js reds if one regresses to it). `applySeed` pushes NOTHING into
  * `errors` for either of them — only `[seed-set …]` (a write threw), `[seed-signature] …` (the
  * render snapshot failed) and the two `[seed-bridge] …` reports do — so those two reasons stay
  * quiet here without an exclusion list, exactly as in `seedThrewNotice`.

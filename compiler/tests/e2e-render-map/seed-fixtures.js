@@ -10,13 +10,32 @@
  * (S-EMPTY-WITH-DATA) fires only when seed=populated yet the DOM is empty.
  *
  * This map keys the known list-rendering corpus apps to a tiny fixture: the
- * top-level reactive cell(s) the loop reads, set to a 2-item array. Apps NOT in
+ * top-level reactive SOURCE cell(s) the loop reads, set to a small array (or, for
+ * an app whose list lives in an enum payload, to that variant value). Apps NOT in
  * this map get only the `empty` cell (mount + DOMContentLoaded). Adding a new
  * app's seed is a one-line entry — the cheapest "with-data" path (DD option 3a:
  * cell-injection, no real db/server).
  *
  * The cell-set is applied AFTER mount via the reactive set side-channel
- * (_scrml_reactive_set), so the values must match the cell's declared shape.
+ * (_scrml_reactive_set), so the values must match the cell's declared shape —
+ * in its EMITTED RUNTIME form, not its source form. The seed bridge
+ * (render-harness.js applySeed) resolves each name against the cells the chunk
+ * really emits and writes nothing for a name that is not one:
+ *   - name a SOURCE cell. A derived cell (`const <x> = @y.filter(...)`) is
+ *     recomputed from its source; the bridge refuses the write (`derived-cell`).
+ *   - name a cell that EXISTS. A match binding / each alias is not a cell
+ *     (`no-such-cell`).
+ *   - write enum values the way the emit represents them (read the app's emitted
+ *     client JS — `bun compiler/bin/scrml.js compile <app> --output-dir <tmp>`):
+ *       unit variant     `.Todo`          -> the bare string "Todo"
+ *       payload variant  `.Loaded(rows)`  -> { variant: "Loaded", data: { rows } }
+ *     (from the emitted `const Status = Object.freeze({ Todo: "Todo", ... })` and
+ *     `Loaded: function(rows) { return { variant: "Loaded", data: { rows } }; }`.)
+ *   - use the values the app actually compares against (§45 strict equality:
+ *     `"doing" != "Doing"`), or every filter matches nothing.
+ * The pinned SEED_OBSERVABILITY table in e2e-render-map.test.js records, per app,
+ * how the seed resolved AND which seeded rows rendered in which container, so a
+ * fixture that stops driving its app reds there rather than scoring green.
  *
  * SEED-SHAPE INVARIANT (S203). A populated seed MUST provide EVERY field the app's
  * template renders off the item's struct. A seed missing a field → the template
@@ -34,27 +53,47 @@ export const POPULATED_SEEDS = {
     // NOTE (S203): the Contact struct is { id, name, email, phone } and the template renders
     // ${contact.phone}; a seed missing `phone` renders literal "undefined" (a FALSE S-NULLISH-TEXT).
     // See the seed-shape invariant in this file's header.
+    // (S427: `id` is `number` in the struct; the old fixture seeded strings.)
     contacts: [
-      { id: "1", name: "Ada Lovelace", email: "ada@x.io", phone: "555-0001" },
-      { id: "2", name: "Alan Turing", email: "alan@x.io", phone: "555-0002" },
+      { id: 1, name: "Ada Lovelace", email: "ada@x.io", phone: "555-0001" },
+      { id: 2, name: "Alan Turing", email: "alan@x.io", phone: "555-0002" },
     ],
   },
   "examples/06-kanban-board.scrml": {
-    todo: [
-      { id: "1", title: "Spec the harness", column: "todo" },
-      { id: "2", title: "Wire detectors", column: "todo" },
+    // Card = { id: number, title: string, status: Status }; Status is a UNIT enum, so each
+    // variant is its bare-string runtime form. Seeds the SOURCE cell `cards` — `todo` /
+    // `inProgress` / `done` are derived from it. One card per status, so every column's
+    // <each> renders exactly one seeded row. (S427: the old fixture seeded the derived `todo`
+    // with a `column:` field the struct does not have.)
+    cards: [
+      { id: 101, title: "Seeded todo card", status: "Todo" },
+      { id: 102, title: "Seeded doing card", status: "InProgress" },
+      { id: 103, title: "Seeded done card", status: "Done" },
     ],
   },
   "examples/16-remote-data.scrml": {
-    contacts: [
-      { id: "1", name: "Ada Lovelace" },
-      { id: "2", name: "Alan Turing" },
-    ],
+    // The app's ONLY cell is `<phase>: ContactsPhase`; the list is `<each in=rows>` inside the
+    // `<Loaded rows>` arm, reading the variant's payload. So the seed is the payload variant
+    // itself, in its runtime form. Contact = { id: int, name: string, email: string }.
+    // (S427: the old fixture seeded a `contacts` cell the app does not have.)
+    phase: {
+      variant: "Loaded",
+      data: {
+        rows: [
+          { id: 1, name: "Ada Lovelace", email: "ada@x.io" },
+          { id: 2, name: "Alan Turing", email: "alan@x.io" },
+        ],
+      },
+    },
   },
   "examples/25-triage-board.scrml": {
+    // Task = { id: number, title: string, column: string, order: number }; the board filters
+    // `@tasks.filter(t => t.column == col)` over `const columns = ["Inbox", "Doing", "Done"]`,
+    // so the seed uses those exact values. Done stays LEGITIMATELY empty (D6 must be quiet on
+    // it). (S427: the old fixture's lowercase "todo"/"doing" matched no column.)
     tasks: [
-      { id: "1", title: "Triage A", column: "todo", order: 0 },
-      { id: "2", title: "Triage B", column: "doing", order: 1 },
+      { id: 101, title: "Seeded inbox task", column: "Inbox", order: 0 },
+      { id: 102, title: "Seeded doing task", column: "Doing", order: 0 },
     ],
   },
 };

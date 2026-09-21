@@ -91,10 +91,11 @@ describe("detector-validation — the three S202 acceptance-bug shapes fire", ()
   // Part (1): the fixture's loop-body unbound-ref shape compiles/renders clean
   //           TODAY (the inlining-substitution bug is fixed); we record that.
   // Part (2): the detector fires on the historical symptom — a mount that threw
-  //           `<ident> is not defined`. The harness records this exact shape on
-  //           REAL corpus apps (examples/16-remote-data, examples/29-engine-vs-
-  //           flags both throw `… is not defined` at mount today), so this is
-  //           the live regression path, reproduced here against the detector.
+  //           `<ident> is not defined`. The harness recorded this exact shape on
+  //           REAL corpus apps (examples/16-remote-data and examples/29-engine-vs-
+  //           flags both threw `… is not defined` at mount when this was written;
+  //           both are `renders-clean` in the committed baseline as of S427), so
+  //           this is the regression path, reproduced here against the detector.
   // -------------------------------------------------------------------------
   test("D1+D7 fire (D1-MOUNT-THROW + S-UNBOUND-REF) on a mount-time `is not defined` throw", () => {
     // Part (2): the detector firing on the symptom.
@@ -377,8 +378,10 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     });
   };
 
-  // The headline: the EXACT 25-triage-board#populated shape. Chrome renders, data does
-  // not. Before S423 this scored `renders-clean` with zero smells — D6's whole reason
+  // The headline: the EXACT shape 25-triage-board#populated rendered under its pre-S427
+  // lowercase-column seed (the fixture is corrected now; this synthetic pin, and the
+  // compiled d6-nested-each-empty-with-data fixture, keep the shape pinned without it).
+  // Chrome renders, data does not. Before S423 this scored `renders-clean` with zero smells — D6's whole reason
   // for existing, scored green off 52 characters of column headings.
   test("D6 fires on the BOARD BUG: non-empty outer range, every inner mount empty", () => {
     const columns = ["Inbox", "Doing", "Done"]
@@ -400,8 +403,8 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   // LEGITIMATELY empty. A predicate of "fire on ANY surviving empty mount slot" — the
   // obvious reading of the discriminator, and the one this arc was dispatched with —
   // scores this correct board RED. It is measured, not hypothetical: mounting
-  // 25-triage with the corrected `column:"Inbox"`/`"Doing"` seed that the
-  // seed-fixtures fix arc will land produces exactly this DOM. This test is what
+  // 25-triage with the corrected `column:"Inbox"`/`"Doing"` seed — the committed
+  // fixture since S427 — produces exactly this DOM. This test is what
   // reds if anyone widens the conjunction to a disjunction.
   test("D6 does NOT fire when some inner mounts rendered and one is legitimately empty", () => {
     const columns =
@@ -776,8 +779,8 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   }
 
   // The count surface: `unresolved` appears ONLY when non-zero, so the committed
-  // `detail.emptyRegions` shape is unchanged for every cell that has none — including
-  // 25-triage, whose baseline entry must not churn.
+  // `detail.emptyRegions` shape is unchanged for every cell that has none (written when
+  // 25-triage was a red cell carrying this detail; since S427 it is green and carries none).
   test("finding 2: the summary omits `unresolved` when there is none", () => {
     const det = seededDetectGained(`<h1>Board</h1><ul>${"<!--scrml-each:v--><!--/scrml-each:v-->"}</ul>`, false);
     expect(det.detail.emptyRegions).toEqual({ regions: 1, mounts: 0, ranges: 1, leaves: 1, emptyLeaves: 1 });
@@ -817,8 +820,8 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   });
 
   // ⛑ S423 — the seed-WRITE gate. `seeded` is only "a fixture was registered";
-  // `examples/06-kanban-board` (derived-cell) and `examples/16-remote-data`
-  // (no-such-cell) write nothing and still carry `seeded:true`.
+  // Until S427, `examples/06-kanban-board` (derived-cell) and `examples/16-remote-data`
+  // (no-such-cell) wrote nothing and still carried `seeded:true`; both fixtures now write.
   test("D6 does NOT fire when the seed bridge wrote NOTHING, even on an empty body", () => {
     const det = seededDetect("", { writes: [{ name: "todo", reason: "derived-cell", wrote: false }], domChanged: false });
     expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
@@ -1277,8 +1280,8 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
 //
 // It also gives D6 a subject of its own. Before this fixture, D6's only live corpus
 // subject was `examples/25-triage-board.scrml#populated`, and only because
-// `seed-fixtures.js` seeds a `column` that matches none of that app's columns — a
-// fixture bug tracked separately and scheduled for correction. A detector whose only
+// `seed-fixtures.js` seeded a `column` that matched none of that app's columns — a
+// fixture bug since corrected (S427), after which this fixture is D6's only compiled subject. A detector whose only
 // proof is "an example app that happens to be broken this week" is one fixture-fix
 // away from being unproven again.
 // =============================================================================
@@ -1402,8 +1405,8 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
   });
 
   // The source-level half: the branch must actually push, and must NOT push for the
-  // three KNOWN fixture bugs (derived-cell / no-such-cell), which are tabled in
-  // e2e-render-map.test.js and belong to a different arc.
+  // fixture-defect reasons (derived-cell / no-such-cell), which the pinned
+  // SEED_OBSERVABILITY table in e2e-render-map.test.js owns.
   test("the harness pushes a consoleError for a missing side-channel, but not for a fixture-bug reason", () => {
     const raw = readFileSync(join(__dirname, "render-harness.js"), "utf8");
     // ⛑⛑ S424 — READ THIS BEFORE TRUSTING THIS TEST. IT IS A SHAPE CHECK, NOT A BEHAVIOUR
@@ -2487,13 +2490,13 @@ describe("S426 — no green state while a seed-bridge failure is on the record",
       .toBe("renders-clean");
   });
 
-  // ---- THE CARVE-OUT: the tabled fixture bugs must stay QUIET and GREEN -----------------
+  // ---- THE CARVE-OUT: fixture-defect reasons must stay QUIET and GREEN -----------------
   //
-  // `derived-cell` / `no-such-cell` are the KNOWN, TABLED fixture defects (SEED_OBSERVABILITY
-  // in e2e-render-map.test.js) on a scheduled fix, not emit regressions. They stay quiet by
+  // `derived-cell` / `no-such-cell` are FIXTURE defects (SEED_OBSERVABILITY in
+  // e2e-render-map.test.js reds on them), not emit regressions. They stay quiet by
   // CONSTRUCTION, not by an exclusion list: `applySeed` pushes nothing into `errors` for
-  // either reason and neither can be a `set-threw`. Two of the four corpus fixtures resolve
-  // this way, so this is the case that keeps the committed baseline still.
+  // either reason and neither can be a `set-threw`. (S427: no corpus fixture resolves this
+  // way any more — two did until the seed fixtures were corrected.)
   for (const reason of ["derived-cell", "no-such-cell"]) {
     test(`CARVE-OUT — a ${reason} fixture defect is NOT a bridge failure and stays green`, () => {
       const report = {

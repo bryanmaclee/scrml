@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 110 |
-| MED | 263 |
+| MED | 262 |
 | LOW | 101 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -15762,7 +15762,21 @@ The `upToRoot` binding's only surviving reference is the fallback branch at `:30
 The cost is navigational: a future reader lands on an 18-line comment presenting the S400 anchor fix as the mechanism that drives the emitted path, when it no longer drives any byte. Same shape as the `emit-expr.ts` stale-premise comments — a comment that survives the code it justified.
 
 ### g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries — the populated seeds name a derived cell, a cell that does not exist, and a column value the app never matches, so with-data coverage is 1 app of 4 even with a working bridge — `NEW S420-peter (found by making the seed bridge live; each PA-verified against app source); MED; open`
-<!-- @gap id=g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries sev=MED status=open locus=compiler/tests/e2e-render-map/seed-fixtures.js(POPULATED_SEEDS — the 06-kanban, 16-remote-data and 25-triage entries) prov=empirical:PA-verified-each-against-the-app-source-at-a5c3810a-after-the-seed-bridge-made-resolution-observable -->
+<!-- @gap id=g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries sev=MED status=resolved resolved-by=S427-peter locus=compiler/tests/e2e-render-map/seed-fixtures.js(POPULATED_SEEDS — the 06-kanban, 16-remote-data and 25-triage entries) prov=empirical:PA-verified-each-against-the-app-source-at-a5c3810a-after-the-seed-bridge-made-resolution-observable -->
+
+⛑ **S427-peter — RESOLVED: all four POPULATED seeds now drive their apps, each proved by the seeded rows' TEXT
+read back from the mounted DOM (not by the cell's state).** 06-kanban seeds the SOURCE cell `cards` (unit enum
+variants are bare strings at runtime — `const Status = Object.freeze({ Todo: "Todo", … })`, read from the
+emitted client JS); 16-remote-data seeds `phase` with the payload variant `{ variant: "Loaded", data: { rows } }`
+— **this entry's "no plain cell-set can drive this app at all" was WRONG**: `phase` is an ordinary settable cell
+and the variant is plain data; 25-triage uses the app's real column values. With-data reach: **1 app → 4**.
+`SEED_OBSERVABILITY` gained a `rendered` pin (per-column seeded text), because the old reason-code pin could NOT
+catch a revert of 25 (the broken seed was also `written` and also changed the DOM). ⚑ **The "keep 25 wrong as a
+live D6 subject" advice below is SUPERSEDED**: D6 region scoping landed at S423/#1012, and the shape stays
+pinned synthetically (`detector-validation.test.js` "D6 fires on the BOARD BUG") and end-to-end
+(`fixtures/d6-nested-each-empty-with-data.scrml`). Corrected 25 scores `renders-clean` with its third column
+legitimately empty — the tier's anti-cry-wolf prediction, now met on a live cell. Baseline: only the four
+`#populated` records hand-updated (434 other cells byte-identical, key order preserved); no Windows regen.
 
 Fixing the seed bridge ([[g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject]]) made the
 seeds RESOLVE, and resolution immediately showed that **three of the four fixtures could never have worked
