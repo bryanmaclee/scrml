@@ -447,7 +447,7 @@ harnesses — and is a DIFFERENT number from the 883 conformance CASES under `co
 | Parser-conformance + native-* | top-level `compiler/tests/*.test.js` | 14 | `gate` (blocking) + pre-commit (since S302) |
 | LSP | `compiler/tests/lsp/**/*.test.js` | 11 | `tracking` only (non-blocking) |
 | Self-host | `compiler/tests/self-host/**/*.test.js` | 4 | `tracking` only (non-blocking) |
-| e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `tracking` only (non-blocking) |
+| e2e-render-map | `compiler/tests/e2e-render-map/` | 2 | `gate` (blocking) + `windows` (advisory) **since S427**. ⚑ **CORRECTED S427: this cell read "`tracking` only", which was WRONG, not stale** — `tracking` never named this directory; until S427 it ran in NO job and NO hook (`g-e2e-render-map-tier-runs-in-no-ci-job-at-all`). Blocking covers the tier's assertions only: the fast-slice green→red delta is WARN-only and `generate-baseline.js --check` runs nowhere. |
 | *(not a test file)* | `compiler/tests/TYPES-BASELINE.json` | — | read by `bun scripts/types-gate.ts --check` (`tracking`, non-blocking) |
 
 **ADDED THIS WINDOW — 8 files, ZERO deleted. Every one is a merge-blocker for a SILENT-WRONG defect

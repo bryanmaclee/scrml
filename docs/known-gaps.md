@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 110 |
-| MED | 264 |
+| MED | 263 |
 | LOW | 101 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -5102,7 +5102,20 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 
 
 ### g-e2e-render-map-tier-runs-in-no-ci-job-at-all — the only tier that MOUNTS the corpus and reads the DOM is referenced by no workflow, no package script and no git hook, so nothing it classifies has ever gated anything — `NEW S416-peter (found while fixing the tier's classifier — checked whether the fix would be exercised in CI); MED; open`
-<!-- @gap id=g-e2e-render-map-tier-runs-in-no-ci-job-at-all sev=MED status=open locus=.github/workflows/ci.yml(gate=tests/unit+conformance+tests/*.test.js;tracking=tests/integration+lsp+commands;windows=unit+conformance—none-name-tests/e2e-render-map)+package.json+scripts/git-hooks prov=empirical:PA-grepped-S416-e2e-render-map-returns-zero-hits-across-.github-package.json-and-scripts/git-hooks -->
+<!-- @gap id=g-e2e-render-map-tier-runs-in-no-ci-job-at-all sev=MED status=resolved resolved-by=S427-peter locus=.github/workflows/ci.yml(gate=tests/unit+conformance+tests/*.test.js;tracking=tests/integration+lsp+commands;windows=unit+conformance—none-name-tests/e2e-render-map)+package.json+scripts/git-hooks prov=empirical:PA-grepped-S416-e2e-render-map-returns-zero-hits-across-.github-package.json-and-scripts/git-hooks -->
+
+⛑ **S427-peter — RESOLVED for the tier's ASSERTIONS.** `ci.yml`'s blocking `gate` job now runs
+`bun test compiler/tests/e2e-render-map/` (259 tests at wiring time), and the advisory `windows` job runs
+it too — the S419 fix agent's "Linux AND Windows" recommendation, since the S417/S419 separator defects
+were Windows-only. **The S416 timing objection was re-checked rather than inherited:** the slow tests now
+carry explicit 60–180 s timeouts, a hanging corpus app classifies as a `HARNESS-TIMEOUT` CELL rather than
+failing a test, and the fast-slice delta is WARN-only — so the residual risk was Linux divergence of the
+hard assertions, which the wiring PR measured on its own CI (two `gate` runs required green before merge)
+instead of assuming. **What stays ungated, deliberately:** the fast-slice green→red delta (WARN-only by
+design) and `generate-baseline.js --check` (the committed baseline carries pre-existing drift — 1 ORPHAN /
+6 NEW / 5 GREEN→RED / 16 RED→GREEN on a full-corpus run at S427; gating it is the "regenerate on Linux,
+settle the known reds, then schedule" sequence this entry already names). The nav-map's claim that this
+tier's gate was `tracking` was WRONG, not stale, and is corrected in the same landing.
 
 ⚑ **S419-peter — PARTIAL, stays open.** The tier's own text no longer claims a CI/pre-push "hard gate" (it now states it runs only via `bun test compiler/tests/e2e-render-map/`, the whole-tree `bun run test`, or the generator directly). The gap itself — no CI job invokes the tier or `generate-baseline.js --check` — is unchanged. Recommendation recorded by the fix agent: a non-required job on Linux AND Windows (the S419 HIGH was Windows-only), and a scheduled `--check` only after a Linux-side baseline regeneration settles the known reds.
 
