@@ -33,6 +33,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { enumerateRenderCorpus } from "./render-corpus-enumerator.js";
 import { seedFor } from "./seed-fixtures.js";
+import { GREEN_STATES } from "./render-detectors.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -45,16 +46,14 @@ const PER_CELL_TIMEOUT_MS = 20000;
 
 /**
  * States that are NOT a gap (green). Everything else is a red/recorded cell.
- * `needs-server` is non-gap: a server-dependent app mounted with NO server is
- * NOT broken (harness-realism, S203 b+c) — so the delta-gate treats throw->
- * needs-server as an improvement and needs-server->throw (a real codegen bug
- * surfacing) as a green->red regression.
+ *
+ * ⛑ S426 — RE-EXPORTED FROM `render-detectors.js`, NOT RE-DECLARED. This was a hand-kept
+ * literal copy of the same Set that `e2e-render-map.test.js` also carried; the module that
+ * produces the states now owns the list (see its header for why `needs-server` is green and
+ * `renders-empty-with-data` is not), and the detectors enforce "no green state while a
+ * seed-bridge failure is on the record" against that one definition.
  */
-export const GREEN_STATES = new Set([
-  "renders-clean",
-  "renders-empty",
-  "needs-server",
-]);
+export { GREEN_STATES };
 
 /**
  * Observe one cell in a subprocess. Returns the recorded cell object. On

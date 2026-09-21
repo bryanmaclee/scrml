@@ -904,7 +904,120 @@ export function isServerAbsenceMessage(msg) {
 }
 
 /**
+ * Did the HARNESS fail to deliver the seed it was asked to deliver?
+ *
+ * ⛑ S426 — THE ONE NAMED PREDICATE FOR "A SEED-BRIDGE FAILURE IS ON THE RECORD", consulted
+ * at every green-state return (see `runDetectors`'s terminal guard). It replaces the inlined
+ * `hasSeedBridgeFailure` that #1002 put at ONE of those returns, because a condition that
+ * lives at one door is a condition that the next door does not have: this entry's whole
+ * history is three rounds each shutting one door and leaving a sibling open (S423 filed the
+ * class · #1002 shut the state-resolution `needs-server` door · S426 found the D1 mount-throw
+ * `needs-server` door, which `return`s BEFORE D2 ever runs, so no `consoleErrors` inspection
+ * happens there at all).
+ *
+ * ⚑ TWO CARRIERS, AND THE SECOND ONE IS THE LOAD-BEARING HALF:
+ *   1. THE NOTICE — a `[seed-bridge]`-prefixed entry in `consoleErrors`. This is what the
+ *      harness pushes (three sites in `observeCompiled`: the `applySeed` throw, the
+ *      `seedThrewNotice` per-write throw, the missing side-channel) and it is the only
+ *      carrier #1002 checked.
+ *   2. THE FACT — the seed report's OWN `errors[]`, and a `set-threw` write. Keying only on
+ *      the notice makes the invariant depend on the harness REMEMBERING TO PUSH, which is
+ *      exactly the defect S423 filed ("this comment said LOUD and the branch was silent").
+ *      It also makes a guard at the `renders-empty` / `renders-clean` returns provably dead
+ *      code — any `[seed-bridge]` notice makes `consoleErrors` non-empty, so the
+ *      state-resolution block returns first and those two returns are never reached with a
+ *      failed seed. Measured, not argued: with the fact carrier they ARE reachable (the
+ *      "VETO WITHOUT the notice" case in detector-validation.test.js constructs one and used
+ *      to pin it GREEN), so the guard there has a real mutation bite.
+ *
+ * ⚠ THE CARVE-OUT IS PRESERVED BY CONSTRUCTION, and it is why this reads `errors` rather
+ * than "any write that did not land": `derived-cell` and `no-such-cell` are the KNOWN, TABLED
+ * fixture bugs (SEED_OBSERVABILITY in e2e-render-map.test.js). `applySeed` pushes NOTHING into
+ * `errors` for either of them — only `[seed-set …]` (a write threw), `[seed-signature] …` (the
+ * render snapshot failed) and the two `[seed-bridge] …` reports do — so those two reasons stay
+ * quiet here without an exclusion list, exactly as in `seedThrewNotice`.
+ *
+ * ⚠ DELIBERATELY NOT A FAILURE SIGNAL: `gainedContent === null` (UNMEASURED). Every harness
+ * path that produces it also records a `[seed-signature]`/`[seed-bridge]` error, so it is
+ * already covered by the carriers above, while direct `runDetectors` callers pass a bare
+ * `null` to exercise D6's veto and must not be reclassified as harness failures.
+ *
+ * BACK-COMPATIBLE: an observation with no `[seed-bridge]` console entry and no seed report
+ * (every pre-S423-shaped call) returns false.
+ *
+ * @param {object} obs — a `runDetectors` observation.
+ * @returns {boolean}
+ */
+export function seedBridgeFailed(obs) {
+  const consoleErrors = obs.consoleErrors ?? [];
+  // 1 — the notice the harness pushes.
+  if (consoleErrors.some((m) => String(m).startsWith("[seed-bridge]"))) return true;
+  // 2 — the fact the harness recorded, whether or not anything pushed a notice.
+  const report = obs.seedReport;
+  if (report == null) return false;
+  const errors = Array.isArray(report.errors) ? report.errors : [];
+  if (errors.length > 0) return true;
+  const writes = Array.isArray(report.writes) ? report.writes : [];
+  return writes.some((w) => w && w.reason === "set-threw");
+}
+
+/** The smell recorded on every cell demoted out of a green state by the seed guard. */
+export const SEED_BRIDGE_SMELL = "S-SEED-BRIDGE-FAILED";
+
+/** The one sentence every demotion site records, so a baseline grep finds them all alike. */
+const SEED_BRIDGE_NOTE =
+  "the harness could not deliver the seed — this cell carries NO verdict about the compiler";
+
+/**
+ * Record the seed-bridge failure on a cell whose door is demoting itself. One writer, so the
+ * demotion sites cannot drift into different records of the same fact.
+ */
+function noteSeedBridgeFailure(smells, detail) {
+  if (!smells.includes(SEED_BRIDGE_SMELL)) smells.push(SEED_BRIDGE_SMELL);
+  detail.seedBridgeFailure = SEED_BRIDGE_NOTE;
+}
+
+/**
  * Run the D0–D7 detectors against one mounted observation.
+ *
+ * ⛑ S426 — THE TERMINAL SEED GUARD LIVES HERE, WRAPPING THE CLASSIFIER, and that placement
+ * is the point. The requirement is not "the D1 door must check the seed"; it is **no cell
+ * may score a GREEN state while a seed-bridge failure is on the record** — green cells have
+ * their `detail` stripped by `generate-baseline.js`, so a green verdict deletes the only
+ * copy of the explanation. Enforcing it at one choke point makes it class-complete over
+ * returns that do not exist yet, which is precisely what the previous two rounds could not
+ * do by patching the door in front of them.
+ *
+ * The classifier's own doors still demote themselves where they can name a TRUER red state
+ * than this guard can (a mount throw is `compiles-but-throws`; a console error is
+ * `compiles-but-throws`). This guard is the backstop for the returns that have no
+ * independent red fact to fall back on — `renders-empty` and `renders-clean`, where nothing
+ * threw and nothing console-errored, and "compiles-but-throws" would be a lie.
+ *
+ * @param {object} obs
+ * @returns {{ state: string, smells: string[], detail: object }}
+ */
+export function runDetectors(obs) {
+  const det = classifyObservation(obs);
+  if (!GREEN_STATES.has(det.state)) return det;
+  if (!seedBridgeFailed(obs)) return det;
+  const smells = det.smells.includes(SEED_BRIDGE_SMELL)
+    ? det.smells
+    : [...det.smells, SEED_BRIDGE_SMELL];
+  return {
+    state: "seed-bridge-failed",
+    smells,
+    detail: {
+      ...det.detail,
+      seedBridgeFailure: SEED_BRIDGE_NOTE,
+      seedBridgeDemotedFrom: det.state,
+    },
+  };
+}
+
+/**
+ * The D0–D7 classification itself. Not exported: `runDetectors` is the entry point, because
+ * the seed guard above must not be bypassable by reaching past it.
  *
  * @param {object} obs
  * @param {Array} obs.compileErrors  — result.errors from compileScrml (D0).
@@ -921,7 +1034,7 @@ export function isServerAbsenceMessage(msg) {
  *   serverJs / uses a `?{}` SQL block)? Gates the needs-server classification.
  * @returns {{ state: string, smells: string[], detail: object }}
  */
-export function runDetectors(obs) {
+function classifyObservation(obs) {
   const smells = [];
   const detail = {};
 
@@ -945,7 +1058,14 @@ export function runDetectors(obs) {
     // null/undefined-ACCESS because a server-only binding/data source is null.
     // Harness-realism non-gap (S203 b+c — NOT a compiler bug). EXCLUDES
     // ReferenceError/TDZ (genuine codegen, stays red) via isServerAbsenceMessage.
-    if (obs.serverDependent && isServerAbsenceMessage(msg)) {
+    // ⛑ S426 — THE FIFTH PATH. This return is a GREEN one and it fires BEFORE D2 runs, so
+    // #1002's `hasSeedBridgeFailure` — which lives in the state-resolution block below and
+    // reads `consoleErrors` — could never be reached from here. A seeded server-dependent app
+    // whose mount throws is the ONE shape where this is harness-reachable, and it is not
+    // exotic: a mount throw means `_scrml_reactive_set` was never captured, so `observeCompiled`
+    // takes its no-side-channel branch on EVERY seeded cell whose mount throws. Verified by
+    // execution before the fix: state `needs-server`, GREEN, seed failure recorded nowhere.
+    if (obs.serverDependent && isServerAbsenceMessage(msg) && !seedBridgeFailed(obs)) {
       smells.push("NEEDS-SERVER");
       detail.needsServer =
         "server-dependent app mounted with no server — a server-only binding/data source resolved to null";
@@ -955,6 +1075,12 @@ export function runDetectors(obs) {
     // D7: an unbound-ref ReferenceError specifically (the board bug-2 shape).
     if (/is not defined/.test(msg)) {
       smells.push("S-UNBOUND-REF");
+    }
+    if (seedBridgeFailed(obs)) {
+      // Demoted HERE rather than by the terminal guard, because this door has a truer red
+      // state available: the mount really did throw. The smell keeps the reason greppable and
+      // `detail` survives (it is kept for RED cells).
+      noteSeedBridgeFailure(smells, detail);
     }
     return { state: "compiles-but-throws", smells, detail };
   }
@@ -1075,20 +1201,29 @@ export function runDetectors(obs) {
     // `isServerAbsenceMessage` admits the carve-out, and that `hasHardSmell` omits
     // D6's `S-EMPTY-WITH-DATA` — is a separate, already-filed arc (item 2 of
     // [[g-d6-seed-gating-has-three-latent-paths-...]]) and is NOT closed here.
-    const hasSeedBridgeFailure = consoleErrors.some((m) =>
-      String(m).startsWith("[seed-bridge]"),
-    );
+    // ⛑ S426 — the inlined `consoleErrors.some(m => m.startsWith("[seed-bridge]"))` that used
+    // to sit here is now the shared `seedBridgeFailed` predicate, consulted by every
+    // green-state return plus the terminal guard. Same answer for every observation the
+    // harness can produce (the notice carrier is checked first); one definition instead of a
+    // condition that had to be remembered at each new door.
     if (
       obs.serverDependent &&
       !hasCodegenError &&
       !hasHardSmell &&
-      !hasSeedBridgeFailure &&
+      !seedBridgeFailed(obs) &&
       consoleErrors.some(isServerAbsenceMessage)
     ) {
       smells.push("NEEDS-SERVER");
       detail.needsServer =
         "server-dependent app mounted with no server — console error from a null server-only data source";
       return { state: "needs-server", smells, detail };
+    }
+    if (seedBridgeFailed(obs)) {
+      // #1002's door. The state is unchanged (a console error is already
+      // `compiles-but-throws`); what is new is that the reason is recorded in the SAME shape
+      // as the other demotions, so one grep over the baseline finds every cell this class
+      // touched instead of three different spellings of it.
+      noteSeedBridgeFailure(smells, detail);
     }
     return { state: "compiles-but-throws", smells, detail };
   }
@@ -1148,7 +1283,37 @@ export const RENDER_STATES = [
   "renders-empty",
   "renders-empty-with-data",
   "renders-clean",
+  // ⛑ S426 — the harness could not deliver the seed, so the cell says NOTHING about the
+  // compiler. Deliberately its own state rather than a reuse: `compiles-but-throws` would
+  // claim a throw that did not happen, `smell-detected-wrong` and `renders-empty-with-data`
+  // both blame the COMPILER for a write the HARNESS failed to make (the exact
+  // mis-attribution round 2 of `seedThrewNotice` shipped), and any GREEN state deletes the
+  // explanation, because `generate-baseline.js` strips `detail` from green cells.
+  "seed-bridge-failed",
 ];
+
+/**
+ * States that are NOT a gap (green) — the delta-gate's definition of "a closed cell".
+ * `needs-server` is non-gap: a server-dependent app mounted with NO server is NOT broken
+ * (harness-realism, S203 b+c), so the gate treats throw->needs-server as an improvement and
+ * needs-server->throw (a real codegen bug surfacing) as a green->red regression.
+ *
+ * ⛑ S416 — `renders-empty-with-data` IS DELIBERATELY ABSENT. An empty render with NO seed is
+ * a valid `<empty>` fallback and stays green; an empty render WITH data seeded is the
+ * board-bug class D6 exists to catch, and it used to land in `renders-empty` and score green.
+ *
+ * ⛑ S426 — CANONICAL HERE, AND IT WAS THREE COPIES. `generate-baseline.js:53` and
+ * `e2e-render-map.test.js:80` each carried their own literal Set, and this module — which
+ * PRODUCES the states and now has to enforce "no green cell may carry a seed-bridge failure"
+ * — would have made a fourth. Both consumers import this one now: a green state added in one
+ * place and forgotten in another is the same "must stay in step" documentary invariant the
+ * #1012 round replaced with hoisted constants.
+ */
+export const GREEN_STATES = new Set([
+  "renders-clean",
+  "renders-empty",
+  "needs-server",
+]);
 
 /**
  * States the HARNESS records when it could not obtain a render at all. These are
