@@ -20,6 +20,7 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { liftEmittedStatementAwaits, emittedCodeCallsServerFn } from "./scheduling.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
+import type { LogicBinding } from "./binding-registry.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -173,6 +174,272 @@ function _findFunctionBodyEnd(code: string, start: number): number {
   // Include trailing newline if present.
   while (i < code.length && code[i] !== "\n") i++;
   return i < code.length ? i + 1 : i;
+}
+
+// ---------------------------------------------------------------------------
+// Lift-group emission (Step 4b)
+// ---------------------------------------------------------------------------
+
+/**
+ * The parameter name a mount-deferred lift group's function receives its host
+ * through. Occupies the exact position the eager
+ * `document.querySelector('[data-scrml-logic="<pid>"]')` holds for an SSR-body
+ * host, so both shapes come out of the one `emitLiftGroup` body.
+ */
+const LIFT_MOUNT_HOST_PARAM = "_scrml_lift_host";
+
+/** The function a mount-deferred lift group is emitted as (pid is a genVar identifier). */
+export function liftMountFnName(pid: string): string {
+  return `_scrml_lift_mount_${pid}`;
+}
+
+/**
+ * File-local driver for a mount-deferred lift group, emitted once per file that
+ * has one. `host` is the freshly mounted `<span data-scrml-logic>`; `body` is the
+ * group's `_scrml_lift_mount_<pid>` function.
+ *
+ *   - Once per host node (defensive): re-running the group on a host would lift
+ *     every row a second time. Today no path reaches a host twice — the host's
+ *     `_scrml_nav_rewire` block is registered BEFORE the controller of any
+ *     template enclosing it (a controller's binding is added after its template
+ *     body), so an outer mount pass looks for the host before an inner `if=`
+ *     inserts it, and the inner pass binds it (measured: the nested-if case binds
+ *     once with or without this mark). The mark keeps a later re-ordering of the
+ *     rehydrator from silently duplicating rows. A re-mount clones the template
+ *     afresh, so a new host never carries it.
+ *   - Effect ownership, for the mount's WHOLE lifetime: the group runs with
+ *     tracking wrappers in place of the two effect constructors (lexically
+ *     shadowed — see the emitted function's parameters), so they apply to every
+ *     effect the group's code creates, whenever it creates it — during the mount
+ *     pass AND later (a keyed list builds per-row effects each time a row is
+ *     added). The mount's teardown — `_scrml_region_track`, which inside a mount
+ *     registers against the mount's scope, drained by `_scrml_unmount_scope` on
+ *     the true→false transition — does two things:
+ *       · marks the mount dead: every wrapped effect body is gated on it, so any
+ *         such effect (whenever created) never runs its body again; an ordinary
+ *         `_scrml_effect` that re-runs gated reads nothing and so drops all its
+ *         subscriptions on that run;
+ *       · disposes, immediately, every effect created during the mount pass and
+ *         every `_scrml_effect_static` created at any time (a static effect keeps
+ *         its first-run subscriptions forever, so the gate alone cannot release
+ *         it). A plain `_scrml_effect` created AFTER the mount pass is not kept
+ *         in a list — holding every per-row effect's disposer for the mount's
+ *         lifetime would retain removed rows — it is released by the gate on its
+ *         next trigger instead.
+ *     Without this each re-mount would leave the previous mount's effects live,
+ *     re-rendering into a detached subtree.
+ *   - The lift target is SAVED and RESTORED around the group: a mount can happen
+ *     synchronously in the middle of another lift group (that group writes a
+ *     cell an `if=` condition reads), and that outer group's remaining lifts must
+ *     still land in its own target.
+ */
+const LIFT_MOUNT_RUN_HELPER: readonly string[] = [
+  "function _scrml_lift_mount_run(host, body) {",
+  "  if (!host || host._scrml_lift_mounted) return;",
+  "  host._scrml_lift_mounted = true;",
+  "  const disposers = [];",
+  "  let collecting = true;",
+  "  let alive = true;",
+  "  const own = (make, keepAlways) => function(fn) {",
+  "    const d = make(function() { if (alive) fn(); });",
+  "    if ((collecting || keepAlways) && typeof d === \"function\") disposers.push(d);",
+  "    return d;",
+  "  };",
+  "  const prevTarget = _scrml_lift_target;",
+  "  try {",
+  "    body(host, own(_scrml_effect, false), own(_scrml_effect_static, true));",
+  "  } finally {",
+  "    collecting = false;",
+  "    _scrml_lift_target = prevTarget;",
+  "  }",
+  "  _scrml_region_track(host, function() { alive = false; for (let i = disposers.length - 1; i >= 0; i--) disposers[i](); disposers.length = 0; });",
+  "}",
+];
+
+/**
+ * True when `emitLiftGroup` wraps the group in an outer re-render
+ * `_scrml_effect` (the whole block re-runs on every reactive change), false for
+ * the two run-once shapes (non-reactive, and keyed-reconcile-only whose list
+ * re-renders through its own static effect). Mirrors emitLiftGroup's decision.
+ */
+function liftGroupWrapsOuterEffect(combinedCode: string, groupHasReactiveDeps: boolean): boolean {
+  if (!groupHasReactiveDeps) return false;
+  const hasKeyedReconcile = combinedCode.includes("_scrml_reconcile_list(");
+  const hasOtherReactiveReads = hasKeyedReconcile
+    ? stripReconcileCalls(combinedCode).includes("_scrml_reactive_get(")
+    : true;
+  return !(hasKeyedReconcile && !hasOtherReactiveReads);
+}
+
+/**
+ * g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template — emit a
+ * lift group whose host is inside a mount-deferred `<template>`.
+ *
+ * `chunkOut` receives code that stays at CHUNK (file) scope, at the group's
+ * source position; `mountOut` receives the body of the group's
+ * `_scrml_lift_mount_<pid>(host, …)` function, run once per mount.
+ *
+ * Declarations keep the scope and evaluation time the SSR-body twin gives them —
+ * nothing about WHERE a declaration lives changes; only render work moves:
+ *
+ *   - RUN-ONCE shapes (non-reactive, keyed-reconcile-only). The SSR-body twin
+ *     runs every statement once, at module init, at chunk scope (so, per SPEC
+ *     §7.6, its `const`/`let` are file-scope). Every statement that does NOT
+ *     contain a `lift` — `const`/`let`, reactive declarations and writes,
+ *     expression statements, lift-free control flow — is emitted to `chunkOut`
+ *     unchanged, so it evaluates exactly when and where the twin evaluates it.
+ *     Only the statements that contain a `lift` go to `mountOut`, run per mount
+ *     against the mounted host.
+ *
+ *     ⚑ ORDER — CURRENT, KNOWN, RULING PENDING (see the S427 inbox question to
+ *     bryan: §7.6 file scope vs §6.7.2.1 memoryless remount). Splitting the block
+ *     changes the relative order of its statements; two consequences are pinned
+ *     by tests as the current behaviour, NOT as correct:
+ *       (a) a lift-free statement that reads a value WRITTEN by a lift-containing
+ *           statement of the same block sees the pre-mount value (it ran at
+ *           init; the lift statement runs at mount);
+ *       (b) a lift-free statement placed AFTER a lift-containing statement runs
+ *           BEFORE it (init precedes mount), so a lift that reads state the
+ *           later statement writes sees the later value on its first render.
+ *     Do not "fix" either without that ruling.
+ *
+ *   - OUTER-EFFECT shape (the block reads reactive state outside a keyed list).
+ *     The whole block — declarations included — stays inside its re-render
+ *     `_scrml_effect`, exactly as the SSR-body twin emits it (declarations are
+ *     effect-local there too); the effect lives in the mount function. No
+ *     declaration is hoisted: a chunk-scope `let` shared across renders turned
+ *     the twin's loud failures (TDZ, duplicate-declaration codegen error) into
+ *     silently wrong output, and collided with file-level imports/functions.
+ */
+function emitMountDeferredLiftGroup(
+  chunkOut: string[],
+  mountOut: string[],
+  stmts: any[],
+  codes: string[],
+  codeStmts: any[],
+  combinedCode: string,
+  groupHasReactiveDeps: boolean,
+): void {
+  if (!liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps)) {
+    const liftCodes: string[] = [];
+    const liftStmts: any[] = [];
+    for (let i = 0; i < codes.length; i++) {
+      if (stmtContainsLift(codeStmts[i])) {
+        liftCodes.push(codes[i]);
+        liftStmts.push(codeStmts[i]);
+      } else {
+        chunkOut.push(codes[i]);
+      }
+    }
+    if (liftCodes.length === 0) return;
+    emitLiftGroup(mountOut, LIFT_MOUNT_HOST_PARAM, liftStmts, liftCodes.join("\n"), groupHasReactiveDeps);
+    return;
+  }
+  emitLiftGroup(mountOut, LIFT_MOUNT_HOST_PARAM, stmts, combinedCode, groupHasReactiveDeps);
+}
+
+/**
+ * Emit one lift group — the statements of a single `${ … lift … }` block whose
+ * placeholder is `pid` — onto `out`, binding its target through `hostExpr`.
+ *
+ * `hostExpr` is the eager `document.querySelector(...)` for a host in the SSR
+ * body, or `LIFT_MOUNT_HOST_PARAM` for a host inside a mount-deferred
+ * `<template>` (the caller then wraps `out` in the group's mount function).
+ * Everything else about the group's shape is identical between the two.
+ */
+function emitLiftGroup(
+  out: string[],
+  hostExpr: string,
+  stmts: any[],
+  combinedCode: string,
+  groupHasReactiveDeps: boolean,
+): void {
+  if (groupHasReactiveDeps) {
+    // Wrap in _scrml_effect: clear the placeholder, re-run the block.
+    // Guard 1 (branch): if the group is a single if-stmt whose condition
+    //   evaluates to the same truthy/falsy value as last time, skip the
+    //   innerHTML clear to preserve event listeners and input state.
+    // Guard 2 (keyed reconcile): if the emitted code uses
+    //   `_scrml_reconcile_list`, the list wrapper is mounted once and
+    //   reconciled in place. An innerHTML clear would destroy the wrapper
+    //   every time the effect re-runs, breaking keyed diffing.
+    // Bug 5: if the ONLY reactive reads in the block are inside keyed
+    //   reconcile calls, the `_scrml_effect_static(renderFn)` inside the
+    //   for-lift emit already handles re-reconciliation. An outer
+    //   _scrml_effect wrap would re-create the list wrapper per mutation,
+    //   causing list accumulation (3 → 8 → 15 on sequential clicks).
+    //   Skip the outer effect wrap for this case. Mixed case (keyed
+    //   reconcile + other reactive reads) falls through to the general
+    //   wrap — preserves existing behavior (known issues there are
+    //   separate from Bug 5 and addressed in a follow-on).
+    const isSingleIf = stmts.length === 1 && stmts[0].kind === "if-stmt";
+    const hasKeyedReconcile = combinedCode.includes("_scrml_reconcile_list(");
+    const hasOtherReactiveReads = hasKeyedReconcile
+      ? stripReconcileCalls(combinedCode).includes("_scrml_reactive_get(")
+      : true;
+    const canSkipOuterEffect = hasKeyedReconcile && !hasOtherReactiveReads;
+
+    if (canSkipOuterEffect) {
+      out.push(`_scrml_lift_target = ${hostExpr};`);
+      out.push(combinedCode);
+      out.push(`_scrml_lift_target = null;`);
+    } else {
+      const targetVar = genVar("lift_tgt");
+      const branchVar = isSingleIf ? genVar("lift_branch") : null;
+      out.push(`const ${targetVar} = ${hostExpr};`);
+      if (branchVar) {
+        out.push(`let ${branchVar} = -1;`);
+      }
+
+      // Mixed-case follow-on to Bug 5: if the block combines a keyed-
+      // reconcile for-lift with OTHER reactive content (e.g. a sibling
+      // `if (@cond) { lift ... }`), hoist the for-lift's one-time setup
+      // (wrapper creation, createFn, renderFn, first render call, static
+      // effect registration) OUTSIDE the outer _scrml_effect. Inside the
+      // effect we retain `_scrml_lift(wrapper)` which re-mounts the same
+      // wrapper node (appendChild MOVES rather than duplicates; the
+      // wrapper's reconciled children persist). With this hoist we can
+      // safely re-enable `targetVar.innerHTML = ""` — it clears other
+      // content but the hoisted wrapper is re-mounted right after,
+      // fixing both (a) wrapper accumulation and (b) conditional-lift
+      // accumulation in one pass.
+      let effectBodyCode = combinedCode;
+      if (hasKeyedReconcile && hasOtherReactiveReads) {
+        const { hoistedSetup, remaining } = hoistForLiftSetup(combinedCode);
+        if (hoistedSetup) {
+          out.push(hoistedSetup);
+          effectBodyCode = remaining;
+        }
+      }
+
+      out.push(`_scrml_effect(function() {`);
+      if (branchVar) {
+        // Extract the condition from the emitted if-statement to check branch identity.
+        // The emitted code starts with `if (condition) {` — extract and test condition.
+        const condMatch = effectBodyCode.match(/^if\s*\((.+)\)\s*\{/);
+        if (condMatch) {
+          out.push(`  const _branch = (${condMatch[1]}) ? 1 : 0;`);
+          out.push(`  if (_branch === ${branchVar}) return;`);
+          out.push(`  ${branchVar} = _branch;`);
+        }
+      }
+      // With the mixed-case hoist in place, innerHTML clear is now safe
+      // even when hasKeyedReconcile (the wrapper is outer-scope; it
+      // re-mounts via the retained _scrml_lift(wrapper) in the body).
+      const hoisted = hasKeyedReconcile && hasOtherReactiveReads;
+      if (!hasKeyedReconcile || hoisted) {
+        out.push(`  ${targetVar}.innerHTML = "";`);
+      }
+      out.push(`  _scrml_lift_target = ${targetVar};`);
+      out.push(`  ${effectBodyCode}`);
+      out.push(`  _scrml_lift_target = null;`);
+      out.push(`});`);
+    }
+  } else {
+    out.push(`_scrml_lift_target = ${hostExpr};`);
+    out.push(combinedCode);
+    out.push(`_scrml_lift_target = null;`);
+  }
 }
 
 /** Check if an AST statement contains a lift-expr anywhere in its tree. */
@@ -440,6 +707,16 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
 
   const topLevel = collectTopLevelLogicStatements(fileAST);
 
+  // Lift hosts inside a mount-deferred `<template>` (emit-html registers a
+  // `lift-host` binding for each, and only for those) → their group is emitted
+  // as a mount function instead of an eager module-init bind. See the lift-group
+  // emission below.
+  const liftHostBindings = new Map<string, LogicBinding>();
+  for (const b of ((ctx.registry?.logicBindings ?? []) as LogicBinding[])) {
+    if (b.kind === "lift-host" && b.placeholderId) liftHostBindings.set(b.placeholderId, b);
+  }
+  const liftMountFnLines = new Map<string, string[]>();
+
   // Group statements by placeholder ID so sibling statements from the same logic
   // block are emitted together. This is critical for reactive lift blocks: the
   // reactive dep (@query) may be in a sibling statement (const q = @query...) while
@@ -460,6 +737,9 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   for (const group of groups) {
     const { pid, stmts } = group;
     const codes: string[] = [];
+    // The source statement each `codes` entry came from (same index). The
+    // mount-deferred lift split (below) classifies per statement.
+    const codeStmts: any[] = [];
     let groupHasLift = false;
     let groupHasReactiveDeps = false;
     let skipGroup = false;
@@ -552,6 +832,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
           `// §6.7.1a \`on mount\` — async scope for the server calls in this block (§13.2).\n` +
           `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log("on mount", _scrml_async_err));`,
         );
+        codeStmts.push(stmt);
         continue;
       }
 
@@ -618,7 +899,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         continue;
       }
 
-      if (code) codes.push(code);
+      if (code) { codes.push(code); codeStmts.push(stmt); }
       if (stmtContainsLift(stmt)) groupHasLift = true;
       // Check for reactive deps in the emitted code (after @var rewriting)
       if (code && code.includes("_scrml_reactive_get(")) groupHasReactiveDeps = true;
@@ -645,94 +926,56 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const combinedCode = codes.join("\n");
 
     if (pid && groupHasLift) {
-      if (groupHasReactiveDeps) {
-        // Wrap in _scrml_effect: clear the placeholder, re-run the block.
-        // Guard 1 (branch): if the group is a single if-stmt whose condition
-        //   evaluates to the same truthy/falsy value as last time, skip the
-        //   innerHTML clear to preserve event listeners and input state.
-        // Guard 2 (keyed reconcile): if the emitted code uses
-        //   `_scrml_reconcile_list`, the list wrapper is mounted once and
-        //   reconciled in place. An innerHTML clear would destroy the wrapper
-        //   every time the effect re-runs, breaking keyed diffing.
-        // Bug 5: if the ONLY reactive reads in the block are inside keyed
-        //   reconcile calls, the `_scrml_effect_static(renderFn)` inside the
-        //   for-lift emit already handles re-reconciliation. An outer
-        //   _scrml_effect wrap would re-create the list wrapper per mutation,
-        //   causing list accumulation (3 → 8 → 15 on sequential clicks).
-        //   Skip the outer effect wrap for this case. Mixed case (keyed
-        //   reconcile + other reactive reads) falls through to the general
-        //   wrap — preserves existing behavior (known issues there are
-        //   separate from Bug 5 and addressed in a follow-on).
-        const isSingleIf = stmts.length === 1 && stmts[0].kind === "if-stmt";
-        const hasKeyedReconcile = combinedCode.includes("_scrml_reconcile_list(");
-        const hasOtherReactiveReads = hasKeyedReconcile
-          ? stripReconcileCalls(combinedCode).includes("_scrml_reactive_get(")
-          : true;
-        const canSkipOuterEffect = hasKeyedReconcile && !hasOtherReactiveReads;
-
-        if (canSkipOuterEffect) {
-          lines.push(`_scrml_lift_target = document.querySelector('[data-scrml-logic="${pid}"]');`);
-          lines.push(combinedCode);
-          lines.push(`_scrml_lift_target = null;`);
-        } else {
-          const targetVar = genVar("lift_tgt");
-          const branchVar = isSingleIf ? genVar("lift_branch") : null;
-          lines.push(`const ${targetVar} = document.querySelector('[data-scrml-logic="${pid}"]');`);
-          if (branchVar) {
-            lines.push(`let ${branchVar} = -1;`);
-          }
-
-          // Mixed-case follow-on to Bug 5: if the block combines a keyed-
-          // reconcile for-lift with OTHER reactive content (e.g. a sibling
-          // `if (@cond) { lift ... }`), hoist the for-lift's one-time setup
-          // (wrapper creation, createFn, renderFn, first render call, static
-          // effect registration) OUTSIDE the outer _scrml_effect. Inside the
-          // effect we retain `_scrml_lift(wrapper)` which re-mounts the same
-          // wrapper node (appendChild MOVES rather than duplicates; the
-          // wrapper's reconciled children persist). With this hoist we can
-          // safely re-enable `targetVar.innerHTML = ""` — it clears other
-          // content but the hoisted wrapper is re-mounted right after,
-          // fixing both (a) wrapper accumulation and (b) conditional-lift
-          // accumulation in one pass.
-          let effectBodyCode = combinedCode;
-          if (hasKeyedReconcile && hasOtherReactiveReads) {
-            const { hoistedSetup, remaining } = hoistForLiftSetup(combinedCode);
-            if (hoistedSetup) {
-              lines.push(hoistedSetup);
-              effectBodyCode = remaining;
-            }
-          }
-
-          lines.push(`_scrml_effect(function() {`);
-          if (branchVar) {
-            // Extract the condition from the emitted if-statement to check branch identity.
-            // The emitted code starts with `if (condition) {` — extract and test condition.
-            const condMatch = effectBodyCode.match(/^if\s*\((.+)\)\s*\{/);
-            if (condMatch) {
-              lines.push(`  const _branch = (${condMatch[1]}) ? 1 : 0;`);
-              lines.push(`  if (_branch === ${branchVar}) return;`);
-              lines.push(`  ${branchVar} = _branch;`);
-            }
-          }
-          // With the mixed-case hoist in place, innerHTML clear is now safe
-          // even when hasKeyedReconcile (the wrapper is outer-scope; it
-          // re-mounts via the retained _scrml_lift(wrapper) in the body).
-          const hoisted = hasKeyedReconcile && hasOtherReactiveReads;
-          if (!hasKeyedReconcile || hoisted) {
-            lines.push(`  ${targetVar}.innerHTML = "";`);
-          }
-          lines.push(`  _scrml_lift_target = ${targetVar};`);
-          lines.push(`  ${effectBodyCode}`);
-          lines.push(`  _scrml_lift_target = null;`);
-          lines.push(`});`);
+      // g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template —
+      // where the lift target comes from. A host in the SSR body is in the
+      // document at module init, so the group binds it eagerly (unchanged,
+      // byte-identical). A host inside a mount-deferred `<template>` (emit-html
+      // registered a `lift-host` binding for it) does NOT exist until the
+      // template is cloned and inserted — `document.querySelector` never
+      // descends into template content, so the eager bind was `null` and the
+      // group either threw (`null.innerHTML`) or `_scrml_lift` fell back to
+      // `document.body`, rendering the rows OUTSIDE their host. Such a group is
+      // emitted as a function of the host instead; emit-event-wiring calls it
+      // from `_scrml_nav_rewire` against each freshly mounted host (§17.1: every
+      // false→true transition mounts a fresh clone).
+      const mountHostBinding = liftHostBindings.get(pid);
+      if (mountHostBinding) {
+        let fnLines = liftMountFnLines.get(pid);
+        if (!fnLines) {
+          fnLines = [];
+          liftMountFnLines.set(pid, fnLines);
+          mountHostBinding.liftMountFn = liftMountFnName(pid);
         }
+        // Only the RENDER work moves into the mount function; the block's
+        // declarations keep file scope (SPEC §7.6) — see emitMountDeferredLiftGroup.
+        const chunkLines: string[] = [];
+        emitMountDeferredLiftGroup(chunkLines, fnLines, stmts, codes, codeStmts, combinedCode, groupHasReactiveDeps);
+        lines.push(...chunkLines);
       } else {
-        lines.push(`_scrml_lift_target = document.querySelector('[data-scrml-logic="${pid}"]');`);
-        lines.push(combinedCode);
-        lines.push(`_scrml_lift_target = null;`);
+        emitLiftGroup(lines, `document.querySelector('[data-scrml-logic="${pid}"]')`, stmts, combinedCode, groupHasReactiveDeps);
       }
     } else {
       lines.push(combinedCode);
+    }
+  }
+
+  // Emit each mount-deferred lift group as `function _scrml_lift_mount_<pid>(host, _scrml_effect, _scrml_effect_static)`.
+  // The two effect constructors are PARAMETERS so every effect the group's code
+  // creates — lexically, at any depth (the outer re-render effect, the keyed
+  // list's static effect, per-item effects) — goes through the tracking pair
+  // `_scrml_lift_mount_run` passes in, and is disposed when the mount that
+  // created it is torn down. Effects elsewhere in the file are untouched. The
+  // declaration hoists within the chunk scope, so its position is immaterial.
+  // The group's lines are NOT re-indented: they may carry multi-line string
+  // literals whose content indentation would change.
+  if (liftMountFnLines.size > 0) {
+    lines.push("");
+    lines.push("// --- lift groups whose host is inside a mount-deferred <template> (§17.1); bound per mount from _scrml_nav_rewire ---");
+    lines.push(...LIFT_MOUNT_RUN_HELPER);
+    for (const [pid, fnLines] of liftMountFnLines) {
+      lines.push(`function ${liftMountFnName(pid)}(${LIFT_MOUNT_HOST_PARAM}, _scrml_effect, _scrml_effect_static) {`);
+      lines.push(...fnLines);
+      lines.push("}");
     }
   }
 

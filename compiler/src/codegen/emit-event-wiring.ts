@@ -1284,6 +1284,36 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   };
   const pushRebindableDisplay = (placeholderId: string, body: string[], rebind = true): void =>
     pushRebindableSel(`[data-scrml-logic="${placeholderId}"]`, body, rebind);
+  // g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template (the
+  // CLASS sweep) — the anchor-element sites below (`<textarea>` RCDATA content,
+  // `<errors of=…/>`, `<render of=@cell/>`, an `<errorBoundary>`-scoped
+  // `${…}`, a `${serverFn()}` one-shot) build a DOCUMENT-scoped boot block
+  // `{ const el = document.querySelector(…); if (el) { … } }` in `_scrml_boot`.
+  // An anchor inside a mount-deferred `<template>` is absent from the document
+  // at boot, so that block no-ops and never re-runs — the S400 static-display
+  // defect, at five more sites. Each site builds its block into a local array
+  // exactly as before and hands it here:
+  //   - SSR-body anchor (`insideMountTemplate` unset) → pushed to `lines`
+  //     unchanged (byte-identical);
+  //   - template-interior anchor → re-scoped to `(root || document)` and
+  //     emitted into `_scrml_nav_rewire` (re-runs on every mount), with the
+  //     site's effect/subscription disposers passed through
+  //     `_scrml_region_track` (see `anchorTrack`) so the mount's teardown
+  //     disposes them.
+  const pushAnchorBlock = (blk: string[], insideMountTemplate: boolean): void => {
+    if (!insideMountTemplate) {
+      for (const l of blk) lines.push(l);
+      return;
+    }
+    for (const l of blk) {
+      reactiveRewire.push("  " + l.replace("const el = document.querySelector(", "const el = (root || document).querySelector("));
+    }
+  };
+  // Wrap an effect/subscription-creating expression so its disposer is
+  // region-tracked — only for a template-interior anchor (identity otherwise,
+  // keeping the SSR-body emit byte-identical).
+  const anchorTrack = (createExpr: string, insideMountTemplate: boolean): string =>
+    insideMountTemplate ? `_scrml_region_track(el, ${createExpr})` : createExpr;
   // Emit a region-tracked reactive-display effect as TWO statements — the bare
   // `_scrml_effect(function() { <inner> });` (its exact shape preserved for the
   // codegen-shape tests) followed by `_scrml_region_track(el, <dispose>);` so a
@@ -1379,6 +1409,22 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
 
     for (const binding of logicBindings) {
       const { placeholderId, expr } = binding;
+
+      // -----------------------------------------------------------------
+      // g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template —
+      // a `${ … lift … }` host inside a mount-deferred `<template>`. Its group
+      // was emitted (emit-reactive-wiring) as `binding.liftMountFn(host, …)`
+      // instead of an eager module-init bind; call it from `_scrml_nav_rewire`
+      // so it runs against every freshly mounted host (the rebind=true path the
+      // S400 static-display fix uses). No `liftMountFn` → no lift code was
+      // emitted for the host → nothing to bind.
+      // -----------------------------------------------------------------
+      if (binding.kind === "lift-host") {
+        if (binding.liftMountFn && placeholderId) {
+          pushRebindableDisplay(placeholderId, [`_scrml_lift_mount_run(el, ${binding.liftMountFn});`], true);
+        }
+        continue;
+      }
 
       // -----------------------------------------------------------------
       // inline-value-form-interp (§18.0 / §17.6) — VALUE-FORM CONTROL-FLOW
@@ -1544,14 +1590,17 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           }
         }
         const valueExpr = concatTerms.join(" + ");
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-rcdata="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
-        lines.push(`      const _scrml_set_rcdata = function() { el.value = ${valueExpr}; };`);
-        lines.push(`      _scrml_set_rcdata();`);
-        lines.push(`      _scrml_effect(function() { _scrml_set_rcdata(); });`);
-        lines.push(`    }`);
-        lines.push(`  }`);
+        const inTpl = binding.insideMountTemplate === true;
+        const blk: string[] = [];
+        blk.push(`  {`);
+        blk.push(`    const el = document.querySelector('[data-scrml-rcdata="${placeholderId}"]');`);
+        blk.push(`    if (el) {`);
+        blk.push(`      const _scrml_set_rcdata = function() { el.value = ${valueExpr}; };`);
+        blk.push(`      _scrml_set_rcdata();`);
+        blk.push(`      ${anchorTrack(`_scrml_effect(function() { _scrml_set_rcdata(); })`, inTpl)};`);
+        blk.push(`    }`);
+        blk.push(`  }`);
+        pushAnchorBlock(blk, inTpl);
         continue;
       }
 
@@ -1593,72 +1642,74 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         }
 
         const suffix = anchorId.replace(/[^a-zA-Z0-9_]/g, "_");
-        lines.push(`  // <errors of=...> element wiring (C11)`);
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-errors-anchor=${JSON.stringify(anchorId)}]');`);
-        lines.push(`    if (el) {`);
+        const inTpl = binding.insideMountTemplate === true;
+        const blk: string[] = [];
+        blk.push(`  // <errors of=...> element wiring (C11)`);
+        blk.push(`  {`);
+        blk.push(`    const el = document.querySelector('[data-scrml-errors-anchor=${JSON.stringify(anchorId)}]');`);
+        blk.push(`    if (el) {`);
         // Local messageFor — prefers a global C10 implementation, falls back
         // to a stub returning the tag string.
-        lines.push(`      const messageForFn_${suffix} = (typeof _scrml_message_for === "function")`);
-        lines.push(`        ? _scrml_message_for`);
-        lines.push(`        : function (errTag, _field) {`);
-        lines.push(`            if (errTag == null) return "";`);
-        lines.push(`            if (typeof errTag === "object" && errTag.tag != null) return String(errTag.tag);`);
-        lines.push(`            return String(errTag);`);
-        lines.push(`          };`);
+        blk.push(`      const messageForFn_${suffix} = (typeof _scrml_message_for === "function")`);
+        blk.push(`        ? _scrml_message_for`);
+        blk.push(`        : function (errTag, _field) {`);
+        blk.push(`            if (errTag == null) return "";`);
+        blk.push(`            if (typeof errTag === "object" && errTag.tag != null) return String(errTag.tag);`);
+        blk.push(`            return String(errTag);`);
+        blk.push(`          };`);
         // Body-override factory — when absent, the default render shape per
         // SPEC line 25190.
         if (bodyFn !== null) {
           // Body-override path bypasses messageFor (the developer owns the
           // markup), so `cellName` is accepted for a uniform call shape but
           // unused here.
-          lines.push(`      const bodyFn_${suffix} = ${bodyFn};`);
-          lines.push(`      const renderOne_${suffix} = function(errTag, field, cellName) {`);
-          lines.push(`        const out = bodyFn_${suffix}(errTag);`);
-          lines.push(`        return (out == null) ? "" : String(out);`);
-          lines.push(`      };`);
+          blk.push(`      const bodyFn_${suffix} = ${bodyFn};`);
+          blk.push(`      const renderOne_${suffix} = function(errTag, field, cellName) {`);
+          blk.push(`        const out = bodyFn_${suffix}(errTag);`);
+          blk.push(`        return (out == null) ? "" : String(out);`);
+          blk.push(`      };`);
         } else {
           // Default render — thread `cellName` as the 3rd arg so `_scrml_message_for`
           // consults the Level-1 per-(cell,validator) inline override before
           // falling through to Level-2 (registered) / Level-3 (shipped default).
-          lines.push(`      const renderOne_${suffix} = function(errTag, field, cellName) {`);
-          lines.push(`        return '<p class="scrml-error">' + messageForFn_${suffix}(errTag, field, cellName) + '</p>';`);
-          lines.push(`      };`);
+          blk.push(`      const renderOne_${suffix} = function(errTag, field, cellName) {`);
+          blk.push(`        return '<p class="scrml-error">' + messageForFn_${suffix}(errTag, field, cellName) + '</p>';`);
+          blk.push(`      };`);
         }
         // Render function: reads source errors, iterates per (allFlag,
         // isRollup), produces innerHTML. Empty source → empty innerHTML
         // (no DOM). Per SPEC line 25193-25195.
-        lines.push(`      const render_${suffix} = function() {`);
-        lines.push(`        const src = _scrml_derived_get(${JSON.stringify(encodedSourceKey)});`);
+        blk.push(`      const render_${suffix} = function() {`);
+        blk.push(`        const src = _scrml_derived_get(${JSON.stringify(encodedSourceKey)});`);
         if (isRollup) {
           // Compound rollup: src is an object map {field: [tags]}.
-          lines.push(`        if (!src || typeof src !== "object") { el.innerHTML = ""; return; }`);
-          lines.push(`        const entries = Object.entries(src);`);
-          lines.push(`        const parts = [];`);
-          lines.push(`        for (const [fieldKey, arr] of entries) {`);
-          lines.push(`          if (!Array.isArray(arr) || arr.length === 0) continue;`);
+          blk.push(`        if (!src || typeof src !== "object") { el.innerHTML = ""; return; }`);
+          blk.push(`        const entries = Object.entries(src);`);
+          blk.push(`        const parts = [];`);
+          blk.push(`        for (const [fieldKey, arr] of entries) {`);
+          blk.push(`          if (!Array.isArray(arr) || arr.length === 0) continue;`);
           // Rollup cell name = compound prefix + "." + iterated field key
           // (e.g. "signup" + "." + "name" → "signup.name"), matching the
           // per-(cell,validator) inline-override registration key.
           if (allFlag) {
-            lines.push(`          for (const tag of arr) parts.push(renderOne_${suffix}(tag, fieldKey, ${JSON.stringify(inlineCellName)} + "." + fieldKey));`);
+            blk.push(`          for (const tag of arr) parts.push(renderOne_${suffix}(tag, fieldKey, ${JSON.stringify(inlineCellName)} + "." + fieldKey));`);
           } else {
-            lines.push(`          parts.push(renderOne_${suffix}(arr[0], fieldKey, ${JSON.stringify(inlineCellName)} + "." + fieldKey));`);
+            blk.push(`          parts.push(renderOne_${suffix}(arr[0], fieldKey, ${JSON.stringify(inlineCellName)} + "." + fieldKey));`);
           }
-          lines.push(`        }`);
-          lines.push(`        el.innerHTML = parts.join("");`);
+          blk.push(`        }`);
+          blk.push(`        el.innerHTML = parts.join("");`);
         } else {
           // Per-field: src is an array of tags. `inlineCellName` IS the cell.
-          lines.push(`        if (!Array.isArray(src) || src.length === 0) { el.innerHTML = ""; return; }`);
+          blk.push(`        if (!Array.isArray(src) || src.length === 0) { el.innerHTML = ""; return; }`);
           if (allFlag) {
-            lines.push(`        const parts = [];`);
-            lines.push(`        for (const tag of src) parts.push(renderOne_${suffix}(tag, ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)}));`);
-            lines.push(`        el.innerHTML = parts.join("");`);
+            blk.push(`        const parts = [];`);
+            blk.push(`        for (const tag of src) parts.push(renderOne_${suffix}(tag, ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)}));`);
+            blk.push(`        el.innerHTML = parts.join("");`);
           } else {
-            lines.push(`        el.innerHTML = renderOne_${suffix}(src[0], ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)});`);
+            blk.push(`        el.innerHTML = renderOne_${suffix}(src[0], ${JSON.stringify(fieldName)}, ${JSON.stringify(inlineCellName)});`);
           }
         }
-        lines.push(`      };`);
+        blk.push(`      };`);
         // ss21 item-5 fix — drive the render from `_scrml_effect`, NOT a
         // `_scrml_reactive_subscribe` on the SOURCE errors cell. That cell is a
         // DERIVED cell (`<field>.errors`) and is never the target of a DIRECT
@@ -1671,9 +1722,10 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         // render re-runs when `_scrml_propagate_dirty` + `_scrml_trigger` wake it
         // on recompute — matching the render-element / disabled-gate /
         // reactive-textContent paths. The effect's initial run IS the first render.
-        lines.push(`      _scrml_effect(function() { render_${suffix}(); });`);
-        lines.push(`    }`);
-        lines.push(`  }`);
+        blk.push(`      ${anchorTrack(`_scrml_effect(function() { render_${suffix}(); })`, inTpl)};`);
+        blk.push(`    }`);
+        blk.push(`  }`);
+        pushAnchorBlock(blk, inTpl);
         continue;
       }
 
@@ -1704,25 +1756,28 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           }
         }
         const suffix = anchorId.replace(/[^a-zA-Z0-9_]/g, "_");
-        lines.push(`  // <render of=@cell/> element wiring (render-expr-primitive)`);
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
-        lines.push(`    if (el) {`);
-        lines.push(`      const render_${suffix} = function() {`);
-        lines.push(`        const _hv = (${acc});`);
-        lines.push(`        const _rt = (typeof _hv === "object" && _hv !== null && typeof _hv.variant === "string") ? _hv.variant : _hv;`);
-        lines.push(`        switch (_rt) {`);
+        const inTpl = binding.insideMountTemplate === true;
+        const blk: string[] = [];
+        blk.push(`  // <render of=@cell/> element wiring (render-expr-primitive)`);
+        blk.push(`  {`);
+        blk.push(`    const el = document.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
+        blk.push(`    if (el) {`);
+        blk.push(`      const render_${suffix} = function() {`);
+        blk.push(`        const _hv = (${acc});`);
+        blk.push(`        const _rt = (typeof _hv === "object" && _hv !== null && typeof _hv.variant === "string") ? _hv.variant : _hv;`);
+        blk.push(`        switch (_rt) {`);
         for (const [vName, vExpr] of Object.entries(variantExprs)) {
-          lines.push(`          case ${JSON.stringify(vName)}: el.innerHTML = (${vExpr}); break;`);
+          blk.push(`          case ${JSON.stringify(vName)}: el.innerHTML = (${vExpr}); break;`);
         }
-        lines.push(`        }`);
-        lines.push(`      };`);
-        lines.push(`      render_${suffix}();`);
+        blk.push(`        }`);
+        blk.push(`      };`);
+        blk.push(`      render_${suffix}();`);
         if (typeof encodedSubscribe === "string" && encodedSubscribe.length > 0) {
-          lines.push(`      _scrml_reactive_subscribe(${JSON.stringify(encodedSubscribe)}, function() { render_${suffix}(); });`);
+          blk.push(`      ${anchorTrack(`_scrml_reactive_subscribe(${JSON.stringify(encodedSubscribe)}, function() { render_${suffix}(); })`, inTpl)};`);
         }
-        lines.push(`    }`);
-        lines.push(`  }`);
+        blk.push(`    }`);
+        blk.push(`  }`);
+        pushAnchorBlock(blk, inTpl);
         continue;
       }
 
@@ -2091,54 +2146,57 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const isAsync = exprUsesServerFn(expr, serverFnNames);
         const renderFn = `_eb_render_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
-        lines.push(`      ${isAsync ? "async " : ""}function ${renderFn}() {`);
-        lines.push(`        let _eb_result;`);
-        lines.push(`        try {`);
-        lines.push(`          _eb_result = ${isAsync ? "await " : ""}(${ebExpr});`);
-        lines.push(`        } catch (_eb_err) {`);
-        lines.push(`          _scrml_error_boundary_log(${bId}, _eb_err);`);
+        const inTpl = binding.insideMountTemplate === true;
+        const blk: string[] = [];
+        blk.push(`  {`);
+        blk.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
+        blk.push(`    if (el) {`);
+        blk.push(`      ${isAsync ? "async " : ""}function ${renderFn}() {`);
+        blk.push(`        let _eb_result;`);
+        blk.push(`        try {`);
+        blk.push(`          _eb_result = ${isAsync ? "await " : ""}(${ebExpr});`);
+        blk.push(`        } catch (_eb_err) {`);
+        blk.push(`          _scrml_error_boundary_log(${bId}, _eb_err);`);
         if (hasFallback) {
-          lines.push(`          el.innerHTML = (${fallbackExpr});`);
-          lines.push(`          return;`);
+          blk.push(`          el.innerHTML = (${fallbackExpr});`);
+          blk.push(`          return;`);
         } else {
-          lines.push(`          throw _eb_err; // §19.6.8 B3 — no fallback; propagate to enclosing boundary/host`);
+          blk.push(`          throw _eb_err; // §19.6.8 B3 — no fallback; propagate to enclosing boundary/host`);
         }
-        lines.push(`        }`);
+        blk.push(`        }`);
         // Typed !-error dispatch (§19.6.3).
-        lines.push(`        if (_eb_result && typeof _eb_result === "object" && _eb_result.__scrml_error) {`);
-        lines.push(`          _scrml_error_boundary_log(${bId}, _eb_result);`);
+        blk.push(`        if (_eb_result && typeof _eb_result === "object" && _eb_result.__scrml_error) {`);
+        blk.push(`          _scrml_error_boundary_log(${bId}, _eb_result);`);
         const variantNames = Object.keys(variantRenders);
         if (variantNames.length > 0) {
-          lines.push(`          switch (_eb_result.variant) {`);
+          blk.push(`          switch (_eb_result.variant) {`);
           for (const vName of variantNames) {
-            lines.push(`            case ${JSON.stringify(vName)}: el.innerHTML = (${variantRenders[vName]}); return;`);
+            blk.push(`            case ${JSON.stringify(vName)}: el.innerHTML = (${variantRenders[vName]}); return;`);
           }
-          lines.push(`          }`);
+          blk.push(`          }`);
         }
         if (hasFallback) {
-          lines.push(`          el.innerHTML = (${fallbackExpr}); // boundary fallback (§19.6.5)`);
-          lines.push(`          return;`);
+          blk.push(`          el.innerHTML = (${fallbackExpr}); // boundary fallback (§19.6.5)`);
+          blk.push(`          return;`);
         } else {
-          lines.push(`          throw _scrml_error_boundary_uncaught(_eb_result); // §19.6.8 B3 — no renders/fallback; propagate`);
+          blk.push(`          throw _scrml_error_boundary_uncaught(_eb_result); // §19.6.8 B3 — no renders/fallback; propagate`);
         }
-        lines.push(`        }`);
+        blk.push(`        }`);
         // Success — plain text render.
-        lines.push(`        el.textContent = _eb_result;`);
-        lines.push(`      }`);
+        blk.push(`        el.textContent = _eb_result;`);
+        blk.push(`      }`);
         // Initial render. When async, the IIFE awaits; reactive re-run wraps in effect.
         if (isAsync) {
-          lines.push(`      ${renderFn}();`);
+          blk.push(`      ${renderFn}();`);
         } else {
-          lines.push(`      ${renderFn}();`);
+          blk.push(`      ${renderFn}();`);
         }
         if (varRefs.length > 0) {
-          lines.push(`      _scrml_effect(function() { ${renderFn}(); });`);
+          blk.push(`      ${anchorTrack(`_scrml_effect(function() { ${renderFn}(); })`, inTpl)};`);
         }
-        lines.push(`    }`);
-        lines.push(`  }`);
+        blk.push(`    }`);
+        blk.push(`  }`);
+        pushAnchorBlock(blk, inTpl);
         continue;
       }
 
@@ -2152,12 +2210,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       if (varRefs.length === 0 && exprUsesServerFn(expr, serverFnNames)) {
         const rewrittenExpr = emitExprField(binding.exprNode, expr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys });
 
-        lines.push(`  {`);
-        lines.push(`    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`);
-        lines.push(`    if (el) {`);
-        lines.push(`      (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`);
-        lines.push(`    }`);
-        lines.push(`  }`);
+        pushAnchorBlock([
+          `  {`,
+          `    const el = document.querySelector('[data-scrml-logic="${placeholderId}"]');`,
+          `    if (el) {`,
+          `      (async () => { try { el.textContent = await (${rewrittenExpr}); } catch (_e) { el.textContent = ""; } })();`,
+          `    }`,
+          `  }`,
+        ], binding.insideMountTemplate === true);
         continue;
       }
 

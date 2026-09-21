@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 110 |
-| MED | 262 |
+| MED | 268 |
 | LOW | 101 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -14095,7 +14095,7 @@ premise that the compile is the gate."*
 
 ### g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template — `benchmarks/todomvc/app.scrml` compiles at exit 0 and throws on first render in both harnesses, rendering zero rows, because the emitted `document.querySelector` for its lift target names an element that exists only inside a mount `<template>`; and BOTH TodoMVC test files are green against the dead build
 
-<!-- @gap id=g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(the top-level `const _scrml_lift_tgt_N = document.querySelector(...)` bind is emitted for a logic block whose host element the `if=` Phase-2 lowering has since moved into a mount `<template>`; the deciding site — which stage decides a lift target's bind is top-level rather than mount-scoped — was NOT traced) prov=empirical:PA-reproduced-by-execution-at-68ed2ce2-happy-dom-querySelector-returns-null-while-the-same-selector-matches-inside-one-of-two-template-contents -->
+<!-- @gap id=g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template sev=HIGH status=resolved resolved-by=S427-peter locus=compiler/src/codegen/emit-reactive-wiring.ts(Step-4b-lift-group-bind—CORRECTED-S427-the-emit-client.ts-locus-below-was-wrong) was:compiler/src/codegen/emit-client.ts(the top-level `const _scrml_lift_tgt_N = document.querySelector(...)` bind is emitted for a logic block whose host element the `if=` Phase-2 lowering has since moved into a mount `<template>`; the deciding site — which stage decides a lift target's bind is top-level rather than mount-scoped — was NOT traced) prov=empirical:PA-reproduced-by-execution-at-68ed2ce2-happy-dom-querySelector-returns-null-while-the-same-selector-matches-inside-one-of-two-template-contents -->
 
 **PA-REPRODUCED BY EXECUTION at `68ed2ce2`**, three-part, each part run rather than read:
 
@@ -14126,6 +14126,81 @@ carriers someone enumerated, with the un-enumerated carrier left silently broken
 see [[g-runtime-reconciliation-regression-post-may-unmeasurable-at-head]]. Re-establishing any perf
 baseline requires this fixed first.
 — `NEW S402-bryan (evidence measured S400 and left unfiled on a contended ledger; re-reproduced by execution before filing)`; **HIGH**; open
+
+⛑ **S427-peter — RESOLVED.** Re-reproduced on `ccd94817` first. **The locus above was wrong**: the eager
+top-level binds are emitted by `emit-reactive-wiring.ts` Step 4b (three sites), and the reason the S400
+`insideMountTemplate` stamp never reached them is that a lift-ONLY logic node registers no logic binding, so
+`addLogicBinding` never stamps it. Fix: template-interior lift hosts register a `lift-host` binding; the group
+emits as `_scrml_lift_mount_<pid>(host, …)` invoked from `_scrml_nav_rewire` against the mounted node, with the
+outer lift target saved/restored and every effect alive-gated to its mount. **Fixed the class, enumerated
+first:** five more template-interior anchor sites had the same eager bind (textarea RCDATA, `<errors of>`,
+`<render of>`, `<errorBoundary>` display, `${serverFn()}` one-shot) — each measured empty/unfetched inside
+`if=` and fixed; match/engine dispatch, `<each>`, `bind:`/`class:`/`ref=` were already rebound (one reachable site deferred, not measured: the `route-splitter` hover-prefetch `a[data-scrml-prefetch]`, a §40.9.7 SHOULD). Governing:
+§10.1 + §17.1's sugar equivalence (`if=` is sugar over `${ if(expr) { lift <el> } }`). `browser-todomvc`
+now asserts rows render (3 fail against the pre-fix build, pass after). 22 corpus client artifacts change,
+every one a previously-broken program (adversarially sampled: base threw or misplaced rows). ⚑ The run-once
+statement ORDER inside such a block is RULING-PENDING — see
+[[g-if-mount-lift-block-statement-timing-ruling-pending]].
+
+### g-if-mount-lift-block-statement-timing-ruling-pending — inside an `if=`, a `${…lift…}` block's lift-free statements run once at file init while its lift statements run per mount, so source order splits in two measured ways; which reading of §7.6 vs §6.7.2.1 governs is bryan's — `NEW S427-peter; MED; ruling-gated`
+<!-- @gap id=g-if-mount-lift-block-statement-timing-ruling-pending sev=MED status=ruling-gated locus=compiler/src/codegen/emit-reactive-wiring.ts(emitMountDeferredLiftGroup — the run-once split) prov=review:S427-adversarial-rounds-1-and-2-on-the-lift-target-mount-fix -->
+
+The S427 lift-target fix keeps base's timing for every lift-FREE statement of a template-interior lift block
+(`const`/`let`/`function`/reactive write/expression run ONCE at file init, at file scope — §7.6, SPEC.md:6417)
+and runs only the statements that contain `lift` per mount. Nothing that worked on base changes. Two ORDER
+consequences, both pinned as **RULING PENDING** in `browser-lift-target-mount-template.test.js`: (a) a lift-free
+statement reading what a lift statement wrote sees the pre-mount value (`hits.push(it)` inside the lift loop,
+`@seen = hits.length` after → 0, the SSR-body twin gives 2); (b) a lift-free statement placed AFTER a lift
+statement runs BEFORE it (first render `second:a`, twin `first:a`). §6.7.2.1 (SPEC.md:3854) requires a
+re-mounting scope to "re-run all bare expressions … exactly as if mounting for the first time" — a `const`
+is arguably not a bare expression, which is the reading shipped. Corpus population of both shapes: zero.
+Question routed to bryan: `handOffs/incoming/2026-09-21-from-S427-peter-to-bryan-if-mount-lift-block-timing.md`.
+⚑ An attempted per-render file-scope hoist for outer-effect groups was REMOVED before landing: it turned loud
+failures into silent wrong output (a wiped mount, closures reading later values) — fail-open, disqualified.
+
+### g-lift-inside-each-row-or-match-arm-silently-dropped — a `${ for … lift }` inside an `<each>` row or an engine/match arm emits NO lift code at all, at exit 0 — `NEW S427-peter; HIGH; open`
+<!-- @gap id=g-lift-inside-each-row-or-match-arm-silently-dropped sev=HIGH status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts(Step-4b-groups-by-_placeholderId),compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:PA-reproduced-each-row-form-on-ccd94817-zero-_scrml_lift-occurrences-in-the-client-bundle;match-arm-form-reproduced-by-the-S427-adversarial-reviewer-on-base-and-head -->
+
+**PA-REPRODUCED on `ccd94817`:** `<each in=@groups key=@.id as g> <ul> ${ for (let it of g.items) { lift <li>${it}</li> } } </ul> </each>`
+compiles at **exit 0** and the emitted client contains **zero** `_scrml_lift` occurrences — the rows are
+silently dropped. The same shape inside an engine/match arm is dropped too (reproduced on base and head by the
+S427 adversarial reviewer, `p10`). Independent of `if=`. Silent wrong output with no diagnostic → HIGH.
+
+### g-lift-block-bare-call-emitted-twice-as-display-binding — in a lift block, a bare call statement is ALSO emitted as a separate `${}` display binding that re-runs it and can clear the host — `NEW S427-peter; MED; open`
+<!-- @gap id=g-lift-block-bare-call-emitted-twice-as-display-binding sev=MED status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-event-wiring.ts—not-traced prov=review:S427-adversarial-round-2-N1-q12-q12b-reproduced-on-base-and-head-at-top-level -->
+
+`${ const v = @count; track(v); lift <b>${v}</b> }` emits `track(v)` inside the lift group AND as a separate
+`_scrml_render_value(el, track(v))` display binding. At top level (base and head alike) the duplicate throws
+`v is not defined` and `track` runs extra times; with `track(@count)` the duplicate runs and **wipes the lifted
+children**, calls tripled. Pre-existing; surfaced by the S427 review, which also found that ANY change giving the
+duplicate a resolvable name turns it from a loud error into a silent wipe.
+
+### g-lift-target-cleared-to-null-at-end-of-every-outer-effect-run — the outer re-render effect in `emitLiftGroup` ends with `_scrml_lift_target = null`, so a top-level group whose write synchronously re-runs another group sends its remaining lifts to `document.body` — `NEW S427-peter; MED; open`
+<!-- @gap id=g-lift-target-cleared-to-null-at-end-of-every-outer-effect-run sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts(emitLiftGroup — the effect body's trailing `_scrml_lift_target = null`) prov=review:S427-adversarial-round-2-N5-q9-and-its-SSR-body-twin-q9t-identical-on-base -->
+
+Same class as the save/restore S427 added to `_scrml_lift_mount_run`, one level out and pre-existing: q9 (a
+top-level group writing `@count`, which synchronously re-runs a group reading it) lands the outer group's later
+`lift <p>` in `document.body`, accumulating. Base shows it identically. Fix is the same save/restore inside the
+emitted effect body — it changes SSR-body output bytes, which is why it was kept out of the S427 fix.
+
+### g-serverfn-display-emits-a-stray-file-scope-fetch — a `${serverFn()}` interpolation also emits a file-scope `_scrml_fetch_<fn>()` call that fires at init even when its `if=` is false, so the server fn is fetched twice — `NEW S427-peter; MED; open`
+<!-- @gap id=g-serverfn-display-emits-a-stray-file-scope-fetch sev=MED status=open locus=searched:compiler/src/codegen/emit-event-wiring.ts(the ${serverFn()} one-shot),compiler/src/codegen/emit-client.ts—not-traced prov=empirical:S427-dev-agent-and-adversarial-reviewer-both-measured-an-init-fetch-with-the-if=-false -->
+
+Pre-existing. The S427 browser test deliberately asserts per-mount fetch DELTAS so it does not pin the stray.
+
+### g-lifted-markup-ignores-if-attr-and-false-checked — inside lifted markup, `if=` on a child element and `checked=${false}` are ignored — TodoMVC rows show both `.view` and `input.edit`, with `checked` inverted — `NEW S427-peter; MED; open`
+<!-- @gap id=g-lifted-markup-ignores-if-attr-and-false-checked sev=MED status=open locus=searched:compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-html.ts—not-traced prov=review:S427-adversarial-round-1-F4-p14-reproduced-on-base-at-top-level -->
+
+Found once TodoMVC's rows started rendering (S427). Same on base at top level (`p14`). The S427 TodoMVC tests
+assert labels only, so the app still LOOKS broken even though its rows now render.
+
+### g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup — two pre-existing lift-body lowering defects: `n = n + 1` inside a `for…lift` over a reactive list is emitted as `const n = n + 1` (TDZ), and a destructured `const` in an outer-effect group is invisible to the keyed-list setup hoisted outside the effect — `NEW S427-peter; MED; open`
+<!-- @gap id=g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup sev=MED status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S427-dev-agent-reproduced-both-at-top-level-on-base-NOT-PA-verified -->
+
+Reported by the S427 dev agent, reproduced at top level on base by it; **not yet PA-verified** — re-reproduce
+before dispatching. Also reported, same status: a bare-expression display (e.g. a `~` initializer) sharing a lift
+group's `<span>` overwrites the lifted children, and a textarea anchor inside a `<match>` arm inside an `if=`
+stays empty (the arm is injected by `_scrml_remount_dispatch` after `rewire` runs).
 
 ---
 
