@@ -3887,6 +3887,18 @@ export function generateHtml(
       // can target lift-exprs to the correct DOM position.
       (node as any)._placeholderId = placeholderId;
       parts.push(`<span data-scrml-logic="${placeholderId}"></span>`);
+      // g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template —
+      // a lift host inside a mount-deferred `<template>` (an `if=` gate or an
+      // if-chain branch, at any nesting) is absent from the document until the
+      // template mounts, so its lift group cannot bind the target at module
+      // init. Record it so emit-reactive-wiring emits the group as a
+      // host-parameterised function and emit-event-wiring binds that function
+      // from `_scrml_nav_rewire` on every mount (the S400 static-display
+      // mechanism, extended to lift targets). A host in the SSR body registers
+      // nothing → byte-identical output.
+      if (registry && bodyHasLift && registry.isInsideMountTemplate()) {
+        registry.addLogicBinding({ kind: "lift-host", placeholderId });
+      }
       if (registry && node.body) {
         for (const child of node.body) {
           // g-onmount-async (S217) — DEFAULT-LOGIC-MODE BARE-EXPR IS AN EFFECT.

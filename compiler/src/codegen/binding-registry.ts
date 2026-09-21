@@ -114,7 +114,24 @@ export interface LogicBinding {
    * arrow-function expression. emit-event-wiring consumes and emits subscribe +
    * per-iteration render.
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow" | "rcdata-content";
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow" | "rcdata-content" | "lift-host";
+
+  /**
+   * g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template — set
+   * when `kind === "lift-host"`. emit-html.ts registers one such binding for a
+   * `${ … lift … }` logic block whose `<span data-scrml-logic>` host sits inside
+   * a MOUNT-DEFERRED `<template>` (registered ONLY there — a host in the plain
+   * SSR body registers nothing, so its emit is byte-identical). The host does
+   * not exist in the document until the template is cloned and inserted, so the
+   * lift group cannot bind its target with a module-init
+   * `document.querySelector` (that returns null: `querySelector` never descends
+   * into template content). emit-reactive-wiring.ts instead emits the group as a
+   * host-parameterised function and records its name here; emit-event-wiring.ts
+   * then binds it from `_scrml_nav_rewire`, which re-runs scoped to every
+   * freshly mounted subtree. Unset when no lift code was emitted for the host
+   * (nothing to bind — the event-wiring pass emits nothing for it).
+   */
+  liftMountFn?: string;
 
   /**
    * 6nz-F4 — RCDATA content-model carve-out (SPEC §24.3.1 companion, SPEC.md:1141).
@@ -663,6 +680,15 @@ export class BindingRegistry {
   /** Exit a mount-deferred `<template>` body. Symmetric with `enterMountTemplate`. */
   exitMountTemplate(): void {
     if (this._mountTemplateDepth > 0) this._mountTemplateDepth--;
+  }
+
+  /**
+   * True while HTML gen is inside a mount-deferred `<template>` body (at any
+   * nesting). Lets a producer decide whether to register a binding at all —
+   * the `lift-host` binding exists only for hosts inside such a template.
+   */
+  isInsideMountTemplate(): boolean {
+    return this._mountTemplateDepth > 0;
   }
 
   /**
