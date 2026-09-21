@@ -24,7 +24,7 @@ Read strictly, §6.7.2.1 says "bare EXPRESSIONS", and a `const` declaration is a
 two may not actually conflict. That reading is what #1021 implements; I want your ruling on whether it
 is the language you intend.
 
-# What #<PR> does today (landed as the conservative reading, ruling pending)
+# What #1021 does today (landed as the conservative reading, ruling pending)
 
 The fix makes a template-interior lift render into the MOUNTED node (it previously bound `null` at top
 level — TodoMVC benchmark dead on arrival, `g-todomvc-benchmark-app-dead-on-arrival-…`, HIGH). For the
@@ -58,6 +58,6 @@ Corpus population of both shapes: **zero**.
 PA lean: **A** — it cannot regress a working program and it is the narrower reading of §6.7.2.1's
 "bare expressions". But the axis (what an `if=` scope owns) is yours.
 
-Direction-of-change of #<PR>: **semantics-changed, previously-broken programs only** (conformance
+Direction-of-change of #1021: **semantics-changed, previously-broken programs only** (conformance
 restoration of §10.1 + §17.1's sugar equivalence). Full review trail in `docs/pr-reviews.md` and
 `docs/changes/s427-lift-target-mount/progress.md`.
