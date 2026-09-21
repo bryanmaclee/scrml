@@ -81,7 +81,7 @@ import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 // type error here, not a silent `asIs` at some adopter's decl site.
 import type { ExprNode, LitExpr, UnaryExpr, EscapeHatchExpr } from "./types/ast.ts";
 import { extractSelectProjection } from "./sql-projection.ts";
-import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls } from "./codegen/collect.ts";
+import { queryInterpolationsAreServerAmbientOnly, queryHasLiveInterpolation, collectServerVarDecls, callableServerVarDecls, fileHasDbStateContext } from "./codegen/collect.ts";
 import type { SelectProjection, ProjectedColumn } from "./sql-projection.ts";
 import { parseMatchArms } from "./match-statechild-parser.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
@@ -8510,19 +8510,142 @@ function validateMarkupAttributes(
 // ---------------------------------------------------------------------------
 
 /**
- * Returns true if the fileAST has a <program> node with a db= attribute.
- * Used to check E-AUTH-005: server @var requires a server context.
+ * True iff the given `<program>` node carries a `db=` attribute.
+ *
+ * ⚑ NODE-LEVEL, NOT FILE-LEVEL, AND THE DIFFERENCE IS THE WHOLE DEFECT THIS
+ * SIGNATURE EXISTS TO PREVENT. This used to be a file-level `hasProgramDbAttr`
+ * that found the top-level `<program>` itself and returned `false` when there was
+ * none — collapsing "this file's program declares no database" (a fact) and "this
+ * file declares no program" (not a fact about the application at all) into one
+ * boolean. Taking the node as a parameter forces the caller to have DECIDED which
+ * of those two it is looking at. See `fileEstablishesServerContext`.
  */
-function hasProgramDbAttr(fileAST: FileAST): boolean {
-  const nodes = (fileAST.nodes as ASTNodeLike[] | undefined)
-    ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
-    ?? [];
-  const programNode = nodes.find(
-    (node: ASTNodeLike) => node.kind === "markup" && (node as ASTNodeLike).tag === "program"
-  );
-  if (!programNode) return false;
-  const attrs = (programNode as ASTNodeLike).attrs as Array<{name: string; value: unknown}> | undefined;
+function programNodeHasDbAttr(programNode: ASTNodeLike): boolean {
+  const attrs = programNode.attrs as Array<{name: string; value: unknown}> | undefined;
   return !!(attrs && attrs.some((a: {name: string; value: unknown}) => a.name === "db"));
+}
+
+/**
+ * §52.11 — does THIS ONE FILE establish a server (database) context?
+ *
+ * Two shapes do, and they are the SAME two `collectDbScopes`
+ * (`codegen/emit-server.ts:745`) recognises when it builds the file's real SQL
+ * connections — so "has a server context" here means "codegen would emit a
+ * database handle", not a second opinion about it:
+ *
+ *   - Form 1 — a top-level `<program db=…>`.
+ *   - Form 2 — a `<db src=…>` state block (`fileHasDbStateContext`). This is the
+ *     canonical multi-file page shape; `examples/23-trucking-dispatch` writes
+ *     `<db src="../../dispatch.db">` in every page file.
+ *
+ * ⚑ THIS IS A POSITIVE TEST AND ITS NEGATION IS **NOT** "client-only". A file that
+ * establishes no context of its own may still sit inside an application that has
+ * one — which is the normal case, not an edge case. Only
+ * `compilationUnitHasServerContext` answers the question `E-AUTH-005` actually
+ * asks; do not reach for this predicate alone at the fire site.
+ *
+ * ⚑ `findTopLevelProgramNode` IS BORROWED, NOT RE-SPELLED. "Does this file declare
+ * a top-level `<program>`?" is the entry-ness question, and four hand copies of it
+ * were deleted into one place at `85ebbb5f` (#859). This adds no fifth: it calls
+ * the `tool-program.ts` helper already imported by this file, which shares
+ * `library-shape.js`'s `kind === "markup" && tag === "program"` test and the same
+ * outer-`nodes`-then-`ast.nodes` precedence the retired file-level predicate used.
+ * The STAMPED `fileAST.fileShape` is deliberately NOT read: it is stamped at the
+ * Stage 3.004 PRECG seam, AFTER this stage, so reading it here degrades silently
+ * to `undefined`.
+ *
+ * ⚑ A nested `<program db=…>` (§43 worker / §4.12.2 scoped-db) does NOT count, and
+ * the top-level-only scan is deliberate rather than an oversight: §4.12.1 makes a
+ * nested `<program>` a SEPARATE compilation unit, so a `<var server>` outside it is
+ * not in its scope. Unchanged from the retired predicate, which also scanned
+ * top-level only.
+ */
+function fileEstablishesServerContext(fileAST: FileAST): boolean {
+  const programNode = findTopLevelProgramNode(fileAST);
+  if (programNode && programNodeHasDbAttr(programNode)) return true;
+  return fileHasDbStateContext(fileAST as unknown as Parameters<typeof fileHasDbStateContext>[0]);
+}
+
+/**
+ * §52.11 — does the APPLICATION under compilation have a server context?
+ *
+ * ⛔ THE UNIT IS THE COMPILATION UNIT, NOT THE FILE, AND THAT IS THE WHOLE FIX.
+ * SPEC §52.11 states `E-AUTH-005`'s trigger as a `<var server>` declaration
+ * "inside a client-only component (a component with no server context)". "No
+ * server context" is a property of the APPLICATION; the check used to evaluate it
+ * against the CURRENT FILE, and under the canonical v0.3 layout those two answers
+ * are guaranteed to differ for every file but one.
+ *
+ * The normative sentences that force the application reading, all pre-existing:
+ *
+ *   - §40.8 — *"A scrml application SHALL declare its top-level `<program>` element
+ *     exactly ONCE, in the application's entry file"* and *"The `<program>`
+ *     declaration SHALL NOT appear in any non-entry file of the same application."*
+ *   - §58.8 — a `<page>` *"is not a separate compilation unit — it shares the
+ *     application `<program>` scope."*
+ *   - §39.12.0 — the v0.3 db-anchor workaround exists for files that are *"NOT
+ *     routes (i.e. not the entry file's `<program>` and not a route file's
+ *     `<page>`)"*, so a route file's `<page>` is already db-anchored by the
+ *     application scope it shares.
+ *
+ * So in a conforming multi-file app EVERY page and component file has NO
+ * `<program>` — §40.8 forbids one there — and the old file-local predicate read
+ * that mandated absence as proof of a client-only context. It refused every
+ * `<var server>` in every non-entry file while prescribing a remedy ("Add db= to
+ * the enclosing `<program>`") the layout makes unreachable. Since §52.4.2 pt 5
+ * makes `<var server>` the only route to an SSR-prerendered cell, that made
+ * server-rendered page data structurally unavailable to every multi-file app.
+ *
+ * ⚑ THE FIX IS A WIDER UNIT, NOT A WEAKER TEST — the distinction matters, because
+ * a weaker test is how this kind of repair usually goes wrong. An application with
+ * NO `db=` anywhere in it still has no server context, and `E-AUTH-005` still
+ * fires on every `<var server>` in it, at every file shape. Conformance
+ * `auth/auth-005-pos` (`<program title="Dashboard">` + `<count server> = 0`) is
+ * unchanged, and so is the no-`<program>`-at-all shape: single-file compilations
+ * behave exactly as before, because there the compilation unit IS the file.
+ *
+ * ⚑ `runTS` already receives the whole file set (`input.files`) from `api.js`
+ * (`api.js` -> `_runTS({ files: ceResults, … })`), so the CLI/build path costs no
+ * new plumbing. It is computed ONCE per compilation, not per file.
+ *
+ * ⛔ THE LSP IS A KNOWN, MEASURED DIVERGENCE — DO NOT READ "the whole file set" AS
+ * TRUE THERE. `lsp/handlers.js` builds `const files = [tabResult];` — the SINGLE
+ * OPEN DOCUMENT, never the workspace — so in the editor the compilation unit is
+ * one file and a page that compiles GREEN through the CLI is RED-SQUIGGLED. That
+ * is this change's own doing: before it, CLI and LSP over-fired consistently.
+ * (An earlier revision of this very comment asserted the opposite — that the LSP
+ * passed the whole set — and the claim propagated into a review before anyone
+ * re-read `handlers.js`. It is corrected here rather than deleted so the next
+ * reader sees that it was checked.)
+ *
+ * ⚑ IT FAILS SAFE, AND IT IS DELIBERATELY NOT WIRED YET. The divergence is
+ * over-FIRING (a false red in the editor, never a missed one), so it is a UX
+ * defect and not a soundness hole. It is left open because the obvious fix is
+ * wrong: `analyzeText`'s `workspace` cache (`lsp/workspace.js` `fileASTMap`) holds
+ * every `.scrml` under the workspace ROOT, which in any repo holding more than one
+ * application — this one holds hundreds — would let app A's `db=` suppress
+ * `E-AUTH-005` across app B. Handing the LSP that set trades a false RED for a
+ * false GREEN, which is the strictly worse direction. Nor does the import graph
+ * help: a page file does not import its entry — that is the whole defect.
+ *
+ * Wiring it correctly needs an APPLICATION boundary (which files constitute one
+ * app), and per §40.8 the entry is *"the file resolved by the build root"* — a
+ * BUILD fact no single FileAST carries — while `E-PROGRAM-002` (one-`<program>`
+ * uniqueness) is still reserved-not-implemented. So the LSP fix and the
+ * two-apps-in-one-invocation gap below are ONE arc, not two, and both wait on a
+ * build-root entry resolver over the file set.
+ *
+ * ⚑ SAME ROOT, STATED PLAINLY: this function's unit is "the files handed to
+ * `runTS`" — input files plus their transitive imports — with NO application
+ * boundary. Two independent applications compiled in one invocation share a
+ * verdict: app A's `db=` suppresses `E-AUTH-005` in app B. Measured harm is
+ * bounded — a leaked `<var server> = ?{…}` still fails `E-SQL-004`, so only a
+ * literal-RHS server cell silently loses its diagnostic, and `W-AUTH-001` still
+ * fires on it — but it is a real gap and it is recorded here rather than
+ * discovered later.
+ */
+function compilationUnitHasServerContext(files: readonly FileAST[]): boolean {
+  return files.some((f) => fileEstablishesServerContext(f));
 }
 
 /**
@@ -8641,6 +8764,12 @@ function annotateNodes(
   errors: TSError[],
   stateTypeRegistry: Map<string, ResolvedType>,
   machineRegistry: Map<string, MachineType>,
+  /**
+   * §52.11 — does the APPLICATION this file belongs to have a server context?
+   * Resolved by `processFile` from the compilation-unit-wide fact `runTS` computes.
+   * Consumed by the `E-AUTH-005` check in the `state-decl` case.
+   */
+  appHasServerContext: boolean,
 ): Map<string, ResolvedType> {
   const nodeTypes = new Map<string, ResolvedType>();
   const filePath = fileAST.filePath;
@@ -11484,8 +11613,12 @@ function annotateNodes(
           if (isServer) {
             const declSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
 
-            // E-AUTH-005: server @var requires a server context (db= on <program>) (§52.11)
-            if (!hasProgramDbAttr(fileAST)) {
+            // E-AUTH-005: a `<var server>` requires a server context (§52.11). The
+            // unit is the APPLICATION, not this file — §40.8 puts the single
+            // `<program>` in the entry file and §58.8 has a `<page>` share that
+            // scope, so a page's own AST cannot answer it. See
+            // `compilationUnitHasServerContext`.
+            if (!appHasServerContext) {
               errors.push(new TSError(
                 "E-AUTH-005",
                 `E-AUTH-005: 'server @${n.name as string}' declared in a client-only context. ` +
@@ -24358,8 +24491,21 @@ function processFile(
   protectAnalysis: ProtectAnalysis,
   routeMap: RouteMap,
   importedTypes?: Map<string, ResolvedType>,
+  /**
+   * §52.11 — does the whole compilation unit have a server context? Supplied by
+   * `runTS`, which is the only caller that can see the other files.
+   *
+   * ⚑ THE FALLBACK IS NOT A CONVENIENCE DEFAULT. When omitted, this file is taken
+   * to BE the compilation unit and the answer is derived from it alone — which is
+   * exactly right for a single-file compile and is the pre-existing behaviour.
+   * Defaulting to `true` instead would silently disable `E-AUTH-005` for any
+   * future caller that forgets the argument; defaulting to `false` would restore
+   * the very over-fire this parameter exists to end.
+   */
+  appHasServerContext?: boolean,
 ): { typedAst: TypedFileAST; errors: TSError[]; stateTypeRegistry: Map<string, ResolvedType> } {
   const errors: TSError[] = [];
+  const hasServerContext = appHasServerContext ?? fileEstablishesServerContext(fileAST);
 
   const filePath = fileAST.filePath;
   const fileSpan: Span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
@@ -24525,6 +24671,7 @@ function processFile(
     errors,
     stateTypeRegistry,
     machineRegistry,
+    hasServerContext,
   );
 
   // §14.12.4 — Engine-cell carve-out for lifecycle annotation
@@ -25102,13 +25249,20 @@ export function runTS(input: {
   const allErrors: TSError[] = [];
   let lastStateTypeRegistry: Map<string, ResolvedType> | undefined;
 
+  // §52.11 — APPLICATION-scope, computed ONCE over the whole compilation unit and
+  // threaded down, never re-derived per file. `E-AUTH-005` asks whether the
+  // application has a server context (§40.8 puts the single `<program>` in the
+  // entry file; §58.8 says a `<page>` shares that scope), so the answer cannot be
+  // read off the file being checked. See `compilationUnitHasServerContext`.
+  const appHasServerContext = compilationUnitHasServerContext(files);
+
   for (const fileAST of files) {
     // Look up imported types for this file from the caller-provided map.
     // api.js builds this map in topological order so dependency types are available
     // when an importing file is processed. If not provided, cross-file types are absent
     // (pre-import-system behavior — single-file compilation still works correctly).
     const importedTypes = importedTypesByFile?.get(fileAST.filePath as string);
-    const { typedAst, errors, stateTypeRegistry } = processFile(fileAST, protectAnalysis, routeMap, importedTypes);
+    const { typedAst, errors, stateTypeRegistry } = processFile(fileAST, protectAnalysis, routeMap, importedTypes, appHasServerContext);
     typedFiles.push(typedAst);
     allErrors.push(...errors);
     lastStateTypeRegistry = stateTypeRegistry;
