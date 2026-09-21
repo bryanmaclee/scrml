@@ -1,0 +1,12 @@
+<program>
+<items> = ["a", "b", "c"]
+<ul>
+    ${
+        let n = 0
+        for (let it of @items) {
+            n = n + 1
+            lift <li class="row">${n}:${it}</li>
+        }
+    }
+</ul>
+</program>
