@@ -2,6 +2,84 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S426 — 2026-09-20 (peter · P-Tech1)
+
+**The floor drained 7 → 0, the lead item's own gap entry turned out to be wrong in three places, and
+the fix's stated invariant was wrong rather than incomplete.** Boot inherited a count of 5 OWED; the
+probe measured **7**, because the two post-wrap PRs of the previous session (#1005, #1006) are
+themselves owed — a wrap cannot count the landings that come after it. Two code-bearing (#1001,
+#1002), five carve-outs by path, and every carve-out **probed by running the gate that governs the
+artifact it changed** rather than stamped.
+
+**The floor pass found a THIRD door on "a seed-bridge failure must be LOUD", and the second door was
+my own fix from the previous session.** #1002 added the `hasSeedBridgeFailure` disqualifier to the
+state-resolution `needs-server` return; the **D1 mount-throw** `needs-server` return has none and
+returns *before* D2 ever runs. PA-reproduced: a seeded, server-dependent app whose mount throws a
+server-absence-shaped `TypeError`, carrying a thrown seed write and the `[seed-bridge]` notice, scores
+**green** with the seed failure recorded nowhere — and green cells have `detail` stripped anyway. Two
+controls pinned it. This is **not** the residual #1002 deferred, which lives inside a block this path
+never reaches. Widened the existing entry as a fifth path rather than forking it, because that entry
+exists precisely because *"fixing one site of a class and not the others is what re-opened it twice"*.
+**The convergent fix enumerates every `return` that yields a GREEN state.**
+
+**Three corrections to my own S424 gap entry, all by measurement.** (1) A **third** delegating
+definition it never named — `svg` counts any element child — found because the entry's own
+sibling-check paragraph told the next reader to *re-derive the set rather than trust this sentence*,
+which is that instruction working rather than failing. (2) **`status-picker.scrml` is not a site at
+all**: no `<select>` element, its one occurrence is inside a `//` comment, and its `<each>` emits
+`<button>` rows — a text-level grep produced that citation, which is **Rule 7's own class committed
+inside a gap entry**. (3) **The real-world trigger population is ZERO** — across 2,609 corpus files,
+`picture`/`video`/`audio`/`svg` have no `<each>` sites and every real `<each>`-inside-`<select>` emits
+options carrying text, which the text half already saves. **So the arc-ordering constraint #1004 made
+binding is dissolved**: growing the seeded set does not make the false positive live, the two arcs are
+independent, and the D6 fix is **preventative** — worth landing on cry-wolf and corpus-is-artifact
+grounds, never on corpus-zero grounds in either direction.
+
+**The dispatch overturned the brief's mechanism, and then the pre-land pass overturned the fix's
+invariant.** The brief specified `node.parentNode`; `select` and the media parents confer via
+`querySelector`, a *descendant* query, so the conferring element is an **ancestor** — and a
+parent-only rule would have **missed the plain mount shape entirely**, since a nested each's rows are
+the mount div's children and the `<select>` is their grandparent. It would have fixed the fence shape,
+left the mount shape red, and looked done. Then the mandatory pre-land pass found **`<datalist>`** as a
+sixth instance that *could not be fixed by the rule the first round stated*: `elementCarriesContent`
+has no datalist arm, and a datalist-only body correctly renders nothing. The invariant had been read
+off a sample of five in which two different questions coincide. It is now **"is this node the kind of
+child its ancestor CONSUMES — did the each produce the rows that parent exists to hold?"**, with six
+body-scope pins forbidding the wrong fix.
+
+**The convergent move: the population was enumerated ONCE instead of patched a seventh time.** 22
+shapes measured against a stated search — every HTML parent whose content model is wholly element
+children that carry no text of their own and are not content candidates, because a text-bearing child
+is already saved by the text half and a candidate child by the candidate half. **Seven covered**,
+including `video`/`audio` > `track`, which neither the brief nor the review had named and which is the
+cleanest evidence the reframing generalizes: a subtitle track must not make a src-less video
+"content", yet an each over subtitle languages did produce its rows. The rest disposed with reasons and
+pinned by tests, including one flagged contestable (`math > mspace`) and one that is a parser fact
+rather than a judgement (`table > col` without `colgroup` is measured **unreachable** — the parser
+hoists the `col` out, so the red is correct). Recorded because **a mis-specified measurement is not
+evidence**: the first enumeration pass used a probe asking only *"is the region reported empty?"* and
+flagged six shapes that are not instances at all, since an each of empty `<span>`s in a `<slot>` **is**
+an empty render.
+
+**A detector that crashed instead of classifying, twice.** Reading the selector table through
+`Object.prototype` meant `<constructor>` threw from `matches()` and `<__proto__>` threw from
+`querySelectorAll()` — exactly those two of eight probed, because the lookup lowercases the tag first,
+so only the all-lowercase members of `Object.prototype` survive as keys. Fixed with a `Map`, immune by
+construction rather than by enumerating hostile names.
+
+**The efficiency finding was declined with numbers.** Cost is linear in rows and essentially flat in
+depth (500 rows at depth 5 = 18.1 ms, at depth 30 = 19.8 ms), so the ancestor walk is not the cost and
+hoisting it would not remove the per-row `querySelectorAll`.
+
+**Also established, and it outlives this arc:** `.claude/maps/test.map.md` says this tier's gate is
+`tracking` (non-blocking). That is **wrong, not stale** — no workflow mentions the tier and the
+source-controlled pre-commit globs `compiler/tests/*.test.js`, which does not descend into the
+subdirectory. **No gate runs this tier at all**, so its now-216 tests pin nothing until someone runs
+them by hand; this is the same standing item as the S420 carry-forward "e2e-render-map CI job".
+Separately, `tracking`'s five red names were re-measured per PR against main's own run (byte-identical)
+and are **already root-caused** by `g-tracking-job-red-on-main-and-nobody-reads-it`, whose S391 audit
+measured them passing locally in under four seconds against ~10.4 s each in CI.
+
 ## S424 — 2026-09-20 (peter · P-Tech1)
 
 **The review floor drained 6 → 0 and convicted my own PR five times, including a red against a correct

@@ -1,3 +1,226 @@
+# scrml — Session 426 (peter · Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: S425-bryan registered LIVE ~7h before my boot and produced no landing evidence all
+> session** — no `board(s425)` progress commit beyond its registration, and the newest scrml-support
+> commits were my own. His declared footprint (#990 dPA drain · #995/#996 · the two August scrml-site
+> reports) is bryan-lane and disjoint from mine; I stayed entirely inside
+> `compiler/tests/e2e-render-map/**` + the ledger. His open PRs are CLAIMED, not lost.
+>
+> ⚑⚑ **THE ONE THING THIS WRAP IS ABOUT: #1009 IS GREEN AND DELIBERATELY NOT MERGED.** Merge permission
+> was granted, gate + windows pass, `tracking` carries the same byte-identical five pre-existing names —
+> and it is HELD, because its own re-review found it turning two TRUE POSITIVES into FALSE GREENS. Do not
+> read "green" as "ready" on this PR.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **⚑⚑ THE LEAD ITEM IS ROUND 3 OF #1009, AND IT IS BOUNDED AND SPECIFIED.** The D6 conferring/consuming
+   fix is 95% right and holds a fail-open hole in the last 5%. **Both defects PA-REPRODUCED against the
+   pre-fix detector, so this is measurement, not a reviewer's claim:**
+   - **(A) The wrapper bound is missing.** `matchesSelfOrRenderedDescendant` runs a full subtree
+     `querySelectorAll`, so ANY element between the consuming ancestor and the row is accepted. **The
+     compiler's own nested-each emits exactly such a wrapper** (`emit-each.ts:1670`/`:3532` create a
+     `<div data-scrml-each-mount>`), so `<select><optgroup><div data-scrml-each-mount><option>` now scores
+     `renders-clean` where it correctly scored `renders-empty-with-data` before — **and the red was
+     right**: options inside a `div` are not in `select.options`, so the dropdown really renders empty.
+     Also measured for `<select><ul><li>…options` and `<picture><div><source>`.
+     ⚑ **The first round's justification for the ancestor walk WAS this mistake** — it argued parent-only
+     "would miss the plain mount shape", but a mount `div` inside a `<select>` is invalid markup the
+     compiler should not emit; the corpus already carries a repro for that class at
+     `docs/changes/each-table-foster/repro-each-option-select.scrml`. **So the round-3 question is partly
+     a compiler question: is the nested-each-inside-select emit itself a filed defect?** Check before
+     designing around it.
+   - **(B) `svg` kept the "any element" half and dropped the "non-emptiness" half.**
+     `if (tag === "svg") return true` tests the node not at all, so rows of empty `<g>` (the wrapper
+     emitted, its `<circle>` children dropped — precisely the chrome-present/data-absent class D6 exists
+     for) and `<metadata>` score green where they correctly reddened before.
+   - **Fix direction: bound by the CONTENT MODEL, not by a subtree query.** Permit only wrappers the
+     model allows (`optgroup` under `select`/`datalist`; `g`/`a`/`switch` under `svg`) or require the
+     consumed child to be a DIRECT child of the consuming ancestor; and for `svg`, restore non-emptiness
+     so an empty `<g>` and the metadata elements (`defs`/`metadata`/`desc`/`title`) confer nothing.
+   - ⛔ **The PR's own test at `detector-validation.test.js:1074` ("the mount shape confers too") PINS THE
+     WRONG BEHAVIOUR.** It must be inverted, not deleted — it is the regression pin for (A).
+   - Two LOW items ride along: the table filters `source`/`track` by attribute but not `option`/`area`/
+     `col` (so an attribute-drop on `<area>` rows goes green while the identical drop on `<source>` reds),
+     and a JSDoc paragraph is duplicated verbatim at `:366-370` and `:372-376`. Plus a comment at
+     `detector-validation.test.js:1095` names `confersContentToConferringAncestor`, which no longer exists
+     (renamed to `…ConsumingAncestor`), making a recorded mutation result un-greppable.
+
+2. **⚑ WHAT IS ALREADY BANKED AND MUST NOT BE REDONE — the round is a TIGHTENING, not a rewrite.** #1009
+   carries real work that survived two reviews: the consuming-ancestor reframing (with the datalist
+   measurements that forced it), a population **enumerated once** (22 shapes, 7 covered incl. the
+   `video`/`audio` > `track` instance nobody had named, 15 disposed with reasons and pinned), the `Map`
+   that closes the `<constructor>`/`<__proto__>` throw class, the hoisted shared selectors, and 6
+   body-scope pins. Tier 216 pass / 0 fail. **Start from that branch; do not restart the arc.**
+
+3. **Review floor: 2 OWED at boot** — #1007 (this session's floor drain, docs-only → carve-out by path)
+   and the wrap PR. Classify with `review-debt.ts`'s `CODE_BEARING_RE` against `gh pr view <n> --json
+   files`, never from this hand-off.
+
+4. **The seed-fixtures arc is UNBLOCKED, and that is a correction to #1004.**
+   `g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries` (MED) was made to run BEHIND the
+   D6 HIGH on the reasoning that growing the seeded set makes the false positive live. **Measured false**
+   — every corpus `<each>`-inside-`<select>` emits options carrying text, which the text half already
+   saves, and the trigger population is ZERO. **The two arcs are independent; pick either.**
+
+5. **Door 3 / the fifth seed-gating path is filed, confirmed, and cleanly peter-drainable.** The D1
+   mount-throw `needs-server` return (`render-detectors.js:757`) has no `hasSeedBridgeFailure`
+   disqualifier and returns before D2 runs, so a seeded server-dependent app with a thrown seed write
+   scores GREEN with the failure recorded nowhere. Widened onto
+   `g-d6-seed-gating-has-three-latent-paths-…` as a fifth path. **The convergent fix enumerates every
+   `return` that yields a GREEN state — there are two in `runDetectors`; count them at fix time.**
+
+6. **⚑ NO GATE RUNS THE e2e-render-map TIER, and the nav-map says otherwise.**
+   `.claude/maps/test.map.md:450` claims the tier's gate is `tracking` (non-blocking). **Wrong, not
+   stale:** `grep -rn e2e-render-map .github/workflows/` returns nothing, and the source-controlled
+   pre-commit globs `compiler/tests/*.test.js`, which does not descend into the subdirectory. So the
+   tier's 216 tests (192 before this session) pin **nothing** until someone runs them by hand. This is the
+   same standing item as the S420 carry-forward "e2e-render-map CI job"; the map correction is owed and
+   was NOT taken this session (maps are a repo-wide shared surface and a refresh was not run — see Gate).
+
+7. **Unchanged and still bryan's:** `E-ASSIGN-004` is still absent from `compiler/src/` and lives in
+   **#996, OPEN**. **The two August scrml-site reports remain the oldest unactioned inbound work**
+   (`needs: action` since August — soft-nav dropping the destination page's stylesheet, and the owed
+   `<outlet/>` repro). Inbox 8 unread, 0 untracked.
+
+8. **Peter-lane carry-forward, unchanged:** the S420 item-4 list (baseline regen owed on POSIX · the three
+   non-inert reserves · `g-w-lint-018` probe-then-close ·
+   `g-s320-autoawait-stale-injectpromiseawait-comments`) · `g-heading-drift-tail-…` (LOW).
+
+## 🔭 DURABLE
+
+**An entry's own "re-derive this rather than trust it" instruction is worth more than the sentence it
+guards.** The S424 gap entry ended its sibling-check paragraph with *"`select` and the three media
+parents are the complete set of delegating definitions at the time of filing; re-derive that set rather
+than trusting this sentence."* The set was re-derived and the sentence was wrong — `svg` was a third
+instance, then `datalist` a sixth, then `track` a seventh. **Three of the seven instances were found by
+someone acting on that one clause.** The lesson is not "be more complete when filing": a filer cannot
+be complete, and the useful thing to write down is the instruction to re-check, with the search that was
+actually run.
+
+**A population enumerated once beats a class patched six times, and the difference is measurable in
+rounds.** select → svg → datalist → track were each found one at a time, across three separate review
+passes, by three different readers. The round that finally asked *"what is the complete set of HTML
+parents whose content is conferred by text-free children?"* — and stated the discriminator — closed all
+seven plus 15 disposals in one pass. ⚑ **The discriminator is what made it possible**, and the first
+attempt at it FAILED: a probe asking only *"is the region reported empty?"* flagged six shapes that are
+not instances, because an each of empty `<span>`s in a `<slot>` genuinely IS an empty render. **A
+mis-specified measurement is not evidence** — the reframed question is a semantic judgement about a
+content model that no probe computes, and the honest move was to record that rather than ship the probe's
+list.
+
+**"Wrong, not incomplete" is a distinct review finding and the more valuable one.** The pre-land pass
+reported `<datalist>` as a missing case. Measuring it showed something better: `elementCarriesContent`
+has no datalist arm and a datalist-only body correctly renders nothing, so the fix's stated invariant —
+*mirror the definition that makes the ancestor content-bearing* — could not express datalist **at all**.
+It had been read off a sample of five in which two different questions coincide. **Body scope asks "did
+the page show anything?"; region scope asks "did this each produce its rows?"** Both answers are right,
+and the apparent contradiction was an artifact of one rule being asked to serve both.
+
+**A verification stamp is never inherited, and this session is the second consecutive proof.** The gap
+said "reproduced by execution". Re-reproducing it on HEAD cost one script and returned three things the
+original record did not have: a third conferring definition, a falsified citation, and a trigger
+population of zero. **The re-run is not ceremony — it is where the corrections come from.**
+
+**A fix's JUSTIFICATION can be falsified without the fix becoming wrong, and the two must be reported
+separately.** The D6 false positive is real, reproduced, and worth closing. Its recorded reason for
+urgency — *three corpus files already hold the shape, so it goes live when the seeded set grows* — is
+false: one of the three has no `<select>` at all, and the other two emit text-bearing options the text
+half already saves. **The verdict held; the claim did not; and the arc-ordering constraint that had been
+made BINDING on that claim dissolved with it.** Report those as three separate facts, because collapsing
+them either kills a good fix or preserves a false premise.
+
+**A detector that can throw is worse than one that is wrong, and a plain object literal is enough to do
+it.** Reading a lookup table through `Object.prototype` turned two hostile tag names into uncaught
+exceptions from two *different* call sites — and only the all-lowercase members of `Object.prototype`
+are reachable, because the lookup lowercases first. The fix that survives review is the one that is
+immune **by construction** (a `Map`) rather than by enumerating the hostile names, because the
+enumeration is exactly what was wrong the first time.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ The gap entry I filed last session was wrong in three places, and I had marked it "reproduced
+   by execution".** The reproduction was real; the population claim, one of three citations, and the
+   completeness of the conferring set were not. **The citation error is the worst of the three**: I
+   grepped for `<select` and counted a hit inside a `//` comment — Rule 7's own class ("don't ask the
+   text what the tree already knows"), committed inside a gap entry, in the session where I was filing
+   other people's instances of it.
+2. **★★★ My #1002 fix from last session left a sibling door open, and the pre-land pass I ran on it did
+   not look for one.** Third round in a row on the same requirement. The class is not "be careful": the
+   requirement is enforced at *every* `return` that yields a green state, and nothing enumerated them.
+3. **★★ The fix direction in my own brief was wrong** — `node.parentNode` where the conferring element
+   is an ancestor. It would have fixed the fence shape and left the plain mount shape red, passing its
+   own new tests. Caught only because the brief licensed the agent to overturn me; the fourth session
+   running that this licence has paid.
+4. **★★ I wrote the ordering constraint into the pickup as BINDING last session on a premise I had not
+   measured.** #1004's whole point was to stop the next boot re-asking an answered question, and it
+   encoded an unmeasured causal claim while doing it.
+5. **★ A shell-quoting failure inside a heredoc collapsed an escaped backslash** and broke a scanner
+   script — the same class recorded in my own misses list three sessions running, with the same fix
+   (write the file with a tool instead). I caught it on the first run and switched.
+6. **★ My own bounded wait-loop guard fired on `grep -c`'s no-match exit code**, reading "settled" as
+   "probe error". It failed in the safe direction (report, don't loop), but it is the exact
+   separate-the-exit-status-from-the-output nuance the rule it implements is about.
+
+## Gate at close
+
+- **PRs: one merged, one closed-superseded, one HELD GREEN.**
+  - **#1007 `2cb502d5`** — the floor drain (7 → 0) + three corrections to my own S424 gap entry. Merged.
+  - **#1008 CLOSED, superseded by #1009**, reason recorded on the PR: the fix round needed a rebase onto
+    the new main and the resulting **force-push is blocked by this session's auto-mode classifier**. Per
+    the S424 precedent (`[3403]`) a branch that cannot be updated is closed in favour of a fresh ref
+    rather than worked around. No history rewritten.
+  - **#1009 OPEN and DELIBERATELY HELD.** `gate` **pass** · `windows` **pass** · `tracking` red with the
+    **byte-identical five pre-existing names**, re-measured per PR against main's own run `35530326211`
+    and never inherited. Merge permission WAS granted. It is held because its own re-review found two
+    fail-open regressions — see pickup item 1.
+- **Cloud:** `gate` + `windows` green on #1007 and #1009. `tracking` red on both, five names, identical to
+  main's own run. Root-caused already, not waved: `g-tracking-job-red-on-main-and-nobody-reads-it` records
+  the S391 audit measuring those five passing locally in under four seconds against ~10.4 s each in CI.
+- **Local:** e2e-render-map tier **216 pass / 0 fail** on the held branch (192 before the fix round, 164 on
+  main). My own mutation of the predicate reds **17** with **183 still passing** — no pre-existing test
+  flips. Verified independently of the agent's report: all 7 conferring instances green, 3 true positives
+  still red, both hostile-tag shapes classify instead of throwing, all 5 body-scope pins still `false`.
+  `state.ts --check` · `facts.ts --check` · `delta-lint` all exit 0.
+- **⚑ ZERO baseline cells move, and the four live-vs-committed warnings are PRE-EXISTING — measured
+  fix-vs-pre-fix, not assumed.** I ran the tier with main's own detector files checked out and it prints
+  the identical 1 ORPHAN / 3 NEW / 2 GREEN→RED at 164 pass / 0 fail. This is the check I skipped and got
+  wrong at S424.
+- **Board: HIGH 111 · MED 264 · LOW 99 · Nominal 7 — unchanged.** No new `@gap` marker was minted: the
+  fifth seed-gating path WIDENED an existing entry rather than forking it, and the three D6 corrections
+  amended an existing one. A count that does not move is the correct outcome when the session's findings
+  belong to filed classes.
+- **Review floor: 1 → 0 → re-opens at 2** (#1007 + the wrap PR). Code-bearing carve-out rate held at
+  **4/229 (2%)** — both code-bearing PRs got full passes, neither was carved.
+- **Maps: NOT refreshed, and the reason is a live correction rather than laziness.** `test.map.md:450` is
+  **wrong** about this tier's gate (it claims `tracking`; nothing runs the tier). A `project-mapper`
+  refresh would rewrite the file wholesale and might restate the same wrong cell, so the correction is
+  owed as a deliberate edit, not a regen. The map is also 17 commits stale (stamp `787d4cb4`) and maps are
+  a repo-wide shared surface with a sibling registered LIVE. Deferred, named here, and in pickup item 6.
+- **Worktrees:** mine removed (`agent-ae898a0814b0977e9`, work carried onto the held branch).
+  **Retained, not mine:** `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`, `onmount-c`, and the
+  sibling `scrml-pinned`.
+- **Branches left deliberately:** `fix/s426-d6-consuming-ancestor` (#1009, held — do not delete),
+  `fix/s426-d6-region-content-conferring-ancestor` (the agent's ref @ `ad2d8b86`, the round-2 source), and
+  `brief/s426-d6-parent-content` (the dispatch brief's own ref; the brief itself rides #1009). Clean these
+  when #1009 lands, not before.
+- **Inbox:** 8 unread, **0 untracked** (checked from the VCS's view, not the filesystem's). Kept unread
+  deliberately — moving an unactioned `needs: action` item to `read/` discards the obligation.
+- **Cross-machine:** scrml `origin/main...HEAD` 0/0 after the #1007 merge and re-sync; scrml-support
+  pushed (board registration + this wrap's meta).
+- **⛔ Environment, two items, both recorded rather than papered over:**
+  - `gh pr merge` was refused by the auto-mode classifier (*Merge Without Review*) — **third session
+    running**; CONFIGURED-NOT-TO, not CANNOT. Cleared in one line once flagged. A **force-push** is also
+    blocked, which is what cost #1008. And a compound read-only command containing `gh pr list` was caught
+    by the same classifier while the bare `gh pr checks <n>` works.
+  - **`bun install` fails in a fresh worktree on this clone:** the puppeteer postinstall finds
+    `C:\Users\pjoli\.cache\puppeteer\chrome\win64-146.0.7680.153` present but `chrome.exe` missing.
+    Environment breakage, not repo breakage; `PUPPETEER_SKIP_DOWNLOAD=1` works. Anything on this clone
+    that shells out to puppeteer/Chrome hits the same broken cache until that folder is deleted and
+    re-downloaded.
+
+---
 # scrml — Session 424 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
