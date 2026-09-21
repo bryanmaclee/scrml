@@ -507,6 +507,44 @@ function emitArmWireFunction(
     (b) => b.kind === "bind-directive" && b.bindAttr != null && b.bindNode != null,
   );
 
+  // g-lift-inside-each-row-or-match-arm-silently-dropped — `${ … lift … }`
+  // blocks in THIS arm body (SPEC §10.1 accumulation mode; §18.0.1's own worked
+  // example is `<Ready(rows)><ul>${ for (let r of rows) { lift <li>…</li> } }</ul></>`).
+  // The arm is rendered by innerHTML replace, so its lift group must run AFTER
+  // each replace, against the new host, with the arm's payload bindings in
+  // scope — exactly this function's contract. The group is registered as a
+  // NESTED lift group (lowered by emit-reactive-wiring Step 4b through the same
+  // path as a top-level block) whose parameters are the payload bindings; its
+  // run's teardown joins `_disposers`, so an arm switch disposes it.
+  //
+  // One logic node can carry several placeholder ids — the initial-arm HTML and
+  // the arm render fn each run generateHtml over the same body — so hosts are
+  // grouped by statement list and located with one selector over all its ids
+  // (only the rendered one is in `_root`).
+  const liftHostsByStmts = new Map<any[], string[]>();
+  for (const b of logicBindings) {
+    if (b.kind !== "lift-host" || !Array.isArray(b.liftStmts) || typeof b.placeholderId !== "string") continue;
+    const ids = liftHostsByStmts.get(b.liftStmts) ?? [];
+    ids.push(b.placeholderId);
+    liftHostsByStmts.set(b.liftStmts, ids);
+  }
+  const wireableLifts: Array<{ fnName: string; placeholderIds: string[] }> = [];
+  if (liftHostsByStmts.size > 0 && registry) {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { genVar } = require("./var-counter.ts") as { genVar: (p: string) => string };
+    for (const [stmts, placeholderIds] of liftHostsByStmts) {
+      const fnName = genVar("lift_nested");
+      const registered = registry.addNestedLiftGroup({
+        fnName,
+        pid: placeholderIds[0],
+        stmts,
+        params: [...payloadBindings],
+        prologue: [],
+      });
+      wireableLifts.push({ fnName: registered, placeholderIds });
+    }
+  }
+
   // B1 (§51.0.B.1) — payload bindings as wire-fn parameters. The dispatcher
   // passes `_data[fieldName]` positionals after `_root`, matching the
   // render-fn signature shape. Bindings are then in scope throughout the
@@ -521,7 +559,8 @@ function emitArmWireFunction(
   if (
     wireableLogic.length === 0 && wireableEvents.length === 0 &&
     wireableRenders.length === 0 && wireableDirectives.length === 0 &&
-    wireableBinds.length === 0 && wireableValueAttrs.length === 0
+    wireableBinds.length === 0 && wireableValueAttrs.length === 0 &&
+    wireableLifts.length === 0
   ) {
     return `function ${wireFnName}(${wireParams}) { return function() {}; }`;
   }
@@ -768,6 +807,15 @@ function emitArmWireFunction(
       });
       for (const bl of bodyLines) lines.push(`  ${bl}`);
     }
+  }
+
+  // ---- Lift groups: run the arm's `${ … lift … }` blocks into their hosts ----
+  for (const lift of wireableLifts) {
+    const selector = lift.placeholderIds.map((id) => `[data-scrml-logic=${JSON.stringify(id)}]`).join(", ");
+    lines.push(`  {`);
+    lines.push(`    const el = _root.querySelector(${JSON.stringify(selector)});`);
+    lines.push(`    if (el) _disposers.push(_scrml_lift_scoped_run(el, ${lift.fnName}, [${payloadBindings.join(", ")}]));`);
+    lines.push(`  }`);
   }
 
   // ---- Event bindings: addEventListener + remover dispose ----

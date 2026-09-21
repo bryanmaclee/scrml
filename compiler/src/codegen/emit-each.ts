@@ -797,6 +797,156 @@ function emitEachPerItemMarkupValue(
 }
 
 /**
+ * Lower `@.` (the §17.7.3 contextual sigil, "the current iteration value") to
+ * the iter binding in a CLONED lift-block statement tree, in every place the
+ * logic emitter reads an expression from: ExprNode `ident` names and the raw
+ * text fields a statement may carry. Stops at a nested `<each>` — its body
+ * rebinds `@.` to its own item (§17.7.3 innermost-scope rule), lowered later
+ * against the inner iter var.
+ */
+function rewriteEachSigilInStmtTree(n: any, iterVarName: string): void {
+  if (!n || typeof n !== "object") return;
+  if (Array.isArray(n)) { for (const x of n) rewriteEachSigilInStmtTree(x, iterVarName); return; }
+  const tag = String((n as any).tag ?? "");
+  if ((n.kind === "markup" && tag === "each") || n.kind === "each-block") return;
+  if (n.kind === "ident" && typeof n.name === "string" && n.name.includes("@")) {
+    n.name = rewriteContextualSigil(n.name.replace(/@\s*\.\s*/g, "@."), iterVarName);
+  }
+  for (const k of Object.keys(n)) {
+    const v = (n as Record<string, unknown>)[k];
+    if (typeof v === "string") {
+      if ((k === "expr" || k === "raw" || k === "iterable" || k === "condition" || k === "init") && /@\s*\./.test(v)) {
+        (n as Record<string, unknown>)[k] = rewriteContextualSigil(v.replace(/@\s*\.\s*/g, "@."), iterVarName);
+      }
+    } else if (v && typeof v === "object" && k !== "span") {
+      rewriteEachSigilInStmtTree(v, iterVarName);
+    }
+  }
+}
+
+/**
+ * g-lift-inside-each-row-or-match-arm-silently-dropped — emit a per-row
+ * `${ … lift … }` accumulation block (SPEC §10.1) into the row being built.
+ *
+ * The block is lowered by emit-reactive-wiring's Step 4b through the SAME
+ * per-group path as its top-level twin (registered here as a nested lift group
+ * — see `NestedLiftGroup`); this site only builds the row's host and drives
+ * the group. The group function lives at file scope, so every row-scope name
+ * the block reads (the iter var, an enclosing each's iter var) is passed in.
+ *
+ * Per row: a `<span data-scrml-logic>` host (the top-level twin's host shape),
+ * and — under a keyed reconcile — a live-keyed driver effect that re-resolves
+ * the row's CURRENT item by its create-time key (the Bug 64 model every other
+ * per-item binding uses). The driver restarts the group only when the resolved
+ * item changes identity (array-replace / same-key new object), so an unrelated
+ * reconcile pass does not rebuild the row; `_scrml_lift_item_run` re-runs the
+ * group when what it read changes (`g.items.push(x)` re-renders THIS row only),
+ * disposing the previous run's effects each time. When the item's key leaves
+ * the list the driver stops the group; inside an `if=` mount the mount scope
+ * stops it on unmount.
+ */
+function emitEachRowLiftGroup(
+  stmts: any[],
+  iterVarName: string,
+  fragmentVar: string,
+  lines: string[],
+  indent: string,
+  span: any,
+): void {
+  const registry = _eachLiftRegistry;
+  if (!registry) {
+    // No registry reachable (a caller outside both known entry points). Fail
+    // LOUD rather than re-introduce the silent skip this path replaced.
+    _eachBindSupportCtx?.errors?.push(new CGError(
+      "E-CODEGEN-INVALID-LOGIC",
+      "E-CODEGEN-INVALID-LOGIC: a `${ … lift … }` block inside an `<each>` row could not be lowered " +
+        "(no binding registry at this emit site) — the row would render without its lifted content. " +
+        "This is a compiler defect; please report it.",
+      span ?? { start: 0, end: 0 },
+      "error",
+    ));
+    lines.push(`${indent}throw new Error("scrml: <each> row lift block was not lowered (compiler defect)");`);
+    return;
+  }
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { genVar } = require("./var-counter.ts") as { genVar: (p: string) => string };
+
+  // Clone so the shared AST is not mutated (the same template can be emitted
+  // more than once), then lower `@.` to this row's iter binding.
+  const clone: any[] = JSON.parse(JSON.stringify(stmts));
+  rewriteEachSigilInStmtTree(clone, iterVarName);
+
+  const cur = currentEachReconcileCtx();
+  const live = cur && cur.iterVar === iterVarName ? cur : null;
+  // Free-name scan over the serialized statements (identifier names live in
+  // JSON string values, so literals are NOT blanked here). Over-inclusion only
+  // adds an unused parameter; a missed name would be a ReferenceError.
+  const scanText = JSON.stringify(clone);
+  const refs = (name: string): boolean => referencesFreeIdent(scanText, name);
+
+  // The row-scope names the group needs, as [name, liveResolveExpr | null].
+  // live: the current item + every referenced ENCLOSING item, re-resolved by
+  // key (pickReferencedEnclosingCtxs applies the shadowing rules).
+  // not live (the `<empty>` body — rendered outside its each's own reconcile
+  // ctx): the referenced names in the enclosing factory's scope, by closure.
+  const scope: Array<{ name: string; resolve: string | null; destructure: [string, string] | null }> = [];
+  if (live) {
+    scope.push({ name: live.iterVar, resolve: `_scrml_resolve_item(${live.mountVar}, ${live.keyVar})`, destructure: live.destructure });
+    for (const enc of pickReferencedEnclosingCtxs(refs)) {
+      scope.push({ name: enc.iterVar, resolve: `_scrml_resolve_item(${enc.mountVar}, ${enc.keyVar})`, destructure: enc.destructure });
+    }
+  } else {
+    const bound = new Set<string>();
+    for (let i = _eachReconcileCtxStack.length - 1; i >= 0; i--) {
+      const enc = _eachReconcileCtxStack[i];
+      const names = [enc.iterVar, ...(enc.destructure ?? [])];
+      if (!names.some((n) => bound.has(n)) && names.some((n) => refs(n))) {
+        scope.push({ name: enc.iterVar, resolve: null, destructure: enc.destructure });
+      }
+      for (const n of names) bound.add(n);
+    }
+  }
+  const params = scope.map((s) => s.name);
+  // `as (k, v)` re-derivations run INSIDE the group function, under the
+  // `_scrml_lift_item_run` effect, so a change to `.value` re-renders the row.
+  const prologue: string[] = [];
+  for (const s of scope) {
+    if (s.destructure) {
+      prologue.push(`const ${s.destructure[0]} = ${s.name}.key;`);
+      prologue.push(`const ${s.destructure[1]} = ${s.name}.value;`);
+    }
+  }
+
+  const pid = genVar("logic");
+  const fnName = registry.addNestedLiftGroup({ fnName: genVar("lift_nested"), pid, stmts: clone, params, prologue });
+
+  const hostVar = `_scrml_each_lift_host_${nextLocalId()}`;
+  lines.push(`${indent}const ${hostVar} = document.createElement("span");`);
+  lines.push(`${indent}${hostVar}.setAttribute("data-scrml-logic", ${JSON.stringify(pid)});`);
+  lines.push(`${indent}${fragmentVar}.appendChild(${hostVar});`);
+
+  if (!live) {
+    lines.push(`${indent}_scrml_mount_track(_scrml_lift_item_run(${hostVar}, ${fnName}, [${params.join(", ")}]));`);
+    return;
+  }
+
+  const stopVar = `_scrml_each_lift_stop_${nextLocalId()}`;
+  const lastVar = `_scrml_each_lift_last_${nextLocalId()}`;
+  const vals = scope.map((_, i) => `_scrml_lv${i}`);
+  lines.push(`${indent}let ${stopVar} = null;`);
+  lines.push(`${indent}let ${lastVar} = null;`);
+  lines.push(`${indent}_scrml_mount_track(function() { if (${stopVar}) { ${stopVar}(); ${stopVar} = null; } ${lastVar} = null; });`);
+  lines.push(`${indent}_scrml_mount_track(_scrml_effect(() => {`);
+  scope.forEach((s, i) => lines.push(`${indent}  const ${vals[i]} = ${s.resolve};`));
+  lines.push(`${indent}  if (${vals.map((v) => `${v} === null`).join(" || ")}) { if (${stopVar}) { ${stopVar}(); ${stopVar} = null; } ${lastVar} = null; return; }`);
+  lines.push(`${indent}  if (${lastVar} !== null && ${vals.map((v, i) => `${lastVar}[${i}] === ${v}`).join(" && ")}) return;`);
+  lines.push(`${indent}  ${lastVar} = [${vals.join(", ")}];`);
+  lines.push(`${indent}  if (${stopVar}) { ${stopVar}(); ${stopVar} = null; }`);
+  lines.push(`${indent}  ${stopVar} = _scrml_lift_item_run(${hostVar}, ${fnName}, ${lastVar});`);
+  lines.push(`${indent}}));`);
+}
+
+/**
  * Emit one `${expr}` interpolation (interior text already extracted) as a
  * per-item text node. Under an active reconcile ctx bound to THIS iter var it is
  * live-keyed (a stable text node + a per-item effect that re-resolves + re-reads
@@ -1417,6 +1567,23 @@ function renderTemplateChildToJs(
           (child as any).span ?? (declStmt as any).span ?? (stmt as any).span ?? { start: 0, end: 0 },
           "error",
         ));
+        return;
+      }
+      // g-lift-inside-each-row-or-match-arm-silently-dropped — a Tier-0
+      // `${ for (…) { lift <li/> } }` accumulation block inside a row template.
+      // SPEC §10.1: "When `lift` appears in an anonymous `${}` block whose
+      // parent is a markup or style context, `lift` appends the value to the
+      // block's accumulator array" — the row template is markup (§17.7.1), so
+      // this renders. Pre-fix it was neither a bare-expr nor carried `raw`, so
+      // it fell to `inner = ""` below and was SILENTLY SKIPPED (exit 0, the
+      // row's `<ul>` empty). Checked AFTER the E-EACH-BODY-DECL-UNSUPPORTED
+      // gate above, which still rejects a top-level declaration loudly.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const { stmtContainsLift } = require("./emit-reactive-wiring.ts") as {
+        stmtContainsLift: (n: any) => boolean;
+      };
+      if (body.some((s: any) => stmtContainsLift(s))) {
+        emitEachRowLiftGroup(body, iterVarName, fragmentVar, lines, indent, (child as any).span);
         return;
       }
       // bare-expr is the common shape; lift-expr / fail-expr / etc. exist
@@ -2742,6 +2909,27 @@ let _eachBindSupportCtx: EachBindSupportCtx | null = null;
 // skipped → byte-identical to pre-fix (no request routing there either).
 let _eachRequestIds: Set<string> | null = null;
 
+// g-lift-inside-each-row-or-match-arm-silently-dropped — the file's binding
+// registry, where a per-row `${ … lift … }` block is registered as a NESTED lift
+// group (lowered later by emit-reactive-wiring Step 4b). Set by
+// `emitEachBodyRenderForFile` (the Tier-1 path) and by `setEachLiftRegistry`
+// around emit-reactive-wiring's Step 4b (the Tier-0 path: an `<each>` inside
+// lifted markup emits its rows while Step 4b lowers the enclosing lift). Same
+// module-level pattern as `_eachRequestIds` (codegen is synchronous).
+let _eachLiftRegistry: { addNestedLiftGroup: (g: any) => string } | null = null;
+
+/**
+ * Set the registry the per-row lift path registers nested groups on (see
+ * `_eachLiftRegistry`); returns the previous value so the caller can restore it.
+ */
+export function setEachLiftRegistry(
+  registry: { addNestedLiftGroup: (g: any) => string } | null,
+): { addNestedLiftGroup: (g: any) => string } | null {
+  const prev = _eachLiftRegistry;
+  _eachLiftRegistry = registry;
+  return prev;
+}
+
 /**
  * i175 — transform the `emitBindDirectiveBody` read-back effect call so it
  * lives + disposes with the per-item node across keyed reconcile. The helper
@@ -3786,6 +3974,8 @@ export function emitEachBodyRenderForFile(
     };
     _eachRequestIds = collectRequestIds(_astForBinds);
   }
+  const _prevLiftRegistry = _eachLiftRegistry;
+  _eachLiftRegistry = (ctx.registry as any) ?? null;
 
   try {
   const eachBlocks = collectEachBlocks(fileAST);
@@ -3910,6 +4100,7 @@ export function emitEachBodyRenderForFile(
     // g-request-is-some-in-each-loop-attr-misroute — drop the per-file request-id
     // set so a later caller (or the Tier-0 lift path) never reads a stale file's.
     _eachRequestIds = null;
+    _eachLiftRegistry = _prevLiftRegistry;
   }
 
   return { renderFunctions, dispatchers };

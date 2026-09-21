@@ -3896,7 +3896,18 @@ export function generateHtml(
       // from `_scrml_nav_rewire` on every mount (the S400 static-display
       // mechanism, extended to lift targets). A host in the SSR body registers
       // nothing → byte-identical output.
-      if (registry && bodyHasLift && registry.isInsideMountTemplate()) {
+      //
+      // g-lift-inside-each-row-or-match-arm-silently-dropped — a lift host inside
+      // a match/engine ARM body (arm context active) is rendered per variant
+      // switch by emit-variant-guard (innerHTML replace + per-arm wire fn); the
+      // file-scope Step 4b never sees the arm's statements, so pre-fix the group
+      // was emitted NOWHERE (exit 0, empty host). Record the statements on the
+      // (arm-tagged) binding; the arm's wire fn registers + runs them per entry.
+      // The arm case takes precedence over the mount-template one: an arm inside
+      // an `if=` is re-rendered by its dispatcher, not by `_scrml_nav_rewire`.
+      if (registry && bodyHasLift && registry.currentArmContext != null) {
+        registry.addLogicBinding({ kind: "lift-host", placeholderId, liftStmts: node.body });
+      } else if (registry && bodyHasLift && registry.isInsideMountTemplate()) {
         registry.addLogicBinding({ kind: "lift-host", placeholderId });
       }
       if (registry && node.body) {

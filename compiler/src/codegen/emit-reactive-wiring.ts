@@ -20,7 +20,7 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { liftEmittedStatementAwaits, emittedCodeCallsServerFn } from "./scheduling.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
-import type { LogicBinding } from "./binding-registry.ts";
+import type { LogicBinding, NestedLiftGroup } from "./binding-registry.ts";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -257,6 +257,58 @@ const LIFT_MOUNT_RUN_HELPER: readonly string[] = [
 ];
 
 /**
+ * g-lift-inside-each-row-or-match-arm-silently-dropped — file-local drivers for
+ * a NESTED lift group (see `NestedLiftGroup` in binding-registry.ts), emitted
+ * once per file that has one.
+ *
+ * `_scrml_lift_scoped_run(host, body, args)` is `_scrml_lift_mount_run` with the
+ * teardown handed back to the caller instead of registered on a mount scope:
+ * an arm is torn down by its dispatcher (the wire function's `_disposers`), a
+ * row by its own effect — neither is an `if=` mount. Same ownership contract:
+ * the group's two effect constructors are shadowed so every effect it creates
+ * is alive-gated to this run, the mount-pass effects and every static effect
+ * are disposed by the returned function, and the lift target is saved/restored.
+ * It is a separate helper (not a refactor of `_scrml_lift_mount_run`) so the
+ * `if=` lift output stays byte-identical.
+ *
+ * `_scrml_lift_item_run(host, body, args)` wraps one scoped run in an effect so
+ * the group RE-RUNS against the same host when what it read synchronously
+ * changes — for a row, the item's own fields (`g.items.push(…)` re-renders that
+ * row, and only that row). Each re-run disposes the previous run first, so a
+ * keyed list or per-element effect inside the block never accumulates. The
+ * returned function disposes the effect and the current run.
+ */
+const NESTED_LIFT_RUN_HELPERS: readonly string[] = [
+  "function _scrml_lift_scoped_run(host, body, args) {",
+  "  const disposers = [];",
+  "  let collecting = true;",
+  "  let alive = true;",
+  "  const own = (make, keepAlways) => function(fn) {",
+  "    const d = make(function() { if (alive) fn(); });",
+  "    if ((collecting || keepAlways) && typeof d === \"function\") disposers.push(d);",
+  "    return d;",
+  "  };",
+  "  const prevTarget = _scrml_lift_target;",
+  "  try {",
+  "    body(host, own(_scrml_effect, false), own(_scrml_effect_static, true), ...args);",
+  "  } finally {",
+  "    collecting = false;",
+  "    _scrml_lift_target = prevTarget;",
+  "  }",
+  "  return function() { alive = false; for (let i = disposers.length - 1; i >= 0; i--) disposers[i](); disposers.length = 0; };",
+  "}",
+  "function _scrml_lift_item_run(host, body, args) {",
+  "  let stop = null;",
+  "  const d = _scrml_effect(function() {",
+  "    if (stop) { stop(); stop = null; }",
+  "    host.replaceChildren();",
+  "    stop = _scrml_lift_scoped_run(host, body, args);",
+  "  });",
+  "  return function() { d(); if (stop) { stop(); stop = null; } };",
+  "}",
+];
+
+/**
  * True when `emitLiftGroup` wraps the group in an outer re-render
  * `_scrml_effect` (the whole block re-runs on every reactive change), false for
  * the two run-once shapes (non-reactive, and keyed-reconcile-only whose list
@@ -443,7 +495,7 @@ function emitLiftGroup(
 }
 
 /** Check if an AST statement contains a lift-expr anywhere in its tree. */
-function stmtContainsLift(node: any): boolean {
+export function stmtContainsLift(node: any): boolean {
   if (!node || typeof node !== "object") return false;
   if (node.kind === "lift-expr") return true;
   for (const key of ["body", "consequent", "alternate"]) {
@@ -734,7 +786,34 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
   }
 
-  for (const group of groups) {
+  // g-lift-inside-each-row-or-match-arm-silently-dropped — NESTED lift groups.
+  // A `${ … lift … }` block inside an `<each>` row or a match/engine arm is
+  // rendered per instance by emit-each / emit-variant-guard, which registered it
+  // (BindingRegistry.addNestedLiftGroup) and emitted a call to its function. It
+  // is lowered HERE, through the very same per-group statement loop below, so
+  // it cannot drift from its top-level twin. Drained as a queue AFTER the
+  // top-level groups: lowering a group can itself register one (an `<each>`
+  // inside Tier-0 lifted markup emits its rows while Step 4b lowers the lift).
+  const nestedLiftGroups: NestedLiftGroup[] = (ctx.registry?.nestedLiftGroups ?? []) as NestedLiftGroup[];
+  const nestedLiftFnLines = new Map<string, string[]>();
+  function* drainGroups(): Generator<{ pid: string | null; stmts: any[]; nested?: NestedLiftGroup }> {
+    for (const g of groups) yield g;
+    for (let i = 0; i < nestedLiftGroups.length; i++) {
+      const ng = nestedLiftGroups[i];
+      nestedLiftFnLines.set(ng.fnName, []);
+      yield { pid: ng.pid, stmts: ng.stmts, nested: ng };
+    }
+  }
+
+  // An `<each>` inside Tier-0 lifted markup emits its rows from inside this
+  // loop (emit-lift → emit-each); give its per-row lift path the registry.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { setEachLiftRegistry } = require("./emit-each.ts") as {
+    setEachLiftRegistry: (r: any) => any;
+  };
+  const prevEachLiftRegistry = setEachLiftRegistry(ctx.registry ?? null);
+
+  for (const group of drainGroups()) {
     const { pid, stmts } = group;
     const codes: string[] = [];
     // The source statement each `codes` entry came from (same index). The
@@ -925,6 +1004,17 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     if (codes.length === 0) continue;
     const combinedCode = codes.join("\n");
 
+    // A nested group NEVER reaches file scope: its statements read the row's
+    // iteration names / the arm's payload bindings, which exist only as the
+    // parameters of its function. The whole block (declarations included) runs
+    // per instance — each row and each arm entry is its own `${}` evaluation.
+    if (group.nested) {
+      const fnLines = nestedLiftFnLines.get(group.nested.fnName)!;
+      if (groupHasLift) emitLiftGroup(fnLines, LIFT_MOUNT_HOST_PARAM, stmts, combinedCode, groupHasReactiveDeps);
+      else fnLines.push(combinedCode);
+      continue;
+    }
+
     if (pid && groupHasLift) {
       // g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template —
       // where the lift target comes from. A host in the SSR body is in the
@@ -958,6 +1048,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       lines.push(combinedCode);
     }
   }
+  setEachLiftRegistry(prevEachLiftRegistry);
 
   // Emit each mount-deferred lift group as `function _scrml_lift_mount_<pid>(host, _scrml_effect, _scrml_effect_static)`.
   // The two effect constructors are PARAMETERS so every effect the group's code
@@ -975,6 +1066,22 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     for (const [pid, fnLines] of liftMountFnLines) {
       lines.push(`function ${liftMountFnName(pid)}(${LIFT_MOUNT_HOST_PARAM}, _scrml_effect, _scrml_effect_static) {`);
       lines.push(...fnLines);
+      lines.push("}");
+    }
+  }
+
+  // Nested lift groups (an `<each>` row / a match or engine arm): same
+  // host-parameterised shape as the mount groups above, plus the instance scope
+  // as trailing parameters. Every registered group gets its function even if it
+  // lowered to nothing — its caller was already emitted.
+  if (nestedLiftGroups.length > 0) {
+    lines.push("");
+    lines.push("// --- lift groups whose host is created per instance (<each> row, match/engine arm); run from the row factory / arm wire fn ---");
+    lines.push(...NESTED_LIFT_RUN_HELPERS);
+    for (const ng of nestedLiftGroups) {
+      lines.push(`function ${ng.fnName}(${[LIFT_MOUNT_HOST_PARAM, "_scrml_effect", "_scrml_effect_static", ...ng.params].join(", ")}) {`);
+      lines.push(...ng.prologue);
+      lines.push(...(nestedLiftFnLines.get(ng.fnName) ?? []));
       lines.push("}");
     }
   }

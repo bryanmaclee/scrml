@@ -134,6 +134,18 @@ export interface LogicBinding {
   liftMountFn?: string;
 
   /**
+   * g-lift-inside-each-row-or-match-arm-silently-dropped — set on a
+   * `kind === "lift-host"` binding registered INSIDE a match/engine arm body
+   * (emit-html.ts, arm context): the statements of the `${ … lift … }` block
+   * the host belongs to. An arm body is rendered per variant switch by
+   * emit-variant-guard.ts (innerHTML replace + a per-arm wire function), never
+   * by the file-scope Step 4b pass, so the arm's wire function registers these
+   * statements as a NESTED lift group (see `NestedLiftGroup`) and runs it
+   * against the freshly rendered host on every arm entry. Unset outside an arm.
+   */
+  liftStmts?: any[];
+
+  /**
    * 6nz-F4 — RCDATA content-model carve-out (SPEC §24.3.1 companion, SPEC.md:1141).
    * Set when `kind === "rcdata-content"`. A reactive `${}` content interpolation
    * inside an RCDATA element (`<textarea>`) must NOT emit a
@@ -596,7 +608,54 @@ export interface LogicBinding {
   };
 }
 
+/**
+ * g-lift-inside-each-row-or-match-arm-silently-dropped — a `${ … lift … }`
+ * block whose host is created PER INSTANCE (one per `<each>` row, one per
+ * match/engine arm entry) rather than once in the page body.
+ *
+ * The render emitters (emit-each.ts per-item factory, emit-variant-guard.ts arm
+ * wire function) run BEFORE emit-reactive-wiring and cannot lower a logic block
+ * themselves; they register the block here and emit a CALL to `fnName`.
+ * emit-reactive-wiring's Step 4b then lowers the statements through the SAME
+ * per-group path a top-level lift block takes and emits them as
+ *
+ *   function <fnName>(_scrml_lift_host, _scrml_effect, _scrml_effect_static, ...params) { … }
+ *
+ * — the host-parameterised shape of the S427 `_scrml_lift_mount_<pid>` groups,
+ * with the instance scope (`params`: the row's iteration names, the arm's
+ * payload bindings) passed in as arguments because the function lives at file
+ * scope. `prologue` lines run first inside the function (the `as (k, v)`
+ * destructure re-derivations), so they execute under the caller's re-run effect.
+ */
+export interface NestedLiftGroup {
+  fnName: string;
+  pid: string;
+  stmts: any[];
+  params: string[];
+  prologue: string[];
+}
+
 export class BindingRegistry {
+  private _nestedLiftGroups: NestedLiftGroup[] = [];
+
+  /**
+   * Register a nested lift group (see `NestedLiftGroup`). Idempotent per
+   * statements array: an arm body generated twice (initial-arm HTML + the arm's
+   * render function) registers once, and the second caller gets the same name.
+   */
+  addNestedLiftGroup(group: NestedLiftGroup): string {
+    for (const g of this._nestedLiftGroups) {
+      if (g.stmts === group.stmts) return g.fnName;
+    }
+    this._nestedLiftGroups.push(group);
+    return group.fnName;
+  }
+
+  /** All nested lift groups registered so far (live array — Step 4b drains it as a queue). */
+  get nestedLiftGroups(): NestedLiftGroup[] {
+    return this._nestedLiftGroups;
+  }
+
   private _eventBindings: EventBinding[];
   private _logicBindings: LogicBinding[];
   /**

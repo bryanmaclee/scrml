@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 110 |
+| HIGH | 112 |
 | MED | 268 |
-| LOW | 101 |
+| LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -14159,7 +14159,7 @@ Question routed to bryan: `handOffs/incoming/2026-09-21-from-S427-peter-to-bryan
 failures into silent wrong output (a wiped mount, closures reading later values) — fail-open, disqualified.
 
 ### g-lift-inside-each-row-or-match-arm-silently-dropped — a `${ for … lift }` inside an `<each>` row or an engine/match arm emits NO lift code at all, at exit 0 — `NEW S427-peter; HIGH; open`
-<!-- @gap id=g-lift-inside-each-row-or-match-arm-silently-dropped sev=HIGH status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts(Step-4b-groups-by-_placeholderId),compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:PA-reproduced-each-row-form-on-ccd94817-zero-_scrml_lift-occurrences-in-the-client-bundle;match-arm-form-reproduced-by-the-S427-adversarial-reviewer-on-base-and-head -->
+<!-- @gap id=g-lift-inside-each-row-or-match-arm-silently-dropped sev=HIGH status=resolved resolved-by=S427-peter locus=searched:compiler/src/codegen/emit-reactive-wiring.ts(Step-4b-groups-by-_placeholderId),compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:PA-reproduced-each-row-form-on-ccd94817-zero-_scrml_lift-occurrences-in-the-client-bundle;match-arm-form-reproduced-by-the-S427-adversarial-reviewer-on-base-and-head -->
 
 **PA-REPRODUCED on `ccd94817`:** `<each in=@groups key=@.id as g> <ul> ${ for (let it of g.items) { lift <li>${it}</li> } } </ul> </each>`
 compiles at **exit 0** and the emitted client contains **zero** `_scrml_lift` occurrences — the rows are
@@ -14195,12 +14195,71 @@ Found once TodoMVC's rows started rendering (S427). Same on base at top level (`
 assert labels only, so the app still LOOKS broken even though its rows now render.
 
 ### g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup — two pre-existing lift-body lowering defects: `n = n + 1` inside a `for…lift` over a reactive list is emitted as `const n = n + 1` (TDZ), and a destructured `const` in an outer-effect group is invisible to the keyed-list setup hoisted outside the effect — `NEW S427-peter; MED; open`
-<!-- @gap id=g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup sev=MED status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S427-dev-agent-reproduced-both-at-top-level-on-base-NOT-PA-verified -->
+<!-- @gap id=g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup sev=HIGH status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S427-dev-agent-reproduced-both-at-top-level-on-base-NOT-PA-verified -->
 
 Reported by the S427 dev agent, reproduced at top level on base by it; **not yet PA-verified** — re-reproduce
 before dispatching. Also reported, same status: a bare-expression display (e.g. a `~` initializer) sharing a lift
 group's `<span>` overwrites the lifted children, and a textarea anchor inside a `<match>` arm inside an `if=`
 stays empty (the arm is injected by `_scrml_remount_dispatch` after `rewire` runs).
+
+⛑ **S427-peter — PA-VERIFIED on `b016352d` and RAISED MED → HIGH.** Both lowering defects reproduce at TOP LEVEL
+with no `if=`, and both kill the WHOLE page at boot while compiling at exit 0: `let n = 0; for (…) { n = n + 1;
+lift … }` emits `const n = n + 1;` → `ReferenceError: Cannot access 'n' before initialization`; `const { prefix,
+suffix } = @cfg; for (…) lift …` → `ReferenceError: prefix is not defined`. A running counter in a lift loop and
+a destructured config are ordinary shapes. The other two items in this entry remain agent-reported, unverified.
+
+⛑ **S427-peter — `g-lift-inside-each-row-or-match-arm-silently-dropped` RESOLVED (#1022).** Traced: the each-row
+drop was `emit-each.ts` `renderTemplateChildToJs` (a `for` statement fell to `inner = ""` with the comment
+`// each: empty logic interpolation skipped`); arm bodies never reached Step 4b and `emitArmWireFunction` had no
+lift branch; and the pre-emit runtime-chunk walk never looked inside deferred arm bodies (`_scrml_lift_target is
+not defined` once code was emitted). Each is now lowered through the SAME Step 4b per-group loop as a top-level
+lift block, as a host-parameterised `_scrml_lift_nested_N(host, …, ...scope)` with the row alias / `@.` / arm
+payload passed in; per-row drivers restart only on item identity change; removed rows and switched-away arms are
+torn down. Enumerated first: 18 loci. Governing: §10.1, and §18.0.1's OWN worked example is an arm lift.
+`const`/`let`/`function` in a row lift block stay `E-EACH-BODY-DECL-UNSUPPORTED` (§17.7.3). Corpus: 0 of 7471
+artifacts change. Adversarial pass: no HIGH/MED.
+
+### g-match-inside-each-row-cannot-see-the-row-variable — a `<match>`/engine arm inside an `<each>` row reads the row alias and the whole list dies at boot — `NEW S427-peter; HIGH; open`
+<!-- @gap id=g-match-inside-each-row-cannot-see-the-row-variable sev=HIGH status=open locus=compiler/src/codegen/emit-variant-guard.ts(emitArmWireFunction — arm wire functions are module-scope and receive only payload bindings, not the enclosing row scope) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-g-is-not-defined-at-init-list-renders-empty -->
+
+`<each in=@groups key=@.id as g> <match for=Kind on=g.kind> <A><p>${g.name}</p></> <B>…</> </match> </each>`
+compiles at exit 0 and throws `ReferenceError: g is not defined` at init; the list renders empty. PA-reproduced
+on `b016352d`. Arm wire functions live at module scope and get only payload bindings. After #1022 a lift in such
+an arm fails the same LOUD way (not silently).
+
+### g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime — the conformance case passes while its emitted program dies at init: the runtime ships without the reconciliation chunk — `NEW S427-peter; HIGH; open`
+<!-- @gap id=g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES — no unscoped `_scrml_reconcile_list(` gate) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-_scrml_reconcile_list-is-not-defined-mounting-conformance-cases-each-ternary-markup-giti033 -->
+
+Mounting `conformance/cases/each/ternary-markup-giti033/case.scrml`'s emit: `ReferenceError: _scrml_reconcile_list
+is not defined` at init; `<main>` renders empty. **Two defects:** the missing chunk gate (a one-line unscoped
+`_scrml_reconcile_list(` post-emit gate per the S427 dev agent — deliberately NOT taken in #1022 because it would
+move a non-lift artifact), and a **hollow conformance case**: its `expected.json` passes against a program that
+cannot run (base §8, the gate that cannot fail). Measure how many conformance cases have a runtime half that would
+catch this.
+
+### g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings — four pre-existing each/arm defects reported by the S427 dev agent — `NEW S427-peter; MED; open`
+<!-- @gap id=g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:S427-dev-agent-reproduced-each-on-base-with-the-display-twin-NOT-PA-verified -->
+
+(1) `<each … as c>` inside Tier-0 lifted markup drops the alias (`c is not defined`; `@.` works). (2) A nested
+each in a lifted row does not re-render on a same-key replace of the outer item. (3) A `<match>` nested in an
+engine arm is not re-dispatched when the engine arm is re-entered (display bindings too). (4) An engine
+`initial=.Ready([...])` drops its payload (emits `reactive_set("phase", "Ready")`). Reproduced by the agent on base
+with the no-lift twin; **not PA-verified** — re-reproduce and split before dispatching.
+
+### g-post-emit-chunk-gates-match-user-string-literals — the post-emit runtime-chunk gates key on emitted TEXT, so a user string containing an internal helper name pulls unused chunks into the runtime — `NEW S427-peter; LOW; open`
+<!-- @gap id=g-post-emit-chunk-gates-match-user-string-literals sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES + the reconciliation lines scan) prov=review:S427-adversarial-pass-on-the-each-row-lift-fix-e8-runtime-55043-to-83143-bytes -->
+
+`<x> = "_scrml_lift_target _scrml_lift_scoped_run( _scrml_reconcile_list("` + `<p>${@x}</p>`: runtime 55,043 B →
+83,143 B. Size and hash only; no false negative today. Rule 7 class; #1022 ADDED entries to this existing
+mechanism rather than creating it.
+
+### g-each-sigil-rewrite-is-literal-unaware — `@.` is rewritten inside string and template literals in an `<each>` row (`"s@.t"` renders `sg.t`), inconsistently with lifted-markup literal text — `NEW S427-peter; LOW; open`
+<!-- @gap id=g-each-sigil-rewrite-is-literal-unaware sev=LOW status=open locus=compiler/src/codegen/emit-each.ts(rewriteContextualSigil / rewriteEachSigilInStmtTree — raw/expr string fields) prov=review:S427-adversarial-pass-e1-e2-e16-base-and-head -->
+
+Pre-existing in plain row interpolations and row text; #1022's statement-tree rewrite inherits it. Rule 7. Also
+recorded by the same pass (pre-existing, MED-class, twin-identical on base): per-item effects of REMOVED rows stay
+subscribed to the container (resolve calls per replace 1 → 201 → 401 over 400 add/remove cycles); inside an `if=`
+they are disposed.
 
 ---
 
