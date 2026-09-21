@@ -128,6 +128,17 @@ jobs:
       # time: 6394 tests, 0 fail. See g-parity-canary-outside-every-blocking-gate.
       - name: Root-level parser/native conformance (S302 — previously ungated)
         run: bun test compiler/tests/*.test.js
+      # S427: the e2e-render-map tier ran in NO job and NO hook — `compiler/tests/*.test.js`
+      # above does not descend into subdirectories, and the pre-commit globs stop at the same
+      # depth. Its detector pins (259 at wiring time, incl. the seed-gating invariant "no cell
+      # scores GREEN while a seed failure is on the record") therefore pinned nothing until
+      # someone ran them by hand. What this step makes BLOCKING is the tier's ASSERTIONS. The
+      # fast-slice green->red delta inside `e2e-render-map.test.js` is WARN-only by design, and
+      # `generate-baseline.js --check` is still not run here (the committed baseline carries
+      # pre-existing drift). Happy-dom only, no browser; ~55s. See
+      # g-e2e-render-map-tier-runs-in-no-ci-job-at-all.
+      - name: e2e-render-map tier assertions (S427 — previously ran in no job)
+        run: bun test compiler/tests/e2e-render-map/
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |
           bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css
@@ -265,3 +276,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Unit + conformance on Windows (catches `\` vs `/` OS-path bugs — #25/#26 class)
         run: bun test compiler/tests/unit compiler/tests/conformance
+      # S427: the e2e-render-map tier is the one that was a SILENT WHOLE-TIER NO-OP on Windows
+      # (S417: every relpath minted with `\`, 0 of 449 baseline keys resolved, the tier reported
+      # green). That separator class is exactly what this job exists to surface.
+      - name: e2e-render-map tier on Windows (S427 — the S417 separator class)
+        run: bun test compiler/tests/e2e-render-map/

@@ -185,7 +185,8 @@ export function enumerateRenderCorpus() {
       // line: 449 of 449 relpaths carried `\`, `tierOf` returned "other" for ALL of them, NO app
       // was ever classified multi-file, `seedFor` matched 0, and 0 of 449 baseline keys resolved —
       // so the tier compared nothing, seeded nothing and tiered nothing, while reporting 12/0.
-      // A silent whole-tier no-op, invisible because the tier runs in no CI job.
+      // A silent whole-tier no-op, invisible because the tier ran in no CI job (true until S427,
+      // when `gate` + `windows` began running it — the Windows run is what now surfaces this class).
       // Normalising HERE rather than at each consumer is deliberate: the separator is a property of
       // how the path was minted, and a per-consumer patch would leave the next consumer to find.
       // On POSIX this is a no-op — `relative` already returns `/` and the replace matches nothing.

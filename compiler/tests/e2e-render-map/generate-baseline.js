@@ -9,6 +9,8 @@
  * on; e2e-render-map.test.js only WARNS on it for the examples+benchmarks slice.
  * ⛑ S419: no CI job, package script or git hook invokes this file or that suite
  * directory by name — both run only by hand (see e2e-render-map.test.js header).
+ * ⛑ S427: the suite DIRECTORY now runs in ci.yml's `gate` + `windows` jobs; THIS file
+ * (write or `--check`) still runs only by hand.
  *
  * Each (app, seed) cell is observed in an ISOLATED SUBPROCESS (observe-one.js)
  * with a hard timeout, because some meta-heavy corpus apps hang/loop at mount in

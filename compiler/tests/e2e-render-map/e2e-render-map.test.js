@@ -31,6 +31,13 @@
  * `--check` is a tool, not a gate. Do not describe either as gating until a job
  * actually invokes it.
  *
+ * ⛑ S427 — UPDATE: ci.yml's blocking `gate` job (and the advisory `windows` job) now run
+ * `bun test compiler/tests/e2e-render-map/`. What that makes BLOCKING is this tier's
+ * ASSERTIONS — every `expect` in this file and in detector-validation.test.js. It does NOT
+ * make the fast-slice green->red delta below blocking (that test stays WARN-only by design),
+ * and `generate-baseline.js --check` is still run by no job or hook. The S419 paragraph
+ * above stays as the record of what was true until S427.
+ *
  * To keep this suite test-time-cheap (the full corpus is subprocess-isolated and
  * minutes long — some meta-heavy apps hang at mount), it re-observes only the
  * FAST representative slice (examples + benchmarks, in-process, ~3s) and reports
@@ -594,7 +601,8 @@ describe("e2e-render-map — multi-file apps compile their own tree", () => {
 // throwaway subprocess they die with the process. examples+benchmarks is ~34
 // apps × ~0.3s ≈ low-tens-of-seconds — test-time viable. The samples tier (incl.
 // the meta-heavy hangers) is observed only by a hand-run of `generate-baseline.js`
-// (write or `--check`), not this suite; no CI job or hook runs either (see header).
+// (write or `--check`), not this suite. This suite runs in CI since S427, but THIS test only
+// warns; `generate-baseline.js` runs in no job or hook (see header).
 // =============================================================================
 describe("e2e-render-map — delta-gate (examples+benchmarks slice, NON-gating)", () => {
   test("no green->red regression in the examples+benchmarks slice (WARN-only)", () => {
@@ -640,8 +648,9 @@ describe("e2e-render-map — delta-gate (examples+benchmarks slice, NON-gating)"
       console.warn(
         `[e2e-render-map] *** GREEN->RED REGRESSIONS (${regressions.length}) *** a closed cell re-opened:\n` +
           regressions.join("\n") +
-          `\n(NON-gating: this suite only warns, and no CI job or git hook runs this tier or ` +
-          `\`generate-baseline.js --check\` — a regression here blocks nothing until someone acts on it.)`,
+          `\n(NON-gating: this delta check only warns — the tier runs in CI (S427) but this test ` +
+          `does not fail on a delta, and no job runs \`generate-baseline.js --check\` — a ` +
+          `regression here blocks nothing until someone acts on it.)`,
       );
     }
 
