@@ -52,6 +52,53 @@
 > **The real next items are pickup 4 (seed-fixtures, unblocked), pickup 5 (door 3, filed and
 > confirmed) and pickup 6 (no gate runs this tier).**
 
+> ⚑⚑ **SECOND POST-WRAP ADDENDUM — THE SESSION CONTINUED PAST BOTH PRIOR ADDENDA. THIS BLOCK IS THE
+> CURRENT STATE; the pickup below and the first addendum are both superseded on their lead item.**
+>
+> **The D6 HIGH is RESOLVED (#1012).** Then door 3 / the fifth seed-gating path was taken and **built**,
+> and it is **HELD in #1014, not merged** — gate + windows green, `tracking` the same five pre-existing
+> names, and two PA-confirmed MEDIUMs from its pre-land pass that would write misleading records into a
+> committed baseline. **Do not merge it as-is, and do not rebuild it.**
+>
+> ⚑ **LEAD ITEM IS NOW ROUND 4 OF #1014, and it is TWO SPECIFIC CHOICES, not an arc.** Both defects are
+> PA-reproduced:
+> 1. **At the D1 door, demote to `seed-bridge-failed`, not `compiles-but-throws`.** `mountAndObserve`
+>    assigns `setFn` only AFTER `exec()` returns, so a mount throw always kills the side channel and the
+>    guard is always true there — it removes the `needs-server` carve-out unconditionally for every SEEDED
+>    server-dependent app. Measured: such a cell scores `compiles-but-throws`, **a compiler-blaming state
+>    for a harness artifact — which is exactly what the fix's own rationale for minting
+>    `seed-bridge-failed` rejects.** It bites the moment the coverage ratchet seeds a `needs-server` app:
+>    permanently red, and no compiler fix can clear it.
+> 2. **Make the "NO verdict about the compiler" note conditional.** It is written unconditionally at both
+>    self-demoting doors. Measured: a seeded app throwing `loadContacts is not defined` — genuine codegen,
+>    `S-UNBOUND-REF` in the same smell set — carries that note into the baseline, **telling the next
+>    triager to disregard a real bug.** Also false for a `[seed-signature]`-only error.
+>
+> **Two findings ride along, filed on the gap:** the invariant is class-complete over `runDetectors`
+> returns but **NOT over CELLS** (`observeCompiled` returns `renders-empty` directly, before the seed is
+> applied — *the class one level out, again*), and doors 3/4 are **unit-only reachable** today, so the
+> in-source "by construction" claim overstates.
+>
+> ⚑ **WHAT MUST NOT BE REBUILT — #1014's core is right:** the two-carrier predicate (the failure has a
+> NOTICE carrier and a FACT carrier, and #1002 guarded only the notice — **all four green returns were
+> fail-open, not three**), the choke-point demotion, `GREEN_STATES` single-sourced from three hand-kept
+> copies, and two EXISTING assertions corrected — one of which **pinned the third door green while its own
+> comment called it hazardous.** Tier 216 → **237 pass / 0 fail**, no baseline cell moves.
+>
+> ⚑⚑ **THE SESSION'S REAL LESSON, and it is mine three times over: every check I ran asked "did it
+> MOVE?" and none asked "is where it moved CORRECT?"** (a) my pre/post labeller could not tell an intended
+> fix from a regression; (b) I passed `obs.seed` where the detector reads `obs.seedReport`, so a true
+> finding sat on evidence testing a different carrier; (c) I printed `needs-server → compiles-but-throws`
+> and called it "FAIL-OPEN → CLOSED" when it is mis-attributed. **The evidence for the reviewer's best
+> finding was already in my own output.** Twice today a review finding was REJECTED for being normatively
+> wrong while behaviourally reproducible, and here one was CONFIRMED the same way — the discriminator is
+> never the reproduction, it is whether you established what the correct answer IS.
+>
+> **State: 5 PRs merged this session** (#1007 `2cb502d5` · #1010 `1cf94d32` · #1011 `adf04b7a` ·
+> #1012 `f8d263de` · #1013 `021323b9`) **· 2 closed-superseded** (#1008, #1009, force-push blocked)
+> **· 1 HELD** (#1014). Board **HIGH 110 · MED 264 · LOW 101 · Nominal 7**. Floor re-opens at 2 (#1013,
+> and this addendum's PR). Both repos 0/0, clean, all gates exit 0.
+
 ## ⏭ NEXT-SESSION PICKUP
 
 1. **⚑⚑ THE LEAD ITEM IS ROUND 3 OF #1009, AND IT IS BOUNDED AND SPECIFIED.** The D6 conferring/consuming

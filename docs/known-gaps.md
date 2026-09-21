@@ -16247,6 +16247,44 @@ EXECUTION**, not relayed. The id stays unrenamed for the same reason as the S424
   `obs.throwMessage`. A fix aimed at item 2 will not close it.
   **Latent, like the rest:** all nine `needs-server` baseline cells are unseeded today, so no cell moves.
 
+⚑⚑ **S426 ROUND 3 — THE FIX IS BUILT AND HELD IN #1014 (NOT MERGED), AND ITS OWN PRE-LAND PASS FOUND
+TWO MIS-ATTRIBUTIONS, BOTH PA-CONFIRMED BY EXECUTION.** The requirement is now enforced at a CHOKE POINT
+rather than door by door: `runDetectors` wraps the classifier and demotes any surviving green state to a
+new red state `seed-bridge-failed`, which is class-complete over green returns **that do not exist yet**.
+⚑ **And the population was larger than this entry said: ALL FOUR green-state returns were fail-open, not
+three — including the one #1002 "closed",** because that guard keyed on the `[seed-bridge]` NOTICE while
+the failure has a second carrier, the report's own `errors[]`/`set-threw` write. A notice-keyed guard is
+**provably dead code** at the last two returns, since any notice makes `consoleErrors` non-empty and the
+state-resolution block returns first.
+
+**What is HELD and why — two defects that would write misleading records into the committed baseline:**
+
+1. **The `needs-server` carve-out became structurally unreachable for any SEEDED server-dependent app.**
+   `mountAndObserve` assigns `setFn` only AFTER `exec()` returns, so a mount throw always kills the side
+   channel and the guard is always true at the D1 door — the term does not discriminate. Measured: such a
+   cell scores **`compiles-but-throws`**, a COMPILER-blaming state for a HARNESS artifact, which is
+   exactly what the fix's own rationale for minting `seed-bridge-failed` rejects. It bites the moment the
+   coverage ratchet seeds a `needs-server` app: the cell reds permanently and **no compiler fix clears
+   it.** Round-4 direction: demote to `seed-bridge-failed` there, which is what the state is FOR.
+2. **The "this cell carries NO verdict about the compiler" note is stamped unconditionally at both
+   self-demoting doors.** Measured: a seeded app throwing `loadContacts is not defined` — a genuine
+   codegen defect, `S-UNBOUND-REF` in the same smell set — carries that note into the baseline, telling
+   the next triager to disregard a real bug. Also false for a `[seed-signature]`-only error, where the
+   snapshot helper threw and every seed write landed. Round-4 direction: make the note conditional on the
+   cell having no independent red reason.
+
+**Two further findings, filed here rather than dropped:** the invariant is class-complete over
+`runDetectors` returns but **NOT over CELLS** — `observeCompiled` returns `renders-empty` directly, before
+the seed is ever applied, so an emit regression that stops locating the entry HTML goes green→green with
+the undelivered seed recorded nowhere (**the class one level out, again**); and doors 3/4 are **unit-only
+reachable** today, because every harness path that fills `seedReport.errors` also pushes a console notice,
+so the in-source *"by construction"* claim overstates what was established.
+
+⚑ **The core of #1014 is right and must not be rebuilt:** the two-carrier predicate, the choke-point
+demotion, `GREEN_STATES` single-sourced (it was THREE hand-kept copies), and two EXISTING assertions
+corrected — one of which **pinned the third door green while its own comment called that hazardous**, i.e.
+a test asserting the bug. Tier 216 → 237 pass / 0 fail, no baseline cell moves.
+
 ⚑ **The pattern this entry is now the record of:** three consecutive rounds have each fixed one door of
 *"a seed-bridge failure must be LOUD"* and left a sibling door open — S423 filed it, #1002 found the
 first fix's loudness was not terminal and shut the second door, and this pass found the third. **Fifth
