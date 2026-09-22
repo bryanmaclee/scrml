@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 114 |
+| HIGH | 115 |
 | MED | 270 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -12072,6 +12072,53 @@ outlet IS.
 the normative catalog, and is the thing that would have saved the adopter 99 pages. (a) is where all
 four FORK RULE rows point.
 
+### ⚑⚑ (a)'s MIGRATION IS MEASURED AND IT IS NOT ZERO — so (a) is a SEPARATE RULING (§8), and the measurement is worse than the fork looked
+
+bryan ratified *"(c) now, then (a)"* at S425 **before this was measured.** §8 is explicit: *"A
+newly-rejecting change still owes a MEASURED migration … treat a non-zero count as a separate ruling
+rather than migrating unilaterally."* Measured by compiling, not grepping — the population is
+"projects where `W-OUTLET-ABSENT-SOFT-NAV-DISABLED` fires", which is the compiler's own answer:
+
+| project | `<outlet>` | `<main>` | lint fires | in (a)'s population |
+|---|---|---|---|---|
+| **`examples/23-trucking-dispatch`** (the FLAGSHIP) | **no** | 1, with a substantial authored landing page | **YES** (`app.scrml:35:1`) | **yes** |
+| **`docs/website`** (scrml.dev's in-repo source) | **no** | 1, containing only a comment | **YES** | **yes** |
+| `compiler/tests/commands/migrate-program-shape-fixtures` | no | 0 | — | likely |
+| `compiler/tests/fixtures/chunk-namespacing/{engine,types,wide}` · `docs/changes/esm-chunks/.../fx` | **yes** | — | no | no |
+
+⚑ **THE FLAGSHIP IS LOSING CONTENT TODAY, SILENTLY, AND IT IS MEASURED.**
+`examples/23-trucking-dispatch/app.scrml`'s `<main>` carries an `<h1>Welcome`, a description, a
+"Get started" card with three links and a stress-test callout. Built with
+`scrml build . --target static`, grepping the 25 emitted HTML files:
+
+- `app.html` (shell only, nothing composed) — `Welcome`=1 `Get started`=1 `Stress-test`=1
+- **all 24 composed route pages — 0 / 0 / 0**
+
+The build reports *"scrml build complete"*. No error, one Info lint that names only soft navigation.
+
+### ⛑ AND THE MEASUREMENT REFRAMES THE FORK — the compiler is being asked to read intent
+
+The two in-corpus instances want OPPOSITE things from the same syntax:
+
+- **scrml-site's `<main>` held SHELL CHROME** (a 73-link reference sidebar). Replacing its children
+  is destruction — that is the reported bug.
+- **the flagship's `<main>` holds THE INDEX ROUTE'S BODY** (a landing page, and there is no
+  `pages/index.scrml`). Replacing its children on a composed route is *exactly what the author
+  wants*, and `app.html` keeps them because nothing composes there.
+
+**Nothing in the source distinguishes those two intents** — which is precisely why §20.8.1.1 makes
+the slot marker-keyed. Without the marker the compiler guesses, and the same guess is correct for one
+author and silently destructive for the other. **That strengthens (a)** — refuse the ambiguous shape
+rather than keep guessing — **and it raises (a)'s cost above the one-liner it looked like:**
+`docs/website` migrates by adding `<outlet/>` inside its `<main>` (§20.8.1.1 case 2, no diagnostic,
+and it re-enables soft nav on scrml.dev, which is what the reporter wants); **the flagship needs its
+landing content MOVED** to a route file before an `<outlet/>` can go in. Small, clarifying, but not
+mechanical.
+
+**PA position, updated: (c) still stands and is unblocked. (a) is re-surfaced with the count** — two
+live projects, one of them the flagship, one of them our own documentation site, and a migration that
+is one line for one and a content move for the other.
+
 ### g-e-sql-004-is-file-local-so-a-multi-file-page-relying-on-the-entry-s-db-attribute-cannot-build — the exact defect #995 just retired for `E-AUTH-005`, still live one stage downstream at codegen, and it now blocks the shape #995 was landed to unblock — `NEW S425-bryan (post-merge R26 empirical verification of #995 on merged main `c59367bb`; PA-reproduced with a control); HIGH; open`
 
 <!-- @gap id=g-e-sql-004-is-file-local-so-a-multi-file-page-relying-on-the-entry-s-db-attribute-cannot-build sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:collectDbScopes(LOCATE BY SYMBOL — the gate computes `const dbScopes = collectDbScopes(fileAST)` and its own comment says "No matching scope was found in the file AST"; the fire site is the `if (!scope)` branch below it. Sibling file-local copy in compiler/src/codegen/emit-tool.ts) prov=empirical:PA-measured-on-merged-main-c59367bb-app-build-emits-E-SQL-004-at-CG-with-E-AUTH-005-correctly-silent -->
@@ -16821,6 +16868,38 @@ fix spec than the symptom. Proven by stating a prediction first and then testing
 | `/\[\[\]\]/` | 0 | OK | **OK** |
 | `/\[/` | +1 | FAIL | **FAIL** |
 | `/\[\[\]/` | +1 | FAIL | **FAIL** |
+| `/\]/` | **−1** | FAIL | **FAIL** |
+
+### ⚑⚑ AMENDED S425 — THE PREDICATE IS CONJUNCTIVE, AND THE MISSING CLAUSE IS A REGRESSION-TEST TRAP
+
+**Credit: flogence S49 re-measured this entry on their own tree, found the clause, and sent it back.
+PA-CONFIRMED BY EXECUTION here on `9944702d` — not relayed.** They pushed back on our framing after
+we pushed back on theirs, and they are right.
+
+**Non-zero net depth is necessary but NOT sufficient. The failure also requires at least one
+top-level `;` to be scanned AFTER the desync.** Two slices with IDENTICAL bracket content and
+opposite outcomes:
+
+| slice body | net | regex position | measured |
+|---|---|---|---|
+| `const s = "abc"` · `return /\[/.test(s)` | +1 | **last statement** | **OK** |
+| `const re = /\[/` · `const s = "abc"` · `return re.test(s)` | +1 | **first statement** | **FAIL** |
+| `const s = "abc"` · `return /\]/.test(s)` | −1 | **last statement** | **OK** |
+| `const re = /\]/` · `const s = "abc"` · `return re.test(s)` | −1 | **first statement** | **FAIL** |
+
+When the regex sits in the LAST statement the only top-level `;` is read at depth 0, the scanner
+correctly concludes multi-statement, no `return ( … )` wrap happens — **the desync is real and
+harmless because nothing is read while it holds.**
+
+⚑ **THIS IS A LIVE FALSE-NEGATIVE GENERATOR, AND IT ALREADY FIRED.** flogence's first fixture set
+**passed 10 of 10**, including every slice both sides now measure as FAIL, because the generator put
+the regex in the trailing statement. **A regression pin written that way passes on the BROKEN
+compiler and certifies the bug fixed.** Whoever builds the fix owes fixtures that place the regex
+BEFORE a top-level `;`, and owes a bite proof against unfixed HEAD — the §8 unproven-gate rule, with
+a known-shaped way to get it wrong.
+
+Also corrected by their table: `/\]/` at net **−1** fails too, so the rule is **non-zero net**, not
+"unclosed". The "BALANCE" framing above is right; the sign is not.
 
 **Mechanism.** `scanForeignSliceShape` decides the §23.2.4a value-flow rule by a syntactic scan of the
 OPAQUE slice: no top-level `;` and no top-level `return` ⇒ single expression ⇒ wrap as `return (slice)`;
@@ -16874,6 +16953,29 @@ coordinate and the offending snippet, while `scrml compile` does NOT truncate an
 telling them directly: run `scrml compile` on the file and the span they asked for is already there** —
 the information exists and their surface is eating it. The LOW severity should be revisited on this
 evidence: two adopter bisections at ~40 minutes each is not a cosmetic cost.
+
+⛑ **RETRACTED IN PART, S425 — the severity argument above does not rest on this adopter, and the
+actionable was a no-op for them.** flogence S49 checked it and reported back:
+
+- **The source diagnosis holds** — they verified `slice(0, 120)` at `build.js:907` and `dev.js:630`
+  (plus `:604` for warnings), and that `compile.js` carries no truncation.
+- **But they were never on `build` or `dev`.** Every flogence script compiles through
+  `cli.js compile`, which does not truncate — so *"re-run through `scrml compile`"* told them to do
+  what they were already doing. **They had the span for both bisections.**
+- ⚑ **The eating surface was THEIR OWN `tail`.** They injected an unbalanced escaped bracket into a
+  real tool and measured the output: **1,262 lines** (352 warnings + 273 ghost lints), with the
+  `artifact:` span line at **1,255 — eighth from the end**. Their convention tails 4–5 lines off a
+  compile because the warning baseline is tracked; `tail -8` shows the span, `tail -4`/`tail -5` do
+  not. Their fix, their one-liner.
+- ⚑ And the printed snippet shows the mechanism outright — `...(async (args) => { return (const re =
+  /\[/; ...` — i.e. **the desync, rendered.** The diagnostic is richer than this entry credited.
+
+**So: the "40 minutes × 2 is not cosmetic" argument is WITHDRAWN as evidence about `compile`.** It
+still stands for `build`/`dev` users, where the truncation is real and measured. flogence asked
+explicitly that we *"re-rank it on true grounds rather than on our mistake"* — recorded, and the
+LOW stands until someone produces a `build`/`dev`-side cost. ⚑ **The generalizable lesson is ours:
+we correctly identified a truncation and then attributed a cost to it that came from a different
+surface entirely — a right mechanism wired to the wrong consumer.**
 
 ### g-default-logic-mode-loses-the-ghost-lint-logic-context-exemption-for-the-whole-program-body — the ghost-pattern scanner's `logicRanges` exemption is computed from explicit `${…}` spans only, so under §40.8 default-logic mode every JS-shaped construct in a `<program>`/`<page>` body is linted as framework ghost syntax — and the compiler's own `W-PROGRAM-REDUNDANT-LOGIC` tells authors to adopt exactly that shape — `NEW S425-bryan (surfaced as a "related and separate, not filed as a bug" aside in the flogence S48 report; PA-REPRODUCED and then WIDENED by measurement — the report's framing was foreign-interior-specific and the real scope is the whole body); MED; open`
 
