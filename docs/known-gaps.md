@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 112 |
-| MED | 268 |
+| HIGH | 114 |
+| MED | 270 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -11987,7 +11987,17 @@ Reporter measured **7 of 7 navigations carrying stale CSS** in Chromium on the l
 
 ### g-soft-nav-redirect-leaves-orphan-history-entry — a soft nav to a redirecting URL pushes history BEFORE fetching, then hard-navigates on the redirect, so one click burns two entries and the first Back appears to do nothing — `NEW S350-bryan (reported by scrml-site); MED; open`
 
-<!-- @gap id=g-soft-nav-redirect-leaves-orphan-history-entry sev=MED status=open locus=compiler/src/runtime-template.js:2713,2724,2752(PA-VERIFIED AT HEAD: `history.pushState` at :2713/:2724 in `_scrml_navigate_soft`, and the redirect fallthrough `if (!res.ok || res.redirected) { _scrml_navigate(res.url || path); return null; }` at :2752 runs AFTER it) prov=adopter:scrml-site-2026-08-18-soft-nav-drops-page-stylesheet -->
+<!-- @gap id=g-soft-nav-redirect-leaves-orphan-history-entry sev=MED status=open locus=compiler/src/runtime-template.js:_scrml_navigate_soft/_scrml_nav_fetch_and_swap(LOCATE BY SYMBOL, not by line — the two `history.pushState` calls live in `_scrml_navigate_soft`, and the redirect fallthrough `if (!res.ok || res.redirected) { _scrml_navigate(res.url || path); return null; }` lives in `_scrml_nav_fetch_and_swap`, which the push precedes) prov=adopter:scrml-site-2026-08-18-soft-nav-drops-page-stylesheet -->
+
+⛑ **LINE NUMBERS CORRECTED S425-bryan, and the correction is the point.** This `locus=` read
+`:2713,2724,2752` when filed at S350. Re-measured by execution on `428e390d`: the pushes are at
+**`:2774`** (and `:2762` for the in-page-hash short-circuit, which is a THIRD site the original
+three-number list did not name), and the redirect fallthrough is at **`:2803`**. Every number had
+rotted and one site was missing. **The numbers are deliberately NOT restored above** — the entry now
+locates by SYMBOL, per S422's own durable (*"a correction rots exactly as fast as the citation it
+corrected — locate by symbol or do not locate"*). The defect itself re-verified live in the same pass:
+`history.pushState({ __scrml_soft: true }, "", path)` runs, then `_scrml_nav_fetch_and_swap(path, null)`
+is called, and only inside that does the response's `redirected` flag get read.
 
 **Reported by scrml-site 2026-08-18; PA-VERIFIED IN OUR SOURCE AT HEAD.** `_scrml_navigate_soft()` pushes the history entry, *then* fetches, then discovers `res.redirected` and falls through to a full `_scrml_navigate(res.url)`. The pushed entry is orphaned — it names a URL whose document was never loaded — so the first Back press appears to do nothing.
 
@@ -11996,6 +12006,102 @@ Reporter measured `history.length` **5 → 7 on a single click**; the first Back
 **Suggested shape (reporter):** push AFTER the fetch resolves, or `replaceState` the redirect target onto the entry already pushed.
 
 Filed separately from [[g-soft-nav-head-sync-drops-stylesheet-links]] because it is true independent of that fix and has its own locus, though both are in the soft-nav path and a single arc should take them together.
+
+### g-outlet-absent-composition-resolves-the-route-slot-by-tag-and-discards-the-chosen-main-s-authored-children — a shell with no `<outlet>` has its first `<main>` silently commandeered as the route slot and its authored children deleted from the emitted document, against §20.8.1.1's marker-never-tag SHALL — `NEW S425-bryan (the owed probe, delivered by scrml-site 2026-08-19; PA-REPRODUCED BY EXECUTION on `428e390d` with an A/B control, not relayed); HIGH; open — the DISPOSITION is a RULING (bryan)`
+
+<!-- @gap id=g-outlet-absent-composition-resolves-the-route-slot-by-tag-and-discards-the-chosen-main-s-authored-children sev=HIGH status=open locus=compiler/src/codegen/index.ts:findBareMainOpenTag(LOCATE BY SYMBOL — the tag-keyed slot finder, whose own docblock reads "The FIRST `<main>` open tag — the pre-§20.8 static/hard-nav composition slot, used only when the shell declares no `<outlet>` marker"; the replace-not-append behaviour is stated verbatim at the composition site: "composing replaces the slot's children") prov=adopter:scrml-site-2026-08-19-outlet-discards-shell-children-repro -->
+
+**PA-REPRODUCED BY EXECUTION on `428e390d`**, A/B, from the reporter's own 12-line case:
+
+| variant | `shell-authored-child` in emitted `out/index.html` |
+|---|---|
+| `<main>` holds the authored `<div>` **and** `<outlet/>` | **1** — survives |
+| `<main>` holds the authored `<div>`, **`<outlet/>` removed** | **0** — silently discarded |
+
+⚑ **The mechanism is sharper than the report states, and the refinement matters for the fix.** With an
+`<outlet/>`, the slot is emitted as a SIBLING (`<div data-scrml-outlet tabindex="-1">`) *after* the
+authored child, which is why it survives. Without one, `<main>` ITSELF becomes the slot and
+composition replaces its children. **The loss is scoped to the authored children of the element the
+fallback finder picks — not to shell markup generally:** the `<header>` in the same reproducer
+survives intact, because it is outside the chosen slot. A report saying "authored shell markup is
+discarded" over-states it; "the first `<main>`'s children are discarded" is the measured claim.
+
+**GOVERNING SENTENCE — outcome 1, quoted verbatim (`compiler/SPEC.md` §20.8.1.1):**
+
+> **Exactly one `<main>` landmark per composed document; the MARKER decides the route slot, never the tag.**
+>
+> "That attribute — never the element's tag name — SHALL identify the route slot, for BOTH the runtime
+> swap (§20.8.2) and the multi-file shell composition (§40.8.2). Every consumer SHALL resolve the slot
+> by attribute NAME (the `[data-scrml-outlet]` selector), not by substring, not by tag."
+
+`findBareMainOpenTag` resolves the slot **by tag**, with no marker present anywhere in the document.
+Its own docblock names itself *"pre-§20.8"* — this is code that §20.8.1.1's SHALL did not retire. So
+the behaviour contradicts a normative sentence that already exists; this is a **BUG against the
+contract, not an unspecified shape.** §20.8.1's own sentence for this case says only that such a
+project *"SHALL emit W-OUTLET-ABSENT-SOFT-NAV-DISABLED and fall back to hard navigation"* — nothing
+licenses commandeering `<main>` or deleting its children.
+
+⚑ **AND §34's row for the diagnostic asserts a severity rationale that is FALSE.** Verbatim:
+*"…fall back to hard (full-document) navigation; **this is informational only (SSR-first hard
+navigation still works)**."* Hard navigation does still navigate — to a document that has lost the
+authored children of its first `<main>`. An author reading an **Info**-level lint whose text names
+only a performance trade has no way to learn that content is being deleted. That is the §8
+hollow-gate family in documentation form, and it is the half of this entry that needs no ruling.
+
+**WHY IT BIT AN ADOPTER, in their words:** removing `<outlet/>` was their first candidate for
+disabling soft nav site-wide, and it *"deleted our entire generated 73-link reference sidebar from
+all 99 pages."* They caught it by diffing the emitted artifact before shipping — nothing warned them.
+They then shipped `hard` on all 551 internal `<a>` instead.
+
+### ⛑ THE DISPOSITION IS A FORK, AND IT IS BRYAN'S — surfaced with a recommendation, not ruled
+
+The reporter explicitly left it open (*"whether the discard itself is correct behaviour is your call —
+we can see an argument that a shell without an outlet is simply not a shell"*). It does **not** fall
+in the S385 PA-ruling class: an adopter is demonstrably depending on the current shape, so condition 3
+(**corpus impact MEASURED ZERO**) fails, and the call sets direction about what a shell without an
+outlet IS.
+
+| # | option | direction | note |
+|---|---|---|---|
+| a | **Refuse it** — a `pages/`-bearing shell with no `<outlet>` is an ERROR | newly-REJECTING | **PA lean.** FORK RULE rows 1–4 all discriminate this way: it LIMITS, it fails CLOSED, newly-rejecting is the REVERSIBLE direction, and it fixes the ROOT rather than the position. Cost: it breaks the reporter's own "remove the outlet to disable soft nav" idiom — but they already abandoned that idiom for `hard`, and §20.8.3 `hard` is the sanctioned opt-out |
+| b | **Append, don't replace** — compose route content INTO the chosen `<main>` after its authored children | semantics-changed | fixes the data loss, keeps the shape working. ⚑ But `semantics-changed` is the class §8 says the gates are weakest against, and it leaves the marker-never-tag SHALL still violated |
+| c | **Keep the behaviour; fix the diagnostic** — name the discard in the lint text and strike §34's false *"informational only"* | inert | ⚑ **Owed REGARDLESS of which way (a)/(b) goes**, and cheap. Does not on its own satisfy §20.8.1.1 |
+| d | **Retire the fallback finder** — no marker, no slot; the shell emits as authored | newly-rejecting-ish | closest to the letter of the SHALL, but leaves "where does route content go?" unanswered, so it likely collapses into (a) |
+
+**PA recommendation: (c) now, unconditionally, then (a).** (c) is inert, removes the false claim from
+the normative catalog, and is the thing that would have saved the adopter 99 pages. (a) is where all
+four FORK RULE rows point.
+
+### g-e-sql-004-is-file-local-so-a-multi-file-page-relying-on-the-entry-s-db-attribute-cannot-build — the exact defect #995 just retired for `E-AUTH-005`, still live one stage downstream at codegen, and it now blocks the shape #995 was landed to unblock — `NEW S425-bryan (post-merge R26 empirical verification of #995 on merged main `c59367bb`; PA-reproduced with a control); HIGH; open`
+
+<!-- @gap id=g-e-sql-004-is-file-local-so-a-multi-file-page-relying-on-the-entry-s-db-attribute-cannot-build sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:collectDbScopes(LOCATE BY SYMBOL — the gate computes `const dbScopes = collectDbScopes(fileAST)` and its own comment says "No matching scope was found in the file AST"; the fire site is the `if (!scope)` branch below it. Sibling file-local copy in compiler/src/codegen/emit-tool.ts) prov=empirical:PA-measured-on-merged-main-c59367bb-app-build-emits-E-SQL-004-at-CG-with-E-AUTH-005-correctly-silent -->
+
+**PA-MEASURED on merged main `c59367bb`, by APPLICATION BUILD with a control.** #995 fixed
+`E-AUTH-005` by computing the server-context answer once per APPLICATION in `runTS`. `E-SQL-004` still
+computes it per FILE:
+
+| shape | `E-AUTH-005` | `E-SQL-004` |
+|---|---|---|
+| page with its own `<db src=>` | silent ✅ | silent ✅ |
+| page relying purely on the entry's `<program db=>` | **silent ✅ (#995's win)** | **FATAL at `[CG]` — build fails** |
+
+So #995's win is real and the shape is still unbuildable: the author is told to *"Add a `db=`
+attribute to the enclosing `<program>` element"* in a file where §40.8 forbids a `<program>` at all.
+**Two errors became one impossible-to-action error** — which is what the #995 PR body disclosed as its
+honest reach, now measured rather than asserted.
+
+⚑ **This entry supersedes the `E-SQL-004` claim inside [[g-spec-sql-schema-codes-zero-emission]]**,
+which records it as *"comment-only; falls back to `:memory:`"*. That was true once; `emit-server.ts`'s
+own comment records the change (*"Historically this path shipped a silent `new SQL(":memory:")` stub …
+We now fire the SHALL-error instead"*). It fires, it is fatal, and it fails the build.
+
+⚑ **METHOD NOTE, recorded because it nearly produced a false regression report against our own
+landing.** The first probe compiled the page file ALONE (`scrml compile pages/board.scrml`) and saw
+`E-AUTH-005` fire — which reads as "#995 does not work." It is the wrong referent: a single-file
+compile has no application context, and #995's whole mechanism is application-scope. Under
+`scrml build .` the diagnostic is correctly silent. **A whole-application question cannot be asked of
+a single-file invocation**, and the failure mode is a well-formed, plausible, wrong answer.
+[[feedback_the_probe_answered_a_different_question]]
 
 ### g-ws-message-door-has-no-body-ceiling-d4-census-missed-it — the `<channel>` server WebSocket `message(ws, raw)` handler `JSON.parse`s an adopter-supplied frame with NO scrml size ceiling, so the dpa-030 D4 body-size fix closes three of FOUR ingress doors — `NEW S350-bryan; HIGH; open`
 
@@ -16693,3 +16799,118 @@ owners already), and confirm the widened window does not start capturing the har
 and would double-count.
 
 — `NEW S424-peter (deferred observation from the item-3 dispatch, kept rather than dropped because it is the unclosed half of the question that dispatch answered)`; **MED**; open
+
+### g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count — the FOURTH trigger on `scanForeignSliceShape`, and the one that finally makes the "harden it once" call concrete — `NEW S425-bryan (adopter report from flogence PA S48, arrived UNTRACKED in the inbox mid-session; PA-REPRODUCED by execution on `c59367bb` — their 9-case matrix re-run 8-for-8, then the MECHANISM proven by prediction-and-test rather than by reading); MED; open`
+
+<!-- @gap id=g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:scanForeignSliceShape(LOCATE BY SYMBOL — the char scan tracks single/double-quoted strings, template literals, line comments and block comments, and has NO regex-literal state and no `\` escape handling outside a string span, so `\[`/`\]` inside a regex literal increment/decrement `depth`) prov=adopter:flogence-S48-2026-09-20-two-codegen-lowering-failures -->
+
+**PA-REPRODUCED on `c59367bb`.** The reporter's matrix, re-run independently — 8 of their 9 rows
+(the 9th skipped for shell-escaping reasons only), **every one agreeing**:
+
+| literal | reported | re-measured |
+|---|---|---|
+| `/\[/` · `/\]/` · `/[^\]]+/` · `/^\s*\[([^\]]+)\]/` | FAIL | **FAIL** |
+| `/[abc]+/` · `/^## /` · `/[^a-z0-9]+/g` · `/\d{4}-\d{2}-\d{2}/g` | OK | **OK** |
+
+⚑ **THE DISCRIMINATOR IS NOT "AN ESCAPED BRACKET" — IT IS BRACKET BALANCE**, and that is a better
+fix spec than the symptom. Proven by stating a prediction first and then testing it:
+
+| slice | net escaped-bracket depth | predicted | measured |
+|---|---|---|---|
+| `/\[\]/` | 0 | OK | **OK** |
+| `/\[\[\]\]/` | 0 | OK | **OK** |
+| `/\[/` | +1 | FAIL | **FAIL** |
+| `/\[\[\]/` | +1 | FAIL | **FAIL** |
+
+**Mechanism.** `scanForeignSliceShape` decides the §23.2.4a value-flow rule by a syntactic scan of the
+OPAQUE slice: no top-level `;` and no top-level `return` ⇒ single expression ⇒ wrap as `return (slice)`;
+otherwise splice verbatim. The scan is depth-aware and skips strings, template literals and both comment
+forms — **but it has no regex-literal state.** So a `\[` inside a regex literal increments `depth` with
+no matching decrement, every subsequent top-level `;` is seen at `depth > 0`, `topLevelStmtSep` stays
+false, and a multi-statement body is wrapped as an expression. The reporter's own emitted output is the
+signature: `const plan = await (async (rows) => { return (const crypto = await import(…)` → `bun` then
+says `Unexpected const`. **Their guess was right** (*"treats `\[` / `\]` as unescaped bracket
+structure"*); this entry adds the locus and the balance discriminator.
+
+### ⛑ TWO CORRECTIONS TO THE REPORT, both measured, and the second one costs them something today
+
+**(1) "Bug 1" and "Bug 2" are ONE defect. The bug-1 attribution is wrong.** The report files a separate
+Bug 1 — *"a method cannot be chained onto an index access"* (`dlines[li].slice(3).trim()`) — with its own
+minimal repro and its own workaround. A four-cell matrix, one variable:
+
+| slice contents | result |
+|---|---|
+| index-access chain, **no** regex | **OK** |
+| index access bound first, **no** regex | **OK** |
+| index-access chain, **with** `/\[/` in the same slice | **FAIL** |
+| index access bound first, **with** `/\[/` in the same slice | **FAIL** |
+
+The index access is irrelevant in both directions. Their bisection landed on that line because editing
+it changed the character stream, not because chaining was implicated — a bisection-attribution artifact.
+
+**(2) ⚑ Their ADOPTED WORKAROUND FOR BUG 1 DOES NOT WORK, and they believe it does.** Row 4 above is
+their workaround with the regex still present: still FAIL. What actually cured their file was the *bug-2*
+workaround (dropping the escaped bracket), which incidentally cured "bug 1" too, because there was only
+ever one bug. **This is the operative thing to tell them** — they are carrying a defensive idiom that
+buys nothing, and if they ever reintroduce an unbalanced escaped bracket it will fail again with the
+workaround in place.
+
+### ⚑ This is the FOURTH trigger on one scanner, and the third entry to say "harden it once"
+
+Existing siblings, all open, all the same function: [[g-foreign-value-block-dot-return-misread-as-keyword]]
+(member `.return` read as the `return` keyword) · [[g-multi-statement-foreign-block-in-statement-position-lowers-to-malformed-js]]
+· `g-foreign-multistmt-value-block-mislowers`. The first already records the call — *"harden the
+scanner's tokenization (string/comment/member-access awareness) once"* — and it has now been paid
+for a fourth time. **The hardening list is now concrete and complete enough to build from:**
+(a) regex-literal state, (b) `\` escape handling outside string spans, (c) the member-access `.return`
+exclusion already specified in the sibling entry. One arc, three symptoms, and the §23.2.3 opacity
+contract is preserved throughout — this is a syntactic scan, not a parse, and it must stay one.
+
+⛑ **Their priority-1 ask is NOT this entry and is already filed.** They ask that
+`E-CODEGEN-INVALID-LOGIC` name the construct and give a span (*"either of these bugs would have been a
+two-minute fix with a span"*). That is [[g-emit-gate-source-anchor-synthetic-artifact-and-cli-truncation]]
+(LOW): `build.js`/`dev.js` truncate the message at `slice(0,120)`, cutting off the `(byte,line,column)`
+coordinate and the offending snippet, while `scrml compile` does NOT truncate and shows them. **Worth
+telling them directly: run `scrml compile` on the file and the span they asked for is already there** —
+the information exists and their surface is eating it. The LOW severity should be revisited on this
+evidence: two adopter bisections at ~40 minutes each is not a cosmetic cost.
+
+### g-default-logic-mode-loses-the-ghost-lint-logic-context-exemption-for-the-whole-program-body — the ghost-pattern scanner's `logicRanges` exemption is computed from explicit `${…}` spans only, so under §40.8 default-logic mode every JS-shaped construct in a `<program>`/`<page>` body is linted as framework ghost syntax — and the compiler's own `W-PROGRAM-REDUNDANT-LOGIC` tells authors to adopt exactly that shape — `NEW S425-bryan (surfaced as a "related and separate, not filed as a bug" aside in the flogence S48 report; PA-REPRODUCED and then WIDENED by measurement — the report's framing was foreign-interior-specific and the real scope is the whole body); MED; open`
+
+<!-- @gap id=g-default-logic-mode-loses-the-ghost-lint-logic-context-exemption-for-the-whole-program-body sev=MED status=open locus=compiler/src/lint-ghost-patterns.js:logicRanges(LOCATE BY SYMBOL — the pre-Stage-2 scanner's only logic-context protection is `skipIf: inRange(offset, logicRanges)` and `logicRanges` is derived from explicit `${ … }` spans; pattern 23's regex is `/(?:^|\s)\([a-z][a-zA-Z]*\)\s*=/g`, pattern for W-LINT-007 likewise) prov=adopter:flogence-S48-2026-09-20-two-codegen-lowering-failures -->
+
+**PA-REPRODUCED on `c59367bb`, and the reported scope was too NARROW.** The report frames it as *"the
+ghost-pattern lint scanner reads inside `_={ }=` interiors"*, cites §23.2.3's *"the `_{}` interior is
+opaque"*, counts 51 such lints in one file, and leaves it unfiled (*"your call whether that is worth a
+ticket"*). Four cases, one variable:
+
+| shape | ghost lints |
+|---|---|
+| A — arrow fn + object literals inside `_={ }=`, body wrapped in explicit `${ }` | **0** |
+| B — same, body in §40.8 default-logic mode (no `${ }`) | **`W-LINT-021` ×1 + `W-LINT-007` ×2** |
+| C — arrow fn in PLAIN scrml logic, **no foreign block at all**, default-logic mode | **`W-LINT-021` ×1** |
+| D — same as C, wrapped in `${ }` | **0** |
+
+**C is the case that relocates the bug.** There is no foreign block in it, so this is not about
+`_={ }=` opacity: **the discriminator is the explicit `${ }` wrapper.** `lint-ghost-patterns.js` runs
+pre-Stage-2 (before the block splitter) and therefore has no ForeignBlock notion at all; its only
+logic-context protection is `inRange(offset, logicRanges)`, and `logicRanges` comes from explicit
+`${ … }` spans. A §40.8 default-logic body has none, so the exemption is lost for the **entire body**.
+Foreign interiors are simply where the most JS-shaped text happens to sit — which is why an adopter
+authoring real parsing code in `_={ }=` sees 51 of them and reads the cause as foreign-specific.
+
+⚑ **THE COMPILER NUDGES AUTHORS INTO THE BROKEN SHAPE.** `W-PROGRAM-REDUNDANT-LOGIC` fires on the
+`${ }`-wrapped form and says *"Remove the redundant `${...}` for cleaner source"* — verbatim, and it
+fired on this session's own probes. So one lint instructs the author to adopt the shape that disarms
+another lint's exemption. That coupling is the finding; the 51 noisy lines are the symptom.
+
+**Why it matters beyond noise** (the reporter's own framing, and it is right): *"it makes a real lint
+regression hard to see."* A ghost-pattern baseline that is 51 false positives deep cannot be read, so
+the pass stops functioning as a gate for the file — the §8 cry-wolf shape arriving by accident rather
+than by design.
+
+**Fix direction, unverified, for whoever takes it:** `logicRanges` needs to include the implicit
+default-logic body span that §40.8 creates, not only explicit `${ … }` spans. ⚑ Owed with it, per §8's
+coverage-removal rule: **count what the scanner would stop inspecting** before widening the exemption —
+a `<program>` body that becomes wholly exempt also stops catching genuine framework-reflex ghosts in
+markup that sits in the same body, and that is the population the pass exists for.
