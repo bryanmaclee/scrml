@@ -14618,6 +14618,8 @@ engine arm is not re-dispatched when the engine arm is re-entered (display bindi
 `initial=.Ready([...])` drops its payload (emits `reactive_set("phase", "Ready")`). Reproduced by the agent on base
 with the no-lift twin; **not PA-verified** — re-reproduce and split before dispatching.
 
+⛑ **S429-peter — (1) and (4) PA-VERIFIED on `c8eb9cd9`.** (1) `<ul>${ lift <li><each in=@items as c><b>${c}</b></each></li> }</ul>` → `initError: ReferenceError: c is not defined` — the WHOLE page script dies at init (loud). (4) `<engine for=Load initial=.Ready(["p","q"])>` emits `_scrml_cs_reactive_set("load", "Ready")` — the payload is DROPPED and the `Ready` arm's `<each in=rows>` renders an EMPTY list with no error (SILENT — worse than this entry's MED). ⚑ (4) is ruling-adjacent: §51.0.E admits `initial=.Variant` ("a STATIC literal") or `initial=@cell` and does not say whether a payload constructor is a static literal — honour vs reject is bryan's (Q4 in the S429 message). The silent drop is wrong under both readings. (2) is likely the same class as `g-each-replaced-row-stops-receiving-in-place-edits` (in flight S429). (3) not yet re-run.
+
 ### g-post-emit-chunk-gates-match-user-string-literals — the post-emit runtime-chunk gates key on emitted TEXT, so a user string containing an internal helper name pulls unused chunks into the runtime — `NEW S427-peter; LOW; open`
 <!-- @gap id=g-post-emit-chunk-gates-match-user-string-literals sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES + the reconciliation lines scan) prov=review:S427-adversarial-pass-on-the-each-row-lift-fix-e8-runtime-55043-to-83143-bytes -->
 

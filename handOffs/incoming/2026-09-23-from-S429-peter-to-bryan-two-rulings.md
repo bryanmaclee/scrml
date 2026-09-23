@@ -2,7 +2,7 @@
 from: S429-peter (P-Tech1)
 to: bryan
 date: 2026-09-23
-subject: "your #996 note acted on; three language questions from the S429 landings"
+subject: "your #996 note acted on; four language questions from the S429 landings"
 needs: ruling
 status: unread
 ---
@@ -67,3 +67,14 @@ The two coherent answers:
 
 Either one picks semantics, so I have not built it. My lean is (a): it matches the component precedent, and
 (b) would make a transition in one row visibly change every row, which no author writing it per-row expects.
+
+## ⚑ Question 4 — does `initial=` accept a payload constructor?
+`<engine for=Load initial=.Ready(["p","q"])>` compiles at exit 0 and emits `_scrml_cs_reactive_set("load", "Ready")`.
+The payload is dropped, so the `Ready` arm's `<each in=rows>` renders an empty list with no error (PA-verified on
+`c8eb9cd9`). §51.0.E admits `initial=.Variant` ("a STATIC literal") or `initial=@cell`, and doesn't say whether
+`.Ready([...])` counts as a static literal.
+- If it does, codegen must carry the payload.
+- If it doesn't, it should be refused at compile time.
+
+The silent drop is wrong either way. My lean is to honour it: a payload variant with no way to state its initial
+payload can't be a start state except through `initial=@cell`.
