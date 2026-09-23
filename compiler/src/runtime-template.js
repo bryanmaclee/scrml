@@ -4508,6 +4508,59 @@ function _scrml_effect_static(fn) {
 }
 
 /**
+ * §6.7.4 \`when <dep-list> changes { body }\` — a reactive effect keyed on an
+ * EXPLICIT dependency list. Unlike _scrml_effect it does NOT run at registration
+ * and does NOT auto-track the body's reads:
+ *
+ *   - subscribe(handler) is the emitted per-dep \`_scrml_reactive_subscribe(dep, h)\`
+ *     calls (emitted in the chunk so the chunk-cell-scope rename namespaces each
+ *     dep key exactly as it namespaces the body's own reads). It returns the
+ *     unsubscribe functions. The subscriber list is the same one every
+ *     _scrml_reactive_set write fans out to, so change detection is reference
+ *     identity on the write (a §6.5 array mutation is a clone-replace write).
+ *   - The body runs with tracking PAUSED: a write that happens while an outer
+ *     _scrml_effect is running must not hand the body's reads to that effect.
+ *   - Subscribers fire after _scrml_propagate_dirty, so a derived read in the
+ *     body pulls the post-change value (the §6.7.4 flush-ordering contract).
+ *   - A synchronous re-entry of the same effect (its body writing one of its own
+ *     deps — E-LIFECYCLE-006 at compile time) is dropped rather than recursed.
+ *   - An async (CPS, §13) body's rejection is reported here; it does not reach
+ *     the writer (§6.7.4 "does NOT propagate to the enclosing scope").
+ *   - The disposer is registered against the if= mount being wired, if any
+ *     (§6.7.2 step 1), and returned so any other host can own it.
+ *
+ * @param {function(function): Array<function>} subscribe — registers the handler
+ * @param {function} body — the lowered effect body
+ * @returns {function} dispose
+ */
+function _scrml_when_changes(subscribe, body) {
+  let running = false;
+  let disposed = false;
+  function handler() {
+    if (disposed || running) return;
+    running = true;
+    const wasPaused = _scrml_tracking_paused;
+    _scrml_tracking_paused = true;
+    try {
+      const r = body();
+      if (r && typeof r.then === "function") {
+        r.then(null, function (e) { console.error("scrml when-effect error:", e); });
+      }
+    } finally {
+      _scrml_tracking_paused = wasPaused;
+      running = false;
+    }
+  }
+  const unsubs = subscribe(handler) || [];
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (let i = 0; i < unsubs.length; i++) unsubs[i]();
+  }
+  return _scrml_mount_track(dispose);
+}
+
+/**
  * Create a computed reactive value.
  *
  * Lazily evaluates fn when .value is accessed. Caches result until a tracked
