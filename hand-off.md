@@ -25,6 +25,21 @@
 
 2. **THE THESIS THE FALSIFIER TESTS, so it is not re-derived.** Measured this session over all 1,036
    `@gap` markers (457 open): **open HIGH splits 57 POST-AST / 18 PRE-AST / 16 no-locus / 7 both**;
+   ⛑⛑ **SUPERSEDED S428 — THE FALSIFIER RAN AND THE THESIS COLLAPSED; THESE FIGURES ARE ALSO STALE
+   AND MIX TWO WATERMARKS.** Verified by execution: the `57/18/16/7` split (98 open HIGH) belongs to
+   commit `38217390` (S413) which carried **983** markers, not 1,036; main at S428 carries **1,070**
+   markers and **108** open HIGH. No snapshot ever carried both numbers. At HEAD the split is
+   59 POST / 18 PRE / 7 both / 24 other. **And the conclusion is dead:** of the 59 post-AST open-HIGH
+   gaps, **46 (78%) are ordinary logic bugs and only 3 are text-reasoning over scrml SOURCE text** —
+   five of the nine text-reasoning ones scan the compiler's OWN EMITTED OUTPUT, which no parser and no
+   parse IR can reach. The premise survives (Acorn-vs-native cannot reach the post-AST majority); the
+   "one shared masking pass" answer does not. Most generous pro-thesis total: 9/59 = 15.3%.
+   ⛑ **AND THE RE-READ THAT IS OWED:** 37 of those 46 are *plumbing* — a walker that doesn't visit a
+   position (~13), an emitter option never threaded through (~8), a hand-maintained enumeration gone
+   stale (~6), pass ordering (~5), emitted block-scope placement (~5). Each is honestly "ordinary"
+   one at a time; summed they are one architectural property repeated 37 times. **A per-defect
+   instrument cannot return that**, and every instrument this project owns is per-defect. Regeneration-rate
+   measurement dispatched S428.
    all-open splits 187 / 46. So Acorn-vs-native is a fight over the 18 and **cannot touch the 57.**
    ⚑ **But the partition is probably the WRONG AXIS, and this session found the counter-example
    itself:** the `}=`-in-a-comment defect (pre-AST, `block-splitter.js`) and the regex-literal defect
