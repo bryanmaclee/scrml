@@ -14567,6 +14567,8 @@ type Phase:enum = { Idle, Active }
 Renders `<li>row:one</li><li>row:two</li>` — the engine body is absent, `initError: null`, no console error. Same
 on the S429 match-in-each fix head. Silent drop of authored markup at exit 0.
 
+⚑ **S429-peter — LOCUS FOUND, RULING-GATED.** `compiler/src/codegen/emit-each.ts:1999` `renderTemplateChildToJs` falls through for `kind="engine-decl"` and emits only a comment. The fix picks language semantics: an engine is a singleton (§51.0.A), the declaration is the mount (§51.0.D), and §51.0.K refuses an engine in a component body for the multiplicity reason that applies equally to an `<each>` row — but no sentence covers iteration. Refuse (compile error, E-COMPONENT-ENGINE-SCOPE sibling) vs render the one singleton per row: **bryan's ruling**, asked in `handOffs/incoming/2026-09-23-from-S429-peter-to-bryan-two-rulings.md` (Q3). PA lean: refuse.
+
 ### g-arm-scoped-each-per-item-effects-leak-on-arm-switch — per-item effects of an `<each>` inside a match arm are never disposed on arm switch — `NEW S429-peter; LOW; open`
 <!-- @gap id=g-arm-scoped-each-per-item-effects-leak-on-arm-switch sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_mount_track records effects only while a mount scope is active; the arm dispatch path never opens one) prov=empirical:S429-review-agent-measured-3-23-123-effect-runs-at-0-10-50-A-B-A-flip-pairs-identical-base-and-head -->
 

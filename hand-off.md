@@ -17,7 +17,7 @@
      replace (`_scrml_reconcile_list` / `_scrml_resolve_item`).
    - **Fix the class:** check splice-replace and index-assign too.
 
-1. **`g-engine-inside-each-row-renders-nothing` (HIGH, PA-verified, silent).** An `<engine>` inside an `<each>`
+1. **`g-engine-inside-each-row-renders-nothing` (HIGH, PA-verified, silent) — ⚑ RULING-GATED, do not build until bryan answers Q3** (locus: `emit-each.ts:1999`; refuse vs render-the-singleton-per-row). An `<engine>` inside an `<each>`
    row renders no state body and logs no error. The nearest mechanism is #1033's row-scoped arm dispatch
    (`emit-match.ts` `prepareRowScopedArms`), since an engine is a match with transitions.
 

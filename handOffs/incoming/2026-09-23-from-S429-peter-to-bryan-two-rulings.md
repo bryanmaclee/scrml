@@ -2,7 +2,7 @@
 from: S429-peter (P-Tech1)
 to: bryan
 date: 2026-09-23
-subject: "your #996 note acted on; two language questions from the S429 landings"
+subject: "your #996 note acted on; three language questions from the S429 landings"
 needs: ruling
 status: unread
 ---
@@ -48,3 +48,22 @@ The spec defines neither (§5.2.1 says only "SHALL wire `fn` as an event listene
 markup around it, without picking one. One visible effect: a row-arm button that reads no arm name now bubbles
 to a page-level delegated ancestor (`del;outer;`), exactly as a plain row button already did on main. Should
 there be one contract, and if so which?
+
+## ⚑ Question 3 — an `<engine>` inside an `<each>` row: refuse it, or render one shared engine per row?
+`<each in=@groups as g><li>${g.name}<engine for=Phase initial=.Active>…</></li></each>` compiles at exit 0 and
+the engine body is **silently dropped**: `emit-each.ts:1999` `renderTemplateChildToJs` emits only
+`// each: unhandled template child kind="engine-decl"`. This is filed as
+`g-engine-inside-each-row-renders-nothing` (HIGH), and a PA trace found the locus.
+- §51.0.A trait 1 makes an engine a SINGLETON.
+- §51.0.D makes the declaration the mount.
+- §51.0.K / `SPEC.md:10869` forbids an engine in a component body because "every component instance would need
+  its own engine instance". That reasoning applies word for word to an `<each>` row, but no sentence covers
+  iteration.
+
+The two coherent answers:
+- (a) **refuse it:** a compile-time error, reusing or siblinging `E-COMPONENT-ENGINE-SCOPE`, since the
+  multiplicity argument is the same;
+- (b) **render the ONE singleton's body in every row,** all rows sharing one state.
+
+Either one picks semantics, so I have not built it. My lean is (a): it matches the component precedent, and
+(b) would make a transition in one row visibly change every row, which no author writing it per-row expects.
