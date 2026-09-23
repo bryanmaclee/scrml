@@ -15,8 +15,6 @@ ${
         const { existsSync, realpathSync } = await import("node:fs")
     }
 
-    import { safeCall, HostError } from 'scrml:host'
-
     export class PAError {
         constructor(code, message, span) {
             this.code = code
@@ -58,15 +56,16 @@ ${
     // ---------------------------------------------------------------------------
 
     function readTableSchema(db, tableName, blockSpan, errors) {
-        let rows = safeCall(() => db.query("PRAGMA table_info(" + JSON.stringify(tableName) + ")").all()) !{
-            | ::Thrown(message, name) :> {
-                errors.push(new PAError(
-                    "E-PA-003",
-                    "E-PA-003: SQLite schema introspection failed for table `" + tableName + "`: " + message,
-                    blockSpan,
-                ))
-                return not
-            }
+        let rows
+        try {
+            rows = db.query("PRAGMA table_info(" + JSON.stringify(tableName) + ")").all()
+        } catch (err) {
+            errors.push(new PAError(
+                "E-PA-003",
+                "E-PA-003: SQLite schema introspection failed for table `" + tableName + "`: " + err.message,
+                blockSpan,
+            ))
+            return null
         }
 
         if (rows.length == 0) {
@@ -328,8 +327,11 @@ ${
         const sourceDir = dirname(filePath)
         const resolvedRaw = resolve(sourceDir, srcRaw)
 
-        let dbPath = safeCall(() => existsSync(resolvedRaw) ? realpathSync(resolvedRaw) : resolvedRaw) !{
-            | ::Thrown(message, name) :> resolvedRaw
+        let dbPath
+        try {
+            dbPath = existsSync(resolvedRaw) ? realpathSync(resolvedRaw) : resolvedRaw
+        } catch (e) {
+            dbPath = resolvedRaw
         }
 
         // Step 3: Verify tables=
