@@ -1,3 +1,129 @@
+# scrml — Session 429 (peter · P-Tech1 Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **SIBLING STATE: S428-bryan was LIVE all session (XPS)** and landed #996, #1030 and #1031 while this session
+> ran. My footprint stayed on peter-lane codegen; I re-merged his landings onto each PR before it landed. His
+> `needs: action` note to me is discharged and archived, and a reply went back.
+
+## ⏭ NEXT-SESSION PICKUP
+
+0. **⚑ LEAD: `g-each-replaced-row-stops-receiving-in-place-edits` (HIGH, PA-verified on `45749bb1`, silent).**
+   - **Symptom:** after `@groups = @groups.map(g => g.id == 1 ? { …new object… } : g)`, in-place edits to that
+     row (`g.name += "!"`) update state but never reach the DOM. Unchanged rows keep updating.
+   - **Scope:** it's a plain `<each>`, with no match or lift involved, so it hits any keyed list whose rows get
+     replaced. The full repro is in the entry.
+   - **Suspect:** the per-item effect keeps the OLD object's deep-reactive subscription after a key-stable
+     replace (`_scrml_reconcile_list` / `_scrml_resolve_item`).
+   - **Fix the class:** check splice-replace and index-assign too.
+
+1. **`g-engine-inside-each-row-renders-nothing` (HIGH, PA-verified, silent).** An `<engine>` inside an `<each>`
+   row renders no state body and logs no error. The nearest mechanism is #1033's row-scoped arm dispatch
+   (`emit-match.ts` `prepareRowScopedArms`), since an engine is a match with transitions.
+
+2. **`g-each-over-page-cell-in-non-row-arm-stale-on-in-place-mutation` (MED, silent).** #1033's arm-scoped each
+   path already reacts to push/splice/reverse, so the likely fix is to route EVERY arm-hosted each through it,
+   not only the ones that read the payload. Measure effect growth against main: the review found the old path
+   leaks too.
+
+3. **Two rulings belong to bryan and have gone to him** in
+   `handOffs/incoming/2026-09-23-from-S429-peter-to-bryan-two-rulings.md`. Don't act on them until he answers:
+   - **Is a keywordless loop binder (`for (it of …)`) mutable?** #1032 keeps a write to it compile-loud. If he
+     rules it mutable, the predicate to flip is recorded in
+     `docs/changes/s427-lift-body-lowering/progress.md`.
+   - **Should the two click contracts converge?** Page delegation runs only the innermost handler; `<each>`-row
+     handlers bubble natively.
+
+   Still owed from S427: the timing ruling for a lift block's statements inside `if=`. Two pinned
+   "RULING PENDING" tests wait on it; flip them to the ruled behaviour, don't delete them.
+
+4. **Carry-forward:**
+   - `g-conformance-runtime-tier-mounts-the-full-runtime-blind-to-chunk-gating` (bryan's lane; the adapter
+     mounts the FULL runtime).
+   - `g-e-assign-004-position-and-binder-coverage` (bryan's lane).
+   - The S427 unverified each/arm findings (`g-each-alias-dropped-inside-tier0-…`): re-reproduce them before
+     dispatching, because #1033 may have closed some.
+   - The S420 item-4 list, unchanged.
+
+## WHAT LANDED — three PRs, seven adversarial passes, all seven found a real defect
+
+| PR | SHA | what | rounds / passes |
+|---|---|---|---|
+| #1029 | `5d139ef5` | giti033: an `<each>` in a ternary-markup expression now ships its runtime chunk. A corpus sweep showed it was the only unguarded instance of the class. | 1 / 1 (2 LOW) |
+| #1032 | `069ade68` | lift-body lowering (the S427 hold): `let` rebinds are assignments, impure loops lower to plain loops, a write to a loop binder is honoured only for `let`, and the keyword comes from the native parser's `declKind` | 5 / 4 (3 HIGH this session) |
+| #1033 | `c8eb9cd9` | a `<match>` in an `<each>` row can read the row, plus 3 siblings. Each arm follows its twin's click contract, and a click fires once even with several chunks loaded. | 4 / 3 (2 HIGH, 1 LOW) |
+
+Peter gave merge permission this session ("yes merge on green"). Each PR merged only after all three held:
+- `gate` + `windows` passed on its latest head.
+- `tracking` matched main's five dev-watcher failure names exactly, re-measured per PR via
+  `gh api …/jobs/<id>/logs`.
+- Its adversarial pass was clean, or its findings were fixed.
+
+## 🔭 DURABLE
+
+**If a brief allows a text scan, the agent will build one.** In round 4 I asked for the loop keyword in
+native-re-parsed bodies without saying it had to come *from the parser*.
+- **What happened:** the agent read the keyword back from the source text at `span.start`. Native spans inside
+  nested lifted markup are block-relative, so the scan was wrong in both directions, including a silent accept
+  of a write to a `const`. The parser already had `declKind`.
+- **Why it matters:** this is exactly the failure shape of bryan's S425 thesis (hand-rolled text reasoning
+  desyncs), reproduced in my own dispatch.
+- **Rule:** when a brief needs a fact the AST lost, carry the fact through the AST. Don't re-derive it from text.
+
+**My brief misnamed a contract, and the agent found the codebase has two.** I told the #1033 agent to match "the
+delegated path" and described row behaviour. In fact page delegation runs only the innermost handler, while row
+handlers bubble. The agent mirrored each twin instead of picking one, and surfaced the discrepancy. When two
+subsystems implement an unspecified behaviour differently, that's a gap in the spec, not a bug in either one.
+
+**Seven for seven.** Every adversarial pass this session found a real defect in work that was CI-green and that
+its dev agent had self-reported clean. Five were HIGH, and four of those were loud→silent or newly-accepting.
+Without the passes, #1032 would have landed on its second round with a silently lost write.
+
+**Measure the class at corpus scale when you can.** For giti033 the class check was a sweep of all 1,797 corpus
+files for helpers that are called but never defined (the script is in the S429 scratch, not committed). That
+turned "is this instance alone?" from a guess into a measurement, and the reviewer then tightened the method and
+re-ran it.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I pushed a merge commit with live conflict markers to the #1032 branch.** The resolver aborted, but my
+   shell chain used `;` after it, so the commit and push ran anyway. I repaired it with a follow-up commit, and
+   the squash merge kept it off main. Memory: `ledger-conflict-resolver-must-gate-the-commit`.
+2. **★★ My round-4 brief permitted a source-text recovery.** See the durable above; the next review caught it.
+3. **★★ Heredoc quoting broke a wrap script again**, the same class recorded three sessions running. Scripts
+   containing quotes or backticks go through the Write tool, never inline heredocs.
+4. **★ My first draft of the changelog block miscounted the review passes.** Corrected before commit, but it is
+   the same prose-count class.
+
+## Gate at close
+
+- **Cloud:** `gate` + `windows` green on every merged PR's final head. Main's CI is green on `5d139ef5` and
+  `069ade68`; `c8eb9cd9`'s run was in progress at wrap (the next boot's CI probe will show it).
+- **Local unit gate on merged main `c8eb9cd9`:** **18936 pass / 17 skip / 1 fail** (975 files, 224 s). The 1 is the `api-decl-codegen` client-only test at 5.05 s under full-suite load; the file passes **11/11 alone**. Same timeout seen at every full run this session, on main and on every branch.
+- **Board:** see the digest. This wrap files 6 gaps (2 HIGH · 2 MED · 2 LOW), and the landings resolve 3 HIGH:
+  `g-conformance-case-…-giti033`, `g-lift-body-assignment-…` and `g-match-inside-each-row-…`.
+- **Delta-log:** [3498]–[3504]; delta-lint PASS.
+- **Maps:** NOT refreshed. They are a repo-wide shared surface and bryan was live. Code landed in:
+  - `emit-lift.js`
+  - `emit-match.ts`
+  - `emit-each.ts`
+  - `emit-variant-guard.ts`
+  - `emit-client.ts`
+  - `emit-event-wiring.ts`
+  - `native-parser/translate-stmt.js`
+
+  The next solo session should run project-mapper incrementally on those files.
+- **Worktrees:**
+  - My three are removed, along with their local branches.
+  - Retained because they aren't mine: `agent-a0742fe4795045e91`, `agent-a4e6b5f2562ae9eaa`, `onmount-c` and
+    `scrml-pinned`.
+  - The remote branches `fix/s429-*` and `hold/s427-lift-body-lowering` stay on origin. The hold is superseded
+    by #1032.
+- **Scratch dirs:** `C:/d429` to `C:/d433` hold dev-agent differential output. Removing `C:/d429` was refused as a
+  protected path. All of them are safe to delete by hand.
+
+---
+
 # scrml — Session 425 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
