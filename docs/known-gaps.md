@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 116 |
-| MED | 271 |
+| HIGH | 117 |
+| MED | 276 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -17255,9 +17255,220 @@ one spelling. Filed HIGH because the incoherence is author-visible and the remed
 not because anyone is cornered.
 
 **Function parameters are the same class** (filed here rather than separately, one mechanism):
-`function f(p) { p = 3 }` emits `function _scrml_f_1(p) { const p = 3; … }` — §50.3.5 names a function
+`function f(p) { p = 3 }` — §50.3.5 names a function
 parameter as a valid assignment target, so this should be a reassignment. Params are not in
 emit-logic's `declaredNames` either. `E-ASSIGN-004` correctly does NOT fire on it.
 
+⛑ **CORRECTION, S428 — this entry said the param case "emits `function _scrml_f_1(p) { const p = 3; … }`".
+IT DOES NOT EMIT AT ALL.** PA-verified by execution on `db800e6e` through the real CLI path:
+`function f(p) { p = 3; return p }` hard-fails with **`E-CODEGEN-INVALID-LOGIC`** —
+`Identifier 'p' has already been declared`. A reader of the struck sentence concludes the parameter
+case is a silent-shadow nuisance; it is a hard stop. Surfaced by the S428 adversarial pass, which also
+found that **the PR's own boundary test for this case is VACUOUS**: `e-assign-004-const-reassign.test.js`
+asserts the param form via `compileWholeScrml` with `write: false`, which skips emit validation, and
+the assertion is only `not.toContain("E-ASSIGN-004")` — which passes whether or not the construct
+compiles. Same shape as §8's unproven gate: a test that cannot fail for the reason it was written.
+
 — NEW S422-bryan (surfaced by the E-ASSIGN-004 build; agent-located, PA-reproduced with a four-way control on unmodified main)
 <!-- @gap id=g-top-level-logic-reassignment-lowers-as-a-fresh-const-so-the-let-escape-fails-there sev=HIGH status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:358(top-level emitOpts omits declaredNames so the emit-logic.ts:2097 reassignment guard is dead)+emit-reactive-wiring.ts:1361,:1852+emit-library.ts:2097,:2109 prov=empirical:PA-reproduced-by-execution-on-unmodified-main-with-a-four-way-control-increment-and-state-cell-and-in-function-all-clean-only-the-equals-assignment-form-fails -->
+
+
+### G-E-ASSIGN-004-NEVER-FIRES-IN-EVENT-HANDLER-ATTRIBUTE-POSITION — a `const` reassignment inside `onclick=${…}` compiles at exit 0 and throws `TypeError` on the first click
+
+The S422 ruling is *"a binding created without `let` is `const`; reassigning or mutating it is
+`E-ASSIGN-004`; `let` is the only escape"*, and SPEC §50.8.5 carries no position carve-out. The check
+fires in `function` bodies and at top-level `${}` default-logic. **It does not reach event-handler
+attribute bodies** — which is *the* mutation site in a UI framework.
+
+**PA-REPRODUCED BY EXECUTION on `db800e6e`** (the #996 landing itself):
+
+```scrml
+<div>
+    ${ const a = 1 }
+    <button onclick=${a = 2}>go</>
+    <p>${a}</>
+</div>
+```
+
+`bun compiler/bin/scrml.js compile … ` → **`Compiled 1 file`, exit 0, no diagnostic.** Emitted client JS:
+
+```js
+const a = 1;                                                    // handler.client.js:6
+"_scrml_attr_onclick_1": function(event) { a = 2; },            // handler.client.js:12
+```
+
+`node --check` **PASSES** on the artifact — so the page loads clean and throws
+`TypeError: Assignment to constant variable.` the first time a user clicks. `onclick=${a += 2}` is
+equally silent.
+
+⚑ **Filed HIGH on the project's own precedent, not on novelty.** The argument that justified building
+`E-ASSIGN-004` at all (user-voice S422) was verbatim *"it closes a shape where scrml exits 0 with zero
+diagnostics and hands the adopter a program that throws."* This is that identical shape, in the
+position an adopter reaches for most, left open by the fix that was built to close it.
+
+**Not a regression** — A/B identical on the pre-fix baseline `45749bb1`. Pre-existing and previously
+unfiled.
+
+**Found INDEPENDENTLY by two S428 dispatches** (an adversarial pre-land review and the measured-migration
+probe), neither aware of the other — which is why it is filed rather than treated as one agent's opinion.
+
+— NEW S428-bryan (PA-reproduced by execution + `node --check` on the emitted artifact; two independent dispatches)
+<!-- @gap id=g-e-assign-004-never-fires-in-event-handler-attribute-position sev=HIGH status=open locus=searched:compiler/src/type-system.ts(fireAssign004IfConst),compiler/src/codegen/emit-event-wiring.ts,compiler/src/codegen/emit-logic.ts prov=spec:§50.8.5-"in-either-statement-or-expression-position"-carries-no-position-carve-out -->
+
+### G-E-ASSIGN-004-NEVER-FIRES-ON-INCREMENT-DECREMENT-OF-A-CONST-BINDING — `x++` / `x--` on a `const` compiles clean and throws at runtime
+
+The ruling says *"reassigning **or mutating**"*. Compound assignment is covered — `-=` `*=` `/=` `%=`
+all fire. **`++` and `--` do not**, because they take a different lowering path.
+
+**PA-REPRODUCED BY EXECUTION on `db800e6e`**, with the compound-assignment control in the same batch:
+
+| source, in a `function` body | result |
+|---|---|
+| `const x = 1; x -= 1` | **`E-ASSIGN-004`** — correct |
+| `const x = 1; x++` | **clean, exit 0** — emits `const x = 1; x++;` |
+| `const x = 1; x--` | **clean, exit 0** |
+
+Same green-compile-then-`TypeError` shape as the handler sibling above, narrower blast radius. Not a
+regression (A/B identical on `45749bb1`).
+
+⚑ This is the same discriminator the top-level `let` defect has — *`++` takes a different lowering path
+and is unaffected* — pointing at one shared cause rather than two.
+
+— NEW S428-bryan (PA-reproduced by execution with a compound-assignment control)
+<!-- @gap id=g-e-assign-004-never-fires-on-increment-decrement-of-a-const-binding sev=MED status=open locus=searched:compiler/src/type-system.ts(fireAssign004IfConst),compiler/src/codegen/emit-logic.ts prov=ruling:user-voice-S422-"bare-naming-is-const-mutation-needs-let"-reassigning-OR-MUTATING -->
+
+### G-LIN-REASSIGNMENT-REPORTS-A-COMPILER-DEFECT-INSTEAD-OF-E-LIN-004 — the "this is a compiler defect, please report it" message survives one keyword away from the fix that retired it
+
+**SPEC §50.9 is explicit:** assignment to a `lin` variable is a re-assignment and **SHALL be
+`E-LIN-004`**. It is not.
+
+**PA-REPRODUCED BY EXECUTION on `db800e6e`:** `function f() { lin a = 1; a = 2; return a }` →
+**`E-CODEGEN-INVALID-LOGIC`**, `Identifier 'a' has already been declared`, emitting
+`const a = 1; const a = 2;`, with the message *"This is a compiler defect (codegen produced malformed
+output). Please report it."*
+
+⚑ **The compiler blames itself for the adopter's error.** #996's whole stated purpose was retiring that
+message class for const/bare reassignment — it was retired for those two spellings and left standing
+for `lin`. Under the S422 widening (*created without `let` ⇒ `const`*) `E-ASSIGN-004` is also
+defensible here; §50.9's `E-LIN-004` is the narrower reading and already normative. Either way the
+current outcome is wrong on both counts.
+
+Not a regression (A/B identical on `45749bb1`).
+
+— NEW S428-bryan (PA-reproduced by execution; SPEC §50.9 quoted)
+<!-- @gap id=g-lin-reassignment-reports-a-compiler-defect-instead-of-e-lin-004 sev=MED status=open locus=searched:compiler/src/type-system.ts,compiler/src/codegen/emit-logic.ts prov=spec:§50.9-"assignment-to-a-lin-variable-is-a-re-assignment-and-SHALL-be-E-LIN-004" -->
+
+### G-FOREIGN-VALUE-BLOCK-IN-ASSIGNMENT-POSITION-IS-NEVER-LOWERED — `n = _={ … }=` is copied verbatim into the JS; the identical `const`-bound form compiles clean
+
+An inline value-returning `_={ … }=` (§23.2.4a) lowers correctly in **declaration** position and is
+passed through **untouched** in **assignment** position, so the emitted artifact contains raw scrml
+source text.
+
+**PA-REPRODUCED BY EXECUTION on `db800e6e`** with the adopter's six-line repro and its control:
+
+```scrml
+<program kind="tool" lang="ts">
+function main(args: string[]): number {
+  let n = 0
+  const ok = _={ in: {} 1 }=
+  n = _={ in: { ok } ok + 1 }=          // ← E-CODEGEN-INVALID-LOGIC
+  return n
+}
+</program>
+```
+
+Emitted: `…); })(); n = _={ in: { ok } ok + 1 }=; return n; }` — the scrml source, unlowered.
+**Control** (both bindings `const`): compiles clean.
+
+So the discriminator is DECLARATION-vs-ASSIGNMENT, not the foreign block. Fails LOUD
+(`E-CODEGEN-INVALID-LOGIC`), so it is a malformed-artifact error rather than a silent miscompile.
+
+⚑ **Reporter's own disposition question, carried:** is this the same root as
+[[g-multi-statement-foreign-block-in-statement-position-lowers-to-malformed-js]], or a separate
+assignment-position path? Their read — and the emit supports it — is **separate**: the multi-statement
+case at least *attempts* a lowering (`return (a b)`), while this one is not lowered at all.
+
+⚑ **Why it matters past the workaround:** the natural shape for accumulating across a loop is
+`total = _={ … }=` on a `let` declared outside it. The adopter hit it four times in one file and
+const-bound every one to a fresh name.
+
+**This is the FOURTH trigger on the same scanner family** ([[g-multi-statement-foreign-block-in-statement-position-lowers-to-malformed-js]]
+· [[g-foreign-multistmt-value-block-mislowers]] · [[g-foreign-value-block-dot-return-misread-as-keyword]]).
+Harden the tokenization once rather than per-position.
+
+— NEW S428-bryan (adopter report from flogence PA S46; PA-reproduced by execution with the const-bound control)
+<!-- @gap id=g-foreign-value-block-in-assignment-position-is-never-lowered sev=MED status=open locus=searched:compiler/src/codegen/emit-logic.ts(scanForeignSliceShape),compiler/src/codegen/emit-expr.ts prov=adopter:flogence-S46-six-line-repro-PA-reproduced-by-execution-on-db800e6e-declaration-lowers-assignment-passes-through -->
+
+### G-NOT-INSIDE-A-FOREIGN-BLOCK-COMPILES-GREEN-AND-THROWS-AT-RUNTIME — the absence token the language teaches everywhere is a bare identifier inside `_={}`, and nothing says so
+
+**PA-REPRODUCED BY EXECUTION on `db800e6e`.** Compiles at **exit 0**; the only two warnings are
+`W-FOREIGN-UNDECLARED-CAPABILITY` presence-nudges and **neither mentions `not`**:
+
+```scrml
+const v = _={ in: {}
+    const x = not
+    return x ? 1 : 0
+  }=
+```
+
+Emitted: `const v = await (async () => { const x = not`. Run: **`ReferenceError: not is not defined`**.
+
+§42.1 makes `not` scrml's sole absence value — *"`null` does not exist in scrml and never will"* — so an
+author who has internalised the rule writes it everywhere. Inside `_={}` they are in host JS, where it
+is an undeclared identifier. The adopter found it only when the code fired against a live API, after
+real spend.
+
+⛑ **RULING-GATED — this is bryan's, and the reporter is explicitly NOT claiming a translation bug.**
+§23.2.3 makes the `_{}` interior opaque, so the compiler is behaving as specified and there is **no
+governing sentence violated**. The three dispositions are **translate / diagnose / document**; the
+reporter asks for **diagnose** (a `W-FOREIGN-*` naming `not` as the likely mistake). A new lint is a
+widening of the diagnostic surface, not conformance restoration, so it is out of the S385 PA-ruling
+class on condition 1.
+
+**The reporter's argument for feasibility, which is the strong part:** the interior is not fully opaque
+to the compiler already — it parses the `in:` list and rewrites the block into a parameterised IIFE, so
+it knows the complete injected binding set. Scanning a foreign body for a small fixed set of
+scrml-only keywords appearing as bare identifiers is a lint, not semantic analysis.
+
+**PA note for the ruling:** a `documented-only` disposition leaves a green compile that crashes, which
+is the class §19/§34 diagnostics exist to prevent; but a lint here reaches INTO an opaque region and
+that is the precedent being set, not the one lint.
+
+— NEW S428-bryan (adopter report from flogence PA S46; PA-reproduced by execution incl. the runtime throw and the warning-text check)
+<!-- @gap id=g-not-inside-a-foreign-block-compiles-green-and-throws-at-runtime sev=MED status=open locus=searched:compiler/src/lint-ghost-patterns.js,compiler/src/codegen/emit-logic.ts,compiler/src/type-system.ts prov=adopter:flogence-S46-PA-reproduced-by-execution-exit-0-then-ReferenceError-RULING-GATED-translate-vs-diagnose-vs-document -->
+
+### G-GHOST-PATTERN-LINT-HAS-NO-FOREIGN-BLOCK-AWARENESS — the linter tells authors to rewrite host JS into scrml syntax, on every `_={}` block
+
+`compiler/src/lint-ghost-patterns.js` contains **zero** occurrences of `_={` or the word `foreign`
+(`grep -c` → 0). It has no notion of a foreign-block region, so it lints §23.2.3-opaque host code as
+though it were scrml markup.
+
+**PA-REPRODUCED BY EXECUTION on `db800e6e`**, three separate false positives in one six-line file:
+
+| line | what it actually is | lint fired |
+|---|---|---|
+| `_={ in: {}` | the foreign-block **opener** | `W-LINT-007` |
+| `const cfg = { retries: 3 }` | a plain **JS object literal** | `W-LINT-007` |
+| `"<div className=\"x\" onClick={handler}>"` | text inside a **JS string literal** | `W-LINT-003` + `W-LINT-004` |
+
+**Root, read from the source:** P7's regex is
+`/(?<!:\w*)(?<!type )\b(?!value\b|props\b)(\w+)\s*=\s*(?<!\$)\{(?!\{)/g`. **`_` is a word character**,
+so the foreign-block opener `_={` is lexically identical to `prop={`. Fires 100% of the time, including
+on `in: {}` with an empty binding list and no component markup anywhere in the file.
+
+⚑ **The per-position pattern is the finding, not the one regex.** P7 already carries two bolted-on
+exclusions for earlier false-positive shapes (the V5-strict typed-cell object-literal RHS; the
+parametric-snippet markup-valued attribute), each with a long in-source rationale. The foreign-block
+opener is the **third** shape, and the fix shipped twice already was a per-position carve-out —
+FORK RULE row 4, *root wins; a per-position fix is a bug generator*. The root fix is a foreign-region
+skip alongside the existing `stringRanges` / `logicRanges` skips, which also closes every OTHER ghost
+pattern firing inside `_{}` interiors by construction.
+
+⚑ **Why it is not merely noise:** a foreign block's interior is host JS **by definition**, so a linter
+whose entire job is flagging "this looks like React/Vue" is guaranteed to fire on legitimate code
+there — and its advice is wrong by construction. The flogence boot digest prints **12 ghost-pattern
+lints on its own source** every run. That is the §8 cry-wolf shape training adopters to ignore the tool
+that exists to catch real ghosts.
+
+— NEW S428-bryan (PA-found while verifying an unrelated adopter report; reproduced by execution with an empty-binding-list control, root read from the P7 regex)
+<!-- @gap id=g-ghost-pattern-lint-has-no-foreign-block-awareness sev=MED status=open locus=compiler/src/lint-ghost-patterns.js prov=rationale:_-is-a-word-character-so-the-foreign-block-opener-_=-is-lexically-identical-to-prop=-and-the-file-has-no-foreign-region-skip -->
