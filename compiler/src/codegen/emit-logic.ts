@@ -282,6 +282,13 @@ export interface EmitLogicOpts {
    */
   serverFnNames?: Set<string> | null;
   /**
+   * §6.7.4 / §13.2 (S429): the file's server-fn names, threaded by
+   * emit-reactive-wiring.ts for the `when-effect` branch ONLY — a `when` body is a
+   * CPS host, so its server calls are awaited inside an async wrapper. A separate
+   * key (not `serverFnNames`) so no other top-level statement's lowering changes.
+   */
+  whenServerFnNames?: Set<string> | null;
+  /**
    * #284: names of LOCAL ALIAS bindings that resolve to a sibling server-fn PEER
    * through a first-class reference (`const p = groupByJob; … p(rows)` / a
    * dispatch table). Forwarded to `EmitExprContext.serverFnPeerAliasNames` so
@@ -3964,15 +3971,57 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // through rewriteBlockBody's multi-statement lowering so every statement runs when
       // the dependency changes. `bodyRaw` carries faithful, parser-derived statement
       // boundaries and is comment-free (ast-builder drops COMMENT tokens).
-      // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
-      // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
-      // so a server-fn / async-peer call cannot strand an `await` in the sync
-      // wrapper (S374 review #1 — latent: top-level when-sites carry no async
-      // colour today, but this makes the sync-wrapper invariant explicit and
-      // future-proof; matches the pre-#693 string path, which never awaited).
-      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
-      return `_scrml_effect(function() { ${body}; });`;
+      //
+      // §6.7.4 (S429) — the effect is keyed on the EXPLICIT dep-list, never on the
+      // body's reads. It used to lower to `_scrml_effect(function(){ body })`, which
+      // broke all three clauses at once: `_scrml_effect` runs its fn at
+      // registration (the body fired at boot), auto-tracks every read in it (an
+      // unlisted `@var` read became a trigger), and the dep-list was never
+      // consulted (writing a listed dep that the body does not read fired nothing).
+      // Now each listed dep gets a plain `_scrml_reactive_subscribe` — the
+      // mechanism every `_scrml_reactive_set` fans out to, already used by the
+      // variant-guard dispatcher and the lift binds — and `_scrml_when_changes`
+      // runs the body UNTRACKED, dedups a same-effect re-entry, and owns teardown.
+      // The subscribe calls are emitted HERE (not inside the runtime helper) so the
+      // chunk cell-scope rename namespaces each dep key exactly as it namespaces
+      // the body's own `_scrml_reactive_get` of the same cell.
+      //
+      // §6.7.4 "Interaction with Server Functions": the body is a CPS host (§13).
+      // It is lowered with `clientAsyncBody:true` + the file's server-fn names so a
+      // server call is awaited, and the wrapper is `async` exactly when an `await`
+      // was emitted. (Before this, the forced-sync wrapper handed the body an
+      // unawaited Promise — `@log = srv()` stored "[object Promise]".) The
+      // runtime helper reports an async body's rejection; it never reaches the
+      // writer. Server-boundary emission keeps the old sync lowering.
+      const isServer = opts.boundary === "server";
+      const baseCtx = _makeExprCtx(opts);
+      const whenSrvNames: Set<string> | null = isServer
+        ? null
+        : (opts.whenServerFnNames ?? baseCtx.serverFnNames ?? null);
+      const whenCtx = isServer || !whenSrvNames
+        ? { ...baseCtx, clientAsyncBody: false }
+        : { ...baseCtx, clientAsyncBody: true, serverFnNames: whenSrvNames };
+      let body = rewriteBlockBody(node.bodyRaw ?? "", null, null, isServer ? "server" : "client", whenCtx).replace(/;\s*$/, "");
+      // The expression-level await (above) covers a call in an expression the body
+      // lowers through the AST path (`@x = srv()`); a statement the block lowering
+      // passes through as text (`const r = srv()`) is reached by the same
+      // paren-correct, scope-legal injector every client fn body uses (§13.2).
+      if (whenSrvNames && whenSrvNames.size > 0 && [...whenSrvNames].some((n) => body.includes(n))) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const sched = require("./scheduling.js") as { injectFnBodyServerCallAwaits: (c: string, p: (n: string) => boolean) => string };
+        body = sched.injectFnBodyServerCallAwaits(body, (n) => whenSrvNames.has(n));
+      }
+      const isAsync = !isServer && /\bawait\b/.test(body);
+      const ctx = opts.encodingCtx;
+      const seen = new Set<string>();
+      const subs: string[] = [];
+      for (const dep of (Array.isArray(node.dependencies) ? node.dependencies : []) as string[]) {
+        if (typeof dep !== "string" || dep.length === 0 || seen.has(dep)) continue;
+        seen.add(dep);
+        const encodedDep = ctx ? ctx.encode(dep) : dep;
+        subs.push(`_scrml_reactive_subscribe(${JSON.stringify(encodedDep)}, _h)`);
+      }
+      return `_scrml_when_changes(function(_h) { return [${subs.join(", ")}]; }, ${isAsync ? "async " : ""}function() { ${body}; });`;
     }
 
     case "when-worker-message": {
@@ -3991,7 +4040,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `@cell` write inside a worker handler is not routed through the transition
       // guard (a narrow shared limitation, not specific to this path).
       // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
+      // (`worker.onmessage` / `worker.onerror`), so no `await`
       // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
       // so a server-fn / async-peer call cannot strand an `await` in the sync
       // wrapper (S374 review #1 — latent: top-level when-sites carry no async
@@ -4008,7 +4057,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const workerVar = `_scrml_worker_${node.workerName}`;
       const binding = node.binding ?? "e";
       // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
+      // (`worker.onmessage` / `worker.onerror`), so no `await`
       // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
       // so a server-fn / async-peer call cannot strand an `await` in the sync
       // wrapper (S374 review #1 — latent: top-level when-sites carry no async

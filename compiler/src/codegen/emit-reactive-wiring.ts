@@ -20,7 +20,7 @@ import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNa
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
 import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emitDeclRhsSqlLoad } from "./emit-sync.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
-import { liftEmittedStatementAwaits, emittedCodeCallsServerFn } from "./scheduling.ts";
+import { liftEmittedStatementAwaits, emittedCodeCallsServerFn, _clientServerFnNames } from "./scheduling.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { LogicBinding, NestedLiftGroup } from "./binding-registry.ts";
@@ -1087,6 +1087,13 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // so far (SPEC §7.6 file scope). See `groupNames` below.
   const fileScopeNames = new Set<string>();
 
+  // §6.7.4 / §13.2 (S429) — a `when … changes` body is a CPS host: its server
+  // calls are awaited inside an async wrapper (emit-logic.ts `when-effect`). The
+  // file-filtered server-fn names reach it under a key ONLY that branch reads, so
+  // no other top-level statement's lowering changes.
+  const whenServerFnNames = ctx.routeMap ? _clientServerFnNames(ctx.routeMap, ctx.filePath ?? "") : null;
+  const whenEmitSpread = whenServerFnNames && whenServerFnNames.size > 0 ? { whenServerFnNames } : {};
+
   for (const group of drainGroups()) {
     const { pid, stmts } = group;
     const codes: string[] = [];
@@ -1125,8 +1132,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const groupNames = liftScopeDeclaredNames(fileScopeNames);
     seedOwnConsts(fileScopeNames, groupNames, true); // chunk scope, if the group lands there (declared-name-marks.ts)
     const groupEmitOpts = groupTildeCtx
-      ? { ...emitOpts, tildeContext: groupTildeCtx, declaredNames: groupNames }
-      : { ...emitOpts, declaredNames: groupNames };
+      ? { ...emitOpts, ...whenEmitSpread, tildeContext: groupTildeCtx, declaredNames: groupNames }
+      : { ...emitOpts, ...whenEmitSpread, declaredNames: groupNames };
     // Per-statement ranges of the side-channel lists a statement's emission appends
     // to, so a statement re-emitted by the mixed-hoist guard below leaves no
     // duplicate behind.

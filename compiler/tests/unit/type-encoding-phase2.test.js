@@ -197,7 +197,12 @@ describe("emitLogicNode with EncodingContext", () => {
       bodyRaw: 'console.log("changed")',
     };
     const output = emitLogicNode(node, { encodingCtx: ctx });
-    expect(output).toContain("_scrml_effect");
+    // §6.7.4 (S429): the effect subscribes to its LISTED deps — "Only the variables
+    // listed in the dep-list trigger the effect" — so the encoded dep name is what
+    // is subscribed. (This used to assert `_scrml_effect`, which never consulted
+    // the dep-list at all, so the test could not see whether deps were encoded.)
+    expect(output).toContain(`_scrml_reactive_subscribe(${JSON.stringify(encodedCount)}, _h)`);
+    expect(output).not.toContain('_scrml_reactive_subscribe("count"');
   });
 
   test("reactive-nested-assign uses encoded target", () => {

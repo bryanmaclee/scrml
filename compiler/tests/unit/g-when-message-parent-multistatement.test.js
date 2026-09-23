@@ -154,8 +154,12 @@ describe("g-when-message-parent-handler-drops-all-but-the-first-statement (§4.1
 // ---------------------------------------------------------------------------
 
 function effectBody(clientJs) {
-  // the reactive effect that reads @count (skip render effects)
-  const re = /_scrml_effect\(function\(\)\s*\{([\s\S]*?)\}\);/g;
+  // The `when` effect's body. §6.7.4 (S429): the effect is keyed on its dep-list
+  // (`_scrml_when_changes(<per-dep subscribe>, function() { body })`), no longer a
+  // bare `_scrml_effect`, which ran the body at mount and auto-tracked its reads —
+  // "The body does NOT execute on initial mount." Only the extractor moved; the
+  // multi-statement assertions below are unchanged.
+  const re = /_scrml_when_changes\(function\(_h\) \{[\s\S]*?\}, (?:async )?function\(\)\s*\{([\s\S]*?)\}\);/g;
   let m;
   while ((m = re.exec(clientJs))) {
     if (/reactive_get\("count"\)/.test(m[1]) && /reactive_set/.test(m[1])) return m[1];

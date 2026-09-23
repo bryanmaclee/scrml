@@ -384,10 +384,11 @@ export function extractInitExpr(stmt: ASTNode): string {
  *
  * Same one-line derivation the injectors in this module each do inline; named
  * here because U1's consumer is an EMITTER context rather than a post-pass over
- * emitted text, and the two must agree on membership. Kept module-local: this is
- * a threading detail, not a new public seam.
+ * emitted text, and the two must agree on membership. Exported (S429) for the one
+ * other emitter host that needs the same file-filtered set: the §6.7.4 `when`
+ * body, threaded by emit-reactive-wiring.ts as `whenServerFnNames`.
  */
-function _clientServerFnNames(routeMap: RouteMap, filePath: string): Set<string> {
+export function _clientServerFnNames(routeMap: RouteMap, filePath: string): Set<string> {
   const names = new Set<string>();
   for (const [id, route] of routeMap.functions) {
     // F5 (S239 round 3) — FILTER ON THE OWNING FILE. `runRI` builds ONE routeMap
