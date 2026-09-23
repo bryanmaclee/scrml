@@ -123,6 +123,47 @@ function reemitJsStringLiteral(rawInner) {
 }
 
 /**
+ * Re-emit ONE token as JS source text for a hand-rolled token re-join.
+ *
+ * A STRING token's `.text` is the literal's INNER text — the tokenizer strips
+ * the delimiters. A re-join that pushes `t.text` therefore turns `"S"` into the
+ * bare identifier `S` (a ReferenceError at runtime, a silent capture when a
+ * binding named `S` is in scope, or a misleading E-SCOPE-001). Re-quote plain
+ * strings through `reemitJsStringLiteral` and re-wrap backtick templates so
+ * their `${…}` interpolations survive — the same re-emit collectExpr applies.
+ * Every other token kind (REGEX, NUMBER, IDENT, PUNCT, …) carries its full
+ * source text already.
+ */
+function reemitTokenSource(tok) {
+  if (tok.kind !== "STRING") return tok.text;
+  return tok.isTemplate ? "`" + tok.text + "`" : reemitJsStringLiteral(tok.text);
+}
+
+/**
+ * Collect the argument text of a call whose opening `(` has just been
+ * consumed, through (and consuming) the matching `)`. Returns the tokens
+ * space-joined, string literals re-quoted (`reemitTokenSource`).
+ *
+ * Paren depth counts only PUNCT parens: a STRING token whose text is `(` or `)`
+ * (the literal `"("`) is NOT a paren — counting it truncated or over-ran the
+ * argument list.
+ *
+ * Shared by the `@arr.<mutator>(…)` (§6.5.1 reactive-array-mutation) and
+ * `@set(…)` (reactive-explicit-set) recognizers in both statement parsers.
+ */
+function collectCallArgsText(peek, consume) {
+  const argParts = [];
+  let parenDepth = 1;
+  while (parenDepth > 0 && peek().kind !== "EOF") {
+    const t = consume();
+    if (t.kind === "PUNCT" && t.text === "(") parenDepth++;
+    if (t.kind === "PUNCT" && t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
+    argParts.push(reemitTokenSource(t));
+  }
+  return argParts.join(" ").trim();
+}
+
+/**
  * Phase 3.5: detect expressions that should NOT be parsed to ExprNode.
  * Returns true for:
  * - HTML tag fragments (tokenizer-spaced: `< / span >`, `< button onclick = ...`)
@@ -8458,15 +8499,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           // @arr.push(item) → reactive-array-mutation node
           consume(); // consume "("
-          const argParts = [];
-          let parenDepth = 1;
-          while (parenDepth > 0 && peek().kind !== "EOF") {
-            const t = consume();
-            if (t.text === "(") parenDepth++;
-            if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-            argParts.push(t.text);
-          }
-          const _ramArgs = argParts.join(" ").trim();
+          const _ramArgs = collectCallArgsText(peek, consume);
           return {
             id: ++counter.next,
             kind: "reactive-array-mutation",
@@ -8753,7 +8786,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           let d = 1;
           while (d > 0 && peek().kind !== "EOF") {
             const t = consume();
-            rawParts.push(t.text);
+            rawParts.push(reemitTokenSource(t));
             if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) d++;
             if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) d--;
           }
@@ -11011,7 +11044,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         let d = 1;
         while (d > 0 && peek().kind !== 'EOF') {
           const t = consume();
-          rawParts.push(t.text);
+          rawParts.push(reemitTokenSource(t));
           if (t.kind === 'PUNCT' && (t.text === '(' || t.text === '[' || t.text === '{')) d++;
           if (t.kind === 'PUNCT' && (t.text === ')' || t.text === ']' || t.text === '}')) d--;
         }
@@ -12271,15 +12304,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const lastSeg = pathSegments[pathSegments.length - 1];
         if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           consume(); // consume "("
-          const argParts = [];
-          let parenDepth = 1;
-          while (parenDepth > 0 && peek().kind !== "EOF") {
-            const t = consume();
-            if (t.text === "(") parenDepth++;
-            if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-            argParts.push(t.text);
-          }
-          const _ramArgs2 = argParts.join(" ").trim();
+          const _ramArgs2 = collectCallArgsText(peek, consume);
           nodes.push({
             id: ++counter.next,
             kind: "reactive-array-mutation",
@@ -13498,7 +13523,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           let d = 1;
           while (d > 0 && peek().kind !== "EOF") {
             const t = consume();
-            rawParts.push(t.text);
+            rawParts.push(reemitTokenSource(t));
             if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) d++;
             if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) d--;
           }
