@@ -59,7 +59,7 @@ ${
         return { kind: "union", members: members }
     }
 
-    fn tAsIs(constraint = null) {
+    fn tAsIs(constraint = not) {
         return { kind: "asIs", constraint: constraint }
     }
 
@@ -71,11 +71,11 @@ ${
         return { kind: "not" }
     }
 
-    fn tSnippet(paramType = null, optional = false) {
+    fn tSnippet(paramType = not, optional = false) {
         return { kind: "snippet", paramType: paramType, optional: optional }
     }
 
-    fn tState(name, attributes, isHtml = false, rendersToDom = false, constructorBody = null) {
+    fn tState(name, attributes, isHtml = false, rendersToDom = false, constructorBody = not) {
         return { kind: "state", name: name, attributes: attributes, isHtml: isHtml, rendersToDom: rendersToDom, constructorBody: constructorBody }
     }
 
@@ -110,7 +110,7 @@ ${
     // ---------------------------------------------------------------------------
 
     fn mapSqliteType(sqlType, nullable) {
-        const upper = (sqlType != null ? sqlType : "").toUpperCase().trim()
+        const upper = (sqlType is some ? sqlType : "").toUpperCase().trim()
 
         let base
         let warning = false
@@ -179,10 +179,10 @@ ${
         const result = parts.join("")
 
         if (result.length == 0 || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(result)) {
-            return { name: null, error: "E-TYPE-052" }
+            return { name: not, error: "E-TYPE-052" }
         }
 
-        return { name: result, error: null }
+        return { name: result, error: not }
     }
 
     // ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ ${
                     let text = part.trim()
                     if (!text) continue
 
-                    let renders = null
+                    let renders = not
                     const rendersIdx = text.indexOf(" renders ")
                     if (rendersIdx != -1) {
                         const markup = text.slice(rendersIdx + " renders ".length).trim()
@@ -287,7 +287,7 @@ ${
                     const name = text
                     if (!name) continue
                     if (!/^[A-Z][A-Za-z0-9_]*$/.test(name)) continue
-                    variants.push({ name: name, payload: null, renders: renders })
+                    variants.push({ name: name, payload: not, renders: renders })
                 }
             } else {
                 const name = trimmed.slice(0, parenIdx).trim()
@@ -310,7 +310,7 @@ ${
                     }
                 }
 
-                let renders = null
+                let renders = not
                 const afterParen = closeParenIdx != -1 ? trimmed.slice(closeParenIdx + 1).trim() : ""
                 if (afterParen.startsWith("renders ")) {
                     const markup = afterParen.slice("renders ".length).trim()
@@ -364,8 +364,8 @@ ${
             return tArray(resolveTypeExpr(elementExpr, typeRegistry))
         }
 
-        if (trimmed == "snippet") return tSnippet(null, false)
-        if (trimmed == "snippet?") return tSnippet(null, true)
+        if (trimmed == "snippet") return tSnippet(not, false)
+        if (trimmed == "snippet?") return tSnippet(not, true)
         if (trimmed.startsWith("snippet(") && trimmed.endsWith(")")) {
             const inner = trimmed.slice(8, -1)
             const colonIdx = inner.indexOf(":")
@@ -405,11 +405,11 @@ ${
 
         lookup(name) {
             let scope = this
-            while (scope != null) {
+            while (scope is some) {
                 if (scope.bindings.has(name)) return scope.bindings.get(name)
                 scope = scope.parent
             }
-            return null
+            return not
         }
 
         hasOwn(name) {
@@ -419,7 +419,7 @@ ${
 
     export class ScopeChain {
         constructor() {
-            this._global = new Scope(null, "global")
+            this._global = new Scope(not, "global")
             this._current = this._global
 
             for (const [name, type] of BUILTIN_TYPES) {
@@ -442,7 +442,7 @@ ${
         }
 
         pop() {
-            if (this._current.parent == null) {
+            if (this._current.parent is not) {
                 throw new Error("ScopeChain: cannot pop global scope")
             }
             this._current = this._current.parent
@@ -473,13 +473,13 @@ ${
             if (!decl.name) continue
 
             if (decl.typeKind == "struct") {
-                const fields = parseStructBody(decl.raw != null ? decl.raw : "", registry)
+                const fields = parseStructBody(decl.raw is some ? decl.raw : "", registry)
                 registry.set(decl.name, tStruct(decl.name, fields))
             } else if (decl.typeKind == "enum") {
-                const variants = parseEnumBody(decl.raw != null ? decl.raw : "", registry)
+                const variants = parseEnumBody(decl.raw is some ? decl.raw : "", registry)
                 registry.set(decl.name, tEnum(decl.name, variants))
             } else if (decl.typeKind == "error") {
-                const fields = parseStructBody(decl.raw != null ? decl.raw : "", registry)
+                const fields = parseStructBody(decl.raw is some ? decl.raw : "", registry)
                 for (const fieldName of fields.keys()) {
                     if (fieldName == "message" || fieldName == "type") {
                         errors.push(new TSError(
@@ -502,13 +502,13 @@ ${
             if (!existing) continue
 
             if (decl.typeKind == "struct" && existing.kind == "struct") {
-                const fields = parseStructBody(decl.raw != null ? decl.raw : "", registry)
+                const fields = parseStructBody(decl.raw is some ? decl.raw : "", registry)
                 registry.set(decl.name, tStruct(decl.name, fields))
             } else if (decl.typeKind == "enum" && existing.kind == "enum") {
-                const variants = parseEnumBody(decl.raw != null ? decl.raw : "", registry)
+                const variants = parseEnumBody(decl.raw is some ? decl.raw : "", registry)
                 registry.set(decl.name, tEnum(decl.name, variants))
             } else if (decl.typeKind == "error" && existing.kind == "error") {
-                const fields = parseStructBody(decl.raw != null ? decl.raw : "", registry)
+                const fields = parseStructBody(decl.raw is some ? decl.raw : "", registry)
                 registry.set(decl.name, tError(decl.name, fields))
             }
         }
@@ -531,7 +531,7 @@ ${
                 shape.attributes,
                 shape.rendersToDom,
                 shape.rendersToDom,
-                null,
+                not,
             ))
         }
 
@@ -539,7 +539,7 @@ ${
     }
 
     export function registerStateType(registry, name, attributes, rendersToDom, constructorBody, errors, span) {
-        if (getElementShape(name) != null) {
+        if ((getElementShape(name)) is some) {
             errors.push(new TSError(
                 "E-STATE-005",
                 "E-STATE-005: State type name `" + name + "` collides with a built-in HTML element name. " +
@@ -565,7 +565,7 @@ ${
     }
 
     export function getStateType(registry, name) {
-        return registry.get(name) != null ? registry.get(name) : null
+        return (registry.get(name)) is some ? registry.get(name) : not
     }
 
     // ---------------------------------------------------------------------------
@@ -622,7 +622,7 @@ ${
             seenNamesThisBlock.set(generatedName, tableName)
 
             const fullFields = new Map()
-            for (const col of (tableTypeView.fullSchema != null ? tableTypeView.fullSchema : [])) {
+            for (const col of (tableTypeView.fullSchema is some ? tableTypeView.fullSchema : [])) {
                 const mapResult = mapSqliteType(col.sqlType, col.nullable)
                 const type = mapResult.type
                 const warning = mapResult.warning
@@ -641,7 +641,7 @@ ${
             const fullType = tStruct(generatedName, fullFields)
 
             const clientFields = new Map()
-            for (const col of (tableTypeView.clientSchema != null ? tableTypeView.clientSchema : [])) {
+            for (const col of (tableTypeView.clientSchema is some ? tableTypeView.clientSchema : [])) {
                 const mapResult = mapSqliteType(col.sqlType, col.nullable)
                 clientFields.set(col.name, mapResult.type)
             }
@@ -658,7 +658,7 @@ ${
     // ---------------------------------------------------------------------------
 
     fn nodeKey(node) {
-        if (node.id != null) return String(node.id)
+        if (node.id is some) return String(node.id)
         if (node.span) {
             const s = node.span
             return s.start + "-" + s.end
@@ -671,13 +671,13 @@ ${
     // ---------------------------------------------------------------------------
 
     export function inferAttrValueType(value) {
-        if (!value) return null
+        if (!value) return not
 
         if (value.kind == "string-literal" || typeof value == "string") return "string"
         if (value.kind == "number-literal") return "number"
         if (value.kind == "boolean-literal") return "boolean"
 
-        return null
+        return not
     }
 
     export function validateMarkupAttributes(node, stateType, errors, filePath) {
@@ -691,7 +691,7 @@ ${
             if (!attr || !attr.name) continue
             const attrName = attr.name
             const defaultSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 }
-            const attrSpan = attr.span != null ? attr.span : (node.span != null ? node.span : defaultSpan)
+            const attrSpan = attr.span is some ? attr.span : (node.span is some ? node.span : defaultSpan)
 
             if (attrName == "ref") continue
             if (attrName.startsWith("bind:")) continue
@@ -750,7 +750,7 @@ ${
 
         function functionBoundary(fnNode) {
             if (!routeMap || !routeMap.functions) return "client"
-            const id = filePath + "::" + (fnNode.span != null ? fnNode.span.start : undefined)
+            const id = filePath + "::" + (fnNode.span is some ? fnNode.span.start : not)
             const entry = routeMap.functions.get(id)
             return entry ? entry.boundary : "client"
         }
@@ -777,7 +777,7 @@ ${
             }
         }
 
-        const topLevelNodes = fileAST.nodes != null ? fileAST.nodes : []
+        const topLevelNodes = fileAST.nodes is some ? fileAST.nodes : []
         collectFnErrorTypes(topLevelNodes)
 
         function visitNode(node) {
@@ -808,7 +808,7 @@ ${
                     for (const attr of attrs) {
                         if (attr && attr.name == "ref" && attr.value && attr.value.kind == "variable-ref") {
                             const refVarName = attr.value.name.replace(/^@/, "")
-                            const elemShape = getElementShape(n.name != null ? n.name : "")
+                            const elemShape = getElementShape(n.name is some ? n.name : "")
                             if (elemShape && elemShape.domInterface) {
                                 scopeChain.bind(refVarName, {
                                     kind: "ref-binding",
@@ -852,13 +852,13 @@ ${
                         visitNode(child)
                     }
                 }
-                resolvedType = { kind: "html-element", tag: n.name != null ? n.name : "unknown", attrs: {} }
+                resolvedType = { kind: "html-element", tag: n.name is some ? n.name : "unknown", attrs: {} }
 
             } else if (nodeKind == "state") {
-                scopeChain.push("state:" + (n.stateType != null ? n.stateType : "unknown"))
+                scopeChain.push("state:" + (n.stateType is some ? n.stateType : "unknown"))
 
                 if (n.stateType == "db") {
-                    const stateBlockId = filePath + "::" + (n.span != null ? n.span.start : undefined)
+                    const stateBlockId = filePath + "::" + (n.span is some ? n.span.start : not)
                     const genMap = generatedTypesByScopeId.get(stateBlockId)
                     if (genMap) {
                         for (const [name, genEntry] of genMap) {
@@ -881,7 +881,7 @@ ${
                 resolvedType = tAsIs()
 
             } else if (nodeKind == "state-constructor-def") {
-                const ctorName = n.stateType != null ? n.stateType : "unknown"
+                const ctorName = n.stateType is some ? n.stateType : "unknown"
                 scopeChain.push("state-ctor:" + ctorName)
 
                 if (stateTypeRegistry && Array.isArray(n.typedAttrs)) {
@@ -894,13 +894,13 @@ ${
                         })
                     }
 
-                    const ctorSpan = n.span != null ? n.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 }
+                    const ctorSpan = n.span is some ? n.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 }
                     registerStateType(
                         stateTypeRegistry,
                         ctorName,
                         attrMap,
                         false,
-                        n.children != null ? n.children : null,
+                        n.children is some ? n.children : not,
                         errors,
                         ctorSpan,
                     )
@@ -908,7 +908,7 @@ ${
                     for (const ta of n.typedAttrs) {
                         scopeChain.bind(ta.name, {
                             kind: "state-attr",
-                            resolvedType: resolveTypeExpr(ta.typeExpr, typeRegistry) != null ? resolveTypeExpr(ta.typeExpr, typeRegistry) : tAsIs(),
+                            resolvedType: (resolveTypeExpr(ta.typeExpr, typeRegistry)) is some ? resolveTypeExpr(ta.typeExpr, typeRegistry) : tAsIs(),
                         })
                     }
                 }
@@ -919,7 +919,7 @@ ${
                 }
 
                 scopeChain.pop()
-                resolvedType = tState(ctorName, new Map(), false, false, n.children != null ? n.children : null)
+                resolvedType = tState(ctorName, new Map(), false, false, n.children is some ? n.children : not)
 
             } else if (nodeKind == "logic") {
                 const body = n.body
@@ -931,7 +931,7 @@ ${
             } else if (nodeKind == "function-decl") {
                 const boundary = functionBoundary(n)
 
-                scopeChain.push("fn:" + (n.name != null ? n.name : "anon") + ":" + boundary)
+                scopeChain.push("fn:" + (n.name is some ? n.name : "anon") + ":" + boundary)
 
                 if (Array.isArray(n.params)) {
                     for (const param of n.params) {
@@ -949,7 +949,7 @@ ${
 
                 scopeChain.pop()
 
-                const fnType = { kind: "function", name: n.name != null ? n.name : "", params: [], returnType: tAsIs() }
+                const fnType = { kind: "function", name: n.name is some ? n.name : "", params: [], returnType: tAsIs() }
                 if (n.name) {
                     scopeChain.bind(n.name, {
                         kind: "function",
@@ -960,7 +960,7 @@ ${
 
                 if (Array.isArray(fnBody)) {
                     const canFail = n.canFail == true
-                    const fnName = n.name != null ? n.name : "<anonymous>"
+                    const fnName = n.name is some ? n.name : "<anonymous>"
                     for (const stmt of fnBody) {
                         if (!stmt) continue
                         if (stmt.kind == "fail-expr" && !canFail) {
@@ -968,7 +968,7 @@ ${
                                 "E-ERROR-001",
                                 "E-ERROR-001: 'fail' used in function '" + fnName + "' which is not declared as failable. " +
                                 "Add '!' to the function signature: 'function " + fnName + "(...)! -> {ErrorType}'.",
-                                (stmt.span != null ? stmt.span : n.span),
+                                (stmt.span is some ? stmt.span : n.span),
                             ))
                         }
                         if (stmt.kind == "propagate-expr" && !canFail) {
@@ -976,34 +976,34 @@ ${
                                 "E-ERROR-003",
                                 "E-ERROR-003: '?' propagation operator used in function '" + fnName + "' which is not declared as failable. " +
                                 "Add '!' to the function signature or handle the error with 'match' or '!{}'.",
-                                (stmt.span != null ? stmt.span : n.span),
+                                (stmt.span is some ? stmt.span : n.span),
                             ))
                         }
                         if (stmt.kind == "propagate-expr" && canFail) {
-                            const calleeRaw = stmt.expr != null ? stmt.expr : ""
+                            const calleeRaw = stmt.expr is some ? stmt.expr : ""
                             const calleeMatch = /^([A-Za-z_$][A-Za-z0-9_$]*)/.exec(calleeRaw)
-                            const calleeName = calleeMatch ? calleeMatch[1] : null
+                            const calleeName = calleeMatch ? calleeMatch[1] : not
                             if (calleeName && fnAllDeclared.has(calleeName) && !fnCanFail.has(calleeName)) {
                                 errors.push(new TSError(
                                     "E-ERROR-004",
                                     "E-ERROR-004: '?' applied to call to '" + calleeName + "' which is not a failable function. " +
                                     "Only '!' functions can be propagated with '?'.",
-                                    (stmt.span != null ? stmt.span : n.span),
+                                    (stmt.span is some ? stmt.span : n.span),
                                 ))
                             }
                         }
                     }
                     for (const stmt of fnBody) {
                         if (!stmt || stmt.kind != "bare-expr") continue
-                        const exprRaw = stmt.expr != null ? stmt.expr : ""
+                        const exprRaw = stmt.expr is some ? stmt.expr : ""
                         const bareCallMatch = /^([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/.exec(exprRaw)
-                        const bareCallee = bareCallMatch ? bareCallMatch[1] : null
+                        const bareCallee = bareCallMatch ? bareCallMatch[1] : not
                         if (bareCallee && fnCanFail.has(bareCallee)) {
                             errors.push(new TSError(
                                 "E-ERROR-002",
                                 "E-ERROR-002: Result of failable function '" + bareCallee + "' is not handled. " +
                                 "Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.",
-                                (stmt.span != null ? stmt.span : n.span),
+                                (stmt.span is some ? stmt.span : n.span),
                             ))
                         }
                     }
@@ -1068,11 +1068,11 @@ ${
 
             } else if (nodeKind == "guarded-expr") {
                 const guardedNode = n.guardedNode
-                const errorArms = n.arms != null ? n.arms : []
+                const errorArms = n.arms is some ? n.arms : []
 
                 if (guardedNode) visitNode(guardedNode)
 
-                let calleeExpr = null
+                let calleeExpr = not
                 if (guardedNode) {
                     if (guardedNode.kind == "bare-expr" && typeof guardedNode.expr == "string") {
                         calleeExpr = guardedNode.expr.trim()
@@ -1084,26 +1084,26 @@ ${
                     }
                 }
 
-                let calleeName = null
+                let calleeName = not
                 if (calleeExpr) {
                     const calleeMatch = /^([A-Za-z_$][A-Za-z0-9_$]*)/.exec(calleeExpr)
                     if (calleeMatch) calleeName = calleeMatch[1]
                 }
 
-                const errorTypeName = calleeName ? (fnErrorTypes.get(calleeName) != null ? fnErrorTypes.get(calleeName) : null) : null
+                const errorTypeName = calleeName ? ((fnErrorTypes.get(calleeName)) is some ? fnErrorTypes.get(calleeName) : not) : not
 
                 if (errorTypeName) {
                     const errorEnumType = typeRegistry.get(errorTypeName)
                     if (errorEnumType && errorEnumType.kind == "enum") {
                         const enumType = errorEnumType
-                        const allVariants = (enumType.variants != null ? enumType.variants : []).map(function(v) { return v.name })
+                        const allVariants = (enumType.variants is some ? enumType.variants : []).map(function(v) { return v.name })
 
                         const hasWildcard = errorArms.some(function(a) { return a.pattern == "_" || a.pattern == "else" })
 
                         if (!hasWildcard && allVariants.length > 0) {
                             const handledVariants = new Set()
                             for (const arm of errorArms) {
-                                const p = arm.pattern != null ? arm.pattern : ""
+                                const p = arm.pattern is some ? arm.pattern : ""
                                 if (p != "_" && p != "else") {
                                     const variantName = p.replace(/^::/, "").replace(/^\./, "")
                                     if (variantName) handledVariants.add(variantName)
@@ -1153,7 +1153,7 @@ ${
                 resolvedType = tAsIs()
 
             } else if (nodeKind == "while-stmt" || nodeKind == "if-stmt") {
-                const condStr = (n.condition != null ? n.condition : "").trim()
+                const condStr = (n.condition is some ? n.condition : "").trim()
                 if (condStr.length > 0) {
                     const inner = (condStr.startsWith("(") && condStr.endsWith(")"))
                         ? condStr.slice(1, -1).trim()
@@ -1161,14 +1161,14 @@ ${
                     const ASSIGN_ROOT_RE = /^[@A-Za-z_$][A-Za-z0-9_$@.]*\s*=[^=]/
                     if (ASSIGN_ROOT_RE.test(inner)) {
                         const stmtKind = n.kind == "while-stmt" ? "while" : "if"
-                        const condLine = n.span != null ? n.span.line : 1
+                        const condLine = n.span is some ? n.span.line : 1
                         errors.push(new TSError(
                             "W-ASSIGN-001",
                             "W-ASSIGN-001: Assignment (`=`) used as the condition of `" + stmtKind + "` at line " + condLine + ".\n" +
                             "  Did you mean `==` for equality comparison?\n" +
                             "  If assignment is intentional, use double parentheses to signal intent:\n\n" +
                             "    " + stmtKind + " ((" + inner.trim() + ")) { ... }\n",
-                            n.span != null ? n.span : { file: filePath, start: 0, end: 0, line: condLine, col: 1 },
+                            n.span is some ? n.span : { file: filePath, start: 0, end: 0, line: condLine, col: 1 },
                             "warning",
                         ))
                     }
@@ -1232,23 +1232,23 @@ ${
                 const entry = scopeChain.lookup(name)
                 if (!entry) {
                     const defaultSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 }
-                    const attrSpan = value.span != null ? value.span : (attr.span != null ? attr.span : (parent != null ? parent.span : defaultSpan))
+                    const attrSpan = value.span is some ? value.span : (attr.span is some ? attr.span : (parent is some ? parent.span : defaultSpan))
                     errors.push(new TSError(
                         "E-SCOPE-001",
                         "E-SCOPE-001: Unquoted identifier `" + name + "` in attribute `" + attr.name + "` " +
                         "cannot be resolved in the current scope.",
-                        attrSpan != null ? attrSpan : defaultSpan,
+                        attrSpan is some ? attrSpan : defaultSpan,
                     ))
                 }
             }
         }
 
-        const allTopNodes = fileAST.nodes != null ? fileAST.nodes : []
+        const allTopNodes = fileAST.nodes is some ? fileAST.nodes : []
         for (const node of allTopNodes) {
             visitNode(node)
         }
 
-        const typeDeclNodes = fileAST.typeDecls != null ? fileAST.typeDecls : []
+        const typeDeclNodes = fileAST.typeDecls is some ? fileAST.typeDecls : []
         for (const node of typeDeclNodes) {
             const key = nodeKey(node)
             if (!nodeTypes.has(key)) {
@@ -1274,14 +1274,14 @@ ${
     }
 
     export function checkNotAssignment(targetType, varName) {
-        if (isOptionalType(targetType)) return null
+        if (isOptionalType(targetType)) return not
         const typeName = targetType.kind == "primitive" ? targetType.name : targetType.kind
         return "E-TYPE-041: Cannot assign `not` to variable `" + varName + "` of type `" + typeName + "`. " +
             "Declare the type as `" + typeName + " | not` to allow absence values (\u00a742)."
     }
 
     export function checkNotReturn(returnType, fnName) {
-        if (isOptionalType(returnType)) return null
+        if (isOptionalType(returnType)) return not
         const typeName = returnType.kind == "primitive" ? returnType.name : returnType.kind
         return "E-TYPE-043: Function `" + fnName + "` has return type `" + typeName + "` but may return `not`. " +
             "Declare the return type as `" + typeName + " | not` to allow absence return values (\u00a742)."
@@ -1297,7 +1297,7 @@ ${
         const MEMBER_RE = /\b([A-Za-z_$][A-Za-z0-9_$]*)\.([A-Za-z_$][A-Za-z0-9_$]*)\b/g
         let m
 
-        while ((m = MEMBER_RE.exec(expr)) != null) {
+        while ((m = MEMBER_RE.exec(expr)) is some) {
             const objName = m[1]
             const fieldName = m[2]
 
@@ -1324,7 +1324,7 @@ ${
     // ---------------------------------------------------------------------------
 
     export function checkEnumExhaustiveness(enumType, armPatterns) {
-        const allVariants = new Set((enumType.variants != null ? enumType.variants : []).map(function(v) { return v.name }))
+        const allVariants = new Set((enumType.variants is some ? enumType.variants : []).map(function(v) { return v.name }))
         const coveredVariants = new Set()
         const duplicateArms = []
         let hasWildcard = false
@@ -1355,7 +1355,7 @@ ${
 
     export function checkUnionExhaustiveness(unionType, armPatterns) {
         const memberNames = new Set()
-        for (const member of (unionType.members != null ? unionType.members : [])) {
+        for (const member of (unionType.members is some ? unionType.members : [])) {
             if (member.kind == "primitive") {
                 memberNames.add(member.name)
             } else if (member.kind == "enum") {
@@ -1390,8 +1390,8 @@ ${
     }
 
     export function checkExhaustiveness(matchNode, subjectType, matchSpan, errors, isPartial = false) {
-        const arms = matchNode.arms != null ? matchNode.arms : []
-        const armPatterns = arms.map(function(arm) { return arm.pattern != null ? arm.pattern : { kind: "wildcard" } })
+        const arms = matchNode.arms is some ? matchNode.arms : []
+        const armPatterns = arms.map(function(arm) { return arm.pattern is some ? arm.pattern : { kind: "wildcard" } })
 
         if (subjectType.kind == "enum") {
             const result = checkEnumExhaustiveness(subjectType, armPatterns)
@@ -1453,7 +1453,7 @@ ${
             }
 
             if (missing.length > 0 && !isPartial) {
-                const unionHasNot = subjectType.members != null
+                const unionHasNot = subjectType.members is some
                     ? subjectType.members.some(function(m) { return m.kind == "not" })
                     : false
                 const missingNot = missing.includes("not")
@@ -1513,21 +1513,21 @@ ${
         }
 
         consume(name, span) {
-            if (!this._vars.has(name)) return null
+            if (!this._vars.has(name)) return not
 
             const state = this._vars.get(name)
             if (state == "consumed") {
                 return {
                     code: "E-LIN-002",
                     varName: name,
-                    span: this._firstUseSpan.get(name) != null ? this._firstUseSpan.get(name) : span,
+                    span: (this._firstUseSpan.get(name)) is some ? this._firstUseSpan.get(name) : span,
                     secondUseSpan: span,
                 }
             }
 
             this._vars.set(name, "consumed")
             this._firstUseSpan.set(name, span)
-            return null
+            return not
         }
 
         forceConsume(name, span) {
@@ -1604,18 +1604,18 @@ ${
     export class TildeTracker {
         constructor() {
             this._state = "uninitialized"
-            this._initSpan = null
+            this._initSpan = not
         }
 
         initialize(span, elide = false) {
             if (this._state == "initialized" && !elide) {
-                const err = { code: "E-TILDE-002", span: this._initSpan != null ? this._initSpan : span }
+                const err = { code: "E-TILDE-002", span: this._initSpan is some ? this._initSpan : span }
                 this._initSpan = span
                 return err
             }
             this._state = "initialized"
             this._initSpan = span
-            return null
+            return not
         }
 
         consume(span) {
@@ -1623,8 +1623,8 @@ ${
                 return { code: "E-TILDE-001", span: span }
             }
             this._state = "uninitialized"
-            this._initSpan = null
-            return null
+            this._initSpan = not
+            return not
         }
 
         isInitialized() { return this._state == "initialized" }
@@ -1668,14 +1668,14 @@ ${
     // ---------------------------------------------------------------------------
 
     export function checkLinear(body, errors, opts = {}) {
-        const parentLinTracker = opts.linTracker != null ? opts.linTracker : null
-        const parentTildeTracker = opts.tildeTracker != null ? opts.tildeTracker : null
-        const parentMustUseTracker = opts.mustUseTracker != null ? opts.mustUseTracker : null
-        const inLoop = opts.inLoop != null ? opts.inLoop : false
-        const file = opts.file != null ? opts.file : "/unknown"
+        const parentLinTracker = opts.linTracker is some ? opts.linTracker : not
+        const parentTildeTracker = opts.tildeTracker is some ? opts.tildeTracker : not
+        const parentMustUseTracker = opts.mustUseTracker is some ? opts.mustUseTracker : not
+        const inLoop = opts.inLoop is some ? opts.inLoop : false
+        const file = opts.file is some ? opts.file : "/unknown"
 
         const linTracker = new LinTracker()
-        const tildeTracker = parentTildeTracker != null ? parentTildeTracker : new TildeTracker()
+        const tildeTracker = parentTildeTracker is some ? parentTildeTracker : new TildeTracker()
         const mustUseTracker = new MustUseTracker()
 
         function mkSpan() {
@@ -1683,12 +1683,12 @@ ${
         }
 
         function emitLinError(desc, contextSpan) {
-            const s = desc.span != null ? desc.span : (contextSpan != null ? contextSpan : mkSpan())
+            const s = desc.span is some ? desc.span : (contextSpan is some ? contextSpan : mkSpan())
             if (desc.code == "E-LIN-002") {
                 errors.push(new TSError(
                     "E-LIN-002",
                     "E-LIN-002: Linear variable `" + desc.varName + "` consumed more than once. " +
-                    "First use at col " + (s.col != null ? s.col : "?") + "; second use at col " + (desc.secondUseSpan != null ? desc.secondUseSpan.col : "?") + ".",
+                    "First use at col " + (s.col is some ? s.col : "?") + "; second use at col " + (desc.secondUseSpan is some ? desc.secondUseSpan.col : "?") + ".",
                     s,
                 ))
             } else if (desc.code == "E-LIN-001") {
@@ -1708,7 +1708,7 @@ ${
         }
 
         function emitTildeError(desc, contextSpan) {
-            const s = desc.span != null ? desc.span : (contextSpan != null ? contextSpan : mkSpan())
+            const s = desc.span is some ? desc.span : (contextSpan is some ? contextSpan : mkSpan())
             if (desc.code == "E-TILDE-001") {
                 errors.push(new TSError("E-TILDE-001", "E-TILDE-001: `~` referenced but not initialized.", s))
             } else if (desc.code == "E-TILDE-002") {
@@ -1733,17 +1733,17 @@ ${
 
             } else if (kind == "lin-ref") {
                 const name = node.name
-                const tracker = lt.has(name) ? lt : (parentLinTracker && parentLinTracker.has(name) ? parentLinTracker : null)
+                const tracker = lt.has(name) ? lt : (parentLinTracker && parentLinTracker.has(name) ? parentLinTracker : not)
                 if (tracker) {
                     if (loop) {
                         errors.push(new TSError(
                             "E-LIN-002",
                             "E-LIN-002: Linear variable `" + name + "` consumed inside a loop. " +
                             "Loop iteration count is unprovable; consume `" + name + "` before or after the loop.",
-                            (node.span != null ? node.span : mkSpan()),
+                            (node.span is some ? node.span : mkSpan()),
                         ))
                     } else {
-                        const err = tracker.consume(name, (node.span != null ? node.span : mkSpan()))
+                        const err = tracker.consume(name, (node.span is some ? node.span : mkSpan()))
                         if (err) emitLinError(err, node.span)
                     }
                 }
@@ -1768,7 +1768,7 @@ ${
                 const linSnap = lt.snapshot()
                 const tildeSnap = tt.snapshot()
 
-                for (const n of (node.consequent != null ? node.consequent : [])) walkNode(n, lt, tt, loop)
+                for (const n of (node.consequent is some ? node.consequent : [])) walkNode(n, lt, tt, loop)
                 const afterConsequent = lt.snapshot()
                 const afterConsequentTilde = tt.snapshot()
 
@@ -1795,7 +1795,7 @@ ${
                             "E-LIN-003",
                             "E-LIN-003: Linear variable `" + varName + "` is consumed in some branches but not others. " +
                             "All branches must consume the same set of lin variables.",
-                            (node.span != null ? node.span : mkSpan()),
+                            (node.span is some ? node.span : mkSpan()),
                         ))
                     }
                 }
@@ -1813,7 +1813,7 @@ ${
                 tt.restore(afterConsequentTilde)
 
             } else if (kind == "match-stmt") {
-                const arms = node.arms != null ? node.arms : []
+                const arms = node.arms is some ? node.arms : []
                 if (arms.length == 0) {
                     // nothing to do
                 } else {
@@ -1824,7 +1824,7 @@ ${
                     for (const arm of arms) {
                         lt.restore(preMatchSnap)
                         tt.restore(preMatchTilde)
-                        for (const n of (arm.body != null ? arm.body : [])) walkNode(n, lt, tt, loop)
+                        for (const n of (arm.body is some ? arm.body : [])) walkNode(n, lt, tt, loop)
                         armSnapshots.push(lt.snapshot())
                     }
 
@@ -1846,7 +1846,7 @@ ${
                                     "E-LIN-003",
                                     "E-LIN-003: Linear variable `" + varName + "` is consumed in some match arms but not others. " +
                                     "All arms must consume the same set of lin variables.",
-                                    (node.span != null ? node.span : mkSpan()),
+                                    (node.span is some ? node.span : mkSpan()),
                                 ))
                             }
                         }
@@ -1858,32 +1858,32 @@ ${
                 }
 
             } else if (kind == "for-loop" || kind == "while-loop") {
-                const loopBody = node.body != null ? node.body : []
+                const loopBody = node.body is some ? node.body : []
                 const elide = !hasNonLiftTildeConsumer(loopBody)
                 walkLoopBody(loopBody, lt, tt, elide)
 
             } else if (kind == "closure") {
-                const captures = node.captures != null ? node.captures : []
+                const captures = node.captures is some ? node.captures : []
                 for (const captureName of captures) {
                     mustUseTracker.markUsed(captureName)
                     if (parentMustUseTracker) parentMustUseTracker.markUsed(captureName)
 
-                    const tracker = lt.has(captureName) ? lt : (parentLinTracker && parentLinTracker.has(captureName) ? parentLinTracker : null)
+                    const tracker = lt.has(captureName) ? lt : (parentLinTracker && parentLinTracker.has(captureName) ? parentLinTracker : not)
                     if (tracker) {
                         if (loop) {
                             errors.push(new TSError(
                                 "E-LIN-002",
                                 "E-LIN-002: Linear variable `" + captureName + "` captured by closure inside a loop. " +
                                 "Loop iteration count is unprovable.",
-                                (node.span != null ? node.span : mkSpan()),
+                                (node.span is some ? node.span : mkSpan()),
                             ))
                         } else {
-                            const err = tracker.consume(captureName, (node.span != null ? node.span : mkSpan()))
+                            const err = tracker.consume(captureName, (node.span is some ? node.span : mkSpan()))
                             if (err) emitLinError(err, node.span)
                         }
                     }
                 }
-                checkLinear(node.body != null ? node.body : [], errors, { linTracker: lt, mustUseTracker: mustUseTracker, inLoop: false, file: file })
+                checkLinear(node.body is some ? node.body : [], errors, { linTracker: lt, mustUseTracker: mustUseTracker, inLoop: false, file: file })
 
             } else {
                 const body = node.body
@@ -1947,19 +1947,19 @@ ${
                 "E-MU-001: Variable `" + entry.name + "` was declared but never used before this scope closes. " +
                 "Either use the value somewhere (e.g., pass it to a function or reference it in a template), " +
                 "or prefix with `const` if you don't need the must-use guarantee.",
-                entry.span != null ? entry.span : mkSpan(),
+                entry.span is some ? entry.span : mkSpan(),
             ))
         }
 
-        const lastNode = Array.isArray(body) ? body[body.length - 1] : null
+        const lastNode = Array.isArray(body) ? body[body.length - 1] : not
         const lastWasElisionLoop = lastNode &&
             (lastNode.kind == "for-loop" || lastNode.kind == "while-loop") &&
-            !hasNonLiftTildeConsumer(lastNode.body != null ? lastNode.body : [])
+            !hasNonLiftTildeConsumer(lastNode.body is some ? lastNode.body : [])
         if (tildeTracker.isInitialized() && !parentTildeTracker && !lastWasElisionLoop) {
             errors.push(new TSError(
                 "E-TILDE-002",
                 "E-TILDE-002: `~` initialized but not consumed before scope exit.",
-                tildeTracker._initSpan != null ? tildeTracker._initSpan : mkSpan(),
+                tildeTracker._initSpan is some ? tildeTracker._initSpan : mkSpan(),
             ))
         }
     }
@@ -1998,8 +1998,8 @@ ${
             }
         }
 
-        const nodes = fileAST.nodes != null ? fileAST.nodes : (fileAST.ast != null ? fileAST.ast.nodes : [])
-        for (const node of (nodes != null ? nodes : [])) visit(node)
+        const nodes = fileAST.nodes is some ? fileAST.nodes : (fileAST.ast is some ? fileAST.ast.nodes : [])
+        for (const node of (nodes is some ? nodes : [])) visit(node)
 
         for (const [fnName, overloads] of registry) {
             if (overloads.size < 2) registry.delete(fnName)
@@ -2017,7 +2017,7 @@ ${
         const FN_KINDS = new Set(["function-decl", "fn-decl", "fn", "function", "closure"])
 
         function mkSpan(node) {
-            return node.span != null ? node.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 }
+            return node.span is some ? node.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 }
         }
 
         function walk(body, loopDepth, insideFn) {
@@ -2060,13 +2060,13 @@ ${
             }
 
             if (LOOP_KINDS.has(kind)) {
-                const loopBody = node.body != null ? node.body : []
+                const loopBody = node.body is some ? node.body : []
                 walk(loopBody, loopDepth + 1, insideFn)
                 return
             }
 
             if (FN_KINDS.has(kind)) {
-                const fnBody = node.body != null ? node.body : []
+                const fnBody = node.body is some ? node.body : []
                 walk(fnBody, 0, false)
                 return
             }
@@ -2100,8 +2100,8 @@ ${
     // ---------------------------------------------------------------------------
 
     fn checkFnBodyProhibitions(fnNode, body, errors, filePath, stateTypeRegistry) {
-        const fnName = fnNode.name != null ? fnNode.name : "<anonymous>"
-        const fnSpan = fnNode.span != null ? fnNode.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 }
+        const fnName = fnNode.name is some ? fnNode.name : "<anonymous>"
+        const fnSpan = fnNode.span is some ? fnNode.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 }
 
         if (fnNode.isAsync || fnNode.async) {
             errors.push(new TSError(
@@ -2188,9 +2188,9 @@ ${
         const ASSIGN_RE = /([A-Za-z_$][A-Za-z0-9_$]*)(?:\.[A-Za-z_$][A-Za-z0-9_$]*)?\s*=[^=>]/
 
         function checkOuterScopeMutation(stmt, txt) {
-            const stmtSpan = stmt.span != null ? stmt.span : fnSpan
+            const stmtSpan = stmt.span is some ? stmt.span : fnSpan
             if (stmt.kind == "assignment") {
-                const targetName = stmt.target != null ? stmt.target : stmt.name
+                const targetName = stmt.target is some ? stmt.target : stmt.name
                 if (targetName && !localNames.has(targetName)) {
                     errors.push(new TSError(
                         "E-FN-003",
@@ -2226,7 +2226,7 @@ ${
         const returnTypes = []
         let hasFnLocalTilde = false
         let hasLiftInBody = false
-        let liftSpan = null
+        let liftSpan = not
 
         for (const stmt of body) {
             if (!stmt || typeof stmt != "object") continue
@@ -2242,7 +2242,7 @@ ${
 
                 if (stmt.kind == "state-instantiation" || stmt.kind == "state-init") {
                     const varName = stmt.name
-                    const typeName = stmt.stateType != null ? stmt.stateType : (stmt.typeName != null ? stmt.typeName : stmt.type)
+                    const typeName = stmt.stateType is some ? stmt.stateType : (stmt.typeName is some ? stmt.typeName : stmt.type)
                     if (varName && typeName) {
                         stateInstances.set(varName, typeName)
                         loadedFields.set(varName, new Set())
@@ -2255,7 +2255,7 @@ ${
                     stmt.kind == "variable-decl"
                 ) {
                     const varName = stmt.name
-                    const stateTypeName = stmt.stateType != null ? stmt.stateType : stmt.instanceOf
+                    const stateTypeName = stmt.stateType is some ? stmt.stateType : stmt.instanceOf
                     if (varName && stateTypeName) {
                         stateInstances.set(varName, stateTypeName)
                         loadedFields.set(varName, new Set())
@@ -2292,17 +2292,17 @@ ${
                 if (stmt.kind == "function-decl") continue
 
                 if (stmt.kind == "return-stmt") {
-                    const returnValue = stmt.value != null ? stmt.value : (stmt.expr != null ? stmt.expr : stmt.expression)
+                    const returnValue = stmt.value is some ? stmt.value : (stmt.expr is some ? stmt.expr : stmt.expression)
                     if (returnValue && typeof returnValue == "string") {
                         const instance = stateInstances.get(returnValue.trim())
                         if (instance && isBranch) {
-                            const retSpan = stmt.span != null ? stmt.span : fnSpan
+                            const retSpan = stmt.span is some ? stmt.span : fnSpan
                             returnTypes.push({ typeName: instance, line: retSpan.line })
                         }
                     }
-                    const retType = stmt.returnType != null ? stmt.returnType : stmt.stateType
+                    const retType = stmt.returnType is some ? stmt.returnType : stmt.stateType
                     if (retType && isBranch) {
-                        const retSpan = stmt.span != null ? stmt.span : fnSpan
+                        const retSpan = stmt.span is some ? stmt.span : fnSpan
                         returnTypes.push({ typeName: retType, line: retSpan.line })
                     }
                 }
@@ -2328,7 +2328,7 @@ ${
             for (const stmt of nodes) {
                 if (!stmt || typeof stmt != "object") continue
 
-                const stmtSpan = stmt.span != null ? stmt.span : fnSpan
+                const stmtSpan = stmt.span is some ? stmt.span : fnSpan
 
                 if (stmt.kind == "sql") {
                     errors.push(new TSError(
@@ -2386,14 +2386,14 @@ ${
                 }
 
                 if (stmt.kind == "return-stmt" && stateTypeRegistry) {
-                    const returnValue = stmt.value != null ? stmt.value : (stmt.expr != null ? stmt.expr : stmt.expression)
-                    const returnVarName = typeof returnValue == "string" ? returnValue.trim() : null
+                    const returnValue = stmt.value is some ? stmt.value : (stmt.expr is some ? stmt.expr : stmt.expression)
+                    const returnVarName = typeof returnValue == "string" ? returnValue.trim() : not
                     if (returnVarName) {
                         const typeName = stateInstances.get(returnVarName)
                         if (typeName) {
                             const stateType = stateTypeRegistry.get(typeName)
                             if (stateType && stateType.attributes) {
-                                const loaded = loadedFields.get(returnVarName) != null ? loadedFields.get(returnVarName) : new Set()
+                                const loaded = (loadedFields.get(returnVarName)) is some ? loadedFields.get(returnVarName) : new Set()
                                 for (const [fieldName] of stateType.attributes) {
                                     if (!loaded.has(fieldName)) {
                                         errors.push(new TSError(
@@ -2438,8 +2438,8 @@ ${
                     const firstRet = returnTypes[0]
                     const fallbackSecondType = uniqueTypes.length > 1 ? uniqueTypes[uniqueTypes.length - 1] : ""
                     const secondRet = returnTypes.find(function(r) { return r.typeName != firstRet.typeName })
-                    const secondTypeName = secondRet != null ? secondRet.typeName : fallbackSecondType
-                    const secondLine = secondRet != null ? secondRet.line : "?"
+                    const secondTypeName = secondRet is some ? secondRet.typeName : fallbackSecondType
+                    const secondLine = secondRet is some ? secondRet.line : "?"
                     errors.push(new TSError(
                         "E-FN-007",
                         "E-FN-007: `fn " + fnName + "` returns `" + firstRet.typeName + "` in one branch " +
@@ -2475,7 +2475,7 @@ ${
         const filePath = fileAST.filePath
         const fileSpan = { file: filePath, start: 0, end: 0, line: 1, col: 1 }
 
-        const typeDecls = fileAST.typeDecls != null ? fileAST.typeDecls : []
+        const typeDecls = fileAST.typeDecls is some ? fileAST.typeDecls : []
         const typeRegistry = buildTypeRegistry(typeDecls, errors, fileSpan)
 
         const stateTypeRegistry = buildStateTypeRegistry()
@@ -2486,7 +2486,7 @@ ${
             for (const [stateBlockId, dbTypeViews] of protectAnalysis.views) {
                 if (!stateBlockId.startsWith(filePath + "::")) continue
 
-                const spanStart = parseInt(stateBlockId.split("::")[1] != null ? stateBlockId.split("::")[1] : "0", 10)
+                const spanStart = parseInt((stateBlockId.split("::")[1]) is some ? stateBlockId.split("::")[1] : "0", 10)
                 const blockSpan = { file: filePath, start: spanStart, end: spanStart, line: 1, col: 1 }
 
                 const genResult = generateDbTypes(
@@ -2520,12 +2520,12 @@ ${
             stateTypeRegistry,
         )
 
-        const linNodes = fileAST.linNodes != null ? fileAST.linNodes : []
+        const linNodes = fileAST.linNodes is some ? fileAST.linNodes : []
         if (linNodes.length > 0) {
             checkLinear(linNodes, errors, { file: filePath })
         }
 
-        const allNodes = fileAST.nodes != null ? fileAST.nodes : []
+        const allNodes = fileAST.nodes is some ? fileAST.nodes : []
         if (allNodes.length > 0) {
             checkLoopControl(allNodes, errors, filePath)
         }
@@ -2548,9 +2548,9 @@ ${
     // ---------------------------------------------------------------------------
 
     export function runTS(input) {
-        const files = input.files != null ? input.files : []
-        const protectAnalysis = input.protectAnalysis != null ? input.protectAnalysis : { views: new Map() }
-        const routeMap = input.routeMap != null ? input.routeMap : { functions: new Map() }
+        const files = input.files is some ? input.files : []
+        const protectAnalysis = input.protectAnalysis is some ? input.protectAnalysis : { views: new Map() }
+        const routeMap = input.routeMap is some ? input.routeMap : { functions: new Map() }
 
         const typedFiles = []
         const allErrors = []
