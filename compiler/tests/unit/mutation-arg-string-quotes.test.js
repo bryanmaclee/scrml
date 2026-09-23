@@ -125,7 +125,7 @@ describe("§6.5.1 mutation args — AST `args` keeps string delimiters (both sta
   });
 
   test("an unbalanced paren string compiles and emits intact", () => {
-    expect(mutationCall(cleanClient(`function f() { @xs.push(")", "(") }`), "push")).toBe(`")" , "("`);
+    expect(mutationCall(cleanClient(`function f() { @xs.push(")", "(") }`), "push")).toBe(`")", "("`);
   });
 });
 
@@ -141,15 +141,15 @@ describe("§6.5.1 mutation args — emit shape, every mutator", () => {
 
   test("splice: multi-arg with an object-literal string (the reported `name : S` shape)", () => {
     expect(mutationCall(cleanClient(`function f() { @xs.splice(0, 1, { id: 1, name: "S" }) }`), "splice"))
-      .toBe(`0 , 1 , { id : 1 , name : "S" }`);
+      .toBe(`0, 1, {id: 1, name: "S"}`);
   });
 
   test("unshift: single-quoted and double-quoted, multi-arg", () => {
-    expect(mutationCall(cleanClient(`function f() { @xs.unshift('e', "f") }`), "unshift")).toBe(`"e" , "f"`);
+    expect(mutationCall(cleanClient(`function f() { @xs.unshift('e', "f") }`), "unshift")).toBe(`"e", "f"`);
   });
 
   test("fill: string value with numeric bounds", () => {
-    expect(mutationCall(cleanClient(`function f() { @xs.fill("z", 0, 1) }`), "fill")).toBe(`"z" , 0 , 1`);
+    expect(mutationCall(cleanClient(`function f() { @xs.fill("z", 0, 1) }`), "fill")).toBe(`"z", 0, 1`);
   });
 
   test("sort: a string inside the comparator arrow", () => {
@@ -171,7 +171,7 @@ describe("§6.5.1 mutation args — string shapes", () => {
       cleanClient(`function f() { @xs.splice(0, 1, "it's", 'say "hi"', "a\\"b", 'c\\'d', "tab\\there") }`),
       "splice",
     );
-    expect(args).toBe(`0 , 1 , "it's" , "say \\"hi\\"" , "a\\"b" , "c'd" , "tab\\there"`);
+    expect(args).toBe(`0, 1, "it's", "say \\"hi\\"", "a\\"b", "c'd", "tab\\there"`);
     // The emitted literals evaluate to the source strings.
     expect(new Function(`return [${args}]`)()).toEqual([0, 1, "it's", 'say "hi"', 'a"b', "c'd", "tab\there"]);
   });
@@ -200,20 +200,20 @@ describe("§6.5.1 mutation args — string shapes", () => {
     expect(args).toBe("{k: \"v\", n: [1, \"two\", {z: \"three\"}], [\"ck\"]: 1, [`t${2}`]: 2}");
   });
 
-  test("regex, number, boolean and null args are unchanged", () => {
-    expect(mutationCall(cleanClient(`function f() { @xs.push(/ab+c/gi, 42, true, null) }`), "push"))
-      .toBe(`/ab+c/gi , 42 , true , null`);
+  test("regex, number, boolean and `not` args are unchanged", () => {
+    expect(mutationCall(cleanClient(`function f() { @xs.push(/ab+c/gi, 42, true, not) }`), "push"))
+      .toBe(`/ab+c/gi, 42, true, null`);
   });
 
   test("a string whose text names an in-scope binding stays a string (no silent capture)", () => {
     const js = cleanClient(`const S = "CAPTURED"\nfunction f() { @xs.push(S, "S") }`);
-    expect(mutationCall(js, "push")).toBe(`S , "S"`);
+    expect(mutationCall(js, "push")).toBe(`S, "S"`);
   });
 });
 
 describe("§6.5.1 mutation args — contexts", () => {
   test("top-level ${} logic block", () => {
-    expect(mutationCall(cleanClient(`\${ @xs.push("blk", '(', ")") }`), "push")).toBe(`"blk" , "(" , ")"`);
+    expect(mutationCall(cleanClient(`\${ @xs.push("blk", '(', ")") }`), "push")).toBe(`"blk", "(", ")"`);
   });
 
   test("arrow handler (expression path) keeps its strings", () => {
@@ -249,5 +249,114 @@ describe("C-style for header — string literals keep their delimiters (all thre
     const iterables = nodes.filter((n) => typeof n.iterable === "string" && n.iterable.includes("length")).map((n) => n.iterable);
     expect(iterables.length).toBeGreaterThan(0);
     for (const it of iterables) expect(it).toContain(`"abc"`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 2 — nothing on these paths emits from RAW TEXT any more.
+// ---------------------------------------------------------------------------
+
+function ramNodes(body) {
+  return astNodes(`<program>\n<xs> = []\n${body}\n</program>\n`).filter((n) => n.kind === "reactive-array-mutation");
+}
+
+describe("round 2 — the argument LIST is a parsed node, not an escape-hatch", () => {
+  test("multi-arg: argsExpr is an array of the arguments, argsIsList set", () => {
+    const [n] = ramNodes(`function f() { @xs.push("use fn here", 1, { k: "v" }) }`);
+    expect(n.argsIsList).toBe(true);
+    expect(n.argsExpr.kind).toBe("array");
+    expect(n.argsExpr.elements.map((e) => e.kind)).toEqual(["lit", "lit", "object"]);
+  });
+
+  test("single non-spread argument: unchanged (its own node, no argsIsList)", () => {
+    const [n] = ramNodes(`function f() { @xs.push("d") }`);
+    expect(n.argsIsList).toBeUndefined();
+    expect(n.argsExpr.kind).toBe("lit");
+  });
+
+  test("single spread argument: a list of one spread", () => {
+    const [n] = ramNodes(`function f() { @xs.push(...["a", "b"]) }`);
+    expect(n.argsIsList).toBe(true);
+    expect(n.argsExpr.elements.map((e) => e.kind)).toEqual(["spread"]);
+  });
+
+  test("an argument that does not parse is isolated; its siblings still get nodes", () => {
+    const [n] = ramNodes(`function f() { @xs.push("use fn here", Point { x: 1 }) }`);
+    expect(n.argsIsList).toBe(true);
+    expect(n.argsExpr.elements[0]).toMatchObject({ kind: "lit", value: "use fn here" });
+    expect(n.argsExpr.elements[1].kind).toBe("escape-hatch");
+  });
+
+  test("emit: the reported strings are printed verbatim", () => {
+    const js = cleanClient("${ @xs.push(\"Point { x: 1 }\", \"use fn here\", 1)\n@xs.push(`navigate(${1})`, \"is not\", 2) }");
+    expect(js).toContain(`.push("Point { x: 1 }", "use fn here", 1);`);
+    expect(js).toContain(".push(`navigate(${1})`, \"is not\", 2);");
+  });
+
+  test("LOUD gain: an undeclared identifier in a multi-arg list is E-SCOPE-001 (was clean + ReferenceError)", () => {
+    const { errors } = compile(`<program>\n<xs> = []\nfunction f() { @xs.splice(0, 1, S) }\n<p>\${@xs.length}</p>\n</program>\n`);
+    expect(errors.map((e) => e.code)).toContain("E-SCOPE-001");
+  });
+
+  test("a block comment in the arguments is dropped (was re-emitted without its `/*`)", () => {
+    const [n] = ramNodes(`function f() { @xs.push(1 /* x */, 2) }`);
+    expect(n.args).toBe(`1 , 2`);
+    expect(mutationCall(cleanClient(`function f() { @xs.push(1 /* x */, 2) }`), "push")).toBe(`1, 2`);
+  });
+});
+
+describe("round 2 — C-style header parts come from the TOKENS", () => {
+  function forNode(body) {
+    return astNodes(`<program>\n<n> = 0\n${body}\n</program>\n`).find((n) => n.kind === "for-stmt");
+  }
+
+  test("a `;` inside a string does not split the header", () => {
+    const n = forNode(`function g() { for (let s = "a;b"; s != "a;b;"; s = s + ";") { @n = 1 } }`);
+    expect(n.cStyleParts.condExpr).toMatchObject({ kind: "binary" });
+    expect(n.cStyleParts.initExpr.raw).toBe(`let s = "a;b"`);
+  });
+
+  test("the `+ +` normaliser no longer rewrites a string (or a unary plus)", () => {
+    const n = forNode(`function g() { for (let q = "x + +y"; q.length < +3; q = q + + "!") { @n = 1 } }`);
+    expect(n.cStyleParts.initExpr.raw).toBe(`let q = "x + +y"`);
+    const js = cleanClient(`<n> = 0\nfunction g() { for (let q = "x + +y"; q.length < 9; q = q + + "!") { @n = 1 } }`);
+    expect(js).toContain(`for (let q = "x + +y"; q.length < 9; q = q + +"!") {`);
+  });
+
+  test("`i++` still emits as a postfix increment", () => {
+    const js = cleanClient(`<n> = 0\nfunction g() { for (let i = 0; i < 3; i++) { @n = @n + 1 } }`);
+    expect(js).toContain(`for (let i = 0; i < 3; i++) {`);
+  });
+
+  test("an EMPTY part is null in cStyleParts and emits empty", () => {
+    const n = forNode(`function g() { for (let s = "fn"; ; ) { break } }`);
+    expect(n.cStyleParts.condExpr).toBeNull();
+    expect(n.cStyleParts.updateExpr).toBeNull();
+    const js = cleanClient(`function g() { for (let s = "fn"; ; ) { break } }`);
+    expect(js).toContain(`for (let s = "fn"; ; ) {`);
+  });
+
+  test("a `let` init with a string is printed through the ExprNode printer (no `fn` rewrite)", () => {
+    const js = cleanClient(`<n> = 0\nfunction g() { for (let t = "fn", u = 'use fn'; t.length < 9; t = t + "!") { @n = 1 } }`);
+    expect(js).toContain(`for (let t = "fn", u = "use fn"; t.length < 9; t = t + "!") {`);
+  });
+});
+
+describe("round 2 — sibling collectors re-quote strings", () => {
+  test("computed bracket index: @m[\"a\" + x] = 5 keeps the string", () => {
+    const js = cleanClient(`<m> = { }\n\${\n  const x = "k"\n  @m["a" + x] = 5\n}`);
+    expect(js).toContain(`_scrml_deep_set(_scrml_cs_reactive_get("m"), ["a" + x], 5)`);
+  });
+
+  test("@set(@o, \"a\", 9) lowers to the COW deep-set on the cell NAME", () => {
+    const js = cleanClient(`<o> = { a: 1 }\nfunction f() { @set(@o, "a", "use fn") }\nfunction g() { @set(@o, "b.c", 9) }`);
+    expect(js).toContain(`_scrml_cs_reactive_set("o", _scrml_deep_set(_scrml_cs_reactive_get("o"), ["a"], "use fn"));`);
+    expect(js).toContain(`_scrml_cs_reactive_set("o", _scrml_deep_set(_scrml_cs_reactive_get("o"), ["b","c"], 9));`);
+  });
+
+  test("upload(file, url): a string first argument keeps its quotes; a string \"(\" / \",\" is not structure", () => {
+    const n = astNodes(`<program>\n\${\n  upload("a,(b", "/up")\n}\n</program>\n`).find((x) => x.kind === "upload-call");
+    expect(n.file).toBe(`"a,(b"`);
+    expect(n.url).toBe(`"/up"`);
   });
 });

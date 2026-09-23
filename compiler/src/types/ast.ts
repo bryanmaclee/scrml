@@ -808,6 +808,14 @@ export interface ReactiveArrayMutationNode extends BaseNode {
   method: string;
   /** Raw arguments string. */
   args: string;
+  /**
+   * ExprNode of the arguments. One non-spread argument: that argument's node.
+   * Any other non-empty list: an `array` node of the arguments, with
+   * `argsIsList` set (codegen prints the elements joined with ", ").
+   */
+  argsExpr?: ExprNode;
+  /** True when `argsExpr` is the argument LIST (see above), not one argument. */
+  argsIsList?: boolean;
 }
 
 /** An explicit reactive set: `@set(@obj, "path", value)`. Escape hatch. */
@@ -815,6 +823,10 @@ export interface ReactiveExplicitSetNode extends BaseNode {
   kind: "reactive-explicit-set";
   /** Raw arguments string. */
   args: string;
+  /** ExprNode of the arguments — same contract as ReactiveArrayMutationNode.argsExpr. */
+  argsExpr?: ExprNode;
+  /** True when `argsExpr` is the argument LIST, not one argument. */
+  argsIsList?: boolean;
 }
 
 // -- Function Declaration --

@@ -912,6 +912,25 @@ export function rewriteReflectForRuntime(code: string): string {
   });
 }
 
+/**
+ * Emit the argument list of a `reactive-array-mutation` / `reactive-explicit-set`.
+ *
+ * A multi-argument (or single-spread) list arrives from the ast-builder as an
+ * `array` node of its arguments with `argsIsList: true` (`buildCallArgsExpr`):
+ * each argument is printed through the ExprNode printer and the results joined
+ * with ", ". Before, such a list was an escape-hatch whose raw text went
+ * through the `rewriteExpr` text passes, which rewrote the CONTENTS of its
+ * string literals (`"use fn here"` → `"use function here"`). A single argument
+ * keeps its own node; a node without either falls back to the raw text as before.
+ */
+function emitCallArgs(node: any, ctx: EmitExprContext): string {
+  const argsExpr = node.argsExpr;
+  if (node.argsIsList && argsExpr && argsExpr.kind === "array" && Array.isArray(argsExpr.elements)) {
+    return argsExpr.elements.map((e: any) => emitExpr(e, ctx)).join(", ");
+  }
+  return emitExprField(argsExpr, node.args ?? "", ctx);
+}
+
 // ---------------------------------------------------------------------------
 // Main export
 // ---------------------------------------------------------------------------
@@ -4094,7 +4113,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const encodedTarget = ctx ? ctx.encode(node.target) : node.target;
       const target = JSON.stringify(encodedTarget);
       const method: string = node.method;
-      const args = emitExprField(node.argsExpr, node.args ?? "", _makeExprCtx(opts));
+      const args = emitCallArgs(node, _makeExprCtx(opts));
 
       // With Proxy-based reactivity, array mutations go through the Proxy traps
       // which automatically notify fine-grained effects. We still call
@@ -4122,8 +4141,33 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     }
 
     case "reactive-explicit-set": {
-      const args = emitExprField(node.argsExpr, node.args ?? "", _makeExprCtx(opts));
-      return `_scrml_reactive_explicit_set(${args});`;
+      // `@set(@cell, "a.b", value)` — a deep write into `@cell` at a dotted
+      // path. Lowered to the SAME COW deep-set a `@cell.a.b = value` write
+      // emits (`reactive-nested-assign`), so the cell is addressed by its NAME
+      // through `_scrml_reactive_get/set` (which the client chunk-scoping
+      // rewrites to its scoped key). Before, the three arguments were emitted
+      // as ONE comma expression — `_scrml_reactive_explicit_set((get("o"), a, 9))`
+      // — with the strings unquoted, and the helper received the cell's VALUE
+      // as its name. A literal path splits at compile time; a computed one at
+      // run time. Any other shape keeps the helper call.
+      const exprCtx = _makeExprCtx(opts);
+      const argsExpr: any = node.argsExpr;
+      if (node.argsIsList && argsExpr?.kind === "array" && Array.isArray(argsExpr.elements)
+          && argsExpr.elements.length === 3) {
+        const [first, pathArg, valueArg] = argsExpr.elements;
+        const firstIsCell = first && first.kind === "ident" && typeof first.name === "string"
+          && /^@[A-Za-z_$][A-Za-z0-9_$]*$/.test(first.name);
+        if (firstIsCell && pathArg?.kind !== "spread" && valueArg?.kind !== "spread") {
+          const bare = first.name.slice(1);
+          const target = JSON.stringify(opts.encodingCtx ? opts.encodingCtx.encode(bare) : bare);
+          const path = pathArg.kind === "lit" && typeof pathArg.value === "string"
+            ? JSON.stringify(pathArg.value.split("."))
+            : `((__p) => typeof __p === "string" ? __p.split(".") : __p)(${emitExpr(pathArg, exprCtx)})`;
+          const value = emitExpr(valueArg, exprCtx);
+          return `_scrml_reactive_set(${target}, _scrml_deep_set(_scrml_reactive_get(${target}), ${path}, ${value}));`;
+        }
+      }
+      return `_scrml_reactive_explicit_set(${emitCallArgs(node, exprCtx)});`;
     }
 
     // S79 — `case "reactive-debounced-decl"` RETIRED. The pre-v0.next

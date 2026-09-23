@@ -179,3 +179,111 @@ describe("§6.5.1 mutation string args — runtime", () => {
     });
   });
 });
+
+// Round 2 (review of 7072776f): with the quotes restored, the multi-argument
+// mutation and the `let`-init C-style header still emitted from RAW TEXT through
+// the rewriteExpr text passes, which rewrote the CONTENTS of the strings — a
+// LOUD failure on main turned SILENT. Each repro's runtime value must equal the
+// value the SAME literals have in a plain `const`.
+describe("round 2 — string CONTENT is never text-rewritten (runtime == plain const)", () => {
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing */ }
+  });
+
+  test("reviewer's repro block: two multi-arg pushes and two let-init C-style headers", () => {
+    run(`<program>
+  <xs> = []
+  <ref> = []
+  <s> = ""
+  <u> = ""
+  \${
+    @xs.push("Point { x: 1 }", "use fn here", 1)
+    for (let t = "fn"; t.length < 9; t = t + "!") { @s = t }
+    @xs.push(\`navigate(\${1})\`, "is not", 2)
+    for (let q = "x + +y"; q.length < 7; q = q + ".") { @u = q }
+    const c = ["Point { x: 1 }", "use fn here", 1, \`navigate(\${1})\`, "is not", 2]
+    @ref = c
+  }
+  <p id="s">\${@s}</p>
+</program>
+`, (app) => {
+      expect(app.get("xs")).toEqual(app.get("ref"));
+      expect(app.get("xs")).toEqual(["Point { x: 1 }", "use fn here", 1, "navigate(1)", "is not", 2]);
+      expect(app.get("s")).toBe("fn!!!!!!");
+      expect(app.get("u")).toBe("x + +y");
+    });
+  });
+
+  test("a `;` inside a string in a C-style header does not move the part split", () => {
+    run(`<program>
+  <n> = 0
+  <w> = ""
+  \${
+    for (let s = "a;b"; s != "a;b;;"; s = s + ";") { @n = @n + 1
+      @w = s }
+  }
+</program>
+`, (app) => {
+      expect(app.get("n")).toBe(2);
+      expect(app.get("w")).toBe("a;b;");
+    });
+  });
+
+  test("a C-style header with an EMPTY part keeps its string parts intact", () => {
+    run(`<program>
+  <w> = ""
+  function f() { for (let s = "use fn"; ; ) { @w = s
+    break } }
+  <p>\${@w}</p>
+  <button id="f" onclick=f()>f</button>
+</program>
+`, (app) => {
+      app.click("f");
+      expect(app.get("w")).toBe("use fn");
+    });
+  });
+
+  test("a block comment inside mutation args is dropped, not re-emitted as code", () => {
+    run(`<program>
+  <xs> = []
+  \${ @xs.push(1 /* x */, 2) }
+</program>
+`, (app) => {
+      expect(app.get("xs")).toEqual([1, 2]);
+    });
+  });
+
+  test("computed bracket-index write with a string: @m[\"a\" + x] = 5", () => {
+    run(`<program>
+  <m> = { }
+  \${
+    const x = "k"
+    @m["a" + x] = 5
+  }
+</program>
+`, (app) => {
+      expect(app.get("m")).toEqual({ ak: 5 });
+    });
+  });
+
+  test("@set(@o, path, value) writes the path (literal and dotted)", () => {
+    run(`<program>
+  <o> = { a: 1, b: { c: 2 } }
+  function f() { @set(@o, "a", "use fn") }
+  function g() { @set(@o, "b.c", 7) }
+  <p id="a">\${@o.a}</p>
+  <button id="f" onclick=f()>f</button><button id="g" onclick=g()>g</button>
+</program>
+`, (app) => {
+      app.click("f");
+      expect(app.get("o")).toEqual({ a: "use fn", b: { c: 2 } });
+      expect(app.text("#a")).toEqual(["use fn"]);
+      app.click("g");
+      expect(app.get("o")).toEqual({ a: "use fn", b: { c: 7 } });
+    });
+  });
+});

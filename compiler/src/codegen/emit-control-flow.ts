@@ -4,7 +4,7 @@ import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
-import { emitStringFromTree } from "../expression-parser.ts";
+import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
@@ -589,6 +589,38 @@ export function emitForStmt(
   }
 }
 
+/**
+ * Emit a C-style `for` header's INIT part from `cStyleParts.initExpr`.
+ *
+ * A declaration init (`let t = "fn"`, `let i = 0, j = 1`) is not an expression,
+ * so the ast-builder's parse folds it to an escape-hatch carrying the raw text,
+ * and the escape-hatch emit runs that text through the `rewriteExpr` text passes
+ * — which do not skip string literals (`"fn"` → `"function"`). Here the leading
+ * declaration keyword (the first token of the raw text, never inside a string)
+ * is split off and the declarator list is parsed as the elements of an array,
+ * so each `name = value` goes through the ExprNode printer. Anything that does
+ * not come back as plain declarators keeps the previous escape-hatch emit.
+ */
+function emitCStyleInit(initExpr: any, ctx: EmitExprContext): string {
+  if (!initExpr) return "";
+  if (initExpr.kind === "escape-hatch" && typeof initExpr.raw === "string") {
+    const m = /^(let|const|var)\s+/.exec(initExpr.raw);
+    if (m) {
+      const rest = initExpr.raw.slice(m[0].length);
+      let list: any = null;
+      try { list = parseExprToNode("[" + rest + "]", initExpr.span?.file ?? "", 0); } catch { list = null; }
+      const decls: any[] | null = list && list.kind === "array" && Array.isArray(list.elements) ? list.elements : null;
+      const isDeclarator = (d: any) =>
+        d && ((d.kind === "ident" && !String(d.name).startsWith("@"))
+          || (d.kind === "assign" && d.op === "=" && d.target && d.target.kind === "ident" && !String(d.target.name).startsWith("@")));
+      if (decls && decls.length > 0 && decls.every(isDeclarator)) {
+        return m[1] + " " + decls.map((d) => emitExpr(d, ctx)).join(", ");
+      }
+    }
+  }
+  return emitExprField(initExpr, "", ctx);
+}
+
 function _emitForStmtInner(
   node: any,
   opts: any,
@@ -624,9 +656,19 @@ function _emitForStmtInner(
     if (cStyleMatch) {
       const _cParts = node.cStyleParts;
       const _cCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
-      const init = emitExprField(_cParts?.initExpr, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
-      const cond = emitExprField(_cParts?.condExpr, cStyleMatch[2].trim(), _cCtx);
-      const update = emitExprField(_cParts?.updateExpr, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
+      // With `cStyleParts` (built from the header TOKENS), a null part is an
+      // EMPTY part (`for (;;)`) and emits "" — never the regex-split text below,
+      // which a `;` inside a string literal mis-splits. The text fallback (and
+      // its `+ +`/`- -` normaliser) runs only for a node that carries no parts.
+      const init = _cParts
+        ? emitCStyleInit(_cParts.initExpr, _cCtx)
+        : emitExprField(undefined, cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
+      const cond = _cParts
+        ? (_cParts.condExpr ? emitExprField(_cParts.condExpr, "", _cCtx) : "")
+        : emitExprField(undefined, cStyleMatch[2].trim(), _cCtx);
+      const update = _cParts
+        ? (_cParts.updateExpr ? emitExprField(_cParts.updateExpr, "", _cCtx) : "")
+        : emitExprField(undefined, cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), _cCtx);
       lines.push(`for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];

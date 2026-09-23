@@ -819,15 +819,33 @@ function tryReactiveWrite(e, span, counter) {
             // arg escape-hatch lowering); `argsExpr` stays null so emit-logic's
             // `rewriteExpr(args)` fallback renders the comma list. ARG-LESS
             // (`pop()` / `shift()` / `sort()` / `reverse()`) -> both empty.
+            // A MULTI-arg (or single-spread) list is carried, as in LIVE
+            // (ast-builder.js buildCallArgsExpr), as an `array` node of its
+            // arguments with `argsIsList: true` — emit-logic prints each argument
+            // through the ExprNode printer. The raw ` , `-joined `args` text is
+            // kept for the text consumers; it is no longer what codegen emits
+            // (its escape-hatch text went through the rewriteExpr text passes,
+            // which rewrote the contents of string literals).
             let argsExpr = null;
             let argsRaw = "";
-            if (nativeArgs.length === 1) {
+            let argsIsList = false;
+            const isSpreadOnly = nativeArgs.length === 1 && nativeArgs[0] && nativeArgs[0].kind === "Spread";
+            if (nativeArgs.length === 1 && !isSpreadOnly) {
                 argsExpr = translateExpr(nativeArgs[0]);
-            } else if (nativeArgs.length > 1) {
+            } else if (nativeArgs.length >= 1) {
                 const serialized = serializeNativeArgList(nativeArgs);
                 argsRaw = serialized === null ? "" : serialized;
+                const elements = nativeArgs.map((a) => (a && a.kind === "Spread")
+                    // a call-arg spread is the array-element Spread shape
+                    // `{ kind: "Spread", expression }` (parse-expr.js makeArraySpread)
+                    ? { kind: "spread", argument: translateExpr(a.expression), span: spanOrZero(a.expression && a.expression.span) }
+                    : translateExpr(a));
+                argsExpr = { kind: "array", elements, span: spanOrZero(e.span) };
+                argsIsList = true;
             }
-            return makeReactiveArrayMutationNode(rootName, methodName, argsExpr, argsRaw, span, counter);
+            const node = makeReactiveArrayMutationNode(rootName, methodName, argsExpr, argsRaw, span, counter);
+            if (argsIsList) node.argsIsList = true;
+            return node;
         }
         return null;
     }

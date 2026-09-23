@@ -131,36 +131,90 @@ function reemitJsStringLiteral(rawInner) {
  * binding named `S` is in scope, or a misleading E-SCOPE-001). Re-quote plain
  * strings through `reemitJsStringLiteral` and re-wrap backtick templates so
  * their `${…}` interpolations survive — the same re-emit collectExpr applies.
- * Every other token kind (REGEX, NUMBER, IDENT, PUNCT, …) carries its full
- * source text already.
+ *
+ * A COMMENT token re-emits as "" (the comment is DROPPED, as collectExpr drops
+ * it). Its `.text` is NOT source: a block comment's text lacks the opening `/*`,
+ * so re-joining it turned `@xs.push(1 /* x *\/, 2)` into `push(1  x *\/ , 2)`.
+ * The remaining kinds (REGEX, NUMBER, IDENT, KEYWORD, PUNCT, OPERATOR, AT_IDENT)
+ * carry their source text; callers still decide what a BLOCK_REF means.
  */
 function reemitTokenSource(tok) {
+  if (tok.kind === "COMMENT") return "";
   if (tok.kind !== "STRING") return tok.text;
   return tok.isTemplate ? "`" + tok.text + "`" : reemitJsStringLiteral(tok.text);
 }
 
+const _OPEN_BRACKETS = new Set(["(", "[", "{"]);
+const _CLOSE_BRACKETS = new Set([")", "]", "}"]);
+
 /**
- * Collect the argument text of a call whose opening `(` has just been
- * consumed, through (and consuming) the matching `)`. Returns the tokens
- * space-joined, string literals re-quoted (`reemitTokenSource`).
+ * Collect the arguments of a call whose opening `(` has just been consumed,
+ * through (and consuming) the matching `)`.
  *
- * Paren depth counts only PUNCT parens: a STRING token whose text is `(` or `)`
- * (the literal `"("`) is NOT a paren — counting it truncated or over-ran the
- * argument list.
+ * Returns `{ text, argTexts }`: `text` is the whole argument list space-joined,
+ * `argTexts` the same split at the top-level commas (one entry per argument).
+ * String literals are re-quoted and comments dropped (`reemitTokenSource`).
  *
- * Shared by the `@arr.<mutator>(…)` (§6.5.1 reactive-array-mutation) and
+ * Depth counts only PUNCT brackets: a STRING token whose text is `(` or `,`
+ * (the literal `"("`) is neither a bracket nor a separator — counting it
+ * truncated or over-ran the argument list.
+ *
+ * Used by the `@arr.<mutator>(…)` (§6.5.1 reactive-array-mutation) and the
  * `@set(…)` (reactive-explicit-set) recognizers in both statement parsers.
  */
-function collectCallArgsText(peek, consume) {
-  const argParts = [];
-  let parenDepth = 1;
-  while (parenDepth > 0 && peek().kind !== "EOF") {
+function collectCallArgs(peek, consume) {
+  const all = [];
+  const argTexts = [];
+  let cur = [];
+  let depth = 1;
+  while (depth > 0 && peek().kind !== "EOF") {
     const t = consume();
-    if (t.kind === "PUNCT" && t.text === "(") parenDepth++;
-    if (t.kind === "PUNCT" && t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-    argParts.push(reemitTokenSource(t));
+    if (t.kind === "PUNCT" && _OPEN_BRACKETS.has(t.text)) depth++;
+    if (t.kind === "PUNCT" && _CLOSE_BRACKETS.has(t.text)) { depth--; if (depth === 0) break; }
+    if (t.kind === "COMMENT") continue;
+    const src = reemitTokenSource(t);
+    all.push(src);
+    if (depth === 1 && t.kind === "PUNCT" && t.text === ",") {
+      argTexts.push(cur.join(" ").trim());
+      cur = [];
+    } else {
+      cur.push(src);
+    }
   }
-  return argParts.join(" ").trim();
+  const last = cur.join(" ").trim();
+  if (last || argTexts.length > 0) argTexts.push(last);
+  return { text: all.join(" ").trim(), argTexts };
+}
+
+/**
+ * Split the tokens of a C-style `for` header — everything after the opening
+ * `(`, optionally including the closing `)` — at its two top-level `;` and
+ * re-join each part with string literals re-quoted and comments dropped.
+ * Returns `[init, cond, update]`, or null when the header is not three parts.
+ *
+ * TOKEN-based on purpose. The previous split was a regex over the joined
+ * header text (`^\(\s*(.*?)\s*;…`), which a `;` inside a string literal moved,
+ * followed by a `\s*\+\s*\+` → `++` text normaliser that rewrote the CONTENT of
+ * any string it touched (`"x + +y"` → `"x++y"`) and fused a unary plus
+ * (`a + +b` → `a++b`). `++`/`--` are single OPERATOR tokens, so no re-fusing is
+ * needed at all.
+ */
+function cStyleHeaderPartTexts(toks) {
+  const parts = [[]];
+  let depth = 0;
+  for (let i = 0; i < toks.length; i++) {
+    const t = toks[i];
+    if (t.kind === "PUNCT" && _OPEN_BRACKETS.has(t.text)) depth++;
+    if (t.kind === "PUNCT" && _CLOSE_BRACKETS.has(t.text)) {
+      if (depth === 0) break; // the header's closing `)`
+      depth--;
+    }
+    if (t.kind === "COMMENT") continue;
+    if (depth === 0 && t.kind === "PUNCT" && t.text === ";") { parts.push([]); continue; }
+    parts[parts.length - 1].push(reemitTokenSource(t));
+  }
+  if (parts.length !== 3) return null;
+  return parts.map((p) => p.join(" ").trim());
 }
 
 /**
@@ -4005,6 +4059,62 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * Build the ExprNode payload for a call's argument list (`collectCallArgs`).
+   *
+   * A single non-spread argument parses as itself (`{ argsExpr }`, unchanged).
+   * Any other non-empty list — two or more arguments, or one spread — has no
+   * single-expression form: a bare `a , b` is a SequenceExpression, which the
+   * parser folds to an escape-hatch whose RAW TEXT codegen then runs through
+   * the `rewriteExpr` text passes, and those passes do not skip string literals
+   * (`"use fn here"` → `"use function here"`, `"Point { x: 1 }"` → `"{ x: 1 }"`).
+   * Such a list is carried as an `array` node of its arguments with
+   * `argsIsList: true`; codegen prints the array through the ExprNode printer
+   * and drops the brackets. When the whole list does not parse, each argument
+   * is parsed on its own, so only an argument that is itself unparseable falls
+   * back to raw text — and it carries no other argument's strings.
+   */
+  function buildCallArgsExpr(argsText, argTexts, startOffset) {
+    if (!argsText) return { argsExpr: safeParseExprToNode(argsText, startOffset) };
+    const isList = argTexts.length > 1 || (argTexts.length === 1 && argTexts[0].startsWith("..."));
+    if (!isList) return { argsExpr: safeParseExprToNode(argsText, startOffset) };
+    const whole = safeParseExprToNode("[" + argsText + "]", startOffset);
+    if (whole && whole.kind === "array") return { argsExpr: whole, argsIsList: true };
+    const elements = [];
+    for (const a of argTexts) {
+      const isSpread = a.startsWith("...");
+      const inner = isSpread ? a.slice(3).trim() : a;
+      let el = safeParseExprToNode(inner, startOffset);
+      if (!el) return { argsExpr: safeParseExprToNode(argsText, startOffset) };
+      // A parse that stops short of the argument's end (`Point { x: 1 }`
+      // parses as the ident `Point`) would silently drop the rest: keep the
+      // WHOLE argument as an escape-hatch instead (raw text, this argument only).
+      const consumed = el.span && typeof el.span.end === "number" ? el.span.end - (startOffset ?? 0) : inner.length;
+      if (el.kind !== "escape-hatch" && consumed < inner.length) {
+        el = { kind: "escape-hatch", span: { file: filePath, start: startOffset ?? 0, end: (startOffset ?? 0) + inner.length, line: 1, col: 1 }, nativeKind: "SkippedExpr", raw: inner };
+      }
+      elements.push(isSpread ? { kind: "spread", argument: el, span: el.span } : el);
+    }
+    const span = { file: filePath, start: startOffset ?? 0, end: (startOffset ?? 0) + argsText.length, line: 1, col: 1 };
+    return { argsExpr: { kind: "array", elements, span }, argsIsList: true };
+  }
+
+  /**
+   * Build a for-stmt's `cStyleParts` from the C-style header's TOKENS
+   * (`cStyleHeaderPartTexts`). An empty part (`for (;;)`) is `null` — the
+   * native translation's shape. Returns undefined when the header is not three
+   * parts, or when a NON-empty part fails to parse, so codegen keeps its
+   * whole-header fallback rather than dropping the part.
+   */
+  function buildCStyleParts(hdrToks) {
+    if (!hdrToks) return undefined;
+    const texts = cStyleHeaderPartTexts(hdrToks);
+    if (!texts) return undefined;
+    const nodes = texts.map((t) => (t ? safeParseExprToNode(t, 0) : null));
+    if (nodes.some((n, i) => texts[i] && !n)) return undefined;
+    return { initExpr: nodes[0], condExpr: nodes[1], updateExpr: nodes[2] };
+  }
+
+  /**
    * Phase 1: safely parse an expression string to ExprNode.
    * Never throws — returns undefined on failure.
    * Used to populate parallel ExprNode fields alongside existing string fields.
@@ -4390,7 +4500,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           innerParts.push(consume());
         }
         const innerToks = innerParts;
-        const innerText = innerToks.map((t) => t.text).join(" ").trim();
+        // Re-quote strings / drop comments: a bare `t.text` join turned
+        // `@m["a" + x] = 5` into the index `a + x`.
+        const innerText = innerToks.map(reemitTokenSource).join(" ").trim();
         // Literal-index optimization: a SINGLE bare NUMBER or STRING token rides
         // the existing string-segment representation (no computed segment).
         if (innerToks.length === 1 && (innerToks[0].kind === "NUMBER" || innerToks[0].kind === "STRING")) {
@@ -8499,14 +8611,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           // @arr.push(item) → reactive-array-mutation node
           consume(); // consume "("
-          const _ramArgs = collectCallArgsText(peek, consume);
+          const { text: _ramArgs, argTexts: _ramArgTexts } = collectCallArgs(peek, consume);
           return {
             id: ++counter.next,
             kind: "reactive-array-mutation",
             target: name,
             method: lastSeg,
             args: _ramArgs,
-            argsExpr: safeParseExprToNode(_ramArgs, spanOf(startTok, peek())?.start ?? 0),
+            ...buildCallArgsExpr(_ramArgs, _ramArgTexts, spanOf(startTok, peek())?.start ?? 0),
             span: spanOf(startTok, peek()),
           };
         }
@@ -8662,20 +8774,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // @set(@obj, "path", value) — explicit escape hatch
       if (name === "set" && peek().text === "(") {
         consume(); // consume "("
-        const argParts = [];
-        let parenDepth = 1;
-        while (parenDepth > 0 && peek().kind !== "EOF") {
-          const t = consume();
-          if (t.text === "(") parenDepth++;
-          if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-          argParts.push(t.text);
-        }
-        const argsStr = argParts.join(" ").trim();
+        const { text: argsStr, argTexts: _resArgTexts } = collectCallArgs(peek, consume);
         return {
           id: ++counter.next,
           kind: "reactive-explicit-set",
           args: argsStr,
-          argsExpr: safeParseExprToNode(argsStr, spanOf(startTok, peek())?.start ?? 0),
+          ...buildCallArgsExpr(argsStr, _resArgTexts, spanOf(startTok, peek())?.start ?? 0),
           span: spanOf(startTok, peek()),
         };
       }
@@ -8761,6 +8865,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // within-node parity compares it.
       let _binderKw = null;
       let iterable;
+      let _cStyleHdrToks = null;
       if (peek().kind === "PUNCT" && peek().text === "(") {
         // JS-style: for (const|let|var x of|in iterable) or C-style: for (init; cond; update)
         consume(); // consume `(`
@@ -8783,10 +8888,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // C-style for: collect raw tokens from `(` to `)` (inclusive)
           // emitForStmt expects iterable in the form "( init; cond; update )"
           const rawParts = ["("];
+          _cStyleHdrToks = [];
           let d = 1;
           while (d > 0 && peek().kind !== "EOF") {
             const t = consume();
-            rawParts.push(reemitTokenSource(t));
+            _cStyleHdrToks.push(t);
+            if (t.kind !== "COMMENT") rawParts.push(reemitTokenSource(t));
             if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) d++;
             if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) d--;
           }
@@ -8884,12 +8991,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (singleStmt) body = [singleStmt];
       }
       // Phase 4: detect C-style for-loop and parse parts individually
-      const _cStyleMatch = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
-      const _cStyleParts = _cStyleMatch ? {
-        initExpr: safeParseExprToNode(_cStyleMatch[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), 0),
-        condExpr: safeParseExprToNode(_cStyleMatch[2].trim(), 0),
-        updateExpr: safeParseExprToNode(_cStyleMatch[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), 0),
-      } : undefined;
+      const _cStyleParts = buildCStyleParts(_cStyleHdrToks);
       return {
         id: ++counter.next,
         kind: "for-stmt",
@@ -8899,7 +9001,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         iterable,
         body,
         iterExpr: safeParseExprToNode(iterable, 0),
-        ...(_cStyleParts && _cStyleParts.initExpr && _cStyleParts.condExpr && _cStyleParts.updateExpr ? { cStyleParts: _cStyleParts } : {}),
+        ...(_cStyleParts ? { cStyleParts: _cStyleParts } : {}),
         span: spanOf(startTok, peek()),
       };
     }
@@ -11021,6 +11123,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const startTok = consume(); // consume `for`
     let variable = 'item';
     let iterable;
+    let _cStyleHdrToks = null;
     let _binderKw = null; // s427 round 4 — see the statement-parser for-stmt sites
     if (peek().kind === 'PUNCT' && peek().text === '(') {
       consume(); // consume `(`
@@ -11041,10 +11144,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
       if (isCStyleFor) {
         const rawParts = ['('];
+        _cStyleHdrToks = [];
         let d = 1;
         while (d > 0 && peek().kind !== 'EOF') {
           const t = consume();
-          rawParts.push(reemitTokenSource(t));
+          _cStyleHdrToks.push(t);
+          if (t.kind !== 'COMMENT') rawParts.push(reemitTokenSource(t));
           if (t.kind === 'PUNCT' && (t.text === '(' || t.text === '[' || t.text === '{')) d++;
           if (t.kind === 'PUNCT' && (t.text === ')' || t.text === ']' || t.text === '}')) d--;
         }
@@ -11116,6 +11221,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       variable,
       iterable,
       iterExpr: safeParseExprToNode(iterable, 0),
+      ...(_cStyleHdrToks ? (() => { const p = buildCStyleParts(_cStyleHdrToks); return p ? { cStyleParts: p } : {}; })() : {}),
       body,
       span: spanOf(startTok, peek()),
     };
@@ -12304,14 +12410,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         const lastSeg = pathSegments[pathSegments.length - 1];
         if (pathSegments.length === 1 && typeof lastSeg === "string" && ARRAY_MUTATIONS.includes(lastSeg) && peek().text === "(") {
           consume(); // consume "("
-          const _ramArgs2 = collectCallArgsText(peek, consume);
+          const { text: _ramArgs2, argTexts: _ramArgTexts2 } = collectCallArgs(peek, consume);
           nodes.push({
             id: ++counter.next,
             kind: "reactive-array-mutation",
             target: name,
             method: lastSeg,
             args: _ramArgs2,
-            argsExpr: safeParseExprToNode(_ramArgs2, spanOf(startTok, peek())?.start ?? 0),
+            ...buildCallArgsExpr(_ramArgs2, _ramArgTexts2, spanOf(startTok, peek())?.start ?? 0),
             span: spanOf(startTok, peek()),
           });
           continue;
@@ -12453,20 +12559,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // @set(@obj, "path", value) — explicit escape hatch
       if (name === "set" && peek().text === "(") {
         consume(); // consume "("
-        const argParts = [];
-        let parenDepth = 1;
-        while (parenDepth > 0 && peek().kind !== "EOF") {
-          const t = consume();
-          if (t.text === "(") parenDepth++;
-          if (t.text === ")") { parenDepth--; if (parenDepth === 0) break; }
-          argParts.push(t.text);
-        }
-        const _resArgs = argParts.join(" ").trim();
+        const { text: _resArgs, argTexts: _resArgTexts2 } = collectCallArgs(peek, consume);
         nodes.push({
           id: ++counter.next,
           kind: "reactive-explicit-set",
           args: _resArgs,
-          argsExpr: safeParseExprToNode(_resArgs, spanOf(startTok, peek())?.start ?? 0),
+          ...buildCallArgsExpr(_resArgs, _resArgTexts2, spanOf(startTok, peek())?.start ?? 0),
           span: spanOf(startTok, peek()),
         });
         continue;
@@ -13498,6 +13596,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // within-node parity compares it.
       let _binderKw = null;
       let iterable;
+      let _cStyleHdrToks = null;
       if (peek().kind === "PUNCT" && peek().text === "(") {
         // JS-style: for (const|let|var x of|in iterable) or C-style: for (init; cond; update)
         consume(); // consume `(`
@@ -13520,10 +13619,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // C-style for: collect raw tokens from `(` to `)` (inclusive)
           // emitForStmt expects iterable in the form "( init; cond; update )"
           const rawParts = ["("];
+          _cStyleHdrToks = [];
           let d = 1;
           while (d > 0 && peek().kind !== "EOF") {
             const t = consume();
-            rawParts.push(reemitTokenSource(t));
+            _cStyleHdrToks.push(t);
+            if (t.kind !== "COMMENT") rawParts.push(reemitTokenSource(t));
             if (t.kind === "PUNCT" && (t.text === "(" || t.text === "[" || t.text === "{")) d++;
             if (t.kind === "PUNCT" && (t.text === ")" || t.text === "]" || t.text === "}")) d--;
           }
@@ -13614,12 +13715,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         if (singleStmt) body = [singleStmt];
       }
       // Phase 4: detect C-style for-loop and parse parts individually
-      const _cStyleMatch2 = iterable.match(/^\(\s*(.*?)\s*;\s*(.*?)\s*;\s*(.*?)\s*\)$/s);
-      const _cStyleParts2 = _cStyleMatch2 ? {
-        initExpr: safeParseExprToNode(_cStyleMatch2[1].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), 0),
-        condExpr: safeParseExprToNode(_cStyleMatch2[2].trim(), 0),
-        updateExpr: safeParseExprToNode(_cStyleMatch2[3].trim().replace(/\s*\+\s*\+/g, "++").replace(/\s*-\s*-/g, "--"), 0),
-      } : undefined;
+      const _cStyleParts2 = buildCStyleParts(_cStyleHdrToks);
       nodes.push({
         id: ++counter.next,
         kind: "for-stmt",
@@ -13629,7 +13725,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         iterable,
         body,
         iterExpr: safeParseExprToNode(iterable, 0),
-        ...(_cStyleParts2 && _cStyleParts2.initExpr && _cStyleParts2.condExpr && _cStyleParts2.updateExpr ? { cStyleParts: _cStyleParts2 } : {}),
+        ...(_cStyleParts2 ? { cStyleParts: _cStyleParts2 } : {}),
         span: spanOf(startTok, peek()),
       });
       continue;
@@ -14148,14 +14244,17 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         while (true) {
           const t = peek();
           if (t.kind === "EOF") break;
-          if (t.text === "(") depth++;
-          if (t.text === ")") {
+          // PUNCT-only depth / separator, and re-quoted strings: a bare
+          // `t.text` join unquoted a string file argument, and a string "("
+          // or "," moved the depth / split the argument.
+          if (t.kind === "PUNCT" && _OPEN_BRACKETS.has(t.text)) depth++;
+          if (t.kind === "PUNCT" && _CLOSE_BRACKETS.has(t.text)) {
             depth--;
             if (depth === 0) { lastTok = consume(); break; }
           }
-          if (t.text === "," && depth === 1) { consume(); break; }
+          if (t.kind === "PUNCT" && t.text === "," && depth === 1) { consume(); break; }
           lastTok = consume();
-          fileParts.push(lastTok.text);
+          if (lastTok.kind !== "COMMENT") fileParts.push(reemitTokenSource(lastTok));
         }
         // Collect second arg (url)
         const urlParts = [];
@@ -14163,12 +14262,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         while (depth > 0) {
           const t = peek();
           if (t.kind === "EOF") break;
-          if (t.text === "(") depth++;
-          if (t.text === ")") {
+          if (t.kind === "PUNCT" && _OPEN_BRACKETS.has(t.text)) depth++;
+          if (t.kind === "PUNCT" && _CLOSE_BRACKETS.has(t.text)) {
             depth--;
             if (depth === 0) { lastTok = consume(); break; }
           }
           lastTok = consume();
+          if (lastTok.kind === "COMMENT") continue;
           if (lastTok.kind === "STRING") {
             // A4: preserve backtick templates so `${...}` interpolations
 
