@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 117 |
+| HIGH | 116 |
 | MED | 276 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -14418,7 +14418,7 @@ Found once TodoMVC's rows started rendering (S427). Same on base at top level (`
 assert labels only, so the app still LOOKS broken even though its rows now render.
 
 ### g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup — two pre-existing lift-body lowering defects: `n = n + 1` inside a `for…lift` over a reactive list is emitted as `const n = n + 1` (TDZ), and a destructured `const` in an outer-effect group is invisible to the keyed-list setup hoisted outside the effect — `NEW S427-peter; MED; open`
-<!-- @gap id=g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup sev=HIGH status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S427-dev-agent-reproduced-both-at-top-level-on-base-NOT-PA-verified -->
+<!-- @gap id=g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup sev=HIGH status=resolved locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S427-dev-agent-reproduced-both-at-top-level-on-base-NOT-PA-verified -->
 
 Reported by the S427 dev agent, reproduced at top level on base by it; **not yet PA-verified** — re-reproduce
 before dispatching. Also reported, same status: a bare-expression display (e.g. a `~` initializer) sharing a lift
@@ -14440,6 +14440,22 @@ and dies at boot, which §50 rejects (corpus negative fixture `phase3-assign-exp
 scope-blind demotion of a working keyed list, a loud→silent predicate miss and push-staleness on the demoted
 path. **Round 2 is fully specified, with repros, in `docs/changes/s427-lift-body-lowering/review-round1/`.**
 ⚑ The const/lin case must fall back to base's LOUD failure: `E-ASSIGN-004` lives in bryan's OPEN #996.
+
+⛑ **S429-peter — RESOLVED (the two verified lowering defects), after five build rounds and four adversarial passes.**
+`let`-declared rebinds in a lift body now lower to assignments (`n = n + 1`, not `const n = n + 1`); block
+declarations stay visible to the hoisted keyed setup; an impure render loop (it writes an outer binding, incl.
+member writes `acc.n = …`) lowers to the plain loop, scope-aware (a nested `let n` is not the outer `n`); a write to a
+rendering loop's OWN binder takes effect only when the head is `for (let …)` — a `const` or keywordless binder write
+fails the compile (E-CODEGEN-INVALID-LOGIC naming the binder; ⚑ keywordless-binder mutability is PENDING bryan's
+ruling, §17.4a vs §50.8.5 — it stays loud until then). `const` reassignment is caught by #996's E-ASSIGN-004
+(merged into the branch; codegen no longer double-reports). The loop-head keyword reaches native-re-parsed bodies
+(components, match/engine arms) via the parser's own `declKind` → `letBinder` in `translate-stmt.js`
+`makeForStmtInOf` — NOT a source-text scan (round 4's scan misread block-relative spans in both directions; deleted).
+Corpus: 2 newly compile (the §50 restorations `phase1-let-bare-001`, `phase3-assign-expr-chained-080`), 0 newly fail,
+31 content diffs, all `let`-rebind sites. Spec + every round's repros: `docs/changes/s427-lift-body-lowering/`.
+The two agent-reported side items above (bare-expr display overwriting lifted children; textarea anchor in a match
+arm in `if=`) remain unverified and are NOT claimed. Known and pinned, not fixed: an immediately-invoked closure that
+writes an outer binding in a keyed body (`[1].forEach(x => { n++ })`) still shares one counter (`3:a,3:b,3:c`).
 
 ⛑ **S427-peter — `g-lift-inside-each-row-or-match-arm-silently-dropped` RESOLVED (#1022).** Traced: the each-row
 drop was `emit-each.ts` `renderTemplateChildToJs` (a `for` statement fell to `inner = ""` with the comment
@@ -17271,6 +17287,11 @@ compiles. Same shape as §8's unproven gate: a test that cannot fail for the rea
 
 — NEW S422-bryan (surfaced by the E-ASSIGN-004 build; agent-located, PA-reproduced with a four-way control on unmodified main)
 <!-- @gap id=g-top-level-logic-reassignment-lowers-as-a-fresh-const-so-the-let-escape-fails-there sev=HIGH status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:358(top-level emitOpts omits declaredNames so the emit-logic.ts:2097 reassignment guard is dead)+emit-reactive-wiring.ts:1361,:1852+emit-library.ts:2097,:2109 prov=empirical:PA-reproduced-by-execution-on-unmodified-main-with-a-four-way-control-increment-and-state-cell-and-in-function-all-clean-only-the-equals-assignment-form-fails -->
+
+⛑ **S429-peter — the `let` FORM is fixed by the S429 lift-body PR, PA-verified by execution:** `${ let n = 1 }` then
+`${ n = 2 }` (and the same inside one block) failed the compile on `87c2df3e` (E-CODEGEN-INVALID-LOGIC, duplicate
+declaration) and renders `2` on the branch — the declared-name set now reaches the top-level emit path. **Status left
+OPEN** for the function-parameter half (`function f(p) { p = 3 }`), which that PR does not touch.
 
 
 ### G-E-ASSIGN-004-NEVER-FIRES-IN-EVENT-HANDLER-ATTRIBUTE-POSITION — a `const` reassignment inside `onclick=${…}` compiles at exit 0 and throws `TypeError` on the first click
