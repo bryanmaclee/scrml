@@ -7561,6 +7561,75 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S428 (2026-09-23, bryan · XPS-8950) — the decision was made: do BOTH tracks, and the prerequisites turn out to have been written down since S117
+
+**The arc.** Started as a routine landing session and became the architecture decision. bryan named a
+recurring cycle unprompted — *fix a bug that creates new bugs → PA says we need a real compiler → I say
+spend the tokens → PA audits and says it's fine, just tweaks* — and the PA had run the full cycle on him
+inside this one session. Two purpose-built measurements followed, then a real 12,277-line program was
+pointed at the compiler for the first time.
+
+**The falsifier (dispatched on bryan's go).** The S425 PA's thesis — *"the middle ground is one shared
+masking pass plus an IR"* — **collapsed.** Of 59 post-AST open-HIGH gaps, 46 (78%) are ordinary logic
+bugs and only 9 are text-reasoning; **only 3 over scrml SOURCE text**, the sole substrate a front-end
+pass could mask. **Five of the nine scan the compiler's OWN EMITTED OUTPUT**, which no parser or parse
+IR can reach. bryan's premise survived; the PA's answer did not. It also found the `57/18/16/7` split
+the session booted on was **S413-era and mixed two watermarks** — that 98-open-HIGH figure belongs to
+`38217390` (983 markers), quoted beside a 1,036-marker count from a later snapshot.
+
+**The regeneration-rate measurement.** Unit of analysis = the FIX, not the defect, and falsifiable both
+ways. **A file that receives a fix is ~4× more likely to receive a new defect filing within 5 sessions
+than one that does not (56.5% vs 14.3%), stable 2.6×–4.5× across four months.** Raw same-file
+regeneration 75% (35/47), median lag 1 session. 36% of reviewed fix PRs had a new gap filed out of
+reviewing that very fix. One finding cut against the sharp form of the claim: *non-fix* PRs convict at
+75.0% against *fix* PRs at 82.1%, so it is **landings** that regenerate defects, not fixes specifically.
+The structural reading: 37 of the 46 "ordinary logic bugs" are plumbing, and **a per-defect instrument
+cannot return "these 37 are one thing" — which is why every audit lands on "just a few tweaks."**
+
+**The self-host migration — the first real program this compiler has ever been pointed at.** 12,277 LOC,
+baseline 3 of 11 modules compiling. One afternoon surfaced six defects that **24,083 passing tests and a
+906-case conformance corpus did not**: `export class` is silently deleted from the artifact (exit 0,
+zero diagnostics, `node --check` passes, guaranteed `ReferenceError`); non-exported classes emit but are
+never scoped; **no forbidden-vocabulary walker enters a class body**, so `null`/`undefined`/`try`/`throw`
+pass unchecked; `return f() !{ … }` silently drops the return; `is some` in a `function(){}` body emits
+an undefined helper; and the two front-ends build **different ASTs for the `!{}` guard form**. Four of
+the six are on one surface — the language's only error-handling mechanism.
+
+**And the explanation.** `compiler/tests/self-host/ast.test.js` never invokes the compiler: it
+text-substitutes `fn`→`function`, wraps the result in a `Blob` and `import()`s it **as JavaScript**, is
+`describe.skip`-ed, and is not in the gate. Its premise *requires* the self-host source to be valid JS —
+so the one test guarding the tree actively selected against it becoming scrml.
+
+**The decision.** bryan: *"split it out and work on both."* Repair the TS compiler and bootstrap in
+scrml, in parallel — on the grounds that the current compiler took 6+ months to reach here, a re-reach
+in a month is a 6× speedup, and the bootstrap can run largely autonomously because it has a terminating
+condition the ledger does not. The PA's reservation, recorded: the scarce resource is bryan's attention,
+not tokens, and the bootstrap track is a standing ruling generator.
+
+**And the prerequisites were already written down.** SPEC.md has carried **P1 (`class`) and P2 (`try`)
+as explicitly-named open R1 decisions since S117** — *"`class` is not scrml vocabulary"*, *"`try` /
+`catch` / `finally` are forbidden scrml vocabulary"*, both with the rejection-code question left open.
+The self-host tree declares 14 classes and 14 `try` blocks. They were never neglected; they were
+theoretical, until a program large enough to care showed up.
+
+- **#996** `E-ASSIGN-004` at statement position — **auto-merged out from under the session** while the
+  mandatory S239 adversarial pass was still running. Both gates cleared clean afterwards: zero false
+  positives across a deliberate hunt, and **0 corpus files newly rejected** over 519 compiled per side
+  with 2,149 emitted artifacts byte-identical.
+- **#1030** restored the `@generated:recent-sessions` block #996 reverted. Root: `state.ts --write` run
+  **mid-merge**, so the generator saw one parent's history — and `--check` PASSED because generator and
+  checker share the vantage point.
+- **#1031** six gaps (three of them false negatives in #996 — event-handler position, `++`/`--`, `lin`),
+  the #1028 review marker at `verdict=finding`, the stale-figure supersession, peter's outbox note.
+- **#1034** self-host A1+A2 migration — 343 absence tokens and 15 strict-equality operators, **300
+  insertions / 300 deletions, a 1:1 substitution**. The 5 `!{}` sites were **held out**: the cloud
+  `within-node` parity gate caught that one `try`→`!{}` in `meta-checker` produced **nine** field-level
+  divergences between the native parser and the Acorn pipeline. The allowlist was deliberately not
+  re-baselined.
+- **#1035** the six self-host defect classes, filed **by class rather than by instance** — the direct
+  application of the regeneration measurement.
+
+
 ### S429, second half (2026-09-23, peter · P-Tech1) — two more landed, four held, and two of the holds were the SPEC saying no
 
 **The arc.** Continued after the first wrap, under "merge each when green". Six dev arcs and seven adversarial passes.
