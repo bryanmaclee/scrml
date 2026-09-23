@@ -22,6 +22,8 @@ ${
         const { tokenizeAttributes, tokenizeLogic, tokenizeSQL, tokenizeCSS, tokenizeError, tokenizePassthrough } = await import("./tokenizer.js")
     }
 
+    import { safeCall, HostError } from 'scrml:host'
+
     // ---------------------------------------------------------------------------
     // Expression parser import — for ExprNode parallel fields (Phase 1/2)
     // ---------------------------------------------------------------------------
@@ -158,8 +160,9 @@ ${
                                 ))
                             }
                         } else if (valTok.kind == "ATTR_CALL") {
-                            let parsed
-                            try { parsed = JSON.parse(valTok.text) } catch (e) { parsed = { name: valTok.text, args: "" } }
+                            let parsed = safeCall(() => JSON.parse(valTok.text)) !{
+                                | ::Thrown(message, name) :> ({ name: valTok.text, args: "" })
+                            }
                             const rawArgs = parsed.args || ""
                             const argList = rawArgs.trim().length == 0
                                 ? []
@@ -325,8 +328,9 @@ ${
 
             if (tok.kind == "ATTR_TYPED_DECL") {
                 hasTypedDecls = true
-                let parsed
-                try { parsed = JSON.parse(tok.text) } catch (e) { parsed = { name: "?", typeExpr: "" } }
+                let parsed = safeCall(() => JSON.parse(tok.text)) !{
+                    | ::Thrown(message, name) :> ({ name: "?", typeExpr: "" })
+                }
 
                 const name = parsed.name
                 const rawTypeExpr = parsed.typeExpr
