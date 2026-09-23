@@ -98,3 +98,95 @@ Total errors across the tree: **349 -> 37**.
 - D4: `let x = ^{ ... }` (meta block as expression RHS) produces malformed JS ->
   E-CODEGEN-INVALID-LOGIC (`tab:325`).
 
+---
+
+## TIER B CHECKPOINT — measured by execution after B1 + B2
+
+**HEADLINE: 5 of 11 compile clean** (baseline 3, after Tier A 5). Total errors **349 -> 33**.
+
+| module | exit | errors/warnings | remaining error codes |
+|---|---|---|---|
+| ast | 1 | 14 / 540 | E-FN-003 x10, E-TRY-NOT-IN-SCRML x2, E-AWAIT-NOT-IN-SCRML x2 |
+| bpp | 0 | clean | — |
+| bs | 1 | 1 / 53 | E-FN-003 x1 |
+| cg | 0 | clean | — |
+| dg | 1 | 8 / 165 | E-FN-003 x8 |
+| meta-checker | 0 | clean | — |
+| module-resolver | 0 | clean | — |
+| pa | 1 | 1 / 56 | E-SCOPE-001 x1 |
+| ri | 0 | clean | — |
+| tab | 1 | 1 / 154 | E-CODEGEN-INVALID-LOGIC x1 |
+| ts | 1 | 8 / 327 | E-FN-003 x5, E-FN-004 x2, E-FN-002 x1 |
+
+### B1 counts — `try`/`catch` -> `safeCall` + `!{}` (§19 + `scrml:host`)
+
+14 real `try` blocks in the tree (all other `try`/`catch` tokens are inside string literals or
+comments). **5 migrated, 9 left unmigrated and reported.**
+
+Migrated (each one `let x = safeCall(() => <original expr>) !{ | ::Thrown(message, name) :> <original handler> }`):
+
+- `pa:59` `readTableSchema` PRAGMA introspection
+- `pa:331` `processDbBlock` realpathSync resolution
+- `ast:162` ATTR_CALL `JSON.parse`
+- `ast:329` ATTR_TYPED_DECL `JSON.parse`
+- `meta-checker:297` `extractIdentifiersFromAST` fallback
+
+No new error enum was needed: `scrml:host` already declares `safeCall(thunk) ! -> HostError` with
+`HostError::Thrown(message, string)`, which is the exact shape of "a JS-host call threw".
+
+### B2 counts — `async`/`await` (§19.9.8)
+
+24 raw `await` tokens. 20 are inside `^{}` meta-block bodies (legal JS host — excluded by §19.9.8's
+own JS-host-interop carve-out) or inside string literals. `async` appears 0 times in a code position.
+**2 real code-position sites: `ast:35` and `ast:39`. Both left unmigrated — see below.**
+
+### THE UNMIGRATABLE LIST (9 B1 blocks + 2 B2 sites)
+
+**(c) the language has no way to express this**
+
+- `ast:34-43` (2 nested `try` blocks, containing the 2 B2 `await import` sites) — dynamic host-module
+  import with a two-level filesystem fallback. §19.9.8 enumerates the Promise boundaries the
+  body-split/CPS machinery covers (`^{}`, `_{}`, server-fn return, `use foreign:`); a bare
+  `import()` call in scrml source is none of them. MEASURED: dropping `await` from
+  `const mod = import("./x.js")` emits a bare `import(...)` with no auto-await and no diagnostic —
+  `mod` is a Promise. And the failure being caught is module RESOLUTION failure of a JS-host
+  primitive, which has no `!` signature to hang an `!{}` on. Moving it into `^{}` would work but is
+  a restructure, and the source comment at `ast:31-32` says `^{}` is stripped in the test context —
+  which is why the fallback lives outside `^{}` in the first place.
+- `pa:282-297` — `try { … } finally { cache.closeAll() }`. scrml has no `finally`, no `defer`, and
+  no scope-exit primitive. `safeCall` cannot express "run this cleanup on both paths". Deleting the
+  `finally` and calling `closeAll()` after the loop leaks the DB handle on any throw.
+
+**(b) compiler defect**
+
+- `pa:104-113`, `pa:122-131`, `pa:134-145`, `pa:142`, `pa:154` — all five sit inside
+  `class SchemaCache` method bodies. MEASURED: an `!{}` guarded expression inside a class method
+  body cannot be lowered — E-CODEGEN-INVALID-LOGIC (defect D5). Migrating these would turn pa's one
+  remaining error into a codegen failure.
+- `ast:553-557` — `try { return parseExprToNode(...) } catch (_e) { return not }`. The 1:1 canonical
+  form is `return safeCall(...) !{ … }`. MEASURED: that form emits the guard but **silently drops
+  the `return`** (defect D7) — the function returns `undefined` on every path, exit 0, no
+  diagnostic. Not migrated rather than rewritten around.
+
+### Additional compiler defects found while migrating (all MEASURED, minimal repros in the report)
+
+- D5: `!{}` inside a class-method body -> E-CODEGEN-INVALID-LOGIC (raw scrml text in the JS output).
+- D6: `export class X { }` is **silently dropped from the emitted JS**, exit 0, no diagnostic.
+  12 of the 14 class declarations in this tree are `export class`; the emitted JS for the tree
+  contains **2** class definitions total. Three modules that "compile clean" (`ri`,
+  `module-resolver`, `meta-checker`) emit `new RIError(...)` / `new ModuleError(...)` /
+  `new MetaError(...)` with the class nowhere in the artifact.
+- D7: `return <failableCall> !{ … }` silently drops the `return`.
+- D8: E-FN-003 false positive — a `for (const x of xs) { x.f = v }` inside a `fn` body is reported as
+  an outer-scope write, though §48.3.3 says "Local `let`/`const`/`lin` variables declared inside the
+  `fn` body may be freely mutated" (`ast:2488`, `ast:2492`).
+- Walker gaps: E-TRY-NOT-IN-SCRML fires on only 6 of the 14 real `try` blocks; `throw new Error(...)`
+  at `meta-checker:454`, `meta-checker:459`, `ts:446` is never rejected.
+
+### Non-conformance classes OUTSIDE the four rules (not touched; reported)
+
+- E-FN-003 x24 + E-FN-004 x2 + E-FN-002 x1 — `fn` declarations whose bodies call nested `function`
+  helpers, call `Math.random()`/`Date.now()`/`document.createElement`. Source non-conformance; the
+  fix is a declaration-shape change (`fn` -> `function`), which is not a syntax migration.
+- 3 `throw new Error(...)` sites (forbidden vocabulary, not one of the four rules).
+
