@@ -17746,3 +17746,43 @@ afternoon by pointing a real program at the compiler — the first such program 
 
 — NEW S428-bryan (both surfaced by the S428 self-host migration; GAP 2's no-diagnostic behaviour reported as MEASURED by the dispatch, PA has not re-run it)
 <!-- @gap id=g-two-language-gaps-a-real-12k-program-hit-that-the-corpus-never-did sev=MED status=open locus=searched:compiler/SPEC.md§19.9.8,compiler/src/codegen/emit-logic.ts prov=adopter:self-host-dogfood-RULING-GATED-no-governing-sentence-exists-for-either-shape -->
+
+### G-THE-TWO-FRONT-ENDS-DISAGREE-ABOUT-THE-GUARD-FORM — one `try`/`catch` → `!{}` migration produced NINE field-level parity divergences
+
+**PA-VERIFIED BY EXECUTION, and the isolation was natural rather than constructed.** The S428
+self-host migration touched 6 modules with two mechanical rules (`null`→`not`, `===`→`==`) and 3
+modules with a third (`try`/`catch` → `safeCall(...) !{ }`). The `within-node` parity gate — which
+measures FIELD-level divergence between the **native parser** and the **Acorn pipeline** — split them
+perfectly:
+
+| module | A1/A2 sites | B1 (`!{}`) sites | within-node residual |
+|---|---|---|---|
+| `ri.scrml` | 52 | 0 | **clean** |
+| `ts.scrml` | 157 | 0 | **clean** |
+| `meta-checker.scrml` | **0** | **1** | **9** |
+| `pa.scrml` | 40 | 2 | **12** |
+
+**A file whose ONLY change was a single `try`/`catch` → `!{}` produced nine divergences.** Reverting
+B1 and keeping A1+A2 takes the suite to **1016 pass / 0 fail** (PA-run locally). `pa.scrml`'s residual
+breakdown: FIELD-SHAPE 3 · MISSING-FIELD 4 · COUNT-LENGTH 3 · SPAN-COORD 2.
+
+⚑ **This is the most serious of the four `!{}` defects filed at S428**, because the other three are
+LOWERING bugs and this one is a **PARSE-level disagreement**: the two front-ends build different ASTs
+for the canonical error-handling shape. Under the M5/M6 ladder the native parser is meant to replace
+the Acorn pipeline behind `--parser=scrml-native`; a form the two disagree about cannot be swapped
+safely.
+
+**The allowlist was deliberately NOT re-baselined.** The gate's own header states that where an
+allowlist entry reflects an actual divergence *"the allowlist entries should be reduced/removed"*.
+Growing it to make the migration green would have buried a parser disagreement inside an unrelated
+commit — the §8 absorbed-escape-hatch shape. The 5 B1 sites are held out of #1034 instead.
+
+**Companion defects on the same `!{}` surface, all S428:**
+[[g-return-of-a-failable-call-with-a-guard-silently-drops-the-return]] (HIGH, PA-verified) ·
+[[g-class-is-a-front-end-blind-spot]] symptom 4 (`!{}` in a class method → `E-CODEGEN-INVALID-LOGIC`) ·
+[[g-is-some-in-a-function-expression-body-emits-an-undefined-helper]].
+**Four defects on one surface in one afternoon** — the surface is the language's ONLY error-handling
+mechanism, and it had no real program exercising it until today.
+
+— NEW S428-bryan (PA-VERIFIED BY EXECUTION — cloud gate caught it, PA isolated it by reverting B1 alone and re-running the suite locally to 1016/0)
+<!-- @gap id=g-the-two-front-ends-disagree-about-the-guard-form sev=HIGH status=open locus=searched:compiler/native-parser,compiler/src/ast-builder.js,compiler/src/codegen/compat/parser-workarounds.js prov=empirical:meta-checker-with-zero-A1-sites-and-one-B1-site-produced-nine-field-level-divergences-and-reverting-B1-takes-the-suite-to-1016-pass-0-fail -->
