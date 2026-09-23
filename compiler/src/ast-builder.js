@@ -8717,10 +8717,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // consume `await`
       }
       let variable = "item";
-      // s427 round 3 (F1) — the binder keyword of a `for (const|let|var x of …)` head.
-      // Recorded ONLY for `const` (as `constBinder: true`): a write to a `const` loop
-      // binder must stay loud, a write to a `let` one must take effect, and the head
-      // keyword was otherwise discarded here. LIVE-only (within-node STRIP_KEYS).
+      // s427 rounds 3-4 (F1) — the binder keyword of a `for (const|let|var x of …)`
+      // head, otherwise discarded here. Recorded ONLY for `let` (as `letBinder: true`):
+      // a write to a rendering loop's binder takes effect only when the binder is
+      // `let`; a `const` or keywordless binder write fails the compile (the
+      // keywordless case pending a language ruling — see emit-lift.js
+      // checkLoopBinderWrites). LIVE-only (within-node STRIP_KEYS). Third site:
+      // parseOneForStmt (for-as-expression).
       let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -8856,7 +8859,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         id: ++counter.next,
         kind: "for-stmt",
         ...(isForAwait ? { isAwait: true } : {}),
-        ...(_binderKw === "const" ? { constBinder: true } : {}),
+        ...(_binderKw === "let" ? { letBinder: true } : {}),
         variable,
         iterable,
         body,
@@ -10983,6 +10986,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const startTok = consume(); // consume `for`
     let variable = 'item';
     let iterable;
+    let _binderKw = null; // s427 round 4 — see the statement-parser for-stmt sites
     if (peek().kind === 'PUNCT' && peek().text === '(') {
       consume(); // consume `(`
       // Detect C-style: look for `;` at paren depth 1 before closing `)`
@@ -11014,7 +11018,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       } else {
         // for-of / for-in: for (const|let|var x of|in iterable)
         if (peek().kind === 'KEYWORD' && (peek().text === 'const' || peek().text === 'let' || peek().text === 'var')) {
-          consume();
+          _binderKw = consume().text;
         }
         // A5 (2026-05-17) — destructuring LHS in for-as-expression.
         if (peek().kind === 'PUNCT' && (peek().text === '[' || peek().text === '{')) {
@@ -11073,6 +11077,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return {
       id: ++counter.next,
       kind: 'for-stmt',
+      ...(_binderKw === 'let' ? { letBinder: true } : {}),
       variable,
       iterable,
       iterExpr: safeParseExprToNode(iterable, 0),
@@ -13455,10 +13460,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // consume `await`
       }
       let variable = "item";
-      // s427 round 3 (F1) — the binder keyword of a `for (const|let|var x of …)` head.
-      // Recorded ONLY for `const` (as `constBinder: true`): a write to a `const` loop
-      // binder must stay loud, a write to a `let` one must take effect, and the head
-      // keyword was otherwise discarded here. LIVE-only (within-node STRIP_KEYS).
+      // s427 rounds 3-4 (F1) — the binder keyword of a `for (const|let|var x of …)`
+      // head, otherwise discarded here. Recorded ONLY for `let` (as `letBinder: true`):
+      // a write to a rendering loop's binder takes effect only when the binder is
+      // `let`; a `const` or keywordless binder write fails the compile (the
+      // keywordless case pending a language ruling — see emit-lift.js
+      // checkLoopBinderWrites). LIVE-only (within-node STRIP_KEYS). Third site:
+      // parseOneForStmt (for-as-expression).
       let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -13587,7 +13595,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         id: ++counter.next,
         kind: "for-stmt",
         ...(isForAwait ? { isAwait: true } : {}),
-        ...(_binderKw === "const" ? { constBinder: true } : {}),
+        ...(_binderKw === "let" ? { letBinder: true } : {}),
         variable,
         iterable,
         body,

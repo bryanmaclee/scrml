@@ -43,6 +43,7 @@
  */
 
 import { nativeParseFile } from "../native-parser/parse-file.js";
+import { annotateNativeForBinders } from "./codegen/for-binder-keyword.ts";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
@@ -1194,6 +1195,7 @@ function reparseSynthesizedFile(
   const errors = result.errors ?? [];
   upgradeNativePropsDeclsInFileAST(result.ast, errors);
   upgradeNativeCallRefArgExprNodesInFileAST(result.ast, filePath);
+  annotateNativeForBinders(result.ast, source); // s427 r4 — for (let …) binders
   return { ast: result.ast, errors };
 }
 

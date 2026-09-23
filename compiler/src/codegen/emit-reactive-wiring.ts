@@ -3,7 +3,7 @@ import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, setStructuralDeclNamesForFile } from "./emit-logic.js";
-import { pushLiftNonKeyed, popLiftNonKeyed } from "./emit-lift.js";
+import { pushLiftNonKeyed, popLiftNonKeyed, checkLoopBinderWrites } from "./emit-lift.js";
 import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
 import {
@@ -856,6 +856,10 @@ export function buildMachineBindingsMap(fileAST: any): Map<string, { engineName:
 export function emitReactiveWiring(ctx: CompileContext): string[] {
   const { fileAST, errors, encodingCtx } = ctx;
   const lines: string[] = [];
+
+  // s427 round 4 — a write to a rendering loop's non-`let` binder fails the compile
+  // (checkLoopBinderWrites, emit-lift.js). One whole-file walk covers every host.
+  checkLoopBinderWrites(fileAST, errors);
 
   const derivedNames = collectDerivedVarNames(fileAST);
   // g-assignment-emits-init-set-inverting-reset (§6.8) — structurally-declared

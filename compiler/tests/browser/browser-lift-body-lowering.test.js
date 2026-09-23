@@ -448,9 +448,20 @@ describe("round 3 F1 — a write to the loop's own binder", () => {
     expect(lis()).toEqual(["a!", "b!"]);
   });
 
-  test("a `const` binder that is written is LOUD at boot, never dropped", () => {
-    const { initError } = compileAndMount(`<program>\n${S}<ul>\${ for (const it of @items) { it = it + "!"
-        lift <li>\${it}</li> } }</ul>\n</program>\n`, "f1-const", { expectBootError: true });
-    expect(String(initError)).toMatch(/readonly|read-only|constant|const/i);
+  test("`+=` and `++` on a `let` binder take effect too", () => {
+    const app = mount(`for (let it of @items) { it += "!"
+        lift <li>\${it}</li> }`, "f1-pe");
+    expect(lis()).toEqual(["a!", "b!"]);
+    app.done();
+    const app2 = mount(`for (let it of @nums) { it++
+        lift <li>\${it}</li> }`, "f1-pp", `<nums> = [1, 2]\n`);
+    expect(lis()).toEqual(["2", "3"]);
+    app2.done();
+  });
+
+  test("a `let` binder written in a match arm (native-parsed arm body) takes effect", () => {
+    compileAndMount(`<program>\n${S}\${ type Ph:enum = { A, B } }\n<phase>: Ph = .A\n<match for=Ph on=@phase>\n    <A><ul>\${ for (let it of @items) { it = it + "!"
+        lift <li>\${it}</li> } }</ul></>\n    <B><p>b</p></>\n</>\n</program>\n`, "f1-arm").done();
+    expect(lis()).toEqual(["a!", "b!"]);
   });
 });

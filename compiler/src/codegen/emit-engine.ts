@@ -53,6 +53,7 @@
 
 import { parseAfterDuration } from "./parse-after-duration.ts";
 import { nsName, nsCellKey, stripNsName } from "./chunk-namespace.ts";
+import { annotateNativeForBinders } from "./for-binder-keyword.ts";
 
 // ---------------------------------------------------------------------------
 // Types — canonical engine-decl + engineMeta shapes consumed
@@ -2491,6 +2492,7 @@ function buildEngineArms(
           const synthResult = nativeParseFile(synthLabel, trimmed);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
+            annotateNativeForBinders(body, trimmed); // s427 r4 — for (let …) binders
           }
         } catch (_e) {
           // Defensive — leave body empty on parse failure.
@@ -2504,6 +2506,7 @@ function buildEngineArms(
           const synthResult = nativeParseFile(synthLabel, inner);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
+            annotateNativeForBinders(body, inner); // s427 r4 — for (let …) binders
           }
         } catch (_e) {
           // Defensive — leave body empty on parse failure.

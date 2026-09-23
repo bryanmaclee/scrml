@@ -7,6 +7,7 @@ import { VOID_ELEMENTS } from "./utils.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
+import { CGError } from "./errors.ts";
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
 
 // ---------------------------------------------------------------------------
@@ -2329,13 +2330,71 @@ export function withLoopBinders(names, forNode) {
 }
 
 /**
- * s427 round 3 (F1) — the keyword of an emitted plain `for (… of …)` head. `let`
- * when the body writes its binder and the source binder is not `const`, so the
- * write takes effect; `const` otherwise — including a written `const` binder, whose
- * write then throws at runtime (loud) rather than being dropped.
+ * s427 rounds 3-4 (F1) — the keyword of an emitted plain `for (… of …)` head. `let`
+ * only when the SOURCE binder is `let` and the body writes it, so the write takes
+ * effect; `const` otherwise. (A write to any other binder of a rendering loop is a
+ * compile error — checkLoopBinderWrites — so its emission never ships.)
  */
 export function forHeadKeyword(forNode) {
-  return !(forNode && forNode.constBinder) && forLoopWritesItsBinder(forNode) ? "let" : "const";
+  return forNode && forNode.letBinder && forLoopWritesItsBinder(forNode) ? "let" : "const";
+}
+
+/**
+ * s427 round 4 — a write to a RENDERING loop's own binder is accepted only when the
+ * binder is declared `let` (`for (let it of …)`). Otherwise the compile fails here:
+ *
+ *   - `for (const it of …) { it = … }` — §50.8.5: assigning to a `const` binding is a
+ *     compile error. The type system's E-ASSIGN-004 check treats every loop binder
+ *     as mutable (the head keyword never reached it), so it does not fire; before
+ *     s427 the compile failed only by accident (the keyed factory re-declared its
+ *     own parameter). Without this the write compiled and threw at boot — or, with
+ *     an initially empty list, only logged a scrml effect error on the first push.
+ *   - `for (it of …) { it = … }` — the keywordless head is canonical (§17.4a), and a
+ *     binding created without `let` is `const` (§50.8.5). Whether a keywordless loop
+ *     binder is mutable is a LANGUAGE decision pending bryan's ruling; until then it
+ *     is not newly accepted (it failed the compile before s427).
+ *
+ * Reported as E-CODEGEN-INVALID-LOGIC (an existing code; no code is minted) with a
+ * message that names the binder. Walks the WHOLE file AST, so every host of a
+ * rendering loop is covered — top level, `if=`, match / engine arm, `<each>` row,
+ * a logic block inside lifted markup. Writes are resolved by scope
+ * (forLoopWritesItsBinder): `=`, compound assignment, `++`/`--`; a nested binding of
+ * the same name shadows the binder; a member write through it (`it.seen = 1`) is
+ * not a binder write.
+ */
+export function checkLoopBinderWrites(fileAST, errors) {
+  if (!fileAST || !Array.isArray(errors)) return;
+  const seen = new WeakSet();
+  const reported = new Set();
+  const visit = (n) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (n.kind === "for-stmt" && !n.letBinder && Array.isArray(n.body) && forBodyLiftsMarkup(n.body) && forBinderNames(n).length > 0 && forLoopWritesItsBinder(n)) {
+      const span = n.span ?? { start: 0, end: 0, line: 1, col: 1 };
+      const key = `${span.file ?? ""}:${span.start}:${span.end}`;
+      if (!reported.has(key)) {
+        reported.add(key);
+        const names = forBinderNames(n).map((b) => `\`${b}\``).join(", ");
+        const how = n.variable != null && typeof n.variable === "object" ? "destructured " : "";
+        errors.push(new CGError(
+          "E-CODEGEN-INVALID-LOGIC",
+          `E-CODEGEN-INVALID-LOGIC: the body of this rendering \`for\` loop assigns its own ${how}loop binder ${names}, ` +
+            `which is not declared \`let\` — so it is \`const\` (§50.8.5: a \`const\` binding cannot be reassigned; ` +
+            `a keywordless \`for (x of …)\` binder is treated as \`const\`, pending a language ruling). ` +
+            `Declare the binder \`let\` — \`for (let x of …)\` — or assign the value to a new \`let\` inside the body.`,
+          span,
+          "error",
+        ));
+      }
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "span") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(fileAST);
 }
 
 /** s427 round 3 (F1) — the names a for-of loop head binds (`[]` for a C-style head). */

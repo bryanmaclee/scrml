@@ -514,13 +514,79 @@ describe("round 3 F1 — a write to the loop's own binder takes effect (let) or 
     expect(js).toContain(`v = v + "!";`);
   });
 
-  test("a `const` binder that is written keeps a `const` head: the write throws (loud), never shadows", () => {
-    const { errors, js } = compile(P(`for (const it of @items) { it = it + "!"
+  // Round 4: a write to a `const` or keywordless binder FAILS THE COMPILE (it compiled
+  // at 5946c3da and threw at boot — or, with an empty initial list, only logged an
+  // effect error on the first push). Choice (b): E-CODEGEN-INVALID-LOGIC with a
+  // message naming the binder. The keywordless case is pending bryan's ruling on
+  // whether a keywordless loop binder is mutable (§17.4a / §50.8.5).
+  const binderErr = (errors) => errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC" && /loop binder/.test(e.message));
+  for (const [label, block] of [
+    ["c1 — `const` binder, `=`", `for (const it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`],
+    ["`const` binder, `+=`", `for (const it of @items) { it += "!"
+        lift <li>\${it}</li> }`],
+    ["`const` binder, `++`", `for (const it of @items) { it++
+        lift <li>\${it}</li> }`],
+    ["`const` binder, write in a nested `if`", `for (const it of @items) { if (it == "a") { it = "A" }
+        lift <li>\${it}</li> }`],
+    ["`const` binder, write in a logic block inside lifted markup (c13c)", `for (const it of @items) { lift <li>\${ it = it + "!" }\${it}</li> }`],
+    ["t3 — keywordless binder (pending bryan's ruling)", `for (it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`],
+    ["c8b — keywordless binder with an outer `let it`", `let it = "outer"
+    for (it of @items) { it = it + "!"
+        lift <li>\${it}</li> }
+    lift <li>after:\${it}</li>`],
+    ["`const` destructured head", `for (const [k, v] of @pairs) { v = v + "!"
+        lift <li>\${k}\${v}</li> }`],
+  ]) {
+    test(`${label}: compile error naming the binder`, () => {
+      const { errors } = compile(P(block, `${S}<pairs> = [["k1", "a"]]\n`));
+      const e = binderErr(errors);
+      expect(e).toBeDefined();
+      expect(e.message).toMatch(/`(it|v)`/);
+    });
+  }
+
+  test("c1b — `const` binder over an initially EMPTY list: still a compile error (was an effect error on the first push)", () => {
+    const { errors } = compile(`<program>\n<items> = []\n<p>ok</p>\n<ul>\${ for (const it of @items) { it = it + "!"
+        lift <li>\${it}</li> } }</ul>\n</program>\n`);
+    expect(binderErr(errors)).toBeDefined();
+  });
+
+  const HOSTS = {
+    "top level": (l) => `<ul>${l}</ul>`,
+    "`if=`": (l) => `<div if=@show><ul>${l}</ul></div>`,
+    "match arm": (l) => `\${ type Ph:enum = { A, B } }\n<phase>: Ph = .A\n<match for=Ph on=@phase>\n    <A><ul>${l}</ul></>\n    <B><p>b</p></>\n</>`,
+    "engine arm": (l) => `\${ type Ph:enum = { A, B } }\n<engine for=Ph initial=.A>\n    <A rule=.B><ul>${l}</ul></>\n    <B></>\n</>`,
+    "`<each>` row": (l) => `<div><each in=@groups key=@.id as g><ul>${l.replace("@items", "g.items")}</ul></each></div>`,
+    "nested lift": (l) => `<div>\${ for (let g of @groups) { lift <ul>${l.replace("@items", "g.items")}</ul> } }</div>`,
+  };
+  const hostProg = (host, kw) => `<program>\n<items> = ["a", "b"]\n<groups> = [{ id: 1, items: ["a", "b"] }]\n<show> = true\n${HOSTS[host](`\${ for (${kw}it of @items) { it += "!"
+        lift <li>\${it}</li> } }`)}\n</program>\n`;
+  for (const host of Object.keys(HOSTS)) {
+    test(`every host — ${host}: \`const\` and keywordless binder writes fail the compile; a \`let\` one compiles`, () => {
+      expect(binderErr(compile(hostProg(host, "const ")).errors)).toBeDefined();
+      expect(binderErr(compile(hostProg(host, "")).errors)).toBeDefined();
+      expect(compile(hostProg(host, "let ")).errors).toEqual([]);
+    });
+  }
+
+  test("control: reading (not writing) a `const` / keywordless binder is unaffected", () => {
+    expect(compile(P(`for (const it of @items) { lift <li>\${it}</li> }`)).errors).toEqual([]);
+    expect(compile(P(`for (it of @items) { lift <li>\${it}</li> }`)).errors).toEqual([]);
+  });
+
+  test("control: a member write through a `const` binder (`it.seen = 1`) is not a binder write", () => {
+    const { errors } = compile(prog(`<ul>\${ for (const it of @items) { it.seen = 1
+        lift <li>\${it.name}</li> } }</ul>`));
+    expect(errors).toEqual([]);
+  });
+
+  test("control: a nested `let it` shadowing a `const` binder takes the write", () => {
+    const { errors } = compile(P(`for (const it of @items) { if (@items.length > 0) { let it = 1
+            it = it + 1 }
         lift <li>\${it}</li> }`));
     expect(errors).toEqual([]);
-    expect(js).toMatch(/for \(const it of _scrml_cs_reactive_get\("items"\)\)/);
-    expect(js).toContain(`it = it + "!";`);
-    expect(js).not.toMatch(/const it = (it|"A")/);
   });
 
   test("`for (… in …)` stays a compile error (E-CTRL-011)", () => {
