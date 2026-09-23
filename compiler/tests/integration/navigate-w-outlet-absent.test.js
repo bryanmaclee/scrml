@@ -20,6 +20,13 @@
  * count as PRESENT — no false "absent") is exercised in §3: the TAB shell scan
  * descends the markup if-chain `branches[].element` + `elseBranch` edges (the
  * twin of `collectOutlets` in symbol-table.ts).
+ *
+ * §5 (S425) pins the message CONTENT, not the fire condition. The lint's text
+ * used to claim it was "informational only — no action required", which is
+ * false: with no `<outlet>` marker, §40.8.2 composition takes the shell's first
+ * `<main>` as the route slot and REPLACES its children on every composed page.
+ * §5 pins the discard clause, its survival under the CLI's 120-char message
+ * slice, and the absence of the old false claim.
  */
 
 import { describe, test, expect, afterAll } from "bun:test";
@@ -29,6 +36,9 @@ import { join } from "path";
 
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
+// §5 reads the real CLI formatter helper rather than re-implementing it — the
+// slice budget the adopter actually sees has to be the one under test.
+import { stripRedundantCode } from "../../src/commands/diagnostic-format.js";
 
 const createdDirs = [];
 
@@ -182,5 +192,115 @@ describe("W-OUTLET-ABSENT-SOFT-NAV-DISABLED — negative (no multi-page signal)"
   test("synthetic filePath (file not on disk) → does NOT fire", () => {
     const { errors } = compileAtPath("test.scrml", "<program><nav>x</nav></program>");
     expect(errorsByCode(errors, "W-OUTLET-ABSENT-SOFT-NAV-DISABLED").length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §5 — THE MESSAGE MUST NAME THE DISCARD (S425 ruling, option (c))
+//
+// This lint used to close with "If SSR-first hard navigation is your intent,
+// this lint is informational only — no action required." That sentence is
+// FALSE: with no `data-scrml-outlet` marker, §40.8.2 composition resolves the
+// route slot BY TAG (the shell's first `<main>`) and REPLACES that element's
+// children on every composed route page. An adopter read exactly that sentence,
+// removed their `<outlet/>`, and lost a generated 73-link sidebar from all 99
+// pages of their site. Nothing warned them.
+//
+// These are PINS, not coverage. The failure this change repairs is a message
+// that describes a performance trade while content is being deleted, so a
+// future reword that drops the discard clause — or demotes it below the CLI's
+// 120-char slice — must turn this suite RED.
+// ---------------------------------------------------------------------------
+
+describe("W-OUTLET-ABSENT-SOFT-NAV-DISABLED — the message names the discard", () => {
+  function fireLint() {
+    const dir = makeProjectDir("outlet-absent-msg");
+    mkdirSync(join(dir, "pages"), { recursive: true });
+    // The shape that loses content: a `<main>` holding authored children and
+    // no `<outlet/>`. Mirrors the adopter's own reproducer.
+    const src =
+      "<program>\n  <header>site header</header>\n  <main>\n    <div>shell-authored-child</div>\n  </main>\n</program>";
+    const fp = stageFile(dir, "app.scrml", src);
+    const { errors } = compileAtPath(fp, src);
+    const hits = errorsByCode(errors, "W-OUTLET-ABSENT-SOFT-NAV-DISABLED");
+    expect(hits.length).toBe(1);
+    return hits[0];
+  }
+
+  test("names the commandeered <main> AND that its children are replaced", () => {
+    const hit = fireLint();
+    // The three facts the old text omitted, each pinned independently so a
+    // partial reword cannot drop one silently.
+    expect(hit.message).toMatch(/first `<main>`/);        // WHICH element
+    expect(hit.message).toMatch(/REPLACED/);              // WHAT happens to it
+    expect(hit.message).toMatch(/authored children/);     // WHAT is lost
+    expect(hit.message).toMatch(/composed page/);         // WHERE the loss lands
+  });
+
+  test("the false 'no action required' clause is GONE", () => {
+    const hit = fireLint();
+    expect(hit.message).not.toMatch(/no action required/);
+    // "informational only" survives ONLY as a CONDITIONAL. If a reword ever
+    // restores the bare claim, this fails.
+    expect(hit.message).toMatch(/informational only IF/);
+  });
+
+  test("names the no-<main> shape too (whole shell dropped, not just children)", () => {
+    // Measured, S425: with no `<main>` anywhere in the shell, `shellAvailable`
+    // is false, composition no-ops, and each route page emits standalone with
+    // NONE of the shell's chrome. A message that mentions only the `<main>`
+    // children case is false for the shape where the loss is total.
+    const hit = fireLint();
+    expect(hit.message).toMatch(/NO `<main>` at all/);
+    expect(hit.message).toMatch(/emits standalone/);
+  });
+
+  test("keeps the remedy sentence and the §20.8.1 pointer", () => {
+    const hit = fireLint();
+    expect(hit.message).toMatch(/add a single `<outlet\/>`/);
+    expect(hit.message).toMatch(/§20\.8\.1/);
+    // Pre-existing pins from §1 — the reword must not have cost these.
+    expect(hit.message).toMatch(/soft navigation/);
+  });
+
+  test("INERT: the code string and info severity are unchanged", () => {
+    const hit = fireLint();
+    expect(hit.code).toBe("W-OUTLET-ABSENT-SOFT-NAV-DISABLED");
+    expect(hit.severity).toBe("info");
+  });
+
+  test("the discard clause SURVIVES the CLI's message slice", async () => {
+    // ⚑ THE PIN THAT MAKES THE FIX REAL. `build.js` and `dev.js` both print
+    // `stripRedundantCode(code, message)?.slice(0, N)`. On the base commit the
+    // surviving window ended at "...shell with no `<outlet>" — so a discard
+    // warning appended at the END of the message would have been invisible on
+    // the two surfaces an adopter actually watches. The clause is front-loaded
+    // deliberately; this test is why a future reword cannot bury it.
+    //
+    // N is READ FROM build.js rather than hand-copied: a hand-copied budget
+    // goes stale silently, which is the same class of defect as the stale line
+    // number this brief warned about. If the formatter's shape changes, this
+    // fails LOUDLY with a named reason instead of quietly passing.
+    const buildSrc = await Bun.file(
+      new URL("../../src/commands/build.js", import.meta.url),
+    ).text();
+    const m = buildSrc.match(
+      /stripRedundantCode\(\s*w\.code\s*,\s*w\.message\s*\)\s*\?\.slice\(\s*0\s*,\s*(\d+)\s*\)/,
+    );
+    expect(
+      m,
+      "build.js no longer prints `stripRedundantCode(w.code, w.message)?.slice(0, N)` — " +
+        "re-derive the warning budget before trusting this pin",
+    ).not.toBe(null);
+    const budget = Number(m[1]);
+
+    const hit = fireLint();
+    const visible = stripRedundantCode(hit.code, hit.message).slice(0, budget);
+
+    // Everything an adopter sees of this lint on a `scrml build` / `scrml dev`
+    // run must already tell them content is being replaced.
+    expect(visible).toMatch(/first `<main>`/);
+    expect(visible).toMatch(/REPLACED/);
+    expect(visible).toMatch(/composed page/);
   });
 });
