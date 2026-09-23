@@ -7561,6 +7561,46 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S425 (2026-09-21/23, bryan · ASUS-Vivobook) — four adopter reports triaged by execution, and the two best findings were corrections to my own work
+
+**The arc.** A session that started as "land #995" and became a triage session. Three inbound adopter
+reports were drained by reproducing every claim rather than filing from the reports' text, and the
+two most valuable findings of the session were **corrections to the PA's own filings** — one from a
+dispatched agent, one from the adopter who consumes the ledger.
+
+- **#1017** — four gap entries filed, all reproduced first. The `<outlet/>` discard (HIGH, the owed
+  probe scrml-site delivered in August), the `E-SQL-004` file-local build-blocker left behind by
+  #995, the foreign-slice regex-scanner blindness, and the ghost-lint exemption lost under §40.8
+  default-logic mode.
+- **#1025** — the dPA drain, re-landed on a fresh ref after #990 proved 28 behind, conflicting and
+  internally malformed. **`dpa-047`/`dpa-048` had read `BANKED — UNRUN` on main for three sessions
+  while both deliberations had run** — the status flip existed only on the unmerged branch, so S424's
+  probe and S423's hand-off were both right about different artifacts. **Three inbound adopter
+  messages had never reached main at all**, having been delivered to that same unmerged ref.
+- **#1026** — review floor 4 → 0. #1023 carved out by path and its 28 shipped `.scrml` reproducers
+  were **executed anyway**; both of its H1 claims confirmed independently on merged main.
+- **#1027** — the outlet-absent diagnostic now names the discard; §34's false *"informational only
+  (SSR-first hard navigation still works)"* struck; §20.8.1 records the behaviour descriptively and
+  deliberately **not** as a `SHALL`.
+
+**What the session got wrong, and how it found out.** The `<outlet/>` entry claimed the behaviour was
+a bug against the contract on the strength of §20.8.1.1's marker-never-tag `SHALL`. A dispatched
+agent found **`SPEC.md:23577` §40.8.2**, which *mandates* the tag-keyed fallback and the child
+replacement — so the SPEC contradicts itself, and option (a) became an amendment rather than a
+conformance restoration. Separately, flogence re-measured the regex-scanner entry on their own tree
+and returned a **conjunctive clause** the entry was missing (the failure needs a top-level `;` after
+the desync, not just an unbalanced bracket) plus a severity argument that rested on **their own
+`tail -4`**, not on the truncation the entry had correctly located. Both corrections were reproduced
+here before being recorded.
+
+**The thread bryan opened, unresolved by design.** He asked whether a middle ground exists between
+Acorn and a native parser. A measurement over all 1,036 `@gap` markers put open-HIGH loci at **57
+POST-AST against 18 PRE-AST**, i.e. the parser choice cannot reach the majority — and then the
+session found a single defect shape (**an unpaired token desyncing a hand-rolled state machine**)
+living in *both* populations, which is evidence the partition is the wrong axis and masking ownership
+is the right one. The falsifier — cross-referencing those 57 loci against the source-text-regex
+census — is **offered and unrun, pending his go.** Row 7; his call.
+
 ### S423 (2026-09-19, peter · Windows) — the detector the tier exists for fires for the first time, after four wrong fix directions and four adversarial passes
 
 **The arc.** `S-EMPTY-WITH-DATA` (D6) answers *"data was seeded and the render showed nothing"* — the board-bug class the whole e2e-render-map tier was built for — and **it had never fired on any corpus cell**. Limb 1 (#978, S420) made the seed reach the app's chunk-scoped cell; D6 stayed dark anyway because it asked its emptiness question of the whole `<body>`, and page chrome answers it. It now also asks the question of the `<each>` render regions, in both emission shapes, and fires when every **leaf** region rendered nothing **and** the render **gained** no content across the seed write. `examples/25-triage-board.scrml#populated` — seed written, DOM moved, three task lists at zero rows — now scores `renders-empty-with-data` instead of `renders-clean` off 52 characters of column headings. The HIGH resolves.

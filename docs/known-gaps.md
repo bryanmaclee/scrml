@@ -31,7 +31,7 @@
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 115 |
-| MED | 270 |
+| MED | 271 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -17144,3 +17144,71 @@ been measured as a bug generator on this exact family.
 
 — NEW S422-bryan (flogence-PA S46 aggregate over our ledger; PA re-counted, 28/28 IDs verified open)
 <!-- @gap id=g-scanner-context-ambiguity-is-one-family-of-28-and-the-lever-is-one-shared-masking-pass sev=HIGH status=open locus=searched:compiler/src/block-splitter.js,compiler/src/tokenizer.js,compiler/src/expression-parser.ts,compiler/src/ast-builder.js,compiler/native-parser/ — this is an AGGREGATE over 28 entries and has no single deciding site by construction; the lever is a shared masking pass that does not yet exist prov=adopter:flogence-S46-counted-our-own-ledger-against-their-own-side-hypothesis-PA-re-counted-28-of-28-verified-open -->
+
+### g-block-splitter-closer-scan-consumes-an-unpaired-foreign-closer-inside-comments-and-string-literals — a bare `}=` anywhere in a `kind="tool"` body is read as a real `_={ }=` closer, so the construct is UNMENTIONABLE in its own source — and the discriminator is PAIRING, the same one that governs the codegen-side scanner — `NEW S425-bryan (adopter report from flogence PA S49 drop 2, found writing a comment that CITED our S425 correction; PA-REPRODUCED and then WIDENED by four controls — two of the reporter's own rows are wrong for the bare form); MED; open`
+
+<!-- @gap id=g-block-splitter-closer-scan-consumes-an-unpaired-foreign-closer-inside-comments-and-string-literals sev=MED status=open locus=compiler/src/block-splitter.js:findStructuralBodyEnd(LOCATE BY SYMBOL — the generic tag-stack scanner over the RAW body; its own header comment at the function says it "runs a generic tag-stack scanner over the raw body", which is the defect stated as a design note) prov=adopter:flogence-S49-2026-09-22-bare-closer-in-a-line-comment -->
+
+**PA-REPRODUCED on `613c9f1e`.** A bare `}=` inside a `//` comment in a `<program kind="tool" lang="ts">`
+body is consumed as a real foreign-block closer → **`E-CTX-001` at stage BS**, reported at the
+function's own closing brace rather than at the offending text. The reporter's core matrix holds:
+
+| comment contains | result |
+|---|---|
+| `}=` alone | **FAIL** `E-CTX-001` |
+| `_={` alone | OK |
+| `_={ }=` (paired) | OK |
+| no foreign token | OK |
+
+### ⚑ TWO OF THE REPORTER'S ROWS ARE WRONG, and four controls say the bug is WIDER than reported
+
+They recorded `}=` in a **string literal** and in a **`/* */` block comment** as **OK**. Both come
+back **FAIL** here. Rather than pick a side I ran controls:
+
+| control | measured | what it settles |
+|---|---|---|
+| bare `}=` in a string literal | **FAIL** | the "OK" is wrong for the bare form |
+| bare `}=` in a `/* */` block comment | **FAIL** | same |
+| bare `}=` with **no real `_={ }=` anywhere in the file** | **FAIL** | **the closer scan runs UNCONDITIONALLY** — it needs no opener to trigger |
+| **paired** `_={ }=` in a string · line comment · block comment | **OK · OK · OK** | this is what their "OK" rows actually measured |
+
+**The rule, corrected: an unpaired `}=` is consumed as a real closer in EVERY context the splitter
+scans — line comment, block comment AND string literal. A paired `_={ }=` is inert everywhere.** The
+masking is blind in all three, not just line comments. Their rows were almost certainly the paired
+form, which is what a doc comment naturally writes — you mention `_={ }=`, not a lone `}=`.
+
+### ⚑⚑ SAME DISCRIMINATOR AS THE CODEGEN-SIDE SCANNER, OPPOSITE END OF THE PIPELINE — this is ONE class
+
+| | scanner | stage | what desyncs it |
+|---|---|---|---|
+| [[g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count]] | `emit-logic.ts` `scanForeignSliceShape` | **post-AST** (codegen) | an **unpaired** escaped bracket → non-zero net depth |
+| **this entry** | `block-splitter.js` `findStructuralBodyEnd` | **pre-AST** (BS) | an **unpaired** closer token |
+
+Two hand-rolled state machines at opposite ends of the compiler, **one failure shape** — an unpaired
+token desyncs the counter, a paired one nets out — and **neither knows about the masking contexts the
+other one partly handles.** This straddles the pre-AST / post-AST partition, which matters: an S425
+measurement of open-HIGH loci put 57 post-AST against 18 pre-AST and treated them as separate
+populations. **This defect is one bug in both, so the partition is not the right axis** — masking
+OWNERSHIP is. It corroborates flogence's own aggregation (28 open gaps as one bug in four costumes:
+13 string-masking · 8 interpolation · 6 comment-state · 1 angle-bracket, with one shared masking pass
+pointed at 27 of 28) from a second, independent direction.
+
+**The practical bite is documentation, and it is sharp:** a comment is where you write *about* the
+language, so a comment is exactly where `}=` appears — and in a language whose own SPEC text is full
+of `_={ }=`, **the construct is unmentionable in its own source.** The reporter hit it writing a
+comment that cited our correction to them.
+
+⛑ **One case they could NOT isolate, carried so nobody re-walks it.** One comment line in a real
+1,000+-line tool produced **17 `E-CTX-001` errors at six unrelated lines**, none within 100 lines of
+the text; causal by double revert, not reducible. **Nine negative shapes they ruled out** (token in a
+comment alone · backticked vs bare · a backticked index-access span · two backtick spans on one line ·
+the verbatim line in a minimal file · nesting depth 0–3 · an unbalanced escaped-bracket regex in a
+comment alone · that regex before the token · the token before that regex). ⚑ **The
+unbalanced-regex-in-a-comment hypothesis is FALSIFIED by both sides** — which matters because it is
+the hypothesis the sibling entry's mechanism makes most attractive. The real file is on their disk;
+ask for it rather than re-reducing.
+
+⚑ **And they flagged their own wrong diagnosis unprompted:** their first internal write-up said *"a
+`_={ }=` token inside a comment is parsed as a foreign block"*, stated from a single revert with no
+matrix, and six fixtures falsified it. Recorded because a reporter who retracts their own framing
+before we read it is the reason this exchange converged in two rounds instead of five.

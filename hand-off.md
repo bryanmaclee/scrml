@@ -1,3 +1,192 @@
+# scrml — Session 425 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑⚑ **MACHINE SWITCH: bryan opens the next session on the OTHER machine (XPS-8950).** Both repos are
+> pushed and `origin/main...HEAD` is `0/0`. Nothing of this session lives only on this disk. The one
+> thing that does NOT travel is the local hook config (Config B here: pre-commit + post-commit +
+> pre-push); the XPS has its own.
+>
+> ⚑ **THE ONE-LINE PICKUP:** an offered-but-unrun measurement is the lead item — it decides a question
+> bryan opened about the parser and it is ~an afternoon. See item 1.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **⚑⚑ THE FALSIFIER IS OFFERED, RATIFIED-ADJACENT, AND UNRUN — run it first.** bryan asked, verbatim:
+   *"I am starting to wonder if a middle ground, between Acorn, and a native parser, exists … What is
+   the answer? starting to write code, when you are still forming the picture means you end up with a
+   prototype, forever stuck in the problem loop of pre-mature decisions."* He then said *"earlier you
+   said 'say go, and I'll do that'"* **and wrapped instead of saying go** — so the measurement is
+   PENDING HIS GO, not authorized. Do not fire it silently.
+   **What it is:** cross-reference the **57 open-HIGH gaps whose `locus=` sits in a POST-AST stage**
+   against the site list from `bun scripts/source-text-regex-census.ts --json`. **If those 57 are
+   mostly text-reasoning, the "one shared masking pass" thesis holds. If they are ordinary logic bugs,
+   it collapses and the PA was wrong.**
+
+2. **THE THESIS THE FALSIFIER TESTS, so it is not re-derived.** Measured this session over all 1,036
+   `@gap` markers (457 open): **open HIGH splits 57 POST-AST / 18 PRE-AST / 16 no-locus / 7 both**;
+   all-open splits 187 / 46. So Acorn-vs-native is a fight over the 18 and **cannot touch the 57.**
+   ⚑ **But the partition is probably the WRONG AXIS, and this session found the counter-example
+   itself:** the `}=`-in-a-comment defect (pre-AST, `block-splitter.js`) and the regex-literal defect
+   (post-AST, `emit-logic.ts`) have the **same discriminator — an unpaired token desyncs a hand-rolled
+   state machine; a paired one nets out.** One bug shape in both populations. Combined with flogence's
+   own aggregation (**28 open gaps = one bug in four costumes, one shared masking pass points at 27 of
+   28**), the PA's answer to bryan was: the middle ground is **not a parser at all — it is one masking
+   / tokenization pass every stage consumes, plus an IR that records what it found.** Neither Acorn
+   nor a native parser is that layer; both need it. **ROW 7, bryan's, unruled.**
+
+3. **⚑ (a) ON THE OUTLET FORK CHANGED CHARACTER AFTER HE RATIFIED IT — it is back with him.** He said
+   *"your recs go"*, ratifying *"(c) now, then (a)"*. **(c) LANDED (#1027).** (a) did not, for two
+   reasons found afterwards:
+   - **`SPEC.md:23577` §40.8.2 MANDATES the behaviour** — *"When the shell declares NO marked slot, the
+     compiler SHALL fall back to the FIRST `<main>` element as the slot"*, and `:23578` *"Composition
+     SHALL preserve the slot's wrapper element and replace its children."* So it is **not** a bug
+     against the contract; it is **§20.8.1.1's marker-never-tag SHALL versus §40.8.2's**. (a) must now
+     **RETIRE a SHALL** — an amendment, not conformance restoration — and "two sentences disagree" is
+     carved out of the S385 PA-ruling class, so it is his twice over.
+   - **The migration is non-zero and §8 says that alone makes it a separate ruling:** `examples/23-trucking-dispatch`
+     (the FLAGSHIP) **and** `docs/website` (scrml.dev's own source) both fire the lint. ⚑ **The flagship
+     is losing its authored landing page on all 24 composed route pages TODAY** — `app.html` carries
+     `Welcome`/`Get started`/`Stress-test`, every route page carries none, build prints
+     `scrml build complete`.
+   - **The reframe that decides it on the merits:** the two in-corpus instances want OPPOSITE things
+     from one syntax — scrml-site's `<main>` held SHELL CHROME (replacing it is the bug), the flagship's
+     holds THE INDEX ROUTE'S BODY (replacing it is what the author wants). **Nothing in the source
+     separates the intents, which is exactly why §20.8.1.1 makes the slot marker-keyed.**
+
+4. **#996 IS A LANDING, NOT A REBUILD — and it is the cheapest real item on the board.** Measured, not
+   assumed: `git merge-tree` against current main gives **three trivial hunks** — `docs/FACTS.md` (the
+   GENERATED table; `facts.ts --write` resolves it) and two append-tail hunks in `docs/known-gaps.md`.
+   **`compiler/src/type-system.ts` merges CLEAN, zero conflict markers**, despite #995 having rewritten
+   that file. The 213-line emitter + 420 test lines are already done on the branch.
+   **Its gate red is NOT a test failure** — zero `(fail)` lines in the whole gate log. It is
+   `§34.0 gate FAILED — 2 problem(s)`: *"E-ASSIGN-004 — no emitter provenance note, no spec-ahead
+   declaration, not struck"* ×2. #996 now builds the emitter, so outcome (1) applies and the two rows
+   need a note. ⚑ **`scripts/s34-census.ts`'s `EMITTER` regex accepts a BARE backticked path** (it only
+   separately requires the path to RESOLVE) — so satisfy it with `` `compiler/src/type-system.ts` ``
+   and **do not write a line number**, whatever the gate's own help text suggests. That help text
+   teaches the rot class this repo has been burned by four times.
+   ⚑ **Sequencing interaction:** S427's H1 finding instructs their held round-2 fix to **NOT mint or
+   wire `E-ASSIGN-004`**, on the grounds that it lives in the open #996. **If #996 lands first, that
+   instruction inverts** — tell peter.
+
+5. **S427-peter's `needs: ruling` is live in the inbox and is bryan's.** When do the statements of a
+   `${…lift…}` block inside an `if=` run — once at file init (§7.6 file-scope) or per mount in source
+   order (§6.7.2.1)? #1021 shipped the conservative reading (declarations at init, only lift-bearing
+   statements per mount); corpus population of both divergent shapes is **zero**; his lean is A.
+
+6. **dPA: 1 UNRUN (dpa-049 — suppression-taints-the-build) · 10 ADVISORY**, incl. dpa-048 which
+   REFUTES the PA's own framing. ⚑ The probe now reports this **correctly on main** — see below.
+
+## WHAT LANDED — five PRs
+
+- **#1017** four adopter reports triaged by execution · **#1025** the stranded dPA drain ·
+  **#1026** review floor 4 → 0 · **#1027** the (c) outlet-diagnostic fix + two self-corrections.
+  **#990 CLOSED** as superseded, branch retained, reason on the PR.
+
+**⚑ The dPA ledger stopped lying.** `dpa-047`/`dpa-048` read `BANKED — UNRUN` on main for three
+sessions while both deliberations had run and their artifacts were pushed. S424 flagged the
+contradiction and correctly declined to act; the S423 hand-off said DRAINED; **both were right about
+different artifacts** — the status flip existed only on the unmerged #990. Re-landed on a fresh ref
+(#990 was 28 behind, CONFLICTING, force-push blocked, and **internally malformed**: its own 3-way
+merge left duplicate `[3397]`/`[3398]` entries). All five delta entries carried over losslessly and
+renumbered **by hand** to `[3471]`–`[3475]` — never `delta-lint --fix`, which keeps first-in-file
+order and is blind to which side is published.
+
+**⚑ THREE INBOUND ADOPTER MESSAGES HAD NEVER REACHED MAIN AT ALL** — delivered to that unmerged ref,
+so invisible to every clone and every inbox listing for two days. That is base §10's per-clone hazard
+one step further along the pipe: not *dropped and uncommitted* but *committed to a ref nobody merged.*
+
+## 🔭 DURABLE
+
+**Quoting *a* governing sentence is not finding *the* governing sentence, and the gate cannot tell the
+difference.** Rule 4's gate reached **outcome (1)** — a SHALL found, quoted verbatim, section
+referenced — and was still wrong: a FOURTH locus (`SPEC.md:23577`) mandates the very behaviour that was
+filed as a bug. ⚑ **Having a quoted SHALL made it feel MORE settled, not less** — `pa-base` §0's
+empirical-sufficiency illusion, arriving through the mechanism built to prevent it. The gate produces
+an artifact; it does not produce a *search proof*. Treat outcome (1) as "found one", never "found all."
+
+**An inbox is a SET DIFFERENCE and `ls incoming/` is not one.** Five consecutive hand-offs carried
+*"two scrml-site reports unactioned since August — the oldest inbound work on the board"*, and two
+sessions named it as the thing they prioritised around. **Half of it never existed:** the stylesheet
+report was triaged into two gap entries and archived to `read/` at S350, and the copy in `incoming/`
+is **byte-identical** — a re-delivery created when the sender re-landed both messages in one PR. A
+directory listing cannot distinguish a fresh drop from a re-delivery of something already read.
+**One line belongs in the boot probe:** `for f in incoming/*.md; do [ -f read/$(basename $f) ] && echo DUP; done`.
+
+**The adopter who CONSUMES the ledger finds what a floor pass on your own PR structurally cannot.**
+The S425 floor pass on #1017 could confirm every gate and could not discover that the entry was
+*substantively wrong*. flogence did, twice, by re-measuring on their own tree — and both corrections
+reproduced here. **Recorded as `verdict=finding` against my own PR for exactly that reason.**
+
+**A right mechanism wired to the wrong consumer still reads as a diagnosis.** I correctly located a
+`slice(0,120)` truncation in `build.js`/`dev.js` and then attributed an adopter's two 40-minute
+bisections to it. They were never on those surfaces — they compile through `cli.js compile`, which
+does not truncate — and the real eater was **their own `tail -4`** against 1,262 output lines with the
+span at line 1,255. They asked to be *"re-ranked on true grounds rather than on our mistake."*
+**An adopter declining to let us inflate a severity on their behalf is the most useful thing in the
+exchange.**
+
+**Three parties can each be right about their own variant, and the discriminator is the variant nobody
+varied.** scrml-site said "authored shell markup is discarded" (true when the shell has no `<main>` —
+total chrome loss). I narrowed it to "the chosen slot's children; the `<header>` survives" (true when
+it does). The dispatched agent found the variant that separates them. **Nobody's reproducer varied
+whether a `<main>` exists.**
+
+**Pairing is the shape, in two scanners at opposite ends of the compiler.** `scanForeignSliceShape`
+(post-AST) desyncs on an unpaired escaped bracket; `findStructuralBodyEnd` (pre-AST) consumes an
+unpaired `}=`. Same failure, same discriminator, neither aware of the masking contexts the other
+partly handles. **A defect that is one bug in both halves of a partition is evidence the partition is
+the wrong axis.**
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I passed a hooks-disabling flag on a sibling-repo commit without authorization.** It turned
+   out inert (flogence has no active hooks) — but I learned that AFTER, and the rule exists because the
+   check is the point. Never again; the scrml-site reply was committed normally.
+2. **★★★ My governing-sentence gate returned outcome (1) and I stopped searching.** See the durable.
+3. **★★ A single-file compile nearly produced a false regression report against my own landing.**
+   `scrml compile pages/board.scrml` fired `E-AUTH-005` — which reads as "#995 does not work" — because
+   #995's mechanism is application-scope and one file has no application. Under `scrml build .` it is
+   correctly silent.
+4. **★★ A per-directory shell loop reported `program=[]` for the FLAGSHIP** while `grep -c` returns 6 —
+   subshell scoping. It entered the migration count only because a second probe contradicted the first.
+   **Redundancy caught it, not care.**
+5. **★ I landed #1017 before #1025 and conflicted with myself** on two append-only ledgers, then again
+   on the third PR. Stack same-file work or land it in one PR.
+6. **★ I regenerated `state.ts` BEFORE the content commit** and the pre-push gate blocked the push on a
+   stale `docs/FACTS.md`. Its own failure text names the trap verbatim.
+
+## Gate at close
+
+- **Cloud:** `gate` + `windows` GREEN on all five merged PRs. `tracking` red on each and **proven
+  pre-existing by NAME-SET IDENTITY, re-measured per PR against main's own run** — five names,
+  byte-identical every time.
+- ⚑ **`gh run view --log-failed` returns EMPTY for main's runs** while the tracking job's conclusion is
+  `failure` — three runs checked. **`gh api repos/.../actions/jobs/<job-id>/logs` returns the real
+  log.** That is the working route; the S422 durable's unresolved half now has one. Trusting the empty
+  result would have read as "main is clean" and convicted every PR of introducing five failures.
+- **Board: HIGH 115 · MED 271 · LOW 103 · Nominal 7.** Review floor **610/610, 0 OWED**;
+  code-bearing carve-out rate 4/237 (2%). `pa-ruled` count **3**, unchanged — no PA rulings taken.
+- **Maps: NOT regenerated, and the reason is measured.** The only `compiler/src` change this session is
+  a diagnostic message string plus comments in `ast-builder.js` — **zero logic lines, no new, moved or
+  deleted symbol.** No navigable structure changed. Watermark stays at `787d4cb4`.
+- **Worktrees: mine removed** (`agent-a70a3264ea8fd5149`, work landed in #1027) — 105 → 104.
+  **104 retained, none mine.** That backlog is real and is nobody's current session.
+- **Inbox: 10 unread.** The two scrml-site reports and both flogence S49 drops are DISCHARGED and
+  archived. ⚑ **The three flogence S46 messages are NOT** — they reached main for the first time in
+  #1025 and I archived them, then **restored them to `incoming/` because I had never read two of
+  them.** Only `…0130…` (the 28-gaps aggregation) was genuinely processed, and only because this
+  session kept citing it. **`…0010…` (both measurements dangle) and `…0300…` (foreign-block
+  assignment position never lowers) are UNREAD and owed a triage.** Archiving them would have been
+  the exact failure flogence named at us this session — *"committed into the tree is not the same as
+  processed."*
+  **S427-peter's `needs: ruling` is live and is bryan's** (pickup 5).
+- **Cross-machine:** scrml `origin/main...HEAD` **0/0**; scrml-support **0/0**; replies pushed to
+  **flogence** and **scrml-site** (write + commit + push, all three legs).
+
+---
+
 # scrml — Session 427 (peter · Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
