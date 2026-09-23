@@ -12026,6 +12026,36 @@ fallback finder picks — not to shell markup generally:** the `<header>` in the
 survives intact, because it is outside the chosen slot. A report saying "authored shell markup is
 discarded" over-states it; "the first `<main>`'s children are discarded" is the measured claim.
 
+⛑ **AMENDED S425 — that correction was itself too narrow, and the reporter's wider framing is right
+for a variant NOBODY'S A/B COVERED.** The dispatched agent ran a **variant C** — a shell with **no
+`<main>` at all** and no `<outlet/>` — which neither the reporter's case nor the A/B above includes.
+**PA-CONFIRMED BY EXECUTION** on `ed856598`:
+
+| variant | shell | route page carries |
+|---|---|---|
+| A | `<main>` + `<outlet/>` | authored child **1** |
+| B | `<main>`, no outlet | authored child **0**; `<header>` **survives** |
+| **C** | **no `<main>`, no outlet** | **`header=0` `footer=0`** — route content only |
+
+In variant C `shellAvailable` goes false, composition no-ops, and **every route page emits standalone
+with none of the shell's chrome** — no `<header>`, no `<footer>`, not even the shell's client bundle.
+The shell's own page keeps everything. Emitted body, verbatim:
+
+```html
+<body>
+    <h2>route-content-marker</h2>
+<script src="scrml-runtime.00u7nbja.js"></script>
+<script src="about.client.01yzikct.js"></script>
+</body>
+```
+
+⚑ **Three parties, three readings, and each was right about its own variant.** scrml-site said
+"authored shell markup is discarded" (right for C, over-stated for B). This entry narrowed it to the
+chosen slot's children (right for B, too narrow for C). The agent found C. **The discriminator is
+whether a `<main>` exists at all, and no one's reproducer varied it** — so a diagnostic naming only
+the `<main>`-children case would be FALSE exactly where the loss is TOTAL. The landed (c) message
+covers both.
+
 **GOVERNING SENTENCE — outcome 1, quoted verbatim (`compiler/SPEC.md` §20.8.1.1):**
 
 > **Exactly one `<main>` landmark per composed document; the MARKER decides the route slot, never the tag.**
@@ -12040,6 +12070,46 @@ the behaviour contradicts a normative sentence that already exists; this is a **
 contract, not an unspecified shape.** §20.8.1's own sentence for this case says only that such a
 project *"SHALL emit W-OUTLET-ABSENT-SOFT-NAV-DISABLED and fall back to hard navigation"* — nothing
 licenses commandeering `<main>` or deleting its children.
+
+### ⛑⛑ RETRACTED S425 — THE PARAGRAPH ABOVE IS WRONG. THE BEHAVIOUR IS SPECIFIED, AND THE SPEC CONTRADICTS ITSELF
+
+**A FOURTH normative locus exists and the governing-sentence gate above missed it.** Found by the
+dispatched agent, **PA-CONFIRMED BY EXECUTION** at `compiler/SPEC.md:23577`, §40.8.2 — three
+consecutive bullets of one subsection:
+
+> `:23576` — *"Slot resolution SHALL match on the **attribute NAME**, exactly as the runtime's
+> `[data-scrml-outlet]` selector does."*
+> `:23577` — *"**When the shell declares NO marked slot, the compiler SHALL fall back to the FIRST
+> `<main>` element as the slot.** This is the pre-§20.8 static / hard-navigation multi-page path,
+> preserved for back-compat; `W-OUTLET-ABSENT-SOFT-NAV-DISABLED` already surfaces the missing outlet."*
+> `:23578` — *"Composition SHALL **preserve the slot's wrapper element** and replace its children
+> with the route body."*
+
+**So the tag-keyed fallback AND the child replacement are both mandated by a `SHALL`.** This is not
+code violating the contract. It is **§20.8.1.1's marker-never-tag `SHALL` in direct tension with
+§40.8.2's fall-back-to-the-first-`<main>` `SHALL`** — two normative sentences that disagree.
+
+⚑ **What that changes, and it is not cosmetic:**
+
+1. **The classification.** "BUG against the contract" → **a SPEC self-contradiction.** The gate's
+   outcome (1) was reached and recorded, and it was still incomplete: quoting *a* governing sentence
+   is not the same as finding *the* governing sentence. **`pa-base` §0 names this exactly** — *"when
+   you have a clean reproducer and a fix in mind, that is the moment the normative source is least
+   likely to be consulted and most needs to be."* Having a quoted SHALL made it feel MORE settled,
+   not less.
+2. **Option (a)'s cost and rung.** (a) is no longer conformance restoration toward an existing SHALL
+   (the cheap, reversible framing). It requires **retiring a normative `SHALL` at `:23577`** — an
+   amendment. And "anything where the SPEC is silent or **two sentences disagree**" is explicitly
+   carved OUT of the S425 PA-ruling class, so (a) was always bryan's; now it is bryan's for a second,
+   independent reason.
+3. **(c) is unaffected** and landed. It corrects a FALSE claim (*"informational only — no action
+   required"*), which is true regardless of which SHALL wins.
+
+**Owed with (a), and not done:** `:23577` must be retired or scoped, not merely out-voted; §20.8.7's
+one-line code summary is also silent on the discard; and `W-PROGRAM-SPA-INFERRED`
+(`ast-builder.js`) carries the identical *"informational only — no action required"* phrasing, which
+is believed TRUE there (no `pages/` → no composition → no discard) but **was not verified by
+execution** — flagged, not asserted.
 
 ⚑ **AND §34's row for the diagnostic asserts a severity rationale that is FALSE.** Verbatim:
 *"…fall back to hard (full-document) navigation; **this is informational only (SSR-first hard
