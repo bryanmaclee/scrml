@@ -825,6 +825,86 @@ function rewriteEachSigilInStmtTree(n: any, iterVarName: string): void {
 }
 
 /**
+ * g-match-inside-each-row-cannot-see-the-row-variable — lower `@.` (§17.7.3,
+ * "the current iteration value") to the enclosing row's iter binding in the
+ * re-parsed BODY of a `<match>` arm that sits inside an `<each>` row. §17.7.3:
+ * `@.field` and `alias.field` "produce identical codegen" — the arm body is part
+ * of the row body, so its `@.` is the ROW item (a match arm is not an iteration
+ * scope). Pre-fix the arm body's `${@.name}` lowered to
+ * `_scrml_reactive_get(".name")` — an empty span at exit 0.
+ *
+ * Mutates the arm-body AST IN PLACE (it is a per-match re-parse owned by this
+ * match-block; see emit-match.ts buildMatchArms). Rewrites every place an arm
+ * body carries expression text the arm emitters read:
+ *   - ExprNode `ident` names (`${@.name}`, `class:x=(@.hot)` operands);
+ *   - raw expression fields (`expr` / `raw` — `attr=(@.x)`, `on…=${…}`);
+ *   - call-ref argument strings (`onclick=pick(@.id)`);
+ *   - the `${…}` segments of a quoted attribute template (`title="t-${@.name}"`)
+ *     — ONLY inside the interpolations, never the literal text around them;
+ *   - a nested `<each>`'s `in=` / `of=` source (evaluated in THIS scope).
+ * Stops at a nested `<each>`'s own body (templateChildren / bodyChildren /
+ * emptyChild / keyExprRaw): there `@.` is the INNER item (innermost-scope rule),
+ * lowered later against the inner iter var. Free text (`kind: "text"`) and bare
+ * unquoted `variable-ref` attr values are left untouched: the first is display
+ * text, the second renders as a static string today (SPEC §5 held-#81) and
+ * rewriting its text would not change that.
+ */
+export function rewriteEachSigilInArmBody(n: any, iterVarName: string): void {
+  if (!n || typeof n !== "object") return;
+  if (Array.isArray(n)) { for (const x of n) rewriteEachSigilInArmBody(x, iterVarName); return; }
+  const lower = (s: string): string =>
+    /@\s*\./.test(s) ? rewriteContextualSigil(s.replace(/@\s*\.\s*/g, "@."), iterVarName) : s;
+  if (n.kind === "each-block") {
+    if (typeof n.inExprRaw === "string") n.inExprRaw = lower(n.inExprRaw);
+    if (typeof n.ofExprRaw === "string") n.ofExprRaw = lower(n.ofExprRaw);
+    return;
+  }
+  if (n.kind === "text") return;
+  if (n.kind === "variable-ref") return;
+  if (n.kind === "ident" && typeof n.name === "string" && n.name.includes("@")) {
+    n.name = lower(n.name);
+  }
+  if (n.kind === "call-ref" && Array.isArray(n.args)) {
+    n.args = n.args.map((a: unknown) => (typeof a === "string" ? lower(a) : a));
+  }
+  if (n.kind === "string-literal" && typeof n.value === "string" && n.value.includes("${")) {
+    n.value = rewriteSigilInsideInterpolations(n.value, lower);
+  }
+  for (const k of Object.keys(n)) {
+    if (k === "span") continue;
+    const v = (n as Record<string, unknown>)[k];
+    if (typeof v === "string") {
+      if (k === "expr" || k === "raw" || k === "handlerExpr" || k === "condition") {
+        (n as Record<string, unknown>)[k] = lower(v);
+      }
+    } else if (v && typeof v === "object") {
+      rewriteEachSigilInArmBody(v, iterVarName);
+    }
+  }
+}
+
+/** Apply `lower` to the text of each top-level `${…}` interpolation in `s` (brace-balanced). */
+function rewriteSigilInsideInterpolations(s: string, lower: (x: string) => string): string {
+  let out = "";
+  let i = 0;
+  while (i < s.length) {
+    const open = s.indexOf("${", i);
+    if (open === -1) { out += s.slice(i); break; }
+    out += s.slice(i, open + 2);
+    let depth = 1;
+    let j = open + 2;
+    while (j < s.length && depth > 0) {
+      if (s[j] === "{") depth++;
+      else if (s[j] === "}") depth--;
+      if (depth > 0) j++;
+    }
+    out += lower(s.slice(open + 2, j));
+    i = j;
+  }
+  return out;
+}
+
+/**
  * g-lift-inside-each-row-or-match-arm-silently-dropped — emit a per-row
  * `${ … lift … }` accumulation block (SPEC §10.1) into the row being built.
  *
@@ -1772,7 +1852,21 @@ function renderTemplateChildToJs(
     // `_scrml_resolve_item`, so reading the discriminant tracks it and the effect
     // re-dispatches on a field change. Outside a reconcile ctx it returns the bare
     // line unchanged (matching the interpolation's own behaviour on that path).
-    const _dispatchLine = `${indent}${dispatchFnName}(${mountVar}, ${discriminant});`;
+    //
+    // g-match-inside-each-row-cannot-see-the-row-variable — the arm render /
+    // wire fns live at FILE scope, so the row-scope names the arm bodies read
+    // (this row's iter var, an enclosing row's, an `as (k, v)` pair) are passed
+    // IN as trailing dispatch arguments — the #1022 nested-lift mechanism
+    // (instance scope as parameters). emit-match stamped the list
+    // (`rowScopeParams`) when it emitted the dispatch fn's matching signature.
+    // Placing them on the dispatch line inside the per-item effect means the
+    // effect's live re-resolution (current + any referenced enclosing item)
+    // binds each to the CURRENT item, and the dispatcher re-renders the arm when
+    // one changes identity (same-key replace). Absent stamp → no extra args
+    // (byte-identical to pre-fix).
+    const _rowScope: string[] = Array.isArray((child as any).rowScopeParams) ? (child as any).rowScopeParams : [];
+    const _dispatchArgs = [mountVar, discriminant, ..._rowScope].join(", ");
+    const _dispatchLine = `${indent}${dispatchFnName}(${_dispatchArgs});`;
     for (const l of maybeWrapEachPerItemEffect([_dispatchLine], iterVarName, indent)) {
       lines.push(l);
     }
@@ -3091,7 +3185,7 @@ function pickReferencedEnclosingCtxs(
  * subscription). `(?<![.\w$])` rejects a leading `.` (and mid-identifier
  * positions); `(?![\w$])` closes the identifier. (S294 adversarial review #2.)
  */
-function referencesFreeIdent(blanked: string, name: string): boolean {
+export function referencesFreeIdent(blanked: string, name: string): boolean {
   if (!name) return false;
   return new RegExp("(?<![.\\w$])" + _escapeForRegex(name) + "(?![\\w$])").test(blanked);
 }
@@ -3902,6 +3996,59 @@ export function emitEngineHandlerBody(preRewritten: string, engineCtx: EachEngin
   return null;
 }
 
+/**
+ * g-match-inside-each-row-cannot-see-the-row-variable — the render fn for an
+ * `<each>` inside the body of a `<match>` arm that is itself inside an `<each>`
+ * row (see the `armScopedEach` branch of emitEachBodyRenderForFile):
+ *
+ *   function <fnName>(_root, ...params) { const _items = <source>; <locate the
+ *     each fence inside _root>; <the SAME reconcile body a top-level each gets> }
+ *
+ * `params` are the arm's payload bindings + row-scope names, so a source such as
+ * `g.items` (or a payload `rows`) and a row body reading `g.name` resolve as
+ * plain parameters. There is one arm instance PER ROW, so the fence is located
+ * inside THIS arm's `_root` by a direct comment walk — NOT `_scrml_find_each_anchor`,
+ * whose per-id cache would hand every row the first row's still-connected fence.
+ * No `_scrml_each_renderers` registration and no module-init call: the arm wire
+ * fn runs it (under an effect) after each arm entry, when `_root` holds the fence.
+ */
+function emitArmScopedEachRenderFn(
+  node: EachBlockAstNode,
+  fnName: string,
+  params: string[],
+  engineCtx: EachEngineCtx | null,
+  eachMapVarNames: Set<string>,
+  eachSetVarNames: Set<string>,
+): string {
+  const iterVarName = node.asName ? node.asName : "_scrml_each_item";
+  resetLocalIdCounter();
+  const fnLines: string[] = [];
+  fnLines.push(`function ${fnName}(${["_root", ...params].join(", ")}) {`);
+  let itemsExpr: string;
+  if (node.iterShape === "in") {
+    itemsExpr = rewriteMapAwareIterable(node.inExprRaw ?? "[]", eachMapVarNames, eachSetVarNames);
+  } else if (node.iterShape === "of") {
+    itemsExpr = `Array.from({length: Number(${rewriteAtCellAccess(node.ofExprRaw ?? "0")}) || 0}, (_v, _i) => _i)`;
+  } else {
+    fnLines.push(`  // each: iter shape unresolved (neither in= nor of=); skipping render`);
+    fnLines.push(`}`);
+    return fnLines.join("\n");
+  }
+  fnLines.push(`  const _items = ${itemsExpr};`);
+  fnLines.push(`  let _mount = null;`);
+  fnLines.push(`  if (_root && typeof document !== "undefined") {`);
+  fnLines.push(`    const _w = document.createTreeWalker(_root, NodeFilter.SHOW_COMMENT);`);
+  fnLines.push(`    let _n;`);
+  fnLines.push(`    while ((_n = _w.nextNode())) { if (String(_n.data || "").trim() === ${JSON.stringify(`scrml-each:${nsId(node.id)}`)}) { _mount = _n; break; } }`);
+  fnLines.push(`  }`);
+  fnLines.push(`  if (!_mount) return;`);
+  for (const l of emitEachReconcileLines(node, iterVarName, "_scrml_each_idx", "_mount", "_items", "  ", engineCtx)) {
+    fnLines.push(l);
+  }
+  fnLines.push(`}`);
+  return fnLines.join("\n");
+}
+
 export function emitEachBodyRenderForFile(
   fileAST: any,
   ctx: CompileContext,
@@ -3991,6 +4138,22 @@ export function emitEachBodyRenderForFile(
     // branch emits it INLINE there. Emitting a module-scope render fn here would
     // produce `const _items = <outerIterVar>.field;` at top level (the outer var
     // is undefined → ReferenceError) — the exact defect this fix closes.
+    // g-match-inside-each-row-cannot-see-the-row-variable — an `<each>` in the
+    // body of a `<match>` arm that is itself inside an `<each>` row. It is
+    // "nested" (its source may read the row alias, `g.items`), but it is NOT in
+    // the row template the outer factory walks inline — it is in an arm body
+    // rendered by innerHTML replace, once per row. Pre-fix it got no render fn
+    // at all (skipped as nested, never emitted inline): the arm's list rendered
+    // EMPTY at exit 0. emit-match stamped `armScopedEach` on it; emit it as a
+    // file-scope render fn that takes the arm's mount root plus the arm's scope
+    // (payload bindings + row names) as PARAMETERS — the same instance-scope-
+    // as-parameters mechanism the arm wire fn uses — and the arm wire fn calls
+    // it under an effect after each arm entry (emit-variant-guard.ts).
+    const armScoped = (node as any).armScopedEach as { fnName: string; params: string[] } | undefined;
+    if (armScoped && typeof armScoped.fnName === "string") {
+      renderFunctions.push(emitArmScopedEachRenderFn(node, armScoped.fnName, armScoped.params ?? [], engineCtx, eachMapVarNames, eachSetVarNames));
+      continue;
+    }
     if (node.isNested) {
       continue;
     }

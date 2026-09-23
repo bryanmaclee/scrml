@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `45749bb1` — wrap(s425): four adopter reports triaged by execution, and the two best findings were corrections to my own work (#1028) — **pushed**
 - `92f40bd4` — wrap(s427): five merged and one held — the held fix's own review found it compiling a const reassignment into a dead page (#1023) — **pushed**
 - `8fbeaf00` — wrap(s426-addendum2): door 3 is built and HELD, and the reviewer's best finding was already in my own output (#1015) — **pushed**
 - `60f8b1fc` — wrap(s424-addendum): correct the wrap's own closing state — five PRs, not three, and two landed after it (#1005) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `344dd9fe` — wrap(s422): three rulings that redefine what a binding is, and five gates that each caught something real (#997) — **pushed**
 - `c6bf6138` — wrap(s421): correct an inherited worktree claim before it reached main — **pushed**
 - `923fc144` — wrap(s420): the floor drained 8 to 0, and then convicted my own fix of the class it was fixing (#980) — **pushed**
-- `6620771b` — wrap(s419): the floor convicted all three of my own PRs, and every fix re-created its class one level away (#975) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

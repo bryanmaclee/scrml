@@ -89,6 +89,15 @@ interface MatchBlockAstNode {
    *  matching the `on=alias.field` form per SPEC §17.7.3 (identical
    *  codegen). Null/absent when the match-block is not inside an each. */
   enclosingEachIterVar?: string | null;
+  /** g-match-inside-each-row-cannot-see-the-row-variable — every name bound by
+   *  the enclosing `<each>` rows (innermost first, shadowed duplicates dropped).
+   *  [] when not inside an each. Set by collectMatchBlocks. */
+  enclosingEachScopeNames?: string[];
+  /** g-match-inside-each-row-cannot-see-the-row-variable — the subset of
+   *  `enclosingEachScopeNames` the arm bodies reference: the trailing params of
+   *  the item-scoped dispatch fn, and the trailing ARGS emit-each passes at the
+   *  per-row dispatch call. Set by emitMatchBodyRenderForFile. */
+  rowScopeParams?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -116,12 +125,17 @@ interface MatchBlockAstNode {
 function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
   const found: MatchBlockAstNode[] = [];
   const seen = new WeakSet<object>();
-  function walk(node: any, eachIterVar: string | null): void {
+  // g-match-inside-each-row-cannot-see-the-row-variable — `scope` carries EVERY
+  // name bound by the enclosing `<each>` rows (innermost first: iter var, then
+  // an `as (k, v)` pair), not just the innermost iter var, so an arm body that
+  // reads an OUTER row's alias from inside a nested each is covered too. Reset
+  // to [] wherever `eachIterVar` resets to null (an `<empty>` body).
+  function walk(node: any, eachIterVar: string | null, scope: string[] = []): void {
     if (!node || typeof node !== "object") return;
     if (seen.has(node)) return;
     seen.add(node);
     if (Array.isArray(node)) {
-      for (const n of node) walk(n, eachIterVar);
+      for (const n of node) walk(n, eachIterVar, scope);
       return;
     }
     if (node.kind === "match-block") {
@@ -129,11 +143,12 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
       // so resolveOnExpr can lower an `on=@.field` sigil. Always set it
       // (idempotent across re-walks).
       (node as MatchBlockAstNode).enclosingEachIterVar = eachIterVar;
+      (node as MatchBlockAstNode).enclosingEachScopeNames = eachIterVar ? scope : [];
       found.push(node as MatchBlockAstNode);
       // Recurse into bodyChildren so nested match-blocks inside arm bodies
       // surface too. Arm bodies are NOT a new iteration scope, so the
       // enclosing each iter var carries through unchanged.
-      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, eachIterVar);
+      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, eachIterVar, scope);
       return;
     }
     // R28-1 — entering an each-block: its per-item template (templateChildren)
@@ -146,8 +161,11 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
       const innerIterVar = (typeof node.asName === "string" && node.asName.length > 0)
         ? node.asName
         : "_scrml_each_item";
-      if (Array.isArray(node.templateChildren)) walk(node.templateChildren, innerIterVar);
-      if (node.emptyChild) walk(node.emptyChild, null);
+      const rowNames = [innerIterVar, ...(Array.isArray(node.asNames) ? node.asNames : [])]
+        .filter((n: unknown) => typeof n === "string" && (n as string).length > 0) as string[];
+      const innerScope = [...rowNames, ...scope.filter((n) => !rowNames.includes(n))];
+      if (Array.isArray(node.templateChildren)) walk(node.templateChildren, innerIterVar, innerScope);
+      if (node.emptyChild) walk(node.emptyChild, null, []);
       // Fall through to the generic descent for any other container fields
       // (bodyChildren is now seen-guarded; descend with the OUTER iter var so
       // a match-block reachable only via a non-template field still resolves).
@@ -161,13 +179,13 @@ function collectMatchBlocks(fileAST: any): MatchBlockAstNode[] {
     // Child shape via `ifChainChildNodes` (ast-if-chain.js), shared with the six
     // sibling walks. (g-each-in-if-else-chain-emits-zero-renderers, <match> drop.)
     if (node.kind === "if-chain") {
-      for (const branchBody of ifChainChildNodes(node)) walk(branchBody, eachIterVar);
+      for (const branchBody of ifChainChildNodes(node)) walk(branchBody, eachIterVar, scope);
       return;
     }
     // Recurse into known container fields. Mirror engine-decl + match-block
     // descent shape — children / body / bodyChildren / nodes / arms.
     for (const key of ["children", "body", "bodyChildren", "nodes", "arms"]) {
-      if (Array.isArray(node[key])) walk(node[key], eachIterVar);
+      if (Array.isArray(node[key])) walk(node[key], eachIterVar, scope);
     }
   }
   // The pipeline passes the OUTER file-result object whose AST nodes live
@@ -1227,6 +1245,10 @@ export function emitMatchBodyRenderForFile(
     const isInEach =
       typeof (matchBlock as MatchBlockAstNode).enclosingEachIterVar === "string" &&
       ((matchBlock as MatchBlockAstNode).enclosingEachIterVar as string).length > 0;
+    // g-match-inside-each-row-cannot-see-the-row-variable — an item-scoped match's
+    // arm bodies read the ROW (`${g.name}`, `onclick=pick(g.id)`, `@.name`), but
+    // its render / wire fns live at FILE scope. Pass the row scope in.
+    const rowScopeParams = isInEach ? prepareRowScopedArms(matchBlock, arms) : [];
     const out = emitVariantGuardedRender(
       () => onResolved.variantExprAccessor,
       arms,
@@ -1250,6 +1272,7 @@ export function emitMatchBodyRenderForFile(
         ...(onResolved.subscribeSubPath ? { subscribeSubPath: onResolved.subscribeSubPath } : {}),
         ...(hasWildcard ? { defaultArmTag: "_" } : {}),
         ...(isInEach ? { itemScopedDispatch: true } : {}),
+        ...(rowScopeParams.length > 0 ? { rowScopeParams } : {}),
       },
     );
     if (out.renderFunctionsJs) renderFunctions.push(out.renderFunctionsJs);
@@ -1257,4 +1280,82 @@ export function emitMatchBodyRenderForFile(
   }
 
   return { renderFunctions, dispatchers };
+}
+
+/**
+ * g-match-inside-each-row-cannot-see-the-row-variable — prepare the arms of a
+ * block-form `<match>` that sits inside an `<each>` row (item-scoped dispatch)
+ * so their bodies can see the row. Returns the row-scope names to pass as
+ * trailing dispatch parameters, and stamps the match-block (`rowScopeParams`,
+ * read by emit-each at the per-row dispatch call) and every `<each>` directly in
+ * an arm body (`armScopedEach`, read by emit-each's render-fn pass and by the
+ * arm wire fn). Idempotent per match-block.
+ *
+ * Mechanism: the #1022 one (a nested lift group in a row or arm receives its
+ * instance scope as PARAMETERS because it lives at file scope) — mirrored for
+ * the arm render path. Steps:
+ *   1. Lower `@.` in the arm bodies to the innermost row's iter var (§17.7.3 —
+ *      a match arm is not an iteration scope; `@.x` ≡ `alias.x`).
+ *   2. Row-scope names = the enclosing rows' names the arm bodies reference as a
+ *      free identifier (a scan over every string the arm ASTs carry; over-
+ *      inclusion only adds an unused parameter, a miss would be a ReferenceError
+ *      — the same trade #1022 made).
+ *   3. Each `<each>` in an arm body gets a file-scope render fn taking
+ *      `(_root, ...payloadBindings, ...rowScope)`; it is recorded on the arm
+ *      (`scopedEaches`) so the arm's wire fn runs it after every arm entry.
+ */
+function prepareRowScopedArms(
+  matchBlock: MatchBlockAstNode,
+  arms: import("./emit-variant-guard.ts").VariantArm[],
+): string[] {
+  if (Array.isArray(matchBlock.rowScopeParams)) return matchBlock.rowScopeParams;
+  const iterVar = matchBlock.enclosingEachIterVar as string;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { rewriteEachSigilInArmBody, referencesFreeIdent } = require("./emit-each.ts") as {
+    rewriteEachSigilInArmBody: (n: any, iterVarName: string) => void;
+    referencesFreeIdent: (blanked: string, name: string) => boolean;
+  };
+  for (const arm of arms) rewriteEachSigilInArmBody(arm.body, iterVar);
+
+  const scopeNames = Array.isArray(matchBlock.enclosingEachScopeNames) && matchBlock.enclosingEachScopeNames.length > 0
+    ? matchBlock.enclosingEachScopeNames
+    : [iterVar];
+  const texts: string[] = [];
+  const seen = new WeakSet<object>();
+  const collect = (n: any): void => {
+    if (typeof n === "string") { texts.push(n); return; }
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) collect(x); return; }
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k.startsWith("__scrml")) continue;
+      collect((n as Record<string, unknown>)[k]);
+    }
+  };
+  for (const arm of arms) collect(arm.body);
+  const scanText = texts.join("\n");
+  const rowScope = scopeNames.filter((name) => referencesFreeIdent(scanText, name));
+  matchBlock.rowScopeParams = rowScope;
+
+  for (const arm of arms) {
+    const armParams = [...arm.payloadBindings, ...rowScope.filter((n) => !arm.payloadBindings.includes(n))];
+    const scopedEaches: Array<{ fnName: string; params: string[] }> = [];
+    const visit = (n: any): void => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+      if (n.kind === "each-block") {
+        const stamp = { fnName: `_scrml_each_arm_render_${nsId(n.id)}`, params: armParams };
+        (n as any).armScopedEach = stamp;
+        scopedEaches.push(stamp);
+        return; // an each nested inside THIS each is emitted inline by its factory
+      }
+      if (n.kind === "if-chain") { for (const b of ifChainChildNodes(n)) visit(b); return; }
+      for (const key of ["children", "body", "bodyChildren", "nodes"]) {
+        if (Array.isArray(n[key])) visit(n[key]);
+      }
+    };
+    visit(arm.body);
+    if (scopedEaches.length > 0) arm.scopedEaches = scopedEaches;
+  }
+  return rowScope;
 }

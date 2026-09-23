@@ -423,6 +423,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   //     the global delegation registry regardless of arm tag.
   const eventBindings = allEventBindings.filter((b) => {
     if (!b.engineArm) return true;
+    // g-match-inside-each-row-cannot-see-the-row-variable — a delegable click
+    // whose handler reads an arm payload binding / enclosing row name is wired
+    // PER ARM by emitArmWireFunction (the only place those names are bound);
+    // delegating it too would run it at module scope → ReferenceError.
+    if ((b as any).armWired === true) return false;
     const domEvent = (b.eventName || "").replace(/^on/, "");
     // Delegable events stay in global registry; non-delegable arm-tagged
     // events are re-emitted by emitArmWireFunction.
