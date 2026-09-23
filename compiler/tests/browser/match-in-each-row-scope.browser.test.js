@@ -463,6 +463,27 @@ describe("round 2 — click order inside an arm in an <each> row matches the sam
   test("row-level onclick + stopPropagation in the button — twin (no match)", () => {
     expect(clickLog(rowProgram(`<button class="i" onclick=stp("btn", event)>x</button>`, false, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn;");
   });
+  // INTENTIONAL behaviour change (review of e0c02544, PA-accepted): a row-arm
+  // handler that reads no arm name is now an element listener like the row's
+  // own handlers, so its click also reaches a page-level delegated ancestor —
+  // exactly as the plain-row twin's does. (main: the arm button was delegated
+  // and the walker stopped at it: `del;`.)
+  const PAGE_WRAPPED = (inner, asArm) => `<program>
+  type Kind:enum = { A, B }
+  <groups> = [{ id: 1, kind: Kind.A }]
+  ${LOG_DECLS}
+  <div class="page" onclick=lg("outer")>
+  <ul><each in=@groups key=@.id as g><li>${asArm ? `<match for=Kind on=g.kind><A>${inner}</><B><b>B</b></></match>` : inner}</li></each></ul>
+  </div>
+</program>
+`;
+  test("row-arm handler reading no arm name + a page-level delegated ancestor — in a <match> arm", () => {
+    expect(clickLog(PAGE_WRAPPED(`<button class="i" onclick=lg("del")>x</button>`, true), "button.i")).toBe("del;outer;");
+  });
+  test("row handler + a page-level delegated ancestor — twin (no match)", () => {
+    expect(clickLog(PAGE_WRAPPED(`<button class="i" onclick=lg("del")>x</button>`, false), "button.i")).toBe("del;outer;");
+  });
+
   test("a submit handler reading the row runs, with preventDefault (compiled clean and threw at submit before)", () => {
     const app = mount(rowProgram(`<form class="f" onsubmit=lg("save" + g.id)><button type="submit">s</button></form>`, true));
     expect(app.errs).toEqual([]);
@@ -483,6 +504,28 @@ describe("round 2 — click order inside an arm outside any <each> matches the s
       expect(clickLog(pageProgram(build(`"hi"`), false), "button.i")).toBe(expected);
     });
   }
+  test("an <each> inside an arm whose ROW handler reads the arm payload (was ReferenceError on click; round 3)", () => {
+    const app = mount(`<program>
+  type Doc:enum = { Empty, Note(note: string) }
+  <cur> = Doc.Note("P")
+  <list> = ["m", "n"]
+  ${LOG_DECLS}
+  <match for=Doc on=@cur>
+    <Empty><p>none</p></>
+    <Note(note)><each in=@list as it><button class="p1" onclick=lg(note + it)>\${it}</button></each></>
+  </match>
+</program>
+`);
+    expect(app.errs).toEqual([]);
+    expect(app.initError).toBeNull();
+    for (const b of app.qa("button.p1")) app.click(b);
+    expect(app.get("log")).toBe("Pm;Pn;");
+    app.set("list", ["m", "n", "o"]);
+    app.set("log", "");
+    for (const b of app.qa("button.p1")) app.click(b);
+    expect(app.get("log")).toBe("Pm;Pn;Po;");
+  });
+
   test("the outer arm-bound handler runs when its own element is clicked", () => {
     expect(clickLog(pageProgram(PAGE_CASES[1][1]("note"), true), "div.o")).toBe("outerhi;");
   });

@@ -89,7 +89,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
-import { emitValueAttrApply, armHandlerFactoryName } from "./emit-event-wiring.ts";
+import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName } from "./emit-event-wiring.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -584,6 +584,10 @@ function emitArmWireFunction(
     if (mode === null) continue;
     b.armParams = [...armParams];
     b.armWiredMode = mode;
+    // Chunk-owned names, computed ONCE here and read back by emit-event-wiring
+    // (see armWalkerPropName: a walker must only run handlers its chunk owns).
+    b.armFactoryName = armHandlerFactoryName(b.placeholderId as string);
+    if (mode === "walker") b.armWalkerProp = armWalkerPropName(b.eventName as string, b.placeholderId as string);
     armDelegated.push({ binding: b, domEvent, mode });
   }
   // render-expr-primitive — `<render of=X/>` bindings tagged with THIS arm
@@ -958,14 +962,15 @@ function emitArmWireFunction(
   // factory `armHandlerFactoryName(id)`; bind it to this arm's parameters here.
   for (const { binding, domEvent, mode } of armDelegated) {
     const eventName = binding.eventName as string;
-    const factory = armHandlerFactoryName(binding.placeholderId as string);
+    const factory = binding.armFactoryName as string;
     lines.push(`  {`);
     lines.push(`    const el = _root.querySelector('[data-scrml-bind-${eventName}=${JSON.stringify(binding.placeholderId)}]');`);
     lines.push(`    if (el) {`);
     if (mode === "walker") {
-      // Run by the document-level delegation walker (emit-event-wiring), at the
-      // same point of the walk a registry handler would run.
-      const prop = JSON.stringify(`__scrml_arm_${eventName}`);
+      // Run by the document-level delegation walker of THIS chunk
+      // (emit-event-wiring), at the same point of the walk a registry handler
+      // would run. The property is chunk- and binding-owned (armWalkerPropName).
+      const prop = JSON.stringify(binding.armWalkerProp as string);
       lines.push(`      el[${prop}] = ${factory}(${armParams.join(", ")});`);
       lines.push(`      _disposers.push(function() { el[${prop}] = null; });`);
     } else {

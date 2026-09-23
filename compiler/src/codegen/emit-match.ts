@@ -1249,6 +1249,7 @@ export function emitMatchBodyRenderForFile(
     // arm bodies read the ROW (`${g.name}`, `onclick=pick(g.id)`, `@.name`), but
     // its render / wire fns live at FILE scope. Pass the row scope in.
     const rowScopeParams = isInEach ? prepareRowScopedArms(matchBlock, arms) : [];
+    if (!isInEach) preparePayloadScopedArmEaches(matchBlock, arms);
     const out = emitVariantGuardedRender(
       () => onResolved.variantExprAccessor,
       arms,
@@ -1304,6 +1305,66 @@ export function emitMatchBodyRenderForFile(
  *      `(_root, ...payloadBindings, ...rowScope)`; it is recorded on the arm
  *      (`scopedEaches`) so the arm's wire fn runs it after every arm entry.
  */
+function preparePayloadScopedArmEaches(
+  matchBlock: MatchBlockAstNode,
+  arms: import("./emit-variant-guard.ts").VariantArm[],
+): void {
+  // g-match-inside-each-row-cannot-see-the-row-variable (sibling, review of
+  // e0c02544) — an `<each>` in an arm of a match OUTSIDE any row whose BODY reads
+  // the arm's payload binding (`<Note(note)><each in=@list as it><button
+  // onclick=f(note, it)>`): its render fn is the module-scope no-arg one, where
+  // `note` does not exist → ReferenceError. Give exactly those eaches the
+  // arm-scoped render path (params = the arm's payload bindings) the row case
+  // uses. An each whose payload use is only its `in=` source keeps the existing
+  // `armPayloadBinding` cell lookup, and an each that reads no payload name is
+  // untouched — both byte-identical.
+  if ((matchBlock as any).__scrmlPayloadEachesPrepared) return;
+  (matchBlock as any).__scrmlPayloadEachesPrepared = true;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { referencesFreeIdent } = require("./emit-each.ts") as {
+    referencesFreeIdent: (blanked: string, name: string) => boolean;
+  };
+  const stringsOf = (root: any): string => {
+    const texts: string[] = [];
+    const seen = new WeakSet<object>();
+    const collect = (n: any): void => {
+      if (typeof n === "string") { texts.push(n); return; }
+      if (!n || typeof n !== "object" || seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) { for (const x of n) collect(x); return; }
+      for (const k of Object.keys(n)) {
+        if (k === "span" || k.startsWith("__scrml")) continue;
+        collect((n as Record<string, unknown>)[k]);
+      }
+    };
+    collect(root);
+    return texts.join("\n");
+  };
+  for (const arm of arms) {
+    if (arm.payloadBindings.length === 0) continue;
+    const scopedEaches: Array<{ fnName: string; params: string[] }> = [];
+    const visit = (n: any): void => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+      if (n.kind === "each-block") {
+        const bodyText = stringsOf([n.templateChildren, n.emptyChild]);
+        if (arm.payloadBindings.some((p) => referencesFreeIdent(bodyText, p))) {
+          const stamp = { fnName: `_scrml_each_arm_render_${nsId(n.id)}`, params: [...arm.payloadBindings] };
+          (n as any).armScopedEach = stamp;
+          scopedEaches.push(stamp);
+        }
+        return;
+      }
+      if (n.kind === "if-chain") { for (const b of ifChainChildNodes(n)) visit(b); return; }
+      for (const key of ["children", "body", "bodyChildren", "nodes"]) {
+        if (Array.isArray(n[key])) visit(n[key]);
+      }
+    };
+    visit(arm.body);
+    if (scopedEaches.length > 0) arm.scopedEaches = [...(arm.scopedEaches ?? []), ...scopedEaches];
+  }
+}
+
 function prepareRowScopedArms(
   matchBlock: MatchBlockAstNode,
   arms: import("./emit-variant-guard.ts").VariantArm[],
