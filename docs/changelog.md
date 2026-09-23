@@ -7561,6 +7561,26 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S429, second half (2026-09-23, peter · P-Tech1) — two more landed, four held, and two of the holds were the SPEC saying no
+
+**The arc.** Continued after the first wrap, under "merge each when green". Six dev arcs and seven adversarial passes.
+Two fixes landed. Four are built and parked on hold refs, each with its reason recorded. Two of those were held not
+for a bug but because landing them would pick semantics bryan owns.
+
+- **#1037:** a match arm's `show=`, `disabled=`, value-form `${ if }` and `<textarea>` can read the arm's names.
+  Before, they threw at boot: a hidden element showed, and a disabled one never disabled. Round 2 fixed arm names
+  spelled like compiler internals (`el`, `_root`, …). Some of those collisions were silent on main.
+- **#1038:** a lifted `<each … as c>` keeps its alias. The page used to die at init. The cause was in the parser,
+  which read `as c` as two bare attributes.
+- **Held on rulings:**
+  - deep reactivity (§6.5 forbids what the replaced-row fix does);
+  - a `<match>` inside an engine state-child (landing it would decide an open fork).
+- **Held for review:**
+  - `when @x changes` now honours its dependency list. It had never fired on its own trigger, and fired on the
+    body's reads instead.
+  - string literals in mutation arguments keep their quotes, and never reach text rewrite passes.
+- **Ledger:** 9 new gaps, 2 raised to HIGH, 1 filed-and-resolved. Q5–Q7 and the `when` blast radius went to bryan.
+
 ### S429 (2026-09-23, peter · P-Tech1) — three codegen HIGHs landed, and all seven adversarial passes found a real defect in the round they reviewed
 
 **The arc.** The S427 held lift-body fix resumed, plus two repro-ready codegen HIGHs, run as three parallel

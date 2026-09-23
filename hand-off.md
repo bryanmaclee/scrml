@@ -1,3 +1,115 @@
+# scrml — Session 429, second half (peter · P-Tech1 Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched. That includes
+> the S429 FIRST-HALF block directly below, whose PICKUP is SUPERSEDED by this one.
+>
+> ⚑ **Peter said "merge the wrap PR when green, then keep going", then "merge each when green and /wrap".** Two PRs
+> landed. FOUR fixes are built and parked on hold refs; each one is recoverable, and the reason for each hold is below.
+> S428-bryan was live all session and landed #1034/#1035 in the middle of it.
+
+## ⏭ NEXT-SESSION PICKUP
+
+0. **⚑ LEAD: land `origin/hold/s429-mutation-arg-string-quotes` @ `257dfeca` — the adversarial pass on round 2 is all
+   that's left.**
+   - **Round 1 (`7072776f`):** re-quoted strings in the hand-rolled mutation-arg collectors. Its review found those
+     strings then flowed through TEXT `rewriteExpr` passes (`"use fn here"` → `"use function here"`), which is
+     LOUD→SILENT.
+   - **Round 2 (`257dfeca`):** parses multi-arg lists into an `array` node printed through the ExprNode printer, splits
+     C-style headers from TOKENS, and fixes `@set`, computed indexes, `upload()` and block comments. It adds an 87-case
+     fuzz, one trigger string per rewrite pass.
+   - **The pass:** run it on a FROZEN ref, criteria as always. Merge main first; it is based on 085ddbe8 and touches
+     `ast-builder.js`, `emit-logic.ts`, `emit-control-flow.ts`, `types/ast.ts` and `native-parser/translate-stmt.js`.
+   - Gap: `g-mutating-method-string-args-lose-their-quotes` (HIGH).
+
+1. **`origin/hold/s429-when-changes-honours-dep-list` @ `2eecc899`: needs a review, plus one more fix, before landing.**
+   - **What it fixes:** `when @x changes` broke all three §6.7.4 clauses (it ran on mount, never fired on its dep, and
+     fired on whatever the body read).
+   - **Still to do:**
+     - (a) the adversarial pass;
+     - (b) `@items.push(x)` from an INLINE handler lowers with no `_scrml_reactive_set` (§6.5.1). Main's auto-tracking
+       hid that; with the fix, a `when @items` that worked on main goes silent. Fix it in the same PR;
+     - (c) bryan has been told about the blast radius (in the message below). Land after (a) and (b) unless he objects.
+   - **Not in scope (recorded):** E-LIFECYCLE-006/-007/-016 never fire; `reads @x` is unparsed; teardown in `if=`,
+     component and match-arm hosts.
+
+2. **Two holds wait on bryan's rulings.** Don't build further until he answers; both questions are in
+   `handOffs/incoming/2026-09-23-from-S429-peter-to-bryan-q5-q7.md`.
+   - **Q5, deep reactivity:** `origin/hold/s429-deep-reactive-cell-writes` @ `58b90cfc`. It fixes
+     `g-each-replaced-row-stops-receiving-in-place-edits` in the direction §6.5.6/§6.5.7 forbid. Amend the spec, or
+     make literal cells shallow.
+   - **Q6, a match in an engine state-child:** `origin/hold/s429-match-in-engine-state-child` @ `e0ac22d6`. Reviewed
+     clean, but it decides his open (A)/(B) fork for the engine position.
+     - Its PARSER layer, where a `</>`-closed capitalised element in a lowercase one stole the state-child's closer
+       (e.g. `<div><Card>…</></div>`), is fork-independent and can be split out and landed whatever he rules.
+
+3. **Next peter-lane work, ready to dispatch:**
+   - `g-arm-cell-only-binding-dead-after-arm-switch` (HIGH, silent). Drop the "reads an arm name" gate in
+     `emitArmWireFunction`, so every arm binding is wired per entry. This changes the emit of every arm with a
+     cell-only binding, so it needs its own differential.
+   - `g-lifted-each-if-attribute-silently-ignored`, **raised to HIGH**. Since #1038, gated content renders for aliased
+     lifted eaches; `W-ATTR-001` is the only signal.
+   - `g-match-complex-on-expr-effect-chunk-not-shipped` (MED). One entry in the `POST_EMIT_HELPER_CHUNK_GATES` table in
+     `emit-client.ts`. It also blocks the engine hold's `on=pick(n)` case.
+   - `g-scrml-sigil-rewrites-reach-inside-every-string-literal` and
+     `g-struct-construction-silently-dropped-to-bare-type-name` (both HIGH, silent, agent-reported). **Re-reproduce
+     before dispatching.** The first is the S425 "one masking pass every stage consumes" thesis, showing up again.
+
+4. **Carry-forward from the first half:** Q1–Q4 to bryan (keywordless binder mutability, the click contracts,
+   `<engine>` in an `<each>` row, `initial=` with a payload); maps not refreshed (see below).
+
+## WHAT LANDED (second half) — two PRs, each after an adversarial pass
+
+| PR | SHA | what | passes |
+|---|---|---|---|
+| #1037 | `9b681f61` | A match arm's `show=` / `disabled=` / value-form `${ if }` / `<textarea>` can read the arm's names (they threw at boot, leaving the element unbound). Unquoted `attr=name` in an arm follows §5.2. **Round 2:** arm names spelled like compiler internals (`el`, `_root`, `_d`…) no longer collide; some of those collisions were SILENT on main. | 2 (1 MED fixed) |
+| #1038 | `83b34323` | A lifted `<each … as c>` keeps its alias. The page died at init; the cause was the parser reading `as c` as two bare attributes. Also fixed: `as (k, v)` and a nested `<each>` in a lifted row. | 1 (clean) |
+
+## 🔭 DURABLE
+
+**Of four fixes held this half, two were held by the SPEC, not by a bug.** The replaced-row fix and the engine-match
+fix were both correct engineering. One resolved an inconsistency in the direction the spec forbids; the other would
+have decided an open ruling by landing. A clean review can't see either; only reading the governing sentences and the
+open-fork ledger can. **Before landing, ask: "does this pick semantics someone else owns?"**
+
+**A dev agent's "the suspect was wrong" is often the finding.** I pointed the replaced-row agent at the per-item
+effect. It measured that the effect was fine and found the real cause was one layer up: literal-vs-computed cell
+wrapping. That turned a HIGH bug into a spec question.
+
+**Every "pre-existing, not fixed" list is a queue, not a footnote.** This half's agents surfaced about 15 pre-existing
+defects in passing, among them a core feature (`when`) that never fired on its own trigger, and string contents
+rewritten inside every literal. The two biggest finds of the half came from the "found along the way" sections.
+
+**Idle time is the cheapest verification budget.** Peter asked twice to use the wait. The waits verified the S427
+backlog and found the `when` HIGH and the engine-match defect, all read-only or on files no agent was touching.
+
+## ⚑ MISSES (mine)
+
+1. **★★ I dispatched `when` and the mutation-quotes fix against the same shared scratchpad.** Agents overwrote each
+   other's repro files in `scratchpad/r/` and `scratchpad/w/` at least three times. Give each agent a private scratch
+   subdir in its brief.
+2. **★ I filed the replaced-row HIGH as a missed update** without checking §6.5 first. The spec question was sitting in
+   the governing section the whole time.
+
+## Gate at close
+
+- **Cloud:** #1037 and #1038 had `gate` + `windows` green on their final heads, and `tracking` matched main's five
+  names exactly.
+- **Local unit gate on main `83b34323`:** **18959 pass / 17 skip / 1 fail** (977 files). The 1 is the `api-decl-codegen` 5 s `node --check` timeout under full-suite load, the same one all session; the file passes 11/11 alone.
+- **Holds (all four on origin, worktrees removed):**
+  - `hold/s429-mutation-arg-string-quotes` `257dfeca`
+  - `hold/s429-when-changes-honours-dep-list` `2eecc899`
+  - `hold/s429-deep-reactive-cell-writes` `58b90cfc`
+  - `hold/s429-match-in-engine-state-child` `e0ac22d6`
+- **Worktrees:** all of this session's are removed. Retained, not mine: `agent-a0742fe4795045e91`,
+  `agent-a4e6b5f2562ae9eaa`, `onmount-c`, `scrml-pinned`. Scratch dirs `C:/b438o`, `C:/b441x`, `C:/cd1`, `C:/rv*`,
+  `C:/d43*` and `C:/w434` hold agent differential data and are safe to delete by hand.
+- **Maps:** NOT refreshed (bryan live; repo-wide shared surface). Code landed today in `emit-lift.js`, `emit-match.ts`,
+  `emit-each.ts`, `emit-variant-guard.ts`, `emit-client.ts`, `emit-event-wiring.ts`, `emit-html.ts`, `ast-builder.js`
+  and `native-parser/translate-stmt.js`.
+- **Delta-log:** [3505]–[3512].
+
+---
+
 # scrml — Session 429 (peter · P-Tech1 Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
