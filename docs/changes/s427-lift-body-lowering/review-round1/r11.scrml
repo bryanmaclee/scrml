@@ -1,0 +1,16 @@
+<program>
+<items> = [{id: 1, name: "a"}, {id: 2, name: "b"}]
+<user> = "U"
+<hits> = 0
+<ul>
+${
+    const name = @user
+    lift <h4>${name}</h4>
+    for (let item of @items) {
+        const name = item.name
+        lift <li class="row"><button class="b" onclick=${@hits = @hits + 1}>${name}</button><input class="in" bind:value=@user/></li>
+    }
+}
+</ul>
+<p id="h">${@hits}</p>
+</program>

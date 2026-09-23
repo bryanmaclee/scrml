@@ -1,0 +1,1 @@
+export async function run(a){ const lab=()=>JSON.stringify([...document.querySelectorAll(".chart-bars .bar-label")].map(x=>x.textContent)); a.set("history",[5,6,7]); console.log("SV", lab()); a.set("history",[9]); console.log("SV", lab()); a.get("history").push(3); console.log("SV push", lab()); }

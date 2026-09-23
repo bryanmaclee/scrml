@@ -2899,6 +2899,23 @@ export function generateClientJs(ctx: CompileContext): string {
     // chunk's own `_scrml_navigate` definition.
     ["_scrml_navigate_soft(", "utilities"],
     ["_scrml_navigate(", "utilities"],
+    // g-lift-inside-each-row-or-match-arm-silently-dropped — a `${ … lift … }`
+    // block inside a `<match>` arm is stored RAW at TAB and lowered only at CG
+    // time (the same deferred-arm shape as GITI-036 above), so the pre-emit
+    // `case "lift-expr"` walk never sees its lift and the `lift` chunk — which
+    // DEFINES `_scrml_lift_target` / `_scrml_lift` — was tree-shaken, leaving
+    // the emitted group's `_scrml_lift_target = …` a ReferenceError the moment
+    // the arm rendered. Every emitted lift group assigns `_scrml_lift_target`
+    // (and the nested-group driver saves it), so the bare name gates the whole
+    // family; a lift-free page references neither and still tree-shakes it out.
+    ["_scrml_lift_target", "lift"],
+    // The nested-lift drivers (`_scrml_lift_scoped_run` / `_scrml_lift_item_run`,
+    // emit-reactive-wiring.ts NESTED_LIFT_RUN_HELPERS) construct effects with
+    // `_scrml_effect` / `_scrml_effect_static` (the `deep_reactive` chunk) even
+    // when the lifted block itself reads nothing reactive — e.g. an engine arm
+    // lifting over its payload binding. The driver's definition carries this
+    // call-form token, so it gates exactly the files that emit the drivers.
+    ["_scrml_lift_scoped_run(", "deep_reactive"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;
@@ -2907,6 +2924,25 @@ export function generateClientJs(ctx: CompileContext): string {
         ctx.usedRuntimeChunks.add(chunkName);
         break;
       }
+    }
+  }
+  // g-lift-inside-each-row-or-match-arm-silently-dropped — a keyed
+  // `for (… of @cell) { lift … }` inside an arm lowers to a
+  // `_scrml_reconcile_list(` call (the `reconciliation` chunk), and the pre-emit
+  // for-stmt gate (`detectFromNode`) never walks a deferred arm body — the same
+  // blindness as the `lift` entry above. SCOPED to files that emit the nested-lift
+  // drivers: an unconditional `_scrml_reconcile_list(` gate would ALSO change the
+  // runtime of a program outside this fix's locus (see the S427 report —
+  // conformance/cases/each/ternary-markup-giti033, whose base build calls the
+  // function with the chunk tree-shaken). Widening it is a separate change.
+  if (!ctx.usedRuntimeChunks.has("reconciliation")) {
+    let _nestedLift = false;
+    let _reconcile = false;
+    for (const _ln of lines) {
+      if (typeof _ln !== "string") continue;
+      if (!_nestedLift && _ln.includes("_scrml_lift_scoped_run(")) _nestedLift = true;
+      if (!_reconcile && _ln.includes("_scrml_reconcile_list(")) _reconcile = true;
+      if (_nestedLift && _reconcile) { ctx.usedRuntimeChunks.add("reconciliation"); break; }
     }
   }
 

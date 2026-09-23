@@ -44,7 +44,7 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { SCRML_RUNTIME } from "../../src/runtime-template.js";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { resolve } from "path";
-import { chunkCellKey } from "../helpers/chunk-scope.js";
+import { chunkCellKey, captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
 if (!globalThis.document) GlobalRegistrator.register();
 
@@ -759,3 +759,102 @@ describe("TodoMVC §10: addTodo — end-to-end behavior", () => {
     expect(api.get("todos")[0].title).toBe("Write tests");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §11: todo rows RENDER — g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template
+//
+// Every test above is green against a build that renders ZERO rows: the harness
+// swallows the client init throw into `initError` and nothing asserted that a
+// row reached the DOM. The row list is a `${ for … lift <li> }` inside
+// `<section class="main" if=@todos.length>` — an `if=` body lowers to a mount
+// `<template>` (§17.1), and the lift target was bound with a module-init
+// `document.querySelector` that never sees template content (`null` → throw on
+// `null.innerHTML`).
+//
+// This section loads the SAME dist artifact the way a page runs it — runtime and
+// client in ONE scope (two classic <script>s share the global lexical env), so
+// `_scrml_lift_target` and the if= mount runtime are reachable, unlike
+// `loadTodoMVC`'s IIFE-wrapped runtime (see HARNESS LIMITATION above).
+// ---------------------------------------------------------------------------
+
+function loadTodoMVCPageScope() {
+  const htmlContent = readFileSync(resolve(DIST, "app.html"), "utf-8");
+  const clientJs = readFileSync(resolve(DIST, "app.client.js"), "utf-8");
+  const referenced = /scrml-runtime\.[A-Za-z0-9]+\.js/.exec(htmlContent);
+  if (!referenced || !existsSync(resolve(DIST, referenced[0]))) {
+    throw new Error("TodoMVC harness: app.html names no runtime present in dist/ — recompile the benchmark.");
+  }
+  const runtimeJs = readFileSync(resolve(DIST, referenced[0]), "utf-8");
+  const bodyMatch = htmlContent.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  document.body.innerHTML = (bodyMatch ? bodyMatch[1] : htmlContent)
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/g, "")
+    .trim();
+  try { globalThis.localStorage && globalThis.localStorage.clear(); } catch { /* storage unavailable */ }
+  let initError = null;
+  const consoleErrors = [];
+  const origError = console.error;
+  console.error = (...args) => { consoleErrors.push(args.map(String).join(" ")); };
+  try {
+    new Function(
+      "window",
+      "document",
+      `${runtimeJs}\n` +
+        captureInsideChunkScope(clientJs, "globalThis.__todomvc_get = _scrml_reactive_get; globalThis.__todomvc_set = _scrml_reactive_set;\n"),
+    )(window, document);
+    document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+  } catch (e) {
+    initError = e;
+  } finally {
+    console.error = origError;
+  }
+  return {
+    initError,
+    consoleErrors,
+    get: (n) => globalThis.__todomvc_get(n),
+    set: (n, v) => globalThis.__todomvc_set(n, v),
+  };
+}
+
+const rowTitles = () =>
+  [...document.querySelectorAll("section.main ul.todo-list li.todo-item label")].map((l) => l.textContent.trim());
+
+// A missing dist must be VISIBLE, never a vacuous pass: the section SKIPS, and its
+// title says why and how to build it.
+describe.skipIf(!distExists)(
+  distExists
+    ? "TodoMVC §11: todo rows render inside ul.todo-list (lift target inside an if= mount template)"
+    : "TodoMVC §11: SKIPPED — benchmarks/todomvc/dist is not built (bun compiler/src/cli.js compile benchmarks/todomvc/app.scrml --output benchmarks/todomvc/dist/ --convert-legacy-css)",
+  () => {
+  test("the client initialises without a throw and without a mount-wiring error", () => {
+    const api = loadTodoMVCPageScope();
+    expect(api.initError).toBeNull();
+    expect(api.consoleErrors).toEqual([]);
+  });
+
+  test("setting @todos mounts section.main and renders one row per todo INSIDE ul.todo-list", () => {
+    const api = loadTodoMVCPageScope();
+    expect(api.initError).toBeNull();
+    expect(document.querySelector("section.main")).toBeNull();
+    api.set("todos", [
+      { id: 1, title: "Learn scrml", completed: false },
+      { id: 2, title: "Write tests", completed: true },
+    ]);
+    expect(document.querySelector("section.main")).not.toBeNull();
+    expect(rowTitles()).toEqual(["Learn scrml", "Write tests"]);
+    // No row escaped its host (the pre-fix fallback lifted into document.body).
+    expect(document.querySelectorAll("li.todo-item").length).toBe(2);
+  });
+
+  test("an empty -> non-empty -> empty -> non-empty cycle re-renders the rows each mount", () => {
+    const api = loadTodoMVCPageScope();
+    api.set("todos", [{ id: 1, title: "a", completed: false }]);
+    expect(rowTitles()).toEqual(["a"]);
+    api.set("todos", []);
+    expect(document.querySelector("section.main")).toBeNull();
+    expect(document.querySelectorAll("li.todo-item").length).toBe(0);
+    api.set("todos", [{ id: 2, title: "b", completed: false }, { id: 3, title: "c", completed: false }]);
+    expect(rowTitles()).toEqual(["b", "c"]);
+    expect(document.querySelectorAll("li.todo-item").length).toBe(2);
+  });
+  },
+);

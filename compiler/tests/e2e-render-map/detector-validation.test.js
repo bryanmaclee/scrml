@@ -30,13 +30,19 @@ import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { dirname, join } from "node:path";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { observeApp } from "./render-harness.js";
+import { observeApp, observeCompiled, seedThrewNotice } from "./render-harness.js";
 import {
   runDetectors,
+  hasRenderedContent,
   regionScopedEmptiness,
   collectEachRegions,
   renderedContentSignature,
   signatureGained,
+  seedBridgeFailed,
+  seedFailureKind,
+  SEED_SNAPSHOT_NOTICE,
+  GREEN_STATES,
+  RENDER_STATES,
 } from "./render-detectors.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -85,10 +91,11 @@ describe("detector-validation — the three S202 acceptance-bug shapes fire", ()
   // Part (1): the fixture's loop-body unbound-ref shape compiles/renders clean
   //           TODAY (the inlining-substitution bug is fixed); we record that.
   // Part (2): the detector fires on the historical symptom — a mount that threw
-  //           `<ident> is not defined`. The harness records this exact shape on
-  //           REAL corpus apps (examples/16-remote-data, examples/29-engine-vs-
-  //           flags both throw `… is not defined` at mount today), so this is
-  //           the live regression path, reproduced here against the detector.
+  //           `<ident> is not defined`. The harness recorded this exact shape on
+  //           REAL corpus apps (examples/16-remote-data and examples/29-engine-vs-
+  //           flags both threw `… is not defined` at mount when this was written;
+  //           both are `renders-clean` in the committed baseline as of S427), so
+  //           this is the regression path, reproduced here against the detector.
   // -------------------------------------------------------------------------
   test("D1+D7 fire (D1-MOUNT-THROW + S-UNBOUND-REF) on a mount-time `is not defined` throw", () => {
     // Part (2): the detector firing on the symptom.
@@ -371,8 +378,10 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     });
   };
 
-  // The headline: the EXACT 25-triage-board#populated shape. Chrome renders, data does
-  // not. Before S423 this scored `renders-clean` with zero smells — D6's whole reason
+  // The headline: the EXACT shape 25-triage-board#populated rendered under its pre-S427
+  // lowercase-column seed (the fixture is corrected now; this synthetic pin, and the
+  // compiled d6-nested-each-empty-with-data fixture, keep the shape pinned without it).
+  // Chrome renders, data does not. Before S423 this scored `renders-clean` with zero smells — D6's whole reason
   // for existing, scored green off 52 characters of column headings.
   test("D6 fires on the BOARD BUG: non-empty outer range, every inner mount empty", () => {
     const columns = ["Inbox", "Doing", "Done"]
@@ -394,8 +403,8 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   // LEGITIMATELY empty. A predicate of "fire on ANY surviving empty mount slot" — the
   // obvious reading of the discriminator, and the one this arc was dispatched with —
   // scores this correct board RED. It is measured, not hypothetical: mounting
-  // 25-triage with the corrected `column:"Inbox"`/`"Doing"` seed that the
-  // seed-fixtures fix arc will land produces exactly this DOM. This test is what
+  // 25-triage with the corrected `column:"Inbox"`/`"Doing"` seed — the committed
+  // fixture since S427 — produces exactly this DOM. This test is what
   // reds if anyone widens the conjunction to a disjunction.
   test("D6 does NOT fire when some inner mounts rendered and one is legitimately empty", () => {
     const columns =
@@ -770,8 +779,8 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   }
 
   // The count surface: `unresolved` appears ONLY when non-zero, so the committed
-  // `detail.emptyRegions` shape is unchanged for every cell that has none — including
-  // 25-triage, whose baseline entry must not churn.
+  // `detail.emptyRegions` shape is unchanged for every cell that has none (written when
+  // 25-triage was a red cell carrying this detail; since S427 it is green and carries none).
   test("finding 2: the summary omits `unresolved` when there is none", () => {
     const det = seededDetectGained(`<h1>Board</h1><ul>${"<!--scrml-each:v--><!--/scrml-each:v-->"}</ul>`, false);
     expect(det.detail.emptyRegions).toEqual({ regions: 1, mounts: 0, ranges: 1, leaves: 1, emptyLeaves: 1 });
@@ -811,8 +820,8 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   });
 
   // ⛑ S423 — the seed-WRITE gate. `seeded` is only "a fixture was registered";
-  // `examples/06-kanban-board` (derived-cell) and `examples/16-remote-data`
-  // (no-such-cell) write nothing and still carry `seeded:true`.
+  // Until S427, `examples/06-kanban-board` (derived-cell) and `examples/16-remote-data`
+  // (no-such-cell) wrote nothing and still carried `seeded:true`; both fixtures now write.
   test("D6 does NOT fire when the seed bridge wrote NOTHING, even on an empty body", () => {
     const det = seededDetect("", { writes: [{ name: "todo", reason: "derived-cell", wrote: false }], domChanged: false });
     expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
@@ -820,7 +829,18 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
   });
 
   test("D6 DOES fire when the seed bridge really wrote and the render is empty", () => {
-    const det = seededDetect("", { writes: [{ name: "tasks", reason: "written", wrote: true }], domChanged: true });
+    // ⛑ S424 — `gainedContent: false` is now STATED rather than left absent. This test exercises
+    // the measured-no-gain path; it previously reached it only because an absent field fell
+    // through to the fire direction, i.e. it depended on the defect fixed in
+    // `seedMovedTheRender` (located by SYMBOL on purpose — a line number in a comment rots and
+    // nothing fails, which this file has already been bitten by). Stating the measurement is
+    // what the round-2 ruling requires of every hand-built report: none may *claim* a
+    // measurement, and none may hide one.
+    const det = seededDetect("", {
+      writes: [{ name: "tasks", reason: "written", wrote: true }],
+      domChanged: true,
+      gainedContent: false,
+    });
     expect(det.smells).toContain("S-EMPTY-WITH-DATA");
     expect(det.detail.emptyWithDataScope).toBe("body");
     expect(det.state).toBe("renders-empty-with-data");
@@ -833,6 +853,419 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
     expect(det.smells).toContain("S-EMPTY-WITH-DATA");
     expect(det.state).toBe("renders-empty-with-data");
   });
+
+  // ⛑ S424 — THE BITE for `seedMovedTheRender`'s fire-only-on-the-measured-value rule.
+  // Surfaced by the review-floor pass on #993, filed as item 1 of
+  // [[g-d6-seed-gating-has-three-latent-paths-...]], then WIDENED by the adversarial pass on
+  // the first attempt at this very fix: that attempt closed `undefined` and left the class,
+  // so `0` / `""` / `NaN` / the string `"false"` all still fabricated a verdict.
+  // The invariant is now: **only a MEASURED `false` fires; every other value vetoes.**
+  // ⚑ Distinct from the back-compat case above, which has NO report at all (`!report`);
+  // these all have a report whose field is missing or malformed.
+  test("S424: only a MEASURED false fires D6 — null, absent and malformed all veto", () => {
+    const writes = [{ name: "tasks", reason: "written", wrote: true }];
+    const report = (extra) => seededDetect("", { writes, domChanged: true, ...extra });
+
+    // (a) MEASURED no-gain -> FIRES. The control: the veto must not silence a real verdict.
+    const measured = report({ gainedContent: false });
+    expect(measured.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(measured.state).toBe("renders-empty-with-data");
+
+    // (b) MEASURED gain -> vetoes.
+    expect(report({ gainedContent: true }).smells).not.toContain("S-EMPTY-WITH-DATA");
+
+    // (c) explicit null (the snapshot threw) -> vetoes. Round-2 behaviour, unchanged.
+    const explicitNull = report({ gainedContent: null });
+    expect(explicitNull.smells).not.toContain("S-EMPTY-WITH-DATA");
+    // ⚑ Pin the CONCRETE state, not merely "not the red one" — asserting only
+    // `!== "renders-empty-with-data"` would stay green if a future change sent the UNMEASURED
+    // forms to some other wrong state (`renders-clean`, `needs-server`).
+    expect(explicitNull.state).toBe("renders-empty");
+
+    // (d) ABSENT field -> vetoes, and lands in the SAME concrete state as explicit null.
+    const absent = report({});
+    expect(absent.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(absent.state).toBe("renders-empty");
+
+    // (e) MALFORMED values -> veto. This is the class the first attempt missed; `"false"` is
+    // the plainest case, since a truthiness-coerced field would read as "it gained content".
+    for (const bad of ["", 0, NaN, "false", "no", {}, []]) {
+      const det = report({ gainedContent: bad });
+      expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-empty");
+    }
+  });
+
+  // =========================================================================
+  // ⛑ S426 — THE REGION'S CONTENT TEST AGREES WITH THE ANCESTOR THAT CONFERS CONTENT.
+  // g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render
+  //
+  // `nodesHaveRenderedContent` decided a region's content from the region's OWN nodes,
+  // but three arms of `elementCarriesContent` make an element content-bearing because of
+  // what it CONTAINS: `select` (an `<option>`), `picture`/`video`/`audio` (a `<source>`/
+  // `<img>` with `src`/`srcset`), `svg` (any element child). The fence lands at the each's
+  // SOURCE position, so the rows sit INSIDE that parent while the element that counts them
+  // sits OUTSIDE the region — and neither `option` nor `source` is in
+  // CONTENT_CANDIDATE_SELECTOR, nor is a `<circle>`. So the region measured EMPTY on a
+  // CORRECT render and D6 scored `renders-empty-with-data`: RED against the compiler.
+  //
+  // ⚠ THE FIX IS NOT A WIDER `CONTENT_CANDIDATE_SELECTOR` — that list also answers BODY
+  // scope, so adding `option`/`source` would make a bare `<option value="1">` count as a
+  // whole page's rendered content, re-opening the S419 one-definition-of-"not rendered"
+  // class from the other side. The BODY-SCOPE PINS at the end of this block are what keep
+  // that door shut, and they are the reason this block cannot be satisfied by the easy fix.
+  //
+  // This is a PREVENTATIVE fix: measured over 2,609 corpus `.scrml` files, every real
+  // `<each>`-inside-a-conferring-parent site emits options WITH TEXT (the text half already
+  // saves them) and `picture`/`video`/`audio`/`svg` are corpus-ZERO. Corpus absence is not
+  // design intent — value-only `<option>` rows and `<source>` rows are legitimate scrml,
+  // and a detector that reds a correct render is the cry-wolf shape pa-base §8 names.
+  // =========================================================================
+
+  // Every conferring definition, in BOTH directions. The QUIET direction (the region's
+  // nodes really do confer) is the defect; the FIRES direction is the control that the
+  // fix did not simply green the family.
+  //
+  // ⚑ EVERY `markup` HERE CARRIES CONTENT OUTSIDE THE REGION THAT ALREADY MAKES THE PARENT
+  // CONTENT-BEARING — the `<select>`'s placeholder option, the `<picture>`'s fallback
+  // `<img>`, a fallback `<source>`, a decorative `<circle>`. That is not incidental
+  // realism, it is what makes the FAIL-OPEN control below sharp, and it was MEASURED into
+  // existence: the first version of this table gave `<video>`/`<audio>`/`<svg>` nothing
+  // outside the region, so with an empty region the WHOLE BODY rendered nothing and D6
+  // fired at `body` scope — the control passed while proving nothing about region scope.
+  const CONFERRING_PARENTS = {
+    // `select` — the `<option>` rows carry a value and NO text, so the text half cannot
+    // save them. This is the shape a real `<select>` of ids/codes emits.
+    "an each of value-only <option>s inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>',
+      rows: '<option value="1"></option><option value="2"></option>',
+    },
+    // `picture` — responsive `<source>` rows.
+    "an each of <source srcset> inside a <picture>": {
+      markup: '<picture>{R}<img src="a.jpg" alt="a"></picture>',
+      rows: '<source srcset="a-480.webp"><source srcset="a-960.webp">',
+    },
+    "an each of <source src> inside a <video>": {
+      markup: '<video><source src="fallback.mp4">{R}</video>',
+      rows: '<source src="a.mp4">',
+    },
+    "an each of <source src> inside an <audio>": {
+      markup: '<audio><source src="fallback.mp3">{R}</audio>',
+      rows: '<source src="a.mp3">',
+    },
+    // ⚑ `svg` IS A THIRD INSTANCE THE GAP ENTRY DID NOT NAME — found by sweeping every
+    // arm of `elementCarriesContent` for a delegating definition, not by trusting the
+    // filed list. `case "svg"` is `el.children.length > 0`: any element child.
+    "an each of shapes inside an <svg>": {
+      markup: '<svg viewBox="0 0 10 10"><circle cx="9" cy="9" r="1"></circle>{R}</svg>',
+      rows: '<circle cx="1" cy="1" r="1"></circle><circle cx="5" cy="5" r="1"></circle>',
+    },
+
+    // ===== FIX ROUND — the parents with NO body-scope counterpart, deliberately. =====
+    // These four are why the table's invariant had to be restated (see
+    // CONSUMED_CHILD_SELECTOR): `elementCarriesContent` has no arm for `datalist`, `map` or
+    // `colgroup`, and counts no `<track>` for a `<video>` — and it MUST NOT, which the
+    // BODY-SCOPE pins at the end of this block enforce. The each still did its job.
+    //
+    // ⚑ Each of these markups carries its own CHROME, because the parent is not itself
+    // content-bearing: without chrome the body renders nothing, D6 answers at `body` scope
+    // and the fail-open control below would prove nothing about region scope. That is the
+    // same mistake this block already made once, recorded above.
+    "an each of <option>s inside a <datalist>": {
+      markup: '<h1>Search</h1><input list="cities"><datalist id="cities">{R}</datalist>',
+      rows: '<option value="Paris"></option><option value="Rome"></option>',
+    },
+    "an each of <area>s inside a <map>": {
+      markup: '<img src="a.png" usemap="#m"><map name="m">{R}</map>',
+      rows: '<area shape="rect" coords="0,0,1,1" href="/a">',
+    },
+    "an each of <col>s inside a <colgroup>": {
+      markup: "<table><colgroup>{R}</colgroup><tbody><tr><td>x</td></tr></tbody></table>",
+      rows: '<col span="2">',
+    },
+    "an each of <track>s inside a <video>": {
+      markup: '<video><source src="fallback.mp4">{R}</video>',
+      rows: '<track src="en.vtt" kind="captions"><track src="fr.vtt" kind="captions">',
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(CONFERRING_PARENTS)) {
+    test(`S426: D6 is QUIET when ${label} rendered rows`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      // The page really does render correctly — `hasRenderedContent` says so via the
+      // conferring parent. That is what makes a RED here a false positive and not a miss.
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      const det = seededDetect(filled);
+      expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-clean");
+    });
+
+    // ⚑ THE MANDATORY FAIL-OPEN CONTROL, ONE PER FAMILY. The SAME markup with the SAME
+    // conferring parent and an EMPTY region must still fire. This is what separates the
+    // fix from asking `elementCarriesContent(parent)`: the `<select>`'s placeholder option,
+    // the `<picture>`'s fallback `<img>` and the `<video>`'s own `<source>` all sit OUTSIDE
+    // the region and already make the parent content-bearing BEFORE any seed — so a
+    // parent-is-content-bearing rule would score every one of these GREEN and D6 would go
+    // dark on exactly the render it exists to catch.
+    test(`S426 FAIL-OPEN CONTROL: D6 still FIRES when ${label} rendered nothing`, () => {
+      const empty = markup.replace("{R}", FENCE("a_1", ""));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${empty}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      const det = seededDetect(empty);
+      expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(det.detail.emptyWithDataScope).toBe("each-regions");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // The BARE parent — nothing outside the region at all, so the region's rows are the only
+  // thing making the page render. These are the three shapes reproduced verbatim on
+  // `f8317399`, where all three printed `page correct: true | allLeavesEmpty: true`.
+  const BARE_CONFERRING_PARENTS = {
+    "<select> whose ONLY options are the each's value-only rows":
+      '<select>{R}</select>|<option value="1"></option>',
+    "<picture> whose ONLY sources are the each's rows":
+      "<picture>{R}</picture>|<source srcset=\"a-480.webp\">",
+    "<svg> whose ONLY shapes are the each's rows":
+      '<svg viewBox="0 0 10 10">{R}</svg>|<circle cx="1" cy="1" r="1"></circle>',
+  };
+  for (const [label, spec] of Object.entries(BARE_CONFERRING_PARENTS)) {
+    test(`S426: D6 is QUIET on the bare repro shape — ${label}`, () => {
+      const [markup, rows] = spec.split("|");
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      // The page renders — the parent is content-bearing ONLY because of these rows.
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      expect(seededDetect(filled).state).toBe("renders-clean");
+    });
+  }
+
+  // ⚑ THE NEAREST SIBLING OF THE FIX, AND THE DISPATCHING HYPOTHESIS WAS WRONG ABOUT IT.
+  // The fix was dispatched as "look at the region's PARENT (`node.parentNode`)". But
+  // `select` and `picture`/`video`/`audio` confer via `querySelector`, which is a
+  // DESCENDANT query — so the conferring element is an ANCESTOR and need not be the parent.
+  // A parent-only rule re-creates this same class one wrapper away, and all three of these
+  // scored RED on a correct render when measured against it. They are the regression pin on
+  // the ancestor walk: revert it to `parentElement`-only and every case here reds.
+  const CONFERRING_ANCESTORS_AT_DEPTH = {
+    "<select><optgroup> (an option group wraps the rows)":
+      '<select><optgroup label="Recent">{R}</optgroup></select>',
+    "<svg><g> (a transform group wraps the shapes)":
+      '<svg viewBox="0 0 10 10"><g transform="translate(1,1)">{R}</g></svg>',
+    "<video><div> (a wrapper element between the video and its sources)":
+      "<video><div>{R}</div></video>",
+  };
+  const DEPTH_ROWS = {
+    "<select><optgroup> (an option group wraps the rows)": '<option value="1"></option>',
+    "<svg><g> (a transform group wraps the shapes)": '<circle cx="1" cy="1" r="1"></circle>',
+    "<video><div> (a wrapper element between the video and its sources)": '<source src="a.mp4">',
+  };
+  for (const [label, markup] of Object.entries(CONFERRING_ANCESTORS_AT_DEPTH)) {
+    test(`S426: the conferring element may be an ANCESTOR, not the parent — ${label}`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", DEPTH_ROWS[label]));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(hasRenderedContent(body)).toBe(true);
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+      expect(seededDetect(filled).state).toBe("renders-clean");
+    });
+  }
+
+  // The MOUNT shape too — a nested each inside a `<select>` is a mount div, and its rows
+  // are the div's children. A fix that understands only the fence is half a fix (the same
+  // ruling the REGION_SHAPES table above makes for the base predicate).
+  test("S426: the mount shape confers too — a nested each of options inside a <select>", () => {
+    const markup = `<select><option value="">Choose…</option>${MOUNT("x_1", '<option value="1"></option>')}</select>`;
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+    expect(seededDetect(markup).state).toBe("renders-clean");
+  });
+
+  // The conferring rule mirrors each parent's OWN test and must not become "anything inside
+  // a conferring parent counts". Each of these sits inside a conferring parent and fails
+  // that parent's own conferring test, so each must still FIRE.
+  const CONFERS_NOTHING = {
+    "a <source> with NO src or srcset inside a <video>": {
+      markup: "<video>{R}</video>", rows: "<source>",
+    },
+    "a non-option element inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>', rows: "<span></span>",
+    },
+    // ⛑ S419 parity — the conferring descendant must be RENDERED. A hidden option is not
+    // content anywhere else in this file and must not become content here.
+    // ⚠ MEASURED, AND IT DOES NOT BITE THE S426 PREDICATE: this case stays green even when
+    // `confersContentToConsumingAncestor` is gutted to `return true`, because
+    // `nodesHaveRenderedContent` already skips an unrendered region node (via
+    // `isUnrenderedByOwnMarkup`) BEFORE asking the conferring question. So this pins the
+    // UPSTREAM guard, not the new predicate — recorded rather than left to imply a bite it
+    // does not have. It still earns its place: it reds if that skip is ever removed.
+    "an <option> hidden by markup inside a <select>": {
+      markup: '<select><option value="">Choose…</option>{R}</select>', rows: '<option hidden value="1"></option>',
+    },
+    // ⚑ `foreignObject` BOUNDS THE SVG RULE. Inside one, HTML content rules apply, so an
+    // empty `<li>` must not become content by way of the enclosing `<svg>`. It is bounded
+    // by a TAG test and not by `namespaceURI`, deliberately: happy-dom reports
+    // `http://www.w3.org/2000/svg` for an `<li>` inside a foreignObject (measured), so a
+    // namespace bound would silently not bind.
+    "an empty <li> inside a <foreignObject> inside an <svg>": {
+      markup: '<svg><circle cx="1" cy="1" r="1"></circle><foreignObject><ul>{R}</ul></foreignObject></svg>',
+      rows: "<li></li>",
+    },
+    // The plain control: the same empty row in a plain `<ul>` is the true positive that
+    // the whole detector exists for, and it is unaffected.
+    "an empty <li> in a plain <ul>": {
+      markup: "<h1>App</h1><ul>{R}</ul>", rows: "<li></li>",
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(CONFERS_NOTHING)) {
+    test(`S426: D6 still FIRES — ${label} confers nothing`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      const det = seededDetect(filled);
+      expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // ⚑ THE ENUMERATION'S DISPOSALS, PINNED. The population was enumerated once by execution
+  // rather than discovered one instance at a time (six were found that way). Every shape
+  // below was measured, judged OUT of scope, and must therefore STILL FIRE — so the
+  // enumeration is a gate and not a paragraph. If a later round decides one of these really
+  // is a consumed row, the test that reds names it precisely.
+  const ENUMERATED_AND_DISPOSED = {
+    // Element children of a `<slot>` are shadow-DOM fallback content, and scrml emits no
+    // shadow roots. An each of empty `<span>`s is an empty render.
+    "empty <span>s inside a <slot>": { markup: "<h1>App</h1><slot>{R}</slot>", rows: "<span></span>" },
+    // `<iframe>`/`<embed>` element children are FALLBACK content, never rendered when the
+    // resource loads. Not consumed rows.
+    "fallback content inside an <iframe>": { markup: "<h1>App</h1><iframe>{R}</iframe>", rows: "<span></span>" },
+    // `<param>` is obsolete — removed from the HTML Living Standard.
+    "<param>s inside an <object>": {
+      markup: '<h1>App</h1><object data="a.swf">{R}</object>', rows: '<param name="q" value="1">',
+    },
+    // Head metadata is not page content in any sense. (`regionScopedEmptiness` only ever
+    // walks the BODY, so a real `<head>` each is out of reach regardless.)
+    "<link>/<meta> in the body": {
+      markup: "<h1>App</h1>{R}", rows: '<link rel="stylesheet" href="a.css"><meta name="x" content="1">',
+    },
+    // ⚠ THE ONE CONTESTABLE DISPOSAL, recorded as such. MathML that carries meaning carries
+    // TEXT (`<math><mn>2</mn>` measures green already, via the text half); an each producing
+    // only spacers renders nothing a reader could see. Revisit if a corpus app emits one.
+    "text-free <mspace> inside <math>": {
+      markup: "<h1>App</h1><math>{R}</math>", rows: '<mspace width="1em"></mspace>',
+    },
+    // MEASURED UNREACHABLE, and this one is a parser fact, not a judgement: a `<col>` with no
+    // `<colgroup>` is HOISTED OUT of the table by the HTML parser, leaving the fence genuinely
+    // empty — so the red is CORRECT. `<colgroup><col>` is covered above; this is not.
+    "a <col> inside a <table> with NO <colgroup>": {
+      markup: "<table>{R}<tbody><tr><td>x</td></tr></tbody></table>", rows: '<col span="2">',
+    },
+    // A standalone `<optgroup>` is invalid HTML no browser renders. Inside a `<select>` or
+    // `<datalist>` it is covered TRANSITIVELY by the ancestor walk (pinned separately).
+    "an <option> inside a standalone <optgroup>": {
+      markup: '<h1>App</h1><optgroup label="g">{R}</optgroup>', rows: '<option value="1"></option>',
+    },
+  };
+  for (const [label, { markup, rows }] of Object.entries(ENUMERATED_AND_DISPOSED)) {
+    test(`S426 enumeration: OUT of scope, still FIRES — ${label}`, () => {
+      const filled = markup.replace("{R}", FENCE("a_1", rows));
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${filled}</main>`;
+      expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(true);
+      expect(seededDetect(filled).state).toBe("renders-empty-with-data");
+    });
+  }
+
+  // `<optgroup>` inside a `<datalist>`, the transitive case the disposal above relies on.
+  test("S426 enumeration: <optgroup> is covered TRANSITIVELY inside a <datalist>", () => {
+    const markup = `<h1>Search</h1><datalist id="c"><optgroup label="g">${FENCE("a_1", '<option value="1"></option>')}</optgroup></datalist>`;
+    const body = document.createElement("body");
+    body.innerHTML = `<main id="root">${markup}</main>`;
+    expect(regionScopedEmptiness(body).allLeavesEmpty).toBe(false);
+    expect(seededDetect(markup).state).toBe("renders-clean");
+  });
+
+  // ⛑ FIX ROUND (finding 2) — A HOSTILE TAG NAME MADE THE DETECTOR **THROW** INSTEAD OF
+  // CLASSIFY, which this file's header forbids outright ("these detectors CLASSIFY a failure;
+  // they NEVER hide one"). The table was an object literal, so the tag lookup read through
+  // `Object.prototype` and handed a truthy NON-selector to `matches()`/`querySelectorAll()`.
+  // MEASURED before the fix: `<constructor>` threw `'function Object() { [native code] }' is
+  // not a valid selector` from `matches`, and `<__proto__>` threw `'[object Object]'` from
+  // `querySelectorAll` — a SECOND instance the review did not name, and from a different call
+  // site. Exactly those two of the eight below, because the lookup lowercases the tag first,
+  // so only the all-lowercase members of `Object.prototype` survive as keys.
+  // The table is a `Map` now, which has no prototype chain to fall through: immune by
+  // construction rather than by enumerating the hostile names. This test proves the class is
+  // closed, and it is the one assertion here that a `Object.hasOwn` patch would also pass —
+  // which is fine; what must never regress is that NONE of these throws.
+  test("S426 finding 2: a prototype-colliding tag name CLASSIFIES, never throws", () => {
+    for (const tag of [
+      "constructor", "__proto__", "toString", "valueOf",
+      "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "prototype",
+    ]) {
+      const markup = `<h1>App</h1><${tag}>${FENCE("a_1", "<b></b>")}</${tag}>`;
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      // The assertion is that this RETURNS rather than throwing...
+      const verdict = regionScopedEmptiness(body);
+      // ...and that it returns the CORRECT answer: `<b></b>` is an empty row under a tag that
+      // consumes nothing, so the region is empty and D6 fires. A `return false` guard that
+      // accidentally suppressed the whole region would pass a throws-check and fail this.
+      expect(verdict.allLeavesEmpty).toBe(true);
+      expect(seededDetect(markup).state).toBe("renders-empty-with-data");
+    }
+  });
+
+  // ⚑ THE PINS THAT FORBID THE EASY FIX. Widening `CONTENT_CANDIDATE_SELECTOR` with
+  // `option` / `source` would green every QUIET case above AND make each of these bodies
+  // count as a rendered page, which is the S419 class
+  // (g-e2e-render-map-hidden-text-counts-as-content-while-hidden-elements-do-not) from the
+  // other side. S426 changes REGION scope only; body scope is byte-for-byte unchanged.
+  const BODY_SCOPE_RENDERS_NOTHING = {
+    "a bare value-only <option>": '<option value="1"></option>',
+    "a bare <source src>": '<source src="a.mp4">',
+    "a bare <source srcset>": '<source srcset="a-480.webp">',
+    "an <option> alone inside an empty-rendering wrapper": '<div><option value="1"></option></div>',
+    "a select with no options (the seeded options loop rendered nothing)": "<select></select>",
+    "a src-less video holding a src-less source": "<video><source></video>",
+    // ⚑ FIX ROUND — THE PIN THAT STOPS THE NEXT PERSON "FIXING" DATALIST THE WRONG WAY.
+    // A `<datalist>` is an autocomplete SOURCE, not page content: a page whose entire output
+    // is a datalist of options shows the reader nothing, so this MUST stay false. That is
+    // precisely why datalist gets no `CONTENT_CANDIDATE_SELECTOR` entry and no
+    // `elementCarriesContent` arm, and why the region-scope question had to be restated as
+    // "did the each produce the rows this parent consumes?" rather than "does this node make
+    // its parent content-bearing?". Both answers are right at their own scope.
+    "a datalist holding options (an autocomplete source, not page content)":
+      '<datalist id="cities"><option value="Paris"></option><option value="Rome"></option></datalist>',
+    "a map holding areas (referenced by usemap, renders nothing itself)":
+      '<map name="m"><area shape="rect" coords="0,0,1,1" href="/a"></map>',
+    "a colgroup holding cols (layout only, no content of its own)":
+      '<table><colgroup><col span="2"></colgroup></table>',
+    "a video whose only child is a track (a subtitle file is not media)":
+      '<video><track src="en.vtt" kind="captions"></video>',
+    "a bare area": '<area shape="rect" coords="0,0,1,1" href="/a">',
+    "a bare col": '<col span="2">',
+    "a bare track": '<track src="en.vtt" kind="captions">',
+  };
+  for (const [label, markup] of Object.entries(BODY_SCOPE_RENDERS_NOTHING)) {
+    test(`S426: BODY scope unchanged — ${label} still renders nothing`, () => {
+      const body = document.createElement("body");
+      body.innerHTML = `<main id="root">${markup}</main>`;
+      expect(hasRenderedContent(body)).toBe(false);
+      // And therefore a seeded cell with this body is still the RED body-scope verdict.
+      const det = seededDetect(markup);
+      expect(det.detail.emptyWithDataScope).toBe("body");
+      expect(det.state).toBe("renders-empty-with-data");
+    });
+  }
 });
 
 // =============================================================================
@@ -847,8 +1280,8 @@ describe("D6 — seeded-and-empty is a RED state; unseeded-and-empty stays green
 //
 // It also gives D6 a subject of its own. Before this fixture, D6's only live corpus
 // subject was `examples/25-triage-board.scrml#populated`, and only because
-// `seed-fixtures.js` seeds a `column` that matches none of that app's columns — a
-// fixture bug tracked separately and scheduled for correction. A detector whose only
+// `seed-fixtures.js` seeded a `column` that matched none of that app's columns — a
+// fixture bug since corrected (S427), after which this fixture is D6's only compiled subject. A detector whose only
 // proof is "an example app that happens to be broken this week" is one fixture-fix
 // away from being unproven again.
 // =============================================================================
@@ -948,9 +1381,12 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
 
   // The emit-regression shape, driven through the REAL observeApp by handing it an app
   // whose compiled client exposes no side-channel is not reachable from a fixture — so
-  // this asserts the contract the branch must satisfy: a non-delivery reason reaches
-  // `consoleErrors`, which D2 turns into a red `compiles-but-throws`, not a green cell.
-  test("a bridge failure reaching consoleErrors reddens the cell (D2), never scores green", () => {
+  // this asserts the contract the branch must satisfy: a non-delivery reason is on the
+  // record, and the cell is red, not green.
+  // ⛑ S427 round 4b — red as `seed-bridge-failed`, NOT via D2 as `compiles-but-throws`. The
+  // notice is the harness's, not the app's: D2 no longer counts it, and the terminal guard is
+  // what reddens the cell. D2-CONSOLE-ERROR is absent because nothing the APP logged errored.
+  test("a bridge failure reaching consoleErrors reddens the cell (seed-bridge-failed), never scores green", () => {
     const det = runDetectors({
       compileErrors: [],
       throwMessage: null,
@@ -959,25 +1395,62 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
       seeded: true,
       seedReport: { chunks: 0, writes: [], domChanged: false, gainedContent: false, observable: false, errors: ["x"] },
     });
-    expect(det.smells).toContain("D2-CONSOLE-ERROR");
-    expect(det.state).toBe("compiles-but-throws");
+    expect(det.smells).not.toContain("D2-CONSOLE-ERROR");
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-empty");
+    // The notice is still RECORDED on the (red) cell.
+    expect(det.detail.consoleErrors[0]).toContain("no _scrml_reactive_set side-channel");
     // Explicitly NOT green.
-    expect(["renders-clean", "renders-empty", "needs-server"]).not.toContain(det.state);
+    expect(GREEN_STATES.has(det.state)).toBe(false);
   });
 
   // The source-level half: the branch must actually push, and must NOT push for the
-  // three KNOWN fixture bugs (derived-cell / no-such-cell), which are tabled in
-  // e2e-render-map.test.js and belong to a different arc.
+  // fixture-defect reasons (derived-cell / no-such-cell), which the pinned
+  // SEED_OBSERVABILITY table in e2e-render-map.test.js owns.
   test("the harness pushes a consoleError for a missing side-channel, but not for a fixture-bug reason", () => {
-    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    const raw = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    // ⛑⛑ S424 — READ THIS BEFORE TRUSTING THIS TEST. IT IS A SHAPE CHECK, NOT A BEHAVIOUR
+    // GATE, AND IT CANNOT BECOME ONE.
+    //
+    // History, because it took three attempts to state honestly. The anchor
+    // `w.reason === "set-threw"` used to resolve to the inlined guard; when the harness
+    // DOCUMENTED both broken rounds in a JSDoc block, the first occurrence moved into PROSE,
+    // and the ±1400/+400 window around it is comment text that mentions `derived-cell` /
+    // `no-such-cell` because the carve-out doc names them. So all three assertions passed on
+    // the explanation of the code rather than the code — the same hollow-gate class the
+    // sibling test below had just fixed, re-created one level away by the comment that fixed
+    // it.
+    //
+    // ⚑ The first repair — stripping comments and re-anchoring on `const threw =
+    // writes.filter(` — DID NOT FIX IT EITHER, and the mutation proof is why: gutting
+    // `seedThrewNotice` to `return null` leaves every anchored string intact, so this test
+    // stayed green 1/0 against a function that can never push a notice. **A source-text
+    // assertion cannot detect a gutted function; there is no anchor that makes it able to.**
+    //
+    // ⚑ THE REAL GATE IS BEHAVIOURAL AND IT IS STRONG: the same mutation reds **13** tests —
+    // the `LOUDNESS_CASES` rows and the whole `S424 item 3` describe, all of which call the
+    // real exported `seedThrewNotice` / `runDetectors`. Measured, not assumed. This test is
+    // retained only for what it can honestly assert: that the carve-out is achieved BY
+    // CONSTRUCTION rather than by special-casing the two fixture-bug reasons in code. If it
+    // ever disagrees with the behavioural tests, believe them.
+    //
+    // Comments are stripped first regardless, so a future doc edit cannot silently move the
+    // anchors again.
+    const src = raw
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
     const noChannel = src.slice(src.indexOf("no _scrml_reactive_set side-channel"));
     expect(noChannel.slice(0, 400)).toContain("obs.consoleErrors.push");
-    // set-threw is an emit/harness failure and IS raised...
+    // set-threw is an emit/harness failure and IS raised — anchored on the EXECUTABLE site
+    // (the counting filter), not on a string any comment could also contain.
+    expect(src).toContain('const threw = writes.filter(');
     expect(src).toContain('w.reason === "set-threw"');
-    // ... while the fixture-bug reasons are deliberately not.
-    const guard = src.slice(src.indexOf('w.reason === "set-threw"') - 1400, src.indexOf('w.reason === "set-threw"') + 400);
-    expect(guard).toContain("derived-cell");
-    expect(guard).toContain("no-such-cell");
+    // ... while the fixture-bug reasons are deliberately not raised. The carve-out now holds
+    // BY CONSTRUCTION (neither reason can make `threw > 0`), so assert that the counting site
+    // is the only gate and that the two reasons are not being special-cased in code.
+    const guard = src.slice(src.indexOf('const threw = writes.filter(') - 600, src.indexOf('const threw = writes.filter(') + 600);
+    expect(guard).not.toContain('reason === "derived-cell"');
+    expect(guard).not.toContain('reason === "no-such-cell"');
   });
 
   // ⛑ S423 fix round 2 (finding 2) — the guard required EVERY write to be `set-threw`,
@@ -990,28 +1463,67 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
     "MIXED: one threw, one names no such cell": [{ reason: "set-threw", wrote: false }, { reason: "no-such-cell", wrote: false }],
     "MIXED: one threw, one is a derived cell": [{ reason: "derived-cell", wrote: false }, { reason: "set-threw", wrote: false }],
     "a single throwing write": [{ reason: "set-threw", wrote: false }],
+    // ⛑ S424 item 3 — MOVED UP FROM QUIET_CASES, and this row IS the gap. A throw is a
+    // harness/emit failure on its own terms; a sibling key landing says nothing about it.
+    "a throw alongside a write that LANDED": [{ reason: "set-threw", wrote: false }, { reason: "written", wrote: true }],
+    "the list key throws, TWO unrelated keys land": [
+      { reason: "set-threw", wrote: false },
+      { reason: "written", wrote: true },
+      { reason: "written", wrote: true },
+    ],
+    "a throw, a landed write AND a tabled fixture bug together": [
+      { reason: "set-threw", wrote: false },
+      { reason: "written", wrote: true },
+      { reason: "derived-cell", wrote: false },
+    ],
   };
   const QUIET_CASES = {
     "the known fixture bugs alone": [{ reason: "derived-cell", wrote: false }, { reason: "no-such-cell", wrote: false }],
-    "a throw alongside a write that LANDED": [{ reason: "set-threw", wrote: false }, { reason: "written", wrote: true }],
     "everything written": [{ reason: "written", wrote: true }],
+    // The carve-out must survive a landed sibling too — it is not conditional on delivery.
+    "a tabled fixture bug alongside a write that LANDED": [
+      { reason: "derived-cell", wrote: false },
+      { reason: "written", wrote: true },
+    ],
+    "no writes at all": [],
   };
-  // The production condition, mirrored from render-harness.js. The tests below pin its
-  // MEANING; the source assertion above pins that the harness still carries it.
-  const shouldBeLoud = (writes) =>
-    writes.length > 0 && !writes.some((w) => w.wrote) && writes.some((w) => w.reason === "set-threw");
+  // ⛑ S424 item 3 — THIS USED TO BE A MIRROR of the production condition, re-typed into
+  // the test file. A mirror is not a gate: it can be green while the harness says the
+  // opposite, which is how rounds 1 and 2 of this predicate both shipped wrong. It now
+  // calls the REAL exported `seedThrewNotice`, so every case below is a bite on production.
+  const shouldBeLoud = (writes) => seedThrewNotice({ writes }) !== null;
   for (const [label, writes] of Object.entries(LOUDNESS_CASES)) {
     test(`F4 loudness FIRES: ${label}`, () => expect(shouldBeLoud(writes)).toBe(true));
   }
   for (const [label, writes] of Object.entries(QUIET_CASES)) {
     test(`F4 loudness stays quiet: ${label}`, () => expect(shouldBeLoud(writes)).toBe(false));
   }
-  test("finding 2: the harness's own condition is the not-delivered AND some-threw shape", () => {
-    const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
-    // The `every(...)` form is the bug; it must be gone.
+  test("the harness's loudness condition is neither of the two forms that shipped wrong", () => {
+    const raw = readFileSync(join(__dirname, "render-harness.js"), "utf8");
+    // ⛑ S424 item 3 — ASSERT OVER CODE, NOT PROSE. This read the whole file, so the moment
+    // the harness DOCUMENTED the two broken forms in a comment (so a fourth round would not
+    // re-derive them), the "must be gone" assertions fired on the explanation of the bug
+    // rather than the bug. A gate that forbids naming a defect in a comment is not
+    // measuring the code. Comments are stripped first; the assertions below are unchanged.
+    const src = raw
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|\s)\/\/[^\n]*/g, "$1");
+    // Round 1's `every(...)` form is a bug; it must stay gone.
     expect(src).not.toContain('writes.every((w) => w.reason === "set-threw")');
-    expect(src).toContain("!seedReport.writes.some((w) => w.wrote)");
-    expect(src).toContain('seedReport.writes.some((w) => w.reason === "set-threw")');
+    // Round 2's "NOTHING was delivered" conjunct is ALSO a bug (it silenced a genuine throw
+    // whenever a sibling key landed) and must likewise stay gone.
+    // ⛑ S424 — pinned to the spelling that can actually EXIST. This named
+    // `seedReport.writes`, but the extraction moved the predicate onto a local `const
+    // writes`, so the assertion guarded a form the code can no longer be written in: a
+    // round-4 regression re-adding the conjunct in its natural shape
+    // (`!writes.some((w) => w.wrote) &&`) would have passed it unchanged. Asserting on the
+    // prefix-free form makes the string gate match the code that exists.
+    expect(src).not.toContain("!writes.some((w) => w.wrote)");
+    expect(src).not.toContain("!seedReport.writes.some((w) => w.wrote)");
+    // ...and the guard must still be WIRED, not merely deleted: the call site pushes
+    // whatever the predicate returns into consoleErrors, which is what D2 reddens on.
+    expect(src).toContain("const threwNotice = seedThrewNotice(seedReport);");
+    expect(src).toContain("if (threwNotice) obs.consoleErrors.push(threwNotice);");
   });
 
   // ⛑ S423 fix round 2 (finding 3) — an UNMEASURED gain signal must not resolve to the
@@ -1036,7 +1548,10 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
     // The swallow-to-false form is the bug; the throw must be captured.
     expect(src).toContain("sigFailed");
     expect(src).toContain("beforeSig === null || afterSig === null ? null : signatureGained");
-    expect(src).toContain("gainedContent is UNMEASURED");
+    // ⛑ S427 — the notice text now lives in ONE place (render-detectors.js), because
+    // `seedFailureKind` must recognise exactly the text the harness pushes.
+    expect(src).toContain("obs.consoleErrors.push(SEED_SNAPSHOT_NOTICE)");
+    expect(SEED_SNAPSHOT_NOTICE).toContain("gainedContent is UNMEASURED");
   });
 
   // ⛑ S423 FINAL ROUND (finding 3) — THE SAME RULING, APPLIED TO THE CLASS.
@@ -1050,9 +1565,10 @@ describe("F4 — a seed that cannot be delivered is LOUD, not silently green", (
     const src = readFileSync(join(__dirname, "render-harness.js"), "utf8");
     // No hand-built report may claim a measurement.
     expect(src).not.toContain("gainedContent: false");
-    // Both synthetic reports are present and report null.
+    // All synthetic reports are present and report null. ⛑ S427 — three now: the seeded
+    // no-html branch builds one too (nothing was mounted, so nothing was measured).
     const synthetic = src.match(/chunks: 0, writes: \[\], domChanged: false, gainedContent: (\w+)/g) ?? [];
-    expect(synthetic.length).toBe(2);
+    expect(synthetic.length).toBe(3);
     for (const s of synthetic) expect(s).toContain("gainedContent: null");
     // The only place `gainedContent` may be a boolean is the computed one in applySeed.
     expect(src).toContain("beforeSig === null || afterSig === null ? null : signatureGained");
@@ -1088,5 +1604,1018 @@ describe("D6 — trailing body-scope cases", () => {
     });
     expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
     expect(det.state).toBe("renders-clean");
+  });
+});
+
+/**
+ * ⛑ S424 item 3 — a genuine `set-threw` was SILENT whenever any OTHER seed key landed.
+ *
+ * Own describe block on purpose (merge hygiene: a sibling branch is appending to the D6
+ * block above). Every test here drives the REAL exported `seedThrewNotice` / `runDetectors`,
+ * never a re-typed mirror of either.
+ */
+describe("S424 item 3 — a set-threw is loud even when a sibling seed key landed", () => {
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
+  });
+
+  // The partial-delivery shape: the key DRIVING the list threw, an unrelated key landed.
+  const PARTIAL = [
+    { name: "items", reason: "set-threw", namespaced: true, wrote: false },
+    { name: "title", reason: "written", namespaced: true, wrote: true },
+  ];
+
+  test("the notice FIRES on a partial delivery (the round-2 bug: it used to be null)", () => {
+    expect(seedThrewNotice({ writes: PARTIAL })).not.toBeNull();
+  });
+
+  test("the notice states the REAL counts and never claims 'none landed' when some did", () => {
+    const msg = seedThrewNotice({ writes: PARTIAL });
+    expect(msg).toContain("1 of 2 seed write(s) threw");
+    expect(msg).toContain("1 landed");
+    // The round-2 wording was only ever true in the all-threw case. Asserting its ABSENCE
+    // is the half that stops a "fix" that fires but still lies about what happened.
+    expect(msg).not.toContain("none landed");
+  });
+
+  test("the all-threw wording is PRESERVED verbatim — this fix widens the gate, it does not move it", () => {
+    const msg = seedThrewNotice({
+      writes: [
+        { reason: "set-threw", wrote: false },
+        { reason: "set-threw", wrote: false },
+      ],
+    });
+    expect(msg).toBe(
+      "[seed-bridge] 2 of 2 seed write(s) threw and none landed — the seed cannot be live",
+    );
+  });
+
+  test("a malformed or absent report is tolerated, not thrown on", () => {
+    expect(seedThrewNotice(null)).toBeNull();
+    expect(seedThrewNotice(undefined)).toBeNull();
+    expect(seedThrewNotice({})).toBeNull();
+    expect(seedThrewNotice({ writes: null })).toBeNull();
+    expect(seedThrewNotice({ writes: [null, undefined] })).toBeNull();
+  });
+
+  // ---- QUESTION B, ANSWERED BY MEASUREMENT: loud, and NO veto. ----
+  //
+  // These cases are the evidence, pinned so the answer cannot silently rot. The decisive
+  // fact is WHERE the short-circuit happens: in `runDetectors`'s STATE-RESOLUTION block, the
+  // `consoleErrors.length > 0` arm `return`s `compiles-but-throws` BEFORE the
+  // `smells.includes("S-EMPTY-WITH-DATA")` arm below it is ever reached. So once the notice
+  // exists, the `renders-empty-with-data` verdict is already displaced; a veto adds nothing
+  // to the STATE and only deletes the S-EMPTY-WITH-DATA smell, which is real recorded
+  // evidence if the throw turns out to be a broken emitted accessor (a COMPILER defect).
+  //
+  // ⚠ NOT the D2 SMELL branch, which is the natural place to look and says the opposite:
+  // it pushes D2-CONSOLE-ERROR and deliberately FALLS THROUGH ("Continue scanning for smells
+  // too ... but the state is already the throws tier"), so D6's smell is still COMPUTED and
+  // recorded. That is exactly why the veto is a no-op on the verdict yet still lossy on the
+  // record — the smell is gathered in one place and resolved in another.
+  //
+  // ⛑ S427 round 4b — THE DECISIVE FACT ABOVE IS NO LONGER TRUE. The state-resolution arm is
+  // now entered only on an APP console error, so a notice does not displace anything. The
+  // answer to question B is unchanged (keep the smell, no veto of D6's COMPUTATION); what is
+  // new is that the `renders-empty-with-data` return itself declines while the seed failed.
+  const partialObs = (consoleErrors) => ({
+    compileErrors: [],
+    throwMessage: null,
+    consoleErrors,
+    document: { body: (() => { const b = document.createElement("body"); b.innerHTML = ""; return b; })() },
+    seeded: true,
+    seedReport: {
+      chunks: 1, writes: PARTIAL, domChanged: false,
+      gainedContent: false, observable: false, errors: ["[seed-set items] boom"],
+    },
+    serverDependent: false,
+  });
+
+  // ⛑ S427 round 4b — THE ORIGINAL GAP IS NOW CLOSED FOR BOTH CARRIERS, AND D6 NO LONGER
+  // DECIDES THE STATE WHILE THE SEED FAILED. This used to pin the gap itself (report-only
+  // partial => `renders-empty-with-data`, blaming the compiler). Once D2 stopped counting the
+  // harness notice, the NOTICE case reached that same return too (measured), so the
+  // `renders-empty-with-data` return now requires `!seedBridgeFailed(obs)`. Both carriers end
+  // `seed-bridge-failed`; the D6 smell survives on the cell (question B, below).
+  test("CLOSED: silent + a landed sibling => seed-bridge-failed, not renders-empty-with-data", () => {
+    const det = runDetectors(partialObs([]));
+    expect(det.state).toBe("seed-bridge-failed");
+    // ⛑ 4c F1 — NOT "renders-empty": D6 fired, so the state it would have scored is
+    // renders-empty-with-data, and recording a green origin would contradict the smell.
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-empty-with-data");
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.detail.seedBridgeFailure).toContain("D6 FIRED on the seed write(s) that DID land");
+  });
+
+  test("AFTER: with the notice, the cell is seed-bridge-failed — RED, and blaming no one wrongly", () => {
+    const det = runDetectors(partialObs([seedThrewNotice({ writes: PARTIAL })]));
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-empty-with-data");
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.smells).not.toContain("D2-CONSOLE-ERROR");
+    expect(GREEN_STATES.has(det.state)).toBe(false);
+    expect(det.state).not.toBe("renders-empty-with-data");
+    // The reason travels WITH the cell, so the baseline records why (detail is kept for RED).
+    expect(JSON.stringify(det.detail)).toContain("seed write(s) threw");
+  });
+
+  test("question B: the D6 smell SURVIVES as corroborating evidence — it is computed, it just does not set the state", () => {
+    const notice = seedThrewNotice({ writes: PARTIAL });
+    expect(notice).not.toBeNull();
+    const det = runDetectors(partialObs([notice]));
+    // Both facts recorded at once: the seed write threw AND the render came back empty.
+    // If the throw is a compiler defect, this second fact is the corroboration; vetoing
+    // D6 would hide exactly that. S427 4b keeps the smell and withdraws only its right to
+    // name the state (it cannot be pinned on the compiler while the seed failed).
+    expect(det.smells).toEqual(expect.arrayContaining(["S-EMPTY-WITH-DATA", "S-SEED-BRIDGE-FAILED"]));
+    expect(det.detail.emptyWithData).toBe(true);
+  });
+
+  // ⛑ S426 — THIS ASSERTION IS DELIBERATELY FLIPPED, AND THE FLIP IS THE FIX.
+  //
+  // It used to pin `renders-empty` — GREEN — and its own comment called that hazardous. It
+  // was right, and it was also the S426 gap reached by a third door: this observation has a
+  // `set-threw` write and a `[seed-set items] boom` in `seedReport.errors`, carries NO console
+  // notice, and therefore never enters the state-resolution block where #1002's guard lives.
+  // It walked straight to the `renders-empty` return and scored green, which strips `detail`
+  // in `generate-baseline.js` and deletes the only record of the throw. Measured on
+  // `021323b9`: `renders-empty`. The hazard the test documented is now closed at the door, so
+  // it pins the closure instead of the hazard.
+  //
+  // Note WHICH carrier catches it: the report's own `errors[]`/`set-threw`, not the notice.
+  // A guard keyed only on the `[seed-bridge]` console prefix (#1002's carrier) would be DEAD
+  // CODE at this return, because any such notice makes `consoleErrors` non-empty and the
+  // state-resolution block returns first. That is why `seedBridgeFailed` reads the FACT and
+  // not only the notification.
+  test("question B: a veto WITHOUT the notice no longer scores the cell GREEN (S426)", () => {
+    // Simulating the veto as any implementation must amount to: seedWasDelivered() false.
+    const vetoed = partialObs([]);
+    vetoed.seedReport = { ...vetoed.seedReport, writes: PARTIAL.map((w) => ({ ...w, wrote: false })) };
+    const det = runDetectors(vetoed);
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(["renders-clean", "renders-empty", "needs-server"]).not.toContain(det.state);
+    expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+    // D6 still did not fire (nothing was delivered, so it has nothing to say) — the cell is
+    // red because the HARNESS failed, and the record says exactly that rather than blaming
+    // the compiler for a write that never happened.
+    expect(det.smells).not.toContain("S-EMPTY-WITH-DATA");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-empty");
+  });
+
+  // ⛑ S424 — THE LOUDNESS WAS NOT ACTUALLY TERMINAL, and this is the case that proved it.
+  // Routing the notice through `consoleErrors` does not make it loud everywhere: the
+  // `needs-server` arm is a GREEN tier, `generate-baseline.js` strips `detail` from green
+  // cells, and the `[seed-bridge]` prefix matches neither `hasCodegenError` nor
+  // `isServerAbsenceMessage` — so a server-dependent seeded app swallowed the notice and
+  // the throw went silent again, by a different door than the one item 3 closed. Surfaced
+  // by the adversarial pass on this very branch and CONFIRMED BY EXECUTION before the fix
+  // (state `needs-server`, smells D2 + S-EMPTY-WITH-DATA + NEEDS-SERVER — green).
+  test("a seed-bridge failure disqualifies the needs-server GREEN carve-out", () => {
+    const notice = seedThrewNotice({ writes: PARTIAL });
+    expect(notice).not.toBeNull(); // guard the premise, as the sibling case does
+
+    const serverAbsence = "Cannot read properties of null (reading 'rows')";
+    const obs = partialObs([serverAbsence, notice]);
+    obs.serverDependent = true;
+
+    const det = runDetectors(obs);
+    // It must NOT reach the green tier while a harness seed failure is on the record.
+    expect(det.state).not.toBe("needs-server");
+    // ⛑ S427 — it is RED, and red as `seed-bridge-failed`, not `compiles-but-throws`: the app's
+    // only error is server-absence, so the harness seed failure is the only thing keeping this
+    // cell off the green tier, and a compiler-blaming state would be the mis-attribution
+    // `seed-bridge-failed` exists to prevent. The carve-out now answers its own question and
+    // the terminal guard demotes it (hence NEEDS-SERVER is present as the demoted-from tier).
+    expect(GREEN_STATES.has(det.state)).toBe(false);
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("needs-server");
+    // And the reason still travels with the now-RED cell.
+    expect(JSON.stringify(det.detail)).toContain("seed write(s) threw");
+
+    // CONTROL — without the seed failure the carve-out still works. This is the half that
+    // makes the fix narrow: `needs-server` exists for a real harness-realism reason (S203
+    // b+c) and must keep working; only the seed-failure case is disqualified.
+    //
+    // ⛑ S426 — `errors: []` IS NEW AND IT IS NOT A CONCESSION TO THE FIX. This control kept
+    // the `errors: ["[seed-set items] boom"]` it inherited from `partialObs` while overriding
+    // `writes` to a single landed write, so the "clean" observation still asserted, in its own
+    // report, that a seed write had THROWN. `applySeed` cannot produce that pair — it pushes
+    // `[seed-set …]` only together with a `set-threw` write — so the old control was a
+    // self-contradictory object that only read as clean because nothing looked at `errors`.
+    // Cleared here so the control tests what it claims to test; the contradictory shape is
+    // pinned separately below, where fail-CLOSED is the answer.
+    const clean = partialObs([serverAbsence]);
+    clean.serverDependent = true;
+    clean.seedReport = {
+      ...clean.seedReport,
+      writes: [{ name: "b", reason: "written", wrote: true }],
+      errors: [],
+    };
+    expect(runDetectors(clean).state).toBe("needs-server");
+  });
+});
+
+/**
+ * ============================================================================
+ * S426 — "a seed-bridge failure must be LOUD" enforced at EVERY green-state return.
+ * ============================================================================
+ *
+ * ROUND THREE of one requirement, and the first one that states the requirement instead of a
+ * door: **no cell may score a state in `GREEN_STATES` while a seed-bridge failure is on the
+ * record.** Green cells have their `detail` stripped by `generate-baseline.js`, so a green
+ * verdict deletes the only copy of the explanation — the failure then exists nowhere.
+ *
+ * The three rounds, and why patching one door at a time kept failing:
+ *   S423   — filed the class (the missing side-channel branch said "LOUD" and was silent).
+ *   #1002  — made a partial `set-threw` loud via `seedThrewNotice`, then found its own
+ *            loudness was not TERMINAL and guarded the state-resolution `needs-server` return.
+ *   S426   — three more green returns had no guard at all. All four measured below.
+ *
+ * MEASURED ON `021323b9` (pre-fix), with the same observations these tests use:
+ *   D1 mount-throw `needs-server` door ....... needs-server  (GREEN) -> compiles-but-throws
+ *   state-resolution `needs-server` door ..... compiles-but-throws (already guarded, #1002)
+ *   `renders-empty` door ..................... renders-empty (GREEN) -> seed-bridge-failed
+ *   `renders-clean` door ..................... renders-clean (GREEN) -> seed-bridge-failed
+ *
+ * ⛑ S427 — the two `needs-server` rows above were themselves wrong in where they moved TO.
+ * `compiles-but-throws` blames the compiler for a server-absence error plus a consequential
+ * seed failure (at the D1 door, EVERY seeded server-dependent app — a mount throw always
+ * leaves the seed undelivered). Both doors now return `needs-server` and the terminal guard
+ * demotes them to `seed-bridge-failed` (demotedFrom `needs-server`). And the recorded note is
+ * now true for the cell it sits on: "NO verdict about the compiler" only where the seed
+ * failure is the only red evidence; "stands on its own evidence" on a real throw / app error.
+ *
+ * ⚑ THE `renders-empty` / `renders-clean` DISPOSITION, ESTABLISHED BY CONSTRUCTION, NOT BY
+ * ARGUMENT. The plausible argument was that `seedThrewNotice` pushes into `consoleErrors`, so
+ * any failed seed reaches D2 and returns `compiles-but-throws` long before these two returns.
+ * That argument is true OF THE NOTICE and false OF THE REQUIREMENT: an observation can carry
+ * the failure in `seedReport` with an EMPTY `consoleErrors`, and then it walks to these
+ * returns and scores green. The repo already contained one — the S424 block's "a VETO WITHOUT
+ * the notice" case, which pinned `renders-empty` as an accepted hazard. So these two doors are
+ * NOT unreachable, and a guard keyed only on the `[seed-bridge]` console prefix would have
+ * been dead code at them. `seedBridgeFailed` reads the FACT (the report's own `errors[]` /
+ * a `set-threw` write) as well as the NOTICE, which is what gives the guard here a bite.
+ */
+describe("S426 — no green state while a seed-bridge failure is on the record", () => {
+  beforeEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* not registered */ }
+    GlobalRegistrator.register();
+  });
+  afterEach(async () => {
+    try { await GlobalRegistrator.unregister(); } catch (_) { /* nothing to do */ }
+  });
+
+  const bodyOf = (html) => {
+    const b = document.createElement("body");
+    b.innerHTML = html;
+    return b;
+  };
+
+  /** A seed that was delivered and moved the render — no failure of any kind. */
+  const CLEAN_SEED = {
+    chunks: 1,
+    writes: [{ name: "rows", reason: "written", namespaced: true, wrote: true }],
+    domChanged: true,
+    gainedContent: true,
+    observable: true,
+    errors: [],
+  };
+
+  /**
+   * A seed write that THREW, carried ONLY in the report — no console notice. This is the
+   * carrier that makes the `renders-empty` / `renders-clean` doors reachable, and it is the
+   * exact pair `applySeed` produces (the `[seed-set …]` error and the `set-threw` write are
+   * pushed together).
+   */
+  const FAILED_SEED_FACT = {
+    chunks: 1,
+    writes: [{ name: "rows", reason: "set-threw", namespaced: true, wrote: false }],
+    domChanged: false,
+    gainedContent: false,
+    observable: false,
+    errors: ["[seed-set rows] TypeError: rows is not a function"],
+  };
+
+  /** The harness's no-side-channel report — what EVERY seeded cell gets when the mount throws. */
+  const NO_CHANNEL_SEED = {
+    chunks: 0,
+    writes: [],
+    domChanged: false,
+    gainedContent: null,
+    observable: false,
+    errors: ["no _scrml_reactive_set side-channel exposed by this emit"],
+  };
+  const NO_CHANNEL_NOTICE =
+    "[seed-bridge] no _scrml_reactive_set side-channel exposed by this emit";
+
+  const SERVER_ABSENCE = "TypeError: Cannot read properties of null (reading 'rows')";
+
+  // ---- DOOR 1: the D1 + D7 mount-throw `needs-server` return (the fifth path) ----------
+  //
+  // THE REPRODUCTION. This is the harness-reachable shape, and it is not exotic: a mount
+  // throw means `_scrml_reactive_set` was never captured, so `observeCompiled` takes its
+  // no-side-channel branch for EVERY seeded cell whose mount throws — the seed cannot have
+  // been delivered, by construction. Pre-fix: `needs-server`, GREEN, detail stripped.
+  const mountThrowObs = (seedReport, consoleErrors) => ({
+    compileErrors: [],
+    throwMessage: SERVER_ABSENCE,
+    consoleErrors: consoleErrors ?? [],
+    document: null,
+    seeded: true,
+    seedReport,
+    serverDependent: true,
+  });
+
+  // ⛑ S427 — S426 pinned this door as `compiles-but-throws`, which is itself the
+  // mis-attribution `seed-bridge-failed` was minted to prevent: the throw is server-absence
+  // (NOT a compiler bug, S203 b+c) and the seed failure is its CONSEQUENCE. Measured on
+  // e98e1406: `compiles-but-throws`, `needsServer` dropped. It is now `seed-bridge-failed`,
+  // demoted from `needs-server` by the terminal guard, with the `needsServer` explanation kept.
+  test("DOOR 1 — a seeded server-absence mount throw with a failed seed is seed-bridge-failed (notice carrier)", () => {
+    const det = runDetectors(mountThrowObs(NO_CHANNEL_SEED, [NO_CHANNEL_NOTICE]));
+    expect(GREEN_STATES.has(det.state)).toBe(false);
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("needs-server");
+    expect(det.detail.needsServer).toContain("server-dependent app mounted with no server");
+    expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+    expect(det.smells).not.toContain("D1-MOUNT-THROW");
+    // ⛑ 4c — the mount threw before the side channel was captured: no write was attempted.
+    expect(det.detail.seedBridgeFailureKind).toBe("not-attempted");
+    // The reason travels WITH the now-red cell, which is the whole point: `detail` is kept
+    // for red cells and stripped for green ones.
+    expect(det.detail.seedBridgeFailure).toContain("no seed write was attempted");
+    // ⛑ 4c — the ONE place "NO verdict" is true: cause established (server-absence throw,
+    // undelivered seed is its consequence).
+    expect(det.detail.seedBridgeFailure).toContain("NO verdict about the compiler");
+    expect(det.detail.seedBridgeFailure).not.toContain("UNDECIDABLE");
+    expect(det.detail.throwMessage).toContain("Cannot read properties of null");
+  });
+
+  test("DOOR 1 — the same door with the failure carried ONLY in the report (no console entry)", () => {
+    const det = runDetectors(mountThrowObs(FAILED_SEED_FACT, []));
+    expect(GREEN_STATES.has(det.state)).toBe(false);
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("needs-server");
+    expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+  });
+
+  // ⛑ S427 — THE OTHER HALF OF DEFECT 1: the door must not over-correct in the other
+  // direction. A ReferenceError is genuine codegen (S-UNBOUND-REF) and stays
+  // `compiles-but-throws` whatever the seed did — and its note must NOT tell the triager the
+  // cell carries no verdict (measured on e98e1406: it did, for `loadContacts is not defined`).
+  test("DOOR 1 — a ReferenceError mount throw with a failed seed stays compiles-but-throws, verdict intact", () => {
+    const obs = mountThrowObs(NO_CHANNEL_SEED, [NO_CHANNEL_NOTICE]);
+    obs.throwMessage = "ReferenceError: loadContacts is not defined";
+    const det = runDetectors(obs);
+    expect(det.state).toBe("compiles-but-throws");
+    expect(det.smells).toContain("D1-MOUNT-THROW");
+    expect(det.smells).toContain("S-UNBOUND-REF");
+    expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+    expect(det.smells).not.toContain("NEEDS-SERVER");
+    expect(det.detail.seedBridgeDemotedFrom).toBeUndefined();
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.detail.seedBridgeFailure).toContain("stands on its own evidence");
+  });
+
+  test("DOOR 1 — a TDZ mount throw on a server app with a failed seed also keeps its verdict", () => {
+    const obs = mountThrowObs(NO_CHANNEL_SEED, [NO_CHANNEL_NOTICE]);
+    obs.throwMessage = "ReferenceError: Cannot access 'rows' before initialization";
+    const det = runDetectors(obs);
+    expect(det.state).toBe("compiles-but-throws");
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+  });
+
+  // ⚑ WHY BOTH CARRIERS ARE KEPT, pinned rather than argued. For every report the harness
+  // actually BUILDS, the fact carrier subsumes the notice: all three failure sites in
+  // `observeCompiled` record an error in the report as well as pushing a notice (measured — a
+  // mutant that drops the notice carrier reds only its own unit case). The notice earns its
+  // place on the observation where the report never reaches the detector at all, e.g. a caller
+  // that names the field something else. This is the S426 brief's OWN reproduction: it passed
+  // the report under `seed`, which `runDetectors` does not read, so the console notice is the
+  // only carrier present — and it must still be enough.
+  test("DOOR 1 — a notice with NO report at all is still enough to disqualify the tier", () => {
+    const det = runDetectors({
+      compileErrors: [],
+      throwMessage: SERVER_ABSENCE,
+      consoleErrors: [NO_CHANNEL_NOTICE],
+      document: null,
+      seeded: true,
+      serverDependent: true,
+      // no `seedReport` — deliberately absent
+    });
+    expect(GREEN_STATES.has(det.state)).toBe(false);
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("needs-server");
+    expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+  });
+
+  // CONTROL A (brief): the same mount throw WITHOUT a seed failure stays green. The
+  // `needs-server` tier exists for a real harness-realism reason (S203 b+c) and nine baseline
+  // cells live in it; the fix must not blanket-red it.
+  test("CONTROL — the same mount throw with a CLEAN seed is still needs-server (green)", () => {
+    const det = runDetectors(mountThrowObs(CLEAN_SEED, []));
+    expect(det.state).toBe("needs-server");
+    expect(GREEN_STATES.has(det.state)).toBe(true);
+    expect(det.smells).not.toContain("S-SEED-BRIDGE-FAILED");
+  });
+
+  // CONTROL B: the nine committed `needs-server` cells are all UNSEEDED — no seed report at
+  // all. This is the case that proves no baseline cell can move.
+  test("CONTROL — an UNSEEDED mount-throw cell (all nine baseline cells) is untouched", () => {
+    const det = runDetectors({
+      compileErrors: [],
+      throwMessage: SERVER_ABSENCE,
+      consoleErrors: [],
+      document: null,
+      seeded: false,
+      serverDependent: true,
+    });
+    expect(det.state).toBe("needs-server");
+    expect(seedBridgeFailed({ consoleErrors: [], seedReport: null })).toBe(false);
+  });
+
+  // ---- DOOR 2: the state-resolution `needs-server` return (#1002's door; must stay shut) --
+  //
+  // ⛑ S427 — THE SIBLING OF DEFECT 1, confirmed by execution on e98e1406: an app whose only
+  // non-notice console error is server-absence, plus a failed seed, scored
+  // `compiles-but-throws` (door-local `!seedBridgeFailed` term, S424). Same argument as the
+  // D1 door: the app's only error is server-absence, so the seed failure is the only thing
+  // keeping the cell off the green tier. Still shut (red), now `seed-bridge-failed`.
+  const door2Obs = (consoleErrors) => ({
+    compileErrors: [],
+    throwMessage: null,
+    consoleErrors,
+    document: { body: bodyOf("<main id=\"root\"></main>") },
+    seeded: true,
+    seedReport: NO_CHANNEL_SEED,
+    serverDependent: true,
+  });
+
+  test("DOOR 2 — a server-absence console error plus a failed seed is seed-bridge-failed, not compiles-but-throws", () => {
+    const det = runDetectors(door2Obs([SERVER_ABSENCE, NO_CHANNEL_NOTICE]));
+    expect(GREEN_STATES.has(det.state)).toBe(false);
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("needs-server");
+    expect(det.detail.needsServer).toContain("console error from a null server-only data source");
+    expect(det.smells).toContain("D2-CONSOLE-ERROR");
+    expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+  });
+
+  // The carve-out still needs a REAL server-absence app error: a harness notice alone never
+  // admits it — even the one notice whose text is not fixed (`[seed-bridge] ${e.message}` from
+  // the `applySeed` catch), which can itself read like a server-absence or a codegen error.
+  test("DOOR 2 — a notice alone never admits the carve-out, even one that READS like server-absence", () => {
+    const lookalike = "[seed-bridge] Cannot read properties of null (reading 'x')";
+    const det = runDetectors(door2Obs([lookalike]));
+    // Round 4b: a notice-only observation never enters the console block, so it is neither
+    // `needs-server` nor `compiles-but-throws` — the guard makes it `seed-bridge-failed`.
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-empty");
+    expect(det.smells).not.toContain("NEEDS-SERVER");
+    // ...and one that reads like a codegen error does not veto a REAL server-absence error.
+    const codegenLookalike = "[seed-bridge] items is not defined";
+    const det2 = runDetectors(door2Obs([SERVER_ABSENCE, codegenLookalike]));
+    expect(det2.state).toBe("seed-bridge-failed");
+    expect(det2.detail.seedBridgeDemotedFrom).toBe("needs-server");
+  });
+
+  test("DOOR 2 — a real CODEGEN console error plus a failed seed stays compiles-but-throws, verdict intact", () => {
+    const det = runDetectors(door2Obs(["ReferenceError: items is not defined", NO_CHANNEL_NOTICE]));
+    expect(det.state).toBe("compiles-but-throws");
+    expect(det.smells).not.toContain("NEEDS-SERVER");
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.detail.seedBridgeFailure).toContain("stands on its own evidence");
+  });
+
+  // ⛑ S427 round 4b — the notice-only case: nothing the APP did errored, so the cell must not
+  // read `compiles-but-throws` (a compiler-blaming state for a harness failure — measured on
+  // 233fe2e4, it did). D2 now reads app console errors only; the cell walks to a green return
+  // and the terminal guard demotes it. The note says there is no verdict, which is true.
+  // ⛑ 4c F2 — re-pinned: a missing side channel on a mount that did NOT throw may be an emit
+  // regression, so "NO verdict about the compiler" was false here. It is UNDECIDABLE.
+  test("DOOR 2 — when the only console errors are harness notices, the cell is seed-bridge-failed, undecidable", () => {
+    const det = runDetectors({ ...door2Obs([NO_CHANNEL_NOTICE]), serverDependent: false });
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-empty");
+    expect(det.smells).not.toContain("D2-CONSOLE-ERROR");
+    expect(det.detail.consoleErrors).toEqual([NO_CHANNEL_NOTICE]); // still recorded
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.detail.seedBridgeFailure).toContain("UNDECIDABLE");
+    expect(det.detail.seedBridgeFailure).toContain("compiler-emitted code");
+    expect(det.detail.seedBridgeFailureKind).toBe("not-attempted");
+  });
+
+  // ---- ROUND 4c: THE VERDICT AXIS — "NO verdict" only where the cause is established ------
+  //
+  // `none` is true only for a `needs-server` demotion reached by the D1 MOUNT-THROW door (the
+  // throw is server absence; the undelivered seed is its consequence). Every other guard
+  // demotion is `undecidable`: a set-threw, a missing side channel on a clean mount, an
+  // applySeed throw, the no-html branch, a snapshot failure — and (refinement of the PA
+  // decision, stated in source) a `needs-server` reached by the CONSOLE door, where the seed
+  // failed on a mount that did not throw, so no causal link to server absence exists.
+  test("VERDICT — a set-threw guard demotion is UNDECIDABLE, never 'NO verdict'", () => {
+    const det = runDetectors(quietObs("<main id=\"root\"></main>", FAILED_SEED_FACT));
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.detail.seedBridgeFailure).toContain("UNDECIDABLE");
+    expect(det.detail.seedBridgeFailureKind).toBe("not-delivered");
+  });
+
+  test("VERDICT — a snapshot-only guard demotion is UNDECIDABLE and 'unmeasured'", () => {
+    const det = runDetectors(quietObs("<main id=\"root\"><p>chrome</p></main>", SIG_ONLY_SEED));
+    expect(det.detail.seedBridgeFailure).toContain("UNDECIDABLE");
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+  });
+
+  test("VERDICT — a needs-server demotion via the CONSOLE door is UNDECIDABLE (no causal link)", () => {
+    const det = runDetectors(door2Obs([SERVER_ABSENCE, NO_CHANNEL_NOTICE]));
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("needs-server");
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.detail.seedBridgeFailure).toContain("UNDECIDABLE");
+  });
+
+  test("VERDICT — a needs-server demotion via the D1 MOUNT-THROW door is the one 'NO verdict'", () => {
+    for (const [report, notices] of [[NO_CHANNEL_SEED, [NO_CHANNEL_NOTICE]], [FAILED_SEED_FACT, []]]) {
+      const det = runDetectors(mountThrowObs(report, notices));
+      expect(det.detail.seedBridgeDemotedFrom).toBe("needs-server");
+      expect(det.detail.seedBridgeFailure).toContain("NO verdict about the compiler");
+      expect(det.detail.seedBridgeFailure).toContain("server absence");
+    }
+  });
+
+  // ---- ROUND 4c F5 / 4d N1: an UNSEEDED cell has no seed to fail ------------------------
+  //
+  // An app that itself logs a line beginning "[seed-bridge]" must not be reclassified as a
+  // seed failure on an UNSEEDED cell: the harness pushes notices only when it has a seed, so
+  // there every console line is the app's. For a non-server app that is base behaviour
+  // (D2 fires, `compiles-but-throws`) — pinned here.
+  test("F5 — an UNSEEDED '[seed-bridge]'-prefixed APP error is an app error, not a seed failure", () => {
+    const det = runDetectors({
+      compileErrors: [],
+      throwMessage: null,
+      consoleErrors: ["[seed-bridge] the app logged this itself"],
+      document: { body: bodyOf("<main id=\"root\"><p>chrome</p></main>") },
+      seeded: false,
+      serverDependent: false,
+    });
+    expect(det.state).toBe("compiles-but-throws");
+    expect(det.smells).toContain("D2-CONSOLE-ERROR");
+    expect(det.smells).not.toContain("S-SEED-BRIDGE-FAILED");
+    expect(det.detail.seedBridgeFailure).toBeUndefined();
+  });
+
+  // ⚑ 4d N1 — THE ONE DELIBERATE DIVERGENCE FROM BASE, pinned AS a divergence. Measured by
+  // running base c59367bb's `runDetectors` on exactly this input: base → `compiles-but-throws`
+  // (its S424 term read any "[seed-bridge]" line as a seed failure, seeded or not, and so
+  // disqualified the carve-out). Here → `needs-server`: an unseeded cell has no seed, so the
+  // line is the app's own server-absence error and is judged as one. Head is the more correct
+  // answer; the 4c comment that called this "exactly as base did" was false and is corrected.
+  test("N1 — DIVERGES FROM BASE: unseeded server app, app-logged '[seed-bridge]' server-absence line → needs-server", () => {
+    const sd = runDetectors({
+      compileErrors: [],
+      throwMessage: null,
+      consoleErrors: ["[seed-bridge] Cannot read properties of null (reading 'x')"],
+      document: { body: bodyOf("<p>hi</p>") },
+      seeded: false,
+      serverDependent: true,
+    });
+    expect(sd.state).toBe("needs-server"); // base c59367bb: "compiles-but-throws"
+    expect(sd.smells).toContain("D2-CONSOLE-ERROR");
+    expect(sd.smells).not.toContain("S-SEED-BRIDGE-FAILED");
+  });
+
+  // ---- ROUND 4d N2 / N3: kind and cause clause true of the shape they sit on --------------
+  test("N2 — a zero-key fixture (no writes, only a snapshot error) reached the loop: not-delivered, not not-attempted", () => {
+    const zeroKey = {
+      chunks: 1, writes: [], domChanged: false, gainedContent: null, observable: false,
+      errors: ["[seed-signature] snapshot helper threw"],
+    };
+    expect(seedFailureKind({ seeded: true, consoleErrors: [], seedReport: zeroKey })).toBe("not-delivered");
+    const det = runDetectors(quietObs("<main id=\"root\"></main>", zeroKey));
+    expect(det.detail.seedBridgeFailure).not.toContain("never reached the write step");
+    // CONTROL: a no-write report with a NON-snapshot reason is still not-attempted.
+    expect(seedFailureKind({ seeded: true, consoleErrors: [], seedReport: NO_CHANNEL_SEED })).toBe("not-attempted");
+  });
+
+  test("N3 — the UNDECIDABLE cause clause is kind-specific: 'unmeasured' cites the snapshot helper, not write-path examples", () => {
+    const det = runDetectors(quietObs("<main id=\"root\"><p>chrome</p></main>", SIG_ONLY_SEED));
+    expect(det.detail.seedBridgeFailureKind).toBe("unmeasured");
+    expect(det.detail.seedBridgeFailure).toContain("render-snapshot helper");
+    for (const wrong of ["_scrml_reactive_set", "side channel", "entry html", "malformed fixture"]) {
+      expect(det.detail.seedBridgeFailure).not.toContain(wrong);
+    }
+    // not-delivered cites the write path; not-attempted cites the skipped-step causes.
+    const nd = runDetectors(quietObs("<main id=\"root\"></main>", FAILED_SEED_FACT));
+    expect(nd.detail.seedBridgeFailure).toContain("throw out of the emitted _scrml_reactive_set");
+    const na = runDetectors({ ...quietObs("<main id=\"root\"></main>", NO_CHANNEL_SEED), consoleErrors: [NO_CHANNEL_NOTICE] });
+    expect(na.detail.seedBridgeFailure).toContain("dropped _scrml_reactive_set side channel");
+  });
+
+  // A DOM smell is independent evidence: `[object Object]` in the page is a codegen defect
+  // whether or not the seed arrived. Round 4b: with no app console error this reaches the
+  // `smell-detected-wrong` return (RED, stands), which now records the seed failure too.
+  test("harness notices plus a hard DOM smell: smell-detected-wrong, and the note keeps the smell's verdict", () => {
+    const det = runDetectors({
+      ...door2Obs([NO_CHANNEL_NOTICE]),
+      document: { body: bodyOf("<main id=\"root\"><p>[object Object]</p></main>") },
+      serverDependent: false,
+    });
+    expect(det.state).toBe("smell-detected-wrong");
+    expect(det.smells).toContain("S-OBJECT-IN-DOM");
+    expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.detail.seedBridgeFailure).toContain("stands on its own evidence");
+  });
+
+  // ---- ROUND 4b: THE CLASS SWEEP — a notice-only failed seed can NEVER land green ---------
+  //
+  // Every failure shape the harness builds (with the exact notice it pushes) × every page
+  // shape that reaches a different return × server-dependent or not. The only legal outcomes
+  // are `seed-bridge-failed` (via the guard) or a HARDER red on the app's own evidence
+  // (`smell-detected-wrong`). Never green, never `renders-empty-with-data` (would blame the
+  // compiler for the seed), never `compiles-but-throws` (would claim an app error).
+  test("SWEEP — every notice-only failed seed ends seed-bridge-failed or smell-detected-wrong", () => {
+    const partial = {
+      chunks: 1,
+      writes: [
+        { name: "rows", reason: "set-threw", namespaced: true, wrote: false },
+        { name: "title", reason: "written", namespaced: true, wrote: true },
+      ],
+      domChanged: true, gainedContent: false, observable: true, errors: ["[seed-set rows] x"],
+    };
+    const SHAPES = [
+      [NO_CHANNEL_SEED, [NO_CHANNEL_NOTICE]],
+      [{ ...NO_CHANNEL_SEED, errors: ["[seed-bridge] boom"] }, ["[seed-bridge] boom"]],
+      [FAILED_SEED_FACT, [seedThrewNotice(FAILED_SEED_FACT)]],
+      [partial, [seedThrewNotice(partial)]],
+      [{ ...partial, gainedContent: true }, [seedThrewNotice(partial)]],
+      [SIG_ONLY_SEED, [SEED_SNAPSHOT_NOTICE]],
+    ];
+    const PAGES = {
+      empty: "<main id=\"root\"></main>",
+      eachLeafEmpty: "<main id=\"root\"><h1>Board</h1><div data-scrml-each-mount=\"each_1\"></div></main>",
+      content: "<main id=\"root\"><p>chrome</p></main>",
+      objectInDom: "<main id=\"root\"><p>[object Object]</p></main>",
+    };
+    let n = 0;
+    for (const [report, notices] of SHAPES) {
+      for (const n0 of notices) expect(n0).not.toBeNull(); // premise
+      for (const [page, html] of Object.entries(PAGES)) {
+        for (const serverDependent of [false, true]) {
+          const det = runDetectors({
+            compileErrors: [], throwMessage: null, consoleErrors: notices,
+            document: { body: bodyOf(html) }, seeded: true, seedReport: report, serverDependent,
+          });
+          const want = page === "objectInDom" ? "smell-detected-wrong" : "seed-bridge-failed";
+          expect([page, det.state]).toEqual([page, want]);
+          expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+          expect(det.smells).not.toContain("D2-CONSOLE-ERROR");
+          n++;
+        }
+      }
+    }
+    expect(n).toBe(48);
+  });
+
+  // D6 with a notice-only failed seed, pinned on its own: the partial-delivery shape with an
+  // empty leaf DOES compute S-EMPTY-WITH-DATA (kept as corroboration, S424 question B) but the
+  // `renders-empty-with-data` return declines while the seed failed.
+  test("D6 — a notice-only PARTIAL failed seed keeps S-EMPTY-WITH-DATA but is seed-bridge-failed", () => {
+    const partial = {
+      chunks: 1,
+      writes: [
+        { name: "rows", reason: "set-threw", namespaced: true, wrote: false },
+        { name: "title", reason: "written", namespaced: true, wrote: true },
+      ],
+      domChanged: true, gainedContent: false, observable: true, errors: ["[seed-set rows] x"],
+    };
+    const det = runDetectors({
+      compileErrors: [], throwMessage: null, consoleErrors: [seedThrewNotice(partial)],
+      document: { body: bodyOf("<main id=\"root\"><h1>Board</h1><div data-scrml-each-mount=\"each_1\"></div></main>") },
+      seeded: true, seedReport: partial, serverDependent: false,
+    });
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("seed-bridge-failed");
+    // ⛑ 4c F1 — the would-have-been state, not the green fall-through (renders-clean).
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-empty-with-data");
+    expect(det.detail.emptyWithDataScope).toBe("each-regions");
+    // ⛑ 4c F1 — the note names the suspect instead of disowning it.
+    expect(det.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(det.detail.seedBridgeFailure).toContain("D6 FIRED on the seed write(s) that DID land");
+    expect(det.detail.seedBridgeFailure).toContain("board-bug-class compiler defect");
+    expect(det.detail.seedBridgeFailureKind).toBe("not-delivered");
+    // CONTROL: the same page and a CLEAN partial-free seed still scores renders-empty-with-data.
+    const clean = runDetectors({
+      compileErrors: [], throwMessage: null, consoleErrors: [],
+      document: { body: bodyOf("<main id=\"root\"><h1>Board</h1><div data-scrml-each-mount=\"each_1\"></div></main>") },
+      seeded: true,
+      seedReport: { ...partial, writes: [partial.writes[1]], errors: [] },
+      serverDependent: false,
+    });
+    expect(clean.state).toBe("renders-empty-with-data");
+  });
+
+  // End to end through the REAL harness: an emit with no `_scrml_reactive_set` mounts clean,
+  // `observeCompiled` pushes its no-side-channel notice, and the cell must be red as
+  // `seed-bridge-failed` — the F4 emit-regression shape, now without a false D2 verdict.
+  test("observeCompiled — a mount with no side channel scores seed-bridge-failed end to end", () => {
+    const artifacts = {
+      errors: [],
+      html: "<body><main id=\"root\"><p>chrome</p></main></body>",
+      clientJs: "",
+      runtimeJs: "",
+      serverDependent: false,
+    };
+    const cell = observeCompiled({ relpath: "x/no-channel.scrml" }, { rows: [1] }, "populated", artifacts);
+    expect(cell.state).toBe("seed-bridge-failed");
+    expect(cell.detail.seedBridgeDemotedFrom).toBe("renders-clean");
+    expect(cell.smells).not.toContain("D2-CONSOLE-ERROR");
+    expect(cell.detail.consoleErrors[0]).toContain("no _scrml_reactive_set side-channel");
+    expect(cell.detail.seed.errors[0]).toContain("no _scrml_reactive_set side-channel");
+    // ⛑ 4c F2 — re-pinned from "no verdict": this is the emit-regression shape itself.
+    expect(cell.detail.seedBridgeFailureKind).toBe("not-attempted");
+    expect(cell.detail.seedBridgeFailure).not.toContain("NO verdict");
+    expect(cell.detail.seedBridgeFailure).toContain("UNDECIDABLE");
+  });
+
+  // ---- [seed-signature]-ONLY: every write landed, only the DOM snapshot failed ------------
+  //
+  // ⛑ S427 — decided and stated in `runDetectors`: it still DEMOTES a green (D6 was vetoed, so
+  // the green is unverified), but the note says what failed — never "did not deliver".
+  const SIG_ONLY_SEED = {
+    chunks: 1,
+    writes: [{ name: "rows", reason: "written", namespaced: true, wrote: true }],
+    domChanged: true,
+    gainedContent: null,
+    observable: true,
+    errors: ["[seed-signature] snapshot helper threw"],
+  };
+
+  test("[seed-signature]-only (report carrier) demotes a green to seed-bridge-failed, kind 'unmeasured'", () => {
+    const det = runDetectors(quietObs("<main id=\"root\"><p>chrome</p></main>", SIG_ONLY_SEED));
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-clean");
+    expect(det.detail.seedBridgeFailureKind).toBe("unmeasured");
+    expect(det.detail.seedBridgeFailure).toContain("snapshot failed");
+    expect(det.detail.seedBridgeFailure).not.toContain("did not deliver");
+    expect(det.detail.seedBridgeFailure).not.toContain("could not deliver");
+  });
+
+  test("[seed-signature]-only with the harness's own notice: the note still does not claim non-delivery", () => {
+    const det = runDetectors({
+      ...quietObs("<main id=\"root\"><p>chrome</p></main>", SIG_ONLY_SEED),
+      consoleErrors: [SEED_SNAPSHOT_NOTICE],
+    });
+    // Round 4b: the notice is not an app error, so the cell reaches the green return and is
+    // demoted — the same answer as the report-only carrier above.
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-clean");
+    expect(det.detail.seedBridgeFailureKind).toBe("unmeasured");
+    expect(det.detail.seedBridgeFailure).not.toContain("did not deliver");
+    expect(det.detail.seedBridgeFailure).toContain("snapshot failed");
+  });
+
+  test("seedFailureKind: not-attempted / not-delivered / unmeasured, each true of what it names", () => {
+    expect(seedFailureKind({ seeded: true, consoleErrors: [], seedReport: CLEAN_SEED })).toBeNull();
+    expect(seedFailureKind({ seeded: true, consoleErrors: [], seedReport: SIG_ONLY_SEED })).toBe("unmeasured");
+    // ⛑ 4c F4 — a bare snapshot notice with NO report cannot confirm any write landed.
+    expect(seedFailureKind({ seeded: true, consoleErrors: [SEED_SNAPSHOT_NOTICE] })).toBe("not-delivered");
+    expect(seedFailureKind({ seeded: true, consoleErrors: [], seedReport: FAILED_SEED_FACT })).toBe("not-delivered");
+    // ⛑ 4c F3 — no write recorded at all: the write step was never reached.
+    expect(seedFailureKind({ seeded: true, consoleErrors: [], seedReport: NO_CHANNEL_SEED })).toBe("not-attempted");
+    // ⛑ 4c F4 — ZERO landed writes (all fixture-bug reasons) + a snapshot error is NOT
+    // "unmeasured": "at least one write landed" would be false of it.
+    for (const reason of ["no-such-cell", "derived-cell"]) {
+      expect(
+        seedFailureKind({
+          seeded: true,
+          consoleErrors: [SEED_SNAPSHOT_NOTICE],
+          seedReport: { ...SIG_ONLY_SEED, writes: [{ name: "rows", reason, namespaced: false, wrote: false }] },
+        }),
+      ).toBe("not-delivered");
+    }
+    // ⛑ 4c F5 — an UNSEEDED observation has no seed to fail, whatever its console says.
+    expect(seedFailureKind({ seeded: false, consoleErrors: [NO_CHANNEL_NOTICE], seedReport: FAILED_SEED_FACT })).toBeNull();
+    expect(seedBridgeFailed({ seeded: false, consoleErrors: [NO_CHANNEL_NOTICE], seedReport: FAILED_SEED_FACT })).toBe(false);
+    // A snapshot failure alongside a thrown write is a non-delivery (fail-closed).
+    expect(
+      seedFailureKind({
+        seeded: true,
+        consoleErrors: [SEED_SNAPSHOT_NOTICE],
+        seedReport: { ...FAILED_SEED_FACT, errors: [...FAILED_SEED_FACT.errors, "[seed-signature] x"] },
+      }),
+    ).toBe("not-delivered");
+    // A snapshot report with any OTHER notice beside it is a non-delivery too.
+    expect(
+      seedFailureKind({ seeded: true, consoleErrors: [SEED_SNAPSHOT_NOTICE, NO_CHANNEL_NOTICE], seedReport: SIG_ONLY_SEED }),
+    ).toBe("not-delivered");
+  });
+
+  // ---- observeCompiled's seeded NO-HTML return -------------------------------------------
+  //
+  // ⛑ S427 — this returned GREEN `renders-empty` BEFORE the seed was attempted and without
+  // passing through `runDetectors`. Unreached by today's four seeds (all emit html), reached
+  // the moment a seed is registered for an app that does not. The unseeded return is pinned
+  // unchanged beside it.
+  test("observeCompiled — a SEEDED cell with no entry html is seed-bridge-failed, not renders-empty", () => {
+    const artifacts = { errors: [], html: "", clientJs: "", serverDependent: false };
+    const cell = observeCompiled({ relpath: "x/no-html.scrml" }, { rows: [1] }, "populated", artifacts);
+    expect(cell.state).toBe("seed-bridge-failed");
+    expect(cell.detail.seedBridgeDemotedFrom).toBe("renders-empty");
+    expect(cell.smells).toContain("NO-HTML-EMITTED");
+    expect(cell.smells).toContain("S-SEED-BRIDGE-FAILED");
+    expect(cell.detail.seed.errors[0]).toContain("no entry html emitted");
+    expect(cell.seeded).toBe(true);
+    // ⛑ 4c F3 — this branch pushes NO notice and attempts NO write; the note must not cite one.
+    expect(cell.detail.seedBridgeFailureKind).toBe("not-attempted");
+    expect(cell.detail.seedBridgeFailure).not.toContain("[seed-bridge] notice");
+    expect(cell.detail.seedBridgeFailure).toContain("no seed write was attempted");
+    expect(cell.detail.seedBridgeFailure).toContain("UNDECIDABLE");
+    expect(cell.detail.consoleErrors).toBeUndefined();
+  });
+
+  test("observeCompiled — the UNSEEDED no-html cell is unchanged (renders-empty, green)", () => {
+    const artifacts = { errors: [], html: "", clientJs: "", serverDependent: false };
+    const cell = observeCompiled({ relpath: "x/no-html.scrml" }, null, "empty", artifacts);
+    expect(cell).toEqual({
+      cellKey: "x/no-html.scrml#empty",
+      state: "renders-empty",
+      smells: ["NO-HTML-EMITTED"],
+      detail: { note: "compiled clean but no entry html located" },
+      seeded: false,
+    });
+  });
+
+  // ---- DOORS 3 + 4: `renders-empty` and `renders-clean` ---------------------------------
+  //
+  // Reached with an EMPTY `consoleErrors`, which is why the notice carrier alone cannot guard
+  // them. Pre-fix these returned `renders-empty` / `renders-clean` — both GREEN.
+  const quietObs = (markup, seedReport) => ({
+    compileErrors: [],
+    throwMessage: null,
+    consoleErrors: [],
+    document: { body: bodyOf(markup) },
+    seeded: true,
+    seedReport,
+    serverDependent: false,
+  });
+
+  test("DOOR 3 — an empty render whose seed write threw is seed-bridge-failed, not renders-empty", () => {
+    const det = runDetectors(quietObs("<main id=\"root\"></main>", FAILED_SEED_FACT));
+    expect(GREEN_STATES.has(det.state)).toBe(false);
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-empty");
+    expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+  });
+
+  test("DOOR 4 — a content-bearing render whose seed write threw is seed-bridge-failed, not renders-clean", () => {
+    const det = runDetectors(
+      quietObs("<main id=\"root\"><p>chrome</p></main>", FAILED_SEED_FACT),
+    );
+    expect(GREEN_STATES.has(det.state)).toBe(false);
+    expect(det.state).toBe("seed-bridge-failed");
+    expect(det.detail.seedBridgeDemotedFrom).toBe("renders-clean");
+  });
+
+  test("CONTROL — the same two renders with a CLEAN seed keep their green states", () => {
+    expect(runDetectors(quietObs("<main id=\"root\"></main>", CLEAN_SEED)).state)
+      .toBe("renders-empty");
+    expect(runDetectors(quietObs("<main id=\"root\"><p>chrome</p></main>", CLEAN_SEED)).state)
+      .toBe("renders-clean");
+  });
+
+  // ---- THE CARVE-OUT: fixture-defect reasons must stay QUIET and GREEN -----------------
+  //
+  // `derived-cell` / `no-such-cell` are FIXTURE defects (SEED_OBSERVABILITY in
+  // e2e-render-map.test.js reds on them), not emit regressions. They stay quiet by
+  // CONSTRUCTION, not by an exclusion list: `applySeed` pushes nothing into `errors` for
+  // either reason and neither can be a `set-threw`. (S427: no corpus fixture resolves this
+  // way any more — two did until the seed fixtures were corrected.)
+  for (const reason of ["derived-cell", "no-such-cell"]) {
+    test(`CARVE-OUT — a ${reason} fixture defect is NOT a bridge failure and stays green`, () => {
+      const report = {
+        chunks: 1,
+        writes: [{ name: "rows", reason, namespaced: false, wrote: false }],
+        domChanged: false,
+        gainedContent: false,
+        observable: false,
+        errors: [],
+      };
+      expect(seedBridgeFailed({ seeded: true, consoleErrors: [], seedReport: report })).toBe(false);
+      expect(runDetectors(quietObs("<main id=\"root\"><p>chrome</p></main>", report)).state)
+        .toBe("renders-clean");
+      expect(runDetectors(quietObs("<main id=\"root\"></main>", report)).state)
+        .toBe("renders-empty");
+    });
+  }
+
+  // ---- THE INVARIANT ITSELF, swept over GREEN_STATES ------------------------------------
+  //
+  // ⚑ THIS IS THE CLASS TEST, AND IT IS WHY THE GUARD IS A WRAPPER RATHER THAN N DOOR
+  // PATCHES. It is parameterised on the EXPORTED `GREEN_STATES`, so adding a green state (or
+  // a new green return that reaches one) cannot silently escape the requirement: the sweep
+  // fails on the missing fixture, and the demotion is enforced at one choke point for every
+  // member of the set.
+  const GREEN_FIXTURES = {
+    "needs-server": (seedReport) => mountThrowObs(seedReport, []),
+    "renders-empty": (seedReport) => quietObs("<main id=\"root\"></main>", seedReport),
+    "renders-clean": (seedReport) => quietObs("<main id=\"root\"><p>chrome</p></main>", seedReport),
+  };
+
+  test("every member of GREEN_STATES has a fixture here (a new green state cannot slip the sweep)", () => {
+    expect(Object.keys(GREEN_FIXTURES).sort()).toEqual([...GREEN_STATES].sort());
+  });
+
+  for (const [state, build] of Object.entries(GREEN_FIXTURES)) {
+    test(`INVARIANT — ${state} is reachable with a clean seed and UNREACHABLE with a failed one`, () => {
+      // Guard the premise: the fixture must really produce this green state, or the second
+      // half would pass for the wrong reason (the S424 lesson — assert the premise).
+      expect(runDetectors(build(CLEAN_SEED)).state).toBe(state);
+      const det = runDetectors(build(FAILED_SEED_FACT));
+      expect(GREEN_STATES.has(det.state)).toBe(false);
+      expect(det.smells).toContain("S-SEED-BRIDGE-FAILED");
+    });
+  }
+
+  // ---- THE PREDICATE, on its own terms --------------------------------------------------
+  test("seedBridgeFailed: the NOTICE carrier fires on a [seed-bridge] console entry", () => {
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [NO_CHANNEL_NOTICE] })).toBe(true);
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [SERVER_ABSENCE] })).toBe(false);
+  });
+
+  test("seedBridgeFailed: the FACT carrier fires on the report's own errors[] or a set-threw", () => {
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [], seedReport: FAILED_SEED_FACT })).toBe(true);
+    // errors[] empty but a write threw — a report shape `applySeed` does not emit, answered
+    // fail-CLOSED on purpose (a contradictory report must not buy a green verdict).
+    expect(
+      seedBridgeFailed({
+        seeded: true,
+        consoleErrors: [],
+        seedReport: { writes: [{ reason: "set-threw", wrote: false }], errors: [] },
+      }),
+    ).toBe(true);
+    // The mirror of the same contradiction: `errors` records a throw while `writes` claims a
+    // landed write. Also fail-closed.
+    expect(
+      seedBridgeFailed({
+        seeded: true,
+        consoleErrors: [],
+        seedReport: { writes: [{ reason: "written", wrote: true }], errors: ["[seed-set x] boom"] },
+      }),
+    ).toBe(true);
+  });
+
+  test("seedBridgeFailed: a clean report, a missing report and a malformed one are all quiet", () => {
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [], seedReport: CLEAN_SEED })).toBe(false);
+    expect(seedBridgeFailed({ seeded: true })).toBe(false);
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [], seedReport: null })).toBe(false);
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [], seedReport: {} })).toBe(false);
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [], seedReport: { writes: null, errors: null } }))
+      .toBe(false);
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [], seedReport: { writes: [null, undefined] } }))
+      .toBe(false);
+    // `gainedContent: null` (UNMEASURED) is NOT on its own a bridge failure: every harness
+    // path that produces it also records an error, while direct callers pass a bare null to
+    // exercise D6's veto.
+    expect(seedBridgeFailed({ seeded: true, consoleErrors: [], seedReport: { ...CLEAN_SEED, gainedContent: null } }))
+      .toBe(false);
+  });
+
+  // ---- THE VOCABULARY -------------------------------------------------------------------
+  test("seed-bridge-failed is a declared state and is NOT green", () => {
+    expect(RENDER_STATES).toContain("seed-bridge-failed");
+    expect(GREEN_STATES.has("seed-bridge-failed")).toBe(false);
+  });
+
+  test("GREEN_STATES is the canonical set the whole tier shares (was three copies)", () => {
+    expect([...GREEN_STATES].sort()).toEqual(["needs-server", "renders-clean", "renders-empty"]);
+  });
+
+  // ---- NOT WIDENED: the already-filed item 2 stays out of scope --------------------------
+  //
+  // Item 2 of the same gap entry — that ANY console error matching `isServerAbsenceMessage`
+  // admits the green carve-out, and that `hasHardSmell` omits D6's `S-EMPTY-WITH-DATA` — is a
+  // DIFFERENT question (which OTHER signals should disqualify the tier) and #1002 scoped it
+  // out deliberately. This pins that S426 did not silently widen into it: with no seed
+  // failure anywhere, a server-absence console error plus an S-EMPTY-WITH-DATA smell still
+  // takes the green carve-out exactly as before.
+  test("OUT OF SCOPE (unchanged) — the wider needs-server masking is still open", () => {
+    const det = runDetectors({
+      compileErrors: [],
+      throwMessage: null,
+      consoleErrors: [SERVER_ABSENCE],
+      document: { body: bodyOf("<main id=\"root\"></main>") },
+      seeded: true,
+      seedReport: { ...CLEAN_SEED, gainedContent: false, domChanged: false },
+      serverDependent: true,
+    });
+    expect(det.smells).toContain("S-EMPTY-WITH-DATA");
+    expect(det.state).toBe("needs-server"); // still green — item 2, not closed here
   });
 });

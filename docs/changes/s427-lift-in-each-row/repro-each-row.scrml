@@ -1,0 +1,14 @@
+<program>
+<groups> = [{ id: 1, items: ["a", "b"] }]
+<div>
+    <each in=@groups key=@.id as g>
+        <ul class="g">
+            ${
+                for (let it of g.items) {
+                    lift <li class="row">${it}</li>
+                }
+            }
+        </ul>
+    </each>
+</div>
+</program>

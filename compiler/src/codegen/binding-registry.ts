@@ -114,7 +114,36 @@ export interface LogicBinding {
    * arrow-function expression. emit-event-wiring consumes and emits subscribe +
    * per-iteration render.
    */
-  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow" | "rcdata-content";
+  kind?: "if-chain-branch" | "if-chain-else" | "render-by-tag" | "errors-element" | "render-element" | "class-directive" | "attr-template" | "bind-directive" | "value-control-flow" | "rcdata-content" | "lift-host";
+
+  /**
+   * g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template — set
+   * when `kind === "lift-host"`. emit-html.ts registers one such binding for a
+   * `${ … lift … }` logic block whose `<span data-scrml-logic>` host sits inside
+   * a MOUNT-DEFERRED `<template>` (registered ONLY there — a host in the plain
+   * SSR body registers nothing, so its emit is byte-identical). The host does
+   * not exist in the document until the template is cloned and inserted, so the
+   * lift group cannot bind its target with a module-init
+   * `document.querySelector` (that returns null: `querySelector` never descends
+   * into template content). emit-reactive-wiring.ts instead emits the group as a
+   * host-parameterised function and records its name here; emit-event-wiring.ts
+   * then binds it from `_scrml_nav_rewire`, which re-runs scoped to every
+   * freshly mounted subtree. Unset when no lift code was emitted for the host
+   * (nothing to bind — the event-wiring pass emits nothing for it).
+   */
+  liftMountFn?: string;
+
+  /**
+   * g-lift-inside-each-row-or-match-arm-silently-dropped — set on a
+   * `kind === "lift-host"` binding registered INSIDE a match/engine arm body
+   * (emit-html.ts, arm context): the statements of the `${ … lift … }` block
+   * the host belongs to. An arm body is rendered per variant switch by
+   * emit-variant-guard.ts (innerHTML replace + a per-arm wire function), never
+   * by the file-scope Step 4b pass, so the arm's wire function registers these
+   * statements as a NESTED lift group (see `NestedLiftGroup`) and runs it
+   * against the freshly rendered host on every arm entry. Unset outside an arm.
+   */
+  liftStmts?: any[];
 
   /**
    * 6nz-F4 — RCDATA content-model carve-out (SPEC §24.3.1 companion, SPEC.md:1141).
@@ -579,7 +608,54 @@ export interface LogicBinding {
   };
 }
 
+/**
+ * g-lift-inside-each-row-or-match-arm-silently-dropped — a `${ … lift … }`
+ * block whose host is created PER INSTANCE (one per `<each>` row, one per
+ * match/engine arm entry) rather than once in the page body.
+ *
+ * The render emitters (emit-each.ts per-item factory, emit-variant-guard.ts arm
+ * wire function) run BEFORE emit-reactive-wiring and cannot lower a logic block
+ * themselves; they register the block here and emit a CALL to `fnName`.
+ * emit-reactive-wiring's Step 4b then lowers the statements through the SAME
+ * per-group path a top-level lift block takes and emits them as
+ *
+ *   function <fnName>(_scrml_lift_host, _scrml_effect, _scrml_effect_static, ...params) { … }
+ *
+ * — the host-parameterised shape of the S427 `_scrml_lift_mount_<pid>` groups,
+ * with the instance scope (`params`: the row's iteration names, the arm's
+ * payload bindings) passed in as arguments because the function lives at file
+ * scope. `prologue` lines run first inside the function (the `as (k, v)`
+ * destructure re-derivations), so they execute under the caller's re-run effect.
+ */
+export interface NestedLiftGroup {
+  fnName: string;
+  pid: string;
+  stmts: any[];
+  params: string[];
+  prologue: string[];
+}
+
 export class BindingRegistry {
+  private _nestedLiftGroups: NestedLiftGroup[] = [];
+
+  /**
+   * Register a nested lift group (see `NestedLiftGroup`). Idempotent per
+   * statements array: an arm body generated twice (initial-arm HTML + the arm's
+   * render function) registers once, and the second caller gets the same name.
+   */
+  addNestedLiftGroup(group: NestedLiftGroup): string {
+    for (const g of this._nestedLiftGroups) {
+      if (g.stmts === group.stmts) return g.fnName;
+    }
+    this._nestedLiftGroups.push(group);
+    return group.fnName;
+  }
+
+  /** All nested lift groups registered so far (live array — Step 4b drains it as a queue). */
+  get nestedLiftGroups(): NestedLiftGroup[] {
+    return this._nestedLiftGroups;
+  }
+
   private _eventBindings: EventBinding[];
   private _logicBindings: LogicBinding[];
   /**
@@ -663,6 +739,15 @@ export class BindingRegistry {
   /** Exit a mount-deferred `<template>` body. Symmetric with `enterMountTemplate`. */
   exitMountTemplate(): void {
     if (this._mountTemplateDepth > 0) this._mountTemplateDepth--;
+  }
+
+  /**
+   * True while HTML gen is inside a mount-deferred `<template>` body (at any
+   * nesting). Lets a producer decide whether to register a binding at all —
+   * the `lift-host` binding exists only for hosts inside such a template.
+   */
+  isInsideMountTemplate(): boolean {
+    return this._mountTemplateDepth > 0;
   }
 
   /**

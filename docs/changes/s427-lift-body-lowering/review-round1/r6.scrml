@@ -1,0 +1,11 @@
+<program>
+<items> = ["a", "b", "c"]
+<ul>
+${
+    let n = 0
+    for (let it of @items) { n = n + 1
+        if (it == "zz") { let n = 99 }
+        lift <li>${n}:${it}</li> }
+}
+</ul>
+</program>

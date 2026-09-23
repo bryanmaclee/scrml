@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 111 |
-| MED | 262 |
-| LOW | 99 |
+| HIGH | 116 |
+| MED | 271 |
+| LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -5102,7 +5102,20 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 
 
 ### g-e2e-render-map-tier-runs-in-no-ci-job-at-all — the only tier that MOUNTS the corpus and reads the DOM is referenced by no workflow, no package script and no git hook, so nothing it classifies has ever gated anything — `NEW S416-peter (found while fixing the tier's classifier — checked whether the fix would be exercised in CI); MED; open`
-<!-- @gap id=g-e2e-render-map-tier-runs-in-no-ci-job-at-all sev=MED status=open locus=.github/workflows/ci.yml(gate=tests/unit+conformance+tests/*.test.js;tracking=tests/integration+lsp+commands;windows=unit+conformance—none-name-tests/e2e-render-map)+package.json+scripts/git-hooks prov=empirical:PA-grepped-S416-e2e-render-map-returns-zero-hits-across-.github-package.json-and-scripts/git-hooks -->
+<!-- @gap id=g-e2e-render-map-tier-runs-in-no-ci-job-at-all sev=MED status=resolved resolved-by=S427-peter locus=.github/workflows/ci.yml(gate=tests/unit+conformance+tests/*.test.js;tracking=tests/integration+lsp+commands;windows=unit+conformance—none-name-tests/e2e-render-map)+package.json+scripts/git-hooks prov=empirical:PA-grepped-S416-e2e-render-map-returns-zero-hits-across-.github-package.json-and-scripts/git-hooks -->
+
+⛑ **S427-peter — RESOLVED for the tier's ASSERTIONS.** `ci.yml`'s blocking `gate` job now runs
+`bun test compiler/tests/e2e-render-map/` (259 tests at wiring time), and the advisory `windows` job runs
+it too — the S419 fix agent's "Linux AND Windows" recommendation, since the S417/S419 separator defects
+were Windows-only. **The S416 timing objection was re-checked rather than inherited:** the slow tests now
+carry explicit 60–180 s timeouts, a hanging corpus app classifies as a `HARNESS-TIMEOUT` CELL rather than
+failing a test, and the fast-slice delta is WARN-only — so the residual risk was Linux divergence of the
+hard assertions, which the wiring PR measured on its own CI (two `gate` runs required green before merge)
+instead of assuming. **What stays ungated, deliberately:** the fast-slice green→red delta (WARN-only by
+design) and `generate-baseline.js --check` (the committed baseline carries pre-existing drift — 1 ORPHAN /
+6 NEW / 5 GREEN→RED / 16 RED→GREEN on a full-corpus run at S427; gating it is the "regenerate on Linux,
+settle the known reds, then schedule" sequence this entry already names). The nav-map's claim that this
+tier's gate was `tracking` was WRONG, not stale, and is corrected in the same landing.
 
 ⚑ **S419-peter — PARTIAL, stays open.** The tier's own text no longer claims a CI/pre-push "hard gate" (it now states it runs only via `bun test compiler/tests/e2e-render-map/`, the whole-tree `bun run test`, or the generator directly). The gap itself — no CI job invokes the tier or `generate-baseline.js --check` — is unchanged. Recommendation recorded by the fix agent: a non-required job on Linux AND Windows (the S419 HIGH was Windows-only), and a scheduled `--check` only after a Linux-side baseline regeneration settles the known reds.
 
@@ -11974,7 +11987,17 @@ Reporter measured **7 of 7 navigations carrying stale CSS** in Chromium on the l
 
 ### g-soft-nav-redirect-leaves-orphan-history-entry — a soft nav to a redirecting URL pushes history BEFORE fetching, then hard-navigates on the redirect, so one click burns two entries and the first Back appears to do nothing — `NEW S350-bryan (reported by scrml-site); MED; open`
 
-<!-- @gap id=g-soft-nav-redirect-leaves-orphan-history-entry sev=MED status=open locus=compiler/src/runtime-template.js:2713,2724,2752(PA-VERIFIED AT HEAD: `history.pushState` at :2713/:2724 in `_scrml_navigate_soft`, and the redirect fallthrough `if (!res.ok || res.redirected) { _scrml_navigate(res.url || path); return null; }` at :2752 runs AFTER it) prov=adopter:scrml-site-2026-08-18-soft-nav-drops-page-stylesheet -->
+<!-- @gap id=g-soft-nav-redirect-leaves-orphan-history-entry sev=MED status=open locus=compiler/src/runtime-template.js:_scrml_navigate_soft/_scrml_nav_fetch_and_swap(LOCATE BY SYMBOL, not by line — the two `history.pushState` calls live in `_scrml_navigate_soft`, and the redirect fallthrough `if (!res.ok || res.redirected) { _scrml_navigate(res.url || path); return null; }` lives in `_scrml_nav_fetch_and_swap`, which the push precedes) prov=adopter:scrml-site-2026-08-18-soft-nav-drops-page-stylesheet -->
+
+⛑ **LINE NUMBERS CORRECTED S425-bryan, and the correction is the point.** This `locus=` read
+`:2713,2724,2752` when filed at S350. Re-measured by execution on `428e390d`: the pushes are at
+**`:2774`** (and `:2762` for the in-page-hash short-circuit, which is a THIRD site the original
+three-number list did not name), and the redirect fallthrough is at **`:2803`**. Every number had
+rotted and one site was missing. **The numbers are deliberately NOT restored above** — the entry now
+locates by SYMBOL, per S422's own durable (*"a correction rots exactly as fast as the citation it
+corrected — locate by symbol or do not locate"*). The defect itself re-verified live in the same pass:
+`history.pushState({ __scrml_soft: true }, "", path)` runs, then `_scrml_nav_fetch_and_swap(path, null)`
+is called, and only inside that does the response's `redirected` flag get read.
 
 **Reported by scrml-site 2026-08-18; PA-VERIFIED IN OUR SOURCE AT HEAD.** `_scrml_navigate_soft()` pushes the history entry, *then* fetches, then discovers `res.redirected` and falls through to a full `_scrml_navigate(res.url)`. The pushed entry is orphaned — it names a URL whose document was never loaded — so the first Back press appears to do nothing.
 
@@ -11983,6 +12006,219 @@ Reporter measured `history.length` **5 → 7 on a single click**; the first Back
 **Suggested shape (reporter):** push AFTER the fetch resolves, or `replaceState` the redirect target onto the entry already pushed.
 
 Filed separately from [[g-soft-nav-head-sync-drops-stylesheet-links]] because it is true independent of that fix and has its own locus, though both are in the soft-nav path and a single arc should take them together.
+
+### g-outlet-absent-composition-resolves-the-route-slot-by-tag-and-discards-the-chosen-main-s-authored-children — a shell with no `<outlet>` has its first `<main>` silently commandeered as the route slot and its authored children deleted from the emitted document, against §20.8.1.1's marker-never-tag SHALL — `NEW S425-bryan (the owed probe, delivered by scrml-site 2026-08-19; PA-REPRODUCED BY EXECUTION on `428e390d` with an A/B control, not relayed); HIGH; open — the DISPOSITION is a RULING (bryan)`
+
+<!-- @gap id=g-outlet-absent-composition-resolves-the-route-slot-by-tag-and-discards-the-chosen-main-s-authored-children sev=HIGH status=open locus=compiler/src/codegen/index.ts:findBareMainOpenTag(LOCATE BY SYMBOL — the tag-keyed slot finder, whose own docblock reads "The FIRST `<main>` open tag — the pre-§20.8 static/hard-nav composition slot, used only when the shell declares no `<outlet>` marker"; the replace-not-append behaviour is stated verbatim at the composition site: "composing replaces the slot's children") prov=adopter:scrml-site-2026-08-19-outlet-discards-shell-children-repro -->
+
+**PA-REPRODUCED BY EXECUTION on `428e390d`**, A/B, from the reporter's own 12-line case:
+
+| variant | `shell-authored-child` in emitted `out/index.html` |
+|---|---|
+| `<main>` holds the authored `<div>` **and** `<outlet/>` | **1** — survives |
+| `<main>` holds the authored `<div>`, **`<outlet/>` removed** | **0** — silently discarded |
+
+⚑ **The mechanism is sharper than the report states, and the refinement matters for the fix.** With an
+`<outlet/>`, the slot is emitted as a SIBLING (`<div data-scrml-outlet tabindex="-1">`) *after* the
+authored child, which is why it survives. Without one, `<main>` ITSELF becomes the slot and
+composition replaces its children. **The loss is scoped to the authored children of the element the
+fallback finder picks — not to shell markup generally:** the `<header>` in the same reproducer
+survives intact, because it is outside the chosen slot. A report saying "authored shell markup is
+discarded" over-states it; "the first `<main>`'s children are discarded" is the measured claim.
+
+⛑ **AMENDED S425 — that correction was itself too narrow, and the reporter's wider framing is right
+for a variant NOBODY'S A/B COVERED.** The dispatched agent ran a **variant C** — a shell with **no
+`<main>` at all** and no `<outlet/>` — which neither the reporter's case nor the A/B above includes.
+**PA-CONFIRMED BY EXECUTION** on `ed856598`:
+
+| variant | shell | route page carries |
+|---|---|---|
+| A | `<main>` + `<outlet/>` | authored child **1** |
+| B | `<main>`, no outlet | authored child **0**; `<header>` **survives** |
+| **C** | **no `<main>`, no outlet** | **`header=0` `footer=0`** — route content only |
+
+In variant C `shellAvailable` goes false, composition no-ops, and **every route page emits standalone
+with none of the shell's chrome** — no `<header>`, no `<footer>`, not even the shell's client bundle.
+The shell's own page keeps everything. Emitted body, verbatim:
+
+```html
+<body>
+    <h2>route-content-marker</h2>
+<script src="scrml-runtime.00u7nbja.js"></script>
+<script src="about.client.01yzikct.js"></script>
+</body>
+```
+
+⚑ **Three parties, three readings, and each was right about its own variant.** scrml-site said
+"authored shell markup is discarded" (right for C, over-stated for B). This entry narrowed it to the
+chosen slot's children (right for B, too narrow for C). The agent found C. **The discriminator is
+whether a `<main>` exists at all, and no one's reproducer varied it** — so a diagnostic naming only
+the `<main>`-children case would be FALSE exactly where the loss is TOTAL. The landed (c) message
+covers both.
+
+**GOVERNING SENTENCE — outcome 1, quoted verbatim (`compiler/SPEC.md` §20.8.1.1):**
+
+> **Exactly one `<main>` landmark per composed document; the MARKER decides the route slot, never the tag.**
+>
+> "That attribute — never the element's tag name — SHALL identify the route slot, for BOTH the runtime
+> swap (§20.8.2) and the multi-file shell composition (§40.8.2). Every consumer SHALL resolve the slot
+> by attribute NAME (the `[data-scrml-outlet]` selector), not by substring, not by tag."
+
+`findBareMainOpenTag` resolves the slot **by tag**, with no marker present anywhere in the document.
+Its own docblock names itself *"pre-§20.8"* — this is code that §20.8.1.1's SHALL did not retire. So
+the behaviour contradicts a normative sentence that already exists; this is a **BUG against the
+contract, not an unspecified shape.** §20.8.1's own sentence for this case says only that such a
+project *"SHALL emit W-OUTLET-ABSENT-SOFT-NAV-DISABLED and fall back to hard navigation"* — nothing
+licenses commandeering `<main>` or deleting its children.
+
+### ⛑⛑ RETRACTED S425 — THE PARAGRAPH ABOVE IS WRONG. THE BEHAVIOUR IS SPECIFIED, AND THE SPEC CONTRADICTS ITSELF
+
+**A FOURTH normative locus exists and the governing-sentence gate above missed it.** Found by the
+dispatched agent, **PA-CONFIRMED BY EXECUTION** at `compiler/SPEC.md:23577`, §40.8.2 — three
+consecutive bullets of one subsection:
+
+> `:23576` — *"Slot resolution SHALL match on the **attribute NAME**, exactly as the runtime's
+> `[data-scrml-outlet]` selector does."*
+> `:23577` — *"**When the shell declares NO marked slot, the compiler SHALL fall back to the FIRST
+> `<main>` element as the slot.** This is the pre-§20.8 static / hard-navigation multi-page path,
+> preserved for back-compat; `W-OUTLET-ABSENT-SOFT-NAV-DISABLED` already surfaces the missing outlet."*
+> `:23578` — *"Composition SHALL **preserve the slot's wrapper element** and replace its children
+> with the route body."*
+
+**So the tag-keyed fallback AND the child replacement are both mandated by a `SHALL`.** This is not
+code violating the contract. It is **§20.8.1.1's marker-never-tag `SHALL` in direct tension with
+§40.8.2's fall-back-to-the-first-`<main>` `SHALL`** — two normative sentences that disagree.
+
+⚑ **What that changes, and it is not cosmetic:**
+
+1. **The classification.** "BUG against the contract" → **a SPEC self-contradiction.** The gate's
+   outcome (1) was reached and recorded, and it was still incomplete: quoting *a* governing sentence
+   is not the same as finding *the* governing sentence. **`pa-base` §0 names this exactly** — *"when
+   you have a clean reproducer and a fix in mind, that is the moment the normative source is least
+   likely to be consulted and most needs to be."* Having a quoted SHALL made it feel MORE settled,
+   not less.
+2. **Option (a)'s cost and rung.** (a) is no longer conformance restoration toward an existing SHALL
+   (the cheap, reversible framing). It requires **retiring a normative `SHALL` at `:23577`** — an
+   amendment. And "anything where the SPEC is silent or **two sentences disagree**" is explicitly
+   carved OUT of the S425 PA-ruling class, so (a) was always bryan's; now it is bryan's for a second,
+   independent reason.
+3. **(c) is unaffected** and landed. It corrects a FALSE claim (*"informational only — no action
+   required"*), which is true regardless of which SHALL wins.
+
+**Owed with (a), and not done:** `:23577` must be retired or scoped, not merely out-voted; §20.8.7's
+one-line code summary is also silent on the discard; and `W-PROGRAM-SPA-INFERRED`
+(`ast-builder.js`) carries the identical *"informational only — no action required"* phrasing, which
+is believed TRUE there (no `pages/` → no composition → no discard) but **was not verified by
+execution** — flagged, not asserted.
+
+⚑ **AND §34's row for the diagnostic asserts a severity rationale that is FALSE.** Verbatim:
+*"…fall back to hard (full-document) navigation; **this is informational only (SSR-first hard
+navigation still works)**."* Hard navigation does still navigate — to a document that has lost the
+authored children of its first `<main>`. An author reading an **Info**-level lint whose text names
+only a performance trade has no way to learn that content is being deleted. That is the §8
+hollow-gate family in documentation form, and it is the half of this entry that needs no ruling.
+
+**WHY IT BIT AN ADOPTER, in their words:** removing `<outlet/>` was their first candidate for
+disabling soft nav site-wide, and it *"deleted our entire generated 73-link reference sidebar from
+all 99 pages."* They caught it by diffing the emitted artifact before shipping — nothing warned them.
+They then shipped `hard` on all 551 internal `<a>` instead.
+
+### ⛑ THE DISPOSITION IS A FORK, AND IT IS BRYAN'S — surfaced with a recommendation, not ruled
+
+The reporter explicitly left it open (*"whether the discard itself is correct behaviour is your call —
+we can see an argument that a shell without an outlet is simply not a shell"*). It does **not** fall
+in the S385 PA-ruling class: an adopter is demonstrably depending on the current shape, so condition 3
+(**corpus impact MEASURED ZERO**) fails, and the call sets direction about what a shell without an
+outlet IS.
+
+| # | option | direction | note |
+|---|---|---|---|
+| a | **Refuse it** — a `pages/`-bearing shell with no `<outlet>` is an ERROR | newly-REJECTING | **PA lean.** FORK RULE rows 1–4 all discriminate this way: it LIMITS, it fails CLOSED, newly-rejecting is the REVERSIBLE direction, and it fixes the ROOT rather than the position. Cost: it breaks the reporter's own "remove the outlet to disable soft nav" idiom — but they already abandoned that idiom for `hard`, and §20.8.3 `hard` is the sanctioned opt-out |
+| b | **Append, don't replace** — compose route content INTO the chosen `<main>` after its authored children | semantics-changed | fixes the data loss, keeps the shape working. ⚑ But `semantics-changed` is the class §8 says the gates are weakest against, and it leaves the marker-never-tag SHALL still violated |
+| c | **Keep the behaviour; fix the diagnostic** — name the discard in the lint text and strike §34's false *"informational only"* | inert | ⚑ **Owed REGARDLESS of which way (a)/(b) goes**, and cheap. Does not on its own satisfy §20.8.1.1 |
+| d | **Retire the fallback finder** — no marker, no slot; the shell emits as authored | newly-rejecting-ish | closest to the letter of the SHALL, but leaves "where does route content go?" unanswered, so it likely collapses into (a) |
+
+**PA recommendation: (c) now, unconditionally, then (a).** (c) is inert, removes the false claim from
+the normative catalog, and is the thing that would have saved the adopter 99 pages. (a) is where all
+four FORK RULE rows point.
+
+### ⚑⚑ (a)'s MIGRATION IS MEASURED AND IT IS NOT ZERO — so (a) is a SEPARATE RULING (§8), and the measurement is worse than the fork looked
+
+bryan ratified *"(c) now, then (a)"* at S425 **before this was measured.** §8 is explicit: *"A
+newly-rejecting change still owes a MEASURED migration … treat a non-zero count as a separate ruling
+rather than migrating unilaterally."* Measured by compiling, not grepping — the population is
+"projects where `W-OUTLET-ABSENT-SOFT-NAV-DISABLED` fires", which is the compiler's own answer:
+
+| project | `<outlet>` | `<main>` | lint fires | in (a)'s population |
+|---|---|---|---|---|
+| **`examples/23-trucking-dispatch`** (the FLAGSHIP) | **no** | 1, with a substantial authored landing page | **YES** (`app.scrml:35:1`) | **yes** |
+| **`docs/website`** (scrml.dev's in-repo source) | **no** | 1, containing only a comment | **YES** | **yes** |
+| `compiler/tests/commands/migrate-program-shape-fixtures` | no | 0 | — | likely |
+| `compiler/tests/fixtures/chunk-namespacing/{engine,types,wide}` · `docs/changes/esm-chunks/.../fx` | **yes** | — | no | no |
+
+⚑ **THE FLAGSHIP IS LOSING CONTENT TODAY, SILENTLY, AND IT IS MEASURED.**
+`examples/23-trucking-dispatch/app.scrml`'s `<main>` carries an `<h1>Welcome`, a description, a
+"Get started" card with three links and a stress-test callout. Built with
+`scrml build . --target static`, grepping the 25 emitted HTML files:
+
+- `app.html` (shell only, nothing composed) — `Welcome`=1 `Get started`=1 `Stress-test`=1
+- **all 24 composed route pages — 0 / 0 / 0**
+
+The build reports *"scrml build complete"*. No error, one Info lint that names only soft navigation.
+
+### ⛑ AND THE MEASUREMENT REFRAMES THE FORK — the compiler is being asked to read intent
+
+The two in-corpus instances want OPPOSITE things from the same syntax:
+
+- **scrml-site's `<main>` held SHELL CHROME** (a 73-link reference sidebar). Replacing its children
+  is destruction — that is the reported bug.
+- **the flagship's `<main>` holds THE INDEX ROUTE'S BODY** (a landing page, and there is no
+  `pages/index.scrml`). Replacing its children on a composed route is *exactly what the author
+  wants*, and `app.html` keeps them because nothing composes there.
+
+**Nothing in the source distinguishes those two intents** — which is precisely why §20.8.1.1 makes
+the slot marker-keyed. Without the marker the compiler guesses, and the same guess is correct for one
+author and silently destructive for the other. **That strengthens (a)** — refuse the ambiguous shape
+rather than keep guessing — **and it raises (a)'s cost above the one-liner it looked like:**
+`docs/website` migrates by adding `<outlet/>` inside its `<main>` (§20.8.1.1 case 2, no diagnostic,
+and it re-enables soft nav on scrml.dev, which is what the reporter wants); **the flagship needs its
+landing content MOVED** to a route file before an `<outlet/>` can go in. Small, clarifying, but not
+mechanical.
+
+**PA position, updated: (c) still stands and is unblocked. (a) is re-surfaced with the count** — two
+live projects, one of them the flagship, one of them our own documentation site, and a migration that
+is one line for one and a content move for the other.
+
+### g-e-sql-004-is-file-local-so-a-multi-file-page-relying-on-the-entry-s-db-attribute-cannot-build — the exact defect #995 just retired for `E-AUTH-005`, still live one stage downstream at codegen, and it now blocks the shape #995 was landed to unblock — `NEW S425-bryan (post-merge R26 empirical verification of #995 on merged main `c59367bb`; PA-reproduced with a control); HIGH; open`
+
+<!-- @gap id=g-e-sql-004-is-file-local-so-a-multi-file-page-relying-on-the-entry-s-db-attribute-cannot-build sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts:collectDbScopes(LOCATE BY SYMBOL — the gate computes `const dbScopes = collectDbScopes(fileAST)` and its own comment says "No matching scope was found in the file AST"; the fire site is the `if (!scope)` branch below it. Sibling file-local copy in compiler/src/codegen/emit-tool.ts) prov=empirical:PA-measured-on-merged-main-c59367bb-app-build-emits-E-SQL-004-at-CG-with-E-AUTH-005-correctly-silent -->
+
+**PA-MEASURED on merged main `c59367bb`, by APPLICATION BUILD with a control.** #995 fixed
+`E-AUTH-005` by computing the server-context answer once per APPLICATION in `runTS`. `E-SQL-004` still
+computes it per FILE:
+
+| shape | `E-AUTH-005` | `E-SQL-004` |
+|---|---|---|
+| page with its own `<db src=>` | silent ✅ | silent ✅ |
+| page relying purely on the entry's `<program db=>` | **silent ✅ (#995's win)** | **FATAL at `[CG]` — build fails** |
+
+So #995's win is real and the shape is still unbuildable: the author is told to *"Add a `db=`
+attribute to the enclosing `<program>` element"* in a file where §40.8 forbids a `<program>` at all.
+**Two errors became one impossible-to-action error** — which is what the #995 PR body disclosed as its
+honest reach, now measured rather than asserted.
+
+⚑ **This entry supersedes the `E-SQL-004` claim inside [[g-spec-sql-schema-codes-zero-emission]]**,
+which records it as *"comment-only; falls back to `:memory:`"*. That was true once; `emit-server.ts`'s
+own comment records the change (*"Historically this path shipped a silent `new SQL(":memory:")` stub …
+We now fire the SHALL-error instead"*). It fires, it is fatal, and it fails the build.
+
+⚑ **METHOD NOTE, recorded because it nearly produced a false regression report against our own
+landing.** The first probe compiled the page file ALONE (`scrml compile pages/board.scrml`) and saw
+`E-AUTH-005` fire — which reads as "#995 does not work." It is the wrong referent: a single-file
+compile has no application context, and #995's whole mechanism is application-scope. Under
+`scrml build .` the diagnostic is correctly silent. **A whole-application question cannot be asked of
+a single-file invocation**, and the failure mode is a well-formed, plausible, wrong answer.
+[[feedback_the_probe_answered_a_different_question]]
 
 ### g-ws-message-door-has-no-body-ceiling-d4-census-missed-it — the `<channel>` server WebSocket `message(ws, raw)` handler `JSON.parse`s an adopter-supplied frame with NO scrml size ceiling, so the dpa-030 D4 body-size fix closes three of FOUR ingress doors — `NEW S350-bryan; HIGH; open`
 
@@ -14082,7 +14318,7 @@ premise that the compile is the gate."*
 
 ### g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template — `benchmarks/todomvc/app.scrml` compiles at exit 0 and throws on first render in both harnesses, rendering zero rows, because the emitted `document.querySelector` for its lift target names an element that exists only inside a mount `<template>`; and BOTH TodoMVC test files are green against the dead build
 
-<!-- @gap id=g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(the top-level `const _scrml_lift_tgt_N = document.querySelector(...)` bind is emitted for a logic block whose host element the `if=` Phase-2 lowering has since moved into a mount `<template>`; the deciding site — which stage decides a lift target's bind is top-level rather than mount-scoped — was NOT traced) prov=empirical:PA-reproduced-by-execution-at-68ed2ce2-happy-dom-querySelector-returns-null-while-the-same-selector-matches-inside-one-of-two-template-contents -->
+<!-- @gap id=g-todomvc-benchmark-app-dead-on-arrival-lift-target-inside-template sev=HIGH status=resolved resolved-by=S427-peter locus=compiler/src/codegen/emit-reactive-wiring.ts(Step-4b-lift-group-bind—CORRECTED-S427-the-emit-client.ts-locus-below-was-wrong) was:compiler/src/codegen/emit-client.ts(the top-level `const _scrml_lift_tgt_N = document.querySelector(...)` bind is emitted for a logic block whose host element the `if=` Phase-2 lowering has since moved into a mount `<template>`; the deciding site — which stage decides a lift target's bind is top-level rather than mount-scoped — was NOT traced) prov=empirical:PA-reproduced-by-execution-at-68ed2ce2-happy-dom-querySelector-returns-null-while-the-same-selector-matches-inside-one-of-two-template-contents -->
 
 **PA-REPRODUCED BY EXECUTION at `68ed2ce2`**, three-part, each part run rather than read:
 
@@ -14113,6 +14349,159 @@ carriers someone enumerated, with the un-enumerated carrier left silently broken
 see [[g-runtime-reconciliation-regression-post-may-unmeasurable-at-head]]. Re-establishing any perf
 baseline requires this fixed first.
 — `NEW S402-bryan (evidence measured S400 and left unfiled on a contended ledger; re-reproduced by execution before filing)`; **HIGH**; open
+
+⛑ **S427-peter — RESOLVED.** Re-reproduced on `ccd94817` first. **The locus above was wrong**: the eager
+top-level binds are emitted by `emit-reactive-wiring.ts` Step 4b (three sites), and the reason the S400
+`insideMountTemplate` stamp never reached them is that a lift-ONLY logic node registers no logic binding, so
+`addLogicBinding` never stamps it. Fix: template-interior lift hosts register a `lift-host` binding; the group
+emits as `_scrml_lift_mount_<pid>(host, …)` invoked from `_scrml_nav_rewire` against the mounted node, with the
+outer lift target saved/restored and every effect alive-gated to its mount. **Fixed the class, enumerated
+first:** five more template-interior anchor sites had the same eager bind (textarea RCDATA, `<errors of>`,
+`<render of>`, `<errorBoundary>` display, `${serverFn()}` one-shot) — each measured empty/unfetched inside
+`if=` and fixed; match/engine dispatch, `<each>`, `bind:`/`class:`/`ref=` were already rebound (one reachable site deferred, not measured: the `route-splitter` hover-prefetch `a[data-scrml-prefetch]`, a §40.9.7 SHOULD). Governing:
+§10.1 + §17.1's sugar equivalence (`if=` is sugar over `${ if(expr) { lift <el> } }`). `browser-todomvc`
+now asserts rows render (3 fail against the pre-fix build, pass after). 22 corpus client artifacts change,
+every one a previously-broken program (adversarially sampled: base threw or misplaced rows). ⚑ The run-once
+statement ORDER inside such a block is RULING-PENDING — see
+[[g-if-mount-lift-block-statement-timing-ruling-pending]].
+
+### g-if-mount-lift-block-statement-timing-ruling-pending — inside an `if=`, a `${…lift…}` block's lift-free statements run once at file init while its lift statements run per mount, so source order splits in two measured ways; which reading of §7.6 vs §6.7.2.1 governs is bryan's — `NEW S427-peter; MED; ruling-gated`
+<!-- @gap id=g-if-mount-lift-block-statement-timing-ruling-pending sev=MED status=ruling-gated locus=compiler/src/codegen/emit-reactive-wiring.ts(emitMountDeferredLiftGroup — the run-once split) prov=review:S427-adversarial-rounds-1-and-2-on-the-lift-target-mount-fix -->
+
+The S427 lift-target fix keeps base's timing for every lift-FREE statement of a template-interior lift block
+(`const`/`let`/`function`/reactive write/expression run ONCE at file init, at file scope — §7.6, SPEC.md:6417)
+and runs only the statements that contain `lift` per mount. Nothing that worked on base changes. Two ORDER
+consequences, both pinned as **RULING PENDING** in `browser-lift-target-mount-template.test.js`: (a) a lift-free
+statement reading what a lift statement wrote sees the pre-mount value (`hits.push(it)` inside the lift loop,
+`@seen = hits.length` after → 0, the SSR-body twin gives 2); (b) a lift-free statement placed AFTER a lift
+statement runs BEFORE it (first render `second:a`, twin `first:a`). §6.7.2.1 (SPEC.md:3854) requires a
+re-mounting scope to "re-run all bare expressions … exactly as if mounting for the first time" — a `const`
+is arguably not a bare expression, which is the reading shipped. Corpus population of both shapes: zero.
+Question routed to bryan: `handOffs/incoming/2026-09-21-from-S427-peter-to-bryan-if-mount-lift-block-timing.md`.
+⚑ An attempted per-render file-scope hoist for outer-effect groups was REMOVED before landing: it turned loud
+failures into silent wrong output (a wiped mount, closures reading later values) — fail-open, disqualified.
+
+### g-lift-inside-each-row-or-match-arm-silently-dropped — a `${ for … lift }` inside an `<each>` row or an engine/match arm emits NO lift code at all, at exit 0 — `NEW S427-peter; HIGH; open`
+<!-- @gap id=g-lift-inside-each-row-or-match-arm-silently-dropped sev=HIGH status=resolved resolved-by=S427-peter locus=searched:compiler/src/codegen/emit-reactive-wiring.ts(Step-4b-groups-by-_placeholderId),compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:PA-reproduced-each-row-form-on-ccd94817-zero-_scrml_lift-occurrences-in-the-client-bundle;match-arm-form-reproduced-by-the-S427-adversarial-reviewer-on-base-and-head -->
+
+**PA-REPRODUCED on `ccd94817`:** `<each in=@groups key=@.id as g> <ul> ${ for (let it of g.items) { lift <li>${it}</li> } } </ul> </each>`
+compiles at **exit 0** and the emitted client contains **zero** `_scrml_lift` occurrences — the rows are
+silently dropped. The same shape inside an engine/match arm is dropped too (reproduced on base and head by the
+S427 adversarial reviewer, `p10`). Independent of `if=`. Silent wrong output with no diagnostic → HIGH.
+
+### g-lift-block-bare-call-emitted-twice-as-display-binding — in a lift block, a bare call statement is ALSO emitted as a separate `${}` display binding that re-runs it and can clear the host — `NEW S427-peter; MED; open`
+<!-- @gap id=g-lift-block-bare-call-emitted-twice-as-display-binding sev=MED status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-event-wiring.ts—not-traced prov=review:S427-adversarial-round-2-N1-q12-q12b-reproduced-on-base-and-head-at-top-level -->
+
+`${ const v = @count; track(v); lift <b>${v}</b> }` emits `track(v)` inside the lift group AND as a separate
+`_scrml_render_value(el, track(v))` display binding. At top level (base and head alike) the duplicate throws
+`v is not defined` and `track` runs extra times; with `track(@count)` the duplicate runs and **wipes the lifted
+children**, calls tripled. Pre-existing; surfaced by the S427 review, which also found that ANY change giving the
+duplicate a resolvable name turns it from a loud error into a silent wipe.
+
+### g-lift-target-cleared-to-null-at-end-of-every-outer-effect-run — the outer re-render effect in `emitLiftGroup` ends with `_scrml_lift_target = null`, so a top-level group whose write synchronously re-runs another group sends its remaining lifts to `document.body` — `NEW S427-peter; MED; open`
+<!-- @gap id=g-lift-target-cleared-to-null-at-end-of-every-outer-effect-run sev=MED status=open locus=compiler/src/codegen/emit-reactive-wiring.ts(emitLiftGroup — the effect body's trailing `_scrml_lift_target = null`) prov=review:S427-adversarial-round-2-N5-q9-and-its-SSR-body-twin-q9t-identical-on-base -->
+
+Same class as the save/restore S427 added to `_scrml_lift_mount_run`, one level out and pre-existing: q9 (a
+top-level group writing `@count`, which synchronously re-runs a group reading it) lands the outer group's later
+`lift <p>` in `document.body`, accumulating. Base shows it identically. Fix is the same save/restore inside the
+emitted effect body — it changes SSR-body output bytes, which is why it was kept out of the S427 fix.
+
+### g-serverfn-display-emits-a-stray-file-scope-fetch — a `${serverFn()}` interpolation also emits a file-scope `_scrml_fetch_<fn>()` call that fires at init even when its `if=` is false, so the server fn is fetched twice — `NEW S427-peter; MED; open`
+<!-- @gap id=g-serverfn-display-emits-a-stray-file-scope-fetch sev=MED status=open locus=searched:compiler/src/codegen/emit-event-wiring.ts(the ${serverFn()} one-shot),compiler/src/codegen/emit-client.ts—not-traced prov=empirical:S427-dev-agent-and-adversarial-reviewer-both-measured-an-init-fetch-with-the-if=-false -->
+
+Pre-existing. The S427 browser test deliberately asserts per-mount fetch DELTAS so it does not pin the stray.
+
+### g-lifted-markup-ignores-if-attr-and-false-checked — inside lifted markup, `if=` on a child element and `checked=${false}` are ignored — TodoMVC rows show both `.view` and `input.edit`, with `checked` inverted — `NEW S427-peter; MED; open`
+<!-- @gap id=g-lifted-markup-ignores-if-attr-and-false-checked sev=MED status=open locus=searched:compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-html.ts—not-traced prov=review:S427-adversarial-round-1-F4-p14-reproduced-on-base-at-top-level -->
+
+Found once TodoMVC's rows started rendering (S427). Same on base at top level (`p14`). The S427 TodoMVC tests
+assert labels only, so the app still LOOKS broken even though its rows now render.
+
+### g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup — two pre-existing lift-body lowering defects: `n = n + 1` inside a `for…lift` over a reactive list is emitted as `const n = n + 1` (TDZ), and a destructured `const` in an outer-effect group is invisible to the keyed-list setup hoisted outside the effect — `NEW S427-peter; MED; open`
+<!-- @gap id=g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup sev=HIGH status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S427-dev-agent-reproduced-both-at-top-level-on-base-NOT-PA-verified -->
+
+Reported by the S427 dev agent, reproduced at top level on base by it; **not yet PA-verified** — re-reproduce
+before dispatching. Also reported, same status: a bare-expression display (e.g. a `~` initializer) sharing a lift
+group's `<span>` overwrites the lifted children, and a textarea anchor inside a `<match>` arm inside an `if=`
+stays empty (the arm is injected by `_scrml_remount_dispatch` after `rewire` runs).
+
+⛑ **S427-peter — PA-VERIFIED on `b016352d` and RAISED MED → HIGH.** Both lowering defects reproduce at TOP LEVEL
+with no `if=`, and both kill the WHOLE page at boot while compiling at exit 0: `let n = 0; for (…) { n = n + 1;
+lift … }` emits `const n = n + 1;` → `ReferenceError: Cannot access 'n' before initialization`; `const { prefix,
+suffix } = @cfg; for (…) lift …` → `ReferenceError: prefix is not defined`. A running counter in a lift loop and
+a destructured config are ordinary shapes. The other two items in this entry remain agent-reported, unverified.
+
+⛑ **S427-peter — FIX BUILT AND HELD, NOT MERGED: `origin/hold/s427-lift-body-lowering` @ `089c0414`.** The fix
+found four causes where one was filed (Step 4b passed no declared-name set; every lift-body emitter dropped it;
+`hasFragmentedLiftBody` dropped statements after a complete-markup lift; the mixed keyed-setup hoist stranded
+block declarations) plus a fifth silent defect (`n += 1` in a keyed body shows the final count on every row). Its
+adversarial pass found a **HIGH loud→silent AND newly-accepting** regression — `const x = 1; x = 2` now compiles
+and dies at boot, which §50 rejects (corpus negative fixture `phase3-assign-expr-to-const-081`) — plus a
+scope-blind demotion of a working keyed list, a loud→silent predicate miss and push-staleness on the demoted
+path. **Round 2 is fully specified, with repros, in `docs/changes/s427-lift-body-lowering/review-round1/`.**
+⚑ The const/lin case must fall back to base's LOUD failure: `E-ASSIGN-004` lives in bryan's OPEN #996.
+
+⛑ **S427-peter — `g-lift-inside-each-row-or-match-arm-silently-dropped` RESOLVED (#1022).** Traced: the each-row
+drop was `emit-each.ts` `renderTemplateChildToJs` (a `for` statement fell to `inner = ""` with the comment
+`// each: empty logic interpolation skipped`); arm bodies never reached Step 4b and `emitArmWireFunction` had no
+lift branch; and the pre-emit runtime-chunk walk never looked inside deferred arm bodies (`_scrml_lift_target is
+not defined` once code was emitted). Each is now lowered through the SAME Step 4b per-group loop as a top-level
+lift block, as a host-parameterised `_scrml_lift_nested_N(host, …, ...scope)` with the row alias / `@.` / arm
+payload passed in; per-row drivers restart only on item identity change; removed rows and switched-away arms are
+torn down. Enumerated first: 18 loci. Governing: §10.1, and §18.0.1's OWN worked example is an arm lift.
+`const`/`let`/`function` in a row lift block stay `E-EACH-BODY-DECL-UNSUPPORTED` (§17.7.3). Corpus: 0 of 7471
+artifacts change. Adversarial pass: no HIGH/MED.
+
+### g-match-inside-each-row-cannot-see-the-row-variable — a `<match>`/engine arm inside an `<each>` row reads the row alias and the whole list dies at boot — `NEW S427-peter; HIGH; open`
+<!-- @gap id=g-match-inside-each-row-cannot-see-the-row-variable sev=HIGH status=open locus=compiler/src/codegen/emit-variant-guard.ts(emitArmWireFunction — arm wire functions are module-scope and receive only payload bindings, not the enclosing row scope) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-g-is-not-defined-at-init-list-renders-empty -->
+
+`<each in=@groups key=@.id as g> <match for=Kind on=g.kind> <A><p>${g.name}</p></> <B>…</> </match> </each>`
+compiles at exit 0 and throws `ReferenceError: g is not defined` at init; the list renders empty. PA-reproduced
+on `b016352d`. Arm wire functions live at module scope and get only payload bindings. After #1022 a lift in such
+an arm fails the same LOUD way (not silently).
+
+### g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime — the conformance case passes while its emitted program dies at init: the runtime ships without the reconciliation chunk — `NEW S427-peter; HIGH; open`
+<!-- @gap id=g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES — no unscoped `_scrml_reconcile_list(` gate) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-_scrml_reconcile_list-is-not-defined-mounting-conformance-cases-each-ternary-markup-giti033 -->
+
+Mounting `conformance/cases/each/ternary-markup-giti033/case.scrml`'s emit: `ReferenceError: _scrml_reconcile_list
+is not defined` at init; `<main>` renders empty. **Two defects:** the missing chunk gate (a one-line unscoped
+`_scrml_reconcile_list(` post-emit gate per the S427 dev agent — deliberately NOT taken in #1022 because it would
+move a non-lift artifact), and a **hollow conformance case**: its `expected.json` passes against a program that
+cannot run (base §8, the gate that cannot fail). Measure how many conformance cases have a runtime half that would
+catch this.
+
+⚑ **S427-peter — MEASURED, AND IT IS THE WHOLE TIER, NOT ONE CASE.** The case HAS a runtime half
+(`domAnchored`: 2 rows, text, attribute). It passes because `conformance/adapters/impl1-ts.ts` runs every
+runtime-half case against the FULL `SCRML_RUNTIME` template (`import … from runtime-template.js` at `:148`,
+concatenated at `:467`/`:924`) — never the tree-shaken runtime the compiler actually emits. **~215 of 898 cases
+carry a runtime half, and every one is structurally blind to chunk-gating defects** (a missing chunk cannot be
+missing from a runtime that ships all of them). The §8 unproven-gate shape at tier scale. Switching the adapter
+to the emitted runtime may turn cases red and is a change to the conformance instrument (bryan's lane):
+surface it, do not switch unilaterally. The one-line `_scrml_reconcile_list(` gate for this case is separate.
+
+### g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings — four pre-existing each/arm defects reported by the S427 dev agent — `NEW S427-peter; MED; open`
+<!-- @gap id=g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:S427-dev-agent-reproduced-each-on-base-with-the-display-twin-NOT-PA-verified -->
+
+(1) `<each … as c>` inside Tier-0 lifted markup drops the alias (`c is not defined`; `@.` works). (2) A nested
+each in a lifted row does not re-render on a same-key replace of the outer item. (3) A `<match>` nested in an
+engine arm is not re-dispatched when the engine arm is re-entered (display bindings too). (4) An engine
+`initial=.Ready([...])` drops its payload (emits `reactive_set("phase", "Ready")`). Reproduced by the agent on base
+with the no-lift twin; **not PA-verified** — re-reproduce and split before dispatching.
+
+### g-post-emit-chunk-gates-match-user-string-literals — the post-emit runtime-chunk gates key on emitted TEXT, so a user string containing an internal helper name pulls unused chunks into the runtime — `NEW S427-peter; LOW; open`
+<!-- @gap id=g-post-emit-chunk-gates-match-user-string-literals sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES + the reconciliation lines scan) prov=review:S427-adversarial-pass-on-the-each-row-lift-fix-e8-runtime-55043-to-83143-bytes -->
+
+`<x> = "_scrml_lift_target _scrml_lift_scoped_run( _scrml_reconcile_list("` + `<p>${@x}</p>`: runtime 55,043 B →
+83,143 B. Size and hash only; no false negative today. Rule 7 class; #1022 ADDED entries to this existing
+mechanism rather than creating it.
+
+### g-each-sigil-rewrite-is-literal-unaware — `@.` is rewritten inside string and template literals in an `<each>` row (`"s@.t"` renders `sg.t`), inconsistently with lifted-markup literal text — `NEW S427-peter; LOW; open`
+<!-- @gap id=g-each-sigil-rewrite-is-literal-unaware sev=LOW status=open locus=compiler/src/codegen/emit-each.ts(rewriteContextualSigil / rewriteEachSigilInStmtTree — raw/expr string fields) prov=review:S427-adversarial-pass-e1-e2-e16-base-and-head -->
+
+Pre-existing in plain row interpolations and row text; #1022's statement-tree rewrite inherits it. Rule 7. Also
+recorded by the same pass (pre-existing, MED-class, twin-identical on base): per-item effects of REMOVED rows stay
+subscribed to the container (resolve calls per replace 1 → 201 → 401 over 400 add/remove cycles); inside an `if=`
+they are disposed.
 
 ---
 
@@ -15749,7 +16138,21 @@ The `upToRoot` binding's only surviving reference is the fallback branch at `:30
 The cost is navigational: a future reader lands on an 18-line comment presenting the S400 anchor fix as the mechanism that drives the emitted path, when it no longer drives any byte. Same shape as the `emit-expr.ts` stale-premise comments — a comment that survives the code it justified.
 
 ### g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries — the populated seeds name a derived cell, a cell that does not exist, and a column value the app never matches, so with-data coverage is 1 app of 4 even with a working bridge — `NEW S420-peter (found by making the seed bridge live; each PA-verified against app source); MED; open`
-<!-- @gap id=g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries sev=MED status=open locus=compiler/tests/e2e-render-map/seed-fixtures.js(POPULATED_SEEDS — the 06-kanban, 16-remote-data and 25-triage entries) prov=empirical:PA-verified-each-against-the-app-source-at-a5c3810a-after-the-seed-bridge-made-resolution-observable -->
+<!-- @gap id=g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries sev=MED status=resolved resolved-by=S427-peter locus=compiler/tests/e2e-render-map/seed-fixtures.js(POPULATED_SEEDS — the 06-kanban, 16-remote-data and 25-triage entries) prov=empirical:PA-verified-each-against-the-app-source-at-a5c3810a-after-the-seed-bridge-made-resolution-observable -->
+
+⛑ **S427-peter — RESOLVED: all four POPULATED seeds now drive their apps, each proved by the seeded rows' TEXT
+read back from the mounted DOM (not by the cell's state).** 06-kanban seeds the SOURCE cell `cards` (unit enum
+variants are bare strings at runtime — `const Status = Object.freeze({ Todo: "Todo", … })`, read from the
+emitted client JS); 16-remote-data seeds `phase` with the payload variant `{ variant: "Loaded", data: { rows } }`
+— **this entry's "no plain cell-set can drive this app at all" was WRONG**: `phase` is an ordinary settable cell
+and the variant is plain data; 25-triage uses the app's real column values. With-data reach: **1 app → 4**.
+`SEED_OBSERVABILITY` gained a `rendered` pin (per-column seeded text), because the old reason-code pin could NOT
+catch a revert of 25 (the broken seed was also `written` and also changed the DOM). ⚑ **The "keep 25 wrong as a
+live D6 subject" advice below is SUPERSEDED**: D6 region scoping landed at S423/#1012, and the shape stays
+pinned synthetically (`detector-validation.test.js` "D6 fires on the BOARD BUG") and end-to-end
+(`fixtures/d6-nested-each-empty-with-data.scrml`). Corrected 25 scores `renders-clean` with its third column
+legitimately empty — the tier's anti-cry-wolf prediction, now met on a live cell. Baseline: only the four
+`#populated` records hand-updated (434 other cells byte-identical, key order preserved); no Windows regen.
 
 Fixing the seed bridge ([[g-e2e-render-map-populated-seed-is-inert-so-d6-has-no-live-subject]]) made the
 seeds RESOLVE, and resolution immediately showed that **three of the four fixtures could never have worked
@@ -16137,6 +16540,678 @@ that pin as weaker evidence than the rest of the tier's.
 
 — NEW S423-peter (the dispatched agent stated this residual against its own landing rather than reporting the class closed; PA-verified by execution — `GAINED=1` silences the true subject's own shape, `GAINED=0` keeps it firing)
 
+⚑ **S424-peter AMENDMENT — the "only the attribute-carried swap falls through" precision above is
+itself too narrow.** Found by the S424 review-floor pass on #993 (`docs/pr-reviews.md` S424). The
+caught-list is correct as far as it goes, but it was measured on swaps that hold the element count
+constant, and `signatureGained` compares **aggregate** counts (`after.elements > before.elements`), not
+per-element identity. **So a content swap under a NET ELEMENT LOSS also reads as no-gain** — a seeded
+gallery replacing three placeholder `<img src="ph.png">` rows with one seeded `<img src="ada.png">`
+goes 3 → 1, `gainedContent:false`, and any empty leaf region on the page then reds a correct render.
+The same holds for any seed that renders FEWER, richer nodes than the placeholder state — a filtered
+list, a collapsed summary, a "show top 1 of N" view. **This strengthens the entry's own conclusion
+rather than changing it:** it is a third instance of the signature being the wrong instrument, and it
+is further evidence for the standing ⛔ above — do not enrich the signature, close it with per-region
+attribution, which subsumes this too. Argued from source, not executed.
+
+---
+
+### g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed — the F4 loudness guard can be downgraded to green by an unrelated console error, a partial seed failure reddens the compiler for the harness's own miss, and `undefined` takes the fire direction where `null` vetoes — `NEW S423-peter (fourth adversarial pass on the limb-2 landing, #993; all three verified by the reviewer by execution, all three LATENT on today's corpus); MED; open`
+<!-- @gap id=g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed sev=MED status=open locus=compiler/tests/e2e-render-map/render-harness.js:742,772(the two F4 loudness guards) and compiler/tests/e2e-render-map/render-detectors.js:666(seedMovedTheRender's === null) and compiler/tests/e2e-render-map/render-detectors.js:757(the D1 mount-throw needs-server return — the S426 FIFTH path, no seed-bridge disqualifier, returns before D2 runs) prov=review:the-fourth-S423-adversarial-pass-which-found-no-correctness-bug-in-the-leaf-ownership-core-and-these-three-in-the-gating-plumbing-around-it -->
+
+**Three paths where D6 produces a verdict from a seed that failed or was never measured.** Filed
+together because they are one class — the gating PLUMBING around the detector, not the region model
+(that residual is [[g-d6-region-emptiness-is-fail-quiet-and-its-gain-conjunct-is-page-global]]) — and
+because #993's own history is that fixing one site of a class and not the others is what re-opened it
+twice.
+
+⚑ **ALL THREE ARE LATENT ON TODAY'S CORPUS, and that is why they were FILED rather than fixed.** The
+landing PA had committed to a stopping rule BEFORE seeing this pass — land unless a finding reds a
+correct corpus cell or makes D6 dark on its subject — and none of them does. Recording the rule here
+because the alternative (re-deciding the bar once the evidence is in) is how a fix round becomes a
+treadmill. The fourth pass also fuzzed **3000 random nestings** against the brute-force oracle with
+**zero mismatches** and found no correctness bug in the leaf/ownership/emptiness core.
+
+1. **`seedMovedTheRender` vetoes on `gainedContent === null` but FIRES on `undefined`** — and both mean
+   *unmeasured*. The "never fabricate a measurement" ruling was applied as a `=== null` check, so any
+   seed report built without the field takes the fire direction: D6 reddens a cell on a measurement
+   that never happened, and `generate-baseline.js` commits the fabricated verdict. Live today only in
+   `detector-validation.test.js`'s own back-compat helper, so it is one forgotten field away in any
+   fourth construction site. **The cheapest pickup on this board: `if (report.gainedContent == null) return true;`.**
+
+2. **The F4 loud push can be silently downgraded back to green.** The no-side-channel branch pushes a
+   `[seed-bridge]` message into `consoleErrors` on the stated premise that a D2 console error reddens
+   the cell. It does not, unconditionally: the `needs-server` arm returns a NON-red state whenever the
+   app is `serverDependent`, no codegen error or hard smell fired, and **any** console error matches
+   `isServerAbsenceMessage` (`.some()`, not all). A server-dependent seeded app that both console-errors
+   on server absence and loses `_scrml_reactive_set` scores `needs-server` — green — and the bridge
+   failure is invisible again, which is the exact fail-open F4 was written to close.
+
+3. **A genuine `set-threw` stays silent whenever any OTHER key landed.** The guard is
+   `!writes.some(w => w.wrote) && writes.some(w => w.reason === "set-threw")`. With a ≥2-key fixture
+   where the key driving the list throws and an unrelated key lands, `seedWasDelivered` is true, no
+   console error is raised, the list renders nothing, and the cell reddens as `renders-empty-with-data`
+   — **blaming the compiler for a seed write the harness itself failed to make.**
+   ⚑ **This one has a NEAR-TERM TRIGGER:** every corpus fixture is single-key *today*, and the next arc
+   on this tier is [[g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries]], which rewrites
+   those fixtures. Whoever takes that arc should close this first, or keep the fixtures single-key.
+
+— NEW S423-peter (fourth adversarial pass on #993; the pass found NO correctness bug in the leaf/ownership core it was aimed at, and these three in the plumbing around it — recorded with that framing because "the review found three things" reads very differently from "the core held and the edges did not")
+
+⚑⚑ **S424-peter AMENDMENT — ITEM 1's PRESCRIBED FIX IS WRONG, and there is a FOURTH path.** Found by
+the S424 review-floor pass on #993 (`docs/pr-reviews.md` S424), which re-derived the same defect
+independently. The id is left unrenamed on purpose — `three-latent-paths` is referenced by `[[...]]`
+elsewhere, and renaming a slug forks every citation.
+
+- **Item 1's one-liner would RED an existing test, so do NOT land it as written.**
+  `if (report.gainedContent == null) return true;` is the fix this entry recommends and it is
+  incomplete. `detector-validation.test.js:823` ("D6 DOES fire when the seed bridge really wrote and
+  the render is empty") builds `{writes:[{name:"tasks",reason:"written",wrote:true}], domChanged:true}`
+  with **no `gainedContent` field**, and asserts D6 fires — so vetoing on absent-or-null turns that
+  test red. ⚑ The reviewer noticed the dependency and proposed
+  `!("gainedContent" in report) || report.gainedContent == null`, which **breaks the same test for the
+  same reason**; neither form works alone. **The correct change is two lines:** veto on absent-or-null
+  at `render-detectors.js:666`, AND make `:823` pass `gainedContent: false` explicitly, which is what
+  that test actually means (it is exercising measured-no-gain, and today it relies on the bug to get
+  there). **Blast radius MEASURED, not assumed:** of nine `seededDetect` call sites, `:823` is the only
+  one that passes a report while omitting the field — `:817` omits it too but is gated off earlier by
+  `seedWasDelivered`, and the bare-markup sites pass no report at all and take the `!report` back-compat
+  path. Reproduced by execution under happy-dom against the landed predicate.
+
+- **FOURTH PATH — tightening to "a seed was actually WRITTEN" made the BODY-GLOBAL half of D6
+  fail-open.** `seedWasDelivered` (`render-detectors.js:616`) now requires
+  `writes.some(w => w.wrote === true)` for **both** scopes, while the loudness guard deliberately raises
+  nothing for `no-such-cell` / `derived-cell`. That justification covers the REGION scope; for the
+  original body-global check it is a regression. Pre-S423 a registered seed plus a completely empty body
+  was red. Now: a codegen change that renames or reshapes the cell accessor so `parseChunkCellScopes`
+  resolves every seed key to `no-such-cell` takes no prologue throw, so the loud path never fires —
+  **every populated cell scores green however empty it renders, D6 off entirely, `consoleErrors` empty
+  and `detail` stripped.** That is the detector going dark on exactly the regression class it exists to
+  catch. Argued from source, not executed.
+
+⚑⚑ **S426-peter AMENDMENT — ITEM 3 IS CLOSED (#1002), AND THE REQUIREMENT IT SERVED HAS A FIFTH PATH
+THAT #1002 NEVER REACHED.** Found by the S426 review-floor pass on #1002 and **REPRODUCED BY PA
+EXECUTION**, not relayed. The id stays unrenamed for the same reason as the S424 amendment.
+
+- **FIFTH PATH — the D1 mount-throw `needs-server` return has no seed-bridge disqualifier.**
+  #1002 added `hasSeedBridgeFailure` to the state-resolution `needs-server` return
+  (`render-detectors.js:887`). The **other** `needs-server` return, at **`:757`** in the D1 + D7
+  mount-throw block, fires on `obs.serverDependent && isServerAbsenceMessage(msg)` and **returns before
+  D2 ever runs**, so no `consoleErrors` inspection happens at all. PA-measured: a seeded,
+  server-dependent app whose mount throws a server-absence-shaped `TypeError`, carrying
+  `seed:{threw:1,...}` and the `[seed-bridge]` notice, scores **`needs-server` — GREEN** with
+  `detail` = `["throwMessage","needsServer"]`. The seed failure appears **nowhere** in `detail`, and
+  `generate-baseline.js` strips `detail` from green cells regardless. **Two controls pinned it:** the
+  same input minus the mount throw still scores `compiles-but-throws` with `S-EMPTY-WITH-DATA` and the
+  seed failure recorded (so #1002's door stays shut), and the same mount throw with no seed failure
+  stays correctly green (so the fix must not blanket-red the tier).
+  ⚑ **This is NOT item 2, and the distinction is load-bearing for whoever fixes it.** Item 2 and
+  #1002's own deferred-scope note both live **inside** the `consoleErrors` block — `isServerAbsenceMessage`
+  breadth, and `hasHardSmell` omitting D6. This path never reaches that block; it is keyed on
+  `obs.throwMessage`. A fix aimed at item 2 will not close it.
+  **Latent, like the rest:** all nine `needs-server` baseline cells are unseeded today, so no cell moves.
+
+⚑⚑ **S426 ROUND 3 — THE FIX IS BUILT AND HELD IN #1014 (NOT MERGED), AND ITS OWN PRE-LAND PASS FOUND
+TWO MIS-ATTRIBUTIONS, BOTH PA-CONFIRMED BY EXECUTION.** The requirement is now enforced at a CHOKE POINT
+rather than door by door: `runDetectors` wraps the classifier and demotes any surviving green state to a
+new red state `seed-bridge-failed`, which is class-complete over green returns **that do not exist yet**.
+⚑ **And the population was larger than this entry said: ALL FOUR green-state returns were fail-open, not
+three — including the one #1002 "closed",** because that guard keyed on the `[seed-bridge]` NOTICE while
+the failure has a second carrier, the report's own `errors[]`/`set-threw` write. A notice-keyed guard is
+**provably dead code** at the last two returns, since any notice makes `consoleErrors` non-empty and the
+state-resolution block returns first.
+
+**What is HELD and why — two defects that would write misleading records into the committed baseline:**
+
+1. **The `needs-server` carve-out became structurally unreachable for any SEEDED server-dependent app.**
+   `mountAndObserve` assigns `setFn` only AFTER `exec()` returns, so a mount throw always kills the side
+   channel and the guard is always true at the D1 door — the term does not discriminate. Measured: such a
+   cell scores **`compiles-but-throws`**, a COMPILER-blaming state for a HARNESS artifact, which is
+   exactly what the fix's own rationale for minting `seed-bridge-failed` rejects. It bites the moment the
+   coverage ratchet seeds a `needs-server` app: the cell reds permanently and **no compiler fix clears
+   it.** Round-4 direction: demote to `seed-bridge-failed` there, which is what the state is FOR.
+2. **The "this cell carries NO verdict about the compiler" note is stamped unconditionally at both
+   self-demoting doors.** Measured: a seeded app throwing `loadContacts is not defined` — a genuine
+   codegen defect, `S-UNBOUND-REF` in the same smell set — carries that note into the baseline, telling
+   the next triager to disregard a real bug. Also false for a `[seed-signature]`-only error, where the
+   snapshot helper threw and every seed write landed. Round-4 direction: make the note conditional on the
+   cell having no independent red reason.
+
+**Two further findings, filed here rather than dropped:** the invariant is class-complete over
+`runDetectors` returns but **NOT over CELLS** — `observeCompiled` returns `renders-empty` directly, before
+the seed is ever applied, so an emit regression that stops locating the entry HTML goes green→green with
+the undelivered seed recorded nowhere (**the class one level out, again**); and doors 3/4 are **unit-only
+reachable** today, because every harness path that fills `seedReport.errors` also pushes a console notice,
+so the in-source *"by construction"* claim overstates what was established.
+
+⚑ **The core of #1014 is right and must not be rebuilt:** the two-carrier predicate, the choke-point
+demotion, `GREEN_STATES` single-sourced (it was THREE hand-kept copies), and two EXISTING assertions
+corrected — one of which **pinned the third door green while its own comment called that hazardous**, i.e.
+a test asserting the bug. Tier 216 → 237 pass / 0 fail, no baseline cell moves.
+
+⚑ **The pattern this entry is now the record of:** three consecutive rounds have each fixed one door of
+*"a seed-bridge failure must be LOUD"* and left a sibling door open — S423 filed it, #1002 found the
+first fix's loudness was not terminal and shut the second door, and this pass found the third. **Fifth
+consecutive session in which a fix re-created its class one level away.** The lesson is not "be more
+careful": it is that this requirement is enforced at **every `return` that yields a GREEN state**, and
+the only convergent fix enumerates those returns rather than patching the one in front of you. There
+are currently two green-tier returns in `runDetectors`; count them at fix time rather than trusting
+this sentence.
+
+---
+
+### g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render — D6's per-region content test asks only the region's OWN nodes, but `select`/`picture`/`video`/`audio` carry content THROUGH children the region contains while the element that counts them sits outside it — `NEW S424-peter (review-floor pass on #993, reproduced by execution under happy-dom); HIGH; open`
+<!-- @gap id=g-d6-region-content-ignores-the-parent-that-confers-content-so-an-each-inside-a-select-or-picture-reds-a-correct-render sev=HIGH status=resolved locus=compiler/tests/e2e-render-map/render-detectors.js:363(nodesHaveRenderedContent — it maps elementCarriesContent over the region's own nodes and their descendants only) with the conferring definitions at :199(select -> querySelector("option")) and :205(picture/video/audio -> their source children) and :216(svg -> el.children.length > 0, ANY element child — the THIRD delegating definition, added S426 by the owed sibling sweep, reproduced by execution with circle rows) and the candidate list at :97(CONTENT_CANDIDATE_SELECTOR, which contains neither "option" nor "source" nor any svg shape element) prov=review:S424-floor-pass-on-993-finding-1-reproduced-by-execution-two-shapes-plus-S426-PA-sibling-sweep-finding-a-third -->
+
+**D6 scores `renders-empty-with-data` — RED, against the compiler — on a render that is correct.**
+This is a FALSE POSITIVE in the direction that matters: the tier's whole purpose is to catch the
+compiler silently rendering nothing, so a red cell here is read as a codegen regression.
+
+**The mechanism, and it is a scope mismatch rather than a missing case.** `nodesHaveRenderedContent`
+asks `elementCarriesContent` of the region's own nodes and their descendants. But two entries in
+`elementCarriesContent` define content by looking UPWARD-OUT rather than at the element itself:
+
+- `case "select"` → `el.querySelector("option") != null` (`:199`)
+- `case "picture" / "video" / "audio"` → their `src`/`srcset`-bearing `<source>` children (`:205`)
+
+`emitEachMountHtml` places the each's fence at the each's SOURCE position, so an `<each>` written
+inside a `<select>` puts the `<option>` nodes INSIDE the region while the `<select>` that makes them
+count sits OUTSIDE it. Neither `option` nor `source` is in `CONTENT_CANDIDATE_SELECTOR`, and both are
+text-free in the common value-only form — so every leaf in the region reads empty, `allLeavesEmpty` is
+true, and D6 fires.
+
+**Reproduced by execution** (happy-dom, against the landed predicate, seed report
+`{writes:[{reason:"written",wrote:true}], domChanged:true, gainedContent:false}`):
+
+| markup | `hasRenderedContent(body)` | D6 verdict |
+|---|---|---|
+| `<select><option value="">Select…</option>` + fence of `<option value="1">` / `<option value="2">` | **true** | **`renders-empty-with-data`** |
+| `<picture><img src="fallback.png">` + fence of two `<source srcset=…>` | **true** | **`renders-empty-with-data`** |
+
+⚑ **The gain conjunct does NOT save the realistic shape.** A static placeholder
+`<option value="">Select…</option>` before the each — the exact pattern `emitEachMountHtml`'s own
+comment cites — already makes the `<select>` content-bearing BEFORE the seed, so `elements` does not
+rise across the write and text-free options contribute no text counts. `gainedContent:false`, veto
+unavailable, cell red.
+
+⚑ **LATENT on today's tier, and the corpus already holds the shape — those are both true and the
+second one is why this is HIGH.** None of the four seeded apps (`03-contact-book`, `06-kanban-board`,
+`16-remote-data`, `25-triage-board`) contains a `<select>` or `<picture>`, so **zero cells move today.**
+But three corpus files already put an `<each>` inside a `<select>` — the trucking-dispatch flagship's
+`components/assignment-picker.scrml` (3 sites), `components/status-picker.scrml` (1) and
+`pages/dispatch/load-new.scrml` (1). **It goes live the moment the seeded set grows, and growing the
+seeded set is precisely the next arc on this tier**
+([[g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries]]).
+
+**This is the S419 "one definition of not-rendered" invariant broken in the other direction** — the
+invariant this diff's own F3 comment invokes. S419 fixed D6 keying on `textContent` alone, which reds a
+text-free render; this is the same error re-created one level down, at the REGION scope instead of the
+BODY scope, by a predicate written to honour it.
+
+**Fix direction (not taken here).** The region test needs to consult the conferring ANCESTOR, not only
+the region's own nodes: when a region's nodes are `option`/`source` (or, generally, when their parent is
+a `CONTENT_CANDIDATE_SELECTOR` element whose content definition delegates to children), the question
+"did this region render content" is answered by asking the parent. ⚑ **Do not fix it by adding `option`
+and `source` to `CONTENT_CANDIDATE_SELECTOR`** — that would make a bare `<option value="1"></option>`
+count as rendered content everywhere, including at body scope, which re-opens the S419 class from the
+other side. **And count what the change stops inspecting before narrowing anything** (pa-base §8,
+coverage-removal blind spot).
+
+⚑ **Sibling check owed with the fix, because this entry's own class is "one site of a class was fixed
+and the others were not":** `elementCarriesContent`'s `textarea` case reads `el.value || el.textContent`
+and `input` reads `.value`/`checked` — both self-contained, so they do not share the defect. `select`
+and the three media parents are the complete set of delegating definitions at the time of filing;
+re-derive that set rather than trusting this sentence.
+
+— `NEW S424-peter (review-floor pass on #993 — the PR the S423 hand-off predicted was "least likely to return anything"; reproduced by execution rather than relayed, per pa-base §8)`; **HIGH**; open
+
+⚑⚑ **S426-peter AMENDMENT — THE DEFECT STANDS AND IS RE-REPRODUCED, BUT THIS ENTRY IS WRONG IN THREE
+PLACES AND ALL THREE ARE MINE.** Re-reproduced on `f8317399` before touching anything (a verification
+stamp is never inherited, pa-base §1): both tabled shapes print `hasRenderedContent(body): true` with
+`allLeavesEmpty: true`, and two controls behave correctly — text-bearing option rows score
+`allLeavesEmpty:false`, a genuinely empty `<ul>` fence stays red.
+
+1. ⚑ **THERE IS A THIRD DELEGATING DEFINITION: `svg`** (`render-detectors.js:216`), which counts **any
+   element child** (`el.children.length > 0`). An `<each>` inside an `<svg>` emitting `<circle>` rows
+   reproduces identically — PA-verified by execution, plus a direct measurement of the delegation
+   itself (`elementCarriesContent(<svg><circle/></svg>)` → `true`, `(<svg></svg>)` → `false`).
+   **The sibling-check paragraph above did its job**: it told the next reader to *"re-derive that set
+   rather than trusting this sentence,"* the set was re-derived, and the sentence was incomplete.
+   That is the instruction working, not failing — but the entry text said "complete set" and it was not.
+
+2. ⚑ **`components/status-picker.scrml` IS NOT A SITE. It has no `<select>` element at all** — its one
+   `<select` occurrence is inside a `//` comment on line 3 describing what the component renders, and
+   its `<each>` emits `<button>` rows. The citation came from a text-level grep, which is
+   `pa-scrml-overlay` **Rule 7's own class** (*don't ask the text what the tree already knows*) committed
+   inside a gap entry. So the corpus holds **two** files with a real `<each>`-inside-`<select>`, not three.
+
+3. ⚑⚑ **THE REAL-WORLD TRIGGER POPULATION IS ZERO, AND THAT DISSOLVES THE ARC-ORDERING CONSTRAINT.**
+   Measured over 2,609 corpus `.scrml` files: `picture`/`video`/`audio`/`svg` have **zero** `<each>`
+   sites, and **every** real `<each>`-inside-`<select>` site emits options carrying TEXT —
+   `assignment-picker.scrml` (3 sites, `${d.name} (${d.current_status})`), `pages/dispatch/load-new.scrml`
+   (`${c.name}`), and `conformance/cases/each/shorthand-option-label-preserved/case.scrml` (2 sites,
+   via `:`-shorthand and `${}`). The **text half** of `nodesHaveRenderedContent` already saves all of
+   them. So the claim above — *"it goes live the moment the seeded set grows, and growing the seeded set
+   is precisely the next arc"* — **is FALSE**: growing the seeded set does not make it live, because the
+   shape that trips it (a value-only `<option>` row) exists nowhere in the corpus.
+   **Consequence for sequencing:** the ordering `#1004` made BINDING — seed-fixtures runs behind this —
+   **is dissolved. The two arcs are independent**, and the seed-fixtures arc is no longer blocked.
+
+⚑ **This is still worth fixing, and NOT on corpus-zero grounds either way.** A detector that reds a
+correct render is the cry-wolf shape (`pa-base` §8: a gate that cries wolf gets bypassed, then deleted),
+value-only `<option>` and `<source>` rows are legitimate scrml, and **the corpus is the artifact of what
+has been written, not evidence of design intent** (the corpus-is-artifact kernel — the same reasoning
+that made the S66 `==` drop wrong). What changes is the CLAIM: the fix is **preventative**, not
+unblocking, and the severity rests on the false-positive direction rather than on imminent cell movement.
+⚑ Recorded because *a fix built before the problem is measured is a fix whose value is unmeasured*
+(`pa-base` §8) — and the measurement was owed **before** the fix, not after.
+
+— `AMENDED S426-peter (re-reproduced on f8317399; owed sibling sweep found a third definition; population counted, two citations falsified)`
+
+**⚑ RESOLVED S426-peter — landed #1012 `f8d263de`, PA-verified on the merged HEAD, not on report.**
+The region test now asks whether a node is **the kind of child its ancestor CONSUMES** — *did the each
+produce the rows that parent exists to hold?* — rather than mirroring what makes the ancestor
+content-bearing at body scope. That reframing was forced by `<datalist>`, which has no
+`elementCarriesContent` arm to mirror and whose body-scope answer must stay "renders nothing"; body
+scope and region scope ask different questions and both answers are right.
+**The population was ENUMERATED ONCE** against a stated search (every HTML parent whose content model
+is wholly element children carrying no text of their own and not in `CONTENT_CANDIDATE_SELECTOR`):
+**7 covered** — `select`>`option` · `datalist`>`option` · `picture`/`video`/`audio`>`source`|`img` ·
+`video`/`audio`>`track[src]` · `svg`>any element · `map`>`area` · `colgroup`>`col` — and 15 further
+shapes disposed with reasons and pinned by tests. `track` was a seventh instance neither the brief nor
+either review had named.
+**Verified by execution on `f8d263de`:** all 7 instances green, 3 true positives still red (empty fence
+in a `<ul>`, a non-`option` node in a `<select>`, a src-less `<source>`), 6 body-scope pins still
+`false`, and the hostile-tag shapes classify instead of throwing. Tier **216 pass / 0 fail** (164
+before). Mutation: gutting the predicate reds **17** with **183** still passing — no pre-existing test
+flips. **ZERO baseline cells move**, measured fix-vs-pre-fix.
+⚑ **Its re-review raised two MEDIUM findings and BOTH WERE REJECTED on measurement** — recorded on the
+closed #1009 and in #1012's commit message. Finding A alleged the fix greened a broken render
+(`<select>` > mount `<div>` > `<option>`); **that claim is falsified by this repo's own S298
+real-browser witness** in [[g-nested-each-div-mount-in-restricted-parent]] — `.options` is
+descendant-lenient, visual render and the a11y tree are correct in Chrome and Firefox, which is why
+that gap was downgraded MED→LOW. Finding B's target (`svg` counting an empty `<g>`) is **pre-existing
+in `elementCarriesContent`**, not introduced here — filed as
+[[g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing]].
+
+---
+
+### g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing — `case "svg"` is `children.length > 0`, so an `<svg>` whose only child is an empty `<g>` or a `<metadata>`/`<defs>`/`<desc>`/`<title>` counts as rendered content at BODY scope — `NEW S426-peter (raised by the #1009 re-review against the region rule; PA-relocated to its real locus, which is pre-existing and body-scope); LOW; open`
+<!-- @gap id=g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing sev=LOW status=open locus=compiler/tests/e2e-render-map/render-detectors.js(elementCarriesContent case "svg" — el.children != null && el.children.length > 0, which asks only that a child EXISTS and never whether it draws) prov=review:S426-re-review-of-1009-finding-B-relocated-after-PA-measurement-showed-the-region-rule-merely-mirrors-this -->
+
+`elementCarriesContent`'s `svg` arm asks only that a child element EXISTS: `el.children.length > 0`.
+So `<svg><g></g></svg>` and `<svg><metadata></metadata></svg>` are content-bearing, although neither
+draws anything. The **chrome-present/data-absent** shape — an `<each>` emitting `<g>` wrappers whose
+`<circle>` children were dropped — is precisely the class D6 exists to catch.
+
+⚑ **Filed HERE rather than against the region rule, and the relocation is the finding.** The #1009
+re-review raised this against `confersContentToConsumingAncestor`'s `svg` branch, as a regression that
+PR introduced. It is not: the region rule **agrees** with this arm, which is the invariant that fix
+exists to restore. Tightening only the region side would re-create the exact asymmetry — region scope
+stricter than the definition that makes the ancestor count — that produced the original false positive.
+**So the fix belongs at the shared definition, where it moves BOTH scopes at once**, and that is a
+different change with a different blast radius: every body-scope cell holding a decorative `<svg>` is in
+range.
+
+**Fix direction (not taken):** require a child that draws — exclude the metadata elements
+(`defs`/`metadata`/`desc`/`title`) and require a non-metadata descendant rather than a direct child, so
+`<svg><g><circle/></g></svg>` still counts. **Count what it stops inspecting before narrowing** (pa-base
+§8) — the corpus population of decorative-`<svg>` cells is unmeasured.
+
+---
+
+### g-consumed-child-table-filters-source-and-track-by-attribute-but-not-option-area-col — a compiler bug that drops the attribute bindings on `<area>` or `<col>` rows scores GREEN, while the identical drop on `<source>` rows correctly reds — `NEW S426-peter (#1009 re-review, LOW; the asymmetry is real and its resolution is a judgement, not a typo); LOW; open`
+<!-- @gap id=g-consumed-child-table-filters-source-and-track-by-attribute-but-not-option-area-col sev=LOW status=open locus=compiler/tests/e2e-render-map/render-detectors.js(CONSUMED_CHILD_SELECTOR — the picture/video/audio entries carry [src]/[srcset] filters and track carries [src], while the select/datalist/map/colgroup entries are bare tag selectors) prov=review:S426-re-review-of-1009-finding-3 -->
+
+The consumed-child table filters some entries by attribute and not others. `source[src], source[srcset]`
+and `track[src]` require the attribute that makes the child functional; `option`, `area` and `col` match
+bare. **Concretely:** a codegen defect that drops the bindings on `<area>` rows emits
+`<map><area><area></map>` — an entirely non-functional image map — and D6 goes green, while the identical
+attribute-drop on `<source>` rows still reds (pinned by the existing `CONFERS_NOTHING` case).
+
+⚑ **This is a judgement, not a typo, and it sits on the same axis as
+[[g-elementcarriescontent-svg-arm-counts-a-child-that-draws-nothing]]:** is the region question *"did
+the each produce its rows?"* or *"is each row individually useful?"* The current table answers the first
+for `option`/`area`/`col` and the second for `source`/`track`, and the in-source comment states the
+first as the rule — so `track[src]`, two lines above, contradicts the stated rationale. **Resolve the
+two entries together or the next reader will re-derive the same inconsistency.** Whichever answer is
+taken, it must hold at BOTH scopes, per the invariant the D6 fix restored.
+
+### g-the-seed-write-runs-outside-the-console-error-shim-so-a-compiler-defect-that-logs-instead-of-throwing-is-invisible — `mountAndObserve` restores the real `console.error` in its own `finally`, and `applySeed` runs after it returns, so nothing the seed-driven re-render logs ever reaches D2 — `NEW S424-peter (surfaced by the item-3 dispatch as a deferred observation, PA-verified by reading the call ordering); MED; open`
+<!-- @gap id=g-the-seed-write-runs-outside-the-console-error-shim-so-a-compiler-defect-that-logs-instead-of-throwing-is-invisible sev=MED status=open locus=compiler/tests/e2e-render-map/render-harness.js(mountAndObserve — the console.error shim is installed just before the mount and restored in that function's own `finally`; applySeed is invoked from observeCompiled AFTER mountAndObserve has returned, so the seed write and every re-render it drives run with the REAL console.error installed) prov=review:S424-item3-dispatch-deferred-observation-PA-verified-by-reading-the-call-ordering-not-by-executing-a-repro -->
+
+**The `e2e-render-map` tier captures `console.error` only during MOUNT, never during the SEED WRITE.**
+`mountAndObserve` shims `console.error` immediately before mounting and restores the real one in its
+own `finally`. `applySeed` is called later, from `observeCompiled`, once `mountAndObserve` has already
+returned. So every console error raised by the seed write — and by the reactive re-render the seed
+triggers, which is the whole point of seeding — goes to the real console, never lands in
+`obs.consoleErrors`, and is therefore invisible to **D2**, to the cell state, and to the committed
+baseline.
+
+⚑ **Why this matters more after S424's item-3 landing, not less.** Item 3 made a seed accessor THROW
+loud on its own terms, and the question it forced was *"is a `set-threw` the harness's fault or the
+compiler's?"* — the answer being that it can be either, which is precisely why the notice must stay
+loud rather than veto. **This entry is the other half of that same question and it is still open:** a
+compiler defect that `console.error`s instead of throwing during the seed-driven render is silent. The
+throwing case is now covered; the logging case is not, and the logging case is the more common shape
+for a reactive runtime.
+
+**Not a fork of [[g-d6-seed-gating-has-three-latent-paths-that-produce-a-verdict-from-a-failed-or-unmeasured-seed]],
+and here is the discriminator.** Those items are all GATING conditions — predicates in the harness and
+the detector deciding whether to fire on a seed that was delivered, partially delivered, or never
+measured. This one is an OBSERVATION WINDOW defect: the signal is never captured in the first place, so
+no gating change can reach it. Different machinery, different fix — the shim's lifetime has to span
+`applySeed`, which means hoisting it out of `mountAndObserve` or re-installing it around the seed — and
+a fix to either entry leaves the other exactly as it was. Cross-linked rather than merged.
+
+**NOT reproduced by execution.** Verified by reading the call ordering (shim install → mount → restore
+in `finally`; `applySeed` invoked afterwards) and by the S424 item-3 agent independently reporting the
+same ordering from its own reading. A repro needs a fixture whose seed write drives a render that
+`console.error`s without throwing — no corpus fixture does that today, which is also why nothing has
+noticed. **Treat the mechanism as located-not-executed** until someone builds that fixture.
+
+⚑ **Sibling check owed with the fix.** If the shim is hoisted to span the seed, confirm it is still
+restored on every exit path (the file's own header comment at `:52` notes three separate `finally`
+owners already), and confirm the widened window does not start capturing the harness's OWN
+`[seed-bridge]` pushes as if they were app errors — those are pushed directly into `obs.consoleErrors`
+and would double-count.
+
+— `NEW S424-peter (deferred observation from the item-3 dispatch, kept rather than dropped because it is the unclosed half of the question that dispatch answered)`; **MED**; open
+
+### g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count — the FOURTH trigger on `scanForeignSliceShape`, and the one that finally makes the "harden it once" call concrete — `NEW S425-bryan (adopter report from flogence PA S48, arrived UNTRACKED in the inbox mid-session; PA-REPRODUCED by execution on `c59367bb` — their 9-case matrix re-run 8-for-8, then the MECHANISM proven by prediction-and-test rather than by reading); MED; open`
+
+<!-- @gap id=g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:scanForeignSliceShape(LOCATE BY SYMBOL — the char scan tracks single/double-quoted strings, template literals, line comments and block comments, and has NO regex-literal state and no `\` escape handling outside a string span, so `\[`/`\]` inside a regex literal increment/decrement `depth`) prov=adopter:flogence-S48-2026-09-20-two-codegen-lowering-failures -->
+
+**PA-REPRODUCED on `c59367bb`.** The reporter's matrix, re-run independently — 8 of their 9 rows
+(the 9th skipped for shell-escaping reasons only), **every one agreeing**:
+
+| literal | reported | re-measured |
+|---|---|---|
+| `/\[/` · `/\]/` · `/[^\]]+/` · `/^\s*\[([^\]]+)\]/` | FAIL | **FAIL** |
+| `/[abc]+/` · `/^## /` · `/[^a-z0-9]+/g` · `/\d{4}-\d{2}-\d{2}/g` | OK | **OK** |
+
+⚑ **THE DISCRIMINATOR IS NOT "AN ESCAPED BRACKET" — IT IS BRACKET BALANCE**, and that is a better
+fix spec than the symptom. Proven by stating a prediction first and then testing it:
+
+| slice | net escaped-bracket depth | predicted | measured |
+|---|---|---|---|
+| `/\[\]/` | 0 | OK | **OK** |
+| `/\[\[\]\]/` | 0 | OK | **OK** |
+| `/\[/` | +1 | FAIL | **FAIL** |
+| `/\[\[\]/` | +1 | FAIL | **FAIL** |
+| `/\]/` | **−1** | FAIL | **FAIL** |
+
+### ⚑⚑ AMENDED S425 — THE PREDICATE IS CONJUNCTIVE, AND THE MISSING CLAUSE IS A REGRESSION-TEST TRAP
+
+**Credit: flogence S49 re-measured this entry on their own tree, found the clause, and sent it back.
+PA-CONFIRMED BY EXECUTION here on `9944702d` — not relayed.** They pushed back on our framing after
+we pushed back on theirs, and they are right.
+
+**Non-zero net depth is necessary but NOT sufficient. The failure also requires at least one
+top-level `;` to be scanned AFTER the desync.** Two slices with IDENTICAL bracket content and
+opposite outcomes:
+
+| slice body | net | regex position | measured |
+|---|---|---|---|
+| `const s = "abc"` · `return /\[/.test(s)` | +1 | **last statement** | **OK** |
+| `const re = /\[/` · `const s = "abc"` · `return re.test(s)` | +1 | **first statement** | **FAIL** |
+| `const s = "abc"` · `return /\]/.test(s)` | −1 | **last statement** | **OK** |
+| `const re = /\]/` · `const s = "abc"` · `return re.test(s)` | −1 | **first statement** | **FAIL** |
+
+When the regex sits in the LAST statement the only top-level `;` is read at depth 0, the scanner
+correctly concludes multi-statement, no `return ( … )` wrap happens — **the desync is real and
+harmless because nothing is read while it holds.**
+
+⚑ **THIS IS A LIVE FALSE-NEGATIVE GENERATOR, AND IT ALREADY FIRED.** flogence's first fixture set
+**passed 10 of 10**, including every slice both sides now measure as FAIL, because the generator put
+the regex in the trailing statement. **A regression pin written that way passes on the BROKEN
+compiler and certifies the bug fixed.** Whoever builds the fix owes fixtures that place the regex
+BEFORE a top-level `;`, and owes a bite proof against unfixed HEAD — the §8 unproven-gate rule, with
+a known-shaped way to get it wrong.
+
+Also corrected by their table: `/\]/` at net **−1** fails too, so the rule is **non-zero net**, not
+"unclosed". The "BALANCE" framing above is right; the sign is not.
+
+**Mechanism.** `scanForeignSliceShape` decides the §23.2.4a value-flow rule by a syntactic scan of the
+OPAQUE slice: no top-level `;` and no top-level `return` ⇒ single expression ⇒ wrap as `return (slice)`;
+otherwise splice verbatim. The scan is depth-aware and skips strings, template literals and both comment
+forms — **but it has no regex-literal state.** So a `\[` inside a regex literal increments `depth` with
+no matching decrement, every subsequent top-level `;` is seen at `depth > 0`, `topLevelStmtSep` stays
+false, and a multi-statement body is wrapped as an expression. The reporter's own emitted output is the
+signature: `const plan = await (async (rows) => { return (const crypto = await import(…)` → `bun` then
+says `Unexpected const`. **Their guess was right** (*"treats `\[` / `\]` as unescaped bracket
+structure"*); this entry adds the locus and the balance discriminator.
+
+### ⛑ TWO CORRECTIONS TO THE REPORT, both measured, and the second one costs them something today
+
+**(1) "Bug 1" and "Bug 2" are ONE defect. The bug-1 attribution is wrong.** The report files a separate
+Bug 1 — *"a method cannot be chained onto an index access"* (`dlines[li].slice(3).trim()`) — with its own
+minimal repro and its own workaround. A four-cell matrix, one variable:
+
+| slice contents | result |
+|---|---|
+| index-access chain, **no** regex | **OK** |
+| index access bound first, **no** regex | **OK** |
+| index-access chain, **with** `/\[/` in the same slice | **FAIL** |
+| index access bound first, **with** `/\[/` in the same slice | **FAIL** |
+
+The index access is irrelevant in both directions. Their bisection landed on that line because editing
+it changed the character stream, not because chaining was implicated — a bisection-attribution artifact.
+
+**(2) ⚑ Their ADOPTED WORKAROUND FOR BUG 1 DOES NOT WORK, and they believe it does.** Row 4 above is
+their workaround with the regex still present: still FAIL. What actually cured their file was the *bug-2*
+workaround (dropping the escaped bracket), which incidentally cured "bug 1" too, because there was only
+ever one bug. **This is the operative thing to tell them** — they are carrying a defensive idiom that
+buys nothing, and if they ever reintroduce an unbalanced escaped bracket it will fail again with the
+workaround in place.
+
+### ⚑ This is the FOURTH trigger on one scanner, and the third entry to say "harden it once"
+
+Existing siblings, all open, all the same function: [[g-foreign-value-block-dot-return-misread-as-keyword]]
+(member `.return` read as the `return` keyword) · [[g-multi-statement-foreign-block-in-statement-position-lowers-to-malformed-js]]
+· `g-foreign-multistmt-value-block-mislowers`. The first already records the call — *"harden the
+scanner's tokenization (string/comment/member-access awareness) once"* — and it has now been paid
+for a fourth time. **The hardening list is now concrete and complete enough to build from:**
+(a) regex-literal state, (b) `\` escape handling outside string spans, (c) the member-access `.return`
+exclusion already specified in the sibling entry. One arc, three symptoms, and the §23.2.3 opacity
+contract is preserved throughout — this is a syntactic scan, not a parse, and it must stay one.
+
+⛑ **Their priority-1 ask is NOT this entry and is already filed.** They ask that
+`E-CODEGEN-INVALID-LOGIC` name the construct and give a span (*"either of these bugs would have been a
+two-minute fix with a span"*). That is [[g-emit-gate-source-anchor-synthetic-artifact-and-cli-truncation]]
+(LOW): `build.js`/`dev.js` truncate the message at `slice(0,120)`, cutting off the `(byte,line,column)`
+coordinate and the offending snippet, while `scrml compile` does NOT truncate and shows them. **Worth
+telling them directly: run `scrml compile` on the file and the span they asked for is already there** —
+the information exists and their surface is eating it. The LOW severity should be revisited on this
+evidence: two adopter bisections at ~40 minutes each is not a cosmetic cost.
+
+⛑ **RETRACTED IN PART, S425 — the severity argument above does not rest on this adopter, and the
+actionable was a no-op for them.** flogence S49 checked it and reported back:
+
+- **The source diagnosis holds** — they verified `slice(0, 120)` at `build.js:907` and `dev.js:630`
+  (plus `:604` for warnings), and that `compile.js` carries no truncation.
+- **But they were never on `build` or `dev`.** Every flogence script compiles through
+  `cli.js compile`, which does not truncate — so *"re-run through `scrml compile`"* told them to do
+  what they were already doing. **They had the span for both bisections.**
+- ⚑ **The eating surface was THEIR OWN `tail`.** They injected an unbalanced escaped bracket into a
+  real tool and measured the output: **1,262 lines** (352 warnings + 273 ghost lints), with the
+  `artifact:` span line at **1,255 — eighth from the end**. Their convention tails 4–5 lines off a
+  compile because the warning baseline is tracked; `tail -8` shows the span, `tail -4`/`tail -5` do
+  not. Their fix, their one-liner.
+- ⚑ And the printed snippet shows the mechanism outright — `...(async (args) => { return (const re =
+  /\[/; ...` — i.e. **the desync, rendered.** The diagnostic is richer than this entry credited.
+
+**So: the "40 minutes × 2 is not cosmetic" argument is WITHDRAWN as evidence about `compile`.** It
+still stands for `build`/`dev` users, where the truncation is real and measured. flogence asked
+explicitly that we *"re-rank it on true grounds rather than on our mistake"* — recorded, and the
+LOW stands until someone produces a `build`/`dev`-side cost. ⚑ **The generalizable lesson is ours:
+we correctly identified a truncation and then attributed a cost to it that came from a different
+surface entirely — a right mechanism wired to the wrong consumer.**
+
+### g-default-logic-mode-loses-the-ghost-lint-logic-context-exemption-for-the-whole-program-body — the ghost-pattern scanner's `logicRanges` exemption is computed from explicit `${…}` spans only, so under §40.8 default-logic mode every JS-shaped construct in a `<program>`/`<page>` body is linted as framework ghost syntax — and the compiler's own `W-PROGRAM-REDUNDANT-LOGIC` tells authors to adopt exactly that shape — `NEW S425-bryan (surfaced as a "related and separate, not filed as a bug" aside in the flogence S48 report; PA-REPRODUCED and then WIDENED by measurement — the report's framing was foreign-interior-specific and the real scope is the whole body); MED; open`
+
+<!-- @gap id=g-default-logic-mode-loses-the-ghost-lint-logic-context-exemption-for-the-whole-program-body sev=MED status=open locus=compiler/src/lint-ghost-patterns.js:logicRanges(LOCATE BY SYMBOL — the pre-Stage-2 scanner's only logic-context protection is `skipIf: inRange(offset, logicRanges)` and `logicRanges` is derived from explicit `${ … }` spans; pattern 23's regex is `/(?:^|\s)\([a-z][a-zA-Z]*\)\s*=/g`, pattern for W-LINT-007 likewise) prov=adopter:flogence-S48-2026-09-20-two-codegen-lowering-failures -->
+
+**PA-REPRODUCED on `c59367bb`, and the reported scope was too NARROW.** The report frames it as *"the
+ghost-pattern lint scanner reads inside `_={ }=` interiors"*, cites §23.2.3's *"the `_{}` interior is
+opaque"*, counts 51 such lints in one file, and leaves it unfiled (*"your call whether that is worth a
+ticket"*). Four cases, one variable:
+
+| shape | ghost lints |
+|---|---|
+| A — arrow fn + object literals inside `_={ }=`, body wrapped in explicit `${ }` | **0** |
+| B — same, body in §40.8 default-logic mode (no `${ }`) | **`W-LINT-021` ×1 + `W-LINT-007` ×2** |
+| C — arrow fn in PLAIN scrml logic, **no foreign block at all**, default-logic mode | **`W-LINT-021` ×1** |
+| D — same as C, wrapped in `${ }` | **0** |
+
+**C is the case that relocates the bug.** There is no foreign block in it, so this is not about
+`_={ }=` opacity: **the discriminator is the explicit `${ }` wrapper.** `lint-ghost-patterns.js` runs
+pre-Stage-2 (before the block splitter) and therefore has no ForeignBlock notion at all; its only
+logic-context protection is `inRange(offset, logicRanges)`, and `logicRanges` comes from explicit
+`${ … }` spans. A §40.8 default-logic body has none, so the exemption is lost for the **entire body**.
+Foreign interiors are simply where the most JS-shaped text happens to sit — which is why an adopter
+authoring real parsing code in `_={ }=` sees 51 of them and reads the cause as foreign-specific.
+
+⚑ **THE COMPILER NUDGES AUTHORS INTO THE BROKEN SHAPE.** `W-PROGRAM-REDUNDANT-LOGIC` fires on the
+`${ }`-wrapped form and says *"Remove the redundant `${...}` for cleaner source"* — verbatim, and it
+fired on this session's own probes. So one lint instructs the author to adopt the shape that disarms
+another lint's exemption. That coupling is the finding; the 51 noisy lines are the symptom.
+
+**Why it matters beyond noise** (the reporter's own framing, and it is right): *"it makes a real lint
+regression hard to see."* A ghost-pattern baseline that is 51 false positives deep cannot be read, so
+the pass stops functioning as a gate for the file — the §8 cry-wolf shape arriving by accident rather
+than by design.
+
+**Fix direction, unverified, for whoever takes it:** `logicRanges` needs to include the implicit
+default-logic body span that §40.8 creates, not only explicit `${ … }` spans. ⚑ Owed with it, per §8's
+coverage-removal rule: **count what the scanner would stop inspecting** before widening the exemption —
+a `<program>` body that becomes wholly exempt also stops catching genuine framework-reflex ghosts in
+markup that sits in the same body, and that is the population the pass exists for.
+### G-SCANNER-CONTEXT-AMBIGUITY-IS-ONE-FAMILY-OF-28-AND-THE-LEVER-IS-ONE-SHARED-MASKING-PASS — 28 open gaps are one bug in four costumes; string/comment/interpolation masking, applied once and reused, is pointed at 27 of them — `NEW S422; HIGH; open`
+
+**AGGREGATE ENTRY — this files no new defect.** It records that 28 already-open gaps share one root,
+so they are worked as a family rather than one position at a time.
+
+**Counted by flogence-PA (S46) over OUR ledger, and INDEPENDENTLY RE-COUNTED HERE.** They invited
+re-judgement rather than trust and supplied the full ID list; all 28 were verified to exist and to be
+`status=open` at `3b66030a`. My counts against theirs:
+
+| | flogence | PA re-count |
+|---|---|---|
+| distinct gaps tracked | 1037 | 1038 |
+| open | 459 | 455 |
+| open with a scanner/parser locus | 63 (13.7%) | 64 |
+| **context-ambiguity shaped** | **28** | **28** — exact |
+
+**The four costumes**, and the sizes are the finding:
+
+| what is misread | open gaps |
+|---|---|
+| **string-literal masking** (a `~`, a quote, a prose run inside a string) | **13** |
+| **`${ }` / template interpolation** | **8** |
+| **no comment state** (`//`, `/*`) | **6** |
+| **`<` read as a tag opener** | **1** |
+
+Severity across the 28: **13 HIGH · 11 MED · 4 LOW**.
+
+**The shared shape:** *a layer that decides what a character means before a grammar exists to ask.* A
+scanner that splits source into blocks must disambiguate blind, and every one of these is a case where
+blind was not good enough.
+
+⚑ **THE LEVER IS ONE SHARED MASKING PASS** — string, comment and template-interpolation state,
+computed once and reused by every downstream scanner — and it is pointed at **27 of 28**. That is the
+root-vs-position fork (FORK RULE row 4) with the whole denominator attached, and it supersedes the
+"seventh member" framing in
+[[g-line-comment-in-a-function-body-trips-the-bare-slash-closer-heuristic]]: the family is 28 across
+four causes, not 7 within one.
+
+⚑ **AND IT REFUTES THE SYNTAX HYPOTHESIS, on our own data.** flogence's operator asked whether `<`
+is overloaded and whether that overload is the pain behind scrml's parsing issues. **It is 1 of 28.**
+Their own corpus shows the overload is real — 1007 opening tags, 94 `<cell> =` declarations, 3
+`const <cell>`, 18 comparisons, 129 `<` inside `//` comments — but removing the `<cell> =` form would
+cost ~94 rewrites in their corpus and far more in ours **and close exactly ONE MED gap**. A breaking
+syntax simplification aimed at `<` is pointed at 3.6% of the family. They filed this against their own
+side's hypothesis, which is why it is worth the weight.
+
+**Methodology limits, stated by them and preserved here:** classification is by gap-ID text, not by
+reading all 28, so some will be misfiled — the IDs are unusually descriptive, which is the only reason
+it works. Their first pass had a wrong denominator (473/326) because the extraction regex required
+`locus=` to sit immediately after `status=`; they caught and corrected it before computing anything
+above, and disclosed it as "exactly the error class we filed at you twice this week."
+
+**What this entry does NOT claim:** that any of the 28 is mis-filed, that the masking pass is cheap, or
+that it is the next thing to build. It claims the denominator, and that per-position fixes have now
+been measured as a bug generator on this exact family.
+
+— NEW S422-bryan (flogence-PA S46 aggregate over our ledger; PA re-counted, 28/28 IDs verified open)
+<!-- @gap id=g-scanner-context-ambiguity-is-one-family-of-28-and-the-lever-is-one-shared-masking-pass sev=HIGH status=open locus=searched:compiler/src/block-splitter.js,compiler/src/tokenizer.js,compiler/src/expression-parser.ts,compiler/src/ast-builder.js,compiler/native-parser/ — this is an AGGREGATE over 28 entries and has no single deciding site by construction; the lever is a shared masking pass that does not yet exist prov=adopter:flogence-S46-counted-our-own-ledger-against-their-own-side-hypothesis-PA-re-counted-28-of-28-verified-open -->
+
+### g-block-splitter-closer-scan-consumes-an-unpaired-foreign-closer-inside-comments-and-string-literals — a bare `}=` anywhere in a `kind="tool"` body is read as a real `_={ }=` closer, so the construct is UNMENTIONABLE in its own source — and the discriminator is PAIRING, the same one that governs the codegen-side scanner — `NEW S425-bryan (adopter report from flogence PA S49 drop 2, found writing a comment that CITED our S425 correction; PA-REPRODUCED and then WIDENED by four controls — two of the reporter's own rows are wrong for the bare form); MED; open`
+
+<!-- @gap id=g-block-splitter-closer-scan-consumes-an-unpaired-foreign-closer-inside-comments-and-string-literals sev=MED status=open locus=compiler/src/block-splitter.js:findStructuralBodyEnd(LOCATE BY SYMBOL — the generic tag-stack scanner over the RAW body; its own header comment at the function says it "runs a generic tag-stack scanner over the raw body", which is the defect stated as a design note) prov=adopter:flogence-S49-2026-09-22-bare-closer-in-a-line-comment -->
+
+**PA-REPRODUCED on `613c9f1e`.** A bare `}=` inside a `//` comment in a `<program kind="tool" lang="ts">`
+body is consumed as a real foreign-block closer → **`E-CTX-001` at stage BS**, reported at the
+function's own closing brace rather than at the offending text. The reporter's core matrix holds:
+
+| comment contains | result |
+|---|---|
+| `}=` alone | **FAIL** `E-CTX-001` |
+| `_={` alone | OK |
+| `_={ }=` (paired) | OK |
+| no foreign token | OK |
+
+### ⚑ TWO OF THE REPORTER'S ROWS ARE WRONG, and four controls say the bug is WIDER than reported
+
+They recorded `}=` in a **string literal** and in a **`/* */` block comment** as **OK**. Both come
+back **FAIL** here. Rather than pick a side I ran controls:
+
+| control | measured | what it settles |
+|---|---|---|
+| bare `}=` in a string literal | **FAIL** | the "OK" is wrong for the bare form |
+| bare `}=` in a `/* */` block comment | **FAIL** | same |
+| bare `}=` with **no real `_={ }=` anywhere in the file** | **FAIL** | **the closer scan runs UNCONDITIONALLY** — it needs no opener to trigger |
+| **paired** `_={ }=` in a string · line comment · block comment | **OK · OK · OK** | this is what their "OK" rows actually measured |
+
+**The rule, corrected: an unpaired `}=` is consumed as a real closer in EVERY context the splitter
+scans — line comment, block comment AND string literal. A paired `_={ }=` is inert everywhere.** The
+masking is blind in all three, not just line comments. Their rows were almost certainly the paired
+form, which is what a doc comment naturally writes — you mention `_={ }=`, not a lone `}=`.
+
+### ⚑⚑ SAME DISCRIMINATOR AS THE CODEGEN-SIDE SCANNER, OPPOSITE END OF THE PIPELINE — this is ONE class
+
+| | scanner | stage | what desyncs it |
+|---|---|---|---|
+| [[g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count]] | `emit-logic.ts` `scanForeignSliceShape` | **post-AST** (codegen) | an **unpaired** escaped bracket → non-zero net depth |
+| **this entry** | `block-splitter.js` `findStructuralBodyEnd` | **pre-AST** (BS) | an **unpaired** closer token |
+
+Two hand-rolled state machines at opposite ends of the compiler, **one failure shape** — an unpaired
+token desyncs the counter, a paired one nets out — and **neither knows about the masking contexts the
+other one partly handles.** This straddles the pre-AST / post-AST partition, which matters: an S425
+measurement of open-HIGH loci put 57 post-AST against 18 pre-AST and treated them as separate
+populations. **This defect is one bug in both, so the partition is not the right axis** — masking
+OWNERSHIP is. It corroborates flogence's own aggregation (28 open gaps as one bug in four costumes:
+13 string-masking · 8 interpolation · 6 comment-state · 1 angle-bracket, with one shared masking pass
+pointed at 27 of 28) from a second, independent direction.
+
+**The practical bite is documentation, and it is sharp:** a comment is where you write *about* the
+language, so a comment is exactly where `}=` appears — and in a language whose own SPEC text is full
+of `_={ }=`, **the construct is unmentionable in its own source.** The reporter hit it writing a
+comment that cited our correction to them.
+
+⛑ **One case they could NOT isolate, carried so nobody re-walks it.** One comment line in a real
+1,000+-line tool produced **17 `E-CTX-001` errors at six unrelated lines**, none within 100 lines of
+the text; causal by double revert, not reducible. **Nine negative shapes they ruled out** (token in a
+comment alone · backticked vs bare · a backticked index-access span · two backtick spans on one line ·
+the verbatim line in a minimal file · nesting depth 0–3 · an unbalanced escaped-bracket regex in a
+comment alone · that regex before the token · the token before that regex). ⚑ **The
+unbalanced-regex-in-a-comment hypothesis is FALSIFIED by both sides** — which matters because it is
+the hypothesis the sibling entry's mechanism makes most attractive. The real file is on their disk;
+ask for it rather than re-reducing.
+
+⚑ **And they flagged their own wrong diagnosis unprompted:** their first internal write-up said *"a
+`_={ }=` token inside a comment is parsed as a foreign block"*, stated from a single revert with no
+matrix, and six fixtures falsified it. Recorded because a reporter who retracts their own framing
+before we read it is the reason this exchange converged in two rounds instead of five.
 ### G-TOP-LEVEL-LOGIC-REASSIGNMENT-LOWERS-AS-A-FRESH-CONST-SO-THE-LET-ESCAPE-FAILS-THERE — `let n = 1; n = n + 1` at top-level `${}` emits `let n = 1; const n = 2;` and dies in codegen, while `n++` and compound forms work — `NEW S422; HIGH; open`
 
 At top-level `${ }` (§40.8 default-logic position) a reassignment written as `name = expr` is lowered

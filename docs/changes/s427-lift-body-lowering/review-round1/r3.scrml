@@ -1,0 +1,6 @@
+<program>
+<items> = ["a"]
+${ const total = 10 }
+<ul>${ total = 5
+       for (let it of @items) { lift <li>${total}:${it}</li> } }</ul>
+</program>

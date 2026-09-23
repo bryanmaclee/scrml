@@ -31,6 +31,13 @@
  * `--check` is a tool, not a gate. Do not describe either as gating until a job
  * actually invokes it.
  *
+ * ⛑ S427 — UPDATE: ci.yml's blocking `gate` job (and the advisory `windows` job) now run
+ * `bun test compiler/tests/e2e-render-map/`. What that makes BLOCKING is this tier's
+ * ASSERTIONS — every `expect` in this file and in detector-validation.test.js. It does NOT
+ * make the fast-slice green->red delta below blocking (that test stays WARN-only by design),
+ * and `generate-baseline.js --check` is still run by no job or hook. The S419 paragraph
+ * above stays as the record of what was true until S427.
+ *
  * To keep this suite test-time-cheap (the full corpus is subprocess-isolated and
  * minutes long — some meta-heavy apps hang at mount), it re-observes only the
  * FAST representative slice (examples + benchmarks, in-process, ~3s) and reports
@@ -50,7 +57,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { enumerateRenderCorpus, REPO_ROOT } from "./render-corpus-enumerator.js";
 import { seedFor, POPULATED_SEEDS } from "./seed-fixtures.js";
-import { ALL_BASELINE_STATES } from "./render-detectors.js";
+import { ALL_BASELINE_STATES, GREEN_STATES } from "./render-detectors.js";
 import {
   observeCellSubprocess,
   seedLabelsFor,
@@ -71,13 +78,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const BASELINE_PATH = join(__dirname, "e2e-render-map-baseline.json");
 
-// `needs-server` is non-gap (server-dependent app, no server at mount — S203 b+c).
-//
-// ⛑ S416 — `renders-empty-with-data` IS DELIBERATELY ABSENT. An empty render with
-// NO seed is a valid `<empty>` fallback and stays green; an empty render WITH data
-// seeded is the board-bug class D6 exists to catch, and it used to land in
-// `renders-empty` and be scored green. Keep these two apart.
-const GREEN_STATES = new Set(["renders-clean", "renders-empty", "needs-server"]);
+// ⛑ S426 — GREEN_STATES IS IMPORTED (see the import block above), not re-declared. The
+// literal Set that used to sit here was the third hand-kept copy of the same list
+// (`generate-baseline.js:53` held the second), and S426 added an enforcement that has to
+// agree with it: `runDetectors` refuses to return ANY green state while a seed-bridge
+// failure is on the record. Three copies of the definition of "green" is three chances for
+// that enforcement to be silently narrower than this gate. The reasons `needs-server` is in
+// it and `renders-empty-with-data` is not now live with the definition, in
+// `render-detectors.js`.
 
 // The fast in-process slice: examples + benchmarks (no samples — samples incl.
 // the meta-heavy hangers belong to the subprocess-isolated standing run).
@@ -206,48 +214,73 @@ describe("e2e-render-map — baseline well-formedness", () => {
   //
   // The expectation is a per-app TABLE, not a floor, so it reds in BOTH directions: a live
   // seed going inert (the regression this closes) and an inert seed coming alive (which means
-  // a fixture was fixed and the note below is stale). The `wrote:false` rows are NOT the
-  // harness bug — they are separate SEED-FIXTURE bugs, named here so they cannot hide behind
-  // a green cell. Do not "fix" any of them by relaxing this table.
+  // a fixture was fixed and the note below is stale). Do not "fix" a row by relaxing this table.
+  //
+  // ⛑ S427 (g-e2e-render-map-seed-fixtures-are-wrong-in-three-of-four-entries) — ALL FOUR
+  // FIXTURES ARE NOW LIVE, AND EACH ROW PINS THE SEEDED ROWS IN THE DOM, NOT JUST `domChanged`.
+  // Three of the four rows used to be fixture bugs (06 seeded the DERIVED `todo`; 16 seeded a
+  // `contacts` cell the app does not have; 25 seeded lowercase columns that no app column
+  // equals). `domChanged` alone cannot tell a broken seed from a working one: 25's broken seed
+  // moved the DOM too — it SHRANK every column to empty. So each row also names WHERE the
+  // seeded items must render: the `rendered.item` texts, grouped per `rendered.group`
+  // container when the app partitions its rows (06's status columns, 25's board columns),
+  // read back out of the mounted document. For 06 and 25 the grouping is the load-bearing
+  // half — a status/column value in the wrong runtime form that still lands SOMEWHERE yields
+  // the same flat text list, but not the same per-column one. Texts are compared with ALL
+  // whitespace removed, so the pin is about the seeded data, not inter-node whitespace.
   const SEED_OBSERVABILITY = {
     "examples/03-contact-book.scrml": {
       reason: "written",
       domChanged: true,
+      rendered: { group: null, item: "li.contact-row .name", texts: ["AdaLovelace", "AlanTuring"] },
       note: "seed resolves to the real cell <contacts>; the Tier-1 <each> renders both rows",
     },
     "examples/06-kanban-board.scrml": {
-      reason: "derived-cell",
-      domChanged: false,
+      reason: "written",
+      domChanged: true,
+      rendered: {
+        group: ".column",
+        item: ".card-title",
+        texts: [["Seededtodocard"], ["Seededdoingcard"], ["Seededdonecard"]],
+      },
       note:
-        "FIXTURE BUG: the seed names `todo`, which the emit declares via " +
-        "`_scrml_cs_derived_declare(\"todo\", () => …cards.filter(…))`. A derived cell is read " +
-        "through `_scrml_derived_fns`, never out of `_scrml_state`, so the write would be " +
-        "discarded — and would leave junk in a slot the runtime itself never writes, on a " +
-        "path that still fires `_scrml_propagate_dirty`. The bridge refuses it. Seeding the " +
-        "SOURCE cell `cards` is what would drive this app.",
+        "seeds the SOURCE cell <cards>: the per-status columns are DERIVED " +
+        "(`_scrml_cs_derived_declare(\"todo\", …)`) and the bridge refuses a derived write. " +
+        "`status` is written in the emitted runtime form of a UNIT variant, the bare string " +
+        "(`const Status = Object.freeze({ Todo: \"Todo\", … })`), so each derived filter " +
+        "`_scrml_structural_eq(c.status, Status.Todo)` routes exactly one card to its column.",
     },
     "examples/16-remote-data.scrml": {
-      reason: "no-such-cell",
-      domChanged: false,
+      reason: "written",
+      domChanged: true,
+      rendered: { group: null, item: "ul.rows li", texts: ["AdaLovelaceada@x.io", "AlanTuringalan@x.io"] },
       note:
-        "FIXTURE BUG: THIS APP HAS NO `contacts` CELL. It declares exactly one cell, " +
-        "`<phase>: ContactsPhase = .Idle`; the list is `<each in=rows>` where `rows` is the " +
-        "MATCH BINDING of `@phase = .Loaded(rows)`, not a cell. The old bridge wrote " +
-        "`<token>$contacts` and it 'read back' — because a plain-object store reads back " +
-        "anything — which is how this was previously mis-reported as a live seed. There is " +
-        "no plain cell-set that drives this app: `.Loaded(rows)` is a PAYLOAD VARIANT, so " +
-        "even seeding `phase` needs a constructed variant, not a value.",
+        "seeds the app's only cell <phase> with the emitted runtime form of the PAYLOAD " +
+        "variant `.Loaded(rows)` — `{ variant: \"Loaded\", data: { rows } }`, exactly what " +
+        "`ContactsPhase.Loaded(rows)` constructs — so the <match> dispatcher mounts the " +
+        "Loaded arm and its <each in=rows> reads `data.rows`.",
     },
     "examples/25-triage-board.scrml": {
       reason: "written",
       domChanged: true,
+      rendered: {
+        group: ".column",
+        item: "li.task",
+        texts: [["Seededinboxtask"], ["Seededdoingtask"], []],
+      },
       note:
-        "seed resolves to the real cell <tasks> and the DOM moves — but it SHRINKS, because " +
-        "the seed's `column` values are lowercase ('todo'/'doing') while the app filters " +
-        "against `const columns = [\"Inbox\", \"Doing\", \"Done\"]`, so all three columns " +
-        "render empty. That is seed-fixtures.js's own SEED-SHAPE INVARIANT being violated by " +
-        "the fixture, not a codegen bug.",
+        "seeds <tasks> with the app's real column values (`\"Inbox\"`/`\"Doing\"`, from " +
+        "`const columns`). Done is LEGITIMATELY empty — the anti-cry-wolf shape D6 must stay " +
+        "quiet on (detector-validation.test.js). The pre-S427 lowercase seed rendered " +
+        "`[[], [], []]` here and scored renders-empty-with-data.",
     },
+  };
+
+  /** The seeded rows as the mounted document shows them, per a table row's `rendered` spec. */
+  const renderedRows = (spec) => {
+    const items = (root) =>
+      [...root.querySelectorAll(spec.item)].map((el) => el.textContent.replace(/\s+/g, ""));
+    return spec.group ? [...document.querySelectorAll(spec.group)].map(items) : items(document);
   };
 
   test("a populated seed resolves to a real cell of the app and is observable in the DOM", async () => {
@@ -285,6 +318,12 @@ describe("e2e-render-map — baseline well-formedness", () => {
           domChanged: rep.domChanged,
           observable: rep.observable,
           seedErrors: rep.errors,
+          // ⛑ S427 — ... and the SEEDED rows are what rendered, where they belong. Read
+          // before the next observeApp replaces the document. A missing table row is caught
+          // below; reading `undefined.rendered` here would throw before that clear message.
+          rendered: SEED_OBSERVABILITY[app.relpath]
+            ? renderedRows(SEED_OBSERVABILITY[app.relpath].rendered)
+            : null,
         };
       }
     } finally {
@@ -312,6 +351,7 @@ describe("e2e-render-map — baseline well-formedness", () => {
         // next to BOTH of its own inputs catches the predicate itself drifting.
         observable: wrote && row.domChanged,
         seedErrors: [],
+        rendered: row.rendered.texts,
       };
     }
     expect(actual).toEqual(expected);
@@ -593,7 +633,8 @@ describe("e2e-render-map — multi-file apps compile their own tree", () => {
 // throwaway subprocess they die with the process. examples+benchmarks is ~34
 // apps × ~0.3s ≈ low-tens-of-seconds — test-time viable. The samples tier (incl.
 // the meta-heavy hangers) is observed only by a hand-run of `generate-baseline.js`
-// (write or `--check`), not this suite; no CI job or hook runs either (see header).
+// (write or `--check`), not this suite. This suite runs in CI since S427, but THIS test only
+// warns; `generate-baseline.js` runs in no job or hook (see header).
 // =============================================================================
 describe("e2e-render-map — delta-gate (examples+benchmarks slice, NON-gating)", () => {
   test("no green->red regression in the examples+benchmarks slice (WARN-only)", () => {
@@ -639,8 +680,9 @@ describe("e2e-render-map — delta-gate (examples+benchmarks slice, NON-gating)"
       console.warn(
         `[e2e-render-map] *** GREEN->RED REGRESSIONS (${regressions.length}) *** a closed cell re-opened:\n` +
           regressions.join("\n") +
-          `\n(NON-gating: this suite only warns, and no CI job or git hook runs this tier or ` +
-          `\`generate-baseline.js --check\` — a regression here blocks nothing until someone acts on it.)`,
+          `\n(NON-gating: this delta check only warns — the tier runs in CI (S427) but this test ` +
+          `does not fail on a delta, and no job runs \`generate-baseline.js --check\` — a ` +
+          `regression here blocks nothing until someone acts on it.)`,
       );
     }
 

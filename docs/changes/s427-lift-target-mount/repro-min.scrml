@@ -1,0 +1,10 @@
+<program>
+<items> = ["a", "b"]
+<ul if=@items.length>
+    ${
+        for (let it of @items) {
+            lift <li>${it}</li>
+        }
+    }
+</ul>
+</program>

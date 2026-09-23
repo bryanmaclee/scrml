@@ -41,7 +41,12 @@ import {
   statSync,
 } from "node:fs";
 import { compileScrml } from "../../src/api.js";
-import { runDetectors, renderedContentSignature, signatureGained } from "./render-detectors.js";
+import {
+  runDetectors,
+  renderedContentSignature,
+  signatureGained,
+  SEED_SNAPSHOT_NOTICE,
+} from "./render-detectors.js";
 import { REPO_ROOT } from "./render-corpus-enumerator.js";
 
 // ⛑ S419 residuals (g-e2e-render-map-baseline-keys-have-drifted-and-orphan-cells-are-never-flagged)
@@ -561,8 +566,8 @@ export function applySeed(seed, obs, scopes, doc) {
   const after = readBody();
   const domChanged = after !== before;
   const afterSig = readSig();
-  // ⛑ S423 fix round — did the write make anything NEW render? A pure LOSS (25-triage,
-  // whose seed empties every column) is deliberately NOT a gain.
+  // ⛑ S423 fix round — did the write make anything NEW render? A pure LOSS (e.g. a seed
+  // that empties every column, as 25-triage's did until S427) is deliberately NOT a gain.
   // ⛑ fix round 2 (finding 3) — `null` when either snapshot failed: UNMEASURED, which the
   // detector treats as a veto (fail-quiet) rather than as "nothing gained". Recorded as an
   // error too, so a broken measurement is loud instead of silently wrong.
@@ -577,6 +582,53 @@ export function applySeed(seed, obs, scopes, doc) {
     observable: writes.some((w) => w.wrote) && domChanged,
     errors,
   };
+}
+
+/**
+ * The F4 loudness notice for a seed whose accessor(s) THREW — or `null` for silence.
+ *
+ * ⛑ S424 item 3, and this condition's THIRD attempt. Extracted from `observeCompiled` on
+ * purpose: the two previous rounds were pinned only by a MIRROR of the predicate re-typed
+ * into the test file plus a `toContain` over the source text, and a mirror asserts nothing
+ * about the code that actually runs (the §8 hollow-gate shape — a test can go green while
+ * production says the opposite, which is precisely how rounds 1 and 2 both shipped). This
+ * is the real function the harness calls, so the tests drive production.
+ *
+ * ⚠ THE CARVE-OUT, UNCHANGED AND LOAD-BEARING: `derived-cell` and `no-such-cell` are
+ * FIXTURE defects, not emit regressions, and must stay QUIET here. (S427: the corpus fixtures
+ * that once resolved this way are corrected; a regression to either reason reds the pinned
+ * SEED_OBSERVABILITY table in e2e-render-map.test.js, which is where it belongs.) They stay quiet by
+ * CONSTRUCTION rather than by an exclusion list: neither reason can ever make `threw > 0`.
+ *
+ * ⚠ HISTORY OF THIS PREDICATE, so a fourth round does not re-derive it:
+ *   round 1 — `writes.every((w) => w.reason === "set-threw")`. A 2-key fixture of
+ *             `[{set-threw},{no-such-cell}]` failed `every` and the throw vanished.
+ *   round 2 — `!writes.some((w) => w.wrote) && writes.some((w) => w.reason === "set-threw")`,
+ *             i.e. "NOTHING was delivered AND something threw". This is the S424 item-3 bug:
+ *             on a >=2-key fixture where the key DRIVING the list throws and an unrelated key
+ *             LANDS, the first conjunct is false, so a genuine accessor throw was silent,
+ *             `seedWasDelivered` was true anyway, and the cell reddened as
+ *             `renders-empty-with-data` — blaming the COMPILER for a write the HARNESS
+ *             failed to make.
+ *   round 3 (here) — a throw is a harness/emit failure ON ITS OWN TERMS. Whether a SIBLING
+ *             key happened to land is irrelevant to whether THIS key threw, so it is not a
+ *             conjunct at all. The landed count belongs in the MESSAGE, not in the gate.
+ *
+ * The message states the real counts either way, and never claims "none landed" when some
+ * did — the round-2 wording was only ever true in the all-threw case.
+ *
+ * @param {{writes?: Array<{reason?: string, wrote?: boolean}>}|null|undefined} seedReport
+ * @returns {string|null}
+ */
+export function seedThrewNotice(seedReport) {
+  if (!seedReport) return null;
+  const writes = Array.isArray(seedReport.writes) ? seedReport.writes : [];
+  const threw = writes.filter((w) => w && w.reason === "set-threw").length;
+  if (threw === 0) return null;
+  const landed = writes.filter((w) => w && w.wrote === true).length;
+  return landed === 0
+    ? `[seed-bridge] ${threw} of ${writes.length} seed write(s) threw and none landed — the seed cannot be live`
+    : `[seed-bridge] ${threw} of ${writes.length} seed write(s) threw while ${landed} landed — the seed is only PARTLY live`;
 }
 
 
@@ -673,8 +725,12 @@ export function observeApp(app, seed, seedLabel, hooks = {}) {
   }
 }
 
-/** The body of observeApp, given compiled artifacts. The caller owns cleanup. */
-function observeCompiled(app, seed, seedLabel, artifacts) {
+/**
+ * The body of observeApp, given compiled artifacts. The caller owns cleanup.
+ * Exported (S427) so a test can drive the returns that precede the mount — e.g. the seeded
+ * no-html branch — with hand-built artifacts, instead of registering a corpus seed to reach it.
+ */
+export function observeCompiled(app, seed, seedLabel, artifacts) {
   const cellKey = `${app.relpath}#${seedLabel}`;
 
   // D0: compile failed (or threw) — record without mounting.
@@ -695,6 +751,37 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
     // Compiled clean but produced no html to mount (e.g. a library-mode file
     // that slipped the <program filter, or a per-route app with no entry html
     // located). Record as renders-empty (no UI to assert) — NOT suppressed.
+    //
+    // ⛑ S427 — A SEEDED cell used to take this return too, scoring GREEN `renders-empty`
+    // straight out of `observeCompiled` — BEFORE any seed was attempted and without passing
+    // through `runDetectors`, so the "no green while a seed failure is on the record" guard
+    // never saw it. Not reached today (measured: all four registered seeds emit html), but the
+    // coverage ratchet registers seeds for more apps, and one that emits no html would have
+    // recorded a populated cell as a clean pass for a render that never happened. The seeded
+    // case now records the fact and goes through the choke point; the UNSEEDED return below is
+    // byte-for-byte what it was.
+    if (seed != null) {
+      const seedReport = {
+        chunks: 0, writes: [], domChanged: false, gainedContent: null, observable: false,
+        errors: ["no entry html emitted — nothing was mounted, so the seed could not be applied"],
+      };
+      const det = runDetectors({
+        compileErrors: [],
+        throwMessage: null,
+        consoleErrors: [],
+        document: null,
+        seeded: true,
+        seedReport,
+        serverDependent: artifacts.serverDependent,
+      });
+      return {
+        cellKey,
+        state: det.state,
+        smells: ["NO-HTML-EMITTED", ...det.smells],
+        detail: { note: "compiled clean but no entry html located", ...det.detail, seed: seedReport },
+        seeded: true,
+      };
+    }
     return {
       cellKey,
       state: "renders-empty",
@@ -726,26 +813,16 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
       // ⛑ S423 fix round (F4), second half: "same path when every write throws". A
       // per-write `set-threw` is recorded in `seedReport.errors` and nowhere else, so a
       // seed whose every write threw ALSO scored green. Raised only for `set-threw` —
-      // NOT for `derived-cell` / `no-such-cell`, which are the three KNOWN, TABLED
-      // fixture bugs (see SEED_OBSERVABILITY in e2e-render-map.test.js). Those are
-      // fixture defects on a scheduled fix, not emit regressions, and reddening them
-      // here would both break the additive bar and pre-empt that arc.
+      // NOT for `derived-cell` / `no-such-cell`, which are FIXTURE defects, not emit
+      // regressions — the pinned SEED_OBSERVABILITY table in e2e-render-map.test.js is
+      // what reds on them (S427: no corpus fixture resolves to either any more).
       //
-      // ⛑ S423 fix round 2 (finding 2) — THIS REQUIRED *EVERY* WRITE TO BE `set-threw`,
-      // which is not the stated intent and left a real accessor throw silent. A 2-key
-      // fixture of `[{set-threw}, {no-such-cell}]` failed `every`, so nothing was pushed,
-      // `seedWasDelivered` was false, D6 was off, and `generate-baseline.js` stripped
-      // `detail` from the green cell — the throw vanishing exactly the way F4 exists to
-      // prevent. The condition that matches the intent is: NOTHING was delivered, and at
-      // least one write FAILED BY THROWING (as opposed to the known fixture-bug reasons).
-      if (seedReport && seedReport.writes.length > 0 &&
-          !seedReport.writes.some((w) => w.wrote) &&
-          seedReport.writes.some((w) => w.reason === "set-threw")) {
-        const threw = seedReport.writes.filter((w) => w.reason === "set-threw").length;
-        obs.consoleErrors.push(
-          `[seed-bridge] ${threw} of ${seedReport.writes.length} seed write(s) threw and none landed — the seed cannot be live`,
-        );
-      }
+      // ⛑ S424 item 3 — the predicate now lives in `seedThrewNotice` (see its header for
+      // the full three-round history and the derived-cell / no-such-cell carve-out). It
+      // used to be inlined here gated on `!writes.some((w) => w.wrote)`, i.e. "NOTHING was
+      // delivered", which silenced a genuine throw whenever any SIBLING key landed.
+      const threwNotice = seedThrewNotice(seedReport);
+      if (threwNotice) obs.consoleErrors.push(threwNotice);
       // ⛑ fix round 2 (finding 3) — a failed render snapshot makes `gainedContent`
       // UNMEASURED. It already vetoes D6; surface it so it is loud, not merely quiet.
       // ⛑ final round — keyed on the SIGNATURE error, not on `gainedContent === null`
@@ -753,9 +830,9 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
       // and it has already pushed its own accurate message. Keying on null would add a
       // second, untrue "the snapshot failed" line on top of it.
       if (seedReport && seedReport.errors.some((e) => String(e).startsWith("[seed-signature]"))) {
-        obs.consoleErrors.push(
-          "[seed-bridge] the render-content snapshot failed — gainedContent is UNMEASURED, D6 suppressed",
-        );
+        // ⛑ S427 — the shared constant, so `seedFailureKind` recognises exactly this text as
+        // "snapshot only" (writes landed) rather than as a non-delivery.
+        obs.consoleErrors.push(SEED_SNAPSHOT_NOTICE);
       }
     } else {
       // Loud, not silent: no reactive side-channel at all means the seed CANNOT be live.
@@ -767,8 +844,10 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
       // emit regression drops `_scrml_reactive_set`, every write is skipped,
       // `seedWasDelivered` is false, and EVERY populated cell scores green however empty
       // it renders — D6 blind, with `generate-baseline.js` stripping `detail` from green
-      // cells so the explanation never reaches the baseline either. A D2 console error
-      // makes the cell red and keeps the reason attached.
+      // cells so the explanation never reaches the baseline either. The report error below
+      // (plus the notice) makes the cell red and keeps the reason attached — ⛑ S427 round
+      // 4b: via `runDetectors`'s terminal guard (`seed-bridge-failed`), no longer by the
+      // notice posing as an app console error under D2.
       const msg = "no _scrml_reactive_set side-channel exposed by this emit";
       seedReport = {
         chunks: 0, writes: [], domChanged: false, gainedContent: null, observable: false,
@@ -785,10 +864,11 @@ function observeCompiled(app, seed, seedLabel, artifacts) {
     document,
     seeded: seed != null,
     // ⛑ S423 limb 2 — D6 needs to know whether the seed was actually WRITTEN, not
-    // merely registered. Two of the four corpus fixtures resolve to `derived-cell` /
-    // `no-such-cell` and write nothing while still carrying `seeded:true`; scoring
-    // such a cell red for an empty render would blame the compiler for a broken
-    // fixture. The report is already computed above, so this is a pass-through.
+    // merely registered. A fixture that resolves to `derived-cell` / `no-such-cell`
+    // writes nothing while still carrying `seeded:true` (two of the four corpus
+    // fixtures did until S427); scoring such a cell red for an empty render would blame
+    // the compiler for a broken fixture. The report is already computed above, so this
+    // is a pass-through.
     seedReport,
     serverDependent: artifacts.serverDependent,
   });

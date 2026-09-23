@@ -1,0 +1,5 @@
+<program>
+${ import { limit, fmt } from './util.scrml' }
+${ limit = 10 }
+<p id="p">${limit}</p>
+</program>

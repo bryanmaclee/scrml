@@ -20088,10 +20088,37 @@ export function buildAST(bsOutput, tokenizerOverrides) {
       //
       // A multi-page project whose `<program>` shell declares no `<outlet>`.
       // Soft navigation + `<a>` link-boost (§20.8.2 / §20.8.3) have no region
-      // to swap into, so they fall back to hard (full-document) navigation. The
-      // lint surfaces the missed enhancement; it is informational only. This is
-      // the complementary branch to W-PROGRAM-SPA-INFERRED (mutually exclusive by
-      // the `pages/` condition — one fires on ABSENT, the other on PRESENT).
+      // to swap into, so they fall back to hard (full-document) navigation.
+      // This is the complementary branch to W-PROGRAM-SPA-INFERRED (mutually
+      // exclusive by the `pages/` condition — one fires on ABSENT, the other on
+      // PRESENT).
+      //
+      // ⚑ THIS LINT IS *NOT* "INFORMATIONAL ONLY", AND SAYING SO COST AN
+      // ADOPTER 99 PAGES OF CONTENT. The message used to close with "If
+      // SSR-first hard navigation is your intent, this lint is informational
+      // only — no action required." That is FALSE. With no `data-scrml-outlet`
+      // marker to compose into, §40.8.2 multi-file composition resolves the
+      // route slot BY TAG — `findBareMainOpenTag` in codegen/index.ts, the
+      // pre-§20.8 fallback — and the composition splice is
+      // `shellBody.slice(0, slotOpenEndIdx)` + route body + `shellBody.slice(
+      // slotCloseIdx)`, so everything the author wrote BETWEEN that `<main>`'s
+      // open and close tags is DROPPED from every composed route page. An
+      // adopter read the "no action required" sentence, concluded the trade was
+      // a pure performance one, removed their `<outlet/>`, and lost a generated
+      // 73-link reference sidebar from all 99 pages of their site. They caught
+      // it by diffing the emitted artifact; nothing warned them.
+      // (Ruling: bryan, S425 — option (c) of the fork in
+      //  g-outlet-absent-composition-resolves-the-route-slot-by-tag-and-discards-the-chosen-main-s-authored-children:
+      //  keep the behaviour, fix the diagnostic. INERT — text only. Whether the
+      //  discard itself is refused is option (a), still open.)
+      //
+      // ⚑ THE DISCARD CLAUSE MUST STAY IN THE FIRST ~112 CHARACTERS OF THE
+      // MESSAGE. `build.js` and `dev.js` both print
+      // `stripRedundantCode(code, message)?.slice(0, 120)` — the two surfaces an
+      // adopter actually watches TRUNCATE at 120 chars. The old message's
+      // surviving window ended at "...shell with no `<outlet>", so a discard
+      // warning appended at the END would have been invisible on exactly the
+      // surface that has to carry it. Measure before you reword.
       // ---------------------------------------------------------------------
       if (filePathIsRealFile && pagesDirPresent) {
         // Does the shell declare an `<outlet>` anywhere in its subtree? The
@@ -20138,12 +20165,25 @@ export function buildAST(bsOutput, tokenizerOverrides) {
             entryProgramNode.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
           errors.push(new TABError(
             "W-OUTLET-ABSENT-SOFT-NAV-DISABLED",
-            `W-OUTLET-ABSENT-SOFT-NAV-DISABLED: this multi-page project (a \`pages/\` directory exists at the project root) ` +
+            // ⚑ The discard clause leads DELIBERATELY: `build.js` / `dev.js`
+            // slice this message to 120 chars. The lead sentence measures 112.
+            // Do not demote it below the fold. See the block comment above.
+            `W-OUTLET-ABSENT-SOFT-NAV-DISABLED: ` +
+            `the shell's first \`<main>\` becomes the route slot and its authored children are REPLACED on every composed page. ` +
+            `This multi-page project (a \`pages/\` directory exists at the project root) ` +
             `declares a \`<program>\` shell with no \`<outlet>\`. The Client Router (§20.8) swaps the current route's content ` +
             `into the shell's \`<outlet>\` region on a soft navigation; with no \`<outlet>\`, soft navigation and \`<a>\` ` +
             `link-boost have no region to swap into and fall back to hard (full-document) navigation. ` +
-            `If SSR-first hard navigation is your intent, this lint is informational only — no action required. ` +
-            `To enable soft navigation, add a single \`<outlet/>\` to the shell where route content should render. ` +
+            `That fallback is not only a navigation trade. With no \`<outlet>\` marker to compose into, multi-file ` +
+            `composition (§40.8.2) resolves the route-content slot BY TAG — the shell's FIRST \`<main>\` — and composing ` +
+            `REPLACES that element's children, so every child you authored inside it is absent from all composed route pages. ` +
+            `Markup OUTSIDE that \`<main>\` (a \`<header>\`, a \`<footer>\`) survives, and the shell's own page keeps its ` +
+            `children; only the commandeered \`<main>\` loses them. If the shell declares NO \`<main>\` at all, ` +
+            `composition finds no slot and every route page emits standalone — with none of the shell's chrome. ` +
+            `This lint is informational only IF that \`<main>\` has no authored children you need to keep; if it has any, ` +
+            `they are being discarded silently and action IS required. ` +
+            `To enable soft navigation — and to keep those children, which an \`<outlet/>\` composes ALONGSIDE rather than ` +
+            `over — add a single \`<outlet/>\` to the shell where route content should render. ` +
             `Per SPEC §20.8.1 the shell holds exactly one flat \`<outlet>\` in V1.`,
             span,
           ));

@@ -1,0 +1,11 @@
+{
+  "id": "auth-005-db-context-neg",
+  "description": "A `<var server>` in a non-entry `<page>` file that supplies its own server context via a `<db src=>` state block does NOT fire E-AUTH-005. The file carries no `<program>` at all — §40.8 forbids one in a non-entry file — so the pre-existing `<program db=>`-only predicate refused this shape, which is the canonical multi-file page form (§52.11 / §40.8 / §58.8).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/conformance/conf-AUTH-005.test.js",
+  "spec": "§52.4.4 / §52.11 / §40.8",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-AUTH-005"]
+  }
+}
