@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 114 |
+| HIGH | 115 |
 | MED | 272 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -17235,3 +17235,52 @@ ask for it rather than re-reducing.
 `_={ }=` token inside a comment is parsed as a foreign block"*, stated from a single revert with no
 matrix, and six fixtures falsified it. Recorded because a reporter who retracts their own framing
 before we read it is the reason this exchange converged in two rounds instead of five.
+### G-TOP-LEVEL-LOGIC-REASSIGNMENT-LOWERS-AS-A-FRESH-CONST-SO-THE-LET-ESCAPE-FAILS-THERE — `let n = 1; n = n + 1` at top-level `${}` emits `let n = 1; const n = 2;` and dies in codegen, while `n++` and compound forms work — `NEW S422; HIGH; open`
+
+At top-level `${ }` (§40.8 default-logic position) a reassignment written as `name = expr` is lowered
+as a **fresh `const` declaration** instead of a reassignment, producing a duplicate binding that fails
+codegen. The identical source inside a `function` body compiles clean.
+
+**PA-REPRODUCED BY EXECUTION on unmodified `main`, with a four-way control:**
+
+| top-level `${ }` | result |
+|---|---|
+| `let n = 1` · read `${n}` in markup | **clean** — a local escapes to the parent fine |
+| `let n = 1` · `n++` · read it | **clean** — emits `let n = 1; n++;` then `_scrml_render_value(el, n)` |
+| `<n> = 1` · `@n = @n + 1` · read it | **clean** — emits proper `_scrml_cs_reactive_set/get` |
+| `let n = 1` · **`n = n + 1`** | **`E-CODEGEN-INVALID-LOGIC`** |
+| the same `let n = 1` · `n = n + 1` **inside a `function`** | **clean** |
+
+⚑ **The discriminator is the `=` assignment FORM, not mutability and not scope.** `++` takes a
+different lowering path and is unaffected. That is also the clue to the fix.
+
+**Locus — traced by the dispatched agent, PA-verified by execution of the symptom:**
+`compiler/src/codegen/emit-reactive-wiring.ts:358` builds the top-level logic `emitOpts` with **no
+`declaredNames` field at all**, so emit-logic's reassignment guard (`opts.declaredNames?.has(node.name)`,
+`emit-logic.ts:2097`) is dead in that position and every bare `name = expr` is treated as a fresh
+binding. Same shape as the S415 match-arm-body fix (`emit-logic.ts` ~5399, which documents the class).
+**Sibling sites with the identical omission:** `emit-reactive-wiring.ts:1361` and `:1852` (`<poll>` /
+`<timer>` bodies), `emit-library.ts:2097` / `:2109`.
+
+⚑ **WHY IT MATTERS NOW.** S422 ruled bare naming is `const` and mutation needs `let`
+([[g-...e-assign-004...]] / user-voice S422). `E-ASSIGN-004` therefore tells an author *"Use `let` if
+the variable needs to be updated after initialization."* At top level `let n = 1; n = n + 1` then fails
+with *"This is a compiler defect. Please report it."* — **the diagnostic's own remedy misfires in one
+position.** Same shape as `E-SQL-004`'s unreachable remedy under §40.8
+([[g-line-comment-in-a-function-body-trips-the-bare-slash-closer-heuristic]] sibling class: a
+diagnostic whose advice the language does not accept).
+
+⚑ **NOT a blocker for `E-ASSIGN-004`, and the earlier framing was wrong.** The dispatched agent
+reported *"there is no valid way to express mutable top-level logic"* and the PA relayed that without
+testing it. **Three working forms exist** — `++`, compound assignment, and a state cell — and the
+state-cell form is the reactive-first grain the language wants anyway (Pillar 2). What is missing is
+one spelling. Filed HIGH because the incoherence is author-visible and the remedy text points at it,
+not because anyone is cornered.
+
+**Function parameters are the same class** (filed here rather than separately, one mechanism):
+`function f(p) { p = 3 }` emits `function _scrml_f_1(p) { const p = 3; … }` — §50.3.5 names a function
+parameter as a valid assignment target, so this should be a reassignment. Params are not in
+emit-logic's `declaredNames` either. `E-ASSIGN-004` correctly does NOT fire on it.
+
+— NEW S422-bryan (surfaced by the E-ASSIGN-004 build; agent-located, PA-reproduced with a four-way control on unmodified main)
+<!-- @gap id=g-top-level-logic-reassignment-lowers-as-a-fresh-const-so-the-let-escape-fails-there sev=HIGH status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:358(top-level emitOpts omits declaredNames so the emit-logic.ts:2097 reassignment guard is dead)+emit-reactive-wiring.ts:1361,:1852+emit-library.ts:2097,:2109 prov=empirical:PA-reproduced-by-execution-on-unmodified-main-with-a-four-way-control-increment-and-state-cell-and-in-function-all-clean-only-the-equals-assignment-form-fails -->

@@ -20057,7 +20057,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
 | E-ASSIGN-003 | §50.9 | Undeclared identifier as assignment expression target | Error |
-| E-ASSIGN-004 | §50.9 | `const` variable as assignment expression target | Error |
+| E-ASSIGN-004 | §50.9 | `const` variable as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`) | Error |
 | E-AUTH-001 | §52.11 | Client-local `@var` used as bound parameter in `?{}` INSERT/UPDATE/DELETE outside server function | Error |
 | E-AUTH-002 | §52.11 | `<var server>` initial value directly derived from a client-local `@var` | Error |
 | E-AUTH-003 | §52.11 | State type declares `authority="server"` without `table=` attribute | Error |
@@ -27866,7 +27866,7 @@ The reactive update is a side effect of the assignment. The expression result is
 
 Assignment-as-expression does not introduce new scope. It assigns to the lvalue's existing binding. The lvalue SHALL be declared (via `let`, `const`, `lin`, `@`, or function parameter) before it is used as an assignment-expression target. Using an undeclared identifier on the left-hand side of an assignment expression is E-ASSIGN-003.
 
-`const` variables are immutable; assigning to a `const` as an expression is E-ASSIGN-004 (same error as a statement-level `const` reassignment).
+`const` variables are immutable; assigning to a `const` as an expression is E-ASSIGN-004 (same error as a statement-level `const` reassignment). A binding is `const` when it was created without `let` — the keywordless bare naming statement `x = value` declares `x` exactly as `const x = value` does, so it is immutable on the same terms. See §50.8.5.
 
 `lin` variables have single-use semantics. Assigning to a `lin` variable as an expression counts as a re-assignment of the binding, which violates linear type rules. This is E-LIN-004 (using the `lin` error code series from §35). Assignment to a `lin` variable using the assignment-as-expression form does NOT count as the single required consumption — the consumption is always a read.
 
@@ -28021,7 +28021,9 @@ Note: This is a runtime safety guard. Undeclared identifiers in expression-posit
 
 #### 50.8.5 E-ASSIGN-004 — Assignment to `const` Variable
 
-**Trigger:** A `const` binding appears on the left-hand side of an assignment expression.
+**Trigger:** A `const` binding appears on the left-hand side of an assignment, in either statement or expression position.
+
+A binding is `const` when it was created WITHOUT `let`. That covers both the explicit keyword form (`const x = 1`) and the keywordless bare naming statement (`x = 1`), which declares `x` exactly as `const x = 1` does. `let` is the only form that produces a mutable binding.
 
 **Severity:** Error.
 
@@ -28031,7 +28033,59 @@ E-ASSIGN-004: `x` at line N is declared `const` and cannot be reassigned.
   Use `let` if the variable needs to be updated after initialization.
 ```
 
-This error applies equally to statement-form (`x = newValue` where `x` is `const`) and expression-form assignment.
+This error applies equally to statement-form (`x = newValue` where `x` is `const`) and expression-form assignment. Statement form includes the compound assignment operators, which per §50.12 are statement-only in scrml: `const x = 1` followed by `x += 1` is E-ASSIGN-004 on the same grounds as `x = 2`.
+
+A `const` freezes the BINDING, not the value it holds. Mutating a property reached through a `const` binding — `obj.field = 2` where `obj` is `const` — is NOT E-ASSIGN-004. Only a bare-identifier left-hand side names the binding itself.
+
+Worked examples — all six of these are E-ASSIGN-004:
+
+```scrml
+${
+    const a = 1
+    a = 2                  // explicit const, plain assignment
+}
+
+${
+    const b = 1
+    b += 1                 // explicit const, compound assignment (§50.12)
+}
+
+${
+    const c = 1
+    c = c + 1              // explicit const, self-referencing
+}
+
+${
+    d = 1                  // bare naming — declares `d` as const
+    d = 2                  // ...so this is a reassignment
+}
+
+${
+    e = 1
+    e += 1
+}
+
+${
+    f = 1
+    f = f + 1
+}
+```
+
+And the escape, which is `let` and only `let`:
+
+```scrml
+${
+    function accumulate(items) {
+        let total = 0
+        for (item of items) {
+            total = total + item    // legal, and legal on every iteration
+        }
+        return total
+    }
+}
+```
+
+A `let` binding stays mutable for its whole lifetime. Reassigning it any number of times is legal; the FIRST reassignment does not convert it to a `const`.
 
 ### 50.9 Normative Statements
 
@@ -28044,7 +28098,10 @@ This error applies equally to statement-form (`x = newValue` where `x` is `const
 - When `=` appears as the root expression of a `while`, `if`, or `else-if` condition without double parentheses, the compiler SHALL emit W-ASSIGN-001. (§50.2.3)
 - When `=` appears at a non-root position in a condition expression tree, W-ASSIGN-001 SHALL NOT be emitted. (§50.2.3)
 - The double-parentheses form `while ((x = expr))` is unambiguously intentional assignment. The compiler SHALL NOT emit W-ASSIGN-001 for this form. (§50.2.3)
-- An assignment expression to a `const` variable SHALL be a compile error (E-ASSIGN-004). (§50.8.5)
+- An assignment to a `const` variable SHALL be a compile error (E-ASSIGN-004), in statement position and in expression position alike. (§50.8.5)
+- A binding created without `let` SHALL be a `const` binding. The keywordless bare naming statement `x = value` declares `x` exactly as `const x = value` does; `let` is the only declaration form that produces a mutable binding. (§50.8.5)
+- A compound assignment (`+=`, `-=`, `*=`, `/=`, `%=`) whose target is a `const` binding SHALL be E-ASSIGN-004. Compound assignment is statement-only in scrml (§50.12), so this follows from the statement-form rule above. (§50.8.5)
+- Mutating a property reached through a `const` binding SHALL NOT be E-ASSIGN-004. `const` freezes the binding, not the value. (§50.8.5)
 - An assignment expression to an undeclared identifier SHALL be a compile error (E-ASSIGN-003). (§50.8.4)
 - Assignment-as-expression to an outer-scope variable from inside a `fn` body SHALL be E-FN-003, identical to statement-form assignment. The expression form does not affect the outer-scope mutation prohibition. (§50.5.2)
 - Assignment to a `lin` variable using the expression form is not a valid consumption. It is a re-assignment and SHALL be E-LIN-004. (§50.6)
@@ -28185,7 +28242,7 @@ E-ASSIGN-001: `let` declaration at line 3 appears in an expression position.
 | E-ASSIGN-001 | `let`, `const`, or `lin` declaration form appears in an expression position | Error |
 | E-ASSIGN-002 | Type mismatch in chained assignment — value type not assignable to all lvalues | Error |
 | E-ASSIGN-003 | Undeclared identifier used as assignment expression target | Error |
-| E-ASSIGN-004 | `const` variable used as assignment expression target | Error |
+| E-ASSIGN-004 | `const` variable used as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`) | Error |
 
 ### 50.12 Interaction Notes
 
