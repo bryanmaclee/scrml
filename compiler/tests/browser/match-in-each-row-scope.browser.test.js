@@ -369,3 +369,121 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — mounted", () =
     expect(lift.rows()).toEqual(["x-oney-one", "B:two"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 2 (review of 92c6198b, HIGH): a click inside an arm must follow EXACTLY
+// the order and propagation of the same markup outside the match. Round 1
+// attached arm-name-reading clicks as element listeners while the rest of the
+// arm stayed delegated to `document`, so an OUTER arm handler fired BEFORE an
+// INNER delegated one and `stopPropagation()` in the inner could not stop it.
+//
+// Each case runs twice — the arm version and its non-match TWIN (the identical
+// markup directly in the `<each>` row, or directly on the page) — and both must
+// produce the same log. Separate tests: a mounted program leaves its document-
+// level delegation listener behind, so two mounts in one test would interfere.
+// ---------------------------------------------------------------------------
+
+const LOG_DECLS = `<log> = ""
+  function lg(s) { @log = @log + s + ";" }
+  function stp(s, e) { e.stopPropagation(); @log = @log + s + ";" }
+  <p id="log">\${@log}</p>`;
+
+/** Builders take the arm name to read (`g.id` / `note`), or its twin's stand-in. */
+const ROW_CASES = [
+  ["both arm-bound", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "inner1;outer1;"],
+  ["inner delegated + outer arm-bound", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=lg("inner")>x</button></div>`, "inner;outer1;"],
+  ["inner arm-bound + outer delegated", (n) => `<div class="o" onclick=lg("outer")><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "inner1;outer;"],
+  ["stopPropagation in the inner", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=stp("inner", event)>x</button></div>`, "inner;"],
+  ["stopPropagation in the outer", (n) => `<div class="o" onclick=stp("outer", event)><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "inner1;outer;"],
+];
+
+function rowProgram(inner, asArm, rowAttr = "") {
+  const body = asArm
+    ? `<match for=Kind on=g.kind><A>${inner}</><B><b>B</b></></match>`
+    : inner;
+  return `<program>
+  type Kind:enum = { A, B }
+  <groups> = [{ id: 1, kind: Kind.A }]
+  ${LOG_DECLS}
+  <ul><each in=@groups key=@.id as g><li class="row"${rowAttr}>${body}</li></each></ul>
+</program>
+`;
+}
+
+const PAGE_CASES = [
+  ["both arm-bound", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "innerhi;"],
+  ["inner delegated + outer arm-bound (the review's t2)", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=lg("inner")>x</button></div>`, "inner;"],
+  ["inner arm-bound + outer delegated", (n) => `<div class="o" onclick=lg("outer")><button class="i" onclick=lg("inner" + ${n})>x</button></div>`, "innerhi;"],
+  ["stopPropagation in the inner", (n) => `<div class="o" onclick=lg("outer" + ${n})><button class="i" onclick=stp("inner", event)>x</button></div>`, "inner;"],
+];
+
+function pageProgram(inner, asArm) {
+  const body = asArm
+    ? `<match for=St on=@st><Idle><p>idle</p></><Busy note>${inner}</></match>`
+    : inner;
+  return `<program>
+  type St:enum = { Idle, Busy(note: string) }
+  <st> = St.Busy("hi")
+  ${LOG_DECLS}
+  ${body}
+</program>
+`;
+}
+
+function clickLog(src, sel) {
+  const app = mount(src);
+  expect(app.errs).toEqual([]);
+  expect(app.initError).toBeNull();
+  const origErr = console.error;
+  const errs = [];
+  console.error = (...a) => { errs.push(a.map(String).join(" ")); };
+  try { app.click(app.q(sel)); } finally { console.error = origErr; }
+  expect(errs).toEqual([]);
+  return app.get("log");
+}
+
+describe("round 2 — click order inside an arm in an <each> row matches the same markup directly in the row", () => {
+  for (const [name, build, expected] of ROW_CASES) {
+    test(`${name} — in a <match> arm`, () => {
+      expect(clickLog(rowProgram(build("g.id"), true), "button.i")).toBe(expected);
+    });
+    test(`${name} — twin (no match)`, () => {
+      expect(clickLog(rowProgram(build("g.id"), false), "button.i")).toBe(expected);
+    });
+  }
+  test("row-level onclick on the <li> around an arm button — in a <match> arm", () => {
+    expect(clickLog(rowProgram(`<button class="i" onclick=lg("btn" + g.id)>x</button>`, true, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn1;row1;");
+  });
+  test("row-level onclick on the <li> around a button — twin (no match)", () => {
+    expect(clickLog(rowProgram(`<button class="i" onclick=lg("btn" + g.id)>x</button>`, false, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn1;row1;");
+  });
+  test("row-level onclick + stopPropagation in the arm button — in a <match> arm", () => {
+    expect(clickLog(rowProgram(`<button class="i" onclick=stp("btn", event)>x</button>`, true, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn;");
+  });
+  test("row-level onclick + stopPropagation in the button — twin (no match)", () => {
+    expect(clickLog(rowProgram(`<button class="i" onclick=stp("btn", event)>x</button>`, false, ` onclick=lg("row" + g.id)`), "button.i")).toBe("btn;");
+  });
+  test("a submit handler reading the row runs, with preventDefault (compiled clean and threw at submit before)", () => {
+    const app = mount(rowProgram(`<form class="f" onsubmit=lg("save" + g.id)><button type="submit">s</button></form>`, true));
+    expect(app.errs).toEqual([]);
+    expect(app.initError).toBeNull();
+    const ev = new window.Event("submit", { bubbles: true, cancelable: true });
+    app.q("form.f").dispatchEvent(ev);
+    expect(app.get("log")).toBe("save1;");
+    expect(ev.defaultPrevented).toBe(true);
+  });
+});
+
+describe("round 2 — click order inside an arm outside any <each> matches the same markup on the page (delegation)", () => {
+  for (const [name, build, expected] of PAGE_CASES) {
+    test(`${name} — in a <match> arm`, () => {
+      expect(clickLog(pageProgram(build("note"), true), "button.i")).toBe(expected);
+    });
+    test(`${name} — twin (no match)`, () => {
+      expect(clickLog(pageProgram(build(`"hi"`), false), "button.i")).toBe(expected);
+    });
+  }
+  test("the outer arm-bound handler runs when its own element is clicked", () => {
+    expect(clickLog(pageProgram(PAGE_CASES[1][1]("note"), true), "div.o")).toBe("outerhi;");
+  });
+});

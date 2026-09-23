@@ -17,7 +17,10 @@
  *   - every arm wire fn takes them after the payload bindings (a payload binding
  *     of the same name shadows the row name);
  *   - the dispatcher's same-value short-circuit also compares the row values;
- *   - a delegable click that reads a wire-fn param is wired per arm;
+ *   - a delegable (click/submit) handler that must see arm names is compiled by
+ *     the SHARED event lowering into a hoisted factory and bound per arm entry:
+ *     every such handler in a ROW arm becomes an element listener (the row's own
+ *     contract); outside a row it runs from the delegation walker (round 2);
  *   - an `<each>` in such an arm renders through `_scrml_each_arm_render_<id>(_root, …)`.
  *
  * Mounted behaviour: compiler/tests/browser/match-in-each-row-scope.browser.test.js.
@@ -121,19 +124,43 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     expect(dispatch.body).toMatch(/_wire_Held\(_mount, _data && _data\["g"\]\)/);
   });
 
-  test("a delegable click that reads the row is wired per arm, not delegated; one that does not stays delegated", () => {
+  test("in a ROW arm every delegable handler becomes an element listener (the row's own contract), built by the shared lowering as a hoisted factory", () => {
     const { errors, js } = compile(program(
-      `<match for=Kind on=g.kind><A><button onclick=pick(g.name)>r</button></><B><button onclick=pick("static")>s</button></></match>`,
+      `<match for=Kind on=g.kind><A><div onclick=pick(g.name)><button onclick=pick("static")>s</button></div></><B><b>B</b></></match>`,
       `<picked> = ""\n  function pick(n) { @picked = n }`,
     ));
     expect(errors).toEqual([]);
+    // the handler bodies come from emit-event-wiring's lowering (fnNameMap-resolved)
+    expect(js).toMatch(/function _scrml_armh__scrml_attr_onclick_\d+\(g\) \{ return function\(event\) \{ _scrml_pick_\d+\(g\.name\); \}; \}/);
+    expect(js).toMatch(/function _scrml_armh__scrml_attr_onclick_\d+\(g\) \{ return function\(event\) \{ _scrml_pick_\d+\("static"\); \}; \}/);
+    // hoisted at chunk scope, ahead of the boot IIFE (the row's arm wires at module init)
+    expect(js.indexOf("function _scrml_armh_")).toBeLessThan(js.indexOf("function _scrml_boot()"));
     const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
-    expect(wireA.body).toMatch(/el\.addEventListener\("click", _h\)/);
-    expect(wireA.body).toMatch(/_scrml_pick_\d+\(g\.name\)/);
-    // the global delegation table carries only the row-free handler
+    expect((wireA.body.match(/el\.addEventListener\("click", _h\)/g) ?? []).length).toBe(2);
+    // nothing of this arm is left in the document-level delegation table
+    expect(js).not.toContain("const _scrml_click = {");
+  });
+
+  test("outside a row, an arm handler reading a payload binding runs from the delegation WALKER; identifier-level check (a string literal is not a read)", () => {
+    const { errors, js } = compile(`<program>
+  type St:enum = { Idle, Busy(note: string) }
+  <st> = St.Busy("hi")
+  <log> = ""
+  function lg(s) { @log = @log + s }
+  <match for=St on=@st><Idle><p>i</p></><Busy note><div onclick=lg(note)><button onclick=lg("note")>l</button></div></></match>
+</program>
+`);
+    expect(errors).toEqual([]);
+    // `lg("note")` reads no arm name: a plain registry entry
     const table = /const _scrml_click = \{([\s\S]*?)\n  \};/.exec(js)?.[1] ?? "";
-    expect(table).toContain(`("static")`);
-    expect(table).not.toContain("g.name");
+    expect(table).toMatch(/_scrml_lg_\d+\("note"\)/);
+    // `lg(note)` is an arm-bound factory, stored on the element by the wire fn
+    expect(js).toMatch(/function _scrml_armh__scrml_attr_onclick_\d+\(note\) \{ return function\(event\) \{ _scrml_lg_\d+\(note\); \}; \}/);
+    const wire = fnSource(js, /_scrml_match_match_\w+_wire_Busy/);
+    expect(wire.body).toMatch(/el\["__scrml_arm_onclick"\] = _scrml_armh__scrml_attr_onclick_\d+\(note\);/);
+    expect(wire.body).not.toContain("addEventListener");
+    // …and the walker runs it at the same point of the walk as a registry handler
+    expect(js).toContain(`if (id && t["__scrml_arm_onclick"]) { t["__scrml_arm_onclick"].call(_scrml_click, event); return; }`);
   });
 
   test("an <each> in the arm renders through a file-scope fn taking the arm scope, run by the wire fn (was: no render fn at all)", () => {

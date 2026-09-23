@@ -89,7 +89,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
-import { emitValueAttrApply } from "./emit-event-wiring.ts";
+import { emitValueAttrApply, armHandlerFactoryName } from "./emit-event-wiring.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -430,6 +430,7 @@ function emitArmWireFunction(
   payloadBindings: string[] = [],
   rowScope: string[] = [],
   scopedEaches: Array<{ fnName: string; params: string[] }> = [],
+  itemScoped = false,
 ): string {
   // Lazy import for the same circular-dep reasons as emitArmRenderFunction.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -494,8 +495,9 @@ function emitArmWireFunction(
   // behave identically — while a miss would leave a stale value or a
   // ReferenceError.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { referencesFreeIdent: _refsFree } = require("./emit-each.ts") as {
+  const { referencesFreeIdent: _refsFree, blankStringAndRegexLiterals: _blankLits } = require("./emit-each.ts") as {
     referencesFreeIdent: (code: string, name: string) => boolean;
+    blankStringAndRegexLiterals: (code: string) => string;
   };
   const _readsAny = (code: string, names: string[]): boolean => {
     if (names.length === 0 || !code) return false;
@@ -508,34 +510,82 @@ function emitArmWireFunction(
   // the dispatcher's row-scope short-circuit.)
   const readsRow = (code: string): boolean => _readsAny(code, rowScope);
 
-  // In-scope event bindings: non-delegable events — plus (g-match-inside-each-
-  // row-cannot-see-the-row-variable) a DELEGABLE `click` whose handler reads a
-  // name only THIS function binds (a payload binding or a row name). Document-
-  // level delegation runs the handler at module scope, where that name does not
-  // exist: `onclick=pick(g.name)` in a row's arm threw `ReferenceError: g is not
-  // defined` on every click (and `onclick=pick(note)` over a payload binding
-  // did the same). Such a handler is attached per arm entry here, closing over
-  // the parameters; `armWired` tells emit-event-wiring to leave it out of the
-  // global delegation table. A click handler that reads neither stays delegated
-  // (byte-identical). `submit` stays delegated unconditionally (its global
-  // path carries form-specific lowering this per-element path does not).
-  const _handlerText = (b: any): string => {
-    const parts: string[] = [];
-    if (typeof b.handlerExpr === "string") parts.push(b.handlerExpr);
-    for (const a of (b.handlerArgs ?? []) as unknown[]) {
-      parts.push(typeof a === "string" ? a : JSON.stringify(a ?? null));
-    }
-    return parts.join(" , ");
-  };
+  // In-scope event bindings: only non-delegable events.
   const wireableEvents = eventBindings.filter((b) => {
     const domEvent = (b.eventName || "").replace(/^on/, "");
-    if (!DELEGABLE_EVENTS.has(domEvent)) return true;
-    if (domEvent === "click" && !b.bareRefHandler && _readsAny(_handlerText(b), armParams)) {
-      b.armWired = true;
-      return true;
-    }
-    return false;
+    return !DELEGABLE_EVENTS.has(domEvent);
   });
+
+  // g-match-inside-each-row-cannot-see-the-row-variable — DELEGABLE events
+  // (click, submit) in this arm whose handler cannot run from the module-scope
+  // delegation table because it reads a name only THIS function binds (a
+  // payload binding or a row name): `onclick=pick(g.name)` in a row's arm threw
+  // `ReferenceError: g is not defined` on every click, and `onclick=pick(note)`
+  // over a payload binding did the same, in any arm.
+  //
+  // ONE handler lowering: emit-event-wiring still compiles the handler exactly
+  // as it compiles every delegated handler (fnNameMap, formFor submit,
+  // preventDefault, engine routing …), but — because `armParams` is set — as a
+  // hoisted chunk-scope FACTORY `function <armHandlerFactoryName(id)>(...armParams)
+  // { return <handler>; }` instead of a registry entry. This function binds the
+  // factory to its parameters and hands the handler to ONE of the two event
+  // contracts scrml already has, chosen to match the arm body's markup twin:
+  //   - "walker" (an arm NOT inside an `<each>` row): the handler is stored on
+  //     the element and the document-level delegation walker runs it exactly
+  //     where it runs a registry handler — innermost element with a handler
+  //     wins, the walk stops (the same order / propagation / `this` as the
+  //     identical markup outside the arm);
+  //   - "native" (an item-scoped arm, inside an `<each>` row): EVERY delegable
+  //     handler in the arm is attached to its element with addEventListener,
+  //     exactly as the row's own per-item handlers are (emit-each) — inner first,
+  //     both fire, `stopPropagation()` honoured, including against a row-level
+  //     `onclick` around the match. Mixing the two contracts inside one row (an
+  //     inner delegated button under an outer element listener) fired OUTER
+  //     before INNER (review of 92c6198b).
+  // A handler outside an item-scoped arm that reads no arm name stays a plain
+  // delegated registry entry (byte-identical).
+  const armParamSet = new Set(armParams);
+  const handlerReadsArmName = (b: any): boolean => {
+    if (armParamSet.size === 0) return false;
+    // Identifier-level: an arm name inside a string literal (`lit("note")`) is
+    // not a read. Prefer the parsed ExprNodes; fall back to literal-blanked text
+    // (unblanked when it carries a template literal, whose `${…}` IS a read).
+    const idents = new Set<string>();
+    const collect = (n: any): void => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const x of n) collect(x); return; }
+      if (n.kind === "ident" && typeof n.name === "string") idents.add(n.name);
+      for (const k of Object.keys(n)) if (k !== "span") collect(n[k]);
+    };
+    const textReads = (text: string): boolean =>
+      _readsAny(text.includes("`") ? text : _blankLits(text), armParams);
+    if (typeof b.handlerExpr === "string" && b.handlerExpr.length > 0) {
+      if (b.handlerExprNode) collect(b.handlerExprNode);
+      else if (textReads(b.handlerExpr)) return true;
+    }
+    const args = (b.handlerArgs ?? []) as unknown[];
+    const argNodes = b.handlerArgExprNodes as unknown[] | undefined;
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i] as any;
+      if (argNodes && argNodes[i]) collect(argNodes[i]);
+      else if (typeof a === "string") { if (textReads(a)) return true; }
+      else if (a && a.kind === "variable-ref" && typeof a.name === "string") idents.add(a.name.split(".")[0]);
+    }
+    for (const n of idents) if (armParamSet.has(n.split(".")[0])) return true;
+    return false;
+  };
+  const armDelegated: Array<{ binding: any; domEvent: string; mode: "walker" | "native" }> = [];
+  for (const b of eventBindings) {
+    const domEvent = (b.eventName || "").replace(/^on/, "");
+    if (!DELEGABLE_EVENTS.has(domEvent)) continue;
+    const mode: "walker" | "native" | null = itemScoped
+      ? "native"
+      : (handlerReadsArmName(b) ? "walker" : null);
+    if (mode === null) continue;
+    b.armParams = [...armParams];
+    b.armWiredMode = mode;
+    armDelegated.push({ binding: b, domEvent, mode });
+  }
   // render-expr-primitive — `<render of=X/>` bindings tagged with THIS arm
   // context. The held value X is commonly the arm's own payload binding
   // (`<Failed err> <render of=err/>`), so it is a wire-fn parameter and is in
@@ -634,7 +684,7 @@ function emitArmWireFunction(
     wireableLogic.length === 0 && wireableEvents.length === 0 &&
     wireableRenders.length === 0 && wireableDirectives.length === 0 &&
     wireableBinds.length === 0 && wireableValueAttrs.length === 0 &&
-    wireableLifts.length === 0 && scopedEaches.length === 0
+    wireableLifts.length === 0 && scopedEaches.length === 0 && armDelegated.length === 0
   ) {
     return `function ${wireFnName}(${wireParams}) { return function() {}; }`;
   }
@@ -901,6 +951,31 @@ function emitArmWireFunction(
   // arm on the next variant switch.
   for (const se of scopedEaches) {
     lines.push(`  _disposers.push(_scrml_effect(function() { ${se.fnName}(${["_root", ...se.params].join(", ")}); }));`);
+  }
+
+  // ---- delegable events bound to this arm's scope (see `armDelegated`) ----
+  // The handler is built by emit-event-wiring's own lowering as the hoisted
+  // factory `armHandlerFactoryName(id)`; bind it to this arm's parameters here.
+  for (const { binding, domEvent, mode } of armDelegated) {
+    const eventName = binding.eventName as string;
+    const factory = armHandlerFactoryName(binding.placeholderId as string);
+    lines.push(`  {`);
+    lines.push(`    const el = _root.querySelector('[data-scrml-bind-${eventName}=${JSON.stringify(binding.placeholderId)}]');`);
+    lines.push(`    if (el) {`);
+    if (mode === "walker") {
+      // Run by the document-level delegation walker (emit-event-wiring), at the
+      // same point of the walk a registry handler would run.
+      const prop = JSON.stringify(`__scrml_arm_${eventName}`);
+      lines.push(`      el[${prop}] = ${factory}(${armParams.join(", ")});`);
+      lines.push(`      _disposers.push(function() { el[${prop}] = null; });`);
+    } else {
+      // An element listener, exactly like a row's own per-item handler.
+      lines.push(`      const _h = ${factory}(${armParams.join(", ")});`);
+      lines.push(`      el.addEventListener(${JSON.stringify(domEvent)}, _h);`);
+      lines.push(`      _disposers.push(function() { el.removeEventListener(${JSON.stringify(domEvent)}, _h); });`);
+    }
+    lines.push(`    }`);
+    lines.push(`  }`);
   }
 
   // ---- Event bindings: addEventListener + remover dispose ----
@@ -1215,6 +1290,7 @@ export function emitVariantGuardedRender(
     // <binding>` expressions resolve as bound parameters, not free vars.
     wireFnLines.push(emitArmWireFunction(
       wireFnName, armContextId, ctx, arm.payloadBindings, armRowScope(arm), arm.scopedEaches ?? [],
+      opts.itemScopedDispatch === true,
     ));
   }
   const wireFunctionsJs = wireFnLines.join("\n\n");

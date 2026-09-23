@@ -244,6 +244,16 @@ interface LogicBinding {
 const DELEGABLE_EVENTS = new Set(["click", "submit"]);
 
 /**
+ * g-match-inside-each-row-cannot-see-the-row-variable — the name of the hoisted
+ * factory an arm-bound delegable handler is compiled into (see `armBoundById` in
+ * emitEventWiring; bound per arm entry by emit-variant-guard.ts). Shared so the
+ * two sides cannot drift.
+ */
+export function armHandlerFactoryName(placeholderId: string): string {
+  return `_scrml_armh_${String(placeholderId).replace(/[^A-Za-z0-9_$]/g, "_")}`;
+}
+
+/**
  * Find the matching closing brace/paren/bracket starting at `openPos`.
  * Returns the index of the closing character, or -1 if not found.
  */
@@ -423,11 +433,6 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   //     the global delegation registry regardless of arm tag.
   const eventBindings = allEventBindings.filter((b) => {
     if (!b.engineArm) return true;
-    // g-match-inside-each-row-cannot-see-the-row-variable — a delegable click
-    // whose handler reads an arm payload binding / enclosing row name is wired
-    // PER ARM by emitArmWireFunction (the only place those names are bound);
-    // delegating it too would run it at module scope → ReferenceError.
-    if ((b as any).armWired === true) return false;
     const domEvent = (b.eventName || "").replace(/^on/, "");
     // Delegable events stay in global registry; non-delegable arm-tagged
     // events are re-emitted by emitArmWireFunction.
@@ -1236,6 +1241,44 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     byEventType.get(eventName)!.push({ placeholderId, handlerExpr });
   }
 
+  // g-match-inside-each-row-cannot-see-the-row-variable — a delegable handler
+  // in a match / engine arm that emitArmWireFunction bound to the arm's scope
+  // (`armParams` set; see `armDelegated` there). Its handler is compiled ABOVE
+  // by exactly the same lowering as every delegated handler, but it reads names
+  // only the arm's wire fn binds (payload bindings, enclosing row names), so it
+  // cannot sit in the module-scope registry. Move it out into a hoisted
+  // chunk-scope FACTORY taking those names; the wire fn binds it per arm entry
+  // and either stores it on the element for the delegation walker below
+  // ("walker") or attaches it as an element listener ("native", an arm inside
+  // an `<each>` row — the row's own handler contract). No arm-bound handler →
+  // nothing here changes (byte-identical).
+  const armBoundById = new Map<string, EventBinding>();
+  for (const b of eventBindings) {
+    if (Array.isArray((b as any).armParams)) armBoundById.set(b.placeholderId, b);
+  }
+  const armFactoryLines: string[] = [];
+  const armWalkerEvents = new Set<string>();
+  if (armBoundById.size > 0) {
+    for (const [eventName, entries] of [...byEventType]) {
+      const keep: typeof entries = [];
+      for (const e of entries) {
+        const b = armBoundById.get(e.placeholderId);
+        if (!b) { keep.push(e); continue; }
+        armFactoryLines.push(
+          `function ${armHandlerFactoryName(e.placeholderId)}(${((b as any).armParams as string[]).join(", ")}) { return ${e.handlerExpr}; }`,
+        );
+        if ((b as any).armWiredMode === "walker") armWalkerEvents.add(eventName);
+      }
+      if (keep.length > 0 || armWalkerEvents.has(eventName)) byEventType.set(eventName, keep);
+      else byEventType.delete(eventName);
+    }
+    // Hoisted chunk-scope declarations: the wire fns that bind them run at
+    // module init (a row's arm dispatches while the row is built), before the
+    // boot below, so they must not live inside it.
+    const iifeAt = lines.indexOf("(function() {");
+    lines.splice(iifeAt === -1 ? 0 : iifeAt, 0, ...armFactoryLines);
+  }
+
   // Emit wiring — delegable events use document.addEventListener with ancestor
   // walk; non-delegable events use Approach A querySelectorAll + forEach.
   //
@@ -1358,6 +1401,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       lines.push(`    while (t && t !== document) {`);
       lines.push(`      const id = t.getAttribute(${JSON.stringify("data-scrml-bind-" + eventName)});`);
       lines.push(`      if (id && ${registryVarName}[id]) { ${registryVarName}[id](event); return; }`);
+      if (armWalkerEvents.has(eventName)) {
+        // An arm-bound handler (see `armBoundById`) runs at the SAME point of
+        // the walk, with the same `this`, as a registry handler would.
+        const prop = JSON.stringify(`__scrml_arm_${eventName}`);
+        lines.push(`      if (id && t[${prop}]) { t[${prop}].call(${registryVarName}, event); return; }`);
+      }
       lines.push(`      t = t.parentElement;`);
       lines.push(`    }`);
       lines.push(`  });`);

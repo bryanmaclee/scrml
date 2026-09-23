@@ -3264,7 +3264,7 @@ function maybeWrapEachPerItemEffect(bodyLines: string[], iterVarName: string, in
  * it is intentionally conservative (an unterminated literal blanks to EOL/EOF,
  * which is safe — over-blanking can only DROP a match, never invent one).
  */
-function blankStringAndRegexLiterals(code: string): string {
+export function blankStringAndRegexLiterals(code: string): string {
   const out = code.split("");
   let i = 0;
   const n = code.length;
