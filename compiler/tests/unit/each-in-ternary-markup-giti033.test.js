@@ -389,3 +389,61 @@ describe("giti033 §7 — string literal with braces inside a ${…} text-body i
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// §8 — the runtime that ships DEFINES what the client calls (S429).
+// The ternary-markup each is invisible to the pre-emit chunk walk, so the
+// `reconciliation` chunk was tree-shaken while the client called
+// `_scrml_reconcile_list(` → ReferenceError at init, empty page, exit 0.
+// Every case above asserted the CLIENT shape; none read the emitted runtime.
+// ---------------------------------------------------------------------------
+
+function emittedRuntime(tmpDir) {
+  const { readdirSync } = require("fs");
+  const outDir = resolve(tmpDir, "out");
+  return readdirSync(outDir)
+    .filter((n) => /^scrml-runtime.*\.js$/.test(n))
+    .map((n) => readFileSync(resolve(outDir, n), "utf8"))
+    .join("\n");
+}
+
+describe("giti033 §8 — the emitted runtime defines _scrml_reconcile_list when the client calls it", () => {
+  const shapes = {
+    "top-level ternary each (the conformance case)": `${DOLLAR}{
+    <rows> = [{ kind: "add", path: "a.txt" }, { kind: "mod", path: "b.txt" }]
+    <show> = true
+}
+<main id="root">
+    ${DOLLAR}{ @show ? <ul id="list">
+        <each in=@rows key=@.path>
+            <li class="row"><span class="tag tag-${DOLLAR}{@.kind}">${DOLLAR}{@.kind}</span></li>
+        </each>
+      </ul> : "" }
+</main>
+`,
+    "unkeyed ternary each over a const": `${DOLLAR}{
+    const names = ["a", "b"]
+    <show> = true
+}
+<main>
+    ${DOLLAR}{ @show ? <ul><each in=names><li>${DOLLAR}{@.}</li></each></ul> : "" }
+</main>
+`,
+  };
+  for (const [label, src] of Object.entries(shapes)) {
+    test(label, () => {
+      const r = compile(src, "giti033-s8");
+      try {
+        expect(codes(r.errors.filter((e) => (e.severity ?? "error") === "error"))).toEqual([]);
+        // The premise is asserted, not assumed — a missing client.js or a renamed
+        // call must fail here, not pass vacuously.
+        expect(r.clientJs.includes("_scrml_reconcile_list(")).toBe(true);
+        const rt = emittedRuntime(r.tmpDir);
+        expect(rt.includes("function _scrml_reconcile_list(")).toBe(true);
+        expect(rt.includes("function _scrml_effect_static(")).toBe(true);
+      } finally {
+        cleanup(r.tmpDir);
+      }
+    });
+  }
+});

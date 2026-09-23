@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 116 |
-| MED | 276 |
+| HIGH | 114 |
+| MED | 277 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -14418,7 +14418,7 @@ Found once TodoMVC's rows started rendering (S427). Same on base at top level (`
 assert labels only, so the app still LOOKS broken even though its rows now render.
 
 ### g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup — two pre-existing lift-body lowering defects: `n = n + 1` inside a `for…lift` over a reactive list is emitted as `const n = n + 1` (TDZ), and a destructured `const` in an outer-effect group is invisible to the keyed-list setup hoisted outside the effect — `NEW S427-peter; MED; open`
-<!-- @gap id=g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup sev=HIGH status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S427-dev-agent-reproduced-both-at-top-level-on-base-NOT-PA-verified -->
+<!-- @gap id=g-lift-body-assignment-lowered-to-const-and-destructured-const-invisible-to-keyed-setup sev=HIGH status=resolved locus=searched:compiler/src/codegen/emit-reactive-wiring.ts,compiler/src/codegen/emit-lift.js—not-traced prov=empirical:S427-dev-agent-reproduced-both-at-top-level-on-base-NOT-PA-verified -->
 
 Reported by the S427 dev agent, reproduced at top level on base by it; **not yet PA-verified** — re-reproduce
 before dispatching. Also reported, same status: a bare-expression display (e.g. a `~` initializer) sharing a lift
@@ -14440,6 +14440,22 @@ and dies at boot, which §50 rejects (corpus negative fixture `phase3-assign-exp
 scope-blind demotion of a working keyed list, a loud→silent predicate miss and push-staleness on the demoted
 path. **Round 2 is fully specified, with repros, in `docs/changes/s427-lift-body-lowering/review-round1/`.**
 ⚑ The const/lin case must fall back to base's LOUD failure: `E-ASSIGN-004` lives in bryan's OPEN #996.
+
+⛑ **S429-peter — RESOLVED (the two verified lowering defects), after five build rounds and four adversarial passes.**
+`let`-declared rebinds in a lift body now lower to assignments (`n = n + 1`, not `const n = n + 1`); block
+declarations stay visible to the hoisted keyed setup; an impure render loop (it writes an outer binding, incl.
+member writes `acc.n = …`) lowers to the plain loop, scope-aware (a nested `let n` is not the outer `n`); a write to a
+rendering loop's OWN binder takes effect only when the head is `for (let …)` — a `const` or keywordless binder write
+fails the compile (E-CODEGEN-INVALID-LOGIC naming the binder; ⚑ keywordless-binder mutability is PENDING bryan's
+ruling, §17.4a vs §50.8.5 — it stays loud until then). `const` reassignment is caught by #996's E-ASSIGN-004
+(merged into the branch; codegen no longer double-reports). The loop-head keyword reaches native-re-parsed bodies
+(components, match/engine arms) via the parser's own `declKind` → `letBinder` in `translate-stmt.js`
+`makeForStmtInOf` — NOT a source-text scan (round 4's scan misread block-relative spans in both directions; deleted).
+Corpus: 2 newly compile (the §50 restorations `phase1-let-bare-001`, `phase3-assign-expr-chained-080`), 0 newly fail,
+31 content diffs, all `let`-rebind sites. Spec + every round's repros: `docs/changes/s427-lift-body-lowering/`.
+The two agent-reported side items above (bare-expr display overwriting lifted children; textarea anchor in a match
+arm in `if=`) remain unverified and are NOT claimed. Known and pinned, not fixed: an immediately-invoked closure that
+writes an outer binding in a keyed body (`[1].forEach(x => { n++ })`) still shares one counter (`3:a,3:b,3:c`).
 
 ⛑ **S427-peter — `g-lift-inside-each-row-or-match-arm-silently-dropped` RESOLVED (#1022).** Traced: the each-row
 drop was `emit-each.ts` `renderTemplateChildToJs` (a `for` statement fell to `inner = ""` with the comment
@@ -14477,8 +14493,8 @@ Corpus: 7475/7475 artifacts byte-identical to main. Not fixed (filed/recorded se
 arm-only name; `<engine>` inside an `<each>` row; a nested `<match>` in a dispatched arm; per-item effects of
 arm-hosted eaches leaking on arm switch.
 
-### g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime — the conformance case passes while its emitted program dies at init: the runtime ships without the reconciliation chunk — `NEW S427-peter; HIGH; open`
-<!-- @gap id=g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES — no unscoped `_scrml_reconcile_list(` gate) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-_scrml_reconcile_list-is-not-defined-mounting-conformance-cases-each-ternary-markup-giti033 -->
+### g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime — the conformance case passes while its emitted program dies at init: the runtime ships without the reconciliation chunk — `NEW S427-peter; HIGH; RESOLVED S429-peter`
+<!-- @gap id=g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime sev=HIGH status=resolved locus=compiler/src/codegen/emit-client.ts(the post-emit `_scrml_reconcile_list(` gate — S427 scoped it to nested-lift files; now unconditional) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-_scrml_reconcile_list-is-not-defined-mounting-conformance-cases-each-ternary-markup-giti033 -->
 
 Mounting `conformance/cases/each/ternary-markup-giti033/case.scrml`'s emit: `ReferenceError: _scrml_reconcile_list
 is not defined` at init; `<main>` renders empty. **Two defects:** the missing chunk gate (a one-line unscoped
@@ -14495,6 +14511,29 @@ carry a runtime half, and every one is structurally blind to chunk-gating defect
 missing from a runtime that ships all of them). The §8 unproven-gate shape at tier scale. Switching the adapter
 to the emitted runtime may turn cases red and is a change to the conformance instrument (bryan's lane):
 surface it, do not switch unilaterally. The one-line `_scrml_reconcile_list(` gate for this case is separate.
+
+⚑ **S429-peter — RESOLVED (the compiler half).** The post-emit `_scrml_reconcile_list(` gate in
+`compiler/src/codegen/emit-client.ts` is now unconditional: the emitted client text is ground truth for
+every producer, and an `<each>` inside a ternary-markup ExprNode is one the pre-emit walk never descends.
+Mounted: both rows render, `initError: null`. Pinned by `each-in-ternary-markup-giti033.test.js` §8
+(reads the EMITTED runtime — every earlier case asserted only the client shape; bite-tested, both shapes
+fail on the pre-fix emitter). ⚑ **The class, measured:** a sweep of all 1,797 corpus `.scrml` files
+(samples/compilation-tests + conformance/cases + examples) for any `_scrml_*` CALLED in the client and
+DEFINED in neither the emitted runtime nor the client found this file as the ONLY unguarded instance
+(`_scrml_reconcile_list` + `_scrml_each_clear` + `_scrml_resolve_item`, one chunk); every other hit is a
+`typeof … === "function"` guard or a comment. Zero at head. The conformance-adapter half is split out to
+[[g-conformance-runtime-tier-mounts-the-full-runtime-blind-to-chunk-gating]].
+
+### g-conformance-runtime-tier-mounts-the-full-runtime-blind-to-chunk-gating — every runtime-half conformance case runs against the full runtime template, so no case can see a tree-shaken chunk — `NEW S429-peter (split from giti033); MED; open; bryan's lane (the conformance instrument)`
+<!-- @gap id=g-conformance-runtime-tier-mounts-the-full-runtime-blind-to-chunk-gating sev=MED status=open locus=conformance/adapters/impl1-ts.ts(imports SCRML_RUNTIME from runtime-template.js and concatenates it — never the tree-shaken runtime the compiler emits) prov=empirical:S427-peter-measured-215-of-898-cases-carry-a-runtime-half-giti033-passed-against-a-program-that-could-not-boot -->
+
+Split from `g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime` when its compiler half was fixed
+(S429). ~215 of 898 cases carry a runtime half and all of them mount the FULL runtime, so a missing chunk
+cannot be missing — giti033 passed its `domAnchored` expectations while its real emit threw at init. Switching
+the adapter to the emitted runtime may turn cases red and changes the conformance instrument: **bryan's lane —
+surfaced, not switched.** Per-shape tests that mount the emitted runtime (e.g. `each-runtime-bug-57`) cover individual shapes;
+the S429 undefined-helper sweep (called-but-undefined `_scrml_*` over the whole corpus) is the only
+CORPUS-WIDE instrument for this class, and it is not in any CI job.
 
 ### g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings — four pre-existing each/arm defects reported by the S427 dev agent — `NEW S427-peter; MED; open`
 <!-- @gap id=g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:S427-dev-agent-reproduced-each-on-base-with-the-display-twin-NOT-PA-verified -->
@@ -17288,6 +17327,11 @@ compiles. Same shape as §8's unproven gate: a test that cannot fail for the rea
 
 — NEW S422-bryan (surfaced by the E-ASSIGN-004 build; agent-located, PA-reproduced with a four-way control on unmodified main)
 <!-- @gap id=g-top-level-logic-reassignment-lowers-as-a-fresh-const-so-the-let-escape-fails-there sev=HIGH status=open locus=compiler/src/codegen/emit-reactive-wiring.ts:358(top-level emitOpts omits declaredNames so the emit-logic.ts:2097 reassignment guard is dead)+emit-reactive-wiring.ts:1361,:1852+emit-library.ts:2097,:2109 prov=empirical:PA-reproduced-by-execution-on-unmodified-main-with-a-four-way-control-increment-and-state-cell-and-in-function-all-clean-only-the-equals-assignment-form-fails -->
+
+⛑ **S429-peter — the `let` FORM is fixed by the S429 lift-body PR, PA-verified by execution:** `${ let n = 1 }` then
+`${ n = 2 }` (and the same inside one block) failed the compile on `87c2df3e` (E-CODEGEN-INVALID-LOGIC, duplicate
+declaration) and renders `2` on the branch — the declared-name set now reaches the top-level emit path. **Status left
+OPEN** for the function-parameter half (`function f(p) { p = 3 }`), which that PR does not touch.
 
 
 ### G-E-ASSIGN-004-NEVER-FIRES-IN-EVENT-HANDLER-ATTRIBUTE-POSITION — a `const` reassignment inside `onclick=${…}` compiles at exit 0 and throws `TypeError` on the first click
