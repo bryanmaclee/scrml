@@ -672,6 +672,8 @@ export class BindingRegistry {
    * The innermost arm context is the one stamped (top of stack).
    */
   private _armContextStack: string[];
+  /** Parallel to `_armContextStack` — see `currentArmNames`. */
+  private _armNamesStack: Array<readonly string[]>;
 
   /**
    * g-call-expression-interpolation-in-if-chain-branch-renders-empty —
@@ -690,6 +692,7 @@ export class BindingRegistry {
     this._eventBindings = [];
     this._logicBindings = [];
     this._armContextStack = [];
+    this._armNamesStack = [];
     this._mountTemplateDepth = 0;
   }
 
@@ -764,8 +767,9 @@ export class BindingRegistry {
    *
    * Format: `"<engineVarName>:<armTag>"` (e.g. `"phase:Showing"`).
    */
-  pushArmContext(armId: string): void {
+  pushArmContext(armId: string, armNames: readonly string[] = []): void {
     this._armContextStack.push(armId);
+    this._armNamesStack.push(armNames);
   }
 
   /**
@@ -775,6 +779,19 @@ export class BindingRegistry {
    */
   popArmContext(): void {
     this._armContextStack.pop();
+    this._armNamesStack.pop();
+  }
+
+  /**
+   * g-arm-directive-binding-reads-arm-name — the names the innermost arm's
+   * render / wire fns bind as PARAMETERS (its payload bindings, then the
+   * enclosing `<each>` row names), pushed alongside the arm context. Empty
+   * outside an arm, or when the caller passed none. emit-html uses it to lower
+   * an unquoted `attr=name` / `attr=name.prop` whose root is one of these as a
+   * runtime read (SPEC §5.2) instead of a static attribute string.
+   */
+  get currentArmNames(): readonly string[] {
+    return this._armNamesStack.length === 0 ? [] : (this._armNamesStack[this._armNamesStack.length - 1] ?? []);
   }
 
   /**
