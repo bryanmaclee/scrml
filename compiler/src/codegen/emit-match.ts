@@ -1321,24 +1321,77 @@ function preparePayloadScopedArmEaches(
   if ((matchBlock as any).__scrmlPayloadEachesPrepared) return;
   (matchBlock as any).__scrmlPayloadEachesPrepared = true;
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { referencesFreeIdent } = require("./emit-each.ts") as {
+  const { referencesFreeIdent, blankStringAndRegexLiterals } = require("./emit-each.ts") as {
     referencesFreeIdent: (blanked: string, name: string) => boolean;
+    blankStringAndRegexLiterals: (code: string) => string;
   };
-  const stringsOf = (root: any): string => {
-    const texts: string[] = [];
+  // Identifier-level (review of 09265ab0): does the subtree READ any of `names`
+  // in an EXPRESSION position? Only expression carriers are consulted — ExprNode
+  // `ident`s, and, where no parsed node exists, the text of an expression field
+  // with string literals blanked. Tag names, attribute strings, class names and
+  // free text never count (a raw-string scan rerouted `<p>` for a payload `p`,
+  // and `class="note"` for a payload `note`).
+  const readsAnyName = (root: any, names: string[]): boolean => {
     const seen = new WeakSet<object>();
-    const collect = (n: any): void => {
-      if (typeof n === "string") { texts.push(n); return; }
-      if (!n || typeof n !== "object" || seen.has(n)) return;
-      seen.add(n);
-      if (Array.isArray(n)) { for (const x of n) collect(x); return; }
-      for (const k of Object.keys(n)) {
-        if (k === "span" || k.startsWith("__scrml")) continue;
-        collect((n as Record<string, unknown>)[k]);
+    let hit = false;
+    const textReads = (text: unknown): void => {
+      if (hit || typeof text !== "string" || text.length === 0) return;
+      const code = text.includes("`") ? text : blankStringAndRegexLiterals(text);
+      if (names.some((nm) => referencesFreeIdent(code, nm))) hit = true;
+    };
+    const interpolations = (s: string): void => {
+      const re = /\$\{/g;
+      let m: RegExpExecArray | null;
+      while (!hit && (m = re.exec(s)) !== null) {
+        let depth = 1;
+        let j = m.index + 2;
+        for (; j < s.length && depth > 0; j++) {
+          if (s[j] === "{") depth++;
+          else if (s[j] === "}") depth--;
+        }
+        textReads(s.slice(m.index + 2, j - 1));
       }
     };
-    collect(root);
-    return texts.join("\n");
+    const visit = (n: any): void => {
+      if (hit || !n || typeof n !== "object" || seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+      switch (n.kind) {
+        case "text":
+        case "variable-ref": // a bare unquoted attr value renders as a static string (held-#81)
+          return;
+        case "ident":
+          if (typeof n.name === "string" && names.includes(n.name.split(".")[0])) hit = true;
+          return;
+        case "escape-hatch":
+          textReads(n.raw);
+          return;
+        case "call-ref":
+          if (typeof n.name === "string" && names.includes(n.name.split(".")[0])) { hit = true; return; }
+          for (const a of (n.args ?? []) as unknown[]) { if (typeof a === "string") textReads(a); else visit(a); }
+          return;
+        case "string-literal":
+          if (typeof n.value === "string" && n.value.includes("${")) interpolations(n.value);
+          return;
+        case "each-block":
+          textReads(n.inExprRaw);
+          textReads(n.ofExprRaw);
+          visit(n.templateChildren);
+          visit(n.emptyChild);
+          return;
+        default:
+          break;
+      }
+      // An expression-bearing node without a parsed ExprNode: read its text.
+      if ((n.kind === "expr" || n.kind === "bare-expr") && !n.exprNode) textReads(n.kind === "expr" ? n.raw : n.expr);
+      for (const k of Object.keys(n)) {
+        if (k === "span" || k.startsWith("__scrml")) continue;
+        const v = (n as Record<string, unknown>)[k];
+        if (v && typeof v === "object") visit(v);
+      }
+    };
+    visit(root);
+    return hit;
   };
   for (const arm of arms) {
     if (arm.payloadBindings.length === 0) continue;
@@ -1347,8 +1400,7 @@ function preparePayloadScopedArmEaches(
       if (!n || typeof n !== "object") return;
       if (Array.isArray(n)) { for (const x of n) visit(x); return; }
       if (n.kind === "each-block") {
-        const bodyText = stringsOf([n.templateChildren, n.emptyChild]);
-        if (arm.payloadBindings.some((p) => referencesFreeIdent(bodyText, p))) {
+        if (readsAnyName([n.templateChildren, n.emptyChild], arm.payloadBindings)) {
           const stamp = { fnName: `_scrml_each_arm_render_${nsId(n.id)}`, params: [...arm.payloadBindings] };
           (n as any).armScopedEach = stamp;
           scopedEaches.push(stamp);

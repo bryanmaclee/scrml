@@ -213,3 +213,47 @@ describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", (
     expect(fnSource(top.js, /__scrml_match_match_\w+_dispatch/).params).toBe("_v");
   });
 });
+
+// Round 4 (review of 09265ab0, LOW): an <each> in an arm OUTSIDE any row takes the
+// arm-scoped render path only when its body READS the arm payload in an
+// expression. The decision is identifier-level: a tag name, an attribute string,
+// a class name or free text that happens to spell the payload name is not a read.
+describe("round 4 — payload-read detection for an arm <each> is identifier-level", () => {
+  const armEach = (payload, eachBody) => `<program>
+  type Doc:enum = { Empty, Note(${payload}: string) }
+  <cur> = Doc.Note("P")
+  <list> = ["m", "n"]
+  <log> = ""
+  function f(a, b) { @log = @log + a + b }
+  <match for=Doc on=@cur>
+    <Empty><p>none</p></>
+    <Note(${payload})><div id="x"><each in=@list as it>${eachBody}</each></div></>
+  </match>
+</program>
+`;
+
+  test("v4: payload `p` spelled only by a tag name `<p>` — not rerouted", () => {
+    const { errors, js } = compile(armEach("p", `<p class="k">\${it}</p>`));
+    expect(errors).toEqual([]);
+    expect(js).not.toContain("_scrml_each_arm_render_");
+  });
+
+  test("v4b: payload `note` only as class=, title= and free text — not rerouted", () => {
+    const { errors, js } = compile(armEach("note", `<span class="note" title="note">\${it} note</span>`));
+    expect(errors).toEqual([]);
+    expect(js).not.toContain("_scrml_each_arm_render_");
+  });
+
+  for (const [label, body] of [
+    ["an interpolation", `<b>\${note}</b>`],
+    ["a call-ref handler arg", `<button onclick=f(note, it)>x</button>`],
+    ["an (expr) attribute", `<b data-n=(note)>x</b>`],
+    ["a quoted attribute template", `<b title="t-\${note}">x</b>`],
+  ]) {
+    test(`a real payload read through ${label} still reroutes`, () => {
+      const { errors, js } = compile(armEach("note", body));
+      expect(errors).toEqual([]);
+      expect(js).toMatch(/function _scrml_each_arm_render_\w+\(_root, note\)/);
+    });
+  }
+});
