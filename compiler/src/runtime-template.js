@@ -850,8 +850,42 @@ function _scrml_render_value(el, v) {
   }
 }
 
+// g-each-replaced-row-stops-receiving-in-place-edits (S429) — the value a cell
+// STORES must be the deep-reactive Proxy, whatever expression produced it.
+//
+// Field writes (row.name = x) reach the DOM only through the Proxy set trap.
+// Codegen wraps a cell write in _scrml_deep_reactive only when the right-hand
+// side is syntactically a literal ({...} / [...] / new ...), so any COMPUTED
+// write stored a raw container: @xs = @xs.map(...), a .filter / .slice / spread,
+// the clone that _scrml_deep_set builds for @xs[i] = v and @xs[i].f = v, the
+// in-place array a push / splice runs on after one of those, a fetched value.
+// Reads of that raw array hand out raw element objects, so a later edit
+// through one of them bypassed the trap: state changed, the DOM did not, and
+// nothing logged. The per-item effect was never the problem — it re-resolves
+// by key and subscribes to the NEW object; the write simply never fired.
+//
+// Wrapping here, at the one place every cell write goes through, closes the
+// whole class. Only plain arrays and plain objects are wrapped (a Proxy over a
+// Date / Map / DOM node / Promise / class instance breaks its methods), a
+// frozen value is left raw (_scrml_deep_reactive declines it: nothing can
+// change it, and a Proxy over it can violate the get-trap invariant), and an
+// existing Proxy passes through unchanged (_scrml_deep_reactive is identity-stable per backing object).
+// This is O(1) per write: the wrap is lazy, nested values are wrapped on
+// access, and nothing walks the rows. typeof-guarded because the
+// deep_reactive chunk ships only when the app has reactive objects at all.
+function _scrml_cell_value(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (typeof _scrml_deep_reactive !== "function") return value;
+  if (!Array.isArray(value)) {
+    const _p = Object.getPrototypeOf(value);
+    if (_p !== Object.prototype && _p !== null) return value;
+  }
+  return _scrml_deep_reactive(value);
+}
+
 function _scrml_reactive_set(name, value) {
   const __t_set_top = __SCRML_PERF ? __SCRML_PERF_NOW() : 0;
+  value = _scrml_cell_value(value);
   // S79 / §6.13 — when a reactivity rule is registered for the cell, route
   // the write through the timing wrapper. Guarded so cells without a rule
   // (the common case) take zero overhead beyond a single property lookup.
@@ -4279,6 +4313,12 @@ function _scrml_deep_reactive(value) {
   // Unwrap if already a proxy
   const unwrapped = _scrml_proxy_targets.get(value);
   if (unwrapped) return value; // already a proxy, return as-is
+
+  // A frozen value cannot change, so it has nothing to notify — and a Proxy
+  // over it breaks the get-trap invariant the moment a nested object is read
+  // (a non-writable, non-configurable property must read back the SAME value,
+  // and the trap would hand back a wrapper). Leave it raw.
+  if (Object.isFrozen(value)) return value;
 
   // Return cached proxy if we already wrapped this object
   if (_scrml_proxy_cache.has(value)) return _scrml_proxy_cache.get(value);
