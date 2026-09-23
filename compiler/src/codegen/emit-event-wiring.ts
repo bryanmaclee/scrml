@@ -14,6 +14,7 @@ import {
   collectEnginesWithMessageArms,
   collectEngineMessageVariants,
 } from "./emit-engine.ts";
+import { nsName } from "./chunk-namespace.ts";
 import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
@@ -242,6 +243,28 @@ interface LogicBinding {
  * All other event types use Approach A (querySelectorAll + forEach).
  */
 const DELEGABLE_EVENTS = new Set(["click", "submit"]);
+
+/**
+ * g-match-inside-each-row-cannot-see-the-row-variable — the name of the hoisted
+ * factory an arm-bound delegable handler is compiled into (see `armBoundById` in
+ * emitEventWiring; bound per arm entry by emit-variant-guard.ts), and — for the
+ * "walker" mode — the element property the handler is stored under.
+ *
+ * Both are OWNED by one chunk and one binding: every client chunk registers its
+ * own document-level walker, so a property keyed only by event name
+ * (`__scrml_arm_onclick`, review of e0c02544) was matched by EVERY loaded
+ * chunk's walker and the handler fired once per chunk. The property carries the
+ * chunk namespace token and the binding's placeholder id, and a walker only
+ * reads the properties of the ids it emitted. emit-variant-guard computes both
+ * names once and stores them on the binding (`armFactoryName` /
+ * `armWalkerProp`), so emit-event-wiring never re-derives them.
+ */
+export function armHandlerFactoryName(placeholderId: string): string {
+  return `_scrml_armh_${nsName(String(placeholderId)).replace(/[^A-Za-z0-9_$]/g, "_")}`;
+}
+export function armWalkerPropName(eventName: string, placeholderId: string): string {
+  return `__scrml_arm_${eventName}_${nsName(String(placeholderId))}`;
+}
 
 /**
  * Find the matching closing brace/paren/bracket starting at `openPos`.
@@ -1231,6 +1254,52 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     byEventType.get(eventName)!.push({ placeholderId, handlerExpr });
   }
 
+  // g-match-inside-each-row-cannot-see-the-row-variable — a delegable handler
+  // in a match / engine arm that emitArmWireFunction bound to the arm's scope
+  // (`armParams` set; see `armDelegated` there). Its handler is compiled ABOVE
+  // by exactly the same lowering as every delegated handler, but it reads names
+  // only the arm's wire fn binds (payload bindings, enclosing row names), so it
+  // cannot sit in the module-scope registry. Move it out into a hoisted
+  // chunk-scope FACTORY taking those names; the wire fn binds it per arm entry
+  // and either stores it on the element for the delegation walker below
+  // ("walker") or attaches it as an element listener ("native", an arm inside
+  // an `<each>` row — the row's own handler contract). No arm-bound handler →
+  // nothing here changes (byte-identical).
+  const armBoundById = new Map<string, EventBinding>();
+  for (const b of eventBindings) {
+    if (Array.isArray((b as any).armParams)) armBoundById.set(b.placeholderId, b);
+  }
+  const armFactoryLines: string[] = [];
+  // eventName → [placeholderId, element property] for this chunk's walker-mode
+  // handlers: the walker reads ONLY these (see armWalkerPropName).
+  const armWalkerEvents = new Map<string, Array<[string, string]>>();
+  if (armBoundById.size > 0) {
+    for (const [eventName, entries] of [...byEventType]) {
+      const keep: typeof entries = [];
+      for (const e of entries) {
+        const b = armBoundById.get(e.placeholderId) as any;
+        if (!b) { keep.push(e); continue; }
+        const factoryName = typeof b.armFactoryName === "string" ? b.armFactoryName : armHandlerFactoryName(e.placeholderId);
+        armFactoryLines.push(
+          `function ${factoryName}(${(b.armParams as string[]).join(", ")}) { return ${e.handlerExpr}; }`,
+        );
+        if (b.armWiredMode === "walker") {
+          const prop = typeof b.armWalkerProp === "string" ? b.armWalkerProp : armWalkerPropName(eventName, e.placeholderId);
+          const owned = armWalkerEvents.get(eventName) ?? [];
+          owned.push([e.placeholderId, prop]);
+          armWalkerEvents.set(eventName, owned);
+        }
+      }
+      if (keep.length > 0 || armWalkerEvents.has(eventName)) byEventType.set(eventName, keep);
+      else byEventType.delete(eventName);
+    }
+    // Hoisted chunk-scope declarations: the wire fns that bind them run at
+    // module init (a row's arm dispatches while the row is built), before the
+    // boot below, so they must not live inside it.
+    const iifeAt = lines.indexOf("(function() {");
+    lines.splice(iifeAt === -1 ? 0 : iifeAt, 0, ...armFactoryLines);
+  }
+
   // Emit wiring — delegable events use document.addEventListener with ancestor
   // walk; non-delegable events use Approach A querySelectorAll + forEach.
   //
@@ -1346,6 +1415,15 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         lines.push(`    ${JSON.stringify(placeholderId)}: ${handlerExpr},`);
       }
       lines.push(`  };`);
+      // Arm-bound walker handlers OWNED by this chunk: placeholder id → the
+      // element property its arm wire fn stores the bound handler under.
+      const armOwned = armWalkerEvents.get(eventName);
+      const armOwnedVar = `${registryVarName}_arm`;
+      if (armOwned) {
+        lines.push(`  const ${armOwnedVar} = {`);
+        for (const [pid, prop] of armOwned) lines.push(`    ${JSON.stringify(pid)}: ${JSON.stringify(prop)},`);
+        lines.push(`  };`);
+      }
 
       // Emit a single document.addEventListener with ancestor walk
       lines.push(`  document.addEventListener(${JSON.stringify(domEvent)}, function(event) {`);
@@ -1353,6 +1431,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       lines.push(`    while (t && t !== document) {`);
       lines.push(`      const id = t.getAttribute(${JSON.stringify("data-scrml-bind-" + eventName)});`);
       lines.push(`      if (id && ${registryVarName}[id]) { ${registryVarName}[id](event); return; }`);
+      if (armOwned) {
+        // An arm-bound handler (see `armBoundById`) runs at the SAME point of
+        // the walk, with the same `this`, as a registry handler would — and only
+        // from the walker of the chunk that owns it.
+        lines.push(`      if (id && ${armOwnedVar}[id] && t[${armOwnedVar}[id]]) { t[${armOwnedVar}[id]].call(${registryVarName}, event); return; }`);
+      }
       lines.push(`      t = t.parentElement;`);
       lines.push(`    }`);
       lines.push(`  });`);

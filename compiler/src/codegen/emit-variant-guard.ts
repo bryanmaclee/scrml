@@ -89,7 +89,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
-import { emitValueAttrApply } from "./emit-event-wiring.ts";
+import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName } from "./emit-event-wiring.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -146,6 +146,14 @@ export interface VariantArm {
    * consumer; future match-block consumer may use it for its own purposes.
    */
   postMountJs?: string;
+  /**
+   * g-match-inside-each-row-cannot-see-the-row-variable — `<each>` blocks in
+   * this arm's body whose render fn takes the arm's scope as parameters
+   * (`fnName(_root, ...params)`, emitted by emit-each for a match inside an
+   * `<each>` row). The arm wire fn runs each one under an effect after every arm
+   * entry. Set only by the match consumer, only for an item-scoped match.
+   */
+  scopedEaches?: Array<{ fnName: string; params: string[] }>;
 }
 
 /**
@@ -268,6 +276,21 @@ export interface VariantGuardOptions {
    *     `itemDispatchFnName` so emit-each can wire the per-item call.
    */
   itemScopedDispatch?: boolean;
+  /**
+   * g-match-inside-each-row-cannot-see-the-row-variable — with
+   * `itemScopedDispatch`: the ROW-scope names the arm bodies read (the row's
+   * iter var, an enclosing row's, an `as (k, v)` pair). The render / wire fns
+   * live at file scope, so — mirroring #1022's nested lift groups, which take
+   * their row / arm scope as parameters — these become trailing parameters of
+   * the dispatch fn (`dispatch(_mount, _v, g)`, passed by the each per-item
+   * effect with the CURRENT item) and of every arm wire fn (after the payload
+   * bindings; a payload binding of the same name shadows the row name in that
+   * arm). The dispatch's same-value short-circuit also compares them, so a
+   * same-key replace (new item object, same variant) re-renders the arm against
+   * the new item instead of leaving it wired to the old one. Unset / [] →
+   * byte-identical to pre-fix.
+   */
+  rowScopeParams?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +428,9 @@ function emitArmWireFunction(
   armContextId: string,
   ctx: CompileContext,
   payloadBindings: string[] = [],
+  rowScope: string[] = [],
+  scopedEaches: Array<{ fnName: string; params: string[] }> = [],
+  itemScoped = false,
 ): string {
   // Lazy import for the same circular-dep reasons as emitArmRenderFunction.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -457,11 +483,113 @@ function emitArmWireFunction(
       typeof b.valueAttrName === "string" &&
       typeof b.expr === "string",
   );
+  // g-match-inside-each-row-cannot-see-the-row-variable — every name this wire
+  // fn binds as a parameter: the arm's payload bindings, then the enclosing
+  // row's scope (item-scoped match inside an `<each>`; the caller already
+  // dropped row names a payload binding shadows).
+  const armParams = [...payloadBindings, ...rowScope];
+  // The scan is deliberately NOT literal-blanked: a lowered attribute template
+  // is a JS template literal (`t-${g.name}`) whose interpolations ARE reads, and
+  // a false positive (the name inside a plain string) only costs an effect that
+  // re-runs nothing / a per-arm listener instead of a delegated one — both
+  // behave identically — while a miss would leave a stale value or a
+  // ReferenceError.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { referencesFreeIdent: _refsFree, blankStringAndRegexLiterals: _blankLits } = require("./emit-each.ts") as {
+    referencesFreeIdent: (code: string, name: string) => boolean;
+    blankStringAndRegexLiterals: (code: string) => string;
+  };
+  const _readsAny = (code: string, names: string[]): boolean => {
+    if (names.length === 0 || !code) return false;
+    return names.some((n) => _refsFree(code, n));
+  };
+  // A binding whose lowered JS reads a ROW name must re-run when that row
+  // item's field changes (`g.name = "x"` in place): the row item is a deep-
+  // reactive Proxy, so an effect over the expression subscribes to exactly the
+  // fields it reads. (A same-key REPLACE re-renders the whole arm instead — see
+  // the dispatcher's row-scope short-circuit.)
+  const readsRow = (code: string): boolean => _readsAny(code, rowScope);
+
   // In-scope event bindings: only non-delegable events.
   const wireableEvents = eventBindings.filter((b) => {
     const domEvent = (b.eventName || "").replace(/^on/, "");
     return !DELEGABLE_EVENTS.has(domEvent);
   });
+
+  // g-match-inside-each-row-cannot-see-the-row-variable — DELEGABLE events
+  // (click, submit) in this arm whose handler cannot run from the module-scope
+  // delegation table because it reads a name only THIS function binds (a
+  // payload binding or a row name): `onclick=pick(g.name)` in a row's arm threw
+  // `ReferenceError: g is not defined` on every click, and `onclick=pick(note)`
+  // over a payload binding did the same, in any arm.
+  //
+  // ONE handler lowering: emit-event-wiring still compiles the handler exactly
+  // as it compiles every delegated handler (fnNameMap, formFor submit,
+  // preventDefault, engine routing …), but — because `armParams` is set — as a
+  // hoisted chunk-scope FACTORY `function <armHandlerFactoryName(id)>(...armParams)
+  // { return <handler>; }` instead of a registry entry. This function binds the
+  // factory to its parameters and hands the handler to ONE of the two event
+  // contracts scrml already has, chosen to match the arm body's markup twin:
+  //   - "walker" (an arm NOT inside an `<each>` row): the handler is stored on
+  //     the element and the document-level delegation walker runs it exactly
+  //     where it runs a registry handler — innermost element with a handler
+  //     wins, the walk stops (the same order / propagation / `this` as the
+  //     identical markup outside the arm);
+  //   - "native" (an item-scoped arm, inside an `<each>` row): EVERY delegable
+  //     handler in the arm is attached to its element with addEventListener,
+  //     exactly as the row's own per-item handlers are (emit-each) — inner first,
+  //     both fire, `stopPropagation()` honoured, including against a row-level
+  //     `onclick` around the match. Mixing the two contracts inside one row (an
+  //     inner delegated button under an outer element listener) fired OUTER
+  //     before INNER (review of 92c6198b).
+  // A handler outside an item-scoped arm that reads no arm name stays a plain
+  // delegated registry entry (byte-identical).
+  const armParamSet = new Set(armParams);
+  const handlerReadsArmName = (b: any): boolean => {
+    if (armParamSet.size === 0) return false;
+    // Identifier-level: an arm name inside a string literal (`lit("note")`) is
+    // not a read. Prefer the parsed ExprNodes; fall back to literal-blanked text
+    // (unblanked when it carries a template literal, whose `${…}` IS a read).
+    const idents = new Set<string>();
+    const collect = (n: any): void => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const x of n) collect(x); return; }
+      if (n.kind === "ident" && typeof n.name === "string") idents.add(n.name);
+      for (const k of Object.keys(n)) if (k !== "span") collect(n[k]);
+    };
+    const textReads = (text: string): boolean =>
+      _readsAny(text.includes("`") ? text : _blankLits(text), armParams);
+    if (typeof b.handlerExpr === "string" && b.handlerExpr.length > 0) {
+      if (b.handlerExprNode) collect(b.handlerExprNode);
+      else if (textReads(b.handlerExpr)) return true;
+    }
+    const args = (b.handlerArgs ?? []) as unknown[];
+    const argNodes = b.handlerArgExprNodes as unknown[] | undefined;
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i] as any;
+      if (argNodes && argNodes[i]) collect(argNodes[i]);
+      else if (typeof a === "string") { if (textReads(a)) return true; }
+      else if (a && a.kind === "variable-ref" && typeof a.name === "string") idents.add(a.name.split(".")[0]);
+    }
+    for (const n of idents) if (armParamSet.has(n.split(".")[0])) return true;
+    return false;
+  };
+  const armDelegated: Array<{ binding: any; domEvent: string; mode: "walker" | "native" }> = [];
+  for (const b of eventBindings) {
+    const domEvent = (b.eventName || "").replace(/^on/, "");
+    if (!DELEGABLE_EVENTS.has(domEvent)) continue;
+    const mode: "walker" | "native" | null = itemScoped
+      ? "native"
+      : (handlerReadsArmName(b) ? "walker" : null);
+    if (mode === null) continue;
+    b.armParams = [...armParams];
+    b.armWiredMode = mode;
+    // Chunk-owned names, computed ONCE here and read back by emit-event-wiring
+    // (see armWalkerPropName: a walker must only run handlers its chunk owns).
+    b.armFactoryName = armHandlerFactoryName(b.placeholderId as string);
+    if (mode === "walker") b.armWalkerProp = armWalkerPropName(b.eventName as string, b.placeholderId as string);
+    armDelegated.push({ binding: b, domEvent, mode });
+  }
   // render-expr-primitive — `<render of=X/>` bindings tagged with THIS arm
   // context. The held value X is commonly the arm's own payload binding
   // (`<Failed err> <render of=err/>`), so it is a wire-fn parameter and is in
@@ -538,7 +666,7 @@ function emitArmWireFunction(
         fnName,
         pid: placeholderIds[0],
         stmts,
-        params: [...payloadBindings],
+        params: [...armParams],
         prologue: [],
       });
       wireableLifts.push({ fnName: registered, placeholderIds });
@@ -553,14 +681,14 @@ function emitArmWireFunction(
   // event handlers, etc. Without this, expressions like
   // `${rows}` produce `el.textContent = rows;` referencing an unbound
   // free variable → runtime ReferenceError. See SURVEY §4.2 sub-anomaly #3.
-  const wireParams = ["_root", ...payloadBindings].join(", ");
+  const wireParams = ["_root", ...armParams].join(", ");
 
   // No bindings to wire → no-op shell so the dispatcher branch stays uniform.
   if (
     wireableLogic.length === 0 && wireableEvents.length === 0 &&
     wireableRenders.length === 0 && wireableDirectives.length === 0 &&
     wireableBinds.length === 0 && wireableValueAttrs.length === 0 &&
-    wireableLifts.length === 0
+    wireableLifts.length === 0 && scopedEaches.length === 0 && armDelegated.length === 0
   ) {
     return `function ${wireFnName}(${wireParams}) { return function() {}; }`;
   }
@@ -609,7 +737,7 @@ function emitArmWireFunction(
     // primitive values `_scrml_render_value` is byte-identical to the prior
     // `el.textContent =` path, so this is safe for every existing arm-body
     // interpolation (GITI-032).
-    if (varRefs.length > 0) {
+    if (varRefs.length > 0 || readsRow(rewrittenExpr)) {
       // Reactive: bind initial value + subscribe via _scrml_effect (returns dispose).
       lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
       lines.push(`      _disposers.push(_scrml_effect(function() { _scrml_render_value(el, ${rewrittenExpr}); }));`);
@@ -667,7 +795,7 @@ function emitArmWireFunction(
       const className = binding.className as string;
       // Apply once at mount, then (when reactive) subscribe via _scrml_effect.
       lines.push(`      el.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr}));`);
-      if (refs.length > 0) {
+      if (refs.length > 0 || readsRow(jsExpr)) {
         lines.push(`      _disposers.push(_scrml_effect(function() { el.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr})); }));`);
       }
     } else if (binding.directiveIsFormValue === true) {
@@ -681,14 +809,14 @@ function emitArmWireFunction(
       // `directiveIsFormValue` marker already encodes the tag ∈ {input,textarea,
       // select} AND no-sibling-bind:value guard (computed at registration).
       lines.push(`      { const _v = ${jsExpr}; if (el.value !== _v) el.value = _v; }`);
-      if (refs.length > 0) {
+      if (refs.length > 0 || readsRow(jsExpr)) {
         lines.push(`      _disposers.push(_scrml_effect(function() { const _v = ${jsExpr}; if (el.value !== _v) el.value = _v; }));`);
       }
     } else {
       // attr-template — set the interpolated attribute value once, then subscribe.
       const attrName = binding.attrName as string;
       lines.push(`      el.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
-      if (refs.length > 0) {
+      if (refs.length > 0 || readsRow(jsExpr)) {
         lines.push(`      _disposers.push(_scrml_effect(function() { el.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
       }
     }
@@ -814,7 +942,44 @@ function emitArmWireFunction(
     const selector = lift.placeholderIds.map((id) => `[data-scrml-logic=${JSON.stringify(id)}]`).join(", ");
     lines.push(`  {`);
     lines.push(`    const el = _root.querySelector(${JSON.stringify(selector)});`);
-    lines.push(`    if (el) _disposers.push(_scrml_lift_scoped_run(el, ${lift.fnName}, [${payloadBindings.join(", ")}]));`);
+    lines.push(`    if (el) _disposers.push(_scrml_lift_scoped_run(el, ${lift.fnName}, [${armParams.join(", ")}]));`);
+    lines.push(`  }`);
+  }
+
+  // ---- g-match-inside-each-row-cannot-see-the-row-variable — arm `<each>`s ----
+  // An `<each>` in the arm body of a match inside an `<each>` row renders
+  // through a file-scope fn that takes this arm's scope as parameters
+  // (emit-each.ts emitArmScopedEachRenderFn). Run it against THIS arm's root
+  // after every arm entry, under an effect so a change to its source (a row
+  // field `g.items`, a cell) re-reconciles it; the effect is disposed with the
+  // arm on the next variant switch.
+  for (const se of scopedEaches) {
+    lines.push(`  _disposers.push(_scrml_effect(function() { ${se.fnName}(${["_root", ...se.params].join(", ")}); }));`);
+  }
+
+  // ---- delegable events bound to this arm's scope (see `armDelegated`) ----
+  // The handler is built by emit-event-wiring's own lowering as the hoisted
+  // factory `armHandlerFactoryName(id)`; bind it to this arm's parameters here.
+  for (const { binding, domEvent, mode } of armDelegated) {
+    const eventName = binding.eventName as string;
+    const factory = binding.armFactoryName as string;
+    lines.push(`  {`);
+    lines.push(`    const el = _root.querySelector('[data-scrml-bind-${eventName}=${JSON.stringify(binding.placeholderId)}]');`);
+    lines.push(`    if (el) {`);
+    if (mode === "walker") {
+      // Run by the document-level delegation walker of THIS chunk
+      // (emit-event-wiring), at the same point of the walk a registry handler
+      // would run. The property is chunk- and binding-owned (armWalkerPropName).
+      const prop = JSON.stringify(binding.armWalkerProp as string);
+      lines.push(`      el[${prop}] = ${factory}(${armParams.join(", ")});`);
+      lines.push(`      _disposers.push(function() { el[${prop}] = null; });`);
+    } else {
+      // An element listener, exactly like a row's own per-item handler.
+      lines.push(`      const _h = ${factory}(${armParams.join(", ")});`);
+      lines.push(`      el.addEventListener(${JSON.stringify(domEvent)}, _h);`);
+      lines.push(`      _disposers.push(function() { el.removeEventListener(${JSON.stringify(domEvent)}, _h); });`);
+    }
+    lines.push(`    }`);
     lines.push(`  }`);
   }
 
@@ -1113,13 +1278,25 @@ export function emitVariantGuardedRender(
   // Emit ALL arm wire fns (even empty arms) so the dispatcher can
   // unconditionally call them — empty arms get a no-op wire fn returning
   // a no-op dispose. This keeps the dispatcher branch-uniform.
+  // g-match-inside-each-row-cannot-see-the-row-variable — row-scope names (only
+  // meaningful for an item-scoped dispatch; see VariantGuardOptions).
+  const rowScopeParams = opts.itemScopedDispatch === true && Array.isArray(opts.rowScopeParams)
+    ? opts.rowScopeParams
+    : [];
+  // Per arm, the row names its payload bindings do not shadow.
+  const armRowScope = (arm: VariantArm): string[] =>
+    rowScopeParams.filter((n) => !arm.payloadBindings.includes(n));
+
   const wireFnLines: string[] = [];
   for (const arm of arms) {
     const wireFnName = `${renderFnPrefix}_${idPrefix}_wire_${arm.tag}`;
     const armContextId = `${idPrefix}:${arm.tag}`;
     // B1 (§51.0.B.1) — pass payload bindings to wire fn so `el.textContent =
     // <binding>` expressions resolve as bound parameters, not free vars.
-    wireFnLines.push(emitArmWireFunction(wireFnName, armContextId, ctx, arm.payloadBindings));
+    wireFnLines.push(emitArmWireFunction(
+      wireFnName, armContextId, ctx, arm.payloadBindings, armRowScope(arm), arm.scopedEaches ?? [],
+      opts.itemScopedDispatch === true,
+    ));
   }
   const wireFunctionsJs = wireFnLines.join("\n\n");
 
@@ -1198,7 +1375,7 @@ export function emitVariantGuardedRender(
   // the per-item mount element as a parameter instead of querying for the
   // single module-scope mount.
   if (itemScoped) {
-    dispatcherLines.push(`function ${dispatchFnName}(_mount, _v) {`);
+    dispatcherLines.push(`function ${dispatchFnName}(${["_mount", "_v", ...rowScopeParams].join(", ")}) {`);
     dispatcherLines.push(`  if (!_mount) return;`);
   } else {
     dispatcherLines.push(`function ${dispatchFnName}(_v) {`);
@@ -1212,8 +1389,25 @@ export function emitVariantGuardedRender(
   // from tearing down + re-parsing an UNCHANGED arm on every list update — which
   // would lose focus/selection/nested state in that arm and waste re-parse work.
   // A fresh mount (remount / new row node) has no cached value → renders normally.
-  dispatcherLines.push(`  if (_mount[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] === _v) return;`);
-  dispatcherLines.push(`  _mount[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] = _v;`);
+  if (rowScopeParams.length > 0) {
+    // g-match-inside-each-row-cannot-see-the-row-variable — the arm is wired
+    // against the row-scope VALUES passed in, so "unchanged" must also mean the
+    // same row item(s). A same-key replace resolves to a NEW item object with,
+    // possibly, the same variant: re-render so the arm reads the new item.
+    // (Identity is stable across an unrelated reconcile pass — the resolver
+    // returns the cached deep-reactive proxy of the same backing object — so
+    // push / remove / reorder still short-circuit.)
+    const lastVKey = JSON.stringify(`__scrml_match_lastv_${idPrefix}`);
+    const lastSKey = JSON.stringify(`__scrml_match_lasts_${idPrefix}`);
+    dispatcherLines.push(`  const _rs = [${rowScopeParams.join(", ")}];`);
+    dispatcherLines.push(`  const _ls = _mount[${lastSKey}];`);
+    dispatcherLines.push(`  if (_mount[${lastVKey}] === _v && _ls && ${rowScopeParams.map((_, i) => `_ls[${i}] === _rs[${i}]`).join(" && ")}) return;`);
+    dispatcherLines.push(`  _mount[${lastVKey}] = _v;`);
+    dispatcherLines.push(`  _mount[${lastSKey}] = _rs;`);
+  } else {
+    dispatcherLines.push(`  if (_mount[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] === _v) return;`);
+    dispatcherLines.push(`  _mount[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] = _v;`);
+  }
   // Variant tag extraction. Unit variants live as bare string tags ("Idle");
   // payload-bearing variants live as `{ variant: "X", data: { fieldName: val } }`
   // tagged-objects per SPEC §51.3.2 / emit-client.ts:emitEnumVariantObjects.
@@ -1290,7 +1484,10 @@ export function emitVariantGuardedRender(
     // the render fn received. Without this, expressions like `${rows}`
     // inside the arm body resolve `rows` as a free variable in the wire-fn
     // scope → runtime ReferenceError. Mirror the render-fn args.
-    const wireArgs = args.length > 0 ? `_mount, ${args}` : `_mount`;
+    // g-match-inside-each-row-cannot-see-the-row-variable — then the row-scope
+    // names this arm's payload bindings do not shadow (the wire fn's trailing
+    // params, in the same order).
+    const wireArgs = ["_mount", ...(args.length > 0 ? [args] : []), ...armRowScope(arm)].join(", ");
     dispatcherLines.push(`  ${head} (_tag === ${JSON.stringify(arm.tag)}) {`);
     dispatcherLines.push(`    _mount.innerHTML = ${fnName}(${args});`);
     dispatcherLines.push(`    ${disposeVar} = ${wireFnName}(${wireArgs});`);
@@ -1337,7 +1534,7 @@ export function emitVariantGuardedRender(
       dispatcherLines.push(`  {`);
     }
     dispatcherLines.push(`    _mount.innerHTML = ${dfnName}();`);
-    dispatcherLines.push(`    ${disposeVar} = ${dwireFnName}(_mount);`);
+    dispatcherLines.push(`    ${disposeVar} = ${dwireFnName}(${["_mount", ...armRowScope(defaultArm)].join(", ")});`);
     // engine-gated-each-populate (S153) — populate each-mounts in the wildcard
     // arm subtree too. See the `hasEachMount` comment above.
     if (hasEachMount) {

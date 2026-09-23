@@ -1,0 +1,259 @@
+/**
+ * g-match-inside-each-row-cannot-see-the-row-variable — EMIT-SHAPE pins.
+ *
+ * A block-form `<match>` inside an `<each>` row is item-scoped (R28-1b): one
+ * dispatch per row, but its arm render / wire functions live at FILE scope.
+ * Pre-fix they received only the arm's payload bindings, so an arm body that
+ * read the row — `${g.name}` — emitted `_scrml_render_value(el, g.name)` against
+ * a free `g` → `ReferenceError: g is not defined` inside the row factory, and
+ * the whole list rendered empty at exit 0.
+ *
+ * Fix — the #1022 mechanism (a nested lift group gets its row / arm scope as
+ * PARAMETERS because it lives at file scope), mirrored for the arm path:
+ *   - emit-match computes the row-scope names the arm bodies read
+ *     (`rowScopeParams`) and lowers `@.` in the arm bodies to the row iter var;
+ *   - the item-scoped dispatch fn takes them after `(_mount, _v)` and the per-row
+ *     call (inside the live-keyed effect) passes the CURRENT item;
+ *   - every arm wire fn takes them after the payload bindings (a payload binding
+ *     of the same name shadows the row name);
+ *   - the dispatcher's same-value short-circuit also compares the row values;
+ *   - a delegable (click/submit) handler that must see arm names is compiled by
+ *     the SHARED event lowering into a hoisted factory and bound per arm entry:
+ *     every such handler in a ROW arm becomes an element listener (the row's own
+ *     contract); outside a row it runs from the delegation walker (round 2);
+ *   - an `<each>` in such an arm renders through `_scrml_each_arm_render_<id>(_root, …)`.
+ *
+ * Mounted behaviour: compiler/tests/browser/match-in-each-row-scope.browser.test.js.
+ */
+
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { writeFileSync, rmSync, existsSync, mkdtempSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { compileScrml } from "../../src/api.js";
+
+let TMP;
+beforeAll(() => { TMP = mkdtempSync(join(tmpdir(), "match-row-scope-")); });
+afterAll(() => { if (TMP && existsSync(TMP)) rmSync(TMP, { recursive: true, force: true }); });
+
+let seq = 0;
+function compile(source) {
+  const abs = join(TMP, `case-${++seq}.scrml`);
+  writeFileSync(abs, source);
+  const result = compileScrml({ inputFiles: [abs], outputDir: join(TMP, "dist"), write: false, log: () => {} });
+  const errors = (result.errors || []).filter((e) => (e.severity ?? "error") === "error");
+  const out = [...(result.outputs || new Map()).values()][0];
+  return { errors, js: out?.clientJs ?? "" };
+}
+
+/** The source text of the top-level `function <name>(…) {…}` whose name matches `re`. */
+function fnSource(js, re) {
+  const m = new RegExp(`function (${re.source})\\(([^)]*)\\) \\{`).exec(js);
+  if (!m) return { name: null, params: null, body: "" };
+  let depth = 1;
+  let i = m.index + m[0].length;
+  for (; i < js.length && depth > 0; i++) {
+    if (js[i] === "{") depth++;
+    else if (js[i] === "}") depth--;
+  }
+  return { name: m[1], params: m[2], body: js.slice(m.index + m[0].length, i - 1) };
+}
+
+const program = (body, decls = "") => `<program>
+  type Kind:enum = { A, B }
+  ${decls}
+  <groups> = [{ id: 1, kind: Kind.A, name: "one", items: ["x"] }, { id: 2, kind: Kind.B, name: "two", items: [] }]
+  <ul>
+    <each in=@groups key=@.id as g>
+      <li class="row">
+${body}
+      </li>
+    </each>
+  </ul>
+</program>
+`;
+
+describe("g-match-inside-each-row-cannot-see-the-row-variable — emit shape", () => {
+  test("the row alias becomes a trailing param of the dispatch fn and of each arm wire fn; the per-row call passes it", () => {
+    const { errors, js } = compile(program(`<match for=Kind on=g.kind><A><p>A:\${g.name}</p></><B><p>B:\${g.name}</p></></match>`));
+    expect(errors).toEqual([]);
+    const dispatch = fnSource(js, /__scrml_match_match_\w+_dispatch/);
+    expect(dispatch.params).toBe("_mount, _v, g");
+    // the per-row call sits in the live-keyed effect, right after `g` is re-resolved
+    expect(js).toMatch(/let g = _scrml_resolve_item\(_mount, _scrml_each_key_\d+\);\s+if \(g === null\) return;\s+__scrml_match_match_\w+_dispatch\(_scrml_match_mount_\d+, g\.kind, g\);/);
+    const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
+    expect(wireA.params).toBe("_root, g");
+    // a row-reading interpolation re-renders on an in-place field edit
+    expect(wireA.body).toContain("_disposers.push(_scrml_effect(function() { _scrml_render_value(el, g.name); }));");
+    expect(dispatch.body).toMatch(/_scrml_match_match_\w+_wire_A\(_mount, g\)/);
+    // the short-circuit compares the row item too (a same-key replace re-renders)
+    expect(dispatch.body).toContain("const _rs = [g];");
+    expect(dispatch.body).toMatch(/=== _v && _ls && _ls\[0\] === _rs\[0\]\) return;/);
+  });
+
+  test("`@.` in an arm body lowers to the row iter var (was `_scrml_reactive_get(\".name\")`)", () => {
+    const { errors, js } = compile(`<program>
+  type Kind:enum = { A, B }
+  <groups> = [{ id: 1, kind: Kind.A, name: "one" }]
+  <ul><each in=@groups key=@.id><li class="row">
+    <match for=Kind on=@.kind><A><p title="t-\${@.name}">A:\${@.name}</p></><B><p>B</p></></match>
+  </li></each></ul>
+</program>
+`);
+    expect(errors).toEqual([]);
+    expect(js).not.toContain(`reactive_get(".name")`);
+    const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
+    expect(wireA.params).toBe("_root, _scrml_each_item");
+    expect(wireA.body).toContain("_scrml_each_item.name");
+  });
+
+  test("payload bindings come first; a payload binding shadows a same-named row alias in that arm", () => {
+    const { errors, js } = compile(`<program>
+  type St:enum = { Idle, Busy(note: string), Held(g: string) }
+  <groups> = [{ id: 1, st: St.Idle, name: "one" }]
+  <ul><each in=@groups key=@.id as g><li class="row">
+    <match for=St on=g.st><Idle><p>\${g.name}</p></><Busy note><p>\${note}/\${g.name}</p></><Held g><p>\${g}</p></></match>
+  </li></each></ul>
+</program>
+`);
+    expect(errors).toEqual([]);
+    expect(fnSource(js, /_scrml_match_match_\w+_wire_Busy/).params).toBe("_root, note, g");
+    expect(fnSource(js, /_scrml_match_match_\w+_wire_Held/).params).toBe("_root, g");
+    const dispatch = fnSource(js, /__scrml_match_match_\w+_dispatch/);
+    expect(dispatch.body).toMatch(/_wire_Busy\(_mount, _data && _data\["note"\], g\)/);
+    expect(dispatch.body).toMatch(/_wire_Held\(_mount, _data && _data\["g"\]\)/);
+  });
+
+  test("in a ROW arm every delegable handler becomes an element listener (the row's own contract), built by the shared lowering as a hoisted factory", () => {
+    const { errors, js } = compile(program(
+      `<match for=Kind on=g.kind><A><div onclick=pick(g.name)><button onclick=pick("static")>s</button></div></><B><b>B</b></></match>`,
+      `<picked> = ""\n  function pick(n) { @picked = n }`,
+    ));
+    expect(errors).toEqual([]);
+    // the handler bodies come from emit-event-wiring's lowering (fnNameMap-resolved)
+    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(g\) \{ return function\(event\) \{ _scrml_pick_\d+\(g\.name\); \}; \}/);
+    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(g\) \{ return function\(event\) \{ _scrml_pick_\d+\("static"\); \}; \}/);
+    // hoisted at chunk scope, ahead of the boot IIFE (the row's arm wires at module init)
+    expect(js.indexOf("function _scrml_armh_")).toBeLessThan(js.indexOf("function _scrml_boot()"));
+    const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
+    expect((wireA.body.match(/el\.addEventListener\("click", _h\)/g) ?? []).length).toBe(2);
+    // nothing of this arm is left in the document-level delegation table
+    expect(js).not.toContain("const _scrml_click = {");
+  });
+
+  test("outside a row, an arm handler reading a payload binding runs from the delegation WALKER; identifier-level check (a string literal is not a read)", () => {
+    const { errors, js } = compile(`<program>
+  type St:enum = { Idle, Busy(note: string) }
+  <st> = St.Busy("hi")
+  <log> = ""
+  function lg(s) { @log = @log + s }
+  <match for=St on=@st><Idle><p>i</p></><Busy note><div onclick=lg(note)><button onclick=lg("note")>l</button></div></></match>
+</program>
+`);
+    expect(errors).toEqual([]);
+    // `lg("note")` reads no arm name: a plain registry entry
+    const table = /const _scrml_click = \{([\s\S]*?)\n  \};/.exec(js)?.[1] ?? "";
+    expect(table).toMatch(/_scrml_lg_\d+\("note"\)/);
+    // `lg(note)` is an arm-bound factory, stored on the element by the wire fn
+    expect(js).toMatch(/function _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\d+\(note\) \{ return function\(event\) \{ _scrml_lg_\d+\(note\); \}; \}/);
+    const wire = fnSource(js, /_scrml_match_match_\w+_wire_Busy/);
+    // the element property is chunk- and binding-owned (round 3: one walker per chunk)
+    expect(wire.body).toMatch(/el\["__scrml_arm_onclick_[0-9a-z]+__scrml_attr_onclick_(\d+)"\] = _scrml_armh_[0-9a-z]+__scrml_attr_onclick_\1\(note\);/);
+    expect(wire.body).not.toContain("addEventListener");
+    // …and the walker runs it at the same point of the walk as a registry handler
+    // and only for the ids THIS chunk owns
+    expect(js).toMatch(/const _scrml_click_arm = \{\s+"_scrml_attr_onclick_\d+": "__scrml_arm_onclick_[0-9a-z]+__scrml_attr_onclick_\d+",\s+\};/);
+    expect(js).toContain(`if (id && _scrml_click_arm[id] && t[_scrml_click_arm[id]]) { t[_scrml_click_arm[id]].call(_scrml_click, event); return; }`);
+  });
+
+  test("an <each> in the arm renders through a file-scope fn taking the arm scope, run by the wire fn (was: no render fn at all)", () => {
+    const { errors, js } = compile(program(`<match for=Kind on=g.kind><A><ol><each in=g.items as it><li>\${it}/\${g.name}</li></each></ol></><B><p>B</p></></match>`));
+    expect(errors).toEqual([]);
+    const each = fnSource(js, /_scrml_each_arm_render_\w+/);
+    expect(each.params).toBe("_root, g");
+    expect(each.body).toContain("const _items = g.items;");
+    // located inside THIS arm's root (never the per-id anchor cache)
+    expect(each.body).toContain("document.createTreeWalker(_root, NodeFilter.SHOW_COMMENT)");
+    expect(each.body).not.toContain("_scrml_find_each_anchor");
+    // not registered for the module-scope remount path
+    expect(js).not.toMatch(new RegExp(`_scrml_each_renderers\\[[^\\]]*\\] = ${each.name};`));
+    const wireA = fnSource(js, /_scrml_match_match_\w+_wire_A/);
+    expect(wireA.body).toContain(`_disposers.push(_scrml_effect(function() { ${each.name}(_root, g); }));`);
+  });
+
+  test("nested each: a match in the INNER row that reads the OUTER alias gets both names", () => {
+    const { errors, js } = compile(`<program>
+  type Kind:enum = { A, B }
+  <groups> = [{ id: 1, name: "one", subs: [{ id: 10, kind: Kind.A, t: "x" }] }]
+  <ul><each in=@groups key=@.id as g><li class="row">
+    <each in=g.subs key=@.id as s><span><match for=Kind on=s.kind><A><b>\${s.t}/\${g.name}</b></><B><b>B</b></></match></span></each>
+  </li></each></ul>
+</program>
+`);
+    expect(errors).toEqual([]);
+    expect(fnSource(js, /__scrml_match_match_\w+_dispatch/).params).toBe("_mount, _v, s, g");
+    expect(fnSource(js, /_scrml_match_match_\w+_wire_A/).params).toBe("_root, s, g");
+  });
+
+  test("byte-identical where nothing reads the row: a row match whose arms never read it, and a match outside any each", () => {
+    const rowFree = compile(program(`<match for=Kind on=g.kind><A><p>A</p></><B><p>B</p></></match>`));
+    expect(rowFree.errors).toEqual([]);
+    const d1 = fnSource(rowFree.js, /__scrml_match_match_\w+_dispatch/);
+    expect(d1.params).toBe("_mount, _v");
+    expect(d1.body).not.toContain("_rs");
+    expect(rowFree.js).toMatch(/__scrml_match_match_\w+_dispatch\(_scrml_match_mount_\d+, g\.kind\);/);
+
+    const top = compile(`<program>
+  type Kind:enum = { A, B }
+  <k> = Kind.A
+  <match for=Kind on=@k><A><p>A</p></><B><p>B</p></></match>
+</program>
+`);
+    expect(top.errors).toEqual([]);
+    expect(fnSource(top.js, /__scrml_match_match_\w+_dispatch/).params).toBe("_v");
+  });
+});
+
+// Round 4 (review of 09265ab0, LOW): an <each> in an arm OUTSIDE any row takes the
+// arm-scoped render path only when its body READS the arm payload in an
+// expression. The decision is identifier-level: a tag name, an attribute string,
+// a class name or free text that happens to spell the payload name is not a read.
+describe("round 4 — payload-read detection for an arm <each> is identifier-level", () => {
+  const armEach = (payload, eachBody) => `<program>
+  type Doc:enum = { Empty, Note(${payload}: string) }
+  <cur> = Doc.Note("P")
+  <list> = ["m", "n"]
+  <log> = ""
+  function f(a, b) { @log = @log + a + b }
+  <match for=Doc on=@cur>
+    <Empty><p>none</p></>
+    <Note(${payload})><div id="x"><each in=@list as it>${eachBody}</each></div></>
+  </match>
+</program>
+`;
+
+  test("v4: payload `p` spelled only by a tag name `<p>` — not rerouted", () => {
+    const { errors, js } = compile(armEach("p", `<p class="k">\${it}</p>`));
+    expect(errors).toEqual([]);
+    expect(js).not.toContain("_scrml_each_arm_render_");
+  });
+
+  test("v4b: payload `note` only as class=, title= and free text — not rerouted", () => {
+    const { errors, js } = compile(armEach("note", `<span class="note" title="note">\${it} note</span>`));
+    expect(errors).toEqual([]);
+    expect(js).not.toContain("_scrml_each_arm_render_");
+  });
+
+  for (const [label, body] of [
+    ["an interpolation", `<b>\${note}</b>`],
+    ["a call-ref handler arg", `<button onclick=f(note, it)>x</button>`],
+    ["an (expr) attribute", `<b data-n=(note)>x</b>`],
+    ["a quoted attribute template", `<b title="t-\${note}">x</b>`],
+  ]) {
+    test(`a real payload read through ${label} still reroutes`, () => {
+      const { errors, js } = compile(armEach("note", body));
+      expect(errors).toEqual([]);
+      expect(js).toMatch(/function _scrml_each_arm_render_\w+\(_root, note\)/);
+    });
+  }
+});
