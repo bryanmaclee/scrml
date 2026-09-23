@@ -48,6 +48,8 @@ ${
         const { extractIdentifiersFromAST } = await import("./expression-parser.js");
     }
 
+    import { safeCall, HostError } from 'scrml:host'
+
     // ---------------------------------------------------------------------------
     // Error type
     // ---------------------------------------------------------------------------
@@ -293,11 +295,8 @@ ${
     // ---------------------------------------------------------------------------
 
     export function checkExprForRuntimeVars(expr, metaLocals, typeRegistry, span, filePath, errors) {
-        let ids
-        try {
-            ids = extractIdentifiersFromAST(expr)
-        } catch {
-            ids = extractIdentifiers(expr)
+        let ids = safeCall(() => extractIdentifiersFromAST(expr)) !{
+            | ::Thrown(message, name) :> extractIdentifiers(expr)
         }
         if (!ids || ids.length == 0) ids = extractIdentifiers(expr)
 
