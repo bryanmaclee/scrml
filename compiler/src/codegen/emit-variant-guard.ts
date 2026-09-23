@@ -65,6 +65,11 @@
  *     (emit-bindings.ts) with a `_root`-rooted acquire + a `_disposers` effect
  *     sink. Fixes `g-bindvalue-wiring-dropped-in-match-arm` (HIGH) for BOTH
  *     `<match>` arm bodies and `<engine>` state-child bodies.
+ *   - `show=`, `disabled=`/`readonly=`/`required=`, a value-form `${ if … }` and
+ *     `<textarea>` content WHEN they read an arm name (a payload binding or an
+ *     enclosing row name) — lowered by emit-event-wiring into a hoisted factory
+ *     this helper calls per arm entry (g-arm-directive-binding-reads-arm-name).
+ *     When they read no arm name they keep the module-scope wiring (unchanged).
  *
  * **Out-of-scope (post-MVP follow-on)** — these reactive surfaces inside
  * arm bodies share the same module-init binding pattern but are NOT
@@ -89,7 +94,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { ENGINE_STATE_CHILD_RESERVED_ATTRS, STATE_CHILD_STRUCTURAL_TAGS } from "../engine-statechild-grammar.ts";
-import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName } from "./emit-event-wiring.ts";
+import { emitValueAttrApply, armHandlerFactoryName, armWalkerPropName, armLogicFactoryName } from "./emit-event-wiring.ts";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -316,6 +321,7 @@ function emitArmRenderFunction(
   arm: VariantArm,
   ctx: CompileContext,
   armContextId: string | null,
+  armNames: string[] = [],
 ): string {
   // Lazy import to avoid circular dep with emit-html.ts (which imports
   // helpers from various siblings). require() is the runtime escape hatch
@@ -339,7 +345,10 @@ function emitArmRenderFunction(
   // bindings out of global emission; this helper's emitArmWireFunction
   // (called by emitVariantGuardedRender) re-emits per-arm wiring to be
   // invoked AFTER each variant change's innerHTML replace.
-  if (armContextId && ctx.registry) ctx.registry.pushArmContext(armContextId);
+  // g-arm-directive-binding-reads-arm-name — the names this arm's render / wire
+  // fns bind (payload bindings, then the row names) travel with the context, so
+  // an unquoted `attr=note` / `attr=g.prop` is lowered as a read of them.
+  if (armContextId && ctx.registry) ctx.registry.pushArmContext(armContextId, armNames);
   let html: string;
   try {
     // ss15 item-2 (S214) -- an arm body is a NESTED markup-render subtree, not
@@ -590,6 +599,68 @@ function emitArmWireFunction(
     if (mode === "walker") b.armWalkerProp = armWalkerPropName(b.eventName as string, b.placeholderId as string);
     armDelegated.push({ binding: b, domEvent, mode });
   }
+  // g-arm-directive-binding-reads-arm-name — LOGIC bindings in this arm that
+  // stay in the module-scope boot / `_scrml_nav_rewire` wiring
+  // (emit-event-wiring's filter keeps them global) but whose expression reads a
+  // name only THIS function binds:
+  //   - `show=(note == "hi")` / `show=isHi(note)` (isVisibilityToggle), and the
+  //     residual component-tag `if=` display limb (isConditionalDisplay);
+  //   - `disabled=` / `readonly=` / `required=` (isReactiveBoolAttr);
+  //   - a value-form `${ if note == "hi" { … } else { … } }` (value-control-flow);
+  //   - `<textarea>${note}</textarea>` (rcdata-content).
+  // Global, each threw `ReferenceError: note is not defined` (or `g`) at boot
+  // and left the element in its unbound state — a `show=` that should hide
+  // SHOWED. Same fix as the delegable handlers above: emit-event-wiring lowers
+  // the binding with its OWN lowering, into a hoisted chunk-scope factory
+  // `armLogicFactoryName(id)(_root, ...armParams)` (see its `armCapture`); this
+  // function calls it after every arm entry and owns the returned disposer.
+  // A binding that reads no arm name is untouched (byte-identical).
+  const exprReadsArmName = (node: unknown, text: unknown): boolean => {
+    if (armParamSet.size === 0) return false;
+    let hit = false;
+    const collect = (n: any): void => {
+      if (hit || !n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const x of n) collect(x); return; }
+      if (n.kind === "ident" && typeof n.name === "string" && armParamSet.has(n.name)) { hit = true; return; }
+      for (const k of Object.keys(n)) {
+        if (k === "span") continue;
+        const v = n[k];
+        // Raw-text fields (a condition kept as text, an escape-hatch's raw) are
+        // scanned as source text; everything else is walked for `ident` nodes.
+        if (typeof v === "string") {
+          if ((k === "expr" || k === "condExpr" || k === "condition" || (k === "raw" && n.kind === "escape-hatch")) && sourceTextReads(v)) { hit = true; return; }
+        } else collect(v);
+      }
+    };
+    collect(node);
+    return hit || (typeof text === "string" && sourceTextReads(text));
+  };
+  // Source-text read test: string / regex literals blanked (unless a template
+  // literal, whose `${…}` IS a read), `@cell` / `@.x` reads blanked (a cell is
+  // never an arm name), then an identifier-boundary match (`x.note` is not a read
+  // of `note`).
+  function sourceTextReads(text: string): boolean {
+    const blanked = (text.includes("`") ? text : _blankLits(text)).replace(/@[A-Za-z_$.][\w$.]*/g, (m) => " ".repeat(m.length));
+    return armParams.some((n) => _refsFree(blanked, n));
+  }
+  const armBoundLogic: any[] = [];
+  for (const b of logicBindings) {
+    if (typeof b.placeholderId !== "string") continue;
+    let reads = false;
+    if (b.isVisibilityToggle || b.isConditionalDisplay || b.isReactiveBoolAttr) {
+      // A bare `show=@x` (varName form) reads a cell only.
+      if (b.kind == null && typeof b.condExpr === "string") reads = exprReadsArmName(b.condExprNode, b.condExpr);
+    } else if (b.kind === "value-control-flow" && b.controlFlowNode) {
+      reads = exprReadsArmName(b.controlFlowNode, null);
+    } else if (b.kind === "rcdata-content" && Array.isArray(b.rcdataParts)) {
+      reads = b.rcdataParts.some((p: any) => p && p.kind === "expr" && exprReadsArmName(p.exprNode, p.expr));
+    }
+    if (!reads) continue;
+    b.armParams = [...armParams];
+    b.armLogicFactory = armLogicFactoryName(b.placeholderId);
+    armBoundLogic.push(b);
+  }
+
   // render-expr-primitive — `<render of=X/>` bindings tagged with THIS arm
   // context. The held value X is commonly the arm's own payload binding
   // (`<Failed err> <render of=err/>`), so it is a wire-fn parameter and is in
@@ -688,7 +759,8 @@ function emitArmWireFunction(
     wireableLogic.length === 0 && wireableEvents.length === 0 &&
     wireableRenders.length === 0 && wireableDirectives.length === 0 &&
     wireableBinds.length === 0 && wireableValueAttrs.length === 0 &&
-    wireableLifts.length === 0 && scopedEaches.length === 0 && armDelegated.length === 0
+    wireableLifts.length === 0 && scopedEaches.length === 0 && armDelegated.length === 0 &&
+    armBoundLogic.length === 0
   ) {
     return `function ${wireFnName}(${wireParams}) { return function() {}; }`;
   }
@@ -955,6 +1027,14 @@ function emitArmWireFunction(
   // arm on the next variant switch.
   for (const se of scopedEaches) {
     lines.push(`  _disposers.push(_scrml_effect(function() { ${se.fnName}(${["_root", ...se.params].join(", ")}); }));`);
+  }
+
+  // ---- logic bindings bound to this arm's scope (see `armBoundLogic`) ----
+  // The factory (emit-event-wiring) locates its element inside `_root`, applies
+  // the binding under an effect, and returns a disposer (null when the element
+  // is not in this arm's DOM).
+  for (const b of armBoundLogic) {
+    lines.push(`  { const _d = ${b.armLogicFactory}(${["_root", ...armParams].join(", ")}); if (_d) _disposers.push(_d); }`);
   }
 
   // ---- delegable events bound to this arm's scope (see `armDelegated`) ----
@@ -1225,6 +1305,15 @@ export function emitVariantGuardedRender(
   const mountAttr = opts.mountAttr ?? "data-scrml-engine-mount";
   const renderFnPrefix = opts.renderFnPrefix ?? "_scrml_engine";
 
+  // g-match-inside-each-row-cannot-see-the-row-variable — row-scope names (only
+  // meaningful for an item-scoped dispatch; see VariantGuardOptions).
+  const rowScopeParams = opts.itemScopedDispatch === true && Array.isArray(opts.rowScopeParams)
+    ? opts.rowScopeParams
+    : [];
+  // Per arm, the row names its payload bindings do not shadow.
+  const armRowScope = (arm: VariantArm): string[] =>
+    rowScopeParams.filter((n) => !arm.payloadBindings.includes(n));
+
   // ---------------- Render functions ----------------
   const renderFnLines: string[] = [];
   for (const arm of arms) {
@@ -1244,7 +1333,7 @@ export function emitVariantGuardedRender(
     // Phase A10 (S78, 2026-05-10) — pass armContextId so
     // emitArmRenderFunction tags bindings with `engineArm = "<varName>:<armTag>"`.
     const armContextId = `${idPrefix}:${arm.tag}`;
-    renderFnLines.push(emitArmRenderFunction(fnName, arm, ctx, armContextId));
+    renderFnLines.push(emitArmRenderFunction(fnName, arm, ctx, armContextId, [...arm.payloadBindings, ...armRowScope(arm)]));
   }
   const renderFunctionsJs = renderFnLines.join("\n\n");
 
@@ -1278,15 +1367,6 @@ export function emitVariantGuardedRender(
   // Emit ALL arm wire fns (even empty arms) so the dispatcher can
   // unconditionally call them — empty arms get a no-op wire fn returning
   // a no-op dispose. This keeps the dispatcher branch-uniform.
-  // g-match-inside-each-row-cannot-see-the-row-variable — row-scope names (only
-  // meaningful for an item-scoped dispatch; see VariantGuardOptions).
-  const rowScopeParams = opts.itemScopedDispatch === true && Array.isArray(opts.rowScopeParams)
-    ? opts.rowScopeParams
-    : [];
-  // Per arm, the row names its payload bindings do not shadow.
-  const armRowScope = (arm: VariantArm): string[] =>
-    rowScopeParams.filter((n) => !arm.payloadBindings.includes(n));
-
   const wireFnLines: string[] = [];
   for (const arm of arms) {
     const wireFnName = `${renderFnPrefix}_${idPrefix}_wire_${arm.tag}`;
@@ -1754,7 +1834,7 @@ export function emitInitialArmHtmlForMount(
   // during initial-arm body generation are tagged. The dispatcher will
   // fire at DOMContentLoaded for the initial variant, calling the per-arm
   // wire function, which restores the wiring inside the mount.
-  if (armContextId && ctx.registry) ctx.registry.pushArmContext(armContextId);
+  if (armContextId && ctx.registry) ctx.registry.pushArmContext(armContextId, arm.payloadBindings);
   try {
     // ss15 item-2 (S214) -- initial-arm body is a NESTED markup-render subtree.
     return generateHtml(arm.body, ctx, undefined, undefined, undefined, true);

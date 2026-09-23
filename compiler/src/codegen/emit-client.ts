@@ -2916,6 +2916,14 @@ export function generateClientJs(ctx: CompileContext): string {
     // lifting over its payload binding. The driver's definition carries this
     // call-form token, so it gates exactly the files that emit the drivers.
     ["_scrml_lift_scoped_run(", "deep_reactive"],
+    // g-arm-directive-binding-reads-arm-name — an arm-bound logic factory
+    // (emit-event-wiring `armLogicFactoryName`) applies its binding under
+    // `_scrml_effect`. The binding lives in a deferred arm body the pre-emit
+    // walk counts only as a registry entry, and an `<engine>` page with no other
+    // reactive surface shipped without `deep_reactive`: `_scrml_effect is not
+    // defined` on the first arm entry. The factory name gates exactly the files
+    // that emit one.
+    ["_scrml_armb_", "deep_reactive"],
   ];
   for (const [helperRef, chunkName] of POST_EMIT_HELPER_CHUNK_GATES) {
     if (ctx.usedRuntimeChunks.has(chunkName)) continue;

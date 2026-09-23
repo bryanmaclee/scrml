@@ -1,5 +1,5 @@
 import { genVar } from "./var-counter.ts";
-import { emitStringFromTree, exprNodeContainsMemberAccess } from "../expression-parser.ts";
+import { emitStringFromTree, exprNodeContainsMemberAccess, parseExprToNode } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
 import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
@@ -768,6 +768,68 @@ function isCleanChainBranch(branchElement: any): boolean {
   if (branchElement.kind !== "markup") return false;
   const stripped = stripChainBranchAttrs(branchElement);
   return isCleanIfNode(stripped);
+}
+
+// ===========================================================================
+// g-arm-directive-binding-reads-arm-name — an UNQUOTED attribute whose value is
+// a name only the enclosing dispatched arm binds.
+//
+// SPEC §5.2: `attr=name` SHALL resolve `name` in the current scope at runtime
+// (and §5.2's atomic-condition rule admits `obj.prop` for `show=`; §5.5.2 admits
+// `obj.prop` for `class:`). Inside a `<match>` / `<engine>` arm the payload
+// bindings and the enclosing `<each>` row names are in scope — they are the
+// arm render / wire fns' PARAMETERS — but this pass lowered such an attribute
+// as if the name were not a local at all:
+//   - `show=note`, `show=g.hot`, `disabled=g.hot`, `title=g.name` became the
+//     STATIC strings `show="note"`, `disabled="g.hot"` (always on), …;
+//   - `class:on=g.hot` read a reactive CELL named `g`
+//     (`_scrml_reactive_get("g").hot`) — a TypeError at boot that killed the
+//     page.
+// The identical markup in a plain `<each>` row resolves the row alias (emit-each
+// builds rows imperatively), so these were arm-only failures, all at exit 0.
+//
+// When the root of such a name is an arm name, the attribute is handed on as the
+// parenthesized EXPRESSION form (`show=(g.hot)`), which every consumer already
+// lowers — and, reading an arm name, it is wired per arm by emitArmWireFunction.
+// Nothing changes for a name that is not an arm name, outside an arm, for an
+// event / `ref=` / `bind:` / bare-identifier `class:` (E-ATTR-013 territory), or
+// for an attribute the value-attr emitter would not lower (a component prop, a
+// boolean HTML attribute, a directive element) — those keep their exact output.
+// ===========================================================================
+function armNameAttrAsExpr(
+  registry: BindingRegistry | null | undefined,
+  name: string,
+  val: any,
+  node: any,
+  tag: string,
+): any {
+  if (!registry || !val || val.kind !== "variable-ref") return val;
+  const armNames = registry.currentArmNames;
+  if (armNames.length === 0) return val;
+  const raw = String(val.name ?? "");
+  if (raw === "" || raw.startsWith("@")) return val;
+  const root = raw.split(/[.[]/)[0];
+  if (!armNames.includes(root)) return val;
+  if (name.startsWith("on") || name === "ref" || name.startsWith("bind:")) return val;
+  if (name.startsWith("class:")) {
+    if (!raw.includes(".")) return val;
+  } else if (name !== "show" && !REACTIVE_BOOL_ATTRS.has(name)) {
+    if (
+      !valueAttrElementIsLowerable(node, tag) ||
+      isDeclaredPropAttr(node, name) ||
+      isUserComponentMarkup(node) ||
+      HTML_BOOLEAN_ATTRS.has(name)
+    ) return val;
+  }
+  const exprRaw = `(${raw})`;
+  let exprNode: any = null;
+  try {
+    exprNode = parseExprToNode(exprRaw, "<arm-attr>", 0);
+  } catch {
+    return val;
+  }
+  if (!exprNode) return val;
+  return { kind: "expr", raw: exprRaw, exprNode, refs: [] };
 }
 
 // ===========================================================================
@@ -3056,7 +3118,7 @@ export function generateHtml(
       for (const attr of attrs) {
         if (!attr) continue;
         const name: string = attr.name;
-        const val = attr.value;
+        const val = armNameAttrAsExpr(registry, name, attr.value, node, tag);
 
         if (name.startsWith("transition:") || name.startsWith("in:") || name.startsWith("out:")) {
           continue;
