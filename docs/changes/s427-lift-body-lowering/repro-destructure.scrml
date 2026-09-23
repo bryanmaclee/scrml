@@ -1,0 +1,12 @@
+<program>
+<cfg> = { prefix: "P-", suffix: "!" }
+<items> = [{ id: 1, name: "a" }, { id: 2, name: "b" }]
+<ul>
+    ${
+        const { prefix, suffix } = @cfg
+        for (let it of @items) {
+            lift <li class="row">${prefix}${it.name}${suffix}</li>
+        }
+    }
+</ul>
+</program>

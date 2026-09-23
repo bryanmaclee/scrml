@@ -1,7 +1,7 @@
 import { genVar } from "./var-counter.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
-import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds } from "./emit-lift.js";
+import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -505,7 +505,7 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
   // declared for the else-limb, where no such binding exists, and the else-limb's
   // `row = "b"` emitted as a bare assignment to nothing.
   if (hasFragmentedLiftBody(consequent)) {
-    const liftCode = emitConsolidatedLift(consequent, { scopeVar: opts.scopeVar ?? null });
+    const liftCode = emitConsolidatedLift(consequent, { scopeVar: opts.scopeVar ?? null, ...(opts.declaredNames != null ? { declaredNames: opts.declaredNames } : {}) });
     if (liftCode) lines.push(`  ${liftCode}`);
   } else {
     for (const code of emitLogicBody(consequent, { ...bodyOpts, declaredNames: blockScopedDeclaredNames(opts.declaredNames) })) {
@@ -519,7 +519,7 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
 
     if (hasFragmentedLiftBody(alternate)) {
       lines.push(`else {`);
-      const liftCode = emitConsolidatedLift(alternate, { scopeVar: opts.scopeVar ?? null });
+      const liftCode = emitConsolidatedLift(alternate, { scopeVar: opts.scopeVar ?? null, ...(opts.declaredNames != null ? { declaredNames: opts.declaredNames } : {}) });
       if (liftCode) lines.push(`  ${liftCode}`);
       lines.push(`}`);
     } else {
@@ -677,7 +677,17 @@ function _emitForStmtInner(
   // `_scrml_reactive_get(...)` (the snapshot value) via emitExprField.
   const bodyIsRender = forBodyLiftsMarkup(node.body);
 
-  if (iterIsReactive && bodyIsRender) {
+  // s427-lift-body-lowering — keyed reconciliation is the same program as the
+  // source loop only when each item's output is a function of the item alone. A
+  // loop tree that writes a binding declared outside the writing loop (a running
+  // counter) is lowered as the plain loop, with non-keyed mode held for its nested
+  // loops; the enclosing lift group re-runs it whole, as the source does. See
+  // forLiftTreeHasImpureLoop (emit-lift.js). Also non-keyed while an enclosing
+  // lowering holds the mode (an impure outer tree, or the Step 4b mixed-hoist guard).
+  const _impureTree = bodyIsRender && !liftNonKeyedActive() && forLiftTreeHasImpureLoop(node, opts?.declaredNames);
+  const _nonKeyed = _impureTree || liftNonKeyedActive();
+
+  if (iterIsReactive && bodyIsRender && !_nonKeyed) {
     // Reactive for/lift path — §6.5.3 with keyed reconciliation
     const wrapperVar = genVar("list_wrapper");
     const renderFn = genVar("render_list");
@@ -698,10 +708,16 @@ function _emitForStmtInner(
     const keyVar = genVar("item_key");
     lines.push(`  const ${keyVar} = ${varName}?.id != null ? ${varName}.id : _scrml_idx;`);
     pushLiftReconcileCtx(buildLiftReconcileCtx(wrapperVar, keyVar, varName, body));
+    // s427-lift-body-lowering — the factory body is a block scope: a COPY of the
+    // enclosing declared names, shared by every statement of the body. Before this
+    // every statement was emitted with no set, so `let m = 0; m = m + x` in the body
+    // lowered to a duplicate `const m` and an assignment to an enclosing `let` to a
+    // TDZ `const`.
+    const bodyNames = new Set<string>(opts?.declaredNames ?? []);
 
     if (hasFragmentedLiftBody(body)) {
       // Pass continueBehavior:"return" so continue-stmts in pre-statements emit `return;`
-      const liftCode = emitConsolidatedLift(body, { directReturn: true, continueBehavior: "return", engineCtx: _liftEngineCtx, scopeVar: varName });
+      const liftCode = emitConsolidatedLift(body, { directReturn: true, continueBehavior: "return", engineCtx: _liftEngineCtx, scopeVar: varName, declaredNames: bodyNames });
       if (liftCode) {
         for (const line of liftCode.split("\n")) {
           lines.push(`  ${line}`);
@@ -717,7 +733,7 @@ function _emitForStmtInner(
       const _liftBodyStart = lines.length;
       for (const child of body) {
         if (child && child.kind === "lift-expr") {
-          const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx: _liftEngineCtx, scopeVar: varName });
+          const code = emitLiftExpr(child, { containerVar: tmpContainerVar, engineCtx: _liftEngineCtx, scopeVar: varName, declaredNames: bodyNames });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
@@ -727,7 +743,7 @@ function _emitForStmtInner(
           // LIFT-5 fix: if-stmt that may contain lift-expr children must route
           // those inner lifts to tmpContainerVar instead of the global ambient
           // _scrml_lift_target (which is null when the reconciler calls this factory).
-          const code = emitIfStmtWithContainer(child, tmpContainerVar, { continueBehavior: "return", engineCtx: _liftEngineCtx, scopeVar: varName });
+          const code = emitIfStmtWithContainer(child, tmpContainerVar, { continueBehavior: "return", engineCtx: _liftEngineCtx, scopeVar: varName, declaredNames: bodyNames });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
@@ -735,7 +751,7 @@ function _emitForStmtInner(
           }
         } else if (child && child.kind === "for-stmt") {
           // LIFT-5 fix: nested for-stmt that may contain lift-expr children.
-          const code = emitForStmtWithContainer(child, tmpContainerVar, { continueBehavior: "return", engineCtx: _liftEngineCtx });
+          const code = emitForStmtWithContainer(child, tmpContainerVar, { continueBehavior: "return", engineCtx: _liftEngineCtx, declaredNames: bodyNames });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
@@ -744,7 +760,7 @@ function _emitForStmtInner(
         } else {
           // Pass continueBehavior:"return" so continue-stmts nested at any depth
           // (e.g. inside an if-body) emit `return;` rather than illegal `continue;`.
-          const code = emitLogicNode(child, { continueBehavior: "return" });
+          const code = emitLogicNode(child, { continueBehavior: "return", declaredNames: bodyNames });
           if (code) {
             for (const line of code.split("\n")) {
               lines.push(`  ${line}`);
@@ -798,15 +814,20 @@ function _emitForStmtInner(
 
   const body: any[] = node.body ?? [];
 
-  if (hasFragmentedLiftBody(body)) {
-    const liftCode = emitConsolidatedLift(body, { engineCtx: _liftEngineCtx, scopeVar: varName });
-    if (liftCode) {
-      lines.push(`  ${liftCode}`);
+  if (_impureTree) pushLiftNonKeyed();
+  try {
+    if (hasFragmentedLiftBody(body)) {
+      const liftCode = emitConsolidatedLift(body, { engineCtx: _liftEngineCtx, scopeVar: varName, ...(opts?.declaredNames != null ? { declaredNames: opts.declaredNames } : {}) });
+      if (liftCode) {
+        lines.push(`  ${liftCode}`);
+      }
+    } else {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+        lines.push(`  ${code}`);
+      }
     }
-  } else {
-    for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
-      lines.push(`  ${code}`);
-    }
+  } finally {
+    if (_impureTree) popLiftNonKeyed();
   }
   lines.push(`}`);
   return lines.join("\n");

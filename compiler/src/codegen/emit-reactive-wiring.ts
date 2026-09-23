@@ -1,7 +1,9 @@
+import * as acorn from "acorn";
 import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, setStructuralDeclNamesForFile } from "./emit-logic.js";
+import { pushLiftNonKeyed, popLiftNonKeyed } from "./emit-lift.js";
 import { CGError } from "./errors.ts";
 import {
   collectTopLevelLogicStatements,
@@ -174,6 +176,97 @@ function _findFunctionBodyEnd(code: string, start: number): number {
   // Include trailing newline if present.
   while (i < code.length && code[i] !== "\n") i++;
   return i < code.length ? i + 1 : i;
+}
+
+// ---------------------------------------------------------------------------
+// s427-lift-body-lowering — the mixed-case hoist must not strand a declaration
+// ---------------------------------------------------------------------------
+
+function _parseScript(js: string): any | null {
+  try {
+    return acorn.parse(js, { ecmaVersion: 2022, sourceType: "script", allowReturnOutsideFunction: true });
+  } catch {
+    return null;
+  }
+}
+
+/** Names declared by the TOP-LEVEL statements of `js` (var/let/const — every
+ *  binding of a destructuring pattern — and function/class declarations). */
+function _topLevelDeclaredNames(js: string): Set<string> | null {
+  const ast = _parseScript(js);
+  if (!ast) return null;
+  const out = new Set<string>();
+  const addPattern = (p: any): void => {
+    if (!p) return;
+    switch (p.type) {
+      case "Identifier": out.add(p.name); return;
+      case "ObjectPattern": for (const pr of p.properties) addPattern(pr.type === "RestElement" ? pr.argument : pr.value); return;
+      case "ArrayPattern": for (const el of p.elements) addPattern(el); return;
+      case "RestElement": addPattern(p.argument); return;
+      case "AssignmentPattern": addPattern(p.left); return;
+    }
+  };
+  for (const st of ast.body) {
+    if (st.type === "VariableDeclaration") for (const d of st.declarations) addPattern(d.id);
+    else if ((st.type === "FunctionDeclaration" || st.type === "ClassDeclaration") && st.id) out.add(st.id.name);
+  }
+  return out;
+}
+
+/** Every identifier REFERENCE in `js` (member `.property` and non-computed object
+ *  keys excluded). Over-collection (locals of the code itself) is harmless — the
+ *  result is only intersected with a set of names declared elsewhere. */
+function _referencedNames(js: string): Set<string> | null {
+  const ast = _parseScript(js);
+  if (!ast) return null;
+  const out = new Set<string>();
+  const visit = (n: any): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (typeof n.type !== "string") return;
+    if (n.type === "Identifier") { out.add(n.name); return; }
+    if (n.type === "MemberExpression") { visit(n.object); if (n.computed) visit(n.property); return; }
+    if (n.type === "Property" || n.type === "MethodDefinition" || n.type === "PropertyDefinition") {
+      if (n.computed) visit(n.key);
+      visit(n.value);
+      return;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(ast);
+  return out;
+}
+
+/**
+ * The mixed-case hoist (`hoistForLiftSetup`) moves a keyed for-lift's item
+ * factory and render function OUT of the group's re-render `_scrml_effect`, while
+ * the group's own declarations stay INSIDE it (they must re-evaluate on every
+ * run). A factory that reads such a declaration —
+ * `const { prefix, suffix } = @cfg; for (it of @items) { lift <li>${prefix}…</li> }`,
+ * or any plain `const pre = @cfg.prefix` — then runs where that name does not
+ * exist: `ReferenceError: prefix is not defined` at boot, whole page dead, compile
+ * at exit 0. Returns true when the hoist would strand such a reference.
+ *
+ * Not reachable by keeping the setup inside the effect either: the list would be
+ * rebuilt (and its static effect re-registered) on every run. Keying cannot
+ * express "rows depend on a block-local that re-evaluates" at all — the rows must
+ * re-render when it changes — so the caller lowers that loop plain instead, and
+ * the group's effect re-runs the whole block exactly as the source reads.
+ * Unparseable code (never observed) keeps the prior lowering.
+ */
+function mixedHoistStrandsADeclaration(combinedCode: string): boolean {
+  const { hoistedSetup, remaining } = hoistForLiftSetup(combinedCode);
+  if (!hoistedSetup) return false;
+  const declared = _topLevelDeclaredNames(remaining);
+  if (!declared || declared.size === 0) return false;
+  const refs = _referencedNames(hoistedSetup);
+  if (!refs) return false;
+  for (const n of refs) if (declared.has(n)) return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -813,6 +906,10 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   };
   const prevEachLiftRegistry = setEachLiftRegistry(ctx.registry ?? null);
 
+  // s427-lift-body-lowering — names declared at chunk scope by the groups emitted
+  // so far (SPEC §7.6 file scope). See `groupNames` below.
+  const fileScopeNames = new Set<string>();
+
   for (const group of drainGroups()) {
     const { pid, stmts } = group;
     const codes: string[] = [];
@@ -836,9 +933,27 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const groupTildeCtx = groupTildeUsed
       ? { var: null as string | null, mode: "single" as "single" | "array" }
       : null;
+    // s427-lift-body-lowering — the group's declared-name scope. Every top-level
+    // statement used to be emitted with NO set, and the set is exactly what tells a
+    // keywordless `n = n + 1` (a `tilde-decl`) after `let n = 0` from a fresh
+    // declaration (emit-logic.ts, the `tilde-decl` arm). Without it the rebind
+    // lowered to `const n = n + 1`: at the block's own top level a duplicate
+    // declaration (E-CODEGEN-INVALID-LOGIC), and one block deeper — a `for` body,
+    // the running counter of a lift loop — a shadowing `const` read in its own TDZ,
+    // `ReferenceError: Cannot access 'n' before initialization` at boot, exit 0.
+    // Seeded from the names earlier groups declared at chunk scope (SPEC §7.6: a
+    // top-level `let`/`const` of a file-level `${}` block is in scope for every
+    // later block); merged back below only when THIS group's declarations land at
+    // chunk scope too.
+    const groupNames = new Set<string>(fileScopeNames);
     const groupEmitOpts = groupTildeCtx
-      ? { ...emitOpts, tildeContext: groupTildeCtx }
-      : emitOpts;
+      ? { ...emitOpts, tildeContext: groupTildeCtx, declaredNames: groupNames }
+      : { ...emitOpts, declaredNames: groupNames };
+    // Per-statement ranges of the side-channel lists a statement's emission appends
+    // to, so a statement re-emitted by the mixed-hoist guard below leaves no
+    // duplicate behind.
+    const stmtSideRanges: Array<{ nested: [number, number]; errs: [number, number] }> = [];
+    const nestedListRef: any[] | null = (ctx.registry?.nestedLiftGroups ?? null) as any[] | null;
 
     for (const stmt of stmts) {
       // S108 Bug 5 Phase 3 — Skip statements from constant-folded logic wrappers.
@@ -872,7 +987,13 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         ));
         continue;
       }
+      const _nestedBefore = nestedListRef ? nestedListRef.length : 0;
+      const _errsBefore = errors.length;
       const code = emitLogicNode(stmt, groupEmitOpts);
+      const _sideRange = {
+        nested: [_nestedBefore, nestedListRef ? nestedListRef.length : 0] as [number, number],
+        errs: [_errsBefore, errors.length] as [number, number],
+      };
 
       // GH #237 (fail-open, S293) — `on mount { … }` calling a server function.
       //
@@ -912,6 +1033,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
           `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log("on mount", _scrml_async_err));`,
         );
         codeStmts.push(stmt);
+        stmtSideRanges.push({ ..._sideRange, onMount: true } as any);
         continue;
       }
 
@@ -978,7 +1100,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         continue;
       }
 
-      if (code) { codes.push(code); codeStmts.push(stmt); }
+      if (code) { codes.push(code); codeStmts.push(stmt); stmtSideRanges.push(_sideRange); }
       if (stmtContainsLift(stmt)) groupHasLift = true;
       // Check for reactive deps in the emitted code (after @var rewriting)
       if (code && code.includes("_scrml_reactive_get(")) groupHasReactiveDeps = true;
@@ -1002,7 +1124,43 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
 
     if (codes.length === 0) continue;
-    const combinedCode = codes.join("\n");
+    let combinedCode = codes.join("\n");
+
+    // s427-lift-body-lowering — the mixed-case hoist guard (see
+    // mixedHoistStrandsADeclaration). When the group re-renders through an outer
+    // effect AND the hoisted keyed setup would read a declaration that stays inside
+    // that effect, every statement that keys a list is re-emitted with its loops
+    // lowered plain; the side-channel entries its first emission appended are
+    // withdrawn first (reverse order keeps the earlier ranges valid).
+    if (
+      groupHasLift &&
+      combinedCode.includes("_scrml_reconcile_list(") &&
+      liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps) &&
+      mixedHoistStrandsADeclaration(combinedCode)
+    ) {
+      for (let i = codes.length - 1; i >= 0; i--) {
+        const r = stmtSideRanges[i] as any;
+        if (!r || r.onMount || !codes[i].includes("_scrml_reconcile_list(")) continue;
+        if (nestedListRef && r.nested[1] > r.nested[0]) nestedListRef.splice(r.nested[0], r.nested[1] - r.nested[0]);
+        if (r.errs[1] > r.errs[0]) errors.splice(r.errs[0], r.errs[1] - r.errs[0]);
+        pushLiftNonKeyed();
+        try {
+          codes[i] = emitLogicNode(codeStmts[i], groupEmitOpts);
+        } finally {
+          popLiftNonKeyed();
+        }
+      }
+      combinedCode = codes.join("\n");
+    }
+
+    // The group's declarations are file scope (SPEC §7.6) exactly when its code
+    // runs at chunk scope: a plain logic group, or a run-once lift group (its
+    // lift-free statements stay at chunk scope in the mount-deferred split too). An
+    // outer-effect group keeps them effect-local, and a nested group's live in its
+    // per-instance function.
+    if (!group.nested && (!(pid && groupHasLift) || !liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps))) {
+      for (const n of groupNames) fileScopeNames.add(n);
+    }
 
     // A nested group NEVER reaches file scope: its statements read the row's
     // iteration names / the arm's payload bindings, which exist only as the
