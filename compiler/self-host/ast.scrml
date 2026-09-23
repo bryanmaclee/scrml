@@ -28,7 +28,7 @@ ${
 
     // In production (compiled scrml), parseExprToNode is available via ^{} import.
     // In test context (Blob URL), ^{} blocks are stripped — this fallback handles it.
-    let parseExprToNode = undefined
+    let parseExprToNode = not
     try {
         const _ep = await import(new URL("../src/expression-parser.ts", import.meta.url).href)
         parseExprToNode = _ep.parseExprToNode
@@ -124,7 +124,7 @@ ${
     // ---------------------------------------------------------------------------
 
     function parseAttributes(tokens, filePath, errors, isComponent) {
-        if (isComponent == null) isComponent = false
+        if (isComponent is not) isComponent = false
         const attrs = []
         let i = 0
 
@@ -175,7 +175,7 @@ ${
                             const refs = []
                             const refRe = /@([A-Za-z_$][A-Za-z0-9_$]*)/g
                             let m
-                            while ((m = refRe.exec(raw)) != null) {
+                            while ((m = refRe.exec(raw)) is some) {
                                 if (!refs.includes(m[1])) refs.push(m[1])
                             }
                             value = { kind: "expr", raw, refs, span: valSpan }
@@ -333,7 +333,7 @@ ${
                 const span = tokenSpan(tok, filePath)
 
                 let typeExpr = rawTypeExpr.trim()
-                let defaultValue = null
+                let defaultValue = not
                 const eqIdx = typeExpr.indexOf("=")
                 if (eqIdx != -1) {
                     defaultValue = typeExpr.slice(eqIdx + 1).trim()
@@ -346,7 +346,7 @@ ${
                     typeExpr = typeExpr.slice(0, -1).trim()
                 }
 
-                if (defaultValue != null) {
+                if (defaultValue is some) {
                     optional = true
                 }
 
@@ -481,7 +481,7 @@ ${
             const optional = match[2] == "?"
             let typeAndDefault = match[3].trim()
 
-            let defaultValue = null
+            let defaultValue = not
             const eqMatch = typeAndDefault.match(/^(.+?)\s*=(?!=|>)\s*(.+)$/)
             if (eqMatch) {
                 typeAndDefault = eqMatch[1].trim()
@@ -493,7 +493,7 @@ ${
             props.push({
                 name,
                 type: typeAndDefault,
-                optional: optional || defaultValue != null,
+                optional: optional || defaultValue is some,
                 default: defaultValue,
                 bindable,
                 isFunctionProp,
@@ -512,7 +512,7 @@ ${
         let i = 0
 
         function peek(n) {
-            if (n == null) n = 0
+            if (n is not) n = 0
             return i + n < tokens.length ? tokens[i + n] : { kind: "EOF", text: "", span: { start: 0, end: 0, line: 1, col: 1 } }
         }
 
@@ -544,18 +544,18 @@ ${
 
         // safeParseExprToNode — Phase 1/2 ExprNode parallel fields
         function safeParseExprToNode(expr, startOffset) {
-            if (!parseExprToNode) return undefined
-            if (!expr || typeof expr !== "string" || !expr.trim()) return undefined
+            if (!parseExprToNode) return not
+            if (!expr || typeof expr != "string" || !expr.trim()) return not
             try {
                 return parseExprToNode(expr, filePath || "", startOffset || 0)
             } catch (_e) {
-                return undefined
+                return not
             }
         }
 
         // collectExpr
         function collectExpr(stopAt) {
-            if (stopAt == null) stopAt = null
+            if (stopAt is not) stopAt = not
             const OPEN_BRACE = String.fromCharCode(123)
             const CLOSE_BRACE = String.fromCharCode(125)
             const parts = []
@@ -805,7 +805,7 @@ ${
                         return childNode
                     }
                 }
-                return null
+                return not
             }
 
             // LET
@@ -993,7 +993,7 @@ ${
                     const result = collectLiftExpr()
                     return { id: ++counter.next, kind: "lift-expr", expr: { kind: "expr", expr: result.expr }, span: spanOf(startTok, peek()) }
                 }
-                return null
+                return not
             }
 
             // FOR
@@ -1201,7 +1201,7 @@ ${
                         }
                         consume()
                     }
-                    return null
+                    return not
                 }
             }
         }
@@ -1216,7 +1216,7 @@ ${
                 consume()
                 consequent = parseRecursiveBody()
             }
-            let alternate = null
+            let alternate = not
             if (peek().kind == "KEYWORD" && peek().text == "else") {
                 consume()
                 if (peek().kind == "KEYWORD" && peek().text == "if") {
@@ -1254,7 +1254,7 @@ ${
                     params.push({ name: s })
                 } else {
                     const name = s.slice(0, colonIdx).trim()
-                    const typeAnnotation = s.slice(colonIdx + 1).trim() || null
+                    const typeAnnotation = s.slice(colonIdx + 1).trim() || not
                     params.push({ name, typeAnnotation })
                 }
             }
@@ -1344,7 +1344,7 @@ ${
                 const result = collectExpr()
                 const rawStr = "import " + result.expr
 
-                const importNode = { id: ++counter.next, kind: "import-decl", raw: rawStr, span: result.span, names: [], source: null, isDefault: false }
+                const importNode = { id: ++counter.next, kind: "import-decl", raw: rawStr, span: result.span, names: [], source: not, isDefault: false }
 
                 const namedMatch = result.expr.match(new RegExp("^\\s*" + String.fromCharCode(123) + "\\s*([^" + String.fromCharCode(125) + "]*)" + String.fromCharCode(125) + "\\s*from\\s+[\"']([^\"']+)[\"']"))
                 if (namedMatch) {
@@ -1369,7 +1369,7 @@ ${
                 const result = collectExpr()
                 const rawStr = "use " + result.expr
 
-                const useNode = { id: ++counter.next, kind: "use-decl", raw: rawStr, span: result.span, names: [], source: null }
+                const useNode = { id: ++counter.next, kind: "use-decl", raw: rawStr, span: result.span, names: [], source: not }
 
                 const namedMatch = result.expr.match(new RegExp("^\\s*([\\w:/.@-]+)\\s*" + String.fromCharCode(123) + "\\s*([^" + String.fromCharCode(125) + "]*)" + String.fromCharCode(125)))
                 if (namedMatch) {
@@ -1392,7 +1392,7 @@ ${
                 const result = collectExpr()
                 const rawStr = "export " + result.expr
 
-                const exportNode = { id: ++counter.next, kind: "export-decl", raw: rawStr, span: result.span, exportedName: null, exportKind: null, reExportSource: null }
+                const exportNode = { id: ++counter.next, kind: "export-decl", raw: rawStr, span: result.span, exportedName: not, exportKind: not, reExportSource: not }
 
                 const reExportMatch = result.expr.match(new RegExp("^\\s*" + String.fromCharCode(123) + "\\s*([^" + String.fromCharCode(125) + "]*)" + String.fromCharCode(125) + "\\s*from\\s+[\"']([^\"']+)[\"']"))
                 if (reExportMatch) {
@@ -1853,7 +1853,7 @@ ${
                 const params = parseParamList()
 
                 let canFail = false
-                let errorType = undefined
+                let errorType = not
                 if (peek().text == "!") {
                     consume()
                     canFail = true
@@ -1866,8 +1866,8 @@ ${
                     }
                 }
 
-                let route = undefined
-                let method = undefined
+                let route = not
+                let method = not
                 while (peek().kind == "IDENT" && (peek().text == "route" || peek().text == "method")) {
                     const attrName = consume().text
                     if (peek().text == "=") {
@@ -1938,7 +1938,7 @@ ${
                 }
 
                 let canFail = false
-                let errorType = undefined
+                let errorType = not
                 if (peek().text == "!") {
                     consume()
                     canFail = true
@@ -2382,7 +2382,7 @@ ${
                         nodes.push({
                             id: ++counter.next,
                             kind: "propagate-expr",
-                            binding: null,
+                            binding: not,
                             expr: innerExpr,
                             exprNode: safeParseExprToNode(innerExpr, 0),
                             span: result.span,
@@ -2469,7 +2469,7 @@ ${
         const seenNames = new Set()
         let match
 
-        while ((match = AT_IDENT_RE.exec(value)) != null) {
+        while ((match = AT_IDENT_RE.exec(value)) is some) {
             const name = match[1]
             if (!seenNames.has(name)) {
                 seenNames.add(name)
@@ -2489,7 +2489,7 @@ ${
             }
         } else {
             for (const ref of refs) {
-                ref.expr = null
+                ref.expr = not
             }
         }
 
@@ -2569,10 +2569,10 @@ ${
 
     fn parseTestBody(tokens, filePath, span, errors) {
         let i = 0
-        let groupName = null
+        let groupName = not
         const tests = []
-        let beforeStmts = null
-        let afterStmts = null
+        let beforeStmts = not
+        let afterStmts = not
         // SPEC §19.12.6 — `test-bind` declarations at body scope of this `~{}`.
         // Scope-local; does NOT leak to siblings. Phase A6-2 (parser) collects;
         // A6-3 (typer) validates RHS shape; A6-4 (codegen) emits dispatch.
@@ -2638,7 +2638,7 @@ ${
                     }
                 }
             }
-            return { raw, op: null, lhs: null, rhs: null }
+            return { raw, op: not, lhs: not, rhs: not }
         }
 
         function collectAssertTokens() {
@@ -2783,7 +2783,7 @@ ${
         while (i < tokens.length && tokens[i].kind != "EOF") {
             const tok = tokens[i]
 
-            if (tok.kind == "STRING" && groupName == null && tests.length == 0 && beforeStmts == null) {
+            if (tok.kind == "STRING" && groupName is not && tests.length == 0 && beforeStmts is not) {
                 groupName = tok.text
                 i++
                 continue
@@ -3247,8 +3247,8 @@ ${
                     const m = rest.match(catchPattern)
                     if (!m) break
                     const typeName = m[1]
-                    const binding = m[2] != null ? m[2] : ""
-                    const openPos = rest.indexOf(OPEN_BRACE, m.index != null ? m.index : 0)
+                    const binding = m[2] is some ? m[2] : ""
+                    const openPos = rest.indexOf(OPEN_BRACE, m.index is some ? m.index : 0)
                     let depth = 0
                     let closePos = openPos
                     for (let ci = openPos; ci < rest.length; ci++) {
@@ -3338,7 +3338,7 @@ ${
             "If you intended one of these, check that the opening delimiter is spelled correctly.",
             span,
         ))
-        return null
+        return not
     }
 
     // ---------------------------------------------------------------------------
@@ -3365,14 +3365,14 @@ ${
     }
 
     fn getAttr(node, name) {
-        if (node.kind != "markup") return null
-        const attrs = node.attrs != null ? node.attrs : []
-        return attrs.find(function(a) { return a.name == name }) != null ? attrs.find(function(a) { return a.name == name }) : null
+        if (node.kind != "markup") return not
+        const attrs = node.attrs is some ? node.attrs : []
+        return (attrs.find(function(a) { return a.name == name })) is some ? attrs.find(function(a) { return a.name == name }) : not
     }
 
     fn hasAttr(node) {
         const names = Array.prototype.slice.call(arguments, 1)
-        return names.some(function(n) { return getAttr(node, n) != null })
+        return names.some(function(n) { return (getAttr(node, n)) is some })
     }
 
     fn collapseIfChains(nodes, errors, filePath) {
@@ -3393,7 +3393,7 @@ ${
 
             // E-CTRL-005
             if (node.kind == "markup" && hasAttr(node, "if") && (hasAttr(node, "else") || hasAttr(node, "else-if"))) {
-                const span = node.span != null ? node.span : { line: 0, col: 0 }
+                const span = node.span is some ? node.span : { line: 0, col: 0 }
                 errors.push(new TABError(
                     "E-CTRL-005",
                     "E-CTRL-005: `else` or `else-if=` and `if=` cannot appear on the same element.",
@@ -3407,7 +3407,7 @@ ${
             // E-CTRL-001/002
             if (node.kind == "markup" && !hasAttr(node, "if")) {
                 if (hasAttr(node, "else")) {
-                    const span = node.span != null ? node.span : { line: 0, col: 0 }
+                    const span = node.span is some ? node.span : { line: 0, col: 0 }
                     errors.push(new TABError(
                         "E-CTRL-001",
                         "E-CTRL-001: `else` on line " + span.line + " has no preceding `if=` element at the same level.",
@@ -3418,7 +3418,7 @@ ${
                     continue
                 }
                 if (hasAttr(node, "else-if")) {
-                    const span = node.span != null ? node.span : { line: 0, col: 0 }
+                    const span = node.span is some ? node.span : { line: 0, col: 0 }
                     errors.push(new TABError(
                         "E-CTRL-002",
                         "E-CTRL-002: `else-if=` on line " + span.line + " has no preceding `if=` element at the same level.",
@@ -3439,7 +3439,7 @@ ${
             // Found if= — start building chain
             const ifAttr = getAttr(node, "if")
             const branches = [{ condition: ifAttr.value, element: node }]
-            let elseBranch = null
+            let elseBranch = not
             let j = idx + 1
 
             while (j < nodes.length) {
@@ -3456,7 +3456,7 @@ ${
                     errors.push(new TABError(
                         "E-CTRL-004",
                         "E-CTRL-004: `else` or `else-if=` cannot appear on a state object opener.",
-                        sibling.span != null ? sibling.span : { line: 0, col: 0 },
+                        sibling.span is some ? sibling.span : { line: 0, col: 0 },
                     ))
                     break
                 }
@@ -3466,7 +3466,7 @@ ${
                         errors.push(new TABError(
                             "E-CTRL-003",
                             "E-CTRL-003: The element on line " + ((sibling.span && sibling.span.line) ? sibling.span.line : 0) + " tries to extend a chain that already ended with `else`.",
-                            sibling.span != null ? sibling.span : { line: 0, col: 0 },
+                            sibling.span is some ? sibling.span : { line: 0, col: 0 },
                         ))
                         break
                     }
@@ -3481,7 +3481,7 @@ ${
                         errors.push(new TABError(
                             "E-CTRL-003",
                             "E-CTRL-003: The element on line " + ((sibling.span && sibling.span.line) ? sibling.span.line : 0) + " tries to extend a chain that already ended with `else`.",
-                            sibling.span != null ? sibling.span : { line: 0, col: 0 },
+                            sibling.span is some ? sibling.span : { line: 0, col: 0 },
                         ))
                         break
                     }
@@ -3565,7 +3565,7 @@ ${
 
         function assign(node) {
             if (!node || typeof node != "object") return
-            if (node.id != undefined && node.span) table.set(node.id, node.span)
+            if (node.id is some && node.span) table.set(node.id, node.span)
 
             for (const key of Object.keys(node)) {
                 if (key == "span" || key == "id") continue
@@ -3590,7 +3590,7 @@ ${
         const counter = { next: 0 }
         const errors = []
 
-        let nodes = blocks.map(function(block) { return buildBlock(block, filePath, null, counter, errors) }).filter(Boolean)
+        let nodes = blocks.map(function(block) { return buildBlock(block, filePath, not, counter, errors) }).filter(Boolean)
 
         nodes = collapseIfChains(nodes, errors, filePath)
 
@@ -3607,23 +3607,23 @@ ${
             function(n) { return n.kind == "markup" && n.tag == "program" }
         )
 
-        let authConfig = null
+        let authConfig = not
         const programNode = nodes.find(function(n) { return n.kind == "markup" && n.tag == "program" })
         if (programNode) {
-            const programAttrs = programNode.attrs != null ? programNode.attrs : []
+            const programAttrs = programNode.attrs is some ? programNode.attrs : []
 
             const getAttrValue = function(name) {
                 const a = programAttrs.find(function(attr) { return attr.name == name })
-                if (!a || !a.value || a.value.kind == "absent") return null
+                if (!a || !a.value || a.value.kind == "absent") return not
                 if (a.value.kind == "string-literal") return a.value.value
-                return null
+                return not
             }
 
             const authVal = getAttrValue("auth")
             if (authVal) {
-                const loginRedirect = getAttrValue("loginRedirect") != null ? getAttrValue("loginRedirect") : "/login"
-                const csrf = getAttrValue("csrf") != null ? getAttrValue("csrf") : "off"
-                const sessionExpiry = getAttrValue("sessionExpiry") != null ? getAttrValue("sessionExpiry") : "1h"
+                const loginRedirect = (getAttrValue("loginRedirect")) is some ? getAttrValue("loginRedirect") : "/login"
+                const csrf = (getAttrValue("csrf")) is some ? getAttrValue("csrf") : "off"
+                const sessionExpiry = (getAttrValue("sessionExpiry")) is some ? getAttrValue("sessionExpiry") : "1h"
 
                 authConfig = {
                     auth: authVal,
@@ -3639,15 +3639,15 @@ ${
             }
         }
 
-        let middlewareConfig = null
+        let middlewareConfig = not
         if (programNode) {
-            const programAttrs2 = programNode.attrs != null ? programNode.attrs : []
+            const programAttrs2 = programNode.attrs is some ? programNode.attrs : []
 
             const getMWAttr = function(attrName) {
                 const a = programAttrs2.find(function(attr) { return attr.name == attrName })
-                if (!a || !a.value || a.value.kind == "absent") return null
+                if (!a || !a.value || a.value.kind == "absent") return not
                 if (a.value.kind == "string-literal") return a.value.value
-                return null
+                return not
             }
 
             const mwCors = getMWAttr("cors")
@@ -3664,7 +3664,7 @@ ${
             // for WS reconnect cadence (per-channel reconnect= still wins). Default 2000ms.
             const mwChannelReconnect = getMWAttr("channel-reconnect")
 
-            if (mwCors != null || mwLog != null || mwRatelimit != null || mwHeaders != null || mwIdempotencyStore != null || mwIdempotencyTTL != null || mwBatchInListCap != null || mwCorsMaxAge != null || mwChannelReconnect != null) {
+            if (mwCors is some || mwLog is some || mwRatelimit is some || mwHeaders is some || mwIdempotencyStore is some || mwIdempotencyTTL is some || mwBatchInListCap is some || mwCorsMaxAge is some || mwChannelReconnect is some) {
                 middlewareConfig = { cors: mwCors, log: mwLog, ratelimit: mwRatelimit, headers: mwHeaders, idempotencyStore: mwIdempotencyStore, idempotencyTTL: mwIdempotencyTTL, batchInListCap: mwBatchInListCap, corsMaxAge: mwCorsMaxAge, channelReconnect: mwChannelReconnect }
             }
 
@@ -3673,7 +3673,7 @@ ${
             // mode csrf="on" codepath was redundant double-validation with the
             // baseline auto-CSRF emit path. See ef70daa.
 
-            if (mwRatelimit != null && !/^\d+\/(sec|min|hour)$/.test(mwRatelimit)) {
+            if (mwRatelimit is some && !/^\d+\/(sec|min|hour)$/.test(mwRatelimit)) {
                 const ratelimitAttr = programAttrs2.find(function(attr) { return attr.name == "ratelimit" })
                 const ratelimitSpan = ratelimitAttr && ratelimitAttr.span ? ratelimitAttr.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 }
                 errors.push(new TABError(
@@ -3695,7 +3695,7 @@ ${
             for (const nodeList of nodeListsToSearch) {
                 for (const node of nodeList) {
                     if (node && node.kind == "logic") {
-                        for (const stmt of (node.body != null ? node.body : [])) {
+                        for (const stmt of (node.body is some ? node.body : [])) {
                             if (stmt && stmt.kind == "function-decl" && stmt.isHandleEscapeHatch) {
                                 topLevelHandles.push(stmt)
                             }
@@ -3711,30 +3711,30 @@ ${
                     errors.push(new TABError(
                         "E-MW-005",
                         "E-MW-005: Only one handle() function is allowed per file. A second definition was found here; the first is at line " + firstLine + ".",
-                        topLevelHandles[idx].span != null ? topLevelHandles[idx].span : { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+                        topLevelHandles[idx].span is some ? topLevelHandles[idx].span : { file: filePath, start: 0, end: 0, line: 1, col: 1 },
                     ))
                 }
             }
 
             function findNestedHandles(stmts) {
-                for (const stmt of (stmts != null ? stmts : [])) {
+                for (const stmt of (stmts is some ? stmts : [])) {
                     if (!stmt) continue
                     if (stmt.kind == "function-decl" && stmt.isHandleEscapeHatch) {
                         errors.push(new TABError(
                             "E-MW-006",
                             "E-MW-006: handle() must be defined at file top level inside a $" + String.fromCharCode(123) + " " + String.fromCharCode(125) + " block. Found definition inside a nested function body.",
-                            stmt.span != null ? stmt.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+                            stmt.span is some ? stmt.span : { file: filePath, start: 0, end: 0, line: 1, col: 1 },
                         ))
                     }
                     if (stmt.kind == "function-decl" && !stmt.isHandleEscapeHatch) {
-                        findNestedHandles(stmt.body != null ? stmt.body : [])
+                        findNestedHandles(stmt.body is some ? stmt.body : [])
                     }
                     if (stmt.kind == "if-stmt") {
-                        findNestedHandles(stmt.consequent != null ? stmt.consequent : [])
-                        findNestedHandles(stmt.alternate != null ? stmt.alternate : [])
+                        findNestedHandles(stmt.consequent is some ? stmt.consequent : [])
+                        findNestedHandles(stmt.alternate is some ? stmt.alternate : [])
                     }
                     if (stmt.kind == "for-stmt" || stmt.kind == "while-stmt") {
-                        findNestedHandles(stmt.body != null ? stmt.body : [])
+                        findNestedHandles(stmt.body is some ? stmt.body : [])
                     }
                 }
             }
@@ -3742,9 +3742,9 @@ ${
             for (const nodeList of nodeListsToSearch) {
                 for (const node of nodeList) {
                     if (node && node.kind == "logic") {
-                        for (const stmt of (node.body != null ? node.body : [])) {
+                        for (const stmt of (node.body is some ? node.body : [])) {
                             if (stmt && stmt.kind == "function-decl" && !stmt.isHandleEscapeHatch) {
-                                findNestedHandles(stmt.body != null ? stmt.body : [])
+                                findNestedHandles(stmt.body is some ? stmt.body : [])
                             }
                         }
                     }
