@@ -20,7 +20,7 @@ ${
             this.code = code
             this.message = message
             this.span = span
-            this.severity = severity != null ? severity : "error"
+            this.severity = severity is some ? severity : "error"
         }
     }
 
@@ -43,7 +43,7 @@ ${
     // ---------------------------------------------------------------------------
 
     fn resolveFileAST(input) {
-        if (!input || typeof input != "object") return null
+        if (!input || typeof input != "object") return not
         const obj = input
 
         // If it has .nodes directly — it's a FileAST
@@ -65,7 +65,7 @@ ${
             }
         }
 
-        return null
+        return not
     }
 
     // ---------------------------------------------------------------------------
@@ -76,7 +76,7 @@ ${
         const names = []
         const re = /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g
         let m
-        while ((m = re.exec(expr)) != null) {
+        while ((m = re.exec(expr)) is some) {
             names.push(m[1])
         }
         return names
@@ -333,7 +333,7 @@ ${
         for (const startNode of allNodes) {
             if (color.get(startNode) != WHITE) continue
 
-            const stack = [{ nodeId: startNode, iter: null }]
+            const stack = [{ nodeId: startNode, iter: not }]
             color.set(startNode, GRAY)
 
             while (stack.length > 0) {
@@ -365,12 +365,12 @@ ${
                 }
                 if (nc == WHITE) {
                     color.set(neighbor, GRAY)
-                    stack.push({ nodeId: neighbor, iter: null })
+                    stack.push({ nodeId: neighbor, iter: not })
                 }
             }
         }
 
-        return null
+        return not
     }
 
     // ---------------------------------------------------------------------------
@@ -415,7 +415,7 @@ ${
 
             for (const fnNode of fnNodes) {
                 const fnNodeId = filePath + "::" + fnNode.span.start
-                const boundary = functionBoundaryById.get(fnNodeId) != null ? functionBoundaryById.get(fnNodeId) : "client"
+                const boundary = functionBoundaryById.get(fnNodeId) is some ? functionBoundaryById.get(fnNodeId) : "client"
                 const nodeId = makeNodeId(filePath, fnNode.span, "fn")
 
                 const dgNode = {
@@ -456,7 +456,7 @@ ${
                 const dgNode = {
                     kind: "reactive",
                     nodeId: nodeId,
-                    varName: rNode.name != null ? rNode.name : "",
+                    varName: rNode.name is some ? rNode.name : "",
                     hasLift: false,
                     span: rNode.span,
                 }
@@ -470,7 +470,7 @@ ${
                 const dgNode = {
                     kind: "reactive",
                     nodeId: nodeId,
-                    varName: dNode.name != null ? dNode.name : "",
+                    varName: dNode.name is some ? dNode.name : "",
                     hasLift: false,
                     span: dNode.span,
                 }
@@ -495,7 +495,7 @@ ${
                 const dgNode = {
                     kind: "sql-query",
                     nodeId: nodeId,
-                    query: sqlNode.query != null ? sqlNode.query : "",
+                    query: sqlNode.query is some ? sqlNode.query : "",
                     hasLift: false,
                     span: sqlNode.span,
                 }
@@ -505,7 +505,7 @@ ${
             // Collect meta blocks
             const metaBlocks = collectAllMetaBlocks(fileAST)
             for (const metaNode of metaBlocks) {
-                const deterministic = metaNode.deterministic != null ? metaNode.deterministic : false
+                const deterministic = metaNode.deterministic is some ? metaNode.deterministic : false
                 const nodeId = makeNodeId(filePath, metaNode.span, "meta")
                 const dgNode = {
                     kind: "meta",
@@ -538,7 +538,7 @@ ${
                 const dgNode = {
                     kind: "import",
                     nodeId: nodeId,
-                    source: impNode.source != null ? impNode.source : "",
+                    source: impNode.source is some ? impNode.source : "",
                     hasLift: false,
                     span: impNode.span,
                 }
@@ -558,7 +558,7 @@ ${
                     const bodyNode = lb.body[i]
 
                     // Find matching DGNode by span
-                    let matchingNodeId = null
+                    let matchingNodeId = not
                     for (const [nid, dgn] of nodes) {
                         if (
                             dgn.span &&
@@ -594,7 +594,7 @@ ${
                 const calleeNodeId = functionNameToNodeId.get(calleeName)
                 if (!calleeNodeId) continue
 
-                const boundary = functionNameToBoundary.get(calleeName) != null ? functionNameToBoundary.get(calleeName) : "client"
+                const boundary = functionNameToBoundary.get(calleeName) is some ? functionNameToBoundary.get(calleeName) : "client"
                 const edgeKind = boundary == "server" ? "awaits" : "calls"
 
                 edges.push({
@@ -639,7 +639,7 @@ ${
                 for (const calleeName of dgNode._pendingDerivedCallees) {
                     const calleeNodeId = functionNameToNodeId.get(calleeName)
                     if (calleeNodeId) {
-                        const boundary = functionNameToBoundary.get(calleeName) != null ? functionNameToBoundary.get(calleeName) : "client"
+                        const boundary = functionNameToBoundary.get(calleeName) is some ? functionNameToBoundary.get(calleeName) : "client"
                         const edgeKind = boundary == "server" ? "awaits" : "calls"
                         edges.push({ from: nodeId, to: calleeNodeId, kind: edgeKind })
                     }
@@ -847,7 +847,7 @@ ${
             for (const callEdge of callEdges) {
                 const calledNode = nodes.get(callEdge.to)
                 if (!calledNode || calledNode.kind != "function") continue
-                let calledFnName = null
+                let calledFnName = not
                 for (const [fnName, fnNodeId] of functionNameToNodeId) {
                     if (fnNodeId == callEdge.to) { calledFnName = fnName; break }
                 }
