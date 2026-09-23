@@ -417,17 +417,21 @@ function buildServerFnNames(fnNameMap: Map<string, string>): Set<string> {
  *   cannot reset the caret mid-typing. Absence clears to `""` rather than
  *   removing: a form control always HAS a value, and `el.value = null` would
  *   stringify to the literal "null".
+ * @param el          the element variable (default `el`). The arm wire fn passes
+ *   a `_scrml_`-prefixed spelling when an arm name is itself `el`
+ *   (g-arm-directive-binding-reads-arm-name round 2).
  */
 export function emitValueAttrApply(
   compiled: string,
   attrName: string,
   isFormValue: boolean,
+  el = "el",
 ): string {
   const write = isFormValue
     ? `const _scrml_s = (_scrml_x === null || _scrml_x === undefined) ? "" : String(_scrml_x); ` +
-      `if (el.value !== _scrml_s) { el.value = _scrml_s; }`
-    : `if (_scrml_x === null || _scrml_x === undefined) { el.removeAttribute(${JSON.stringify(attrName)}); } ` +
-      `else { el.setAttribute(${JSON.stringify(attrName)}, String(_scrml_x)); }`;
+      `if (${el}.value !== _scrml_s) { ${el}.value = _scrml_s; }`
+    : `if (_scrml_x === null || _scrml_x === undefined) { ${el}.removeAttribute(${JSON.stringify(attrName)}); } ` +
+      `else { ${el}.setAttribute(${JSON.stringify(attrName)}, String(_scrml_x)); }`;
   return (
     `{ const _scrml_w = function(_scrml_x) { ${write} }; ` +
     `const _scrml_v = (${compiled}); ` +
@@ -1368,30 +1372,38 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // (module scope, where the arm's names do not exist): they emit the SAME body
   // into the binding's hoisted factory
   //
-  //   function <armLogicFactory>(_root, ...armParams) {
-  //     const el = _root.querySelector('<selector>'); if (!el) return null;
+  //   function <armLogicFactory>(_scrml_root, ...armParams) {
+  //     const _scrml_el = _scrml_root.querySelector('<selector>'); if (!_scrml_el) return null;
   //     const _scrml_arm_ds = [];
-  //     const _scrml_region_track = function(_e, _d) { _scrml_arm_ds.push(_d); return _d; };
+  //     const _scrml_region_track = function(_scrml_e, _scrml_d) { _scrml_arm_ds.push(_scrml_d); return _scrml_d; };
   //     <body>
   //     return function() { <dispose each> };
   //   }
   //
   // which the arm's wire fn calls after every arm entry, pushing the returned
   // disposer onto its `_disposers`. Every effect the shared lowerings create is
-  // already routed through `_scrml_region_track(el, <dispose>)` (see
+  // already routed through `_scrml_region_track(<el>, <dispose>)` (see
   // regionEffectLines / anchorTrack), so the local binding of that name collects
   // exactly those disposers — the arm's teardown stops them on the next switch.
+  //
+  // EVERY name the factory declares or takes, besides the arm's own names, is
+  // `_scrml_`-prefixed (round 2): the arm's names are its parameters and its body
+  // reads them, so a payload / row alias called `el` or `_root` was a duplicate
+  // declaration (E-CODEGEN-INVALID-LOGIC) — or, left unprefixed inside the body,
+  // would be shadowed by the element. The shared lowerings spell their element
+  // reference `armEl()`, which is `el` everywhere except inside a capture.
   let armCapture: LogicBinding | null = null;
+  const armEl = (): string => (armCapture ? "_scrml_el" : "el");
   const armLogicFactoryLines: string[] = [];
   const emitArmLogicFactory = (b: LogicBinding, selector: string, body: string[]): void => {
-    const params = ["_root", ...(b.armParams ?? [])].join(", ");
+    const params = ["_scrml_root", ...(b.armParams ?? [])].join(", ");
     armLogicFactoryLines.push(`function ${b.armLogicFactory}(${params}) {`);
-    armLogicFactoryLines.push(`  const el = _root.querySelector('${selector}');`);
-    armLogicFactoryLines.push(`  if (!el) return null;`);
+    armLogicFactoryLines.push(`  const _scrml_el = _scrml_root.querySelector('${selector}');`);
+    armLogicFactoryLines.push(`  if (!_scrml_el) return null;`);
     armLogicFactoryLines.push(`  const _scrml_arm_ds = [];`);
-    armLogicFactoryLines.push(`  const _scrml_region_track = function(_e, _d) { _scrml_arm_ds.push(_d); return _d; };`);
+    armLogicFactoryLines.push(`  const _scrml_region_track = function(_scrml_e, _scrml_d) { _scrml_arm_ds.push(_scrml_d); return _scrml_d; };`);
     for (const l of body) armLogicFactoryLines.push(`  ${l}`);
-    armLogicFactoryLines.push(`  return function() { for (const _d of _scrml_arm_ds) { try { _d(); } catch (_e) {} } };`);
+    armLogicFactoryLines.push(`  return function() { for (const _scrml_d of _scrml_arm_ds) { try { _scrml_d(); } catch (_scrml_e) {} } };`);
     armLogicFactoryLines.push(`}`);
   };
   const pushRebindableSel = (selector: string, body: string[], rebind = true): void => {
@@ -1438,14 +1450,14 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   // region-tracked — only for a template-interior anchor (identity otherwise,
   // keeping the SSR-body emit byte-identical).
   const anchorTrack = (createExpr: string, insideMountTemplate: boolean): string =>
-    insideMountTemplate || armCapture ? `_scrml_region_track(el, ${createExpr})` : createExpr;
+    insideMountTemplate || armCapture ? `_scrml_region_track(${armEl()}, ${createExpr})` : createExpr;
   // Emit a region-tracked reactive-display effect as TWO statements — the bare
   // `_scrml_effect(function() { <inner> });` (its exact shape preserved for the
   // codegen-shape tests) followed by `_scrml_region_track(el, <dispose>);` so a
   // soft nav away disposes it (finding #2). `inner` is the effect body.
   const regionEffectLines = (inner: string): string[] => [
     `const _scrml_disp = _scrml_effect(function() { ${inner} });`,
-    `_scrml_region_track(el, _scrml_disp);`,
+    `_scrml_region_track(${armEl()}, _scrml_disp);`,
   ];
 
   for (const [eventName, entries] of byEventType) {
@@ -1671,11 +1683,11 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             // Reactive: define the value computation once, render it now, and
             // re-render under a region-tracked effect (re-runs the reads → tracks).
             cfBody.push(`const ${cfRenderFn} = function() { return ${valueExpr}; };`);
-            cfBody.push(`_scrml_render_value(el, ${cfRenderFn}());`);
-            cfBody.push(...regionEffectLines(`_scrml_render_value(el, ${cfRenderFn}());`));
+            cfBody.push(`_scrml_render_value(${armEl()}, ${cfRenderFn}());`);
+            cfBody.push(...regionEffectLines(`_scrml_render_value(${armEl()}, ${cfRenderFn}());`));
           } else {
             // Static scrutinee/condition: one-shot render.
-            cfBody.push(`_scrml_render_value(el, ${valueExpr});`);
+            cfBody.push(`_scrml_render_value(${armEl()}, ${valueExpr});`);
           }
           // Only the reactive variant needs a rehydrator rebind; the static
           // one-shot is server-rendered in a swapped region — EXCEPT when the
@@ -1739,7 +1751,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
         const valueExpr = concatTerms.join(" + ");
         const inTpl = binding.insideMountTemplate === true;
         const rcdataInner = [
-          `const _scrml_set_rcdata = function() { el.value = ${valueExpr}; };`,
+          `const _scrml_set_rcdata = function() { ${armEl()}.value = ${valueExpr}; };`,
           `_scrml_set_rcdata();`,
           `${anchorTrack(`_scrml_effect(function() { _scrml_set_rcdata(); })`, inTpl)};`,
         ];
@@ -2097,7 +2109,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           const condNode = reparseRequestRefEscapeHatch(binding.condExprNode, binding.condExpr, "<bool-attr-request-ref>", requestIds, /* gateToRegisteredRequests */ true);
           const compiled = emitExprField(condNode, binding.condExpr, { mode: "client", derivedNames: ctx.derivedNames, synthCellKeys: ctx.synthCellKeys, requestIds });
           const conditionCode = `(${compiled})`;
-          const toggle = `if (${conditionCode}) { el.setAttribute(${JSON.stringify(attrName)}, ""); } else { el.removeAttribute(${JSON.stringify(attrName)}); }`;
+          const toggle = `if (${conditionCode}) { ${armEl()}.setAttribute(${JSON.stringify(attrName)}, ""); } else { ${armEl()}.removeAttribute(${JSON.stringify(attrName)}); }`;
           // Rebindable (findings #1/#2): re-binds the boolean-attr toggle scoped to
           // a swapped region; the effect is region-tracked for teardown.
           pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, [
@@ -2205,8 +2217,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
           const dtBody: string[] = [];
           if (!hasTransition) {
             // No transition — simple display toggle (original behavior)
-            dtBody.push(`el.style.display = ${conditionCode} ? "" : "none";`);
-            dtBody.push(...regionEffectLines(`el.style.display = ${conditionCode} ? "" : "none";`));
+            dtBody.push(`${armEl()}.style.display = ${conditionCode} ? "" : "none";`);
+            dtBody.push(...regionEffectLines(`${armEl()}.style.display = ${conditionCode} ? "" : "none";`));
           } else {
             // Transition-aware display toggle
             const enterClass = binding.transitionEnter ? `"scrml-enter-${binding.transitionEnter}"` : null;
@@ -2214,28 +2226,28 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
             const fnName = `_scrml_transition_${placeholderId.replace(/[^a-zA-Z0-9_]/g, "_")}`;
 
             // Initial state — no animation on first render
-            dtBody.push(`el.style.display = ${conditionCode} ? "" : "none";`);
+            dtBody.push(`${armEl()}.style.display = ${conditionCode} ? "" : "none";`);
             dtBody.push(`function ${fnName}() {`);
             dtBody.push(`  const _scrml_show = ${conditionCode};`);
             dtBody.push(`  if (_scrml_show) {`);
             if (enterClass) {
-              dtBody.push(`    el.style.display = "";`);
-              dtBody.push(`    el.classList.add(${enterClass});`);
-              dtBody.push(`    el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${enterClass}); el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
+              dtBody.push(`    ${armEl()}.style.display = "";`);
+              dtBody.push(`    ${armEl()}.classList.add(${enterClass});`);
+              dtBody.push(`    ${armEl()}.addEventListener("animationend", function _scrml_ae() { ${armEl()}.classList.remove(${enterClass}); ${armEl()}.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
             } else {
-              dtBody.push(`    el.style.display = "";`);
+              dtBody.push(`    ${armEl()}.style.display = "";`);
             }
             dtBody.push(`  } else {`);
             if (exitClass) {
-              dtBody.push(`    el.classList.add(${exitClass});`);
-              dtBody.push(`    el.addEventListener("animationend", function _scrml_ae() { el.classList.remove(${exitClass}); el.style.display = "none"; el.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
+              dtBody.push(`    ${armEl()}.classList.add(${exitClass});`);
+              dtBody.push(`    ${armEl()}.addEventListener("animationend", function _scrml_ae() { ${armEl()}.classList.remove(${exitClass}); ${armEl()}.style.display = "none"; ${armEl()}.removeEventListener("animationend", _scrml_ae); }, { once: true });`);
             } else {
-              dtBody.push(`    el.style.display = "none";`);
+              dtBody.push(`    ${armEl()}.style.display = "none";`);
             }
             dtBody.push(`  }`);
             dtBody.push(`}`);
             dtBody.push(`const _scrml_disp = _scrml_effect(${fnName});`);
-            dtBody.push(`_scrml_region_track(el, _scrml_disp);`);
+            dtBody.push(`_scrml_region_track(${armEl()}, _scrml_disp);`);
           }
           pushRebindableSel(`[${dataAttr}="${placeholderId}"]`, dtBody);
         }
@@ -2560,7 +2572,7 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   if (logicBindings && logicBindings.length > 0) {
     for (const b of logicBindings) {
       if (!Array.isArray(b.armParams) || typeof b.armLogicFactory !== "string") continue;
-      if (!armLogicFactoryLines.includes(`function ${b.armLogicFactory}(${["_root", ...b.armParams].join(", ")}) {`)) {
+      if (!armLogicFactoryLines.includes(`function ${b.armLogicFactory}(${["_scrml_root", ...b.armParams].join(", ")}) {`)) {
         throw new Error(
           `emit-event-wiring: arm-bound logic binding ${String(b.placeholderId)} (${String(b.engineArm)}) produced no ` +
           `factory ${b.armLogicFactory} — its lowering did not reach an element-scoped sink.`,

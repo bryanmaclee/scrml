@@ -497,6 +497,25 @@ function emitArmWireFunction(
   // row's scope (item-scoped match inside an `<each>`; the caller already
   // dropped row names a payload binding shadows).
   const armParams = [...payloadBindings, ...rowScope];
+  // g-arm-directive-binding-reads-arm-name (round 2) — the wire fn's OWN names
+  // (its `_root` parameter, the `_disposers` sink, the per-binding `el` / `_h` /
+  // `_v` / `_hv` / `_rt` / `_d` locals) share a scope with the arm's names, which
+  // are its parameters. An arm name spelled like one of them was a duplicate
+  // declaration (SyntaxError → E-CODEGEN-INVALID-LOGIC) or, worse, was silently
+  // SHADOWED by the internal (`${el}` rendered the element). An internal that
+  // collides with an arm name takes a `_scrml_arm`-prefixed spelling instead
+  // (the `_scrml_` namespace is the compiler's); without a collision the
+  // spelling — and so the emitted bytes — are unchanged.
+  const _armTaken = new Set(armParams);
+  const armLocal = (n: string): string => (_armTaken.has(n) ? `_scrml_arm${n.startsWith("_") ? "" : "_"}${n}` : n);
+  const R = armLocal("_root");
+  const DS = armLocal("_disposers");
+  const EL = armLocal("el");
+  const H = armLocal("_h");
+  const D = armLocal("_d");
+  const V = armLocal("_v");
+  const HV = armLocal("_hv");
+  const RT = armLocal("_rt");
   // The scan is deliberately NOT literal-blanked: a lowered attribute template
   // is a JS template literal (`t-${g.name}`) whose interpolations ARE reads, and
   // a false positive (the name inside a plain string) only costs an effect that
@@ -752,7 +771,7 @@ function emitArmWireFunction(
   // event handlers, etc. Without this, expressions like
   // `${rows}` produce `el.textContent = rows;` referencing an unbound
   // free variable → runtime ReferenceError. See SURVEY §4.2 sub-anomaly #3.
-  const wireParams = ["_root", ...armParams].join(", ");
+  const wireParams = [R, ...armParams].join(", ");
 
   // No bindings to wire → no-op shell so the dispatcher branch stays uniform.
   if (
@@ -768,7 +787,7 @@ function emitArmWireFunction(
   const encodingCtx = ctx.encodingCtx;
   const lines: string[] = [];
   lines.push(`function ${wireFnName}(${wireParams}) {`);
-  lines.push(`  const _disposers = [];`);
+  lines.push(`  const ${DS} = [];`);
 
   // ---- Logic bindings: textContent + _scrml_effect ----
   for (const binding of wireableLogic) {
@@ -797,8 +816,8 @@ function emitArmWireFunction(
       }
     }
     lines.push(`  {`);
-    lines.push(`    const el = _root.querySelector('[data-scrml-logic=${JSON.stringify(placeholderId)}]');`);
-    lines.push(`    if (el) {`);
+    lines.push(`    const ${EL} = ${R}.querySelector('[data-scrml-logic=${JSON.stringify(placeholderId)}]');`);
+    lines.push(`    if (${EL}) {`);
     // markup-as-value (§1.4/§7.4 Pillar 1) in EXPRESSION position — a ternary
     // arm `${ cond ? <p>X</p> : "" }` re-parsed inside this arm body now lowers
     // its markup consequent to a real DOM node (emit-lift `emitMarkupValueExpr`).
@@ -811,11 +830,11 @@ function emitArmWireFunction(
     // interpolation (GITI-032).
     if (varRefs.length > 0 || readsRow(rewrittenExpr)) {
       // Reactive: bind initial value + subscribe via _scrml_effect (returns dispose).
-      lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
-      lines.push(`      _disposers.push(_scrml_effect(function() { _scrml_render_value(el, ${rewrittenExpr}); }));`);
+      lines.push(`      _scrml_render_value(${EL}, ${rewrittenExpr});`);
+      lines.push(`      ${DS}.push(_scrml_effect(function() { _scrml_render_value(${EL}, ${rewrittenExpr}); }));`);
     } else {
       // No reactive deps — write once. No dispose needed.
-      lines.push(`      _scrml_render_value(el, ${rewrittenExpr});`);
+      lines.push(`      _scrml_render_value(${EL}, ${rewrittenExpr});`);
     }
     lines.push(`    }`);
     lines.push(`  }`);
@@ -834,15 +853,15 @@ function emitArmWireFunction(
     const variantExprs = (binding.renderVariantExprs ?? {}) as Record<string, string>;
     const suffix = anchorId.replace(/[^a-zA-Z0-9_]/g, "_");
     lines.push(`  {`);
-    lines.push(`    const el = _root.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
-    lines.push(`    if (el) {`);
+    lines.push(`    const ${EL} = ${R}.querySelector('[data-scrml-render-anchor=${JSON.stringify(anchorId)}]');`);
+    lines.push(`    if (${EL}) {`);
     // Tag extraction mirrors the variant-guard dispatcher: object → `.variant`,
     // bare string → the value itself.
-    lines.push(`      const _hv = (${acc});`);
-    lines.push(`      const _rt = (typeof _hv === "object" && _hv !== null && typeof _hv.variant === "string") ? _hv.variant : _hv;`);
-    lines.push(`      switch (_rt) {`);
+    lines.push(`      const ${HV} = (${acc});`);
+    lines.push(`      const ${RT} = (typeof ${HV} === "object" && ${HV} !== null && typeof ${HV}.variant === "string") ? ${HV}.variant : ${HV};`);
+    lines.push(`      switch (${RT}) {`);
     for (const [vName, vExpr] of Object.entries(variantExprs)) {
-      lines.push(`        case ${JSON.stringify(vName)}: el.innerHTML = (${vExpr}); break;`);
+      lines.push(`        case ${JSON.stringify(vName)}: ${EL}.innerHTML = (${vExpr}); break;`);
     }
     lines.push(`      }`);
     lines.push(`    }`);
@@ -861,14 +880,14 @@ function emitArmWireFunction(
     const jsExpr = binding.directiveJsExpr as string;
     const refs = (binding.directiveRefs ?? []) as string[];
     lines.push(`  {`);
-    lines.push(`    const el = _root.querySelector(${JSON.stringify(selector)});`);
-    lines.push(`    if (el) {`);
+    lines.push(`    const ${EL} = ${R}.querySelector(${JSON.stringify(selector)});`);
+    lines.push(`    if (${EL}) {`);
     if (binding.kind === "class-directive") {
       const className = binding.className as string;
       // Apply once at mount, then (when reactive) subscribe via _scrml_effect.
-      lines.push(`      el.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr}));`);
+      lines.push(`      ${EL}.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr}));`);
       if (refs.length > 0 || readsRow(jsExpr)) {
-        lines.push(`      _disposers.push(_scrml_effect(function() { el.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr})); }));`);
+        lines.push(`      ${DS}.push(_scrml_effect(function() { ${EL}.classList.toggle(${JSON.stringify(className)}, !!(${jsExpr})); }));`);
       }
     } else if (binding.directiveIsFormValue === true) {
       // i225 — form-control `value="${…}"` inside an arm body is the `.value`
@@ -880,16 +899,16 @@ function emitArmWireFunction(
       // file-scope `isFormControlValue` block in emit-bindings.ts (i174); the
       // `directiveIsFormValue` marker already encodes the tag ∈ {input,textarea,
       // select} AND no-sibling-bind:value guard (computed at registration).
-      lines.push(`      { const _v = ${jsExpr}; if (el.value !== _v) el.value = _v; }`);
+      lines.push(`      { const ${V} = ${jsExpr}; if (${EL}.value !== ${V}) ${EL}.value = ${V}; }`);
       if (refs.length > 0 || readsRow(jsExpr)) {
-        lines.push(`      _disposers.push(_scrml_effect(function() { const _v = ${jsExpr}; if (el.value !== _v) el.value = _v; }));`);
+        lines.push(`      ${DS}.push(_scrml_effect(function() { const ${V} = ${jsExpr}; if (${EL}.value !== ${V}) ${EL}.value = ${V}; }));`);
       }
     } else {
       // attr-template — set the interpolated attribute value once, then subscribe.
       const attrName = binding.attrName as string;
-      lines.push(`      el.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
+      lines.push(`      ${EL}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr});`);
       if (refs.length > 0 || readsRow(jsExpr)) {
-        lines.push(`      _disposers.push(_scrml_effect(function() { el.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
+        lines.push(`      ${DS}.push(_scrml_effect(function() { ${EL}.setAttribute(${JSON.stringify(attrName)}, ${jsExpr}); }));`);
       }
     }
     lines.push(`    }`);
@@ -946,12 +965,13 @@ function emitArmWireFunction(
       compiled,
       attrName,
       binding.valueAttrIsFormValue === true,
+      EL,
     );
     lines.push(`  {`);
-    lines.push(`    const el = _root.querySelector(${JSON.stringify(selector)});`);
-    lines.push(`    if (el) {`);
+    lines.push(`    const ${EL} = ${R}.querySelector(${JSON.stringify(selector)});`);
+    lines.push(`    if (${EL}) {`);
     lines.push(`      ${apply}`);
-    lines.push(`      _disposers.push(_scrml_effect(function() { ${apply} }));`);
+    lines.push(`      ${DS}.push(_scrml_effect(function() { ${apply} }));`);
     lines.push(`    }`);
     lines.push(`  }`);
   }
@@ -992,10 +1012,10 @@ function emitArmWireFunction(
       const bodyLines = emitBindDirectiveBody(binding.bindAttr, binding.bindNode, {
         // `_root`-rooted acquire: the arm subtree is mounted under `_root`, so
         // the bind placeholder lives inside it (NOT the document at large).
-        acquire: (sel: string) => `_root.querySelector('${sel}')`,
+        acquire: (sel: string) => `${R}.querySelector('${sel}')`,
         // Disposal sink: push the effect handle onto `_disposers` so the
         // variant-change teardown stops the stale-element subscription.
-        wrapEffect: (effectCall: string) => `_disposers.push(${effectCall})`,
+        wrapEffect: (effectCall: string) => `${DS}.push(${effectCall})`,
         enumVarMap: _armEnumVarMap,
         reactiveTypeMap: _armReactiveTypeMap,
         encodingCtx: ctx.encodingCtx,
@@ -1013,8 +1033,8 @@ function emitArmWireFunction(
   for (const lift of wireableLifts) {
     const selector = lift.placeholderIds.map((id) => `[data-scrml-logic=${JSON.stringify(id)}]`).join(", ");
     lines.push(`  {`);
-    lines.push(`    const el = _root.querySelector(${JSON.stringify(selector)});`);
-    lines.push(`    if (el) _disposers.push(_scrml_lift_scoped_run(el, ${lift.fnName}, [${armParams.join(", ")}]));`);
+    lines.push(`    const ${EL} = ${R}.querySelector(${JSON.stringify(selector)});`);
+    lines.push(`    if (${EL}) ${DS}.push(_scrml_lift_scoped_run(${EL}, ${lift.fnName}, [${armParams.join(", ")}]));`);
     lines.push(`  }`);
   }
 
@@ -1026,7 +1046,7 @@ function emitArmWireFunction(
   // field `g.items`, a cell) re-reconciles it; the effect is disposed with the
   // arm on the next variant switch.
   for (const se of scopedEaches) {
-    lines.push(`  _disposers.push(_scrml_effect(function() { ${se.fnName}(${["_root", ...se.params].join(", ")}); }));`);
+    lines.push(`  ${DS}.push(_scrml_effect(function() { ${se.fnName}(${[R, ...se.params].join(", ")}); }));`);
   }
 
   // ---- logic bindings bound to this arm's scope (see `armBoundLogic`) ----
@@ -1034,7 +1054,7 @@ function emitArmWireFunction(
   // the binding under an effect, and returns a disposer (null when the element
   // is not in this arm's DOM).
   for (const b of armBoundLogic) {
-    lines.push(`  { const _d = ${b.armLogicFactory}(${["_root", ...armParams].join(", ")}); if (_d) _disposers.push(_d); }`);
+    lines.push(`  { const ${D} = ${b.armLogicFactory}(${[R, ...armParams].join(", ")}); if (${D}) ${DS}.push(${D}); }`);
   }
 
   // ---- delegable events bound to this arm's scope (see `armDelegated`) ----
@@ -1044,20 +1064,20 @@ function emitArmWireFunction(
     const eventName = binding.eventName as string;
     const factory = binding.armFactoryName as string;
     lines.push(`  {`);
-    lines.push(`    const el = _root.querySelector('[data-scrml-bind-${eventName}=${JSON.stringify(binding.placeholderId)}]');`);
-    lines.push(`    if (el) {`);
+    lines.push(`    const ${EL} = ${R}.querySelector('[data-scrml-bind-${eventName}=${JSON.stringify(binding.placeholderId)}]');`);
+    lines.push(`    if (${EL}) {`);
     if (mode === "walker") {
       // Run by the document-level delegation walker of THIS chunk
       // (emit-event-wiring), at the same point of the walk a registry handler
       // would run. The property is chunk- and binding-owned (armWalkerPropName).
       const prop = JSON.stringify(binding.armWalkerProp as string);
-      lines.push(`      el[${prop}] = ${factory}(${armParams.join(", ")});`);
-      lines.push(`      _disposers.push(function() { el[${prop}] = null; });`);
+      lines.push(`      ${EL}[${prop}] = ${factory}(${armParams.join(", ")});`);
+      lines.push(`      ${DS}.push(function() { ${EL}[${prop}] = null; });`);
     } else {
       // An element listener, exactly like a row's own per-item handler.
-      lines.push(`      const _h = ${factory}(${armParams.join(", ")});`);
-      lines.push(`      el.addEventListener(${JSON.stringify(domEvent)}, _h);`);
-      lines.push(`      _disposers.push(function() { el.removeEventListener(${JSON.stringify(domEvent)}, _h); });`);
+      lines.push(`      const ${H} = ${factory}(${armParams.join(", ")});`);
+      lines.push(`      ${EL}.addEventListener(${JSON.stringify(domEvent)}, ${H});`);
+      lines.push(`      ${DS}.push(function() { ${EL}.removeEventListener(${JSON.stringify(domEvent)}, ${H}); });`);
     }
     lines.push(`    }`);
     lines.push(`  }`);
@@ -1241,11 +1261,11 @@ function emitArmWireFunction(
     const handlerExpr = buildHandlerExpr(binding);
     const dataAttr = `data-scrml-bind-${eventName}`;
     lines.push(`  {`);
-    lines.push(`    const el = _root.querySelector('[${dataAttr}=${JSON.stringify(placeholderId)}]');`);
-    lines.push(`    const _h = ${handlerExpr};`);
-    lines.push(`    if (el) {`);
-    lines.push(`      el.addEventListener(${JSON.stringify(domEvent)}, _h);`);
-    lines.push(`      _disposers.push(function() { el.removeEventListener(${JSON.stringify(domEvent)}, _h); });`);
+    lines.push(`    const ${EL} = ${R}.querySelector('[${dataAttr}=${JSON.stringify(placeholderId)}]');`);
+    lines.push(`    const ${H} = ${handlerExpr};`);
+    lines.push(`    if (${EL}) {`);
+    lines.push(`      ${EL}.addEventListener(${JSON.stringify(domEvent)}, ${H});`);
+    lines.push(`      ${DS}.push(function() { ${EL}.removeEventListener(${JSON.stringify(domEvent)}, ${H}); });`);
     lines.push(`    }`);
     lines.push(`  }`);
   }
@@ -1253,7 +1273,7 @@ function emitArmWireFunction(
   // Dispose: tear down all _scrml_effect handles + event-listener removers.
   // Wrapped in try/catch per-disposer — defensive against partial failures
   // (a runtime dispose that throws shouldn't strand the others).
-  lines.push(`  return function() { for (const _d of _disposers) { try { _d(); } catch (_e) {} } };`);
+  lines.push(`  return function() { for (const _d of ${DS}) { try { _d(); } catch (_e) {} } };`);
   lines.push(`}`);
   return lines.join("\n");
 }
@@ -1435,8 +1455,20 @@ export function emitVariantGuardedRender(
   // lines below ("if (<disposeVar>) ..." + "<disposeVar> = wireFn(...)")
   // operate on THIS item's dispose, not a shared one. Both forms are valid
   // assignment targets, so the downstream emission is identical.
+  // g-arm-directive-binding-reads-arm-name (round 2) — the dispatch fn's own
+  // names share a scope with the row names it takes as parameters (item-scoped
+  // mode). A row alias spelled like one of them (`as _v`, `as _mount`) was a
+  // duplicate parameter or was shadowed by the internal; a colliding internal
+  // takes a `_scrml_arm`-prefixed spelling. No collision → unchanged bytes.
+  const dispLocal = (n: string): string => (rowScopeParams.includes(n) ? `_scrml_arm${n}` : n);
+  const MT = dispLocal("_mount");
+  const VV = dispLocal("_v");
+  const TG = dispLocal("_tag");
+  const DT = dispLocal("_data");
+  const RS = dispLocal("_rs");
+  const LS = dispLocal("_ls");
   const disposeVar = (opts.itemScopedDispatch === true)
-    ? `_mount[${JSON.stringify(itemDisposeKey)}]`
+    ? `${MT}[${JSON.stringify(itemDisposeKey)}]`
     : `_${renderFnPrefix}_${idPrefix}_dispose`;
   const dispatchFnName = `_${renderFnPrefix}_${idPrefix}_dispatch`;
   const dispatcherLines: string[] = [];
@@ -1455,12 +1487,12 @@ export function emitVariantGuardedRender(
   // the per-item mount element as a parameter instead of querying for the
   // single module-scope mount.
   if (itemScoped) {
-    dispatcherLines.push(`function ${dispatchFnName}(${["_mount", "_v", ...rowScopeParams].join(", ")}) {`);
-    dispatcherLines.push(`  if (!_mount) return;`);
+    dispatcherLines.push(`function ${dispatchFnName}(${[MT, VV, ...rowScopeParams].join(", ")}) {`);
+    dispatcherLines.push(`  if (!${MT}) return;`);
   } else {
-    dispatcherLines.push(`function ${dispatchFnName}(_v) {`);
-    dispatcherLines.push(`  const _mount = document.querySelector('[${mountAttr}="${idPrefix}"]');`);
-    dispatcherLines.push(`  if (!_mount) return;`);
+    dispatcherLines.push(`function ${dispatchFnName}(${VV}) {`);
+    dispatcherLines.push(`  const ${MT} = document.querySelector('[${mountAttr}="${idPrefix}"]');`);
+    dispatcherLines.push(`  if (!${MT}) return;`);
   }
   // Same-value short-circuit — skip the dispose + innerHTML rebuild when the value
   // is UNCHANGED (=== holds for enum unit-variant string tags). A payload-bearing
@@ -1479,14 +1511,14 @@ export function emitVariantGuardedRender(
     // push / remove / reorder still short-circuit.)
     const lastVKey = JSON.stringify(`__scrml_match_lastv_${idPrefix}`);
     const lastSKey = JSON.stringify(`__scrml_match_lasts_${idPrefix}`);
-    dispatcherLines.push(`  const _rs = [${rowScopeParams.join(", ")}];`);
-    dispatcherLines.push(`  const _ls = _mount[${lastSKey}];`);
-    dispatcherLines.push(`  if (_mount[${lastVKey}] === _v && _ls && ${rowScopeParams.map((_, i) => `_ls[${i}] === _rs[${i}]`).join(" && ")}) return;`);
-    dispatcherLines.push(`  _mount[${lastVKey}] = _v;`);
-    dispatcherLines.push(`  _mount[${lastSKey}] = _rs;`);
+    dispatcherLines.push(`  const ${RS} = [${rowScopeParams.join(", ")}];`);
+    dispatcherLines.push(`  const ${LS} = ${MT}[${lastSKey}];`);
+    dispatcherLines.push(`  if (${MT}[${lastVKey}] === ${VV} && ${LS} && ${rowScopeParams.map((_, i) => `${LS}[${i}] === ${RS}[${i}]`).join(" && ")}) return;`);
+    dispatcherLines.push(`  ${MT}[${lastVKey}] = ${VV};`);
+    dispatcherLines.push(`  ${MT}[${lastSKey}] = ${RS};`);
   } else {
-    dispatcherLines.push(`  if (_mount[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] === _v) return;`);
-    dispatcherLines.push(`  _mount[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] = _v;`);
+    dispatcherLines.push(`  if (${MT}[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] === ${VV}) return;`);
+    dispatcherLines.push(`  ${MT}[${JSON.stringify(`__scrml_match_lastv_${idPrefix}`)}] = ${VV};`);
   }
   // Variant tag extraction. Unit variants live as bare string tags ("Idle");
   // payload-bearing variants live as `{ variant: "X", data: { fieldName: val } }`
@@ -1507,8 +1539,8 @@ export function emitVariantGuardedRender(
   // `.tag`, so the fallback is inert for them. ValidationError payload is flat
   // fields (`.predicate`, `.threshold`, …) rather than a `.data` sub-object, so
   // `_data` stays null for these (the canonical L4 arms render static strings).
-  dispatcherLines.push(`  const _tag = (typeof _v === "object" && _v !== null && typeof _v.variant === "string") ? _v.variant : (typeof _v === "object" && _v !== null && typeof _v.tag === "string") ? _v.tag : _v;`);
-  dispatcherLines.push(`  const _data = (typeof _v === "object" && _v !== null && _v.data && typeof _v.data === "object") ? _v.data : null;`);
+  dispatcherLines.push(`  const ${TG} = (typeof ${VV} === "object" && ${VV} !== null && typeof ${VV}.variant === "string") ? ${VV}.variant : (typeof ${VV} === "object" && ${VV} !== null && typeof ${VV}.tag === "string") ? ${VV}.tag : ${VV};`);
+  dispatcherLines.push(`  const ${DT} = (typeof ${VV} === "object" && ${VV} !== null && ${VV}.data && typeof ${VV}.data === "object") ? ${VV}.data : null;`);
   // Tear down the prior arm's wiring before the innerHTML replace so
   // _scrml_effect callbacks don't fire against detached spans (memory
   // hygiene). Idempotent — calling dispose twice is a no-op (the runtime
@@ -1558,7 +1590,7 @@ export function emitVariantGuardedRender(
       ? arm.payloadFieldNames
       : arm.payloadBindings;
     const args = lookupKeys
-      .map((key) => `_data && _data[${JSON.stringify(key)}]`)
+      .map((key) => `${DT} && ${DT}[${JSON.stringify(key)}]`)
       .join(", ");
     // B1 (§51.0.B.1) — wire-fn receives `_mount` PLUS the same payload args
     // the render fn received. Without this, expressions like `${rows}`
@@ -1567,14 +1599,14 @@ export function emitVariantGuardedRender(
     // g-match-inside-each-row-cannot-see-the-row-variable — then the row-scope
     // names this arm's payload bindings do not shadow (the wire fn's trailing
     // params, in the same order).
-    const wireArgs = ["_mount", ...(args.length > 0 ? [args] : []), ...armRowScope(arm)].join(", ");
-    dispatcherLines.push(`  ${head} (_tag === ${JSON.stringify(arm.tag)}) {`);
-    dispatcherLines.push(`    _mount.innerHTML = ${fnName}(${args});`);
+    const wireArgs = [MT, ...(args.length > 0 ? [args] : []), ...armRowScope(arm)].join(", ");
+    dispatcherLines.push(`  ${head} (${TG} === ${JSON.stringify(arm.tag)}) {`);
+    dispatcherLines.push(`    ${MT}.innerHTML = ${fnName}(${args});`);
     dispatcherLines.push(`    ${disposeVar} = ${wireFnName}(${wireArgs});`);
     // engine-gated-each-populate (S153) — populate each-mounts in the freshly
     // mounted arm subtree. See the `hasEachMount` comment above.
     if (hasEachMount) {
-      dispatcherLines.push(`    _scrml_remount_each(_mount);`);
+      dispatcherLines.push(`    _scrml_remount_each(${MT});`);
     }
     // A5-7 Wave 2.4 (§51.0.Q.1, Bug #2) — postMountJs injection point.
     // The engine consumer populates this for composite arms with inner-
@@ -1613,12 +1645,12 @@ export function emitVariantGuardedRender(
       // Only-a-wildcard match-block — no `if` above to attach `else` to.
       dispatcherLines.push(`  {`);
     }
-    dispatcherLines.push(`    _mount.innerHTML = ${dfnName}();`);
-    dispatcherLines.push(`    ${disposeVar} = ${dwireFnName}(${["_mount", ...armRowScope(defaultArm)].join(", ")});`);
+    dispatcherLines.push(`    ${MT}.innerHTML = ${dfnName}();`);
+    dispatcherLines.push(`    ${disposeVar} = ${dwireFnName}(${[MT, ...armRowScope(defaultArm)].join(", ")});`);
     // engine-gated-each-populate (S153) — populate each-mounts in the wildcard
     // arm subtree too. See the `hasEachMount` comment above.
     if (hasEachMount) {
-      dispatcherLines.push(`    _scrml_remount_each(_mount);`);
+      dispatcherLines.push(`    _scrml_remount_each(${MT});`);
     }
     dispatcherLines.push(`  }`);
   }

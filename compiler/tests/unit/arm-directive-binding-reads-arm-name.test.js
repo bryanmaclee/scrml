@@ -84,16 +84,16 @@ const ROW = (body) => `<program>
 `;
 
 describe("arm-bound logic bindings — hoisted factory, bound per arm entry", () => {
-  test("show=(payload) → a `_scrml_armb_` factory over (_root, note); nothing reads `note` at module scope", () => {
+  test("show=(payload) → a `_scrml_armb_` factory over (_scrml_root, note); nothing reads `note` at module scope", () => {
     const { errors, js } = compile(PAY('<p show=(note == "hi")>x</p>'));
     expect(errors).toEqual([]);
     const f = fnSource(js, /_scrml_armb_\w+/);
     expect(f.name).not.toBeNull();
-    expect(f.params).toBe("_root, note");
-    expect(f.body).toContain(`const el = _root.querySelector('[data-scrml-bind-show=`);
-    expect(f.body).toContain(`el.style.display = ((note === "hi")) ? "" : "none";`);
+    expect(f.params).toBe("_scrml_root, note");
+    expect(f.body).toContain(`const _scrml_el = _scrml_root.querySelector('[data-scrml-bind-show=`);
+    expect(f.body).toContain(`_scrml_el.style.display = ((note === "hi")) ? "" : "none";`);
     // the effect's disposer is collected by the factory, not region-tracked globally
-    expect(f.body).toContain("const _scrml_region_track = function(_e, _d) { _scrml_arm_ds.push(_d); return _d; };");
+    expect(f.body).toContain("const _scrml_region_track = function(_scrml_e, _scrml_d) { _scrml_arm_ds.push(_scrml_d); return _scrml_d; };");
     const wire = fnSource(js, /_scrml_match_\w+_wire_Note/);
     expect(wire.params).toBe("_root, note");
     expect(wire.body).toContain(`{ const _d = ${f.name}(_root, note); if (_d) _disposers.push(_d); }`);
@@ -108,13 +108,13 @@ describe("arm-bound logic bindings — hoisted factory, bound per arm entry", ()
     expect(boot).toBeGreaterThan(at);
   });
 
-  test("row arm: disabled= over the row alias and the payload → factories over (_root, tag, g)", () => {
+  test("row arm: disabled= over the row alias and the payload → factories over (_scrml_root, tag, g)", () => {
     const { errors, js } = compile(ROW('<button disabled=(g.hot)>a</button><button disabled=(tag == "x")>b</button>'));
     expect(errors).toEqual([]);
     const fns = [...js.matchAll(/function (_scrml_armb_\w+)\(([^)]*)\)/g)];
     expect(fns.length).toBe(2);
-    for (const m of fns) expect(m[2]).toBe("_root, tag, g");
-    expect(js).toContain(`el.setAttribute("disabled", "")`);
+    for (const m of fns) expect(m[2]).toBe("_scrml_root, tag, g");
+    expect(js).toContain(`_scrml_el.setAttribute("disabled", "")`);
     expect(navRewire(js)).not.toMatch(/\bg\.hot\b/);
   });
 
@@ -123,8 +123,8 @@ describe("arm-bound logic bindings — hoisted factory, bound per arm entry", ()
     expect(errors).toEqual([]);
     const fns = [...js.matchAll(/function (_scrml_armb_\w+)\(([^)]*)\)/g)].map((m) => fnSource(js, new RegExp(m[1])));
     expect(fns.length).toBe(2);
-    expect(fns.some((f) => f.body.includes("_scrml_render_value(el, ") && f.body.includes("_scrml_effect("))).toBe(true);
-    expect(fns.some((f) => f.body.includes("el.value = ") && f.body.includes("_scrml_region_track(el, _scrml_effect("))).toBe(true);
+    expect(fns.some((f) => f.body.includes("_scrml_render_value(_scrml_el, ") && f.body.includes("_scrml_effect("))).toBe(true);
+    expect(fns.some((f) => f.body.includes("_scrml_el.value = ") && f.body.includes("_scrml_region_track(_scrml_el, _scrml_effect("))).toBe(true);
   });
 });
 
@@ -180,8 +180,8 @@ describe("unquoted attribute whose root is an arm name (SPEC §5.2: resolved at 
     const { errors, js } = compile(ROW("<span show=g.hot>h</span>"));
     expect(errors).toEqual([]);
     const f = fnSource(js, /_scrml_armb_\w+/);
-    expect(f.params).toBe("_root, tag, g");
-    expect(f.body).toContain("el.style.display = (g.hot) ? \"\" : \"none\";");
+    expect(f.params).toBe("_scrml_root, tag, g");
+    expect(f.body).toContain("_scrml_el.style.display = (g.hot) ? \"\" : \"none\";");
   });
 
   test("an unquoted event handler / bare-identifier class: keep their existing lowering", () => {

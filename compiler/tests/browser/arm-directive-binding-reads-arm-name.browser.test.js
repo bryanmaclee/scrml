@@ -429,3 +429,114 @@ type Phase:enum = {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 2 — an arm name spelled like one of the compiler's own locals.
+//
+// The arm-bound factory (`_scrml_armb_`), the arm wire fn and the item-scoped
+// dispatch fn all take the arm's names as PARAMETERS next to names of their
+// own. On 56c606ca a payload / row alias called `el` (or `_root`, `_disposers`,
+// `_h`, `_d`, …) was a duplicate declaration (E-CODEGEN-INVALID-LOGIC) or was
+// silently SHADOWED by the internal (`${el}` rendered the element). Every kind
+// in the matrix must compile and give the twin's values under each such name.
+//
+// Not listed, and why (both fail identically in the plain-row twin — the
+// `<each>` path, out of this change's lane):
+//   - a ROW ALIAS `_mount` (emit-each's per-row `let _mount`), and
+//   - `event` in an event handler (every handler is `function(event) { … }`).
+// ---------------------------------------------------------------------------
+const INTERNAL_NAMES = [
+  "el", "root", "_root", "e", "t", "node", "d", "i", "k", "v",
+  "_d", "_e", "_h", "_v", "_hv", "_rt", "_disposers", "_tag", "_data", "_rs", "_ls", "_mount", "event",
+];
+const COLLISION_KINDS = [
+  // [markup, probe, want]; X/Y as in the matrix, B = a bare boolean-ish read
+  ['<p class="c0" show=(X)>k</p>', vis, ["vis", "hid"]],
+  ['<p class="c1" show=isHi(Y)>k</p>', vis, ["vis", "hid"]],
+  ['<p class="c2" show=(X) transition:fade>k</p>', vis, ["vis", "hid"]],
+  ['<button class="c3" disabled=(X)>k</button>', has("disabled"), ["on", "off"]],
+  ['<input class="c4" readonly=(X)/>', has("readonly"), ["on", "off"]],
+  ['<input class="c5" required=(X)/>', has("required"), ["on", "off"]],
+  ['<textarea class="c6">${Y}</textarea>', (e) => e.value, ["hi", "zz"]],
+  ['<p class="c7">${ if (X) { "T" } else { "F" } }</p>', (e) => e.textContent.trim(), ["T", "F"]],
+  ['<p class="c8" title=Y>k</p>', (e) => e.getAttribute("title"), ["hi", "zz"]],
+  ['<p class="c9">${Y}</p>', (e) => e.textContent.trim(), ["hi", "zz"]],
+  ['<p class="c10" class:on=(X)>k</p>', (e) => (e.classList.contains("on") ? "on" : "off"), ["on", "off"]],
+  ['<p class="c11" title=(X ? "T" : "F")>k</p>', (e) => e.getAttribute("title"), ["T", "F"]],
+  ['<p class="c12" title="t-${Y}">k</p>', (e) => e.getAttribute("title"), ["t-hi", "t-zz"]],
+  ['<input class="c13" value=(Y)/>', (e) => e.value, ["hi", "zz"]],
+  ['<ul class="c14">${ for (let q of [Y]) { lift <li>${q}</li> } }</ul>', (e) => e.textContent.trim(), ["hi", "zz"]],
+  ['<input class="c15" value="v-${Y}"/>', (e) => e.value, ["v-hi", "v-zz"]],
+];
+const collisionBody = (x, y) =>
+  COLLISION_KINDS.map(([m]) => fill(m, x, y, "")).join("") +
+  `<input class="cf" onfocus=recF(${y})/><button class="cc" onclick=recC(${y})>c</button><input class="cb" bind:value=@txt/>`;
+const COLLISION_PRE = `  <logF> = ""
+  <logC> = ""
+  <txt> = "t0"
+  function recF(s) { @logF = @logF + s + ";" }
+  function recC(s) { @logC = @logC + s + ";" }
+  function isHi(s) { return s == "hi" }
+`;
+const collisionProgram = (scope, N) => {
+  if (scope === "payload") {
+    const body = collisionBody(`${N} == "hi"`, N);
+    return `<program>
+  type Doc:enum = { Empty, Note(${N}: string) }
+  <cur> = Doc.Note("hi")
+  <cur2> = Doc.Note("zz")
+${COLLISION_PRE}  <div><match for=Doc on=@cur><Empty><p>none</p></><Note(${N})>${body}</></match></div>
+  <div><match for=Doc on=@cur2><Empty><p>none</p></><Note(${N})>${body}</></match></div>
+</program>
+`;
+  }
+  if (scope === "row payload") {
+    return `<program>
+  type Kind:enum = { A, B(${N}: string) }
+  <groups> = [{ id: 1, kind: Kind.B("hi") }, { id: 2, kind: Kind.B("zz") }]
+${COLLISION_PRE}  <ul><each in=@groups key=@.id as g><li><match for=Kind on=g.kind><A><p>a</p></><B(${N})>${collisionBody(`${N} == "hi"`, N)}</></match></li></each></ul>
+</program>
+`;
+  }
+  return `<program>
+  type Kind:enum = { A, B(tag: string) }
+  <groups> = [{ id: 1, kind: Kind.B("x"), hot: true, name: "hi" }, { id: 2, kind: Kind.B("y"), hot: false, name: "zz" }]
+${COLLISION_PRE}  <ul><each in=@groups key=@.id as ${N}><li><match for=Kind on=${N}.kind><A><p>a</p></><B(tag)>${collisionBody(`${N}.hot`, `${N}.name`)}<span class="cs" show=${N}.hot>s</span><span class="cd" class:on=${N}.hot>d</span></></match></li></each></ul>
+</program>
+`;
+};
+
+describe("round 2 — an arm name spelled like a compiler internal compiles and behaves like its twin", () => {
+  for (const N of INTERNAL_NAMES) {
+    for (const scope of ["payload", "row alias", "row payload"]) {
+      if (scope === "row alias" && N === "_mount") continue; // emit-each `let _mount` — twin broken too (see above)
+      test(`${scope} named \`${N}\` — every kind`, () => {
+        const app = mount(collisionProgram(scope, N));
+        try {
+          expect(app.errs).toEqual([]);
+          expect(app.initError).toBeNull();
+          COLLISION_KINDS.forEach(([, probe, want], i) => {
+            expect([i, app.qa(`.c${i}`).map(probe)]).toEqual([i, want]);
+          });
+          if (scope === "row alias") {
+            expect(app.qa(".cs").map(vis)).toEqual(["vis", "hid"]);
+            expect(app.qa(".cd").map((e) => (e.classList.contains("on") ? "on" : "off"))).toEqual(["on", "off"]);
+          }
+          if (N !== "event") { // every handler is `function(event) { … }` — the plain-row twin fails too
+            for (const e of app.qa(".cf")) e.dispatchEvent(new window.Event("focus"));
+            for (const e of app.qa(".cc")) e.dispatchEvent(new window.Event("click", { bubbles: true }));
+            expect(globalThis.__get("logF")).toBe("hi;zz;");
+            expect(globalThis.__get("logC")).toBe("hi;zz;");
+          }
+          const cb = app.qa(".cb")[0];
+          cb.value = "typed";
+          cb.dispatchEvent(new window.Event("input", { bubbles: true }));
+          expect(globalThis.__get("txt")).toBe("typed");
+          expect(app.consoleErrors).toEqual([]);
+        } finally {
+          app.restore();
+        }
+      });
+    }
+  }
+});
