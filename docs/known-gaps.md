@@ -14498,8 +14498,9 @@ Split from `g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime` when
 (S429). ~215 of 898 cases carry a runtime half and all of them mount the FULL runtime, so a missing chunk
 cannot be missing — giti033 passed its `domAnchored` expectations while its real emit threw at init. Switching
 the adapter to the emitted runtime may turn cases red and changes the conformance instrument: **bryan's lane —
-surfaced, not switched.** Until then the S429 undefined-helper sweep (called-but-undefined `_scrml_*` over the
-corpus) is the only instrument for this class, and it is not in any CI job.
+surfaced, not switched.** Per-shape tests that mount the emitted runtime (e.g. `each-runtime-bug-57`) cover individual shapes;
+the S429 undefined-helper sweep (called-but-undefined `_scrml_*` over the whole corpus) is the only
+CORPUS-WIDE instrument for this class, and it is not in any CI job.
 
 ### g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings — four pre-existing each/arm defects reported by the S427 dev agent — `NEW S427-peter; MED; open`
 <!-- @gap id=g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:S427-dev-agent-reproduced-each-on-base-with-the-display-twin-NOT-PA-verified -->

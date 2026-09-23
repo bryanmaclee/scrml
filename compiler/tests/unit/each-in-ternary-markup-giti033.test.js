@@ -435,9 +435,12 @@ describe("giti033 §8 — the emitted runtime defines _scrml_reconcile_list when
       const r = compile(src, "giti033-s8");
       try {
         expect(codes(r.errors.filter((e) => (e.severity ?? "error") === "error"))).toEqual([]);
-        if (r.clientJs.includes("_scrml_reconcile_list(")) {
-          expect(emittedRuntime(r.tmpDir).includes("function _scrml_reconcile_list(")).toBe(true);
-        }
+        // The premise is asserted, not assumed — a missing client.js or a renamed
+        // call must fail here, not pass vacuously.
+        expect(r.clientJs.includes("_scrml_reconcile_list(")).toBe(true);
+        const rt = emittedRuntime(r.tmpDir);
+        expect(rt.includes("function _scrml_reconcile_list(")).toBe(true);
+        expect(rt.includes("function _scrml_effect_static(")).toBe(true);
       } finally {
         cleanup(r.tmpDir);
       }

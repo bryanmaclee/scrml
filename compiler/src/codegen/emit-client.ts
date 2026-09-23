@@ -2937,10 +2937,15 @@ export function generateClientJs(ctx: CompileContext): string {
   // tree-shaken → `ReferenceError` at init, page empty, exit 0. S427 scoped this
   // gate to nested-lift files to keep #1022's blast radius to its locus; the
   // emitted text is ground truth for every producer, so it is now unconditional.
+  // `deep_reactive` rides with it, as at every pre-emit site that adds
+  // `reconciliation`: the chunk reads `_scrml_tracking_paused` / calls
+  // `_scrml_effect_static` unguarded, the chunk-dependency table does not record
+  // that edge, and `applyChunkDependencies` has already run by this point.
   if (!ctx.usedRuntimeChunks.has("reconciliation")) {
     for (const _ln of lines) {
       if (typeof _ln === "string" && _ln.includes("_scrml_reconcile_list(")) {
         ctx.usedRuntimeChunks.add("reconciliation");
+        ctx.usedRuntimeChunks.add("deep_reactive");
         break;
       }
     }
