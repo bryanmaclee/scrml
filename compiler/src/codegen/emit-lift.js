@@ -6,7 +6,7 @@ import { genVar } from "./var-counter.ts";
 import { VOID_ELEMENTS } from "./utils.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
-import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
+import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
 
 // ---------------------------------------------------------------------------
@@ -2290,7 +2290,60 @@ export function forLiftTreeHasImpureLoop(forNode, outerDeclared) {
   // object declared outside the loop is the same shared state as rebinding it.
   // Mutation through a method call (`acc.list.push(x)`) is NOT detected — a call
   // is opaque here.
-  return _liftTreeWritesEscapeARenderLoop(forNode, outerDeclared);
+  //
+  // s427 round 3 (F1) — a write to a rendering loop's OWN binder
+  // (`for (let it of @items) { it = it + "!" … }`) is impure too. The keyed
+  // factory receives the binder as a parameter and its row effects re-read the item
+  // through `_scrml_resolve_item`, which silently discards the write; only the
+  // plain loop renders what the source wrote (see forLoopWritesItsBinder).
+  return _liftTreeWalk(forNode, outerDeclared).impure;
+}
+
+/**
+ * s427 round 3 (F1) — whether the loop's body writes the loop's OWN binder (the
+ * `it` of `for (let it of …)`, every name of a destructured head), resolved by
+ * scope: a nested `let it` / nested loop binder / function or lambda parameter of
+ * the same name shadows it. A member write through the binder (`it.seen = 1`)
+ * mutates the item, not the binding, and does not count.
+ */
+export function forLoopWritesItsBinder(forNode) {
+  return _liftTreeWalk(forNode, null).rootBinderWritten;
+}
+
+/**
+ * s427 round 3 (F1) — the declared-name set of a loop BODY, with the loop's own
+ * binder(s) in it when the body writes them. Before this the binder never entered
+ * the set, so `it = it + "!"` resolved against the ENCLOSING scope: with an outer
+ * `const it` / `let it` of the same name it lowered to an assignment of that outer
+ * binding (the row rendered the untouched item, exit 0), and with none to a fresh
+ * `const it` that re-declared the binder. The binder is the body's own, mutable
+ * binding (never an "own const" — see declared-name-marks.ts): a keywordless write
+ * is its assignment. A COPY; `names` is not mutated. Unchanged when the body does
+ * not write its binder.
+ */
+export function withLoopBinders(names, forNode) {
+  if (!forLoopWritesItsBinder(forNode)) return names;
+  const out = new Set(names ?? []);
+  for (const b of forBinderNames(forNode)) { out.add(b); markDeclaredMutable(out, b); }
+  return out;
+}
+
+/**
+ * s427 round 3 (F1) — the keyword of an emitted plain `for (… of …)` head. `let`
+ * when the body writes its binder and the source binder is not `const`, so the
+ * write takes effect; `const` otherwise — including a written `const` binder, whose
+ * write then throws at runtime (loud) rather than being dropped.
+ */
+export function forHeadKeyword(forNode) {
+  return !(forNode && forNode.constBinder) && forLoopWritesItsBinder(forNode) ? "let" : "const";
+}
+
+/** s427 round 3 (F1) — the names a for-of loop head binds (`[]` for a C-style head). */
+export function forBinderNames(forNode) {
+  const v = forNode && forNode.variable;
+  if (typeof v === "string" && v) return [v];
+  if (isDestructurePattern(v)) return [..._iterDestructureBindNames(v)];
+  return [];
 }
 
 const _BARE_WRITE = /^\s*(?:(?:\+\+|--)\s*([A-Za-z_$][\w$]*)|([A-Za-z_$][\w$]*)\s*(?:\+\+|--|(?:\*\*|>>>|>>|<<|&&|\|\||\?\?|[-+*/%&|^])?=(?!=)))/;
@@ -2302,10 +2355,17 @@ function _writeTargetRoot(t) {
   return cur && cur.kind === "ident" && typeof cur.name === "string" ? cur.name : null;
 }
 
-function _liftTreeWritesEscapeARenderLoop(forNode, outerDeclared) {
+function _liftTreeWalk(forNode, outerDeclared) {
   // A scope: { names: Map<name, "let" | "const" | "loopvar">, render: boolean }.
   const scopes = [];
   let impure = false;
+  let rootBinderWritten = false;
+  /** A write resolved to scope `j`: the binder of a RENDERING loop is impure (F1). */
+  const binderWrite = (j, name) => {
+    if (j < 0 || scopes[j].names.get(name) !== "loopvar") return;
+    if (j === 0) rootBinderWritten = true;
+    if (scopes[j].render) impure = true;
+  };
 
   const resolve = (name) => {
     for (let i = scopes.length - 1; i >= 0; i--) {
@@ -2328,13 +2388,14 @@ function _liftTreeWritesEscapeARenderLoop(forNode, outerDeclared) {
     else if (isDestructurePattern(v)) for (const b of _iterDestructureBindNames(v)) scope.names.set(b, "loopvar");
     const it = typeof n.iterable === "string" ? n.iterable : "";
     const m = it.match(/^\(\s*(?:let|const|var)\s+([A-Za-z_$][\w$]*)/);
-    if (m) scope.names.set(m[1], "loopvar");
+    if (m) scope.names.set(m[1], "cloopvar"); // a C-style counter: a plain JS `let`, never keyed
   };
   /** An identifier write (`x = …`, `x += …`, `x++`): an unresolved name is outer. */
   const identWrite = (name) => {
     if (typeof name !== "string" || !name || name.startsWith("@") || name === "~") return;
     const j = resolve(name);
     if (j < innermostRender()) impure = true; // includes j === -1 (outside the tree)
+    binderWrite(j, name);
   };
   /** A member write: counts only when its root is a KNOWN binding outside the
    *  innermost rendering loop (an unresolved root not in the enclosing scope is a
@@ -2361,7 +2422,7 @@ function _liftTreeWritesEscapeARenderLoop(forNode, outerDeclared) {
   };
 
   const visit = (n) => {
-    if (impure || !n || typeof n !== "object") return;
+    if ((impure && outerDeclared !== null) || !n || typeof n !== "object") return;
     if (Array.isArray(n)) { visitBlock(n, false); return; }
     switch (n.kind) {
       case "lift-expr":
@@ -2396,6 +2457,7 @@ function _liftTreeWritesEscapeARenderLoop(forNode, outerDeclared) {
             // error; see declared-name-marks.ts). Nothing to key on either way.
             if (j === scopes.length - 1 && scopes[j].names.get(n.name) === "const") break;
             if (j < innermostRender()) impure = true;
+            binderWrite(j, n.name);
           } else if (outerDeclared && outerDeclared.has(n.name)) {
             impure = true; // rebinds a binding declared outside the whole tree
           } else {
@@ -2425,7 +2487,7 @@ function _liftTreeWritesEscapeARenderLoop(forNode, outerDeclared) {
 
   const rootBody = Array.isArray(forNode.body) ? forNode.body : [];
   visitBlock(rootBody, true, (scope) => declareForVar(scope, forNode));
-  return impure;
+  return { impure, rootBinderWritten };
 }
 
 // ---------------------------------------------------------------------------
@@ -2605,7 +2667,7 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
     const keyVar = genVar('item_key');
     lines.push(`  const ${keyVar} = ${varName}?.id != null ? ${varName}.id : _scrml_idx;`);
     pushLiftReconcileCtx(buildLiftReconcileCtx(wrapperVar, keyVar, varName, body));
-    const bodyNames = liftScopeDeclaredNames(outerNames);
+    const bodyNames = withLoopBinders(liftScopeDeclaredNames(outerNames), forNode);
 
     for (const child of body) {
       if (!child) continue;
@@ -2679,9 +2741,9 @@ export function emitForStmtWithContainer(forNode, containerElVar, opts = {}) {
   }
 
   // Non-reactive path — plain for loop (pre-S96 behavior, preserved).
-  lines.push(`for (const ${varName} of ${rewrittenIterable}) {`);
+  lines.push(`for (${forHeadKeyword(forNode)} ${varName} of ${rewrittenIterable}) {`);
 
-  const bodyNames = liftScopeDeclaredNames(outerNames);
+  const bodyNames = withLoopBinders(liftScopeDeclaredNames(outerNames), forNode);
   if (_impure) pushLiftNonKeyed();
   try {
     for (const child of body) {

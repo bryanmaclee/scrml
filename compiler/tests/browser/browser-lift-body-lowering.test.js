@@ -32,7 +32,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 const tmpRoot = resolve(tmpdir(), "scrml-lift-body-lowering");
 
-function compileAndMount(source, baseName, { expectBootError = false } = {}) {
+function compileAndMount(source, baseName, { expectBootError = false, expectCodes = null } = {}) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const dir = resolve(tmpRoot, `case-${uniq}`);
   mkdirSync(dir, { recursive: true });
@@ -41,7 +41,8 @@ function compileAndMount(source, baseName, { expectBootError = false } = {}) {
   const outDir = resolve(dir, "out");
   const result = compileScrml({ inputFiles: [input], write: true, outputDir: outDir, log: () => {} });
   const errors = (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
-  expect(errors).toEqual([]);
+  if (expectCodes) expect(errors.map((e) => e.code)).toEqual(expectCodes);
+  else expect(errors).toEqual([]);
   const html = readFileSync(resolve(outDir, `${baseName}.html`), "utf8");
   const clientJs = readFileSync(resolve(outDir, `${baseName}.client.js`), "utf8");
   const runtimeName = /scrml-runtime\.[A-Za-z0-9]+\.js/.exec(html)?.[0] ?? result.runtimeFilename ?? "scrml-runtime.js";
@@ -381,19 +382,75 @@ describe("round 2 M3 — a loop lowered plain re-renders on an in-place mutation
   });
 });
 
-describe("round 2 H1 — a keywordless write to a `const` in a nested block is LOUD at boot, never a silent shadow", () => {
-  for (const [label, block] of [
-    ["in the loop body", `        const t = 1
+describe("round 2 H1 — a keywordless write to a `const` in a nested block is LOUD, never a silent shadow", () => {
+  // Since #996 the type system rejects these at compile time (E-ASSIGN-004); the
+  // emitted lowering underneath is still pinned to throw, not to shadow.
+  for (const [label, block, codes] of [
+    ["in the loop body (E-ASSIGN-004)", `        const t = 1
         for (let it of @items) { t = 5
-            lift <li class="row">\${t}:\${it.name}</li> }`],
-    ["in an `if` beside the loop", `        const t = 1
+            lift <li class="row">\${t}:\${it.name}</li> }`, ["E-ASSIGN-004"]],
+    ["in an `if` beside the loop (E-ASSIGN-004)", `        const t = 1
         if (@items.length > 0) { t = 2 }
-        for (let it of @items) { lift <li class="row">\${t}\${it.name}</li> }`],
+        for (let it of @items) { lift <li class="row">\${t}\${it.name}</li> }`, ["E-ASSIGN-004"]],
+    ["h1k — in a logic block inside lifted markup (the type system does not see it; exit 0)", `        const total = 10
+        for (let it of @items) { lift <li class="row">\${ total = 3 }\${total}:\${it.name}</li> }`, []],
   ]) {
     test(label, () => {
-      const { initError } = compileAndMount(ul(block), "h1-nested", { expectBootError: true });
+      const { initError } = compileAndMount(ul(block), "h1-nested", { expectBootError: true, expectCodes: codes });
       expect(initError).not.toBeNull();
       expect(String(initError)).toMatch(/readonly|read-only|constant|const/i);
     });
   }
+});
+
+describe("round 3 F1 — a write to the loop's own binder", () => {
+  const S = `<items> = ["a", "b"]\n`;
+  const mount = (block, name, cells = S) => compileAndMount(`<program>\n${cells}<ul>\${ ${block} }</ul>\n</program>\n`, name);
+  const lis = () => [...document.querySelectorAll("li")].map((e) => e.textContent.trim());
+  for (const [label, block] of [
+    ["lv3 — outer `const it` of the same name", `const it = 5
+    for (let it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`],
+    ["lv7 — outer `let it` of the same name", `let it = "z"
+    for (let it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`],
+    ["lv1 — no outer binding", `for (let it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`],
+  ]) {
+    test(`${label}: the rows show the written value and follow push (was the untouched item at exit 0)`, () => {
+      const app = mount(block, "f1");
+      expect(lis()).toEqual(["a!", "b!"]);
+      app.get("items").push("c");
+      expect(lis()).toEqual(["a!", "b!", "c!"]);
+      app.done();
+    });
+  }
+
+  test("lv5 — a write in a nested `if` (base and main shadowed it silently)", () => {
+    const app = mount(`const label = "L"
+    for (let label of @items) { if (label == "a") { label = "A" }
+        lift <li>\${label}</li> }`, "f1-if");
+    expect(lis()).toEqual(["A", "b"]);
+    app.done();
+  });
+
+  test("a destructured `[k, v]` head", () => {
+    const app = mount(`let v = "z"
+    for (let [k, v] of @pairs) { v = v + "!"
+        lift <li>\${k}\${v}</li> }`, "f1-destr", `<pairs> = [["k1", "a"], ["k2", "b"]]\n`);
+    expect(lis()).toEqual(["k1a!", "k2b!"]);
+    app.done();
+  });
+
+  test("a nested rendering loop writing its own binder", () => {
+    compileAndMount(`<program>\n<groups> = [{ id: 1, items: ["a", "b"] }]\n<div>\${ for (let g of @groups) { lift <ul>\${ for (let it of g.items) { it = it + "!"
+        lift <li>\${it}</li> } }</ul> } }</div>\n</program>\n`, "f1-nested").done();
+    expect(lis()).toEqual(["a!", "b!"]);
+  });
+
+  test("a `const` binder that is written is LOUD at boot, never dropped", () => {
+    const { initError } = compileAndMount(`<program>\n${S}<ul>\${ for (const it of @items) { it = it + "!"
+        lift <li>\${it}</li> } }</ul>\n</program>\n`, "f1-const", { expectBootError: true });
+    expect(String(initError)).toMatch(/readonly|read-only|constant|const/i);
+  });
 });

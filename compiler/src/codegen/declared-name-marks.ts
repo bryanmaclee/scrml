@@ -10,10 +10,12 @@
  * `TypeError: Attempted to assign to readonly property` at boot — where base
  * emitted a second `const x` in the same scope and failed the COMPILE
  * (E-CODEGEN-INVALID-LOGIC, "Identifier 'x' has already been declared").
- * SPEC §50: *"`const` variables are immutable; assigning to a `const` as an
- * expression is E-ASSIGN-004."* That dedicated diagnostic is not this change's to
- * mint. Until it exists, a keywordless write to a `const` on these paths is lowered
- * so it fails at least as loudly as base, and is never a silent shadow:
+ * SPEC §50.8.5 makes that write E-ASSIGN-004, which the TYPE SYSTEM reports at
+ * statement position (#996) — this module does not report it. Its job is the
+ * LOWERING: a keywordless write to a `const` on these paths is emitted so it fails
+ * at least as loudly as base even where the type system does not see it (a write
+ * in a `${}` logic block inside lifted markup, for one), and is never a silent
+ * shadow:
  *
  *   - the `const` was declared in the SAME JS scope as the write → base's emission,
  *     a second `const x = …` — the compile fails exactly as it did on base;

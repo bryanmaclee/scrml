@@ -135,6 +135,12 @@ const STRIP_KEYS: ReadonlySet<string> = new Set([
                               // semantic divergence.
   "openerEffectBadSlice",     // companion raw-text slice for the above message —
                               // same live-only diagnostic-support metadata class.
+  "constBinder",              // s427 round 3 (F1) — LIVE-only flag on a for-stmt
+                              // whose head was `for (const x of …)`. The native
+                              // parser does not record the binder keyword; a
+                              // codegen-support field (a write to a `const`
+                              // binder stays loud), NOT a semantic divergence
+                              // of the parsed tree.
   "_notPrefixNegation",       // S188 (g-not-negation-enforce) — LIVE-only
                               // diagnostic-support flag stamped by
                               // parseExprToNode when the lowering choke-point

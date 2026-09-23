@@ -2,7 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
-import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed } from "./emit-lift.js";
+import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -714,7 +714,7 @@ function _emitForStmtInner(
     // every statement was emitted with no set, so `let m = 0; m = m + x` in the body
     // lowered to a duplicate `const m` and an assignment to an enclosing `let` to a
     // TDZ `const`.
-    const bodyNames = liftScopeDeclaredNames(opts?.declaredNames);
+    const bodyNames = withLoopBinders(liftScopeDeclaredNames(opts?.declaredNames), node);
 
     if (hasFragmentedLiftBody(body)) {
       // Pass continueBehavior:"return" so continue-stmts in pre-statements emit `return;`
@@ -811,19 +811,25 @@ function _emitForStmtInner(
   // Non-reactive path — plain for loop
   const _plainForCtx: EmitExprContext = { mode: opts?.boundary === "server" ? "server" : "client", serverFnNames: opts?.serverFnNames ?? null, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames ?? null, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs ?? null, syncPeerCalls: opts?.syncPeerCalls ?? null, localMapVarNames: opts?.localMapVarNames ?? null, localSetVarNames: opts?.localSetVarNames ?? null, localOrderedMapVarNames: opts?.localOrderedMapVarNames ?? null, mapVarNames: opts?.mapVarNames ?? null, setVarNames: opts?.setVarNames ?? null, orderedMapVarNames: opts?.orderedMapVarNames ?? null };
   iterable = emitExprField(node.iterExpr, iterable, _plainForCtx);
-  lines.push(`for (const ${varName} of ${iterable}) {`);
+  // s427 round 3 (F1) — a RENDERING loop whose body writes its own binder: the
+  // binder is the body's own binding (so the write assigns it, not an outer
+  // same-named binding) and the head is `let` unless the source binder is `const`
+  // (see forHeadKeyword / withLoopBinders in emit-lift.js). Other loops unchanged.
+  const _headKw = bodyIsRender ? forHeadKeyword(node) : "const";
+  const _plainNames = bodyIsRender ? withLoopBinders(opts?.declaredNames, node) : opts?.declaredNames;
+  lines.push(`for (${_headKw} ${varName} of ${iterable}) {`);
 
   const body: any[] = node.body ?? [];
 
   if (_impureTree) pushLiftNonKeyed();
   try {
     if (hasFragmentedLiftBody(body)) {
-      const liftCode = emitConsolidatedLift(body, { engineCtx: _liftEngineCtx, scopeVar: varName, ...(opts?.declaredNames != null ? { declaredNames: opts.declaredNames } : {}) });
+      const liftCode = emitConsolidatedLift(body, { engineCtx: _liftEngineCtx, scopeVar: varName, ...(_plainNames != null ? { declaredNames: _plainNames } : {}) });
       if (liftCode) {
         lines.push(`  ${liftCode}`);
       }
     } else {
-      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(_plainNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
     }

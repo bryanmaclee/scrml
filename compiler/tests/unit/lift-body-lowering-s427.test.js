@@ -251,61 +251,63 @@ function compileW(source) {
   return { errors };
 }
 
+// Round 3: origin/main #996 landed E-ASSIGN-004 (§50.8.5) in the type system. These
+// pin the post-merge truth — the type system rejects the write — AND the lowering
+// underneath it (never a silent shadowing `const`), which is what still stands
+// where the type system does not see the write (see the h1k pin below).
 describe("round 2 H1 — a keywordless write to a `const` stays LOUD (never a silent shadow, never exit 0 where base failed the compile)", () => {
   test("r3b — `const total` and `total = 5` in the same lift block: compile fails, as on base", () => {
     const { errors } = compileW(prog(`<ul>\${ const total = 10
        total = 5
        for (let it of @items) { lift <li>\${total}:\${it.name}</li> } }</ul>`));
-    expect(codes(errors)).toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(codes(errors)).toContain("E-ASSIGN-004");
   });
 
   test("r3 — `const` in an earlier block, the write in a later lift block at chunk scope: compile fails, as on base", () => {
     const { errors } = compileW(prog(`\${ const total = 10 }
 <ul>\${ total = 5
        for (let it of @items) { lift <li>\${total}:\${it.name}</li> } }</ul>`));
-    expect(codes(errors)).toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(codes(errors)).toContain("E-ASSIGN-004");
   });
 
   test("r3c — `const` and the write in two plain file-level blocks: compile fails, as on base", () => {
     const { errors } = compileW(prog(`\${ const total = 10 }
 \${ total = 5 }
 <p>\${total}</p>`));
-    expect(codes(errors)).toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(codes(errors)).toContain("E-ASSIGN-004");
   });
 
   test("sibling: a destructured `const` binding written in the same block: compile fails", () => {
     const { errors } = compileW(prog(`<ul>\${ const { prefix } = @cfg
        prefix = "Z"
        for (let it of @items) { lift <li>\${prefix}\${it.name}</li> } }</ul>`));
-    expect(codes(errors)).toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(codes(errors)).toContain("E-ASSIGN-004");
   });
 
-  test("sibling: the write in a later block whose code runs INSIDE its re-render effect fails the compile (a shadow there would drop the write silently)", () => {
+  test("sibling: the write in a later block whose code runs INSIDE its re-render effect fails the compile ONCE (E-ASSIGN-004; no duplicate codegen report)", () => {
     const { errors } = compileW(prog(`\${ const total = 10 }
 <ul>\${ total = 5
        let n = 0
        for (let it of @items) { n = n + 1
            lift <li>\${n}:\${total}</li> } }</ul>`));
-    const e = errors.find((x) => x.code === "E-CODEGEN-INVALID-LOGIC");
-    expect(e).toBeDefined();
-    expect(e.message).toContain("`total`");
-    expect(e.message).toContain("const");
+    expect(codes(errors).filter((c) => c === "E-ASSIGN-004").length).toBe(1);
+    expect(codes(errors)).not.toContain("E-CODEGEN-INVALID-LOGIC");
   });
 
-  test("sibling: a write in a NESTED block of the lift body is the assignment (throws at runtime), never a shadowing `const`", () => {
+  test("sibling: a write in a NESTED block of the lift body — E-ASSIGN-004, and lowered as the assignment, never a shadowing `const`", () => {
     const { errors, js } = compile(prog(`<ul>\${ const t = 1
        for (let it of @items) { t = 5
            lift <li>\${t}:\${it.name}</li> } }</ul>`));
-    expect(errors).toEqual([]);
+    expect(codes(errors)).toContain("E-ASSIGN-004");
     expect(js).toContain("t = 5;");
     expect(js).not.toContain("const t = 5");
   });
 
-  test("sibling: a write in an `if` body next to the lift loop is the assignment, never a shadowing `const`", () => {
+  test("sibling: a write in an `if` body next to the lift loop — E-ASSIGN-004, and lowered as the assignment, never a shadowing `const`", () => {
     const { errors, js } = compile(prog(`<ul>\${ const t = 1
        if (@items.length > 0) { t = 2 }
        for (let it of @items) { lift <li>\${t}\${it.name}</li> } }</ul>`));
-    expect(errors).toEqual([]);
+    expect(codes(errors)).toContain("E-ASSIGN-004");
     expect(js).toContain("t = 2;");
     expect(js).not.toContain("const t = 2");
   });
@@ -320,7 +322,17 @@ describe("round 2 H1 — a keywordless write to a `const` stays LOUD (never a si
     <p>bad</>
 </>
 `);
-    expect(errors.length).toBeGreaterThan(0);
+    expect(codes(errors)).toContain("E-ASSIGN-004");
+  });
+
+  test("h1k — a write in a `${}` logic block INSIDE lifted markup (a position E-ASSIGN-004 does not reach) is the assignment, never a shadowing `const`", () => {
+    const { errors, js } = compile(prog(`<ul>\${ const total = 10
+    for (let it of @items) { lift <li>\${ total = 3 }\${total}:\${it.name}</li> } }</ul>`));
+    // KNOWN: the type system does not see this position (compiles at exit 0 on main
+    // too). The lowering keeps it loud — it throws at boot — where main renders 3.
+    expect(errors).toEqual([]);
+    expect(js).toContain("total = 3;");
+    expect(js).not.toContain("const total = 3");
   });
 
   test("control: a `let` of the same name in the loop body shadows the `const` — its rebind is an ordinary assignment", () => {
@@ -455,4 +467,112 @@ describe("round 2 L1 — a member write to an object declared outside the loop i
     expect(errors).toEqual([]);
     expect(js).toContain("_scrml_reconcile_list(");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Round 3 F1 — a write to a rendering loop's OWN binder.
+// ---------------------------------------------------------------------------
+
+describe("round 3 F1 — a write to the loop's own binder takes effect (let) or stays loud (const)", () => {
+  const S = `<items> = ["a", "b"]\n`;
+  const P = (block, cells = S) => `<program>\n${cells}<ul>\${ ${block} }</ul>\n</program>\n`;
+  for (const [label, block] of [
+    ["lv3 — an outer `const it` of the same name", `const it = 5
+    for (let it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`],
+    ["lv7 — an outer `let it` of the same name", `let it = "z"
+    for (let it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`],
+    ["lv1 — no outer binding", `for (let it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`],
+    ["lv6 — the write in a nested `if`", `for (let it of @items) { if (it == "a") { it = "A" }
+        lift <li>\${it}</li> }`],
+  ]) {
+    test(`${label}: plain loop with a \`let\` head, the write is the binder's assignment`, () => {
+      const { errors, js } = compile(P(block));
+      expect(errors).toEqual([]);
+      expect(js).not.toContain("_scrml_reconcile_list(");
+      expect(js).toMatch(/for \(let it of _scrml_cs_reactive_get\("items"\)\)/);
+      expect(js).not.toMatch(/const it = (it|"A")/);
+    });
+  }
+
+  test("lv4 — the binder shares its name with an EARLIER block's `let item`", () => {
+    const { errors, js } = compile(P(`for (let item of @items) { item = item + "!"
+        lift <li>\${item}</li> }`, `${S}\${ let item = "none" }\n<p>\${item}</p>\n`));
+    expect(errors).toEqual([]);
+    expect(js).toMatch(/for \(let item of _scrml_cs_reactive_get\("items"\)\)/);
+    expect(js).toContain(`item = item + "!";`);
+  });
+
+  test("a destructured head `for (let [k, v] of …)`: the written binder is the body's own", () => {
+    const { errors, js } = compile(P(`let v = "z"
+    for (let [k, v] of @pairs) { v = v + "!"
+        lift <li>\${k}\${v}</li> }`, `<pairs> = [["k1", "a"], ["k2", "b"]]\n`));
+    expect(errors).toEqual([]);
+    expect(js).toMatch(/for \(let \[\s*k,\s*v\s*\] of _scrml_cs_reactive_get\("pairs"\)\)/);
+    expect(js).toContain(`v = v + "!";`);
+  });
+
+  test("a `const` binder that is written keeps a `const` head: the write throws (loud), never shadows", () => {
+    const { errors, js } = compile(P(`for (const it of @items) { it = it + "!"
+        lift <li>\${it}</li> }`));
+    expect(errors).toEqual([]);
+    expect(js).toMatch(/for \(const it of _scrml_cs_reactive_get\("items"\)\)/);
+    expect(js).toContain(`it = it + "!";`);
+    expect(js).not.toMatch(/const it = (it|"A")/);
+  });
+
+  test("`for (… in …)` stays a compile error (E-CTRL-011)", () => {
+    const { errors } = compile(P(`for (let k in @items) { k = k + "!"
+        lift <li>\${k}</li> }`));
+    expect(codes(errors)).toContain("E-CTRL-011");
+  });
+
+  test("a C-style counter with an outer `const i`: the counter's own writes assign the loop `let i`", () => {
+    const { errors, js } = compile(P(`const i = 9
+    for (let i = 0; i < 4; i = i + 1) { i = i + 1
+        lift <li>\${i}</li> }`));
+    expect(errors).toEqual([]);
+    expect(js).toContain("i = i + 1;");
+    expect(js).not.toContain("const i = i + 1");
+  });
+
+  test("control: a nested loop that reuses the name writes ITS binder — the outer list stays keyed", () => {
+    const { errors, js } = compile(P(`for (let it of @items) { for (let it of [1, 2]) { it = it + 10 }
+        lift <li>\${it}</li> }`));
+    expect(errors).toEqual([]);
+    expect(js).toContain("_scrml_reconcile_list(");
+  });
+
+  test("a NESTED rendering loop that writes its own binder is lowered plain with a `let` head", () => {
+    const { errors, js } = compile(`<program>\n<groups> = [{ id: 1, items: ["a", "b"] }]\n<div>\${ for (let g of @groups) { lift <ul>\${ for (let it of g.items) { it = it + "!"
+        lift <li>\${it}</li> } }</ul> } }</div>\n</program>\n`);
+    expect(errors).toEqual([]);
+    expect(js).toMatch(/for \(let it of g\.items\)/);
+    expect(js).not.toMatch(/const it = (it|"A")/);
+  });
+});
+
+describe("KNOWN pre-existing — a callback invoked immediately inside the loop body writes the counter unseen", () => {
+  // The purity walk does not descend into lambda / function bodies (a handler runs
+  // later), so a callback INVOKED during the render (`[1].forEach(x => { n = n + 1 })`,
+  // `bump()`) is invisible to it and the list stays keyed: every row shows the final
+  // count. Base b497b892 renders the same (`3:a,3:b,3:c`). Pinned as today's
+  // behaviour, NOT as correct — see progress.md (round 3).
+  for (const [label, block] of [
+    ["`[1].forEach(x => { n = n + 1 })`", `let n = 0
+    for (let it of @items) { [1].forEach(x => { n = n + 1 })
+        lift <li>\${n}:\${it}</li> }`],
+    ["`const bump = () => { n = n + 1 }` then `bump()`", `let n = 0
+    const bump = () => { n = n + 1 }
+    for (let it of @items) { bump()
+        lift <li>\${n}:\${it}</li> }`],
+  ]) {
+    test(`KNOWN pre-existing: ${label} — the loop stays keyed`, () => {
+      const { errors, js } = compile(`<program>\n<items> = ["a", "b", "c"]\n<ul>\${ ${block} }</ul>\n</program>\n`);
+      expect(errors).toEqual([]);
+      expect(js).toContain("_scrml_reconcile_list(");
+    });
+  }
 });

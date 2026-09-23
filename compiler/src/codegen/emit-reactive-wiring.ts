@@ -1344,27 +1344,20 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       // shares the chunk scope — where the duplicate fails the compile, as it did on
       // base. It does not: it runs inside the group's effect / per-instance function,
       // where that `const` would be a silent SHADOW that drops the write. The write
-      // is re-emitted as the assignment it is, and the compile fails with the same
-      // code base failed it with (E-CODEGEN-INVALID-LOGIC — no dedicated diagnostic
-      // for a `const` write exists in the compiler yet; SPEC §50 names one). A
-      // top-level keywordless assignment appends nothing to the side channels, so
-      // nothing is withdrawn.
+      // is re-emitted as the assignment it is, which throws if it ever runs.
+      //
+      // No codegen diagnostic is added: every statement that reaches here is a
+      // keywordless write at a `${}` block's TOP level to a name an earlier block
+      // bound `const` — exactly the position the type system's §50.8.5 check
+      // (E-ASSIGN-004, statement form) sees across blocks, so the compile has
+      // already failed on it. A second report of the same write here was a
+      // duplicate (round-3 review F3). A top-level keywordless assignment appends
+      // nothing to the side channels, so nothing is withdrawn.
       for (let i = 0; i < codes.length; i++) {
         const r = stmtSideRanges[i] as any;
         if (!r || !r.seededConst || r.onMount) continue;
         const st = codeStmts[i];
         codes[i] = withSeededConstsOff(groupNames, () => emitLogicNode(st, groupEmitOpts));
-        const nm = typeof st?.name === "string" ? st.name : "?";
-        errors.push(new CGError(
-          "E-CODEGEN-INVALID-LOGIC",
-          `E-CODEGEN-INVALID-LOGIC: the keywordless assignment \`${nm} = …\` writes \`${nm}\`, which an earlier ` +
-            `\`\${}\` block declares \`const\` (SPEC §50: a \`const\` is immutable). This block runs inside its ` +
-            `re-render effect, so the write cannot be lowered: as an assignment it throws at runtime, as a ` +
-            `declaration it would silently shadow \`${nm}\`. Declare \`${nm}\` with \`let\` if it is meant to change, ` +
-            `or give this value its own name.`,
-          st?.span ?? { file: fileAST.filePath ?? "", start: 0, end: 0, line: 1, col: 1 },
-          "error",
-        ));
       }
       combinedCode = codes.join("\n");
     }

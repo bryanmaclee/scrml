@@ -8717,6 +8717,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // consume `await`
       }
       let variable = "item";
+      // s427 round 3 (F1) — the binder keyword of a `for (const|let|var x of …)` head.
+      // Recorded ONLY for `const` (as `constBinder: true`): a write to a `const` loop
+      // binder must stay loud, a write to a `let` one must take effect, and the head
+      // keyword was otherwise discarded here. LIVE-only (within-node STRIP_KEYS).
+      let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
         // JS-style: for (const|let|var x of|in iterable) or C-style: for (init; cond; update)
@@ -8753,7 +8758,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // for-of / for-in: for (const|let|var x of|in iterable)
           // skip const/let/var
           if (peek().kind === "KEYWORD" && (peek().text === "const" || peek().text === "let" || peek().text === "var")) {
-            consume();
+            _binderKw = consume().text;
           }
           // A5 (2026-05-17) — destructuring LHS: `for (const [a, b] of xs)` or
           // `for (const {a, b: ren} of xs)`. parseDestructurePattern consumes
@@ -8851,6 +8856,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         id: ++counter.next,
         kind: "for-stmt",
         ...(isForAwait ? { isAwait: true } : {}),
+        ...(_binderKw === "const" ? { constBinder: true } : {}),
         variable,
         iterable,
         body,
@@ -13449,6 +13455,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // consume `await`
       }
       let variable = "item";
+      // s427 round 3 (F1) — the binder keyword of a `for (const|let|var x of …)` head.
+      // Recorded ONLY for `const` (as `constBinder: true`): a write to a `const` loop
+      // binder must stay loud, a write to a `let` one must take effect, and the head
+      // keyword was otherwise discarded here. LIVE-only (within-node STRIP_KEYS).
+      let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
         // JS-style: for (const|let|var x of|in iterable) or C-style: for (init; cond; update)
@@ -13485,7 +13496,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // for-of / for-in: for (const|let|var x of|in iterable)
           // skip const/let/var
           if (peek().kind === "KEYWORD" && (peek().text === "const" || peek().text === "let" || peek().text === "var")) {
-            consume();
+            _binderKw = consume().text;
           }
           // A5 (2026-05-17) — destructuring LHS: `for (const [a, b] of xs)` or
           // `for (const {a, b: ren} of xs)`. parseDestructurePattern consumes
@@ -13576,6 +13587,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         id: ++counter.next,
         kind: "for-stmt",
         ...(isForAwait ? { isAwait: true } : {}),
+        ...(_binderKw === "const" ? { constBinder: true } : {}),
         variable,
         iterable,
         body,
