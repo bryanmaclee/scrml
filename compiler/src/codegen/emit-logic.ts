@@ -6,6 +6,7 @@ import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsPare
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
+import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
@@ -2002,10 +2003,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const _letDeclLhs = nameOrPatternText(node.name);
       if (isDestructurePattern(node.name)) {
         if (opts.declaredNames) {
-          for (const bind of _iterDestructureBindNames(node.name)) opts.declaredNames.add(bind);
+          for (const bind of _iterDestructureBindNames(node.name)) { opts.declaredNames.add(bind); markDeclaredMutable(opts.declaredNames, bind); }
         }
       } else if (node.name && opts.declaredNames) {
         opts.declaredNames.add(node.name);
+        markDeclaredMutable(opts.declaredNames, node.name);
       }
       // If-as-expression: `let a = if (cond) { lift val }`
       if (node.ifExpr) {
@@ -2094,7 +2096,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // DestructurePattern (const-decl only; tilde-decl never destructures).
       const _constDeclLhs = nameOrPatternText(node.name);
       // For tilde-decl: if name was already declared by let-decl, emit as reassignment
-      if (node.kind === "tilde-decl" && typeof node.name === "string" && opts.declaredNames?.has(node.name)) {
+      // s427 round 2 (H1): not when the nearest declaration is a `const` on a lift-scope
+      // set — base's fresh-`const` emission is kept there (see tildeDeclIsRebind).
+      if (node.kind === "tilde-decl" && typeof node.name === "string" && tildeDeclIsRebind(opts.declaredNames, node.name)) {
         const init = node.init ?? "";
         const tildeRhs = emitExprField(node.initExpr, init, _makeExprCtx(opts));
         return `${node.name} = ${tildeRhs};`;
@@ -2111,7 +2115,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // declaration semantics). Server-only, like every `_scrml_sql` emission.
       if (
         (node as any)._bareAssign && node.sqlNode && node.sqlNode.kind === "sql"
-        && typeof node.name === "string" && opts.declaredNames?.has(node.name)
+        && typeof node.name === "string" && tildeDeclIsRebind(opts.declaredNames, node.name)
       ) {
         if (opts.boundary === "server") {
           const sqlStmt = emitLogicNode(node.sqlNode, opts);
@@ -2147,9 +2151,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       }
       if (node.kind === "const-decl" && node.name && opts.declaredNames) {
         if (isDestructurePattern(node.name)) {
-          for (const bind of _iterDestructureBindNames(node.name)) opts.declaredNames.add(bind);
+          for (const bind of _iterDestructureBindNames(node.name)) { opts.declaredNames.add(bind); markDeclaredImmutable(opts.declaredNames, bind); }
         } else {
           opts.declaredNames.add(node.name);
+          markDeclaredImmutable(opts.declaredNames, node.name);
         }
       }
       // If-as-expression: `const a = if (cond) { lift val }`
@@ -3175,7 +3180,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           return `let ${tVar} = ${liftRhs};`;
         }
       }
-      return emitLiftExpr(node);
+      // s427-lift-body-lowering — a logic block inside the lifted markup resolves
+      // keywordless assignments against THIS scope's declared names.
+      return emitLiftExpr(node, opts.declaredNames != null ? { declaredNames: opts.declaredNames } : {});
     }
 
     case "foreign": {
@@ -4271,6 +4278,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         declaredNames: new Set<string>(opts.declaredNames ?? []),
         insideFunctionBody: true,
       };
+      // s427 round 2 (H1): a function body is a new function scope with a set of its
+      // own, as it always had — not a lift scope (see declared-name-marks.ts).
+      clearLiftScope(fnOpts.declaredNames);
       const body: any[] = node.body ?? [];
 
       const bodyCodes = emitFnShortcutBody(body, fnOpts, node.fnKind, node.hasReturnType);

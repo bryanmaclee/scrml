@@ -1,7 +1,10 @@
+import * as acorn from "acorn";
 import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, setStructuralDeclNamesForFile } from "./emit-logic.js";
+import { pushLiftNonKeyed, popLiftNonKeyed, checkLoopBinderWrites } from "./emit-lift.js";
+import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
 import {
   collectTopLevelLogicStatements,
@@ -174,6 +177,269 @@ function _findFunctionBodyEnd(code: string, start: number): number {
   // Include trailing newline if present.
   while (i < code.length && code[i] !== "\n") i++;
   return i < code.length ? i + 1 : i;
+}
+
+// ---------------------------------------------------------------------------
+// s427-lift-body-lowering — the mixed-case hoist must not strand a declaration
+// ---------------------------------------------------------------------------
+
+function _parseScript(js: string): any | null {
+  try {
+    return acorn.parse(js, { ecmaVersion: 2022, sourceType: "script", allowReturnOutsideFunction: true });
+  } catch {
+    return null;
+  }
+}
+
+/** Names declared by the TOP-LEVEL statements of `js` (var/let/const — every
+ *  binding of a destructuring pattern — and function/class declarations). */
+function _topLevelDeclaredNames(js: string): Set<string> | null {
+  const ast = _parseScript(js);
+  if (!ast) return null;
+  const out = new Set<string>();
+  const addPattern = (p: any): void => {
+    if (!p) return;
+    switch (p.type) {
+      case "Identifier": out.add(p.name); return;
+      case "ObjectPattern": for (const pr of p.properties) addPattern(pr.type === "RestElement" ? pr.argument : pr.value); return;
+      case "ArrayPattern": for (const el of p.elements) addPattern(el); return;
+      case "RestElement": addPattern(p.argument); return;
+      case "AssignmentPattern": addPattern(p.left); return;
+    }
+  };
+  for (const st of ast.body) {
+    if (st.type === "VariableDeclaration") for (const d of st.declarations) addPattern(d.id);
+    else if ((st.type === "FunctionDeclaration" || st.type === "ClassDeclaration") && st.id) out.add(st.id.name);
+  }
+  return out;
+}
+
+/**
+ * s427 round 2 (M1) — the FREE identifier references of `js`: every identifier
+ * read or written that no declaration inside `js` itself binds at that point.
+ *
+ * Round 1 collected EVERY identifier and intersected it with the group's
+ * top-level declarations, with no scope analysis — so a row-local
+ * `const name = item.name` inside the keyed factory, sharing a name with the
+ * block's `const name = @user`, read as a reference to the block-level binding
+ * and demoted a working keyed list to a plain loop (row identity lost on push /
+ * reverse). A name bound by a nearer declaration — a factory-local `let`/`const`,
+ * a function or arrow parameter, a nested block, a nested function, a catch
+ * binding, a for-loop head — is not a reference to the block-level one.
+ *
+ * Standard ESTree lexical scoping: `var` and function declarations hoist to the
+ * nearest function scope, `let`/`const`/`class` to the nearest block; every
+ * binding of a scope is visible throughout that scope (hoisting / TDZ), so
+ * declarations are collected before the scope's references are resolved.
+ */
+function _freeNames(js: string): Set<string> | null {
+  const ast = _parseScript(js);
+  if (!ast) return null;
+  const free = new Set<string>();
+  type Scope = { names: Set<string>; parent: Scope | null };
+
+  const patternNames = (p: any, out: Set<string>): void => {
+    if (!p) return;
+    switch (p.type) {
+      case "Identifier": out.add(p.name); return;
+      case "ObjectPattern": for (const pr of p.properties) patternNames(pr.type === "RestElement" ? pr.argument : pr.value, out); return;
+      case "ArrayPattern": for (const el of p.elements) patternNames(el, out); return;
+      case "RestElement": patternNames(p.argument, out); return;
+      case "AssignmentPattern": patternNames(p.left, out); return;
+    }
+  };
+  /** `var` declarations and (sloppy-mode) nested function declarations of a function
+   *  body, found through nested blocks but not nested functions. */
+  const hoistedVarNames = (n: any, out: Set<string>): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) hoistedVarNames(c, out); return; }
+    if (typeof n.type !== "string") return;
+    if (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression" || n.type === "ClassDeclaration" || n.type === "ClassExpression") return;
+    if (n.type === "VariableDeclaration" && n.kind === "var") for (const d of n.declarations) patternNames(d.id, out);
+    for (const k of Object.keys(n)) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      const v = n[k];
+      if (v && typeof v === "object") hoistedVarNames(v, out);
+    }
+  };
+  /** Block-scoped declarations DIRECTLY in a statement list. */
+  const lexicalNames = (stmts: any[], out: Set<string>): void => {
+    for (const st of stmts ?? []) {
+      if (!st) continue;
+      if (st.type === "VariableDeclaration" && st.kind !== "var") for (const d of st.declarations) patternNames(d.id, out);
+      else if ((st.type === "FunctionDeclaration" || st.type === "ClassDeclaration") && st.id) out.add(st.id.name);
+    }
+  };
+  const resolves = (name: string, s: Scope | null): boolean => {
+    for (let c = s; c; c = c.parent) if (c.names.has(name)) return true;
+    return false;
+  };
+  const ref = (name: string, s: Scope): void => { if (!resolves(name, s)) free.add(name); };
+
+  /** A binding pattern: its names are bound elsewhere; only defaults and computed
+   *  keys are references. */
+  const visitPattern = (p: any, s: Scope): void => {
+    if (!p) return;
+    switch (p.type) {
+      case "Identifier": return;
+      case "ObjectPattern":
+        for (const pr of p.properties) {
+          if (pr.type === "RestElement") visitPattern(pr.argument, s);
+          else { if (pr.computed) visit(pr.key, s); visitPattern(pr.value, s); }
+        }
+        return;
+      case "ArrayPattern": for (const el of p.elements) visitPattern(el, s); return;
+      case "RestElement": visitPattern(p.argument, s); return;
+      case "AssignmentPattern": visitPattern(p.left, s); visit(p.right, s); return;
+      default: visit(p, s); // a member-expression target in an assignment pattern
+    }
+  };
+  /** An assignment target: identifiers in it are REFERENCES (writes). */
+  const visitTarget = (p: any, s: Scope): void => {
+    if (!p) return;
+    switch (p.type) {
+      case "Identifier": ref(p.name, s); return;
+      case "ObjectPattern":
+        for (const pr of p.properties) {
+          if (pr.type === "RestElement") visitTarget(pr.argument, s);
+          else { if (pr.computed) visit(pr.key, s); visitTarget(pr.value, s); }
+        }
+        return;
+      case "ArrayPattern": for (const el of p.elements) visitTarget(el, s); return;
+      case "RestElement": visitTarget(p.argument, s); return;
+      case "AssignmentPattern": visitTarget(p.left, s); visit(p.right, s); return;
+      default: visit(p, s);
+    }
+  };
+  const blockScope = (stmts: any[], parent: Scope): Scope => {
+    const names = new Set<string>();
+    lexicalNames(stmts, names);
+    return { names, parent };
+  };
+  const visitFunction = (fn: any, s: Scope): void => {
+    const names = new Set<string>();
+    // A named function EXPRESSION binds its own name inside itself.
+    if (fn.type === "FunctionExpression" && fn.id) names.add(fn.id.name);
+    for (const p of fn.params) patternNames(p, names);
+    if (fn.type !== "ArrowFunctionExpression") names.add("arguments");
+    const fs: Scope = { names, parent: s };
+    for (const p of fn.params) visitPattern(p, fs);
+    if (fn.body && fn.body.type === "BlockStatement") {
+      hoistedVarNames(fn.body.body, names);
+      lexicalNames(fn.body.body, names);
+      for (const st of fn.body.body) visit(st, fs);
+    } else {
+      visit(fn.body, fs);
+    }
+  };
+  const visitClass = (c: any, s: Scope): void => {
+    const cs: Scope = { names: new Set(c.id ? [c.id.name] : []), parent: s };
+    if (c.superClass) visit(c.superClass, s);
+    for (const m of c.body.body) {
+      if (m.computed) visit(m.key, cs);
+      if (m.value) visit(m.value, cs);
+      if (m.type === "StaticBlock") { const bs = blockScope(m.body, cs); for (const st of m.body) visit(st, bs); }
+    }
+  };
+
+  const visit = (n: any, s: Scope): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c, s); return; }
+    if (typeof n.type !== "string") return;
+    switch (n.type) {
+      case "Identifier": ref(n.name, s); return;
+      case "MemberExpression": visit(n.object, s); if (n.computed) visit(n.property, s); return;
+      case "Property":
+        if (n.computed) visit(n.key, s);
+        visit(n.value, s);
+        return;
+      case "LabeledStatement": visit(n.body, s); return;
+      case "BreakStatement": case "ContinueStatement": return;
+      case "MetaProperty": return;
+      case "FunctionDeclaration": case "FunctionExpression": case "ArrowFunctionExpression":
+        visitFunction(n, s); return;
+      case "ClassDeclaration": case "ClassExpression": visitClass(n, s); return;
+      case "VariableDeclaration":
+        for (const d of n.declarations) { visitPattern(d.id, s); visit(d.init, s); }
+        return;
+      case "AssignmentExpression": visitTarget(n.left, s); visit(n.right, s); return;
+      case "UpdateExpression": visitTarget(n.argument, s); return;
+      case "BlockStatement": { const bs = blockScope(n.body, s); for (const st of n.body) visit(st, bs); return; }
+      case "StaticBlock": { const bs = blockScope(n.body, s); for (const st of n.body) visit(st, bs); return; }
+      case "ForStatement": {
+        const fs: Scope = { names: new Set(), parent: s };
+        if (n.init && n.init.type === "VariableDeclaration" && n.init.kind !== "var") for (const d of n.init.declarations) patternNames(d.id, fs.names);
+        visit(n.init, fs); visit(n.test, fs); visit(n.update, fs); visit(n.body, fs);
+        return;
+      }
+      case "ForInStatement": case "ForOfStatement": {
+        const fs: Scope = { names: new Set(), parent: s };
+        if (n.left.type === "VariableDeclaration") {
+          if (n.left.kind !== "var") for (const d of n.left.declarations) patternNames(d.id, fs.names);
+          for (const d of n.left.declarations) visitPattern(d.id, fs);
+        } else {
+          visitTarget(n.left, s);
+        }
+        visit(n.right, s);
+        visit(n.body, fs);
+        return;
+      }
+      case "SwitchStatement": {
+        visit(n.discriminant, s);
+        const all = n.cases.flatMap((c: any) => c.consequent);
+        const ss = blockScope(all, s);
+        for (const c of n.cases) { visit(c.test, ss); for (const st of c.consequent) visit(st, ss); }
+        return;
+      }
+      case "CatchClause": {
+        const cs: Scope = { names: new Set(), parent: s };
+        if (n.param) { patternNames(n.param, cs.names); visitPattern(n.param, cs); }
+        visit(n.body, cs);
+        return;
+      }
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      const v = n[k];
+      if (v && typeof v === "object") visit(v, s);
+    }
+  };
+
+  // The program's own top-level declarations bind within it too (a hoisted
+  // factory's `function _scrml_create_item_N(…)` is not a free reference).
+  const top: Scope = { names: new Set(), parent: null };
+  hoistedVarNames(ast.body, top.names);
+  lexicalNames(ast.body, top.names);
+  for (const st of ast.body) visit(st, top);
+  return free;
+}
+
+/**
+ * The mixed-case hoist (`hoistForLiftSetup`) moves a keyed for-lift's item
+ * factory and render function OUT of the group's re-render `_scrml_effect`, while
+ * the group's own declarations stay INSIDE it (they must re-evaluate on every
+ * run). A factory that reads such a declaration —
+ * `const { prefix, suffix } = @cfg; for (it of @items) { lift <li>${prefix}…</li> }`,
+ * or any plain `const pre = @cfg.prefix` — then runs where that name does not
+ * exist: `ReferenceError: prefix is not defined` at boot, whole page dead, compile
+ * at exit 0. Returns true when the hoist would strand such a reference.
+ *
+ * Not reachable by keeping the setup inside the effect either: the list would be
+ * rebuilt (and its static effect re-registered) on every run. Keying cannot
+ * express "rows depend on a block-local that re-evaluates" at all — the rows must
+ * re-render when it changes — so the caller lowers that loop plain instead, and
+ * the group's effect re-runs the whole block exactly as the source reads.
+ * Unparseable code (never observed) keeps the prior lowering.
+ */
+function mixedHoistStrandsADeclaration(combinedCode: string): boolean {
+  const { hoistedSetup, remaining } = hoistForLiftSetup(combinedCode);
+  if (!hoistedSetup) return false;
+  const declared = _topLevelDeclaredNames(remaining);
+  if (!declared || declared.size === 0) return false;
+  const refs = _freeNames(hoistedSetup);
+  if (!refs) return false;
+  for (const n of refs) if (declared.has(n)) return true;
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -591,6 +857,10 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   const { fileAST, errors, encodingCtx } = ctx;
   const lines: string[] = [];
 
+  // s427 round 4 — a write to a rendering loop's non-`let` binder fails the compile
+  // (checkLoopBinderWrites, emit-lift.js). One whole-file walk covers every host.
+  checkLoopBinderWrites(fileAST, errors);
+
   const derivedNames = collectDerivedVarNames(fileAST);
   // g-assignment-emits-init-set-inverting-reset (§6.8) — structurally-declared
   // (`<name>`) cell names, so _emitInitThunkSidecar can skip a reset init-thunk
@@ -813,6 +1083,10 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   };
   const prevEachLiftRegistry = setEachLiftRegistry(ctx.registry ?? null);
 
+  // s427-lift-body-lowering — names declared at chunk scope by the groups emitted
+  // so far (SPEC §7.6 file scope). See `groupNames` below.
+  const fileScopeNames = new Set<string>();
+
   for (const group of drainGroups()) {
     const { pid, stmts } = group;
     const codes: string[] = [];
@@ -836,9 +1110,28 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     const groupTildeCtx = groupTildeUsed
       ? { var: null as string | null, mode: "single" as "single" | "array" }
       : null;
+    // s427-lift-body-lowering — the group's declared-name scope. Every top-level
+    // statement used to be emitted with NO set, and the set is exactly what tells a
+    // keywordless `n = n + 1` (a `tilde-decl`) after `let n = 0` from a fresh
+    // declaration (emit-logic.ts, the `tilde-decl` arm). Without it the rebind
+    // lowered to `const n = n + 1`: at the block's own top level a duplicate
+    // declaration (E-CODEGEN-INVALID-LOGIC), and one block deeper — a `for` body,
+    // the running counter of a lift loop — a shadowing `const` read in its own TDZ,
+    // `ReferenceError: Cannot access 'n' before initialization` at boot, exit 0.
+    // Seeded from the names earlier groups declared at chunk scope (SPEC §7.6: a
+    // top-level `let`/`const` of a file-level `${}` block is in scope for every
+    // later block); merged back below only when THIS group's declarations land at
+    // chunk scope too.
+    const groupNames = liftScopeDeclaredNames(fileScopeNames);
+    seedOwnConsts(fileScopeNames, groupNames, true); // chunk scope, if the group lands there (declared-name-marks.ts)
     const groupEmitOpts = groupTildeCtx
-      ? { ...emitOpts, tildeContext: groupTildeCtx }
-      : emitOpts;
+      ? { ...emitOpts, tildeContext: groupTildeCtx, declaredNames: groupNames }
+      : { ...emitOpts, declaredNames: groupNames };
+    // Per-statement ranges of the side-channel lists a statement's emission appends
+    // to, so a statement re-emitted by the mixed-hoist guard below leaves no
+    // duplicate behind.
+    const stmtSideRanges: Array<{ nested: [number, number]; errs: [number, number] }> = [];
+    const nestedListRef: any[] | null = (ctx.registry?.nestedLiftGroups ?? null) as any[] | null;
 
     for (const stmt of stmts) {
       // S108 Bug 5 Phase 3 — Skip statements from constant-folded logic wrappers.
@@ -872,7 +1165,15 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         ));
         continue;
       }
+      const _nestedBefore = nestedListRef ? nestedListRef.length : 0;
+      const _errsBefore = errors.length;
+      const _seededBefore = seededConstFallbackCount();
       const code = emitLogicNode(stmt, groupEmitOpts);
+      const _sideRange = {
+        nested: [_nestedBefore, nestedListRef ? nestedListRef.length : 0] as [number, number],
+        errs: [_errsBefore, errors.length] as [number, number],
+        seededConst: seededConstFallbackCount() !== _seededBefore,
+      };
 
       // GH #237 (fail-open, S293) — `on mount { … }` calling a server function.
       //
@@ -912,6 +1213,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
           `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log("on mount", _scrml_async_err));`,
         );
         codeStmts.push(stmt);
+        stmtSideRanges.push({ ..._sideRange, onMount: true } as any);
         continue;
       }
 
@@ -978,7 +1280,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
         continue;
       }
 
-      if (code) { codes.push(code); codeStmts.push(stmt); }
+      if (code) { codes.push(code); codeStmts.push(stmt); stmtSideRanges.push(_sideRange); }
       if (stmtContainsLift(stmt)) groupHasLift = true;
       // Check for reactive deps in the emitted code (after @var rewriting)
       if (code && code.includes("_scrml_reactive_get(")) groupHasReactiveDeps = true;
@@ -1002,7 +1304,67 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     }
 
     if (codes.length === 0) continue;
-    const combinedCode = codes.join("\n");
+    let combinedCode = codes.join("\n");
+
+    // s427-lift-body-lowering — the mixed-case hoist guard (see
+    // mixedHoistStrandsADeclaration). When the group re-renders through an outer
+    // effect AND the hoisted keyed setup would read a declaration that stays inside
+    // that effect, every statement that keys a list is re-emitted with its loops
+    // lowered plain; the side-channel entries its first emission appended are
+    // withdrawn first (reverse order keeps the earlier ranges valid).
+    if (
+      groupHasLift &&
+      combinedCode.includes("_scrml_reconcile_list(") &&
+      liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps) &&
+      mixedHoistStrandsADeclaration(combinedCode)
+    ) {
+      for (let i = codes.length - 1; i >= 0; i--) {
+        const r = stmtSideRanges[i] as any;
+        if (!r || r.onMount || !codes[i].includes("_scrml_reconcile_list(")) continue;
+        if (nestedListRef && r.nested[1] > r.nested[0]) nestedListRef.splice(r.nested[0], r.nested[1] - r.nested[0]);
+        if (r.errs[1] > r.errs[0]) errors.splice(r.errs[0], r.errs[1] - r.errs[0]);
+        pushLiftNonKeyed();
+        try {
+          codes[i] = emitLogicNode(codeStmts[i], groupEmitOpts);
+        } finally {
+          popLiftNonKeyed();
+        }
+      }
+      combinedCode = codes.join("\n");
+    }
+
+    // The group's declarations are file scope (SPEC §7.6) exactly when its code
+    // runs at chunk scope: a plain logic group, or a run-once lift group (its
+    // lift-free statements stay at chunk scope in the mount-deferred split too). An
+    // outer-effect group keeps them effect-local, and a nested group's live in its
+    // per-instance function.
+    const groupAtChunkScope = !group.nested && (!(pid && groupHasLift) || !liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps));
+    if (groupAtChunkScope) {
+      for (const n of groupNames) fileScopeNames.add(n);
+      seedOwnConsts(groupNames, fileScopeNames);
+    } else if (stmtSideRanges.some((r: any) => r && r.seededConst)) {
+      // s427 round 2 (H1) — a keywordless write to an earlier group's `const` was
+      // lowered as base's duplicate `const` on the assumption that this group's code
+      // shares the chunk scope — where the duplicate fails the compile, as it did on
+      // base. It does not: it runs inside the group's effect / per-instance function,
+      // where that `const` would be a silent SHADOW that drops the write. The write
+      // is re-emitted as the assignment it is, which throws if it ever runs.
+      //
+      // No codegen diagnostic is added: every statement that reaches here is a
+      // keywordless write at a `${}` block's TOP level to a name an earlier block
+      // bound `const` — exactly the position the type system's §50.8.5 check
+      // (E-ASSIGN-004, statement form) sees across blocks, so the compile has
+      // already failed on it. A second report of the same write here was a
+      // duplicate (round-3 review F3). A top-level keywordless assignment appends
+      // nothing to the side channels, so nothing is withdrawn.
+      for (let i = 0; i < codes.length; i++) {
+        const r = stmtSideRanges[i] as any;
+        if (!r || !r.seededConst || r.onMount) continue;
+        const st = codeStmts[i];
+        codes[i] = withSeededConstsOff(groupNames, () => emitLogicNode(st, groupEmitOpts));
+      }
+      combinedCode = codes.join("\n");
+    }
 
     // A nested group NEVER reaches file scope: its statements read the row's
     // iteration names / the arm's payload bindings, which exist only as the
