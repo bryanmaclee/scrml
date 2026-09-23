@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 120 |
-| MED | 281 |
+| HIGH | 126 |
+| MED | 284 |
 | LOW | 105 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -1277,7 +1277,29 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 <!-- ⚑ S385-bryan filing batch 5 — the "separable defects, file not design" set from dpa-028 (offline/PWA, 2026-08-15). The DD named FOUR; the PA reproduced each by execution before filing rather than relaying, and ONE DID NOT REPRODUCE (recorded below, not filed). bryan: "file those four". -->
 
 ### g-when-changes-effect-fires-eagerly-at-registration — a `when @cell changes { … }` block RUNS ONCE AT BOOT, before anything has changed. **PA-REPRODUCED by emit on `9a0ad569`:** the block lowers to a bare `_scrml_effect(function(){ … })` (observed verbatim: `_scrml_effect(function() { if (_scrml_cs_reactive_get("online")) _scrml_flush_4();; });`), and `_scrml_effect` runs its body immediately at registration to collect dependencies — so the "changes" body executes at module init with the cell's INITIAL value. For the canonical offline shape (`when @online changes { if (@online) flush() }`) that means **a flush fires at page load**, against a queue the author expects to be replayed only on a transition. ⚑ **The name is the contract:** `changes` says "on change", and the S130 axiom is that state fully describes its own transitions — an edge-triggered construct that also level-triggers at boot is the construct disagreeing with its own name. **Spec-intent needs confirming before a fix direction is chosen** — if eager-first-run is intended, the SPEC must say so and the PRIMER must warn, because the emitted `_scrml_effect` is indistinguishable from a `${}` reactive block at the source level. Cosmetic rider observed in the same emit: a doubled statement terminator (`_scrml_flush_4();;`). — `NEW S385-bryan (dpa-028 separable defect 2; PA-reproduced by emit inspection); **MED**; open`
-<!-- @gap id=g-when-changes-effect-fires-eagerly-at-registration sev=MED status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-event-wiring.ts,compiler/src/runtime-template.js(_scrml_effect) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md-separable-defect-2-PA-reproduced-by-emit-the-when-block-lowers-to-a-bare-scrml-effect-which-runs-at-registration -->
+<!-- @gap id=g-when-changes-effect-fires-eagerly-at-registration sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-event-wiring.ts,compiler/src/runtime-template.js(_scrml_effect) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md-separable-defect-2-PA-reproduced-by-emit-the-when-block-lowers-to-a-bare-scrml-effect-which-runs-at-registration -->
+
+⛑ **S429-peter — WIDER THAN FILED, RAISED TO HIGH.** PA-verified on `085ddbe8` (program level AND inside `${}`): the
+`_scrml_effect(function(){ body })` lowering breaks all three §6.7.4 clauses, not just the eager run. `when @n changes
+{ @log = @log + "n:" + @m + ";" }` → boot `n:0;` (runs on mount), clicking `n` does NOTHING (the declared trigger is
+never subscribed), clicking `m` FIRES it (the body's reads became the triggers — §6.7.4: "The compiler does NOT
+auto-track `@variable` reads inside the body"). A `when` fires on the wrong changes and never on its own. Silent.
+Fix dispatched S429 (`fix/s429-when-changes-honours-dep-list`).
+
+(when-changes, continued) ⛑ **FIX BUILT, NOT YET REVIEWED, HELD:** `origin/hold/s429-when-changes-honours-dep-list` @
+`2eecc899`. `emit-logic.ts` `case "when-effect"` now emits `_scrml_when_changes(subscribe-per-listed-dep, body)`; new
+runtime helper runs the body with tracking paused, drops sync self-re-entry, reports async rejections, registers its
+disposer with `_scrml_mount_track`. Server calls in the body are now awaited (the old sync wrapper stored
+"[object Promise]"). **Held because:** (1) no adversarial pass yet; (2) it EXPOSES `@items.push(x)` in an INLINE handler
+lowering to an in-place proxy mutation with NO `_scrml_reactive_set` (§6.5.1 violated) — main's auto-tracking masked
+it, so a `when @items changes` that worked on main goes silent; fix that lowering in the same PR; (3) every `when` in
+every adopter changes timing — surface to bryan before landing. Also found, pre-existing: E-LIFECYCLE-006/-007/-016
+and W-LIFECYCLE-010 NEVER FIRE (the `phase2-when-*` sample expectations do not hold); `when … changes reads @a` is not
+parsed (E-SCOPE-001 on `reads`, node dropped); `when` in an `if=` region is hoisted to file scope and never torn down;
+`when` in a component body → E-COMPONENT-021; `${ when … }` in a match arm → `ReferenceError: when is not defined`.
+Behaviour changes measured on the corpus: `when-001-basic-effect`, `gauntlet-r10-go-contacts`,
+`gauntlet-r10-vue-datatable` (its derived-cell dep never fires → the page clamp never runs; should be E-LIFECYCLE-007),
+`gauntlet-r10-svelte-dashboard`, `phase2-when-*`.
 
 ### g-foreign-block-reading-a-browser-global-escalates-the-client-fn-to-the-server — a CLIENT function that reads a browser-only global through `_={ … }=` is **server-escalated**, so the global is evaluated where it does not exist. **PA-REPRODUCED by execution on `9a0ad569`:** `function checkOnline() { const v = _={ in: {} navigator.onLine }= ; @online = v }`, called from an `onclick`, emits `async function _scrml_fetch_checkOnline_3()` performing `await fetch("/_scrml/__ri_route_checkOnline_1", {method:"POST", …})` and produces a `.server.js` — `navigator.onLine` is routed to the server, where `navigator` is undefined. ⚑ **It also fails to compile, for a reason that makes the footgun worse:** `E-CPS-NONIDEM-NO-STORAGE` (2 errors) — the escalation drags in the A9-Ext-5 idempotency-key machinery and then demands a storage backend, for what the author wrote as a purely local browser check. So the author's diagnostic names an idempotency-storage gap and says nothing about the escalation that caused it. **This is the §12 inference boundary meeting §23's opacity rule:** the `_{}` interior is opaque (§23.2.3) so the compiler cannot see that `navigator` is client-only, and §12.2's escalation triggers treat the host reach as a server signal. The DD framed this as "documented behaviour … the emitted client reads an unbound continuation local"; the PA's reproduction is **sharper and worse** — full escalation plus a misleading terminal error. Fix direction unverified: candidates are a client-only `_{}` form, a browser-global recognition set at the §12.2 trigger, or a targeted diagnostic naming the escalation. — `NEW S385-bryan (dpa-028 separable defect 4; PA-reproduced by execution, and the reproduction sharpened the claim); **HIGH**; open`
 <!-- @gap id=g-foreign-block-reading-a-browser-global-escalates-the-client-fn-to-the-server sev=HIGH status=open locus=searched:compiler/src/route-inference.ts,compiler/src/codegen/emit-server.ts,compiler/src/type-system.ts(§12.2-triggers) prov=dd:offline-pwa-dpa-028-separable-defect-4-PA-reproduced-navigator-onLine-in-a-client-fn-emits-a-POST-to-_scrml-__ri_route-and-a-server-js-plus-a-misleading-E-CPS-NONIDEM-NO-STORAGE -->
@@ -14550,6 +14572,8 @@ match/lift involved; also visible through the match-in-row path. Silent (exit 0,
 the entry above is the full repro. Suspect: the per-item effect keeps the
 OLD object's deep-reactive subscription after the key-stable replace.
 
+⛑ **S429-peter — RE-FRAMED: an INCONSISTENCY, and RULING-GATED.** The per-item effect is NOT stale (measured: it re-resolves by key onto the new object). The cause is `_scrml_reactive_set` storing raw values for computed writes while codegen `_wrapDeepReactive` wraps only syntactic literals — so literal-initialised rows are deep-reactive and computed ones are not. §6.5.6/§6.5.7 say NEITHER should be ("no implicit deep reactivity"). A fix making every cell write deep-reactive is BUILT and HELD on `origin/hold/s429-deep-reactive-cell-writes` @ `58b90cfc` (23 tests, flat subscriptions, frozen values left raw, worker `.send` copies to plain). Amend §6.5 vs make literals shallow: **bryan's (Q5)**, asked in `handOffs/incoming/2026-09-23-from-S429-peter-to-bryan-q5-q7.md`.
+
 ### g-engine-inside-each-row-renders-nothing — an `<engine>` in an `<each>` row renders no state body, no error — `NEW S429-peter; HIGH; open`
 <!-- @gap id=g-engine-inside-each-row-renders-nothing sev=HIGH status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-match.ts—not-traced prov=empirical:S429-match-in-each-dev-agent-found-review-agent-and-PA-reproduced-on-45749bb1 -->
 
@@ -14609,6 +14633,117 @@ Loud (`ReferenceError: w is not defined`), identical on main and the S429 match-
 the same pass, loud and pre-existing: a row-each inside an arm with an inner match reading the OUTER payload
 throws ReferenceError (rv5/v9).
 
+### g-arm-directive-bindings-cannot-read-arm-names — inside a `<match>` arm, `show=` / `disabled=` / value-form `${ if }` / `<textarea>` reading a payload or row name threw at boot and left the element unbound — `NEW S429-peter; HIGH; RESOLVED #1037`
+<!-- @gap id=g-arm-directive-bindings-cannot-read-arm-names sev=HIGH status=resolved locus=compiler/src/codegen/emit-variant-guard.ts(emitArmWireFunction)+emit-event-wiring.ts(arm-bound factory capture)+emit-html.ts(armNameAttrAsExpr) prov=empirical:S429-PA-reproduced-on-c8eb9cd9-show-in-arm-ReferenceError-hidden-element-visible -->
+
+Fixed by #1037 (`9b681f61`) — two adversarial passes. Round 2 also fixed arm names spelled like compiler internals (`el`, `_root`, `_d`, `_h`, `_disposers`, …) colliding with the wire function / row dispatcher — some SILENT on main (`${el}` rendered the element). Left open, filed separately: `g-arm-cell-only-binding-dead-after-arm-switch`, `g-e-attr-013-not-raised-inside-arm-bodies`, `g-each-over-array-literal-in-non-row-arm-referenceerror`; `_scrml_` namespace reservation is Q7 to bryan.
+
+### g-match-anywhere-in-engine-state-child-loses-the-state-child — a `<match>` nested in an engine state-child (even inside a `<div>`) makes the engine report that state-child MISSING — `NEW S429-peter; MED; open`
+<!-- @gap id=g-match-anywhere-in-engine-state-child-loses-the-state-child sev=MED status=open locus=searched:compiler/src/codegen/emit-engine.ts,the engine state-child collector—not-traced prov=empirical:S429-PA-reproduced-on-d6d6e55a-three-layouts-one-line-multi-line-div-wrapped-control-without-match-compiles-and-renders -->
+
+```
+type Phase:enum = { Off, On }
+type Kind:enum = { X, Y }
+<k>: Kind = .X
+<engine for=Phase initial=.On>
+  <Off rule=.On><p>off</p></>
+  <On rule=.Off>
+    <match for=Kind on=@k>
+      <X><p>X</p></>
+      <Y><p>Y</p></>
+    </match>
+  </>
+</>
+```
+→ `E-ENGINE-STATE-CHILD-MISSING: body is missing a state-child for variant .On`. Wrapping the `<match>` in a `<div>`
+does not help. The same engine with a plain `<p>` in `On` compiles and renders. LOUD but MISLEADING: the diagnostic
+names a missing state-child the author wrote. Suspect the state-child collector treats the inner `<X>`/`<Y>` arm
+tags (capitalised, variant-shaped) as engine state-children and loses `On`. This makes S427 item (3) ("a `<match>`
+nested in an engine arm is not re-dispatched on re-entry") unreachable as written; that item may have been measured
+through a different shape.
+
+⛑ **S429-peter — FIX BUILT, REVIEWED CLEAN, AND HELD ON A RULING:** `origin/hold/s429-match-in-engine-state-child` @
+`e0ac22d6`. Three layers: (1) `engine-statechild-parser.ts` closer finders used per-kind counters and `</>` popped the
+lowercase one first — a `</>`-closed capitalised element inside a lowercase one (a match's arms, OR `<div><Card>…</></div>`)
+stole the state-child's closer; now one open-element stack. (2) re-entry re-dispatch of nested matches via the engine
+arm's `postMountJs` (S427 item 3, reproduced with named closers on main). (3) nested-match payload reads. The review
+found it clean on every criterion, BUT: E-IF-IN-DISPATCHED-ARM defines "dispatched arm" to include engine
+state-children, and `g-nested-block-match-in-dispatched-arm-silently-drops` is an OPEN operator fork (A refuse / B
+support) — landing this commits the engine position to (B) ahead of bryan's ruling. Also open on the branch: MED-1 a
+payload read in an EVENT HANDLER inside the nested arm is unbound (ReferenceError on click); MED-2 a complex `on=`
+(`_scrml_effect` chunk not shipped, `g-match-complex-on-expr-effect-chunk-not-shipped`) turns the old false compile error
+into a boot crash. ⚑ The parser layer (1) is independently valuable — the likeliest real case is a COMPONENT closed with
+`</>` inside a `<div>` in a state-child — and can be split out once the ruling says how the match case should behave.
+
+### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; open`
+<!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/rewrite.ts(the §6.5.1 clone-mutate-replace lowering)—not-traced prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
+
+`function a() { @groups.splice(0, 1, { id: 1, name: "S" }) }` emits `.splice(0 , 1 , { id : 1 , name : S })` — compiles
+clean, `ReferenceError: S is not defined` on click. `push({ id: 2, name: "P" })` emits `push({id: 2, name: P})` and is
+caught only by a MISLEADING `E-SCOPE-001` (undeclared `P`). A string whose text matches a declared plain binding
+would silently become that binding. Also seen: `@items.push("d")` → `push(d)`. Fix dispatched S429.
+
+(mutation-arg quotes, continued) ⛑ **FIX BUILT, ROUND 1 REVIEWED (finding fixed in round 2), ROUND 2 NOT YET REVIEWED, HELD:**
+`origin/hold/s429-mutation-arg-string-quotes` @ `257dfeca`. Round 1 (`7072776f`) re-quoted strings in the hand-rolled arg
+collectors; its review found that correctly-quoted strings then flowed through TEXT-level `rewriteExpr` passes that do
+not skip strings (`"use fn here"` → `"use function here"`, `"x + +y"` → `"x++y"`) — LOUD→SILENT. Round 2 parses
+multi-arg lists into an `array` node (`argsIsList`) printed through the ExprNode printer, splits C-style headers from
+TOKENS (`cStyleHeaderPartTexts`), drops the `+ +` normaliser, and fixes `@set(@o,"a",9)` (not in SPEC — now lowers to
+the path deep-set), computed bracket indexes, `upload()` args, and block comments inside args. 87-case fuzz (every
+client rewrite pass × quoting × emit path). Also makes multi-arg lists scope-checked (undeclared name → E-SCOPE-001,
+was a runtime ReferenceError) and fixes `conformance/cases/loop/loop-006-neg` (a labelled `for` never bound its loop
+var). Next session: adversarial pass on `257dfeca`, then land.
+
+### g-arm-cell-only-binding-dead-after-arm-switch — inside a `<match>` arm, `show=@flag` / `disabled=@flag` (cell-only reads) stop updating once the arm has been switched away and back, or in a non-initial arm — `NEW S429-peter; HIGH; open`
+<!-- @gap id=g-arm-cell-only-binding-dead-after-arm-switch sev=HIGH status=open locus=compiler/src/codegen/emit-variant-guard.ts(emitArmWireFunction — a binding that reads NO arm name stays in boot-time wiring bound to the first-rendered element; re-dispatch replaces the element) prov=empirical:S429-arm-bindings-dev-agent-found-review-agent-confirmed-identical-on-d6d6e55a-and-the-fix-head -->
+
+`<Note(note)><p show=@cf>…</p>`: toggling `@cf` works before any arm switch; after Empty→Note it does nothing, no console
+output. SILENT. Inconsistent on the S429 arm-bindings head: `show=(note == "hi" && @cf)` survives the switch (it reads an
+arm name, so it is re-wired per entry), `show=@cf` does not. The fix is to wire EVERY arm binding per entry (drop the
+"reads an arm name" gate) — changes emitted output of every arm with a cell-only binding, so its own PR + differential.
+
+### g-e-attr-013-not-raised-inside-arm-bodies — `class:on=note` inside a `<match>` arm compiles and reads a CELL named `note`, even with a payload `note` in scope; outside an arm it is E-ATTR-013 + E-SCOPE-001 — `NEW S429-peter; MED; open`
+<!-- @gap id=g-e-attr-013-not-raised-inside-arm-bodies sev=MED status=open locus=compiler/src/ast-builder.js(E-ATTR-013 raise site does not reach arm bodies) prov=review:S429-arm-bindings-review-identical-on-main-and-head -->
+
+### g-lifted-each-if-attribute-silently-ignored — `if=` on an `<each>` inside lifted markup is never read; the list always renders — `NEW S429-peter; MED; open`
+<!-- @gap id=g-lifted-each-if-attribute-silently-ignored sev=HIGH status=open locus=compiler/src/codegen/emit-each.ts(eachBlockFromMarkupNode never reads if=) prov=empirical:S429-each-alias-dev-agent-reported-on-main-085ddbe8-NOT-PA-verified -->
+
+Reported by the S429 lifted-each dev agent, identical on main; not yet PA-verified. Silent (the author's condition
+is dropped). Also recorded: a three-name `as (a, b, x)` on a lifted `<each>` falls back to the string path and fails
+only at runtime (loud, but not at compile time).
+
+⛑ **S429-peter — RAISED MED → HIGH after #1038 landed.** For an ALIASED lifted `<each>` (and a nested one #1038 now promotes) main crashed at init, which hid the ignored `if=`; #1038 removes the crash, so the gated content now RENDERS. `W-ATTR-001 "Attribute if= is not recognized on <each>"` is the only signal and its text is misleading (the attribute is dropped, not forwarded). The `@.` form already did this on main. PA-accepted at landing because a page-killing crash is worse; fail-open class of §17.1.2.3 (`g-structural-if-inside-each-row-template-fails-open`).
+
+### g-each-over-array-literal-in-non-row-arm-referenceerror — `<each in=[{…payload…}]>` (an array LITERAL reading the arm payload) inside a non-row `<match>` arm throws `ReferenceError: k is not defined` — `NEW S429-peter; MED; open`
+<!-- @gap id=g-each-over-array-literal-in-non-row-arm-referenceerror sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts—not-traced prov=empirical:S429-arm-bindings-dev-agent-found-on-main-d6d6e55a-NOT-PA-verified -->
+
+Loud (console ReferenceError). Reported alongside, also loud and identical in the plain-row twin: a row alias named
+`_mount` collides with `emit-each`'s per-row `let _mount`, and a row alias `_root` read by an each inside an arm emits
+`_scrml_each_arm_render_*(_root, …, _root)`. `event` as an arm name inside a `function(event)` handler wrapper is
+shadowed.
+
+### g-match-complex-on-expr-effect-chunk-not-shipped — a `<match>` whose `on=` is a complex expression (effect-based dispatch) calls `_scrml_effect` without ensuring the `deep_reactive` chunk ships — `NEW S429-peter; MED; open`
+<!-- @gap id=g-match-complex-on-expr-effect-chunk-not-shipped sev=MED status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES — no `_scrml_effect(` entry) prov=empirical:S429-engine-statechild-dev-agent-found-NOT-PA-verified -->
+
+In a file with no other reactive code: `_scrml_effect is not defined` at init. Same class as the giti033 chunk-gate
+fix (#1029). ⚑ The S429 corpus sweep (called-but-undefined `_scrml_*`) did NOT see it — no corpus file has the shape —
+which is the sweep's documented blind spot: it measures the corpus, not the construct space.
+
+### g-scrml-sigil-rewrites-reach-inside-every-string-literal — `<#w>`, `<#field>`, `?{…}` and `Color::Red` are rewritten INSIDE string literals, even in a plain `const c = "…"` — `NEW S429-peter; HIGH; open`
+<!-- @gap id=g-scrml-sigil-rewrites-reach-inside-every-string-literal sev=HIGH status=open locus=searched:compiler/src/codegen/rewrite.ts(rewriteExpr pass pipeline — text-level passes, upstream of the arg collectors)—not-traced prov=empirical:S429-mutation-quotes-dev-agent-reproduced-on-main-085ddbe8-NOT-PA-verified -->
+
+Silent value corruption of string literals that happen to contain scrml sigil text. `match x { .A => 1 }` inside a
+string does not compile at all. Same class as the S429 mutation-arg finding (text-level passes blind to strings) but
+upstream, on EVERY string. The S427/S425 "one masking pass every stage consumes" thesis again.
+
+### g-struct-construction-silently-dropped-to-bare-type-name — `const p = Point { x: 1 }` compiles to `const p = Point;` with no diagnostic — `NEW S429-peter; HIGH; open`
+<!-- @gap id=g-struct-construction-silently-dropped-to-bare-type-name sev=HIGH status=open locus=searched:compiler/src/ast-builder.js,compiler/src/codegen/rewrite.ts(rewriteStructConstruction)—not-traced prov=empirical:S429-mutation-quotes-dev-agent-reproduced-on-main-085ddbe8-NOT-PA-verified -->
+
+Also `@xs.push(Point { x: 1 })` (single arg). Silent. Also recorded by the same agent, pre-existing: a `@set(...)` on
+the line after a `@x.path = v` write is swallowed into that write's value and dropped; the native parser's
+`serializeNativeArgList` reads `a.argument` where a native call-arg spread stores `a.expression`; the type system binds
+C-style loop names by regex over the init's raw text (`"let zz"` in a string would bind `zz`).
+
 ### g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings — four pre-existing each/arm defects reported by the S427 dev agent — `NEW S427-peter; MED; open`
 <!-- @gap id=g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:S427-dev-agent-reproduced-each-on-base-with-the-display-twin-NOT-PA-verified -->
 
@@ -14619,6 +14754,8 @@ engine arm is not re-dispatched when the engine arm is re-entered (display bindi
 with the no-lift twin; **not PA-verified** — re-reproduce and split before dispatching.
 
 ⛑ **S429-peter — (1) and (4) PA-VERIFIED on `c8eb9cd9`.** (1) `<ul>${ lift <li><each in=@items as c><b>${c}</b></each></li> }</ul>` → `initError: ReferenceError: c is not defined` — the WHOLE page script dies at init (loud). (4) `<engine for=Load initial=.Ready(["p","q"])>` emits `_scrml_cs_reactive_set("load", "Ready")` — the payload is DROPPED and the `Ready` arm's `<each in=rows>` renders an EMPTY list with no error (SILENT — worse than this entry's MED). ⚑ (4) is ruling-adjacent: §51.0.E admits `initial=.Variant` ("a STATIC literal") or `initial=@cell` and does not say whether a payload constructor is a static literal — honour vs reject is bryan's (Q4 in the S429 message). The silent drop is wrong under both readings. (2) is likely the same class as `g-each-replaced-row-stops-receiving-in-place-edits` (in flight S429). (3) not yet re-run.
+
+⛑ **S429-peter — item (1) RESOLVED by #1038 (`83b34323`):** the parser read `as c` as two bare attributes; `as (k, v)` and nested lifted eaches fixed with it. Item (3) is `g-match-anywhere-in-engine-state-child-loses-the-state-child` (fix held on a ruling). Item (4) is ruling-gated (Q4). Item (2) likely belongs to the §6.5 deep-reactivity question (Q5).
 
 ### g-post-emit-chunk-gates-match-user-string-literals — the post-emit runtime-chunk gates key on emitted TEXT, so a user string containing an internal helper name pulls unused chunks into the runtime — `NEW S427-peter; LOW; open`
 <!-- @gap id=g-post-emit-chunk-gates-match-user-string-literals sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES + the reconciliation lines scan) prov=review:S427-adversarial-pass-on-the-each-row-lift-fix-e8-runtime-55043-to-83143-bytes -->
