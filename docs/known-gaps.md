@@ -30,7 +30,7 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 117 |
+| HIGH | 116 |
 | MED | 276 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
@@ -14453,12 +14453,29 @@ torn down. Enumerated first: 18 loci. Governing: §10.1, and §18.0.1's OWN work
 artifacts change. Adversarial pass: no HIGH/MED.
 
 ### g-match-inside-each-row-cannot-see-the-row-variable — a `<match>`/engine arm inside an `<each>` row reads the row alias and the whole list dies at boot — `NEW S427-peter; HIGH; open`
-<!-- @gap id=g-match-inside-each-row-cannot-see-the-row-variable sev=HIGH status=open locus=compiler/src/codegen/emit-variant-guard.ts(emitArmWireFunction — arm wire functions are module-scope and receive only payload bindings, not the enclosing row scope) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-g-is-not-defined-at-init-list-renders-empty -->
+<!-- @gap id=g-match-inside-each-row-cannot-see-the-row-variable sev=HIGH status=resolved locus=compiler/src/codegen/emit-variant-guard.ts(emitArmWireFunction — arm wire functions are module-scope and receive only payload bindings, not the enclosing row scope) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-g-is-not-defined-at-init-list-renders-empty -->
 
 `<each in=@groups key=@.id as g> <match for=Kind on=g.kind> <A><p>${g.name}</p></> <B>…</> </match> </each>`
 compiles at exit 0 and throws `ReferenceError: g is not defined` at init; the list renders empty. PA-reproduced
 on `b016352d`. Arm wire functions live at module scope and get only payload bindings. After #1022 a lift in such
 an arm fails the same LOUD way (not silently).
+
+⛑ **S429-peter — RESOLVED, with three siblings of the same class, after four build rounds and three adversarial
+passes.** Arm render/wire functions now receive the enclosing row names as trailing parameters (payload bindings
+first; a payload binding shadows a same-named row alias), mirroring #1022's instance-scope mechanism
+(`emit-match.ts` `prepareRowScopedArms`, `emit-variant-guard.ts`, `emit-each.ts` `emitArmScopedEachRenderFn`). Also
+fixed: `@.` in an arm body (rendered empty); an `<each>` inside such an arm (never got a render fn — empty); a
+delegable `onclick`/`onsubmit` reading an arm-only name — row alias OR payload binding, with or without `<each>` —
+which threw at event time. **Click contract:** each arm mirrors its no-match twin — in a row, arm handlers are
+element listeners like the row's own (inner first, both fire, `stopPropagation` honoured); outside a row, an
+arm-name handler is stored per chunk+placeholder (`__scrml_arm_<event>_<token>_<id>`) and run by that chunk's own
+delegated walker (innermost-only, like page delegation). ⚑ **One accepted behaviour change:** a row-arm handler
+that reads no arm name now bubbles to a page-level delegated ancestor (`del;outer;`), exactly as a plain row button
+already did on main. The two contracts themselves (page innermost-only vs row bubbling) are a question for bryan.
+An `<each>` in a NON-row arm whose body reads the payload now takes an arm-scoped path (identifier-level detection).
+Corpus: 7475/7475 artifacts byte-identical to main. Not fixed (filed/recorded separately): `show=` reading an
+arm-only name; `<engine>` inside an `<each>` row; a nested `<match>` in a dispatched arm; per-item effects of
+arm-hosted eaches leaking on arm switch.
 
 ### g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime — the conformance case passes while its emitted program dies at init: the runtime ships without the reconciliation chunk — `NEW S427-peter; HIGH; open`
 <!-- @gap id=g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES — no unscoped `_scrml_reconcile_list(` gate) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-_scrml_reconcile_list-is-not-defined-mounting-conformance-cases-each-ternary-markup-giti033 -->
