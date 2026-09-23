@@ -190,3 +190,63 @@ own JS-host-interop carve-out) or inside string literals. `async` appears 0 time
   fix is a declaration-shape change (`fn` -> `function`), which is not a syntax migration.
 - 3 `throw new Error(...)` sites (forbidden vocabulary, not one of the four rules).
 
+---
+
+## THE CROSS-CUTTING FINDING — `class` bodies are a front-end blind spot
+
+Minimal repro, MEASURED (`probe14.scrml`):
+
+```scrml
+${
+    class E {
+        constructor(sev) {
+            this.sev = sev != null ? sev : "error"   // NOT rejected by E-SYNTAX-042
+            this.other = undefined                    // NOT rejected by E-SYNTAX-042
+        }
+        check(x) {
+            try { return x.y } catch (e) { return null }   // NOT rejected by E-TRY-NOT-IN-SCRML
+        }
+        eq(a, b) { return a === b }                   // IS rejected — E-EQ-004
+    }
+    export function touch() { return 1 }
+}
+```
+
+One of four forbidden-vocabulary walkers reaches into a class body. And the class-body re-emit path
+emits:
+
+```js
+this . sev = sev !== null ? sev : "error"
+```
+
+**D9 — a silent semantic narrowing.** The source says `!= null` (JS: matches `null` AND `undefined`);
+the output says `!== null` (matches `null` only). Every `undefined` now takes the other branch. Exit
+0, no diagnostic.
+
+Everything that goes wrong with `class` in this tree is one blind spot:
+- forbidden-token walkers skip class bodies (above),
+- the scope table does not register class names (D2 — `E-SCOPE-001` on `new X()`),
+- `export class` is dropped from the artifact entirely (D6),
+- `is some` / `is not` mis-lower or leak a placeholder inside class methods (D1),
+- `!{}` cannot be lowered inside a class method at all (D5),
+- the class-body re-emit narrows `!=` to `!==` (D9).
+
+14 class declarations across the 11 modules; 12 of them `export class`. The emitted JS for the whole
+tree contains **2** class definitions.
+
+## THE OTHER STRUCTURAL FINDING — the parity harness assumes the source is JavaScript
+
+`compiler/tests/self-host/ast.test.js` does not invoke the compiler. It slices the `${ ... }` body out
+of `ast.scrml`, strips `^{}` blocks, and **evaluates the remainder as JavaScript via a Blob URL**. That
+works only while the self-host source is ALSO valid JavaScript. After the migration it throws at module
+load (`Expected ")" but found "is"`). The suite was already `describe.skip`-ed at baseline, and
+`compiler/tests/self-host/` is not in the pre-commit gate, so nothing red turned redder in the gate —
+but the harness's premise is now false, and that premise is the reason this source drifted into
+JavaScript in the first place. NOT fixed here: `compiler/tests/` is outside this dispatch's write scope.
+
+## Gate
+
+`bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail`
+- before: 24083 pass / 76 skip / 10 todo / 0 fail (24169 across 1326 files)
+- after:  24083 pass / 76 skip / 10 todo / 0 fail (24169 across 1326 files)
+
