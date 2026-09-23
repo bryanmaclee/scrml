@@ -9,7 +9,14 @@
  *   - A13 E-SYNTAX-043 legacy `(x) =>` — blocked on statement-boundary tokenization
  *   - A15 E-MATCH-012 / A16 W-MATCH-002 — checkExhaustiveness is orphan, needs wiring
  *   - A17 E-ASSIGN-001 decl-in-expr — same block-splitter issue as A13
- *   - B1/B2 E-ASSIGN-003/004 — tilde-decl semantic question (needs spec ruling)
+ *   - B1 E-ASSIGN-003 — still deferred (undeclared identifier as assignment target)
+ *
+ * B2 E-ASSIGN-004 is BUILT as of S422. The "tilde-decl semantic question" this
+ * header recorded as needing a spec ruling got one — bryan, S422, verbatim:
+ * "confirmed. bare naming is const, mutation needs let. widen it." A binding
+ * created without `let` is a `const` binding whether the keyword is written or
+ * not, so both the explicit-`const` and the keywordless-bare form refuse
+ * reassignment. See compiler/tests/unit/e-assign-004-const-reassign.test.js.
  */
 
 import { describe, test, expect } from "bun:test";
