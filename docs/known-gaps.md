@@ -17609,3 +17609,180 @@ that exists to catch real ghosts.
 
 — NEW S428-bryan (PA-found while verifying an unrelated adopter report; reproduced by execution with an empty-binding-list control, root read from the P7 regex)
 <!-- @gap id=g-ghost-pattern-lint-has-no-foreign-block-awareness sev=MED status=open locus=compiler/src/lint-ghost-patterns.js prov=rationale:_-is-a-word-character-so-the-foreign-block-opener-_=-is-lexically-identical-to-prop=-and-the-file-has-no-foreign-region-skip -->
+
+
+### G-CLASS-IS-A-FRONT-END-BLIND-SPOT — `export class` is silently deleted from the artifact, plain `class` is never scoped, and no forbidden-vocabulary walker enters a class body
+
+**Filed as ONE entry covering five symptoms, deliberately.** They are one blind spot, not five bugs, and
+filing them separately is the instance-granularity habit this project measured at S428 as its own
+failure mode ([[g-...]] see the S428 regeneration measurement: five named classes, 289 instances,
+spans up to 209 session-ordinals, each drained ≤20% at a time).
+
+**⚑ SYMPTOM 1 — `export class` is SILENTLY DROPPED. PA-VERIFIED BY EXECUTION on `db800e6e`:**
+
+```scrml
+<program>
+${
+    export class RIError { constructor(msg) { this.msg = msg } }
+    export function boom() { return new RIError("x") }
+}
+</program>
+```
+
+→ **`Compiled 1 file`. exit 0. ZERO diagnostics.** Emitted JS: **0** `class RIError` definitions,
+**1** `new RIError(...)` reference. `node --check` **PASSES** on the artifact — so it loads and throws
+`ReferenceError` on first call. A clean compile producing a guaranteed runtime failure.
+
+**SYMPTOM 2 — a NON-exported `class` IS emitted but is never registered in the scope table**, so
+`new Plain()` fires `E-SCOPE-001` (*"Undeclared identifier"*). PA-verified in the same run. So the two
+forms fail in opposite directions: one silently, one loudly, neither correctly.
+
+**SYMPTOM 3 — no forbidden-vocabulary walker enters a class body.** `null`, `undefined`, `try` and
+`throw` all pass unchecked inside `class X { … }`; only `E-EQ-004` reaches in. Measured consequence:
+`compiler/self-host/meta-checker.scrml` **compiled clean at baseline while containing `try`, `throw`
+and `null`.** `E-TRY-NOT-IN-SCRML` fires on only 6 of the 14 real `try` blocks in that tree.
+
+**SYMPTOM 4 — `!{}` inside a class-method body cannot be lowered** → `E-CODEGEN-INVALID-LOGIC` with the
+raw scrml `!{ | ::Thrown… }` pasted into the JS. *(relayed from the S428 migration dispatch; not
+independently PA-reproduced.)*
+
+**SYMPTOM 5 — the class re-emit path silently NARROWS absence semantics.** Source `x != null` (matches
+`null` AND `undefined`) is re-emitted as `x !== null` (matches only `null`). Exit 0, no diagnostic.
+*(relayed; not independently PA-reproduced.)*
+
+⚑ **WHY THIS MATTERS BEYOND `class`.** The self-host tree declares **14 classes, 12 of them
+`export class`**, and the emitted JS for the whole tree contains **2** class definitions. This is the
+single largest blocker to scrml compiling itself, and it was invisible at exit 0 behind 24,083 passing
+tests and a 906-case conformance corpus — because no real program exercised it.
+
+— NEW S428-bryan (symptoms 1-3 PA-VERIFIED BY EXECUTION with minimal repros + `node --check`; 4-5 relayed from the S428 self-host migration dispatch and marked as such)
+<!-- @gap id=g-class-is-a-front-end-blind-spot sev=HIGH status=open locus=searched:compiler/src/ast-builder.js,compiler/src/symbol-table.ts,compiler/src/codegen/emit-logic.ts,compiler/src/type-system.ts prov=empirical:PA-reproduced-export-class-emits-zero-definitions-and-one-new-reference-at-exit-0-with-node-check-passing -->
+
+### G-RETURN-OF-A-FAILABLE-CALL-WITH-A-GUARD-SILENTLY-DROPS-THE-RETURN — `return f() !{ … }` returns `undefined` on success
+
+**PA-VERIFIED BY EXECUTION on `db800e6e`.** `return safeCall(() => 42) !{ | ::Thrown(message, name) :> { return 0 } }`
+compiles at **exit 0 with zero diagnostics** and emits:
+
+```js
+function _scrml_direct_1() {
+  let _scrml__scrml_result_2 = safeCall(() => 42);
+  if (_scrml__scrml_result_2 && _scrml__scrml_result_2.__scrml_error) { … return 0; … }
+}                                    // ← success path falls off the end → undefined
+```
+
+The author's `return` is **gone**. The error path returns correctly; the success path returns
+`undefined`. The two-statement form `let r = f() !{ … }; return r` is correct, so the defect is
+specific to the guard in `return` position.
+
+⚑ **This is one of the four canonical error-handling shapes**, it is the most natural spelling, and it
+fails silently. It blocks the 1:1 migration of `try { return parse(x) } catch { return not }` — whose
+canonical scrml form is exactly the broken one.
+
+— NEW S428-bryan (PA-VERIFIED BY EXECUTION with the two-statement control in the same run)
+<!-- @gap id=g-return-of-a-failable-call-with-a-guard-silently-drops-the-return sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-expr.ts prov=empirical:PA-reproduced-emitted-function-has-no-success-path-return-at-exit-0 -->
+
+### G-IS-SOME-IN-A-FUNCTION-EXPRESSION-BODY-EMITS-AN-UNDEFINED-HELPER — `__scrml_is_some__` reaches the artifact and is defined nowhere
+
+*(Relayed from the S428 migration dispatch; NOT independently PA-reproduced — re-verify before dispatching.)*
+
+Two lowering defects on the same §42 surface:
+
+- `is some` / `is not` with a **bare operand inside a `function(){}` expression body or a class-method
+  body** emits the internal placeholder `__scrml_is_some__(…)` / `__scrml_is_not__(…)` into the output.
+  The helper is **defined nowhere in the runtime bundle** → guaranteed `ReferenceError`, no diagnostic.
+  Arrow callbacks and nested `function` *declarations* lower correctly. Reported repro:
+  `arr.some(function(n) { return f(n) is some })` vs the arrow form.
+- **Parenthesised operand in the same position:** `(expr) is not` → `((expr) === null)`. The
+  `undefined` half is **dropped**, violating §42.8 (*"`is not` SHALL compile to
+  `(x === null || x === undefined)`"*). Silent wrong answer, not a crash.
+
+— NEW S428-bryan (RELAYED from the S428 self-host migration dispatch, 5 post-migration instances reported; PA has NOT re-run these — the two sibling S428 findings that WERE re-run both reproduced exactly)
+<!-- @gap id=g-is-some-in-a-function-expression-body-emits-an-undefined-helper sev=HIGH status=open locus=searched:compiler/src/codegen/emit-expr.ts,compiler/src/codegen/emit-logic.ts prov=spec:§42.8-"is-not-SHALL-compile-to-(x-===-null-||-x-===-undefined)" -->
+
+### G-SELF-HOST-PARITY-HARNESS-EVALUATES-SCRML-SOURCE-AS-JAVASCRIPT — the one test guarding the self-host tree structurally required it to stay JS
+
+**PA-VERIFIED BY READING THE SOURCE.** `compiler/tests/self-host/ast.test.js` **never invokes the
+compiler**:
+
+- `:101` — `.replace(/\bfn\s+([A-Za-z_$])/g, "function $1")` — text-substitutes scrml `fn` into JS `function`
+- `:116-118` — wraps the result in a `Blob` and `await import(blobUrl)` — **evaluates it as JavaScript**
+- `:237` — `describe.skip`
+- and `compiler/tests/self-host` is **not in the pre-commit gate**
+
+⚑ **Its premise is that the self-host source IS valid JavaScript.** Any drift toward real scrml breaks
+it — so the harness actively selected against the source becoming scrml. Composed with the class-body
+walker gap above, this is the complete mechanism behind **12,277 LOC of JavaScript wearing a `${}`**:
+nothing checked it, and the one thing that looked like it was checking it required the opposite.
+
+**Not a "fix the test" item.** A parity harness for a self-hosting compiler has to compile the source
+with the compiler and compare artifacts; this one cannot be repaired into that, it has to be replaced.
+
+— NEW S428-bryan (PA-VERIFIED by reading the harness; line numbers current at `db800e6e`)
+<!-- @gap id=g-self-host-parity-harness-evaluates-scrml-source-as-javascript sev=MED status=open locus=compiler/tests/self-host/ast.test.js prov=empirical:PA-read-the-harness-it-text-substitutes-fn-to-function-and-imports-a-Blob-as-javascript-and-is-describe-skipped-and-not-in-the-gate -->
+
+### G-TWO-LANGUAGE-GAPS-A-REAL-12K-PROGRAM-HIT-THAT-THE-CORPUS-NEVER-DID — no scope-exit primitive, and `import()` is not a body-split boundary — RULING-GATED
+
+Both surfaced by migrating a real 12,277-LOC program, neither present anywhere in the conformance
+corpus. **Neither is a bug against a governing sentence — both are places the language has no form**,
+so both are bryan's, not PA-rulable (S385 class, condition 1 fails).
+
+**GAP 1 — no `finally`, no `defer`, no scope-exit primitive.** `compiler/self-host/pa.scrml:282` is
+`try { … } finally { cache.closeAll() }`. `safeCall` + `!{}` expresses "handle the error"; it cannot
+express **"run this cleanup on BOTH paths."** Deleting the `finally` leaks a SQLite handle on any
+throw. There is no canonical scrml form, so the site is unmigrated and the module stays
+non-conformant.
+
+**GAP 2 — a bare `import()` is not one of the Promise boundaries body-split covers.** §19.9.8
+enumerates the boundaries CPS owns — `^{}`, `_{}`, server-fn return, `use foreign:` — and a dynamic
+host-module import is none of them. **Measured:** dropping the `await` from
+`const mod = import("./x.js")` emits a bare `import(...)` with **no auto-await and no diagnostic**;
+`mod` is a Promise and `mod.thing` is `undefined`. So the §19.9.8 "no async/await" rule has a hole at
+exactly the shape a self-hosting compiler needs (loading a host module with a filesystem fallback).
+
+⚑ **Why these two matter more than their instance count.** The S322 pause was ruled on the argument
+that a conformance campaign proves the implementation matches the spec and says **nothing about
+whether the spec is the language we want.** These are two instances of exactly that, produced in one
+afternoon by pointing a real program at the compiler — the first such program this project has had.
+
+— NEW S428-bryan (both surfaced by the S428 self-host migration; GAP 2's no-diagnostic behaviour reported as MEASURED by the dispatch, PA has not re-run it)
+<!-- @gap id=g-two-language-gaps-a-real-12k-program-hit-that-the-corpus-never-did sev=MED status=open locus=searched:compiler/SPEC.md§19.9.8,compiler/src/codegen/emit-logic.ts prov=adopter:self-host-dogfood-RULING-GATED-no-governing-sentence-exists-for-either-shape -->
+
+### G-THE-TWO-FRONT-ENDS-DISAGREE-ABOUT-THE-GUARD-FORM — one `try`/`catch` → `!{}` migration produced NINE field-level parity divergences
+
+**PA-VERIFIED BY EXECUTION, and the isolation was natural rather than constructed.** The S428
+self-host migration touched 6 modules with two mechanical rules (`null`→`not`, `===`→`==`) and 3
+modules with a third (`try`/`catch` → `safeCall(...) !{ }`). The `within-node` parity gate — which
+measures FIELD-level divergence between the **native parser** and the **Acorn pipeline** — split them
+perfectly:
+
+| module | A1/A2 sites | B1 (`!{}`) sites | within-node residual |
+|---|---|---|---|
+| `ri.scrml` | 52 | 0 | **clean** |
+| `ts.scrml` | 157 | 0 | **clean** |
+| `meta-checker.scrml` | **0** | **1** | **9** |
+| `pa.scrml` | 40 | 2 | **12** |
+
+**A file whose ONLY change was a single `try`/`catch` → `!{}` produced nine divergences.** Reverting
+B1 and keeping A1+A2 takes the suite to **1016 pass / 0 fail** (PA-run locally). `pa.scrml`'s residual
+breakdown: FIELD-SHAPE 3 · MISSING-FIELD 4 · COUNT-LENGTH 3 · SPAN-COORD 2.
+
+⚑ **This is the most serious of the four `!{}` defects filed at S428**, because the other three are
+LOWERING bugs and this one is a **PARSE-level disagreement**: the two front-ends build different ASTs
+for the canonical error-handling shape. Under the M5/M6 ladder the native parser is meant to replace
+the Acorn pipeline behind `--parser=scrml-native`; a form the two disagree about cannot be swapped
+safely.
+
+**The allowlist was deliberately NOT re-baselined.** The gate's own header states that where an
+allowlist entry reflects an actual divergence *"the allowlist entries should be reduced/removed"*.
+Growing it to make the migration green would have buried a parser disagreement inside an unrelated
+commit — the §8 absorbed-escape-hatch shape. The 5 B1 sites are held out of #1034 instead.
+
+**Companion defects on the same `!{}` surface, all S428:**
+[[g-return-of-a-failable-call-with-a-guard-silently-drops-the-return]] (HIGH, PA-verified) ·
+[[g-class-is-a-front-end-blind-spot]] symptom 4 (`!{}` in a class method → `E-CODEGEN-INVALID-LOGIC`) ·
+[[g-is-some-in-a-function-expression-body-emits-an-undefined-helper]].
+**Four defects on one surface in one afternoon** — the surface is the language's ONLY error-handling
+mechanism, and it had no real program exercising it until today.
+
+— NEW S428-bryan (PA-VERIFIED BY EXECUTION — cloud gate caught it, PA isolated it by reverting B1 alone and re-running the suite locally to 1016/0)
+<!-- @gap id=g-the-two-front-ends-disagree-about-the-guard-form sev=HIGH status=open locus=searched:compiler/native-parser,compiler/src/ast-builder.js,compiler/src/codegen/compat/parser-workarounds.js prov=empirical:meta-checker-with-zero-A1-sites-and-one-B1-site-produced-nine-field-level-divergences-and-reverting-B1-takes-the-suite-to-1016-pass-0-fail -->
