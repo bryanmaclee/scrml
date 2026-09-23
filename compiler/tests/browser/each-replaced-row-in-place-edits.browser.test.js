@@ -337,3 +337,45 @@ describe("computed writes of non-plain / frozen values still render", () => {
     } finally { app.restoreConsole(); }
   });
 });
+
+// ---------------------------------------------------------------------------
+// 6. A cell value handed to an inline worker. The cell stores a Proxy, and
+//    structured clone (postMessage) throws DataCloneError on one. The emitted
+//    send hands the worker a plain copy. A fake Worker runs the real
+//    structuredClone.
+// ---------------------------------------------------------------------------
+
+describe("a cell value sent to an inline worker survives structured clone", () => {
+  test("a literal cell and a computed cell both post without DataCloneError", () => {
+    globalThis.__posted = [];
+    const FakeWorker = class {
+      constructor(url) { this.url = url; }
+      postMessage(d) { globalThis.__posted.push(structuredClone(d)); }
+    };
+    globalThis.Worker = FakeWorker;
+    window.Worker = FakeWorker;
+    const app = mount(`<program>
+  <nums> = [1, 2, 3]
+  <rows> = [{ id: 1, name: "one" }]
+  <program name="echo">
+    \${ when message(d) { send(d) } }
+  </>
+  \${ function a() { <#echo>.send(@nums) } }
+  \${ function b() {
+    @rows = @rows.map(r => ({ id: r.id, name: r.name + "!" }))
+    <#echo>.send(@rows)
+  } }
+  <button id="a" onclick=a()>.</button>
+  <button id="b" onclick=b()>.</button>
+</program>
+`);
+    try {
+      expect(app.errs).toEqual([]);
+      expect(app.initError).toBeNull();
+      app.press("a");
+      app.press("b");
+      expect(app.consoleErrors).toEqual([]);
+      expect(globalThis.__posted).toEqual([[1, 2, 3], [{ id: 1, name: "one!" }]]);
+    } finally { app.restoreConsole(); delete globalThis.Worker; }
+  });
+});

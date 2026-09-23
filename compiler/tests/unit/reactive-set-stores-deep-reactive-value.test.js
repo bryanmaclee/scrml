@@ -33,7 +33,8 @@ function createRuntime() {
 
     ${SCRML_RUNTIME}
 
-    return { _scrml_deep_reactive, _scrml_effect, _scrml_reactive_set, _scrml_reactive_get };
+    return { _scrml_deep_reactive, _scrml_effect, _scrml_reactive_set, _scrml_reactive_get,
+      _scrml_to_plain: typeof _scrml_to_plain === "function" ? _scrml_to_plain : null };
   `);
   return wrapper();
 }
@@ -128,5 +129,66 @@ describe("_scrml_reactive_set stores the deep-reactive value of a computed write
     expect(got.to.variant).toBe("B");
     // and the direct form: _scrml_deep_reactive declines a frozen value
     expect(rt._scrml_deep_reactive(entry)).toBe(entry);
+  });
+});
+
+// A cell value now reaches the structured-clone boundary (worker postMessage)
+// as a Proxy far more often, and structured clone throws on a Proxy anywhere in
+// the graph. _scrml_to_plain is the copy the worker send hands over.
+describe("_scrml_to_plain — the structured-clone boundary", () => {
+  test("structured clone of a stored cell value throws; of its _scrml_to_plain copy it round-trips", () => {
+    const rt = createRuntime();
+    expect(typeof rt._scrml_to_plain).toBe("function");
+    // a stored value that also carries a Proxy INSIDE its raw backing array
+    // (what a .map over a proxied array produces)
+    rt._scrml_reactive_set("rows", [{ id: 1, when: new Date(0), tags: ["a"] }]);
+    const carried = rt._scrml_reactive_get("rows").map((r) => r);
+    rt._scrml_reactive_set("rows", [...carried, { id: 2, when: new Date(1), tags: [] }]);
+    const cell = rt._scrml_reactive_get("rows");
+    expect(() => structuredClone(cell)).toThrow();
+    const plain = rt._scrml_to_plain(cell);
+    const back = structuredClone(plain);
+    expect(back).toEqual([{ id: 1, when: new Date(0), tags: ["a"] }, { id: 2, when: new Date(1), tags: [] }]);
+    expect(back[0].when instanceof Date).toBe(true);
+  });
+
+  test("primitives and non-plain values pass through; a shared sub-object is copied once", () => {
+    const rt = createRuntime();
+    for (const v of [null, 3, "s", true]) expect(rt._scrml_to_plain(v)).toBe(v);
+    const m = new Map([["k", 1]]);
+    expect(rt._scrml_to_plain(m)).toBe(m);
+    const shared = { x: 1 };
+    const out = rt._scrml_to_plain(rt._scrml_deep_reactive({ a: shared, b: shared }));
+    expect(out.a).toBe(out.b);
+    expect(out.a).not.toBe(shared);
+  });
+});
+
+describe("worker send hands the worker a plain copy (emitted shape)", () => {
+  test("the emitted <#name>.send unwraps data before postMessage", async () => {
+    const { splitBlocks } = await import("../../src/block-splitter.js");
+    const { buildAST } = await import("../../src/ast-builder.js");
+    const { runCEFile } = await import("../../src/component-expander.js");
+    const { runCG } = await import("../../src/codegen/index.ts");
+    const src = `<program>
+<program name="doubler">
+    \${ when message(n) { send(n) } }
+</>
+<div>Main</>
+</program>`;
+    const ce = runCEFile(buildAST(splitBlocks("test.scrml", src)));
+    const cg = runCG({
+      files: [ce],
+      routeMap: { routes: [], functions: new Map(), authMiddleware: new Map() },
+      depGraph: { nodes: new Map(), edges: [] },
+      protectAnalysis: null,
+      embedRuntime: true,
+    });
+    const js = [...cg.outputs.values()][0].clientJs;
+    const send = js.slice(js.indexOf("_scrml_worker_doubler.send = function(data) {"));
+    const unwrap = send.indexOf(`if (typeof _scrml_to_plain === "function") data = _scrml_to_plain(data);`);
+    const post = send.indexOf("postMessage(data)");
+    expect(unwrap).toBeGreaterThan(0);
+    expect(post).toBeGreaterThan(unwrap);
   });
 });

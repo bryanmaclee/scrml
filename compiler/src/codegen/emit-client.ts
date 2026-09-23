@@ -2401,6 +2401,12 @@ export function generateClientJs(ctx: CompileContext): string {
     for (const name of workerNames) {
       lines.push(`const _scrml_worker_${name} = new Worker("${name}.worker.js");`);
       lines.push(`_scrml_worker_${name}.send = function(data) {`);
+      // A cell value is a deep-reactive Proxy (every plain array / object a
+      // cell stores is — S429 _scrml_cell_value), and postMessage's structured
+      // clone throws DataCloneError on a Proxy anywhere in the graph. Hand the
+      // worker a plain copy. typeof-guarded: without the deep_reactive chunk no
+      // Proxy can exist and data passes through untouched.
+      lines.push(`  if (typeof _scrml_to_plain === "function") data = _scrml_to_plain(data);`);
       lines.push(`  return new Promise(function(resolve) {`);
       lines.push(`    _scrml_worker_${name}.onmessage = function(e) { resolve(e.data); };`);
       lines.push(`    _scrml_worker_${name}.postMessage(data);`);

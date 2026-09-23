@@ -4379,6 +4379,30 @@ function _scrml_deep_reactive(value) {
   return proxy;
 }
 
+/**
+ * A plain (Proxy-free) copy of a value, for the structured-clone boundary
+ * (worker postMessage). Structured clone throws DataCloneError on a Proxy
+ * anywhere in the graph, and a cell stores the deep-reactive Proxy of every
+ * plain array / object (_scrml_cell_value). Plain arrays and plain objects are
+ * copied through their backing objects; every other value (primitives, Date,
+ * Map, Set, typed arrays, ...) is returned as-is — those are cloneable and a
+ * cell never wraps them. A shared sub-object is copied once.
+ */
+function _scrml_to_plain(value, _seen) {
+  if (value === null || typeof value !== "object") return value;
+  const raw = _scrml_proxy_targets.get(value);
+  const src = raw !== undefined ? raw : value;
+  const isArr = Array.isArray(src);
+  const proto = isArr ? null : Object.getPrototypeOf(src);
+  if (!isArr && proto !== Object.prototype && proto !== null) return src;
+  if (!_seen) _seen = new Map();
+  if (_seen.has(src)) return _seen.get(src);
+  const out = isArr ? new Array(src.length) : (proto === null ? Object.create(null) : {});
+  _seen.set(src, out);
+  for (const k of Object.keys(src)) out[k] = _scrml_to_plain(src[k], _seen);
+  return out;
+}
+
 // §20.8.2 Client-Router region reactivity (navigate-wave1b, findings #1/#2).
 //
 // Disposers for reactive-display effects bound to elements INSIDE the persistent
