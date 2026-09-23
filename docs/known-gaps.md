@@ -30,8 +30,8 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 115 |
-| MED | 271 |
+| HIGH | 114 |
+| MED | 272 |
 | LOW | 103 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
@@ -14460,8 +14460,8 @@ compiles at exit 0 and throws `ReferenceError: g is not defined` at init; the li
 on `b016352d`. Arm wire functions live at module scope and get only payload bindings. After #1022 a lift in such
 an arm fails the same LOUD way (not silently).
 
-### g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime — the conformance case passes while its emitted program dies at init: the runtime ships without the reconciliation chunk — `NEW S427-peter; HIGH; open`
-<!-- @gap id=g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES — no unscoped `_scrml_reconcile_list(` gate) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-_scrml_reconcile_list-is-not-defined-mounting-conformance-cases-each-ternary-markup-giti033 -->
+### g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime — the conformance case passes while its emitted program dies at init: the runtime ships without the reconciliation chunk — `NEW S427-peter; HIGH; RESOLVED S429-peter`
+<!-- @gap id=g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime sev=HIGH status=resolved locus=compiler/src/codegen/emit-client.ts(the post-emit `_scrml_reconcile_list(` gate — S427 scoped it to nested-lift files; now unconditional) prov=empirical:PA-reproduced-on-b016352d-ReferenceError-_scrml_reconcile_list-is-not-defined-mounting-conformance-cases-each-ternary-markup-giti033 -->
 
 Mounting `conformance/cases/each/ternary-markup-giti033/case.scrml`'s emit: `ReferenceError: _scrml_reconcile_list
 is not defined` at init; `<main>` renders empty. **Two defects:** the missing chunk gate (a one-line unscoped
@@ -14478,6 +14478,28 @@ carry a runtime half, and every one is structurally blind to chunk-gating defect
 missing from a runtime that ships all of them). The §8 unproven-gate shape at tier scale. Switching the adapter
 to the emitted runtime may turn cases red and is a change to the conformance instrument (bryan's lane):
 surface it, do not switch unilaterally. The one-line `_scrml_reconcile_list(` gate for this case is separate.
+
+⚑ **S429-peter — RESOLVED (the compiler half).** The post-emit `_scrml_reconcile_list(` gate in
+`compiler/src/codegen/emit-client.ts` is now unconditional: the emitted client text is ground truth for
+every producer, and an `<each>` inside a ternary-markup ExprNode is one the pre-emit walk never descends.
+Mounted: both rows render, `initError: null`. Pinned by `each-in-ternary-markup-giti033.test.js` §8
+(reads the EMITTED runtime — every earlier case asserted only the client shape; bite-tested, both shapes
+fail on the pre-fix emitter). ⚑ **The class, measured:** a sweep of all 1,797 corpus `.scrml` files
+(samples/compilation-tests + conformance/cases + examples) for any `_scrml_*` CALLED in the client and
+DEFINED in neither the emitted runtime nor the client found this file as the ONLY unguarded instance
+(`_scrml_reconcile_list` + `_scrml_each_clear` + `_scrml_resolve_item`, one chunk); every other hit is a
+`typeof … === "function"` guard or a comment. Zero at head. The conformance-adapter half is split out to
+[[g-conformance-runtime-tier-mounts-the-full-runtime-blind-to-chunk-gating]].
+
+### g-conformance-runtime-tier-mounts-the-full-runtime-blind-to-chunk-gating — every runtime-half conformance case runs against the full runtime template, so no case can see a tree-shaken chunk — `NEW S429-peter (split from giti033); MED; open; bryan's lane (the conformance instrument)`
+<!-- @gap id=g-conformance-runtime-tier-mounts-the-full-runtime-blind-to-chunk-gating sev=MED status=open locus=conformance/adapters/impl1-ts.ts(imports SCRML_RUNTIME from runtime-template.js and concatenates it — never the tree-shaken runtime the compiler emits) prov=empirical:S427-peter-measured-215-of-898-cases-carry-a-runtime-half-giti033-passed-against-a-program-that-could-not-boot -->
+
+Split from `g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime` when its compiler half was fixed
+(S429). ~215 of 898 cases carry a runtime half and all of them mount the FULL runtime, so a missing chunk
+cannot be missing — giti033 passed its `domAnchored` expectations while its real emit threw at init. Switching
+the adapter to the emitted runtime may turn cases red and changes the conformance instrument: **bryan's lane —
+surfaced, not switched.** Until then the S429 undefined-helper sweep (called-but-undefined `_scrml_*` over the
+corpus) is the only instrument for this class, and it is not in any CI job.
 
 ### g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings — four pre-existing each/arm defects reported by the S427 dev agent — `NEW S427-peter; MED; open`
 <!-- @gap id=g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:S427-dev-agent-reproduced-each-on-base-with-the-display-twin-NOT-PA-verified -->

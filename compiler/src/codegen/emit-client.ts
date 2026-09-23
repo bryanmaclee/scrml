@@ -2926,23 +2926,23 @@ export function generateClientJs(ctx: CompileContext): string {
       }
     }
   }
-  // g-lift-inside-each-row-or-match-arm-silently-dropped — a keyed
-  // `for (… of @cell) { lift … }` inside an arm lowers to a
-  // `_scrml_reconcile_list(` call (the `reconciliation` chunk), and the pre-emit
-  // for-stmt gate (`detectFromNode`) never walks a deferred arm body — the same
-  // blindness as the `lift` entry above. SCOPED to files that emit the nested-lift
-  // drivers: an unconditional `_scrml_reconcile_list(` gate would ALSO change the
-  // runtime of a program outside this fix's locus (see the S427 report —
-  // conformance/cases/each/ternary-markup-giti033, whose base build calls the
-  // function with the chunk tree-shaken). Widening it is a separate change.
+  // g-lift-inside-each-row-or-match-arm-silently-dropped (S427) +
+  // g-conformance-case-ternary-markup-giti033-emits-a-dead-runtime (S429) — a
+  // `_scrml_reconcile_list(` call can be emitted from a shape the pre-emit
+  // for-stmt / each walk (`detectFromNode`) never visits: a keyed
+  // `for (… of @cell) { lift … }` in a deferred arm body, AND an `<each>` inside
+  // a ternary markup expression (`${ @show ? <ul><each …/></ul> : "" }`), whose
+  // markup lives in an ExprNode the walk does not descend. Either way the client
+  // CALLS the function while the `reconciliation` chunk that DEFINES it is
+  // tree-shaken → `ReferenceError` at init, page empty, exit 0. S427 scoped this
+  // gate to nested-lift files to keep #1022's blast radius to its locus; the
+  // emitted text is ground truth for every producer, so it is now unconditional.
   if (!ctx.usedRuntimeChunks.has("reconciliation")) {
-    let _nestedLift = false;
-    let _reconcile = false;
     for (const _ln of lines) {
-      if (typeof _ln !== "string") continue;
-      if (!_nestedLift && _ln.includes("_scrml_lift_scoped_run(")) _nestedLift = true;
-      if (!_reconcile && _ln.includes("_scrml_reconcile_list(")) _reconcile = true;
-      if (_nestedLift && _reconcile) { ctx.usedRuntimeChunks.add("reconciliation"); break; }
+      if (typeof _ln === "string" && _ln.includes("_scrml_reconcile_list(")) {
+        ctx.usedRuntimeChunks.add("reconciliation");
+        break;
+      }
     }
   }
 
