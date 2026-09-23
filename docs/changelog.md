@@ -7561,6 +7561,28 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S429 (2026-09-23, peter · P-Tech1) — three codegen HIGHs landed, and all seven adversarial passes found a real defect in the round they reviewed
+
+**The arc.** The S427 held lift-body fix resumed, plus two repro-ready codegen HIGHs, run as three parallel
+dev arcs. The session's shape was the review loop: **seven adversarial passes on frozen refs, and all seven found
+a real defect** (five of them HIGH) in work that was CI-green and dev-self-reported clean.
+
+- **#1029** — giti033's page was dead at init. An `<each>` inside a ternary-markup expression called
+  `_scrml_reconcile_list(` with its chunk tree-shaken. The post-emit gate is now unconditional. A sweep of all
+  1,797 corpus files for any called-but-undefined `_scrml_*` helper found this as the only unguarded instance.
+- **#1032** — lift-body lowering. A `let` rebind is an assignment (not `const x = …`); an impure render loop
+  lowers plain (scope-aware); a write to a loop's own binder takes effect only for `for (let …)`, and a
+  `const`/keywordless binder write fails the compile (keywordless mutability is pending bryan's ruling). The
+  loop keyword reaches native-re-parsed bodies through the parser's own `declKind` — a round-4 source-text scan
+  was proven wrong in both directions and deleted. Also fixes bryan's top-level `let`-reassignment HIGH for the
+  `let` form.
+- **#1033** — a `<match>` inside an `<each>` row can read the row (the whole list died at boot), plus three
+  siblings: `@.` in an arm, an `<each>` in such an arm, and delegable handlers reading arm names. Each arm now
+  follows the click contract of the markup around it; the codebase has two (page innermost-only, row
+  bubbling), and the question of converging them went to bryan.
+- **Ledger:** six gaps filed from the review passes, all reproduced on main, including two HIGHs: a replaced
+  row stops receiving edits, and an `<engine>` inside an `<each>` row renders nothing.
+
 ### S425 (2026-09-21/23, bryan · ASUS-Vivobook) — four adopter reports triaged by execution, and the two best findings were corrections to my own work
 
 **The arc.** A session that started as "land #995" and became a triage session. Three inbound adopter

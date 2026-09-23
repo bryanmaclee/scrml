@@ -30,9 +30,9 @@
 | Severity | Open |
 |---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 114 |
-| MED | 277 |
-| LOW | 103 |
+| HIGH | 116 |
+| MED | 279 |
+| LOW | 105 |
 | Nominal (spec-ahead-of-impl) | 7 |
 <!-- @generated:gap-counts END -->
 
@@ -14535,6 +14535,80 @@ surfaced, not switched.** Per-shape tests that mount the emitted runtime (e.g. `
 the S429 undefined-helper sweep (called-but-undefined `_scrml_*` over the whole corpus) is the only
 CORPUS-WIDE instrument for this class, and it is not in any CI job.
 
+### g-each-replaced-row-stops-receiving-in-place-edits — after a same-key replace of one row's object, in-place edits to that row update state but never reach the DOM — `NEW S429-peter; HIGH; open`
+<!-- @gap id=g-each-replaced-row-stops-receiving-in-place-edits sev=HIGH status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/runtime-template.js(_scrml_reconcile_list per-item effect / _scrml_resolve_item)—not-traced prov=empirical:S429-review-agent-found-PA-reproduced-on-45749bb1-happy-dom-DOM-Rone!-two!!!-vs-state-Rone!!!-two!!! -->
+
+```
+<groups> = [{ id: 1, name: "one" }, { id: 2, name: "two" }]
+function rs() { @groups = @groups.map(g => g.id == 1 ? { id: 1, name: "R" + g.name } : g) }
+function ra() { for (const g of @groups) { g.name = g.name + "!" } }
+<ul><each in=@groups key=@.id as g><li>${g.name}</li></each></ul>
+```
+Click `ra` → `one! two!` (correct). Click `rs` → `Rone! two!` (correct). Click `ra` twice more → DOM `Rone! two!!!`,
+state `Rone!!! two!!!`. The replaced row freezes at the replace; unchanged rows keep updating. Plain `<each>`, no
+match/lift involved; also visible through the match-in-row path. Silent (exit 0, no console error). Repro:
+the entry above is the full repro. Suspect: the per-item effect keeps the
+OLD object's deep-reactive subscription after the key-stable replace.
+
+### g-engine-inside-each-row-renders-nothing — an `<engine>` in an `<each>` row renders no state body, no error — `NEW S429-peter; HIGH; open`
+<!-- @gap id=g-engine-inside-each-row-renders-nothing sev=HIGH status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-match.ts—not-traced prov=empirical:S429-match-in-each-dev-agent-found-review-agent-and-PA-reproduced-on-45749bb1 -->
+
+```
+type Phase:enum = { Idle, Active }
+<each in=@groups key=@.id as g>
+  <li>row:${g.name}
+    <engine for=Phase initial=.Active>
+      <Idle rule=.Active><p class="idle">idle</p></>
+      <Active rule=.Idle><p class="act">act</p></>
+    </>
+  </li>
+</each>
+```
+Renders `<li>row:one</li><li>row:two</li>` — the engine body is absent, `initError: null`, no console error. Same
+on the S429 match-in-each fix head. Silent drop of authored markup at exit 0.
+
+⚑ **S429-peter — LOCUS FOUND, RULING-GATED.** `compiler/src/codegen/emit-each.ts:1999` `renderTemplateChildToJs` falls through for `kind="engine-decl"` and emits only a comment. The fix picks language semantics: an engine is a singleton (§51.0.A), the declaration is the mount (§51.0.D), and §51.0.K refuses an engine in a component body for the multiplicity reason that applies equally to an `<each>` row — but no sentence covers iteration. Refuse (compile error, E-COMPONENT-ENGINE-SCOPE sibling) vs render the one singleton per row: **bryan's ruling**, asked in `handOffs/incoming/2026-09-23-from-S429-peter-to-bryan-two-rulings.md` (Q3). PA lean: refuse.
+
+### g-arm-scoped-each-per-item-effects-leak-on-arm-switch — per-item effects of an `<each>` inside a match arm are never disposed on arm switch — `NEW S429-peter; LOW; open`
+<!-- @gap id=g-arm-scoped-each-per-item-effects-leak-on-arm-switch sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_mount_track records effects only while a mount scope is active; the arm dispatch path never opens one) prov=empirical:S429-review-agent-measured-3-23-123-effect-runs-at-0-10-50-A-B-A-flip-pairs-identical-base-and-head -->
+
++2 dead per-item effects per arm re-entry, still writing to detached nodes. Pre-existing for a top-level match;
+the S429 match-in-each fix inherits it on the new row-arm path.
+
+### g-e-assign-004-position-and-binder-coverage — three E-ASSIGN-004 coverage holes found by the S429 lift-body work — `NEW S429-peter; MED; open; bryan's lane (#996 owner)`
+<!-- @gap id=g-e-assign-004-position-and-binder-coverage sev=MED status=open locus=compiler/src/type-system.ts(E-ASSIGN-004 statement-position check) prov=empirical:S429-lift-body-round-3-dev-agent-on-merged-db800e6e-NOT-PA-verified -->
+
+(1) A write to an outer `const` inside `${…}` logic within lifted markup (`lift <li>${ total = 3 }…</li>` with
+`const total` outside) is not reported — main renders `3` silently; after the S429 lift-body fix it is loud at boot
+(TypeError), still not compile-time. (2) A write to a `const` loop binder (`for (const it of …) { it = … }`) is
+not reported — the type system does not see the loop-head keyword (the S429 fix adds `constBinder` to the for-stmt
+AST node; the type system can now consume it). Loud at boot after the S429 fix. (3) FALSE POSITIVE: a destructured
+`let` loop binder shadowing an outer `const` (`const name = …; for (let { name } of …) { name = … }`) reports
+E-ASSIGN-004 against the outer `const`. Re-reproduce before acting.
+(4) S429 round-3 review, same entry: expression-form `const g = (t = 3)` on a `const t` is missed even in the SAME
+block (compile clean, runtime throw) — §50.8.5 says expression position is covered. (`t++` is ALREADY FILED by
+S428-bryan as `g-e-assign-004-never-fires-on-increment-decrement-of-a-const-binding`; event-handler position as
+`g-e-assign-004-never-fires-in-event-handler-attribute-position` — not duplicated here.) (5) Also misses a `const`
+loop binder written in a FUNCTION body (`for (const x of xs) { x = … }` → TDZ at runtime on main). Repros: S429
+scratch r3/ y2, x2, x3, t1.
+
+⚑ RULING NEEDED (bryan) — is a keywordless loop binder (`for (it of …)`, the §17.4a canonical head) mutable? §50.8.5's
+letter ("created WITHOUT `let`" → `const`) says no. The S429 lift-body fix keeps it compile-loud pending the ruling.
+
+### g-each-over-page-cell-in-non-row-arm-stale-on-in-place-mutation — an `<each>` over a page cell inside a (non-row) match arm does not re-render on push/splice/reverse — `NEW S429-peter; MED; open`
+<!-- @gap id=g-each-over-page-cell-in-non-row-arm-stale-on-in-place-mutation sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-variant-guard.ts(arm-hosted each uses the cell lookup path; only reassign or arm re-entry re-renders)—not-traced prov=empirical:S429-review-agent-rv5-v1m-v8m-identical-on-87c2df3e-and-the-fix-head -->
+
+After `@list.push(x)` the arm's list still shows the old rows (`T-m,T-n`); a full `@list = …` reassign or leaving
+and re-entering the arm refreshes it. Silent. The S429 match-in-each fix's arm-scoped each path (taken when the
+body reads the arm payload) DOES react to all three — the natural fix is to route every arm-hosted each through it.
+
+### g-lift-each-inside-if-inside-arm-alias-undefined — `lift <each>` inside `${ if … }` inside a match arm throws ReferenceError on the each alias — `NEW S429-peter; LOW; open`
+<!-- @gap id=g-lift-each-inside-if-inside-arm-alias-undefined sev=LOW status=open locus=searched:compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-match.ts—not-traced prov=empirical:S429-review-agent-rv5-v3-v3m-identical-main-and-head -->
+
+Loud (`ReferenceError: w is not defined`), identical on main and the S429 match-in-each head. Also recorded by
+the same pass, loud and pre-existing: a row-each inside an arm with an inner match reading the OUTER payload
+throws ReferenceError (rv5/v9).
+
 ### g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings — four pre-existing each/arm defects reported by the S427 dev agent — `NEW S427-peter; MED; open`
 <!-- @gap id=g-each-alias-dropped-inside-tier0-lifted-markup-and-other-S427-each-findings sev=MED status=open locus=searched:compiler/src/codegen/emit-each.ts,compiler/src/codegen/emit-lift.js,compiler/src/codegen/emit-variant-guard.ts—not-traced prov=empirical:S427-dev-agent-reproduced-each-on-base-with-the-display-twin-NOT-PA-verified -->
 
@@ -14543,6 +14617,8 @@ each in a lifted row does not re-render on a same-key replace of the outer item.
 engine arm is not re-dispatched when the engine arm is re-entered (display bindings too). (4) An engine
 `initial=.Ready([...])` drops its payload (emits `reactive_set("phase", "Ready")`). Reproduced by the agent on base
 with the no-lift twin; **not PA-verified** — re-reproduce and split before dispatching.
+
+⛑ **S429-peter — (1) and (4) PA-VERIFIED on `c8eb9cd9`.** (1) `<ul>${ lift <li><each in=@items as c><b>${c}</b></each></li> }</ul>` → `initError: ReferenceError: c is not defined` — the WHOLE page script dies at init (loud). (4) `<engine for=Load initial=.Ready(["p","q"])>` emits `_scrml_cs_reactive_set("load", "Ready")` — the payload is DROPPED and the `Ready` arm's `<each in=rows>` renders an EMPTY list with no error (SILENT — worse than this entry's MED). ⚑ (4) is ruling-adjacent: §51.0.E admits `initial=.Variant` ("a STATIC literal") or `initial=@cell` and does not say whether a payload constructor is a static literal — honour vs reject is bryan's (Q4 in the S429 message). The silent drop is wrong under both readings. (2) is likely the same class as `g-each-replaced-row-stops-receiving-in-place-edits` (in flight S429). (3) not yet re-run.
 
 ### g-post-emit-chunk-gates-match-user-string-literals — the post-emit runtime-chunk gates key on emitted TEXT, so a user string containing an internal helper name pulls unused chunks into the runtime — `NEW S427-peter; LOW; open`
 <!-- @gap id=g-post-emit-chunk-gates-match-user-string-literals sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(POST_EMIT_HELPER_CHUNK_GATES + the reconciliation lines scan) prov=review:S427-adversarial-pass-on-the-each-row-lift-fix-e8-runtime-55043-to-83143-bytes -->
