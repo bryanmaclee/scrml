@@ -61,7 +61,6 @@
 
 import type { CompileContext } from "./context.ts";
 import { nsId } from "./chunk-namespace.ts";
-import { annotateNativeForBinders } from "./for-binder-keyword.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { collectDerivedVarNames } from "./reactive-deps.ts";
 
@@ -913,7 +912,6 @@ function buildMatchArms(
           const synthResult = nativeParseFile(synthLabel, trimmed);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
-            annotateNativeForBinders(body, trimmed); // s427 r4 — for (let …) binders
           }
         } catch (_e) {
           // Defensive — leave body empty on parse failure.
@@ -932,7 +930,6 @@ function buildMatchArms(
           const synthResult = nativeParseFile(synthLabel, inner);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
-            annotateNativeForBinders(body, inner); // s427 r4 — for (let …) binders
           }
         } catch (_e) {
           // Defensive — leave body empty on parse failure.
@@ -991,7 +988,6 @@ function buildMatchArms(
           const synthResult = nativeParseFile(synthLabel, synthSrc);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
-            annotateNativeForBinders(body, synthSrc); // s427 r4 — for (let …) binders
           }
         }
       } catch (_e) {

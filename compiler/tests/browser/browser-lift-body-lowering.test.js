@@ -465,3 +465,111 @@ describe("round 3 F1 — a write to the loop's own binder", () => {
     expect(lis()).toEqual(["a!", "b!"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 5 — the binder keyword of a NATIVE-parsed loop (component bodies,
+// match / engine arm bodies, and the `${}` logic inside their lifted markup) comes
+// from the native parser's own VarDecl `declKind`, carried by the translation
+// layer (native-parser/translate-stmt.js makeForStmtInOf) — not from a scan of the
+// source text. The round-4 text scan read BLOCK-relative spans as file offsets
+// (both loops of a nested pair resolved to the same text), matched `let$` / a
+// label / a comment wrongly. Repros: scratchpad r4v/x/.
+// ---------------------------------------------------------------------------
+
+describe("round 5 — native-parsed loop binders: `let` writes take effect, `const` / keywordless writes fail the compile", () => {
+  const binderErr = (errors) => errors.find((e) => e.code === "E-CODEGEN-INVALID-LOGIC" && /loop binder/.test(e.message));
+  const compileOnly = (source, name) => {
+    const dir = resolve(tmpRoot, `r5-${name}-${Math.random().toString(36).slice(2, 10)}`);
+    mkdirSync(dir, { recursive: true });
+    const input = resolve(dir, `${name}.scrml`);
+    writeFileSync(input, source);
+    const result = compileScrml({ inputFiles: [input], write: true, outputDir: resolve(dir, "out"), log: () => {} });
+    return (result.errors ?? []).filter((e) => (e.severity ?? "error") === "error");
+  };
+  const comp = (loop, extra = "") => `<program>
+\${
+    const List = <ul props={ xs: string[] }>
+        \${ ${extra}${loop}
+            lift <li>\${it}</li> } }
+    </>
+}
+<items> = ["a", "b"]
+<div><List xs=@items/></div>
+<div><List xs=@items/></div>
+</program>
+`;
+  const nestComp = (outer, inner) => `<program>
+\${
+    const List = <div props={ gs: string[][] }>
+        \${ for (${outer}g of gs) { lift <ul>\${ for (${inner}it of g) { it += "!"
+            lift <li>\${it}</li> } }</ul> } }
+    </>
+}
+<groups> = [["a", "b"], ["c"]]
+<div><List gs=@groups/></div>
+</program>
+`;
+  const arm = (loop) => `<program>
+<items> = ["a", "b"]
+<groups> = [["a", "b"], ["c"]]
+\${ type Ph:enum = { A, B } }
+<phase>: Ph = .A
+<match for=Ph on=@phase>
+    <A><ul>\${ ${loop}
+        lift <li>\${it}</li> } }</ul></>
+    <B><p>b</p></>
+</>
+</program>
+`;
+  const nestArm = (outer, inner) => `<program>
+<groups> = [["a", "b"], ["c"]]
+\${ type Ph:enum = { A, B } }
+<phase>: Ph = .A
+<match for=Ph on=@phase>
+    <A><div>\${ for (${outer}g of @groups) { lift <ul>\${ for (${inner}it of g) { it += "!"
+            lift <li>\${it}</li> } }</ul> } }</div></>
+    <B><p>b</p></>
+</>
+</program>
+`;
+  const lis = () => [...document.querySelectorAll("li")].map((e) => e.textContent.trim());
+
+  // [label, source, expected rows | null for "the compile fails naming the binder"]
+  const CASES = [
+    ["component, `let` binder", comp(`for (let it of xs) { it += "!"`), ["a!", "b!", "a!", "b!"]],
+    ["component, `const` binder", comp(`for (const it of xs) { it += "!"`), null],
+    ["component, keywordless binder", comp(`for (it of xs) { it += "!"`), null],
+    ["component, labelled `let` loop (c_lbl)", comp(`outer: for (let it of xs) { it += "!"`), ["a!", "b!", "a!", "b!"]],
+    ["component, comment in the head (c_cmt)", comp(`for (/* c */ let it of xs) { it += "!"`), ["a!", "b!", "a!", "b!"]],
+    ["component, a binder NAMED `let$` (same / c_letd — keywordless)", comp(`for (let$ of xs) { let$ += "!"`).replace("${it}</li>", "${let$}</li>"), null],
+    ["component, outer `let let$` + keywordless `let$` loop (c_letd)", comp(`for (let$ of xs) { let$ += "!"`, `let let$ = "o"\n            `).replace("${it}</li>", "${let$}</li>"), null],
+    ["component nested: outer `const`, inner `let` (comp1 / n_b)", nestComp("const ", "let "), ["a!", "b!", "c!"]],
+    ["component nested: outer `let`, inner `const` (n_a)", nestComp("let ", "const "), null],
+    ["component nested: outer `let`, inner `const`, inner block padded (s28 — the text scan read the OUTER head)",
+      nestComp("let ", "const ").replace("lift <ul>${ for", "lift <ul>${                            for"), null],
+    ["component nested: both `let`", nestComp("let ", "let "), ["a!", "b!", "c!"]],
+    ["component nested: outer `let`, inner keywordless", nestComp("let ", ""), null],
+    ["match arm, `let` binder", arm(`for (let it of @items) { it += "!"`), ["a!", "b!"]],
+    ["match arm, `const` binder", arm(`for (const it of @items) { it += "!"`), null],
+    ["match arm, labelled `let` loop (m_lbl)", arm(`outer: for (let it of @items) { it += "!"`), ["a!", "b!"]],
+    ["match arm, labelled `const` loop (m_lblc)", arm(`outer: for (const it of @items) { it += "!"`), null],
+    ["match arm, binder named `letter` (keywordless)", arm(`let letter = "o"
+    for (letter of @items) { letter += "!"`).replace("${it}</li>", "${letter}</li>"), null],
+    ["match arm, binder named `let_` (keywordless)", arm(`for (let_ of @items) { let_ += "!"`).replace("${it}</li>", "${let_}</li>"), null],
+    ["match arm, CRLF source, `let` binder (m_crlf)", arm(`for (let it of @items) { it += "!"`).replace(/\n/g, "\r\n"), ["a!", "b!"]],
+    ["match arm nested: outer `const`, inner `let` (marm)", nestArm("const ", "let "), ["a!", "b!", "c!"]],
+    ["match arm nested: outer `let`, inner `const`", nestArm("let ", "const "), null],
+  ];
+  for (const [label, source, want] of CASES) {
+    test(label, () => {
+      if (want === null) {
+        const errors = compileOnly(source, "r5");
+        const e = binderErr(errors);
+        expect(e).toBeDefined();
+      } else {
+        compileAndMount(source, "r5").done();
+        expect(lis()).toEqual(want);
+      }
+    });
+  }
+});

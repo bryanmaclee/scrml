@@ -8722,8 +8722,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // a write to a rendering loop's binder takes effect only when the binder is
       // `let`; a `const` or keywordless binder write fails the compile (the
       // keywordless case pending a language ruling — see emit-lift.js
-      // checkLoopBinderWrites). LIVE-only (within-node STRIP_KEYS). Third site:
-      // parseOneForStmt (for-as-expression).
+      // checkLoopBinderWrites). Third site: parseOneForStmt (for-as-expression).
+      // The native translation carries the same flag from the native parser's own
+      // VarDecl `declKind` (native-parser/translate-stmt.js makeForStmtInOf), and
+      // within-node parity compares it.
       let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -13465,8 +13467,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // a write to a rendering loop's binder takes effect only when the binder is
       // `let`; a `const` or keywordless binder write fails the compile (the
       // keywordless case pending a language ruling — see emit-lift.js
-      // checkLoopBinderWrites). LIVE-only (within-node STRIP_KEYS). Third site:
-      // parseOneForStmt (for-as-expression).
+      // checkLoopBinderWrites). Third site: parseOneForStmt (for-as-expression).
+      // The native translation carries the same flag from the native parser's own
+      // VarDecl `declKind` (native-parser/translate-stmt.js makeForStmtInOf), and
+      // within-node parity compares it.
       let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {

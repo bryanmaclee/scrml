@@ -1958,6 +1958,14 @@ function makeForStmtInOf(stmt, counter, label) {
     if (iterableText !== null) {
         node.iterable = iterableText;
     }
+    // s427 round 5 — the head's `let` keyword, from the parser's own VarDecl
+    // (`declKind`), as the LIVE statement parser records it (ast-builder.js, all
+    // three for-stmt sites): `letBinder: true` only for `for (let x of|in …)`.
+    // Codegen accepts a write to a rendering loop's binder only when it is `let`
+    // (emit-lift.js checkLoopBinderWrites). C-style heads carry no binder and no flag.
+    if (left && left.kind === StmtKind.VarDecl && left.declKind === "let") {
+        node.letBinder = true;
+    }
     if (label !== null && label !== undefined) {
         node.label = label;
     }
