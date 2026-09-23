@@ -1,3 +1,218 @@
+# scrml — Session 428 (bryan · XPS-8950) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑⚑ **THE DECISION WAS MADE THIS SESSION: DO BOTH TRACKS.** bryan, verbatim: *"I am still quite split
+> on the decision, and that might be the decision. split it out and work on both."* Repair the TS
+> compiler AND bootstrap the compiler in scrml, in parallel. His reasoning, and it corrects a framing
+> the PA had wrong: *"when I said 'after a month, we will be right here' I meant it as a good thing.
+> the current compiler has taken over 6 months to get here."* Plus: *"the bootstrap version can be
+> built, largely, autonomously given that there is already a clear goal to run toward … the only thing
+> I lose by going for both is tokens, I have those is spades."*
+>
+> ⚑⚑ **AND HE SET THE NEXT SESSION'S LEAD HIMSELF:** *"the most pressing is that there are still open
+> Qs that **should** be answered as a prerequisite before we start on the bootstrap work."* → **START
+> HERE. Item 1.**
+
+## ⏭ NEXT-SESSION PICKUP
+
+### 1. ⚑⚑ THE FOUR BLOCKING PREREQUISITES. All four are bryan's. Nothing bootstrap-shaped starts until P1–P4 are ruled.
+
+Each one changes **what gets written** in 12,277 lines of bootstrap source, so none can be deferred
+and discovered halfway.
+
+**⚑ P1 and P2 are not new questions. SPEC.md has carried them as explicitly-named OPEN DECISIONS
+since S117 — they were never neglected, they were theoretical, because no program large enough to
+care had ever been compiled.**
+
+- **P1 — IS `class` IN THE LANGUAGE?** *(the blocking one)*
+  PA-verified by execution: **SPEC contains no `class` grammar at all** — every `class` hit in 38,050
+  lines is the HTML `class=` attribute. `E-STMT-CLASS-NAME`'s §34.1 row says verbatim: *"`class` is
+  not scrml vocabulary, and whether `class` earns a parse-layer `E-*-NOT-IN-SCRML` rejection
+  (mirroring `E-ASYNC-NOT-IN-SCRML`) is an **open R1 statement-catalog-bridge decision**."*
+  **The self-host tree declares 14 classes, 12 of them `export class`.**
+  ⚑ **This decides whether [[g-class-is-a-front-end-blind-spot]] (HIGH, filed today) is a bug to
+  IMPLEMENT or a construct to REJECT — entirely different work.** PA lean, stated as a lean: scrml is
+  state-first (Pillar 2, Rule 6), a class is close to the thing engines and structs exist to replace,
+  so *no class* is the likely answer — and it means a structural rewrite of 14 declarations before the
+  bootstrap writes a new line.
+
+- **P2 — SAME QUESTION FOR `try` / `catch` / `finally`.**
+  `E-STMT-TRY-NO-HANDLER`: *"`try`/`catch`/`finally` are **forbidden scrml vocabulary** … Whether
+  `try` earns a parse-layer rejection is an **open R1 decision**."* `throw` WAS closed
+  (`E-THROW-NOT-IN-SCRML` exists); `try` was left open. The self-host tree has 14 `try` blocks and the
+  walkers catch only 6 of them.
+
+- **P3 — IS THERE A SCOPE-EXIT PRIMITIVE? (distinct from P2, and this is the LANGUAGE GAP)**
+  P2 asks whether `try` is rejected. P3 asks **how you release a resource on both paths.**
+  `compiler/self-host/pa.scrml:282` is `try { … } finally { cache.closeAll() }` around a SQLite
+  handle. `safeCall` + `!{}` handles the error; **nothing expresses the cleanup.** A compiler owns file
+  handles, DB connections and temp dirs — not an edge case for a self-hosting compiler. Currently
+  inexpressible, **no governing sentence**, so out of the S385 PA-ruling class on condition 1.
+  Filed as half of [[g-two-language-gaps-a-real-12k-program-hit-that-the-corpus-never-did]].
+
+- **P4 — HOW DOES A SCRML PROGRAM LOAD A HOST MODULE?**
+  A bare `import()` is **not** one of §19.9.8's body-split boundaries (`^{}` · `_{}` · server-fn
+  return · `use foreign:`). **Measured:** dropping the `await` from `const mod = import("./x.js")`
+  emits a bare `import(...)` with **no auto-await and no diagnostic** — `mod` is a Promise and
+  `mod.thing` is `undefined`. A self-hosting compiler must load modules. Other half of the same gap
+  entry.
+
+**Then three governance calls, settable at kickoff rather than blocking:**
+- **P5 — the bootstrap's DONE-GATE must be fixed-point + conformance, NOT "it compiles."** Today
+  proved those are decoupled: three self-host modules compile clean while emitting `new RIError(...)`
+  against a class the compiler deleted. A track measuring itself on a compile gate would declare
+  victory while shipping garbage.
+- **P6 — during the split, which implementation is authoritative?** §62.1 answers it in principle (a
+  compiler is scrml iff it passes the conformance suite for the version it declares). It does not
+  answer the operational case: when TS and the bootstrap disagree on a case **not in the corpus**, who
+  wins and who may add the case?
+- **P7 — is the TS ledger maintenance-only?** ~480 open gaps. If bootstrap is the future most will
+  never be fixed — correct, but the review floor, boot cost and gap counts keep billing for work
+  nobody intends to do. One sentence, or it is a standing tax.
+
+### 2. THE PREREQUISITE WORK THAT IS NOT A RULING — the six defects are on the critical path EITHER WAY
+
+Filed today in #1035. `export class` silently dropping means 12 of 14 class declarations vanish from
+the artifact, so **the bootstrap track cannot produce meaningful signal until it is resolved** (by
+implementation or by rejection — P1 decides which). Sequence these in the TS track and let the
+bootstrap start behind them:
+[[g-class-is-a-front-end-blind-spot]] (HIGH) · [[g-return-of-a-failable-call-with-a-guard-silently-drops-the-return]]
+(HIGH) · [[g-the-two-front-ends-disagree-about-the-guard-form]] (HIGH) ·
+[[g-is-some-in-a-function-expression-body-emits-an-undefined-helper]] (HIGH) ·
+[[g-self-host-parity-harness-evaluates-scrml-source-as-javascript]] (MED).
+
+⚑ **Four of those are on ONE surface — `!{}` — found in one afternoon.** That surface is the
+language's only error-handling mechanism and nothing real had exercised it until today.
+
+### 3. THE BOOTSTRAP'S STARTING POSITION, measured
+
+`compiler/self-host/` — 11 modules, 12,277 LOC. **NOT a scratch build.** Baseline **3 of 11 compiled
+clean**; after the A1+A2 migration landed today (#1034) the mechanical layer is gone. What remains is
+`E-FN-003`-family purity errors (a fifth non-conformance class, unmeasured), the 9 held `try` blocks,
+2 held `await` sites, and one `E-CODEGEN-INVALID-LOGIC` in `tab.scrml`.
+**The 5 `!{}` sites were deliberately HELD OUT of #1034** — see the durable below.
+
+### 4. bryan's inbox is the bottleneck and it GREW this session
+`handOffs/incoming/` — **9 live**, of which these are his: S420-peter subdir-shell-lint routing
+(unread since 09-17) · S427-peter if=/mount lift-block timing (two tests pinned RULING PENDING) ·
+**S429-peter two rulings** · **S429-peter Q5–Q7**. Plus dPA: **1 UNRUN (dpa-049) · 10 ADVISORY**.
+⚑ S385 measured 30 of 60 open HIGHs blocked on an operator decision, median age 38 sessions. **P1–P4
+add four more to that queue, and the bootstrap track is a standing ruling generator** — every
+category-(c) finding is a design question only he can answer. This is the PA's strongest reservation
+about running both tracks, and it is about attention, not tokens.
+
+## WHAT LANDED — five PRs
+
+| PR | what |
+|---|---|
+| **#996** | `E-ASSIGN-004` at statement position — **auto-merged out from under me**, see MISSES |
+| **#1030** | the generated-block regression **I** introduced in #996 |
+| **#1031** | six gaps · the #1028 review marker (`verdict=finding`) · the stale-figure supersession · peter's outbox note |
+| **#1034** | self-host A1+A2 migration — 300 lines, 1:1 substitution |
+| **#1035** | six self-host defect classes |
+
+⚑ **Concurrent lane:** peter ran **S429 and S429b** during this session. Main moved five times under
+my open PRs; I rebased four times and resolved the same append-tail conflict shape each time.
+
+## 🔭 DURABLE
+
+**A per-defect instrument cannot return "these 37 are one thing," and every instrument this project
+owns is per-defect.** The falsifier I wrote this morning classified 46 of 59 post-AST open-HIGH gaps
+as "ordinary logic bugs" — correctly, one at a time. But 37 of the 46 are *plumbing*: a walker that
+doesn't visit a position (~13), an emitter option never threaded through (~8), a hand-maintained
+enumeration gone stale (~6), pass ordering (~5), emitted block-scope placement (~5). Summed, they are
+one architectural property repeated 37 times. **N honest small answers sum to "lots of little
+things," which is exactly the input that produces "just a few tweaks."** bryan named the cycle
+unprompted — *fix a bug that creates new bugs → PA says we need a real compiler → I say spend the
+tokens → PA audits and says it's fine, just tweaks* — and **the PA ran the full cycle on him inside
+this one session.** The project's own wrap titles corroborate it twice: `wrap(s419)` *"every fix
+re-created its class one level away"*, `wrap(s420)` *"convicted my own fix of the class it was
+fixing."*
+
+**And the measurement says he is right, with a control.** A file that receives a fix is **~4× more
+likely** to receive a new defect filing within 5 sessions than one that does not (56.5% vs 14.3%),
+**stable between 2.6× and 4.5× across four months**. Raw same-file regeneration 75% (35/47), median
+lag 1 session. Causal floor: **36% of reviewed fix PRs had a new gap filed out of reviewing that very
+fix**, 1.6 new defects per convicted fix. ⚑ **One finding cuts AGAINST the sharp form of his claim:**
+code-bearing *fix* PRs convict at 82.1%, *non-fix* PRs at 75.0% — not significantly different. It is
+**landings** that regenerate defects, not fixes specifically.
+
+**A green compile and a working artifact are fully decoupled here, and the gap is silent.**
+PA-verified: `export class X {}` + `new X()` → `Compiled 1 file`, exit 0, **zero diagnostics**, **zero
+class definitions emitted**, one `new X(...)` reference, and `node --check` PASSES. It loads and dies
+on first call. This is the reason P5 exists: a bootstrap gated on "it compiles" would read as success
+while shipping nothing.
+
+**The test that was supposed to guard the self-host tree structurally required it to stay
+JavaScript.** `compiler/tests/self-host/ast.test.js` never invokes the compiler — it text-substitutes
+`fn`→`function` (`:101`), wraps the result in a `Blob` and `import()`s it **as JavaScript**
+(`:116-118`), is `describe.skip`-ed (`:237`), and `compiler/tests/self-host` is not in the gate. Its
+premise is that the source IS valid JS, so drift toward real scrml would have broken it. Combined with
+the forbidden-vocabulary walkers not entering class bodies, that is the **complete mechanism** behind
+12,277 lines of JavaScript wearing a `${}`.
+
+**A cloud gate caught something worth more than the change that tripped it — and re-baselining would
+have buried it.** #1034's first push failed the `within-node` parity gate (native parser vs Acorn,
+FIELD-level). The isolation was natural, not constructed: `ri` (52 migration sites, 0 `!{}`) CLEAN ·
+`ts` (157, 0) CLEAN · `meta-checker` (**0** migration sites, **1** `!{}`) → **residual 9** · `pa` (40,
+2) → residual 12. **One `try`→`!{}` produced nine field-level divergences.** The allowlist was
+deliberately NOT grown — its own header says an entry reflecting a real divergence should be
+*reduced*. The 5 `!{}` sites were held out of the PR instead.
+
+**`--force-with-lease` does not protect you from pushing the WRONG HEAD.** Its lease is on the remote
+ref, not on what you are sending. See MISSES 2.
+
+## ⚑ MISSES (mine)
+
+1. **★★★ I told bryan #996 was HELD and it had already merged.** `db800e6e`, attributed to his
+   account; I never ran `gh pr merge`. Mechanism INFERRED not proven — the timeline API records only a
+   `merged` event — but the precedent is exact (#995 at S425 carried auto-merge from S422 and fired
+   the minute its BEHIND state cleared). **The cost is sequencing:** it merged while the mandatory
+   S239 adversarial pass was still running. **S425 drew this exact distinction, I read that entry at
+   boot, and still did not check.** Defence is one command before every push; now applied on every
+   subsequent PR this session.
+2. **★★★ I clobbered my own migration branch.** `git checkout -B` aborted on STAGED changes
+   (`checkout --` does not clear the index), so HEAD was still the gaps branch when the next
+   force-push ran. Recovered from reflog. **Caught by a pre-push content gate I had added two commands
+   earlier** — assert the delta shape and refuse otherwise. Verify what you are about to push, not
+   just what you are pushing over.
+3. **★★ I landed a generated-block regression in #996 and the currency gate ratified it.** I ran
+   `state.ts --write` **mid-merge**; `git merge` leaves HEAD at the pre-merge branch tip, so the
+   generator saw only one parent's history. `--check` then PASSED because generator and checker share
+   the vantage point. Rule: **regenerate a git-derived `@generated` block only from a COMMITTED
+   vantage point.** Fixed in #1030; deliberately did NOT add a gate, because a gate sharing the
+   generator's vantage point IS the defect.
+4. **★★ Three of my own probes were wrong, all the same substring/text-scan class I spent the day
+   filing.** `grep -oE 'E-[A-Z0-9-]+'` matched `E-031-UNPROVEN` inside `W-TYPE-031-UNPROVEN` and
+   nearly produced "0 of 11 self-host modules compile" when the answer was 3 · `grep -c '\bnot\b'`
+   counted English prose in comments · a bounded poll keyed on `gh pr checks`' exit status read a
+   known-pre-existing failure as a probe error. All three caught by re-reading, none by a gate.
+5. **★ I reported the falsifier's verdict without the re-read it needed.** "78% are ordinary logic
+   bugs, the thesis collapses" was true and was the step-5 move in the cycle bryan named. I had asked
+   whether my *remedy* was right, got a correct no, and reported it as "the code is basically fine."
+   Those are different questions.
+
+## Gate at close
+
+- **Cloud:** `gate` + `windows` GREEN on every PR merged. `tracking` red on each and **proven
+  pre-existing by NAME-SET IDENTITY, re-measured per PR against main's own newest run** — five
+  dev-watcher names, byte-identical every time, zero new.
+- **Pre-commit:** 24,257 pass / 76 skip / 0 fail at the last local run.
+- **Board / review floor / `pa-ruled` count:** see the regenerated `@generated` blocks and
+  `bun scripts/review-debt.ts` — NOT re-typed here (the S428 lesson: a hand-typed derived number rots).
+- **Maps:** NOT regenerated. The only `compiler/src` change this session is **none** — this session
+  landed doc/ledger changes plus `compiler/self-host/*.scrml` source, which no map indexes. Watermark
+  unchanged, deliberately.
+- **Worktrees:** the three agent worktrees and the PA landing worktree are cleaned at 6b.
+- **Inbox:** the three flogence S46 messages are **processed and archived** (they were the S425
+  restore — `…0010…` and `…0300…` were genuinely unread until this session). **9 live remain, four of
+  them bryan's rulings.**
+- **Cross-repo:** flogence reply delivered — write, commit, push, 0/0 (they were 74 behind; the rebase
+  mattered). peter's note delivered via #1031.
+
+---
+
 # scrml — Session 429, second half (peter · P-Tech1 Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched. That includes
