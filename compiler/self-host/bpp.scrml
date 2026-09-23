@@ -76,13 +76,13 @@ export function splitBareExprStatements(expr) {
     let braceDepth = 0
     let i = 0
     let stmtStart = 0
-    let inString = null
+    let inString = not
 
     while (i < trimmed.length) {
         const ch = trimmed[i]
 
         // Track string literals
-        if (inString == null) {
+        if (inString is not) {
             if (ch == '"' || ch == "'" || ch == '`') {
                 inString = ch
                 i++
@@ -90,7 +90,7 @@ export function splitBareExprStatements(expr) {
             }
         } else {
             if (ch == '\\') { i += 2; continue }
-            if (ch == inString) { inString = null }
+            if (ch == inString) { inString = not }
             i++
             continue
         }
@@ -178,7 +178,7 @@ export function splitMergedStatements(firstName, initStr, declType) {
         const letMatch = remaining.match(/^(.*?)\s+(?:let|const)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*=\s*([\s\S]*)$/)
 
         // Pick the match that occurs later in the string (longer first capture)
-        let match = null
+        let match = not
         if (reactiveMatch && letMatch) {
             match = reactiveMatch[1].length >= letMatch[1].length ? reactiveMatch : letMatch
         } else {
@@ -222,7 +222,7 @@ export function splitMergedStatements(firstName, initStr, declType) {
                     statements.push(`${currentType} ${currentName} = ${rewriteExpr(finalValue)};`)
                 }
             }
-            remaining = null
+            remaining = not
         }
     }
 
