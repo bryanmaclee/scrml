@@ -75,13 +75,13 @@ ${
                 "Verify the table name is correct and the database file is up to date.",
                 blockSpan,
             ))
-            return null
+            return not
         }
 
         return rows.map(function(row) {
             return {
                 name: row.name,
-                sqlType: (row.type !== null && row.type !== undefined) ? row.type : "",
+                sqlType: row.type is some ? row.type : "",
                 nullable: row.notnull == 0,
                 isPrimaryKey: row.pk > 0,
             }
@@ -108,8 +108,8 @@ ${
                     "E-PA-003: Failed to open SQLite database at `" + dbPath + "`: " + err.message,
                     blockSpan,
                 ))
-                this._dbs.set(dbPath, null)
-                return null
+                this._dbs.set(dbPath, not)
+                return not
             }
             this._dbs.set(dbPath, db)
             return db
@@ -126,8 +126,8 @@ ${
                     "E-PA-003: Failed to create in-memory SQLite database for shadow schema: " + err.message,
                     blockSpan,
                 ))
-                this._dbs.set(dbPath, null)
-                return null
+                this._dbs.set(dbPath, not)
+                return not
             }
             for (const stmt of createStatements) {
                 try {
@@ -139,8 +139,8 @@ ${
                         blockSpan,
                     ))
                     try { db.close() } catch (e) { /* ignore */ }
-                    this._dbs.set(dbPath, null)
-                    return null
+                    this._dbs.set(dbPath, not)
+                    return not
                 }
             }
             this._dbs.set(dbPath, db)
@@ -149,7 +149,7 @@ ${
 
         closeAll() {
             for (const db of this._dbs.values()) {
-                if ((db !== null && db !== undefined)) {
+                if (db is some) {
                     try { db.close() } catch (e) { /* ignore */ }
                 }
             }
@@ -173,7 +173,7 @@ ${
                     // `is some` needs a simple identifier — assign first, then check.
                     CREATE_TABLE_RE.lastIndex = 0
                     let m = CREATE_TABLE_RE.exec(query)
-                    while ((m !== null && m !== undefined)) {
+                    while (m is some) {
                         const tableName = m[1].toLowerCase()
                         result.set(tableName, m[0])
                         m = CREATE_TABLE_RE.exec(query)
@@ -204,7 +204,7 @@ ${
         for (const tableName of tableNames) {
             const key = tableName.toLowerCase()
             const stmt = createTableMap.get(key)
-            if (stmt == undefined) {
+            if (stmt is not) {
                 missingTables.push(tableName)
             } else {
                 createStmts.push(stmt)
@@ -222,7 +222,7 @@ ${
                 "block so the compiler can validate the schema at compile time.",
                 blockSpan,
             ))
-            return null
+            return not
         }
 
         process.stderr.write(
@@ -261,11 +261,11 @@ ${
 
     // Returns the string value from a string-literal AttrValue, or not if absent/wrong shape.
     fn attrStringValue(attrNode) {
-        if (!attrNode) return null
+        if (!attrNode) return not
         if (attrNode.value && attrNode.value.kind == "string-literal") {
             return attrNode.value.value
         }
-        return null
+        return not
     }
 
     // ---------------------------------------------------------------------------
@@ -283,7 +283,7 @@ ${
                 const filePath = fileAST.filePath
                 const nodes = fileAST.ast
                     ? fileAST.ast.nodes
-                    : ((fileAST.nodes !== null && fileAST.nodes !== undefined) ? fileAST.nodes : [])
+                    : (fileAST.nodes is some ? fileAST.nodes : [])
 
                 const createTableMap = extractCreateTableStatements(nodes)
                 const dbBlocks = collectDbBlocks(nodes)
@@ -313,7 +313,7 @@ ${
         const srcAttr = findAttr(block.attrs, "src")
         const srcRaw = attrStringValue(srcAttr)
 
-        if (srcRaw === null) {
+        if (srcRaw is not) {
             errors.push(new PAError(
                 "E-PA-006",
                 "E-PA-006: The `< db>` state block is missing the required `src=` attribute. " +
@@ -338,7 +338,7 @@ ${
         const tablesAttr = findAttr(block.attrs, "tables")
         const tablesRaw = attrStringValue(tablesAttr)
 
-        if (tablesRaw === null) {
+        if (tablesRaw is not) {
             errors.push(new PAError(
                 "E-PA-005",
                 "E-PA-005: The `< db>` state block is missing the required `tables=` attribute. " +
@@ -363,7 +363,7 @@ ${
 
         // Step 5: Open database (real file or shadow in-memory)
         const db = resolveDb(dbPath, tableNames, createTableMap, cache, blockSpan, errors)
-        if (db === null) return
+        if (db is not) return
 
         // Step 6: Read schemas — accumulate all errors before bailing
         const tableSchemas = new Map()
@@ -371,7 +371,7 @@ ${
 
         for (const tableName of tableNames) {
             const schema = readTableSchema(db, tableName, blockSpan, errors)
-            if (schema === null) {
+            if (schema is not) {
                 anyTableFailed = true
             } else {
                 tableSchemas.set(tableName, schema)
@@ -383,7 +383,7 @@ ${
         // Step 7: Parse protect= (absent or empty → no candidate fields)
         const protectAttr = findAttr(block.attrs, "protect")
         const protectRaw = attrStringValue(protectAttr)
-        const candidateFields = (protectRaw !== null && protectRaw !== undefined) ? parseCommaList(protectRaw) : []
+        const candidateFields = protectRaw is some ? parseCommaList(protectRaw) : []
 
         // Step 8: Validate protect= fields against combined column set (E-PA-007)
         const columnToTables = new Map()

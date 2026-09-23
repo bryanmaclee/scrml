@@ -76,7 +76,7 @@ ${
         for (const entry of SERVER_ONLY_PATTERNS) {
             if (entry.pattern.test(expr)) return entry.resourceType
         }
-        return null
+        return not
     }
 
     // ---------------------------------------------------------------------------
@@ -114,7 +114,7 @@ ${
         const names = []
         const re = new RegExp(DIRECT_CALL_REGEX_SRC, "g")
         let m
-        while ((m = re.exec(expr)) != null) {
+        while ((m = re.exec(expr)) is some) {
             // Destructure to avoid computed member access warning from RI on this file itself
             const capturedName = m.slice(1, 2).pop()
             names.push(capturedName)
@@ -155,7 +155,7 @@ ${
     }
 
     export function collectFileFunctions(fileAST) {
-        const nodes = fileAST.nodes != null ? fileAST.nodes : (fileAST.ast ? fileAST.ast.nodes : [])
+        const nodes = fileAST.nodes is some ? fileAST.nodes : (fileAST.ast ? fileAST.ast.nodes : [])
         const result = []
 
         function visitNodes(astNodes) {
@@ -225,11 +225,11 @@ ${
             }
 
             if (node.kind == "bare-expr") {
-                const expr = node.expr != null ? node.expr : ""
+                const expr = node.expr is some ? node.expr : ""
 
                 // Trigger 1: server-only resource access
                 const resourceType = detectServerOnlyResource(expr)
-                if (resourceType != null) {
+                if (resourceType is some) {
                     triggers.push({
                         kind: "server-only-resource",
                         resourceType: resourceType,
@@ -268,7 +268,7 @@ ${
             }
 
             if (node.kind == "let-decl" || node.kind == "const-decl" || node.kind == "tilde-decl") {
-                const init = node.init != null ? node.init : ""
+                const init = node.init is some ? node.init : ""
 
                 // Trigger 2: protected field access via direct destructuring
                 for (const fieldName of protectedFields) {
@@ -283,7 +283,7 @@ ${
 
                 // Trigger 1: server-only resource in the init expression
                 const resourceType = detectServerOnlyResource(init)
-                if (resourceType != null) {
+                if (resourceType is some) {
                     triggers.push({
                         kind: "server-only-resource",
                         resourceType: resourceType,
@@ -298,11 +298,11 @@ ${
             }
 
             if (node.kind == "state-decl") {
-                const init = node.init != null ? node.init : ""
+                const init = node.init is some ? node.init : ""
 
                 // Trigger 1: server-only resource in the init expression
                 const reactDeclResourceType = detectServerOnlyResource(init)
-                if (reactDeclResourceType != null) {
+                if (reactDeclResourceType is some) {
                     triggers.push({
                         kind: "server-only-resource",
                         resourceType: reactDeclResourceType,
@@ -345,22 +345,22 @@ ${
 
     function findReactiveAssignment(body) {
         function visitNode(node) {
-            if (!node || typeof node != "object") return null
+            if (!node || typeof node != "object") return not
 
             if (node.kind == "state-decl") {
                 return node
             }
 
             if (node.kind == "bare-expr") {
-                const expr = node.expr != null ? node.expr : ""
+                const expr = node.expr is some ? node.expr : ""
                 if (/\B@[A-Za-z_$][A-Za-z0-9_$]*\s*=[^=]/.test(expr)) {
                     return node
                 }
-                return null
+                return not
             }
 
             if (node.kind == "function-decl") {
-                return null
+                return not
             }
 
             for (const key of Object.keys(node)) {
@@ -369,20 +369,20 @@ ${
                 if (Array.isArray(val)) {
                     for (const child of val) {
                         const found = visitNode(child)
-                        if (found != null) return found
+                        if (found is some) return found
                     }
                 }
             }
 
-            return null
+            return not
         }
 
         for (const node of body) {
             const found = visitNode(node)
-            if (found != null) return found
+            if (found is some) return found
         }
 
-        return null
+        return not
     }
 
     // ---------------------------------------------------------------------------
@@ -390,7 +390,7 @@ ${
     // ---------------------------------------------------------------------------
 
     function hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) {
-        const init = node.init != null ? node.init : ""
+        const init = node.init is some ? node.init : ""
         if (!init) return false
         const calleeNames = extractCalleesFromExpr(init)
         for (const calleeName of calleeNames) {
@@ -410,14 +410,14 @@ ${
         if (!init) return false
         // Check for ?{` SQL sigil pattern
         if (new RegExp("\\?" + OB + "`").test(init)) return true
-        if (detectServerOnlyResource(init) != null) return true
+        if ((detectServerOnlyResource(init)) is some) return true
         return false
     }
 
     function isReactiveStatement(node) {
         if (node.kind == "state-decl") return true
         if (node.kind == "bare-expr") {
-            const expr = node.expr != null ? node.expr : ""
+            const expr = node.expr is some ? node.expr : ""
             if (/\B@[A-Za-z_$][A-Za-z0-9_$]*\s*=[^=]/.test(expr)) return true
         }
         return false
@@ -429,9 +429,9 @@ ${
         if (node.kind == "sql") return true
 
         if (node.kind == "bare-expr") {
-            const expr = node.expr != null ? node.expr : ""
+            const expr = node.expr is some ? node.expr : ""
 
-            if (detectServerOnlyResource(expr) != null) return true
+            if ((detectServerOnlyResource(expr)) is some) return true
 
             for (const fieldName of protectedFields) {
                 if (bareExprAccessesField(expr, fieldName)) return true
@@ -450,13 +450,13 @@ ${
         }
 
         if (node.kind == "let-decl" || node.kind == "const-decl") {
-            const init = node.init != null ? node.init : ""
+            const init = node.init is some ? node.init : ""
 
             for (const fieldName of protectedFields) {
                 if (declDestructuresField(init, fieldName)) return true
             }
 
-            if (detectServerOnlyResource(init) != null) return true
+            if ((detectServerOnlyResource(init)) is some) return true
 
             const calleeNames = extractCalleesFromExpr(init)
             for (const calleeName of calleeNames) {
@@ -474,7 +474,7 @@ ${
     }
 
     export function analyzeCPSEligibility(body, protectedFields, stateBlockIdByField, functionIndex, analysisMap, resolvedServerFnIds, importedServerFnNames) {
-        if (!body || body.length == 0) return null
+        if (!body || body.length == 0) return not
 
         const serverIndices = []
         const reactiveIndices = []
@@ -516,8 +516,8 @@ ${
         const hasReactive = reactiveIndices.length > 0 || reactiveServerIndices.length > 0
         const hasServer = serverIndices.length > 0 || reactiveServerIndices.length > 0
 
-        if (!hasReactive || !hasServer) return null
-        if (mixedIndices.length > 0) return null
+        if (!hasReactive || !hasServer) return not
+        if (mixedIndices.length > 0) return not
 
         const allServerIndices = [...serverIndices, ...reactiveServerIndices].sort(function(a, b) { return a - b })
         const clientStmtIndices = []
@@ -527,7 +527,7 @@ ${
             }
         }
 
-        let returnVarName = null
+        let returnVarName = not
         for (const ri of reactiveServerIndices) {
             const node = body[ri]
             if (node.kind == "state-decl" && node.name) {
@@ -569,13 +569,13 @@ ${
     function buildImportedServerFnNames(files) {
         const names = new Set()
         for (const fileAST of files) {
-            const imports = fileAST.imports != null ? fileAST.imports : (fileAST.ast ? fileAST.ast.imports : [])
+            const imports = fileAST.imports is some ? fileAST.imports : (fileAST.ast ? fileAST.ast.imports : [])
             if (!imports) continue
             for (const node of imports) {
                 if (node && node.kind == "import-decl" && node.source) {
                     const source = node.source.replace(/^['"]|['"]$/g, "")
                     if (SERVER_ONLY_SCRML_MODULES.has(source)) {
-                        for (const name of (node.names != null ? node.names : [])) {
+                        for (const name of (node.names is some ? node.names : [])) {
                             names.add(name)
                         }
                     }
@@ -669,7 +669,7 @@ ${
             dir = parentDir
         }
 
-        return null
+        return not
     }
 
     export function buildPageRouteTree(files) {
@@ -684,7 +684,7 @@ ${
                     filePath: filePath,
                     urlPattern: "/",
                     params: [],
-                    layoutFilePath: null,
+                    layoutFilePath: not,
                     isCatchAll: false,
                 })
                 continue
@@ -719,15 +719,15 @@ ${
 
         // 8a: Explicit auth= from <program auth="required">
         for (const fileAST of files) {
-            const authConfig = fileAST.authConfig != null ? fileAST.authConfig : (fileAST.ast ? fileAST.ast.authConfig : null)
+            const authConfig = fileAST.authConfig is some ? fileAST.authConfig : (fileAST.ast ? fileAST.ast.authConfig : not)
             if (!authConfig || authConfig.auth != "required") continue
 
             authMiddleware.set(fileAST.filePath, {
                 filePath: fileAST.filePath,
                 auth: authConfig.auth,
-                loginRedirect: authConfig.loginRedirect != null ? authConfig.loginRedirect : "/login",
-                csrf: authConfig.csrf != null ? authConfig.csrf : "off",
-                sessionExpiry: authConfig.sessionExpiry != null ? authConfig.sessionExpiry : "1h",
+                loginRedirect: authConfig.loginRedirect is some ? authConfig.loginRedirect : "/login",
+                csrf: authConfig.csrf is some ? authConfig.csrf : "off",
+                sessionExpiry: authConfig.sessionExpiry is some ? authConfig.sessionExpiry : "1h",
             })
         }
 
@@ -884,12 +884,12 @@ ${
                     functionNodeId: fnNodeId,
                     boundary: "middleware",
                     escalationReasons: [],
-                    generatedRouteName: null,
-                    explicitRoute: null,
-                    explicitMethod: null,
+                    generatedRouteName: not,
+                    explicitRoute: not,
+                    explicitMethod: not,
                     isSSE: false,
-                    serverEntrySpan: null,
-                    cpsSplit: null,
+                    serverEntrySpan: not,
+                    cpsSplit: not,
                 })
                 continue
             }
@@ -901,7 +901,7 @@ ${
             const isServer = allReasons.length > 0
             const boundary = isServer ? "server" : "client"
 
-            let cpsSplit = null
+            let cpsSplit = not
 
             if (isServer) {
                 const body = Array.isArray(record.fnNode.body) ? record.fnNode.body : []
@@ -912,7 +912,7 @@ ${
                 } else {
                     const reactiveAssignment = findReactiveAssignment(body)
 
-                    if (reactiveAssignment != null) {
+                    if (reactiveAssignment is some) {
                         const cpsResult = analyzeCPSEligibility(
                             body,
                             allProtectedFields,
@@ -930,8 +930,8 @@ ${
                                 returnVarName: cpsResult.returnVarName,
                             }
                         } else {
-                            const fnName = record.fnNode.name != null ? record.fnNode.name : "<anonymous>"
-                            const errorSpan = reactiveAssignment.span != null ? reactiveAssignment.span : record.fnNode.span
+                            const fnName = record.fnNode.name is some ? record.fnNode.name : "<anonymous>"
+                            const errorSpan = reactiveAssignment.span is some ? reactiveAssignment.span : record.fnNode.span
                             errors.push(new RIError(
                                 "E-RI-002",
                                 "E-RI-002: Server-escalated function `" + fnName + "` " +
@@ -946,22 +946,22 @@ ${
             }
 
             const hasExplicitRoute = !!(record.fnNode.route)
-            const fnNameForRoute = record.fnNode.name != null ? record.fnNode.name : "anon"
+            const fnNameForRoute = record.fnNode.name is some ? record.fnNode.name : "anon"
             const generatedRouteName = isServer
                 ? (hasExplicitRoute ? record.fnNode.route : generateRouteName(fnNameForRoute))
-                : null
+                : not
 
-            const serverEntrySpan = isServer ? record.fnNode.span : null
+            const serverEntrySpan = isServer ? record.fnNode.span : not
             const isSSE = isServer && record.fnNode.isGenerator == true
 
-            const explicitMethod = isSSE ? "GET" : (record.fnNode.method != null ? record.fnNode.method : null)
+            const explicitMethod = isSSE ? "GET" : (record.fnNode.method is some ? record.fnNode.method : not)
 
             functions.set(fnNodeId, {
                 functionNodeId: fnNodeId,
                 boundary: boundary,
                 escalationReasons: deduped,
                 generatedRouteName: generatedRouteName,
-                explicitRoute: hasExplicitRoute ? record.fnNode.route : null,
+                explicitRoute: hasExplicitRoute ? record.fnNode.route : not,
                 explicitMethod: explicitMethod,
                 isSSE: isSSE,
                 serverEntrySpan: serverEntrySpan,
