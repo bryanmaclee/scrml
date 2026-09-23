@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `5198057e` — wrap(s429): the engine-in-each HIGH is ruling-gated — third question to bryan — **LOCAL-ONLY**
 - `45749bb1` — wrap(s425): four adopter reports triaged by execution, and the two best findings were corrections to my own work (#1028) — **pushed**
 - `92f40bd4` — wrap(s427): five merged and one held — the held fix's own review found it compiling a const reassignment into a dead page (#1023) — **pushed**
 - `8fbeaf00` — wrap(s426-addendum2): door 3 is built and HELD, and the reviewer's best finding was already in my own output (#1015) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `27a0bb17` — wrap(s423): the detector the tier exists for fires for the first time, after four wrong fix directions and four adversarial passes (#998) — **pushed**
 - `344dd9fe` — wrap(s422): three rulings that redefine what a binding is, and five gates that each caught something real (#997) — **pushed**
 - `c6bf6138` — wrap(s421): correct an inherited worktree claim before it reached main — **pushed**
-- `923fc144` — wrap(s420): the floor drained 8 to 0, and then convicted my own fix of the class it was fixing (#980) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
