@@ -5664,6 +5664,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           const value = _parseLiftAttrValue(attrSpan);
           if (value === null) return null;
           attrs.push({ name: attrName, value, span: attrSpan });
+        } else if (tag === "each" && attrName === "as") {
+          // §17.7.3 / §59.8 — the `<each … as NAME>` / `as (K, V)` binding is a
+          // bareword clause, not a boolean attribute. The structural each-block
+          // (buildBlock) captures it into `asName` / `asNames`; lifted markup
+          // never reaches that path, so capture it HERE as the `as` attribute's
+          // value. Pre-fix the name landed as a SEPARATE boolean attribute
+          // (`c`), `as` stayed valueless, the lifted each lost its alias and the
+          // emitted body read an unbound `c` (ReferenceError — the whole page
+          // script died at init), and `as (k, v)` bailed this tag parse to the
+          // string fallback (a literal `<each>` element). The value carries NO
+          // exprNode on purpose: the alias is a BINDING, not a read.
+          attrs.push({ name: attrName, value: _parseLiftEachAsClause(attrSpan), span: attrSpan });
         } else {
           // Boolean attribute (no =)
           attrs.push({ name: attrName, value: { kind: "absent", span: attrSpan }, span: attrSpan });
@@ -5803,6 +5815,39 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
     // EOF without closer on non-component — malformed
     return null;
+  }
+
+  /**
+   * Parse the binding after a lifted `<each>`'s `as` keyword. Returns
+   *   - `{kind:"variable-ref", name}` for `as NAME`,
+   *   - `{kind:"expr", raw:"(K, V)", refs:[]}` for the §59.8 two-name form,
+   *   - `{kind:"absent"}` when no well-formed binding follows (nothing is
+   *     consumed, so the tokens parse exactly as they did before).
+   * A bareword directly followed by `=` is the NEXT attribute (`as key=…`),
+   * not a binding.
+   */
+  function _parseLiftEachAsClause(attrSpan) {
+    const isName = (tok) => tok && (tok.kind === "IDENT" || tok.kind === "KEYWORD") && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(tok.text);
+    const t = peek();
+    if (isName(t) && !(peek(1)?.kind === "PUNCT" && (peek(1).text === "=" || peek(1).text === ":" || peek(1).text === "-"))) {
+      consume();
+      return { kind: "variable-ref", name: t.text, span: tokenSpan(t, filePath) };
+    }
+    if (
+      t.kind === "PUNCT" && t.text === "(" &&
+      isName(peek(1)) &&
+      peek(2)?.kind === "PUNCT" && peek(2).text === "," &&
+      isName(peek(3)) &&
+      peek(4)?.kind === "PUNCT" && peek(4).text === ")"
+    ) {
+      consume();
+      const k = consume();
+      consume();
+      const v = consume();
+      consume();
+      return { kind: "expr", raw: `(${k.text}, ${v.text})`, refs: [], span: tokenSpan(t, filePath) };
+    }
+    return { kind: "absent", span: attrSpan };
   }
 
   /** Collect one attribute name token (possibly compound like `bind:value`, `class:active`, `aria-label`, `data-id`). */

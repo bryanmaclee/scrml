@@ -3719,6 +3719,20 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     else if (n === "as") asName = eachAttrRawText(attr.value);
   }
 
+  // §59.8 — `as (k, v)`: parseLiftTag captures the two-name destructure as the
+  // `as` value's raw `(k, v)`. Mirror buildBlock: `asNames` carries both names
+  // and `asName` stays null (the iterated value is the `{ key, value }` struct).
+  let asNames: [string, string] | null = null;
+  if (asName !== null) {
+    const tuple = /^\(\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*,\s*([A-Za-z_$][A-Za-z0-9_$]*)\s*\)$/.exec(asName);
+    if (tuple) {
+      asNames = [tuple[1], tuple[2]];
+      asName = null;
+    } else if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(asName)) {
+      asName = null;
+    }
+  }
+
   let iterShape: "in" | "of" | null = null;
   if (inExprRaw && !ofExprRaw) iterShape = "in";
   else if (ofExprRaw && !inExprRaw) iterShape = "of";
@@ -3739,9 +3753,9 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     }
     const childTag = child.kind === "markup" ? String(child.tag ?? child.name ?? "") : "";
     if (childTag === "empty" && emptyChild === null) {
-      emptyChild = child;
+      emptyChild = promoteNestedMarkupEach(child);
     } else {
-      templateChildren.push(child);
+      templateChildren.push(promoteNestedMarkupEach(child));
     }
   }
 
@@ -3752,6 +3766,7 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     inExprRaw,
     ofExprRaw,
     asName,
+    asNames,
     keyExprRaw,
     bodyChildren: children,
     templateChildren,
@@ -3759,6 +3774,32 @@ export function eachBlockFromMarkupNode(markupNode: any): EachBlockAstNode | nul
     bodyRaw: "",
     span: markupNode.span ?? null,
   };
+}
+
+/**
+ * A generic markup `<each>` nested ANYWHERE inside a lifted `<each>`'s body
+ * (directly, or under an ordinary element: `<b><each in=c.kids as k>…`) must
+ * reach the per-item render as a structural `each-block` — that is the only
+ * shape its nested-each branch lowers (iteration source resolved against the
+ * OUTER row, inner alias bound). Left as generic markup it rendered a literal
+ * `<each>` element whose body read the unbound inner alias. Returns the node
+ * itself when nothing below it changes; otherwise a shallow copy with promoted
+ * children (the parsed AST is not mutated). Logic children are not descended:
+ * a `${ … lift … }` inside the body is its own lift, lowered on its own path.
+ */
+function promoteNestedMarkupEach(node: any): any {
+  if (!node || typeof node !== "object" || node.kind !== "markup") return node;
+  if (String(node.tag ?? node.name ?? "") === "each") {
+    return eachBlockFromMarkupNode(node) ?? node;
+  }
+  if (!Array.isArray(node.children) || node.children.length === 0) return node;
+  let changed = false;
+  const children = node.children.map((c: any) => {
+    const p = promoteNestedMarkupEach(c);
+    if (p !== c) changed = true;
+    return p;
+  });
+  return changed ? { ...node, children } : node;
 }
 
 /**
