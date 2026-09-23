@@ -286,6 +286,9 @@ interface OnExprResolution {
    *  fires the callback with the WHOLE cell value, so the dispatch must
    *  apply this sub-path to reach the enum-variant discriminant. */
   subscribeSubPath: string;
+  /** S429 — the scrutinee is the enclosing engine state-child's payload
+   *  binding (`<On(x)>` … `on=x`), resolved against the engine cell. */
+  engineArmPayload?: boolean;
 }
 
 /**
@@ -484,6 +487,32 @@ function resolveOnExpr(
       });
     } catch (_e) {
       // Leave loweredAccessor = innerExpr (verbatim fallback).
+    }
+    // S429 — `on=x` where `x` is the enclosing ENGINE state-child's payload
+    // binding (`<On(x)>`). The dispatcher effect is at file scope, where `x` is
+    // unbound; bind the referenced payload locals from the engine cell around
+    // the accessor. The effect's read of the engine cell also makes a payload
+    // change re-dispatch.
+    const _payloadStamp = engineArmPayloadStamp(matchBlock);
+    if (_payloadStamp) {
+      // The bare-binding form (`on=x`) subscribes to the engine cell with a
+      // `.data[field]` sub-path (Shape A) — a payload change re-dispatches, and
+      // no effect runtime is required. A unit / other variant yields undefined,
+      // and the mount only exists inside this state-child anyway.
+      const bare = _payloadStamp.bindings.find((b) => b.local === innerExpr);
+      if (bare) {
+        return {
+          variantExprAccessor: engineArmPayloadReadJs(_payloadStamp, bare.field),
+          variantSubscribeName: _payloadStamp.cellName,
+          subscribeSubPath: `?.data?.[${JSON.stringify(bare.field)}]`,
+          engineArmPayload: true,
+        };
+      }
+      const used = _payloadStamp.bindings.filter((b) => referencesFreeIdent(innerExpr, b.local));
+      if (used.length > 0) {
+        loweredAccessor = `(function(${used.map((b) => b.local).join(", ")}) { return (${loweredAccessor}); })(` +
+          `${used.map((b) => engineArmPayloadReadJs(_payloadStamp, b.field)).join(", ")})`;
+      }
     }
     return {
       variantExprAccessor: loweredAccessor,
@@ -789,8 +818,13 @@ function buildMatchArms(
   // on=, or an unresolved complex expression — those shapes don't carry a live
   // variant payload to iterate, so no stamp).
   const _armCellResolution = resolveOnExpr(matchBlock, fileAST);
+  // S429 — an `on=<engine payload binding>` scrutinee subscribes to the ENGINE
+  // cell with a `.data[field]` sub-path; that cell does not carry THIS match's
+  // variant payload at its root, so it is not an arm-payload source (and
+  // buildMatchArms may run before or after the engine stamp — excluding it keeps
+  // the result order-independent, identical to the Shape-B resolution).
   const _armCellName: string | null =
-    _armCellResolution && _armCellResolution.variantSubscribeName
+    _armCellResolution && _armCellResolution.variantSubscribeName && !_armCellResolution.engineArmPayload
       ? _armCellResolution.variantSubscribeName
       : null;
 
@@ -1203,6 +1237,114 @@ export function emitMatchMountHtml(
  *   ];
  *   ```
  */
+/**
+ * S429 — re-dispatch a block `<match>` that sits in an ENGINE STATE-CHILD body
+ * on every entry into that state-child.
+ *
+ * The match's dispatcher resolves its mount per call and short-circuits on an
+ * unchanged value by caching it ON THE MOUNT ELEMENT. The engine dispatcher
+ * writes the state-child's HTML with `innerHTML`, so every entry creates a
+ * FRESH, EMPTY mount — and nothing dispatched into it until the scrutinee next
+ * changed. Leaving the state-child and re-entering it rendered the match blank
+ * (and the new-mount cache is empty, so a re-dispatch here always renders).
+ *
+ * Returns the JS statement the engine arm's post-mount block runs, or null when
+ * the match emits no module-scope dispatcher (no non-empty arm, no resolvable
+ * `on=`) — mirrors the skip conditions of `emitMatchBodyRenderForFile`.
+ *
+ * The call is gated on a `var` readiness flag that `emitMatchBodyRenderForFile`
+ * emits AFTER the match's dispatcher block: the engine's initial dispatch can run
+ * before that block (eager chunk loading), where the dispatcher's module-scope
+ * `let` dispose handle is still in its TDZ. Skipping is correct there — the
+ * match's own init-fire renders the freshly-mounted arm when its block runs.
+ * `typeof` keeps the guard safe even if the two blocks ever land in different
+ * scopes (then it degrades to the pre-S429 behaviour, never to a throw).
+ */
+/**
+ * S429 — the enclosing engine state-child's payload bindings, stamped on a
+ * match-block by emit-engine's `buildEngineArms` (`<On(x)>` → `{ local: "x",
+ * field: "x" }`). The match's render / wire fns and its dispatcher live at FILE
+ * scope, where the state-child's binding does not exist, so a nested arm body
+ * reading `${x}` (or `on=x`) threw `ReferenceError: x is not defined`. The value
+ * is read from the engine cell instead — the same resolution the
+ * `<each in=binding>` case uses (emit-each.ts `armPayloadBinding`).
+ */
+interface EngineArmPayloadStamp {
+  cellName: string;
+  variantTag: string;
+  bindings: Array<{ local: string; field: string }>;
+}
+
+function engineArmPayloadStamp(matchBlock: MatchBlockAstNode): EngineArmPayloadStamp | null {
+  const s = (matchBlock as any).__scrmlEngineArmPayload;
+  if (!s || typeof s !== "object" || !Array.isArray(s.bindings) || s.bindings.length === 0) return null;
+  return s as EngineArmPayloadStamp;
+}
+
+/** JS expression reading one engine payload field (undefined when the engine
+ *  is not currently in `variantTag`). */
+function engineArmPayloadReadJs(stamp: EngineArmPayloadStamp, field: string): string {
+  return `(function(){ var _e = _scrml_reactive_get(${JSON.stringify(stamp.cellName)}); ` +
+    `return (_e && typeof _e === "object" && _e.variant === ${JSON.stringify(stamp.variantTag)} && _e.data) ` +
+    `? _e.data[${JSON.stringify(field)}] : undefined; })()`;
+}
+
+/** Word-boundary reference to `name` as a free identifier (not `@name`, not `.name`). */
+function referencesFreeIdent(text: string, name: string): boolean {
+  const esc = name.replace(/[$]/g, "\\$");
+  return new RegExp(`(^|[^A-Za-z0-9_$@.])${esc}(?![A-Za-z0-9_$])`).test(text);
+}
+
+/**
+ * Declare the enclosing state-child's payload locals at the top of each arm's
+ * render + wire fn (skipping any the arm's own payload bindings shadow).
+ * The fn heads are the fixed `function <name>(<params>) {` shape
+ * emit-variant-guard emits; a head that is not found is left untouched.
+ */
+function injectEngineArmPayloadLocals(
+  js: string,
+  idPrefix: string,
+  arms: import("./emit-variant-guard.ts").VariantArm[],
+  stamp: EngineArmPayloadStamp,
+): string {
+  let outJs = js;
+  for (const arm of arms) {
+    const own = new Set(arm.payloadBindings ?? []);
+    const decls = stamp.bindings
+      .filter((b) => !own.has(b.local))
+      .map((b) => `const ${b.local} = ${engineArmPayloadReadJs(stamp, b.field)};`);
+    if (decls.length === 0) continue;
+    for (const kind of ["render", "wire"]) {
+      const head = `function _scrml_match_${idPrefix}_${kind}_${arm.tag}(`;
+      const at = outJs.indexOf(head);
+      if (at < 0) continue;
+      const close = outJs.indexOf(")", at + head.length);
+      if (close < 0) continue;
+      const brace = outJs.indexOf("{", close);
+      if (brace < 0 || outJs.slice(close + 1, brace).trim() !== "") continue;
+      outJs = outJs.slice(0, brace + 1) + " " + decls.join(" ") + outJs.slice(brace + 1);
+    }
+  }
+  return outJs;
+}
+
+export function engineArmMatchRedispatchJs(
+  matchBlock: MatchBlockAstNode,
+  fileAST: any,
+): string | null {
+  const arms = buildMatchArms(matchBlock, fileAST);
+  if (!arms || arms.length === 0) return null;
+  if (arms.every((a) => !a.body || a.body.length === 0)) return null;
+  const onResolved = resolveOnExpr(matchBlock, fileAST);
+  if (!onResolved) return null;
+  const idPrefix = `match_${nsId(matchBlock.id)}`;
+  (matchBlock as any).__scrmlEngineArmRedispatch = true;
+  const live = `__scrml_match_${idPrefix}_live`;
+  // `_${renderFnPrefix}_${idPrefix}_dispatch` with renderFnPrefix "_scrml_match"
+  // (emit-variant-guard.ts dispatchFnName).
+  return `if (typeof ${live} !== "undefined" && ${live}) __scrml_match_${idPrefix}_dispatch(${onResolved.variantExprAccessor});`;
+}
+
 export function emitMatchBodyRenderForFile(
   fileAST: any,
   ctx: CompileContext,
@@ -1276,8 +1418,21 @@ export function emitMatchBodyRenderForFile(
         ...(rowScopeParams.length > 0 ? { rowScopeParams } : {}),
       },
     );
-    if (out.renderFunctionsJs) renderFunctions.push(out.renderFunctionsJs);
+    // S429 — engine state-child payload locals for the arm fns (see
+    // `EngineArmPayloadStamp`). Only a match stamped by buildEngineArms.
+    const payloadStamp = isInEach ? null : engineArmPayloadStamp(matchBlock);
+    if (out.renderFunctionsJs) {
+      renderFunctions.push(payloadStamp
+        ? injectEngineArmPayloadLocals(out.renderFunctionsJs, idPrefix, arms, payloadStamp)
+        : out.renderFunctionsJs);
+    }
     if (out.dispatcherJs) dispatchers.push(out.dispatcherJs);
+    // S429 — readiness flag for the engine-arm re-entry re-dispatch
+    // (`engineArmMatchRedispatchJs`). Emitted only for a match that sits in an
+    // engine state-child body, so no other match's output changes.
+    if (out.dispatcherJs && !isInEach && (matchBlock as any).__scrmlEngineArmRedispatch === true) {
+      dispatchers.push(`var __scrml_match_${idPrefix}_live = true;`);
+    }
   }
 
   return { renderFunctions, dispatchers };

@@ -2220,6 +2220,56 @@ export function emitEngineSubstrate(fileAST: any, errors?: import("./errors.ts")
 // from `emitEngineSubstrate` is preserved either way.
 
 /**
+ * S429 — the block `<match>` nodes that render DIRECTLY in an engine
+ * state-child body (at any element depth), each lowered to the re-dispatch
+ * statement the arm's post-mount block runs (`engineArmMatchRedispatchJs`).
+ *
+ * Deliberately NOT descended:
+ *   - a nested `engine-decl` — its own state-children are its own arms; its
+ *     matches re-dispatch from ITS dispatcher.
+ *   - an `each-block` — a match in a row is item-scoped; the each renderer
+ *     dispatches it per row (`_scrml_remount_each` runs on arm entry).
+ *   - a `match-block`'s arms — a match inside a DISPATCHED MATCH ARM emits no
+ *     dispatcher at all today (g-nested-block-match-in-dispatched-arm-silently-
+ *     drops, ruling-gated); it is not this function's to wire.
+ */
+function collectEngineArmMatchRedispatches(
+  body: unknown[],
+  fileAST: any,
+  payload: { cellName: string; variantTag: string; bindings: Array<{ local: string; field: string }> } | null,
+): string[] {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { engineArmMatchRedispatchJs } = require("./emit-match.ts") as {
+    engineArmMatchRedispatchJs: typeof import("./emit-match.ts").engineArmMatchRedispatchJs;
+  };
+  const out: string[] = [];
+  const seen = new WeakSet<object>();
+  function walk(node: any): void {
+    if (!node || typeof node !== "object") return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) { for (const n of node) walk(n); return; }
+    if (node.kind === "engine-decl" || node.kind === "each-block") return;
+    if (node.kind === "match-block") {
+      // Stamp the state-child's payload bindings FIRST — resolveOnExpr (called
+      // below and again by emitMatchBodyRenderForFile) reads it to bind an
+      // `on=x` scrutinee, and the match's arm fns read it for `${x}` bodies.
+      if (payload && payload.bindings.length > 0) node.__scrmlEngineArmPayload = payload;
+      if (fileAST) {
+        const js = engineArmMatchRedispatchJs(node, fileAST);
+        if (js) out.push(js);
+      }
+      return;
+    }
+    for (const key of ["children", "body", "bodyChildren", "nodes"]) {
+      if (Array.isArray(node[key])) walk(node[key]);
+    }
+  }
+  walk(body);
+  return out;
+}
+
+/**
  * Build VariantArm[] from an engine-decl's stateChildren + bodyChildren.
  *
  * `stateChildren` comes from PASS 11/B15's structural parser
@@ -2625,6 +2675,34 @@ function buildEngineArms(
         lines.push(`}`);
         postMountJs = lines.join("\n");
       }
+    }
+    // S429 — a block `<match>` in this state-child's body gets a FRESH, empty
+    // mount on every entry (the dispatcher writes the arm with innerHTML), and
+    // the match only dispatches when its scrutinee changes — so leaving and
+    // re-entering the state-child rendered it blank. Re-dispatch each such match
+    // after the arm mounts. See `engineArmMatchRedispatchJs` (emit-match.ts).
+    const redispatch = collectEngineArmMatchRedispatches(
+      body,
+      fileAST,
+      meta.varName && payloadBindings.length > 0
+        ? {
+            cellName: meta.varName,
+            variantTag: tag,
+            bindings: payloadBindings.map((local: string, i: number) => ({
+              local,
+              field: (Array.isArray(payloadFieldNames) && payloadFieldNames.length === payloadBindings.length && payloadFieldNames[i])
+                ? payloadFieldNames[i]
+                : local,
+            })),
+          }
+        : null,
+    );
+    if (redispatch.length > 0) {
+      const lines = [
+        `// S429 — re-dispatch block <match> mounts inside state-child ${tag} on entry`,
+        ...redispatch,
+      ];
+      postMountJs = postMountJs ? `${postMountJs}\n${lines.join("\n")}` : lines.join("\n");
     }
     // g-each-over-arm-payload-binding-unbound (2026-06-17) — stamp any
     // `<each in=BINDING>` in THIS state-child's render body whose iterable is one

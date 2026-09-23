@@ -37,7 +37,7 @@
  */
 
 import type { Span, FileAST } from "../types/ast.ts";
-import { walkFileAst } from "./ast-walk.ts";
+import { walkFileAst, walkNode } from "./ast-walk.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape — matches CEError shape used by the existing component
@@ -157,7 +157,51 @@ export function runPostCEInvariantFile(file: {
   const suppressed = new Set<object>();
   collectUnrecognizedMatchBlocks(ast, errors, suppressed, file.filePath);
 
-  walkFileAst(ast, (node) => {
+  // S429 — engine state-child bodies. `walkFileAst` (and NR) never descend an
+  // `engine-decl`'s `bodyChildren`, so an unresolved uppercase tag written INSIDE
+  // a state-child body (`<On><Foo>…</></>`) reached codegen as a phantom
+  // `<foo>` element at exit 0 — the exact silent window this pass exists to
+  // close. Until S429 the engine state-child parser also mis-read such a tag as
+  // a SIBLING state-child when it sat inside a lowercase element and closed with
+  // `</>` (a false E-ENGINE-STATE-CHILD-MISSING); fixing that parse must not
+  // turn the shape silent, so the invariant now covers these bodies too.
+  // The state-child WRAPPERS (the direct uppercase children of the engine body)
+  // are variants, not component references, and are skipped; their contents are
+  // walked with the same visitor, and a nested engine found there is handled the
+  // same way. (Match-block arm bodies stay out of scope here exactly as they are
+  // at file level — `walkNode` does not descend a `match-block`.)
+  const engineQueue: object[] = [];
+  const engineSeen = new Set<object>();
+
+  const visitor = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if ((node as { kind?: string }).kind === "engine-decl" && !engineSeen.has(node)) {
+      engineSeen.add(node);
+      engineQueue.push(node);
+    }
+    checkResidual(node);
+  };
+
+  walkFileAst(ast, visitor);
+  while (engineQueue.length > 0) {
+    const decl = engineQueue.shift() as { bodyChildren?: unknown[] };
+    for (const child of decl.bodyChildren ?? []) {
+      const c = child as { kind?: string; tag?: string; children?: unknown[] } | null;
+      if (!c || typeof c !== "object") continue;
+      const t = c.tag ?? "";
+      const isStateChildWrapper =
+        c.kind === "markup" && t.length > 0 && t.charCodeAt(0) >= 65 && t.charCodeAt(0) <= 90;
+      if (isStateChildWrapper) {
+        for (const inner of c.children ?? []) walkNode(inner, visitor);
+      } else {
+        walkNode(c, visitor);
+      }
+    }
+  }
+
+  return errors;
+
+  function checkResidual(node: unknown): void {
     if (!node || typeof node !== "object") return;
     const n = node as {
       kind?: string;
@@ -220,9 +264,7 @@ export function runPostCEInvariantFile(file: {
       span,
       severity: "error",
     });
-  });
-
-  return errors;
+  }
 }
 
 /**
