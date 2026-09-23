@@ -32,7 +32,7 @@ if (!globalThis.document) GlobalRegistrator.register();
 
 const tmpRoot = resolve(tmpdir(), "scrml-lift-body-lowering");
 
-function compileAndMount(source, baseName) {
+function compileAndMount(source, baseName, { expectBootError = false } = {}) {
   const uniq = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const dir = resolve(tmpRoot, `case-${uniq}`);
   mkdirSync(dir, { recursive: true });
@@ -65,6 +65,7 @@ function compileAndMount(source, baseName) {
   } finally {
     console.error = origError;
   }
+  if (expectBootError) return { initError };
   expect(initError).toBeNull();
   expect(consoleErrors).toEqual([]);
   const later = [];
@@ -276,4 +277,123 @@ describe("<each> row host (block-level let/const are E-EACH-BODY-DECL-UNSUPPORTE
     expect([...document.querySelectorAll("ul.g")].map((u) => [...u.querySelectorAll("li")].map((l) => l.textContent.trim()))).toEqual([["1", "2", "7"], ["3"]]);
     app.done();
   });
+});
+
+// ---------------------------------------------------------------------------
+// Round 2 (adversarial review round 1 of s427). Repros:
+// docs/changes/s427-lift-body-lowering/review-round1/.
+// ---------------------------------------------------------------------------
+
+const ul = (block, extra = "") => `<program>\n${CELLS}${extra}<ul>\n    \${\n${block}\n    }\n</ul>\n</program>\n`;
+
+describe("round 2 M2 — a nested block's own declaration does not hide the loop's outer write", () => {
+  for (const [label, body] of [
+    ["r6 — nested `if` with its own `let n`", `            n = n + 1
+            if (it.name == "zz") { let n = 99 }`],
+    ["nested `for` with its own `let n`", `            n = n + 1
+            for (let q of [1]) { let n = 50 }`],
+    ["`else` branch with its own `let n`", `            n = n + 1
+            if (it.id > 99) { let z = 1 } else { let n = 9 }`],
+  ]) {
+    test(`${label}: each row gets its ordinal and the counter restarts per render (was \`2:a,2:b\` keyed)`, () => {
+      const app = compileAndMount(ul(`        let n = 0
+        for (let it of @items) {
+${body}
+            lift <li class="row">\${n}:\${it.name}</li>
+        }`), "m2");
+      counterAssertions(app);
+      app.done();
+    });
+  }
+});
+
+describe("round 2 L1 — a member write to an object declared outside the loop", () => {
+  test("r7 — `acc.n = acc.n + 1`: each row gets its ordinal (keyed showed the final count)", () => {
+    const app = compileAndMount(ul(`        const acc = { n: 0 }
+        for (let it of @items) { acc.n = acc.n + 1
+            lift <li class="row">\${acc.n}:\${it.name}</li> }`), "l1");
+    counterAssertions(app);
+    app.done();
+  });
+});
+
+describe("round 2 M1 — a row-local name equal to a block-level name keeps the list keyed", () => {
+  test("r5 — rows keep their element identity across push and reverse, and follow the cells", () => {
+    const app = compileAndMount(ul(`        const name = @user
+        lift <h4>\${name}</h4>
+        for (let item of @items) {
+            const name = item.name
+            lift <li class="row">\${name}</li>
+        }`, `<user> = "U"\n`), "m1");
+    expect(rows()).toEqual(["a", "b"]);
+    const first = document.querySelector("li.row");
+    app.get("items").push({ id: 3, name: "c" });
+    expect(rows()).toEqual(["a", "b", "c"]);
+    expect(document.querySelector("li.row")).toBe(first);
+    app.set("items", [...app.get("items")].reverse());
+    expect(rows()).toEqual(["c", "b", "a"]);
+    expect([...document.querySelectorAll("li.row")].includes(first)).toBe(true);
+    app.set("user", "V");
+    expect(document.querySelector("h4").textContent.trim()).toBe("V");
+    app.done();
+  });
+});
+
+describe("round 2 M3 — a loop lowered plain re-renders on an in-place mutation (push), not only on reassignment", () => {
+  // The round-1 review reported the demoted loop going stale on `push`. That did NOT
+  // reproduce with a program-produced array: every compiled `@x = …` stores
+  // `_scrml_deep_reactive(…)`, whose mutations notify the group's `_scrml_effect`
+  // exactly as they notify the keyed path. The stale reading came from the review
+  // harness writing a RAW array through `_scrml_reactive_set` (bypassing
+  // `_scrml_deep_reactive`) and then pushing onto it — the keyed path is equally
+  // stale on such an array. These pin the behaviour on the arrays a program makes.
+  const pushZ = (app) => app.get("items").push({ id: 3, name: "z" });
+  test("top level counter", () => {
+    const app = compileAndMount(`<program>\n${CELLS}<ul>\n    ${COUNTER}\n</ul>\n</program>\n`, "m3-top");
+    pushZ(app);
+    expect(rows()).toEqual(["1:a", "2:b", "3:z"]);
+    app.done();
+  });
+  test("if=-mounted counter", () => {
+    const app = compileAndMount(`<program>\n${CELLS}<div if=@show><ul>\n    ${COUNTER}\n</ul></div>\n</program>\n`, "m3-if");
+    pushZ(app);
+    expect(rows()).toEqual(["1:a", "2:b", "3:z"]);
+    app.done();
+  });
+  test("match-arm counter", () => {
+    const app = compileAndMount(`<program>\n${CELLS}\${ type Ph:enum = { A, B } }
+<phase>: Ph = .A
+<match for=Ph on=@phase>
+    <A><ul>${COUNTER}</ul></>
+    <B><p class="b">b</p></>
+</>
+</program>
+`, "m3-arm");
+    pushZ(app);
+    expect(rows()).toEqual(["1:a", "2:b", "3:z"]);
+    app.done();
+  });
+  test("destructure (plain via the mixed-hoist guard)", () => {
+    const app = compileAndMount(`<program>\n${CELLS}<ul>\n    ${DESTRUCTURE}\n</ul>\n</program>\n`, "m3-destructure");
+    pushZ(app);
+    expect(rows()).toEqual(["P-a!", "P-b!", "P-z!"]);
+    app.done();
+  });
+});
+
+describe("round 2 H1 — a keywordless write to a `const` in a nested block is LOUD at boot, never a silent shadow", () => {
+  for (const [label, block] of [
+    ["in the loop body", `        const t = 1
+        for (let it of @items) { t = 5
+            lift <li class="row">\${t}:\${it.name}</li> }`],
+    ["in an `if` beside the loop", `        const t = 1
+        if (@items.length > 0) { t = 2 }
+        for (let it of @items) { lift <li class="row">\${t}\${it.name}</li> }`],
+  ]) {
+    test(label, () => {
+      const { initError } = compileAndMount(ul(block), "h1-nested", { expectBootError: true });
+      expect(initError).not.toBeNull();
+      expect(String(initError)).toMatch(/readonly|read-only|constant|const/i);
+    });
+  }
 });

@@ -44,6 +44,7 @@ import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.t
 import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
 import { CGError } from "./errors.ts";
+import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
 import { parseExprToNode, splitTopLevelCommas } from "../expression-parser.ts";
 import { resolveLogLoc, resolveSpanLineCol } from "./log-loc.ts";
@@ -4104,6 +4105,9 @@ function emitLambda(node: LambdaExpr, ctx: EmitExprContext): string {
     const nm = (p as { name?: string }).name;
     if (typeof nm === "string" && nm) _childDeclared.add(nm);
   }
+  // s427 round 2 (H1): a lambda body is a function scope with a set of its own, as
+  // it always had — not a lift scope (see declared-name-marks.ts).
+  clearLiftScope(_childDeclared);
   const paramCtx: EmitExprContext = { ...ctx, declaredNames: _childDeclared, peerAwaitable: false };
   const bodyCtx: EmitExprContext = { ...ctx, declaredNames: _childDeclared, peerAwaitable: node.isAsync };
 

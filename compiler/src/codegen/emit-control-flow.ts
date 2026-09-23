@@ -1,4 +1,5 @@
 import { genVar } from "./var-counter.ts";
+import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
 import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed } from "./emit-lift.js";
@@ -713,7 +714,7 @@ function _emitForStmtInner(
     // every statement was emitted with no set, so `let m = 0; m = m + x` in the body
     // lowered to a duplicate `const m` and an assignment to an enclosing `let` to a
     // TDZ `const`.
-    const bodyNames = new Set<string>(opts?.declaredNames ?? []);
+    const bodyNames = liftScopeDeclaredNames(opts?.declaredNames);
 
     if (hasFragmentedLiftBody(body)) {
       // Pass continueBehavior:"return" so continue-stmts in pre-statements emit `return;`

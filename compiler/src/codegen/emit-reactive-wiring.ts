@@ -4,6 +4,7 @@ import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { emitLogicNode, nodeListContainsTildeRef, setStructuralDeclNamesForFile } from "./emit-logic.js";
 import { pushLiftNonKeyed, popLiftNonKeyed } from "./emit-lift.js";
+import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
 import {
   collectTopLevelLogicStatements,
@@ -213,32 +214,204 @@ function _topLevelDeclaredNames(js: string): Set<string> | null {
   return out;
 }
 
-/** Every identifier REFERENCE in `js` (member `.property` and non-computed object
- *  keys excluded). Over-collection (locals of the code itself) is harmless — the
- *  result is only intersected with a set of names declared elsewhere. */
-function _referencedNames(js: string): Set<string> | null {
+/**
+ * s427 round 2 (M1) — the FREE identifier references of `js`: every identifier
+ * read or written that no declaration inside `js` itself binds at that point.
+ *
+ * Round 1 collected EVERY identifier and intersected it with the group's
+ * top-level declarations, with no scope analysis — so a row-local
+ * `const name = item.name` inside the keyed factory, sharing a name with the
+ * block's `const name = @user`, read as a reference to the block-level binding
+ * and demoted a working keyed list to a plain loop (row identity lost on push /
+ * reverse). A name bound by a nearer declaration — a factory-local `let`/`const`,
+ * a function or arrow parameter, a nested block, a nested function, a catch
+ * binding, a for-loop head — is not a reference to the block-level one.
+ *
+ * Standard ESTree lexical scoping: `var` and function declarations hoist to the
+ * nearest function scope, `let`/`const`/`class` to the nearest block; every
+ * binding of a scope is visible throughout that scope (hoisting / TDZ), so
+ * declarations are collected before the scope's references are resolved.
+ */
+function _freeNames(js: string): Set<string> | null {
   const ast = _parseScript(js);
   if (!ast) return null;
-  const out = new Set<string>();
-  const visit = (n: any): void => {
+  const free = new Set<string>();
+  type Scope = { names: Set<string>; parent: Scope | null };
+
+  const patternNames = (p: any, out: Set<string>): void => {
+    if (!p) return;
+    switch (p.type) {
+      case "Identifier": out.add(p.name); return;
+      case "ObjectPattern": for (const pr of p.properties) patternNames(pr.type === "RestElement" ? pr.argument : pr.value, out); return;
+      case "ArrayPattern": for (const el of p.elements) patternNames(el, out); return;
+      case "RestElement": patternNames(p.argument, out); return;
+      case "AssignmentPattern": patternNames(p.left, out); return;
+    }
+  };
+  /** `var` declarations and (sloppy-mode) nested function declarations of a function
+   *  body, found through nested blocks but not nested functions. */
+  const hoistedVarNames = (n: any, out: Set<string>): void => {
     if (!n || typeof n !== "object") return;
-    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
+    if (Array.isArray(n)) { for (const c of n) hoistedVarNames(c, out); return; }
     if (typeof n.type !== "string") return;
-    if (n.type === "Identifier") { out.add(n.name); return; }
-    if (n.type === "MemberExpression") { visit(n.object); if (n.computed) visit(n.property); return; }
-    if (n.type === "Property" || n.type === "MethodDefinition" || n.type === "PropertyDefinition") {
-      if (n.computed) visit(n.key);
-      visit(n.value);
-      return;
+    if (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression" || n.type === "ClassDeclaration" || n.type === "ClassExpression") return;
+    if (n.type === "VariableDeclaration" && n.kind === "var") for (const d of n.declarations) patternNames(d.id, out);
+    for (const k of Object.keys(n)) {
+      if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      const v = n[k];
+      if (v && typeof v === "object") hoistedVarNames(v, out);
+    }
+  };
+  /** Block-scoped declarations DIRECTLY in a statement list. */
+  const lexicalNames = (stmts: any[], out: Set<string>): void => {
+    for (const st of stmts ?? []) {
+      if (!st) continue;
+      if (st.type === "VariableDeclaration" && st.kind !== "var") for (const d of st.declarations) patternNames(d.id, out);
+      else if ((st.type === "FunctionDeclaration" || st.type === "ClassDeclaration") && st.id) out.add(st.id.name);
+    }
+  };
+  const resolves = (name: string, s: Scope | null): boolean => {
+    for (let c = s; c; c = c.parent) if (c.names.has(name)) return true;
+    return false;
+  };
+  const ref = (name: string, s: Scope): void => { if (!resolves(name, s)) free.add(name); };
+
+  /** A binding pattern: its names are bound elsewhere; only defaults and computed
+   *  keys are references. */
+  const visitPattern = (p: any, s: Scope): void => {
+    if (!p) return;
+    switch (p.type) {
+      case "Identifier": return;
+      case "ObjectPattern":
+        for (const pr of p.properties) {
+          if (pr.type === "RestElement") visitPattern(pr.argument, s);
+          else { if (pr.computed) visit(pr.key, s); visitPattern(pr.value, s); }
+        }
+        return;
+      case "ArrayPattern": for (const el of p.elements) visitPattern(el, s); return;
+      case "RestElement": visitPattern(p.argument, s); return;
+      case "AssignmentPattern": visitPattern(p.left, s); visit(p.right, s); return;
+      default: visit(p, s); // a member-expression target in an assignment pattern
+    }
+  };
+  /** An assignment target: identifiers in it are REFERENCES (writes). */
+  const visitTarget = (p: any, s: Scope): void => {
+    if (!p) return;
+    switch (p.type) {
+      case "Identifier": ref(p.name, s); return;
+      case "ObjectPattern":
+        for (const pr of p.properties) {
+          if (pr.type === "RestElement") visitTarget(pr.argument, s);
+          else { if (pr.computed) visit(pr.key, s); visitTarget(pr.value, s); }
+        }
+        return;
+      case "ArrayPattern": for (const el of p.elements) visitTarget(el, s); return;
+      case "RestElement": visitTarget(p.argument, s); return;
+      case "AssignmentPattern": visitTarget(p.left, s); visit(p.right, s); return;
+      default: visit(p, s);
+    }
+  };
+  const blockScope = (stmts: any[], parent: Scope): Scope => {
+    const names = new Set<string>();
+    lexicalNames(stmts, names);
+    return { names, parent };
+  };
+  const visitFunction = (fn: any, s: Scope): void => {
+    const names = new Set<string>();
+    // A named function EXPRESSION binds its own name inside itself.
+    if (fn.type === "FunctionExpression" && fn.id) names.add(fn.id.name);
+    for (const p of fn.params) patternNames(p, names);
+    if (fn.type !== "ArrowFunctionExpression") names.add("arguments");
+    const fs: Scope = { names, parent: s };
+    for (const p of fn.params) visitPattern(p, fs);
+    if (fn.body && fn.body.type === "BlockStatement") {
+      hoistedVarNames(fn.body.body, names);
+      lexicalNames(fn.body.body, names);
+      for (const st of fn.body.body) visit(st, fs);
+    } else {
+      visit(fn.body, fs);
+    }
+  };
+  const visitClass = (c: any, s: Scope): void => {
+    const cs: Scope = { names: new Set(c.id ? [c.id.name] : []), parent: s };
+    if (c.superClass) visit(c.superClass, s);
+    for (const m of c.body.body) {
+      if (m.computed) visit(m.key, cs);
+      if (m.value) visit(m.value, cs);
+      if (m.type === "StaticBlock") { const bs = blockScope(m.body, cs); for (const st of m.body) visit(st, bs); }
+    }
+  };
+
+  const visit = (n: any, s: Scope): void => {
+    if (!n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) visit(c, s); return; }
+    if (typeof n.type !== "string") return;
+    switch (n.type) {
+      case "Identifier": ref(n.name, s); return;
+      case "MemberExpression": visit(n.object, s); if (n.computed) visit(n.property, s); return;
+      case "Property":
+        if (n.computed) visit(n.key, s);
+        visit(n.value, s);
+        return;
+      case "LabeledStatement": visit(n.body, s); return;
+      case "BreakStatement": case "ContinueStatement": return;
+      case "MetaProperty": return;
+      case "FunctionDeclaration": case "FunctionExpression": case "ArrowFunctionExpression":
+        visitFunction(n, s); return;
+      case "ClassDeclaration": case "ClassExpression": visitClass(n, s); return;
+      case "VariableDeclaration":
+        for (const d of n.declarations) { visitPattern(d.id, s); visit(d.init, s); }
+        return;
+      case "AssignmentExpression": visitTarget(n.left, s); visit(n.right, s); return;
+      case "UpdateExpression": visitTarget(n.argument, s); return;
+      case "BlockStatement": { const bs = blockScope(n.body, s); for (const st of n.body) visit(st, bs); return; }
+      case "StaticBlock": { const bs = blockScope(n.body, s); for (const st of n.body) visit(st, bs); return; }
+      case "ForStatement": {
+        const fs: Scope = { names: new Set(), parent: s };
+        if (n.init && n.init.type === "VariableDeclaration" && n.init.kind !== "var") for (const d of n.init.declarations) patternNames(d.id, fs.names);
+        visit(n.init, fs); visit(n.test, fs); visit(n.update, fs); visit(n.body, fs);
+        return;
+      }
+      case "ForInStatement": case "ForOfStatement": {
+        const fs: Scope = { names: new Set(), parent: s };
+        if (n.left.type === "VariableDeclaration") {
+          if (n.left.kind !== "var") for (const d of n.left.declarations) patternNames(d.id, fs.names);
+          for (const d of n.left.declarations) visitPattern(d.id, fs);
+        } else {
+          visitTarget(n.left, s);
+        }
+        visit(n.right, s);
+        visit(n.body, fs);
+        return;
+      }
+      case "SwitchStatement": {
+        visit(n.discriminant, s);
+        const all = n.cases.flatMap((c: any) => c.consequent);
+        const ss = blockScope(all, s);
+        for (const c of n.cases) { visit(c.test, ss); for (const st of c.consequent) visit(st, ss); }
+        return;
+      }
+      case "CatchClause": {
+        const cs: Scope = { names: new Set(), parent: s };
+        if (n.param) { patternNames(n.param, cs.names); visitPattern(n.param, cs); }
+        visit(n.body, cs);
+        return;
+      }
     }
     for (const k of Object.keys(n)) {
       if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
       const v = n[k];
-      if (v && typeof v === "object") visit(v);
+      if (v && typeof v === "object") visit(v, s);
     }
   };
-  visit(ast);
-  return out;
+
+  // The program's own top-level declarations bind within it too (a hoisted
+  // factory's `function _scrml_create_item_N(…)` is not a free reference).
+  const top: Scope = { names: new Set(), parent: null };
+  hoistedVarNames(ast.body, top.names);
+  lexicalNames(ast.body, top.names);
+  for (const st of ast.body) visit(st, top);
+  return free;
 }
 
 /**
@@ -263,7 +436,7 @@ function mixedHoistStrandsADeclaration(combinedCode: string): boolean {
   if (!hoistedSetup) return false;
   const declared = _topLevelDeclaredNames(remaining);
   if (!declared || declared.size === 0) return false;
-  const refs = _referencedNames(hoistedSetup);
+  const refs = _freeNames(hoistedSetup);
   if (!refs) return false;
   for (const n of refs) if (declared.has(n)) return true;
   return false;
@@ -945,7 +1118,8 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     // top-level `let`/`const` of a file-level `${}` block is in scope for every
     // later block); merged back below only when THIS group's declarations land at
     // chunk scope too.
-    const groupNames = new Set<string>(fileScopeNames);
+    const groupNames = liftScopeDeclaredNames(fileScopeNames);
+    seedOwnConsts(fileScopeNames, groupNames, true); // chunk scope, if the group lands there (declared-name-marks.ts)
     const groupEmitOpts = groupTildeCtx
       ? { ...emitOpts, tildeContext: groupTildeCtx, declaredNames: groupNames }
       : { ...emitOpts, declaredNames: groupNames };
@@ -989,10 +1163,12 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       }
       const _nestedBefore = nestedListRef ? nestedListRef.length : 0;
       const _errsBefore = errors.length;
+      const _seededBefore = seededConstFallbackCount();
       const code = emitLogicNode(stmt, groupEmitOpts);
       const _sideRange = {
         nested: [_nestedBefore, nestedListRef ? nestedListRef.length : 0] as [number, number],
         errs: [_errsBefore, errors.length] as [number, number],
+        seededConst: seededConstFallbackCount() !== _seededBefore,
       };
 
       // GH #237 (fail-open, S293) — `on mount { … }` calling a server function.
@@ -1158,8 +1334,39 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     // lift-free statements stay at chunk scope in the mount-deferred split too). An
     // outer-effect group keeps them effect-local, and a nested group's live in its
     // per-instance function.
-    if (!group.nested && (!(pid && groupHasLift) || !liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps))) {
+    const groupAtChunkScope = !group.nested && (!(pid && groupHasLift) || !liftGroupWrapsOuterEffect(combinedCode, groupHasReactiveDeps));
+    if (groupAtChunkScope) {
       for (const n of groupNames) fileScopeNames.add(n);
+      seedOwnConsts(groupNames, fileScopeNames);
+    } else if (stmtSideRanges.some((r: any) => r && r.seededConst)) {
+      // s427 round 2 (H1) — a keywordless write to an earlier group's `const` was
+      // lowered as base's duplicate `const` on the assumption that this group's code
+      // shares the chunk scope — where the duplicate fails the compile, as it did on
+      // base. It does not: it runs inside the group's effect / per-instance function,
+      // where that `const` would be a silent SHADOW that drops the write. The write
+      // is re-emitted as the assignment it is, and the compile fails with the same
+      // code base failed it with (E-CODEGEN-INVALID-LOGIC — no dedicated diagnostic
+      // for a `const` write exists in the compiler yet; SPEC §50 names one). A
+      // top-level keywordless assignment appends nothing to the side channels, so
+      // nothing is withdrawn.
+      for (let i = 0; i < codes.length; i++) {
+        const r = stmtSideRanges[i] as any;
+        if (!r || !r.seededConst || r.onMount) continue;
+        const st = codeStmts[i];
+        codes[i] = withSeededConstsOff(groupNames, () => emitLogicNode(st, groupEmitOpts));
+        const nm = typeof st?.name === "string" ? st.name : "?";
+        errors.push(new CGError(
+          "E-CODEGEN-INVALID-LOGIC",
+          `E-CODEGEN-INVALID-LOGIC: the keywordless assignment \`${nm} = …\` writes \`${nm}\`, which an earlier ` +
+            `\`\${}\` block declares \`const\` (SPEC §50: a \`const\` is immutable). This block runs inside its ` +
+            `re-render effect, so the write cannot be lowered: as an assignment it throws at runtime, as a ` +
+            `declaration it would silently shadow \`${nm}\`. Declare \`${nm}\` with \`let\` if it is meant to change, ` +
+            `or give this value its own name.`,
+          st?.span ?? { file: fileAST.filePath ?? "", start: 0, end: 0, line: 1, col: 1 },
+          "error",
+        ));
+      }
+      combinedCode = codes.join("\n");
     }
 
     // A nested group NEVER reaches file scope: its statements read the row's
