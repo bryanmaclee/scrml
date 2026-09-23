@@ -980,6 +980,28 @@ interface ScopeEntry {
    */
   isLin?: boolean;
   /**
+   * §50.8.5 E-ASSIGN-004 — the binding is IMMUTABLE. A later assignment to that
+   * name, at statement position, is E-ASSIGN-004.
+   *
+   * S422 ruling (bryan, verbatim): *"confirmed. bare naming is const, mutation
+   * needs let. widen it."* — a binding created WITHOUT `let` is a `const`
+   * binding whether or not the `const` keyword is written. `let` is the only
+   * escape. So this is set for BOTH:
+   *   - `const x = 1` — the explicit keyword form.
+   *   - `x = 1` — the keywordless bare form, which the parser surfaces as a
+   *     `tilde-decl` (ast-builder.js ~9939) or, for the `x = ?{...}` SQL-init
+   *     variant, as a `const-decl` carrying `_bareAssign`.
+   *
+   * Deliberately NOT set for:
+   *   - `let` bindings — the one mutable form, and the ruling's named escape.
+   *   - `lin` bindings — single-use semantics, governed by E-LIN-004 (§50.3.5).
+   *   - function parameters — §50.3.5 names a "function parameter" as a valid
+   *     assignment target alongside `let`.
+   *   - `for` / `each` loop binders — introduced by the loop, not by a naming
+   *     statement.
+   */
+  isConst?: boolean;
+  /**
    * SPEC §19.x render-expr-primitive — `<render of=@cell/>` enum-only fence.
    * The declaring AST node, stashed on reactive-cell binds so the render fence
    * can recover the cell's INITIALIZER when its `resolvedType` erased to `asIs`.
@@ -8176,6 +8198,104 @@ function checkLogicExprIdents(
 }
 
 /**
+ * §50.8.5 E-ASSIGN-004 — Assignment to `const` Variable.
+ *
+ * SPEC §50.8.5, closing sentence (SPEC.md:28032):
+ *   "This error applies equally to statement-form (`x = newValue` where `x` is
+ *    `const`) and expression-form assignment."
+ *
+ * SPEC §50.3.5 (SPEC.md:27869):
+ *   "`const` variables are immutable; assigning to a `const` as an expression
+ *    is E-ASSIGN-004 (same error as a statement-level `const` reassignment)."
+ *
+ * SCOPE — STATEMENT position, any IMMUTABLE binding. S422 ruling (bryan,
+ * verbatim): *"confirmed. bare naming is const, mutation needs let. widen it."*
+ * A binding created WITHOUT `let` is a `const` binding whether the keyword is
+ * written or not, so all six of these are E-ASSIGN-004:
+ *
+ *   const x = 1 ; x = 2          x = 1 ; x = 2
+ *   const x = 1 ; x += 1         x = 1 ; x += 1
+ *   const x = 1 ; x = x + 1      x = 1 ; x = x + 1
+ *
+ * and `let` is the only escape — all three `let` forms stay clean.
+ *
+ * NOT in scope, and deliberately left silent:
+ *   - EXPRESSION-position assignment (`someCall(x = 2)`) — the SPEC's original
+ *     trigger phrasing, and the other half of §50.8.5. Not this dispatch.
+ *   - property mutation through a `const` binding (`obj.prop = 2`). A `const`
+ *     freezes the BINDING, not the value; this is legal JS and legal scrml.
+ *     Only a bare-IDENT lvalue reaches this helper.
+ *   - function parameters and loop binders — §50.3.5 names a "function
+ *     parameter" as a valid assignment target, and a loop binder is introduced
+ *     by the loop rather than by a naming statement.
+ *
+ * Returns true when the diagnostic fired (lets the caller skip work that would
+ * otherwise double-report on an already-rejected statement).
+ */
+function fireAssign004IfConst(
+  name: unknown,
+  span: Span,
+  scopeChain: ScopeChain,
+  errors: TSError[],
+): boolean {
+  if (typeof name !== "string" || name.length === 0) return false;
+  const entry = scopeChain.lookup(name);
+  if (!entry || entry.isConst !== true) return false;
+  errors.push(new TSError(
+    "E-ASSIGN-004",
+    `E-ASSIGN-004: \`${name}\` at line ${span.line} is declared \`const\` and cannot be reassigned.\n` +
+    `  Use \`let\` if the variable needs to be updated after initialization.`,
+    span,
+  ));
+  return true;
+}
+
+/**
+ * §50.8.5 — handle a KEYWORDLESS statement-position assignment (`x = expr`).
+ *
+ * That one source shape carries two different meanings, and which one applies
+ * depends entirely on whether the name is ALREADY BOUND:
+ *
+ *   1. NOT bound  → the statement CREATES the binding. Per the S422 ruling
+ *      ("bare naming is const, mutation needs let") the new binding is `const`.
+ *   2. Bound, immutable → REASSIGNMENT of a `const`. E-ASSIGN-004.
+ *   3. Bound, mutable (`let`, a function parameter, a loop binder) → a LEGAL
+ *      reassignment. Nothing fires, and critically the existing entry is left
+ *      ALONE.
+ *
+ * ⚑ Case 3 is why this is a helper rather than two lines at each call site.
+ * Re-binding in case 3 would install a fresh `isConst` entry over a `let`,
+ * silently converting it to a `const` — so `let x = 1; x = 2; x = 3` would
+ * compile the first reassignment and then reject the second. `let` is the ONLY
+ * escape the ruling grants; an escape that expires after one use is not an
+ * escape. (Caught by the pre-commit hook on `stdlib/compiler/meta-checker.scrml`,
+ * which assigns a single `let ids` three times.)
+ *
+ * Case 2 also deliberately does NOT rebind: shadowing the `const` with a fresh
+ * mutable entry would silence every SUBSEQUENT reassignment of the same name,
+ * reporting `x = 2; x = 3` once instead of twice.
+ *
+ * So the ONLY path that binds is case 1 — a genuinely new name.
+ */
+function bindOrRejectBareAssignment(
+  name: unknown,
+  span: Span,
+  scopeChain: ScopeChain,
+  errors: TSError[],
+): void {
+  if (typeof name !== "string" || name.length === 0) return;
+  const existing = scopeChain.lookup(name);
+  if (existing) {
+    // Cases 2 and 3 — a reassignment either way. Fire only if immutable, and
+    // never rebind.
+    fireAssign004IfConst(name, span, scopeChain, errors);
+    return;
+  }
+  // Case 1 — this statement introduces the name. Bare naming creates a `const`.
+  scopeChain.bind(name, { kind: "variable", resolvedType: tAsIs(), isConst: true });
+}
+
+/**
  * §54.6.3 E-STATE-TRANSITION-ILLEGAL — walk an ExprNode tree and fire on
  * any call whose callee is a member-access on a state-typed binding where
  * the method name is NOT in the binding's declared `transitions` map.
@@ -11104,14 +11224,41 @@ function annotateNodes(
         // structured DestructurePattern (replaces A1's bare-expr scrape).
         // For patterns, walk recursively and bind every yielded name as a
         // plain `asIs` variable.
+        //
+        // §50.8.5 E-ASSIGN-004 — mark the binding immutable. This case is
+        // shared by `let-decl` and `const-decl`; only the latter is immutable.
+        //
+        // ⚑ `_bareAssign` marks a const-decl the parser SYNTHESIZED from a
+        // keywordless `name = ?{...}` SQL-init (ast-builder.js ~9939). It is a
+        // bare assignment wearing a const-decl's clothes, so it routes to
+        // `bindOrRejectBareAssignment` — which is what distinguishes "creates a
+        // new const" from "reassigns an existing `let`". Treating it as an
+        // unconditional const-decl here would convert `let w = 0; w = ?{…}` into
+        // a const and reject the NEXT assignment to `w`.
+        if ((n as Record<string, unknown>)._bareAssign === true && typeof n.name === "string") {
+          const bareSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+          bindOrRejectBareAssignment(n.name, bareSpan, scopeChain, errors);
+          const mxnBare = (n as { matchExpr?: ASTNodeLike }).matchExpr;
+          if (mxnBare && typeof mxnBare === "object") visitNode(mxnBare);
+          break;
+        }
+        const _isConstBinding = n.kind === "const-decl";
         if (n.name && isDestructurePattern(n.name)) {
           for (const bind of iterDestructuredNames(n.name as DestructurePatternShape)) {
             if (!scopeChain.lookup(bind)) {
-              scopeChain.bind(bind, { kind: "variable", resolvedType: tAsIs() });
+              scopeChain.bind(bind, {
+                kind: "variable",
+                resolvedType: tAsIs(),
+                ...(_isConstBinding ? { isConst: true } : {}),
+              });
             }
           }
         } else if (n.name) {
-          scopeChain.bind(n.name as string, { kind: "variable", resolvedType });
+          scopeChain.bind(n.name as string, {
+            kind: "variable",
+            resolvedType,
+            ...(_isConstBinding ? { isConst: true } : {}),
+          });
         }
         // S19 Phase 2: visit embedded match-expr so exhaustiveness/arm checks fire.
         const mxn = (n as { matchExpr?: ASTNodeLike }).matchExpr;
@@ -11945,6 +12092,32 @@ function annotateNodes(
             // resolved via the type registry) supplies payload context; bare
             // `.V(...)` falls through (no context) per §14.10 line 7174.
             inferBareVariantsAtVariantCtorArgs(beExprNode, null, typeRegistry, beSpan, errors);
+          }
+          // §50.8.5 E-ASSIGN-004 — the COMPOUND statement-form sibling of the
+          // `tilde-decl` check. `x += 2` is excluded from the tilde-decl
+          // production (which requires `peek(1)` to be a bare `=`), so it
+          // surfaces as a `bare-expr` whose ROOT ExprNode is an `assign`.
+          //
+          // SPEC §50.12 (SPEC.md:28201): "`+=`, `-=`, `*=`, `/=`, `%=` are
+          // currently statement-only in scrml." — so a compound assignment is
+          // by the SPEC's own words a STATEMENT-form assignment, and §50.8.5's
+          // closing sentence puts statement-form squarely inside E-ASSIGN-004.
+          //
+          // Bounded to the ROOT node on purpose: a nested assign (`f(x = 2)`)
+          // is EXPRESSION position — the other half of §50.8.5, not this
+          // dispatch's half. `obj.prop += 1` never fires either: a `const`
+          // freezes the binding, not the value, so the target must be a bare
+          // `ident` for the lvalue to be the const binding itself.
+          {
+            const beAssignRoot = beExprNode as { kind?: string; target?: { kind?: string; name?: unknown } } | undefined;
+            if (
+              beAssignRoot
+              && beAssignRoot.kind === "assign"
+              && beAssignRoot.target
+              && beAssignRoot.target.kind === "ident"
+            ) {
+              fireAssign004IfConst(beAssignRoot.target.name, beSpan, scopeChain, errors);
+            }
           }
         }
         // E-ERROR-002 (§19.4.3): a bare call to a failable function at top-level
@@ -12901,9 +13074,30 @@ function annotateNodes(
         if (tildInitExpr) {
           checkLogicExprIdents(tildInitExpr, tildSpan, scopeChain, typeRegistry, errors, n.name as string | undefined, fnAllDeclared);
         }
-        if (n.name) {
-          scopeChain.bind(n.name as string, { kind: "variable", resolvedType: tAsIs() });
-        }
+        // §50.8.5 E-ASSIGN-004 — STATEMENT-form `const` reassignment.
+        //
+        // A keywordless statement-position `x = expr` parses as a `tilde-decl`
+        // (ast-builder.js ~9939). That one node kind carries BOTH roles:
+        //   - FIRST occurrence of the name → it CREATES the binding, and per the
+        //     S422 ruling ("bare naming is const, mutation needs let") that
+        //     binding is `const`. Bound with `isConst: true` below.
+        //   - LATER occurrence → it REASSIGNS an existing binding. If that
+        //     binding is immutable, this is E-ASSIGN-004.
+        //
+        // SPEC §50.8.5's closing sentence (SPEC.md:28032):
+        //   "This error applies equally to statement-form (`x = newValue` where
+        //    `x` is `const`) and expression-form assignment."
+        //
+        // Checked BEFORE the bind below, so the lookup sees the PRIOR binding.
+        //
+        // Without this the emitted JS is one of two silent defects:
+        //   in a fn body → `const x = 1; x = 2;` — valid JS, runtime
+        //     `TypeError: Assignment to constant variable.`
+        //   at top level → `const x = 1; const x = 2;` — invalid JS, reported to
+        //     the adopter as `E-CODEGEN-INVALID-LOGIC` ("this is a compiler
+        //     defect ... please report it"), which blames the compiler for the
+        //     adopter's error.
+        bindOrRejectBareAssignment(n.name, tildSpan, scopeChain, errors);
         resolvedType = tAsIs();
         break;
       }
@@ -25164,6 +25358,20 @@ function processFile(
     // declarations from `type X:enum = { ... }` etc.
     typeRegistry,
   });
+
+  // §50.8.5 / dpa-047 call 3 — E-ASSIGN-004 and E-MU-001 CO-FIRE, by design.
+  //
+  // `x = 1` followed by `x = 2` satisfies both conditions: the second statement
+  // reassigns a `const` binding (E-ASSIGN-004), and the must-use tracker
+  // separately observes the first write was never read (E-MU-001).
+  //
+  // An earlier revision of this dispatch suppressed E-MU-001 on any name that
+  // fired E-ASSIGN-004. That is REMOVED. bryan ruled call 3 at S422 — verbatim:
+  // "lint first, hard error later if its the right move." — which moves
+  // unused-binding to a LINT on its own arc. An informational lint alongside a
+  // hard error is coherent, not a collision, so there is nothing to arbitrate,
+  // and E-MU-001's severity / population / `_`-prefix hatch are left exactly as
+  // they were. This dispatch changes NOTHING about E-MU-001.
 
   return { typedAst, errors, stateTypeRegistry };
 }
