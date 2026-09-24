@@ -2923,6 +2923,16 @@ function nextLocalId(): number {
 function resetLocalIdCounter(): void {
   _localIdCounter = 0;
 }
+/**
+ * s430-emit-state-leak — per-file reset of the local-var counter. The main each
+ * paths reset it per block, but the lift / markup-value path
+ * (`emitNestedEachFromMarkup`) allocates without a reset, so its var names
+ * (`_scrml_each_mount_N`, …) depended on the previous file's final counter value.
+ * The codegen driver calls this at the head of each file.
+ */
+export function resetEachLocalIdCounter(): void {
+  _localIdCounter = 0;
+}
 
 // ---------------------------------------------------------------------------
 // Bug 64 / R28-1c (S159) — Tier-1 `<each>` per-item content reactivity on
@@ -3022,6 +3032,22 @@ export function setEachLiftRegistry(
   const prev = _eachLiftRegistry;
   _eachLiftRegistry = registry;
   return prev;
+}
+
+/**
+ * s430-emit-state-leak — restore every emit-each module singleton to its initial
+ * value. Called once at the head of every `runCG`, so a compile can never inherit
+ * a value stranded by an earlier compile in the same process (each of these is
+ * scoped by push/pop or try/finally on the normal path; an exception mid-emit is
+ * the path that strands one).
+ */
+export function resetEachModuleState(): void {
+  _localIdCounter = 0;
+  _eachReconcileCtxStack.length = 0;
+  _eachBindSupportCtx = null;
+  _eachMarkupFnNames = null;
+  _eachRequestIds = null;
+  _eachLiftRegistry = null;
 }
 
 /**

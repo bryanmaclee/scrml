@@ -1090,11 +1090,49 @@ let _structuralDeclNamesForFile: Set<string> | null = null;
 // increments). Module-level like `_structuralDeclNamesForFile` so it survives the
 // control-flow re-dispatch that omits it from opts. Reset per file below.
 let _implicitInitEmittedForFile: Set<string> = new Set();
+// s430-emit-state-leak — the FILE the two per-file values above were installed
+// for. The install MUST precede every reader: function bodies (emitFunctions)
+// are emitted BEFORE the top-level logic (emitReactiveWiring), so an install
+// that only happened at the reactive-wiring step left every function body
+// reading the PREVIOUS file's set — `null` in a fresh process, whatever the
+// last compile left behind otherwise — and compile output depended on what the
+// same process had compiled before (a `@cell = …` reassignment inside a
+// function registered, or did not register, a §6.8 reset init-thunk depending
+// on history). The codegen driver now installs at the head of each file's
+// emission (runCG per-file loop + generateClientJs) and clears after; the
+// reactive-wiring call is idempotent for the file already installed, so it no
+// longer resets the emission-order tracker mid-file.
+let _emitLogicStateFile: object | null = null;
+/**
+ * Install the per-file emit-logic state for `file` (a FileAST — identity is the
+ * key). Idempotent: re-installing for the file already installed is a no-op, so
+ * nested per-file entry points (runCG loop → generateClientJs →
+ * emitReactiveWiring) agree on ONE install and the emission-order tracker is
+ * never cleared mid-file.
+ */
+export function beginEmitLogicFile(file: object | null, names: Set<string> | null): boolean {
+  // A missing file identity (synthetic harness AST) never short-circuits.
+  if (file && file === _emitLogicStateFile) return false;
+  _emitLogicStateFile = file ?? null;
+  _structuralDeclNamesForFile = names;
+  _implicitInitEmittedForFile = new Set();
+  // TRUE = this call installed the state, so the caller owns the matching
+  // `endEmitLogicFile()`; FALSE = an outer entry point already owns it.
+  return true;
+}
+/** Clear the per-file emit-logic state (end of a file's / a compile's emission). */
+export function endEmitLogicFile(): void {
+  _emitLogicStateFile = null;
+  _structuralDeclNamesForFile = null;
+  _implicitInitEmittedForFile = new Set();
+}
+/**
+ * Legacy direct-install entry (no file identity). Always (re)installs and clears
+ * the emission-order tracker. Prefer `beginEmitLogicFile`.
+ */
 export function setStructuralDeclNamesForFile(s: Set<string> | null): void {
+  _emitLogicStateFile = null;
   _structuralDeclNamesForFile = s;
-  // This is the per-file entry point (called once per file from emit-reactive-wiring),
-  // so it is the correct place to clear the emission-order tracker — otherwise an
-  // `@x` in one file would suppress the first `@x` init-thunk in the next.
   _implicitInitEmittedForFile = new Set();
 }
 
