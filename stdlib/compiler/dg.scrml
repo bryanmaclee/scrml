@@ -1,3 +1,5 @@
+import:host { runDG as _runDG, DGError as _DGError } from "../../compiler/src/dependency-graph.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = runDG({ files, routeMap })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runDG: _runDG, DGError: _DGError } = await import("../../compiler/src/dependency-graph.ts");
-    }
 
     export const runDG = _runDG
     export const DGError = _DGError

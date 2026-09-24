@@ -1,3 +1,5 @@
+import:host { runBPP as _runBPP, runBPPFile as _runBPPFile } from "../../compiler/src/body-pre-parser.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = runBPP({ files })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runBPP: _runBPP, runBPPFile: _runBPPFile } = await import("../../compiler/src/body-pre-parser.ts");
-    }
 
     export const runBPP = _runBPP
     export const runBPPFile = _runBPPFile

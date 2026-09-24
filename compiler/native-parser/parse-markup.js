@@ -572,7 +572,12 @@ export function emitContextBlock(ctx, frame, endPos, cursor) {
             // Stmt span to a bodyText offset by subtracting `bodyStart`, NOT
             // `blockSpan.start` (which would over-shift LEFT by the opener length).
             block.bodyStart = bodyStart;
-            block.body = parseLogicBodyBestEffort(bodyText, ctx, bodyStart, frame.openSpan.line, frame.openSpan.col);
+            // The body's first byte sits AFTER the `${` opener, so its host
+            // column is the opener's column plus the opener's width (S430 —
+            // pre-fix every diagnostic on a body's first line was reported 2
+            // columns early, at the `$`).
+            block.body = parseLogicBodyBestEffort(bodyText, ctx, bodyStart, frame.openSpan.line,
+                frame.openSpan.col + (bodyStart - frame.openSpan.start));
         }
     }
 
@@ -635,7 +640,8 @@ export function emitContextBlock(ctx, frame, endPos, cursor) {
             // NOT block.span.start. See the InLogicEscape branch note.
             block.bodyStart = bodyStart;
             block.body = parseLogicBodyBestEffort(
-                block.bodyText, ctx, bodyStart, frame.openSpan.line, frame.openSpan.col);
+                block.bodyText, ctx, bodyStart, frame.openSpan.line,
+                frame.openSpan.col + (bodyStart - frame.openSpan.start));   // past `^{` (S430)
         } else {
             block.bodyText = "";
             block.body = [];

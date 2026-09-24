@@ -1,3 +1,5 @@
+import:host { runCE as _runCE, runCEFile as _runCEFile } from "../../compiler/src/component-expander.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = runCE({ files, exportRegistry, fileASTMap })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runCE: _runCE, runCEFile: _runCEFile } = await import("../../compiler/src/component-expander.ts");
-    }
 
     export const runCE = _runCE
     export const runCEFile = _runCEFile

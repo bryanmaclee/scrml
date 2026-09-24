@@ -138,8 +138,18 @@ export function nativeParseFile(filePath, source) {
     //     lazily-created (tag-frame.js `ensureDiagnostics`) — it is `undefined`
     //     on a clean parse. Each diagnostic is `{ code, message, span }`.
     if (ctx !== undefined && ctx !== null && Array.isArray(ctx.diagnostics)) {
+        // A `${}` inside markup-as-value inside a logic body is parsed on two
+        // paths (the enclosing expression's markup delegate and the markup
+        // layer's own logic escape), and both forward the body's diagnostics.
+        // The same code at the same span is ONE report (S430 — witnessed as a
+        // doubled E-DYNAMIC-IMPORT-NOT-IN-SCRML).
+        const seenDiag = new Set();
         for (const diag of ctx.diagnostics) {
             if (diag !== undefined && diag !== null) {
+                const sp = diag.span;
+                const key = String(diag.code) + "@" + (sp ? String(sp.start) + ":" + String(sp.end) : "");
+                if (sp && seenDiag.has(key)) continue;
+                seenDiag.add(key);
                 errors.push(diag);
             }
         }

@@ -11,6 +11,12 @@ import { resolve } from "path";
 
 const STDLIB_DIR = resolve(import.meta.dir, "../../../stdlib/compiler");
 
+// S430 P4 — every stdlib/compiler/*.scrml bridges into the host compiler with a
+// file-top `import:host { … } from "../../compiler/src/<stage>"` (§21.3.1),
+// admitted by the repo-root `scrml.toml` (`host-import = "self-host-only"`,
+// §22.13). The former `^{ await import(...) }` bridge is rejected by
+// E-DYNAMIC-IMPORT-NOT-IN-SCRML (§21.3.2); these files compile clean again.
+
 // Helper: compile a scrml file in library mode and return the libraryJs output
 function compileLibrary(filename) {
   const r = compileScrml({
@@ -52,7 +58,7 @@ describe("§90 Compiler API — per-stage modules", () => {
 
     test(`${stage}: compiles without errors`, () => {
       const { errors } = compileLibrary(file);
-      expect(errors.length).toBe(0);
+      expect(errors).toEqual([]);
     });
 
     test(`${stage}: exports ${expectedExports.join(", ")}`, () => {
@@ -71,7 +77,7 @@ describe("§90 Compiler API — per-stage modules", () => {
 describe("§91 Compiler API — umbrella module", () => {
   test("index.scrml compiles without errors", () => {
     const { errors } = compileLibrary("index.scrml");
-    expect(errors.length).toBe(0);
+    expect(errors).toEqual([]);
   });
 
   test("umbrella exports full pipeline function", () => {

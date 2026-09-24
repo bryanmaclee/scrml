@@ -1,3 +1,5 @@
+import:host { resolveModules as _resolveModules } from "../../compiler/src/module-resolver.js"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -12,9 +14,6 @@ ${
     //   const result = resolveModules(fileASTs)
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { resolveModules: _resolveModules } = await import("../../compiler/src/module-resolver.js");
-    }
 
     export const resolveModules = _resolveModules
 }
