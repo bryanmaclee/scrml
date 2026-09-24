@@ -1100,8 +1100,9 @@ let _implicitInitEmittedForFile: Set<string> = new Set();
 // function registered, or did not register, a §6.8 reset init-thunk depending
 // on history). The codegen driver now installs at the head of each file's
 // emission (runCG per-file loop + generateClientJs) and clears after; the
-// reactive-wiring call is idempotent for the file already installed, so it no
-// longer resets the emission-order tracker mid-file.
+// reactive-wiring install is idempotent for the file already installed, and the
+// implicit-cell tracker restarts at the start of top-level logic emission
+// (`beginTopLevelLogicEmission`) — a fixed point of every file's emission.
 let _emitLogicStateFile: object | null = null;
 /**
  * Install the per-file emit-logic state for `file` (a FileAST — identity is the
@@ -1119,6 +1120,18 @@ export function beginEmitLogicFile(file: object | null, names: Set<string> | nul
   // TRUE = this call installed the state, so the caller owns the matching
   // `endEmitLogicFile()`; FALSE = an outer entry point already owns it.
   return true;
+}
+/**
+ * Mark the start of a file's TOP-LEVEL logic emission (emitReactiveWiring): the
+ * implicit-cell tracker records top-level emission order ("the FIRST top-level
+ * write is the implicit declaration"), so it restarts here. A write inside a
+ * function body is never a declaration; the paths that lower one without
+ * `insideFunctionBody` (e.g. the forbidden `try` body) must not consume a
+ * top-level first-write slot, so whatever they recorded is discarded. Runs at a
+ * fixed point of every file's emission, so it is history-independent.
+ */
+export function beginTopLevelLogicEmission(): void {
+  _implicitInitEmittedForFile = new Set();
 }
 /** Clear the per-file emit-logic state (end of a file's / a compile's emission). */
 export function endEmitLogicFile(): void {
