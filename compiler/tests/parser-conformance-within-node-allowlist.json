@@ -6672,12 +6672,12 @@
     "SPAN-COORD": 47
   },
   "stdlib/fs/index.scrml": {
-    "COUNT-LENGTH": 2,
+    "COUNT-LENGTH": 3,
     "EXTRA-FIELD": 22,
-    "FIELD-SHAPE": 25,
+    "FIELD-SHAPE": 27,
     "KIND-NAME": 8,
-    "MISSING-FIELD": 124,
-    "SPAN-COORD": 18
+    "MISSING-FIELD": 125,
+    "SPAN-COORD": 20
   },
   "stdlib/host/index.scrml": {
     "COUNT-LENGTH": 3,
