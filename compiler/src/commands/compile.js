@@ -14,7 +14,6 @@ import { compileScrml, scanDirectory } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "./diagnostic-format.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
-import { redactCredentialsInText } from "../db-uri-redact.ts";
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers — no dependencies
@@ -354,9 +353,7 @@ function getSourceContext(filePath, line, contextLines = 2) {
       const lineNum = String(i + 1).padStart(4);
       const marker = (i + 1 === line) ? c.red(" > ") : "   ";
       const numStr = (i + 1 === line) ? c.red(lineNum) : c.dim(lineNum);
-      // F4 (s430-dev-db-stub): a `db=` / `src=` connection URI in the echoed
-      // source line must not print its credentials.
-      result += `${marker}${numStr} ${c.dim("|")} ${redactCredentialsInText(lines[i])}\n`;
+      result += `${marker}${numStr} ${c.dim("|")} ${lines[i]}\n`;
     }
     return result;
   } catch {
@@ -580,11 +577,16 @@ function runOnce(opts, selfHostModules = null) {
   // Non-fatal — adopter-facing guidance when JSX/Vue/Svelte syntax is detected.
   // Visible by default so typing `onClick={fn}` does not silently compile to
   // broken output.
+  // s430-dev-db-stub F4 — every diagnostic block printed below passes the
+  // compile unit's secret redactor (`result.redact`, built by compileScrml from
+  // the unit's own connection values). The messages are already redacted; this
+  // covers the source excerpt formatError reads from disk.
+  const redact = typeof result.redact === "function" ? result.redact : (t) => t;
   const lintDiags = result.lintDiagnostics || [];
   if (lintDiags.length > 0) {
     console.error("");
     for (const d of lintDiags) {
-      console.error(formatLintDiagnostic(d, cwd));
+      console.error(redact(formatLintDiagnostic(d, cwd)));
     }
   }
 
@@ -592,7 +594,7 @@ function runOnce(opts, selfHostModules = null) {
   if (result.warnings.length > 0) {
     console.error("");
     for (const w of result.warnings) {
-      console.error(formatWarning(w, cwd));
+      console.error(redact(formatWarning(w, cwd)));
     }
   }
 
@@ -600,7 +602,7 @@ function runOnce(opts, selfHostModules = null) {
   if (result.errors.length > 0) {
     console.error("");
     for (const e of result.errors) {
-      console.error(formatError(e, cwd));
+      console.error(redact(formatError(e, cwd)));
       console.error("");
     }
   }

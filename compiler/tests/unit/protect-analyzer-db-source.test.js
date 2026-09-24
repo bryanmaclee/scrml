@@ -120,7 +120,7 @@ describe("§2 an empty database is called out (F5)", () => {
     const idxPath = e.message.indexOf(join(srcDir, "app.db"));
     expect(idxEmpty).toBeGreaterThan(-1);
     expect(idxPath).toBeGreaterThan(idxEmpty);
-    expect(e.message).toContain("no tables at all (the file is zero bytes)");
+    expect(e.message).toContain("no tables or views at all (the file is zero bytes)");
     // `dev` / `build` print the first 120 characters after the code prefix.
     expect(e.message.replace(/^E-PA-004: /, "").slice(0, 120)).toContain("EMPTY");
   });
@@ -150,6 +150,31 @@ describe("§2 an empty database is called out (F5)", () => {
     const e = e004("./app.db");
     expect(e.message).not.toContain("EMPTY");
     expect(e.message).not.toContain("ZERO-BYTE");
+  });
+
+  test("R2-5: a VIEWS-only database is not empty — it is never told to delete itself", () => {
+    const p = join(srcDir, "app.db");
+    const d = new Database(p);
+    d.run("CREATE VIEW v AS SELECT 1 AS one");
+    d.close();
+    const e = e004("./app.db");
+    expect(e).toBeDefined();
+    expect(e.message).not.toContain("EMPTY");
+    expect(e.message).not.toContain("delete this file");
+  });
+
+  test("R2-5: a database holding only SQLite bookkeeping (sqlite_sequence) IS empty", () => {
+    const p = join(srcDir, "app.db");
+    const d = new Database(p);
+    d.run("CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT)");
+    d.run("INSERT INTO t DEFAULT VALUES");
+    d.run("DROP TABLE t");
+    const left = d.query("SELECT name FROM sqlite_master").all().map((r) => r.name);
+    d.close();
+    expect(left).toEqual(["sqlite_sequence"]);
+    const e = e004("./app.db");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("the EMPTY database");
   });
 
   test("a 2+-byte non-database file is E-PA-003 (SQLite refuses it), never an E-PA-004 empty callout", () => {

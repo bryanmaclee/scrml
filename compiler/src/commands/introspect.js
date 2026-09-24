@@ -24,7 +24,7 @@ import { writeFileSync } from "fs";
 import { resolve } from "path";
 import { SQL } from "bun";
 import { resolveDbDriver } from "../codegen/db-driver.ts";
-import { redactDbUri } from "../db-uri-redact.ts";
+import { SecretRedactor } from "../diagnostic-secrets.ts";
 import { readActualSchemaPg, emitScrmlSchemaSource, readTableNamesPg } from "../schema-differ.js";
 
 const isTTY = process.stderr.isTTY;
@@ -119,17 +119,23 @@ export async function runIntrospect(args) {
     process.exit(1);
   }
 
+  // s430-dev-db-stub F4 — every error printed from here on names or may echo
+  // the connection URL (driver error text included); it passes the same
+  // value-based redactor compileScrml uses.
+  const redactor = new SecretRedactor([url]);
+  const say = (text) => console.error(redactor.redact(text));
+
   // Validate the URL resolves to the Postgres driver — introspect is
   // Postgres-only in v1 (it reads information_schema).
   const resolved = resolveDbDriver(url);
   if (!resolved.ok) {
-    console.error(c.red("error:") + " " + resolved.error.message);
+    say(c.red("error:") + " " + resolved.error.message);
     process.exit(1);
   }
   if (resolved.info.driver !== "postgres") {
-    console.error(
+    say(
       c.red("error:") +
-        ` scrml introspect is Postgres-only (v1). The URL "${redactDbUri(url)}" resolves to the ` +
+        ` scrml introspect is Postgres-only (v1). The URL "${url}" resolves to the ` +
         `"${resolved.info.driver}" driver. Provide a postgres:// or postgresql:// URL.`,
     );
     process.exit(1);
@@ -171,7 +177,7 @@ export async function runIntrospect(args) {
     emittedTables = emitted.emittedTables;
     droppedCount = emitted.droppedCount;
   } catch (err) {
-    console.error(c.red("error:") + ` failed to introspect Postgres schema: ${err.message}`);
+    say(c.red("error:") + ` failed to introspect Postgres schema: ${err.message}`);
     if (sql) await closeSql(sql);
     process.exit(1);
     return;

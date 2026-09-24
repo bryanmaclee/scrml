@@ -23,6 +23,7 @@ import { runAttributeInterpolation } from "./validators/attribute-interpolation.
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
+import { SecretRedactor, collectFromAst as collectConnectionValuesFromAst, harvestFromSource as harvestConnectionValues } from "./diagnostic-secrets.ts";
 import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
@@ -727,6 +728,40 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * }}
  */
 export function compileScrml(options = {}) {
+  // s430-dev-db-stub F4 — THE OUTPUT CHOKEPOINT for compile diagnostics.
+  // Every connection string in the compile unit is collected (by value) while
+  // the unit compiles; on the way out, every error / warning / lint message is
+  // redacted of exactly those values' secret parts, a thrown compiler error is
+  // redacted before it propagates, and `result.redact(text)` is handed to the
+  // consumers that print text the compiler did not produce (the source excerpt
+  // under a diagnostic, read from disk by commands/compile.js). `Note(PA):`
+  // lines go through the same redactor via runPA's onNote sink.
+  const redactor = options._secretRedactor ?? new SecretRedactor();
+  let result;
+  try {
+    result = compileScrmlUnredacted({ ...options, _secretRedactor: redactor });
+  } catch (err) {
+    if (!redactor.hasSecrets) {
+      // Crashed before BS read the sources — harvest the inputs directly.
+      for (const f of options.inputFiles ?? []) {
+        try { redactor.addValues(harvestConnectionValues(readFileSync(resolve(f), "utf8"))); } catch { /* unreadable */ }
+      }
+    }
+    if (err && typeof err === "object") {
+      try { if (typeof err.message === "string") err.message = redactor.redact(err.message); } catch { /* read-only */ }
+      try { if (typeof err.stack === "string") err.stack = redactor.redact(err.stack); } catch { /* read-only */ }
+    }
+    throw err;
+  }
+  for (const list of [result.errors, result.warnings, result.lintDiagnostics]) {
+    if (Array.isArray(list)) for (const d of list) redactor.redactDiagnostic(d);
+  }
+  result.redact = (text) => redactor.redact(text);
+  return result;
+}
+
+function compileScrmlUnredacted(options = {}) {
+  const _secretRedactor = options._secretRedactor;
   let {
     inputFiles = [],
   } = options;
@@ -1150,6 +1185,12 @@ export function compileScrml(options = {}) {
       allErrors.push({ stage: "BS", code: e.code || "E-BS-000", message: e.message });
     }
   }
+  // s430-dev-db-stub F4 — value harvest for the output chokepoint (see
+  // compileScrml). Runs before any early return so a file that fails to split
+  // still has its connection values known.
+  if (_secretRedactor) {
+    for (const src of sourceByFile.values()) _secretRedactor.addValues(harvestConnectionValues(src));
+  }
 
   if (bsResults.length === 0) {
     const errors = allErrors;
@@ -1338,6 +1379,8 @@ export function compileScrml(options = {}) {
     }
     tabResults.push(result);
     bsByTab.set(result, bsResult);
+    // s430-dev-db-stub F4 — connection values straight from the tree.
+    if (_secretRedactor) _secretRedactor.addValues(collectConnectionValuesFromAst(result.ast));
     if (verbose) log(`  [TAB] ${result.filePath}: ${result.ast?.nodes?.length ?? 0} nodes`);
   }
 
@@ -1918,7 +1961,13 @@ export function compileScrml(options = {}) {
 
   // Stage 4: PA (all files)
   const _runPA = selfHostModules?.runPA ?? runPA;
-  const paResult = stage("PA", () => _runPA({ files: ceResults }));
+  const paResult = stage("PA", () => _runPA({
+    files: ceResults,
+    // s430-dev-db-stub F4 — `Note(PA):` lines pass the output chokepoint.
+    onNote: _secretRedactor
+      ? (line) => { process.stderr.write(_secretRedactor.redact(line)); }
+      : undefined,
+  }));
   collectErrors("PA", paResult.errors);
   if (verbose) {
     const viewCount = paResult.protectAnalysis?.views?.size ?? 0;

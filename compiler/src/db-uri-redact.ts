@@ -1,24 +1,24 @@
 /**
- * Credential redaction for database targets echoed in compiler output.
+ * Display form of a database target for a message that names it
+ * (s430-dev-db-stub F4).
  *
- * A `db=` / `<db src=>` value can be a driver connection URI that carries a
- * password (`postgres://admin:S3cret@host/app`). Any diagnostic, note or CLI
- * message that names the target MUST pass it through `redactDbUri` first —
- * compiler output lands in terminals, CI logs and pasted bug reports.
- * (s430-dev-db-stub F4.)
+ * This is NOT the redaction mechanism — that is value-based and lives in
+ * `diagnostic-secrets.ts` (every compile-unit connection value's secret parts
+ * are removed from every diagnostic at the compileScrml chokepoint). This
+ * helper only decides how a message DISPLAYS the one value it is about, and it
+ * works on that value alone:
  *
- * What is redacted:
- *   - the whole userinfo of a `scheme://userinfo@host` URI (user AND password —
- *     the user name is half a credential). Everything up to the LAST `@` after
- *     `://` is treated as userinfo, so an unencoded `@` or `/` inside a password
- *     cannot leak its tail. Over-redacting a path that contains `@` is the safe
- *     failure.
- *   - `password=` / `pass=` / `pwd=` / `sslpassword=` parameter values, in a
- *     query string or a space/semicolon-separated key=value string.
+ *   - the whole userinfo of `scheme://userinfo@host` is shown as `<redacted>`
+ *     (the user name is half a credential; everything up to the LAST `@` after
+ *     `://` counts, so an unencoded `@` or `/` in a password cannot leak);
+ *   - every secret `deriveSecrets` finds in the value (query / keyword
+ *     password parameters, in raw, unquoted and decoded forms) is replaced.
  *
- * A plain SQLite path (`./app.db`, `sqlite:./app.db`, `:memory:`) has no
- * `://` userinfo and no password parameter, and passes through unchanged.
+ * A plain SQLite path (`./app.db`, `sqlite:./app.db`, `:memory:`) passes
+ * through unchanged.
  */
+
+import { deriveSecrets } from "./diagnostic-secrets.ts";
 
 const REDACTED = "<redacted>";
 
@@ -26,7 +26,7 @@ export function redactDbUri(target: string): string {
   if (typeof target !== "string" || target.length === 0) return target;
   let out = target;
 
-  const schemeMatch = out.match(/^[a-z][a-z0-9+.\-]*:\/\//i);
+  const schemeMatch = out.match(/^\s*[a-z][a-z0-9+.\-]*:\/\//i);
   if (schemeMatch !== null) {
     const prefix = schemeMatch[0];
     const rest = out.slice(prefix.length);
@@ -36,28 +36,9 @@ export function redactDbUri(target: string): string {
     }
   }
 
-  return redactPasswordParams(out);
-}
-
-function redactPasswordParams(text: string): string {
-  return text.replace(
-    /(^|[?&;\s])((?:ssl)?password|pass|pwd)=[^&;\s#"'`]*/gi,
-    (_m, lead: string, key: string) => `${lead}${key}=${REDACTED}`,
-  );
-}
-
-/**
- * Redact every URI userinfo and password parameter found ANYWHERE in a run of
- * text — for echoing SOURCE lines (the code frame under a diagnostic), where
- * the `db=` value sits inside markup rather than standing alone. A userinfo run
- * ends at whitespace or a quote/backtick/angle bracket; within that run the
- * match extends to the LAST `@`, so an unencoded `@` in a password is covered.
- */
-export function redactCredentialsInText(text: string): string {
-  if (typeof text !== "string" || text.length === 0) return text;
-  const out = text.replace(
-    /([a-z][a-z0-9+.\-]*:\/\/)[^\s"'`<>]*@/gi,
-    (_m, scheme: string) => `${scheme}${REDACTED}@`,
-  );
-  return redactPasswordParams(out);
+  const secrets = deriveSecrets(target).sort((a, b) => b.length - a.length);
+  for (const s of secrets) {
+    if (out.includes(s)) out = out.split(s).join(REDACTED);
+  }
+  return out;
 }
