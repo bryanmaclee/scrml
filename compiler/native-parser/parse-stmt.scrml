@@ -170,6 +170,8 @@ ${
         parseBinding, parseBindingIdent, parseObjectPattern, parseArrayPattern,
         // M4.2 — `noIn` scope helpers (the for-head deferral closure).
         enterNoInScope, exitNoInScope,
+        // S430 P1 / P4 — the shared forbidden-construct messages.
+        CLASS_NOT_IN_SCRML_MESSAGE,
     } from "./parse-expr.scrml"
     import {
         VarDeclKind, MethodKind,
@@ -630,8 +632,10 @@ ${
             return parseClassDecl(ctx, false)
         }
 
-        // An `import` statement.
-        if (kind == TokenKind.KwImport) {
+        // An `import` statement. A dynamic `import(...)` at statement
+        // position is an EXPRESSION statement (S430 P4) — parse-expr fires
+        // E-DYNAMIC-IMPORT-NOT-IN-SCRML. Mirrors parse-stmt.js.
+        if (kind == TokenKind.KwImport && peekKind(cursor, 1) != TokenKind.LParen) {
             return parseImport(ctx)
         }
 
@@ -1642,9 +1646,16 @@ ${
     // -- parseClassDecl — a `class Name extends Base { ... }` declaration --
     // `allowAnonymous` is true ONLY for `export default class {}`; a plain
     // declaration always names.
+    //
+    // S430 P1 — `class` is NOT scrml vocabulary (SPEC §7.2.1). Fire
+    // E-CLASS-NOT-IN-SCRML at the `class` keyword and RECOVER by parsing the
+    // construct anyway; covers statement, `export class`, and
+    // `export default class`. Mirrors parse-stmt.js.
     export fn parseClassDecl(ctx, allowAnonymous) {
         const cursor = ctx.cursor
         const kw = advance(cursor)
+
+        recordError(ctx, "E-CLASS-NOT-IN-SCRML", CLASS_NOT_IN_SCRML_MESSAGE, kw.span)
 
         let name = ""
         if (currentKind(cursor) == TokenKind.Ident) {

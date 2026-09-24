@@ -103,6 +103,15 @@ import { markupValueAllowedAfter } from "./parse-seam.js";
 // body.js has no imports — no module cycle is introduced.
 import { parseErrorArms } from "./parse-error-body.js";
 
+// S430 P1 / P4 — the two forbidden-construct messages, shared by the
+// expression arm here (parsePostfix) and the declaration arm in parse-stmt.js
+// (parseClassDecl). Text mirrors the default parser (ast-builder.js) so both
+// front-ends say the same thing. SPEC §7.2.1 / §21.3.2 + §34.
+export const CLASS_NOT_IN_SCRML_MESSAGE =
+    "scrml has no `class` (§7.2.1). Model the data as a struct value (`type Point:struct = { x: number, y: number }`) and the behaviour as free functions over it (`fn moved(p: Point, dx: number) -> Point { ... }`); state changes by RETURNING A NEW VALUE (`p = moved(p, 1)`), not by mutating `this`. Behaviour selection is a `match` at the use site, not a method looked up on the value. Only the class construct is rejected — `class=` attributes, `x.class`, and a `class` object key or struct field are fine.";
+export const DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE =
+    "scrml has no dynamic `import(...)` (§21.3.2). Use a static `import { name } from \"./mod.scrml\"` at file top level. A host-language (TS/JS) module is bridged with the manifest-gated `import:host { name } from \"...\"` declaration (§21.3.1), never a runtime `import()` — including inside a `^{}` meta body.";
+
 // --- makeParseExprContext — parser state constructor ---
 // M4.1 added an ASYNC/GENERATOR SCOPE pair (`inAsync` / `inGenerator`). M4.3
 // REMOVED `inAsync` — scrml has no `async`/`await` at the language level
@@ -930,6 +939,52 @@ export function parsePostfix(ctx) {
         // call on an identifier named `async`).
         const asyncTok = advance(cursor);
         return parsePostfixChain(ctx, makeIdent("async", asyncTok.span));
+    }
+
+    // --- `class` in expression position (S430 P1, SPEC §7.2.1). scrml has
+    // no `class` construct. Fire E-CLASS-NOT-IN-SCRML at the `class` keyword
+    // and RECOVER by consuming the whole class head + body (`class Name?
+    // (extends <expr>)? { ... }`) so the rest of the program still parses.
+    // The recovery value is the `not` atom — a placeholder only; the
+    // construct itself is rejected, and a placeholder that names nothing
+    // cannot cascade an E-SCOPE-001 onto the same line. A `class` reached
+    // here as a member name (`x.class`) or object key (`{ class: 1 }`) never
+    // enters parsePostfix — those are parsed by parseMemberProperty /
+    // parseObjectLiteral — so "the word is not at fault" holds. The class
+    // DECLARATION (statement position) fires the same code in
+    // parse-stmt.js:parseClassDecl. ---
+    if (kind === TokenKind.KwClass) {
+        const classTok = advance(cursor);   // consume `class`
+        recordError(ctx, "E-CLASS-NOT-IN-SCRML", CLASS_NOT_IN_SCRML_MESSAGE, classTok.span);
+        if (currentKind(cursor) === TokenKind.Ident) {
+            advance(cursor);   // the optional class-expression name
+        }
+        if (currentKind(cursor) === TokenKind.KwExtends) {
+            advance(cursor);   // consume `extends`
+            parsePostfix(ctx);   // the superclass expression — parsed, discarded
+        }
+        let endSpan = classTok.span;
+        if (currentKind(cursor) === TokenKind.LBrace) {
+            endSpan = parseBlockStub(ctx).span;   // the class body — skipped, discarded
+        }
+        return makeNotValue(makeSpan(classTok.span.start, endSpan.end, classTok.span.line, classTok.span.col));
+    }
+
+    // --- dynamic `import(...)` (S430 P4, SPEC §21.3.2). scrml has no dynamic
+    // import; a host module is bridged with the manifest-gated `import:host`
+    // declaration (§21.3.1). Fire E-DYNAMIC-IMPORT-NOT-IN-SCRML at the
+    // `import` keyword and RECOVER by parsing the argument list as an
+    // ordinary call so the rest of the expression still parses; the call's
+    // result is replaced by the `not` placeholder (see the `class` arm). A
+    // static `import { … } from` never reaches here — it is a statement,
+    // routed by parse-stmt.js. ---
+    if (kind === TokenKind.KwImport && peekKind(cursor, 1) === TokenKind.LParen) {
+        const importTok = advance(cursor);   // consume `import`
+        recordError(ctx, "E-DYNAMIC-IMPORT-NOT-IN-SCRML", DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE, importTok.span);
+        const call = parsePostfixChain(ctx, makeIdent("import", importTok.span));
+        const endPos = (call !== null && call !== undefined && call.span !== undefined)
+            ? call.span.end : importTok.span.end;
+        return makeNotValue(makeSpan(importTok.span.start, endPos, importTok.span.line, importTok.span.col));
     }
 
     // --- `new` expression — handled at its own (member-level) precedence. ---
@@ -4269,6 +4324,23 @@ export function parseObjectPatternProperty(ctx) {
             valueTarget = makeBindingAssignmentPattern(valueTarget, dflt, apSpan);
         }
         return makeBindingPropertyShorthand(nameTok.name, valueTarget);
+    }
+
+    // Keyword-spelled key — `{ class: c }`, `{ default: d }`. Any keyword is a
+    // valid property NAME (the same rule parseMemberProperty applies after
+    // `.`), but only in the KEYED form: a keyword cannot be a shorthand
+    // binding (`{ class }` would bind a variable named `class`). Before S430
+    // this fell to the malformed arm below and panic-resynced ONTO the
+    // keyword — for `class`, straight into parseClassDecl — so a legal
+    // destructure of a `class` field reported E-STMT-PATTERN-PROPERTY plus a
+    // cascade (and, with S430 P1, a false E-CLASS-NOT-IN-SCRML: "the word is
+    // not at fault").
+    if (isKeywordKind(kind) && peekKind(cursor, 1) === TokenKind.Colon) {
+        const keyTok = advance(cursor);
+        advance(cursor);   // consume :
+        const valueTarget = parseBindingTargetWithDefault(ctx);
+        const keyExpr = { kind: "Ident", name: identTextOf(keyTok), span: keyTok.span };
+        return makeBindingPropertyKeyValue(keyExpr, valueTarget, false);
     }
 
     // Malformed — record a diagnostic and emit a placeholder shorthand so the

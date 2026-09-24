@@ -11,9 +11,9 @@
 
 import { describe, test, expect } from "bun:test";
 import { fileURLToPath } from "node:url";
-import { execSync } from "child_process";
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
+import { compileScrml } from "../../src/api.js";
 
 // Import from the original JS source to validate the test assertions.
 const compilerModuleResolver = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../src/module-resolver.js");
@@ -78,21 +78,25 @@ describe("self-host: module-resolver.scrml compilation", () => {
   //       bare-expr).
   // All three fixed in changes/a1-scope-walker-export-class-closures
   // (commits 8f16e01 + 92ce1f3 + de7af98).
-  test("compiles without errors [A2-SURFACED — fixed by A1]", () => {
-    const compilerRoot = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../../compiler");
-    const cli = resolve(compilerRoot, "src/cli.js");
-
-    if (!existsSync(cli)) {
-      console.log("Skipping compilation test — compiler CLI not available in this worktree");
-      return;
-    }
-
-    const outDir = resolve(dirname(scrmlFile), "dist");
-    const result = execSync(`bun ${cli} compile ${scrmlFile} -o ${outDir}`, {
-      encoding: "utf-8",
-      timeout: 30000,
+  // ⚑ S430 P1 + P4 — this used to assert a clean CLI compile. The file now
+  // reports exactly three unmigrated sites (SPEC §7.2.1 / §21.3.2):
+  //   :26, :27  `^{ … await import("node:path" / "node:fs") }` — the bridge
+  //             `import:host` replaces (§21.3.1); the bootstrap track's
+  //             import:host unit migrates it, not this dispatch;
+  //   :34       `export class ModuleError` — the class→struct rewrite is P1b.
+  // The A1 scope-walker fixes this test guarded stay guarded: any OTHER error
+  // (an E-SCOPE-001 regression included) fails the exact-residue pin.
+  test("compiles with exactly the known S430 residue [A2-SURFACED — fixed by A1]", () => {
+    const r = compileScrml({
+      inputFiles: [scrmlFile], outputDir: resolve(dirname(scrmlFile), "dist"),
+      write: false, log: () => {},
     });
-    expect(result).toContain("Compiled");
+    const got = (r.errors ?? []).map((e) => `${e.code}@${e.span?.line ?? e.tabSpan?.line}`).sort();
+    expect(got).toEqual([
+      "E-CLASS-NOT-IN-SCRML@34",
+      "E-DYNAMIC-IMPORT-NOT-IN-SCRML@26",
+      "E-DYNAMIC-IMPORT-NOT-IN-SCRML@27",
+    ]);
   });
 });
 

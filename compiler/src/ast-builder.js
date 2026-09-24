@@ -2394,6 +2394,130 @@ function emitForbiddenSwitchInRaw(raw, valTokSpan, baseOffset, filePath, errors)
 }
 
 // ---------------------------------------------------------------------------
+// E-CLASS-NOT-IN-SCRML / E-DYNAMIC-IMPORT-NOT-IN-SCRML — token-stream rejection
+// ---------------------------------------------------------------------------
+
+/**
+ * §7.2.1 / §21.3.2 (S430 rulings P1 + P4): scrml has no `class` construct
+ * and no dynamic `import(...)`. Both are rejected at the parse layer, in the
+ * same family as `E-THROW-NOT-IN-SCRML` / `E-TRY-NOT-IN-SCRML` /
+ * `E-ASYNC-NOT-IN-SCRML`.
+ *
+ * WHY A TOKEN SCAN AND NOT A STATEMENT-HEAD CHECK. The default parser never
+ * builds a class node: a `class` declaration is collected as a bare expression
+ * and handed to acorn (an `escape-hatch` with `nativeKind: "ClassExpression"`),
+ * a class EXPRESSION lands the same way inside an initializer, and an EXPORTED
+ * class / exported unannotated `const` keeps only its raw text (`export-decl`
+ * with no parsed initializer). `import(...)` is likewise an escape-hatch
+ * `ImportExpression` or raw export text. A statement-head check would see the
+ * declaration and miss the other three positions; an ExprNode walk would miss
+ * the raw-only export positions and anything acorn failed to parse. The logic
+ * TOKEN stream is the one representation every position shares, and the
+ * tokens carry exact source spans.
+ *
+ * "The word is not at fault" (bryan, S430 P1). Only the CONSTRUCT fires:
+ *   - `class` must be a KEYWORD token, NOT preceded by `.` / `?.` (so `x.class`
+ *     and `x?.class` are member names), and it must be FOLLOWED by a class
+ *     head: a name (IDENT, or a keyword-spelled name that is itself followed
+ *     by `{` / `extends`), `{`, or `extends`. So `{ class: 1 }`,
+ *     `{ class: c } = o`, `{ class() {} }`, a struct field `class: string`,
+ *     and the HTML `class=` attribute (which is never a logic token at all)
+ *     do not fire.
+ *   - `import` must be a KEYWORD token immediately followed by `(`, NOT
+ *     preceded by `.` / `?.`. `import { x } from "y"`, `import:host`, and
+ *     `import.meta` do not fire.
+ * `_{}` foreign code is opaque — its interior is never tokenized — so nothing
+ * inside it can fire. `^{}` meta bodies ARE tokenized and DO fire: §21.3.1
+ * states the `^{}` body "MUST NOT contain dynamic `await import(...)` calls",
+ * and §22.12 says `^{}` "parses as scrml-native, full stop".
+ *
+ * Returns `[{ code, tok }]` in source order.
+ */
+function findClassAndDynamicImportTokens(tokens) {
+  const hits = [];
+  if (!Array.isArray(tokens)) return hits;
+  const isMemberDot = (t) => !!t && (t.text === "." || t.text === "?.");
+  for (let k = 0; k < tokens.length; k++) {
+    const t = tokens[k];
+    if (!t || t.kind !== "KEYWORD") continue;
+    if (isMemberDot(tokens[k - 1])) continue;
+    const next = tokens[k + 1];
+    if (!next) continue;
+    if (t.text === "class") {
+      const next2 = tokens[k + 2];
+      const opensHead = (x) => !!x && (x.text === "{" || (x.kind === "KEYWORD" && x.text === "extends"));
+      const isHead =
+        next.kind === "IDENT" ||
+        opensHead(next) ||
+        (next.kind === "KEYWORD" && opensHead(next2));
+      if (isHead) hits.push({ code: "E-CLASS-NOT-IN-SCRML", tok: t });
+    } else if (t.text === "import" && next.text === "(") {
+      hits.push({ code: "E-DYNAMIC-IMPORT-NOT-IN-SCRML", tok: t });
+    }
+  }
+  return hits;
+}
+
+const E_CLASS_NOT_IN_SCRML_MESSAGE =
+  "scrml has no `class` (§7.2.1). Model the data as a " +
+  "struct value (`type Point:struct = { x: number, y: number }`) and the behaviour " +
+  "as free functions over it (`fn moved(p: Point, dx: number) -> Point { ... }`); " +
+  "state changes by RETURNING A NEW VALUE (`p = moved(p, 1)`), not by mutating " +
+  "`this`. Behaviour selection is a `match` at the use site, not a method looked " +
+  "up on the value. Only the class construct is rejected — `class=` attributes, " +
+  "`x.class`, and a `class` object key or struct field are fine.";
+
+const E_DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE =
+  "scrml has no dynamic `import(...)` (§21.3.2). " +
+  "Use a static `import { name } from \"./mod.scrml\"` at file top level. A " +
+  "host-language (TS/JS) module is bridged with the manifest-gated `import:host " +
+  "{ name } from \"...\"` declaration (§21.3.1), never a runtime `import()` — " +
+  "including inside a `^{}` meta body.";
+
+/**
+ * Push one TABError per `class` construct / dynamic `import(` in `tokens`.
+ * Deduplicated against `errors` on (code, start offset): parseLogicBody is
+ * re-entered over sub-slices of an already-scanned stream (the `export`
+ * re-parse), and a diagnostic must be reported once.
+ */
+function emitClassAndDynamicImportErrors(tokens, filePath, errors) {
+  if (!errors) return;
+  for (const { code, tok } of findClassAndDynamicImportTokens(tokens)) {
+    const start = tok.span?.start;
+    const dup = errors.some((e) =>
+      e && e.code === code && (e.tabSpan?.start ?? e.span?.start) === start,
+    );
+    if (dup) continue;
+    errors.push(new TABError(
+      code,
+      code === "E-CLASS-NOT-IN-SCRML" ? E_CLASS_NOT_IN_SCRML_MESSAGE : E_DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE,
+      tokenSpan(tok, filePath),
+    ));
+  }
+}
+
+/**
+ * The same rejection for expression text that never enters a logic token
+ * stream — an attribute value (`onclick=${...}` / `{...}` / quoted) or an
+ * inline `${...}` inside a `lift <tag attr=${...}/>`. These are handed to
+ * acorn directly (the E-SWITCH-FORBIDDEN bypass shape, see
+ * findForbiddenSwitchInRaw), so they are tokenized here just for the scan.
+ * `baseOffset` / `line` / `col` locate `raw[0]` in the file.
+ */
+function emitClassAndDynamicImportErrorsInRaw(raw, baseOffset, line, col, filePath, errors) {
+  if (!errors || typeof raw !== "string") return;
+  // Cheap pre-filter: most attribute values contain neither word.
+  if (!/\b(?:class|import)\b/.test(raw)) return;
+  let toks;
+  try {
+    toks = tokenizeLogic(raw, baseOffset ?? 0, line ?? 1, col ?? 1, []);
+  } catch {
+    return; // a tokenizer failure here is reported by the expression parse itself
+  }
+  emitClassAndDynamicImportErrors(toks, filePath, errors);
+}
+
+// ---------------------------------------------------------------------------
 // Span helpers
 // ---------------------------------------------------------------------------
 
@@ -3060,6 +3184,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               // Token text is the inner of `{...}` (delimiter `{` skipped),
               // so baseOffset = valSpan.start + 1.
               emitForbiddenSwitchInRaw(raw, valSpan, (valSpan?.start ?? 0) + 1, filePath, errors);
+              emitClassAndDynamicImportErrorsInRaw(raw, (valSpan?.start ?? 0) + 1, valSpan?.line, (valSpan?.col ?? 0) + 1, filePath, errors);
               value = { kind: "expr", raw, refs, exprNode: safeParseExprToNodeGlobal(raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
             }
           } else if (valTok.kind === "ATTR_EXPR") {
@@ -3081,6 +3206,17 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // relative index within the token text and the token spans don't
             // overlap across attributes).
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
+            // §7.2.1 / §21.3.2 — same bypass shape: attribute text never
+            // enters a logic token stream, so scan it here.
+            // The token span includes the value's delimiters (`${`+`}` = 3,
+            // `(`+`)` / quotes = 2, unquoted = 0); recover the leading width
+            // so the diagnostic points at the keyword, not the delimiter.
+            {
+              const _delim = (valSpan && typeof valSpan.end === "number")
+                ? (valSpan.end - valSpan.start) - raw.length : 0;
+              const _lead = _delim >= 3 ? 2 : _delim >= 2 ? 1 : 0;
+              emitClassAndDynamicImportErrorsInRaw(raw, (valSpan?.start ?? 0) + _lead, valSpan?.line, (valSpan?.col ?? 1) + _lead, filePath, errors);
+            }
             value = { kind: "expr", raw, refs, exprNode: safeParseExprToNodeGlobal(raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
           } else if (valTok.kind === "ATTR_OP_REJECT") {
             // cluster-A (S188 "reject + parens") — an unquoted CONDITION
@@ -3833,6 +3969,11 @@ function _captureWhenHandlerBody(peek, consume) {
 export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, counter, errors, blockContext) {
   const nodes = [];
   let i = 0;
+  // §7.2.1 / §21.3.2 — reject a `class` construct and a dynamic `import(...)`
+  // anywhere in this logic / meta body (see findClassAndDynamicImportTokens for
+  // why this is a token scan). Deduplicated, so a re-entered sub-slice (the
+  // `export` re-parse) does not report twice.
+  emitClassAndDynamicImportErrors(tokens, filePath, errors);
   // markup-value-in-expression-2026-06-17 (a)+(b) — re-entry guard for
   // parseExprWithMarkupValues. safeParseExprToNode tries the markup-aware path
   // when markup is present; that path recurses (via safeParseExprToNode on a
@@ -5907,6 +6048,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // so the keyword surfaces a diagnostic. baseOffset uses refSpan.start
       // for uniqueness; the inner content starts ~2 chars in (after `${`).
       emitForbiddenSwitchInRaw(inner, refSpan, refSpan?.start ?? 0, filePath, errors);
+      emitClassAndDynamicImportErrorsInRaw(inner, refSpan?.start ?? 0, refSpan?.line, refSpan?.col, filePath, errors);
       return {
         kind: "expr",
         raw: inner,

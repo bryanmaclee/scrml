@@ -110,6 +110,8 @@ import {
     parseBinding, parseBindingIdent, parseObjectPattern, parseArrayPattern,
     // M4.2 — `noIn` scope helpers (the for-head deferral closure).
     enterNoInScope, exitNoInScope,
+    // S430 P1 / P4 — the shared forbidden-construct messages.
+    CLASS_NOT_IN_SCRML_MESSAGE,
 } from "./parse-expr.js";
 import {
     VarDeclKind, MethodKind,
@@ -744,8 +746,11 @@ export function parseStatement(ctx) {
         return parseClassDecl(ctx);
     }
 
-    // An `import` statement.
-    if (kind === TokenKind.KwImport) {
+    // An `import` statement. A dynamic `import(...)` at statement position is
+    // an EXPRESSION statement (S430 P4) — route it to parseExprStatement, where
+    // parse-expr.js:parsePostfix fires E-DYNAMIC-IMPORT-NOT-IN-SCRML, instead of
+    // mis-parsing it as a static import (the pre-S430 E-STMT-EXPECT-FROM noise).
+    if (kind === TokenKind.KwImport && peekKind(cursor, 1) !== TokenKind.LParen) {
         return parseImport(ctx);
     }
 
@@ -2160,9 +2165,22 @@ export function parseScrmlFunctionDecl(ctx, allowAnonymous) {
 // --- parseClassDecl — a `class Name extends Base { ... }` declaration ---
 // `allowAnonymous` is true ONLY for `export default class {}` (a
 // default-exported class may be anonymous); a plain declaration always names.
+//
+// S430 P1 — `class` is NOT scrml vocabulary (SPEC §7.2.1; bryan: "I really
+// want to reject class ... but the word is not at fault"). parseClassDecl
+// fires E-CLASS-NOT-IN-SCRML at the `class` keyword and RECOVERS by parsing
+// the construct anyway (the M4.3 `E-ASYNC-NOT-IN-SCRML` / B7 `E-TRY-NOT-IN-SCRML`
+// posture), so the rest of the program still surfaces its own diagnostics.
+// This single site covers every declaration position: a statement-level
+// `class`, `export class`, and `export default class`. A class EXPRESSION
+// fires the same code in parse-expr.js:parsePostfix. The E-STMT-CLASS-* codes
+// below are retained as the complementary malformed-construct diagnostics
+// guarding the recovery parse (SPEC §34.1 — the S117 open decision is closed).
 export function parseClassDecl(ctx, allowAnonymous) {
     const cursor = ctx.cursor;
     const kw = advance(cursor);   // consume `class`
+
+    recordError(ctx, "E-CLASS-NOT-IN-SCRML", CLASS_NOT_IN_SCRML_MESSAGE, kw.span);
 
     // The name. A plain declaration always names; `export default class` may
     // be anonymous (`name` is "" — ESTree's null id). A class name is never
