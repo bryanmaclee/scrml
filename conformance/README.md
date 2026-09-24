@@ -75,7 +75,9 @@ exists (the browser-harness is a working prototype of two-thirds of it):
     "domAnchored": [{ "selector": "#display", "text": "Count: 2" }],
     // (b) §52 server-fn responses — keyed by the IMPL-NEUTRAL source fn name ----
     "serverStub":  { "loadTasks": [{ "id": 1, "text": "a" }] }
-  }
+  },
+  // (c) optional: expected-to-fail on impl#1 for a status=carried gap (S430 P7) --
+  "xfail": { "impl1-ts": "g-some-carried-gap" }
 }
 ```
 
@@ -289,6 +291,51 @@ it from the entry's import graph (§21.3). A case with `import { x } from
 `E-IMPORT-*` family stays silent). NOTE: the adapter's `run()` executes only the
 ENTRY bundle, so cross-file imports are gated at the CODES level today; the
 runtime half of multi-file (sibling-bundle loading) is a later wave.
+
+### Per-implementation expected failure (`xfail`) — carried gaps (S430 P7)
+
+The ruling (bryan, S430 P7): impl#1 (the TS compiler) is fixed only for cause —
+bootstrap-blocking, adopter-reported, or security. Every other gap is **carried**:
+converted into a conformance case that pins the **correct** behaviour, is
+expected to fail on impl#1, and is required of the bootstrap (impl#2).
+
+A case marks itself with a top-level `xfail` block (beside `expect`, not inside it):
+
+```jsonc
+{
+  "id": "some-correct-behaviour",
+  "expect": { "codes": ["E-SOMETHING"] },          // the CORRECT contract, as for any case
+  "xfail": { "impl1-ts": "g-the-carried-gap-id" }  // impl id -> a status=carried gap
+}
+```
+
+| on the named impl | outcome | gate |
+|---|---|---|
+| the case FAILS | **XFAIL** — reported with the gap id and what failed | green |
+| the case PASSES | **XPASS** — the gap is fixed here; remove the mark, resolve the gap | **red** |
+| the gap id has no `@gap` marker in `docs/known-gaps.md` | failure | **red** |
+| the gap's marker is not `status=carried` | failure | **red** |
+| `xfail` is empty / not an object / names an unknown impl id | failure | **red** |
+| the `expect` block is malformed (S365 container policy) | failure — never absorbable | **red** |
+
+And the reverse direction: **every `status=carried` gap must be pinned by at
+least one xfail case** (a carried gap with no case is an untested claim, not a
+triaged defect) — the gated bridge asserts the unpinned list is empty.
+
+- Implementation ids: `impl1-ts` only (`KNOWN_IMPL_IDS` in `run.ts`, sourced from
+  the adapter's `IMPL_ID`). Under P7 the bootstrap must pass every case, so an
+  impl#2 xfail is a ruling change, not a missing feature.
+- Every entry point prints **`conformance (impl1-ts): N xfail of M cases`** — the
+  ratio, so an escape hatch absorbing the suite is a visible number rather than
+  something one has to inspect (pa-base §8, the absorbed escape hatch).
+- The gap ledger is read through `scripts/state.ts`'s own marker parser and
+  integrity guards (one parser for the marker grammar). `status=carried` is
+  counted in its own §0 column there — owed by the bootstrap, never in Open.
+- An XFAIL still prints what failed (`(expected) missing [...]`), so a mark that
+  has started failing for a different reason is readable from the run.
+- The mark is keyed to the GAP, not to a specific failure: a marked case that
+  starts failing for an unrelated reason stays XFAIL. The printed `(expected)`
+  line is the only defence today (see the dispatch report's deferred items).
 
 ## OQ1 — whole-tree vs anchored (the default-mode resolution)
 

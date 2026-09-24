@@ -28,6 +28,13 @@ import { tmpdir } from "os";
 // api.js is the reference compiler's public entry (plain ESM .js).
 import { compileScrml } from "../../compiler/src/api.js";
 
+/**
+ * This adapter's IMPLEMENTATION ID — the key a case's `expected.json` uses to mark itself
+ * expected-to-fail on THIS implementation: `"xfail": { "impl1-ts": "<gap-id>" }` (S430 P7).
+ * An impl#2 adapter exports its own id; the runner resolves xfail against whichever adapter ran.
+ */
+export const IMPL_ID = "impl1-ts";
+
 export type Severity = "error" | "warning" | "info";
 
 export interface CompileResult {
