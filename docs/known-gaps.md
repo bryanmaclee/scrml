@@ -18012,3 +18012,22 @@ safeCall form hits the let-through-guard lost-write gap), and precondition throw
 panic primitive for programmer-error preconditions. None affects importers (stdlib runs from JS shims). Awaiting bryan.
 
 <!-- @gap id=g-export-swallow-closure-leaves-unmigratable-throw-sites sev=MED status=open locus=stdlib/test/index.scrml prov=ruling:user-voice-S430-P2 -->
+
+### G-EMIT-LOGIC-STRUCTURAL-DECL-NAMES-LEAK-ACROSS-COMPILES — the TS compiler's output depends on what it compiled earlier in the process
+
+**Agent-reproduced (S430 `s430-stage-swap`), RELAYED.** `emit-logic.ts` module-level `_structuralDeclNamesForFile` is reset only
+by emit-reactive-wiring, but function-body emission reads it FIRST, so each file sees the PREVIOUS file's set. Repro: compile
+`conformance/cases/error/handler-recovery-into-cell/case.scrml` twice in one process — the first emits
+`_scrml_cs_init_set("result", () => _scrml_risky_3())` inside `go()`, the second does not. The fresh-process (CLI) output looks
+like the WRONG one (registers a reset thunk inside a function — the g-assignment-emits-init-set-inverting-reset class, §6.8).
+Hits multi-file builds and dev/LSP recompiles. **P7 criterion 1 (bootstrap-blocking):** the P5 hybrid differential must be
+deterministic; the harness currently works around it by running pure and hybrid in separate processes.
+
+<!-- @gap id=g-emit-logic-structural-decl-names-leak-across-compiles sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts prov=empirical:agent-s430-stage-swap -->
+
+### G-RECURSIVE-COMPONENT-OVERFLOWS-CE-DEEP-CLONE — a recursive component crashes the compiler
+
+**Agent-reported (S430 `s430-stage-swap`), RELAYED.** `samples/gauntlet-s19-phase4/nested-comments.scrml`: CE `_deepCloneAst`
+overflows the stack on a recursive component; the CLI prints "Compiler crashed unexpectedly".
+
+<!-- @gap id=g-recursive-component-overflows-ce-deep-clone sev=MED status=open locus=compiler/src/component-expander.ts prov=empirical:agent-s430-stage-swap -->
