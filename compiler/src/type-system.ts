@@ -13253,13 +13253,22 @@ function annotateNodes(
         // for-of / for-in form: `variable` is a string name, OR a structured
         // DestructurePattern (A5 2026-05-17), OR null for C-style headers.
         const forVar = (n as Record<string, unknown>).variable;
+        // s430 — §50.8.5 / §50.9: an EXPLICIT `const` binder (`for (const x of …)`,
+        // plain or destructured; the parser records it as `constBinder: true`) is
+        // immutable, so a write to it in the body is E-ASSIGN-004 in EVERY loop,
+        // not only a rendering one. A `let` binder is mutable. A KEYWORDLESS binder
+        // (`for (x of …)`) is deliberately left mutable here, exactly as before:
+        // whether it is `const` is a language ruling still pending with bryan.
+        const _forBinderConst = (n as Record<string, unknown>).constBinder === true
+          ? { isConst: true as const }
+          : {};
         if (typeof forVar === "string" && forVar.length > 0) {
           // §14.8.8 (T2a) — when the iterated collection is a SQL-projection
           // `Row[]`, bind `forVar` to the row STRUCT (so `forVar.id` types and
           // `forVar.bogus` → E-TYPE-004). Bounded to sql-row provenance; every
           // other collection keeps the permissive `asIs` binding.
           const _forRow = resolveIterableRowElement((n as Record<string, unknown>).iterable);
-          scopeChain.bind(forVar, { kind: "variable", resolvedType: _forRow ?? tAsIs() });
+          scopeChain.bind(forVar, { kind: "variable", resolvedType: _forRow ?? tAsIs(), ..._forBinderConst });
         } else if (isDestructurePattern(forVar)) {
           // A5 — structural destructuring walk. Each bound name enters scope
           // as a plain `asIs` variable in the loop's own scope (pushed above),
@@ -13269,7 +13278,7 @@ function annotateNodes(
           // E-ASSIGN-004 on `const name = ""; for (let { name } of rows) {
           // name = … }`) — s430-destructure-shadow.
           for (const bind of iterDestructuredNames(forVar as DestructurePatternShape)) {
-            scopeChain.bind(bind, { kind: "variable", resolvedType: tAsIs() });
+            scopeChain.bind(bind, { kind: "variable", resolvedType: tAsIs(), ..._forBinderConst });
           }
         }
         // C-style form: extract the declared counter name from the initExpr

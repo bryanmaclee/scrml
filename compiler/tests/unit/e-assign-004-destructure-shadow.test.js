@@ -61,6 +61,25 @@ ${body}
 }
 ${SHELL}`;
 
+/**
+ * EXECUTE the program's first user function (`_scrml_f_N`, a pure function over
+ * its arguments) and return its result. "Compiles clean" is not enough: a
+ * shadowing loop binder once compiled at exit 0 into `for (const x …) { const x
+ * = x … }`, a TDZ ReferenceError. Throws if the emitted function throws.
+ */
+function runF(clientJs, ...args) {
+  const m = /function (_scrml_f\w*)\(/.exec(clientJs);
+  if (!m) throw new Error("no emitted user function in clientJs");
+  const open = clientJs.indexOf("{", m.index);
+  let depth = 0, end = open;
+  for (; end < clientJs.length; end++) {
+    if (clientJs[end] === "{") depth++;
+    else if (clientJs[end] === "}" && --depth === 0) break;
+  }
+  const text = clientJs.slice(m.index, end + 1);
+  return new Function(`${text}; return ${m[1]};`)()(...args);
+}
+
 /** E-ASSIGN-004 diagnostics, as `name@line` for precise assertions. */
 function assign004(fatal) {
   return fatal
@@ -86,6 +105,7 @@ describe("destructured `let` shadowing an outer immutable binding is MUTABLE", (
     expect(r.fatalCodes).not.toContain("E-ASSIGN-004");
     expect(r.fatal).toEqual([]);
     expect(r.clientJs).toContain("let { a, b } = o;");
+    expect(runF(r.clientJs, { a: 1, b: 2 })).toBe(3);
   });
 
   test("object pattern shadows an outer BARE-named (implicitly const) binding", () => {
@@ -95,7 +115,11 @@ describe("destructured `let` shadowing an outer immutable binding is MUTABLE", (
         a = a + b
         return a
     }`));
+    // E-MU-001 on the unused top-level `a = 0` is expected and unrelated; the
+    // point is that the inner write is NOT E-ASSIGN-004 and the function runs.
     expect(r.fatalCodes).not.toContain("E-ASSIGN-004");
+    expect(r.fatalCodes).toEqual(["E-MU-001"]);
+    expect(runF(r.clientJs, { a: 1, b: 2 })).toBe(3);
   });
 
   test("block-level `let { a } = o` inside an `if` shadows an outer `const`", () => {
@@ -110,6 +134,7 @@ describe("destructured `let` shadowing an outer immutable binding is MUTABLE", (
     }`));
     expect(r.fatalCodes).not.toContain("E-ASSIGN-004");
     expect(r.fatal).toEqual([]);
+    expect(runF(r.clientJs, { a: 4 }, true)).toBe(5);
   });
 
   test("array pattern with a nested object + rest shadows outer `const`s", () => {
@@ -123,6 +148,7 @@ describe("destructured `let` shadowing an outer immutable binding is MUTABLE", (
     }`));
     expect(r.fatalCodes).not.toContain("E-ASSIGN-004");
     expect(r.fatal).toEqual([]);
+    expect(runF(r.clientJs, [{ a: 10 }, 1, 2, 3])).toBe(13);
   });
 
   test("renamed object property binds the ALIAS, which may shadow", () => {
@@ -132,10 +158,14 @@ describe("destructured `let` shadowing an outer immutable binding is MUTABLE", (
         b = b + 1
         return b
     }`));
-    expect(r.fatalCodes).not.toContain("E-ASSIGN-004");
+    expect(r.fatal).toEqual([]);
+    expect(runF(r.clientJs, { a: 41 })).toBe(42);
   });
 
-  test("for-of object-pattern binder shadows an outer `const`", () => {
+  // s430 fix round (F1) — these two once asserted only "no E-ASSIGN-004" on a
+  // program that compiled at exit 0 into `for (const { name } of rows) { const
+  // name = name + "!"` — a TDZ ReferenceError. They now EXECUTE the output.
+  test("for-of object-pattern binder shadows an outer `const` — compiles AND runs", () => {
     const r = compile(wrap(`    const name = ""
     function f(rows) {
         let out = ""
@@ -145,10 +175,13 @@ describe("destructured `let` shadowing an outer immutable binding is MUTABLE", (
         }
         return out
     }`));
-    expect(r.fatalCodes).not.toContain("E-ASSIGN-004");
+    expect(r.fatal).toEqual([]);
+    expect(r.clientJs).toContain("for (let { name } of rows)");
+    expect(r.clientJs).not.toContain("const name = name");
+    expect(runF(r.clientJs, [{ name: "a" }, { name: "b" }])).toBe("a!b!");
   });
 
-  test("for-of array-pattern binder shadows outer `const`s", () => {
+  test("for-of array-pattern binder shadows outer `const`s — compiles AND runs", () => {
     const r = compile(wrap(`    const k = 0
     const v = 0
     function f(pairs) {
@@ -159,7 +192,9 @@ describe("destructured `let` shadowing an outer immutable binding is MUTABLE", (
         }
         return s
     }`));
-    expect(r.fatalCodes).not.toContain("E-ASSIGN-004");
+    expect(r.fatal).toEqual([]);
+    expect(r.clientJs).toMatch(/for \(let \[\s*k,\s*v\s*\] of pairs\)/);
+    expect(runF(r.clientJs, [[1, 2], [3, 4]])).toBe(10);
   });
 
   test("control: a NON-destructured `let` shadow was already clean and stays clean", () => {
@@ -170,6 +205,7 @@ describe("destructured `let` shadowing an outer immutable binding is MUTABLE", (
         return a
     }`));
     expect(r.fatal).toEqual([]);
+    expect(runF(r.clientJs, 1)).toBe(2);
   });
 });
 

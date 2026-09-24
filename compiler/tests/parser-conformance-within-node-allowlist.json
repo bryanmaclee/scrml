@@ -42,10 +42,10 @@
   },
   "compiler/self-host/meta-checker.scrml": {
     "COUNT-LENGTH": 9,
-    "EXTRA-FIELD": 101,
+    "EXTRA-FIELD": 102,
     "FIELD-SHAPE": 98,
     "KIND-NAME": 31,
-    "MISSING-FIELD": 294,
+    "MISSING-FIELD": 295,
     "SPAN-COORD": 73
   },
   "compiler/self-host/module-resolver.scrml": {
@@ -66,7 +66,7 @@
   },
   "compiler/self-host/ri.scrml": {
     "COUNT-LENGTH": 17,
-    "EXTRA-FIELD": 220,
+    "EXTRA-FIELD": 224,
     "FIELD-SHAPE": 190,
     "KIND-NAME": 67,
     "MISSING-FIELD": 387,
@@ -82,10 +82,10 @@
   },
   "compiler/self-host/ts.scrml": {
     "COUNT-LENGTH": 35,
-    "EXTRA-FIELD": 329,
+    "EXTRA-FIELD": 333,
     "FIELD-SHAPE": 264,
     "KIND-NAME": 81,
-    "MISSING-FIELD": 571,
+    "MISSING-FIELD": 574,
     "SPAN-COORD": 198
   },
   "examples/01-hello.scrml": {
@@ -6435,7 +6435,7 @@
   "stdlib/auth/jwt.scrml": {
     "KIND-NAME": 32,
     "FIELD-SHAPE": 80,
-    "MISSING-FIELD": 241,
+    "MISSING-FIELD": 242,
     "EXTRA-FIELD": 126,
     "COUNT-LENGTH": 13,
     "SPAN-COORD": 83
@@ -6530,10 +6530,10 @@
   },
   "stdlib/compiler/meta-checker.scrml": {
     "COUNT-LENGTH": 9,
-    "EXTRA-FIELD": 101,
+    "EXTRA-FIELD": 102,
     "FIELD-SHAPE": 98,
     "KIND-NAME": 31,
-    "MISSING-FIELD": 294,
+    "MISSING-FIELD": 295,
     "SPAN-COORD": 73
   },
   "stdlib/compiler/mod.scrml": {
@@ -6739,7 +6739,7 @@
     "KIND-NAME": 16,
     "FIELD-SHAPE": 64,
     "MISSING-FIELD": 230,
-    "EXTRA-FIELD": 72,
+    "EXTRA-FIELD": 73,
     "COUNT-LENGTH": 9,
     "SPAN-COORD": 48
   },
