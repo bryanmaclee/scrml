@@ -3453,7 +3453,7 @@ banked:     S430 2026-09-24 (bryan: "bank it and lets discuss")
    instances; logic `<name>` reads the default instance)? Stress test: a library `<dropdown>` used 3× on
    one page needs per-instance open/closed state; a theme `<swatch>` wants one shared value.
 2. **Q2 RULED (S430, bryan): *"b, renders reads right"*** — markup attaches via a `renders` clause after the declaration (reusing §19.2 enum-variant vocabulary); not a body between tags, not opener `:`-shorthand.
-3. Defaults: named vs positional vs inline-on-the-attribute (`hex:string="#338967"`).
+3. **Q3 RULED (S430, bryan): *"c, and go uniform"*** — defaults INLINE on each attribute (`<swatch label:string="Brand" hex:string="#338967">`), and UNIFORM: a single-value cell is `<count:int=0>`; the `<x> = v` RHS form retires (mechanical corpus migration owed WITH the build). Sub-point for the DD: whether the type may be inferred from the default (`<count=0>`) given bryan's "typed, obviously".
 4. Attributes (scalar fields) vs children (nested state) — one model or two.
 5. Access: `<swatch>` in logic vs `@swatch` — does V5-strict's two-form rule survive?
 6. The retirement pole — `state x: T = …` keyword form — argued at full strength.
