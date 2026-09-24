@@ -7,7 +7,7 @@ import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMer
 import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
-import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr } from "./emit-lift.js";
+import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { extractReactiveDeps, extractReactiveDepsFromExprNode, extractReactiveDepsTransitive, isMapTypeAnnotation, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { emitStringFromTree, parseExprToNode } from "../expression-parser.ts";
 import type { EncodingContext, ResolvedType, StructType } from "./type-encoding.ts";
@@ -4584,11 +4584,17 @@ function _emitForStmtWithTilde(node: any, opts: EmitLogicOpts): string {
   }
 
   const rewrittenIterable = emitExprField(node.iterExpr, iterable, _makeExprCtx(opts));
-  lines.push(`for (const ${varName} of ${rewrittenIterable}) {`);
+  // s430 — a `let` binder the body writes gets a `let` head and enters the body's
+  // declared names, so `x = x + 1` is an assignment rather than a TDZ
+  // `const x = x + 1` (emit-lift.js loopBodyDeclaredNames). Every other loop is
+  // byte-identical: forHeadKeyword is `const` and the names pass through.
+  lines.push(`for (${forHeadKeyword(node)} ${varName} of ${rewrittenIterable}) {`);
+  const _tildeLoopNames = loopBodyDeclaredNames(opts.declaredNames, node, false);
+  const _tildeBodyOpts: EmitLogicOpts = _tildeLoopNames === opts.declaredNames ? opts : { ...opts, declaredNames: _tildeLoopNames };
 
   const body: any[] = node.body ?? [];
   for (const child of body) {
-    const code = emitLogicNode(child, opts);
+    const code = emitLogicNode(child, _tildeBodyOpts);
     if (code) {
       for (const line of code.split("\n")) lines.push(`  ${line}`);
     }
@@ -5001,11 +5007,14 @@ function emitForExprDecl(name: string, forExpr: any, keyword: "let" | "const", o
   }
 
   const rewrittenIterable = emitExprField(forExpr.iterExpr, iterable, _makeExprCtx(opts));
-  lines.push(`for (const ${varName} of ${rewrittenIterable}) {`);
+  // s430 — same `let`-binder rule as _emitForStmtWithTilde (loopBodyDeclaredNames).
+  lines.push(`for (${forHeadKeyword(forExpr)} ${varName} of ${rewrittenIterable}) {`);
+  const _exprLoopNames = loopBodyDeclaredNames(bodyOpts.declaredNames, forExpr, false);
+  const _exprBodyOpts: EmitLogicOpts = _exprLoopNames === bodyOpts.declaredNames ? bodyOpts : { ...bodyOpts, declaredNames: _exprLoopNames };
 
   const body: any[] = forExpr.body ?? [];
   for (const stmt of body) {
-    const code = emitLogicNode(stmt, bodyOpts);
+    const code = emitLogicNode(stmt, _exprBodyOpts);
     if (code) {
       for (const line of code.split("\n")) lines.push(`  ${line}`);
     }
