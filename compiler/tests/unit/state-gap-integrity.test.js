@@ -177,7 +177,8 @@ describe("state.ts §5 — status=carried is a recognised, separately-counted pa
   test("the live §0 table header names the Carried column the generator writes", () => {
     const ledger = readFileSync(join(import.meta.dir, "../../../docs/known-gaps.md"), "utf8");
     // The generated rows carry THREE cells; a two-column static header would render them as garbage.
-    expect(ledger).toMatch(/\| Severity \| Open[^|\n]*\| Carried[^|\n]*\|\n\|---\|---\|---\|/);
+    // `\r?\n`: a Windows checkout (core.autocrlf) reads this ledger with CRLF line ends (CI `windows`, #1050).
+    expect(ledger).toMatch(/\| Severity \| Open[^|\r\n]*\| Carried[^|\r\n]*\|\r?\n\|---\|---\|---\|/);
     expect(ledger).toMatch(/\| HIGH \| \d+ \| \d+ \|/);
   });
 });
