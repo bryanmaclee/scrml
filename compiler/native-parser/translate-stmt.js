@@ -1966,6 +1966,11 @@ function makeForStmtInOf(stmt, counter, label) {
     if (left && left.kind === StmtKind.VarDecl && left.declKind === "let") {
         node.letBinder = true;
     }
+    // s430 — and `constBinder: true` for `for (const x of|in …)`, as the LIVE
+    // parser records it: the type system binds an explicit `const` binder immutable.
+    if (left && left.kind === StmtKind.VarDecl && left.declKind === "const") {
+        node.constBinder = true;
+    }
     if (label !== null && label !== undefined) {
         node.label = label;
     }
