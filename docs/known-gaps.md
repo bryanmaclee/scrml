@@ -17980,3 +17980,15 @@ Underneath, pre-existing and silent: with ONE write the function emits `const to
 file-level `let`, exit 0 on both builds. That silent half is the real defect (§6.9 hoisting / §7.6 file-level scope).
 
 <!-- @gap id=g-e-assign-004-blames-a-forward-declared-let sev=MED status=open locus=compiler/src/type-system.ts prov=review:S430-996-F3 -->
+
+### G-NON-RENDERING-LOOP-WRITE-TO-ITS-OWN-BINDER-EMITS-A-TDZ-REFERENCEERROR — `for (let name of rows) { name = name + "!" }` compiles, dies at runtime
+
+**Agent-reproduced (S430 `s430-destructure-shadow`, found along the way), RELAYED.** In a loop that does not lift/render,
+`function f(rows) { for (let name of rows) { name = name + "!" … } }` → exit 0, emits
+`for (const name of rows) { const name = name + "!"; …` → ReferenceError (TDZ). Same for destructured binders
+`for (let { name } of rows)` / `for (let [k, v] of pairs)`. #1032 (S427/S429) fixed only the RENDERING-loop path
+(`emit-control-flow.ts` ~:826, "Other loops unchanged"); the `forHeadKeyword` / `withLoopBinders` machinery in `emit-lift.js`
+~:2325 could be extended. Sibling, same arm: `for (const x of xs) { x = 1 }` fires NO E-ASSIGN-004 (the type-system for-arm
+ignores `letBinder`) — its fix is entangled with peter's pending Q1 (is a keywordless binder mutable?).
+
+<!-- @gap id=g-non-rendering-loop-write-to-its-own-binder-emits-a-tdz-referenceerror sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts prov=empirical:agent-s430-destructure-shadow -->
