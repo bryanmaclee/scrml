@@ -1,3 +1,5 @@
+import:host { splitBlocks as _splitBlocks, runBlockSplitter as _runBlockSplitter } from "../../compiler/src/block-splitter.js"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = splitBlocks(filePath, source)
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { splitBlocks: _splitBlocks, runBlockSplitter: _runBlockSplitter } = await import("../../compiler/src/block-splitter.js");
-    }
 
     export const splitBlocks = _splitBlocks
     export const runBlockSplitter = _runBlockSplitter

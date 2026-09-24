@@ -115,18 +115,16 @@ describe("self-host: meta-checker.scrml compilation", () => {
       inputFiles: [scrmlFile], outputDir: outDir, write: false, verbose: false, log: () => {},
     });
     const got = (r.errors ?? []).map((e) => `${e.code}@${e.span?.line ?? e.tabSpan?.line}`).sort();
-    // ⚑ S430 P1 + P4 add two more unmigrated sites (SPEC §7.2.1 / §21.3.2):
-    //   :48  `^{ … await import("./expression-parser.js") }` — the bridge
-    //        `import:host` replaces (§21.3.1); migrated by the bootstrap
-    //        track's import:host unit, not here;
-    //   :55  `export class MetaError` — the class→struct rewrite is P1b
-    //        (free fns over struct values), also a bootstrap-track unit.
+    // ⚑ S430 P1 adds one more unmigrated site (SPEC §7.2.1):
+    //   :54  `export class MetaError` — the class→struct rewrite is P1b
+    //        (free fns over struct values), a bootstrap-track unit.
+    // (S430 P4: the file's `^{ await import(...) }` bridge became a file-top
+    // `import:host` — lines shifted by -1.)
     expect(got).toEqual([
-      "E-CLASS-NOT-IN-SCRML@55",
-      "E-DYNAMIC-IMPORT-NOT-IN-SCRML@48",
-      "E-THROW-NOT-IN-SCRML@455",
-      "E-THROW-NOT-IN-SCRML@460",
-      "E-TRY-NOT-IN-SCRML@297",
+      "E-CLASS-NOT-IN-SCRML@54",
+      "E-THROW-NOT-IN-SCRML@454",
+      "E-THROW-NOT-IN-SCRML@459",
+      "E-TRY-NOT-IN-SCRML@296",
     ]);
   });
 });

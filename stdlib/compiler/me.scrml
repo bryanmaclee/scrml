@@ -1,3 +1,5 @@
+import:host { runMetaEval as _runMetaEval, MetaEvalError as _MetaEvalError } from "../../compiler/src/meta-eval.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = runMetaEval({ files })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runMetaEval: _runMetaEval, MetaEvalError: _MetaEvalError } = await import("../../compiler/src/meta-eval.ts");
-    }
 
     export const runMetaEval = _runMetaEval
     export const MetaEvalError = _MetaEvalError

@@ -1,3 +1,5 @@
+import:host { runPA as _runPA, PAError as _PAError } from "../../compiler/src/protect-analyzer.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = runPA({ files })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runPA: _runPA, PAError: _PAError } = await import("../../compiler/src/protect-analyzer.ts");
-    }
 
     export const runPA = _runPA
     export const PAError = _PAError

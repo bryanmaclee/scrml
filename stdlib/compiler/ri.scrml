@@ -1,3 +1,5 @@
+import:host { runRI as _runRI, RIError as _RIError, collectFileFunctions as _collectFileFunctions, generateRouteName as _generateRouteName, buildFunctionIndex as _buildFunctionIndex, buildPageRouteTree as _buildPageRouteTree } from "../../compiler/src/route-inference.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = runRI({ files, protectAnalysis })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runRI: _runRI, RIError: _RIError, collectFileFunctions: _collectFileFunctions, generateRouteName: _generateRouteName, buildFunctionIndex: _buildFunctionIndex, buildPageRouteTree: _buildPageRouteTree } = await import("../../compiler/src/route-inference.ts");
-    }
 
     export const runRI = _runRI
     export const RIError = _RIError

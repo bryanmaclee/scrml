@@ -11,19 +11,11 @@ import { resolve } from "path";
 
 const STDLIB_DIR = resolve(import.meta.dir, "../../../stdlib/compiler");
 
-// ⚑ S430 P4 — every stdlib/compiler/*.scrml bridges into the host compiler with
-// `^{ const { … } = await import("../../compiler/src/<stage>") }`. SPEC §21.3.2
-// now rejects dynamic `import(...)` (E-DYNAMIC-IMPORT-NOT-IN-SCRML), and
-// §21.3.1 names exactly this `^{ await import(...) }` bridge as the path
-// `import:host` replaces. These files are NOT migrated here — the
-// import:host conversion is the bootstrap track's first unit (a separate
-// dispatch). Until it lands, each file compiles with EXACTLY its bridge
-// sites as residue (line-pinned, the S430 P2 meta-checker precedent): a new
-// error class fails the test, and so does a migration that clears a site
-// without updating the pin.
-const S430_P4_RESIDUE = (...lines) => lines.map((l) => `E-DYNAMIC-IMPORT-NOT-IN-SCRML@${l}`);
-const residueOf = (errors) =>
-  (errors ?? []).map((e) => `${e.code}@${e.span?.line ?? e.tabSpan?.line}`).sort();
+// S430 P4 — every stdlib/compiler/*.scrml bridges into the host compiler with a
+// file-top `import:host { … } from "../../compiler/src/<stage>"` (§21.3.1),
+// admitted by the repo-root `scrml.toml` (`host-import = "self-host-only"`,
+// §22.13). The former `^{ await import(...) }` bridge is rejected by
+// E-DYNAMIC-IMPORT-NOT-IN-SCRML (§21.3.2); these files compile clean again.
 
 // Helper: compile a scrml file in library mode and return the libraryJs output
 function compileLibrary(filename) {
@@ -46,27 +38,27 @@ function compileLibrary(filename) {
 
 describe("§90 Compiler API — per-stage modules", () => {
   const stageTests = [
-    { file: "bs.scrml", exports: ["splitBlocks", "runBlockSplitter"], residue: S430_P4_RESIDUE(15) },
-    { file: "tab.scrml", exports: ["buildAST", "runTAB", "parseLogicBody", "TABError"], residue: S430_P4_RESIDUE(15) },
-    { file: "mod.scrml", exports: ["resolveModules"], residue: S430_P4_RESIDUE(16) },
-    { file: "ce.scrml", exports: ["runCE", "runCEFile"], residue: S430_P4_RESIDUE(15) },
-    { file: "bpp.scrml", exports: ["runBPP", "runBPPFile"], residue: S430_P4_RESIDUE(15) },
-    { file: "pa.scrml", exports: ["runPA", "PAError"], residue: S430_P4_RESIDUE(15) },
-    { file: "ri.scrml", exports: ["runRI", "RIError", "collectFileFunctions", "generateRouteName", "buildFunctionIndex", "buildPageRouteTree"], residue: S430_P4_RESIDUE(15) },
-    { file: "ts.scrml", exports: ["runTS", "TSError"], residue: S430_P4_RESIDUE(15) },
-    { file: "mc.scrml", exports: ["runMetaChecker", "MetaError", "buildFileTypeRegistry", "createReflect", "bodyUsesCompileTimeApis"], residue: S430_P4_RESIDUE(17) },
-    { file: "me.scrml", exports: ["runMetaEval", "MetaEvalError"], residue: S430_P4_RESIDUE(15) },
-    { file: "dg.scrml", exports: ["runDG", "DGError"], residue: S430_P4_RESIDUE(15) },
-    { file: "cg.scrml", exports: ["runCG", "CGError"], residue: S430_P4_RESIDUE(15) },
-    { file: "expr.scrml", exports: ["parseExpression", "parseStatements", "walk", "extractIdentifiersFromAST", "extractReactiveDepsFromAST", "astToJs", "rewriteReactiveRefsAST", "rewriteServerReactiveRefsAST"], residue: S430_P4_RESIDUE(16) },
+    { file: "bs.scrml", exports: ["splitBlocks", "runBlockSplitter"] },
+    { file: "tab.scrml", exports: ["buildAST", "runTAB", "parseLogicBody", "TABError"] },
+    { file: "mod.scrml", exports: ["resolveModules"] },
+    { file: "ce.scrml", exports: ["runCE", "runCEFile"] },
+    { file: "bpp.scrml", exports: ["runBPP", "runBPPFile"] },
+    { file: "pa.scrml", exports: ["runPA", "PAError"] },
+    { file: "ri.scrml", exports: ["runRI", "RIError", "collectFileFunctions", "generateRouteName", "buildFunctionIndex", "buildPageRouteTree"] },
+    { file: "ts.scrml", exports: ["runTS", "TSError"] },
+    { file: "mc.scrml", exports: ["runMetaChecker", "MetaError", "buildFileTypeRegistry", "createReflect", "bodyUsesCompileTimeApis"] },
+    { file: "me.scrml", exports: ["runMetaEval", "MetaEvalError"] },
+    { file: "dg.scrml", exports: ["runDG", "DGError"] },
+    { file: "cg.scrml", exports: ["runCG", "CGError"] },
+    { file: "expr.scrml", exports: ["parseExpression", "parseStatements", "walk", "extractIdentifiersFromAST", "extractReactiveDepsFromAST", "astToJs", "rewriteReactiveRefsAST", "rewriteServerReactiveRefsAST"] },
   ];
 
-  for (const { file, exports: expectedExports, residue } of stageTests) {
+  for (const { file, exports: expectedExports } of stageTests) {
     const stage = file.replace(".scrml", "");
 
-    test(`${stage}: compiles with exactly the known S430 P4 residue (pending import:host)`, () => {
+    test(`${stage}: compiles without errors`, () => {
       const { errors } = compileLibrary(file);
-      expect(residueOf(errors)).toEqual(residue.slice().sort());
+      expect(errors).toEqual([]);
     });
 
     test(`${stage}: exports ${expectedExports.join(", ")}`, () => {
@@ -83,10 +75,9 @@ describe("§90 Compiler API — per-stage modules", () => {
 // ---------------------------------------------------------------------------
 
 describe("§91 Compiler API — umbrella module", () => {
-  test("index.scrml compiles with exactly the known S430 P4 residue (pending import:host)", () => {
+  test("index.scrml compiles without errors", () => {
     const { errors } = compileLibrary("index.scrml");
-    expect(residueOf(errors)).toEqual(
-      S430_P4_RESIDUE(32, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 49).sort());
+    expect(errors).toEqual([]);
   });
 
   test("umbrella exports full pipeline function", () => {

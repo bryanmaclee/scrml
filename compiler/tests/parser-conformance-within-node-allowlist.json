@@ -6456,132 +6456,118 @@
     "SPAN-COORD": 134
   },
   "stdlib/compiler/bpp.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 3,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 21,
-    "SPAN-COORD": 5
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 20,
+    "SPAN-COORD": 6
   },
   "stdlib/compiler/bs.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 3,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 21,
-    "SPAN-COORD": 5
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 20,
+    "SPAN-COORD": 6
   },
   "stdlib/compiler/ce.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 3,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 21,
-    "SPAN-COORD": 5
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 20,
+    "SPAN-COORD": 6
   },
   "stdlib/compiler/cg.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 3,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 21,
-    "SPAN-COORD": 5
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 20,
+    "SPAN-COORD": 6
   },
   "stdlib/compiler/dg.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 3,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 21,
-    "SPAN-COORD": 5
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 20,
+    "SPAN-COORD": 6
   },
   "stdlib/compiler/expr.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 9,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 75,
-    "SPAN-COORD": 17
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 18,
+    "MISSING-FIELD": 74,
+    "SPAN-COORD": 18
   },
   "stdlib/compiler/index.scrml": {
     "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 57,
-    "FIELD-SHAPE": 20,
-    "KIND-NAME": 14,
-    "MISSING-FIELD": 199,
-    "SPAN-COORD": 33
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 60,
+    "MISSING-FIELD": 159,
+    "SPAN-COORD": 60
   },
   "stdlib/compiler/mc.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 6,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 48,
-    "SPAN-COORD": 11
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 12,
+    "MISSING-FIELD": 47,
+    "SPAN-COORD": 12
   },
   "stdlib/compiler/me.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 3,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 21,
-    "SPAN-COORD": 5
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 20,
+    "SPAN-COORD": 6
   },
   "stdlib/compiler/meta-checker.scrml": {
-    "COUNT-LENGTH": 11,
-    "EXTRA-FIELD": 98,
-    "FIELD-SHAPE": 86,
-    "KIND-NAME": 27,
-    "MISSING-FIELD": 270,
-    "SPAN-COORD": 62
+    "COUNT-LENGTH": 12,
+    "EXTRA-FIELD": 95,
+    "FIELD-SHAPE": 87,
+    "KIND-NAME": 26,
+    "MISSING-FIELD": 269,
+    "SPAN-COORD": 63
   },
   "stdlib/compiler/mod.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 2,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 12,
-    "SPAN-COORD": 3
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 4,
+    "MISSING-FIELD": 11,
+    "SPAN-COORD": 4
   },
   "stdlib/compiler/module-resolver.scrml": {
-    "COUNT-LENGTH": 2,
-    "EXTRA-FIELD": 41,
-    "FIELD-SHAPE": 33,
-    "KIND-NAME": 12,
-    "MISSING-FIELD": 149,
-    "SPAN-COORD": 23
+    "COUNT-LENGTH": 6,
+    "EXTRA-FIELD": 35,
+    "FIELD-SHAPE": 42,
+    "KIND-NAME": 11,
+    "MISSING-FIELD": 148,
+    "SPAN-COORD": 34
   },
   "stdlib/compiler/pa.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 3,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 21,
-    "SPAN-COORD": 5
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 20,
+    "SPAN-COORD": 6
   },
   "stdlib/compiler/ri.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 7,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 57,
-    "SPAN-COORD": 13
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 14,
+    "MISSING-FIELD": 56,
+    "SPAN-COORD": 14
   },
   "stdlib/compiler/tab.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 5,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 39,
-    "SPAN-COORD": 9
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 10,
+    "MISSING-FIELD": 38,
+    "SPAN-COORD": 10
   },
   "stdlib/compiler/ts.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 5,
-    "FIELD-SHAPE": 3,
-    "KIND-NAME": 1,
-    "MISSING-FIELD": 21,
-    "SPAN-COORD": 5
+    "COUNT-LENGTH": 2,
+    "EXTRA-FIELD": 2,
+    "FIELD-SHAPE": 6,
+    "MISSING-FIELD": 20,
+    "SPAN-COORD": 6
   },
   "stdlib/cron/index.scrml": {
     "COUNT-LENGTH": 1,

@@ -1,3 +1,5 @@
+import:host { runMetaChecker as _runMetaChecker, MetaError as _MetaError, buildFileTypeRegistry as _buildFileTypeRegistry, createReflect as _createReflect, bodyUsesCompileTimeApis as _bodyUsesCompileTimeApis } from "../../compiler/src/meta-checker.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -13,9 +15,6 @@ ${
     //   const result = runMetaChecker({ files })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runMetaChecker: _runMetaChecker, MetaError: _MetaError, buildFileTypeRegistry: _buildFileTypeRegistry, createReflect: _createReflect, bodyUsesCompileTimeApis: _bodyUsesCompileTimeApis } = await import("../../compiler/src/meta-checker.ts");
-    }
 
     export const runMetaChecker = _runMetaChecker
     export const MetaError = _MetaError

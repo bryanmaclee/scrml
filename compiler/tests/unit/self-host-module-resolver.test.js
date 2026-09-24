@@ -78,25 +78,25 @@ describe("self-host: module-resolver.scrml compilation", () => {
   //       bare-expr).
   // All three fixed in changes/a1-scope-walker-export-class-closures
   // (commits 8f16e01 + 92ce1f3 + de7af98).
-  // ⚑ S430 P1 + P4 — this used to assert a clean CLI compile. The file now
-  // reports exactly three unmigrated sites (SPEC §7.2.1 / §21.3.2):
-  //   :26, :27  `^{ … await import("node:path" / "node:fs") }` — the bridge
-  //             `import:host` replaces (§21.3.1); the bootstrap track's
-  //             import:host unit migrates it, not this dispatch;
-  //   :34       `export class ModuleError` — the class→struct rewrite is P1b.
+  // ⚑ S430 P1 — this used to assert a clean CLI compile. The file now reports
+  // exactly one unmigrated site (SPEC §7.2.1):
+  //   :32  `export class ModuleError` — the class→struct rewrite is P1b.
+  // (S430 P4: its `^{ await import("path"/"fs") }` became static
+  // `scrml:path` / `scrml:fs` imports — builtins are not import:host targets.)
   // The A1 scope-walker fixes this test guarded stay guarded: any OTHER error
   // (an E-SCOPE-001 regression included) fails the exact-residue pin.
+  // Compiled in LIBRARY mode — how every stdlib/compiler module is consumed
+  // (compiler-api §90, emit-library §7). The old CLI call compiled it as a
+  // browser APP; with `scrml:path` (a server-only stdlib module with no client
+  // chunk) that correctly adds E-STDLIB-CLIENT-CHUNK-MISSING, which says
+  // nothing about this library module.
   test("compiles with exactly the known S430 residue [A2-SURFACED — fixed by A1]", () => {
     const r = compileScrml({
       inputFiles: [scrmlFile], outputDir: resolve(dirname(scrmlFile), "dist"),
-      write: false, log: () => {},
+      mode: "library", write: false, log: () => {},
     });
     const got = (r.errors ?? []).map((e) => `${e.code}@${e.span?.line ?? e.tabSpan?.line}`).sort();
-    expect(got).toEqual([
-      "E-CLASS-NOT-IN-SCRML@34",
-      "E-DYNAMIC-IMPORT-NOT-IN-SCRML@26",
-      "E-DYNAMIC-IMPORT-NOT-IN-SCRML@27",
-    ]);
+    expect(got).toEqual(["E-CLASS-NOT-IN-SCRML@32"]);
   });
 });
 
