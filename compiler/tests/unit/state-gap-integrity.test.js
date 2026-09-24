@@ -15,7 +15,15 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { parseGapMarkers, gapCountsFromTokens, headingMarkerDrift } from "../../../scripts/state.ts";
+import {
+  parseGapMarkers,
+  gapCountsFromTokens,
+  headingMarkerDrift,
+  classifyGapStatus,
+  GAP_STATUS_CARRIED,
+} from "../../../scripts/state.ts";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 describe("state.ts §1 — duplicate-id gap markers do not double-count", () => {
   test("a same-id pair with AGREEING status is counted ONCE (per entry, not per marker)", () => {
@@ -117,5 +125,59 @@ describe("state.ts §4 — the malformed cross-check is attribute-ORDER-independ
       "<!-- @gap sev=MED status=open id=g-real -->",       // real, id-later
     ].join("\n");
     expect(parseGapMarkers(text).map((t) => t.id)).toEqual(["g-real"]);
+  });
+});
+
+// S430 P7 — `status=carried`: a live impl#1 defect the TS compiler is NOT being fixed for, pinned by an
+// xfail conformance case and owed by the bootstrap. It must be RECOGNISED (not the unknown-status throw),
+// counted in its OWN column (never folded into open, never dropped as closed), and visible to the drift probe.
+describe("state.ts §5 — status=carried is a recognised, separately-counted partition (S430 P7)", () => {
+  test("carried classifies as its own partition, distinct from open and closed", () => {
+    expect(classifyGapStatus("carried")).toBe("carried");
+    expect(GAP_STATUS_CARRIED.has("carried")).toBe(true);
+    expect(classifyGapStatus("open")).toBe("open");
+    expect(classifyGapStatus("resolved")).toBe("closed");
+    expect(classifyGapStatus("nominal")).toBe("nominal");
+    expect(classifyGapStatus("totally-made-up")).toBeNull();
+  });
+
+  test("carried gaps are counted per severity and NOT added into the open headline", () => {
+    const g = gapCountsFromTokens([
+      { id: "g-o1", sev: "HIGH", status: "open" },
+      { id: "g-c1", sev: "HIGH", status: "carried" },
+      { id: "g-c2", sev: "HIGH", status: "carried" },
+      { id: "g-c3", sev: "MED", status: "carried" },
+      { id: "g-c4", sev: "NOMINAL", status: "carried" },
+      { id: "g-r1", sev: "LOW", status: "resolved" },
+    ]);
+    expect(g.high).toBe(1); // only the open one — carried is owed by the bootstrap, not impl#1
+    expect(g.med).toBe(0);
+    expect(g.low).toBe(0);
+    expect(g.carried).toEqual({ high: 2, med: 1, low: 0, nominal: 1 });
+  });
+
+  test("an unclassified status still THROWS from the token counter (the S299/S307 fail-loud guard)", () => {
+    expect(() => gapCountsFromTokens([{ id: "g-u", sev: "MED", status: "carryed" }])).toThrow(
+      /does not classify[\s\S]*g-u/,
+    );
+  });
+
+  test("a heading saying open over a marker saying carried IS drift (half a triage is visible)", () => {
+    const text = [
+      "### g-half — x — `S1; MED; open`",
+      "<!-- @gap id=g-half sev=MED status=carried -->",
+      "",
+      "### g-whole — y — `S1; MED; carried`",
+      "<!-- @gap id=g-whole sev=MED status=carried -->",
+    ].join("\n");
+    const { drift } = headingMarkerDrift(text);
+    expect(drift.map((d) => d.id)).toEqual(["g-half"]);
+  });
+
+  test("the live §0 table header names the Carried column the generator writes", () => {
+    const ledger = readFileSync(join(import.meta.dir, "../../../docs/known-gaps.md"), "utf8");
+    // The generated rows carry THREE cells; a two-column static header would render them as garbage.
+    expect(ledger).toMatch(/\| Severity \| Open[^|\n]*\| Carried[^|\n]*\|\n\|---\|---\|---\|/);
+    expect(ledger).toMatch(/\| HIGH \| \d+ \| \d+ \|/);
   });
 });

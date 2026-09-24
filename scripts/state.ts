@@ -18,15 +18,18 @@
 //   Every gap in docs/known-gaps.md carries a grep token
 //     <!-- @gap id=<id> sev=<HIGH|MED|LOW|NOMINAL> status=<status> -->
 //   Headline counts derive ONLY from these tokens:
-//     HIGH/MED/LOW open = `sev=<SEV>` AND status ∈ GAP_STATUS_OPEN
-//     Nominal line      = `sev=NOMINAL` AND status ∈ GAP_STATUS_NOMINAL
-//   Everything in GAP_STATUS_CLOSED is excluded.
+//     HIGH/MED/LOW open    = `sev=<SEV>` AND status ∈ GAP_STATUS_OPEN     (owed by impl#1, the TS compiler)
+//     HIGH/MED/LOW carried = `sev=<SEV>` AND status ∈ GAP_STATUS_CARRIED  (owed by impl#2, the bootstrap)
+//     Nominal line         = `sev=NOMINAL` AND status ∈ GAP_STATUS_NOMINAL
+//   Everything in GAP_STATUS_CLOSED is excluded. CARRIED is its OWN column, never folded into open
+//   (S430 P7 — see the GAP_STATUS_CARRIED comment below).
 //
 //   ⚑ THE STATUS VOCABULARY IS NOT A FIXED SIX AND `open` IS NOT THE ONLY OPEN VALUE. The authority is
-//   the GAP_STATUS_OPEN / GAP_STATUS_CLOSED / GAP_STATUS_NOMINAL sets below — read THEM, not this
-//   comment. `in-progress`, `narrowed`, `ruling-gated` and `partial-impl` all count as OPEN (S299 direction
-//   (b), extended S313); `fixed`, `deferred`, `non-gap`, `forensic` and `root-caused-elsewhere` count as
-//   CLOSED. A status in NEITHER set THROWS (the S307 fail-loud guard) rather than vanishing from a count.
+//   the GAP_STATUS_OPEN / GAP_STATUS_CARRIED / GAP_STATUS_CLOSED / GAP_STATUS_NOMINAL sets below (one
+//   classifier, classifyGapStatus) — read THEM, not this comment. `in-progress`, `narrowed`, `ruling-gated`
+//   and `partial-impl` all count as OPEN (S299 direction (b), extended S313); `carried` is its own partition
+//   (S430 P7); `fixed`, `deferred`, `non-gap`, `forensic` and `root-caused-elsewhere` count as CLOSED. A
+//   status in NO set THROWS (the S307 fail-loud guard) rather than vanishing from a count.
 //
 //   ⛑ S420 — this comment previously said the vocabulary was exactly those six values and that open was
 //   `status=open`. Both were false, and the cost was measured: a PA read this block, counted the 21
@@ -90,6 +93,29 @@ const GAP_STATUS_CLOSED = new Set([
   "root-caused-elsewhere",  // real, but tracked under another entry
 ]);
 const GAP_STATUS_NOMINAL = new Set(["nominal"]);
+// S430 P7 (bryan): the TS gap ledger is fixed only for cause (bootstrap-blocking / adopter-reported /
+// security). Every other gap is CARRIED — a live defect in impl#1 that impl#1 will NOT be fixed for,
+// pinned instead by a conformance case asserting the CORRECT behaviour, expected-to-fail on impl#1
+// (`"xfail": { "impl1-ts": "<gap-id>" }` in the case's expected.json) and REQUIRED of the bootstrap.
+//
+// It is neither OPEN nor CLOSED, and it is deliberately a THIRD partition rather than a member of
+// either: folded into OPEN, the board could not tell work the TS compiler owes from work the bootstrap
+// owes; folded into CLOSED, a live defect would drop off every count the moment it was triaged — the
+// absorbed-escape-hatch shape (pa-base §8). So every rollup reports it in its own column.
+//
+// The conformance runner (conformance/run.ts) enforces the pairing in BOTH directions: an xfail case
+// must name a gap whose marker says `status=carried`, and a `status=carried` gap must be pinned by at
+// least one xfail case. A carried gap with no case is an untested claim, not a triaged defect.
+export const GAP_STATUS_CARRIED = new Set(["carried"]);
+
+/** Which partition a status counts in. `null` = unclassified (the callers fail loud on it). */
+export function classifyGapStatus(status: string): "open" | "carried" | "closed" | "nominal" | null {
+  if (GAP_STATUS_OPEN.has(status)) return "open";
+  if (GAP_STATUS_CARRIED.has(status)) return "carried";
+  if (GAP_STATUS_CLOSED.has(status)) return "closed";
+  if (GAP_STATUS_NOMINAL.has(status)) return "nominal";
+  return null;
+}
 
 /**
  * Parse every `@gap` marker out of a known-gaps document.
@@ -107,23 +133,7 @@ export function parseGapMarkers(text: string): { id: string; sev: string; status
 
 function gapCounts() {
   const text = readFileSync(`${ROOT}/docs/known-gaps.md`, "utf8");
-  const tokens = gapMarkersFrom(text);
-
-  // Fail loudly on a status no partition claims. Silence here is what produced the
-  // under-count this replaced.
-  const unknown = tokens.filter(
-    (t) => !GAP_STATUS_OPEN.has(t.status) && !GAP_STATUS_CLOSED.has(t.status) && !GAP_STATUS_NOMINAL.has(t.status),
-  );
-  if (unknown.length > 0) {
-    const lines = unknown.map((t) => `    ${t.id}  status=${t.status}`).join("\n");
-    throw new Error(
-      `state.ts: ${unknown.length} @gap marker(s) carry a status this script does not classify:\n${lines}\n` +
-      `  Add it to GAP_STATUS_OPEN or GAP_STATUS_CLOSED in scripts/state.ts (deciding how it COUNTS),\n` +
-      `  or correct the marker. Refusing to emit a count that silently omits them.`,
-    );
-  }
-
-  return gapCountsFromTokens(tokens);
+  return gapCountsFromTokens(gapMarkersFrom(text));
 }
 
 function gapMarkersFrom(text: string) {
@@ -202,6 +212,20 @@ function gapMarkersFrom(text: string) {
 }
 
 export function gapCountsFromTokens(tokens: { id: string; sev: string; status: string }[]) {
+  // Fail loudly on a status no partition claims. Silence here is what produced the
+  // under-count this replaced. (S430: moved here from gapCounts() so the guard is reachable from a
+  // test and from every caller of this function — the conformance runner builds its carried-gap
+  // index through it — rather than only from the file-reading wrapper.)
+  const unknown = tokens.filter((t) => classifyGapStatus(t.status) === null);
+  if (unknown.length > 0) {
+    const lines = unknown.map((t) => `    ${t.id}  status=${t.status}`).join("\n");
+    throw new Error(
+      `state.ts: ${unknown.length} @gap marker(s) carry a status this script does not classify:\n${lines}\n` +
+      `  Add it to GAP_STATUS_OPEN, GAP_STATUS_CARRIED or GAP_STATUS_CLOSED in scripts/state.ts (deciding\n` +
+      `  how it COUNTS), or correct the marker. Refusing to emit a count that silently omits them.`,
+    );
+  }
+
   // g-gap-markers-duplicate-id-conflicting-status-double-counted — the counts are
   // per-ENTRY, but an entry may (malformedly) carry TWO `@gap` markers sharing one id,
   // which marker-granular counting DOUBLE-COUNTS. Dedup to one token per id before
@@ -233,7 +257,16 @@ export function gapCountsFromTokens(tokens: { id: string; sev: string; status: s
   const med = openBy("MED");
   const low = openBy("LOW");
   const nominal = uniq.filter((t) => t.sev === "NOMINAL" && t.status === "nominal").length;
-  return { tokens: uniq, high, med, low, nominal };
+  // CARRIED — counted per severity, NOMINAL included (a spec-ahead entry can be carried too), and
+  // NEVER added into high/med/low above: those are what impl#1 owes, these are what the bootstrap owes.
+  const carriedBy = (sev: string) => uniq.filter((t) => t.sev === sev && GAP_STATUS_CARRIED.has(t.status)).length;
+  const carried = {
+    high: carriedBy("HIGH"),
+    med: carriedBy("MED"),
+    low: carriedBy("LOW"),
+    nominal: carriedBy("NOMINAL"),
+  };
+  return { tokens: uniq, high, med, low, nominal, carried };
 }
 
 // g-known-gaps-heading-and-marker-status-can-disagree-silently — `state.ts` derives
@@ -277,11 +310,9 @@ export function headingMarkerDrift(srcText?: string): {
   const drift: { line: number; id: string; heading: string; marker: string }[] = [];
   // Classify a status word the same way the COUNTS do, so the two can never disagree about what
   // "still open" means. A word in no set is unknown → skipped (prose), never guessed at.
-  const cls = (s: string): "open" | "closed" | "nominal" | null =>
-    GAP_STATUS_OPEN.has(s) ? "open"
-      : GAP_STATUS_CLOSED.has(s) ? "closed"
-        : GAP_STATUS_NOMINAL.has(s) ? "nominal"
-          : null;
+  // S430: `carried` is its own class, so a heading reading `open` over a marker reading `carried` (a
+  // triage that flipped one side and not the other) is reported as drift like any other disagreement.
+  const cls = classifyGapStatus;
   let headings = 0;
   let inspected = 0;
   let noTail = 0;    // heading carries no classifiable status word
@@ -351,13 +382,15 @@ const GEN_SECTIONS: GenSection[] = [
     file: `${ROOT}/docs/known-gaps.md`,
     // The §0 at-a-glance table's four data rows — derived from the @gap tokens, so they always
     // equal what PRINT reports. Header + separator + the "Count basis" legend stay STATIC (hand-doc).
+    // S430: a THIRD column, Carried — owed by the bootstrap, not by impl#1 (see GAP_STATUS_CARRIED).
+    // ⚑ The static header in docs/known-gaps.md §0 must name three columns to match.
     produce: () => {
       const g = gapCounts();
       return [
-        `| HIGH | ${g.high} |`,
-        `| MED | ${g.med} |`,
-        `| LOW | ${g.low} |`,
-        `| Nominal (spec-ahead-of-impl) | ${g.nominal} |`,
+        `| HIGH | ${g.high} | ${g.carried.high} |`,
+        `| MED | ${g.med} | ${g.carried.med} |`,
+        `| LOW | ${g.low} | ${g.carried.low} |`,
+        `| Nominal (spec-ahead-of-impl) | ${g.nominal} | ${g.carried.nominal} |`,
       ].join("\n");
     },
   },
@@ -893,6 +926,7 @@ function digest(): string {
   const head = sh("git", ["rev-parse", "--short", "HEAD"]).stdout.trim();
   const g = gapCounts();
   const highIds = g.tokens.filter((t) => t.sev === "HIGH" && t.status === "open").map((t) => t.id);
+  const carriedHighIds = g.tokens.filter((t) => t.sev === "HIGH" && GAP_STATUS_CARRIED.has(t.status)).map((t) => t.id);
   const maps = mapsStaleness();
   const dl = deltaLog();
   const anchors = sessionAnchors(3);
@@ -917,6 +951,11 @@ function digest(): string {
   L.push(`## Board — from \`@gap\` tokens @ \`${head}\``);
   L.push(`- **HIGH ${g.high}** · MED ${g.med} · LOW ${g.low} · Nominal ${g.nominal}`);
   L.push(`- Named open HIGHs: ${highIds.length ? highIds.map((i) => `\`${i}\``).join(", ") : "_none_"}`);
+  L.push(
+    `- **Carried** (owed by the bootstrap; xfail on impl#1 in conformance): HIGH ${g.carried.high} · ` +
+      `MED ${g.carried.med} · LOW ${g.carried.low} · Nominal ${g.carried.nominal}`,
+  );
+  L.push(`- Named carried HIGHs: ${carriedHighIds.length ? carriedHighIds.map((i) => `\`${i}\``).join(", ") : "_none_"}`);
   L.push("");
   if (dl) {
     L.push(`## Recent rulings — last ${dl.rulings.length} \`rule\` (delta-log ${dl.sessHeader})`);
@@ -1002,7 +1041,13 @@ function main() {
   L.push(`  MED     open : ${g.med}`);
   L.push(`  LOW     open : ${g.low}`);
   L.push(`  Nominal      : ${g.nominal}   (spec-ahead-of-impl)`);
-  L.push(`  (${g.tokens.length} @gap tokens total; non-open excluded from the headline count)`);
+  L.push("");
+  L.push("Carried-gap inventory (status=carried — owed by the bootstrap, xfail on impl#1 in conformance):");
+  L.push(`  HIGH carried : ${g.carried.high}`);
+  L.push(`  MED  carried : ${g.carried.med}`);
+  L.push(`  LOW  carried : ${g.carried.low}`);
+  L.push(`  Nominal carr.: ${g.carried.nominal}`);
+  L.push(`  (${g.tokens.length} @gap tokens total; closed excluded; carried is NOT in the open headline count)`);
   L.push("");
 
   L.push("Tests — pre-commit subset (unit + integration + conformance; NOT the browser suite):");

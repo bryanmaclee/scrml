@@ -210,6 +210,7 @@ function toMermaid(nodes: Map<string, Node>, edges: Edge[]): string {
   }
   out.push("classDef open fill:#fee,stroke:#c00;");
   out.push("classDef resolved fill:#efe,stroke:#0a0;");
+  out.push("classDef carried fill:#ffe,stroke:#b80;"); // S430 P7 — owed by the bootstrap, not impl#1
   out.push("classDef current fill:#eef,stroke:#06c;");
   out.push("classDef doc fill:#f7f7f7,stroke:#999,stroke-dasharray:3;");
   return out.join("\n") + "\n";
@@ -322,6 +323,9 @@ function report(corpus: string[]) {
   console.log(`  corpus: ${corpus.length} file(s)`);
   console.log(`  nodes:  ${nodes.size}  (${Object.entries(byKind).sort().map(([k, v]) => `${k}:${v}`).join(" ")})`);
   console.log(`  GAP round-trip (must match state.ts): HIGH open=${gapByStatusSev["HIGH open"] ?? 0} · MED open=${gapByStatusSev["MED open"] ?? 0} · LOW open=${gapByStatusSev["LOW open"] ?? 0}`);
+  // S430 P7 — `status=carried` (owed by the bootstrap, xfail on impl#1) is its own column in state.ts,
+  // never folded into open; report it beside the open figures rather than letting it vanish.
+  console.log(`  GAP carried (owed by the bootstrap):   HIGH carried=${gapByStatusSev["HIGH carried"] ?? 0} · MED carried=${gapByStatusSev["MED carried"] ?? 0} · LOW carried=${gapByStatusSev["LOW carried"] ?? 0}`);
   console.log(`  edges:  ${edges.length}  (${Object.entries(byType).sort().map(([k, v]) => `${k}:${v}`).join(" ")})`);
 
   const ids = new Set(nodes.keys());
