@@ -18096,3 +18096,12 @@ caller's `!{}` never runs (§19.9.4 error envelope).
 (the native twin of GH #264).
 
 <!-- @gap id=g-native-parser-fail-loses-enum-type-and-variant sev=MED status=open locus=compiler/native-parser/translate-stmt.js prov=empirical:agent-s430-defer -->
+
+### G-LSP-NEVER-PUBLISHES-FORBIDDEN-VOCABULARY-CODES — the editor shows no error for `class X {}` / `import("x")`
+
+**Reviewer-executed (S430).** `lsp/handlers.js analyzeText` calls TAB directly, not `compileScrml`, so E-CLASS-NOT-IN-SCRML and
+E-DYNAMIC-IMPORT-NOT-IN-SCRML (decided on the native tree after TAB) never reach the editor: a file the compiler rejects shows
+only W-TYPE-031-UNPROVEN. Same on base (the codes did not exist) — a gap, not a regression. Likely the same for any diagnostic
+produced by a stage `analyzeText` does not run.
+
+<!-- @gap id=g-lsp-never-publishes-forbidden-vocabulary-codes sev=MED status=open locus=lsp/handlers.js prov=empirical:review-S430-rcl4 -->
