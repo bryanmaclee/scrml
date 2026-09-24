@@ -56,3 +56,39 @@
      E-PA-004 out (EMPTY is front-loaded so it survives; the path itself may be cut).
   F7 LEFT: a backtick inside a path breaks the code span in the message.
   Pre-existing, noticed: E-PA-002 text + Note(PA) say "?{} block(s)" though <schema> DDL also feeds the shadow map.
+- 2026-09-24 ROUND 3 (re-review of 14e61077: F1/F2/F3/F5 held; F4 approach rejected — pattern redaction is
+  enumerate-forever + mangles frames). Merged origin/main (f554e171, maps-only) -> 43a74eac.
+  b1915379: VALUE-based redaction.
+    compiler/src/diagnostic-secrets.ts: collectFromAst (db/src/store/*-store string attrs anywhere in the tree),
+      harvestFromSource (narrow db=/src=/*-store= VALUE harvest, quoted or unquoted — needed because the tree
+      misses single-quoted <db src='…'> [pre-existing mis-tokenization into attr NAMES], unquoted db=scheme://…
+      [also shredded into names], and files that fail BS), deriveSecrets (userinfo password under WHATWG and
+      last-@ readings; password|pass|pwd|passwd|sslpassword query/keyword values; raw/unquoted/decoded),
+      SecretRedactor.redact (whole echoed value -> display form, then exact secret substrings; secrets < 6 chars
+      only at non-word boundaries so they cannot shred prose).
+    SINK LIST (every place compiler output can carry a connection value):
+      1. compileScrml (api.js) — THE chokepoint. Redacts every string field of result.errors / warnings /
+         lintDiagnostics, a thrown compiler error's message+stack, and Note(PA) lines via runPA onNote; exposes
+         result.redact. Downstream readers of those messages: commands/compile.js, dev.js (console, error page,
+         JSON), build.js, serve.js, semdiff.js, migrate.js, promote.js.
+      2. commands/compile.js — result.redact over each printed lint/warning/error block (covers the source
+         excerpt read from disk).
+      3. commands/generate.js — `detected <db src=…>` line (R2-2).
+      4. commands/introspect.js — every error after URL parse (`say`), incl. driver error text.
+      5. lsp/handlers.js analyzeText — every editor diagnostic + PA notes to the server log.
+      Not covered: a direct runPA caller that passes no onNote writes notes raw to stderr (unit tests; the
+      self-host runPA override ignores onNote — self-host is out of scope). PA's own messages still display the
+      value via redactDbUri (defense in depth for direct callers).
+    compiler/src/db-target.ts classifyDbTarget: THE classifier (trim, case-insensitive scheme; Bun.SQL accepts
+      POSTGRES:// — measured). resolveDbDriver + protect-analyzer both use it; PA never treats a scheme:// value as
+      a file, and strips sqlite:/sqlite:// to the path. Behaviour change: POSTGRES:// / PostgreSQL:// / leading
+      space now resolve to the postgres driver (were E-SQL-005 / file path).
+    redactCredentialsInText (pattern) deleted; redactDbUri kept only as a value's display form.
+    R2-5: EMPTY = zero user tables+views (name NOT LIKE 'sqlite\_%'); views-only db not EMPTY; sqlite_sequence-only IS.
+    Mutation proof (mirror in .scratch/mut): C1 api diag loop, C2 compile.js excerpt, C3 Note onNote, C4 no
+      harvest, C5 no tree, C6 LSP, C7 generate, C8 introspect, C9 PA classifier revert, C10 PA display — each
+      turns >=1 test red (C2: 16).
+  R2-6 LEFT (per coordinator): a crashed writer can leave a -shm with no -wal; openSchemaReadHandle then takes
+    the immutable path and the stray -shm persists (base behaved the same). A checkpoint racing the existsSync
+    (-wal) probe can pick the immutable path while a writer is mid-flight; immutable then reads the main file
+    only. immutable did improve the hot-journal case (no journal replay attempt, no side file).
