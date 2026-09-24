@@ -18120,3 +18120,11 @@ caller's `!{}` then tests a Promise, so a `CpsError.ServerError` is never handle
 auto-await injector does not see locally-declared async functions.
 
 <!-- @gap id=g-nested-async-function-called-without-await-loses-its-failure sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts prov=review:S430-defer-round4-F6 -->
+
+### G-LIVE-PARSER-DROPS-AN-UNBRACED-ELSE-ARM-AND-RUNS-IT-UNCONDITIONALLY — `if (c) {…} else D()` always calls `D()`
+
+**Reviewer-reproduced (S430 defer round-5 review, F), same on base, SILENT, affects every program.** In the live (default)
+pipeline, `if (c) { D("y;") } else D("x;")` emits `if (c) {…}` followed by an UNCONDITIONAL `D("x;")` — the unbraced else arm is
+detached from its `if`. The native parser is correct. Any program writing a brace-less else runs that branch always, at exit 0.
+
+<!-- @gap id=g-live-parser-drops-an-unbraced-else-arm-and-runs-it-unconditionally sev=HIGH status=open locus=compiler/src/ast-builder.js prov=review:S430-defer-round5-F -->
