@@ -24,6 +24,8 @@
  * No I/O. No URL parsing beyond prefix matching. This function is pure.
  */
 
+import { redactDbUri } from "../db-uri-redact.ts";
+
 export type DbDriver = "sqlite" | "postgres" | "mysql";
 
 export interface DbDriverInfo {
@@ -106,7 +108,7 @@ export function resolveDbDriver(uri: string): DbDriverResult {
       error: {
         code: "E-SQL-005",
         message:
-          `E-SQL-005: \`<program db="${trimmed}">\` uses an unsupported prefix for \`?{}\`. ` +
+          `E-SQL-005: \`<program db="${redactDbUri(trimmed)}">\` uses an unsupported prefix for \`?{}\`. ` +
           `MongoDB (\`mongo://\` / \`mongodb://\`) is not a SQL driver — use the meta ` +
           `context \`^{}\` for non-SQL data sources. See SPEC §44.2.`,
       },
@@ -123,7 +125,7 @@ export function resolveDbDriver(uri: string): DbDriverResult {
       error: {
         code: "E-SQL-005",
         message:
-          `E-SQL-005: \`<program db="${trimmed}">\` uses an unrecognized URI scheme \`${schemeMatch[1]}://\`. ` +
+          `E-SQL-005: \`<program db="${redactDbUri(trimmed)}">\` uses an unrecognized URI scheme \`${schemeMatch[1]}://\`. ` +
           `Supported schemes: \`postgres://\`, \`postgresql://\`, \`mysql://\`, \`sqlite:\`. ` +
           `For local files use a relative path (e.g. \`./app.db\`) or \`:memory:\`. ` +
           `See SPEC §44.2.`,

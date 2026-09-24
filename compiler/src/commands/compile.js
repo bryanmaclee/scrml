@@ -14,6 +14,7 @@ import { compileScrml, scanDirectory } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "./diagnostic-format.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
+import { redactCredentialsInText } from "../db-uri-redact.ts";
 
 // ---------------------------------------------------------------------------
 // ANSI color helpers — no dependencies
@@ -353,7 +354,9 @@ function getSourceContext(filePath, line, contextLines = 2) {
       const lineNum = String(i + 1).padStart(4);
       const marker = (i + 1 === line) ? c.red(" > ") : "   ";
       const numStr = (i + 1 === line) ? c.red(lineNum) : c.dim(lineNum);
-      result += `${marker}${numStr} ${c.dim("|")} ${lines[i]}\n`;
+      // F4 (s430-dev-db-stub): a `db=` / `src=` connection URI in the echoed
+      // source line must not print its credentials.
+      result += `${marker}${numStr} ${c.dim("|")} ${redactCredentialsInText(lines[i])}\n`;
     }
     return result;
   } catch {

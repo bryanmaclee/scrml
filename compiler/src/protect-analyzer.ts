@@ -62,6 +62,7 @@ import { Database } from "bun:sqlite";
 import { resolve, dirname } from "node:path";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
+import { redactDbUri } from "./db-uri-redact.ts";
 import {
   parseSchemaBlock,
   generateCreateTable,
@@ -872,15 +873,21 @@ function resolveDb(
     // E-PA-002: cannot build shadow DB — missing CREATE TABLE for at least one table.
     const missingList = missingTables.join(", ");
     const tableWord = missingTables.length === 1 ? "table" : "tables";
+    // F4 (s430-dev-db-stub): a driver URI can carry a password — it is never
+    // echoed verbatim. The `db-migrate` remedy stays copy-pasteable when the URI
+    // carries no credentials; when it does, a redacted URI would not run, so the
+    // remedy names a placeholder instead.
+    const shownTarget = srcIsDriverUri ? redactDbUri(dbPath) : dbPath;
+    const migrateTarget = srcIsDriverUri && shownTarget !== dbPath ? "<your connection string>" : dbPath;
     const what = srcIsDriverUri
-      ? `Driver URI \`${dbPath}\` cannot be introspected at compile time yet (Phase 2)`
-      : `Database file \`${dbPath}\` does not exist`;
+      ? `Driver URI \`${shownTarget}\` cannot be introspected at compile time yet (Phase 2)`
+      : `Database file \`${shownTarget}\` does not exist`;
     errors.push(new PAError(
       "E-PA-002",
       `E-PA-002: ${what} and no CREATE TABLE statement ` +
       `was found in any \`?{}\` block for ${tableWord} \`${missingList}\`. ` +
       `First remedy: declare ${tableWord} \`${missingList}\` in a \`<schema>\` block, then run ` +
-      `\`scrml db-migrate . --db ${dbPath}\` to create ${tableWord === "table" ? "it" : "them"}. ` +
+      `\`scrml db-migrate . --db ${migrateTarget}\` to create ${tableWord === "table" ? "it" : "them"}. ` +
       `The compiler generates that DDL from your \`<schema>\` — do NOT hand-write the schema ` +
       `or rebuild it by hand against \`bun:sqlite\`. ` +
       (srcIsDriverUri
@@ -894,7 +901,7 @@ function resolveDb(
   }
 
   // All tables have CREATE TABLE statements. Build shadow DB.
-  const what = srcIsDriverUri ? `Driver URI '${dbPath}'` : `Database file '${dbPath}' does not exist`;
+  const what = srcIsDriverUri ? `Driver URI '${redactDbUri(dbPath)}'` : `Database file '${dbPath}' does not exist`;
   process.stderr.write(
     `Note(PA): ${what}. ` +
     `Using in-memory schema from ?{} blocks for compile-time validation.\n`,

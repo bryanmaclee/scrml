@@ -24,6 +24,7 @@ import { writeFileSync } from "fs";
 import { resolve } from "path";
 import { SQL } from "bun";
 import { resolveDbDriver } from "../codegen/db-driver.ts";
+import { redactDbUri } from "../db-uri-redact.ts";
 import { readActualSchemaPg, emitScrmlSchemaSource, readTableNamesPg } from "../schema-differ.js";
 
 const isTTY = process.stderr.isTTY;
@@ -128,7 +129,7 @@ export async function runIntrospect(args) {
   if (resolved.info.driver !== "postgres") {
     console.error(
       c.red("error:") +
-        ` scrml introspect is Postgres-only (v1). The URL "${url}" resolves to the ` +
+        ` scrml introspect is Postgres-only (v1). The URL "${redactDbUri(url)}" resolves to the ` +
         `"${resolved.info.driver}" driver. Provide a postgres:// or postgresql:// URL.`,
     );
     process.exit(1);
