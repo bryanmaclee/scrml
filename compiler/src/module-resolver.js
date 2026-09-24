@@ -28,6 +28,7 @@ import { existsSync } from "fs";
 import { fileURLToPath } from "url";
 import { toPosix, PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { collectMarkupReturningFnNames, resolveImportedMarkupLocalNames } from "./markup-return-scan.js";
+import { scanHostModule } from "./host-import.js";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -182,6 +183,13 @@ export function buildImportGraph(fileASTs) {
   // producers/consumers can never desync native vs posix (the #-fix invariant).
   const graph = new PathKeyedMap();
   const errors = [];
+  // §21.3.1 host-side named-export records, keyed by the host module's
+  // absolute (posix) path: `{ exports, scrmlTargets }` — `scrmlTargets` are the
+  // scrml files the host module's OWN static imports name. Consumed by
+  // detectCircularImports so an `import:host` cycle (scrml -> host -> the same
+  // scrml graph) is E-IMPORT-002. Host modules are NOT graph nodes (they are
+  // never compiled).
+  const hostRecords = new PathKeyedMap();
 
   // Collect the set of files being compiled so we can distinguish "this import
   // points to a file that's in the compile set" (present by definition) from
@@ -217,6 +225,10 @@ export function buildImportGraph(fileASTs) {
     for (const imp of astImports) {
       if (!imp.source) continue;
 
+      // §21.3.1 `import:host` — a rejected one (placement / host-tag /
+      // manifest; already reported by host-import.js) is not loaded at all.
+      if (typeof imp.hostTag === "string" && imp._hostImportRejected === true) continue;
+
       // E-IMPORT-005: bare npm-style specifier — only vendor: imports may reach
       // third-party code. §40.4 requires the `vendor:` prefix so the compiler
       // can enforce project-scoped vendor directories.
@@ -235,6 +247,18 @@ export function buildImportGraph(fileASTs) {
       // Resolve relative path to absolute
       const absSource = resolveModulePath(imp.source, filePath);
 
+      // §21.3.1 `import:host` — the host module is loaded and its named exports
+      // extracted at compile time (never evaluated): E-IMPORT-006 when it is
+      // missing, E-IMPORT-004 for a name it does not export, and its own static
+      // imports recorded for the E-IMPORT-002 cycle check.
+      if (typeof imp.hostTag === "string") {
+        const hostErr = checkHostImport(imp, absSource, filePath, compileSet, hostRecords);
+        if (hostErr.length > 0) {
+          errors.push(...hostErr);
+          if (hostErr.some((e) => e.code === "E-IMPORT-006")) continue;
+        }
+      }
+
       // E-IMPORT-006: target file does not exist.
       //
       // Skip the check when:
@@ -242,6 +266,7 @@ export function buildImportGraph(fileASTs) {
       //   - the target is already in the compile set (will be compiled; presence is implicit),
       //   - the importer isn't a real on-disk file (synthetic paths used by unit tests).
       if (
+        typeof imp.hostTag !== "string" &&
         !imp.source.endsWith(".js") &&
         !compileSet.has(absSource) &&
         existsSync(filePath) &&
@@ -397,7 +422,7 @@ export function buildImportGraph(fileASTs) {
   // (flags only ever turn on), so it converges; a guard caps pathological input.
   propagateReturnsMarkup(graph, fileASTs);
 
-  return { graph, errors };
+  return { graph, errors, hostRecords };
 }
 
 /** Is `name` flagged `returnsMarkup` among `exports` (array of graph export records)? */
@@ -475,6 +500,71 @@ function propagateReturnsMarkup(graph, fileASTs) {
 }
 
 // ---------------------------------------------------------------------------
+// §21.3.1 `import:host` — host-module record
+// ---------------------------------------------------------------------------
+
+/**
+ * Load one `import:host` target's named-export record (Bun.Transpiler.scan —
+ * the module is parsed, never evaluated) and validate the imported names.
+ * Records the host module's scrml-side import edges in `hostRecords`.
+ *
+ * A host module names a scrml file when one of its import specifiers ends
+ * `.scrml`, or ends `.js` and the sibling `.scrml` is in this compile set (the
+ * emitted module of a compiled scrml file — the same correspondence api.js
+ * `rewriteRelativeImportPaths` uses). Only the host module's OWN static import
+ * list is read; nothing traverses into further TS/JS modules.
+ *
+ * @returns {ModuleError[]}
+ */
+function checkHostImport(imp, absSource, importerPath, compileSet, hostRecords) {
+  const errors = [];
+  const span = imp.span ? { ...imp.span, file: importerPath } : null;
+  if (!existsSync(absSource)) {
+    errors.push(new ModuleError(
+      "E-IMPORT-006",
+      `E-IMPORT-006: Cannot resolve \`import:host\` target \`${imp.source}\` — no file found at \`${absSource}\`. ` +
+      `The host module is read at compile time for its named exports, so it must exist. ` +
+      `Relative paths are resolved against the importing file's directory.`,
+      span,
+    ));
+    return errors;
+  }
+  let record = hostRecords.get(absSource);
+  if (!record) {
+    const scan = scanHostModule(absSource);
+    const scrmlTargets = [];
+    for (const spec of scan.imports) {
+      if (!(spec.startsWith("./") || spec.startsWith("../"))) continue;
+      const abs = resolveModulePath(spec, absSource);
+      if (abs.endsWith(".scrml")) {
+        scrmlTargets.push(abs);
+      } else if (abs.endsWith(".js") && compileSet.has(abs.replace(/\.js$/, ".scrml"))) {
+        scrmlTargets.push(abs.replace(/\.js$/, ".scrml"));
+      }
+    }
+    record = { exports: scan.exports, scrmlTargets };
+    hostRecords.set(absSource, record);
+  }
+  if (record.exports) {
+    const importedNames = Array.isArray(imp.specifiers) && imp.specifiers.length > 0
+      ? imp.specifiers.map((sp) => sp.imported)
+      : (imp.names || []);
+    for (const name of importedNames) {
+      if (typeof name === "string" && !record.exports.has(name)) {
+        const available = [...record.exports].map((n) => "`" + n + "`").join(", ");
+        errors.push(new ModuleError(
+          "E-IMPORT-004",
+          `E-IMPORT-004: \`${name}\` is not exported by the host module \`${imp.source}\`. ` +
+          `Its named exports are: ${available || "(none)"}.`,
+          span,
+        ));
+      }
+    }
+  }
+  return errors;
+}
+
+// ---------------------------------------------------------------------------
 // Circular dependency detection (E-IMPORT-002)
 // ---------------------------------------------------------------------------
 
@@ -484,7 +574,7 @@ function propagateReturnsMarkup(graph, fileASTs) {
  * @param {Map<string, object>} graph — import graph from buildImportGraph
  * @returns {ModuleError[]} — E-IMPORT-002 errors for each cycle detected
  */
-export function detectCircularImports(graph) {
+export function detectCircularImports(graph, hostRecords = null) {
   const errors = [];
   const visited = new Set();
   const inStack = new Set();
@@ -512,6 +602,15 @@ export function detectCircularImports(graph) {
     if (entry) {
       for (const imp of entry.imports) {
         dfs(imp.absSource, [...path, filePath]);
+      }
+    } else if (hostRecords) {
+      // §21.3.1 — a host module's recorded scrml-side imports close an
+      // `import:host` cycle (scrml -> host -> scrml).
+      const host = hostRecords.get(filePath);
+      if (host) {
+        for (const target of host.scrmlTargets) {
+          dfs(target, [...path, filePath]);
+        }
       }
     }
 
@@ -785,11 +884,11 @@ export function resolveModules(fileASTs) {
   const allErrors = [];
 
   // Step 1: Build the import graph
-  const { graph, errors: graphErrors } = buildImportGraph(fileASTs);
+  const { graph, errors: graphErrors, hostRecords } = buildImportGraph(fileASTs);
   allErrors.push(...graphErrors);
 
-  // Step 2: Detect circular imports
-  const circularErrors = detectCircularImports(graph);
+  // Step 2: Detect circular imports (incl. §21.3.1 host-module edges)
+  const circularErrors = detectCircularImports(graph, hostRecords);
   allErrors.push(...circularErrors);
 
   // Step 3: Build export registry
