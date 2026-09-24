@@ -88,6 +88,29 @@
     Mutation proof (mirror in .scratch/mut): C1 api diag loop, C2 compile.js excerpt, C3 Note onNote, C4 no
       harvest, C5 no tree, C6 LSP, C7 generate, C8 introspect, C9 PA classifier revert, C10 PA display — each
       turns >=1 test red (C2: 16).
+  ROUND 3b (coordinator: no newly-accepting change inside a security fix):
+    SPEC searched for a sentence making URI schemes / db= prefixes case-insensitive: grep "case-insensitiv" x
+      scheme/prefix/db/uri/url/driver, and "prefix|scheme ... case" — only hits are §4.17/§34 E-SCRIPT-001 /
+      E-STYLE-001 close-tag matching. None governs db=. => reverted, not stopped.
+    classifyDbTarget now reproduces base resolveDbDriver EXACTLY: trim kept; postgres:// postgresql:// mysql://
+      sqlite: mongo:// mongodb:// matched case-SENSITIVELY; any other scheme:// (case-insensitive regex, as base)
+      -> unsupported-scheme with the scheme quoted AS WRITTEN. So POSTGRES:// / PostgreSQL:// / MONGODB:// /
+      SQLITE:// are E-SQL-005 exactly as before; SQLITE:./x.db still falls to the path heuristic.
+    Verified against MAIN's compiler (read-only) for 9 edge values x {<program db>, <db src> + DDL}: identical
+      diagnostic codes and exit status in all 18 runs.
+    protect-analyzer: postgres/mysql -> driver; mongo/unsupported-scheme -> "unsupported" = NOT a file (R2-1 fix
+      kept) but reported as "Database target ... uses a URI scheme no ?{} driver accepts (E-SQL-005 ...)"
+      (E-PA-002 wording + Note(PA) wording), never as a driver and never as a resolved path. Fire conditions are
+      unchanged from base (base resolved these to a path that never exists -> the same E-PA-002 / shadow outcomes).
+    DEFERRED TO BRYAN: case-insensitive scheme acceptance. Reason for it: RFC 3986 §3.1 says schemes are
+      case-insensitive and Bun.SQL accepts POSTGRES:// / MYSQL:// (measured). That is a reason, not a ruling —
+      it would newly ACCEPT values that are E-SQL-005 today and needs a SPEC sentence.
+    Kept (has a governing sentence): the protect-analyzer strips a `sqlite:` prefix to its path before the
+      schema read. SPEC §8.1.1 driver table (L6512) "`sqlite:./path` | bun:sqlite via Bun.SQL | Local SQLite
+      file" + L6533 "A plain path without prefix (e.g., db="./app.db") SHALL be treated as sqlite:./app.db".
+      Base resolved `sqlite:./x.db` to the nonexistent `<dir>/sqlite:/x.db`, so a <db src="sqlite:…"> never
+      read its real file. This CAN change outcomes: such a block now reads the real file (and may newly report
+      E-PA-004 where the shadow schema used to pass). Surfaced for the re-review.
   R2-6 LEFT (per coordinator): a crashed writer can leave a -shm with no -wal; openSchemaReadHandle then takes
     the immutable path and the stray -shm persists (base behaved the same). A checkpoint racing the existsSync
     (-wal) probe can pick the immutable path while a writer is mid-flight; immutable then reads the main file

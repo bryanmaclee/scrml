@@ -207,16 +207,24 @@ function parseCommaList(raw: string): string[] {
 
 /**
  * Classification goes through the ONE shared classifier (`db-target.ts`, also
- * behind codegen's `resolveDbDriver`) — s430-dev-db-stub R2-1. Any value with a
- * `scheme://` (Postgres, MySQL, Mongo, or an unsupported scheme) is NOT a file:
- * the protect-analyzer skips filesystem resolution and routes to the
- * shadow-DB path (CREATE TABLE harvested from this file). A `sqlite:` prefix is
- * stripped to its path. Real driver introspection at compile time is a later
- * phase.
+ * behind codegen's `resolveDbDriver`) — s430-dev-db-stub R2-1. It accepts
+ * exactly what codegen accepts (case-sensitive driver prefixes, trimmed).
+ *
+ *  - "driver":      postgres / mysql — skip the filesystem, shadow-DB path.
+ *  - "unsupported": any other `scheme://` shape (Mongo, a typo'd or
+ *                   upper-case scheme — what codegen rejects as E-SQL-005).
+ *                   It is NOT a file either: same shadow / E-PA-002 flow as a
+ *                   driver URI, but reported as an unsupported target, never as
+ *                   a driver and never as a resolved file path.
+ *  - "file":        `sqlite:` (prefix stripped to its path — SPEC §8.1.1) or a
+ *                   bare path.
  */
-function isNonFileTarget(cls: DbTargetClass): boolean {
-  return cls.kind === "postgres" || cls.kind === "mysql" ||
-    cls.kind === "mongo" || cls.kind === "unsupported-scheme";
+type SrcTargetKind = "driver" | "unsupported" | "file";
+
+function srcTargetKind(cls: DbTargetClass): SrcTargetKind {
+  if (cls.kind === "postgres" || cls.kind === "mysql") return "driver";
+  if (cls.kind === "mongo" || cls.kind === "unsupported-scheme") return "unsupported";
+  return "file";
 }
 
 // ---------------------------------------------------------------------------
@@ -265,7 +273,15 @@ export function describeDbSource(
   sourceDir: string,
   isDriverUri: boolean,
   db: Database | null = null,
+  isUnsupportedTarget: boolean = false,
 ): DbSourceDescription {
+  if (isUnsupportedTarget) {
+    return {
+      where: SHADOW_WHERE,
+      detail: "The `src=` value has a URI scheme no `?{}` driver accepts (see E-SQL-005); it is not a " +
+        "file and is not introspected. ",
+    };
+  }
   if (isDriverUri) {
     return {
       where: SHADOW_WHERE,
@@ -925,6 +941,7 @@ function resolveDb(
   blockSpan: Span,
   errors: PAError[],
   srcIsDriverUri: boolean = false,
+  srcIsUnsupported: boolean = false,
 ): Database | null {
   // Driver URI (postgres:// / mysql://) — skip the filesystem check entirely.
   // Schema validation at compile time happens via the shadow-DB path. Real
@@ -957,7 +974,11 @@ function resolveDb(
     // remedy names a placeholder instead.
     const shownTarget = srcIsDriverUri ? redactDbUri(dbPath) : dbPath;
     const migrateTarget = srcIsDriverUri && shownTarget !== dbPath ? "<your connection string>" : dbPath;
-    const what = srcIsDriverUri
+    const what = srcIsUnsupported
+      ? `Database target \`${shownTarget}\` uses a URI scheme no \`?{}\` driver accepts ` +
+        `(E-SQL-005 — supported: \`postgres://\`, \`postgresql://\`, \`mysql://\`, \`sqlite:\`), ` +
+        `so it is not a file and cannot be introspected,`
+      : srcIsDriverUri
       ? `Driver URI \`${shownTarget}\` cannot be introspected at compile time yet (Phase 2)`
       : `Database file \`${shownTarget}\` does not exist`;
     errors.push(new PAError(
@@ -979,7 +1000,9 @@ function resolveDb(
   }
 
   // All tables have CREATE TABLE statements. Build shadow DB.
-  const what = srcIsDriverUri ? `Driver URI '${redactDbUri(dbPath)}'` : `Database file '${dbPath}' does not exist`;
+  const what = srcIsUnsupported
+    ? `Unsupported database target '${redactDbUri(dbPath)}' (no \`?{}\` driver accepts its URI scheme — E-SQL-005)`
+    : srcIsDriverUri ? `Driver URI '${redactDbUri(dbPath)}'` : `Database file '${dbPath}' does not exist`;
   cache.note(
     `Note(PA): ${what}. ` +
     `Using in-memory schema from ?{} blocks for compile-time validation.\n`,
@@ -1153,7 +1176,8 @@ function processDbBlock(
   // ------------------------------------------------------------------
   let dbPath: string;
   const srcClass = classifyDbTarget(srcRaw);
-  const isDriverConnectionUri = isNonFileTarget(srcClass);
+  const srcKind = srcTargetKind(srcClass);
+  const isDriverConnectionUri = srcKind !== "file";
   const sourceDir = dirname(filePath);
 
   if (isDriverConnectionUri) {
@@ -1211,7 +1235,7 @@ function processDbBlock(
   //   - file missing + no CREATE TABLE → E-PA-002
   //   - driver URI (postgres:// / mysql://) → forced shadow DB; no file check
   // ------------------------------------------------------------------
-  const db = resolveDb(dbPath, tableNames, createTableMap, cache, blockSpan, errors, isDriverConnectionUri);
+  const db = resolveDb(dbPath, tableNames, createTableMap, cache, blockSpan, errors, isDriverConnectionUri, srcKind === "unsupported");
   if (db === null) return;
 
   // ------------------------------------------------------------------
@@ -1225,7 +1249,7 @@ function processDbBlock(
   let anyTableFailed = false;
 
   const dbSource = (): DbSourceDescription =>
-    describeDbSource(dbPath, srcRaw, sourceDir, isDriverConnectionUri, db);
+    describeDbSource(dbPath, srcRaw, sourceDir, isDriverConnectionUri, db, srcKind === "unsupported");
   for (const tableName of tableNames) {
     const schema = readTableSchema(db, tableName, blockSpan, errors, dbSource);
     if (schema === null) {

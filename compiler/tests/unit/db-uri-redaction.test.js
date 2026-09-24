@@ -87,16 +87,35 @@ describe("§1 value-derived secrets", () => {
   });
 });
 
-describe("§2 one classifier (R2-1)", () => {
-  test("a driver-accepted Postgres URI is classified postgres regardless of case / whitespace", () => {
-    for (const v of ["POSTGRES://a:b@h/x", " postgres://a:b@h/x", "PostgreSQL://a:b@h/x"]) {
-      expect(classifyDbTarget(v).kind).toBe("postgres");
-      expect(resolveDbDriver(v).ok).toBe(true);
+describe("§2 one classifier (R2-1) — codegen's PRE-EXISTING acceptance, exactly", () => {
+  test("driver prefixes stay case-sensitive; whitespace is trimmed (as base resolveDbDriver)", () => {
+    expect(classifyDbTarget(" postgres://a:b@h/x").kind).toBe("postgres");
+    expect(resolveDbDriver(" postgres://a:b@h/x").ok).toBe(true);
+    for (const v of ["POSTGRES://a:b@h/x", "PostgreSQL://a:b@h/x", "MYSQL://a:b@h/x", "MONGODB://a:b@h/x", "SQLITE://x.db"]) {
+      expect(classifyDbTarget(v).kind).toBe("unsupported-scheme");
+      expect(resolveDbDriver(v).ok).toBe(false);
     }
+    // base: `mongodb://` hit the dedicated Mongo branch; `SQLITE:./x.db` (no //) fell to the path heuristic
+    expect(classifyDbTarget("mongodb://h/x").kind).toBe("mongo");
+    expect(classifyDbTarget("SQLITE:./x.db").kind).toBe("sqlite-file");
+    expect(resolveDbDriver("SQLITE:./x.db").ok).toBe(true);
   });
 
-  test("protect-analyzer does not treat POSTGRES:// or a leading-space URI as a file path", () => {
-    for (const v of ["POSTGRES://admin:SecC1@db.example/app", " postgres://admin:SecC1@db.example/app"]) {
+  test("uppercase scheme: codegen E-SQL-005 exactly as base — scheme quoted as WRITTEN — and no secret printed", () => {
+    const r = resolveDbDriver("POSTGRES://admin:SecJ1upper@db.example/app");
+    expect(r.ok).toBe(false);
+    expect(r.error.code).toBe("E-SQL-005");
+    expect(r.error.message).toContain("uses an unrecognized URI scheme `POSTGRES://`");
+    expect(r.error.message).not.toContain("SecJ1upper");
+  });
+
+  test("protect-analyzer never treats a scheme:// value as a FILE — driver or unsupported", () => {
+    const cases = [
+      { v: " postgres://admin:SecC1@db.example/app", label: "Driver URI" },
+      { v: "POSTGRES://admin:SecC1@db.example/app", label: "Database target" },
+      { v: "mongodb://admin:SecC1@db.example/app", label: "Database target" },
+    ];
+    for (const { v, label } of cases) {
       const span = { file: "/v/a.scrml", start: 0, end: 10, line: 1, col: 1 };
       const ast = {
         filePath: "/v/a.scrml",
@@ -105,12 +124,16 @@ describe("§2 one classifier (R2-1)", () => {
           { name: "tables", value: { kind: "string-literal", value: "items" }, span },
         ] }],
       };
-      const notes = [];
-      const { errors } = runPA({ files: [ast], onNote: (l) => notes.push(l) });
+      const { errors } = runPA({ files: [ast], onNote: () => {} });
       const e = errors.find((x) => x.code === "E-PA-002");
-      expect(e.message).toContain("Driver URI");
+      expect(e.message).toContain(label);
       expect(e.message).not.toContain("Database file");
+      expect(e.message).not.toContain("/v/");
       expect(e.message).not.toContain("SecC1");
+      if (label === "Database target") {
+        expect(e.message).toContain("E-SQL-005");
+        expect(e.message).not.toContain("Driver URI");
+      }
     }
   });
 
@@ -195,6 +218,15 @@ describe("§3 END-TO-END: no bypass input prints its secret", () => {
     expect(all.some((d) => d.code === "E-PA-002")).toBe(true);
     expect(JSON.stringify(all.map((d) => d.message))).not.toContain("SecI1api");
     expect(result.redact(`x ${v} y`)).not.toContain("SecI1api");
+  });
+
+  test("uppercase scheme end-to-end: E-SQL-005 fires exactly as base, no secret printed", () => {
+    const v = "POSTGRES://admin:SecJ2upper@db.example/app";
+    const out = compileFile(dir, "upper.scrml",
+      `<program db="${v}">\n  \${\n    function n() {\n      return ?{\`SELECT 1\`}.all()\n    }\n  }\n  <p>x</p>\n</program>\n`);
+    expect(out).toContain("E-SQL-005");
+    expect(out).toContain("uses an unrecognized URI scheme `POSTGRES://`");
+    expect(out).not.toContain("SecJ2upper");
   });
 
   test("Note(PA) path (DDL present) prints no secret", () => {
