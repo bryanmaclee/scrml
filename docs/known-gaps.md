@@ -18073,3 +18073,26 @@ the specifier is also not re-based to the output directory. Loud at runtime, sil
 narrow source read; the parser defect itself remains (§5 attribute quoting).
 
 <!-- @gap id=g-db-opener-splits-single-quoted-and-unquoted-attribute-values sev=MED status=open locus=compiler/src/ast-builder.js prov=empirical:agent-s430-dev-db-stub -->
+
+### G-SPLIT-FUNCTION-DROPS-A-LET-SQL-READ — `let row = ?{SELECT}.get()` in a body-split function becomes `let row;` and vanishes server-side
+
+**Agent-reproduced (S430 `s430-defer`), same on base, SILENT.** In a CPS-split function, `let row = ?{SELECT …}.get()` lowers to
+`let row;` on the client and is absent from the server batch. Silent wrong lowering at exit 0 (§19.9.3 / §19.9.9).
+
+<!-- @gap id=g-split-function-drops-a-let-sql-read sev=HIGH status=open locus=compiler/src/route-inference.ts prov=empirical:agent-s430-defer -->
+
+### G-SINGLE-BATCH-CPS-WRAPPER-IGNORES-A-SERVER-ERROR-ENVELOPE — a server-side `!` failure is dropped when the function returns nothing
+
+**Agent-reproduced (S430 `s430-defer`), same on base, SILENT.** The single-batch CPS client wrapper checks the server
+`__scrml_error` envelope only on the value-returning path; with no return value a server-side failure is ignored and the
+caller's `!{}` never runs (§19.9.4 error envelope).
+
+<!-- @gap id=g-single-batch-cps-wrapper-ignores-a-server-error-envelope sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts prov=empirical:agent-s430-defer -->
+
+### G-NATIVE-PARSER-FAIL-LOSES-ENUM-TYPE-AND-VARIANT — `fail E.X` under `--parser=scrml-native` emits `type:""`
+
+**Agent-reproduced (S430 `s430-defer`).** Every native `fail E.X` gets E-ERROR-009 + E-TYPE-080, and the emitted envelope has
+`type:""`, so `!{}` arms never match. Plus: native `on mount { … }` parses only the first expression and silently drops the rest
+(the native twin of GH #264).
+
+<!-- @gap id=g-native-parser-fail-loses-enum-type-and-variant sev=MED status=open locus=compiler/native-parser/translate-stmt.js prov=empirical:agent-s430-defer -->
