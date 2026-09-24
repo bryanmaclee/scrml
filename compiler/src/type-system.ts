@@ -11244,14 +11244,24 @@ function annotateNodes(
         }
         const _isConstBinding = n.kind === "const-decl";
         if (n.name && isDestructurePattern(n.name)) {
+          // A destructured declaration is a DECLARATION of every name it
+          // yields — each binds in the CURRENT scope and shadows any outer
+          // binding of the same name, exactly as the plain `let x` / `const x`
+          // arm below does (§7.3.1 block scoping; §50.9 `let` is the only
+          // mutable declaration form). Bind UNCONDITIONALLY.
+          //
+          // ⚑ Do NOT guard with `!scopeChain.lookup(bind)`. `lookup` walks the
+          // WHOLE chain, so that guard skipped the bind whenever ANY outer
+          // scope held the name, and the inner name then resolved to the OUTER
+          // entry: `const a = 0; function f(o) { let { a } = o; a = 1 }` fired
+          // a false E-ASSIGN-004, and the mirror `let a = 0; … const { a } = o;
+          // a = 1` compiled clean and threw at runtime (s430-destructure-shadow).
           for (const bind of iterDestructuredNames(n.name as DestructurePatternShape)) {
-            if (!scopeChain.lookup(bind)) {
-              scopeChain.bind(bind, {
-                kind: "variable",
-                resolvedType: tAsIs(),
-                ...(_isConstBinding ? { isConst: true } : {}),
-              });
-            }
+            scopeChain.bind(bind, {
+              kind: "variable",
+              resolvedType: tAsIs(),
+              ...(_isConstBinding ? { isConst: true } : {}),
+            });
           }
         } else if (n.name) {
           scopeChain.bind(n.name as string, {
@@ -13252,11 +13262,14 @@ function annotateNodes(
           scopeChain.bind(forVar, { kind: "variable", resolvedType: _forRow ?? tAsIs() });
         } else if (isDestructurePattern(forVar)) {
           // A5 — structural destructuring walk. Each bound name enters scope
-          // as a plain `asIs` variable (same semantics as A1's regex extractor).
+          // as a plain `asIs` variable in the loop's own scope (pushed above),
+          // shadowing any outer binding — the same unconditional bind the
+          // single-identifier arm does. A `!scopeChain.lookup(bind)` guard here
+          // resolved a shadowing binder to the OUTER entry (a false
+          // E-ASSIGN-004 on `const name = ""; for (let { name } of rows) {
+          // name = … }`) — s430-destructure-shadow.
           for (const bind of iterDestructuredNames(forVar as DestructurePatternShape)) {
-            if (!scopeChain.lookup(bind)) {
-              scopeChain.bind(bind, { kind: "variable", resolvedType: tAsIs() });
-            }
+            scopeChain.bind(bind, { kind: "variable", resolvedType: tAsIs() });
           }
         }
         // C-style form: extract the declared counter name from the initExpr
