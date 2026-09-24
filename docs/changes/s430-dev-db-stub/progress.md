@@ -115,3 +115,48 @@
     the immutable path and the stray -shm persists (base behaved the same). A checkpoint racing the existsSync
     (-wal) probe can pick the immutable path while a writer is mid-flight; immutable then reads the main file
     only. immutable did improve the hot-journal case (no journal replay attempt, no side file).
+- 2026-09-24 ROUND 4 (re-review of 241a33ab: 333-file db corpus identical base vs fix; default paths clean).
+  Merged origin/main 3676d2ae (#1042) -> b724547a. Fix 1bb6c49a:
+  A (verbose leak): compileScrml harvests the inputs UP FRONT, each source as BS reads it (covers gathered
+    imports), and the tree after TAB; wraps the `log` callback; and intercepts console.log/error/warn/info +
+    process.stdout/stderr.write for the duration of the (synchronous) compile, restored in finally.
+    Grep of api.js + stages for direct writes that can carry a message or a value (all now under the
+    interception): api.js verbose collectErrors log (the reported leak) + every other log(); protect-analyzer
+    Note(PA) (default stderr writer; api passes onNote too); expression-parser.ts:3071 console.warn (source
+    preview); codegen/log-loc.ts:339/365; codegen/runtime-chunks.ts:401; reachability-solver.ts:166 perfLog.
+  B (thrown values): re-thrown as a NEW object via SecretRedactor.redactThrown — message, stack, cause
+    (recursive, depth 4), every own string prop (filePath, path, …); a thrown string is redacted. dev's
+    compileThrowDiagnostic receives the redacted object (String(err), e.filePath).
+  C (over-redaction — design correction):
+    (1) values collected ONLY from <program db>, <page db>, <db src>, <program idempotency-store> (the SPEC's
+        only *-store= attribute; session-store= is a mentioned follow-up, not defined). Never a generic src=.
+        Tree walker + an opening-tag scanner that records value offsets (handles quotes, \-escapes, unquoted).
+    (2) messages: each WHOLE value replaced by its POSITIONAL display form (userinfo span + password-param value
+        spans -> <redacted>), plus the forms messages actually echo: trimmed, the sqlite:-stripped path (in
+        resolved-path messages), and two self-anchored fragments — `user:password` (the ':' joins the pair) and
+        `key=value` for password params. The fragments exist because an unquoted `db=scheme://…` is split by the
+        tokenizer into attribute NAMES and W-ATTR-001 then quotes `admin:s3cret@db=` — found while testing.
+    (3) excerpts: redacted by attribute SPAN first (stateless — correct even if the file changed on disk after
+        the compile, which watch mode prints), then exact copies of a registered whole value.
+    (4) LONG_SECRET_RULE: a bare secret is replaced on its own only if >= 12 chars AND not purely alphabetic.
+        Every compiler token that could collide (codes like E-PA-002 [8], commands, element/attr names, SQL
+        identifiers, dictionary words, line numbers, §-refs) is shorter or single-class; a strong password is
+        12+ and mixed. Backstop only — for a message that echoes the value transformed (normalized path).
+        Known residue: a value whose resolved path is normalized (`a//b`, `..`) and whose secret is < 12 or
+        purely alphabetic can still print in E-PA-002's path. Not reproduced in the corpus; noted.
+    redactDbUri is now the positional display: postgres://postgres:postgres@h -> postgres://<redacted>@h.
+  Mutation proof (mirror .scratch/mut, db-uri-redaction + -r4 tests): A1 log callback unredacted -> 3 red;
+    A2 no interception -> 1 red; B rethrow raw -> 2 red; B2 own props/cause raw -> 1 red; C3 excerpt not
+    span-redacted -> 26 red; C3b excerpt by whole-value substring only (no span) -> 1 red (stale-registry case);
+    C1 <img src> harvested -> 2 red; C4 bare secrets any length -> 6 red.
+  UNVERIFIED (per coordinator, not chased): self-host compiler/self-host/pa.scrml:228 Note(PA) writes its own
+    stderr (self-host out of scope; api's interception would still catch it when run under compileScrml);
+    db-migrate.js error prints and dev.js:1074 route-handler error print are RUNTIME error text, not compile
+    diagnostics — follow-up.
+  DECLARED BEHAVIOUR CHANGES riding this arc (for the PR description):
+    1. `sqlite:` prefix strip in the protect-analyzer: `<db src="sqlite:./x.db">` now behaves exactly like
+       `<db src="./x.db">` (SPEC §8.1.1 L6512 + L6533). Base resolved it to the nonexistent `<dir>/sqlite:/x.db`
+       and always fell to the shadow schema. Newly fires E-PA-004 ONLY when a real db file sits beside the
+       source and lacks a listed table.
+    2. F2 shadow-cache key (path + exact CREATE set): removes a false E-PA-004 -> newly ACCEPTS two `<db>`
+       blocks sharing a `src=` with different `tables=` (same file or across files).
