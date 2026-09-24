@@ -341,9 +341,11 @@ function parseArgs(args) {
  * @param {number} [contextLines=2]
  * @returns {string} formatted source snippet with line numbers
  */
-function getSourceContext(filePath, line, contextLines = 2) {
+function getSourceContext(filePath, line, contextLines = 2, redactSource = (t) => t) {
   try {
-    const source = readFileSync(filePath, "utf8");
+    // s430-dev-db-stub F4 — connection values in the excerpt are replaced by
+    // their display form AT THEIR SPAN; every other byte prints as written.
+    const source = redactSource(readFileSync(filePath, "utf8"));
     const lines = source.split("\n");
     const start = Math.max(0, line - 1 - contextLines);
     const end = Math.min(lines.length, line + contextLines);
@@ -368,7 +370,7 @@ function getSourceContext(filePath, line, contextLines = 2) {
  * @param {string} cwd — current working directory for relative paths
  * @returns {string}
  */
-export function formatError(err, cwd) {
+export function formatError(err, cwd, redactSource = (t) => t) {
   const parts = [];
 
   // Source location resolved FIRST so the header can drop a `(line N, col N)`
@@ -398,7 +400,7 @@ export function formatError(err, cwd) {
 
     // Source context
     if (errLine) {
-      const ctx = getSourceContext(errFile, errLine);
+      const ctx = getSourceContext(errFile, errLine, 2, redactSource);
       if (ctx) parts.push(ctx.trimEnd());
     }
   }
@@ -577,16 +579,16 @@ function runOnce(opts, selfHostModules = null) {
   // Non-fatal — adopter-facing guidance when JSX/Vue/Svelte syntax is detected.
   // Visible by default so typing `onClick={fn}` does not silently compile to
   // broken output.
-  // s430-dev-db-stub F4 — every diagnostic block printed below passes the
-  // compile unit's secret redactor (`result.redact`, built by compileScrml from
-  // the unit's own connection values). The messages are already redacted; this
-  // covers the source excerpt formatError reads from disk.
-  const redact = typeof result.redact === "function" ? result.redact : (t) => t;
+  // s430-dev-db-stub F4 — diagnostic MESSAGES arrive already redacted from the
+  // compileScrml chokepoint. The one thing printed here that the compiler did
+  // not produce is the source excerpt formatError reads from disk; it is
+  // redacted by connection-attribute SPAN via `result.redactSource`.
+  const redactSource = typeof result.redactSource === "function" ? result.redactSource : (t) => t;
   const lintDiags = result.lintDiagnostics || [];
   if (lintDiags.length > 0) {
     console.error("");
     for (const d of lintDiags) {
-      console.error(redact(formatLintDiagnostic(d, cwd)));
+      console.error(formatLintDiagnostic(d, cwd));
     }
   }
 
@@ -594,7 +596,7 @@ function runOnce(opts, selfHostModules = null) {
   if (result.warnings.length > 0) {
     console.error("");
     for (const w of result.warnings) {
-      console.error(redact(formatWarning(w, cwd)));
+      console.error(formatWarning(w, cwd));
     }
   }
 
@@ -602,7 +604,7 @@ function runOnce(opts, selfHostModules = null) {
   if (result.errors.length > 0) {
     console.error("");
     for (const e of result.errors) {
-      console.error(redact(formatError(e, cwd)));
+      console.error(formatError(e, cwd, redactSource));
       console.error("");
     }
   }

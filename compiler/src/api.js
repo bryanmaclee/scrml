@@ -23,7 +23,7 @@ import { runAttributeInterpolation } from "./validators/attribute-interpolation.
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
-import { SecretRedactor, collectFromAst as collectConnectionValuesFromAst, harvestFromSource as harvestConnectionValues } from "./diagnostic-secrets.ts";
+import { SecretRedactor, collectFromAst as collectConnectionValuesFromAst } from "./diagnostic-secrets.ts";
 import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
@@ -728,36 +728,69 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * }}
  */
 export function compileScrml(options = {}) {
-  // s430-dev-db-stub F4 — THE OUTPUT CHOKEPOINT for compile diagnostics.
-  // Every connection string in the compile unit is collected (by value) while
-  // the unit compiles; on the way out, every error / warning / lint message is
-  // redacted of exactly those values' secret parts, a thrown compiler error is
-  // redacted before it propagates, and `result.redact(text)` is handed to the
-  // consumers that print text the compiler did not produce (the source excerpt
-  // under a diagnostic, read from disk by commands/compile.js). `Note(PA):`
-  // lines go through the same redactor via runPA's onNote sink.
+  // s430-dev-db-stub F4 — THE OUTPUT CHOKEPOINT for a compile.
+  //
+  // The compile unit's connection values (`<program db>`, `<page db>`,
+  // `<db src>`, `idempotency-store=`) are collected by VALUE — from the inputs
+  // up front, again after BS and after TAB inside the compile — and every piece
+  // of text the compile emits passes the redactor, which replaces each WHOLE
+  // value by its display form (userinfo + password parameters -> <redacted>):
+  //   - returned diagnostics (every string field of errors / warnings / lints);
+  //   - a thrown compiler error — re-thrown as a NEW redacted object (message,
+  //     stack, cause, filePath, …), since the original may be frozen;
+  //   - EVERYTHING written to the terminal during the compile: the `log`
+  //     callback (`--verbose` stage lines echo diagnostic messages), and any
+  //     console / process.std{out,err} write a stage makes directly (Note(PA),
+  //     expression-parser warnings, perf lines) — intercepted for the duration
+  //     of this synchronous call and restored in `finally`.
+  // Consumers that print text the compiler did not produce get
+  // `result.redact(text)` for messages and `result.redactSource(text)` for the
+  // source excerpt under a diagnostic (redacted by attribute SPAN, never by
+  // substring search over code).
   const redactor = options._secretRedactor ?? new SecretRedactor();
+  for (const f of options.inputFiles ?? []) {
+    try { redactor.addSource(readFileSync(resolve(f), "utf8")); } catch { /* a directory / unreadable — BS reports it */ }
+  }
+  const userLog = typeof options.log === "function" ? options.log : console.log;
+  const log = (...args) => userLog(...args.map((a) => (typeof a === "string" ? redactor.redact(a) : a)));
+  const restoreOutput = interceptCompileOutput(redactor);
   let result;
   try {
-    result = compileScrmlUnredacted({ ...options, _secretRedactor: redactor });
+    result = compileScrmlUnredacted({ ...options, log, _secretRedactor: redactor });
   } catch (err) {
-    if (!redactor.hasSecrets) {
-      // Crashed before BS read the sources — harvest the inputs directly.
-      for (const f of options.inputFiles ?? []) {
-        try { redactor.addValues(harvestConnectionValues(readFileSync(resolve(f), "utf8"))); } catch { /* unreadable */ }
-      }
-    }
-    if (err && typeof err === "object") {
-      try { if (typeof err.message === "string") err.message = redactor.redact(err.message); } catch { /* read-only */ }
-      try { if (typeof err.stack === "string") err.stack = redactor.redact(err.stack); } catch { /* read-only */ }
-    }
-    throw err;
+    throw redactor.redactThrown(err);
+  } finally {
+    restoreOutput();
   }
   for (const list of [result.errors, result.warnings, result.lintDiagnostics]) {
     if (Array.isArray(list)) for (const d of list) redactor.redactDiagnostic(d);
   }
   result.redact = (text) => redactor.redact(text);
+  result.redactSource = (text) => redactor.redactSource(text);
   return result;
+}
+
+/**
+ * Route every console / process.std{out,err} write made during a compile
+ * through the redactor. Returns the restore function. The compile is
+ * synchronous, so nothing else writes while the patch is in place.
+ */
+function interceptCompileOutput(redactor) {
+  const red = (a) => (typeof a === "string" ? redactor.redact(a) : a);
+  const saved = {
+    log: console.log, error: console.error, warn: console.warn, info: console.info,
+    out: process.stdout.write, err: process.stderr.write,
+  };
+  console.log = (...a) => saved.log.apply(console, a.map(red));
+  console.error = (...a) => saved.error.apply(console, a.map(red));
+  console.warn = (...a) => saved.warn.apply(console, a.map(red));
+  console.info = (...a) => saved.info.apply(console, a.map(red));
+  process.stdout.write = function (chunk, ...rest) { return saved.out.call(process.stdout, red(chunk), ...rest); };
+  process.stderr.write = function (chunk, ...rest) { return saved.err.call(process.stderr, red(chunk), ...rest); };
+  return () => {
+    console.log = saved.log; console.error = saved.error; console.warn = saved.warn; console.info = saved.info;
+    process.stdout.write = saved.out; process.stderr.write = saved.err;
+  };
 }
 
 function compileScrmlUnredacted(options = {}) {
@@ -1176,6 +1209,9 @@ function compileScrmlUnredacted(options = {}) {
       source = convertLegacyCssSource(source);
     }
     sourceByFile.set(filePath, source);
+    // s430-dev-db-stub F4 — register this file's connection values BEFORE any
+    // stage can echo them (a gathered import was not in the up-front harvest).
+    if (_secretRedactor) _secretRedactor.addSource(source);
     try {
       const result = stage("BS", () => _splitBlocks(filePath, source));
       bsResults.push(result);
@@ -1184,12 +1220,6 @@ function compileScrmlUnredacted(options = {}) {
     } catch (e) {
       allErrors.push({ stage: "BS", code: e.code || "E-BS-000", message: e.message });
     }
-  }
-  // s430-dev-db-stub F4 — value harvest for the output chokepoint (see
-  // compileScrml). Runs before any early return so a file that fails to split
-  // still has its connection values known.
-  if (_secretRedactor) {
-    for (const src of sourceByFile.values()) _secretRedactor.addValues(harvestConnectionValues(src));
   }
 
   if (bsResults.length === 0) {
