@@ -125,13 +125,23 @@ describe("§2 an empty database is called out (F5)", () => {
     expect(e.message.replace(/^E-PA-004: /, "").slice(0, 120)).toContain("EMPTY");
   });
 
-  test("1-byte file (SQLite also opens it as an empty db): EMPTY, and the size is stated", () => {
+  test("1-byte file: EMPTY with its size where SQLite opens it, E-PA-003 where it does not — never a crash", () => {
+    // Whether SQLite opens a 1-byte file as an empty database is a property of
+    // the SQLite build, not of this analyzer: bun:sqlite on Linux opens it,
+    // bun:sqlite on Windows (CI `windows` job, #1047) rejects it as "not a
+    // database". The analyzer's guarantee is the same either way — it tells the
+    // truth about what it read — so the test pins that, not the build.
     writeFileSync(join(srcDir, "app.db"), "x");
-    const e = e004("./app.db");
-    expect(e).toBeDefined();
-    expect(e.message).toContain("the EMPTY database");
-    expect(e.message).not.toContain("ZERO-BYTE");
-    expect(e.message).toContain("(the file is 1 byte)");
+    const file = join(srcDir, "app.scrml");
+    const { errors } = runPA({ files: [makeDbFileAST(file, { src: "./app.db", tables: "items" })] });
+    const e = errors.find((x) => x.code === "E-PA-004");
+    const e3 = errors.find((x) => x.code === "E-PA-003");
+    expect(Boolean(e) !== Boolean(e3)).toBe(true);
+    if (e) {
+      expect(e.message).toContain("the EMPTY database");
+      expect(e.message).not.toContain("ZERO-BYTE");
+      expect(e.message).toContain("(the file is 1 byte)");
+    }
   });
 
   test("a real but tableless database (4096-byte WAL header): EMPTY — size is not the predicate", () => {
