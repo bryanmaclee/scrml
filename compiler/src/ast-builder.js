@@ -11963,7 +11963,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       } else {
         // export type Name... | export function Name... | export fn Name... | export const Name... | export let Name...
         // F-AUTH-002: `pure`/`server` modifier(s) have already been consumed above; isPure/isServer flags carry that intent.
-        const declMatch = expr.match(/^\s*(type|function|fn|const|let)\s+(\w+)/);
+        // `function` also admits the generator star in every spelling —
+        // `function *k`, `function* k`, `function*k` (collectExpr space-pads it
+        // to `function * k`). Without it an exported GENERATOR matched nothing:
+        // exportKind stayed null, no function-decl was synthesized, and the
+        // body was never statement-parsed at all (S430 P2 follow-up — every
+        // diagnostic inside it was lost, and the name was undeclared).
+        const declMatch =
+          expr.match(/^\s*(function)\s*\*\s*(\w+)/) ||
+          expr.match(/^\s*(type|function|fn|const|let)\s+(\w+)/);
         if (declMatch) {
           exportNode.exportKind = declMatch[1];
           exportNode.exportedName = declMatch[2];

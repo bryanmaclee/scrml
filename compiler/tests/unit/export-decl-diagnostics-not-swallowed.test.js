@@ -27,6 +27,11 @@
  * FunctionExpression with a BlockStatement body). `try`/`throw` inside one is
  * silent whether or not it is exported. The parity test below pins that the
  * export makes no difference there; the rejection itself is a separate gap.
+ *
+ * ⚑ GENERATORS (reviewer finding on 4ff064c0). An exported generator was swallowed
+ * one step EARLIER than the re-parse: the export-decl name matcher required
+ * `function <name>` and missed the `*`, so no function-decl was synthesized and the
+ * body was never statement-parsed. Fixed at that matcher; pinned below.
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
@@ -102,6 +107,44 @@ describe("E-TRY / E-THROW fire inside exported declarations", () => {
       expect(errs(exported, code).length).toBe(errs(plain, code).length);
       expect(errs(exported, code).map(lineOf)).toEqual(errs(plain, code).map(lineOf));
     }
+  });
+});
+
+// ⚑ Exported GENERATORS were swallowed one level earlier: the export-decl's
+// `declMatch` regex required `function\s+NAME`, so `function *k` / `function* k`
+// matched nothing — no exportKind, no synthesized function-decl, no re-parse at
+// all. Even an undeclared name inside produced nothing.
+describe("exported generators — all three spellings fire like the un-exported twin", () => {
+  const BODY = "k() {\n    yield 1\n    throw new Error(\"x\")\n  }\n}";
+  const twin = () => compile("${\n  function *" + BODY);
+  for (const [label, head] of [
+    ["export function *k", "export function *"],
+    ["export function* k", "export function* "],
+    ["export function*k", "export function*"],
+    ["export server function* k", "export server function* "],
+  ]) {
+    test(`${label} — throw → E-THROW-NOT-IN-SCRML, same line as un-exported \`function *k\``, () => {
+      const r = compile("${\n  " + head + BODY);
+      const e = errs(r, "E-THROW-NOT-IN-SCRML");
+      expect(e.length).toBe(1);
+      expect(lineOf(e[0])).toBe(4);
+      expect(e.map(lineOf)).toEqual(errs(twin(), "E-THROW-NOT-IN-SCRML").map(lineOf));
+    });
+  }
+
+  test("export function* — try → E-TRY-NOT-IN-SCRML; condition head → E-CONDITION-HEAD-UNPARENTHESIZED", () => {
+    const r = compile(
+      "${\n  export function* k(n) {\n    try { yield 1 } catch (e) { yield 2 }\n    while (n + 1) < 4 { yield n }\n  }\n}",
+    );
+    expect(errs(r, "E-TRY-NOT-IN-SCRML").map(lineOf)).toEqual([3]);
+    expect(errs(r, "E-CONDITION-HEAD-UNPARENTHESIZED").map(lineOf)).toEqual([4]);
+  });
+
+  test("a LEGAL exported generator is declared and callable (was E-SCOPE-001 at its use site)", () => {
+    const r = compile(
+      "<program>\n${\n  export function* evens(n) {\n    for (let i = 0; i < n; i++) {\n      if (i % 2 == 0) yield i\n    }\n  }\n  <out> = [...evens(6)].join(\",\")\n}\n<p>${@out}</p>\n</program>",
+    );
+    expect((r.errors ?? []).map((e) => e.code)).toEqual([]);
   });
 });
 

@@ -44,14 +44,15 @@
  * for the project's whole life behind passing unit tests.
  *
  * ⚑ SURFACING — HISTORY. Until S430 this diagnostic was SILENT inside an `export`-ed
- * `function` / `fn` / `server function` (and any function nested in one): the export
- * synth re-parse in ast-builder.js kept only E-FN-EQUALS-BODY from its sub-parse and
- * discarded the rest. S430 P2 closed that swallow; the code now fires there too —
- * pinned in `export-decl-diagnostics-not-swallowed.test.js`. (The S414 measurement
- * also listed `export const g = () => { ... }` as silent. That row was a different
- * gap: a block-bodied arrow body is an escape-hatch expression that is never
- * statement-parsed, exported or not — for this code it surfaces as
- * E-CODEGEN-INVALID-LOGIC instead.)
+ * `function` / `function*` / `fn` / `server function` (and any function nested in one):
+ * the export synth re-parse in ast-builder.js kept only E-FN-EQUALS-BODY from its
+ * sub-parse and discarded the rest, and an exported generator was not re-parsed at all.
+ * S430 P2 closed both; the code now fires there too — pinned in
+ * `export-decl-diagnostics-not-swallowed.test.js`. (The S414 measurement also listed
+ * `export const g = () => { ... }` as silent. That row is a different, STILL-OPEN gap: a
+ * block-bodied arrow body is an escape-hatch expression that is never statement-parsed,
+ * exported or not. For this code a writing build fails as E-CODEGEN-INVALID-LOGIC; a
+ * `write: false` compile reports nothing.)
  *
  * ⚑ Recovery had to go rather than be tightened again: round 3 made it strictly WORSE
  * than doing nothing — base truncated `while (i) < n >> 1` to `while (i) { }`, which
