@@ -442,18 +442,37 @@ export class SecretRedactor {
    * own string property (`filePath`, `path`, `code`, ...).
    */
   redactThrown(err: unknown, depth = 0): unknown {
+    // Nothing registered, or nothing to change: the ORIGINAL value, untouched
+    // (identity, class and every property preserved).
+    if (this.forms.length === 0) return err;
     if (typeof err === "string") return this.redact(err);
     if (!err || typeof err !== "object" || depth > 4) return err;
     const src = err as any;
-    const out: any = new Error(typeof src.message === "string" ? this.redact(src.message) : String(src.message ?? ""));
-    if (typeof src.name === "string") out.name = src.name;
-    for (const k of Object.getOwnPropertyNames(src)) {
-      if (k === "message" || k === "stack" || k === "cause") continue;
-      const v = src[k];
-      out[k] = typeof v === "string" ? this.redact(v) : v;
+    const names = Object.getOwnPropertyNames(src);
+    if (!names.includes("stack") && typeof src.stack === "string") names.push("stack");
+    if (!names.includes("message") && typeof src.message === "string") names.push("message");
+    const changed = new Map<string, unknown>();
+    for (const k of names) {
+      let v: unknown;
+      try { v = src[k]; } catch { continue; }
+      const nv = k === "cause" ? this.redactThrown(v, depth + 1)
+        : typeof v === "string" ? this.redact(v) : v;
+      if (nv !== v) changed.set(k, nv);
     }
-    if ("cause" in src) out.cause = this.redactThrown(src.cause, depth + 1);
-    out.stack = typeof src.stack === "string" ? this.redact(src.stack) : out.stack;
+    if (changed.size === 0) return err;
+    // A NEW object with the SAME prototype (so `instanceof TypeError` /
+    // `StageSeamError` still holds) — the original may be frozen.
+    const out = Object.create(Object.getPrototypeOf(src));
+    for (const k of names) {
+      const desc = Object.getOwnPropertyDescriptor(src, k);
+      const value = changed.has(k) ? changed.get(k) : (desc && "value" in desc ? desc.value : src[k]);
+      Object.defineProperty(out, k, {
+        value,
+        writable: true,
+        configurable: true,
+        enumerable: desc ? !!desc.enumerable : false,
+      });
+    }
     return out;
   }
 }

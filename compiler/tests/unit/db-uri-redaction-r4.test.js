@@ -110,27 +110,57 @@ describe("§8 B: a thrown compiler error is re-thrown as a NEW redacted value", 
     throw new Error("expected compileScrml to throw");
   }
 
-  test("a FROZEN Error carrying the value in message, filePath, cause and stack", async () => {
+  // A substituted stage's throw reaches the caller as a StageSeamError (the
+  // pipeline-seam wrapper, #1043) whose message embeds the original's stack and
+  // whose `cause` is the original — every layer must come out redacted, and
+  // the classes must survive.
+  test("a FROZEN Error (message, filePath, nested cause, stack) — class preserved at every layer", async () => {
+    const { StageSeamError } = await import("../../src/pipeline-seam.ts");
     const e = await compileThrowing(() => {
-      const inner = new Error(`inner ${V}`);
-      throw Object.freeze(Object.assign(new Error(`boom ${V}`), { filePath: `/x/${V}`, code: "E-TEST-1", cause: inner }));
+      const inner = new RangeError(`inner ${V}`);
+      throw Object.freeze(Object.assign(new TypeError(`boom ${V}`), { filePath: `/x/${V}`, code: "E-TEST-1", cause: inner }));
     });
-    expect(Object.isFrozen(e)).toBe(false);
+    expect(e).toBeInstanceOf(StageSeamError);
     expect(e.message).toContain("boom");
     expect(e.message).not.toContain(S);
-    expect(e.filePath).not.toContain(S);
-    expect(e.code).toBe("E-TEST-1");
-    expect(String(e.cause?.message)).toContain("inner");
-    expect(String(e.cause?.message)).not.toContain(S);
     expect(String(e.stack)).not.toContain(S);
     expect(String(e)).not.toContain(S);
+    const c = e.cause;
+    expect(c).toBeInstanceOf(TypeError);
+    expect(Object.isFrozen(c)).toBe(false);          // a NEW object — the original was frozen
+    expect(c.message).toContain("boom");
+    expect(c.message).not.toContain(S);
+    expect(c.filePath).not.toContain(S);
+    expect(c.code).toBe("E-TEST-1");
+    expect(String(c.stack)).not.toContain(S);
+    expect(c.cause).toBeInstanceOf(RangeError);
+    expect(String(c.cause.message)).toContain("inner");
+    expect(String(c.cause.message)).not.toContain(S);
   });
 
   test("a thrown STRING", async () => {
     const e = await compileThrowing(() => { throw `plain ${V}`; });
-    expect(typeof e).toBe("string");
-    expect(e).toContain("plain");
-    expect(e).not.toContain(S);
+    expect(String(e)).not.toContain(S);
+    expect(typeof e.cause).toBe("string");
+    expect(e.cause).toContain("plain");
+    expect(e.cause).not.toContain(S);
+  });
+
+  test("unit: nothing registered / nothing to redact → the ORIGINAL error, untouched", () => {
+    const t = new TypeError(`boom ${V}`);
+    expect(new SecretRedactor().redactThrown(t)).toBe(t);
+    const clean = new TypeError("no secret here");
+    expect(new SecretRedactor([V]).redactThrown(clean)).toBe(clean);
+  });
+
+  test("unit: a redacted error keeps its class and own props", () => {
+    class MyErr extends Error { constructor(m) { super(m); this.name = "MyErr"; this.extra = `x ${V}`; } }
+    const out = new SecretRedactor([V]).redactThrown(Object.freeze(new MyErr(`boom ${V}`)));
+    expect(out).toBeInstanceOf(MyErr);
+    expect(out.name).toBe("MyErr");
+    expect(out.message).not.toContain(S);
+    expect(out.extra).not.toContain(S);
+    expect(String(out)).toContain("MyErr");
   });
 });
 
