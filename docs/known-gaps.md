@@ -17962,3 +17962,21 @@ Four non-fixes reported (empty-then-refill, mutable key, setTimeout defer, combi
 flogence S11 hidden-initial-subtree note. Reproduce before dispatching.
 
 <!-- @gap id=g-each-row-stale-after-an-awaited-server-call sev=HIGH status=open locus=searched:none-yet prov=adopter:flogence-S49 -->
+
+### G-E-ASSIGN-004-MISSES-ARROW-BODIES-AND-IF-EXPRESSION-ARMS — a const reassigned inside an arrow body or an if-as-expression arm compiles and throws at runtime
+
+**Reviewer-reproduced (S430 review of #996), RELAYED — PA did not re-run.** `const t = 1` + `const h = () => { t = 2; return t }` →
+exit 0, emits `t = 2` (TypeError at runtime). `const k = 0` + `const r = if (c) { k = 1; 1 } else { 2 }` → same. Identical on the
+pre-#996 baseline (not a regression). Governing: §50.8.5 "in either statement or expression position". Distinct from the
+positions already in `g-e-assign-004-position-and-binder-coverage`. P7 disposition candidate: carried.
+
+<!-- @gap id=g-e-assign-004-misses-arrow-bodies-and-if-expression-arms sev=MED status=open locus=compiler/src/type-system.ts prov=review:S430-996-F2 -->
+
+### G-E-ASSIGN-004-BLAMES-A-FORWARD-DECLARED-LET — a function writing a file-level `let` declared later is told to "use let"
+
+**Reviewer-reproduced (S430 review of #996), RELAYED.** `function f() { total = 5; total = 6; return total }` then `let total = 0`
+→ `E-ASSIGN-004 … declared const … Use let` although the author wrote `let` (baseline: `E-CODEGEN-INVALID-LOGIC`, loud→loud).
+Underneath, pre-existing and silent: with ONE write the function emits `const total = 5` — a local shadow — and never writes the
+file-level `let`, exit 0 on both builds. That silent half is the real defect (§6.9 hoisting / §7.6 file-level scope).
+
+<!-- @gap id=g-e-assign-004-blames-a-forward-declared-let sev=MED status=open locus=compiler/src/type-system.ts prov=review:S430-996-F3 -->
