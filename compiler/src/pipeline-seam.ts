@@ -166,7 +166,7 @@ const diagnostics = arr(diagnostic);
 
 /** The AST node invariant (see file header). Cycle-safe; skips `_`-prefixed private keys. */
 function astNodes(): Check {
-  return (v, p) => walkAst(v, p, new Set(), false);
+  return (v, p) => walkAst(v, p, new Set(), true); // the list itself is a node slot
 }
 function walkAst(v: unknown, p: string, seen: Set<unknown>, isNodeSlot: boolean, isTestCase = false): Divergence {
   if (!v || typeof v !== "object") {
