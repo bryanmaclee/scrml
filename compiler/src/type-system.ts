@@ -11212,13 +11212,23 @@ function annotateNodes(
         }
         {
           const bindSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-          checkLinShadowing(
-            typeof n.name === "string" ? n.name : undefined,
-            bindSpan,
-            scopeChain,
-            errors,
-            (n.kind === "const-decl") ? "const" : "let",
-          );
+          // s430 — every name a DESTRUCTURED declaration yields is checked too:
+          // `lin tok = …; if (…) { const { tok } = o }` shadows the `lin` exactly
+          // as `const tok = …` does (before, a pattern name was skipped).
+          const _linShadowNames: string[] = typeof n.name === "string"
+            ? [n.name]
+            : isDestructurePattern(n.name)
+              ? [...iterDestructuredNames(n.name as DestructurePatternShape)]
+              : [];
+          for (const _nm of _linShadowNames) {
+            checkLinShadowing(
+              _nm,
+              bindSpan,
+              scopeChain,
+              errors,
+              (n.kind === "const-decl") ? "const" : "let",
+            );
+          }
         }
         // A5 (2026-05-17) — `n.name` is either a bare-ident string OR a
         // structured DestructurePattern (replaces A1's bare-expr scrape).
