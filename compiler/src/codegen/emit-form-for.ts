@@ -318,8 +318,10 @@ function nextSynthId(): number {
 }
 
 /**
- * Reset the synth-id counter — TEST USE ONLY. Production callers should never
- * need this; ids must remain globally unique within a compilation unit.
+ * Reset the synth-id counter. Ids must remain unique within a compilation unit,
+ * so the ONLY production caller is the compile head (api.js compileScrml,
+ * s430-emit-state-leak): without it the counter was process-monotonic and a
+ * synthesized node's id depended on what the process had compiled before.
  */
 export function _resetSynthIdCounter(): void {
   _synthIdCounter = 0x40000000;

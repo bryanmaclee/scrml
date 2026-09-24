@@ -1,0 +1,5 @@
+${
+    export fn greet(name) {
+        return "Hello, " + name
+    }
+}

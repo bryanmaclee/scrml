@@ -58,7 +58,7 @@ import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
-import { setBatchLoopHoists, setBatchInListCap } from "./emit-control-flow.ts";
+import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
@@ -74,7 +74,7 @@ import { generateWorkerJs } from "./emit-worker.ts";
 import { appendSourceMappingUrl } from "./source-map.ts";
 import { buildSourceMap } from "./build-source-map.ts";
 import { registerFileSource, resetLogLoc, fileDeclaresLog, fileDeclaresRender, filePrintBuiltinsShadowed, fileDeclaresFileScopeBinding } from "./log-loc.ts";
-import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors } from "./emit-expr.ts";
+import { setLogProductionStrip, setLogShadowedInFile, setRenderShadowedInFile, setPrintShadowedNames, setSessionProjectionActive, setSessionShadowedInFile, setCurrentUserAmbientActive, resetTildeUnresolvedErrors, drainTildeUnresolvedErrors, setCurrentFileRequestIds, setServerAsyncClassifier, resetSessionValueUseErrors } from "./emit-expr.ts";
 import {
   buildChunkNamespaceState,
   setChunkNamespaceState,
@@ -88,6 +88,11 @@ import { renameCellAccessors, CS_PREFIX } from "./cell-accessor-rename.ts";
 
 import { EncodingContext } from "./type-encoding.ts";
 import { collectDerivedVarNames, collectReactiveVarNames, collectStructuralDeclNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
+// s430-emit-state-leak — module-state install / reset seams (resetCodegenModuleState).
+import { beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
+import { resetEachModuleState, resetEachLocalIdCounter } from "./emit-each.ts";
+import { resetLiftModuleState } from "./emit-lift.js";
+import { setVariantFieldsForRewriter, setProtectContextForRewriter, setBoolColumnsForRewriter, setTenantContextForRewriter } from "./rewrite.ts";
 import { collectTopLevelLogicStatements, containsSql, getNodes } from "./collect.ts";
 import type { CompileContext } from "./context.ts";
 import type { ReachabilityRecord } from "../types/reachability.ts";
@@ -1084,6 +1089,51 @@ function findMatchingCloseIdx(html: string, tag: string, fromIdx: number): numbe
 }
 
 /**
+ * s430-emit-state-leak — restore every module-level per-file / per-compile
+ * codegen singleton to its initial value. Called once at the head of `runCG`.
+ *
+ * Invariant: CG output is a pure function of CG input. Each singleton below is
+ * installed per file (or per emit entry point) and, on the normal path, cleared
+ * after; but (a) a reader that runs BEFORE its file's install sees whatever the
+ * previous file / previous compile left, and (b) an exception mid-emit strands a
+ * value past the clear. Resetting here closes (b) for every compile; (a) is
+ * closed at each install site (see `beginEmitLogicFile`). The audit that produced
+ * this list is in docs/changes/s430-emit-state-leak/progress.md — a NEW
+ * module-level `let` / container in codegen that holds per-file or per-compile
+ * state belongs here too.
+ */
+export function resetCodegenModuleState(): void {
+  // emit-logic — §6.8 structural-decl set + implicit-init emission tracker.
+  endEmitLogicFile();
+  // emit-each / emit-lift — local-var counter, ctx stacks, per-file bind ctx.
+  resetEachModuleState();
+  resetLiftModuleState();
+  // emit-control-flow — Tier-2 hoist map, IN-list cap, per-file variant schema.
+  setBatchLoopHoists(null);
+  setBatchInListCap(null);
+  setVariantFieldsForFile(null, null);
+  // rewrite.ts — per-file variant / protect / bool-column / tenant contexts.
+  setVariantFieldsForRewriter(null, null);
+  setProtectContextForRewriter(null);
+  setBoolColumnsForRewriter(null);
+  setTenantContextForRewriter(null);
+  // emit-expr — per-file shadow / ambient flags, request ids, server async
+  // classifier, session diagnostic sink. (The log production flag + `~` sink
+  // are set/reset by runCG itself.)
+  setLogShadowedInFile(false);
+  setRenderShadowedInFile(false);
+  setPrintShadowedNames([]);
+  setSessionShadowedInFile(false);
+  setSessionProjectionActive(false);
+  setCurrentUserAmbientActive(false); // also resets rewrite.ts + expression-parser mirrors
+  setCurrentFileRequestIds(null);
+  setServerAsyncClassifier(null);
+  resetSessionValueUseErrors();
+  // chunk-namespace — per-unit id namespace token.
+  resetChunkNamespaceState();
+}
+
+/**
  * Run the Code Generator (CG, Stage 8).
  */
 export function runCG(input: CgInput): CgOutput {
@@ -1192,6 +1242,12 @@ export function runCG(input: CgInput): CgOutput {
   // this compile. Entries accumulated during emitTransitionGuard are drained
   // into `errors` after the per-file loop finishes.
   clearMachineCodegenErrors();
+
+  // s430-emit-state-leak — every module-level per-file/per-compile codegen
+  // singleton starts this compile from its initial value, so output is a pure
+  // function of the input regardless of what this process compiled before (an
+  // exception mid-emit in a PREVIOUS compile can otherwise strand a value).
+  resetCodegenModuleState();
 
   const outputs = new Map<string, CgFileOutput>();
   const errors: CGError[] = [];
@@ -1848,6 +1904,16 @@ export function runCG(input: CgInput): CgOutput {
       setSessionShadowedInFile(fileDeclaresFileScopeBinding(fileAST, "session") || collectReactiveVarNames(fileAST).has("session"));
       // §52 (S233) — default the `@currentUser` ambient OFF; re-set per-file below.
       setCurrentUserAmbientActive(false);
+      // s430-emit-state-leak — install THIS file's emit-logic state (§6.8
+      // structural-decl set + implicit-init tracker) before ANY of its emission.
+      // Function bodies, server/library/test emission all run emitLogicNode; the
+      // install used to happen only at the top-level reactive-wiring step, so
+      // every earlier reader saw the previous file's (or previous compile's) set.
+      beginEmitLogicFile(fileAST, collectStructuralDeclNames(fileAST));
+      // s430-emit-state-leak — emit-each's local-var counter is reset per each
+      // block on the main path, but the lift/markup-value path allocates from it
+      // without a reset, so its names depended on the previous file's last value.
+      resetEachLocalIdCounter();
       const analysis = fileAnalyses.get(filePath);
       const nodes: object[] = analysis ? (analysis as any).nodes : [];
 
@@ -2671,6 +2737,9 @@ export function runCG(input: CgInput): CgOutput {
     // splitting) and no emitter invoked later in this process inherits a
     // stale token.
     resetChunkNamespaceState();
+    // s430-emit-state-leak — drop the last file's emit-logic state so no later
+    // emitter (or the next compile in this process) can read it.
+    endEmitLogicFile();
     // §32 / §47 (S397) — drain the fail-closed `~` floor. DELIBERATELY here in the
     // `finally` and not at the loop tail: the tool (`outputs.set(filePath, toolOutput)`)
     // and library (`libOutput`) paths each leave the iteration by their own `continue`,

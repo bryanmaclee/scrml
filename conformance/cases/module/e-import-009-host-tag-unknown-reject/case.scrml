@@ -1,0 +1,4 @@
+import:wasm { add } from "./math.wasm"
+<program>
+    <p>${add(1, 2)}</p>
+</program>

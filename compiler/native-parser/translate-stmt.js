@@ -2318,6 +2318,9 @@ function makeImportDecl(stmt, counter) {
         source: (stmt.source === undefined) ? null : stmt.source,
         isDefault,
         span: spanOrZero(stmt.span),
+        // §21.3.1 `import:<host-tag>` — carried through (host-import.js gates it).
+        ...(typeof stmt.hostTag === "string" ? { hostTag: stmt.hostTag } : {}),
+        ...(typeof stmt.hostProse === "string" ? { hostProse: stmt.hostProse } : {}),
     };
 }
 
