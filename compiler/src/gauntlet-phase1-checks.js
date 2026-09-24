@@ -79,6 +79,9 @@ import {
   referencesHint,
   harvestRawCreateTables,
 } from "./schema-differ.js";
+// s430 — destructured-pattern name walk (E-SCOPE-010). Self-contained helpers;
+// route-inference.ts imports them the same way.
+import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
 
 // ---------------------------------------------------------------------------
 // Error class — matches TABError shape for uniform collection in api.js
@@ -453,20 +456,28 @@ function checkFileScopeDuplicateBindings(ast, filePath, errors) {
         for (const stmt of node.body) {
           if (!stmt) continue;
           if (stmt.kind !== "let-decl" && stmt.kind !== "const-decl") continue;
-          const name = stmt.name;
-          if (!name) continue;
-          const prior = seen.get(name);
-          if (prior) {
-            errors.push(new GauntletError(
-              "E-SCOPE-010",
-              `E-SCOPE-010: \`${name}\` is already declared at file scope ` +
-              `(first declaration at line ${prior.span?.line ?? "?"}). ` +
-              `Two file-scope \`\${ }\` blocks cannot declare the same \`${stmt.kind === "const-decl" ? "const" : "let"}\` name. ` +
-              `Rename this declaration, or merge the two \`\${ }\` blocks into one.`,
-              stmt.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
-            ));
-          } else {
-            seen.set(name, stmt);
+          if (!stmt.name) continue;
+          // s430 — a DESTRUCTURED declaration binds every name its pattern
+          // yields. Before, the pattern OBJECT itself was the Map key, so two
+          // file-scope `const { a } = …` never collided here and fell through
+          // to E-CODEGEN-INVALID-LOGIC (a "compiler defect" message).
+          const names = typeof stmt.name === "string"
+            ? [stmt.name]
+            : isDestructurePattern(stmt.name) ? [...iterDestructuredNames(stmt.name)] : [];
+          for (const name of names) {
+            const prior = seen.get(name);
+            if (prior) {
+              errors.push(new GauntletError(
+                "E-SCOPE-010",
+                `E-SCOPE-010: \`${name}\` is already declared at file scope ` +
+                `(first declaration at line ${prior.span?.line ?? "?"}). ` +
+                `Two file-scope \`\${ }\` blocks cannot declare the same \`${stmt.kind === "const-decl" ? "const" : "let"}\` name. ` +
+                `Rename this declaration, or merge the two \`\${ }\` blocks into one.`,
+                stmt.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 },
+              ));
+            } else {
+              seen.set(name, stmt);
+            }
           }
         }
         continue;

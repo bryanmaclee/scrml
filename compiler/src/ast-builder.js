@@ -8771,6 +8771,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // The native translation carries the same flag from the native parser's own
       // VarDecl `declKind` (native-parser/translate-stmt.js makeForStmtInOf), and
       // within-node parity compares it.
+      // s430 — `const` is recorded too (as `constBinder: true`) so the type system
+      // binds an explicit `const` binder immutable (E-ASSIGN-004 on a write in ANY
+      // loop). A keywordless (and `var`) head carries neither flag.
       let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -8907,6 +8910,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         kind: "for-stmt",
         ...(isForAwait ? { isAwait: true } : {}),
         ...(_binderKw === "let" ? { letBinder: true } : {}),
+        ...(_binderKw === "const" ? { constBinder: true } : {}),
         variable,
         iterable,
         body,
@@ -11125,6 +11129,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       id: ++counter.next,
       kind: 'for-stmt',
       ...(_binderKw === 'let' ? { letBinder: true } : {}),
+      ...(_binderKw === 'const' ? { constBinder: true } : {}),
       variable,
       iterable,
       iterExpr: safeParseExprToNode(iterable, 0),
@@ -13546,6 +13551,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // The native translation carries the same flag from the native parser's own
       // VarDecl `declKind` (native-parser/translate-stmt.js makeForStmtInOf), and
       // within-node parity compares it.
+      // s430 — `const` is recorded too (as `constBinder: true`) so the type system
+      // binds an explicit `const` binder immutable (E-ASSIGN-004 on a write in ANY
+      // loop). A keywordless (and `var`) head carries neither flag.
       let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -13675,6 +13683,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         kind: "for-stmt",
         ...(isForAwait ? { isAwait: true } : {}),
         ...(_binderKw === "let" ? { letBinder: true } : {}),
+        ...(_binderKw === "const" ? { constBinder: true } : {}),
         variable,
         iterable,
         body,
