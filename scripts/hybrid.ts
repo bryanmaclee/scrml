@@ -29,7 +29,8 @@
  * `compiler/self-host/`) is unsettled, so the runner takes any path:
  *   - a `.js` / `.ts` / `.mjs` path: imported directly; must export the stage's entry (see --list)
  *     or a default function.
- *   - a `.scrml` path: compiled FIRST by the pure TS compiler in library mode to a temp dir, then
+ *   - a `.scrml` path: compiled FIRST by the pure TS compiler in library mode to a temp dir (in a
+ *     child process, so the hybrid process keeps a pure compile history), then
  *     the emitted `<base>.js` is imported. A compile failure is reported loud (exit 2) — it is not
  *     a hybrid result.
  *   - the literal `ts`: the TS stage itself, routed THROUGH the seam (validated). This is the
@@ -65,8 +66,28 @@ class InvalidRun extends Error {}
 // Substitute loading
 // ---------------------------------------------------------------------------
 
-/** Compile a `.scrml` substitute with the pure TS compiler (library mode) and return its JS path. */
+/**
+ * Compile a `.scrml` substitute with the pure TS compiler (library mode) and return its JS path.
+ *
+ * Runs in a CHILD process, not this one: the TS compiler is not hermetic across compiles in one
+ * process (see the note above `runDifferential`), so compiling the substitute here would give the
+ * hybrid's first conformance case a different compile history than a pure-TS run's first case.
+ */
 function compileScrmlSubstitute(scrmlPath: string): string {
+  const p = Bun.spawnSync(["bun", fileURLToPath(import.meta.url), "--compile-substitute", scrmlPath], {
+    cwd: REPO_ROOT,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const out = p.stdout.toString();
+  const m = /^SUBSTITUTE-JS:(.+)$/m.exec(out);
+  if (p.exitCode === 0 && m) return m[1];
+  const err = p.stderr.toString().replace(/^hybrid: /, "").trim();
+  throw new InvalidRun(err || `compiling substitute ${scrmlPath} failed (exit ${p.exitCode})`);
+}
+
+/** Child-process body of `compileScrmlSubstitute`. */
+function compileScrmlSubstituteInProcess(scrmlPath: string): string {
   const outDir = mkdtempSync(join(tmpdir(), "scrml-hybrid-sub-"));
   const result = compileScrml({
     inputFiles: [scrmlPath],
@@ -445,6 +466,7 @@ function parseArgs(argv: string[]) {
     json: null as string | null,
     concurrency: 4,
     sideWorker: null as string | null,
+    compileSubstitute: null as string | null,
   };
   const need = (i: number, flag: string) => {
     if (i >= argv.length) throw new InvalidRun(`${flag} needs a value`);
@@ -474,6 +496,7 @@ function parseArgs(argv: string[]) {
       opts.concurrency = whole(need(++i, a), a);
       if (opts.concurrency < 1) throw new InvalidRun("--concurrency must be >= 1");
     } else if (a === "--side-worker") opts.sideWorker = need(++i, a); // internal: see runDifferential
+    else if (a === "--compile-substitute") opts.compileSubstitute = need(++i, a); // internal: see compileScrmlSubstitute
     else throw new InvalidRun(`unknown argument ${JSON.stringify(a)}`);
   }
   return opts;
@@ -489,6 +512,10 @@ function printStages(): void {
 
 async function main(argv: string[]): Promise<number> {
   const opts = parseArgs(argv);
+  if (opts.compileSubstitute) {
+    console.log(`SUBSTITUTE-JS:${compileScrmlSubstituteInProcess(resolve(opts.compileSubstitute))}`);
+    return 0;
+  }
   if (opts.sideWorker) {
     await sideWorker(opts.sideWorker, opts.swaps);
     return 0;
