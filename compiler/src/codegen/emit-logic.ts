@@ -1090,11 +1090,62 @@ let _structuralDeclNamesForFile: Set<string> | null = null;
 // increments). Module-level like `_structuralDeclNamesForFile` so it survives the
 // control-flow re-dispatch that omits it from opts. Reset per file below.
 let _implicitInitEmittedForFile: Set<string> = new Set();
+// s430-emit-state-leak — the FILE the two per-file values above were installed
+// for. The install MUST precede every reader: function bodies (emitFunctions)
+// are emitted BEFORE the top-level logic (emitReactiveWiring), so an install
+// that only happened at the reactive-wiring step left every function body
+// reading the PREVIOUS file's set — `null` in a fresh process, whatever the
+// last compile left behind otherwise — and compile output depended on what the
+// same process had compiled before (a `@cell = …` reassignment inside a
+// function registered, or did not register, a §6.8 reset init-thunk depending
+// on history). The codegen driver now installs at the head of each file's
+// emission (runCG per-file loop + generateClientJs) and clears after; the
+// reactive-wiring install is idempotent for the file already installed, and the
+// implicit-cell tracker restarts at the start of top-level logic emission
+// (`beginTopLevelLogicEmission`) — a fixed point of every file's emission.
+let _emitLogicStateFile: object | null = null;
+/**
+ * Install the per-file emit-logic state for `file` (a FileAST — identity is the
+ * key). Idempotent: re-installing for the file already installed is a no-op, so
+ * nested per-file entry points (runCG loop → generateClientJs →
+ * emitReactiveWiring) agree on ONE install and the emission-order tracker is
+ * never cleared mid-file.
+ */
+export function beginEmitLogicFile(file: object | null, names: Set<string> | null): boolean {
+  // A missing file identity (synthetic harness AST) never short-circuits.
+  if (file && file === _emitLogicStateFile) return false;
+  _emitLogicStateFile = file ?? null;
+  _structuralDeclNamesForFile = names;
+  _implicitInitEmittedForFile = new Set();
+  // TRUE = this call installed the state, so the caller owns the matching
+  // `endEmitLogicFile()`; FALSE = an outer entry point already owns it.
+  return true;
+}
+/**
+ * Mark the start of a file's TOP-LEVEL logic emission (emitReactiveWiring): the
+ * implicit-cell tracker records top-level emission order ("the FIRST top-level
+ * write is the implicit declaration"), so it restarts here. A write inside a
+ * function body is never a declaration; the paths that lower one without
+ * `insideFunctionBody` (e.g. the forbidden `try` body) must not consume a
+ * top-level first-write slot, so whatever they recorded is discarded. Runs at a
+ * fixed point of every file's emission, so it is history-independent.
+ */
+export function beginTopLevelLogicEmission(): void {
+  _implicitInitEmittedForFile = new Set();
+}
+/** Clear the per-file emit-logic state (end of a file's / a compile's emission). */
+export function endEmitLogicFile(): void {
+  _emitLogicStateFile = null;
+  _structuralDeclNamesForFile = null;
+  _implicitInitEmittedForFile = new Set();
+}
+/**
+ * Legacy direct-install entry (no file identity). Always (re)installs and clears
+ * the emission-order tracker. Prefer `beginEmitLogicFile`.
+ */
 export function setStructuralDeclNamesForFile(s: Set<string> | null): void {
+  _emitLogicStateFile = null;
   _structuralDeclNamesForFile = s;
-  // This is the per-file entry point (called once per file from emit-reactive-wiring),
-  // so it is the correct place to clear the emission-order tracker — otherwise an
-  // `@x` in one file would suppress the first `@x` init-thunk in the next.
   _implicitInitEmittedForFile = new Set();
 }
 
@@ -3680,7 +3731,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           bindingName = guardedNode.name;
           initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
         } else {
-          const bodyCode = emitLogicNode(guardedNode);
+          // s430-emit-state-leak — lower the guarded statement with THIS
+          // statement's opts. It was called with none, so a reactive assignment
+          // `@cell = f() !{…}` inside a function lost `insideFunctionBody` and
+          // registered a §6.8 reset init-thunk from inside the function (and, for
+          // an implicit cell, consumed the file's first-write slot so the
+          // top-level declaration lost its thunk). The `~` context is NOT passed:
+          // the guarded expression's value is `resultVar`, and the `~` rewire to
+          // it happens below (§32 Gap 5) — letting the inner emit repoint `~` too
+          // would claim the slot for the unguarded raw call.
+          const bodyCode = emitLogicNode(guardedNode, { ...opts, tildeContext: undefined });
           if (bodyCode) {
             initExpr = bodyCode.replace(/;\s*$/, "").replace(/^\s*return\s+/, "");
           }
