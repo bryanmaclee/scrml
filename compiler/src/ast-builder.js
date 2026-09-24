@@ -6407,7 +6407,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       case "IDENT": return !DEFER_NON_LEAD_IDENTS.has(next.text);
       case "AT_IDENT": return true;
       case "KEYWORD": return !DEFER_NON_LEAD_KEYWORDS.has(next.text);
-      case "BLOCK_REF": return !!(next.block && next.block.type !== "error-effect");
+      // Only a `?{}` SQL block leads a deferred statement (§19.16.1) — the same
+      // set the native parser admits (TokenKind.SqlBlock).
+      case "BLOCK_REF": return !!(next.block && next.block.type === "sql");
       case "PUNCT": return next.text === "{";
       default: return false;
     }
