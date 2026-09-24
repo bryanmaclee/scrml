@@ -1349,7 +1349,13 @@ export function compileScrml(options = {}) {
     // by both front-ends, run before any later stage consumes the AST.
     {
       const _fp = result.filePath || bsResult.filePath;
-      collectErrors("TAB", validateHostImports(result.ast, _fp, hostImportCaps.byFile.get(_fp) || null), _fp);
+      // Fast path: the gate walks the whole AST, so skip files whose source
+      // cannot contain the form at all (`import` then `:`). A comment or
+      // string that matches only costs the walk; it never skips a real one.
+      const _src = sourceByFile.get(_fp);
+      if (typeof _src !== "string" || /\bimport\s*:/.test(_src)) {
+        collectErrors("TAB", validateHostImports(result.ast, _fp, hostImportCaps.byFile.get(_fp) || null), _fp);
+      }
     }
     // issue #12 blast radius — a `?{}` SQL block inside a CONCISE / curried arrow
     // body (`(x) => ?{...}`, `(a)=>(b)=>{?{...}}`, `.map(x => ?{...})`) leaks as the
