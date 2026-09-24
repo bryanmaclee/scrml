@@ -1,0 +1,4 @@
+import { greet } from "./helpers.scrml"
+<program>
+    <p>${greet("Ada")}</p>
+</program>
