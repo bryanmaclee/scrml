@@ -265,6 +265,45 @@ describe("§3 restrictions — validators/lint-defer.ts", () => {
       <n> = 0
       defer @n = 1`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
   });
+  test("defer inside an arrow / function-expression body -> E-DEFER-OUTSIDE-FUNCTION (stage-1 limitation, named — not an E-CODEGEN-INVALID-LOGIC)", () => {
+    const logic = `
+      <trace> = ""
+      function go() {
+        const run = () => {
+          defer @trace = @trace + "L;"
+          @trace = @trace + "b;"
+        }
+        run()
+        const f2 = function() {
+          defer @trace = @trace + "F;"
+        }
+        f2()
+      }`;
+    expect(check(logic)).toEqual(["E-DEFER-OUTSIDE-FUNCTION", "E-DEFER-OUTSIDE-FUNCTION"]);
+    const nat = runDeferChecks(nativeAST(wrap(logic)).ast).map((d) => d.code);
+    expect(nat).toEqual(["E-DEFER-OUTSIDE-FUNCTION", "E-DEFER-OUTSIDE-FUNCTION"]);
+    const r = compile(wrap(logic, `<button onclick=go()>go</button><p>\${@trace}</p>`));
+    expect(count(r, "E-DEFER-OUTSIDE-FUNCTION")).toBe(2);
+  });
+  test("defer in an `on mount` body -> E-DEFER-OUTSIDE-FUNCTION (live front-end)", () => {
+    expect(check(`
+      <trace> = ""
+      on mount {
+        defer @trace = @trace + "m;"
+        @trace = @trace + "x;"
+      }`)).toEqual(["E-DEFER-OUTSIDE-FUNCTION"]);
+  });
+  test("a lambda that merely calls a function named `defer` is not flagged", () => {
+    expect(check(`
+      function defer(x) { return x }
+      function go() {
+        const f = () => {
+          defer(1)
+          return 2
+        }
+        f()
+      }`)).toEqual([]);
+  });
   test("defer in a function, in a fn, and in nested blocks is legal", () => {
     expect(check(`
       function a(x) {

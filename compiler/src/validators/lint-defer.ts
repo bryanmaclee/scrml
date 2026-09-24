@@ -23,9 +23,14 @@
  *     route inference (`route-inference.ts`, `analyzeCPSEligibility`).
  *
  * Function boundaries: a `function-decl` body (covers `function`, `fn`,
- * `server function`) and a structured `lambda` block body. A nested function
- * inside a deferred body is its OWN control-flow scope: its `return` / `fail` /
- * `?` are legal, and it may contain its own `defer`.
+ * `server function`) is where `defer` is legal. A `lambda` (arrow / function
+ * expression) body is a fresh control-flow scope but does NOT admit `defer` in
+ * stage 1 (§19.16.3 rule 4) — both front-ends carry a block-bodied lambda as
+ * host-expression TEXT (an `escape-hatch`), as they do an `on mount { }` body,
+ * so a `defer` there is found by a statement-anchored scan of that text and
+ * reported as E-DEFER-OUTSIDE-FUNCTION instead of reaching codegen verbatim.
+ * A nested function inside a deferred body is its OWN control-flow scope: its
+ * `return` / `fail` / `?` are legal.
  *
  * Pipeline placement: post-TAB, next to `lint-async-user-source.ts` (api.js).
  * Needs only the parsed AST.
@@ -64,6 +69,29 @@ interface WalkState {
   inFunction: boolean;
   /** Non-null while inside a deferred body (reset at a nested function boundary). */
   defer: DeferCtx | null;
+  /** True inside a function-EXPRESSION / arrow body (defer not admitted, §19.16.3 rule 4). */
+  inLambda?: boolean;
+}
+
+/**
+ * A `defer` statement lead inside RAW host-expression text — the body of a
+ * block-bodied arrow / function expression, or an `on mount { … }` body, both of
+ * which the front-ends carry as text (an `escape-hatch` / a raw `bare-expr`)
+ * rather than as a parsed statement list. Anchored at a statement boundary
+ * (`{`, `;`, newline, start) and followed by a statement-lead character, so
+ * `defer(x)` / `defer = 1` / `x.defer` never match.
+ */
+const RAW_DEFER_LEAD_RE =
+  /(?:^|[{;\n])\s*defer[ \t]+(?!(?:or|and|is|as|of|in|instanceof|else)\b)(?:[A-Za-z_$@{]|\?\{)/;
+
+/** Escape-hatch kinds that carry a FUNCTION-EXPRESSION body as raw text. */
+function isRawFunctionExpression(n: Node): boolean {
+  if (n.kind !== "escape-hatch" || typeof n.raw !== "string") return false;
+  const nk = n.nativeKind;
+  if (nk === "ArrowFunctionExpression" || nk === "FunctionExpression") return true;
+  // The live expression parser gives up on a block-bodied lambda containing a
+  // scrml-only statement (`ParseError`); recognise the lambda by its text.
+  return /^\s*(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/.test(n.raw as string);
 }
 
 const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt"]);
@@ -71,6 +99,17 @@ const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt"]);
 function spanOf(n: Node, filePath: string): Span {
   return (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span;
 }
+
+const TOP_LEVEL_MSG =
+  "`defer` is only valid inside a function declaration body (`function`, `fn`, `server function`) " +
+  "or a block nested in one (§19.16.3). Top-level logic, `on mount` bodies and markup/state-block " +
+  "bodies are page/module initialisation, which the compiler reorders — there is no single block " +
+  "exit to run the deferred statement at. Move this into the function whose exit it belongs to.";
+
+const LAMBDA_MSG =
+  "`defer` is not supported inside an arrow-function or function-expression body in this stage " +
+  "(§19.16.3) — those bodies are lowered as host-expression text, not as a scrml statement list. " +
+  "Move the body into a named `function` / `fn` declaration and call it.";
 
 const CONTROL_FLOW_WHY =
   "a deferred statement runs while its block is already exiting, so it cannot redirect " +
@@ -108,6 +147,19 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     // logic statement lists, so `defer` has no meaning there.
     if (typeof kind === "string" && (isMetaKind(kind) || kind === "foreign" || kind === "Foreign")) return;
 
+    // --- raw-text bodies: a `defer` inside text the front-end did not parse as
+    // statements would reach codegen verbatim (an E-CODEGEN-INVALID-LOGIC with no
+    // root cause). Name the actual rule instead.
+    if (isRawFunctionExpression(n) && RAW_DEFER_LEAD_RE.test(n.raw as string)) {
+      report("E-DEFER-OUTSIDE-FUNCTION", n, LAMBDA_MSG);
+      return;
+    }
+    if (kind === "bare-expr" && n._onMountEffect === true && typeof n.expr === "string" &&
+        RAW_DEFER_LEAD_RE.test(n.expr as string)) {
+      report("E-DEFER-OUTSIDE-FUNCTION", n, TOP_LEVEL_MSG);
+      return;
+    }
+
     // --- function boundaries: a fresh control-flow scope ---
     if (kind === "function-decl") {
       const inner: WalkState = { inFunction: true, defer: null };
@@ -118,7 +170,11 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       return;
     }
     if (kind === "lambda") {
-      const inner: WalkState = { inFunction: true, defer: null };
+      // A function EXPRESSION / arrow body is a fresh control-flow scope, but
+      // stage 1 does not admit `defer` in it (§19.16.3 rule 4): lambda bodies
+      // are lowered as host-expression text, not as a scrml statement list, so
+      // there is no statement list to attach the deferred body to.
+      const inner: WalkState = { inFunction: false, defer: null, inLambda: true };
       for (const key of Object.keys(n)) {
         if (key === "span" || key === "parent") continue;
         walk(n[key], inner);
@@ -132,12 +188,10 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
           "a deferred statement cannot itself contain a `defer` — the deferred statement runs " +
           "while its block is already exiting, so there is no block left to attach the inner " +
           "`defer` to (§19.16.3). Write the inner statement directly in the outer deferred body.");
+      } else if (st.inLambda) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, LAMBDA_MSG);
       } else if (!st.inFunction) {
-        report("E-DEFER-OUTSIDE-FUNCTION", n,
-          "`defer` is only valid inside a function body (`function`, `fn`, `server function`) or a " +
-          "block nested in one (§19.16.3). Top-level logic and markup/state-block bodies are " +
-          "page/module initialisation, which the compiler reorders — there is no single block exit " +
-          "to run the deferred statement at. Move this into the function whose exit it belongs to.");
+        report("E-DEFER-OUTSIDE-FUNCTION", n, TOP_LEVEL_MSG);
       }
       const inner: WalkState = {
         inFunction: st.inFunction,

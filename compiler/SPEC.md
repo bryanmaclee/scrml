@@ -15496,6 +15496,11 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum (the render-expression is enum-scoped) | Error |
+| E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body contains `return`, `fail`, `?`, or a `break`/`continue` whose target is outside it | Error |
+| E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` | Error |
+| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A failable call inside a deferred body is not handled in place (`!{}` or `match`); replaces E-ERROR-002 there | Error |
+| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body (top-level logic, `on mount`, markup/state-block body, or — stage 1 — an arrow/function-expression body) | Error |
+| E-DEFER-SERVER-IN-SPLIT | §19.16.5 | A server-tier deferred body in a body-split (CPS) function | Error |
 | E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope (fail-fast over silent passthrough; design-insight 22, S74). | Test |
 | W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from non-`!` / non-boundary caller (cycle 1 of A9 Ext 4 deprecation; v0.next). | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition; reserved-E, unscheduled per §63.7. Not yet emitted. | Error |
@@ -15886,6 +15891,220 @@ type Phase:enum = { Idle, Loading, Loaded(title: string), Failed(err: LoadError)
 The render-expression REUSES the existing per-variant `renders` machinery (the boundary's `allVariantRenderExprs` map + `emitBoundaryMarkupExpr`), substituting X's `.data` as the payload source instead of the boundary's `_eb_result.data`. It emits a render-anchor plus a per-variant `switch (X.variant)` that sets the anchor's `innerHTML` to the matching variant's `renders` markup, re-firing on X's reactive change. No new display infrastructure is introduced.
 
 **Cross-references.** §19.2 (the `renders` display contract this fires); §19.6 / §19.6.6 (`<errorBoundary>` + the E-ERROR-005 exhaustiveness fence the render-expression reuses); §18.0.1 (the `<match for=Type>` arm — the common render-expression locus); §13.5 (RemoteData — `Failed(Error)` is a held error variant the render-expression displays); §4.15 (`<render>` structural-element registration). Authority: design-insight "Held-error display — render-expression primitive (a/c)" (2026-06-15, RATIFIED), the error-handling holistic deep-dive, and the held-error-display debate.
+
+
+### 19.16 `defer` — the Scope-Exit Statement
+
+**Added 2026-09-24 (S430, P3 stage 1 of 2).**
+
+> **Provenance (pa-base Rule 4b):** `provenance: ruling:user-voice-S430-P3` — bryan S430, P3 = option (d),
+> STAGED (*"d staged, move on to P4"*), verbatim in `scrml-support/user-voice-scrml.md` §S430. Ratified
+> content: stage 1 = `defer <stmt>` (block-scoped, LIFO, runs on every exit including `return`/`fail`/`?`;
+> a deferred statement may not `return`/`fail`/`?`/nest a `defer`; a failable call inside it is handled in
+> place with `!{}`; logic/function bodies only; `<script defer>` untouched; MUST run after the LAST
+> body-split CPS continuation, not at the first stub return). Stage 2 (NOT specified here) = a fail-closed
+> must-release obligation checker. **Rejected alternatives, recorded so they are not re-proposed:** `lin`
+> (§35.1 forbids intermediate references, so it cannot model use-then-release), `cleanup()` (§6.7 is
+> reactive-scope teardown — the wrong altitude), and a `using` block. **Direction of change: WIDENING +
+> newly-rejecting only for the new form** — `defer` was not a statement before; every restriction below
+> applies only to source that uses the new statement, and `defer` as an identifier is unchanged
+> (§19.16.1), so no pre-existing program changes acceptance status.
+
+scrml has no `try`/`finally` (§19.1, §19.9.8). `defer` is how a function says *"whatever happens from
+here on, do this on the way out"* — close the cache, clear the busy flag, release the lock — without
+writing the release on every exit path by hand. It is the scope-exit half of what `try … finally` did
+in host code, and nothing else: it catches nothing and changes no error's course.
+
+#### 19.16.1 Syntax
+
+```
+defer-stmt     ::= 'defer' deferred-body
+deferred-body  ::= statement                      -- on the SAME source line as `defer`
+                 | '{' statement* '}'             -- block form: the statements run as one unit
+```
+
+`defer` is a **contextual keyword** (the §19.2.3 `renders` / §14.12.2 `to` precedent). It opens a defer
+statement ONLY at statement start, and ONLY when the next token is on the same source line and can
+begin a statement — an identifier (other than the word operators `or`/`and`), an `@`-cell, a `?{}` block,
+a `{`, or a statement keyword other than `is`/`as`/`of`/`in`/`instanceof`/`else`/`from`/`extends`/
+`case`/`catch`/`finally`/`default`. Everywhere else `defer` is an ordinary identifier: `defer(x)` is a
+call of a function named `defer`, `defer = 1` / `defer.x = 1` / `defer += 1` are writes, a lone `defer` is
+a read, and `<script defer>` is the HTML boolean attribute, which never reaches the logic grammar
+(ruling P1: *"the word is not at fault"*).
+
+```scrml
+function save(doc) {
+    @busy = true
+    defer @busy = false                 // single-statement form
+    defer {                             // block form — one deferred body
+        log("save done")
+        @saves = @saves + 1
+    }
+    persist(doc)
+}
+```
+
+#### 19.16.2 Semantics
+
+- **Registration.** Executing a `defer` statement registers its deferred body against the **enclosing
+  block** — the innermost statement list that contains the `defer`: a function body, an `if`/`else`
+  branch, a loop body (once per iteration), a `match` arm block, a `given` body, or a `{ }` block. The
+  deferred body is NOT executed where the `defer` appears.
+- **Exit.** When control leaves the enclosing block, every deferred body registered in that block runs
+  exactly once, on EVERY exit path: falling off the end of the block; `return` (after the return value
+  has been evaluated — the deferred body cannot change it); `break` / `continue` out of the block; `fail`
+  (§19.3); `?` propagation (§19.5); the implicit CPS failure return of a body-split function (§19.9.5);
+  and a non-`!` host/runtime error (§19.6.8) passing through the block, which continues propagating after
+  the deferred bodies have run.
+- **Not reached, not registered.** A `defer` that control never reached — the block was left before the
+  `defer` statement executed — registers nothing and runs nothing.
+- **Order.** Deferred bodies of one block run in **reverse registration order (LIFO)**: the last `defer`
+  executed runs first. Deferred bodies of an inner block run when the inner block exits, before any of
+  the outer block's.
+- **Evaluation time.** The deferred body is evaluated in full at exit — nothing in it (not even a call's
+  arguments) is evaluated at registration. It sees the bindings in scope at the `defer`'s position; a
+  binding declared later in the same block is NOT in scope for it (§7.6 lexical scope).
+- **A host error inside a deferred body** propagates from the exit point like any other host error; the
+  block's remaining (earlier-registered) deferred bodies still run first.
+
+#### 19.16.3 Restrictions (normative)
+
+A deferred body is a scope-exit ACTION. It runs while the block is already leaving — possibly with a
+return value already computed or an error already in flight — so it SHALL NOT itself redirect control.
+
+1. **No control transfer out of the deferred body — E-DEFER-CONTROL-FLOW.** A deferred body SHALL NOT
+   contain a `return`, a `fail`, a `?` propagation, or a `break` / `continue` whose target lies outside
+   the deferred body. A `break`/`continue` that targets a loop INSIDE the deferred body is permitted. A
+   function or lambda body nested inside the deferred body is its own control-flow scope; its own
+   `return`/`fail`/`?` are not restricted by this rule. — `E-DEFER-CONTROL-FLOW: a deferred statement
+   cannot contain {return | fail | a ? propagation | a break/continue that leaves it} — it runs while
+   its block is already exiting (§19.16.3).`
+2. **No nested `defer` — E-DEFER-NESTED.** A deferred body SHALL NOT contain a `defer` statement
+   (outside a nested function body). There is no block to attach it to that is not already exiting.
+3. **Failable calls are handled in place — E-DEFER-UNHANDLED-FAILABLE.** A call to a failable function
+   (declared `!`, §19.4, or CPS-implicit `!`, §19.9.5) inside a deferred body SHALL be handled in place,
+   with an inline `!{}` handler (§19.4.3, the canonical form) or an exhaustive `match` on the result.
+   `?` is excluded by rule 1, and an enclosing `!` signature does NOT satisfy the requirement: the block
+   is already exiting, so there is no caller-bound path left for the error to take. Inside a deferred
+   body this code REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. (Scope: the same
+   statement-position call shape E-ERROR-002 checks — a bare call statement.)
+4. **Function declaration bodies only — E-DEFER-OUTSIDE-FUNCTION.** `defer` SHALL appear only inside
+   the body of a function DECLARATION — `function`, `fn`, `server function` — including any block nested
+   in one. It is E-DEFER-OUTSIDE-FUNCTION in every other position:
+   - the top level of a `${ }` logic block, a `<program>` / `<page>` / `<channel>` body, a state-block
+     body, or an `on mount { }` body (§6.7.1a). That code is page/module initialisation, which the
+     compiler reorders and distributes (§6.9 hoisting, §40.8 auto-lift, §12 placement), so there is no
+     single block exit to attach the deferred body to. `defer` in markup is therefore always an error,
+     never a silently inert statement.
+   - the body of an arrow function or function expression (`() => { … }`, `function () { … }`).
+     **Stage-1 limitation, recorded as such:** both front-ends carry a block-bodied function
+     expression as host-expression text rather than as a scrml statement list, so there is no list to
+     attach the deferred body to. The diagnostic names the rule and the fix (move the body into a named
+     `function`/`fn` declaration). Admitting `defer` in lambda bodies waits on structured lambda bodies;
+     it is not ruled out by this section.
+
+#### 19.16.4 `defer` in a pure `fn` (§48)
+
+`defer` is **legal in a `fn` body.** It is control flow — it moves a statement to the block's exit — not
+an effect, so it cannot by itself break purity. The deferred body is an ordinary part of the `fn` body
+and is subject to EVERY §48.3 prohibition exactly as if it were written at each exit: a deferred `?{}`
+is E-FN-001, a deferred outer-scope mutation or call to a non-`fn` function is E-FN-003, and so on.
+§48 return-site completeness is unaffected, because a deferred body can never be a return site
+(§19.16.3 rule 1).
+
+#### 19.16.5 Body-split / CPS (§19.9.3, §19.9.9)
+
+- In a function whose body is split across the client/server boundary, the enclosing block of a
+  top-level `defer` is the WHOLE function body. Its deferred body SHALL run after the **LAST**
+  continuation completes — after the final server batch's result has been received and every client
+  statement scheduled after it has run — and SHALL NOT run when an earlier batch's stub returns. It also
+  runs when an intermediate batch fails and the function returns its `CpsError` / server error envelope
+  (§19.6.7 — batch 1's commit stands; the deferred body still runs on the way out).
+- For §19.9.9.1 tier classification a `defer` statement takes the tier of its deferred body. A `defer`
+  whose deferred body is client-tier is a CLIENT statement: placed between two server statements, it
+  closes the batch exactly as any client statement does (§19.9.9.2 step 2). A deferred body that writes a
+  reactive cell counts as the function's reactive statement for §12 CPS eligibility.
+- **A server-tier deferred body in a split function — E-DEFER-SERVER-IN-SPLIT.** A deferred body that is
+  itself server-tier — its own `?{}` SQL, a server-only resource, protected-field access, or a call to a
+  server-escalated function (all of which §19.9.9.1 tiers `server` inside a split body) — in a function
+  that the compiler splits SHALL be a compile error. It would have to run inside a server batch, and a
+  batch ends before the later batches and client continuations: the premature release this section
+  forbids. Stage 1 rejects rather than lowers it wrongly. Resolution: keep the acquire / use / release
+  together in a `server function` (which is not split; its `defer` runs on the server at that function's
+  exit) and call that function, or make the deferred body client-side.
+- A function that is NOT split (wholly client or wholly server) runs its deferred bodies on the side the
+  function runs on; no further rule applies.
+
+#### 19.16.6 Lowering (normative for the observable behaviour, informative for the shape)
+
+The compiler lowers `defer` to a **compiler-emitted host `try { … } finally { … }`**: the statements
+after the `defer` in its block become the `try` body and the deferred body becomes the `finally` body;
+a second `defer` nests inside the first `try`, which yields LIFO order by construction. In a split
+function the wrapper is sequential (one `await` per batch, §19.9.9.4), so the `finally` closes around
+the last `await`. Like the §19.6.8 `<errorBoundary>` backstop (B4), this is compiler-emitted host JS,
+NOT a scrml-source `try`: the no-`try`/`catch`/`finally` standing rule (§19.1, §19.9.8,
+E-TRY-NOT-IN-SCRML) is unaffected.
+
+#### 19.16.7 Worked example
+
+The motivating host-code site (`compiler/self-host/pa.scrml`, `runPA`) was written as a `try … finally`,
+which scrml does not have. With `defer`:
+
+```scrml
+export function runPA(input) {
+    const views = new Map()
+    const errors = []
+    let cache = openSchemaCache()
+    defer closeAll(cache)                 // runs on EVERY exit below, after the return value is built
+
+    for (const fileAST of input.files) {
+        const nodes = fileAST.ast ? fileAST.ast.nodes : []
+        const createTableMap = extractCreateTableStatements(nodes)
+        for (const block of collectDbBlocks(nodes)) {
+            processDbBlock(block, fileAST.filePath, cache, views, errors, createTableMap)
+        }
+    }
+    return { protectAnalysis: { views: views }, errors: errors }
+}
+```
+
+`closeAll(cache)` runs once: after the returned object has been built, or — if `processDbBlock` raises a
+host error — before that error continues outward. Were `closeAll` failable, rule 3 requires
+`defer closeAll(cache) !{ else :> log("cache close failed") }`.
+
+A body-split function (§19.9.9) — the deferred clear runs after BOTH batches, never between them:
+
+```scrml
+function checkout(cartId: number) {
+    @busy = true
+    defer @busy = false                   // client-tier; runs after the LAST continuation
+    let reserved = ?{`UPDATE inventory SET held = held + 1 WHERE cart_id = ${cartId} RETURNING held`}.get()
+    @reservationShown = reserved.held     // client work — closes batch 0
+    ?{`INSERT INTO charges (cart_id, amount) VALUES (${cartId}, 4200)`}.run()   // batch 1
+}
+```
+
+#### 19.16.8 Error codes
+
+This section introduces five codes, catalogued in §19.13 and §34: **E-DEFER-CONTROL-FLOW**,
+**E-DEFER-NESTED**, **E-DEFER-UNHANDLED-FAILABLE**, **E-DEFER-OUTSIDE-FUNCTION** (§19.16.3) and
+**E-DEFER-SERVER-IN-SPLIT** (§19.16.5). All five are hard errors. The two front-ends share one
+structural checker (the live-shaped AST both produce), so the codes fire identically under
+`--parser=scrml-native`.
+
+#### 19.16.9 Interaction with `lin` (§35)
+
+A `lin` binding (§35) referenced inside a deferred body is counted by the §35 exactly-once analysis at
+the `defer` statement's position. That is sound: a reached `defer` runs its body exactly once on every
+exit. So `lin tok = acquire()` followed by `defer release(tok)` consumes `tok` once, and consuming `tok`
+anywhere else in the block as well is `E-LIN-002` (consumed more than once) — a `lin` cannot be used
+and then released (§35.1 forbids intermediate references; that is why `lin` was rejected as the P3
+mechanism). The general use-then-release obligation is stage 2 of P3 and is NOT specified here.
+
+**Cross-references.** §19.3 / §19.5 (`fail` / `?` — exits that run deferred bodies, and forms a deferred
+body may not contain); §19.4.3 (the handling requirement rule 3 narrows); §19.6.8 (the compiler-emitted
+host-JS precedent the lowering follows); §19.9.3 / §19.9.5 / §19.9.9 (body-split — §19.16.5); §35 (`lin`
+— §19.16.9); §48 (`fn` — §19.16.4).
 
 ---
 
@@ -19987,6 +20206,11 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
 | E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
+| E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker.) | Error |
+| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-SERVER-IN-SPLIT | §19.16.5 | A deferred body that is itself server-tier (own `?{}` SQL, a server-only resource, protected-field access, or a call to a server-escalated function) in a function the compiler body-splits (§19.9.9). It would have to run inside a server batch, which ends before the later batches and client continuations — the premature release §19.16.5 forbids; rejected rather than lowered wrongly. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/route-inference.ts`, the CPS-eligibility caller.) | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum; the render-expression is enum-scoped (S196) | Error |
