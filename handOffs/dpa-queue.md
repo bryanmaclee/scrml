@@ -3446,7 +3446,8 @@ banked:     S430 2026-09-24 (bryan: "bank it and lets discuss")
 
 ### The questions — ONE AT A TIME, in this order
 
-1. **Singleton or template?** Is a `<name …> = …` declaration one value, or a template whose markup uses
+0. **Q1 RULED IN CONVERSATION (S430, bryan):** *"can we say <*swatch ...> to ref everywhere?"* + *"read-only, writes go through logic. through tracked exhaustive logic if possible, and typed, obviously"* → a plain `<name …/>` use is a NEW INSTANCE; `<*name/>` references THE shared (default) instance; attributes on a `<*name>` ref are READ-ONLY (writes from markup are a compile error); writes go through LOGIC, via a tracked, exhaustively-checkable, typed write contract where possible (the engine `rule=` direction). Still to confirm: `@name` in logic = the shared instance's data. The DD's Q1 job is now to STRESS-TEST this ruling in full programs (app, component library ×3, theme library), not to re-open it; then proceed to Q2.
+1. **Singleton or template?** *(ruled above — kept for the record)* Is a `<name …> = …` declaration one value, or a template whose markup uses
    are instances? If both, what is the rule (candidate: a top-level declaration is the template AND its
    default instance, mounted at declaration like an engine's decl=mount; markup uses are further
    instances; logic `<name>` reads the default instance)? Stress test: a library `<dropdown>` used 3× on
