@@ -29,6 +29,14 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../compiler/src/api.js";
 
 /**
+ * This adapter's IMPLEMENTATION ID — the key a case's `expected.json` uses to mark itself
+ * expected-to-fail on THIS implementation (S430 P7):
+ * `"xfail": { "impl1-ts": { "gap": "<gap-id>", "fails": <signature> } }`.
+ * An impl#2 adapter exports its own id; the runner resolves xfail against whichever adapter ran.
+ */
+export const IMPL_ID = "impl1-ts";
+
+/**
  * Compile-options overlay (s430-stage-swap). Spread LAST into every `compileScrml` call this
  * adapter makes (codes half, runtime half, server half, tool half), so an adapter VARIANT can run
  * the unchanged suite against a modified pipeline — `adapters/hybrid.ts` sets
