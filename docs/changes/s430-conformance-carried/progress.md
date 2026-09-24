@@ -120,3 +120,19 @@ Restore all three files from backup -> bridge + unit 942 pass / 0 fail, top-leve
 - B3 both now pass -> bridge RED `0 xfail of 2 cases, 2 XPASS (failures)`; hybrid exit 0,
   `XPASS api/api-clean-pos … (reported, not red)`.
 - Restored -> touched suites 994 pass / 0 fail, `0 xfail of 910 cases`; state.ts --check both sections PASS.
+
+## Round 4 (re-review of 1b0964ef — one LOW: normalisation over-corrected)
+- `normalizeVolatile` (applied to tool stdout, every DOM/state line, thrown messages) replaced by
+  `normalizeCrashText`, applied ONLY to crash text: the tool's stderr error head and a thrown runtime-half
+  message. It rewrites only (a) paths inside the adapter's own `<tmpdir>/scrml-conf-{impl1,run,server,tool}-XXXXXX`
+  dirs (tmpdir + its realpath) and the `:line:col` after them, (b) a whole-line `Bun vX.Y.Z (...)` banner,
+  (c) the `NN | ` gutter at a line start. Tool stdout and DOM/state/anchored lines are hashed RAW.
+- Tests: the reviewer's four merge pairs, executed for real (three tool runs printing the pair values, one
+  real runtime state case) -> DIFFERENT digests. Mutation (re-apply the 1b0964ef broad normaliser to program
+  output) -> all 4 RED; restored -> 4 green. A pin that normalizeCrashText leaves a program-chosen /tmp path,
+  a mid-line banner, a mid-line gutter and a non-adapter tmpdir path unchanged. Crashing-tool stability
+  tests stay green.
+- Live: print/tool-println-clean-stdout with the crashing source -> sha256:7d9dcc52ae05fa3f on 3 runs + once
+  with TMPDIR=<worktree>/.scratch/alt-tmp; marked -> bridge XFAIL `1 xfail of 1 cases`; expected stdout
+  perturbed -> RED; restored.
+- conformance-xfail + hybrid-xfail + gated bridge: 946 pass / 0 fail after restore.

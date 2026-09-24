@@ -38,7 +38,7 @@ import {
   failureSignature,
   signatureDiff,
   KNOWN_IMPL_IDS,
-  normalizeVolatile,
+  normalizeCrashText,
 } from "../../../conformance/run.ts";
 
 const LEDGER = [
@@ -375,33 +375,78 @@ describe("S430 review MED — a crashing tool case has a STABLE runtime signatur
     expect(b.observedSignature.runtime).not.toBe(a.observedSignature.runtime);
   }, 60_000);
 
-  test("normalizeVolatile strips temp paths, the Bun banner and the frame gutter", () => {
+  test("normalizeCrashText strips the adapter's temp dirs, the Bun banner line and the frame gutter", () => {
     const raw =
       "15 | function main(args) {\n16 |   const n = args[7].length;\nTypeError: x\n" +
       "      at main (" + tmpdir() + "/scrml-conf-tool-AbC123/case.tool.js:16:18)\n" +
-      "      at /tmp/scrml-conf-tool-ZzZ999/case.tool.js:23:32\n\nBun v1.3.14 (Linux x64)";
-    const n = normalizeVolatile(raw);
+      "      at " + tmpdir() + "/scrml-conf-tool-ZzZ999/case.tool.js:23:32\n\nBun v1.3.14 (Linux x64)";
+    const n = normalizeCrashText(raw);
     expect(n).not.toMatch(/AbC123|ZzZ999|1\.3\.14|:16:18|:23:32|^15 \|/m);
-    expect(n).toContain("<TMP>:<L>");
+    expect(n).toContain("<TMP>/case.tool.js:<L>");
     expect(n).toContain("Bun <VERSION>");
-    expect(normalizeVolatile(JSON.stringify(raw))).not.toMatch(/AbC123|ZzZ999|1\.3\.14/);
+  });
+
+  test("normalizeCrashText leaves everything that is NOT the adapter's own volatility alone", () => {
+    // a /tmp path the PROGRAM chose, a banner-looking string mid-line, a gutter-looking string mid-line
+    for (const s of ["open /tmp/alpha.txt failed", "said: Bun v1.2.3 ok", "x = 1 | apples", tmpdir() + "/user-dir/a.json"]) {
+      expect(normalizeCrashText(s)).toBe(s);
+    }
   });
 
   test("a thrown runtime half is signed by name + normalised message, not the raw message", async () => {
-    // Reached through the structured-key path directly: evaluateCase records the throw as
-    // `threw:<name>: <normalised message>`.
-    const fake = {
+    const at = (d) => "ENOENT " + tmpdir() + "/scrml-conf-run-" + d + "/case.client.js";
+    const fake = (d) => ({
       missing: [], forbidden: [], prefixViolations: [], severityMismatches: [], countMismatches: [],
-      runtimeFailures: ["runtime half threw: ENOENT " + tmpdir() + "/scrml-x-1/a.js"],
-      runtimeSignatureKeys: ["threw:Error: " + normalizeVolatile("ENOENT " + tmpdir() + "/scrml-x-1/a.js")],
-    };
-    const fake2 = {
-      ...fake,
-      runtimeFailures: ["runtime half threw: ENOENT " + tmpdir() + "/scrml-x-2/a.js"],
-      runtimeSignatureKeys: ["threw:Error: " + normalizeVolatile("ENOENT " + tmpdir() + "/scrml-x-2/a.js")],
-    };
-    expect(failureSignature(fake2)).toEqual(failureSignature(fake));
+      runtimeFailures: ["runtime half threw: " + at(d)],
+      runtimeSignatureKeys: ["threw:Error: " + normalizeCrashText(at(d))],
+    });
+    expect(failureSignature(fake("Aa1111"))).toEqual(failureSignature(fake("Bb2222")));
   });
+});
+
+// Review of 1b0964ef (LOW): the first normaliser was applied to program OUTPUT too and merged
+// genuinely different failures. Each of the reviewer's four pairs must be DIFFERENT digests, executed
+// for real (tool runs and a real runtime state case), not synthesised.
+describe("S430 review LOW (round 2) — program output is hashed RAW: the four merge pairs stay distinct", () => {
+  const toolPrinting = (text) =>
+    [
+      '<program kind="tool" lang="ts">',
+      "    function main(args: string[]): number {",
+      `        print(${JSON.stringify(text)})`,
+      "        return 0",
+      "    }",
+      "</program>",
+      "",
+    ].join("\n");
+  const toolCase = () => caseJson("tool-out", { expectOverride: { codes: [], notCodes: [], stdout: "never" } });
+  const toolDigest = async (text) => {
+    const r = await evalOne(toolPrinting(text), toolCase());
+    expect(r.runtimeFailures.join("\n")).toContain(JSON.stringify(text).slice(1, -1)); // really printed
+    return r.observedSignature.runtime;
+  };
+
+  test("stdout 'wrote /tmp/alpha.txt' vs 'wrote /tmp/beta.txt'", async () => {
+    expect(await toolDigest("wrote /tmp/alpha.txt")).not.toBe(await toolDigest("wrote /tmp/beta.txt"));
+  }, 60_000);
+
+  test("stdout '1 | apples' vs '2 | apples' (a gutter-shaped line of program output)", async () => {
+    expect(await toolDigest("1 | apples")).not.toBe(await toolDigest("2 | apples"));
+  }, 60_000);
+
+  test("stdout 'Bun v1.2.3 ok' vs 'Bun v9.9.9 ok'", async () => {
+    expect(await toolDigest("Bun v1.2.3 ok")).not.toBe(await toolDigest("Bun v9.9.9 ok"));
+  }, 60_000);
+
+  test("state got '/tmp/cache/a.json' vs got '/tmp/cache/b.json'", async () => {
+    const src = (v) =>
+      ["${", `    <path> = ${JSON.stringify(v)}`, "}", '<p id="p">${@path}</>', ""].join("\n");
+    const json = caseJson("state-path", { expectOverride: { codes: [], notCodes: [], input: [], state: { path: "never" } } });
+    const a = await evalOne(src("/tmp/cache/a.json"), json);
+    const b = await evalOne(src("/tmp/cache/b.json"), json);
+    expect(a.runtimeFailures.join("\n")).toContain("/tmp/cache/a.json");
+    expect(b.runtimeFailures.join("\n")).toContain("/tmp/cache/b.json");
+    expect(a.observedSignature.runtime).not.toBe(b.observedSignature.runtime);
+  }, 60_000);
 });
 
 describe("S430 review LOW — the codes signature pins the emitted E-* MULTISET", () => {

@@ -39,7 +39,7 @@
  * Run directly:  `bun conformance/run.ts`   (exits non-zero on any failure)
  * Or via bun:test: conformance/conformance-corpus.test.js
  */
-import { readdirSync, readFileSync, statSync, existsSync } from "fs";
+import { readdirSync, readFileSync, statSync, existsSync, realpathSync } from "fs";
 import { tmpdir } from "os";
 import { createHash } from "crypto";
 import { join, dirname, relative } from "path";
@@ -398,10 +398,10 @@ export type Outcome = "pass" | "fail" | "xfail" | "xpass";
  *             (review round: `missing:E-X` alone does not pin what the compiler emits INSTEAD, so
  *             a new unrelated error on a carried case would stay XFAIL; multiplicity matters).
  *             Readable on purpose: a reviewer can see which codes the carried gap is about.
- *   runtime — `sha256:<16 hex>` over the sorted runtime-half failure KEYS: the failure line with
- *             run-to-run volatile parts normalised (normalizeVolatile), or, for a tool run, a
- *             structured record { expected stdout, actual stdout, exit code, error head } — never
- *             raw stderr. The keys carry the DOM / state diff (which cell, expected vs got; which
+ *   runtime — `sha256:<16 hex>` over the sorted runtime-half failure KEYS: the failure line RAW,
+ *             or, for a tool run, a structured record { expected stdout, actual stdout (RAW), exit
+ *             code, error head } — never raw stderr. Only CRASH text (the stderr error head, a thrown
+ *             message) is normalised, and only for what is volatile there (normalizeCrashText). The keys carry the DOM / state diff (which cell, expected vs got; which
  *             anchored selector), so the digest moves when the runtime failure changes in any way.
  *             A digest rather than the text because a whole-tree DOM diff is too large to pin
  *             readably in a JSON file; the run prints the lines themselves under every XFAIL.
@@ -448,7 +448,7 @@ export function failureSignature(r: CaseResult): XfailSignature {
     const keys =
       r.runtimeSignatureKeys && r.runtimeSignatureKeys.length === r.runtimeFailures.length
         ? r.runtimeSignatureKeys
-        : r.runtimeFailures.map(normalizeVolatile);
+        : r.runtimeFailures;
     const h = createHash("sha256").update([...keys].sort().join("\n")).digest("hex");
     sig.runtime = "sha256:" + h.slice(0, 16);
   }
@@ -864,31 +864,44 @@ export async function runCaseRuntime(c: LoadedCase): Promise<string[]> {
 }
 
 /**
- * Normalise the run-to-run VOLATILE parts of a failure text before it is hashed into an xfail
- * signature (S430 P7 review, MED): mkdtemp paths, the Bun version banner, the line:col of a frame
- * in a generated temp file, and the `NN |` source-frame gutter Bun prints above an uncaught error.
- * Without this a "tool crashes on impl#1" case produced a new digest on every run and could never
- * be carried. Display text is NOT normalised — only the signature input.
+ * Normalise the run-to-run VOLATILE parts of a CRASH text — a tool's stderr, or a thrown runtime-half
+ * message — before it is hashed into an xfail signature. Applied to NOTHING else: a tool's stdout and
+ * every DOM / state / anchored failure line are program OUTPUT and are hashed RAW, because anything
+ * normalised there merges genuinely different failures (review of 1b0964ef: stdout "/tmp/alpha.txt"
+ * vs "/tmp/beta.txt", "1 | apples" vs "2 | apples", "Bun v1.2.3 ok" vs "Bun v9.9.9 ok", and a state
+ * value "/tmp/cache/a.json" vs "b.json" all hashed identically under the earlier, broad version).
+ *
+ * What IS volatile, and so the ONLY things rewritten:
+ *   - paths inside the adapter's OWN mkdtemp dirs (`<tmpdir>/scrml-conf-{impl1,run,server,tool}-XXXXXX`),
+ *     and the `:line:col` that follows such a path (a generated-code position);
+ *   - the Bun version banner, as a whole line (`Bun v1.3.14 (Linux x64)`);
+ *   - the `NN | ` source-frame gutter Bun prints above an uncaught error, at a line start.
+ * Why (S430 P7 review, MED): without this a "tool crashes on impl#1" case produced a new digest on
+ * every run and could never be carried. Display text is NOT normalised — only the signature input.
  */
-export function normalizeVolatile(text: string): string {
+export function normalizeCrashText(text: string): string {
   const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pathTail = String.raw`[^\s:'"\\)]*`;
-  return text
-    // the platform temp dir (os.tmpdir()) and the conventional /tmp, /private/tmp, /var/folders roots
-    .replace(new RegExp(escapeRe(tmpdir()) + "/" + pathTail, "g"), "<TMP>")
-    .replace(new RegExp(String.raw`/(?:private/)?tmp/` + pathTail, "g"), "<TMP>")
-    .replace(new RegExp(String.raw`/var/folders/` + pathTail, "g"), "<TMP>")
-    // line:col after a temp path (generated-code positions)
-    .replace(/<TMP>:\d+(?::\d+)?/g, "<TMP>:<L>")
-    // the Bun version banner
-    .replace(/Bun v\d+\.\d+\.\d+[^\n"\\]*/g, "Bun <VERSION>")
-    // the `NN | source` frame gutter, at a real line start, after an escaped `\n` in JSON text, or
-    // right after the opening quote of a JSON-stringified stderr
-    .replace(/(^|\n|\\n|")([ \t]*)\d+( \|)/g, "$1$2N$3");
+  const roots = new Set([tmpdir()]);
+  try {
+    roots.add(realpathSync(tmpdir()));
+  } catch {
+    /* a tmpdir that cannot be resolved still matches as given */
+  }
+  let out = text;
+  for (const root of roots) {
+    out = out.replace(
+      new RegExp(escapeRe(root) + String.raw`/scrml-conf-(?:impl1|run|server|tool)-[A-Za-z0-9]+(/[^\s:'"()]*)?`, "g"),
+      "<TMP>$1",
+    );
+  }
+  return out
+    .replace(/(<TMP>[^\s:'"()]*):\d+(?::\d+)?/g, "$1:<L>")
+    .replace(/^Bun v\d+\.\d+\.\d+(?: \([^)\n]*\))?[ \t]*$/gm, "Bun <VERSION>")
+    .replace(/^([ \t]*)\d+( \| )/gm, "$1N$2");
 }
 
 /**
- * The error head of a process's stderr: the `SomethingError: message` / `error: …` lines, paths
+ * The error head of a process's stderr: the `SomethingError: message` / `error: …` lines, crash text
  * normalised. What a crash IS, without the frames, gutters and banner around it.
  */
 function errorHead(stderr: string): string {
@@ -896,19 +909,19 @@ function errorHead(stderr: string): string {
     .split("\n")
     .map((l) => l.trim())
     .filter((l) => /^([A-Z][A-Za-z]*(Error|Exception)|error|panic)\b/.test(l));
-  return normalizeVolatile(heads.length > 0 ? heads.join("\n") : stderr.trim());
+  return normalizeCrashText(heads.length > 0 ? heads.join("\n") : stderr.trim());
 }
 
 /**
  * The runtime half with, beside each human-readable failure line, the STRUCTURED key the xfail
- * signature hashes: for a tool run, `{ expected stdout, actual stdout, exit code, error head }`
- * (never the raw stderr); for every other assertion, the failure line with volatile parts
- * normalised. `failures[i]` and `keys[i]` describe the same failure.
+ * signature hashes: for a tool run, `{ expected stdout, actual stdout (RAW), exit code, error head }`
+ * (never the raw stderr); for every other assertion, the failure line itself, RAW.
+ * `failures[i]` and `keys[i]` describe the same failure.
  */
 export async function runCaseRuntimeDetailed(c: LoadedCase): Promise<{ failures: string[]; keys: string[] }> {
   const structured: string[] = [];
   const failures = await runtimeBody(c, structured);
-  return { failures, keys: failures.map((f, i) => structured[i] ?? normalizeVolatile(f)) };
+  return { failures, keys: failures.map((f, i) => structured[i] ?? f) };
 }
 
 async function runtimeBody(c: LoadedCase, structuredKeys: string[]): Promise<string[]> {
@@ -927,7 +940,7 @@ async function runtimeBody(c: LoadedCase, structuredKeys: string[]): Promise<str
         "stdout:" +
         JSON.stringify({
           expected: e.stdout,
-          actual: normalizeVolatile(tr.stdout),
+          actual: tr.stdout, // RAW — program output is never normalised
           exitCode: tr.exitCode,
           error: tr.stderr ? errorHead(tr.stderr) : "",
         });
@@ -1036,7 +1049,7 @@ export async function evaluateCase(
       r.runtimeFailures = ["runtime half threw: " + message];
       // The signature pins WHAT was thrown (name + message), paths/versions normalised — not the
       // raw message, which can carry a per-run temp path.
-      r.runtimeSignatureKeys = ["threw:" + name + ": " + normalizeVolatile(message)];
+      r.runtimeSignatureKeys = ["threw:" + name + ": " + normalizeCrashText(message)];
     }
     if (r.runtimeFailures.length > 0) r.pass = false;
   }

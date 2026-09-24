@@ -330,12 +330,15 @@ The signature is derived from the case's own two contract halves:
   a carried case would stay XFAIL. Multiplicity counts (a double fire is a
   different failure). `W-*`/`I-*` are not pinned. Readable on purpose.
 - **`runtime`** — `sha256:` + 16 hex of the sorted runtime-half failure KEYS: each
-  failure line with run-to-run volatile parts normalised (temp paths → `<TMP>`,
-  `Bun vX.Y.Z` → `Bun <VERSION>`, generated-code `:line:col` and the `NN |`
-  source-frame gutter), and for a `kind="tool"` run a STRUCTURED record —
-  expected stdout, actual stdout, exit code, and the error head
-  (`TypeError: …`) — never the raw stderr. A thrown runtime half is keyed by the
-  error's name + normalised message. The keys carry the DOM / state diff (which
+  DOM / state / anchored failure line RAW, and for a `kind="tool"` run a
+  STRUCTURED record — expected stdout, actual stdout (RAW), exit code, and the
+  error head (`TypeError: …`) — never the raw stderr. A thrown runtime half is
+  keyed by the error's name + message. Only CRASH text (the stderr error head, a
+  thrown message) is normalised, and only for what is actually volatile there:
+  paths inside the adapter's own `scrml-conf-*` temp dirs (+ the `:line:col`
+  after them), a whole-line `Bun vX.Y.Z (…)` banner, and the `NN | ` frame gutter
+  at a line start. Program output is never normalised — a program that prints
+  `/tmp/alpha.txt` and one that prints `/tmp/beta.txt` fail differently. The keys carry the DOM / state diff (which
   cell, expected vs got; which anchored selector), so any change to the runtime
   failure moves the digest, and nothing else does. The run prints the lines
   themselves under every XFAIL.
