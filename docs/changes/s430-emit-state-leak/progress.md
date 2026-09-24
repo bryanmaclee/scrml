@@ -49,3 +49,13 @@ other passes
 - ast-builder `_engineBodyBuildDepth` — SAFE (try/finally); tokenizer override `let`s — restored at buildAST tail (not finally; only when overrides passed)
 - expression-parser `TEMPLATE_INTERP_CACHE`, symbol-table `DERIVED_CELL_REGISTRY` (WeakMaps on AST/scope) — SAFE
 - html-elements `REGISTRY`, attribute-registry `ELEMENT_ATTR_REGISTRY`, tailwind-classes `registry` — SAFE (populated at module load only)
+
+## Results
+- e04e15d0 implicit-cell tracker restarts at top-level emission (beginTopLevelLogicEmission) — fixes a regression the per-file install
+  introduced for implicit cells written first by a function body lowered without insideFunctionBody (rust-state-machine.scrml).
+- Corpus A/B AFTER (1922 files, one process sorted + reversed vs fresh per file): 0 differences (was 4).
+- Fresh-before vs fresh-after (intended output changes): 4 clientJs (in-function §6.8 thunk removed: ctrl-switch-forbidden-fn-body-pos,
+  handler-recovery-into-cell, parse-variant happy-unit/payload) + 2 serverJs (stdlib/auth/flows + index: guarded safeCallAsync now awaited).
+- Full `bun run test`: HEAD 32483 pass / 59 fail / 179 skip; base f554e171 (src reverted, same tests) 32481 / 61 / 179.
+  The 58 shared failures are identical by name in both runs (pre-existing: browser/happy-dom, dev-server, tokenizer parity).
+  Base-only: the two new s430 tests. HEAD-only: none.
