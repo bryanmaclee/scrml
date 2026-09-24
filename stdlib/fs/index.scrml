@@ -18,6 +18,8 @@ ${
     //   }
     // ---------------------------------------------------------------------------
 
+    import { safeCall, HostError } from 'scrml:host'
+
     /**
      * Read the contents of a file synchronously.
      *
@@ -110,16 +112,16 @@ ${
      */
     export function statSync(path) {
         const fs = require("node:fs")
-        try {
-            const s = fs.statSync(path)
-            return {
-                isFile: s.isFile(),
-                isDirectory: s.isDirectory(),
-                size: s.size,
-                mtime: s.mtime
-            }
-        } catch(e) {
-            return not
+        // fs.statSync throws on a missing path; safeCall turns that host throw
+        // into HostError::Thrown, and the arm maps it to `not`.
+        const s = safeCall(() => fs.statSync(path)) !{
+            | ::Thrown(message, name) :> { return not }
+        }
+        return {
+            isFile: s.isFile(),
+            isDirectory: s.isDirectory(),
+            size: s.size,
+            mtime: s.mtime
         }
     }
 
