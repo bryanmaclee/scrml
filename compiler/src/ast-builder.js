@@ -11600,7 +11600,16 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
 
     // IMPORT — parse structured import data per §21.3
-    if (tok.kind === "KEYWORD" && tok.text === "import") {
+    // A dynamic `import(...)` at statement position is an EXPRESSION statement,
+    // not a declaration (S430 P4, §21.3.2): pre-S430 it was mis-built as an
+    // `import-decl` whose raw was `import ( "x" )`. It now falls through to the
+    // expression-statement path. (E-DYNAMIC-IMPORT-NOT-IN-SCRML itself is
+    // decided on the native tree — native-walker/forbidden-js-native.ts.)
+    if (tok.kind === "KEYWORD" && tok.text === "import" && (() => {
+      let o = 1;
+      while (peek(o).kind === "COMMENT") o++;   // `import/**/(…)` is still a call
+      return peek(o).text !== "(";
+    })()) {
       const startTok = consume();
       const { expr: rawExpr, span } = collectExpr();
       const rawStr = "import " + rawExpr;

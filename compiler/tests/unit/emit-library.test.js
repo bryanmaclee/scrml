@@ -428,7 +428,12 @@ describe("emit-library §7: integration", () => {
       write: false,
     });
 
-    expect(result.errors).toHaveLength(0);
+    // ⚑ S430 P1 — the file's one unmigrated site (`export class ModuleError`,
+    // see self-host-module-resolver.test.js) is the ONLY error; library
+    // output is still produced, which is what this test is about.
+    expect(result.errors.map((e) => `${e.code}@${e.span?.line ?? e.tabSpan?.line}`).sort()).toEqual([
+      "E-CLASS-NOT-IN-SCRML@32",
+    ]);
 
     // Should have output for the file
     const outputs = [...result.outputs.values()];

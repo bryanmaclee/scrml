@@ -1,3 +1,5 @@
+import:host { runCG as _runCG, CGError as _CGError } from "../../compiler/src/codegen/index.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = runCG({ files, routeMap, depGraph, protectAnalysis, mode })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runCG: _runCG, CGError: _CGError } = await import("../../compiler/src/codegen/index.ts");
-    }
 
     export const runCG = _runCG
     export const CGError = _CGError

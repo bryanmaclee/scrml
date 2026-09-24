@@ -1,3 +1,5 @@
+import:host { buildAST as _buildAST, runTAB as _runTAB, parseLogicBody as _parseLogicBody, TABError as _TABError } from "../../compiler/src/ast-builder.js"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const fileAST = buildAST(bsOutput)
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { buildAST: _buildAST, runTAB: _runTAB, parseLogicBody: _parseLogicBody, TABError: _TABError } = await import("../../compiler/src/ast-builder.js");
-    }
 
     export const buildAST = _buildAST
     export const runTAB = _runTAB

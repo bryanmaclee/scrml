@@ -1231,7 +1231,11 @@ const DECL_MODULE_CORPUS = [
 // FORBIDDEN_VOCAB_CODES — the B7 parse-layer rejection codes a `forbidsVocab`
 // corpus entry is allowed to carry. The construct still parses (node-kind
 // conformance holds); only these diagnostics are tolerated.
-const FORBIDDEN_VOCAB_CODES = ["E-TRY-NOT-IN-SCRML", "E-THROW-NOT-IN-SCRML"];
+// S430 P1 adds `E-CLASS-NOT-IN-SCRML`: `class` is not scrml vocabulary
+// (SPEC §7.2.1), and the native parser fires it at the `class` keyword while
+// still building the ClassDecl recovery node these corpora assert the shape
+// of — the same footing as the B7 `try`/`throw` codes.
+const FORBIDDEN_VOCAB_CODES = ["E-TRY-NOT-IN-SCRML", "E-THROW-NOT-IN-SCRML", "E-CLASS-NOT-IN-SCRML"];
 
 // nonVocabErrors — the diagnostics of a native parse with the tolerated B7
 // forbidden-vocabulary codes filtered out. For a non-`forbidsVocab` corpus
@@ -1703,7 +1707,9 @@ describe("statement-parser — M3.3 closes the forward seam (all leads parsed)",
 
     test("a `class` declaration lead is parsed by M3.3 (seam closed)", () => {
         const r = parseWithNative("class C {}");
-        expect(r.errors).toEqual([]);
+        // S430 P1 adds E-CLASS-NOT-IN-SCRML (forbidden vocabulary, not a seam
+        // failure) — filtered, as the B7 `try` / `throw` leads are.
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-FORWARD-M3-3");
         expect(r.body[0].kind).toBe(StmtKind.ClassDecl);
     });
@@ -2306,10 +2312,21 @@ describe("P4-5 statement-parser — typed function parameters", () => {
     });
 });
 
+// S430 P1: `class` is not scrml vocabulary (SPEC §7.2.1). The native parser
+// fires `E-CLASS-NOT-IN-SCRML` at the `class` keyword and still builds the
+// ClassDecl recovery node, so these tests assert the RECOVERY-PARSE SHAPE with
+// the forbidden-vocabulary codes filtered out (the B7 try/throw posture).
 describe("M3.3 statement-parser — class declarations (native shape)", () => {
+    test("a class declaration fires E-CLASS-NOT-IN-SCRML at the `class` keyword", () => {
+        const r = parseWithNative("class C {}");
+        const hits = r.errors.filter((e) => e.code === "E-CLASS-NOT-IN-SCRML");
+        expect(hits.length).toBe(1);
+        expect(hits[0].span.start).toBe(0);
+    });
+
     test("class declaration — ClassDecl node", () => {
         const r = parseWithNative("class C {}");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.body[0].kind).toBe(StmtKind.ClassDecl);
         expect(r.body[0].name).toBe("C");
         expect(r.body[0].superClass).toBe(null);
@@ -2318,7 +2335,7 @@ describe("M3.3 statement-parser — class declarations (native shape)", () => {
 
     test("class with extends — superClass populated", () => {
         const r = parseWithNative("class C extends Base {}");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.body[0].superClass).not.toBe(null);
         expect(r.body[0].superClass.kind).toBe(ExprKind.Ident);
         expect(r.body[0].superClass.name).toBe("Base");
@@ -2326,7 +2343,7 @@ describe("M3.3 statement-parser — class declarations (native shape)", () => {
 
     test("class method — Method member, in-line body", () => {
         const r = parseWithNative("class C { m() { return 1; } }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const m = r.body[0].body[0];
         expect(m.memberKind).toBe(ClassMemberKind.Method);
         expect(m.methodKind).toBe("method");
@@ -2340,21 +2357,21 @@ describe("M3.3 statement-parser — class declarations (native shape)", () => {
 
     test("class constructor — methodKind constructor", () => {
         const r = parseWithNative("class C { constructor(x) { this.x = x; } }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const m = r.body[0].body[0];
         expect(m.methodKind).toBe("constructor");
     });
 
     test("class static method — isStatic true", () => {
         const r = parseWithNative("class C { static make() {} }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.body[0].body[0].isStatic).toBe(true);
         expect(r.body[0].body[0].key.name).toBe("make");
     });
 
     test("class getter / setter — methodKind get / set", () => {
         const r = parseWithNative("class C { get v() { return 1; } set v(n) {} }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.body[0].body[0].methodKind).toBe("get");
         expect(r.body[0].body[1].methodKind).toBe("set");
     });
@@ -2370,7 +2387,7 @@ describe("M3.3 statement-parser — class declarations (native shape)", () => {
 
     test("class field — Property member", () => {
         const r = parseWithNative("class C { x = 1; }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const f = r.body[0].body[0];
         expect(f.memberKind).toBe(ClassMemberKind.Property);
         expect(f.key.name).toBe("x");
@@ -2379,7 +2396,7 @@ describe("M3.3 statement-parser — class declarations (native shape)", () => {
 
     test("class uninitialized field — value is not", () => {
         const r = parseWithNative("class C { x; }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const f = r.body[0].body[0];
         expect(f.memberKind).toBe(ClassMemberKind.Property);
         expect(f.value === undefined || f.value === null).toBe(true);
@@ -2387,13 +2404,13 @@ describe("M3.3 statement-parser — class declarations (native shape)", () => {
 
     test("class computed method name — computed true", () => {
         const r = parseWithNative("class C { ['m']() {} }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.body[0].body[0].computed).toBe(true);
     });
 
     test("a method named `static` is a method, not a static prefix", () => {
         const r = parseWithNative("class C { static() {} }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const m = r.body[0].body[0];
         expect(m.isStatic).toBe(false);
         expect(m.key.name).toBe("static");
@@ -2401,7 +2418,7 @@ describe("M3.3 statement-parser — class declarations (native shape)", () => {
 
     test("a method named `get` is a method, not an accessor prefix", () => {
         const r = parseWithNative("class C { get() { return 1; } }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         const m = r.body[0].body[0];
         expect(m.methodKind).toBe("method");
         expect(m.key.name).toBe("get");
@@ -2411,7 +2428,7 @@ describe("M3.3 statement-parser — class declarations (native shape)", () => {
         // `constructor` is an Object.prototype member name — the M1 lexer's
         // JS_KEYWORDS lookup must use an own-property guard or it mis-lexes.
         const r = parseWithNative("class C { constructor() {} }");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
         expect(r.body[0].body[0].methodKind).toBe("constructor");
         // The same name as a plain method-call identifier.
         const r2 = parseWithNative("let obj = {}; obj.constructor;");
@@ -2930,7 +2947,7 @@ describe("M3.4 statement-parser — return-legality", () => {
         const r = parseWithNative("class C { m() { return this; } }");
         expect(r.ok).toBe(true);
         expect(r.errors.map((e) => e.code)).not.toContain("E-STMT-RETURN-OUTSIDE-FUNCTION");
-        expect(r.errors).toEqual([]);
+        expect(nonVocabErrors(r.errors)).toEqual([]);
     });
 
     test("a top-level `return` after a function decl still fires (depth restored)", () => {
