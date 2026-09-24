@@ -59,7 +59,7 @@
 //     no-op).
 // =============================================================================
 
-import { safeParseExprToNodeGlobal } from "../ast-builder.js";
+import { safeParseExprToNodeGlobal, emitForbiddenJsForAttrExpr } from "../ast-builder.js";
 
 // The two attr-value kinds that carry an expression and therefore an exprNode,
 // mirroring the live `parseAttributes` per-kind branches.
@@ -99,7 +99,11 @@ function valStartOffset(val: any): number {
 // builders; the engine walker reads `sourceText` off the SAME shared value
 // objects, but exprNode / argExprNodes are purely additive and never read by
 // that walker, so an in-place add is safe).
-function populateAttrValueExprNode(val: any, filePath: string, errors: any[]): void {
+// `check` — S430 P1/P4: emit E-CLASS-NOT-IN-SCRML / E-DYNAMIC-IMPORT-NOT-IN-SCRML
+// for this value (see emitForbiddenJsForNativeAttr). False for a value inside a
+// logic body (lift / markup-as-value): the native parser parsed that attribute
+// expression itself and already reported it.
+function populateAttrValueExprNode(val: any, filePath: string, errors: any[], check?: { source: string } | null): void {
   if (val === null || val === undefined || typeof val !== "object") return;
 
   // (1) call-ref -> argExprNodes (ast-builder.js 1831-1832). The handler family
@@ -114,6 +118,10 @@ function populateAttrValueExprNode(val: any, filePath: string, errors: any[]): v
       .filter(Boolean);
     // Live sets argExprNodes ONLY when every arg parsed (no drops); else undefined.
     val.argExprNodes = parsed.length === argList.length ? parsed : undefined;
+    // §7.2.1 / §21.3.2 — a construct in a call-ref argument.
+    if (check && typeof val.name === "string") {
+      emitForbiddenJsForNativeAttr(parsed, `${val.name}(${argList.join(", ")})`, val, check.source, filePath, errors);
+    }
     return;
   }
 
@@ -127,6 +135,37 @@ function populateAttrValueExprNode(val: any, filePath: string, errors: any[]): v
   // valSpan.start, errors). `errors` lets the parser surface E-SQL-008 /
   // E-RESET-NO-ARG the SAME way live does at the attr-value site.
   val.exprNode = safeParseExprToNodeGlobal(text, filePath, valStartOffset(val), errors);
+  // §7.2.1 / §21.3.2 — S430 P1/P4 on the native attr-value path: count a
+  // `class` construct / dynamic `import()` from the PARSED expression and
+  // place it on the raw text's tokens, exactly as the live parseAttributes
+  // site does (ast-builder.js). Before this the native pipeline never checked
+  // an attribute expression at all.
+  if (check && val.kind === "expr") emitForbiddenJsForNativeAttr([val.exprNode], text, val, check.source, filePath, errors);
+}
+
+// emitForbiddenJsForNativeAttr — the construct is counted from the PARSED
+// expression(s) (ast-builder.js emitForbiddenJsForAttrExpr) and placed on the
+// tokens of the value's text. The native value span's `start` is a file offset
+// but its `col` is not reliable (measured S430: always 1), so the text's
+// position is recovered from the source: the value text is searched for inside
+// the value's own span, and line/col are counted from the source.
+function emitForbiddenJsForNativeAttr(nodes: any[], text: string, val: any, source: string, filePath: string, errors: any[]): void {
+  const span = val && typeof val.span === "object" && val.span !== null ? val.span : null;
+  const start = span && typeof span.start === "number" ? span.start : 0;
+  const end = span && typeof span.end === "number" ? span.end : start + text.length;
+  let base = start;
+  if (typeof source === "string" && source.length > 0) {
+    const at = source.slice(start, end).indexOf(text);
+    if (at >= 0) base = start + at;
+  }
+  let line = 1;
+  let col = 1;
+  if (typeof source === "string") {
+    for (let i = 0; i < base && i < source.length; i++) {
+      if (source.charCodeAt(i) === 10) { line++; col = 1; } else { col++; }
+    }
+  }
+  emitForbiddenJsForAttrExpr(nodes, text, base, line, col, filePath, errors);
 }
 
 // populateNativeAttrValueExprNodes — walk an assembled native FileAST and stamp
@@ -148,6 +187,7 @@ export function populateNativeAttrValueExprNodes(
   ast: any,
   filePath: string,
   errors?: any[],
+  source?: string,
 ): any {
   if (ast === null || ast === undefined || typeof ast !== "object") return ast;
   const fp = typeof filePath === "string" ? filePath : "";
@@ -163,26 +203,36 @@ export function populateNativeAttrValueExprNodes(
     ast.channelDecls,
   ];
 
-  const stack: any[] = [];
+  // S430 — the E-CLASS / E-DYNAMIC-IMPORT check needs the source to place a
+  // diagnostic; without it (a caller that only wants exprNode) no check runs.
+  const src = typeof source === "string" ? source : null;
+
+  // Each entry carries whether it sits inside a logic body (`inLogic`) — an
+  // attr value there belongs to lift / markup-as-value markup that the native
+  // parser parsed and checked itself.
+  const stack: Array<{ v: any; inLogic: boolean }> = [];
   for (const root of roots) {
     if (Array.isArray(root)) {
-      for (const item of root) stack.push(item);
+      for (const item of root) stack.push({ v: item, inLogic: false });
     }
   }
 
   const seen = new Set<any>();
   while (stack.length > 0) {
-    const cur = stack.pop();
+    const entry = stack.pop()!;
+    const cur = entry.v;
     if (cur === null || cur === undefined || typeof cur !== "object") continue;
     if (seen.has(cur)) continue;
     seen.add(cur);
 
     if (Array.isArray(cur)) {
       for (const item of cur) {
-        if (item !== null && typeof item === "object") stack.push(item);
+        if (item !== null && typeof item === "object") stack.push({ v: item, inLogic: entry.inLogic });
       }
       continue;
     }
+    const check = src !== null && !entry.inLogic ? { source: src } : null;
+    const childInLogic = entry.inLogic || cur.kind === "logic" || cur.kind === "meta";
 
     // An object node — if it carries an `attrs` array, stamp exprNode on each
     // expression-bearing attr value.
@@ -190,7 +240,7 @@ export function populateNativeAttrValueExprNodes(
     if (Array.isArray(attrs)) {
       for (const attr of attrs) {
         if (attr !== null && attr !== undefined && typeof attr === "object") {
-          populateAttrValueExprNode(attr.value, fp, errs);
+          populateAttrValueExprNode(attr.value, fp, errs, check);
         }
       }
     }
@@ -206,7 +256,7 @@ export function populateNativeAttrValueExprNodes(
     // (`ifCond.exprNode`) plus an EXTRA-FIELD (`ifCond.sourceText`, which
     // `populateAttrValueExprNode` normalises away).
     if (cur.ifCond !== null && cur.ifCond !== undefined && typeof cur.ifCond === "object") {
-      populateAttrValueExprNode(cur.ifCond, fp, errs);
+      populateAttrValueExprNode(cur.ifCond, fp, errs, check);
     }
 
     // Descend every object/array field so nested children / body / lift-expr
@@ -218,7 +268,7 @@ export function populateNativeAttrValueExprNodes(
     for (const k of Object.keys(cur)) {
       if (k === "_nativeEngineBlock" || k === "_source") continue;
       const v = cur[k];
-      if (v !== null && typeof v === "object") stack.push(v);
+      if (v !== null && typeof v === "object") stack.push({ v, inLogic: childInLogic });
     }
   }
 

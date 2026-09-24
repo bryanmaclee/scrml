@@ -1426,7 +1426,8 @@ function _compileScrmlImpl(options = {}) {
         if (result && result.ast) {
           if (Array.isArray(result.errors) === false) result.errors = [];
           populateNativeAttrValueExprNodes(
-            result.ast, result.filePath || bsResult.filePath, result.errors);
+            result.ast, result.filePath || bsResult.filePath, result.errors,
+            sourceByFile.get(bsResult.filePath) ?? "");
           // M5-swap — native string-`.expr`/`.init`/`.condition` backfill. The
           // native make*/translate* builders set these legacy string fields empty
           // (carrying the structured exprNode/initExpr/condExpr sibling instead).

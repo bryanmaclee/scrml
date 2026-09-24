@@ -2502,12 +2502,17 @@ export function esTreeToExprNode(
       const sourceNode = (node as { source: ESNode }).source;
       const sourceExpr = esTreeToExprNode(sourceNode, filePath, baseOffset, rawSource);
       const importRaw = `import(${emitStringFromTree(sourceExpr)})`;
-      return {
+      const importEh: EscapeHatchExpr = {
         kind: "escape-hatch",
         span,
         nativeKind: "ImportExpression",
         raw: importRaw,
-      } satisfies EscapeHatchExpr;
+      };
+      // A construct nested in the specifier (`import(import("a"))`) is lost
+      // with the converted source child unless recorded here (S430 P1/P4).
+      const importInner = forbiddenJsConstructsBelow(node);
+      if (importInner) importEh.forbiddenJs = importInner;
+      return importEh;
     }
 
     // ---- Binary ----
@@ -2937,12 +2942,46 @@ export function esTreeToExprNode(
 
 /** Create an EscapeHatchExpr for an unsupported ESTree node type. */
 function makeEscapeHatch(node: ESNode, span: ExprSpan, rawSource: string): EscapeHatchExpr {
-  return {
+  const eh: EscapeHatchExpr = {
     kind: "escape-hatch",
     span,
     nativeKind: node.type,
     raw: rawSource,
-  } satisfies EscapeHatchExpr;
+  };
+  const inner = forbiddenJsConstructsBelow(node);
+  if (inner) eh.forbiddenJs = inner;
+  return eh;
+}
+
+/**
+ * S430 P1 / P4 (SPEC §7.2.1 / §21.3.2) — count the `class` constructs
+ * (ClassDeclaration / ClassExpression) and dynamic imports (ImportExpression)
+ * strictly BELOW an ESTree node. An escape-hatch keeps only raw text for its
+ * subtree (a block-bodied arrow, a function expression, a class body), so
+ * without this record a `class` or `import()` nested inside it would be
+ * invisible to the structural check in ast-builder.js
+ * (`countForbiddenJsInNodes`). The node's OWN kind is carried by
+ * `nativeKind`; this counts descendants only. Returns `undefined` when there
+ * are none, so the escape-hatch shape is unchanged for every other program.
+ */
+export function forbiddenJsConstructsBelow(root: unknown): { classes: number; imports: number } | undefined {
+  let classes = 0;
+  let imports = 0;
+  const seen = new Set<object>();
+  const visit = (n: unknown, isRoot: boolean): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) visit(c, false); return; }
+    const t = (n as { type?: unknown }).type;
+    if (!isRoot && (t === "ClassDeclaration" || t === "ClassExpression")) classes++;
+    if (!isRoot && t === "ImportExpression") imports++;
+    for (const k of Object.keys(n as object)) {
+      if (k === "loc" || k === "range") continue;
+      visit((n as Record<string, unknown>)[k], false);
+    }
+  };
+  visit(root, true);
+  return classes || imports ? { classes, imports } : undefined;
 }
 
 /** Convert ESTree parameter nodes to LambdaParam[]. */

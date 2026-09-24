@@ -2087,6 +2087,14 @@ export interface EscapeHatchExpr {
   nativeKind: string;
   /** Raw source text of the unsupported expression. */
   raw: string;
+  /**
+   * S430 P1 / P4 — `class` constructs and dynamic imports strictly BELOW the
+   * ESTree node this escape-hatch replaced (its subtree survives only as
+   * `raw`). Present only when non-zero. Read by the structural
+   * E-CLASS-NOT-IN-SCRML / E-DYNAMIC-IMPORT-NOT-IN-SCRML check in
+   * ast-builder.js; nothing else consumes it.
+   */
+  forbiddenJs?: { classes: number; imports: number };
 }
 
 // ---- Reset Expression (§6.8.2) ----

@@ -135,6 +135,12 @@ ${
     // S430 P1 / P4 — the two forbidden-construct messages, shared by the
     // expression arm here (parsePostfix) and the declaration arm in
     // parse-stmt.scrml (parseClassDecl). Mirrors parse-expr.js.
+    // classExprParser — parse-stmt's parseClassDecl, registered at load.
+    let classExprParser = not
+    export fn setClassExprParser(parser) {
+        classExprParser = parser
+    }
+
     export const CLASS_NOT_IN_SCRML_MESSAGE =
         "scrml has no `class` (§7.2.1). Model the data as a struct value (`type Point:struct = { x: number, y: number }`) and the behaviour as free functions over it (`fn moved(p: Point, dx: number) -> Point { ... }`); state changes by RETURNING A NEW VALUE (`p = moved(p, 1)`), not by mutating `this`. Behaviour selection is a `match` at the use site, not a method looked up on the value. Only the class construct is rejected — `class=` attributes, `x.class`, and a `class` object key or struct field are fine."
     export const DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE =
@@ -963,7 +969,16 @@ ${
         // consuming the class head + body; the recovery value is the `not`
         // placeholder. Mirrors parse-expr.js. ---
         if (kind == TokenKind.KwClass) {
-            const classTok = advance(cursor)   // consume `class`
+            const classTok = current(cursor)
+            // Prefer the statement layer's class parser (registered by
+            // parse-stmt via setClassExprParser) — it parses the body in-line.
+            // Mirrors parse-expr.js.
+            if (classExprParser is some) {
+                const decl = classExprParser(ctx, true)
+                const endPos = (decl is some && decl.span is some) ? decl.span.end : classTok.span.end
+                return makeNotValue(makeSpan(classTok.span.start, endPos, classTok.span.line, classTok.span.col))
+            }
+            advance(cursor)   // consume `class`
             recordError(ctx, "E-CLASS-NOT-IN-SCRML", CLASS_NOT_IN_SCRML_MESSAGE, classTok.span)
             if (currentKind(cursor) == TokenKind.Ident) {
                 advance(cursor)   // the optional class-expression name

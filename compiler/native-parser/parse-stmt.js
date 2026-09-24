@@ -112,6 +112,7 @@ import {
     enterNoInScope, exitNoInScope,
     // S430 P1 / P4 — the shared forbidden-construct messages.
     CLASS_NOT_IN_SCRML_MESSAGE,
+    setClassExprParser,
 } from "./parse-expr.js";
 import {
     VarDeclKind, MethodKind,
@@ -4548,3 +4549,8 @@ export function parseProgram(tokens, source) {
     const body = parseStatementList(ctx, undefined);
     return { body, errors: ctx.errors };
 }
+
+// S430 P1 — a class EXPRESSION (parse-expr.js parsePostfix) parses through the
+// same class parser as a declaration, so its body — and anything forbidden in
+// it — is parsed, not skipped.
+setClassExprParser(parseClassDecl);

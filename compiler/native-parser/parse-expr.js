@@ -107,6 +107,16 @@ import { parseErrorArms } from "./parse-error-body.js";
 // expression arm here (parsePostfix) and the declaration arm in parse-stmt.js
 // (parseClassDecl). Text mirrors the default parser (ast-builder.js) so both
 // front-ends say the same thing. SPEC §7.2.1 / §21.3.2 + §34.
+// classExprParser — the statement layer's class parser (parse-stmt.js
+// parseClassDecl), registered by parse-stmt at module load. A `var` with NO
+// initializer on purpose: parse-expr <-> parse-stmt is a module cycle and
+// parse-stmt's body (which registers) can run BEFORE this module's body — a
+// `let` would be in its TDZ there, and an initializer would reset the value.
+var classExprParser;
+export function setClassExprParser(fn) {
+    classExprParser = (typeof fn === "function") ? fn : undefined;
+}
+
 export const CLASS_NOT_IN_SCRML_MESSAGE =
     "scrml has no `class` (§7.2.1). Model the data as a struct value (`type Point:struct = { x: number, y: number }`) and the behaviour as free functions over it (`fn moved(p: Point, dx: number) -> Point { ... }`); state changes by RETURNING A NEW VALUE (`p = moved(p, 1)`), not by mutating `this`. Behaviour selection is a `match` at the use site, not a method looked up on the value. Only the class construct is rejected — `class=` attributes, `x.class`, and a `class` object key or struct field are fine.";
 export const DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE =
@@ -954,7 +964,19 @@ export function parsePostfix(ctx) {
     // DECLARATION (statement position) fires the same code in
     // parse-stmt.js:parseClassDecl. ---
     if (kind === TokenKind.KwClass) {
-        const classTok = advance(cursor);   // consume `class`
+        const classTok = current(cursor);
+        // Prefer the statement layer's class parser: it records the code at
+        // the keyword AND parses the class body in-line, so a construct
+        // inside a method body (a nested `class`, an `import()`) is reported
+        // too. parse-stmt.js registers it at load (setClassExprParser) —
+        // parse-expr cannot import parse-stmt (module cycle).
+        if (typeof classExprParser === "function") {
+            const decl = classExprParser(ctx, true);
+            const endPos = (decl !== null && decl !== undefined && decl.span !== undefined)
+                ? decl.span.end : classTok.span.end;
+            return makeNotValue(makeSpan(classTok.span.start, endPos, classTok.span.line, classTok.span.col));
+        }
+        advance(cursor);   // consume `class`
         recordError(ctx, "E-CLASS-NOT-IN-SCRML", CLASS_NOT_IN_SCRML_MESSAGE, classTok.span);
         if (currentKind(cursor) === TokenKind.Ident) {
             advance(cursor);   // the optional class-expression name

@@ -172,6 +172,7 @@ ${
         enterNoInScope, exitNoInScope,
         // S430 P1 / P4 — the shared forbidden-construct messages.
         CLASS_NOT_IN_SCRML_MESSAGE,
+        setClassExprParser,
     } from "./parse-expr.scrml"
     import {
         VarDeclKind, MethodKind,

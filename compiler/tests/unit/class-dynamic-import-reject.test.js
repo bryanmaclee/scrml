@@ -112,8 +112,47 @@ describe("§21.3.1 — dynamic import inside a `^{}` meta body fires", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// The S430 adversarial-review probe set (rcl/probes, copied inline) + two
+// extra probes. Every probe compiles through BOTH front-ends and must report
+// EXACTLY the listed codes at EXACTLY the listed line:col — so every legit
+// form (markup prose, strings, comments, regex, CSS, SQL, `class=`, `x.class`,
+// `{class: 1}`, `import.meta`, `o.import(…)`, quoted HTML attribute values)
+// fires nothing, and every true positive fires once, at its keyword.
+//
+// Native `null` rows: inline `_={ … }=` / `_{ }` foreign code INSIDE a function
+// body. The native parser tokenizes that interior (it has no foreign-code
+// production there) and already fails those programs on base with parse
+// errors, so nothing that compiled breaks; left as a noted gap.
+// ---------------------------------------------------------------------------
+import { S430_REVIEW_PROBES } from "../helpers/s430-class-import-review-probes.js";
+
+const hitsWithCol = (src, parser) => rejectHits(src, parser).sort();
+
+describe("S430 review probes — both front-ends, exact codes + positions", () => {
+  for (const [name, src, def, nat] of S430_REVIEW_PROBES) {
+    test(`${name} — default`, () => {
+      expect(hitsWithCol(src)).toEqual(def.slice().sort());
+    });
+    if (nat !== null) {
+      test(`${name} — scrml-native`, () => {
+        expect(hitsWithCol(src, "scrml-native")).toEqual(nat.slice().sort());
+      });
+    }
+  }
+});
+
+// PA decision (S430): a QUOTED HTML attribute value is a string literal emitted
+// as data (§5 quoting), not scrml source — `onclick="import('./x.js')"` does not
+// fire (SPEC §21.3.2).
+describe("a quoted attribute value is data, not scrml source", () => {
+  const src = `<program>\n<button onclick="import('./x.js')">a</button>\n<p title="class Foo extends Bar">b</p>\n</program>`;
+  test("default", () => expect(rejectHits(src)).toEqual([]));
+  test("scrml-native", () => expect(rejectHits(src, "scrml-native")).toEqual([]));
+});
+
 // Attribute values never enter a logic token stream (the E-SWITCH-FORBIDDEN
-// bypass shape) — the default parser scans them separately.
+// bypass shape) — the construct is counted from the parsed attribute expression.
 describe("default parser — attribute-value expressions are scanned", () => {
   test("onclick=${() => import(\"x\")} fires at the keyword", () => {
     const src = `<program>\n<button onclick=\${() => import("x")}>go</button>\n</program>`;
