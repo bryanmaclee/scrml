@@ -1,0 +1,27 @@
+${
+    <trace> = ""
+
+    function D(s: string) {
+        @trace = @trace + s
+    }
+
+    function f() {
+        const z = "z;"
+        defer D(z)
+        defer {
+            const q = "q;"
+            D(q)
+        }
+        defer helper()
+        const q = "other;"
+        D(q)
+        function helper() {
+            D("h;")
+        }
+        return 1
+    }
+}
+<program>
+    <button id="go" onclick=f()>Go</>
+    <p id="out">${@trace}</p>
+</program>

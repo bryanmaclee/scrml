@@ -1,0 +1,13 @@
+{
+  "id": "defer-yield-in-defer-neg",
+  "description": "§19.16.3 rule 1 (S430 round 5, F5) — `yield` inside a deferred body is E-DEFER-CONTROL-FLOW (exactly once), not an emitted-JS error ('yield is reserved').",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 1: a deferred body SHALL NOT contain a `yield` / `yield*` — it would suspend the generator from inside a block that is already exiting.",
+  "expect": {
+    "codes": ["E-DEFER-CONTROL-FLOW"],
+    "codeCounts": { "E-DEFER-CONTROL-FLOW": 1 },
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"]
+  }
+}

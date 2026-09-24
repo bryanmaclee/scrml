@@ -56,3 +56,18 @@
 - `let v = f()?` followed by a newline merges with the next line (ASI).
 - labelled loops lose their labels in emission (labelled `break`/`continue` target the wrong loop / fail).
 - (ours, cosmetic) the scheduled client-fn body loop indents only the first line of a multi-line statement, so `const _scrml_defers_N = [];` is indented but the `try {` block is not.
+
+## Round 5 (re-review of d80eb34c)
+- main unchanged since the round-4 merge (origin/main b22f5e83 is an ancestor of HEAD) — no merge.
+- F1 HIGH: E-DEFER-LATER-SHADOW (lint-defer `checkLaterShadow`): a deferred statement whose free identifier (from its TREE; its own declarations, lambda / nested-fn params bound; text arm bodies parsed) is (re)declared by a later let/const/lin in its enclosing block chain -> compile error naming the binding + both lines. Later `function` decls excluded (hoisted — in scope at the defer). Unanalysable + later decls present -> fails closed. Covers the shadow, TDZ-behind-early-return, enclosing-block and destructured variants.
+- F2 MED: new validators/lint-redeclare.ts, E-SCOPE-REDECLARE (§7.3.3): let/const/lin/function redeclaring a same-block binding or (top-level block) a parameter; nested-block shadowing legal; fn-vs-fn left alone; file scope stays E-SCOPE-010. Corpus measured by COMPILING all 2616 tracked .scrml (base d80eb34c vs build): 0 files newly flagged, 0 output diffs (11 stdlib async/await code diffs = the known extraction-path harness artifact, as in rounds 1/5).
+- F3/F4: E-DEFER-UNSUPPORTED-SITE — `defer` in a bare `{ }` block (live: bare-expr text; native: the bridge's Block flatten marks a direct Defer `inBareBlock`) or a single-statement match / handler arm; found by PARSING the text (native parser), not word matching. §19.16.2 amended (bare blocks are not stage-1 defer sites; structural bare-block parsing = a separate arc).
+- F5: `yield` / `yield*` in a deferred body -> E-DEFER-CONTROL-FLOW (yield-stmt; escape-hatch parsed with the native parser inside a probe generator). §19.16.3 rule 1 amended.
+- conformance +8 (defer: later-shadow-neg (4), later-shadow-ok (runtime), unsupported-site-neg (2), yield-in-defer-neg, scope-redeclare-with-defer-neg; fn: scope-redeclare-neg (3), scope-redeclare-nested-ok (runtime)). Unit +18.
+
+## Noted, not fixed (round 5)
+- brace-less `if (c) defer X` registers on the if-branch's own (implicit) block, so X runs when that branch exits — consistent with §19.16.2 but a footgun; candidate warning.
+- F6 (pre-existing HIGH, reviewer filing as a gap): a nested function that becomes `async` because it calls a server fn is invoked WITHOUT await (`let r = inner()`), so its `!{}` tests a Promise and a transport error is silently lost.
+- FOUND + FIXED this round (not in the review): a `defer` directly in an arm of a VALUE-producing match/if/for (value-form expression, or a `match` that is a `fn`'s implicit-return tail) lost the arm's value (`let k = match m { .A :> { defer D(); let t = 7; t } }` left k null — the tail was captured into a fresh tilde var inside the try). Now E-DEFER-UNSUPPORTED-SITE (§19.16.2 amended); conformance value-arm-site-neg. A braced `match` STATEMENT arm that is not a value tail stays a defer site.
+- pre-existing (seen while probing): in a block, `D("a;")` followed by `1` on the next line merges into ONE statement (the `1` is swallowed) — the known newline-merge class.
+- round 5 commit attempt 1 was stopped by the pre-commit hook: bare-assign-sql-init §6 — a keywordless `w = ?{…}` is carried as a const-decl tagged `_bareAssign` (an ASSIGNMENT); lint-redeclare flagged it as a redeclaration of `let w`. Both new checks now skip `_bareAssign` decls.

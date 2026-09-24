@@ -6049,6 +6049,26 @@ ${ function makeSpan(start, end, line = 1, col = start) { ... } }
 
 Default parameters compile directly to JavaScript default parameter syntax.
 
+#### 7.3.3 A block binds each name once
+
+**Added S430 (round 5 of the `defer` arc).** Inside a function body, a `let`, `const`, `lin` or
+`function` declaration SHALL NOT redeclare a name already bound in the SAME block — another
+`let` / `const` / `lin` / `function` declaration of that block, or, in the function's own top-level
+block, one of the function's parameters. Violation: **E-SCOPE-REDECLARE**, naming both declarations.
+
+- Shadowing in a NESTED block (an `if` / loop / `match`-arm body declaring a name the enclosing block
+  or the parameter list already binds) is legal and unaffected.
+- Two `function` declarations of one name in one block are outside this rule.
+- File-scope duplicates are E-SCOPE-010 (§7.6), not this code.
+
+*Why a rule (not just a codegen failure):* such a program previously failed at codegen as an
+unexplained E-CODEGEN-INVALID-LOGIC ("Identifier 'x' has already been declared") — and the same
+program compiled and ran once a `defer` (§19.16) was added to the block, because the defer lowering
+wraps the block in a host `try`, which turns an illegal redeclaration of a parameter into legal
+shadowing. A `defer` must not change which programs compile. **Direction of change: newly-rejecting
+in name only** — every program it rejects already failed to compile at codegen (measured on the
+corpus when it landed).
+
 ### 7.4 Markup as Expression in Logic Context
 
 Markup syntax is valid as an expression inside `${ }` logic contexts.
@@ -15539,6 +15559,8 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A failable call inside a deferred body is not handled in place (`!{}` or `match`), or a deferred `!{}` handler has no catch-all `\| _ :>` arm; replaces E-ERROR-002 there | Error |
 | E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body (top-level logic, `on mount`, markup/state-block body, or — stage 1 — an arrow/function-expression body) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | In a body-split (CPS) function: a server-tier deferred body, or a `defer` nested inside a statement the split runs server-side | Error |
+| E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` in a bare `{ }` block, a single-statement (unbraced) `match` / `!{}` arm, or an arm of a value-producing `match` / `if` / `for` — not a stage-1 defer site | Error |
+| E-DEFER-LATER-SHADOW | §19.16.2 | A deferred body reads a name that a `let` / `const` / `lin` declaration later in its enclosing block chain (re)binds | Error |
 | E-TEST-006 | §19.12.7 | `~{}` test block: server-function call inside an active `test-bind` context references a server function with no `test-bind` declaration in scope (fail-fast over silent passthrough; design-insight 22, S74). | Test |
 | W-CPS-NEEDS-FAILABLE | §19.9.5 | Bare call to CPS-implicit-`!` function from non-`!` / non-boundary caller (cycle 1 of A9 Ext 4 deprecation; v0.next). | Warning |
 | E-CPS-NEEDS-FAILABLE | §19.9.5 | Same condition; reserved-E, unscheduled per §63.7. Not yet emitted. | Error |
@@ -15986,8 +16008,18 @@ function save(doc) {
 
 - **Registration.** Executing a `defer` statement registers its deferred body against the **enclosing
   block** — the innermost statement list that contains the `defer`: a function body, an `if`/`else`
-  branch, a loop body (once per iteration), a `match` arm block, a `given` body, or a `{ }` block. The
+  branch, a loop body (once per iteration), a braced `match` arm block, or a `given` body. The
   deferred body is NOT executed where the `defer` appears.
+- **Not defer sites in stage 1 — E-DEFER-UNSUPPORTED-SITE** (S430 round 5). A bare `{ }` block
+  statement, and a single-statement (unbraced) `match` or `!{}` handler arm (`.A :> defer D()`), are
+  carried by the front-end as text rather than as a statement list, so a `defer` there has no block to
+  attach to. It SHALL be a compile error, never silently mis-scoped. (Supporting bare blocks means
+  parsing them structurally — a separate arc.) The same code covers a `defer` written directly in an
+  arm of a `match` / `if` / `for` that is used for its VALUE — a value-form expression
+  (`let k = match m { .A :> { defer D(); 7 } }`), or a `match` statement that is a `fn`'s implicit
+  return tail (§48): the arm's last expression is the value produced, and the defer block would
+  capture it. Write the body as a braced block of an `if` / `match` statement arm / function, or move
+  the `defer` to the enclosing block.
 - **Exit.** When control leaves the enclosing block, every deferred body registered in that block runs
   exactly once, on EVERY exit path: falling off the end of the block; `return` (after the return value
   has been evaluated — the deferred body cannot change it); `break` / `continue` out of the block; `fail`
@@ -16002,6 +16034,16 @@ function save(doc) {
 - **Evaluation time.** The deferred body is evaluated in full at exit — nothing in it (not even a call's
   arguments) is evaluated at registration. It sees the bindings in scope at the `defer`'s position; a
   binding declared later in the same block is NOT in scope for it (§7.6 lexical scope).
+- **A later declaration of a name the deferred body reads — E-DEFER-LATER-SHADOW** (S430 round 5). The
+  deferred body runs at the block's exit, where a `let` / `const` / `lin` declaration written AFTER the
+  `defer` — in its own block or in any enclosing block of the same function — is in force. If the
+  deferred body reads a name that such a later declaration (re)binds, the program SHALL be rejected:
+  otherwise the deferred body would read the later binding (silently shadowing the one in scope at the
+  `defer`) or read it before it is initialised. The diagnostic names the binding and both sites; the
+  author renames one. (A later `function` declaration is not a later binding — function declarations
+  are hoisted to the top of their block and are in scope at the `defer` already.) When part of the
+  deferred body cannot be analysed as a tree and its block chain declares names after the `defer`,
+  the check fails closed with the same code.
 - **A host error inside a deferred body** (a non-`!` runtime error, §19.6.8) does not stop the block's
   other deferred bodies: every remaining one still runs, in LIFO order. After all of them have run, the
   FIRST host error raised by a deferred body propagates from the block's exit like any other host
@@ -16014,8 +16056,9 @@ A deferred body is a scope-exit ACTION. It runs while the block is already leavi
 return value already computed or an error already in flight — so it SHALL NOT itself redirect control.
 
 1. **No control transfer out of the deferred body — E-DEFER-CONTROL-FLOW.** A deferred body SHALL NOT
-   contain a `return`, a `fail`, a `?` propagation, or a `break` / `continue` whose target lies outside
-   the deferred body. A `break`/`continue` that targets a loop INSIDE the deferred body is permitted. A
+   contain a `return`, a `fail`, a `?` propagation, a `yield` / `yield*` (a suspension of the generator
+   from inside a block that is already exiting — S430 round 5), or a `break` / `continue` whose target
+   lies outside the deferred body. A `break`/`continue` that targets a loop INSIDE the deferred body is permitted. A
    function or lambda body nested inside the deferred body is its own control-flow scope; its own
    `return`/`fail`/`?` are not restricted by this rule. The rule reaches EVERY statement position inside
    the deferred body, including the arm bodies of a value-form `match` or `if` (`let k = match m {
@@ -16187,9 +16230,10 @@ function save(id: number) {
 
 #### 19.16.8 Error codes
 
-This section introduces five codes, catalogued in §19.13 and §34: **E-DEFER-CONTROL-FLOW**,
-**E-DEFER-NESTED**, **E-DEFER-UNHANDLED-FAILABLE**, **E-DEFER-OUTSIDE-FUNCTION** (§19.16.3) and
-**E-DEFER-SERVER-IN-SPLIT** (§19.16.5). All five are hard errors. The two front-ends share one
+This section introduces seven codes, catalogued in §19.13 and §34: **E-DEFER-UNSUPPORTED-SITE** and
+**E-DEFER-LATER-SHADOW** (§19.16.2), **E-DEFER-CONTROL-FLOW**, **E-DEFER-NESTED**,
+**E-DEFER-UNHANDLED-FAILABLE**, **E-DEFER-OUTSIDE-FUNCTION** (§19.16.3) and **E-DEFER-SERVER-IN-SPLIT**
+(§19.16.5). All seven are hard errors. The two front-ends share one
 structural checker (the live-shaped AST both produce), so for the constructs both front-ends parse
 into the same tree the codes fire identically under `--parser=scrml-native`. **Known divergence (not
 a rule — an implementation gap, recorded S430 round 3):** the native front-end does not currently
@@ -20234,6 +20278,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ATTR-WRITER-CONFLICT | §5.5.3, §5.5.4 | A WHOLESALE reactive value writer — `class=(expr)` / `style=(expr)` (the whole attribute) or `value=(expr)` on a form control (the `.value` property) — shares a physical DOM surface with ANOTHER writer on the SAME element, so the wholesale write would silently erase the other's work on its next reactive evaluation. Detected pairs: `class=(expr)` with `class:name=` or transition classes (`className` surface); `style=(expr)` with `if=`/`show=` or transitions (`style`/`display` surface); `value=(expr)` with `bind:value` (`.value` surface). Axiom ① (bryan's #81 ruling): each physical DOM surface has at most one wholesale owner — the diagnostic names BOTH sites and the author picks one. The conflicting attribute is NOT emitted (byte-identical to pre-#81), so an ignored error degrades to the old behavior rather than a broken one. Generic string attributes (`title=`, `id=`, `alt=`, `data-*`) have no per-token composer form and are always sole writers. (Catalog addition S268 — #81 writer-ownership Axiom ①; emitted at `compiler/src/codegen/emit-html.ts` `analyzeWriterConflict`.) | Error |
 | E-ATTR-UNQUOTED-OPERATOR | §5.1, §17.1 | An unquoted attribute CONDITION (`if=`/`show=`/`else-if=`) contains a bare binary/ternary operator (`>= > < <= == != && \|\| + - * /` or ternary `?:`). An unquoted condition admits only the atomic forms (`@var` / `obj.prop` / `fn()` / prefix `!`); operator conditions SHALL be parenthesized `if=(expr)` or quoted `if="expr"`. Fires ONCE per offending attribute (cluster-A, S188 "reject + parens"). | Error |
 | E-SCOPE-001 | §5.2 | Unquoted identifier not resolvable in scope | Error |
+| E-SCOPE-REDECLARE | §7.3.3 | Inside a function body, a `let` / `const` / `lin` / `function` declaration redeclares a name already bound in the SAME block (another such declaration, or — in the function's top-level block — a parameter). Nested-block shadowing is legal. Before this code the program failed at codegen ("Identifier already declared"); a `defer` in the block made it compile. Direction: newly-rejecting in name only (every rejected program already failed at codegen). (S430 round 5; emitted at `compiler/src/validators/lint-redeclare.ts`.) | Error |
 | E-SCOPE-010 | §20.4 | Developer declares variable with reserved binding name (`route`, `session`) **(reserved-binding trigger spec-ahead, S265 — not fired; E-SCOPE-010 currently fires only for a DUPLICATE file-scope `let`/`const`)** | Error |
 | E-SCOPE-011 | §20.4 | Access to undeclared route parameter name **(Reserved / spec-ahead, S263 — no fire site: the undeclared-route-param check is spec-ahead — `route.params` is not typer-supported for pages and no param-name allow-list exists. Excluded from the freeze fireable set.)** | Error |
 | E-SCOPE-012 | §20.5 | `session` accessed outside a server-escalated function body **(LIVE, S265 (i29e) — the §20.5 server `session` establishment builtin is built; bare `session` is bound into server-escalated scopes and auto-escalates its enclosing function, so a `session` reference that is NOT server-escalated (e.g. top-level `${ }` logic) fires this. Distinct from the `@session` client projection.)** | Error |
@@ -20331,6 +20376,8 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | A bare call to a failable function (declared `!` or CPS-implicit `!`) inside a deferred body is not handled in place with `!{}` (or a `match`). `?` is excluded and an enclosing `!` does not cover it; inside a deferred body this REPLACES E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call. **Provenance:** `ruling:user-voice-S430-P3`. ALSO (S430 round 3): a `!{}` handler on a deferred call that has no catch-all `\| _ :>` arm — a transport failure outside the declared enum (a server / CPS callee's `CpsError`) would otherwise propagate out of the `finally`. (S430; emitted at `compiler/src/type-system.ts`, the function-body §19 walker, and — for the totality limb — `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `defer` outside a function-declaration body: the top level of a `${ }` logic block, an `on mount` body, a markup / state-block body — page/module initialisation with no single block exit — or (stage-1 limitation) an arrow-function / function-expression body, which the front-ends carry as host-expression text. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-SERVER-IN-SPLIT | §19.16.5 | A deferred body that is itself server-tier (own `?{}` SQL, a server-only resource, protected-field access, or a call to a server-escalated function) in a function the compiler body-splits (§19.9.9) — OR (S430 review) a `defer` of any tier nested inside a top-level statement the split places on the server (e.g. an `if` whose branch holds a `?{}`). Either way the deferred body would run inside a server batch, which ends before the later batches and client continuations — the premature release §19.16.5 forbids; rejected (fail closed) rather than lowered wrongly. The message names the concrete trigger (query, server-only resource, or the callee the compiler placed server-side). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/route-inference.ts`, the CPS-eligibility caller.) | Error |
+| E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `defer` written in a bare `{ }` block statement, or as a single-statement (unbraced) `match` / `!{}` handler arm (`.A :> defer D()`). The front-ends carry those bodies as text (the native bridge flattens bare blocks), so the `defer` would never be parsed or lowered — or would silently attach to the enclosing block. Also: a `defer` directly in an arm of a `match` / `if` / `for` used for its VALUE (a value-form expression, or a `match` that is a `fn`'s implicit-return tail) — the defer block would capture the arm's result (measured: the produced value was lost). Rejected in stage 1; supporting bare blocks needs them parsed structurally (a separate arc). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
+| E-DEFER-LATER-SHADOW | §19.16.2 | A deferred statement reads a name that a `let` / `const` / `lin` declaration LATER in its enclosing block chain (re)binds. The deferred statement runs at the block's exit, where it would capture the later binding (silently shadowing the one in scope at the `defer`) or read it before initialisation. Names the binding and both sites; the author renames one. Fails closed when the deferred statement cannot be analysed as a tree and the chain declares later names. A later `function` declaration is not a later binding (hoisted). **Provenance:** `ruling:user-voice-S430-P3` (S430 round-5 review). (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute (S196 — render-expression) | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's held enum has no `renders` clause; reuses the §19.6.6 E-ERROR-005 per-variant exhaustiveness logic at the render-expression fire site (S196) | Error |
 | E-RENDER-NOT-ENUM | §19.15.3 | `<render of=X>` — X's static type resolves to a non-enum; the render-expression is enum-scoped (S196) | Error |

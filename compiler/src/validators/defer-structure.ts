@@ -103,6 +103,12 @@ export type TextBody = { text: string | null; label: string };
 
 export function textBodiesOf(n: Node): TextBody[] {
   const out: TextBody[] = [];
+  // A bare `{ … }` block statement: the live front-end carries it as a
+  // `bare-expr` whose text is the whole block (S430 round 5).
+  if (n.kind === "bare-expr" && typeof n.expr === "string" && (n.expr as string).trim().startsWith("{") &&
+      !n._onMountEffect) {
+    out.push({ text: n.expr as string, label: "a bare `{ }` block" });
+  }
   if (n.kind === "guarded-expr" && Array.isArray(n.arms)) {
     for (const a of n.arms as Node[]) {
       if (a && typeof a.handler === "string" && (a.handler as string).trim() !== "") {
@@ -132,38 +138,47 @@ export function textBodiesOf(n: Node): TextBody[] {
 }
 
 /**
- * Does host-expression / statement TEXT contain a `defer` STATEMENT? Answered
- * by PARSING it with the native statement parser (which lexes strings, regex
- * and template literals properly and recognizes `defer` exactly as §19.16.1
- * defines it), then looking for a `Defer` node in the tree — never by matching
- * the word. `asExpression` wraps the text as an initializer (a lambda /
- * function-expression escape-hatch); otherwise it is parsed as statements (an
- * `on mount { }` body). Unparseable text answers `false`: it is not evidence
- * of a `defer`, and such text fails codegen's own emitted-JS gate regardless.
+ * Does host-expression / statement TEXT contain a node of one of `kinds` in
+ * the NATIVE parser's tree (`Defer`, `Yield`, …)? Answered by PARSING the text
+ * with the native statement parser (which lexes strings, regex and template
+ * literals properly and recognizes `defer` exactly as §19.16.1 defines it) —
+ * never by matching the word. The text is parsed inside a probe GENERATOR
+ * function so `yield` is grammatical; `asExpression` parses it as an
+ * initializer (a lambda / function-expression / expression escape-hatch),
+ * otherwise as statements (an `on mount { }` body, a bare block, an arm body).
+ * Unparseable text answers `false`: it is not evidence of the construct, and
+ * such text fails codegen's own emitted-JS gate regardless.
  */
-export function textContainsDeferStatement(text: string, asExpression: boolean): boolean {
+export function textContainsNativeKind(text: string, asExpression: boolean, kinds: readonly string[]): boolean {
   /* eslint-disable @typescript-eslint/no-require-imports */
   const { lex } = require("../../native-parser/lex.js") as { lex: (s: string) => unknown[] };
   const { parseProgram } = require("../../native-parser/parse-stmt.js") as {
     parseProgram: (t: unknown[], s: string) => { body: unknown[]; errors: unknown[] };
   };
   /* eslint-enable @typescript-eslint/no-require-imports */
-  const src = asExpression ? "let __scrml_defer_probe__ = " + text : text;
+  const inner = asExpression ? "let __scrml_probe_value__ = " + text : text;
+  const src = "function* __scrml_probe__() {\n" + inner + "\n}";
   let tree: { body: unknown[]; errors: unknown[] };
   try {
     tree = parseProgram(lex(src), src);
   } catch {
     return false;
   }
+  const want = new Set(kinds);
   let found = false;
   const seen = new WeakSet<object>();
   const walk = (n: unknown): void => {
     if (found || !n || typeof n !== "object" || seen.has(n as object)) return;
     seen.add(n as object);
     if (Array.isArray(n)) { for (const c of n) walk(c); return; }
-    if ((n as Node).kind === "Defer") { found = true; return; }
+    if (want.has((n as Node).kind as string)) { found = true; return; }
     for (const k of Object.keys(n as object)) if (k !== "span") walk((n as Node)[k]);
   };
   walk(tree.body);
   return found;
+}
+
+/** Does TEXT contain a `defer` statement (parsed; see textContainsNativeKind)? */
+export function textContainsDeferStatement(text: string, asExpression: boolean): boolean {
+  return text.includes("defer") && textContainsNativeKind(text, asExpression, ["Defer"]);
 }

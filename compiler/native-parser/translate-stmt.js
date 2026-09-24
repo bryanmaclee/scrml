@@ -153,6 +153,13 @@ function appendTranslatedStmt(out, stmt, counter) {
             if (Array.isArray(stmt.body)) {
                 for (const inner of stmt.body) {
                     appendTranslatedStmt(out, inner, counter);
+                    // S430 §19.16.2 — flattening would silently re-attach a
+                    // `defer` written directly in the bare block to the
+                    // ENCLOSING block. Mark it so the defer checker fails closed
+                    // (E-DEFER-UNSUPPORTED-SITE) instead.
+                    if (inner && inner.kind === StmtKind.Defer && out.length > 0) {
+                        out[out.length - 1].inBareBlock = true;
+                    }
                 }
             }
             return;

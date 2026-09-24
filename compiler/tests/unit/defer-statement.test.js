@@ -30,6 +30,7 @@ import { buildAST } from "../../src/ast-builder.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { compileScrml } from "../../src/api.js";
 import { runDeferChecks } from "../../src/validators/lint-defer.ts";
+import { runRedeclareChecks } from "../../src/validators/lint-redeclare.ts";
 import { lowerDeferList, lowerDefers, isDeferLoweredTry } from "../../src/codegen/lower-defer.ts";
 import { deferStackRunnerLines } from "../../src/codegen/emit-control-flow.ts";
 import { normalizeChunkToken } from "../helpers/chunk-scope.js";
@@ -1080,5 +1081,278 @@ log.push("after"); })();`;
     const innerJs = js.slice(js.indexOf("function inner("));
     // the nested function's own non-total handler keeps its propagation
     expect(innerJs).toMatch(/else \{ return /);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §12 — round 5: later-shadow, redeclaration, unsupported sites, yield
+// ---------------------------------------------------------------------------
+
+describe("§12 F1 — E-DEFER-LATER-SHADOW (a deferred read of a name declared later)", () => {
+  const codes = (logic) => runDeferChecks(liveAST(wrap(logic)).ast).map((d) => d.code);
+  test("const declared after the defer, shadowing a file-level one", () => {
+    expect(codes(`
+      const x = "outer"
+      function D(s) { log(s) }
+      function f() {
+        defer D("x=" + x + ";")
+        const x = "inner"
+        return x
+      }`)).toEqual(["E-DEFER-LATER-SHADOW"]);
+  });
+  test("TDZ variant — the later declaration after an early return", () => {
+    expect(codes(`
+      const x = "outer"
+      function D(s) { log(s) }
+      function f(c) {
+        defer D(x)
+        if (c) { return "early" }
+        const x = "inner"
+        return x
+      }`)).toEqual(["E-DEFER-LATER-SHADOW"]);
+  });
+  test("a later declaration in an ENCLOSING block of the chain", () => {
+    expect(codes(`
+      function D(s) { log(s) }
+      function f(c) {
+        if (c) {
+          defer D(y)
+        }
+        let y = "later"
+        return y
+      }`)).toEqual(["E-DEFER-LATER-SHADOW"]);
+  });
+  test("a destructured later declaration", () => {
+    expect(codes(`
+      function D(s) { log(s) }
+      function f() {
+        defer D(a)
+        const { a } = { a: "A" }
+        return a
+      }`)).toEqual(["E-DEFER-LATER-SHADOW"]);
+  });
+  test("clean: declared BEFORE the defer; declared inside the deferred body; a later function; an unrelated later name", () => {
+    expect(codes(`
+      function D(s) { log(s) }
+      function f() {
+        const z = "z"
+        defer D(z)
+        defer {
+          const q = "q"
+          D(q)
+        }
+        defer helper()
+        const q = "other"
+        const unrelated = 1
+        function helper() { D("h") }
+        return q + unrelated
+      }`)).toEqual([]);
+  });
+  test("the message names the binding and both sites", () => {
+    const d = runDeferChecks(liveAST(wrap(`
+      const x = "outer"
+      function D(s) { log(s) }
+      function f() {
+        defer D(x)
+        const x = "inner"
+        return x
+      }`)).ast)[0];
+    expect(d.message).toContain("`x`");
+    expect(d.message).toMatch(/line \d+\).*line \d+/s);
+  });
+  test("both front-ends agree", () => {
+    const src = wrap(`
+      const x = "outer"
+      function D(s) { log(s) }
+      function f() {
+        defer D(x)
+        const x = "inner"
+        return x
+      }`);
+    expect(runDeferChecks(nativeAST(src).ast).map((d) => d.code)).toEqual(["E-DEFER-LATER-SHADOW"]);
+  });
+});
+
+describe("§12 F2 — E-SCOPE-REDECLARE (a block binds each name once), independent of defer", () => {
+  const codes = (logic) => runRedeclareChecks(liveAST(wrap(logic)).ast).map((d) => d.code);
+  test("let redeclaring a parameter; let redeclaring a same-block let; function redeclaring a const", () => {
+    expect(codes(`
+      function p1(x) { let x = "inner"
+        return x }
+      function p2() { let y = 1
+        let y = 2
+        return y }
+      function p3() { const z = 1
+        function z() { return 2 }
+        return z }`)).toEqual(["E-SCOPE-REDECLARE", "E-SCOPE-REDECLARE", "E-SCOPE-REDECLARE"]);
+  });
+  test("nested-block shadowing of a parameter or outer binding is legal", () => {
+    expect(codes(`
+      function p4(w) {
+        let v = 1
+        if (true) {
+          let w = 3
+          let v = 2
+          return w + v
+        }
+        return w
+      }`)).toEqual([]);
+  });
+  test("adding a defer does not make a redeclared parameter compile", () => {
+    const withDefer = compile(wrap(`
+      <trace> = ""
+      function D(s: string) { @trace = @trace + s }
+      function f(x) {
+        defer D("x=" + x + ";")
+        let x = "inner"
+        return x
+      }`, `<button onclick=f("a")>go</button><p>\${@trace}</p>`));
+    expect(count(withDefer, "E-SCOPE-REDECLARE")).toBe(1);
+  });
+  test("both front-ends agree", () => {
+    const src = wrap(`
+      function p1(x) {
+        let x = "inner"
+        return x
+      }`);
+    expect(runRedeclareChecks(nativeAST(src).ast).map((d) => d.code)).toEqual(["E-SCOPE-REDECLARE"]);
+  });
+});
+
+describe("§12 F3/F4 — bare blocks and single-statement arms are not defer sites (fail closed)", () => {
+  const codes = (logic) => runDeferChecks(liveAST(wrap(logic)).ast).map((d) => d.code);
+  const nativeCodes = (logic) => runDeferChecks(nativeAST(wrap(logic)).ast).map((d) => d.code);
+  const bare = `
+      function D(s) { log(s) }
+      function f() {
+        {
+          defer D("x;")
+          D("b;")
+        }
+        D("after;")
+      }`;
+  test("defer in a bare { } block -> E-DEFER-UNSUPPORTED-SITE (live + native)", () => {
+    expect(codes(bare)).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+    expect(nativeCodes(bare)).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+  });
+  test("defer as a single-statement match arm -> E-DEFER-UNSUPPORTED-SITE", () => {
+    expect(codes(`
+      type Mode:enum = { A, B }
+      function D(s) { log(s) }
+      function f(m: Mode) {
+        match m {
+          .A :> defer D("a;")
+          .B :> D("b;")
+        }
+      }`)).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+  });
+  test("a braced match arm block IS a defer site", () => {
+    expect(codes(`
+      type Mode:enum = { A, B }
+      function D(s) { log(s) }
+      function f(m: Mode) {
+        match m {
+          .A :> {
+            defer D("a;")
+            D("in;")
+          }
+          .B :> D("b;")
+        }
+      }`)).toEqual([]);
+  });
+  test("a bare block / arm that merely mentions the word defer is not flagged", () => {
+    expect(codes(`
+      function defer(x) { return x }
+      function f() {
+        {
+          log("defer me")
+          defer(1)
+        }
+      }`)).toEqual([]);
+  });
+});
+
+describe("§12 F5 — yield in a deferred body", () => {
+  const codes = (logic) => runDeferChecks(liveAST(wrap(logic)).ast).map((d) => d.code);
+  test("`defer yield 99` in a generator -> E-DEFER-CONTROL-FLOW", () => {
+    expect(codes(`
+      function* gen() {
+        defer yield 99
+        yield 1
+      }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+  });
+  test("a yield in a deferred block / an expression position -> E-DEFER-CONTROL-FLOW", () => {
+    expect(codes(`
+      function* other() { yield 2 }
+      function* gen() {
+        defer {
+          let v = yield* other()
+        }
+        yield 1
+      }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+  });
+  test("a yield in a generator NESTED in the deferred body is its own scope", () => {
+    expect(codes(`
+      function* gen() {
+        defer {
+          function* inner() { yield 1 }
+          log(inner)
+        }
+        yield 1
+      }`)).toEqual([]);
+  });
+});
+
+describe("§12 value-producing arms are not defer sites (the value would be captured)", () => {
+  const codes = (logic) => runDeferChecks(liveAST(wrap(logic)).ast).map((d) => d.code);
+  test("value-form match arm, value-form if arm, fn-tail match statement arm", () => {
+    expect(codes(`
+      type Mode:enum = { A, B }
+      function D(s) { log(s) }
+      function f(m: Mode) {
+        let k = match m {
+          .A :> {
+            defer D("a;")
+            let t = 7
+            t
+          }
+          .B :> 2
+        }
+        return k
+      }
+      function h(c: boolean) {
+        let k = if (c) {
+          defer D("h;")
+          5
+        } else {
+          6
+        }
+        return k
+      }
+      fn g(m: Mode) -> number {
+        match m {
+          .A :> {
+            defer log("g")
+            let t = 7
+            t
+          }
+          .B :> 2
+        }
+      }`)).toEqual(["E-DEFER-UNSUPPORTED-SITE", "E-DEFER-UNSUPPORTED-SITE", "E-DEFER-UNSUPPORTED-SITE"]);
+  });
+  test("a match STATEMENT arm that is not a value tail stays a defer site", () => {
+    expect(codes(`
+      type Mode:enum = { A, B }
+      function D(s) { log(s) }
+      function f(m: Mode) {
+        match m {
+          .A :> {
+            defer D("a;")
+            D("in;")
+          }
+          .B :> D("b;")
+        }
+        return 1
+      }`)).toEqual([]);
   });
 });

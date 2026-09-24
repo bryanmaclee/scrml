@@ -72,6 +72,7 @@ import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 import { runDeferChecks } from "./validators/lint-defer.ts";
+import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
 import { forbiddenJsDiagnosticsForDefault, nativeForbiddenJsAttrDiagnostics } from "./native-walker/forbidden-js-native.ts";
 
 // ---------------------------------------------------------------------------
@@ -1781,6 +1782,15 @@ function _compileScrmlImpl(options = {}) {
   for (const tabResult of tabResults) {
     const deferDiags = stage("DEFER-CHECKS", () => runDeferChecks(tabResult.ast));
     collectErrors("DEFER-CHECKS", deferDiags);
+  }
+
+  // §7.3.3 (S430 round 5) — a block binds each name once: a `let`/`const`/`lin`/
+  // `function` redeclaring a same-block binding or a parameter is
+  // E-SCOPE-REDECLARE (before this it failed at codegen as an unexplained
+  // E-CODEGEN-INVALID-LOGIC — and a `defer` made it silently legal).
+  for (const tabResult of tabResults) {
+    const redeclDiags = stage("SCOPE-REDECLARE", () => runRedeclareChecks(tabResult.ast));
+    collectErrors("SCOPE-REDECLARE", redeclDiags);
   }
 
   // Stage 3.1: Module Resolution
