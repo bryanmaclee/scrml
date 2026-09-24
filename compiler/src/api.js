@@ -65,6 +65,8 @@ import { runEStateBlockStatementForm } from "./lint-e-state-block-statement-form
 import { runWInputStateMarkupNonreactive } from "./lint-w-input-state-markup-nonreactive.js";
 import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
+import { readHostImportCapabilities, validateHostImports } from "./host-import.js";
+import { parse as acornParse } from "acorn";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
@@ -581,64 +583,125 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, em
   // If source dir and output dir are the same, no rewriting needed
   if (sourceDir === outDir) return jsCode;
 
+  // `.ts` / `.mts` / `.mjs` as well as `.js`: a §21.3.1 `import:host` names a
+  // TypeScript or JavaScript host module and is emitted as this same static
+  // import, so its specifier needs the same source->output re-base.
+  const REBASED_EXT_RE = /\.(?:js|mjs|ts|mts)$/;
+
+  /**
+   * The re-based specifier for one relative import, or null to leave it.
+   * @param {string} relPath — the specifier as emitted (source-relative)
+   */
+  const rebase = (relPath) => {
+    if (!(relPath.startsWith("./") || relPath.startsWith("../"))) return null;
+    if (!REBASED_EXT_RE.test(relPath)) return null;
+    // F-COMPILE-002: skip .server.js / .client.js — these are scrml output
+    // artefacts whose specifier is ALREADY expressed in dist coordinates by
+    // the emitter, so relocating it here would double-apply the transform.
+    // (D-4, S296: the older justification here — "they live in the dist tree
+    // at the same relative position as their .scrml source" — is FALSE. The
+    // dist tree strips a leading `pages/` segment per SPEC §47.9.5, so a
+    // `pages/` file does NOT sit at its source-relative position. The skip is
+    // still correct, but only because `emit-server.ts`
+    // `distRelativeServerSpecifier` now emits a dist-space specifier and the
+    // client half computes its URLs in dist space too.)
+    if (relPath.endsWith(".server.js") || relPath.endsWith(".client.js")) {
+      return null;
+    }
+    // Resolve the import path from the source file's directory
+    const absImportPath = resolve(sourceDir, relPath);
+    // A scrml-emitted library module (`<base>.js`) — the §64 standalone-tool /
+    // library-to-library import case (`import { fn } from "./lib.js"`). Detect
+    // it in SOURCE space: the `.js` corresponds to a `.scrml` source THIS build
+    // actually compiled (`emittedScrmlSources`) — NOT a filesystem basename
+    // coincidence (a genuinely vendored `./util.js` next to an unrelated,
+    // uncompiled `./util.scrml` still relocates via the generic branch below).
+    //
+    // g-tool-artifact-import-specifier-dangles (S317): the OLD code returned
+    // the source-space specifier VERBATIM here on the false premise that a
+    // `<base>.js` sits at its source-relative position in dist. That is the
+    // SAME assumption S296 already debunked for `.server.js`: the dist tree
+    // strips a leading `pages/` segment (SPEC §47.9.5), so a `pages/mytool.scrml`
+    // tool lands at `dist/mytool.js` and its source-space `../models/lib.js`
+    // overshoots dist by one segment → green compile, `Cannot find module` at
+    // runtime. Fix: re-base to DIST space via the SAME `distRelativeLocalSpecifier`
+    // S296 gave the server half (here with the `.js` extension). On a project
+    // with no `pages/` segment the two spaces coincide → byte-identical emit.
+    // Falls back to the verbatim skip when no `outputBaseDir` is threaded
+    // (legacy single-file callers with no dist tree to re-base against).
+    if (
+      relPath.endsWith(".js") &&
+      emittedScrmlSources &&
+      emittedScrmlSources.has(absImportPath.replace(/\.js$/, ".scrml"))
+    ) {
+      if (outputBaseDir) {
+        return distRelativeLocalSpecifier(
+          relPath.replace(/\.js$/, ".scrml"), sourceFilePath, outputBaseDir, ".js",
+        );
+      }
+      return null;
+    }
+    // Compute the relative path from the directory the file is WRITTEN to.
+    // Callers pass the emitted file's OWN dist directory (not the output
+    // root): a nested `<out>/sub/x.js` previously got a specifier computed
+    // from `<out>/`, one level short, and failed at runtime. This becomes an
+    // emitted import specifier, so posix-normalize it (GitHub #18) — a raw
+    // Windows `relative()` result would embed `\` and break the import.
+    let newRelPath = toPosixSpecifier(relative(outDir, absImportPath));
+    // Ensure it starts with ./ or ../
+    if (!newRelPath.startsWith('.')) newRelPath = './' + newRelPath;
+    return newRelPath;
+  };
+
+  // Structural path: parse the emitted module and rewrite exactly the
+  // `source` string of each top-level `import` declaration — any number per
+  // line, any clause shape (named / default / namespace / side-effect), and
+  // never a look-alike inside a string, template or comment.
+  const sources = staticImportSources(jsCode);
+  if (sources !== null) {
+    let out = jsCode;
+    for (let k = sources.length - 1; k >= 0; k--) {
+      const src = sources[k];
+      const next = rebase(src.value);
+      if (next === null || next === src.value) continue;
+      const quote = out[src.start];
+      out = out.slice(0, src.start) + quote + next + quote + out.slice(src.end);
+    }
+    return out;
+  }
+
+  // Fallback (the text is not a parseable module — e.g. a fragment): the
+  // line-anchored form. Trailing blanks are tolerated (the library emitter
+  // pads a rewritten `import:host` line).
   return jsCode.replace(
-    /^(import\s+(?:\{[^}]*\}|[^\s]+)\s+from\s+)(["'])(\.\.?\/[^"']+\.js)\2(;?)$/gm,
+    /^(import\s+(?:\{[^}]*\}|[^\s]+)\s+from\s+)(["'])(\.\.?\/[^"']+\.(?:js|mjs|ts|mts))\2(;?)[ \t]*$/gm,
     (match, prefix, quote, relPath, semi) => {
-      // F-COMPILE-002: skip .server.js / .client.js — these are scrml output
-      // artefacts whose specifier is ALREADY expressed in dist coordinates by
-      // the emitter, so relocating it here would double-apply the transform.
-      // (D-4, S296: the older justification here — "they live in the dist tree
-      // at the same relative position as their .scrml source" — is FALSE. The
-      // dist tree strips a leading `pages/` segment per SPEC §47.9.5, so a
-      // `pages/` file does NOT sit at its source-relative position. The skip is
-      // still correct, but only because `emit-server.ts`
-      // `distRelativeServerSpecifier` now emits a dist-space specifier and the
-      // client half computes its URLs in dist space too.)
-      if (relPath.endsWith(".server.js") || relPath.endsWith(".client.js")) {
-        return match;
-      }
-      // Resolve the import path from the source file's directory
-      const absImportPath = resolve(sourceDir, relPath);
-      // A scrml-emitted library module (`<base>.js`) — the §64 standalone-tool /
-      // library-to-library import case (`import { fn } from "./lib.js"`). Detect
-      // it in SOURCE space: the `.js` corresponds to a `.scrml` source THIS build
-      // actually compiled (`emittedScrmlSources`) — NOT a filesystem basename
-      // coincidence (a genuinely vendored `./util.js` next to an unrelated,
-      // uncompiled `./util.scrml` still relocates via the generic branch below).
-      //
-      // g-tool-artifact-import-specifier-dangles (S317): the OLD code returned
-      // the source-space specifier VERBATIM here on the false premise that a
-      // `<base>.js` sits at its source-relative position in dist. That is the
-      // SAME assumption S296 already debunked for `.server.js`: the dist tree
-      // strips a leading `pages/` segment (SPEC §47.9.5), so a `pages/mytool.scrml`
-      // tool lands at `dist/mytool.js` and its source-space `../models/lib.js`
-      // overshoots dist by one segment → green compile, `Cannot find module` at
-      // runtime. Fix: re-base to DIST space via the SAME `distRelativeLocalSpecifier`
-      // S296 gave the server half (here with the `.js` extension). On a project
-      // with no `pages/` segment the two spaces coincide → byte-identical emit.
-      // Falls back to the verbatim skip when no `outputBaseDir` is threaded
-      // (legacy single-file callers with no dist tree to re-base against).
-      if (
-        emittedScrmlSources &&
-        emittedScrmlSources.has(absImportPath.replace(/\.js$/, ".scrml"))
-      ) {
-        if (outputBaseDir) {
-          const distSpec = distRelativeLocalSpecifier(
-            relPath.replace(/\.js$/, ".scrml"), sourceFilePath, outputBaseDir, ".js",
-          );
-          return `${prefix}${quote}${distSpec}${quote}${semi}`;
-        }
-        return match;
-      }
-      // Compute the relative path from the output directory. This becomes an
-      // emitted import specifier, so posix-normalize it (GitHub #18) — a raw
-      // Windows `relative()` result would embed `\` and break the import.
-      let newRelPath = toPosixSpecifier(relative(outDir, absImportPath));
-      // Ensure it starts with ./ or ../
-      if (!newRelPath.startsWith('.')) newRelPath = './' + newRelPath;
-      return `${prefix}${quote}${newRelPath}${quote}${semi}`;
+      const next = rebase(relPath);
+      return next === null ? match : `${prefix}${quote}${next}${quote}${semi}`;
     }
   );
+}
+
+/**
+ * The `source` literal of every top-level static `import` declaration in an
+ * emitted ES module, as `{ value, start, end }` (start/end include the
+ * quotes), in source order. Null when the text does not parse as a module.
+ * @param {string} jsCode
+ */
+function staticImportSources(jsCode) {
+  let program;
+  try {
+    program = acornParse(jsCode, { ecmaVersion: "latest", sourceType: "module", allowHashBang: true });
+  } catch {
+    return null;
+  }
+  const out = [];
+  for (const node of program.body) {
+    if (node && node.type === "ImportDeclaration" && node.source && typeof node.source.value === "string") {
+      out.push({ value: node.source.value, start: node.source.start, end: node.source.end });
+    }
+  }
+  return out;
 }
 
 /**
@@ -1173,6 +1236,19 @@ function _compileScrmlImpl(options = {}) {
     }
   }
 
+  // Stage 1.5: project manifest — `[capabilities] host-import` (SPEC §22.13).
+  // "The manifest entry is read at compile-time before any parse begins." Read
+  // once per compile (not memoized across compiles, so a manifest edit takes
+  // effect on the next build) for every input file; the per-file capability
+  // gates `import:host` (§21.3.1) in `validateHostImports` right after TAB.
+  // An unrecognised `host-import` value is E-MANIFEST-001, reported once per
+  // manifest.
+  const hostImportCaps = stage("MANIFEST", () =>
+    readHostImportCapabilities(inputFiles.map((f) => resolve(f))));
+  for (const e of hostImportCaps.errors) {
+    collectErrors("MANIFEST", [e], e.filePath || null);
+  }
+
   // Stage 2: Block Splitter (per-file)
   // When selfHostModules.splitBlocks is provided (or stageOverrides names the stage), the validated stage seam (pipeline-seam.ts) substitutes it.
   const _splitBlocks = seams.pick("BS", splitBlocks);
@@ -1378,6 +1454,22 @@ function _compileScrmlImpl(options = {}) {
     const bsResult = bsResults[i];
     const result = stage("TAB", () => _buildAST(bsResult));
     collectErrors("TAB", result.errors, result.filePath || bsResult.filePath);
+    // §21.3.1 `import:host` gate — placement (E-IMPORT-003), host-tag
+    // (E-IMPORT-009) and the §22.13 manifest allow-list (E-IMPORT-008). Shared
+    // by both front-ends, run before any later stage consumes the AST.
+    {
+      const _fp = result.filePath || bsResult.filePath;
+      // Fast path: the gate walks the whole AST, so skip a file whose source
+      // does not contain the substring `import` at all. That test is a strict
+      // SUPERSET of every form either parser accepts — each one needs the
+      // `import` keyword spelled out, with anything (comments, newlines) after
+      // it — so it can only cost a walk, never skip a real `import:host`. (A
+      // narrower `import\s*:` test was a bypass: `import /* c */ :host`.)
+      const _src = sourceByFile.get(_fp);
+      if (typeof _src !== "string" || _src.includes("import")) {
+        collectErrors("TAB", validateHostImports(result.ast, _fp, hostImportCaps.byFile.get(_fp) || null), _fp);
+      }
+    }
     // issue #12 blast radius — a `?{}` SQL block inside a CONCISE / curried arrow
     // body (`(x) => ?{...}`, `(a)=>(b)=>{?{...}}`, `.map(x => ?{...})`) leaks as the
     // generic E-CODEGEN-INVALID-LOGIC (and, when the fn does not escalate to server,
@@ -3009,14 +3101,21 @@ function _compileScrmlImpl(options = {}) {
       const emittedScrmlSources = new Set(cgResult.outputs.keys());
       for (const [filePath, output] of cgResult.outputs) {
         const base = basename(filePath, ".scrml");
+        // The directory this file's artifacts are written to — the same
+        // computation as the write phase's `pathFor` — so the gated bytes are
+        // the bytes that get written (import specifiers are re-based from it).
+        const _gateRelDir = cgOutputBaseDir
+          ? stripPagesPrefix(dirname(relative(cgOutputBaseDir, filePath)))
+          : ".";
+        const gateDir = (_gateRelDir === "." || _gateRelDir === "") ? outputDir : join(outputDir, _gateRelDir);
         // §64 — standalone-tool module (kind="tool"): a single runnable `<base>.js`.
         if (output.toolJs) {
-          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
+          let s = rewriteRelativeImportPaths(output.toolJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.js`, s);
         }
         if (output.serverJs) {
-          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
+          let s = rewriteRelativeImportPaths(output.serverJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.server.js`, s);
         }
@@ -3028,7 +3127,7 @@ function _compileScrmlImpl(options = {}) {
         // carry `libraryJs`; pure library-mode outputs never carry `clientJs` —
         // so this is byte-identical for both.
         if (output.libraryJs) {
-          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
+          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.js`, s);
         }
@@ -3325,13 +3424,13 @@ function _compileScrmlImpl(options = {}) {
         // (NO html / client / CSRF / server-route split). Written and returned.
         if (output.toolJs) {
           const { targetDir } = pathFor(filePath, ".js");
-          let s = rewriteRelativeImportPaths(output.toolJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
+          let s = rewriteRelativeImportPaths(output.toolJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
           if (writeOutput(filePath, ".js", s)) fileCount++;
         }
         if (output.serverJs) {
           const { targetDir } = pathFor(filePath, ".server.js");
-          let s = rewriteRelativeImportPaths(output.serverJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
+          let s = rewriteRelativeImportPaths(output.serverJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
           if (writeOutput(filePath, ".server.js", s)) fileCount++;
         }
@@ -3343,7 +3442,7 @@ function _compileScrmlImpl(options = {}) {
         // outputs carry only one, so both are byte-identical.
         if (output.libraryJs) {
           const { targetDir } = pathFor(filePath, ".js");
-          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, outputDir, emittedScrmlSources, cgOutputBaseDir);
+          let s = rewriteRelativeImportPaths(output.libraryJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir);
           s = rewriteStdlibImports(s, targetDir, outputDir, bundledStdlib);
           if (writeOutput(filePath, ".js", s)) fileCount++;
         }
