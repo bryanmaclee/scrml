@@ -37,6 +37,11 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "fs";
 import { fileURLToPath } from "node:url";
+// S430 review — the @gap marker grammar has ONE parser (state.ts's attribute-bag parse + its
+// integrity guards) and ONE status classifier. flograph used to carry a second, fixed-order regex
+// that required `status=` to be the LAST attribute, so every marker with a trailing `locus=` /
+// `prov=` (~570 of ~1,100) was invisible here — the S307 defect, surviving in a sibling.
+import { parseGapMarkers, classifyGapStatus } from "./state.ts";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url)).replace(/\/$/, "");
 const SUPPORT = `${ROOT}/../scrml-support`;
@@ -77,7 +82,23 @@ export type Node = { id: string; kind: string; status: string; sev: string | nul
 export type Edge = { from: string; type: string; target: string; verified: boolean; file: string; line: number };
 
 // ── Parse ────────────────────────────────────────────────────────────────────
-const GAP_RE = /<!--\s*@gap\s+id=(\S+)\s+sev=(HIGH|MED|LOW|NOMINAL)\s+status=(\S+)\s*-->/;
+/**
+ * The @gap marker on one line, through state.ts's parser. A marker state.ts refuses (real id,
+ * malformed sev/status) is fatal in the ledger state.ts itself guards (docs/known-gaps.md) and is
+ * collected as a warning elsewhere — `--with-support` reads design docs that may quote marker
+ * TEMPLATES, and a template must not take the whole graph down.
+ */
+export const gapWarnings: string[] = [];
+function gapOnLine(line: string, file: string, lineNo: number): { id: string; sev: string; status: string } | null {
+  if (!line.includes("@gap")) return null;
+  try {
+    return parseGapMarkers(line)[0] ?? null;
+  } catch (e) {
+    if (file.endsWith("/docs/known-gaps.md")) throw e;
+    gapWarnings.push(`${rel(file)}:${lineNo}: @gap marker not parseable — ${String((e as Error).message).split("\n")[0]}`);
+    return null;
+  }
+}
 // ⛑ S416 — exported so `compiler/tests/unit/marker-parser-pins.test.js` can pin the REAL
 // regex rather than a copy. The pin harness exists because a test that RE-DECLARES one of
 // these five marker regexes passes with the fix reverted (the mutant survives), which is the
@@ -136,9 +157,9 @@ function parseFile(file: string, nodes: Map<string, Node>, dupes: string[], edge
     if (/^\s*```/.test(line)) { inFence = !inFence; continue; }
 
     // node tokens — scanned regardless of fence so @gap count matches state.ts + defines boundaries
-    const gap = line.match(GAP_RE);
+    const gap = gapOnLine(line, file, i + 1);
     if (gap) {
-      const n: Node = { id: gap[1], kind: "gap", status: gap[3], sev: gap[2], file, line: i + 1 };
+      const n: Node = { id: gap.id, kind: "gap", status: gap.status, sev: gap.sev, file, line: i + 1 };
       if (nodes.has(n.id) && nodes.get(n.id)!.kind !== "doc") dupes.push(`${n.id} (${rel(file)}:${i + 1})`);
       nodes.set(n.id, n);
       current = n.id;
@@ -314,7 +335,12 @@ function report(corpus: string[]) {
   const gapByStatusSev: Record<string, number> = {};
   for (const n of nodes.values()) {
     byKind[n.kind] = (byKind[n.kind] ?? 0) + 1;
-    if (n.kind === "gap") gapByStatusSev[`${n.sev} ${n.status}`] = (gapByStatusSev[`${n.sev} ${n.status}`] ?? 0) + 1;
+    // Counted by the state.ts CLASSIFIER, not the literal status word — `in-progress`/`narrowed`/… are
+    // open there, so a literal "open" match could never round-trip.
+    if (n.kind === "gap") {
+      const k = `${n.sev} ${classifyGapStatus(n.status) ?? n.status}`;
+      gapByStatusSev[k] = (gapByStatusSev[k] ?? 0) + 1;
+    }
   }
   const byType: Record<string, number> = {};
   for (const e of edges) byType[e.type] = (byType[e.type] ?? 0) + 1;
@@ -326,6 +352,7 @@ function report(corpus: string[]) {
   // S430 P7 — `status=carried` (owed by the bootstrap, xfail on impl#1) is its own column in state.ts,
   // never folded into open; report it beside the open figures rather than letting it vanish.
   console.log(`  GAP carried (owed by the bootstrap):   HIGH carried=${gapByStatusSev["HIGH carried"] ?? 0} · MED carried=${gapByStatusSev["MED carried"] ?? 0} · LOW carried=${gapByStatusSev["LOW carried"] ?? 0}`);
+  if (gapWarnings.length) console.log(`  @gap markers skipped (unparseable, outside the ledger): ${gapWarnings.length} — ${gapWarnings.slice(0, 3).join("; ")}`);
   console.log(`  edges:  ${edges.length}  (${Object.entries(byType).sort().map(([k, v]) => `${k}:${v}`).join(" ")})`);
 
   const ids = new Set(nodes.keys());

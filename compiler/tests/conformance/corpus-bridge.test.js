@@ -48,7 +48,7 @@ import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
   const cases = loadCases();
   const gaps = loadGapStatusIndex();
-  const tally = { xfail: 0, xpass: 0 };
+  const tally = { ran: 0, xfail: 0, xpass: 0 }; // `ran` = cases actually executed (honours -t)
 
   test("corpus is non-empty (cases discovered under conformance/cases/)", () => {
     expect(cases.length).toBeGreaterThan(0);
@@ -63,7 +63,7 @@ describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
 
   afterAll(() => {
     // The ratio, every run — an absorbing hatch is a number going up, visible without inspection.
-    console.log(xfailRatioLine(tally.xfail, cases.length, tally.xpass));
+    console.log(xfailRatioLine(tally.xfail, tally.ran, tally.xpass));
   });
 
   for (const c of cases) {
@@ -73,6 +73,7 @@ describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
       (c.expected["runtime-half-pending"] ? " [runtime-half-pending]" : runtime ? " [runtime]" : "") +
       (marked ? " [xfail]" : "");
     test(`${c.relDir} (${c.expected.id})${tag}`, async () => {
+      tally.ran++;
       if (marked) {
         // (c) an xfail-marked case: the verdict is the OUTCOME, and each way it can be wrong is a
         // distinct, named failure.

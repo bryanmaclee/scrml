@@ -81,3 +81,42 @@ Runtime half — forms/checkbox-check with expect.state = {agreed:false} (true i
 Restore all three files from backup -> bridge + unit 942 pass / 0 fail, top-level wrapper 908/0, `0 xfail of 906`, state.ts gap-counts PASS.
 
 - Commit subject of c002a0bb is still wrong ("WIP ... start"); branch is UNPUSHED, left as is per PA (squash-merge fixes it).
+
+## Round 3 (adversarial review of a5b36238 — fix round)
+- Merged origin/main (7b3fe980). Conflict in conformance/adapters/impl1-ts.ts: kept BOTH `IMPL_ID` and main's
+  `compileOverlay`/`setCompileOverlay`. §0 gap-counts regenerated over the merged ledger (HIGH 136 / MED 293 / LOW 106).
+- MED 1 (unstable tool signature): the runtime digest now hashes structured KEYS, not display text.
+  tool run -> `stdout:{expected, actual, exitCode, error head}` (never raw stderr); thrown half ->
+  `threw:<name>: <normalised message>`; every other line -> normalizeVolatile(line) (tmp paths -> <TMP>,
+  Bun vX.Y.Z -> Bun <VERSION>, <TMP>:line:col -> <TMP>:<L>, `NN |` gutter -> `N |`).
+  Reviewer reproducer (`const n = args[7].length`, wrong stdout): sha256:78547c61c91f8237 on two runs from two
+  different case paths (unit test); live: print/tool-println-clean-stdout perturbed the same way captured
+  sha256:7d9dcc52ae05fa3f twice (once by id, once by dir).
+- LOW 2: codes signature includes the emitted E-* multiset `emitted:<code>=<n>` (only for a failing case;
+  W-/I- not pinned). Unit test: clean-source signature {missing:E-NEVER}; same contract on a source that also
+  emits E-API-BASE-MISSING -> FAIL `NEW failure ... emitted:E-API-BASE-MISSING=1`; multiplicity test (=1 vs =2).
+- LOW 3: flograph consumes state.ts parseGapMarkers + classifyGapStatus (GAP_RE deleted). `--report` round-trip
+  now HIGH open=136 · MED open=293 · LOW open=106 == state.ts (was 9/71/40). S416 freeze does not cover it: the
+  freeze is about widening `[^>]` in NODE_RE / state.ts:248 / boot / corpus-zero; GAP_RE was not one of the
+  four sites, and marker-parser-pins stays green. Unparseable markers outside docs/known-gaps.md are warned +
+  skipped (--with-support may quote templates); in the ledger they throw, as state.ts does.
+  `flograph --check` FAILs with 2 duplicate ids BOTH before and after (pre-existing:
+  g-db-migrate-check-constraint-oneof-pattern, g-gap-counts-silently-drops-unrecognised-status).
+  New test flograph-gap-parser.test.js: red against the old flograph, green now.
+- MED 4 (P5 x P7): scripts/hybrid.ts runHybridConformance routes through evaluateCase. XFAIL ok (listed),
+  different failure red, XPASS reported + counted but NOT red, non-carried/unsigned mark red; a StageSeamError
+  from the runtime half is re-thrown by evaluateCase so the hybrid still labels it SEAM VIOLATION.
+  New test hybrid-xfail.test.js (identity TAB, synthetic carried case): red against the old hybrid.ts, green now.
+- Cosmetic: bridge/wrapper ratio denominator = cases actually run (honours -t): `2 xfail of 2 cases`.
+- failureSummary collapses multi-line runtime failures onto one line (a stdout mismatch now says what mismatched).
+
+### BITE round 3 (live corpus, gated bridge + hybrid CLI; probe gap g-s430-bite-probe carried)
+- B1 api-clean-pos (codes [E-S430-BITE-NEVER-FIRES]) + tool-println-clean-stdout (crashing source) both marked with
+  captured signatures -> GREEN twice in a row: `2 xfail of 2 cases`; run.ts exit 0 `2 xfail of 910 cases`;
+  hybrid --swap TAB=identity exit 0 `1 xfail of 1` for each.
+- B2 both perturbed (api codes -> E-S430-BITE-OTHER-REGRESSION; tool expected stdout changed) -> RED, both
+  `FAILS DIFFERENTLY` (codes diff both directions; runtime recorded sha256:7d9dcc52ae05fa3f observed
+  sha256:90bfea0fd4f8c121); hybrid exit 1 `1 FAILED`.
+- B3 both now pass -> bridge RED `0 xfail of 2 cases, 2 XPASS (failures)`; hybrid exit 0,
+  `XPASS api/api-clean-pos … (reported, not red)`.
+- Restored -> touched suites 994 pass / 0 fail, `0 xfail of 910 cases`; state.ts --check both sections PASS.

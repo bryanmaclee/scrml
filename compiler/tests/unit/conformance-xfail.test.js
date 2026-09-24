@@ -38,6 +38,7 @@ import {
   failureSignature,
   signatureDiff,
   KNOWN_IMPL_IDS,
+  normalizeVolatile,
 } from "../../../conformance/run.ts";
 
 const LEDGER = [
@@ -296,5 +297,143 @@ describe("S430 P7 — the pairing, the totals, and the pure pieces", () => {
 
   test("the ledger index refuses an unclassified status (the state.ts fail-loud guard)", () => {
     expect(() => gapStatusIndexFromText("<!-- @gap id=g-x sev=MED status=carryed -->")).toThrow(/does not classify/);
+  });
+});
+
+// ── S430 review round ────────────────────────────────────────────────────────────────────────────
+
+// The reviewer's reproducer: a kind="tool" program that CRASHES on impl#1 (args[7] is undefined),
+// with a wrong expected stdout. Bun's stderr for it carries a random mkdtemp path, the Bun version
+// and generated-code line numbers; before the fix the digest changed on every run.
+const TOOL_CRASH = [
+  '<program kind="tool" lang="ts">',
+  "    function main(args: string[]): number {",
+  "        const n = args[7].length",
+  "        println(n)",
+  "        return 0",
+  "    }",
+  "</program>",
+  "",
+].join("\n");
+
+// A source that emits an unrelated error (E-API-BASE-MISSING), for the emitted-multiset pin.
+const EMITS_API_BASE_MISSING = [
+  "<program>",
+  "",
+  "type UserQuery:struct = { id: int }",
+  "type UserResult:enum = {",
+  "  Found(name: string)",
+  "  NotFound",
+  "}",
+  "",
+  '<api src="openapi.json">',
+  '  getUser(UserQuery) -> GET "/users/${id}" : UserResult',
+  "</api>",
+  "",
+  "</program>",
+  "",
+].join("\n");
+
+async function evalOne(source, json) {
+  const r0 = mkdtempSync(join(tmpdir(), "scrml-conformance-xfail-one-"));
+  try {
+    addCase(r0, "case-dir-" + Math.random().toString(36).slice(2), json, source);
+    return await evaluateCase(loadCases(r0)[0], gaps);
+  } finally {
+    rmSync(r0, { recursive: true, force: true });
+  }
+}
+
+describe("S430 review MED — a crashing tool case has a STABLE runtime signature", () => {
+  const toolCase = (xfail) =>
+    caseJson("tool-crash", { expectOverride: { codes: [], notCodes: [], stdout: "never" }, xfail });
+
+  test("the same crash, run twice from different case paths, yields the identical digest", async () => {
+    const a = await evalOne(TOOL_CRASH, toolCase());
+    const b = await evalOne(TOOL_CRASH, toolCase());
+    expect(a.pass).toBe(false);
+    // the DISPLAY text still carries the volatile temp path (it differs run to run) …
+    expect(a.runtimeFailures[0]).toMatch(/scrml-conf-tool-/);
+    expect(a.runtimeFailures[0]).not.toBe(b.runtimeFailures[0]);
+    // … but the signature is structured and normalised, so it does not.
+    expect(a.observedSignature.runtime).toMatch(/^sha256:[0-9a-f]{16}$/);
+    expect(b.observedSignature).toEqual(a.observedSignature);
+    expect(a.runtimeSignatureKeys[0]).toContain('"exitCode":1');
+    expect(a.runtimeSignatureKeys[0]).toContain("TypeError: undefined is not an object");
+    expect(a.runtimeSignatureKeys[0]).not.toMatch(/scrml-conf-tool-|Bun v\d/);
+  }, 60_000);
+
+  test("so the crash can be CARRIED: marked with its captured signature it is XFAIL on a fresh run", async () => {
+    const cap = await evalOne(TOOL_CRASH, toolCase());
+    const r = await evalOne(TOOL_CRASH, toolCase({ "impl1-ts": { gap: "g-carried-a", fails: cap.observedSignature } }));
+    expect(r.outcome).toBe("xfail");
+  }, 60_000);
+
+  test("a different expected stdout on the same crash is a different signature", async () => {
+    const a = await evalOne(TOOL_CRASH, toolCase());
+    const b = await evalOne(TOOL_CRASH, caseJson("tool-crash", { expectOverride: { codes: [], notCodes: [], stdout: "other" } }));
+    expect(b.observedSignature.runtime).not.toBe(a.observedSignature.runtime);
+  }, 60_000);
+
+  test("normalizeVolatile strips temp paths, the Bun banner and the frame gutter", () => {
+    const raw =
+      "15 | function main(args) {\n16 |   const n = args[7].length;\nTypeError: x\n" +
+      "      at main (" + tmpdir() + "/scrml-conf-tool-AbC123/case.tool.js:16:18)\n" +
+      "      at /tmp/scrml-conf-tool-ZzZ999/case.tool.js:23:32\n\nBun v1.3.14 (Linux x64)";
+    const n = normalizeVolatile(raw);
+    expect(n).not.toMatch(/AbC123|ZzZ999|1\.3\.14|:16:18|:23:32|^15 \|/m);
+    expect(n).toContain("<TMP>:<L>");
+    expect(n).toContain("Bun <VERSION>");
+    expect(normalizeVolatile(JSON.stringify(raw))).not.toMatch(/AbC123|ZzZ999|1\.3\.14/);
+  });
+
+  test("a thrown runtime half is signed by name + normalised message, not the raw message", async () => {
+    // Reached through the structured-key path directly: evaluateCase records the throw as
+    // `threw:<name>: <normalised message>`.
+    const fake = {
+      missing: [], forbidden: [], prefixViolations: [], severityMismatches: [], countMismatches: [],
+      runtimeFailures: ["runtime half threw: ENOENT " + tmpdir() + "/scrml-x-1/a.js"],
+      runtimeSignatureKeys: ["threw:Error: " + normalizeVolatile("ENOENT " + tmpdir() + "/scrml-x-1/a.js")],
+    };
+    const fake2 = {
+      ...fake,
+      runtimeFailures: ["runtime half threw: ENOENT " + tmpdir() + "/scrml-x-2/a.js"],
+      runtimeSignatureKeys: ["threw:Error: " + normalizeVolatile("ENOENT " + tmpdir() + "/scrml-x-2/a.js")],
+    };
+    expect(failureSignature(fake2)).toEqual(failureSignature(fake));
+  });
+});
+
+describe("S430 review LOW — the codes signature pins the emitted E-* MULTISET", () => {
+  const contract = { codes: [NEVER_FIRES], notCodes: [] };
+
+  test("a carried case that starts emitting an unrelated NEW error is a FAIL, not an absorbed XFAIL", async () => {
+    // Recorded against the clean source: the only failure is the missing code.
+    const clean = await evalOne(SOURCE, caseJson("c3", { expectOverride: contract }));
+    expect(clean.observedSignature).toEqual({ codes: ["missing:" + NEVER_FIRES] });
+    // Same contract, same missing code — but the compiler now ALSO emits E-API-BASE-MISSING.
+    const r = await evalOne(
+      EMITS_API_BASE_MISSING,
+      caseJson("c3", { expectOverride: contract, xfail: { "impl1-ts": { gap: "g-carried-a", fails: clean.observedSignature } } }),
+    );
+    expect(r.missing).toEqual([NEVER_FIRES]); // the recorded assertion failure is unchanged …
+    expect(r.outcome).toBe("fail"); // … and the new error is still caught
+    expect(r.signatureMismatch.join("\n")).toContain("NEW failure not in the recorded signature: emitted:E-API-BASE-MISSING=1");
+  }, 60_000);
+
+  test("multiplicity is part of the signature", () => {
+    const base = {
+      missing: ["E-X"], forbidden: [], prefixViolations: [], severityMismatches: [], countMismatches: [],
+      runtimeFailures: [],
+    };
+    const once = failureSignature({ ...base, emittedCounts: { "E-Y": 1, "W-Z": 3 } });
+    const twice = failureSignature({ ...base, emittedCounts: { "E-Y": 2, "W-Z": 3 } });
+    expect(once).toEqual({ codes: ["emitted:E-Y=1", "missing:E-X"] }); // W-* is not pinned
+    expect(signatureDiff(once, twice)).toEqual([
+      "codes: NEW failure not in the recorded signature: emitted:E-Y=2",
+      "codes: recorded failure no longer occurs: emitted:E-Y=1",
+    ]);
+    // A PASSING case's signature stays empty whatever it emits.
+    expect(failureSignature({ ...base, missing: [], emittedCounts: { "E-Y": 1 } })).toEqual({});
   });
 });

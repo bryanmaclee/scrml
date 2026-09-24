@@ -324,11 +324,21 @@ The signature is derived from the case's own two contract halves:
 
 - **`codes`** — the exact, sorted set of failed codes-half assertions, one string
   each: `missing:<code>`, `forbidden:<code>`, `prefix:<violation>`,
-  `severity:<mismatch>`, `codeCounts:<mismatch>`. Readable on purpose.
-- **`runtime`** — `sha256:` + 16 hex of the sorted runtime-half failure lines
-  (which carry the normalized DOM / state diff: which cell, expected vs got; which
-  anchored selector). Any change to the runtime failure moves the digest. The run
-  prints the lines themselves under every XFAIL.
+  `severity:<mismatch>`, `codeCounts:<mismatch>` — PLUS the multiset of every
+  `E-*` code the compile emitted, `emitted:<code>=<n>`. `missing:E-X` alone does
+  not say what the compiler emits INSTEAD, so without it a new, unrelated error on
+  a carried case would stay XFAIL. Multiplicity counts (a double fire is a
+  different failure). `W-*`/`I-*` are not pinned. Readable on purpose.
+- **`runtime`** — `sha256:` + 16 hex of the sorted runtime-half failure KEYS: each
+  failure line with run-to-run volatile parts normalised (temp paths → `<TMP>`,
+  `Bun vX.Y.Z` → `Bun <VERSION>`, generated-code `:line:col` and the `NN |`
+  source-frame gutter), and for a `kind="tool"` run a STRUCTURED record —
+  expected stdout, actual stdout, exit code, and the error head
+  (`TypeError: …`) — never the raw stderr. A thrown runtime half is keyed by the
+  error's name + normalised message. The keys carry the DOM / state diff (which
+  cell, expected vs got; which anchored selector), so any change to the runtime
+  failure moves the digest, and nothing else does. The run prints the lines
+  themselves under every XFAIL.
 
 Omit a key when that half passes. An empty `fails`, a missing `fails`, and the
 bare-string form `"impl1-ts": "<gap-id>"` are all REJECTED ("xfail needs a failure
@@ -373,9 +383,12 @@ triaged defect) — the gated bridge asserts the unpinned list is empty.
 - When a carried gap's failure legitimately changes shape (the TS compiler moved,
   but the gap is still open), re-record with `--xfail-signature`; the diff the
   FAIL printed is what the reviewer checks.
-- The runtime digest is only as stable as the failure lines it hashes. They are
-  deterministic for state / DOM / anchored assertions; a runtime half that THROWS
-  hashes the thrown message, which could carry a temp path — re-record if so.
+- **Hybrid runs (P5 × P7).** `bun scripts/hybrid.ts --conformance` runs every
+  case through the same `evaluateCase`: a hybrid still contains TS stages, so the
+  `impl1-ts` marks apply. XFAIL is ok and a different failure is red, but an XPASS
+  is REPORTED and counted, NOT red — the swapped stage may be what fixed the
+  carried gap (the pure-impl1 gate still turns that same case red). A stage-seam
+  violation is never absorbable by a mark.
 
 ## OQ1 — whole-tree vs anchored (the default-mode resolution)
 

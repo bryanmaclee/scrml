@@ -40,6 +40,7 @@
  * Or via bun:test: conformance/conformance-corpus.test.js
  */
 import { readdirSync, readFileSync, statSync, existsSync } from "fs";
+import { tmpdir } from "os";
 import { createHash } from "crypto";
 import { join, dirname, relative } from "path";
 import { fileURLToPath } from "url";
@@ -370,6 +371,12 @@ export interface CaseResult {
   runtimeHalfPending: boolean;
   /** Runtime (b) half failures (empty when the case has no runtime half or it passed). */
   runtimeFailures: string[];
+  /** Per runtime failure, the normalised/structured key the xfail signature hashes (parallel to
+   *  runtimeFailures; filled by evaluateCase). Empty => the signature normalises runtimeFailures. */
+  runtimeSignatureKeys?: string[];
+  /** Per-code occurrence count of everything the compile emitted (the xfail signature pins the
+   *  E-* multiset from it, so a NEW error on a carried case is not absorbed). */
+  emittedCounts?: Record<string, number>;
   hasRuntimeHalf: boolean;
 }
 
@@ -387,12 +394,17 @@ export type Outcome = "pass" | "fail" | "xfail" | "xpass";
  *   codes   — the exact, sorted set of failed codes-half assertions, one string each:
  *               `missing:<code>` · `forbidden:<code>` · `prefix:<violation>` ·
  *               `severity:<mismatch>` · `codeCounts:<mismatch>`
+ *             PLUS the MULTISET of every E-* code the compile emitted, `emitted:<code>=<n>`
+ *             (review round: `missing:E-X` alone does not pin what the compiler emits INSTEAD, so
+ *             a new unrelated error on a carried case would stay XFAIL; multiplicity matters).
  *             Readable on purpose: a reviewer can see which codes the carried gap is about.
- *   runtime — `sha256:<16 hex>` over the sorted runtime-half failure lines. Those lines carry the
- *             normalized DOM / state diff (which cell, expected vs got; which anchored selector), so
- *             the digest moves when the runtime failure changes in any way. A digest rather than the
- *             text because a whole-tree DOM diff is too large to pin readably in a JSON file; the
- *             run prints the lines themselves under every XFAIL.
+ *   runtime — `sha256:<16 hex>` over the sorted runtime-half failure KEYS: the failure line with
+ *             run-to-run volatile parts normalised (normalizeVolatile), or, for a tool run, a
+ *             structured record { expected stdout, actual stdout, exit code, error head } — never
+ *             raw stderr. The keys carry the DOM / state diff (which cell, expected vs got; which
+ *             anchored selector), so the digest moves when the runtime failure changes in any way.
+ *             A digest rather than the text because a whole-tree DOM diff is too large to pin
+ *             readably in a JSON file; the run prints the lines themselves under every XFAIL.
  *
  * Either key is omitted when that half does not fail. The signature of a passing case is `{}`, and an
  * empty recorded signature is rejected — a mark cannot pin "fails in no way".
@@ -420,11 +432,24 @@ export function failureSignature(r: CaseResult): XfailSignature {
     ...r.prefixViolations.map((s) => "prefix:" + s),
     ...r.severityMismatches.map((s) => "severity:" + s),
     ...r.countMismatches.map((s) => "codeCounts:" + s),
-  ].sort();
+  ];
+  // The E-* multiset is part of HOW the case fails — but only of a case that fails. A passing
+  // case's signature stays `{}` (XPASS is decided before signatures are compared).
+  const fails = codes.length > 0 || r.runtimeFailures.length > 0;
+  if (fails) {
+    for (const [code, n] of Object.entries(r.emittedCounts ?? {})) {
+      if (code.startsWith("E-")) codes.push(`emitted:${code}=${n}`);
+    }
+  }
+  codes.sort();
   const sig: XfailSignature = {};
   if (codes.length > 0) sig.codes = codes;
   if (r.runtimeFailures.length > 0) {
-    const h = createHash("sha256").update([...r.runtimeFailures].sort().join("\n")).digest("hex");
+    const keys =
+      r.runtimeSignatureKeys && r.runtimeSignatureKeys.length === r.runtimeFailures.length
+        ? r.runtimeSignatureKeys
+        : r.runtimeFailures.map(normalizeVolatile);
+    const h = createHash("sha256").update([...keys].sort().join("\n")).digest("hex");
     sig.runtime = "sha256:" + h.slice(0, 16);
   }
   return sig;
@@ -824,6 +849,7 @@ export function runCase(c: LoadedCase): CaseResult {
     shapeErrors: [],   // unreachable non-empty: runCase returns early on any container violation
     runtimeHalfPending: c.expected["runtime-half-pending"] === true,
     runtimeFailures: [],
+    emittedCounts: counts,
     hasRuntimeHalf: hasRuntimeHalf(c),
   };
 }
@@ -834,6 +860,58 @@ export function runCase(c: LoadedCase): CaseResult {
  * no runtime half returns an empty list.
  */
 export async function runCaseRuntime(c: LoadedCase): Promise<string[]> {
+  return (await runCaseRuntimeDetailed(c)).failures;
+}
+
+/**
+ * Normalise the run-to-run VOLATILE parts of a failure text before it is hashed into an xfail
+ * signature (S430 P7 review, MED): mkdtemp paths, the Bun version banner, the line:col of a frame
+ * in a generated temp file, and the `NN |` source-frame gutter Bun prints above an uncaught error.
+ * Without this a "tool crashes on impl#1" case produced a new digest on every run and could never
+ * be carried. Display text is NOT normalised — only the signature input.
+ */
+export function normalizeVolatile(text: string): string {
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pathTail = String.raw`[^\s:'"\\)]*`;
+  return text
+    // the platform temp dir (os.tmpdir()) and the conventional /tmp, /private/tmp, /var/folders roots
+    .replace(new RegExp(escapeRe(tmpdir()) + "/" + pathTail, "g"), "<TMP>")
+    .replace(new RegExp(String.raw`/(?:private/)?tmp/` + pathTail, "g"), "<TMP>")
+    .replace(new RegExp(String.raw`/var/folders/` + pathTail, "g"), "<TMP>")
+    // line:col after a temp path (generated-code positions)
+    .replace(/<TMP>:\d+(?::\d+)?/g, "<TMP>:<L>")
+    // the Bun version banner
+    .replace(/Bun v\d+\.\d+\.\d+[^\n"\\]*/g, "Bun <VERSION>")
+    // the `NN | source` frame gutter, at a real line start, after an escaped `\n` in JSON text, or
+    // right after the opening quote of a JSON-stringified stderr
+    .replace(/(^|\n|\\n|")([ \t]*)\d+( \|)/g, "$1$2N$3");
+}
+
+/**
+ * The error head of a process's stderr: the `SomethingError: message` / `error: …` lines, paths
+ * normalised. What a crash IS, without the frames, gutters and banner around it.
+ */
+function errorHead(stderr: string): string {
+  const heads = stderr
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => /^([A-Z][A-Za-z]*(Error|Exception)|error|panic)\b/.test(l));
+  return normalizeVolatile(heads.length > 0 ? heads.join("\n") : stderr.trim());
+}
+
+/**
+ * The runtime half with, beside each human-readable failure line, the STRUCTURED key the xfail
+ * signature hashes: for a tool run, `{ expected stdout, actual stdout, exit code, error head }`
+ * (never the raw stderr); for every other assertion, the failure line with volatile parts
+ * normalised. `failures[i]` and `keys[i]` describe the same failure.
+ */
+export async function runCaseRuntimeDetailed(c: LoadedCase): Promise<{ failures: string[]; keys: string[] }> {
+  const structured: string[] = [];
+  const failures = await runtimeBody(c, structured);
+  return { failures, keys: failures.map((f, i) => structured[i] ?? normalizeVolatile(f)) };
+}
+
+async function runtimeBody(c: LoadedCase, structuredKeys: string[]): Promise<string[]> {
   if (!hasRuntimeHalf(c)) return [];
   const e = c.expected.expect;
   const failures: string[] = [];
@@ -845,6 +923,14 @@ export async function runCaseRuntime(c: LoadedCase): Promise<string[]> {
   if (e.stdout !== undefined) {
     const tr = runTool(c.source, c.auxFiles);
     if (tr.stdout !== e.stdout) {
+      structuredKeys[failures.length] =
+        "stdout:" +
+        JSON.stringify({
+          expected: e.stdout,
+          actual: normalizeVolatile(tr.stdout),
+          exitCode: tr.exitCode,
+          error: tr.stderr ? errorHead(tr.stderr) : "",
+        });
       failures.push(
         "stdout mismatch:\n    expected: " + JSON.stringify(e.stdout) +
           "\n    got:      " + JSON.stringify(tr.stdout) +
@@ -938,9 +1024,19 @@ export async function evaluateCase(
   const r = runCase(c);
   if (r.hasRuntimeHalf) {
     try {
-      r.runtimeFailures = await runCaseRuntime(c);
+      const d = await runCaseRuntimeDetailed(c);
+      r.runtimeFailures = d.failures;
+      r.runtimeSignatureKeys = d.keys;
     } catch (e) {
-      r.runtimeFailures = ["runtime half threw: " + (e instanceof Error ? e.message : String(e))];
+      // A stage-seam violation (s430-stage-swap hybrid) is a defect of the substituted STAGE, never a
+      // behaviour an xfail mark could describe — let it reach the hybrid runner, which labels it.
+      if (e instanceof Error && e.name === "StageSeamError") throw e;
+      const name = e instanceof Error ? e.name : typeof e;
+      const message = e instanceof Error ? e.message : String(e);
+      r.runtimeFailures = ["runtime half threw: " + message];
+      // The signature pins WHAT was thrown (name + message), paths/versions normalised — not the
+      // raw message, which can carry a per-run temp path.
+      r.runtimeSignatureKeys = ["threw:" + name + ": " + normalizeVolatile(message)];
     }
     if (r.runtimeFailures.length > 0) r.pass = false;
   }
@@ -969,7 +1065,12 @@ export function failureSummary(r: CaseResult): string[] {
   for (const f of r.prefixViolations) out.push("forbidden-prefix " + f);
   for (const f of r.severityMismatches) out.push("severity " + f);
   for (const f of r.countMismatches) out.push("codeCounts " + f);
-  for (const f of r.runtimeFailures) out.push("runtime " + f.split("\n")[0]);
+  // Multi-line failures (a stdout mismatch is `stdout mismatch:` + expected/got/stderr lines) are
+  // collapsed onto one line, so the summary shows WHAT mismatched rather than just the heading.
+  for (const f of r.runtimeFailures) {
+    const one = f.replace(/\s*\n\s*/g, " / ");
+    out.push("runtime " + (one.length > 300 ? one.slice(0, 300) + "…" : one));
+  }
   return out;
 }
 

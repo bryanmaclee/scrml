@@ -38,7 +38,7 @@ import {
 describe("scrml conformance corpus — impl#1 (codes + runtime)", () => {
   const cases = loadCases();
   const gaps = loadGapStatusIndex();
-  const tally = { xfail: 0, xpass: 0 };
+  const tally = { ran: 0, xfail: 0, xpass: 0 }; // `ran` = cases actually executed (honours -t)
 
   test("corpus is non-empty (cases loaded)", () => {
     expect(cases.length).toBeGreaterThan(0);
@@ -48,7 +48,7 @@ describe("scrml conformance corpus — impl#1 (codes + runtime)", () => {
     expect(unpinnedCarriedGaps(cases, gaps)).toEqual([]);
   });
 
-  afterAll(() => console.log(xfailRatioLine(tally.xfail, cases.length, tally.xpass)));
+  afterAll(() => console.log(xfailRatioLine(tally.xfail, tally.ran, tally.xpass)));
 
   for (const c of cases) {
     const runtime = hasRuntimeHalf(c);
@@ -59,6 +59,7 @@ describe("scrml conformance corpus — impl#1 (codes + runtime)", () => {
         : "";
     const label = `${c.relDir} (${c.expected.id})${tag}`;
     test(label, async () => {
+      tally.ran++;
       if ("xfail" in c.expected) {
         const r = await evaluateCase(c, gaps);
         expect(r.shapeErrors).toEqual([]);
