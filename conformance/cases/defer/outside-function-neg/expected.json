@@ -1,0 +1,13 @@
+{
+  "id": "defer-outside-function-neg",
+  "description": "§19.16.3 rule 4 — `defer` at the top level of a `${ }` logic block (no enclosing function body) is E-DEFER-OUTSIDE-FUNCTION, exactly once; it is never a silently inert statement.",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 4: `defer` SHALL appear only inside a function body; top-level logic is page/module initialisation that the compiler reorders, so there is no single block exit to attach the deferred body to.",
+  "expect": {
+    "codes": ["E-DEFER-OUTSIDE-FUNCTION"],
+    "codeCounts": { "E-DEFER-OUTSIDE-FUNCTION": 1 },
+    "notCodes": ["E-DEFER-NESTED", "E-DEFER-CONTROL-FLOW"]
+  }
+}

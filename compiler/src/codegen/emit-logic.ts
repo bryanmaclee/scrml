@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr } from "./emit-lift.js";
@@ -4177,7 +4177,19 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     }
 
     case "try-stmt":
+      // §19.16.6 — a compiler-lowered `defer` scope (lower-defer.ts) threads
+      // opts into both halves; a SOURCE try (E-TRY-NOT-IN-SCRML) keeps the
+      // legacy emitter.
+      if (node.deferLowered === true) return emitDeferScope(node, opts);
       return emitTryStmt(node);
+
+    case "defer-stmt":
+      // Every `defer-stmt` is lowered before emission (codegen/index.ts ->
+      // lower-defer.ts), and the CPS wrappers lower their own top level. An
+      // un-lowered one reaching here is a compiler bug: emit a statement that
+      // fails the emitted-JS parse gate LOUDLY rather than silently running the
+      // deferred body in place (which would be a wrong lowering, §19.16.2).
+      return `/* scrml internal: unlowered defer */ defer_not_lowered!;`;
 
     case "match-stmt":
     case "match-expr":
@@ -4346,6 +4358,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
 export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: string | undefined, hasReturnType?: boolean): string[] {
   const TAIL_KINDS = new Set(["bare-expr", "match-stmt", "match-expr", "switch-stmt"]);
   let tailIdx = -1;
+  // §19.16.6 — index of a trailing compiler-lowered `defer` scope whose `try`
+  // body carries the function's tail expression (`fn f() { let c = open();
+  // defer close(c); compute(c) }` — the tail `compute(c)` is INSIDE the try).
+  let deferTailIdx = -1;
   // Bug H fix: apply implicit tail-expression return for both `fn` shorthand and
   // `function` declarations with return-type annotations (`-> T` or `: T`).
   // When a function declares its return type, the tail match/switch/bare-expr is
@@ -4355,6 +4371,7 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
       const s = body[i];
       if (!s || s._compileTimeOnly) continue;
       if (TAIL_KINDS.has(s.kind)) tailIdx = i;
+      else if (s.kind === "try-stmt" && s.deferLowered === true) deferTailIdx = i;
       break;
     }
   }
@@ -4373,7 +4390,20 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
     const stmt = body[i];
     if (!stmt) continue;
     let code: string;
-    if (i === tailIdx) {
+    if (i === deferTailIdx) {
+      // Recurse: the try body keeps the implicit-tail-return semantics (the
+      // return value is computed BEFORE the finally runs — §19.16.2).
+      const inner = emitFnShortcutBody(stmt.body ?? [], { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames) }, fnKind, hasReturnType);
+      const deferredOpts: any = { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames) };
+      delete deferredOpts.tildeContext;
+      const deferred = emitLogicBody(stmt.finallyNode?.body ?? [], deferredOpts);
+      const out2: string[] = ["try {"];
+      for (const c of inner) for (const l of c.split("\n")) out2.push(`  ${l}`);
+      out2.push("} finally {");
+      for (const c of deferred) for (const l of c.split("\n")) out2.push(`  ${l}`);
+      out2.push("}");
+      code = out2.join("\n");
+    } else if (i === tailIdx) {
       if (stmt.kind === "bare-expr") {
         const exprCtx = _makeExprCtx(bodyOpts);
         const exprCode = stmt.exprNode

@@ -1,0 +1,27 @@
+${
+    type SaveError:enum = {
+        Rejected(reason: string)
+    }
+
+    <cleaned> = 0
+    <result> = "init"
+
+    function save(amount: number)! -> SaveError {
+        defer @cleaned = @cleaned + 1
+        if (amount <= 0) {
+            fail SaveError.Rejected("non-positive")
+        }
+        return "saved " + amount
+    }
+
+    function go() {
+        @result = save(0) !{
+            | ::Rejected(reason) :> "failed: " + reason
+        }
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@result}</p>
+    <p id="cleaned">${@cleaned}</p>
+</program>

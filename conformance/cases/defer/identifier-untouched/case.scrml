@@ -1,0 +1,16 @@
+${
+    <got> = ""
+
+    function defer(x: string) {
+        return "called " + x
+    }
+
+    function go() {
+        let r = defer("a")
+        @got = r
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@got}</p>
+</program>

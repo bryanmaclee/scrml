@@ -391,6 +391,13 @@ interface CPSResult {
    */
   pureServerIndices: number[];
   reactiveServerIndices: number[];
+  /**
+   * §19.16.5 (S430 P3) — body indices of top-level `defer` statements whose
+   * deferred body is server-tier. Non-empty on an eligible split =>
+   * E-DEFER-SERVER-IN-SPLIT (a server batch ends before the later batches, so
+   * the deferred body would run before the function's final exit).
+   */
+  deferServerIndices?: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -2783,6 +2790,7 @@ export function analyzeCPSEligibility(
   const reactiveIndices: number[] = [];
   const reactiveServerIndices: number[] = []; // state-decls whose init calls a server fn
   const mixedIndices: number[] = []; // bare-expr statements that are BOTH server + reactive
+  const deferServerIndices: number[] = []; // §19.16.5 — `defer` stmts whose deferred body is server-tier
 
   for (let i = 0; i < body.length; i++) {
     const node = body[i];
@@ -2808,7 +2816,13 @@ export function analyzeCPSEligibility(
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
         hasServerOnlyResourceInInit(node, importedServerNamespaces));
 
-    if (isReactiveServer) {
+    if (isServer && (node as any).kind === "defer-stmt") {
+      // §19.16.5 — a server-tier deferred body. Tier it SERVER (never "mixed")
+      // so the split is still computed and the caller can report the precise
+      // E-DEFER-SERVER-IN-SPLIT instead of a cascading E-RI-002.
+      serverIndices.push(i);
+      deferServerIndices.push(i);
+    } else if (isReactiveServer) {
       reactiveServerIndices.push(i);
     } else if (isReactive && isServer) {
       // bare-expr with both @var= and server resource — truly unsplittable
@@ -2859,6 +2873,7 @@ export function analyzeCPSEligibility(
     // Ext 1 M1.3: tier sub-sets for the multi-batch planner's body-DG.
     pureServerIndices: [...serverIndices].sort((a, b) => a - b),
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
+    deferServerIndices,
   };
 }
 
@@ -2932,6 +2947,14 @@ function hasServerOnlyResourceInInit(
  */
 function isReactiveStatement(node: LogicStatement): boolean {
   if (node.kind === "state-decl") return true;
+  // §19.16.5 — a `defer` statement takes the tier of its deferred body: it is a
+  // reactive statement when the deferred body writes a reactive cell (so a
+  // function whose only reactive write is `defer @busy = false` is still
+  // CPS-eligible and the write stays on the client).
+  if ((node as any).kind === "defer-stmt") {
+    const inner = (node as any).body;
+    return Array.isArray(inner) && findReactiveAssignment(inner as LogicStatement[]) !== null;
+  }
   if (node.kind === "bare-expr") {
     // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
     const expr = (node as any).exprNode ? emitStringFromTree((node as any).exprNode) : ((node as any).expr ?? "");
@@ -2968,6 +2991,10 @@ const CONTROL_FLOW_TRIGGER_KINDS = new Set([
   "match-stmt",
   "match-expr",
   "try-stmt",
+  // §19.16.5 (S430 P3) — a `defer` statement is server-tier when its deferred
+  // body contains a server trigger; the nested scan classifies it. A server-tier
+  // defer in a split function is then rejected (E-DEFER-SERVER-IN-SPLIT).
+  "defer-stmt",
 ]);
 
 /**
@@ -5847,6 +5874,32 @@ export function runRI(input: RIInput): RIOutput {
             // Insight 26 D2c: per-file server-only imported namespaces.
             perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
           );
+
+          if (cpsResult && cpsResult.eligible && cpsResult.deferServerIndices && cpsResult.deferServerIndices.length > 0) {
+            // §19.16.5 (S430 P3) — E-DEFER-SERVER-IN-SPLIT. A server-tier
+            // deferred body in a body-split function would have to run INSIDE a
+            // server batch, and a batch ends before the later batches and the
+            // client continuations — i.e. the release would run before the
+            // function's final exit. Stage 1 rejects it rather than lower it
+            // wrongly. (The split itself is still installed below so no
+            // cascading E-RI-002 fires on the function's reactive writes.)
+            const _fnName = record.fnNode.name ?? "<anonymous>";
+            for (const di of cpsResult.deferServerIndices) {
+              const dNode = body[di] as any;
+              errors.push(new RIError(
+                "E-DEFER-SERVER-IN-SPLIT",
+                `E-DEFER-SERVER-IN-SPLIT: \`${_fnName}\` is split across the client/server boundary ` +
+                `(§19.9.9), and this \`defer\` runs server-side work (a \`?{}\` query, a server-only ` +
+                `resource, or a server-function call). A split function's deferred statement runs ` +
+                `after its LAST continuation (§19.16.5), but server work can only run inside a server ` +
+                `batch — and a batch ends before the later batches and client statements, so the ` +
+                `deferred work would run too early. Keep the acquire/use/release together in a ` +
+                `\`server function\` (its \`defer\` then runs on the server at that function's exit) and ` +
+                `call it from here, or make the deferred statement client-side.`,
+                (dNode && dNode.span) ?? record.fnNode.span,
+              ));
+            }
+          }
 
           if (cpsResult && cpsResult.eligible) {
             // Ext 1 M1.1: single-batch construction is the back-compat

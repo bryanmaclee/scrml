@@ -66,6 +66,7 @@ import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
+import { runDeferChecks } from "./validators/lint-defer.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -1542,6 +1543,14 @@ export function compileScrml(options = {}) {
   for (const tabResult of tabResults) {
     const asyncDiags = stage("REJECT-ASYNC-AWAIT", () => runAsyncAwaitReject(tabResult.ast));
     collectErrors("REJECT-ASYNC-AWAIT", asyncDiags);
+  }
+
+  // §19.16.3 (S430 P3 stage 1) — structural `defer` restrictions:
+  // E-DEFER-OUTSIDE-FUNCTION / E-DEFER-NESTED / E-DEFER-CONTROL-FLOW. Runs on the
+  // live-shaped AST so the live and native front-ends share one checker.
+  for (const tabResult of tabResults) {
+    const deferDiags = stage("DEFER-CHECKS", () => runDeferChecks(tabResult.ast));
+    collectErrors("DEFER-CHECKS", deferDiags);
   }
 
   // Stage 3.1: Module Resolution

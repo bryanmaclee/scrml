@@ -1097,6 +1097,39 @@ export function emitContinueStmt(node: any): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * §19.16.6 (S430 P3) — emit a LOWERED `defer` scope: a `try-stmt` built by
+ * `lower-defer.ts` (`deferLowered: true`). `body` holds the statements that
+ * followed the `defer` in its block; `finallyNode.body` holds the deferred
+ * statement(s). Unlike the legacy `emitTryStmt` (source try — itself rejected by
+ * E-TRY-NOT-IN-SCRML), this threads the caller's `opts` into BOTH halves, so the
+ * statements after a `defer` lower exactly as they would have without it
+ * (boundary, engine/map bindings, server-fn awaits, tilde context, …). Each half
+ * gets a block-scoped copy of `declaredNames` — the `try`/`finally` braces are
+ * JS blocks.
+ *
+ * The output is a plain host `try { … } finally { … }`: every JS exit of the
+ * `try` (return, break, continue, a thrown host error, the `return` a `fail` /
+ * `?` / CPS failure lowers to) runs the `finally` — which is exactly §19.16.2.
+ */
+export function emitDeferScope(node: any, opts: any): string {
+  const lines: string[] = [];
+  lines.push(`try {`);
+  for (const code of emitLogicBody(node.body ?? [], { ...opts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames) })) {
+    for (const line of code.split("\n")) lines.push(`  ${line}`);
+  }
+  lines.push(`} finally {`);
+  const deferred = node.finallyNode && Array.isArray(node.finallyNode.body) ? node.finallyNode.body : [];
+  // The deferred body is NOT a tilde-capture continuation of the surrounding
+  // statements (§32 — it runs at exit); drop any inherited tilde context.
+  const { tildeContext: _dropTilde, ...deferOpts } = opts ?? {};
+  for (const code of emitLogicBody(deferred, { ...deferOpts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames) })) {
+    for (const line of code.split("\n")) lines.push(`  ${line}`);
+  }
+  lines.push(`}`);
+  return lines.join("\n");
+}
+
+/**
  * Emit a try-catch-finally statement.
  */
 export function emitTryStmt(node: any): string {

@@ -1,0 +1,21 @@
+${
+    <trace> = ""
+
+    function go() {
+        for (const i of [1, 2, 3, 4]) {
+            defer @trace = @trace + "e" + i + ";"
+            if (i == 2) {
+                continue
+            }
+            if (i == 3) {
+                break
+            }
+            @trace = @trace + "b" + i + ";"
+        }
+        @trace = @trace + "done;"
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

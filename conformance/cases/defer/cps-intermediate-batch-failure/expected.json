@@ -1,0 +1,16 @@
+{
+  "id": "defer-cps-intermediate-batch-failure",
+  "description": "§19.16.5 — a body-split function whose FIRST server batch fails still runs its deferred bodies on the way out: the batch's error return is an exit of the function body. The stubbed server error makes batch 0 fail, so the client work after it never runs, but @busy is cleared and \"D;\" is appended: trace = \"start;D;\", @busy = false.",
+  "language-version": "1.0",
+  "spec": "§19.16.5",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.5: the deferred body also runs when an intermediate batch fails and the function returns its error envelope (§19.6.7); §19.16.2 lists the implicit CPS failure return among the exits. serverStub declares an impl-neutral server error for every batch of `save`.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "serverStub": { "save": { "__serverError": { "type": "CpsError", "variant": "ServerError" } } },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "trace": "start;D;", "busy": false },
+    "domAnchored": [{ "selector": "#out", "text": "start;D;" }]
+  }
+}

@@ -1,0 +1,46 @@
+${
+    type E:enum = {
+        Bad
+    }
+
+    <n> = 0
+
+    function risky()! -> E {
+        fail E.Bad
+    }
+
+    function a() {
+        defer return
+    }
+
+    function b()! -> E {
+        defer fail E.Bad
+        @n = 1
+    }
+
+    function c()! -> E {
+        defer {
+            let v = risky()?
+            @n = v
+        }
+        @n = 2
+    }
+
+    function d() {
+        for (const i of [1, 2]) {
+            defer {
+                if (i == 1) {
+                    break
+                }
+            }
+            @n = i
+        }
+    }
+}
+<program>
+    <button onclick=a()>a</>
+    <button onclick=b()>b</>
+    <button onclick=c()>c</>
+    <button onclick=d()>d</>
+    <p>${@n}</p>
+</program>

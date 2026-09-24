@@ -1,0 +1,15 @@
+{
+  "id": "defer-lifo-fallthrough",
+  "description": "§19.16.2 — deferred bodies run at the enclosing block's exit (fall-through), in reverse registration order (LIFO); the block form runs its statements in order as one unit. go() writes a, registers 1, 2, then the block {3,4}, writes b, falls off the end: trace = \"ab3421\".",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: a deferred body is NOT executed where the `defer` appears; every deferred body registered in the block runs exactly once when control leaves the block, last-registered first. The block form `defer { … }` is one deferred body whose statements run in source order. So after `a` and `b` the exits run the block (3 then 4), then 2, then 1.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "ab3421" },
+    "domAnchored": [{ "selector": "#out", "text": "ab3421" }]
+  }
+}

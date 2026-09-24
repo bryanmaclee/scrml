@@ -1,0 +1,31 @@
+${
+    type LoadError:enum = {
+        Missing(key: string)
+    }
+
+    <trace> = ""
+    <result> = "init"
+
+    function load(key: string)! -> LoadError {
+        fail LoadError.Missing(key)
+    }
+
+    function outer()! -> LoadError {
+        @trace = @trace + "open;"
+        defer @trace = @trace + "close;"
+        let v = load("k1")?
+        @trace = @trace + "after;"
+        return v
+    }
+
+    function go() {
+        @result = outer() !{
+            | ::Missing(key) :> "missing " + key
+        }
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@result}</p>
+    <p id="trace">${@trace}</p>
+</program>

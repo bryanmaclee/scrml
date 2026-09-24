@@ -1,0 +1,15 @@
+{
+  "id": "defer-loop-per-iteration",
+  "description": "§19.16.2 — a `defer` in a loop body is scoped to ONE iteration: it runs at the end of every iteration, including one left by `continue` and the one left by `break`. Iteration 1 falls through (b1 then e1), 2 continues (e2), 3 breaks (e3), 4 never runs: trace = \"b1;e1;e2;e3;done;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2 Registration: the enclosing block of a `defer` in a loop body is that body, once per iteration; Exit: `break` / `continue` out of the block run its deferred bodies.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "b1;e1;e2;e3;done;" },
+    "domAnchored": [{ "selector": "#out", "text": "b1;e1;e2;e3;done;" }]
+  }
+}

@@ -305,7 +305,15 @@ function installServerStubFetch(serverStub: ServerStub): () => void {
   // impl#1 route: `/_scrml/__ri_route_<sourceFnName>_<counter>` (utils.routePath
   // + route-inference.generateRouteName), optionally `__batch_<i>` for a CPS
   // multi-batch split. The captured group is the scrml-source fn name.
-  const ROUTE_RE = /^\/_scrml\/__ri_route_(.+)_\d+(?:__batch_\d+)?$/;
+  // NON-greedy capture (S430 fix): with a greedy `(.+)` the multi-batch route
+  // `__ri_route_save_1__batch_0` matched as name `save_1__batch` + `_0` (the
+  // optional batch group left empty), so a stub keyed by the source fn name
+  // never matched a CPS multi-batch route and every batch silently got the
+  // unstubbed `null` 200. Non-greedy takes the SHORTEST name for which the rest
+  // (`_<counter>` + optional `__batch_<i>` + end) still matches; a name that
+  // itself contains `_<digits>` (`load_2` -> `__ri_route_load_2_5`) still
+  // resolves, because the shorter candidate fails the `$` anchor.
+  const ROUTE_RE = /^\/_scrml\/__ri_route_(.+?)_\d+(?:__batch_\d+)?$/;
   g.fetch = async (input: any): Promise<any> => {
     const url = typeof input === "string" ? input : (input && input.url) || String(input);
     const m = String(url).match(ROUTE_RE);
