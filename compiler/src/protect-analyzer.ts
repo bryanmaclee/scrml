@@ -60,7 +60,7 @@
 
 import { Database } from "bun:sqlite";
 import { resolve, dirname } from "node:path";
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
 import {
   parseSchemaBlock,
@@ -230,6 +230,62 @@ function isDriverUri(s: string): boolean {
 // ---------------------------------------------------------------------------
 
 /**
+ * What an E-PA-004 says about the database it read. `where` completes the
+ * sentence "Table `t` was not found in …"; `detail` is zero or more whole
+ * sentences (each ending in a space) appended after it.
+ */
+interface DbSourceDescription {
+  where: string;
+  detail: string;
+}
+
+/**
+ * Describe the database a `< db>` block's schema was read from, for E-PA-004.
+ *
+ *  - A real file: its resolved absolute path, the `src=` it was resolved from
+ *    and the directory it was resolved against, and — when the file is zero
+ *    bytes — an explicit statement that it is an empty stub with no tables.
+ *  - The shadow schema (file absent, or a driver URI): says so. A driver URI is
+ *    NOT echoed — it can carry credentials.
+ */
+function describeDbSource(
+  dbPath: string,
+  srcRaw: string,
+  sourceDir: string,
+  isDriverUri: boolean,
+): DbSourceDescription {
+  if (isDriverUri) {
+    return {
+      where: "the in-memory schema built from the `CREATE TABLE` statements in this file's `?{}` blocks",
+      detail: "A driver-URI `src=` is not introspected at compile time. ",
+    };
+  }
+  if (!existsSync(dbPath)) {
+    return {
+      where: "the in-memory schema built from the `CREATE TABLE` statements in this file's `?{}` blocks",
+      detail: `The database file \`${dbPath}\` does not exist, so it was not read. `,
+    };
+  }
+  let size = -1;
+  try { size = statSync(dbPath).size; } catch { /* size stays unknown */ }
+  const zeroByte = size === 0
+    ? `That file is ZERO BYTES — an empty database with no tables at all. A zero-byte ` +
+      `database is usually a stub created as a side effect when some other process (for ` +
+      `example a running server that resolves the same relative path from a different ` +
+      `working directory) opened this path before a real database existed there. If your ` +
+      `real database lives elsewhere, delete this file and point \`src=\` at the real one. `
+    : "";
+  return {
+    // "ZERO-BYTE" is front-loaded ahead of the (possibly long) path: `scrml dev`
+    // and `scrml build` print only the first 120 characters of a message.
+    where:
+      `the ${size === 0 ? "ZERO-BYTE " : ""}database \`${dbPath}\` ` +
+      `(\`src="${srcRaw}"\` resolved against the source file's directory \`${sourceDir}\`)`,
+    detail: zeroByte,
+  };
+}
+
+/**
  * Open a SQLite database and read the full schema for a named table using
  * PRAGMA table_info().
  *
@@ -249,6 +305,7 @@ function readTableSchema(
   tableName: string,
   blockSpan: Span,
   errors: PAError[],
+  source: DbSourceDescription = { where: "the database", detail: "" },
 ): ColumnDef[] | null {
   let rows: PAPragmaRow[];
   try {
@@ -265,11 +322,15 @@ function readTableSchema(
   }
 
   if (rows.length === 0) {
-    // E-PA-004: table not found in the database.
+    // E-PA-004: table not found in the database. The message names WHICH
+    // database was read (s430-dev-db-stub): an adopter whose relative `src=`
+    // resolved to a different file than they meant — or to a zero-byte stub
+    // some other process created — could not tell from "the database" alone.
     errors.push(new PAError(
       "E-PA-004",
-      `E-PA-004: Table \`${tableName}\` was not found in the database. ` +
-      `Verify the table name is correct and the database file is up to date.`,
+      `E-PA-004: Table \`${tableName}\` was not found in ${source.where}. ` +
+      source.detail +
+      `Verify the table name is correct and that this is the database you meant.`,
       blockSpan,
     ));
     return null;
@@ -1007,12 +1068,12 @@ function processDbBlock(
   // ------------------------------------------------------------------
   let dbPath: string;
   const isDriverConnectionUri = isDriverUri(srcRaw);
+  const sourceDir = dirname(filePath);
 
   if (isDriverConnectionUri) {
     // Use the URI verbatim as the cache key — no path resolution.
     dbPath = srcRaw;
   } else {
-    const sourceDir = dirname(filePath);
     const resolvedRaw = resolve(sourceDir, srcRaw);
 
     // realpathSync resolves symlinks to a canonical path. We only call it if
@@ -1077,8 +1138,9 @@ function processDbBlock(
   const tableSchemas = new Map<string, ColumnDef[]>();
   let anyTableFailed = false;
 
+  const dbSource = describeDbSource(dbPath, srcRaw, sourceDir, isDriverConnectionUri);
   for (const tableName of tableNames) {
-    const schema = readTableSchema(db, tableName, blockSpan, errors);
+    const schema = readTableSchema(db, tableName, blockSpan, errors, dbSource);
     if (schema === null) {
       anyTableFailed = true;
     } else {
