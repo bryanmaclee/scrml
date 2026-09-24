@@ -1,0 +1,12 @@
+{
+  "id": "e-import-003-host-import-inside-logic-reject",
+  "description": "§21.3.1 — an `import:host` written inside a `${}` logic block fires E-IMPORT-003 exactly once: unlike a plain `import`, `import:host` is valid ONLY at file top level, outside any `${}` context. (No manifest governs the case, so E-IMPORT-008 also fires.)",
+  "language-version": "1.0",
+  "spec": "§21.3.1",
+  "rationale": "§21.3.1: \"import:host SHALL appear only at file top level, OUTSIDE any ${} logic context. An import:host declaration inside a ${} block or any nested scope SHALL be a compile error (E-IMPORT-003 — same as plain import).\"",
+  "expect": {
+    "codes": ["E-IMPORT-003", "E-IMPORT-008"],
+    "notCodes": ["E-SCOPE-001"],
+    "codeCounts": { "E-IMPORT-003": 1 }
+  }
+}

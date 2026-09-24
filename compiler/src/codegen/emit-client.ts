@@ -6,7 +6,7 @@ import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTop
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, type RequestBodyCell } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
@@ -14,7 +14,7 @@ import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments
 import { scanClientEgress } from "./egress-field-scan.ts";
 import { emitFunctions } from "./emit-functions.ts";
 import { getNodes, isServerOnlyNode } from "./collect.ts";
-import { emitLogicNode } from "./emit-logic.ts";
+import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring, fileHasOutlet } from "./emit-reactive-wiring.ts";
 import { filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -2021,6 +2021,15 @@ export function generateClientJs(ctx: CompileContext): string {
   // per-file set through every control-flow position, `reparseRequestRefEscapeHatch`
   // falls back to this set whenever the hand-threaded set is empty. Cleared below.
   setCurrentFileRequestIds(fileAST ? collectRequestIds(fileAST) : new Set<string>());
+  // s430-emit-state-leak — install this file's emit-logic state (the §6.8
+  // structural-decl set + implicit-init tracker) BEFORE emitFunctions: function
+  // bodies read it, and before this they read the previous file's. No-op when the
+  // runCG per-file loop already installed it for this file; when this call is the
+  // installer (a direct harness caller) it also owns the clear at the end.
+  const _ownsEmitLogicState = beginEmitLogicFile(
+    fileAST ?? null,
+    fileAST ? collectStructuralDeclNames(fileAST) : null,
+  );
 
   lines.push("// Generated client-side JS for scrml");
   lines.push("// This file is executable browser JavaScript.");
@@ -4122,6 +4131,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — release the per-file
   // registered-request id set so it cannot leak into the next file's emission.
   setCurrentFileRequestIds(null);
+  if (_ownsEmitLogicState) endEmitLogicFile();
 
   return clientCode;
 }

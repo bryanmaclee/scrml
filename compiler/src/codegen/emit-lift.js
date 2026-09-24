@@ -73,6 +73,19 @@ export function pushLiftNonKeyed() { _scrml_lift_non_keyed_depth++; }
 export function popLiftNonKeyed() { _scrml_lift_non_keyed_depth--; }
 export function liftNonKeyedActive() { return _scrml_lift_non_keyed_depth > 0; }
 
+/**
+ * s430-emit-state-leak — restore every emit-lift module stack / counter to its
+ * initial value. Called once at the head of every `runCG`: each is balanced by
+ * push/pop on the normal path, but an exception mid-emit in an EARLIER compile
+ * strands entries, and the next compile would then read them.
+ */
+export function resetLiftModuleState() {
+  _scrml_lift_reconcile_ctx_stack.length = 0;
+  _scrml_lift_scope_names_stack.length = 0;
+  _scrml_lift_non_keyed_depth = 0;
+  _scrml_lift_request_ids_stack.length = 0;
+}
+
 // S293 — item-derived-local REPLAY prelude for per-item effect / handler wraps.
 //
 // The S288 render path (emitForStmtWithContainer) re-resolves ancestor items by

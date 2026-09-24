@@ -1963,6 +1963,54 @@ ${
         const kw = advance(cursor)
         const specifiers = []
 
+        // §21.3.1 `import:<host-tag> { a, b as c } from "m"` — the
+        // host-import declaration. Only the braced named clause is in its
+        // grammar. The tag is recorded on the node; placement / host-tag /
+        // manifest are enforced by compiler/src/host-import.js.
+        if (currentKind(cursor) == TokenKind.Colon) {
+            advance(cursor)
+            // Not the declaration shape at all — the tag is not `host` AND
+            // no `{ ... }` clause follows (typically file-top prose). Consume
+            // the rest of the line; the shared gate reports ONE E-IMPORT-009.
+            const tagIsIdent = currentKind(cursor) == TokenKind.Ident
+            const tagName = tagIsIdent ? current(cursor).name : ""
+            if (tagName != "host" && (tagIsIdent && peekKind(cursor, 1) == TokenKind.LBrace) == false) {
+                const words = []
+                while (atEnd(cursor) == false
+                    && currentKind(cursor) != TokenKind.Semicolon
+                    && current(cursor).span.line == kw.span.line) {
+                    const t = advance(cursor)
+                    words.push(t.text)
+                }
+                const proseEnd = finishStatementTerminator(ctx, kw)
+                const proseNode = makeImport(specifiers, "",
+                    makeSpan(kw.span.start, proseEnd, kw.span.line, kw.span.col))
+                proseNode.hostTag = tagName
+                proseNode.hostProse = ("import: " + words.join(" ")).trim()
+                return proseNode
+            }
+            let hostTag = ""
+            if (currentKind(cursor) == TokenKind.Ident) {
+                hostTag = advance(cursor).name
+            } else {
+                recordError(ctx, "E-STMT-IMPORT-NAME",
+                    "expected a host-tag identifier after 'import:'", spanHere(ctx))
+            }
+            if (currentKind(cursor) == TokenKind.LBrace) {
+                parseNamedImportSpecifiers(ctx, specifiers)
+            } else {
+                recordError(ctx, "E-STMT-IMPORT-NAME",
+                    "expected '{' — 'import:<host-tag>' takes a braced named-import clause", spanHere(ctx))
+            }
+            expectFromKeyword(ctx)
+            const hostSource = expectModuleString(ctx)
+            const hostEnd = finishStatementTerminator(ctx, kw)
+            const hostNode = makeImport(specifiers, hostSource,
+                makeSpan(kw.span.start, hostEnd, kw.span.line, kw.span.col))
+            hostNode.hostTag = hostTag
+            return hostNode
+        }
+
         // Bare side-effect import — `import "m";`.
         if (currentKind(cursor) == TokenKind.StringLit) {
             const source = expectModuleString(ctx)
