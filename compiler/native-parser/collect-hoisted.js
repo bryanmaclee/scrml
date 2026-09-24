@@ -596,6 +596,9 @@ function synthImportDecl(stmt, stamp) {
         source: typeof stmt.source === "string" ? stmt.source : null,
         isDefault,
         span: stmt.span,
+        // §21.3.1 `import:<host-tag>` — carried through (host-import.js gates it).
+        ...(typeof stmt.hostTag === "string" ? { hostTag: stmt.hostTag } : {}),
+        ...(typeof stmt.hostProse === "string" ? { hostProse: stmt.hostProse } : {}),
     };
 }
 

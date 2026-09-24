@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 126 | 0 |
-| MED | 284 | 0 |
-| LOW | 105 | 0 |
+| HIGH | 136 | 0 |
+| MED | 293 | 0 |
+| LOW | 106 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -17928,3 +17928,185 @@ mechanism, and it had no real program exercising it until today.
 
 — NEW S428-bryan (PA-VERIFIED BY EXECUTION — cloud gate caught it, PA isolated it by reverting B1 alone and re-running the suite locally to 1016/0)
 <!-- @gap id=g-the-two-front-ends-disagree-about-the-guard-form sev=HIGH status=open locus=searched:compiler/native-parser,compiler/src/ast-builder.js,compiler/src/codegen/compat/parser-workarounds.js prov=empirical:meta-checker-with-zero-A1-sites-and-one-B1-site-produced-nine-field-level-divergences-and-reverting-B1-takes-the-suite-to-1016-pass-0-fail -->
+
+### G-ENUM-VARIANT-PAYLOAD-MAY-STORE-A-FUNCTION — the passed-vs-stored rule is enforced for struct fields only
+
+**PA-VERIFIED BY EXECUTION on `15e60e4b` (S430).** `type Op:enum = { Run(f: (x: int) -> int), Stop }` + `<op>: Op = .Stop`
+compiles at exit 0 with no diagnostic about the function-typed payload. Governing sentence, §15.11.5.1: *"A function may
+be PASSED (a component prop) or CALLED (an event handler, inline), but it SHALL NEVER be STORED as value data (a struct
+field or a state cell)."* An enum payload is stored value data (held in cells, `==`-compared, serialized). Only
+`E-STRUCT-FUNCTION-FIELD` (§14.3) enforces the rule. Direction of the fix: newly-rejecting → candidate for the S385
+PA-ruling class once the corpus is COMPILED to zero. Also the anti-virtual-function stance bryan stated S430.
+
+<!-- @gap id=g-enum-variant-payload-may-store-a-function sev=MED status=open locus=searched:compiler/src/type-system.ts(E-STRUCT-FUNCTION-FIELD-site-only) prov=spec:§15.11.5.1-SHALL-NEVER-be-STORED-as-value-data -->
+
+### G-IMPORT-HOST-IS-UNIMPLEMENTED-AND-RENDERS-AS-PAGE-TEXT — a normative §21.3.1 declaration compiles to visible body text
+
+**PA-VERIFIED BY EXECUTION on `15e60e4b` (S430).** `import:host { tokenize } from "./tok.js"` at file top compiles at
+exit 0, zero diagnostics, and the declaration appears VERBATIM in the emitted `<body>`. `grep -rn 'import:host\|E-IMPORT-008'
+compiler/src` → zero hits. §21.3.1 is normative (S114) with `E-IMPORT-008` / `E-IMPORT-009` in §34 and no implementation.
+Ruled to BUILD at S430 (P4). The bootstrap's host-module bridge.
+
+<!-- @gap id=g-import-host-is-unimplemented-and-renders-as-page-text sev=HIGH status=open locus=searched:compiler/src,compiler/native-parser prov=ruling:user-voice-S430-P4 -->
+
+### G-DEV-CREATES-EMPTY-DB-STUBS-THAT-BREAK-LATER-COMPILES — `scrml dev` leaves zero-byte `.db` files beside sources
+
+**Adopter-reported (flogence S49, 2026-09-23), RELAYED-UNVERIFIED — reproduction dispatched S430 (`s430-dev-db-stub`).**
+`db="./flogence.db"` with the real store at the repo root: `dev` creates zero-byte `src/flogence.db` + `src/ports/flogence.db`;
+every later `compile` resolves against the source dir, opens the stub, and fails `E-PA-004` naming tables — not the path it
+opened. Two defects: the side-effect create + resolution mismatch, and a diagnostic that does not name the resolved path.
+
+<!-- @gap id=g-dev-creates-empty-db-stubs-that-break-later-compiles sev=HIGH status=open locus=compiler/src/commands/dev.js prov=adopter:flogence-S49 -->
+
+### G-EACH-ROW-STALE-AFTER-AN-AWAITED-SERVER-CALL — a cell reassigned after an async boundary repaints a `${}` but not a keyed `<each>` row
+
+**Adopter-reported (flogence S49, 2026-09-23), RELAYED-UNVERIFIED.** A click handler awaits a server fn, reassigns the
+backing cell, recomputes `@findHits`; `<each in=@findHits as h key=h.k>` rows do not repaint until the next keystroke, while
+`${@findMsg}` outside the each updates. Positive control: the same recompute called synchronously from `oninput` repaints.
+Four non-fixes reported (empty-then-refill, mutable key, setTimeout defer, combinations). Possibly the same root as the
+flogence S11 hidden-initial-subtree note. Reproduce before dispatching.
+
+<!-- @gap id=g-each-row-stale-after-an-awaited-server-call sev=HIGH status=open locus=searched:none-yet prov=adopter:flogence-S49 -->
+
+### G-E-ASSIGN-004-MISSES-ARROW-BODIES-AND-IF-EXPRESSION-ARMS — a const reassigned inside an arrow body or an if-as-expression arm compiles and throws at runtime
+
+**Reviewer-reproduced (S430 review of #996), RELAYED — PA did not re-run.** `const t = 1` + `const h = () => { t = 2; return t }` →
+exit 0, emits `t = 2` (TypeError at runtime). `const k = 0` + `const r = if (c) { k = 1; 1 } else { 2 }` → same. Identical on the
+pre-#996 baseline (not a regression). Governing: §50.8.5 "in either statement or expression position". Distinct from the
+positions already in `g-e-assign-004-position-and-binder-coverage`. P7 disposition candidate: carried.
+
+<!-- @gap id=g-e-assign-004-misses-arrow-bodies-and-if-expression-arms sev=MED status=open locus=compiler/src/type-system.ts prov=review:S430-996-F2 -->
+
+### G-E-ASSIGN-004-BLAMES-A-FORWARD-DECLARED-LET — a function writing a file-level `let` declared later is told to "use let"
+
+**Reviewer-reproduced (S430 review of #996), RELAYED.** `function f() { total = 5; total = 6; return total }` then `let total = 0`
+→ `E-ASSIGN-004 … declared const … Use let` although the author wrote `let` (baseline: `E-CODEGEN-INVALID-LOGIC`, loud→loud).
+Underneath, pre-existing and silent: with ONE write the function emits `const total = 5` — a local shadow — and never writes the
+file-level `let`, exit 0 on both builds. That silent half is the real defect (§6.9 hoisting / §7.6 file-level scope).
+
+<!-- @gap id=g-e-assign-004-blames-a-forward-declared-let sev=MED status=open locus=compiler/src/type-system.ts prov=review:S430-996-F3 -->
+
+### G-NON-RENDERING-LOOP-WRITE-TO-ITS-OWN-BINDER-EMITS-A-TDZ-REFERENCEERROR — `for (let name of rows) { name = name + "!" }` compiles, dies at runtime
+
+**Agent-reproduced (S430 `s430-destructure-shadow`, found along the way), RELAYED.** In a loop that does not lift/render,
+`function f(rows) { for (let name of rows) { name = name + "!" … } }` → exit 0, emits
+`for (const name of rows) { const name = name + "!"; …` → ReferenceError (TDZ). Same for destructured binders
+`for (let { name } of rows)` / `for (let [k, v] of pairs)`. #1032 (S427/S429) fixed only the RENDERING-loop path
+(`emit-control-flow.ts` ~:826, "Other loops unchanged"); the `forHeadKeyword` / `withLoopBinders` machinery in `emit-lift.js`
+~:2325 could be extended. Sibling, same arm: `for (const x of xs) { x = 1 }` fires NO E-ASSIGN-004 (the type-system for-arm
+ignores `letBinder`) — its fix is entangled with peter's pending Q1 (is a keywordless binder mutable?).
+
+<!-- @gap id=g-non-rendering-loop-write-to-its-own-binder-emits-a-tdz-referenceerror sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts prov=empirical:agent-s430-destructure-shadow -->
+
+### G-LET-BOUND-THROUGH-A-GUARDED-EXPRESSION-IS-NOT-A-DECLARED-LOCAL — a later bare write becomes a `const` shadow and is lost
+
+**Agent-reproduced (S430 `s430-p2-export-swallow`, found along the way), RELAYED.** `let v = safeCall(() => JSON.parse(x)) !{ | ::Thrown(message, name) :> 0 }`
+then `if (v == 0) v = 1` → the nested write is emitted as `const v = 1` (a block-local shadow) and the outer `let` is never
+written, exit 0. Same silent-lost-write shape as the underlying half of `g-e-assign-004-blames-a-forward-declared-let` — a
+binding the typer/emitter does not register as a declared local. `!{}` is the language's only error-handling surface.
+
+<!-- @gap id=g-let-bound-through-a-guarded-expression-is-not-a-declared-local sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts prov=empirical:agent-s430-p2-export-swallow -->
+
+### G-EXPORT-SWALLOW-CLOSURE-LEAVES-UNMIGRATABLE-THROW-SITES — six corpus files newly fail and each needs a design call
+
+**S430 P2 arc (`s430-p2-export-swallow`).** Closing the export-declaration diagnostic swallow newly fails 6 files whose sites
+cannot be migrated without a ruling: `stdlib/test/index.scrml` (15 sites — the assertion library's contract IS "throw to the
+runner"), the `reflect()` closure throws that report E-META-003 in both meta-checker copies, meta-checker :297 `try` (canonical
+safeCall form hits the let-through-guard lost-write gap), and precondition throws in non-failable functions
+(oauth google:52/github:48/discord:40/microsoft:51 `opts required`, pkce:37 length 43–128, crypto:65 algorithm). scrml has no
+panic primitive for programmer-error preconditions. None affects importers (stdlib runs from JS shims). Awaiting bryan.
+
+<!-- @gap id=g-export-swallow-closure-leaves-unmigratable-throw-sites sev=MED status=open locus=stdlib/test/index.scrml prov=ruling:user-voice-S430-P2 -->
+
+### G-EMIT-LOGIC-STRUCTURAL-DECL-NAMES-LEAK-ACROSS-COMPILES — the TS compiler's output depends on what it compiled earlier in the process
+
+**Agent-reproduced (S430 `s430-stage-swap`), RELAYED.** `emit-logic.ts` module-level `_structuralDeclNamesForFile` is reset only
+by emit-reactive-wiring, but function-body emission reads it FIRST, so each file sees the PREVIOUS file's set. Repro: compile
+`conformance/cases/error/handler-recovery-into-cell/case.scrml` twice in one process — the first emits
+`_scrml_cs_init_set("result", () => _scrml_risky_3())` inside `go()`, the second does not. The fresh-process (CLI) output looks
+like the WRONG one (registers a reset thunk inside a function — the g-assignment-emits-init-set-inverting-reset class, §6.8).
+Hits multi-file builds and dev/LSP recompiles. **P7 criterion 1 (bootstrap-blocking):** the P5 hybrid differential must be
+deterministic; the harness currently works around it by running pure and hybrid in separate processes.
+
+<!-- @gap id=g-emit-logic-structural-decl-names-leak-across-compiles sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts prov=empirical:agent-s430-stage-swap -->
+
+### G-RECURSIVE-COMPONENT-OVERFLOWS-CE-DEEP-CLONE — a recursive component crashes the compiler
+
+**Agent-reported (S430 `s430-stage-swap`), RELAYED.** `samples/gauntlet-s19-phase4/nested-comments.scrml`: CE `_deepCloneAst`
+overflows the stack on a recursive component; the CLI prints "Compiler crashed unexpectedly".
+
+<!-- @gap id=g-recursive-component-overflows-ce-deep-clone sev=MED status=open locus=compiler/src/component-expander.ts prov=empirical:agent-s430-stage-swap -->
+
+### G-LOOP-BINDER-WRITE-DETECTION-SKIPS-CLOSURES-AND-TEMPLATE-INTERPOLATIONS — a `let` binder written from a closure still gets a `const` head
+
+**Reviewer-reproduced (S430 re-review of `s430-destructure-shadow` round 2), same on base.** The binder-write walk
+(`_liftTreeWalk`, emit-lift.js) returns early at `function-decl`/`lambda` and never enters template-literal interpolations:
+`for (let x of xs) { const g = () => { x = x + 1 }; g() }` → TypeError (assign to const); the `function g(){ x = x + 1 }`
+form lowers to `const x = x + 1` (TDZ); `` s = s + `${x++}` `` → TypeError; at top level the page dies at init. Same blind spot:
+`const y = 1; const g = () => { y = 2 }` fires NO E-ASSIGN-004 (general typer gap, not loop-specific). exit 0.
+
+<!-- @gap id=g-loop-binder-write-detection-skips-closures-and-template-interpolations sev=MED status=open locus=compiler/src/codegen/emit-lift.js prov=review:S430-destructure-round2 -->
+
+### G-HOISTED-LOOP-WRITE-TO-AN-OUTER-LET-EMITS-A-TDZ — §8.10 batch-hoisted loop bodies drop the enclosing scope's names
+
+**Reviewer-reproduced (S430), same on base.** `server function recent(ids) { let n = 0; for (const x of ids) { let row = ?{…}.get();
+n = n + 1 } return n }` emits `const n = n + 1;` in `.server.js`, CLI exit 0 → the server handler throws. `emitHoistedForStmt`
+passes no enclosing `declaredNames` (its own comment names the drop).
+
+<!-- @gap id=g-hoisted-loop-write-to-an-outer-let-emits-a-tdz sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts prov=review:S430-destructure-round2 -->
+
+### G-LABELED-LOOPS-AND-SAME-SCOPE-REDECLARATION-REACH-CODEGEN-AS-DEFECTS — `continue outer`, `let a; let a`, `[x] = [x*3]`
+
+**Reviewer-reproduced (S430), same on base, LOUD.** Labeled loops lose their label in function bodies; same-scope redeclaration
+and the destructuring assignment `[x] = [x * 3]` emit invalid JS. The validate-emit gate catches all three (exit 1) but as
+E-CODEGEN-INVALID-LOGIC ("compiler defect") — a diagnostic that does not name the root cause is itself a diagnostic bug.
+
+<!-- @gap id=g-labeled-loops-and-same-scope-redeclaration-reach-codegen-as-defects sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts prov=review:S430-destructure-round2 -->
+
+### G-FILE-TOP-JS-IMPORT-IN-A-PAGE-EMITS-AN-ES-IMPORT-INTO-A-CLASSIC-SCRIPT — the page dies with a SyntaxError on load
+
+**Agent-reproduced (S430 `s430-import-host`), same on base.** A plain file-top `import { x } from "./x.js"` in a browser-mode page
+compiles at exit 0 and emits an ES `import` statement at the top of the classic-script `client.js` → SyntaxError at page load;
+the specifier is also not re-based to the output directory. Loud at runtime, silent at compile.
+
+<!-- @gap id=g-file-top-js-import-in-a-page-emits-an-es-import-into-a-classic-script sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts prov=empirical:agent-s430-import-host -->
+
+### G-DB-OPENER-SPLITS-SINGLE-QUOTED-AND-UNQUOTED-ATTRIBUTE-VALUES — `<db src='…'>` / `db=scheme://…` become attribute names
+
+**Agent-reproduced (S430 `s430-dev-db-stub` round 3), same on base.** The `<db>` state opener mis-tokenizes a single-quoted
+`src='…'` and an unquoted `db=scheme://…` into bare attribute NAMES. The round-3 credential redaction covers the leak via a
+narrow source read; the parser defect itself remains (§5 attribute quoting).
+
+<!-- @gap id=g-db-opener-splits-single-quoted-and-unquoted-attribute-values sev=MED status=open locus=compiler/src/ast-builder.js prov=empirical:agent-s430-dev-db-stub -->
+
+### G-SPLIT-FUNCTION-DROPS-A-LET-SQL-READ — `let row = ?{SELECT}.get()` in a body-split function becomes `let row;` and vanishes server-side
+
+**Agent-reproduced (S430 `s430-defer`), same on base, SILENT.** In a CPS-split function, `let row = ?{SELECT …}.get()` lowers to
+`let row;` on the client and is absent from the server batch. Silent wrong lowering at exit 0 (§19.9.3 / §19.9.9).
+
+<!-- @gap id=g-split-function-drops-a-let-sql-read sev=HIGH status=open locus=compiler/src/route-inference.ts prov=empirical:agent-s430-defer -->
+
+### G-SINGLE-BATCH-CPS-WRAPPER-IGNORES-A-SERVER-ERROR-ENVELOPE — a server-side `!` failure is dropped when the function returns nothing
+
+**Agent-reproduced (S430 `s430-defer`), same on base, SILENT.** The single-batch CPS client wrapper checks the server
+`__scrml_error` envelope only on the value-returning path; with no return value a server-side failure is ignored and the
+caller's `!{}` never runs (§19.9.4 error envelope).
+
+<!-- @gap id=g-single-batch-cps-wrapper-ignores-a-server-error-envelope sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts prov=empirical:agent-s430-defer -->
+
+### G-NATIVE-PARSER-FAIL-LOSES-ENUM-TYPE-AND-VARIANT — `fail E.X` under `--parser=scrml-native` emits `type:""`
+
+**Agent-reproduced (S430 `s430-defer`).** Every native `fail E.X` gets E-ERROR-009 + E-TYPE-080, and the emitted envelope has
+`type:""`, so `!{}` arms never match. Plus: native `on mount { … }` parses only the first expression and silently drops the rest
+(the native twin of GH #264).
+
+<!-- @gap id=g-native-parser-fail-loses-enum-type-and-variant sev=MED status=open locus=compiler/native-parser/translate-stmt.js prov=empirical:agent-s430-defer -->
+
+### G-LSP-NEVER-PUBLISHES-FORBIDDEN-VOCABULARY-CODES — the editor shows no error for `class X {}` / `import("x")`
+
+**Reviewer-executed (S430).** `lsp/handlers.js analyzeText` calls TAB directly, not `compileScrml`, so E-CLASS-NOT-IN-SCRML and
+E-DYNAMIC-IMPORT-NOT-IN-SCRML (decided on the native tree after TAB) never reach the editor: a file the compiler rejects shows
+only W-TYPE-031-UNPROVEN. Same on base (the codes did not exist) — a gap, not a regression. Likely the same for any diagnostic
+produced by a stage `analyzeText` does not run.
+
+<!-- @gap id=g-lsp-never-publishes-forbidden-vocabulary-codes sev=MED status=open locus=lsp/handlers.js prov=empirical:review-S430-rcl4 -->

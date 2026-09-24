@@ -2,7 +2,7 @@ import * as acorn from "acorn";
 import { genVar } from "./var-counter.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
 import { emitStringFromTree } from "../expression-parser.ts";
-import { emitLogicNode, nodeListContainsTildeRef, setStructuralDeclNamesForFile } from "./emit-logic.js";
+import { emitLogicNode, nodeListContainsTildeRef, beginEmitLogicFile, beginTopLevelLogicEmission } from "./emit-logic.js";
 import { pushLiftNonKeyed, popLiftNonKeyed, checkLoopBinderWrites } from "./emit-lift.js";
 import { liftScopeDeclaredNames, seedOwnConsts, seededConstFallbackCount, withSeededConstsOff } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
@@ -869,7 +869,13 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
   // Publish to the module-level fallback so _emitInitThunkSidecar's reassignment
   // guard fires for a reassignment nested in a top-level control-flow body (whose
   // hand-picked opts do not carry structuralDeclNames — S239 F1). File-immutable.
-  setStructuralDeclNamesForFile(structuralDeclNames);
+  // s430-emit-state-leak — idempotent per file: the codegen driver has already
+  // installed this file's state BEFORE function-body emission (which reads it);
+  // this call only covers a direct emitReactiveWiring caller (unit harnesses).
+  beginEmitLogicFile(fileAST, structuralDeclNames);
+  // The implicit-cell first-write tracker counts TOP-LEVEL writes only; restart
+  // it here so a function body lowered earlier cannot claim a top-level slot.
+  beginTopLevelLogicEmission();
   // Bug 61 — dotted synth-cell keys for compound parents in this file. Read
   // from the CompileContext (populated in index.ts via collectSynthCellKeys);
   // threaded into emitOpts so `@<compound>.<synthProp>` reads in top-level logic

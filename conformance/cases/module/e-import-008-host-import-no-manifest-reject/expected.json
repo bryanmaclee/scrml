@@ -1,0 +1,12 @@
+{
+  "id": "e-import-008-host-import-no-manifest-reject",
+  "description": "§21.3.1 / §22.13 — a file-top `import:host` in a project with no `scrml.toml` fires E-IMPORT-008 exactly once: an absent manifest defaults `[capabilities] host-import` to \"disabled\". The imported name stays bound (no cascading E-SCOPE-001 on its use).",
+  "language-version": "1.0",
+  "spec": "§21.3.1",
+  "rationale": "§22.13: \"If the manifest is absent, the entry defaults to \\\"disabled\\\"\" and \"\\\"disabled\\\" — import:host declarations SHALL fire E-IMPORT-008 in every file of the project.\" §21.3.1: named bindings are in the logic scope as if plainly imported, so the use site raises no scope error.",
+  "expect": {
+    "codes": ["E-IMPORT-008"],
+    "notCodes": ["E-SCOPE-001", "E-IMPORT-009", "E-IMPORT-003"],
+    "codeCounts": { "E-IMPORT-008": 1 }
+  }
+}

@@ -864,7 +864,7 @@ ${
         // body (an engine state-child / match-arm body — SPEC §4.18.1). A
         // code-default body has its own `{`-bearing grammar and is not the
         // markup-child position the P4-3 target files exercise.
-        const orphanActive = not isCodeDefault(currentBodyMode(ctx))
+        const orphanActive = !isCodeDefault(currentBodyMode(ctx))
         if (orphanActive && handleOrphanBrace(run, cursor, ctx)) return
         const inOrphan = orphanActive && markupOrphanBraceDepth(ctx) > 0
 

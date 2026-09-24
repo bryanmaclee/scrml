@@ -180,7 +180,8 @@ function nextSynthId(): number {
   return _synthIdCounter++;
 }
 
-/** Reset the synth-id counter — TEST USE ONLY. */
+/** Reset the synth-id counter. Production caller: the compile head only (api.js
+ *  compileScrml, s430-emit-state-leak) — see emit-form-for.ts's twin. */
 export function _resetSynthIdCounter(): void {
   _synthIdCounter = 0x50000000;
 }

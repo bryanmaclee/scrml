@@ -170,6 +170,9 @@ ${
         parseBinding, parseBindingIdent, parseObjectPattern, parseArrayPattern,
         // M4.2 — `noIn` scope helpers (the for-head deferral closure).
         enterNoInScope, exitNoInScope,
+        // S430 P1 / P4 — the shared forbidden-construct messages.
+        CLASS_NOT_IN_SCRML_MESSAGE,
+        setClassExprParser,
     } from "./parse-expr.scrml"
     import {
         VarDeclKind, MethodKind,
@@ -630,8 +633,10 @@ ${
             return parseClassDecl(ctx, false)
         }
 
-        // An `import` statement.
-        if (kind == TokenKind.KwImport) {
+        // An `import` statement. A dynamic `import(...)` at statement
+        // position is an EXPRESSION statement (S430 P4) — parse-expr fires
+        // E-DYNAMIC-IMPORT-NOT-IN-SCRML. Mirrors parse-stmt.js.
+        if (kind == TokenKind.KwImport && peekKind(cursor, 1) != TokenKind.LParen) {
             return parseImport(ctx)
         }
 
@@ -1642,9 +1647,16 @@ ${
     // -- parseClassDecl — a `class Name extends Base { ... }` declaration --
     // `allowAnonymous` is true ONLY for `export default class {}`; a plain
     // declaration always names.
+    //
+    // S430 P1 — `class` is NOT scrml vocabulary (SPEC §7.2.1). Fire
+    // E-CLASS-NOT-IN-SCRML at the `class` keyword and RECOVER by parsing the
+    // construct anyway; covers statement, `export class`, and
+    // `export default class`. Mirrors parse-stmt.js.
     export fn parseClassDecl(ctx, allowAnonymous) {
         const cursor = ctx.cursor
         const kw = advance(cursor)
+
+        recordError(ctx, "E-CLASS-NOT-IN-SCRML", CLASS_NOT_IN_SCRML_MESSAGE, kw.span)
 
         let name = ""
         if (currentKind(cursor) == TokenKind.Ident) {
@@ -1962,6 +1974,54 @@ ${
         const cursor = ctx.cursor
         const kw = advance(cursor)
         const specifiers = []
+
+        // §21.3.1 `import:<host-tag> { a, b as c } from "m"` — the
+        // host-import declaration. Only the braced named clause is in its
+        // grammar. The tag is recorded on the node; placement / host-tag /
+        // manifest are enforced by compiler/src/host-import.js.
+        if (currentKind(cursor) == TokenKind.Colon) {
+            advance(cursor)
+            // Not the declaration shape at all — the tag is not `host` AND
+            // no `{ ... }` clause follows (typically file-top prose). Consume
+            // the rest of the line; the shared gate reports ONE E-IMPORT-009.
+            const tagIsIdent = currentKind(cursor) == TokenKind.Ident
+            const tagName = tagIsIdent ? current(cursor).name : ""
+            if (tagName != "host" && (tagIsIdent && peekKind(cursor, 1) == TokenKind.LBrace) == false) {
+                const words = []
+                while (atEnd(cursor) == false
+                    && currentKind(cursor) != TokenKind.Semicolon
+                    && current(cursor).span.line == kw.span.line) {
+                    const t = advance(cursor)
+                    words.push(t.text)
+                }
+                const proseEnd = finishStatementTerminator(ctx, kw)
+                const proseNode = makeImport(specifiers, "",
+                    makeSpan(kw.span.start, proseEnd, kw.span.line, kw.span.col))
+                proseNode.hostTag = tagName
+                proseNode.hostProse = ("import: " + words.join(" ")).trim()
+                return proseNode
+            }
+            let hostTag = ""
+            if (currentKind(cursor) == TokenKind.Ident) {
+                hostTag = advance(cursor).name
+            } else {
+                recordError(ctx, "E-STMT-IMPORT-NAME",
+                    "expected a host-tag identifier after 'import:'", spanHere(ctx))
+            }
+            if (currentKind(cursor) == TokenKind.LBrace) {
+                parseNamedImportSpecifiers(ctx, specifiers)
+            } else {
+                recordError(ctx, "E-STMT-IMPORT-NAME",
+                    "expected '{' — 'import:<host-tag>' takes a braced named-import clause", spanHere(ctx))
+            }
+            expectFromKeyword(ctx)
+            const hostSource = expectModuleString(ctx)
+            const hostEnd = finishStatementTerminator(ctx, kw)
+            const hostNode = makeImport(specifiers, hostSource,
+                makeSpan(kw.span.start, hostEnd, kw.span.line, kw.span.col))
+            hostNode.hostTag = hostTag
+            return hostNode
+        }
 
         // Bare side-effect import — `import "m";`.
         if (currentKind(cursor) == TokenKind.StringLit) {
@@ -3023,6 +3083,55 @@ ${
     export fn parseProgram(tokens) {
         const ctx = makeParseStmtContext(tokens)
         const body = parseStatementList(ctx, not)
-        return { body, errors: ctx.errors }
+        return { body, errors: ctx.errors.concat(collectBlockStubBodyErrors(body, ctx.errors)) }
     }
+
+    // -- collectBlockStubBodyErrors — the diagnostics of every BlockStub body
+    // re-entered inside THIS parse (parked on `stub.bodyErrors` by
+    // reenterBlockStubs), in this parse's own coordinates. Does not cross a
+    // MarkupValue (a separately-parsed body). S430 — mirrors parse-stmt.js.
+    export fn collectBlockStubBodyErrors(root, already) {
+        const out = []
+        const have = new Set()
+        if (Array.isArray(already)) {
+            for (const e of already) {
+                if (e is some) {
+                    have.add(String(e.code) + "@" + String(e.span is some ? e.span.start : ""))
+                }
+            }
+        }
+        const seen = new Set()
+        const stack = [root]
+        while (stack.length > 0) {
+            const cur = stack.pop()
+            if (cur is not || typeof cur != "object" || seen.has(cur)) { continue }
+            seen.add(cur)
+            if (Array.isArray(cur)) {
+                for (const el of cur) { stack.push(el) }
+                continue
+            }
+            if (cur.kind == "MarkupValue") { continue }
+            if (cur.kind == "BlockStub" && Array.isArray(cur.bodyErrors)) {
+                for (const e of cur.bodyErrors) {
+                    if (e is some) {
+                        const key = String(e.code) + "@" + String(e.span is some ? e.span.start : "")
+                        if (have.has(key) == false) {
+                            have.add(key)
+                            out.push(e)
+                        }
+                    }
+                }
+            }
+            for (const key of Object.keys(cur)) {
+                const v = cur[key]
+                if (v is some && typeof v == "object") { stack.push(v) }
+            }
+        }
+        out.sort((a, b) => ((a.span is some ? a.span.start : 0) - (b.span is some ? b.span.start : 0)))
+        return out
+    }
+
+    // S430 P1 — a class EXPRESSION parses through the same class parser as a
+    // declaration (parse-expr's parsePostfix). Mirrors parse-stmt.js.
+    setClassExprParser(parseClassDecl)
 }

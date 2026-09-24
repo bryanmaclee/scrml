@@ -1,3 +1,5 @@
+import:host { runTS as _runTS, TSError as _TSError } from "../../compiler/src/type-system.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -11,9 +13,6 @@ ${
     //   const result = runTS({ files, protectAnalysis, routeMap })
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { runTS: _runTS, TSError: _TSError } = await import("../../compiler/src/type-system.ts");
-    }
 
     export const runTS = _runTS
     export const TSError = _TSError

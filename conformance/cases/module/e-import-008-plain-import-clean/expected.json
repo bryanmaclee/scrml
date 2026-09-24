@@ -1,0 +1,11 @@
+{
+  "id": "e-import-008-plain-import-clean",
+  "description": "§21.3.1 / §22.13 — the clean twin: a plain file-top `import { ... } from \"./helpers.scrml\"` in a project with no manifest is NOT gated. E-IMPORT-008 constrains `import:host` only.",
+  "language-version": "1.0",
+  "spec": "§21.3.1",
+  "rationale": "§21.3.1 / §22.13 gate the `import:host` declaration form. A plain `import` of a scrml module is the canonical adopter path and never consults `[capabilities] host-import`, so with the manifest absent (\"disabled\") it still compiles clean.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-IMPORT-008", "E-IMPORT-009", "E-IMPORT-003", "E-IMPORT-006"]
+  }
+}

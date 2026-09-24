@@ -1625,6 +1625,54 @@ function cleanFnSignatures(text: string): string {
 }
 
 /**
+ * §21.3.1 `import:host { ... } from "..."` — the library whole-block path emits
+ * the logic block's SOURCE TEXT, so a host import would reach the `.js`
+ * verbatim as `import:host { ... }` (invalid JS). Its emitted form is the
+ * static ES import `import { ... } from "..."`, i.e. the source minus the
+ * `:<tag>` suffix. Blank the suffix with same-length spaces (so every other
+ * absolute-span splice that runs on this slice stays aligned). Each edit is
+ * driven by a host `import-decl` NODE and anchored at its span, so only real
+ * declarations are touched — a string literal that happens to contain
+ * `import:host` is not (there is no node for it).
+ */
+const HOST_IMPORT_GAP = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*`;
+const HOST_TAG_SUFFIX_RE = new RegExp(`^${HOST_IMPORT_GAP}:${HOST_IMPORT_GAP}[A-Za-z_$][A-Za-z0-9_$]*`);
+
+function blankHostImportTags(blockText: string, blockStart: number, body: unknown): string {
+  if (!Array.isArray(body)) return blockText;
+  let out = blockText;
+  for (const n of body as any[]) {
+    if (!n || n.kind !== "import-decl" || typeof n.hostTag !== "string") continue;
+    const s = n.span;
+    if (!s || typeof s.start !== "number") continue;
+    const anchor = s.start - blockStart;
+    if (anchor < 0 || anchor >= out.length) continue;
+    // Locate the declaration's own `import` keyword: the native parser's span
+    // starts ON it; the live parser's starts just after it, and — when a
+    // comment sits between `import` and `:` — inside that comment. So walk
+    // back from the span start to the nearest `import` that actually opens an
+    // `import <gap> : <gap> <tag>` run. Comments may sit in either gap (the
+    // tokenizer drops them), so the gap is whitespace OR block/line comments.
+    let rel = -1;
+    let m: RegExpExecArray | null = null;
+    for (let kw = out.lastIndexOf("import", anchor); kw >= 0; kw = out.lastIndexOf("import", kw - 1)) {
+      if (kw > 0 && /[A-Za-z0-9_$]/.test(out[kw - 1])) continue;
+      const after = kw + "import".length;
+      const hit = HOST_TAG_SUFFIX_RE.exec(out.slice(after));
+      if (hit) { rel = after; m = hit; break; }
+    }
+    if (rel < 0 || !m) continue;
+    // Drop the tag and move the freed width to the END of the declaration, so
+    // the emitted line reads `import { a } from "./m.js"` (not `import      {`).
+    const end = typeof s.end === "number" && s.end - blockStart > rel ? s.end - blockStart : rel + m[0].length;
+    const segment = out.slice(rel, end);
+    const rewritten = " " + segment.slice(m[0].length).trimStart();
+    out = out.slice(0, rel) + rewritten + " ".repeat(Math.max(0, segment.length - rewritten.length)) + out.slice(end);
+  }
+  return out;
+}
+
+/**
  * Generate ES module output for a scrml file in library mode.
  *
  * Library mode emits importable ES modules — no browser runtime, no IIFE,
@@ -1739,7 +1787,11 @@ export function generateLibraryJs(
       // ---------------------------------------------------------------------------
       const logicSpan = logic.span as Span | undefined;
       if (logicSpan && typeof logicSpan.start === "number" && typeof logicSpan.end === "number") {
-        let blockText = sourceText.slice(logicSpan.start, logicSpan.end);
+        let blockText = blankHostImportTags(
+          sourceText.slice(logicSpan.start, logicSpan.end),
+          logicSpan.start,
+          logic.body,
+        );
         // §19 host-containment — lower every `EXPR !{ | ::Variant(...) :> ... }`
         // call-site handler (the public try/catch replacement) by span-splicing
         // the AST-lowered emission over its raw `!{}` source. The library

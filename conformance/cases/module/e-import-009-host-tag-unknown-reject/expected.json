@@ -1,0 +1,12 @@
+{
+  "id": "e-import-009-host-tag-unknown-reject",
+  "description": "§21.3.1 — `import:wasm { ... }` uses a host-tag other than `host` and fires E-IMPORT-009 exactly once. (No manifest governs the case, so E-IMPORT-008 also fires — the two rules are independent.)",
+  "language-version": "1.0",
+  "spec": "§21.3.1",
+  "rationale": "§21.3.1: \"The host-tag SHALL be host in v1. Any other host-tag value SHALL be a compile error (E-IMPORT-009 — unknown host-tag; only host is recognized in v1).\" `wasm` is named as future-reserved, not recognized.",
+  "expect": {
+    "codes": ["E-IMPORT-009", "E-IMPORT-008"],
+    "notCodes": ["E-SCOPE-001"],
+    "codeCounts": { "E-IMPORT-009": 1 }
+  }
+}

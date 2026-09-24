@@ -1,3 +1,18 @@
+import:host { compileScrml as _compileScrml, scanDirectory as _scanDirectory } from "../../compiler/src/api.js"
+import:host { splitBlocks as _splitBlocks } from "../../compiler/src/block-splitter.js"
+import:host { buildAST as _buildAST } from "../../compiler/src/ast-builder.js"
+import:host { resolveModules as _resolveModules } from "../../compiler/src/module-resolver.js"
+import:host { runCE as _runCE } from "../../compiler/src/component-expander.ts"
+import:host { runBPP as _runBPP } from "../../compiler/src/body-pre-parser.ts"
+import:host { runPA as _runPA } from "../../compiler/src/protect-analyzer.ts"
+import:host { runRI as _runRI } from "../../compiler/src/route-inference.ts"
+import:host { runTS as _runTS } from "../../compiler/src/type-system.ts"
+import:host { runMetaChecker as _runMetaChecker } from "../../compiler/src/meta-checker.ts"
+import:host { runMetaEval as _runMetaEval } from "../../compiler/src/meta-eval.ts"
+import:host { runDG as _runDG } from "../../compiler/src/dependency-graph.ts"
+import:host { runCG as _runCG } from "../../compiler/src/codegen/index.ts"
+import:host { parseExpression as _parseExpression, extractIdentifiersFromAST as _extractIdentifiersFromAST } from "../../compiler/src/expression-parser.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -27,27 +42,6 @@ ${
     // Pipeline order: BS → TAB → MOD → CE → BPP → PA → RI → TS → MC → ME → DG → CG
     // ---------------------------------------------------------------------------
 
-    ^{
-        // Full pipeline
-        const { compileScrml: _compileScrml, scanDirectory: _scanDirectory } = await import("../../compiler/src/api.js");
-
-        // Stage entry points
-        const { splitBlocks: _splitBlocks } = await import("../../compiler/src/block-splitter.js");
-        const { buildAST: _buildAST } = await import("../../compiler/src/ast-builder.js");
-        const { resolveModules: _resolveModules } = await import("../../compiler/src/module-resolver.js");
-        const { runCE: _runCE } = await import("../../compiler/src/component-expander.ts");
-        const { runBPP: _runBPP } = await import("../../compiler/src/body-pre-parser.ts");
-        const { runPA: _runPA } = await import("../../compiler/src/protect-analyzer.ts");
-        const { runRI: _runRI } = await import("../../compiler/src/route-inference.ts");
-        const { runTS: _runTS } = await import("../../compiler/src/type-system.ts");
-        const { runMetaChecker: _runMetaChecker } = await import("../../compiler/src/meta-checker.ts");
-        const { runMetaEval: _runMetaEval } = await import("../../compiler/src/meta-eval.ts");
-        const { runDG: _runDG } = await import("../../compiler/src/dependency-graph.ts");
-        const { runCG: _runCG } = await import("../../compiler/src/codegen/index.ts");
-
-        // Expression parser
-        const { parseExpression: _parseExpression, extractIdentifiersFromAST: _extractIdentifiersFromAST } = await import("../../compiler/src/expression-parser.ts");
-    }
 
     // Full pipeline
     export const compileScrml = _compileScrml

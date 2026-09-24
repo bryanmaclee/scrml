@@ -1,3 +1,5 @@
+import:host { parseExpression as _parseExpression, parseStatements as _parseStatements, walk as _walk, extractIdentifiersFromAST as _extractIdentifiersFromAST, extractReactiveDepsFromAST as _extractReactiveDepsFromAST, astToJs as _astToJs, rewriteReactiveRefsAST as _rewriteReactiveRefsAST, rewriteServerReactiveRefsAST as _rewriteServerReactiveRefsAST } from "../../compiler/src/expression-parser.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -12,9 +14,6 @@ ${
     //   const { ast, error } = parseExpression("@count + 1")
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { parseExpression: _parseExpression, parseStatements: _parseStatements, walk: _walk, extractIdentifiersFromAST: _extractIdentifiersFromAST, extractReactiveDepsFromAST: _extractReactiveDepsFromAST, astToJs: _astToJs, rewriteReactiveRefsAST: _rewriteReactiveRefsAST, rewriteServerReactiveRefsAST: _rewriteServerReactiveRefsAST } = await import("../../compiler/src/expression-parser.ts");
-    }
 
     export const parseExpression = _parseExpression
     export const parseStatements = _parseStatements
