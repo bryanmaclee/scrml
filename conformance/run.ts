@@ -22,10 +22,13 @@
  *       static .html (DD OQ1 step 1).
  *
  *   (c) XFAIL   — per-IMPLEMENTATION expected failure (S430 P7). A case may carry
- *       `"xfail": { "impl1-ts": "<gap-id>" }`: the case pins the CORRECT behaviour,
- *       impl#1 (TS) is known not to have it, and the named gap is `status=carried`
- *       in docs/known-gaps.md (owed by the bootstrap, not by impl#1). Outcomes:
- *         - fails on the named impl  -> XFAIL  (not a failure; names the gap)
+ *       `"xfail": { "impl1-ts": { "gap": "<gap-id>", "fails": <signature> } }`: the case
+ *       pins the CORRECT behaviour, impl#1 (TS) is known not to have it, the named gap
+ *       is `status=carried` in docs/known-gaps.md (owed by the bootstrap, not by impl#1),
+ *       and `fails` records HOW impl#1 fails it (see XfailSignature). Outcomes:
+ *         - fails WITH the recorded signature -> XFAIL (not a failure; names the gap)
+ *         - fails with a DIFFERENT signature  -> FAIL  (a new failure is not covered by
+ *           the carried gap; the diff is printed)
  *         - PASSES on the named impl -> XPASS  (A FAILURE — the gap is fixed, so the
  *           mark must come off and the gap be resolved; a mark cannot stay silently)
  *         - names a gap that is absent, or not `status=carried` -> a FAILURE
@@ -37,6 +40,7 @@
  * Or via bun:test: conformance/conformance-corpus.test.js
  */
 import { readdirSync, readFileSync, statSync, existsSync } from "fs";
+import { createHash } from "crypto";
 import { join, dirname, relative } from "path";
 import { fileURLToPath } from "url";
 import { compile, IMPL_ID } from "./adapters/impl1-ts.ts";
@@ -80,9 +84,10 @@ export interface ExpectedCase {
   /** OQ4 — MANDATORY spec anchor for (b) runtime cases (the soundness gate). */
   spec?: string;
   rationale?: string;
-  /** S430 P7 — per-implementation EXPECTED FAILURE: impl id -> the `status=carried` gap id that
-   *  explains it. See the header's (c) paragraph and `resolveXfail`. */
-  xfail?: Record<string, string>;
+  /** S430 P7 — per-implementation EXPECTED FAILURE: impl id -> { gap: the `status=carried` gap id
+   *  that explains it, fails: the recorded failure signature }. See the header's (c) paragraph,
+   *  `XfailSignature` and `resolveXfail`. */
+  xfail?: Record<string, { gap: string; fails: { codes?: string[]; runtime?: string } }>;
   expect: {
     codes: string[];
     notCodes: string[];
@@ -371,9 +376,94 @@ export interface CaseResult {
 /** S430 P7 — the four outcomes of a case once its `xfail` mark is taken into account. */
 export type Outcome = "pass" | "fail" | "xfail" | "xpass";
 
+/**
+ * THE EXPECTED-FAILURE SIGNATURE (S430 P7, round 2).
+ *
+ * A mark that says only "this case fails" absorbs EVERY failure of the case — including a brand-new
+ * regression on a carried case, which would then read XFAIL forever (pa-base §8, the absorbed escape
+ * hatch, at the scale of a triage that may mark hundreds of cases). So a mark records HOW the case
+ * fails, derived from the case's own two contract halves, and any other failure is a plain FAIL:
+ *
+ *   codes   — the exact, sorted set of failed codes-half assertions, one string each:
+ *               `missing:<code>` · `forbidden:<code>` · `prefix:<violation>` ·
+ *               `severity:<mismatch>` · `codeCounts:<mismatch>`
+ *             Readable on purpose: a reviewer can see which codes the carried gap is about.
+ *   runtime — `sha256:<16 hex>` over the sorted runtime-half failure lines. Those lines carry the
+ *             normalized DOM / state diff (which cell, expected vs got; which anchored selector), so
+ *             the digest moves when the runtime failure changes in any way. A digest rather than the
+ *             text because a whole-tree DOM diff is too large to pin readably in a JSON file; the
+ *             run prints the lines themselves under every XFAIL.
+ *
+ * Either key is omitted when that half does not fail. The signature of a passing case is `{}`, and an
+ * empty recorded signature is rejected — a mark cannot pin "fails in no way".
+ *
+ * Capture it mechanically: `bun conformance/run.ts --xfail-signature <case-id>`.
+ */
+export interface XfailSignature {
+  codes?: string[];
+  runtime?: string;
+}
+
+/** A resolved, validated mark for one implementation. */
+export interface XfailMark {
+  gap: string;
+  fails: XfailSignature;
+}
+
+const RUNTIME_DIGEST_RE = /^sha256:[0-9a-f]{16}$/;
+
+/** The observed failure signature of a result (see XfailSignature). `{}` for a passing case. */
+export function failureSignature(r: CaseResult): XfailSignature {
+  const codes = [
+    ...r.missing.map((c) => "missing:" + c),
+    ...r.forbidden.map((c) => "forbidden:" + c),
+    ...r.prefixViolations.map((s) => "prefix:" + s),
+    ...r.severityMismatches.map((s) => "severity:" + s),
+    ...r.countMismatches.map((s) => "codeCounts:" + s),
+  ].sort();
+  const sig: XfailSignature = {};
+  if (codes.length > 0) sig.codes = codes;
+  if (r.runtimeFailures.length > 0) {
+    const h = createHash("sha256").update([...r.runtimeFailures].sort().join("\n")).digest("hex");
+    sig.runtime = "sha256:" + h.slice(0, 16);
+  }
+  return sig;
+}
+
+/** Canonical form for comparison: codes sorted, empty halves dropped. */
+function canonicalSignature(s: XfailSignature): XfailSignature {
+  const out: XfailSignature = {};
+  if (s.codes && s.codes.length > 0) out.codes = [...s.codes].sort();
+  if (s.runtime !== undefined) out.runtime = s.runtime;
+  return out;
+}
+
+/** Human-readable differences between a recorded and an observed signature (empty = identical). */
+export function signatureDiff(expected: XfailSignature, observed: XfailSignature): string[] {
+  const e = canonicalSignature(expected);
+  const o = canonicalSignature(observed);
+  const out: string[] = [];
+  const eCodes = new Set(e.codes ?? []);
+  const oCodes = new Set(o.codes ?? []);
+  for (const c of oCodes) if (!eCodes.has(c)) out.push(`codes: NEW failure not in the recorded signature: ${c}`);
+  for (const c of eCodes) if (!oCodes.has(c)) out.push(`codes: recorded failure no longer occurs: ${c}`);
+  if (e.runtime !== o.runtime) {
+    out.push(
+      `runtime: recorded ${e.runtime ?? "(runtime half passes)"}, observed ${o.runtime ?? "(runtime half passes)"}`,
+    );
+  }
+  return out;
+}
+
 export interface EvaluatedCase extends CaseResult {
   /** The carried gap this case is expected to fail for on THIS impl, or null when unmarked. */
   xfailGap: string | null;
+  /** The recorded failure signature for THIS impl, or null when unmarked. */
+  expectedSignature: XfailSignature | null;
+  /** The failure signature actually observed on this run (`{}` when every assertion held). */
+  observedSignature: XfailSignature;
+  /** Recorded-vs-observed differences for a marked case that FAILED. Non-empty => outcome "fail". */
+  signatureMismatch: string[];
   /** A malformed / dangling `xfail` declaration. Non-empty => outcome "fail", whatever the assertions say. */
   xfailErrors: string[];
   outcome: Outcome;
@@ -404,80 +494,148 @@ export function loadGapStatusIndex(): GapStatusIndex {
   return liveGapIndex;
 }
 
+/** Validate a recorded `fails` signature. Returns errors (empty = well-formed). */
+function validateSignature(where: string, f: unknown): string[] {
+  if (!isPlainObject(f)) {
+    return [`${where}.fails is ${describeContainer(f)} — expected { "codes"?: string[], "runtime"?: "sha256:<16 hex>" }`];
+  }
+  const errors: string[] = [];
+  for (const key of Object.keys(f)) {
+    if (key !== "codes" && key !== "runtime") errors.push(`${where}.fails.${key} is not a signature key (codes, runtime)`);
+  }
+  if ("codes" in f) {
+    const c = f.codes;
+    if (!Array.isArray(c) || c.length === 0 || c.some((s) => typeof s !== "string" || s === "")) {
+      errors.push(`${where}.fails.codes is ${describeContainer(c)} — expected a NON-EMPTY array of strings (omit the key when the codes half passes)`);
+    }
+  }
+  if ("runtime" in f) {
+    if (typeof f.runtime !== "string" || !RUNTIME_DIGEST_RE.test(f.runtime)) {
+      errors.push(`${where}.fails.runtime is ${describeContainer(f.runtime)} — expected "sha256:<16 lowercase hex>"`);
+    }
+  }
+  if (!("codes" in f) && !("runtime" in f)) {
+    errors.push(`${where}.fails is EMPTY — a signature must pin at least one failing half (codes and/or runtime)`);
+  }
+  return errors;
+}
+
 /**
  * Validate a case's `xfail` declaration and resolve it for implementation `impl`.
  *
+ * Shape: `"xfail": { "<impl-id>": { "gap": "<carried-gap-id>", "fails": <XfailSignature> } }`.
+ * The bare-string form `"<impl-id>": "<gap-id>"` is REJECTED — a mark without a failure signature
+ * would absorb any failure at all.
+ *
  * EVERY entry is validated, not only the one for the running impl — a dangling gap id under another
- * impl's key is still a lie in the corpus. Returns the gap id for `impl` (null when the case is not
- * marked for it) plus any declaration errors. Pure: reads only its arguments.
+ * impl's key is still a lie in the corpus. Returns the mark for `impl` (null when the case is not
+ * marked for it, or its entry is malformed) plus any declaration errors. Pure: reads only its arguments.
  */
 export function resolveXfail(
   expected: ExpectedCase,
   impl: string,
   gaps: GapStatusIndex,
-): { gap: string | null; errors: string[] } {
-  if (!("xfail" in expected)) return { gap: null, errors: [] };
+): { mark: XfailMark | null; errors: string[] } {
+  if (!("xfail" in expected)) return { mark: null, errors: [] };
   const x = (expected as { xfail?: unknown }).xfail;
   if (!isPlainObject(x)) {
-    return { gap: null, errors: [`xfail is ${describeContainer(x)} — expected an object { "<impl-id>": "<gap-id>" }`] };
+    return {
+      mark: null,
+      errors: [`xfail is ${describeContainer(x)} — expected an object { "<impl-id>": { "gap": …, "fails": … } }`],
+    };
   }
   if (Object.keys(x).length === 0) {
     return {
-      gap: null,
-      errors: ["xfail is present but EMPTY — it marks nothing. Omit the key, or name an impl and a carried gap."],
+      mark: null,
+      errors: ["xfail is present but EMPTY — it marks nothing. Omit the key, or name an impl, a carried gap and a signature."],
     };
   }
   const errors: string[] = [];
+  let mine: XfailMark | null = null;
   for (const [k, v] of Object.entries(x)) {
+    const where = `xfail['${k}']`;
     if (!KNOWN_IMPL_IDS.includes(k)) {
-      errors.push(`xfail['${k}'] names an unknown implementation — known: ${KNOWN_IMPL_IDS.join(", ")}`);
+      errors.push(`${where} names an unknown implementation — known: ${KNOWN_IMPL_IDS.join(", ")}`);
       continue;
     }
-    if (typeof v !== "string" || v.trim() === "") {
-      errors.push(`xfail['${k}'] is ${describeContainer(v)} — expected a gap id string`);
-      continue;
-    }
-    const status = gaps.get(v);
-    if (status === undefined) {
-      errors.push(`xfail['${k}'] names gap '${v}', which has no @gap marker in docs/known-gaps.md`);
-    } else if (!GAP_STATUS_CARRIED.has(status)) {
+    if (typeof v === "string") {
       errors.push(
-        `xfail['${k}'] names gap '${v}', whose marker says status=${status} — an expected failure must ` +
-          `name a status=carried gap (S430 P7: carried = owed by the bootstrap, xfail on impl#1)`,
+        `${where} is a bare gap id — xfail needs a failure signature: { "gap": ${JSON.stringify(v)}, "fails": … }. ` +
+          `Capture it with \`bun conformance/run.ts --xfail-signature ${expected.id}\`.`,
       );
+      continue;
+    }
+    if (!isPlainObject(v)) {
+      errors.push(`${where} is ${describeContainer(v)} — expected { "gap": "<carried-gap-id>", "fails": <signature> }`);
+      continue;
+    }
+    const before = errors.length;
+    for (const key of Object.keys(v)) {
+      if (key !== "gap" && key !== "fails") errors.push(`${where}.${key} is not a mark key (gap, fails)`);
+    }
+    const gap = v.gap;
+    if (typeof gap !== "string" || gap.trim() === "") {
+      errors.push(`${where}.gap is ${describeContainer(gap)} — expected a carried gap id string`);
+    } else {
+      const status = gaps.get(gap);
+      if (status === undefined) {
+        errors.push(`${where} names gap '${gap}', which has no @gap marker in docs/known-gaps.md`);
+      } else if (!GAP_STATUS_CARRIED.has(status)) {
+        errors.push(
+          `${where} names gap '${gap}', whose marker says status=${status} — an expected failure must ` +
+            `name a status=carried gap (S430 P7: carried = owed by the bootstrap, xfail on impl#1)`,
+        );
+      }
+    }
+    if (!("fails" in v)) {
+      errors.push(
+        `${where} has no "fails" — xfail needs a failure signature. ` +
+          `Capture it with \`bun conformance/run.ts --xfail-signature ${expected.id}\`.`,
+      );
+    } else {
+      errors.push(...validateSignature(where, v.fails));
+    }
+    if (k === impl && errors.length === before) {
+      mine = { gap: gap as string, fails: canonicalSignature(v.fails as XfailSignature) };
     }
   }
-  const mine = x[impl];
-  const gap = typeof mine === "string" && mine.trim() !== "" ? mine : null;
-  return { gap, errors };
+  return { mark: mine, errors };
 }
 
 /**
  * The outcome table. A malformed contract (`shapeErrors`) or a malformed/dangling xfail is ALWAYS a
- * failure — an xfail mark absorbs a behavioural gap, never a broken case file.
+ * failure — an xfail mark absorbs a behavioural gap, never a broken case file. A marked case that
+ * fails DIFFERENTLY from its recorded signature is a FAIL: the carried gap does not cover a new failure.
  */
 export function classifyOutcome(
   assertionsPass: boolean,
   shapeErrors: readonly string[],
   xfailGap: string | null,
   xfailErrors: readonly string[],
+  signatureMatches: boolean = true,
 ): Outcome {
   if (shapeErrors.length > 0 || xfailErrors.length > 0) return "fail";
   if (xfailGap === null) return assertionsPass ? "pass" : "fail";
-  return assertionsPass ? "xpass" : "xfail";
+  if (assertionsPass) return "xpass";
+  return signatureMatches ? "xfail" : "fail";
 }
 
 /**
  * The reverse direction: every `status=carried` gap must be pinned by at least one case marked xfail
  * for it. A carried gap no case pins has no executable statement of the correct behaviour — which is
  * the whole of what "carried" promises the bootstrap. Returns the unpinned gap ids, sorted.
+ * (A malformed mark still counts as naming its gap here: that case is already red on its own, and
+ * reporting the gap unpinned too would double-report one defect.)
  */
 export function unpinnedCarriedGaps(cases: readonly LoadedCase[], gaps: GapStatusIndex): string[] {
   const pinned = new Set<string>();
   for (const c of cases) {
     const x = (c.expected as { xfail?: unknown }).xfail;
     if (!isPlainObject(x)) continue;
-    for (const v of Object.values(x)) if (typeof v === "string") pinned.add(v);
+    for (const v of Object.values(x)) {
+      if (typeof v === "string") pinned.add(v);
+      else if (isPlainObject(v) && typeof v.gap === "string") pinned.add(v.gap);
+    }
   }
   const out: string[] = [];
   for (const [id, status] of gaps) if (GAP_STATUS_CARRIED.has(status) && !pinned.has(id)) out.push(id);
@@ -786,9 +944,21 @@ export async function evaluateCase(
     }
     if (r.runtimeFailures.length > 0) r.pass = false;
   }
-  const { gap, errors } = resolveXfail(c.expected, impl, gaps);
-  const outcome = classifyOutcome(r.pass, r.shapeErrors, gap, errors);
-  return { ...r, xfailGap: gap, xfailErrors: errors, outcome, ok: outcome === "pass" || outcome === "xfail" };
+  const { mark, errors } = resolveXfail(c.expected, impl, gaps);
+  const observed = failureSignature(r);
+  // Only a marked case that FAILED is compared: a passing one is XPASS regardless of its signature.
+  const signatureMismatch = mark && !r.pass ? signatureDiff(mark.fails, observed) : [];
+  const outcome = classifyOutcome(r.pass, r.shapeErrors, mark?.gap ?? null, errors, signatureMismatch.length === 0);
+  return {
+    ...r,
+    xfailGap: mark?.gap ?? null,
+    expectedSignature: mark?.fails ?? null,
+    observedSignature: observed,
+    signatureMismatch,
+    xfailErrors: errors,
+    outcome,
+    ok: outcome === "pass" || outcome === "xfail",
+  };
 }
 
 /** One-line-per-item summary of what failed, for XFAIL reporting (so the mark never hides the failure). */
@@ -837,7 +1007,49 @@ export function xfailRatioLine(xfailed: number, total: number, xpassed: number):
   );
 }
 
+/**
+ * `--xfail-signature <case-id|relDir>` — print the CURRENT failure signature of one case as a ready-to-
+ * paste `xfail` block, so a triage records the signature mechanically rather than by hand. Exit 1 when
+ * the case PASSES (there is no failure to pin — and marking a passing case would be an XPASS).
+ * The `gap` field is the case's existing mark when it has one, else the literal "<carried-gap-id>",
+ * which the runner rejects until it is replaced with a real status=carried id.
+ */
+async function printSignature(which: string): Promise<number> {
+  const cases = loadCases();
+  const c = cases.find((k) => k.expected.id === which || k.relDir === which);
+  if (!c) {
+    console.error(`--xfail-signature: no case with id or dir '${which}'`);
+    return 2;
+  }
+  const r = await evaluateCase(c);
+  if (r.shapeErrors.length > 0) {
+    console.error(`--xfail-signature: ${c.relDir} has a malformed expect block — fix the contract first:`);
+    for (const f of r.shapeErrors) console.error(`  ${f}`);
+    return 1;
+  }
+  if (r.pass) {
+    console.error(`--xfail-signature: ${c.relDir} PASSES on ${IMPL_ID} — there is no failure to record.`);
+    return 1;
+  }
+  const existing = (c.expected as { xfail?: Record<string, { gap?: unknown }> }).xfail?.[IMPL_ID];
+  const gap = existing && typeof existing === "object" && typeof existing.gap === "string" ? existing.gap : "<carried-gap-id>";
+  // The failures the signature pins, human-readable, on stderr so stdout stays pasteable JSON.
+  console.error(`# ${c.relDir} (${c.expected.id}) fails on ${IMPL_ID} with:`);
+  for (const f of failureSummary(r)) console.error(`#   ${f}`);
+  console.log(JSON.stringify({ xfail: { [IMPL_ID]: { gap, fails: r.observedSignature } } }, null, 2));
+  return 0;
+}
+
 async function main(): Promise<void> {
+  const sigAt = process.argv.indexOf("--xfail-signature");
+  if (sigAt >= 0) {
+    const which = process.argv[sigAt + 1];
+    if (!which) {
+      console.error("usage: bun conformance/run.ts --xfail-signature <case-id|relDir>");
+      process.exit(2);
+    }
+    process.exit(await printSignature(which));
+  }
   const { results, passed, failed, xfailed, xpassed, unpinnedCarried } = await runAll();
   for (const r of results) {
     const tag = r.outcome.toUpperCase();
@@ -845,6 +1057,10 @@ async function main(): Promise<void> {
     const gapNote = r.xfailGap ? `  [xfail ${IMPL_ID}: ${r.xfailGap}]` : "";
     console.log(`${tag}  ${r.relDir}${rt}${gapNote}`);
     for (const f of r.xfailErrors) console.log(`        xfail: ${f}`);
+    if (r.signatureMismatch.length > 0) {
+      console.log(`        FAILS DIFFERENTLY from the recorded xfail signature for gap '${r.xfailGap}':`);
+      for (const f of r.signatureMismatch) console.log(`          ${f}`);
+    }
     if (r.outcome === "xfail") {
       // Still say WHAT failed: an XFAIL that has quietly started failing for a different reason must
       // be readable from the run, not only from a debugger.
@@ -886,7 +1102,7 @@ async function main(): Promise<void> {
     }
   }
   for (const g of unpinnedCarried) {
-    console.log(`UNPINNED  gap '${g}' is status=carried but no case carries "xfail": { "${IMPL_ID}": "${g}" }`);
+    console.log(`UNPINNED  gap '${g}' is status=carried but no case carries "xfail": { "${IMPL_ID}": { "gap": "${g}", … } }`);
   }
   console.log(
     `\nconformance (impl#1): ${passed}/${results.length} cases pass` +

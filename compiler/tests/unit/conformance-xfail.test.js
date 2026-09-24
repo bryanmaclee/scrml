@@ -6,19 +6,21 @@
  * runner's `xfail` mark is the mechanism, and a mark is an escape hatch, so every way it could absorb
  * a failure it should not is pinned here:
  *
- *   - a case that FAILS on the marked impl        -> XFAIL (green)
- *   - a case that PASSES on the marked impl       -> XPASS (RED — the gap is fixed; the mark must go)
- *   - a mark naming a gap absent from the ledger  -> RED
- *   - a mark naming a gap that is not carried     -> RED
- *   - a malformed mark / unknown impl id          -> RED
- *   - a malformed CONTRACT is never absorbable    -> RED even when marked
- *   - a carried gap no case pins                  -> reported (the gated bridge asserts it empty)
+ *   - fails on the marked impl WITH the recorded signature -> XFAIL (green)
+ *   - fails with a DIFFERENT signature (codes or runtime)  -> FAIL  (a new regression stays visible)
+ *   - PASSES on the marked impl                            -> XPASS (RED — the gap is fixed)
+ *   - a bare-string mark / no `fails` / empty `fails`      -> RED ("xfail needs a failure signature")
+ *   - a mark naming a gap absent from the ledger           -> RED
+ *   - a mark naming a gap that is not carried              -> RED
+ *   - a malformed mark / unknown impl id                   -> RED
+ *   - a malformed CONTRACT is never absorbable             -> RED even when marked
+ *   - a carried gap no case pins                           -> reported (the gated bridge asserts it empty)
  *   - `N xfail of M` is the reported ratio
  *
  * The live ledger carries no `status=carried` gap yet, so the ACCEPTING path is exercised against a
- * synthetic ledger (gapStatusIndexFromText) and synthetic case dirs (loadCases(dir)) — a gate whose
- * accepting path could only be reached by editing the live ledger is one whose accepting path is
- * never run. The compile itself is REAL (impl#1), not stubbed.
+ * synthetic ledger (gapStatusIndexFromText) and synthetic case dirs (loadCases(dir)). The compile AND
+ * the runtime half are REAL (impl#1 + happy-dom), not stubbed — the signature is only worth anything
+ * if it is computed from what the real harness observes.
  */
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "fs";
@@ -33,6 +35,8 @@ import {
   unpinnedCarriedGaps,
   gapStatusIndexFromText,
   xfailRatioLine,
+  failureSignature,
+  signatureDiff,
   KNOWN_IMPL_IDS,
 } from "../../../conformance/run.ts";
 
@@ -47,41 +51,67 @@ const LEDGER = [
 // compiler emits, so it fails on impl#1 by construction (the stand-in for a carried defect).
 const SOURCE = "<program>\n<p>hello</p>\n</program>\n";
 const NEVER_FIRES = "E-CONFORMANCE-XFAIL-FIXTURE-NEVER-FIRES";
+const OTHER_NEVER_FIRES = "E-CONFORMANCE-XFAIL-FIXTURE-OTHER";
+const SIG_A = { codes: ["missing:" + NEVER_FIRES] };
+const MARK_A = { "impl1-ts": { gap: "g-carried-a", fails: SIG_A } };
+
+// A real runtime-half source (the forms/checkbox-check case): checking the box drives @agreed to true.
+const RT_SOURCE = [
+  "${",
+  "    <agreed> = false",
+  "}",
+  '<input type="checkbox" id="agree-checkbox" bind:checked=@agreed />',
+  '<p id="status">Agreed: ${@agreed}</>',
+  "",
+].join("\n");
+const rtExpect = (agreedWant) => ({
+  codes: [],
+  notCodes: [],
+  input: [{ check: "#agree-checkbox" }],
+  state: { agreed: agreedWant },
+});
 
 function caseJson(id, { fails, xfail, expectOverride } = {}) {
   const j = {
     id,
     description: "xfail fixture",
     "language-version": "1.0",
-    expect: expectOverride ?? { codes: fails ? [NEVER_FIRES] : [], notCodes: [] },
+    expect: expectOverride ?? { codes: fails ? [fails === true ? NEVER_FIRES : fails] : [], notCodes: [] },
   };
   if (xfail !== undefined) j.xfail = xfail;
   return j;
 }
 
 let root;
+let rtSignature; // the runtime signature observed for the "agreed must be false" (wrong) contract
 const gaps = gapStatusIndexFromText(LEDGER);
+
+function addCase(dir, name, json, source = SOURCE) {
+  const d = join(dir, name);
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, "case.scrml"), source);
+  writeFileSync(join(d, "expected.json"), JSON.stringify(json, null, 2));
+}
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), "scrml-conformance-xfail-"));
-  const add = (name, json) => {
-    const d = join(root, name);
-    mkdirSync(d, { recursive: true });
-    writeFileSync(join(d, "case.scrml"), SOURCE);
-    writeFileSync(join(d, "expected.json"), JSON.stringify(json, null, 2));
-  };
-  add("a-xfail-still-fails", caseJson("xf-1", { fails: true, xfail: { "impl1-ts": "g-carried-a" } }));
-  add("b-xpass", caseJson("xf-2", { fails: false, xfail: { "impl1-ts": "g-carried-a" } }));
-  add("c-dangling-gap", caseJson("xf-3", { fails: true, xfail: { "impl1-ts": "g-no-such-gap" } }));
-  add("d-open-not-carried", caseJson("xf-4", { fails: true, xfail: { "impl1-ts": "g-open-b" } }));
-  add("e-unknown-impl", caseJson("xf-5", { fails: true, xfail: { impl1: "g-carried-a" } }));
+  const add = (name, json, source) => addCase(root, name, json, source);
+  add("a-xfail-matching-signature", caseJson("xf-1", { fails: true, xfail: MARK_A }));
+  add("a2-fails-differently", caseJson("xf-1b", { fails: OTHER_NEVER_FIRES, xfail: MARK_A }));
+  add("b-xpass", caseJson("xf-2", { fails: false, xfail: MARK_A }));
+  add("c-dangling-gap", caseJson("xf-3", { fails: true, xfail: { "impl1-ts": { gap: "g-no-such-gap", fails: SIG_A } } }));
+  add("d-open-not-carried", caseJson("xf-4", { fails: true, xfail: { "impl1-ts": { gap: "g-open-b", fails: SIG_A } } }));
+  add("e-unknown-impl", caseJson("xf-5", { fails: true, xfail: { impl1: { gap: "g-carried-a", fails: SIG_A } } }));
   add("f-empty-mark", caseJson("xf-6", { fails: true, xfail: {} }));
   add("g-malformed-contract-marked", caseJson("xf-7", {
-    xfail: { "impl1-ts": "g-carried-a" },
+    xfail: MARK_A,
     expectOverride: { codes: [], notCodes: [], severity: {} }, // S365 container policy violation
   }));
   add("h-plain-pass", caseJson("xf-8", { fails: false }));
   add("i-plain-fail", caseJson("xf-9", { fails: true }));
+  add("j-bare-string-mark", caseJson("xf-10", { fails: true, xfail: { "impl1-ts": "g-carried-a" } }));
+  add("k-no-fails-key", caseJson("xf-11", { fails: true, xfail: { "impl1-ts": { gap: "g-carried-a" } } }));
+  add("l-empty-fails", caseJson("xf-12", { fails: true, xfail: { "impl1-ts": { gap: "g-carried-a", fails: {} } } }));
 });
 
 afterAll(() => {
@@ -90,21 +120,46 @@ afterAll(() => {
 
 const byDir = () => Object.fromEntries(loadCases(root).map((c) => [c.relDir, c]));
 
-describe("S430 P7 — xfail outcomes against the real impl#1 compile", () => {
-  test("a marked case that still FAILS is XFAIL (green) and names its gap", async () => {
-    const r = await evaluateCase(byDir()["a-xfail-still-fails"], gaps);
+describe("S430 P7 — xfail outcomes against the real impl#1 compile (codes half)", () => {
+  test("a marked case failing WITH its recorded signature is XFAIL (green) and names its gap", async () => {
+    const r = await evaluateCase(byDir()["a-xfail-matching-signature"], gaps);
     expect(r.pass).toBe(false); // the raw assertions DID fail — `pass` keeps its pre-S430 meaning
+    expect(r.observedSignature).toEqual(SIG_A);
+    expect(r.signatureMismatch).toEqual([]);
     expect(r.outcome).toBe("xfail");
     expect(r.ok).toBe(true);
     expect(r.xfailGap).toBe("g-carried-a");
-    expect(r.missing).toEqual([NEVER_FIRES]); // the failure stays readable under the mark
+  });
+
+  test("a marked case failing DIFFERENTLY is a FAIL — a new failure is not covered by the carried gap", async () => {
+    const r = await evaluateCase(byDir()["a2-fails-differently"], gaps);
+    expect(r.outcome).toBe("fail");
+    expect(r.ok).toBe(false);
+    expect(r.signatureMismatch.join("\n")).toContain("NEW failure not in the recorded signature: missing:" + OTHER_NEVER_FIRES);
+    expect(r.signatureMismatch.join("\n")).toContain("recorded failure no longer occurs: missing:" + NEVER_FIRES);
   });
 
   test("a marked case that PASSES is XPASS — a FAILURE, not a pass", async () => {
     const r = await evaluateCase(byDir()["b-xpass"], gaps);
     expect(r.pass).toBe(true);
+    expect(r.observedSignature).toEqual({});
     expect(r.outcome).toBe("xpass");
     expect(r.ok).toBe(false);
+  });
+
+  test("the bare-string form is rejected: xfail needs a failure signature", async () => {
+    const r = await evaluateCase(byDir()["j-bare-string-mark"], gaps);
+    expect(r.outcome).toBe("fail");
+    expect(r.xfailErrors.join("\n")).toMatch(/xfail needs a failure signature[\s\S]*--xfail-signature xf-10/);
+  });
+
+  test("a mark with no `fails`, or an EMPTY `fails`, is rejected", async () => {
+    const k = await evaluateCase(byDir()["k-no-fails-key"], gaps);
+    expect(k.outcome).toBe("fail");
+    expect(k.xfailErrors.join("\n")).toMatch(/xfail needs a failure signature/);
+    const l = await evaluateCase(byDir()["l-empty-fails"], gaps);
+    expect(l.outcome).toBe("fail");
+    expect(l.xfailErrors.join("\n")).toMatch(/fails is EMPTY/);
   });
 
   test("a mark naming a gap absent from the ledger is a failure", async () => {
@@ -143,17 +198,57 @@ describe("S430 P7 — xfail outcomes against the real impl#1 compile", () => {
   });
 });
 
+describe("S430 P7 — the runtime-half signature is a stable digest of the real DOM/state diff", () => {
+  let rtRoot;
+  beforeAll(async () => {
+    rtRoot = mkdtempSync(join(tmpdir(), "scrml-conformance-xfail-rt-"));
+    // Capture: the (deliberately wrong) contract "after check, agreed is false" fails at runtime.
+    addCase(rtRoot, "capture", caseJson("rt-0", { expectOverride: rtExpect(false) }), RT_SOURCE);
+    const cap = await evaluateCase(loadCases(rtRoot)[0], gaps);
+    rtSignature = cap.observedSignature;
+    const mark = { "impl1-ts": { gap: "g-carried-a", fails: rtSignature } };
+    addCase(rtRoot, "rt-same", caseJson("rt-1", { expectOverride: rtExpect(false), xfail: mark }), RT_SOURCE);
+    addCase(rtRoot, "rt-different", caseJson("rt-2", { expectOverride: rtExpect("maybe"), xfail: mark }), RT_SOURCE);
+    addCase(rtRoot, "rt-passes", caseJson("rt-3", { expectOverride: rtExpect(true), xfail: mark }), RT_SOURCE);
+  });
+  afterAll(() => {
+    if (rtRoot) rmSync(rtRoot, { recursive: true, force: true });
+  });
+  const rt = () => Object.fromEntries(loadCases(rtRoot).map((c) => [c.relDir, c]));
+
+  test("the captured runtime signature is a digest, with no codes half (the codes half passes)", () => {
+    expect(Object.keys(rtSignature)).toEqual(["runtime"]);
+    expect(rtSignature.runtime).toMatch(/^sha256:[0-9a-f]{16}$/);
+  });
+
+  test("same runtime failure -> XFAIL; the digest is stable across runs", async () => {
+    const r = await evaluateCase(rt()["rt-same"], gaps);
+    expect(r.observedSignature).toEqual(rtSignature);
+    expect(r.outcome).toBe("xfail");
+  });
+
+  test("a DIFFERENT runtime failure (same cell, different wrong value) -> FAIL", async () => {
+    const r = await evaluateCase(rt()["rt-different"], gaps);
+    expect(r.outcome).toBe("fail");
+    expect(r.signatureMismatch.join("\n")).toMatch(/^runtime: recorded sha256:/);
+  });
+
+  test("the runtime half passing -> XPASS", async () => {
+    expect((await evaluateCase(rt()["rt-passes"], gaps)).outcome).toBe("xpass");
+  });
+});
+
 describe("S430 P7 — the pairing, the totals, and the pure pieces", () => {
   test("runAll reports N xfail of M, XPASS, and the unpinned carried gap", async () => {
     const res = await runAll(root, gaps);
-    expect(res.results.length).toBe(9);
+    expect(res.results.length).toBe(13);
     expect(res.xfailed).toBe(1);
     expect(res.xpassed).toBe(1);
     expect(res.passed).toBe(1);
-    expect(res.failed).toBe(6);
+    expect(res.failed).toBe(10);
     expect(res.unpinnedCarried).toEqual(["g-carried-unpinned"]);
     expect(xfailRatioLine(res.xfailed, res.results.length, res.xpassed)).toBe(
-      "conformance (impl1-ts): 1 xfail of 9 cases, 1 XPASS (failures)",
+      "conformance (impl1-ts): 1 xfail of 13 cases, 1 XPASS (failures)",
     );
   });
 
@@ -167,15 +262,35 @@ describe("S430 P7 — the pairing, the totals, and the pure pieces", () => {
     expect(classifyOutcome(true, [], null, [])).toBe("pass");
     expect(classifyOutcome(false, [], null, [])).toBe("fail");
     expect(classifyOutcome(false, [], "g", [])).toBe("xfail");
+    expect(classifyOutcome(false, [], "g", [], false)).toBe("fail"); // fails differently
     expect(classifyOutcome(true, [], "g", [])).toBe("xpass");
+    expect(classifyOutcome(true, [], "g", [], false)).toBe("xpass");
     expect(classifyOutcome(false, ["bad"], "g", [])).toBe("fail");
     expect(classifyOutcome(false, [], "g", ["bad mark"])).toBe("fail");
   });
 
-  test("resolveXfail: absent key is free; a non-object is an error; only impl1-ts is known", () => {
-    expect(resolveXfail({ id: "x" }, "impl1-ts", gaps)).toEqual({ gap: null, errors: [] });
+  test("failureSignature / signatureDiff are order-insensitive and name both directions", () => {
+    const r = {
+      missing: ["E-B", "E-A"], forbidden: ["W-X"], prefixViolations: [], severityMismatches: [],
+      countMismatches: [], runtimeFailures: [],
+    };
+    expect(failureSignature(r)).toEqual({ codes: ["forbidden:W-X", "missing:E-A", "missing:E-B"] });
+    expect(signatureDiff({ codes: ["missing:E-B", "missing:E-A", "forbidden:W-X"] }, failureSignature(r))).toEqual([]);
+    expect(signatureDiff({ codes: ["missing:E-A"] }, { codes: ["missing:E-C"] })).toEqual([
+      "codes: NEW failure not in the recorded signature: missing:E-C",
+      "codes: recorded failure no longer occurs: missing:E-A",
+    ]);
+  });
+
+  test("resolveXfail: absent key is free; malformed shapes are errors; only impl1-ts is known", () => {
+    expect(resolveXfail({ id: "x" }, "impl1-ts", gaps)).toEqual({ mark: null, errors: [] });
     expect(resolveXfail({ id: "x", xfail: "g-carried-a" }, "impl1-ts", gaps).errors.length).toBe(1);
-    expect(resolveXfail({ id: "x", xfail: { "impl1-ts": "" } }, "impl1-ts", gaps).errors.length).toBe(1);
+    const extraKey = resolveXfail({ id: "x", xfail: { "impl1-ts": { gap: "g-carried-a", fails: SIG_A, why: "?" } } }, "impl1-ts", gaps);
+    expect(extraKey.errors.join("\n")).toMatch(/why is not a mark key/);
+    const badDigest = resolveXfail({ id: "x", xfail: { "impl1-ts": { gap: "g-carried-a", fails: { runtime: "abc" } } } }, "impl1-ts", gaps);
+    expect(badDigest.errors.join("\n")).toMatch(/sha256:<16 lowercase hex>/);
+    const ok = resolveXfail({ id: "x", xfail: MARK_A }, "impl1-ts", gaps);
+    expect(ok).toEqual({ mark: { gap: "g-carried-a", fails: SIG_A }, errors: [] });
     expect(KNOWN_IMPL_IDS).toEqual(["impl1-ts"]);
   });
 

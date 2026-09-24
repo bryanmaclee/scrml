@@ -7,8 +7,9 @@
  *   (b) when the case carries any of { input, dom, domAnchored, state }, the
  *       post-run state snapshot + normalized DOM satisfy the runtime contract
  *       (compile + execute in happy-dom — see conformance/adapters/impl1-ts.ts).
- *   (c) S430 P7 — an `"xfail": { "impl1-ts": "<gap-id>" }` case must still FAIL
- *       (XFAIL) for a `status=carried` gap; XPASS / a dangling gap is red. Same
+ *   (c) S430 P7 — an `"xfail": { "impl1-ts": { "gap", "fails" } }` case must still FAIL
+ *       with its recorded signature (XFAIL) for a `status=carried` gap; failing
+ *       differently / XPASS / a dangling gap / no signature is red. Same
  *       semantics as the gated bridge (compiler/tests/conformance/corpus-bridge.test.js).
  *
  * NOTE: this file lives under the top-level conformance/ dir (SCOPE OQ5 — the
@@ -67,7 +68,9 @@ describe("scrml conformance corpus — impl#1 (codes + runtime)", () => {
         const why =
           r.outcome === "xpass"
             ? `XPASS — gap '${r.xfailGap}' is FIXED on impl1-ts; remove the xfail mark and resolve the gap.`
-            : `XFAIL (${r.xfailGap}): ${failureSummary(r).join(" | ")}`;
+            : r.signatureMismatch.length > 0
+              ? `FAILS DIFFERENTLY for '${r.xfailGap}': ${r.signatureMismatch.join(" | ")}`
+              : `XFAIL (${r.xfailGap}): ${failureSummary(r).join(" | ")}`;
         expect({ outcome: r.outcome, why }).toEqual({ outcome: "xfail", why: expect.any(String) });
         return;
       }

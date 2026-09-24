@@ -77,7 +77,7 @@ exists (the browser-harness is a working prototype of two-thirds of it):
     "serverStub":  { "loadTasks": [{ "id": 1, "text": "a" }] }
   },
   // (c) optional: expected-to-fail on impl#1 for a status=carried gap (S430 P7) --
-  "xfail": { "impl1-ts": "g-some-carried-gap" }
+  "xfail": { "impl1-ts": { "gap": "g-some-carried-gap", "fails": { "codes": ["missing:E-X"] } } }
 }
 ```
 
@@ -299,20 +299,58 @@ bootstrap-blocking, adopter-reported, or security. Every other gap is **carried*
 converted into a conformance case that pins the **correct** behaviour, is
 expected to fail on impl#1, and is required of the bootstrap (impl#2).
 
-A case marks itself with a top-level `xfail` block (beside `expect`, not inside it):
+A case marks itself with a top-level `xfail` block (beside `expect`, not inside it).
+The mark names the carried gap AND records **how** impl#1 fails the case — its
+failure signature — so a carried case that starts failing for a different reason
+is a plain FAIL, not a silently-absorbed XFAIL:
 
 ```jsonc
 {
   "id": "some-correct-behaviour",
-  "expect": { "codes": ["E-SOMETHING"] },          // the CORRECT contract, as for any case
-  "xfail": { "impl1-ts": "g-the-carried-gap-id" }  // impl id -> a status=carried gap
+  "expect": { "codes": ["E-SOMETHING"], "state": { "n": 2 } },   // the CORRECT contract
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-the-carried-gap-id",                  // a status=carried gap
+      "fails": {                                      // the recorded failure signature
+        "codes":   ["missing:E-SOMETHING"],           // exact set of failed codes-half assertions
+        "runtime": "sha256:0123456789abcdef"          // digest of the runtime-half failure lines
+      }
+    }
+  }
 }
 ```
 
+The signature is derived from the case's own two contract halves:
+
+- **`codes`** — the exact, sorted set of failed codes-half assertions, one string
+  each: `missing:<code>`, `forbidden:<code>`, `prefix:<violation>`,
+  `severity:<mismatch>`, `codeCounts:<mismatch>`. Readable on purpose.
+- **`runtime`** — `sha256:` + 16 hex of the sorted runtime-half failure lines
+  (which carry the normalized DOM / state diff: which cell, expected vs got; which
+  anchored selector). Any change to the runtime failure moves the digest. The run
+  prints the lines themselves under every XFAIL.
+
+Omit a key when that half passes. An empty `fails`, a missing `fails`, and the
+bare-string form `"impl1-ts": "<gap-id>"` are all REJECTED ("xfail needs a failure
+signature") — nobody can mark a case without pinning how it fails.
+
+**Record it mechanically, never by hand:**
+
+```sh
+bun conformance/run.ts --xfail-signature <case-id | case dir>
+```
+
+prints a paste-ready `{ "xfail": { "impl1-ts": { "gap": …, "fails": … } } }` on
+stdout (the failures it pins, human-readable, on stderr). `gap` is the case's
+existing mark or the literal `<carried-gap-id>`, which the runner rejects until you
+put a real `status=carried` id there. Exit 1 when the case passes (nothing to pin).
+
 | on the named impl | outcome | gate |
 |---|---|---|
-| the case FAILS | **XFAIL** — reported with the gap id and what failed | green |
+| fails WITH the recorded signature | **XFAIL** — reported with the gap id and what failed | green |
+| fails with a DIFFERENT signature | **FAIL** — the diff is printed (new failure / recorded failure gone / runtime digest moved) | **red** |
 | the case PASSES | **XPASS** — the gap is fixed here; remove the mark, resolve the gap | **red** |
+| bare-string mark / no `fails` / empty `fails` / malformed signature | failure | **red** |
 | the gap id has no `@gap` marker in `docs/known-gaps.md` | failure | **red** |
 | the gap's marker is not `status=carried` | failure | **red** |
 | `xfail` is empty / not an object / names an unknown impl id | failure | **red** |
@@ -331,11 +369,13 @@ triaged defect) — the gated bridge asserts the unpinned list is empty.
 - The gap ledger is read through `scripts/state.ts`'s own marker parser and
   integrity guards (one parser for the marker grammar). `status=carried` is
   counted in its own §0 column there — owed by the bootstrap, never in Open.
-- An XFAIL still prints what failed (`(expected) missing [...]`), so a mark that
-  has started failing for a different reason is readable from the run.
-- The mark is keyed to the GAP, not to a specific failure: a marked case that
-  starts failing for an unrelated reason stays XFAIL. The printed `(expected)`
-  line is the only defence today (see the dispatch report's deferred items).
+- An XFAIL still prints what failed (`(expected) missing [...]`).
+- When a carried gap's failure legitimately changes shape (the TS compiler moved,
+  but the gap is still open), re-record with `--xfail-signature`; the diff the
+  FAIL printed is what the reviewer checks.
+- The runtime digest is only as stable as the failure lines it hashes. They are
+  deterministic for state / DOM / anchored assertions; a runtime half that THROWS
+  hashes the thrown message, which could carry a temp path — re-record if so.
 
 ## OQ1 — whole-tree vs anchored (the default-mode resolution)
 

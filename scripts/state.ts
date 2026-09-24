@@ -96,7 +96,7 @@ const GAP_STATUS_NOMINAL = new Set(["nominal"]);
 // S430 P7 (bryan): the TS gap ledger is fixed only for cause (bootstrap-blocking / adopter-reported /
 // security). Every other gap is CARRIED — a live defect in impl#1 that impl#1 will NOT be fixed for,
 // pinned instead by a conformance case asserting the CORRECT behaviour, expected-to-fail on impl#1
-// (`"xfail": { "impl1-ts": "<gap-id>" }` in the case's expected.json) and REQUIRED of the bootstrap.
+// (`"xfail": { "impl1-ts": { "gap": "<gap-id>", "fails": <signature> } }` in the case's expected.json) and REQUIRED of the bootstrap.
 //
 // It is neither OPEN nor CLOSED, and it is deliberately a THIRD partition rather than a member of
 // either: folded into OPEN, the board could not tell work the TS compiler owes from work the bootstrap

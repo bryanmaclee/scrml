@@ -53,3 +53,31 @@ Target case: conformance/cases/api/api-clean-pos (a passing case). Probe gap id:
   files reverted in place) 32480 pass / 179 skip / 59 fail. The (fail) sets are IDENTICAL (comm both ways empty):
   browser/happy-dom runtime, dev-server hot-reload, transition-001, self-host tokenizer parity — pre-existing,
   not introduced here. +19 pass = the new tests.
+
+## Round 2 (PA: NOTE 3 — the mark must pin HOW the case fails)
+- Shape: `"xfail": { "impl1-ts": { "gap": "<carried-gap-id>", "fails": { "codes"?: [...], "runtime"?: "sha256:<16hex>" } } }`.
+  codes = exact sorted set of failed codes-half assertions (`missing:`/`forbidden:`/`prefix:`/`severity:`/`codeCounts:`);
+  runtime = sha256 (16 hex) of the sorted runtime-half failure lines (the state/DOM/anchored diff text).
+  Bare-string form, missing `fails`, empty `fails`, unknown keys, bad digest -> all RED ("xfail needs a failure signature").
+- A marked case failing with a DIFFERENT signature -> FAIL (diff printed both directions: NEW failure / recorded failure gone / runtime digest moved).
+- Helper: `bun conformance/run.ts --xfail-signature <case-id|relDir>` -> paste-ready JSON on stdout, the pinned failures on stderr; exit 1 if the case passes.
+- Unit tests: conformance-xfail.test.js now 21 (incl. a REAL runtime-half case: capture, same -> XFAIL, different wrong value -> FAIL, passes -> XPASS).
+
+### BITE PROOF round 2 (live corpus + live ledger, gated bridge; probe gap g-s430-bite-probe status=carried appended to the ledger)
+Codes half — api/api-clean-pos with expect.codes = ["E-S430-BITE-NEVER-FIRES"]:
+- S0 bare-string mark -> RED: `xfail['impl1-ts'] is a bare gap id — xfail needs a failure signature ... Capture it with bun conformance/run.ts --xfail-signature api-clean-pos`.
+- S1 `--xfail-signature api-clean-pos` exit 0 -> `{"xfail":{"impl1-ts":{"gap":"<carried-gap-id>","fails":{"codes":["missing:E-S430-BITE-NEVER-FIRES"]}}}}` (stderr: `missing ["E-S430-BITE-NEVER-FIRES"]`).
+- S2 pasted (gap filled) -> GREEN: `api/api-clean-pos: XFAIL (g-s430-bite-probe): missing [...]`, `1 xfail of 906 cases`; run.ts exit 0.
+- S3 perturbed to fail differently (codes = ["E-S430-BITE-OTHER-REGRESSION"]) -> RED outcome fail:
+  `codes: NEW failure not in the recorded signature: missing:E-S430-BITE-OTHER-REGRESSION | codes: recorded failure no longer occurs: missing:E-S430-BITE-NEVER-FIRES`; run.ts exit 1, `0 xfail of 906`.
+- S3b recorded failure PLUS a new one -> RED: `NEW failure not in the recorded signature: missing:E-S430-BITE-OTHER-REGRESSION`.
+- S4 passes (codes = []) -> RED XPASS, `0 xfail of 906 cases, 1 XPASS (failures)`.
+Runtime half — forms/checkbox-check with expect.state = {agreed:false} (true is correct):
+- R1 capture -> `{"runtime":"sha256:a42af8cb0a6faaae"}` (stderr `runtime state: cell 'agreed' expected false, got true`).
+- R2 pasted -> GREEN XFAIL; a second capture in a fresh process reproduced sha256:a42af8cb0a6faaae (stable).
+- R3 same failure + a new domAnchored failure -> RED: `runtime: recorded sha256:a42af8cb0a6faaae, observed sha256:f8bd9aa226eb3dbb`.
+- R4 same cell, different wrong value (agreed:"maybe") -> RED: observed sha256:ebeee5c56515fad4.
+- R5 runtime passes -> RED XPASS.
+Restore all three files from backup -> bridge + unit 942 pass / 0 fail, top-level wrapper 908/0, `0 xfail of 906`, state.ts gap-counts PASS.
+
+- Commit subject of c002a0bb is still wrong ("WIP ... start"); branch is UNPUSHED, left as is per PA (squash-merge fixes it).

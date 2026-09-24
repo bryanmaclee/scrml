@@ -17,11 +17,14 @@
  *       post-run normalized DOM + state snapshot satisfy the contract
  *       (compile + execute in happy-dom — see conformance/adapters/impl1-ts.ts).
  *
- * (c) XFAIL (S430 P7) — a case carrying `"xfail": { "impl1-ts": "<gap-id>" }` is
- *     EXPECTED to fail on impl#1 for a `status=carried` gap. It is green here iff it
- *     still fails (XFAIL); it goes RED if it passes (XPASS — the gap is fixed and the
- *     mark must come off), if the gap id is missing from docs/known-gaps.md, or if
- *     the gap is not `status=carried`. A carried gap that no case pins is red too.
+ * (c) XFAIL (S430 P7) — a case carrying
+ *     `"xfail": { "impl1-ts": { "gap": "<gap-id>", "fails": <signature> } }` is EXPECTED
+ *     to fail on impl#1 for a `status=carried` gap, in exactly the recorded way. It is
+ *     green here iff it still fails WITH that signature (XFAIL); it goes RED if it fails
+ *     DIFFERENTLY (a new failure is not covered by the carried gap), if it passes (XPASS
+ *     — the gap is fixed and the mark must come off), if the mark has no signature, if
+ *     the gap id is missing from docs/known-gaps.md, or if the gap is not
+ *     `status=carried`. A carried gap that no case pins is red too.
  *     The `N xfail of M` ratio is printed after the run so an escape hatch absorbing
  *     the suite is a visible number, not something one has to go and inspect.
  *
@@ -84,7 +87,11 @@ describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
               `Remove the xfail mark and resolve the gap.`
             : r.outcome === "xfail"
               ? `XFAIL (${r.xfailGap}): ${failureSummary(r).join(" | ")}`
-              : `outcome ${r.outcome}`;
+              : r.signatureMismatch.length > 0
+                ? `FAILS DIFFERENTLY from the recorded signature for '${r.xfailGap}': ` +
+                  r.signatureMismatch.join(" | ") + ` — observed ${JSON.stringify(r.observedSignature)}` +
+                  ` — now failing with: ${failureSummary(r).join(" | ")}`
+                : `outcome ${r.outcome}`;
         expect({ outcome: r.outcome, why }).toEqual({ outcome: "xfail", why: expect.any(String) });
         if (r.outcome === "xfail") console.log(`  ${c.relDir}: ${why}`);
         return;
