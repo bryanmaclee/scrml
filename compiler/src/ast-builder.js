@@ -53,7 +53,7 @@ import {
 // `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts
 // this file does not import it.
 
-import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
+import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, readForbiddenJsRecord } from "./expression-parser.ts";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -2467,49 +2467,37 @@ function emitForbiddenSwitchInRaw(raw, valTokSpan, baseOffset, filePath, errors)
 // ---------------------------------------------------------------------------
 
 /**
- * §7.2.1 / §21.3.2 (S430 rulings P1 + P4): scrml has no `class` construct
- * and no dynamic `import(...)`. Both are rejected at the parse layer, in the
- * same family as `E-THROW-NOT-IN-SCRML` / `E-TRY-NOT-IN-SCRML` /
- * `E-ASYNC-NOT-IN-SCRML`.
+ * §7.2.1 / §21.3.2 (S430 rulings P1 + P4): scrml has no `class` construct and
+ * no dynamic `import(...)`. Both are rejected at the parse layer, in the same
+ * family as `E-THROW-NOT-IN-SCRML` / `E-TRY-NOT-IN-SCRML` / `E-ASYNC-NOT-IN-SCRML`.
  *
- * WHETHER a construct is present is decided from PARSED TREES ONLY — never
- * from source text. "The word is not at fault" (bryan, S430 P1): the word
- * `class` / `import(` in markup prose, a string, a comment, CSS, SQL, an
- * attribute name or value text is not the construct, and only a parse knows
- * which is which. The trees that answer it:
+ * WHETHER — from parsed trees only. "The word is not at fault" (bryan, S430
+ * P1): `class` / `import(` in markup prose, a string, a comment, CSS, SQL or a
+ * quoted attribute value is not the construct, and only a parse knows which is
+ * which. Every expression parse records, on the ROOT ExprNode it returns, the
+ * constructs ACORN found anywhere in the parsed text (expression-parser.ts
+ * `readForbiddenJsRecord` — acorn's tree, so constructs the converter keeps
+ * only as raw text are included: block-bodied arrows, function expressions,
+ * template interpolations). Text the expression parser could not take as an
+ * expression is re-parsed as a statement list (a `when` body). Text no parse
+ * accounts for (trailing content, a skipped expression, a raw-only export) is
+ * the one place a TOKEN view is used — and then only when it holds no markup.
+ * Markup subtrees are never walked: their text is not logic, and every `${ }`
+ * inside markup is a logic body of its own.
  *
- *   - an `escape-hatch` ExprNode whose `nativeKind` is ClassExpression /
- *     ClassDeclaration / ImportExpression (acorn parsed the construct; the
- *     default parser has no structured node for it) — this is also how a
- *     statement-level `class X {}` arrives (a bare-expr over ClassExpression);
- *   - `escape-hatch.forbiddenJs` — the same constructs BELOW an unconverted
- *     subtree (a block-bodied arrow, a function expression), recorded by
- *     expression-parser.ts from acorn's own tree;
- *   - an `export-decl` whose declaration the default parser keeps as raw text
- *     only (`export class …`, `export default class …`, an unannotated
- *     `export const … = …`): that text is parsed with the same expression
- *     parser and its tree is counted;
- *   - a `bare-expr` whose text the parser did not structure (a statement the
- *     default parser mis-shaped, e.g. a string-literal match arm): its text is
- *     re-parsed; if it is not an expression at all it is re-TOKENIZED and its
- *     keyword-shaped tokens are counted — unless it contains markup, in which
- *     case nothing is counted (a miss is preferred to firing on prose).
- *
- * Markup subtrees are never walked: their text is not logic, and each `${ }`
- * inside markup is its own logic body, parsed (and checked) by its own
- * parseLogicBody call. `_{ }` foreign code and `^{ }` meta bodies are likewise
- * their own blocks (foreign is opaque; meta is checked by its own parse —
- * §21.3.1 closes `^{ await import(...) }`, §22.12 makes `^{}` scrml-native).
- *
- * WHERE the diagnostic points is a separate question, because the default
- * parser's escape-hatch spans are not file coordinates (measured S430: most
- * carry the statement start or offset 0 — the expression text is a
- * re-joined token string). So each counted construct is PLACED on a
- * keyword-shaped token of the statement it came from, preferring tokens the
- * parser consumed as logic (not collected inside a markup region, not
- * preceded by a word or `>` as prose is). The count is the tree's; the
- * tokens only locate it — a statement with prose and no construct fires
- * nothing.
+ * WHERE — from the source tokens the parsed text was built from, never from a
+ * guess. The default parser builds expression text by joining the logic TOKENS
+ * a statement consumed (`collectExpr`), so its node offsets are offsets in a
+ * re-joined string, not the file. parseLogicBody therefore REGISTERS each
+ * joined string with the token behind every part (`_fjsRegistry`), and the
+ * markup-value skeleton parse registers its skeleton with markup-region tokens
+ * removed. A construct is mapped to a source token by ORDER: the k-th
+ * construct of a word in the parsed text is the k-th construct-shaped keyword
+ * token of that word among the tokens the text came from. When the two counts
+ * differ (a construct the source tokenizer did not produce a keyword for, e.g.
+ * inside a template literal) the mapping is not trusted and the diagnostic is
+ * placed on the ENCLOSING STATEMENT's start — a recorded gap, never a prose
+ * token.
  */
 
 const FORBIDDEN_JS_CODE_CLASS = "E-CLASS-NOT-IN-SCRML";
@@ -2535,17 +2523,28 @@ const E_DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE =
 // are parsed as their own body (logic inside markup, meta, foreign, sql).
 const FORBIDDEN_JS_SKIP_KINDS = new Set([
   "markup", "markup-value", "html-fragment", "text", "component-def",
-  "logic", "foreign", "Foreign", "sql", "sql-block", "css", "style",
+  "logic", "meta", "foreign", "Foreign", "sql", "sql-block", "css", "style",
 ]);
 
-// Cheap text prefilter — a tree can only hold a construct whose keyword is in
-// the text it was parsed from.
+// A cheap prefilter — a text can only hold a construct whose keyword it contains.
 const FORBIDDEN_JS_WORD_RE = /(?:^|[^A-Za-z0-9_$.])(?:class|import)(?![A-Za-z0-9_$])/;
+const FORBIDDEN_JS_MARKUP_RE = /<\s*[A-Za-z_]/;
+
+/** The nearest non-comment token before (`dir` -1) or after (+1) index `k`. */
+function forbiddenJsSigToken(tokens, k, dir) {
+  for (let j = k + dir; j >= 0 && j < tokens.length; j += dir) {
+    const t = tokens[j];
+    if (t && t.kind !== "COMMENT") return t;
+  }
+  return null;
+}
 
 /**
- * Is `t` (a logic token) shaped like the construct's keyword? `class` must be
+ * Is `tokens[k]` shaped like the construct's keyword? `class` must be
  * followed by a class head (a name, `{`, or `extends`) and `import` by `(`;
- * neither may be a member name (`x.class`, `o.import(…)`).
+ * neither may be a member name (`x.class`, `o.import(…)`). Used to LOCATE a
+ * construct the tree already found, and to count constructs in text no parse
+ * accounts for — never to decide one inside parsed text.
  */
 function forbiddenJsKeywordKind(tokens, k) {
   const t = tokens[k];
@@ -2564,68 +2563,42 @@ function forbiddenJsKeywordKind(tokens, k) {
   return null;
 }
 
-/** The nearest non-comment token before (`dir` -1) or after (+1) index `k`. */
-function forbiddenJsSigToken(tokens, k, dir) {
-  for (let j = k + dir; j >= 0 && j < tokens.length; j += dir) {
-    const t = tokens[j];
-    if (t && t.kind !== "COMMENT") return t;
-  }
-  return null;
-}
-
 /**
- * A keyword that reads like prose: preceded by a word, a literal, or a `>`
- * (a tag close — markup text starts there). A real construct is never
- * preceded by a value (`x class Foo` / `foo import(…)` are not JS). Used only
- * to RANK where a tree-counted construct is placed, never to decide one.
+ * Collect the parse records in a subtree. A node carrying a record is the root
+ * of a parse whose text covers everything below it, so the walk stops there
+ * (a nested root is a re-parse of text the outer record already counted). An
+ * escape-hatch with NO record is text no parse accounted for (a skipped
+ * expression) — reported as `uncovered`.
+ *
+ * `out` receives `{ rec }` or `{ uncovered: text }`, each with `stmt` — the
+ * innermost statement node enclosing it (its span is file coordinates; it is
+ * the fallback location).
  */
-function forbiddenJsLooksLikeProse(tokens, k) {
-  const prev = forbiddenJsSigToken(tokens, k, -1);
-  if (!prev) return false;
-  if (prev.kind === "IDENT" || prev.kind === "NUMBER" || prev.kind === "STRING") return true;
-  return prev.text === ">";
-}
-
-/** Count the constructs in an ExprNode tree (escape-hatches + forbiddenJs). */
-function countForbiddenJsInExpr(node, acc, seen) {
+function collectForbiddenJsRecords(node, stmt, out, seen) {
   if (!node || typeof node !== "object" || seen.has(node)) return;
   seen.add(node);
-  if (Array.isArray(node)) { for (const c of node) countForbiddenJsInExpr(c, acc, seen); return; }
+  if (Array.isArray(node)) { for (const c of node) collectForbiddenJsRecords(c, stmt, out, seen); return; }
   if (FORBIDDEN_JS_SKIP_KINDS.has(node.kind)) return;
+  // The synthetic function-decl an `export function` re-parse produces: its
+  // body was parsed — and reported — by that sub-parse (ast-builder export path).
+  if (node.fromExport === true && node.kind === "function-decl") return;
+  const rec = readForbiddenJsRecord(node);
+  if (rec) { out.push({ rec, stmt }); return; }
   if (node.kind === "escape-hatch") {
-    if (node.nativeKind === "ClassExpression" || node.nativeKind === "ClassDeclaration") acc.class++;
-    else if (node.nativeKind === "ImportExpression") acc.import++;
-    if (node.forbiddenJs) {
-      acc.class += node.forbiddenJs.classes || 0;
-      acc.import += node.forbiddenJs.imports || 0;
-    }
+    if (typeof node.raw === "string" && FORBIDDEN_JS_WORD_RE.test(node.raw)) out.push({ uncovered: node.raw, stmt });
     return;
   }
+  if (node.kind === "export-decl" && !node.valueInitExpr) {
+    const text = exportDeclUnparsedText(node);
+    if (text && FORBIDDEN_JS_WORD_RE.test(text)) out.push({ reparse: text, stmt: node });
+    return;
+  }
+  const isStmt = typeof node.id === "number" && node.span && typeof node.span.start === "number"
+    && typeof node.span.line === "number";
+  const here = isStmt ? node : stmt;
   for (const key of Object.keys(node)) {
     if (key === "span" || key === "parent") continue;
-    countForbiddenJsInExpr(node[key], acc, seen);
-  }
-}
-
-/** Count constructs in a text the parser kept raw: parse it; if it is not an
- *  expression, count keyword-shaped tokens — unless it holds markup. */
-function countForbiddenJsInRawText(text, filePath, acc) {
-  if (typeof text !== "string" || !FORBIDDEN_JS_WORD_RE.test(text)) return;
-  let tree = null;
-  try { tree = parseExprToNode(text, filePath, 0); } catch { tree = null; }
-  // The expression parser stops at the end of the FIRST expression; text left
-  // over means the whole was not one expression (e.g. `"a" => { … }`).
-  const covered = !!tree && !(tree.span && typeof tree.span.end === "number" && text.slice(tree.span.end).trim() !== "");
-  if (covered && !(tree.kind === "escape-hatch" && tree.nativeKind === "ParseError")) {
-    countForbiddenJsInExpr(tree, acc, new WeakSet());
-    return;
-  }
-  if (/<\s*[A-Za-z_]/.test(text)) return; // markup present — cannot tell prose from code
-  let toks;
-  try { toks = tokenizeLogic(text, 0, 1, 1, []); } catch { return; }
-  for (let k = 0; k < toks.length; k++) {
-    const kind = forbiddenJsKeywordKind(toks, k);
-    if (kind && !forbiddenJsLooksLikeProse(toks, k)) acc[kind]++;
+    collectForbiddenJsRecords(node[key], here, out, seen);
   }
 }
 
@@ -2635,7 +2608,6 @@ function exportDeclUnparsedText(node) {
   const k = node.exportKind;
   if (k === "function" || k === "fn" || k === "type" || k === "re-export" || k === "re-export-all" ||
       k === "local" || k === "rename") return null;           // parsed elsewhere / names only
-  if (node.valueInitExpr) return null;                          // annotated const/let — tree walked
   let text = node.raw.replace(/^\s*export\s+/, "").replace(/^(?:(?:pure|server)\s+)+/, "");
   text = text.replace(/^default\s+/, "");
   const decl = /^(?:const|let)\s+[A-Za-z_$][A-Za-z0-9_$]*\s*(?::[^=]*)?=\s*/.exec(text);
@@ -2644,94 +2616,203 @@ function exportDeclUnparsedText(node) {
 }
 
 /**
- * Count the constructs in a list of statement nodes. Statement-level forms
- * the default parser keeps as raw text are parsed here (see module doc).
+ * The construct-shaped keyword tokens of `word` among `candToks` (in order).
+ * `allToks` is the stream the shape test reads neighbours from.
  */
-function countForbiddenJsInNodes(nodes, filePath, acc, seen) {
-  if (!nodes || typeof nodes !== "object" || seen.has(nodes)) return;
-  seen.add(nodes);
-  if (Array.isArray(nodes)) { for (const n of nodes) countForbiddenJsInNodes(n, filePath, acc, seen); return; }
-  const n = nodes;
-  if (FORBIDDEN_JS_SKIP_KINDS.has(n.kind) || n.kind === "meta") return;
-  if (n.kind === "escape-hatch") { countForbiddenJsInExpr(n, acc, new WeakSet()); return; }
-  if (n.kind === "export-decl") {
-    const text = exportDeclUnparsedText(n);
-    if (text) countForbiddenJsInRawText(text, filePath, acc);
-    return;
+function forbiddenJsCandidates(candToks, allToks, word, indexOf) {
+  const out = [];
+  for (const t of candToks) {
+    if (t && t.kind === "STRING" && t.isTemplate) {
+      // A template literal is ONE source token; a construct in one of its
+      // `${ }` interpolations has no keyword token of its own. Tokenize each
+      // interpolation body in place (its own file coordinates) and take its
+      // construct-shaped keywords — the text between interpolations is string
+      // content and is not looked at.
+      for (const inner of forbiddenJsTemplateInterpTokens(t)) {
+        const k = inner.toks.indexOf(inner.tok);
+        if (forbiddenJsKeywordKind(inner.toks, k) === word) out.push(inner.tok);
+      }
+      continue;
+    }
+    const k = indexOf(t);
+    if (k >= 0 && forbiddenJsKeywordKind(allToks, k) === word) out.push(t);
   }
-  if (n.kind === "bare-expr" && typeof n.expr === "string" && FORBIDDEN_JS_WORD_RE.test(n.expr)) {
-    // The tree the parser built vs a fresh parse of the whole statement text:
-    // a mis-shaped statement (e.g. a string-literal match arm) keeps only part
-    // of its text in `exprNode`. Take the larger count — they agree whenever
-    // the parser structured the statement.
-    const fromTree = { class: 0, import: 0 };
-    countForbiddenJsInExpr(n.exprNode, fromTree, new WeakSet());
-    const fromText = { class: 0, import: 0 };
-    countForbiddenJsInRawText(n.expr, filePath, fromText);
-    acc.class += Math.max(fromTree.class, fromText.class);
-    acc.import += Math.max(fromTree.import, fromText.import);
-    return;
-  }
-  for (const key of Object.keys(n)) {
-    if (key === "span" || key === "parent") continue;
-    countForbiddenJsInNodes(n[key], filePath, acc, seen);
-  }
-}
-
-function pushForbiddenJsError(code, span, errors) {
-  const dup = errors.some((e) =>
-    e && e.code === code && (e.tabSpan?.start ?? e.span?.start) === span.start,
-  );
-  if (dup) return;
-  errors.push(new TABError(
-    code,
-    code === FORBIDDEN_JS_CODE_CLASS ? E_CLASS_NOT_IN_SCRML_MESSAGE : E_DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE,
-    span,
-  ));
+  return out;
 }
 
 /**
- * Place `counts` (from a tree) on keyword tokens of `tokens[lo, hi)` and push
- * the diagnostics. Preferred tokens: consumed as logic (not in `markupTokens`)
- * and not prose-shaped; then the rest, in source order. A count with no token
- * left to stand on is reported at `fallbackTok`.
+ * The logic tokens of each `${ … }` interpolation inside a template-literal
+ * STRING token, in file coordinates (the token's `text` is the source between
+ * the backticks). Returns `[{ tok, toks }]` — `toks` is the interpolation's
+ * own stream, for the shape test's neighbours.
  */
-function placeForbiddenJs(counts, tokens, lo, hi, markupTokens, fallbackTok, filePath, errors) {
-  for (const kind of ["class", "import"]) {
-    let need = counts[kind] || 0;
-    if (need <= 0) continue;
-    const code = kind === "class" ? FORBIDDEN_JS_CODE_CLASS : FORBIDDEN_JS_CODE_IMPORT;
-    const good = [];
-    const weak = [];
-    for (let k = lo; k < hi; k++) {
-      if (forbiddenJsKeywordKind(tokens, k) !== kind) continue;
-      const t = tokens[k];
-      if ((markupTokens && markupTokens.has(t)) || forbiddenJsLooksLikeProse(tokens, k)) weak.push(t);
-      else good.push(t);
-    }
-    for (const t of good.concat(weak)) {
-      if (need <= 0) break;
-      pushForbiddenJsError(code, tokenSpan(t, filePath), errors);
-      need--;
-    }
-    for (; need > 0 && fallbackTok; need--) pushForbiddenJsError(code, tokenSpan(fallbackTok, filePath), errors);
+function forbiddenJsTemplateInterpTokens(t) {
+  const out = [];
+  const text = typeof t.text === "string" ? t.text : "";
+  if (!t.span || !FORBIDDEN_JS_WORD_RE.test(text)) return out;
+  let line = t.span.line ?? 1;
+  let col = (t.span.col ?? 1) + 1; // past the opening backtick
+  const posAt = []; // line/col of every text offset
+  for (let k = 0; k <= text.length; k++) {
+    posAt.push([line, col]);
+    if (text[k] === "\n") { line++; col = 1; } else col++;
   }
+  let k = 0;
+  while (k < text.length) {
+    if (text[k] === "\\") { k += 2; continue; }
+    if (text[k] === "$" && text[k + 1] === "{") {
+      const bodyStart = k + 2;
+      let depth = 1;
+      let q = null;
+      let m = bodyStart;
+      while (m < text.length && depth > 0) {
+        const c = text[m];
+        if (q) { if (c === "\\") { m += 2; continue; } if (c === q) q = null; m++; continue; }
+        if (c === '"' || c === "'" || c === "`") { q = c; m++; continue; }
+        if (c === "{") depth++;
+        else if (c === "}") { depth--; if (depth === 0) break; }
+        m++;
+      }
+      const body = text.slice(bodyStart, m);
+      if (FORBIDDEN_JS_WORD_RE.test(body)) {
+        let toks = [];
+        const [bl, bc] = posAt[bodyStart] || [line, col];
+        try { toks = tokenizeLogic(body, t.span.start + 1 + bodyStart, bl, bc, []); } catch { toks = []; }
+        for (const tok of toks) out.push({ tok, toks });
+      }
+      k = m + 1;
+      continue;
+    }
+    k++;
+  }
+  return out;
+}
+
+/**
+ * Resolve one collected item to sites `[{ code, tok }]` (`tok` null = place on
+ * the enclosing statement). `lookup(text)` returns the source tokens the text
+ * was built from (in order), or null; `allToks` + `indexOf` are that token
+ * stream. `parse(text)` parses a text and returns its root ExprNode.
+ */
+function resolveForbiddenJsItem(item, lookup, allToks, indexOf, parse) {
+  const sites = [];
+  let rec = item.rec;
+  if (!rec && item.reparse) {
+    const root = parse(item.reparse);
+    rec = root ? readForbiddenJsRecord(root) : undefined;
+    if (!rec) item = { uncovered: item.reparse, stmt: item.stmt };
+  }
+  if (rec && rec.covered) {
+    const srcToks = lookup(rec.text);
+    for (const word of ["class", "import"]) {
+      const found = rec.sites.filter((s) => s.word === word);
+      if (found.length === 0) continue;
+      const code = word === "class" ? FORBIDDEN_JS_CODE_CLASS : FORBIDDEN_JS_CODE_IMPORT;
+      const cand = srcToks ? forbiddenJsCandidates(srcToks, allToks, word, indexOf) : [];
+      const exact = srcToks !== null && cand.length === found.length;
+      for (let k = 0; k < found.length; k++) sites.push({ code, tok: exact ? cand[k] : null });
+    }
+    return sites;
+  }
+  // No parse accounts for this text (trailing content after an expression, a
+  // skipped expression, a raw export that does not parse). Count its
+  // construct-shaped keyword tokens — unless it holds markup, where prose and
+  // code cannot be told apart without a parse (a miss beats firing on prose).
+  const text = rec ? rec.text : item.uncovered;
+  if (typeof text !== "string" || !FORBIDDEN_JS_WORD_RE.test(text) || FORBIDDEN_JS_MARKUP_RE.test(text)) return sites;
+  let toks;
+  try { toks = tokenizeLogic(text, 0, 1, 1, []); } catch { return sites; }
+  const srcToks = lookup(text);
+  for (const word of ["class", "import"]) {
+    let n = 0;
+    for (let k = 0; k < toks.length; k++) if (forbiddenJsKeywordKind(toks, k) === word) n++;
+    if (n === 0) continue;
+    const code = word === "class" ? FORBIDDEN_JS_CODE_CLASS : FORBIDDEN_JS_CODE_IMPORT;
+    const cand = srcToks ? forbiddenJsCandidates(srcToks, allToks, word, indexOf) : [];
+    const exact = srcToks !== null && cand.length === n;
+    for (let k = 0; k < n; k++) sites.push({ code, tok: exact ? cand[k] : null });
+  }
+  return sites;
+}
+
+/**
+ * Push the diagnostics for resolved sites. A site on a token is keyed by
+ * (code, token start) against everything already reported (a re-entered parse
+ * of the same tokens reports the same site); a statement-start fallback is
+ * keyed only against diagnostics that existed BEFORE this call, so two
+ * unplaceable constructs in one statement stay two diagnostics.
+ */
+function pushForbiddenJsSites(items, filePath, errors) {
+  const before = new Set();
+  for (const e of errors) {
+    if (e && (e.code === FORBIDDEN_JS_CODE_CLASS || e.code === FORBIDDEN_JS_CODE_IMPORT)) {
+      before.add(e.code + "@" + (e.tabSpan?.start ?? e.span?.start));
+    }
+  }
+  const placed = new Set(before);
+  for (const { site, fallback } of items) {
+    let span = null;
+    if (site.tok) span = tokenSpan(site.tok, filePath);
+    else if (fallback) span = fallback;
+    if (!span) continue;
+    const key = site.code + "@" + span.start;
+    if (site.tok ? placed.has(key) : before.has(key)) continue;
+    placed.add(key);
+    errors.push(new TABError(
+      site.code,
+      site.code === FORBIDDEN_JS_CODE_CLASS ? E_CLASS_NOT_IN_SCRML_MESSAGE : E_DYNAMIC_IMPORT_NOT_IN_SCRML_MESSAGE,
+      span,
+    ));
+  }
+}
+
+/** A statement node's span as a diagnostic span, or null. */
+function forbiddenJsStmtSpan(stmt, filePath) {
+  if (!stmt || !stmt.span || typeof stmt.span.start !== "number") return null;
+  const s = stmt.span;
+  return { file: filePath, start: s.start, end: typeof s.end === "number" ? s.end : s.start, line: s.line ?? 1, col: s.col ?? 1 };
 }
 
 /**
  * The attribute-value sites: an attribute expression never enters a logic
- * token stream, but it IS parsed (`exprNode`). Count from that tree; locate
- * on the tokens of the raw text. `baseOffset` / `line` / `col` locate `raw[0]`.
+ * token stream, but it IS parsed (`exprNodes` — one root, or a call-ref's
+ * argument roots). Constructs come from those trees; each is located on the
+ * tokens of the attribute's own source text `raw` (exact source — the
+ * attribute tokenizer does not re-join), `baseOffset` / `line` / `col`
+ * locating `raw[0]`. When the attribute text holds markup, or the counts do
+ * not match, the diagnostic goes on the attribute value's start.
  */
-export function emitForbiddenJsForAttrExpr(exprNode, raw, baseOffset, line, col, filePath, errors) {
+export function emitForbiddenJsForAttrExpr(exprNodes, raw, baseOffset, line, col, filePath, errors) {
   if (!errors || typeof raw !== "string" || !FORBIDDEN_JS_WORD_RE.test(raw)) return;
-  const counts = { class: 0, import: 0 };
-  countForbiddenJsInExpr(exprNode, counts, new WeakSet());
-  if (!counts.class && !counts.import) return;
-  let toks;
-  try { toks = tokenizeLogic(raw, baseOffset ?? 0, line ?? 1, col ?? 1, []); } catch { toks = []; }
-  const fallback = toks[0] || null;
-  placeForbiddenJs(counts, toks, 0, toks.length, null, fallback, filePath, errors);
+  const items = [];
+  collectForbiddenJsRecords(exprNodes, null, items, new WeakSet());
+  if (items.length === 0) return;
+  let toks = [];
+  if (!FORBIDDEN_JS_MARKUP_RE.test(raw)) {
+    try { toks = tokenizeLogic(raw, baseOffset ?? 0, line ?? 1, col ?? 1, []); } catch { toks = []; }
+  }
+  const idx = new Map(toks.map((t, k) => [t, k]));
+  const lookup = () => (toks.length > 0 ? toks : null);
+  const parse = (text) => { try { return parseExprToNode(text, filePath, 0); } catch { return null; } };
+  const fallback = { file: filePath, start: baseOffset ?? 0, end: (baseOffset ?? 0) + raw.length, line: line ?? 1, col: col ?? 1 };
+  const out = [];
+  // One attribute value is one text: constructs from all its roots are mapped
+  // against its tokens together, in order.
+  const merged = { class: [], import: [] };
+  let unplaceable = false;
+  for (const item of items) {
+    const sites = resolveForbiddenJsItem(item, () => null, toks, (t) => (idx.has(t) ? idx.get(t) : -1), parse);
+    for (const s of sites) merged[s.code === FORBIDDEN_JS_CODE_CLASS ? "class" : "import"].push(s);
+    if (item.rec && !item.rec.covered) unplaceable = true;
+  }
+  for (const word of ["class", "import"]) {
+    const sites = merged[word];
+    if (sites.length === 0) continue;
+    const cand = unplaceable ? [] : forbiddenJsCandidates(lookup() || [], toks, word, (t) => (idx.has(t) ? idx.get(t) : -1));
+    const exact = cand.length === sites.length;
+    for (let k = 0; k < sites.length; k++) out.push({ site: { code: sites[k].code, tok: exact ? cand[k] : null }, fallback });
+  }
+  pushForbiddenJsSites(out, filePath, errors);
 }
 
 // ---------------------------------------------------------------------------
@@ -4158,6 +4239,7 @@ function _captureWhenHandlerBody(peek, consume) {
   let bodyRaw = "";
   let prevLine = null;
   let nest = 0; // nesting of {}/()/[] INSIDE the body (excludes the body braces)
+  const fjsParts = []; // §7.2.1 / §21.3.2 — where each token's text sits in bodyRaw
   while (depth > 0 && peek().kind !== "EOF") {
     const t = peek();
     if (t.kind === "PUNCT" && t.text === "{") depth++;
@@ -4181,24 +4263,23 @@ function _captureWhenHandlerBody(peek, consume) {
       const nl = atTop && prevLine !== null && line !== null && line > prevLine;
       bodyRaw += (nl ? "\n" : " ") + piece;
     }
+    fjsParts.push({ s: bodyRaw.length - piece.length, e: bodyRaw.length, tok: lastTok });
     // An opener raises the nest AFTER its own placement decision.
     if (isPunct && (tx === "{" || tx === "(" || tx === "[")) nest++;
     if (line !== null) prevLine = line;
   }
-  return { bodyRaw, lastTok };
+  return { bodyRaw, lastTok, fjsParts };
 }
 
 export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, counter, errors, blockContext) {
   const nodes = [];
   let i = 0;
   // §7.2.1 / §21.3.2 — E-CLASS-NOT-IN-SCRML / E-DYNAMIC-IMPORT-NOT-IN-SCRML
-  // (see countForbiddenJsInNodes). `_markupTokens` records the tokens
-  // collectExpr consumed inside a markup region, and `_stmtSegments` the
-  // token index + node count at the start of every top-level statement, so a
-  // construct counted from a statement's TREE can be placed on a logic token
-  // of that same statement.
-  const _markupTokens = new Set();
-  const _stmtSegments = [];
+  // (module doc at collectForbiddenJsRecords). `_fjsRegistry` holds every
+  // expression text this body's collectExpr built, with the source token
+  // behind each part, so a construct found in a parsed text can be mapped back
+  // to the token it came from.
+  const _fjsRegistry = [];
   // markup-value-in-expression-2026-06-17 (a)+(b) — re-entry guard for
   // parseExprWithMarkupValues. safeParseExprToNode tries the markup-aware path
   // when markup is present; that path recurses (via safeParseExprToNode on a
@@ -4493,6 +4574,31 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return spans;
   }
 
+  function registerForbiddenJsSkeleton(expr, skeleton, spans) {
+    if (!FORBIDDEN_JS_WORD_RE.test(skeleton)) return;
+    for (let r = _fjsRegistry.length - 1; r >= 0; r--) {
+      const entry = _fjsRegistry[r];
+      const base = entry.text.indexOf(expr);
+      if (base < 0) continue;
+      const parts = [];
+      for (const p of entry.parts) {
+        if (p.s < base || p.e > base + expr.length) continue;
+        const rs = p.s - base;
+        const re = p.e - base;
+        let inside = false;
+        let shift = 0;
+        for (let q = 0; q < spans.length; q++) {
+          const [a, b] = spans[q];
+          if (rs < b && re > a) { inside = true; break; }
+          if (b <= rs) shift += `__scrml_mv_${q}__`.length - (b - a);
+        }
+        if (!inside) parts.push({ s: rs + shift, e: re + shift, tok: p.tok });
+      }
+      _fjsRegistry.push({ text: skeleton, parts });
+      return;
+    }
+  }
+
   function parseExprWithMarkupValues(expr, startOffset) {
     if (!expr || typeof expr !== "string") return null;
     // Cheap gate: a markup opener in the tokenizer-spaced form is `<` followed
@@ -4630,6 +4736,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       markupNodes.push(mkNode);
     }
     skeleton += expr.slice(last);
+
+    // §7.2.1 / §21.3.2 — register the skeleton with the markup-region parts
+    // REMOVED: prose inside a markup value is not logic, and the skeleton's
+    // constructs map only onto the tokens outside the markup spans.
+    registerForbiddenJsSkeleton(expr, skeleton, spans);
 
     // Parse the placeholder skeleton (acorn-clean — placeholders are plain idents).
     const skel = safeParseExprToNode(skeleton, startOffset);
@@ -4796,10 +4907,12 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const partSpans = [];
     // GITI-039: push the per-part span (markup-region only) alongside each
     // partLines entry — keeps parts/partLines/partSpans index-aligned.
+    // §7.2.1 / §21.3.2 — the source token behind each part (index-aligned),
+    // registered with the joined text on return (_fjsRegistry).
+    const partToks = [];
     const pushPartSpan = () => {
       partSpans.push(angleDepth > 0 && lastTok && lastTok.span ? lastTok.span : null);
-      // §7.2.1 / §21.3.2 — a token collected inside markup is text, not logic.
-      if (angleDepth > 0 && lastTok) _markupTokens.add(lastTok);
+      partToks.push(lastTok);
     };
     const startTok = peek();
     let lastTok = startTok;
@@ -5771,10 +5884,48 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       pushPartSpan();
     }
 
+    const _joined = joinWithNewlines(parts, partLines, partSpans);
+    registerForbiddenJsText(_joined, parts, partLines, partSpans, partToks);
     return {
-      expr: joinWithNewlines(parts, partLines, partSpans),
+      expr: _joined,
       span: parts.length > 0 ? spanOf(startTok, lastTok) : spanOf(startTok, startTok),
     };
+  }
+
+  // §7.2.1 / §21.3.2 — record where each part of a joined expression text sits
+  // (joinWithNewlines' exact separator rule) and which token it came from.
+  function registerForbiddenJsText(joined, parts, partLines, partSpans, partToks) {
+    if (typeof joined !== "string" || !FORBIDDEN_JS_WORD_RE.test(joined)) return;
+    if (partToks.length !== parts.length) return;
+    const entry = [];
+    let pos = 0;
+    for (let k = 0; k < parts.length; k++) {
+      if (k > 0) {
+        const prevSpan = partSpans ? partSpans[k - 1] : null;
+        const curSpan = partSpans ? partSpans[k] : null;
+        if (!(prevSpan && curSpan && prevSpan.end === curSpan.start)) pos += 1;
+      }
+      const len = String(parts[k]).length;
+      entry.push({ s: pos, e: pos + len, tok: partToks[k] });
+      pos += len;
+    }
+    if (pos !== joined.length) return; // the join did not follow the rule — do not trust it
+    _fjsRegistry.push({ text: joined, parts: entry });
+  }
+
+  // The source tokens (in order) a text was built from: the most recent
+  // registered text that contains it; null when none does.
+  function lookupForbiddenJsTokens(text) {
+    if (typeof text !== "string" || text.length === 0) return null;
+    for (let r = _fjsRegistry.length - 1; r >= 0; r--) {
+      const entry = _fjsRegistry[r];
+      const base = entry.text.indexOf(text);
+      if (base < 0) continue;
+      const out = [];
+      for (const p of entry.parts) if (p.s >= base && p.e <= base + text.length) out.push(p.tok);
+      return out;
+    }
+    return null;
   }
 
   /**
@@ -5786,6 +5937,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     let depth = 1;
     const parts = [];
     const partLines = [];
+    const partToks = []; // §7.2.1 / §21.3.2 — _fjsRegistry
     let lastTok = startTok;
 
     while (depth > 0) {
@@ -5832,10 +5984,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         parts.push(lastTok.text);
       }
       partLines.push(lastTok.span?.line ?? 0);
+      partToks.push(lastTok);
     }
 
+    const _bracedJoined = joinWithNewlines(parts, partLines);
+    registerForbiddenJsText(_bracedJoined, parts, partLines, null, partToks);
     return {
-      body: joinWithNewlines(parts, partLines),
+      body: _bracedJoined,
       span: parts.length > 0 ? spanOf(startTok, lastTok) : spanOf(startTok, startTok),
     };
   }
@@ -5852,6 +6007,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   function collectLiftExpr() {
     const parts = [];
     const partLines = [];
+    const partToks = []; // §7.2.1 / §21.3.2 — _fjsRegistry
     const startTok = peek();
     let lastTok = startTok;
     let depth = 0;
@@ -5973,10 +6129,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         parts.push(lastTok.text);
       }
       partLines.push(lastTok.span?.line ?? 0);
+      partToks.push(lastTok);
     }
 
+    const _liftJoined = joinWithNewlines(parts, partLines);
+    registerForbiddenJsText(_liftJoined, parts, partLines, null, partToks);
     return {
-      expr: joinWithNewlines(parts, partLines),
+      expr: _liftJoined,
       span: parts.length > 0 ? spanOf(startTok, lastTok) : spanOf(startTok, startTok),
     };
   }
@@ -11116,6 +11275,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
     const parts = [];
     const partLines = [];
+    const partToks = []; // §7.2.1 / §21.3.2 — _fjsRegistry
     const startTok = peek();
     let lastTok = startTok;
     let depth = 0;
@@ -11150,6 +11310,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         parts.push(lastTok.text);
       }
       partLines.push(lastTok.span?.line ?? 0);
+      partToks.push(lastTok);
       // After closing the outermost `(`, ALWAYS stop — the pre-S414 behaviour. When what
       // follows is one of the continuation operators the head is illegally
       // unparenthesized (SPEC §50.2.1/§50.2.3/§49.2.1), so REJECT it. There is
@@ -11171,8 +11332,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         break;
       }
     }
+    const _condJoined = joinWithNewlines(parts, partLines);
+    registerForbiddenJsText(_condJoined, parts, partLines, null, partToks);
     return {
-      expr: joinWithNewlines(parts, partLines),
+      expr: _condJoined,
       span: parts.length > 0 ? spanOf(startTok, lastTok) : spanOf(startTok, startTok),
     };
   }
@@ -11846,7 +12009,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   while (true) {
     const tok = peek();
     if (tok.kind === "EOF") break;
-    _stmtSegments.push({ ti: i, ni: nodes.length });
 
     // Phase 4 / §32 — update tilde context based on last pushed node.
     // Tilde is initialized by EITHER (1) a value-lift `lift-expr`, OR
@@ -14567,7 +14729,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // (shared _captureWhenHandlerBody — see its doc). Fixes the multi-statement drop
         // (g-when-message-parent-handler-drops-all-but-the-first-statement, S372).
         if (peek().text === "{") {
-          const { bodyRaw: _whenWorkerBody, lastTok } = _captureWhenHandlerBody(peek, consume);
+          const { bodyRaw: _whenWorkerBody, lastTok, fjsParts: _whenWorkerParts } = _captureWhenHandlerBody(peek, consume);
+          _fjsRegistry.push({ text: _whenWorkerBody, parts: _whenWorkerParts });
           nodes.push({
             id: ++counter.next,
             kind: workerName ? "when-worker-" + eventType : "when-message",
@@ -14611,7 +14774,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // (g-when-effect-multi-statement-body-drops-all-but-first, S372) — the same bug
       // the worker-handler branch above had.
       if (peek().text === "{") {
-        const { bodyRaw: _whenEffectBody, lastTok } = _captureWhenHandlerBody(peek, consume);
+        const { bodyRaw: _whenEffectBody, lastTok, fjsParts: _whenEffectParts } = _captureWhenHandlerBody(peek, consume);
+        _fjsRegistry.push({ text: _whenEffectBody, parts: _whenEffectParts });
         nodes.push({
           id: ++counter.next,
           kind: "when-effect",
@@ -14966,35 +15130,34 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   emitForbiddenJsForBody();
   return nodes;
 
-  // §7.2.1 / §21.3.2 — count each top-level statement's constructs from its
-  // TREE, place each on a keyword token of that statement (module doc at
-  // countForbiddenJsInNodes). Only statements whose token range holds a
-  // keyword-shaped token are walked at all.
+  // §7.2.1 / §21.3.2 — every construct in this body's parsed trees, each on
+  // the source token it came from (module doc at collectForbiddenJsRecords).
   function emitForbiddenJsForBody() {
-    if (!errors || _stmtSegments.length === 0) return;
+    if (!errors) return;
+    // Cheap prefilter: a construct's keyword must appear in some token's text
+    // (a KEYWORD token, or inside a template-literal STRING token).
     let any = false;
     for (let k = 0; k < tokens.length && !any; k++) {
       const t = tokens[k];
-      if (t && t.kind === "KEYWORD" && (t.text === "class" || t.text === "import")) any = true;
+      if (t && typeof t.text === "string" && FORBIDDEN_JS_WORD_RE.test(t.text)) any = true;
     }
     if (!any) return;
-    for (let s = 0; s < _stmtSegments.length; s++) {
-      const seg = _stmtSegments[s];
-      const next = _stmtSegments[s + 1];
-      const lo = seg.ti;
-      const hi = next ? next.ti : i;
-      const segNodes = nodes.slice(seg.ni, next ? next.ni : nodes.length);
-      if (segNodes.length === 0) continue;
-      let has = false;
-      for (let k = lo; k < hi && !has; k++) if (forbiddenJsKeywordKind(tokens, k)) has = true;
-      const counts = { class: 0, import: 0 };
-      countForbiddenJsInNodes(segNodes, filePath, counts, new WeakSet());
-      if (!counts.class && !counts.import) continue;
-      // A statement whose own tokens hold no keyword (a node an earlier
-      // statement's parse attached here) is placed on the whole body's tokens.
-      if (has) placeForbiddenJs(counts, tokens, lo, hi, _markupTokens, tokens[lo], filePath, errors);
-      else placeForbiddenJs(counts, tokens, 0, i, _markupTokens, tokens[lo], filePath, errors);
+    const items = [];
+    collectForbiddenJsRecords(nodes, null, items, new WeakSet());
+    if (items.length === 0) return;
+    const idx = new Map();
+    for (let k = 0; k < tokens.length; k++) idx.set(tokens[k], k);
+    const indexOf = (t) => (idx.has(t) ? idx.get(t) : -1);
+    const parse = (text) => { try { return parseExprToNode(text, filePath, 0); } catch { return null; } };
+    const out = [];
+    for (const item of items) {
+      const fallback = forbiddenJsStmtSpan(item.stmt, filePath)
+        ?? (tokens[0] ? tokenSpan(tokens[0], filePath) : null);
+      for (const site of resolveForbiddenJsItem(item, lookupForbiddenJsTokens, tokens, indexOf, parse)) {
+        out.push({ site, fallback });
+      }
     }
+    pushForbiddenJsSites(out, filePath, errors);
   }
 }
 

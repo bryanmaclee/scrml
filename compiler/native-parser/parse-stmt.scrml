@@ -3083,6 +3083,55 @@ ${
     export fn parseProgram(tokens) {
         const ctx = makeParseStmtContext(tokens)
         const body = parseStatementList(ctx, not)
-        return { body, errors: ctx.errors }
+        return { body, errors: ctx.errors.concat(collectBlockStubBodyErrors(body, ctx.errors)) }
     }
+
+    // -- collectBlockStubBodyErrors — the diagnostics of every BlockStub body
+    // re-entered inside THIS parse (parked on `stub.bodyErrors` by
+    // reenterBlockStubs), in this parse's own coordinates. Does not cross a
+    // MarkupValue (a separately-parsed body). S430 — mirrors parse-stmt.js.
+    export fn collectBlockStubBodyErrors(root, already) {
+        const out = []
+        const have = new Set()
+        if (Array.isArray(already)) {
+            for (const e of already) {
+                if (e is some) {
+                    have.add(String(e.code) + "@" + String(e.span is some ? e.span.start : ""))
+                }
+            }
+        }
+        const seen = new Set()
+        const stack = [root]
+        while (stack.length > 0) {
+            const cur = stack.pop()
+            if (cur is not || typeof cur != "object" || seen.has(cur)) { continue }
+            seen.add(cur)
+            if (Array.isArray(cur)) {
+                for (const el of cur) { stack.push(el) }
+                continue
+            }
+            if (cur.kind == "MarkupValue") { continue }
+            if (cur.kind == "BlockStub" && Array.isArray(cur.bodyErrors)) {
+                for (const e of cur.bodyErrors) {
+                    if (e is some) {
+                        const key = String(e.code) + "@" + String(e.span is some ? e.span.start : "")
+                        if (have.has(key) == false) {
+                            have.add(key)
+                            out.push(e)
+                        }
+                    }
+                }
+            }
+            for (const key of Object.keys(cur)) {
+                const v = cur[key]
+                if (v is some && typeof v == "object") { stack.push(v) }
+            }
+        }
+        out.sort((a, b) => ((a.span is some ? a.span.start : 0) - (b.span is some ? b.span.start : 0)))
+        return out
+    }
+
+    // S430 P1 — a class EXPRESSION parses through the same class parser as a
+    // declaration (parse-expr's parsePostfix). Mirrors parse-stmt.js.
+    setClassExprParser(parseClassDecl)
 }

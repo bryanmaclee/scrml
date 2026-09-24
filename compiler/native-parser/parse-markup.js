@@ -737,71 +737,7 @@ export function parseLogicBodyBestEffort(bodyText, ctx, bodyAbsStart, bodyAbsLin
             j = j + 1;
         }
     }
-    // Forward the diagnostics of every re-entered BlockStub body too (an arrow
-    // / function-expression / match-arm block body). reenterBlockStubs
-    // (parse-stmt.js) parses each such body in its OWN context and parks the
-    // result on `stub.bodyErrors`; before S430 nothing read that field, so
-    // every diagnostic inside a block body was silently dropped — the native
-    // twin of the live `export` re-parse swallow closed in S430 P2 (e.g. a
-    // `class` in a match arm inside a function never reported
-    // E-CLASS-NOT-IN-SCRML). The stub's tokens come from this body's lex, so
-    // its spans are body-local and shift exactly like result.errors.
-    const stubErrors = collectBlockStubBodyErrors(body, result.errors);
-    let k = 0;
-    while (k < stubErrors.length) {
-        const e = stubErrors[k];
-        const diag = makeDiagnostic(e.code, e.message, shiftBodySpan(e.span, bodyAbsStart, bodyAbsLine, bodyAbsCol));
-        if (ctx !== null && ctx !== undefined && ctx.delegationStack !== undefined
-            && ctx.delegationStack.length > 0) {
-            diag.delegationFrame = ctx.delegationStack[ctx.delegationStack.length - 1];
-        }
-        pushDiagnostic(ctx, diag);
-        k = k + 1;
-    }
     return body;
-}
-
-// collectBlockStubBodyErrors — calculation. Every `BlockStub.bodyErrors` entry
-// under `root` (nested stubs included — a re-entered body's own stubs carry
-// their own `bodyErrors`), minus any already in `already` (same code + start).
-// Spans are left body-local; the caller shifts them.
-export function collectBlockStubBodyErrors(root, already) {
-    const out = [];
-    const have = new Set();
-    if (Array.isArray(already)) {
-        for (const e of already) {
-            if (e !== undefined && e !== null) {
-                have.add(String(e.code) + "@" + String(e.span !== undefined && e.span !== null ? e.span.start : ""));
-            }
-        }
-    }
-    const seen = new Set();
-    const stack = [root];
-    while (stack.length > 0) {
-        const cur = stack.pop();
-        if (cur === undefined || cur === null || typeof cur !== "object" || seen.has(cur)) continue;
-        seen.add(cur);
-        if (Array.isArray(cur)) {
-            for (const el of cur) stack.push(el);
-            continue;
-        }
-        if (cur.kind === "BlockStub" && Array.isArray(cur.bodyErrors)) {
-            for (const e of cur.bodyErrors) {
-                if (e === undefined || e === null) continue;
-                const key = String(e.code) + "@" + String(e.span !== undefined && e.span !== null ? e.span.start : "");
-                if (have.has(key)) continue;
-                have.add(key);
-                out.push(e);
-            }
-        }
-        for (const key of Object.keys(cur)) {
-            const v = cur[key];
-            if (v !== null && typeof v === "object") stack.push(v);
-        }
-    }
-    // Source order, so the forwarded stream reads top to bottom.
-    out.sort((a, b) => ((a.span && a.span.start) || 0) - ((b.span && b.span.start) || 0));
-    return out;
 }
 
 // shiftBodySpan — calculation (pure). Translate a body-local span (the

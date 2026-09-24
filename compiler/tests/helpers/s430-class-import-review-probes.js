@@ -1,6 +1,7 @@
-// GENERATED from the S430 adversarial-review probes (rcl/probes) + two extra
-// mixed-statement / call-ref probes. Each row: [name, source, expected-default,
-// expected-native]. `null` = native not asserted (see the note at the use site).
+// GENERATED from the S430 adversarial-review probes (round 1: rcl/probes;
+// round 3: r3-*) + two extra mixed-statement / call-ref probes. Each row:
+// [name, source, expected-default, expected-native]. `null` = native not
+// asserted (see the note at the use site).
 export const S430_REVIEW_PROBES = [
   ["cs01", "<program>\n${\n  function f() {\n    return <div>\n      #{ .class { color: red; } }\n      <p>hi</p>\n    </div>\n  }\n}\n<p>x</p>\n</program>\n", [], []],
   ["fn01", "<program>\n${\n  class A { }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:3"], ["E-CLASS-NOT-IN-SCRML@3:3"]],
@@ -46,4 +47,18 @@ export const S430_REVIEW_PROBES = [
   ["sq01", "<program>\n<db src=\"t.db\" tables=\"t\">\n  ${\n    function loadT() {\n      return ?{`SELECT class FROM t WHERE import = 1`}.all()\n    }\n    function loadU() {\n      return ?{`SELECT \"class Foo\" AS k, import(x) FROM t`}.all()\n    }\n  }\n  <p>x</p>\n</db>\n</program>\n", [], []],
   ["x1_callref", "<program>\n${\n  function f(x) { return x }\n}\n<button onclick=f(import(\"x\"))>go</button>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@5:19"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@5:19"]],
   ["x2_mixed", "<program>\n${\n  const pair = [<p>the class Room is full</p>, class { }]\n  function g() {\n    lift <p>class Act begins</p>\n    return import(\"./y.js\")\n  }\n  const nested = () => { const k = class { m() { return class { } } } }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:48","E-CLASS-NOT-IN-SCRML@8:36","E-CLASS-NOT-IN-SCRML@8:57","E-DYNAMIC-IMPORT-NOT-IN-SCRML@6:12"], ["E-CLASS-NOT-IN-SCRML@3:48","E-CLASS-NOT-IN-SCRML@8:36","E-CLASS-NOT-IN-SCRML@8:57","E-DYNAMIC-IMPORT-NOT-IN-SCRML@6:12"]],
+  ["r3-f1a", "<program>\n${\n  const pair = [<p>Hello, class Foo is here</p>, class { }]\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:50"], ["E-CLASS-NOT-IN-SCRML@3:50"]],
+  ["r3-f1b", "<program>\n${\n  const pair = [<p>Hello, import(\"q\") now</p>, import(\"y\")]\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:48"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:48"]],
+  ["r3-f1c", "<program>\n${\n  function f() {\n    return [<p>a, class Foo</p>, class { }, <p>b</p>]\n  }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@4:34"], ["E-CLASS-NOT-IN-SCRML@4:34"]],
+  ["r3-f1d", "<program>\n${\n  const a = 1\n  const m = [\n    1,\n    class Q { },\n    import(\"z\")\n  ]\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@6:5","E-DYNAMIC-IMPORT-NOT-IN-SCRML@7:5"], ["E-CLASS-NOT-IN-SCRML@6:5","E-DYNAMIC-IMPORT-NOT-IN-SCRML@7:5"]],
+  ["r3-f2a", "<program>\n<x> = 0\n${\n  when @x changes { const K = class { }; const m = import(\"q\") }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@4:31","E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:52"], ["E-CLASS-NOT-IN-SCRML@4:31","E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:52"]],
+  ["r3-f2b1", "<program>\nconst v = <div>${ import(\"x\") }</div>\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@2:19"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@2:19"]],
+  ["r3-f2b2", "<program>\nconst w = <div>${ (class { }).name }</div>\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@2:20"], ["E-CLASS-NOT-IN-SCRML@2:20"]],
+  ["r3-f2c1", "<program>\n${\n  const s = `${class { }}`\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:16"], ["E-CLASS-NOT-IN-SCRML@3:16"]],
+  ["r3-f2c2", "<program>\n${\n  const s = `a ${import(\"x\")} b`\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:18"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:18"]],
+  ["r3-f2d1", "<program>\n${\n  export const r: number = (class { }).length\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:29"], ["E-CLASS-NOT-IN-SCRML@3:29"]],
+  ["r3-f2d2", "<program>\n${\n  export const q: any = import(\"z\")\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:25"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:25"]],
+  ["r3-f2d3", "<program>\n${\n  export let s: any = () => { return class { } }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:38"], ["E-CLASS-NOT-IN-SCRML@3:38"]],
+  ["r3-f3a", "<program>\n${\n  function f() {\n    lift <li>${ (() => { const K = class { }; return 1 })() }</li>\n  }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@4:36"], ["E-CLASS-NOT-IN-SCRML@4:36"]],
+  ["r3-f3b", "<program>\n${\n  function f() {\n    lift <li>${ (() => {\n      const z = 0\n      const q = 1 +;\n      return 1 })() }</li>\n  }\n}\n<p>x</p>\n</program>\n", [], []],
 ];

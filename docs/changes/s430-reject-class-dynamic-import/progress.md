@@ -36,3 +36,39 @@
 - c5067e21 within-node allowlist tightened by the 899 SPAN-COORD the col fix removed (312 rows, none up).
 - 3f3ac6c9 self-host-smoke strips the new static scrml:path/fs imports (surfaced only in the full run).
 - Full `bun run test`: 32,664 pass / 56 fail (55 = the same pre-existing browser/dev/detector/esm set; 1 = self-host-smoke, fixed in 3f3ac6c9).
+
+## Review round 3 (on f12cd07c) — 2026-09-24
+- Merged origin/main (#1047 74f64bef) at 79779497; only docs/FACTS.md conflicted (regenerated).
+- F1 (placement on prose): default parser no longer ranks tokens. Each parse records on its ROOT
+  ExprNode (non-enumerable, expression-parser.ts readForbiddenJsRecord) the constructs ACORN found +
+  the parsed text. parseLogicBody registers every joined expression text with the token behind each
+  part (collectExpr / collectBracedBody / collectLiftExpr / collectIfCondition / when bodies; the
+  markup-value skeleton registers with markup-region parts removed). A construct maps to the k-th
+  construct-shaped keyword token of its text; template-literal interpolations are tokenized in place.
+  Count mismatch => the enclosing statement's start (the recorded gap; never a prose token).
+  NOTE for the reviewer: "expression-text start + node.start" is not available as stated — the
+  default parser's expression text is a RE-JOINED token string and acorn offsets are in a
+  preprocessed copy of it (preprocessForAcorn rewrites `::`, `is not`, …), so offsets map to the
+  file only through the token registry; that is what is used.
+- F2: (a) `when` bodies parse as statements when not an expression; (b) top-level markup `${}` fires;
+  (c) template interpolations fire (acorn tree) and are placed inside the template; (d) typed exports:
+  valueInitExpr is walked. All pinned on both parsers.
+- F3: native block-body errors are now collected by the parseProgram that owns the stubs (its own
+  coordinates) and NOT across a MarkupValue; the parse-markup.js forwarding is removed. No double report.
+- F4: parse-expr.scrml writer is a `function`; parse-stmt.scrml collectBlockStubBodyErrors is `fn`;
+  both mirrors compile to their base error set (E-EQ-005 / E-CG-ENUM-BINDING-COLLISION only).
+- Corpus A/B vs HEAD (2,582 files, both parsers): default 0 class/import diffs, 0 artifact diffs
+  (only rows moving: the stdlib async carve-out resolving against the extract's own stdlib root —
+  measurement artifact); native 0 diffs. Totals: 16 class + 16 import, identical positions on both parsers.
+
+### Gaps / open questions (filed, not fixed)
+- F5 (native FP): the native lexer tokenizes `as` as a keyword, so `let as = …` fails natively; SPEC
+  reserves no such keyword. Also a `</>` closer inside lift markup is a native false positive.
+- F6 (pre-existing): E-IMPORT-003 fires with a misleading message for an `import` inside a markup `${}`.
+- Native: an anonymous `class { }` inside a template interpolation also reports E-STMT-CLASS-NAME
+  (the interpolation is parsed as a statement list natively).
+- Native: a `${}` inside markup-as-value in a logic body is parsed on two paths and forwarded twice;
+  nativeParseFile collapses exact (code+span) duplicates — the double parse itself is unfixed.
+- OPEN DESIGN QUESTION for bryan: a QUOTED inline event-handler attribute (`onclick="import('./x.js')"`)
+  is treated as data (PA decision S430, no fire) — but the browser executes it as JavaScript. Should
+  quoted inline event-handler attributes be raw JS at all?

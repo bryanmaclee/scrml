@@ -135,9 +135,11 @@ ${
     // S430 P1 / P4 — the two forbidden-construct messages, shared by the
     // expression arm here (parsePostfix) and the declaration arm in
     // parse-stmt.scrml (parseClassDecl). Mirrors parse-expr.js.
-    // classExprParser — parse-stmt's parseClassDecl, registered at load.
+    // classExprParser — parse-stmt's parseClassDecl, registered at load. The
+    // writer is a `function`, not an `fn`: it mutates this module-level cell,
+    // which an `fn` may not do (E-FN-003, §48.3.3). Mirrors parse-expr.js.
     let classExprParser = not
-    export fn setClassExprParser(parser) {
+    export function setClassExprParser(parser) {
         classExprParser = parser
     }
 

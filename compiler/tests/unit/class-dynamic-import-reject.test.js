@@ -145,6 +145,23 @@ describe("S430 review probes — both front-ends, exact codes + positions", () =
 // PA decision (S430): a QUOTED HTML attribute value is a string literal emitted
 // as data (§5 quoting), not scrml source — `onclick="import('./x.js')"` does not
 // fire (SPEC §21.3.2).
+// S430 review round 3, F3: a diagnostic inside a block body (an arrow inside a
+// `${}` inside lift markup inside a function) is reported ONCE, at its own
+// position — the native BlockStub-body errors are collected by the parse that
+// owns the stub, in that parse's coordinates (parse-stmt.js parseProgram).
+describe("native: a block-body diagnostic is reported once, where it is", () => {
+  const src = "<program>\n${\n  function f() {\n    lift <li>${ (() => {\n      const z = 0\n      const q = 1 +;\n      return 1 })() }</li>\n  }\n}\n<p>x</p>\n</program>\n";
+  test("an ordinary parse error inside the arrow body", () => {
+    const dir = mkdtempSync(join(tmpdir(), "cdireject-f3-"));
+    const f = join(dir, "case.scrml");
+    writeFileSync(f, src);
+    const r = compileScrml({ inputFiles: [f], outputDir: join(dir, "dist"), write: false, log: () => {}, parser: "scrml-native" });
+    const got = (r.errors || []).filter((e) => e.code === "E-EXPR-UNEXPECTED")
+      .map((e) => `${(e.span || e.tabSpan).line}:${(e.span || e.tabSpan).col}`);
+    expect(got).toEqual(["6:20"]);
+  });
+});
+
 describe("a quoted attribute value is data, not scrml source", () => {
   const src = `<program>\n<button onclick="import('./x.js')">a</button>\n<p title="class Foo extends Bar">b</p>\n</program>`;
   test("default", () => expect(rejectHits(src)).toEqual([]));
