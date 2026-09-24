@@ -12068,6 +12068,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         let synthIsGenerator = false;
         let synthHasReturnType = false;
         let synthReturnTypeAnnotation = undefined;
+        let synthErrorType = undefined;
         try {
           // Slice the consumed tokens (from cursor before collectExpr to
           // cursor after) and re-parse them via parseLogicBody. The token
@@ -12132,6 +12133,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               synthIsGenerator = !!innerFn.isGenerator;
               synthHasReturnType = !!innerFn.hasReturnType;
               synthReturnTypeAnnotation = innerFn.returnTypeAnnotation;
+              // The declared `! -> ErrorType`. Without it the type system reads the
+              // exported function as `! -> Error` (type-system.ts defaults a missing
+              // errorType to "Error"), so every `fail T::V` in its body is a false
+              // E-ERROR-009 and its call sites get no exhaustive `!{}` check.
+              synthErrorType = innerFn.errorType;
             }
             // Surface EVERY re-parse diagnostic. The sub-parse runs over the
             // original token slice, so each diagnostic's span already points at
@@ -12165,6 +12171,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           ...(hasIdempotentModifier ? { idempotentModifier: true } : {}),
           isGenerator: synthIsGenerator,
           canFail: synthCanFail,
+          ...(synthErrorType ? { errorType: synthErrorType } : {}),
           ...(synthHasReturnType ? { hasReturnType: true } : {}),
           ...(synthReturnTypeAnnotation ? { returnTypeAnnotation: synthReturnTypeAnnotation } : {}),
           raw: rawStr,

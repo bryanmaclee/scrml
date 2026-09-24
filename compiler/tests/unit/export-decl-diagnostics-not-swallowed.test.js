@@ -121,6 +121,26 @@ describe("other parse-layer diagnostics surface too — the fix is not a per-cod
   });
 });
 
+describe("the export synth carries the declared error type", () => {
+  // Pre-fix the synth function-decl copied canFail but not errorType, so the
+  // type system read `export function f() ! -> E` as `! -> Error` and reported
+  // every `fail E::V` in its body as E-ERROR-009 ("not a valid variant of the
+  // declared error type 'Error'"). 12 such false positives across stdlib.
+  test("export function f() ! -> E { fail E::V } — no E-ERROR-009", () => {
+    const r = compile(
+      "${\n  export type E:enum = { Bad(message: string) }\n  export function f(x) ! -> E {\n    if (x < 0) {\n      fail E::Bad(\"neg\")\n    }\n    return x\n  }\n}",
+    );
+    expect(errs(r, "E-ERROR-009")).toEqual([]);
+  });
+
+  test("an INVALID variant in an exported failable still reports E-ERROR-009", () => {
+    const r = compile(
+      "${\n  export type E:enum = { Bad(message: string) }\n  export function f(x) ! -> E {\n    if (x < 0) {\n      fail E::Nope(\"neg\")\n    }\n    return x\n  }\n}",
+    );
+    expect(errs(r, "E-ERROR-009").length).toBeGreaterThan(0);
+  });
+});
+
 describe("legal exported functions stay clean", () => {
   test("export function with ordinary control flow — no parse-layer errors", () => {
     const r = compile(
