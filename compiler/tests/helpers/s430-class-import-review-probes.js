@@ -1,8 +1,9 @@
 // GENERATED from the S430 adversarial-review probes (round 1: rcl/probes;
-// round 3: r3-*; round 4: r4-*) + two extra mixed-statement / call-ref probes.
-// Each row: [name, source, expected-default, expected-native]. `null` =
-// native not asserted (see the note at the use site). Since S430 round 4 the
-// default pipeline takes this family from the native tree, so the two agree.
+// round 3: r3-*; round 4: r4-*; round 5: r5-*) + two extra mixed-statement /
+// call-ref probes. Each row: [name, source, expected-default, expected-native].
+// `null` = native not asserted (inline foreign code, which the native pipeline
+// rejects on base). Since S430 round 4 the default pipeline takes this family
+// from the native tree, so the two agree.
 export const S430_REVIEW_PROBES = [
   ["cs01", "<program>\n${\n  function f() {\n    return <div>\n      #{ .class { color: red; } }\n      <p>hi</p>\n    </div>\n  }\n}\n<p>x</p>\n</program>\n", [], []],
   ["fn01", "<program>\n${\n  class A { }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:3"], ["E-CLASS-NOT-IN-SCRML@3:3"]],
@@ -75,4 +76,21 @@ export const S430_REVIEW_PROBES = [
   ["r4-fb5", "<program>\n${\n  const v = <p>class Foo is ${ (class K { }).name }</p>\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:33"], ["E-CLASS-NOT-IN-SCRML@3:33"]],
   ["r4-fb6", "<program>\n${\n  function f() {\n    return <div>${ <b>${ import(\"x\") }</b> }</div>\n  }\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:26"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:26"]],
   ["r4-g1_letas", "<program>\n${\n  let as = 1\n  const cls = { class: as }\n}\n<p>${cls.class}</p>\n</program>\n", [], []],
+  ["r5-c1", "<program>\n<on> = true\n<a> = 1\n<div data-x=${({class:1})}>x</div>\n</program>\n", [], []],
+  ["r5-c2", "<program>\n<on> = true\n<a> = 1\n<div data-x=${[{class:1}]}>x</div>\n</program>\n", [], []],
+  ["r5-c3", "<program>\n<on> = true\n<a> = 1\n<div data-x=${a => ({class:a})}>x</div>\n</program>\n", [], []],
+  ["r5-c4", "<program>\n<on> = true\n<a> = 1\n<div data-x=${@on ? \"class\" : \"import\"}>x</div>\n</program>\n", [], []],
+  ["r5-c5", "<program>\n<on> = true\n<a> = 1\n<div class:active=@on>x</div>\n</program>\n", [], []],
+  ["r5-c6", "<program>\n${\n  function f(class_) { return class_ }\n}\n<button onclick=f(class_)>x</button>\n</program>\n", [], []],
+  ["r5-c7", "<program>\n<items> = [{ class: \"a\" }]\n<ul>\n  <each for=@items key=@.class>\n    <li>${@.class}</li>\n  </each>\n</ul>\n</program>\n", [], []],
+  ["r5-f1a", "<program>\n<on> = true\n<a> = 1\n<div data-cfg=${{ class: \"primary\", id: 1 }}>x</div>\n</program>\n", [], []],
+  ["r5-f1b", "<program>\n<on> = true\n<a> = 1\n<div data-cfg=${{ id: 1, class: \"primary\" }}>x</div>\n</program>\n", [], []],
+  ["r5-f1c", "<program>\n<on> = true\n<a> = 1\n<div data-x=${{ class: 1 }.class}>x</div>\n</program>\n", [], []],
+  ["r5-f1d", "<program>\n<on> = true\n<a> = 1\n<p if=${ {class: 1}.class == 1 }>x</p>\n</program>\n", [], []],
+  ["r5-f1e", "<program>\n<on> = true\n<a> = 1\n<div data-cfg=${{\n  class: \"primary\"\n}}>x</div>\n</program>\n", [], []],
+  ["r5-f1f", "<program>\n<on> = true\n<a> = 1\n<button onclick=${ { class: 1 } }>x</button>\n</program>\n", [], []],
+  ["r5-f2", "<program lang=\"ts\">\n${\n  export function f(p: string) {\n    const out: string = _={ in: { p }\n      if (p) /'/.test(p)\n      return p\n    }=\n    const msg = 'class Foo { }'\n    return out + msg\n  }\n}\n<p>x</p>\n</program>\n", [], null],
+  ["r5-t1", "<program>\n<on> = true\n<a> = 1\n<div data-x=${class { }}>x</div>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@4:15"], ["E-CLASS-NOT-IN-SCRML@4:15"]],
+  ["r5-t2", "<program>\n<on> = true\n<a> = 1\n<button onclick=${ @a = 1; import(\"x\") }>x</button>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:28"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:28"]],
+  ["r5-t3", "<program>\n<on> = true\n<a> = 1\n<div data-x=${ {k: class { }} }>x</div>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@4:20"], ["E-CLASS-NOT-IN-SCRML@4:20"]],
 ];

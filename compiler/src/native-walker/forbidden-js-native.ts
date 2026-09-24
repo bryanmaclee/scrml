@@ -106,10 +106,10 @@ export function nativeForbiddenJsAttrDiagnostics(ast: any, source: string, fileP
     seen.add(cur);
     if (Array.isArray(cur)) { for (const el of cur) stack.push({ v: el, inLogic }); continue; }
     if (!inLogic) {
-      const vals: any[] = [];
-      if (Array.isArray(cur.attrs)) for (const a of cur.attrs) if (a && a.value) vals.push(a.value);
-      if (cur.ifCond && typeof cur.ifCond === "object") vals.push(cur.ifCond);
-      for (const val of vals) {
+      const vals: Array<{ val: any; name: string }> = [];
+      if (Array.isArray(cur.attrs)) for (const a of cur.attrs) if (a && a.value) vals.push({ val: a.value, name: String(a.name ?? "") });
+      if (cur.ifCond && typeof cur.ifCond === "object") vals.push({ val: cur.ifCond, name: "if" });
+      for (const { val, name } of vals) {
         const text = attrExprText(val);
         if (!text || !/\b(?:class|import)\b/.test(text)) continue;
         const span = val.span;
@@ -118,9 +118,9 @@ export function nativeForbiddenJsAttrDiagnostics(ast: any, source: string, fileP
         const at = source.slice(start, end).indexOf(text);
         if (at < 0) continue; // the text is not the source (a rebuilt call-ref) — cannot place
         const base = start + at;
-        let res: any;
-        try { res = parseProgram(lex(text), text); } catch { continue; }
-        for (const e of res.errors || []) {
+        const errs = parseAttrExprForFamily(text, isHandlerAttrName(name));
+        if (errs === null) continue;
+        for (const e of errs) {
           if (!e || !FORBIDDEN_JS_CODES.has(e.code) || !e.span) continue;
           const abs = base + e.span.start;
           const { line, col } = lineColAt(source, abs);
@@ -136,6 +136,38 @@ export function nativeForbiddenJsAttrDiagnostics(ast: any, source: string, fileP
     }
   }
   return out;
+}
+
+/** An event-handler attribute (`onclick=`, `on:click=`) — the one place a value may be a statement list. */
+function isHandlerAttrName(name: string): boolean {
+  return /^on[:A-Za-z]/.test(name);
+}
+
+/**
+ * Parse an attribute value's text and return its family diagnostics, with spans
+ * relative to `text` (null = could not be parsed at all).
+ *
+ * An attribute value is an EXPRESSION, so it is parsed as one: wrapped in
+ * parentheses, so a `{`-led value is an object literal, not a block (a block
+ * would read `{ class: 1 }` as a label then a class declaration — S430 review:
+ * `data-cfg=${{ class: "primary" }}` fired). Only an event-handler value that
+ * does not parse as an expression is re-parsed as a statement list (a handler
+ * may be `@x = 1; save()`).
+ */
+function parseAttrExprForFamily(text: string, isHandler: boolean): any[] | null {
+  let res: any;
+  try { res = parseProgram(lex("(" + text + ")"), "(" + text + ")"); } catch { res = null; }
+  const asExpr = res && Array.isArray(res.errors) ? res.errors : null;
+  const exprOk = asExpr !== null && asExpr.every((e: any) => e && FORBIDDEN_JS_CODES.has(e.code));
+  if (exprOk || !isHandler) {
+    if (asExpr === null) return null;
+    // Shift out of the wrapper: text offset = wrapped offset - 1.
+    return asExpr
+      .filter((e: any) => e && FORBIDDEN_JS_CODES.has(e.code) && e.span)
+      .map((e: any) => ({ ...e, span: { ...e.span, start: e.span.start - 1, end: (e.span.end ?? e.span.start) - 1 } }));
+  }
+  try { res = parseProgram(lex(text), text); } catch { return null; }
+  return (res.errors || []).filter((e: any) => e && FORBIDDEN_JS_CODES.has(e.code) && e.span);
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +245,18 @@ function foreignSpans(ast: any): Array<[number, number]> {
   return out;
 }
 
+/** `source` with each [start, end) span replaced by spaces (newlines kept). */
+function blankSpans(source: string, spans: Array<[number, number]>): string {
+  if (spans.length === 0) return source;
+  const chars = source.split("");
+  for (const [a, b] of spans) {
+    for (let i = Math.max(0, a); i < Math.min(b, chars.length); i++) {
+      if (chars[i] !== "\n" && chars[i] !== "\r") chars[i] = " ";
+    }
+  }
+  return chars.join("");
+}
+
 export interface ForbiddenJsDefaultResult {
   diagnostics: Diag[];
   /** Units reported by the fallback (native could not speak for them). */
@@ -230,17 +274,26 @@ export function forbiddenJsDiagnosticsForDefault(filePath: string, source: strin
   const result: ForbiddenJsDefaultResult = { diagnostics: [], fallbackUsed: 0, nativeFailed: false };
   if (typeof source !== "string" || !/\b(?:class|import)\b/.test(source)) return result;
 
+  // Foreign code is opaque (§23.2.3), and the native lexer has no production
+  // for inline `_={ … }=` — lexing its interior as scrml can DESYNC the lexer
+  // (a regex after `)` read as division, an apostrophe opening a phantom
+  // string) so that code AFTER the region is mis-lexed (S430 review: a string
+  // `'class Foo { }'` after `}=` fired). So the regions the default parser
+  // recognised are BLANKED before the native parse — every character replaced
+  // with a space, newlines kept, so every offset / line / column is unchanged.
+  const foreign = foreignSpans(defaultAst);
+  const nativeSource = blankSpans(source, foreign);
+
   let diags: Diag[] = [];
   try {
-    const r: any = nativeParseFile(filePath, source);
+    const r: any = nativeParseFile(filePath, nativeSource);
     for (const e of r?.errors || []) { const d = toDiag(e, filePath); if (d) diags.push(d); }
-    diags = diags.concat(nativeForbiddenJsAttrDiagnostics(r?.ast, source, filePath));
+    diags = diags.concat(nativeForbiddenJsAttrDiagnostics(r?.ast, nativeSource, filePath));
   } catch {
     result.nativeFailed = true;
   }
 
-  // Foreign-code veto.
-  const foreign = foreignSpans(defaultAst);
+  // Foreign-code veto — a belt over the blanking above.
   diags = diags.filter((d) => !foreign.some(([a, b]) => d.span.start >= a && d.span.start < b));
 
   // Exact duplicates (same code + start) are one report.

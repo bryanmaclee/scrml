@@ -90,3 +90,22 @@
   E-SCOPE-001 column corrections (+2, CE's native re-parse; the column fix); 0 artifact diffs. Fallback: 0 units,
   native never threw. (b) 71 probe rows, default == native, exactly once, pinned. (c) added stage ~230 ms
   median over 876 files (examples + samples/compilation-tests), end-to-end ~3-10% in noisy runs.
+
+## Round 5 (on dee37465) — 2026-09-24
+- F1 (HIGH): attribute values are parsed as an EXPRESSION (`(` + text + `)`, offsets shifted back by 1), so
+  `data-cfg=${{ class: "primary" }}` is an object literal, not a block + class declaration. Only an event-handler
+  value (`on…=`) that does not parse as an expression is re-parsed as a statement list. Six FP cases + the
+  reviewer's clean set + three true positives pinned (r5-*).
+- F2 (MED-HIGH): the default pipeline BLANKS the default-parser-recognised foreign spans (spaces; newlines kept, so
+  offsets/lines/cols are unchanged) before the native parse, so a native lexer desync inside `_={ }=` cannot
+  mis-lex code after the region. The veto stays as a belt. Reproducer pinned (default []).
+- Gate (a) re-run: unchanged — 16+16 in 12 files, 4 exit changes (all with family codes), 2 E-SCOPE-001 column
+  corrections, 0 artifact diffs.
+
+### Gaps (not fixed)
+- Native PIPELINE (`--parser=scrml-native`) still lexes inline `_={ }=` natively (the F2 reproducer reports
+  E-CLASS@8:18 there); the native pipeline already rejects these programs on base (unclosed-brace errors), so
+  nothing that compiled breaks. Fix belongs with native foreign-code support.
+- Unbalanced braces inside foreign code push a real construct to the statement-start fallback (still fires).
+- The LSP never publishes these two codes (base or fix): `analyzeText` calls TAB directly, not compileScrml.
+  Follow-up: route the LSP through forbiddenJsDiagnosticsForDefault.
