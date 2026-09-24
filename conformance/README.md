@@ -211,9 +211,18 @@ sibling cases for present-vs-absent / success-vs-error paths, as the corpus does
   "loadUser":  { "__scrml_absent": true },
   // server-`!` error: the IMPL-NEUTRAL directive (names the scrml error TYPE +
   // VARIANT, not any wire keys). status defaults to 500 (§19.9.2).
-  "loadName":  { "__serverError": { "type": "LoadError", "variant": "Timeout" } }
+  "loadName":  { "__serverError": { "type": "LoadError", "variant": "Timeout" } },
+  // per-BATCH (S430): a §19.9.9 multi-batch split answers batch i with element i
+  // (any of the forms above). A single-batch / non-split route is batch 0.
+  "save":      { "__batches": [null, { "__serverError": { "type": "CpsError", "variant": "ServerError" } }] }
 }
 ```
+
+**Why `__batches` is impl-neutral.** The batch ORDINAL of a multi-batch split is
+normative (§19.9.9.3 `batchIndex`, source order), so "batch 1 fails, batch 0
+succeeds" is a program-level scenario, not an impl#1 route detail. impl#1's
+adapter reads the ordinal from its `__batch_<i>` route suffix; impl#2 maps it
+from its own batching.
 
 **Why the error directive (server-`!` wire SHAPE is D3 impl-freedom).** §57.2's
 absence envelope is normative AND impl#1-matched, so an absent response is declared

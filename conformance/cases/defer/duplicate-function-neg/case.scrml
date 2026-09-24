@@ -1,0 +1,26 @@
+${
+    <trace> = ""
+
+    function D(s: string) {
+        @trace = @trace + s
+    }
+
+    function go2() {
+        D("g2;")
+    }
+
+    function f() {
+        defer go2()
+        function g() {
+            return 1
+        }
+        function g() {
+            return 2
+        }
+        return g()
+    }
+}
+<program>
+    <button onclick=f()>go</>
+    <p>${@trace}</p>
+</program>

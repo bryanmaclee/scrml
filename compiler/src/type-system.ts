@@ -10532,10 +10532,22 @@ function annotateNodes(
           const fnName = (n.name as string) ?? "<anonymous>";
           // Recursive walk: visit every descendant statement but stop descending
           // into nested function bodies (they have their own canFail signature).
+          // §19.16.3 rule 3 (S430 P3) — depth of enclosing `defer` bodies. Inside a
+          // deferred body a bare failable call is E-DEFER-UNHANDLED-FAILABLE (it
+          // must be handled in place — `?` is excluded and the enclosing `!` cannot
+          // carry the error out of a block that is already exiting).
+          let _deferDepth = 0;
           const visitStmt = (stmt: ASTNodeLike | undefined | null): void => {
             if (!stmt || typeof stmt !== "object") return;
             const k = stmt.kind;
             if (k === "function-decl" || k === "fn-decl") return; // nested fn — different scope
+            if (k === "defer-stmt") {
+              const deferred = (stmt as Record<string, unknown>).body;
+              _deferDepth++;
+              if (Array.isArray(deferred)) deferred.forEach((c) => visitStmt(c as ASTNodeLike));
+              _deferDepth--;
+              return;
+            }
             // E-ERROR-001: fail used in non-! function (§19.3.3)
             if (k === "fail-expr" && !canFail) {
               errors.push(new TSError(
@@ -10747,7 +10759,19 @@ function annotateNodes(
               const bareCallee = extractCalleeNameFromNode(stmt) ?? extractCalleeNameFromString(
                 stmt.exprNode ? emitStringFromTree(stmt.exprNode as import("./types/ast.ts").ExprNode) : (stmt.expr as string | undefined)
               );
-              if (bareCallee && fnCanFail.has(bareCallee)) {
+              if (bareCallee && fnCanFail.has(bareCallee) && _deferDepth > 0) {
+                // §19.16.3 rule 3 — inside a deferred body, REPLACES
+                // E-ERROR-002 / W-CPS-NEEDS-FAILABLE for the same call.
+                errors.push(new TSError(
+                  "E-DEFER-UNHANDLED-FAILABLE",
+                  `E-DEFER-UNHANDLED-FAILABLE: the deferred call to failable function '${bareCallee}' ` +
+                  `is not handled. A deferred statement runs while its block is already exiting, so its ` +
+                  `error cannot propagate: '?' is not allowed in a deferred statement and the enclosing ` +
+                  `function's '!' does not cover it (§19.16.3). Handle it in place: ` +
+                  `'defer ${bareCallee}(...) !{ | _ :> ... }' (or one arm per variant), or 'match' on the result.`,
+                  (stmt.span ?? n.span) as Span,
+                ));
+              } else if (bareCallee && fnCanFail.has(bareCallee)) {
                 if (fnCpsImplicitFailable.has(bareCallee)) {
                   // CPS-implicit-failable: warn (cycle 1 of deprecation) ONLY
                   // when caller is NOT `!`-typed. Caller has three migration
@@ -12156,7 +12180,11 @@ function annotateNodes(
         const bareCallee = extractCalleeNameFromNode(n) ?? extractCalleeNameFromString(
           n.exprNode ? emitStringFromTree(n.exprNode as import("./types/ast.ts").ExprNode) : (n.expr as string | undefined)
         );
-        const inGuarded = (n as Record<string, unknown>).__inGuardedContext === true;
+        // §19.16.3 rule 3 — a bare call inside a deferred body is checked by the
+        // function-body §19 walker (E-DEFER-UNHANDLED-FAILABLE), which REPLACES
+        // E-ERROR-002 / W-CPS-NEEDS-FAILABLE there.
+        const inGuarded = (n as Record<string, unknown>).__inGuardedContext === true ||
+          (n as Record<string, unknown>).__inDeferBody === true;
         const enclosingFnCanFail = (n as Record<string, unknown>).__enclosingFnCanFail === true;
         // errorBoundary (§19.6 / §19.4.3 item 4) — a `!`-call reached inside an
         // `<errorBoundary>` subtree is contained by the boundary; the markup
@@ -12905,6 +12933,34 @@ function annotateNodes(
       //     arms), NOT W-GIVEN-ARROW-LEGACY (no double-fire / cross-contam).
       // Mirrors the W-MATCH-ARROW-LEGACY arm-context-scoped emission. Lands in
       // result.warnings via the info-severity diagnostic-stream partition (S93).
+      // §19.16 (S430 P3) — `defer <stmt>`. The deferred body is ordinary logic
+      // for scope / type purposes (it sees the bindings in scope at the `defer`,
+      // §19.16.2), so walk it. Mark its statements `__inDeferBody` so the
+      // generic bare-call E-ERROR-002 / W-CPS-NEEDS-FAILABLE check below yields
+      // to the function-body §19 walker's E-DEFER-UNHANDLED-FAILABLE (§19.16.3
+      // rule 3: inside a deferred body that code REPLACES E-ERROR-002).
+      case "defer-stmt": {
+        const deferBody = (n as { body?: ASTNodeLike[] }).body;
+        const markDefer = (x: unknown): void => {
+          if (!x || typeof x !== "object") return;
+          if (Array.isArray(x)) { x.forEach(markDefer); return; }
+          const xn = x as Record<string, unknown>;
+          if (xn.kind === "function-decl" || xn.kind === "lambda") return;
+          if (typeof xn.kind === "string") xn.__inDeferBody = true;
+          for (const key of ["body", "consequent", "alternate", "arms", "cases", "guardedNode"]) {
+            if (xn[key] && typeof xn[key] === "object") markDefer(xn[key]);
+          }
+        };
+        markDefer(deferBody);
+        if (Array.isArray(deferBody)) {
+          for (const child of deferBody) {
+            if (child && typeof child === "object" && (child as ASTNodeLike).kind) visitNode(child);
+          }
+        }
+        resolvedType = tAsIs();
+        break;
+      }
+
       case "given-guard": {
         const inMatchBody = (n as { __inMatchBody?: boolean }).__inMatchBody === true;
         const glyph = (n as { separatorGlyph?: string }).separatorGlyph;

@@ -1,0 +1,18 @@
+<program db="sqlite::memory:">
+<schema>
+    tasks { id: integer primary key, done: integer }
+    locks { id: integer primary key, held: integer }
+</schema>
+${
+    <trace> = ""
+
+    function save(id: number) {
+        @trace = @trace + "start;"
+        defer ?{`UPDATE locks SET held = 0 WHERE id = ${id}`}.run()
+        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
+        @trace = @trace + "end;"
+    }
+}
+<button onclick=save(1)>go</>
+<p>${@trace}</p>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "defer-hoist-structural",
+  "description": "§19.16.6 (S430 round 3, H2 + M1) — the lowering's decision to move a nested function in front of the `try` is STRUCTURAL. (1) `show` references `a`, which a DESTRUCTURING `const { a }` declares after the defer — it stays with that binding and returns \"INNER\" (a name-only analysis hoisted it and it silently read the OUTER `a`). (2) `sum` references `p`/`q` from `const [p, q]` after the defer — kept with them (hoisting threw ReferenceError). (3) `helper` mentions `kind` only as an object key, inside a string and as its own shadowing local — it is NOT a reference to the tail's `kind`, so it is hoisted and callable BEFORE the defer (a text match kept it inside and it threw TypeError). trace = \"INNER;D1;sum3;D2;local1kind;tail;D3;\" — identical to the no-defer twin `hoist-structural-twin`.",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.6: the lowering SHALL NOT change the meaning of the rest of the block — a nested function declared after the defer stays visible to the whole block, unless its body refers to a binding declared after the defer, in which case it stays with that binding. Observable result must equal the no-defer twin.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-", "E-SCOPE-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "INNER;D1;sum3;D2;local1kind;tail;D3;" },
+    "domAnchored": [{ "selector": "#out", "text": "INNER;D1;sum3;D2;local1kind;tail;D3;" }]
+  }
+}

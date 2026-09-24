@@ -99,6 +99,7 @@ import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 import { parseSchemaBlock } from "../schema-differ.js";
 import { lintCompiledForUndefined } from "./lint-undefined-interpolation.ts";
+import { lowerDefers } from "./lower-defer.ts";
 import {
   emitPerRouteChunks,
   type ChunkKey,
@@ -1340,6 +1341,35 @@ export function runCG(input: CgInput): CgOutput {
     setBatchLoopHoists(map);
   } else {
     setBatchLoopHoists(null);
+  }
+
+  // §19.16.6 (S430 P3) — lower every `defer` statement to its compiler-emitted
+  // host `try { … } finally { … }` form BEFORE analysis/emission, so every
+  // statement-list emitter (client, server, library, nested bodies) sees a
+  // plain `try-stmt{deferLowered}` it already knows how to walk. The TOP-LEVEL
+  // body of a CPS-split function is skipped: route inference addressed it by
+  // statement INDEX, so the CPS client wrappers lower it themselves in their
+  // sequential walk (emit-functions.ts) — see lower-defer.ts.
+  for (const fileAST of files) {
+    const fp = (fileAST as any)?.filePath as string | undefined;
+    const splitFnNodes = new Set<unknown>();
+    const collectSplit = (node: unknown, seen: WeakSet<object>): void => {
+      if (!node || typeof node !== "object" || seen.has(node as object)) return;
+      seen.add(node as object);
+      if (Array.isArray(node)) { for (const c of node) collectSplit(c, seen); return; }
+      const n = node as Record<string, unknown>;
+      if (n.kind === "function-decl" && fp) {
+        const start = (n.span as { start?: number } | undefined)?.start;
+        const route = safeRouteMap.functions.get(`${fp}::${start}`) as { cpsSplit?: unknown } | undefined;
+        if (route && route.cpsSplit) splitFnNodes.add(n);
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "span" || key === "parent") continue;
+        collectSplit(n[key], seen);
+      }
+    };
+    collectSplit(fileAST, new WeakSet());
+    lowerDefers(fileAST, splitFnNodes);
   }
 
   // Analysis pass: collect all data from AST before emission begins.

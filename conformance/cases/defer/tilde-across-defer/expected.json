@@ -1,0 +1,15 @@
+{
+  "id": "defer-tilde-across-defer",
+  "description": "§19.16.6 / §32 — a `~` accumulator initialised before a `defer` and read after it is the SAME accumulator (the statements after a `defer` continue the sequence; they are not a new §32.4 context). f(): two(5) sets ~ = 10, `return ~ + 1` = 11; g(): two(4), `let r = ~` = 8. Deferred bodies still run: trace = \"DE\".",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.6: the statements after a `defer` continue the enclosing statement sequence; a `~` initialised before the `defer` resolves after it (§32.2), and no E-CG-TILDE-UNRESOLVED fires.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "notCodes": ["E-CG-TILDE-UNRESOLVED"],
+    "input": [{ "click": "#go" }],
+    "state": { "got": 11, "got2": 8, "trace": "DE" }
+  }
+}

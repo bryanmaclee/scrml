@@ -1,0 +1,15 @@
+{
+  "id": "defer-control-flow-inner-loop-ok",
+  "description": "§19.16.3 rule 1 carve-outs — a `break`/`continue` whose target loop is INSIDE the deferred body is legal, and a function nested inside the deferred body is its own control-flow scope (its `return` is legal). No E-DEFER-* fires; at exit the deferred body runs: trace = \"body;x1;pos;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 1: only a `break`/`continue` whose target lies OUTSIDE the deferred body is restricted; a nested function or lambda body's own `return` is not restricted.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "body;x1;pos;" },
+    "domAnchored": [{ "selector": "#out", "text": "body;x1;pos;" }]
+  }
+}

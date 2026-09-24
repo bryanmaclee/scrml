@@ -1,0 +1,15 @@
+{
+  "id": "defer-fn-pure-local",
+  "description": "§19.16.4 — `defer` is legal in a pure `fn` (it is control flow, not an effect). The deferred body here writes only a LOCAL, which §48 permits. The implicit tail value `acc + 1` is computed before the deferred `acc = 0` runs: settle(20) = 41. No E-FN-* and no E-DEFER-* fires.",
+  "language-version": "1.0",
+  "spec": "§19.16.4",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.4: `defer` is legal in a `fn`; the deferred body is subject to every §48.3 prohibition (a local write is not prohibited). §19.16.2: the return value (here the §48 implicit tail) is evaluated before the deferred bodies run, so the tail value is 41, not 1.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-", "E-FN-"],
+    "input": [{ "click": "#go" }],
+    "state": { "got": 41 },
+    "domAnchored": [{ "selector": "#out", "text": "41" }]
+  }
+}

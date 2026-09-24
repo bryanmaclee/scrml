@@ -1,0 +1,15 @@
+{
+  "id": "defer-server-callee-error-total-handler-twin",
+  "description": "No-defer TWIN of `server-callee-error-total-handler`: the same release call, written as the last statement before `return` instead of deferred. With the same transport error the observable result must be identical: @out = \"OK\", trace = \"work;release-failed;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: a deferred body runs at the block's exit; with a total handler and no control transfer, deferring the final release is observably identical to writing it before the return.",
+  "expect": {
+    "codes": [],
+    "serverStub": { "release": { "__serverError": { "type": "CpsError", "variant": "ServerError" } } },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "out": "OK", "trace": "work;release-failed;" },
+    "domAnchored": [{ "selector": "#out", "text": "OK" }]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "id": "defer-nested-fn-handler-in-defer",
+  "description": "§19.16.3 rule 1 (S430 round 4, N3) — a function DECLARED inside a deferred body is its own control-flow scope: its own `!{}` (not total — only `::Busy`) keeps the unmatched-error propagation. risky() fails with Gone, `inner` returns that error (it does NOT run on to \"past;\"), and the deferred body's total handler records \"inner-failed;\". trace = \"work;inner-failed;\" — identical to the no-defer twin. (Before the fix the deferred-body flag leaked into `inner`, its propagation was dropped, and it appended \"past;\".)",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 1: a function nested inside a deferred body is its own control-flow scope; only the deferred body itself is restricted.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "work;inner-failed;" },
+    "domAnchored": [{ "selector": "#out", "text": "work;inner-failed;" }]
+  }
+}

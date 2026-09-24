@@ -1,0 +1,26 @@
+<program db="sqlite::memory:">
+<schema>
+    tasks { id: integer primary key, done: integer }
+    log { id: integer primary key, msg: text }
+</schema>
+${
+    <trace> = ""
+    <busy> = false
+
+    function save(id: number) {
+        @busy = true
+        @trace = @trace + "start;"
+        defer @trace = @trace + "D;"
+        defer @busy = false
+        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
+        @trace = @trace + "mid;"
+        ?{`INSERT INTO log (msg) VALUES ('saved')`}.run()
+        @trace = @trace + "end;"
+    }
+}
+<errorBoundary fallback={<p id="err">save failed</p>}>
+    <button id="go" onclick=save(1)>Go</>
+</>
+<p id="out">${@trace}</p>
+<p id="busy">${@busy}</p>
+</program>

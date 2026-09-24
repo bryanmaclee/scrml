@@ -1,0 +1,18 @@
+${
+    <trace> = ""
+
+    function go() {
+        @trace = @trace + "a"
+        defer @trace = @trace + "1"
+        defer @trace = @trace + "2"
+        defer {
+            @trace = @trace + "3"
+            @trace = @trace + "4"
+        }
+        @trace = @trace + "b"
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

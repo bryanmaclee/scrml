@@ -1,0 +1,35 @@
+${
+    <trace> = ""
+    <got> = 0
+    <got2> = 0
+
+    function add(s: string) {
+        @trace = @trace + s
+    }
+
+    function two(x: number) {
+        return x * 2
+    }
+
+    function f() {
+        two(5)
+        defer add("D")
+        return ~ + 1
+    }
+
+    function g() {
+        two(4)
+        defer add("E")
+        let r = ~
+        return r
+    }
+
+    function go() {
+        @got = f()
+        @got2 = g()
+    }
+}
+<program>
+    <button id="go" onclick=go()>go</>
+    <p id="out">${@got} ${@got2} ${@trace}</p>
+</program>

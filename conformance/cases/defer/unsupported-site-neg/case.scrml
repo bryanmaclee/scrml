@@ -1,0 +1,26 @@
+${
+    type Mode:enum = { A, B }
+    <trace> = ""
+
+    function D(s: string) {
+        @trace = @trace + s
+    }
+
+    function bare() {
+        {
+            defer D("x;")
+            D("b;")
+        }
+        D("after;")
+    }
+
+    function arm(m: Mode) {
+        match m {
+            .A :> defer D("a;")
+            .B :> D("b;")
+        }
+    }
+}
+<program>
+    <p>${@trace}</p>
+</program>

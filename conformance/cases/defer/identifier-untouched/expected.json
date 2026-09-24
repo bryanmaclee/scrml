@@ -1,0 +1,15 @@
+{
+  "id": "defer-identifier-untouched",
+  "description": "§19.16.1 — `defer` is a CONTEXTUAL keyword. A function named `defer` and a call `defer(\"a\")` keep their ordinary meaning (the token after `defer` is `(`, which never opens a defer statement). @got = \"called a\"; no E-DEFER-* fires.",
+  "language-version": "1.0",
+  "spec": "§19.16.1",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.1: `defer` opens a defer statement only at statement start with a same-line statement lead; `defer(x)` is a call of a function named `defer` (ruling P1: \"the word is not at fault\").",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "got": "called a" },
+    "domAnchored": [{ "selector": "#out", "text": "called a" }]
+  }
+}

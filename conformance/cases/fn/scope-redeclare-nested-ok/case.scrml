@@ -1,0 +1,22 @@
+${
+    <out> = ""
+
+    function p4(w) {
+        let v = "v"
+        if (w > 0) {
+            let w = "shadow-w;"
+            let v = "shadow-v;"
+            @out = @out + w + v
+        }
+        @out = @out + v + ";"
+        return w
+    }
+
+    function go() {
+        p4(1)
+    }
+}
+<program>
+    <button id="go" onclick=go()>go</>
+    <p id="out">${@out}</p>
+</program>

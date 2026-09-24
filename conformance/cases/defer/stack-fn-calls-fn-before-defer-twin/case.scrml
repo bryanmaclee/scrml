@@ -1,0 +1,29 @@
+${
+    <trace> = ""
+    <out> = ""
+
+    function D(s: string) {
+        @trace = @trace + s
+    }
+
+    function n2() {
+        let r = first()
+        function first() {
+            return second() + "1"
+        }
+        function second() {
+            return "2"
+        }
+        D("e;")
+        return r
+    }
+
+    function go() {
+        @out = n2()
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@out}</p>
+    <p id="trace">${@trace}</p>
+</program>

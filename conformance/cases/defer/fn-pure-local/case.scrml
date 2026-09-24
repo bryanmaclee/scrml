@@ -1,0 +1,17 @@
+${
+    <got> = 0
+
+    fn settle(x: number) -> number {
+        let acc = x * 2
+        defer acc = 0
+        acc + 1
+    }
+
+    function go() {
+        @got = settle(20)
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@got}</p>
+</program>

@@ -1,0 +1,12 @@
+{
+  "id": "defer-value-arm-site-neg",
+  "description": "§19.16.2 (S430 round 5) — a `defer` directly in an arm of a value-form `match` (`let k = match m { .A :> { defer D(); let t = 7; t } … }`) is E-DEFER-UNSUPPORTED-SITE (exactly once): lowered, the defer block would capture the arm's result and k would be left unset — measured before this check.",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: an arm of a match / if / for used for its value is not a stage-1 defer site; it SHALL be a compile error rather than silently lose the produced value.",
+  "expect": {
+    "codes": ["E-DEFER-UNSUPPORTED-SITE"],
+    "codeCounts": { "E-DEFER-UNSUPPORTED-SITE": 1 }
+  }
+}

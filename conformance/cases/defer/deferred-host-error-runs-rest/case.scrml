@@ -1,0 +1,19 @@
+${
+    <trace> = ""
+
+    function boom(o) {
+        @trace = @trace + "boom;"
+        return o.missing.deeper
+    }
+
+    function work() {
+        defer @trace = @trace + "first-registered;"
+        defer boom({})
+        defer @trace = @trace + "last-registered;"
+        @trace = @trace + "work;"
+    }
+}
+<program>
+    <button id="go" onclick=work()>Go</>
+    <p id="out">${@trace}</p>
+</program>

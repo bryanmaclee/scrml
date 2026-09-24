@@ -1,0 +1,9 @@
+${
+    function* gen() {
+        defer yield 99
+        yield 1
+    }
+}
+<program>
+    <p>x</p>
+</program>
