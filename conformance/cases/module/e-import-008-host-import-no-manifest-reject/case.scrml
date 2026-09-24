@@ -1,0 +1,4 @@
+import:host { tokenize } from "./tok.js"
+<program>
+    <p>${tokenize("a b").length}</p>
+</program>

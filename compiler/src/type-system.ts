@@ -21235,6 +21235,16 @@ let _letReparseHandles: {
 const _REPARSE_ID_BASE = 0x40000000; // 1_073_741_824 — disjoint from real ids
 const _REPARSE_ID_STRIDE = 0x100000; //     1_048_576 — per-re-parse id room
 let _reparseIdCursor = _REPARSE_ID_BASE;
+/**
+ * s430-emit-state-leak — restart the re-parse id allocator. Called once per
+ * compile (api.js compileScrml head): the cursor was process-monotonic, so the
+ * ids of re-parsed each-in-match-arm nodes depended on how many re-parses the
+ * process had done before, and after ~1000 re-parses the stride walked the
+ * range past 2^31. Disjointness is only required within one compile.
+ */
+export function resetReparseIdCursor(): void {
+  _reparseIdCursor = _REPARSE_ID_BASE;
+}
 function _nextReparseIdBase(): number {
   const base = _reparseIdCursor;
   _reparseIdCursor += _REPARSE_ID_STRIDE;
@@ -25488,6 +25498,15 @@ export function runTS(input: {
   const typedFiles: TypedFileAST[] = [];
   const allErrors: TSError[] = [];
   let lastStateTypeRegistry: Map<string, ResolvedType> | undefined;
+
+  // s430-emit-state-leak — every id allocator TS drives restarts per run, so the
+  // ids it stamps are a function of THIS compilation unit (runTS is called once
+  // per compile by api.js, and repeatedly in one process by the LSP): the
+  // each-in-match-arm re-parse cursor and the formFor / tableFor synth-node
+  // counters (lazy-required, same as their other TS call sites).
+  resetReparseIdCursor();
+  (require("./codegen/emit-form-for.ts") as typeof import("./codegen/emit-form-for.ts"))._resetSynthIdCounter();
+  (require("./codegen/emit-table-for.ts") as typeof import("./codegen/emit-table-for.ts"))._resetSynthIdCounter();
 
   // §52.11 — APPLICATION-scope, computed ONCE over the whole compilation unit and
   // threaded down, never re-derived per file. `E-AUTH-005` asks whether the
