@@ -2526,6 +2526,34 @@ export function parseImport(ctx) {
     const kw = advance(cursor);   // consume `import`
     const specifiers = [];
 
+    // §21.3.1 `import:<host-tag> { a, b as c } from "m"` — the host-import
+    // declaration. Only the braced named clause is in its grammar. The tag is
+    // recorded on the node; placement / host-tag / manifest are enforced by
+    // compiler/src/host-import.js (shared with the live front-end).
+    if (currentKind(cursor) === TokenKind.Colon) {
+        advance(cursor);   // consume :
+        let hostTag = "";
+        if (currentKind(cursor) === TokenKind.Ident) {
+            hostTag = advance(cursor).name;
+        } else {
+            recordError(ctx, "E-STMT-IMPORT-NAME",
+                "expected a host-tag identifier after 'import:'", spanHere(ctx));
+        }
+        if (currentKind(cursor) === TokenKind.LBrace) {
+            parseNamedImportSpecifiers(ctx, specifiers);
+        } else {
+            recordError(ctx, "E-STMT-IMPORT-NAME",
+                "expected '{' — 'import:<host-tag>' takes a braced named-import clause", spanHere(ctx));
+        }
+        expectFromKeyword(ctx);
+        const hostSource = expectModuleString(ctx);
+        const hostEnd = finishStatementTerminator(ctx, kw);
+        const hostNode = makeImport(specifiers, hostSource,
+            makeSpan(kw.span.start, hostEnd, kw.span.line, kw.span.col));
+        hostNode.hostTag = hostTag;
+        return hostNode;
+    }
+
     // Bare side-effect import — `import "m";`.
     if (currentKind(cursor) === TokenKind.StringLit) {
         const source = expectModuleString(ctx);

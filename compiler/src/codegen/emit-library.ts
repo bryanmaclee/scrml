@@ -1631,8 +1631,8 @@ function cleanFnSignatures(text: string): string {
  * static ES import `import { ... } from "..."`, i.e. the source minus the
  * `:<tag>` suffix. Blank the suffix with same-length spaces (so every other
  * absolute-span splice that runs on this slice stays aligned), anchored on
- * each host `import-decl` node's span — whose start sits on the `:` right
- * after the `import` keyword — not on a text search, so a string literal that
+ * each host `import-decl` node's span (which starts on the `:` or on the
+ * `import` keyword, per front-end) — not on a text search, so a string literal that
  * happens to contain `import:host` is never touched.
  */
 function blankHostImportTags(blockText: string, blockStart: number, body: unknown): string {
@@ -1642,8 +1642,11 @@ function blankHostImportTags(blockText: string, blockStart: number, body: unknow
     if (!n || n.kind !== "import-decl" || typeof n.hostTag !== "string") continue;
     const s = n.span;
     if (!s || typeof s.start !== "number") continue;
-    const rel = s.start - blockStart;
+    let rel = s.start - blockStart;
     if (rel < 0 || rel >= out.length) continue;
+    // The live parser's span starts on the `:`; the native parser's on the
+    // `import` keyword itself — step over it.
+    if (/^import(?![A-Za-z0-9_$])/.test(out.slice(rel))) rel += "import".length;
     const m = /^\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*/.exec(out.slice(rel));
     if (!m || !/import\s*$/.test(out.slice(0, rel))) continue;
     // Drop the tag and move the freed width to the END of the declaration, so

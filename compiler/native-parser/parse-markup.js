@@ -2207,6 +2207,10 @@ export function braceIsInStringLiteral(cursor) {
 // changes, this copy must change in lockstep (re-synced this session).
 const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)[*\s]|type\s+\w|fn[*\s]\w?|function[*\s]\w?|let\s+[A-Za-z_]|const\s+[A-Za-z_]|import\s+[{a-zA-Z_*"'])/;
 
+// IMPORT_HOST_LIFT_RE — VERBATIM copy of ast-builder.js's IMPORT_HOST_LIFT_RE.
+// A text run opening with the §21.3.1 `import:<host-tag>` declaration.
+const IMPORT_HOST_LIFT_RE = /^\s*import\s*:/;
+
 // TOPLEVEL_STATE_DECL_RE — VERBATIM copy of ast-builder.js L369. A text run
 // opening with a `<Ident ...>` then `=` / `:` / a nested `<Ident` (a Variant C
 // compound state-decl).
@@ -2722,6 +2726,14 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             // `server fn` / `let` / `const` decl keywords. Fires at any
             // declaration-site parent.
             if (BARE_DECL_RE.test(raw)) {
+                result.push(synthLiftedLogicBlock(block, source, ctx));
+                i = i + 1;
+                continue;
+            }
+            // IMPORT_HOST_LIFT_RE — §21.3.1 `import:<host-tag> { ... }` (the
+            // live oracle's IMPORT_HOST_LIFT_RE lift). Without it the line is
+            // page text.
+            if (IMPORT_HOST_LIFT_RE.test(raw)) {
                 result.push(synthLiftedLogicBlock(block, source, ctx));
                 i = i + 1;
                 continue;
