@@ -38,3 +38,20 @@
 - FOUND: the export synth drops `errorType` (copies canFail only) — every exported
   `! -> T` function is typed as `! -> Error`, which is the source of the pre-existing
   E-ERROR-009 false positives in stdlib/oauth/google + crypto.
+
+## Commits
+- 6dbec305 fix(ast-builder): surface every export synth re-parse diagnostic (+ 11 unit tests;
+  self-host-meta-checker compile test re-pinned to the exact 3-site residue).
+- 1b4a6c88 migrate: parse-markup.scrml:867, oauth/google.scrml:91.
+- 19df2286 migrate: stdlib/fs statSync (+ within-node allowlist +6 for fs, ALL from the
+  added `import ... from 'scrml:host'` node — native parser drops it; same class already
+  allowlisted for crypto/jwt/host). Droppable.
+- 011287ea fix(ast-builder): export synth carries errorType (12 false E-ERROR-009 gone,
+  0 added, stdlib/data/parse.scrml newly passing). Droppable.
+- SPEC §34 E-CONDITION-HEAD-UNPARENTHESIZED row + §49 gap paragraph updated; SPEC-INDEX regen.
+
+## Final measurement (base 15e60e4b vs branch, 2,577 tracked .scrml)
+- fix only:        14 changed, 6 newly failing, 0 newly passing
+- after migration: 13 changed, 6 newly failing (the migrated files returned to their base
+  error sets; the 6 newly-failing files each still hold un-migrated sites)
+- after errorType: additionally 1 newly passing (stdlib/data/parse.scrml)
