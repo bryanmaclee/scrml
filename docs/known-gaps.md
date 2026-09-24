@@ -18031,3 +18031,29 @@ deterministic; the harness currently works around it by running pure and hybrid 
 overflows the stack on a recursive component; the CLI prints "Compiler crashed unexpectedly".
 
 <!-- @gap id=g-recursive-component-overflows-ce-deep-clone sev=MED status=open locus=compiler/src/component-expander.ts prov=empirical:agent-s430-stage-swap -->
+
+### G-LOOP-BINDER-WRITE-DETECTION-SKIPS-CLOSURES-AND-TEMPLATE-INTERPOLATIONS — a `let` binder written from a closure still gets a `const` head
+
+**Reviewer-reproduced (S430 re-review of `s430-destructure-shadow` round 2), same on base.** The binder-write walk
+(`_liftTreeWalk`, emit-lift.js) returns early at `function-decl`/`lambda` and never enters template-literal interpolations:
+`for (let x of xs) { const g = () => { x = x + 1 }; g() }` → TypeError (assign to const); the `function g(){ x = x + 1 }`
+form lowers to `const x = x + 1` (TDZ); `` s = s + `${x++}` `` → TypeError; at top level the page dies at init. Same blind spot:
+`const y = 1; const g = () => { y = 2 }` fires NO E-ASSIGN-004 (general typer gap, not loop-specific). exit 0.
+
+<!-- @gap id=g-loop-binder-write-detection-skips-closures-and-template-interpolations sev=MED status=open locus=compiler/src/codegen/emit-lift.js prov=review:S430-destructure-round2 -->
+
+### G-HOISTED-LOOP-WRITE-TO-AN-OUTER-LET-EMITS-A-TDZ — §8.10 batch-hoisted loop bodies drop the enclosing scope's names
+
+**Reviewer-reproduced (S430), same on base.** `server function recent(ids) { let n = 0; for (const x of ids) { let row = ?{…}.get();
+n = n + 1 } return n }` emits `const n = n + 1;` in `.server.js`, CLI exit 0 → the server handler throws. `emitHoistedForStmt`
+passes no enclosing `declaredNames` (its own comment names the drop).
+
+<!-- @gap id=g-hoisted-loop-write-to-an-outer-let-emits-a-tdz sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts prov=review:S430-destructure-round2 -->
+
+### G-LABELED-LOOPS-AND-SAME-SCOPE-REDECLARATION-REACH-CODEGEN-AS-DEFECTS — `continue outer`, `let a; let a`, `[x] = [x*3]`
+
+**Reviewer-reproduced (S430), same on base, LOUD.** Labeled loops lose their label in function bodies; same-scope redeclaration
+and the destructuring assignment `[x] = [x * 3]` emit invalid JS. The validate-emit gate catches all three (exit 1) but as
+E-CODEGEN-INVALID-LOGIC ("compiler defect") — a diagnostic that does not name the root cause is itself a diagnostic bug.
+
+<!-- @gap id=g-labeled-loops-and-same-scope-redeclaration-reach-codegen-as-defects sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts prov=review:S430-destructure-round2 -->
