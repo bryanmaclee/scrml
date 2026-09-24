@@ -2,7 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { liftScopeDeclaredNames } from "./declared-name-marks.ts";
 import { emitExpr, emitExprField, type EmitExprContext } from "./emit-expr.ts";
 import { emitLogicNode, emitLogicBody, blockScopedDeclaredNames, planBlockArmLift, _awaitMatchArmServerCalls, _matchArmResultIsBlockBody, _blockTailIsValueExpr, _objectLiteralArmFromStructuredBody } from "./emit-logic.js";
-import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword } from "./emit-lift.js";
+import { hasFragmentedLiftBody, emitConsolidatedLift, emitLiftExpr, emitIfStmtWithContainer, emitForStmtWithContainer, buildLiftEngineCtxFromExtras, pushLiftReconcileCtx, popLiftReconcileCtx, buildLiftReconcileCtx, pushLiftRequestIds, popLiftRequestIds, forLiftTreeHasImpureLoop, liftNonKeyedActive, pushLiftNonKeyed, popLiftNonKeyed, withLoopBinders, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
 import { emitTransitionGuard } from "./emit-machines.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
@@ -814,9 +814,14 @@ function _emitForStmtInner(
   // s427 round 3 (F1) — a RENDERING loop whose body writes its own binder: the
   // binder is the body's own binding (so the write assigns it, not an outer
   // same-named binding) and the head is `let` unless the source binder is `const`
-  // (see forHeadKeyword / withLoopBinders in emit-lift.js). Other loops unchanged.
-  const _headKw = bodyIsRender ? forHeadKeyword(node) : "const";
-  const _plainNames = bodyIsRender ? withLoopBinders(opts?.declaredNames, node) : opts?.declaredNames;
+  // (see forHeadKeyword / withLoopBinders in emit-lift.js).
+  // s430 — and a NON-rendering loop whose `let` binder the body writes gets the
+  // same treatment (loopBodyDeclaredNames); before, the write lowered to a
+  // body-local `const x = x …` (a TDZ ReferenceError at exit 0). forHeadKeyword is
+  // `const` for any loop that is not `let`-bound-and-written, so every other
+  // loop's head is unchanged.
+  const _headKw = forHeadKeyword(node);
+  const _plainNames = loopBodyDeclaredNames(opts?.declaredNames, node, bodyIsRender);
   lines.push(`for (${_headKw} ${varName} of ${iterable}) {`);
 
   const body: any[] = node.body ?? [];
@@ -1014,8 +1019,14 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
     : `(${mapVar}.get(${loopVar}.${keyField}) ?? [])`;
   const rewrittenBody = substituteHoistedSqlInBody(node.body ?? [], sourceRe, replacement);
 
-  lines.push(`for (const ${loopVar} of ${iterable}) {`);
-  for (const code of emitLogicBody(rewrittenBody, { ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  // s430 — a `let` binder the body writes: `let` head + the binder in the body's
+  // declared names, so the write is an assignment (not a TDZ `const x = x …`).
+  // Every other hoisted loop is byte-identical to before (no declaredNames — which
+  // is itself a pre-existing drop of the enclosing scope's names; out of scope).
+  const _hoistHeadKw = forHeadKeyword(node);
+  const _hoistNames = _hoistHeadKw === "let" ? loopBodyDeclaredNames((opts as any)?.declaredNames, node, false) : undefined;
+  lines.push(`for (${_hoistHeadKw} ${loopVar} of ${iterable}) {`);
+  for (const code of emitLogicBody(rewrittenBody, { ...(_hoistNames ? { declaredNames: _hoistNames } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);

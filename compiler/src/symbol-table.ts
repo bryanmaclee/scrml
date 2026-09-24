@@ -155,6 +155,9 @@ import {
 } from "./native-walker/engine-statechild-walker.ts";
 // B18 — multi-statement event-handler validation helper.
 import { scanForTopLevelSemicolon } from "./multi-statement-scan.ts";
+// s430 — destructured-pattern name walk for E-NAME-COLLIDES-STATE. The two
+// helpers are self-contained (route-inference.ts imports them the same way).
+import { isDestructurePattern, iterDestructuredNames } from "./type-system.ts";
 import { isAuthorMainTag } from "./landmark-tag.ts";
 // §17.1.1 if-chain child SHAPE. `collapseIfChains` (ast-builder.js) rewrites an
 // `if=`/`else-if=`/`else` chain WITH an else arm into `{kind:"if-chain",
@@ -1527,8 +1530,20 @@ function checkLocalDeclCollidesState(
   errors: SYMDiagnostic[],
 ): void {
   if (!decl.name) return;
-  const collided = lookupStateCell(currentScope, decl.name);
-  if (!collided) return;
+  // s430 — a DESTRUCTURED declaration (`const { count } = o`) declares every
+  // name its pattern yields, and §6.1.3 forbids a local named like a state cell
+  // regardless of declaration form. Before this only a string `decl.name` was
+  // checked, so a pattern slipped through (and once the type system bound
+  // destructured names correctly, `<count> = 0` + `const { count } = o` compiled
+  // at exit 0 where it used to fail — by accident — with E-SCOPE-001).
+  if (isDestructurePattern(decl.name)) {
+    const kw = decl.kind === "let-decl" ? "let" : decl.kind === "lin-decl" ? "lin" : "const";
+    for (const bind of iterDestructuredNames(decl.name)) {
+      reportLocalNameCollidesState(bind, `${kw} ${bind}`, decl.kind === "let-decl", decl.span, currentScope, errors);
+    }
+    return;
+  }
+  if (typeof decl.name !== "string") return;
   // Render the local-decl keyword display: `let x`, `const x`, `lin x`, or
   // bare `x` (for tilde-decl which has no leading keyword).
   let declDisplay: string;
@@ -1539,6 +1554,25 @@ function checkLocalDeclCollidesState(
     case "tilde-decl": declDisplay = `${decl.name}`;       break;
     default:           declDisplay = decl.name;
   }
+  reportLocalNameCollidesState(decl.name, declDisplay, decl.kind === "let-decl", decl.span, currentScope, errors);
+}
+
+/**
+ * The E-NAME-COLLIDES-STATE report for ONE declared local name. Shared by every
+ * local declaration form — plain / destructured `let` / `const`, `lin`, a bare
+ * `x = …`, and a destructured `for (… of …)` binder.
+ */
+function reportLocalNameCollidesState(
+  name: string,
+  declDisplay: string,
+  isLet: boolean,
+  span: Span | undefined,
+  currentScope: Scope,
+  errors: SYMDiagnostic[],
+): void {
+  if (!name) return;
+  const collided = lookupStateCell(currentScope, name);
+  if (!collided) return;
   // The collision is detected by parent-chain walk; the registered record's
   // qualifiedPath disambiguates which cell is being shadowed (relevant for
   // compound-child collisions where the user's `let` sits in an outer
@@ -1551,8 +1585,8 @@ function checkLocalDeclCollidesState(
   // once-bound (mutation path doesn't apply); `tilde-decl` is a v0.next form
   // with distinct semantics. The base message remains the same for those.
   let hint = "";
-  if (decl.kind === "let-decl" && typeof decl.name === "string") {
-    const n = decl.name;
+  if (isLet) {
+    const n = name;
     const qp = collided.qualifiedPath;
     hint =
       `\n\nhint: This often arises when JS-style code uses \`let ${n} = ...\` `
@@ -1570,7 +1604,7 @@ function checkLocalDeclCollidesState(
       + `Local names cannot shadow registered state-cell names (V5-strict, SPEC §6.1.3). `
       + `Rename the local, or use \`@${collided.qualifiedPath}\` to read the cell directly.`
       + hint,
-    span: decl.span,
+    span,
     severity: "error",
   });
 }
@@ -1753,6 +1787,20 @@ function walkLocalDeclsForCollisions(
       // No early-continue: a local-decl may carry an if-/for-/match-as-
       // expression body that contains nested decls. Generic-recursion
       // fallthrough handles its child arrays.
+    }
+
+    // s430 — a DESTRUCTURED `for (… of …)` binder declares every name its
+    // pattern yields; each is checked like a destructured `let` / `const`.
+    // (A single-identifier loop binder is NOT checked here — a pre-existing,
+    // separate gap, left for its own ruling; see s430-destructure-shadow.)
+    if (kind === "for-stmt" && isDestructurePattern(anyN.variable)) {
+      const kw = anyN.letBinder === true ? "let" : anyN.constBinder === true ? "const" : "";
+      for (const bind of iterDestructuredNames(anyN.variable)) {
+        reportLocalNameCollidesState(
+          bind, kw ? `${kw} ${bind}` : bind, anyN.letBinder === true,
+          anyN.span, currentScope, errors,
+        );
+      }
     }
 
     if (kind === "state-decl") {

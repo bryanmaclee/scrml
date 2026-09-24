@@ -28,6 +28,18 @@ import { tmpdir } from "os";
 // api.js is the reference compiler's public entry (plain ESM .js).
 import { compileScrml } from "../../compiler/src/api.js";
 
+/**
+ * Compile-options overlay (s430-stage-swap). Spread LAST into every `compileScrml` call this
+ * adapter makes (codes half, runtime half, server half, tool half), so an adapter VARIANT can run
+ * the unchanged suite against a modified pipeline — `adapters/hybrid.ts` sets
+ * `{ stageOverrides }` here to run conformance through a hybrid compiler (bryan S430 P5).
+ * Empty by default: the spread adds no key, and impl#1 compiles exactly as before.
+ */
+let compileOverlay: Record<string, unknown> = {};
+export function setCompileOverlay(overlay: Record<string, unknown> | null): void {
+  compileOverlay = overlay ?? {};
+}
+
 export type Severity = "error" | "warning" | "info";
 
 export interface CompileResult {
@@ -98,6 +110,7 @@ export function compile(source: string, auxFiles: Record<string, string> = {}): 
       write: false,
       outputDir: join(dir, "out"),
       log: () => {},
+      ...compileOverlay,
     }) as { errors?: Diagnostic[]; warnings?: Diagnostic[] };
 
     // Build the per-code severity map. The errors stream wins (the §34 fatal
@@ -444,6 +457,7 @@ export async function run(
       write: false,
       outputDir: join(dir, "out"),
       log: () => {},
+      ...compileOverlay,
     }) as { outputs?: Map<string, { html?: string; clientJs?: string }> };
 
     const out = result.outputs ? result.outputs.get(file) : undefined;
@@ -895,6 +909,7 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
       write: false,
       outputDir: join(dir, "out"),
       log: () => {},
+      ...compileOverlay,
     }) as { outputs?: Map<string, { html?: string; clientJs?: string; serverJs?: string }> };
 
     const out = result.outputs ? result.outputs.get(file) : undefined;
@@ -989,6 +1004,7 @@ export function runTool(source: string, auxFiles: Record<string, string> = {}): 
       write: false,
       outputDir: join(dir, "out"),
       log: () => {},
+      ...compileOverlay,
     }) as { outputs?: Map<string, { toolJs?: string }> };
     const out = result.outputs ? result.outputs.get(file) : undefined;
     const toolJs = (out && out.toolJs) || "";

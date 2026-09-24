@@ -8858,6 +8858,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // The native translation carries the same flag from the native parser's own
       // VarDecl `declKind` (native-parser/translate-stmt.js makeForStmtInOf), and
       // within-node parity compares it.
+      // s430 — `const` is recorded too (as `constBinder: true`) so the type system
+      // binds an explicit `const` binder immutable (E-ASSIGN-004 on a write in ANY
+      // loop). A keywordless (and `var`) head carries neither flag.
       let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -8994,6 +8997,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         kind: "for-stmt",
         ...(isForAwait ? { isAwait: true } : {}),
         ...(_binderKw === "let" ? { letBinder: true } : {}),
+        ...(_binderKw === "const" ? { constBinder: true } : {}),
         variable,
         iterable,
         body,
@@ -11212,6 +11216,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       id: ++counter.next,
       kind: 'for-stmt',
       ...(_binderKw === 'let' ? { letBinder: true } : {}),
+      ...(_binderKw === 'const' ? { constBinder: true } : {}),
       variable,
       iterable,
       iterExpr: safeParseExprToNode(iterable, 0),
@@ -12050,7 +12055,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       } else {
         // export type Name... | export function Name... | export fn Name... | export const Name... | export let Name...
         // F-AUTH-002: `pure`/`server` modifier(s) have already been consumed above; isPure/isServer flags carry that intent.
-        const declMatch = expr.match(/^\s*(type|function|fn|const|let)\s+(\w+)/);
+        // `function` also admits the generator star in every spelling —
+        // `function *k`, `function* k`, `function*k` (collectExpr space-pads it
+        // to `function * k`). Without it an exported GENERATOR matched nothing:
+        // exportKind stayed null, no function-decl was synthesized, and the
+        // body was never statement-parsed at all (S430 P2 follow-up — every
+        // diagnostic inside it was lost, and the name was undeclared).
+        const declMatch =
+          expr.match(/^\s*(function)\s*\*\s*(\w+)/) ||
+          expr.match(/^\s*(type|function|fn|const|let)\s+(\w+)/);
         if (declMatch) {
           exportNode.exportKind = declMatch[1];
           exportNode.exportedName = declMatch[2];
@@ -12155,6 +12168,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         let synthIsGenerator = false;
         let synthHasReturnType = false;
         let synthReturnTypeAnnotation = undefined;
+        let synthErrorType = undefined;
         try {
           // Slice the consumed tokens (from cursor before collectExpr to
           // cursor after) and re-parse them via parseLogicBody. The token
@@ -12187,11 +12201,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               ? { kind: "EOF", text: "", span: { start: lastTok.span?.end ?? 0, end: lastTok.span?.end ?? 0, line: lastTok.span?.line ?? 1, col: lastTok.span?.col ?? 1 } }
               : { kind: "EOF", text: "", span: { start: 0, end: 0, line: 1, col: 1 } };
             subToks = subToks.concat([eofTok]);
-            // Capture the re-parse errors instead of discarding them, so the ONE fatal
-            // syntax error the outer export parse cannot see — E-FN-EQUALS-BODY, the
-            // unsanctioned `export fn NAME() = <expr>` shorthand — is surfaced. Every
-            // OTHER re-parse error stays suppressed (the "must not double-emit" intent):
-            // the outer parse of the export statement re-reports those.
+            // Capture the re-parse diagnostics so they can be surfaced below. This
+            // re-parse is the ONLY statement-level parse the exported declaration's
+            // body ever receives: the outer export path reads the whole declaration
+            // with collectExpr(), which does not parse statements. So every
+            // parse-layer diagnostic inside an exported function / fn / server
+            // function — and inside any function nested within one — exists ONLY
+            // here. (S430 P2: this site used to keep just E-FN-EQUALS-BODY and drop
+            // the rest, on the belief that the outer parse re-reported them. It did
+            // not: E-TRY-NOT-IN-SCRML, E-THROW-NOT-IN-SCRML,
+            // E-CONDITION-HEAD-UNPARENTHESIZED, E-FOR-UNPARENTHESIZED-HEAD … were all
+            // silently lost, so an exported function compiled at exit 0 with source
+            // the same function un-exported is rejected for.)
             const _subErrors = [];
             const subNodes = parseLogicBody(
               subToks,
@@ -12199,7 +12220,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               [],
               parentBlock,
               counter,
-              _subErrors,    // captured — only E-FN-EQUALS-BODY is surfaced below (others suppressed)
+              _subErrors,    // captured — ALL surfaced below (deduplicated)
               blockContext,
             );
             const innerFn = Array.isArray(subNodes)
@@ -12212,13 +12233,26 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               synthIsGenerator = !!innerFn.isGenerator;
               synthHasReturnType = !!innerFn.hasReturnType;
               synthReturnTypeAnnotation = innerFn.returnTypeAnnotation;
+              // The declared `! -> ErrorType`. Without it the type system reads the
+              // exported function as `! -> Error` (type-system.ts defaults a missing
+              // errorType to "Error"), so every `fail T::V` in its body is a false
+              // E-ERROR-009 and its call sites get no exhaustive `!{}` check.
+              synthErrorType = innerFn.errorType;
             }
-            // Surface ONLY the E-FN-EQUALS-BODY fatal from the re-parse (an
-            // `export fn NAME() = <expr>` shorthand) — otherwise the export path
-            // swallows it into a silent empty exported function. All other
-            // re-parse errors stay suppressed (the outer parse re-reports them).
-            const _eqBodyErr = _subErrors.find((e) => e && e.code === "E-FN-EQUALS-BODY");
-            if (_eqBodyErr) errors.push(_eqBodyErr);
+            // Surface EVERY re-parse diagnostic. The sub-parse runs over the
+            // original token slice, so each diagnostic's span already points at
+            // the real source position — no remapping is needed. A diagnostic
+            // already present in `errors` (same code at the same source offset)
+            // is not pushed twice.
+            for (const _se of _subErrors) {
+              if (!_se) continue;
+              const _seStart = _se.tabSpan?.start ?? _se.span?.start;
+              const _dup = errors.some((e) =>
+                e && e.code === _se.code &&
+                (e.tabSpan?.start ?? e.span?.start) === _seStart,
+              );
+              if (!_dup) errors.push(_se);
+            }
           }
         } catch (_synthErr) {
           // Fall back to empty params/body on re-parse failure — preserves
@@ -12237,6 +12271,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           ...(hasIdempotentModifier ? { idempotentModifier: true } : {}),
           isGenerator: synthIsGenerator,
           canFail: synthCanFail,
+          ...(synthErrorType ? { errorType: synthErrorType } : {}),
           ...(synthHasReturnType ? { hasReturnType: true } : {}),
           ...(synthReturnTypeAnnotation ? { returnTypeAnnotation: synthReturnTypeAnnotation } : {}),
           raw: rawStr,
@@ -13611,6 +13646,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // The native translation carries the same flag from the native parser's own
       // VarDecl `declKind` (native-parser/translate-stmt.js makeForStmtInOf), and
       // within-node parity compares it.
+      // s430 — `const` is recorded too (as `constBinder: true`) so the type system
+      // binds an explicit `const` binder immutable (E-ASSIGN-004 on a write in ANY
+      // loop). A keywordless (and `var`) head carries neither flag.
       let _binderKw = null;
       let iterable;
       if (peek().kind === "PUNCT" && peek().text === "(") {
@@ -13740,6 +13778,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         kind: "for-stmt",
         ...(isForAwait ? { isAwait: true } : {}),
         ...(_binderKw === "let" ? { letBinder: true } : {}),
+        ...(_binderKw === "const" ? { constBinder: true } : {}),
         variable,
         iterable,
         body,

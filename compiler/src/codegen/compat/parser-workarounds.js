@@ -18,7 +18,8 @@ import { emitExprField } from "../emit-expr.ts";
 //   - splitMergedStatements has ZERO call sites in emit-logic.ts proper —
 //     the import on emit-logic.ts:5 is dead. It is still exported because
 //     compile.js:617 loads the self-host BPP module's version of it for the
-//     self-host pipeline contract, and bpp.test.js exercises it directly.
+//     self-host pipeline contract, and tests/unit/parser-workarounds.test.js
+//     exercises it directly.
 //
 // Empirical verification: tests/integration/m6-5-parser-workarounds-noop-
 // under-native.test.js installs spies via setBPPOverrides() and confirms
@@ -34,7 +35,8 @@ import { emitExprField } from "../emit-expr.ts";
 //   3. Delete rewrite.ts:1283's call site in fixBlockBody (or convert
 //      fixBlockBody to a no-op alongside).
 //   4. Strip compile.js:613-621's BPP self-host module loader entry.
-//   5. Drop tests/self-host/bpp.test.js (or migrate any still-meaningful
+//   5. Drop tests/unit/parser-workarounds.test.js (moved from the retired
+//      tests/self-host/bpp.test.js by s430-stage-swap; or migrate any still-meaningful
 //      assertions into native-parser conformance tests).
 // ---------------------------------------------------------------------------
 
