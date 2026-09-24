@@ -24,3 +24,35 @@
   "project root = directory containing the <program> file" for vendor: only). grep "relative" x db/sqlite/src.
   => resolution base is a RULING. Stopped at diagnosis for that part; no resolution change made.
 - a0cf97ae: E-PA-004 names resolved abs path + src= + base dir; ZERO-BYTE front-loaded; tests.
+- 2026-09-24 FIX ROUND (adversarial review of eac84828). main unmoved (15e60e4b); no merge needed.
+  F4 SECURITY 64194551: new compiler/src/db-uri-redact.ts (redactDbUri / redactCredentialsInText).
+    URI-echo site survey (grep of compiler/src for db=/src=/connection-string interpolation into messages):
+      REDACTED   protect-analyzer.ts E-PA-002 `what` (Driver URI `...`)         compile-time diag
+      REDACTED   protect-analyzer.ts E-PA-002 db-migrate remedy --db ...        compile-time diag (placeholder when
+                 credentials present; verbatim when credential-free so it stays copy-pasteable)
+      REDACTED   protect-analyzer.ts Note(PA) stderr line                       compile-time note
+      REDACTED   codegen/db-driver.ts E-SQL-005 (mongo:// branch)               compile-time diag
+      REDACTED   codegen/db-driver.ts E-SQL-005 (unrecognized-scheme branch)    compile-time diag
+      REDACTED   commands/compile.js getSourceContext code frame (the source line printed under every diag)
+      REDACTED   commands/introspect.js non-postgres driver error (CLI; echoes the URL argument)
+      NOT A DIAG emit-server.ts / emit-tool.ts / emit-channel.ts write the conn string into the SERVER bundle
+                 (runtime needs it; server-only). Hard-coded creds in a server artifact is a separate hygiene
+                 question (env-var indirection) — surfaced, not touched.
+      NOT ECHOED db-migrate.js (only a SQLite path at :485); Bun.SQL connection-error e.message text not audited.
+      NOT ECHOED protect-analyzer E-PA-003 (file paths only; openDb never sees a driver URI).
+  F1/F2/F3/F5 0aaffd32:
+    F1 openSchemaReadHandle: no -wal present -> file: URI + immutable=1 + READONLY|URI (no side files, measured);
+       -wal present (live writer) -> plain readonly (measured: immutable misses an un-checkpointed CREATE TABLE).
+    F2 shadow cache key = path + sorted exact CREATE set; shadow wording names ?{} AND <schema> (both feed the map).
+    F5 "<512" premise measured FALSE on bun:sqlite: only 0/1-byte files open as empty dbs; every 2..600-byte
+       non-db (zero-filled or junk) -> "file is not a database" (E-PA-003). A real tableless db (4096B WAL
+       header) is equally empty. Predicate is now sqlite_master table count == 0; message states byte size.
+    F3 mutation proof (mirror copy in .scratch/mut; each applied, test run, reverted):
+       M1 open -> new Database(dbPath)       : 2 red     M4 cache key = dbPath          : 2 red
+       M2 drop readonly, live-WAL branch     : 1 red     M5 driver URI into detail      : 1 red
+       M3 drop immutable                     : 1 red     M6 empty = size===0            : 2 red
+       F4a..d unredact Note / E-PA-002 / E-SQL-005 / code frame : 2 red each
+  F6 LEFT: dev.js:630 / build.js:907 print message.slice(0,120) — a long absolute path pushes the rest of
+     E-PA-004 out (EMPTY is front-loaded so it survives; the path itself may be cut).
+  F7 LEFT: a backtick inside a path breaks the code span in the message.
+  Pre-existing, noticed: E-PA-002 text + Note(PA) say "?{} block(s)" though <schema> DDL also feeds the shadow map.
