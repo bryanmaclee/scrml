@@ -296,6 +296,12 @@ function extractScrmlLogic() {
   // Strip ^{} meta blocks (async imports we provide manually below)
   logicBody = removeMetaBlocks(logicBody);
 
+  // S430 P4 — the file's former `^{ await import("path"/"fs") }` is now a pair
+  // of static `import { … } from "scrml:path" / "scrml:fs"` declarations (a
+  // dynamic import is E-DYNAMIC-IMPORT-NOT-IN-SCRML). Strip them the same way:
+  // the bindings are still passed in as parameters below.
+  logicBody = logicBody.replace(/^\s*import\s*\{[^}]*\}\s*from\s*"scrml:(?:path|fs)"\s*$/gm, "");
+
   // S89: rewrite scrml `not`/`is not`/`is some` absence-syntax to the JS-runtime
   // equivalent emitted by emit-expr.ts. Done BEFORE `fn` keyword rewrite so
   // any `fn` bodies that use `not` get the substitution.
