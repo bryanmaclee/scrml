@@ -55,3 +55,16 @@
 - after migration: 13 changed, 6 newly failing (the migrated files returned to their base
   error sets; the 6 newly-failing files each still hold un-migrated sites)
 - after errorType: additionally 1 newly passing (stdlib/data/parse.scrml)
+
+## Follow-up (reviewer finding on 4ff064c0) — exported generators
+- Root VERIFIED: export-decl declMatch `/^\s*(type|function|fn|const|let)\s+(\w+)/` misses
+  `function * k` (collectExpr space-pads the star) -> exportKind null -> no synth, no re-parse.
+- Fixed at the matcher (0c5334d4). Probe before -> after:
+  `export function *k`, `export function* k`: none -> E-THROW-NOT-IN-SCRML @4:5;
+  `export server function* k`: E-CODEGEN-INVALID-LOGIC (write:true only) -> E-THROW @4:5;
+  un-exported twin `function *k`: E-THROW @4:5 (unchanged).
+- Legal exported generator: library output now AST-emitted `function*` (runs, [0,1,2]);
+  browser SPA use-site was E-SCOPE-001 on base, now compiles clean.
+- Corpus A/B vs 4ff064c0: 0 of 2,577 files change.
+- SPEC §34 row + §49 note reworded; arrow/expression-body caveat now says the truth:
+  a writing build fails E-CODEGEN-INVALID-LOGIC, a write:false compile reports nothing.
