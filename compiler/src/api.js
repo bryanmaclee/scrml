@@ -51,7 +51,9 @@ import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
 import { runNRBatch } from "./name-resolver.ts";
 import { runTCBatch } from "./tag-canonicalizer.ts";
 import { runSYMBatch } from "./symbol-table.ts";
-import { setBPPOverrides } from "./codegen/compat/parser-workarounds.js";
+import { setBPPOverrides, getBPPOverrides } from "./codegen/compat/parser-workarounds.js";
+import { clearProjectRootCache } from "./codegen/chunk-namespace.ts";
+import { resetMarkupValueExprIdCounter } from "../native-parser/translate-expr.js";
 import { lintGhostPatterns } from "./lint-ghost-patterns.js";
 import { runIMatchPromotable } from "./lint-i-match-promotable.js";
 import { runIFnPromotable } from "./lint-i-fn-promotable.js";
@@ -727,6 +729,28 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * }}
  */
 export function compileScrml(options = {}) {
+  // s430-emit-state-leak — a compile's output MUST be a pure function of its
+  // input, never of what this process compiled before (the P5 hybrid
+  // differential compiles a corpus in one process). Compile-scoped module state
+  // owned by stages that are not per-compile entry points of their own is reset
+  // HERE; per-stage state is reset at its stage head (runCG:
+  // resetCodegenModuleState, runTS: id allocators, runDG / runRI: counters).
+  resetMarkupValueExprIdCounter();
+  // The project-root memo is a pure function of the filesystem, but the
+  // filesystem can change between compiles in a long-lived process (dev/serve:
+  // a `scrml.toml` created mid-session); re-derive it per compile.
+  clearProjectRootCache();
+  // `selfHostModules.bpp` installs parser-workaround overrides for THIS compile
+  // only; restore the prior value so they cannot leak into the next compile.
+  const _priorBPPOverrides = getBPPOverrides();
+  try {
+    return _compileScrmlImpl(options);
+  } finally {
+    setBPPOverrides(_priorBPPOverrides);
+  }
+}
+
+function _compileScrmlImpl(options = {}) {
   let {
     inputFiles = [],
   } = options;

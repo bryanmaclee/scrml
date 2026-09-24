@@ -1338,6 +1338,16 @@ function makeEscapeHatch(nativeKind, raw, span) {
 // range so they can never collide with a sibling FileAST node id.
 let _markupValueExprIdCounter = { next: 900_000_000 };
 let _translateMarkupValueToLiveNodeCached = null;
+/**
+ * s430-emit-state-leak — restart the module-local markup-value id counter. Called
+ * once per compile (api.js compileScrml head) so the ids stamped on embedded
+ * markup nodes are a function of THIS compile's input, not of how many markup
+ * values the process translated before. (The ids are documented as not
+ * load-bearing for codegen; this makes that a non-question rather than a claim.)
+ */
+export function resetMarkupValueExprIdCounter() {
+    _markupValueExprIdCounter = { next: 900_000_000 };
+}
 function translateMarkupValueExpr(nativeExpr) {
     if (_translateMarkupValueToLiveNodeCached === null) {
         try {

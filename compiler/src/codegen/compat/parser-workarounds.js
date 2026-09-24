@@ -45,6 +45,10 @@ import { emitExprField } from "../emit-expr.ts";
 // ---------------------------------------------------------------------------
 let _overrides = null;
 export function setBPPOverrides(mod) { _overrides = mod; }
+/** s430-emit-state-leak — read the installed overrides so a caller that installs
+ *  them for ONE compile (api.js, `selfHostModules.bpp`) can restore the prior
+ *  value afterwards instead of leaking its overrides into every later compile. */
+export function getBPPOverrides() { return _overrides; }
 
 /**
  * Detect if a string looks like a leaked comment (natural language text).
