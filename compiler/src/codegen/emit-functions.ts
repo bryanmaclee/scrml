@@ -1,8 +1,7 @@
 import { genVar } from "./var-counter.ts";
 import { routePath, paramName, paramSignature } from "./utils.ts";
 import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.js";
-import { mayReferenceAny } from "./lower-defer.ts";
-import { listDeclaredNames } from "../validators/defer-structure.ts";
+import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
@@ -275,87 +274,44 @@ function cpsNeedsIdempotencyKey(cpsSplit: CpsSplit | undefined): boolean {
 }
 
 /**
- * §19.16.5 / §19.16.6 (S430 P3) — an open `defer` scope in a CPS client
- * wrapper's SEQUENTIAL statement walk.
+ * §19.16.5 / §19.16.6 (S430 P3, round 4) — the defer STACK of a CPS client
+ * wrapper's top-level walk.
  *
  * A CPS-split function's top-level body is NOT pre-lowered by lower-defer.ts
- * (route inference addressed it by index). Instead the wrapper walk opens a
- * host `try {` at the `defer`'s position and records the deferred body; after
- * the walk — i.e. after the LAST batch's `await` and the last client
- * continuation — `closeCpsDeferScopes` closes every open scope LIFO with its
- * `finally`. So the deferred body runs after the final continuation, and on
- * every early exit in between (a batch's error-envelope `return`, a thrown
- * client statement caught by the wrapper's outer catch), never when an earlier
- * stub returns. A server-tier deferred body never reaches here — it is
- * E-DEFER-SERVER-IN-SPLIT upstream (route-inference.ts).
+ * (route inference addressed it by index). When it contains a `defer`, the
+ * wrapper declares the same per-block stack every lowered block uses and opens
+ * its `try` at the TOP of the walk (`openCpsDeferStack`); each top-level
+ * `defer` pushes its closure at its position in the sequential walk (the
+ * `defer-stmt` case of emitLogicNode, via `deferStack` in the walk's opts); and
+ * `closeCpsDeferStack` closes the `finally` after the walk — after the LAST
+ * batch's `await` and the last client continuation. So a deferred statement
+ * runs after the final continuation, and on every early exit in between (a
+ * batch's error-envelope `return`, a thrown client statement caught by the
+ * wrapper's outer catch), never when an earlier stub returns. Nothing in the
+ * walk moves. The closures are `async` (the wrapper is). A server-tier deferred
+ * body never reaches here — it is E-DEFER-SERVER-IN-SPLIT upstream.
  */
-interface OpenCpsDefer {
-  /** Index in `lines` of the first line AFTER the `try {` (re-indented on close). */
+interface CpsDeferStack {
+  /** Index in `lines` of the first line after the `try {` (re-indented on close). */
   openAt: number;
-  /** Leading whitespace of the `try {` line. */
   pad: string;
-  /** Emitted deferred-body statements. */
-  deferredCode: string[];
+  ctx: DeferStackCtx;
 }
 
-function openCpsDeferScope(
-  lines: string[],
-  stack: OpenCpsDefer[],
-  pad: string,
-  deferNode: ASTNode,
-  opts: Record<string, unknown>,
-): void {
-  const deferred = Array.isArray((deferNode as { body?: unknown }).body) ? (deferNode as { body: ASTNode[] }).body : [];
-  const deferredCode = emitLogicBody(deferred, { ...opts, declaredNames: new Set<string>((opts.declaredNames as Set<string> | undefined) ?? []), inDeferredBody: true } as any);
+function openCpsDeferStack(lines: string[], pad: string, body: ASTNode[]): CpsDeferStack | null {
+  if (!body.some((s) => s && (s as ASTNode).kind === "defer-stmt")) return null;
+  const ctx: DeferStackCtx = { name: genVar("defers"), bodies: [], async: true };
+  lines.push(`${pad}const ${ctx.name} = [];`);
   lines.push(`${pad}try {`);
-  stack.push({ openAt: lines.length, pad, deferredCode });
+  return { openAt: lines.length, pad, ctx };
 }
 
-/**
- * S430 review F1 — before a CPS wrapper opens a `defer`'s `try`, emit the
- * CLIENT-side `function` declarations that come LATER in the walk, so they stay
- * visible to the whole wrapper body (block hoisting), exactly as lower-defer.ts
- * does for an ordinary statement list. `order` is the remaining walk order;
- * `isServerIdx` excludes statements that belong to a server batch. Emitted
- * indices are added to `hoisted` so the walk skips them.
- */
-function hoistCpsFunctionDecls(
-  lines: string[],
-  pad: string,
-  body: ASTNode[],
-  order: number[],
-  isServerIdx: (i: number) => boolean,
-  hoisted: Set<number>,
-  opts: Record<string, unknown>,
-): void {
-  // Round 3 (H2) — the same structural rule as lower-defer.ts: a function that
-  // references a local declared later in the walk stays with that binding.
-  const laterDecls = listDeclaredNames(order.map((i) => body[i]).filter((x) => x && !isServerIdxSafe(isServerIdx, body, x)));
-  for (const idx of order) {
-    const s = body[idx];
-    if (!s || s.kind !== "function-decl" || isServerIdx(idx) || hoisted.has(idx)) continue;
-    if (mayReferenceAny(s as any, laterDecls)) continue;
-    const code = emitLogicNode(s, opts as any);
-    if (code) for (const line of code.split("\n")) lines.push(`${pad}${line}`);
-    hoisted.add(idx);
-  }
-}
-
-function isServerIdxSafe(isServerIdx: (i: number) => boolean, body: ASTNode[], node: ASTNode): boolean {
-  const i = body.indexOf(node);
-  return i >= 0 && isServerIdx(i);
-}
-
-function closeCpsDeferScopes(lines: string[], stack: OpenCpsDefer[]): void {
-  while (stack.length > 0) {
-    const d = stack.pop()!;
-    for (let k = d.openAt; k < lines.length; k++) lines[k] = `  ${lines[k]}`;
-    lines.push(`${d.pad}} finally {`);
-    for (const code of d.deferredCode) {
-      for (const line of code.split("\n")) lines.push(`${d.pad}  ${line}`);
-    }
-    lines.push(`${d.pad}}`);
-  }
+function closeCpsDeferStack(lines: string[], st: CpsDeferStack | null): void {
+  if (!st) return;
+  for (let k = st.openAt; k < lines.length; k++) lines[k] = `  ${lines[k]}`;
+  lines.push(`${st.pad}} finally {`);
+  for (const line of deferStackRunnerLines(st.ctx.name, true)) lines.push(`${st.pad}  ${line}`);
+  lines.push(`${st.pad}}`);
 }
 
 /** A per-batch fetch-emission plan entry (Ext 1 M1.5 — client side). */
@@ -494,15 +450,14 @@ function emitMultiBatchWrapper(opts: {
   // everything between the awaits.
   lines.push(`  try {`);
 
-  // §19.16.5 — open `defer` scopes of this wrapper's top-level walk.
-  const deferStack: OpenCpsDefer[] = [];
+  // §19.16.5 — the wrapper body's defer stack (opened at the top of the walk).
+  const deferStack = openCpsDeferStack(lines, "    ", body);
+  const walkOpts: Record<string, unknown> = deferStack ? { ...cpsOptsBase, deferStack: deferStack.ctx, deferAsync: true } : cpsOptsBase;
 
-  const hoistedFnIdx = new Set<number>();
   for (let si = 0; si < schedule.length; si++) {
     const stmtIndex = schedule[si];
     const stmt = body[stmtIndex];
     if (!stmt) continue;
-    if (hoistedFnIdx.has(stmtIndex)) continue;
 
     const owningBatch = batchOfIndex.get(stmtIndex);
     if (owningBatch !== undefined) {
@@ -560,8 +515,8 @@ function emitMultiBatchWrapper(opts: {
     // §19.16.5 — a top-level client-tier `defer`: open its scope here; it
     // closes after the whole walk (after the LAST batch await).
     if (stmt.kind === "defer-stmt") {
-      hoistCpsFunctionDecls(lines, "    ", body, schedule.slice(si + 1), (i) => batchOfIndex.has(i), hoistedFnIdx, cpsOptsBase);
-      openCpsDeferScope(lines, deferStack, "    ", stmt, cpsOptsBase);
+      const code = emitLogicNode(stmt, walkOpts as any);
+      for (const line of code.split("\n")) lines.push(`    ${line}`);
       continue;
     }
     // A client statement — emit it directly, interleaved between the awaits.
@@ -593,7 +548,7 @@ function emitMultiBatchWrapper(opts: {
   }
 
   // §19.16.5 — close every open `defer` scope (LIFO) AFTER the last batch.
-  closeCpsDeferScopes(lines, deferStack);
+  closeCpsDeferStack(lines, deferStack);
 
   // A9-Ext-4 D1: outer catch — an interleaved client statement that throws
   // surfaces as a tagged scrml-error envelope (NetworkError variant), matching
@@ -1178,6 +1133,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         cpsOptsBase: {
           declaredNames: new Set<string>(),
           insideFunctionBody: true,
+          // §19.16.6 — the CPS wrapper is async: defer closures in it are async.
+          deferAsync: true,
           // Bug 61 / GH #262 — synth-cell keys for expression-position
           // `@<compound>.<synthProp>` collapse inside CPS (failable/async) bodies.
           ...(ctx.synthCellKeys && ctx.synthCellKeys.size > 0 ? { synthCellKeys: ctx.synthCellKeys } : {}),
@@ -1230,6 +1187,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     const cpsOpts: any = {
       declaredNames: new Set<string>(),
       insideFunctionBody: true,
+      // §19.16.6 — the CPS wrapper is async: defer closures in it are async.
+      deferAsync: true,
       // Bug 61 / GH #262 — synth-cell keys for expression-position
       // `@<compound>.<synthProp>` collapse inside CPS (failable/async) bodies.
       ...(ctx.synthCellKeys && ctx.synthCellKeys.size > 0 ? { synthCellKeys: ctx.synthCellKeys } : {}),
@@ -1250,13 +1209,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       ...(enginesWithMessageArms.size > 0 ? { enginesWithMessageArms } : {}),
       ...(engineMessageVariants.size > 0 ? { engineMessageVariants } : {}),
     };
-    // §19.16.5 — open `defer` scopes of this wrapper's top-level walk.
-    const deferStack: OpenCpsDefer[] = [];
-    const hoistedFnIdx = new Set<number>();
+    // §19.16.5 — the wrapper body's defer stack (opened at the top of the walk).
+    const deferStack = openCpsDeferStack(lines, "    ", body);
+    const walkOpts: any = deferStack ? { ...cpsOpts, deferStack: deferStack.ctx, deferAsync: true } : cpsOpts;
     for (let i = 0; i < body.length; i++) {
       const stmt = body[i];
       if (!stmt) continue;
-      if (hoistedFnIdx.has(i)) continue;
 
       if (cpsSplit.serverStmtIndices.includes(i)) {
         // This is a server statement — replace with a call to the server stub.
@@ -1287,8 +1245,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       } else if ((stmt as ASTNode).kind === "defer-stmt") {
         // §19.16.5 — a top-level client-tier `defer`: its scope closes after
         // the whole walk, i.e. after the server await and every continuation.
-        hoistCpsFunctionDecls(lines, "    ", body, body.map((_, k) => k).slice(i + 1), (k) => cpsSplit.serverStmtIndices.includes(k), hoistedFnIdx, cpsOpts);
-        openCpsDeferScope(lines, deferStack, "    ", stmt as ASTNode, cpsOpts);
+        const code = emitLogicNode(stmt, walkOpts);
+        for (const line of code.split("\n")) lines.push(`    ${line}`);
       } else {
         // Client statement — emit it directly.
         // Security guard: server-only nodes must not appear in client CPS wrapper.
@@ -1318,7 +1276,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     }
 
     // §19.16.5 — close every open `defer` scope (LIFO) after the last continuation.
-    closeCpsDeferScopes(lines, deferStack);
+    closeCpsDeferStack(lines, deferStack);
 
     // A9-Ext-4 D1 catch arm: surface fetch / network failures as a tagged
     // scrml-error variant (NetworkError variant of CpsError synthetic enum).

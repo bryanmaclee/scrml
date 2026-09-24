@@ -318,7 +318,7 @@ export const PARSE_REENTRY_FILES: readonly string[] = [
   "compiler/src/codegen/emit-match.ts",
   // S430 §19.16 `defer` — parses text-carried arm / handler bodies (and, via the
   // native parser, lambda / on-mount text) into statement trees so the defer
-  // checker and the defer lowering reason about STRUCTURE, never text.
+  // checker reasons about STRUCTURE, never text.
   "compiler/src/validators/defer-structure.ts",
 ];
 

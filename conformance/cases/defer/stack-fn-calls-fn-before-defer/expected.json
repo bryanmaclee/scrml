@@ -1,0 +1,15 @@
+{
+  "id": "defer-stack-fn-calls-fn-before-defer",
+  "description": "§19.16.6 (S430 round 4, N2) — `first` (declared after the defer, called before it) calls `second`, another function declared after the defer. With the per-block stack nothing moves, so both are hoisted within the block: n2() = \"21\", trace \"e;\" — identical to the no-defer twin. (The round-3 lowering counted `second` as a tail binding, kept `first` inside the try, and threw `first is not a function`.)",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.6: every declaration stays in its original block; function hoisting is unchanged by the defer.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "out": "21", "trace": "e;" },
+    "domAnchored": [{ "selector": "#out", "text": "21" }]
+  }
+}

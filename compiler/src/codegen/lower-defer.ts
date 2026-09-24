@@ -1,130 +1,108 @@
 /**
- * `defer` lowering — SPEC §19.16.6 (S430 P3 stage 1).
+ * `defer` lowering — SPEC §19.16.6 (S430 P3 stage 1; round 4: the defer STACK).
  *
  * A `defer` statement registers its deferred body against the ENCLOSING BLOCK;
- * the body runs exactly once on every exit from that block, LIFO (§19.16.2).
- * The lowering is a compiler-emitted host `try { … } finally { … }`: for a
- * statement list
+ * every registered body runs exactly once on every exit from that block, LIFO
+ * (§19.16.2). The lowering gives each block that contains a `defer` its own
+ * stack and wraps the WHOLE block — unchanged, in place — in a host
+ * `try { … } finally { … }`:
  *
- *     [ a, defer D1, b, defer D2, c ]
+ *     const _scrml_defers_N = [];
+ *     try {
+ *       a;
+ *       _scrml_defers_N.push(() => { D1 });   // `defer D1`, at its position
+ *       b;
+ *       _scrml_defers_N.push(() => { D2 });   // `defer D2`
+ *       c;
+ *     } finally {
+ *       // run every registered closure, last-registered first; a host error in
+ *       // one does not stop the others — the first such error is rethrown after
+ *     }
  *
- * the statements AFTER each `defer` become the `try` body and the deferred body
- * becomes the `finally` body, nesting for each subsequent `defer`:
+ * Nothing moves across a boundary: every declaration stays in its original
+ * block, so function hoisting, `let`/`const` scoping and TDZ are exactly what
+ * they are without the `defer`. "Not reached ⇒ not registered" holds because an
+ * unreached `defer` never pushed; LIFO holds because the runner walks the stack
+ * backwards; "evaluated at exit" holds because the deferred statement is a
+ * closure body, run by the `finally`; a `return` value is computed before the
+ * `finally` runs. A loop body is its own block, so each iteration has its own
+ * stack instance and its defers run at that iteration's exit.
  *
- *     a
- *     try { b; try { c } finally { D2 } } finally { D1 }
- *
- * which yields LIFO order, "not reached => not registered", and run-on-every-
- * exit (`return` / `break` / `continue` / `fail` / `?` / host throw) by
- * construction — all of those are JS exits of the `try` block.
- *
- * The lowered node is a `try-stmt` carrying `deferLowered: true` (NOT a
+ * The lowered block is a `try-stmt` carrying `deferLowered: true` (NOT a
  * scrml-source try — E-TRY-NOT-IN-SCRML is a parse-time rule and never sees
- * it). Reusing the `try-stmt` SHAPE (`body` + `finallyNode.body`) means every
- * codegen walker that already understands try-stmt (reactive-deps, usage
- * analysis, the scheduler's control-flow fence, the auto-await injector) sees
- * into both halves with no per-walker change. `emitLogicNode` routes the flag to
- * the opts-threading `emitDeferScope` emitter (emit-control-flow.ts).
+ * it) and `deferStack` (the stack's name, minted at emission). Each `defer-stmt`
+ * stays IN PLACE as a registration marker (`lowered: true`); its deferred
+ * statements move to `finallyNode.body` (`deferStart` / `deferCount` index
+ * them), so every codegen walker that already understands try-stmt
+ * (reactive-deps, usage analysis, async colouring, the auto-await injector)
+ * still sees each deferred statement exactly once. `emitLogicNode` routes the
+ * flag to `emitDeferScope` (emit-control-flow.ts).
  *
  * ⚑ BODY-SPLIT (CPS, §19.9.9 / §19.16.5): the TOP-LEVEL statement list of a
- * CPS-split function is NOT restructured here. Route inference computed the
- * split as INDICES into that exact list (`cpsSplit.serverStmtIndices`,
- * `serverBatches[].indices`, `topoOrder`), and both the server stubs and the
- * client wrapper address statements by those indices. The client wrappers
- * (emit-functions.ts) lower a top-level `defer-stmt` themselves, by opening the
- * `try` at the defer's position in their SEQUENTIAL walk and closing every open
- * `finally` after the walk — i.e. after the LAST batch's `await` and the last
+ * CPS-split function is NOT restructured here — route inference addressed it
+ * by statement INDEX. The CPS client wrappers (emit-functions.ts) use the same
+ * stack: it is declared and its `try` opened at the TOP of the wrapper body,
+ * each top-level `defer` pushes at its position in the sequential walk, and the
+ * `finally` closes after the walk — after the LAST batch's `await` and the last
  * client continuation. Nested lists inside a split function are lowered here as
- * usual (the split never addresses them). A server-tier deferred body in a
- * split function is rejected upstream (E-DEFER-SERVER-IN-SPLIT), so a server
- * batch never contains a `defer-stmt`.
+ * usual. A server-tier deferred body in a split function is rejected upstream
+ * (E-DEFER-SERVER-IN-SPLIT), so a server batch never contains a `defer-stmt`.
  *
  * The pass mutates statement arrays IN PLACE (splice) so any other holder of
- * the same array sees the lowered list. It is idempotent: a lowered list no
- * longer contains a `defer-stmt`.
+ * the same array sees the lowered list. It is idempotent.
  *
  * @module lower-defer
  */
 
-import { functionFreeRefs, listDeclaredNames } from "../validators/defer-structure.ts";
-
 type Node = Record<string, unknown> & { kind?: string; span?: unknown };
 
-/** Is this the compiler-lowered form of a `defer` (not a source try)? */
+/** Is this the compiler-lowered form of a `defer` block (not a source try)? */
 export function isDeferLoweredTry(node: unknown): boolean {
   return !!node && typeof node === "object" &&
     (node as Node).kind === "try-stmt" && (node as Node).deferLowered === true;
 }
 
+const isDeferStmt = (s: unknown): boolean =>
+  !!s && typeof s === "object" && (s as Node).kind === "defer-stmt" && (s as Node).lowered !== true;
+
 /**
- * Restructure one statement list. Returns the new list contents (the caller
+ * Lower one statement list that contains `defer` statements: the whole list
+ * becomes the body of ONE `try-stmt{deferLowered}`; each `defer-stmt` becomes
+ * an in-place registration marker whose deferred statements move to the
+ * try-stmt's `finallyNode.body`. Returns the new list contents (the caller
  * splices them into the original array).
  */
 export function lowerDeferList(list: unknown[]): unknown[] {
-  const idx = list.findIndex((s) => !!s && typeof s === "object" && (s as Node).kind === "defer-stmt");
-  if (idx < 0) return list;
-  const d = list[idx] as Node;
-  // S430 review F1 / round 3 (H2, M1) — a nested `function` declaration
-  // written AFTER the `defer` is visible to the WHOLE block in scrml (as in JS,
-  // a function declaration is hoisted to the top of its block), so code BEFORE
-  // the `defer` may call it. Wrapping it inside the `try` would scope it to the
-  // try block and that earlier call would throw. Such declarations are moved
-  // out, in front of the `try`, where block hoisting still reaches the whole
-  // original block.
-  //
-  // One exception keeps a declaration INSIDE: the function REFERENCES a local
-  // binding declared in the rest-of-block. That binding lives in the `try`
-  // block, so a hoisted function would silently bind whatever same-named
-  // binding is in the OUTER scope instead (or throw). Kept inside, the function
-  // still works for every call made after the `defer` (a call made before it
-  // would already have hit that binding's temporal dead zone in the un-deferred
-  // program too).
-  //
-  // Both halves are STRUCTURAL (contract Rule 7): the declared names come from
-  // the destructure-aware binding iterator (`let {a}` / `const [p, q]` declare
-  // `a` / `p`, `q`), and the references from a scope-aware walk of the
-  // function's TREE (`functionFreeRefs`) — a local that shadows the name is not
-  // a reference, and neither is an object key, a property name or string
-  // content. When the walk cannot see part of the body structurally it answers
-  // "unknown", and the declaration stays inside (the only choice that cannot
-  // silently rebind a name).
-  const tail = list.slice(idx + 1);
-  const tailDeclNames = listDeclaredNames(tail);
-  const hoisted: unknown[] = [];
-  const kept: unknown[] = [];
-  for (const s of tail) {
-    const sn = s as Node;
-    if (sn && typeof sn === "object" && sn.kind === "function-decl" && !mayReferenceAny(sn, tailDeclNames)) {
-      hoisted.push(s);
-    } else {
-      kept.push(s);
-    }
-  }
-  const rest = lowerDeferList(kept);
-  const deferredBody = Array.isArray(d.body) ? (d.body as unknown[]) : [];
+  if (!list.some(isDeferStmt)) return list;
+  const deferred: unknown[] = [];
+  let firstDefer: Node | null = null;
+  const body = list.map((s) => {
+    if (!isDeferStmt(s)) return s;
+    const d = s as Node;
+    if (!firstDefer) firstDefer = d;
+    const stmts = Array.isArray(d.body) ? (d.body as unknown[]) : [];
+    const marker: Node = {
+      id: d.id,
+      kind: "defer-stmt",
+      lowered: true,
+      blockForm: d.blockForm === true,
+      deferStart: deferred.length,
+      deferCount: stmts.length,
+      span: d.span,
+    };
+    deferred.push(...stmts);
+    return marker;
+  });
   const tryNode: Node = {
-    id: d.id,
+    id: (firstDefer as Node | null)?.id,
     kind: "try-stmt",
     header: "",
-    body: rest,
-    finallyNode: { header: "", body: deferredBody },
+    body,
+    finallyNode: { header: "", body: deferred },
     deferLowered: true,
-    span: d.span,
+    span: (firstDefer as Node | null)?.span,
   };
-  return [...list.slice(0, idx), ...hoisted, tryNode];
-}
-
-/**
- * Could `fn` reference any of `names`? Structural: the function's free
- * identifiers from a scope-aware tree walk. `true` when the walk reports
- * "unknown" (part of the body is not visible as a tree).
- */
-export function mayReferenceAny(fn: Node, names: Set<string>): boolean {
-  if (names.size === 0) return false;
-  const free = functionFreeRefs(fn);
-  if (free === null) return true;
-  for (const n of names) if (free.has(n)) return true;
-  return false;
+  return [tryNode];
 }
 
 /**
@@ -140,7 +118,7 @@ export function lowerDefers(root: unknown, skipTopLevelOf: Set<unknown>): void {
     seen.add(node as object);
     if (Array.isArray(node)) {
       for (const c of node) visit(c);
-      if (node.some((s) => !!s && typeof s === "object" && (s as Node).kind === "defer-stmt")) {
+      if (node.some(isDeferStmt)) {
         const lowered = lowerDeferList(node);
         node.splice(0, node.length, ...lowered);
       }
@@ -165,6 +143,5 @@ export function lowerDefers(root: unknown, skipTopLevelOf: Set<unknown>): void {
 
 /** Does this statement list contain a (not-yet-lowered) `defer-stmt`? */
 export function listHasDefer(list: unknown): boolean {
-  return Array.isArray(list) &&
-    list.some((s) => !!s && typeof s === "object" && (s as Node).kind === "defer-stmt");
+  return Array.isArray(list) && list.some(isDeferStmt);
 }

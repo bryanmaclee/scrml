@@ -41,3 +41,18 @@
 - h08: `for await` inside a handler arm slips past E-FOR-AWAIT-NOT-IN-SCRML (handler text is never walked by the async/await validator).
 - native: `!{}` handler arms are dropped (`arms: []`) -> native compiles of deferred handlers get E-TYPE-080 + (now) E-DEFER-UNHANDLED-FAILABLE; §19.16.8 records the divergence.
 - block-level nested function called before its declaration inside an `if` block -> E-SCOPE-001 (scope checker does not hoist block-level fn decls).
+
+## Round 4 (re-review of 28cd5bb9) — replace the lowering: a per-block defer STACK
+- merged origin/main (#1042-#1049) as 6157ba78: conflicts in compiler/src/api.js (import lines — kept both: runDeferChecks + forbidden-js-native) and SPEC-INDEX.md (regenerated + §19 note re-added); P5 seam test + defer suite green after merge.
+- N1/N2 root cause = splitting the block at the defer and guessing what may move. REPLACED: each block with defers lowers to `const _scrml_defers_N = []; try { <whole block, in place> } finally { <run stack LIFO; all run; first host error rethrown> }`; each `defer S` -> `_scrml_defers_N.push(() => { S })` at its position. DELETED: hoisting analysis, functionFreeRefs, mayReferenceAny, listDeclaredNames/bindingNames, tail-name sets, the CPS-wrapper hoist. CPS wrappers: same stack, try opened at the TOP of the wrapper walk, finally after the LAST batch await. Closures are `async` + awaited iff the host body is async (server handler / SSE async generator / CPS wrapper / async client fn; a nested fn re-emits async when its body awaits).
+- N3: fnOpts for a nested function-decl resets inDeferredBody + deferStack (+ deferAsync). Adversarial: removing the reset -> nested-fn-handler-in-defer gets "work;past;".
+- host error in a deferred statement: SPEC'd (§19.16.2) run all remaining LIFO, then rethrow the FIRST; executed unit test + conformance deferred-host-error-runs-rest.
+- conformance (+7): stack-arrow-helper-before-defer(+twin, 4), stack-fn-calls-fn-before-defer(+twin, "21"), nested-fn-handler-in-defer(+twin), deferred-host-error-runs-rest. Unit tests updated to the stack shape + executed runner tests (LIFO, errors, async).
+- SPEC §19.16.6 rewritten (stack; "never moved on a guess" struck), §19.16.2 host-error rule.
+
+## Pre-existing base bugs found by the round-3/4 reviewer (recorded, not fixed)
+- `!{}` arm handler text is cut at the FIRST `}` — the rest of a multi-brace arm body is dropped.
+- `| else :>` handler arm emits invalid JS (use `| _ :>`).
+- `let v = f()?` followed by a newline merges with the next line (ASI).
+- labelled loops lose their labels in emission (labelled `break`/`continue` target the wrong loop / fail).
+- (ours, cosmetic) the scheduled client-fn body loop indents only the first line of a multi-line statement, so `const _scrml_defers_N = [];` is indented but the `try {` block is not.

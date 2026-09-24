@@ -16002,8 +16002,11 @@ function save(doc) {
 - **Evaluation time.** The deferred body is evaluated in full at exit — nothing in it (not even a call's
   arguments) is evaluated at registration. It sees the bindings in scope at the `defer`'s position; a
   binding declared later in the same block is NOT in scope for it (§7.6 lexical scope).
-- **A host error inside a deferred body** propagates from the exit point like any other host error; the
-  block's remaining (earlier-registered) deferred bodies still run first.
+- **A host error inside a deferred body** (a non-`!` runtime error, §19.6.8) does not stop the block's
+  other deferred bodies: every remaining one still runs, in LIFO order. After all of them have run, the
+  FIRST host error raised by a deferred body propagates from the block's exit like any other host
+  error — replacing an error that was already in flight, as a host `finally` does. (Chosen S430 round 4,
+  following Go, where a panicking deferred call does not prevent the remaining deferred calls.)
 
 #### 19.16.3 Restrictions (normative)
 
@@ -16101,23 +16104,45 @@ is E-FN-001, a deferred outer-scope mutation or call to a non-`fn` function is E
 
 #### 19.16.6 Lowering (normative for the observable behaviour, informative for the shape)
 
-The compiler lowers `defer` to a **compiler-emitted host `try { … } finally { … }`**: the statements
-after the `defer` in its block become the `try` body and the deferred body becomes the `finally` body;
-a second `defer` nests inside the first `try`, which yields LIFO order by construction. In a split
-function the wrapper is sequential (one `await` per batch, §19.9.9.4), so the `finally` closes around
-the last `await`. The lowering SHALL NOT change the meaning of the rest of the block:
-- a nested `function` declaration written after the `defer` stays visible to the whole block (block
-  hoisting, as without the `defer`) — the compiler emits it ahead of the `try`, unless its body refers
-  to a binding declared after the `defer`, in which case it stays with that binding. "Declared" includes
-  every name a destructuring declaration binds (`const { a }`, `const [p, q]`); "refers to" means a
-  free reference in the function's tree — a name the function re-declares locally, an object key, a
-  property name or string content is not a reference. When any part of the function body cannot be
-  analysed as a tree, the declaration stays with the bindings (it is never moved on a guess);
-- a `~` accumulator (§32) initialised before the `defer` and read after it is the same accumulator —
-  the statements after a `defer` continue the enclosing statement sequence; they are not a new §32.4
-  context. Like the §19.6.8 `<errorBoundary>` backstop (B4), this is compiler-emitted host JS,
-NOT a scrml-source `try`: the no-`try`/`catch`/`finally` standing rule (§19.1, §19.9.8,
-E-TRY-NOT-IN-SCRML) is unaffected.
+**The observable contract (normative).** Lowering a `defer` SHALL NOT change the meaning of the rest
+of its block. Every declaration stays in the block it was written in, so function-declaration
+hoisting, `let`/`const` scoping and temporal-dead-zone behaviour are exactly what they are without the
+`defer`; a `~` accumulator (§32) initialised before a `defer` and read after it is the same
+accumulator (the block is one statement sequence, not a new §32.4 context).
+
+**The shape (informative).** Each block that contains a `defer` gets its own **defer stack** and is
+wrapped — whole, unchanged, in place — in a compiler-emitted host `try { … } finally { … }` (S430
+round 4):
+
+```js
+const _scrml_defers_N = [];
+try {
+  a;
+  _scrml_defers_N.push(() => { D1; });   // `defer D1`, at its position
+  b;
+  _scrml_defers_N.push(() => { D2; });   // `defer D2`
+  c;
+} finally {
+  // run the stack last-registered first; a host error in one does not stop the
+  // others, and the first such error is rethrown after all have run
+}
+```
+
+Each property of §19.16.2 falls out of the shape: a `defer` that is not reached never pushed
+("not reached, not registered"); the runner walks the stack backwards (LIFO); the deferred statement is
+the body of a closure the `finally` calls, so it is evaluated at exit and sees the bindings in scope at
+the `defer`; a `return` value is computed before the `finally` runs. A loop body is its own block, so
+each iteration has its own stack instance and its deferred statements run at that iteration's exit.
+When the host body is async (a server handler, a CPS wrapper, a client function that awaits) the
+closures are `async` and the runner awaits each one, so a deferred call to a server function completes
+before the function returns. In a split function (§19.9.9) the client wrapper declares the stack and
+opens its `try` at the top of the wrapper body, each top-level `defer` pushes at its position in the
+wrapper's sequential walk, and the `finally` closes after the last batch's `await` and the last client
+continuation (§19.16.5).
+
+Like the §19.6.8 `<errorBoundary>` backstop (B4), this is compiler-emitted host JS, NOT a scrml-source
+`try`: the no-`try`/`catch`/`finally` standing rule (§19.1, §19.9.8, E-TRY-NOT-IN-SCRML) is
+unaffected.
 
 #### 19.16.7 Worked example
 

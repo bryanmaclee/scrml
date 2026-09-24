@@ -31,6 +31,7 @@ import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { compileScrml } from "../../src/api.js";
 import { runDeferChecks } from "../../src/validators/lint-defer.ts";
 import { lowerDeferList, lowerDefers, isDeferLoweredTry } from "../../src/codegen/lower-defer.ts";
+import { deferStackRunnerLines } from "../../src/codegen/emit-control-flow.ts";
 import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
@@ -376,18 +377,14 @@ describe("§5 lowering — codegen/lower-defer.ts", () => {
   const S = (name) => ({ kind: "bare-expr", expr: name });
   const D = (name) => ({ kind: "defer-stmt", body: [S(name)], blockForm: false });
 
-  test("[a, defer D1, b, defer D2, c] -> a; try { b; try { c } finally { D2 } } finally { D1 }", () => {
+  test("[a, defer D1, b, defer D2, c] -> ONE try-stmt whose body is the whole block, in place; defers become markers", () => {
     const out = lowerDeferList([S("a"), D("D1"), S("b"), D("D2"), S("c")]);
-    expect(out.length).toBe(2);
-    expect(out[0].expr).toBe("a");
-    const t1 = out[1];
-    expect(isDeferLoweredTry(t1)).toBe(true);
-    expect(t1.finallyNode.body[0].expr).toBe("D1");
-    expect(t1.body[0].expr).toBe("b");
-    const t2 = t1.body[1];
-    expect(isDeferLoweredTry(t2)).toBe(true);
-    expect(t2.finallyNode.body[0].expr).toBe("D2");
-    expect(t2.body.map((s) => s.expr)).toEqual(["c"]);
+    expect(out.length).toBe(1);
+    const t = out[0];
+    expect(isDeferLoweredTry(t)).toBe(true);
+    expect(t.body.map((x) => x.kind === "defer-stmt" ? `defer#${x.deferStart}` : x.expr)).toEqual(["a", "defer#0", "b", "defer#1", "c"]);
+    expect(t.body[1].lowered).toBe(true);
+    expect(t.finallyNode.body.map((x) => x.expr)).toEqual(["D1", "D2"]);
   });
   test("a list with no defer is returned unchanged", () => {
     const list = [S("a"), S("b")];
@@ -398,7 +395,7 @@ describe("§5 lowering — codegen/lower-defer.ts", () => {
     lowerDefers({ nodes: [fn] }, new Set());
     const cons = fn.body[1].consequent;
     expect(cons.length).toBe(1);
-    expect(isDeferLoweredTry(cons[0])).toBe(true);
+    expect(cons[0].body.map((x) => x.kind)).toEqual(["defer-stmt", "bare-expr"]);
     lowerDefers({ nodes: [fn] }, new Set());
     expect(fn.body[1].consequent.length).toBe(1);
   });
@@ -416,7 +413,7 @@ describe("§5 lowering — codegen/lower-defer.ts", () => {
 // ---------------------------------------------------------------------------
 
 describe("§6 emitted client JS", () => {
-  test("a defer lowers to a host try/finally with LIFO nesting", () => {
+  test("a defer lowers to a per-block stack: registration in place, one try/finally around the whole block", () => {
     const r = compile(wrap(`
       <trace> = ""
       function go() {
@@ -427,15 +424,22 @@ describe("§6 emitted client JS", () => {
       }`, `<button onclick=go()>go</button><p>\${@trace}</p>`));
     expect(r.errors.map((e) => e.code)).toEqual([]);
     const js = r.clientJs;
+    const m = js.match(/const (_scrml_defers_\d+) = \[\];\s*try \{/);
+    expect(m).not.toBeNull();
+    const st = m[1];
+    const ia = js.indexOf(`+ "a")`);
+    const p1 = js.indexOf(`${st}.push(() => {`);
     const i1 = js.indexOf(`+ "1")`);
     const i2 = js.indexOf(`+ "2")`);
     const ib = js.indexOf(`+ "b")`);
-    expect(js).toContain("finally {");
-    // LIFO: the "2" finally is INNER, so it is emitted before (above) the "1" finally,
-    // and both come after the body statement "b".
-    expect(ib).toBeGreaterThan(0);
-    expect(i2).toBeGreaterThan(ib);
-    expect(i1).toBeGreaterThan(i2);
+    // in source order, in place: a, push(1), push(2), b; then the runner.
+    expect(ia).toBeGreaterThan(js.indexOf(m[0]));
+    expect(p1).toBeGreaterThan(ia);
+    expect(i1).toBeGreaterThan(p1);
+    expect(i2).toBeGreaterThan(i1);
+    expect(ib).toBeGreaterThan(i2);
+    expect(js.indexOf("} finally {", ib)).toBeGreaterThan(ib);
+    expect(js).toContain(`for (let ${st}_i = ${st}.length - 1; ${st}_i >= 0; ${st}_i--)`);
     expect(js).not.toContain("defer_not_lowered");
   });
   test("a fn with an implicit tail after a defer returns the tail INSIDE the try (value computed before the finally)", () => {
@@ -448,7 +452,9 @@ describe("§6 emitted client JS", () => {
       }
       function go() { @got = settle(20) }`, `<button onclick=go()>go</button><p>\${@got}</p>`));
     expect(r.errors.map((e) => e.code)).toEqual([]);
-    expect(r.clientJs).toMatch(/try \{\s*return acc \+ 1;\s*\} finally \{\s*acc = 0;/);
+    // The tail stays in place inside the try; the deferred write is a closure
+    // registered before it and run by the finally.
+    expect(r.clientJs).toMatch(/\.push\(\(\) => \{\s*acc = 0;\s*\}\);\s*return acc \+ 1;\s*\} finally \{/);
   });
   test("a server function's defer lowers on the server side", () => {
     const r = compile(`<program db="sqlite::memory:">
@@ -507,17 +513,23 @@ describe("§7 body-split — the deferred body runs after the LAST continuation"
     const w = js.slice(wrapperStart);
     const lastAwait = w.lastIndexOf("await _scrml_fetch_save_batch_1");
     const endWrite = w.indexOf(`+ "end;"`);
-    const fin = w.indexOf("} finally {");
-    const deferWrite = w.indexOf(`+ "D;"`);
+    const m = w.match(/const (_scrml_defers_\d+) = \[\];\s*try \{/);
+    expect(m).not.toBeNull();
+    const st = m[1];
+    const push = w.indexOf(`${st}.push(async () => {`);
+    const fin = w.indexOf("} finally {", endWrite);
+    const runner = w.indexOf(`await ${st}[${st}_i]()`);
     expect(lastAwait).toBeGreaterThan(-1);
+    // The stack's try opens at the TOP of the wrapper (before the first batch
+    // await, so a batch-0 failure still runs it) and registration sits at the
+    // defer's position; the finally closes after the LAST batch await and the
+    // trailing client write.
+    expect(w.indexOf(m[0])).toBeLessThan(w.indexOf("await _scrml_fetch_save_batch_0"));
+    expect(push).toBeGreaterThan(w.indexOf(`+ "start;"`));
+    expect(push).toBeLessThan(w.indexOf("await _scrml_fetch_save_batch_0"));
     expect(endWrite).toBeGreaterThan(lastAwait);
     expect(fin).toBeGreaterThan(endWrite);
-    expect(deferWrite).toBeGreaterThan(fin);
-    // The try opens BEFORE the first batch await (so a batch-0 failure still runs it).
-    const tryOpen = w.indexOf("try {", w.indexOf(`+ "start;"`));
-    const firstAwait = w.indexOf("await _scrml_fetch_save_batch_0");
-    expect(tryOpen).toBeGreaterThan(-1);
-    expect(tryOpen).toBeLessThan(firstAwait);
+    expect(runner).toBeGreaterThan(fin);
   });
   test("no server stub contains the deferred body", () => {
     const r = compile(cpsProgram(`defer @trace = @trace + "D;"`));
@@ -742,27 +754,16 @@ ${body}
   });
 });
 
-describe("§9 F1 — a nested function declared after a defer stays hoisted", () => {
-  test("lowerDeferList moves later function-decls in front of the try", () => {
+describe("§9 F1 / round 4 — nothing moves: declarations stay in their block", () => {
+  test("lowerDeferList keeps every statement — function declarations included — in place, in order", () => {
     const S = (name) => ({ kind: "bare-expr", expr: name });
     const fn = (name, body = []) => ({ kind: "function-decl", name, body });
-    const out = lowerDeferList([S("a"), { kind: "defer-stmt", body: [S("D")] }, S("b"), fn("helper"), { kind: "defer-stmt", body: [S("D2")] }, fn("h2")]);
-    expect(out.map((s) => s.kind)).toEqual(["bare-expr", "function-decl", "function-decl", "try-stmt"]);
-    expect(out[1].name).toBe("helper");
-    expect(out[2].name).toBe("h2");
-  });
-  test("a function that references a binding declared after the defer stays with that binding (inside the try)", () => {
-    const S = (name) => ({ kind: "bare-expr", expr: name });
-    const out = lowerDeferList([
-      { kind: "defer-stmt", body: [S("D")] },
-      { kind: "let-decl", name: "late", init: "1" },
-      { kind: "function-decl", name: "useLate", body: [{ kind: "return-stmt", expr: "late + 1" }] },
-    ]);
+    const out = lowerDeferList([S("a"), { kind: "defer-stmt", body: [S("D")] }, S("b"), fn("helper"), { kind: "let-decl", name: "late" }, fn("useLate")]);
     expect(out.length).toBe(1);
-    expect(isDeferLoweredTry(out[0])).toBe(true);
-    expect(out[0].body.map((s) => s.kind)).toEqual(["let-decl", "function-decl"]);
+    expect(out[0].body.map((x) => x.kind === "function-decl" ? `fn:${x.name}` : x.kind)).toEqual(
+      ["bare-expr", "defer-stmt", "bare-expr", "fn:helper", "let-decl", "fn:useLate"]);
   });
-  test("client: the helper is declared before the try", () => {
+  test("client: the helper is declared inside the same block as its earlier call (no hoisting across a boundary)", () => {
     const r = compile(wrap(`
       <trace> = ""
       function add(s: string) { @trace = @trace + s }
@@ -772,11 +773,12 @@ describe("§9 F1 — a nested function declared after a defer stays hoisted", ()
         function helper() { return "H" }
       }`, `<button onclick=f()>go</button><p>\${@trace}</p>`));
     expect(r.errors.map((e) => e.code)).toEqual([]);
-    const js = r.clientJs;
-    expect(js.indexOf("function helper()")).toBeGreaterThan(-1);
-    expect(js.indexOf("function helper()")).toBeLessThan(js.indexOf("try {", js.indexOf("function _scrml_f_")));
+    const fnJs = r.clientJs.slice(r.clientJs.indexOf("function _scrml_f_"));
+    const tryAt = fnJs.indexOf("try {");
+    expect(fnJs.indexOf("helper()")).toBeGreaterThan(tryAt);
+    expect(fnJs.indexOf("function helper()")).toBeGreaterThan(tryAt);
   });
-  test("server: the helper is declared before the try in the server handler", () => {
+  test("server: the helper stays in the handler body's block too", () => {
     const r = compile(`<program db="sqlite::memory:">
 <schema>
     t { id: integer primary key, x: integer }
@@ -797,49 +799,11 @@ describe("§9 F1 — a nested function declared after a defer stays hoisted", ()
 <p>\${@srv}</p>
 </program>`);
     expect(r.errors.map((e) => e.code)).toEqual([]);
-    const i = r.serverJs.indexOf("function helperS()");
-    expect(i).toBeGreaterThan(-1);
-    expect(i).toBeLessThan(r.serverJs.indexOf("try {", r.serverJs.indexOf("let out = helperS()")));
-  });
-  test("nested block: the helper is hoisted within its own block", () => {
-    const fnNode = {
-      kind: "function-decl", name: "outer", body: [
-        { kind: "if-stmt", consequent: [
-          { kind: "defer-stmt", body: [{ kind: "bare-expr", expr: "D" }] },
-          { kind: "bare-expr", expr: "x" },
-          { kind: "function-decl", name: "inner", body: [] },
-        ] },
-      ],
-    };
-    lowerDefers({ nodes: [fnNode] }, new Set());
-    const cons = fnNode.body[0].consequent;
-    expect(cons.map((s) => s.kind)).toEqual(["function-decl", "try-stmt"]);
-  });
-  test("CPS split wrapper: a client function-decl after the defer is emitted before the wrapper's try", () => {
-    const r = compile(`<program db="sqlite::memory:">
-<schema>
-    t { id: integer primary key, x: integer }
-</schema>
-\${
-    <trace> = ""
-    function save(id: number) {
-        @trace = @trace + "s;"
-        defer @trace = @trace + "D;"
-        ?{\`UPDATE t SET x = 1 WHERE id = \${id}\`}.run()
-        @trace = @trace + "end;"
-        function label() {
-            return "L;"
-        }
-    }
-}
-<button onclick=save(1)>go</button>
-<p>\${@trace}</p>
-</program>`);
-    const w = r.clientJs.slice(r.clientJs.indexOf("async function _scrml_cps_save"));
-    const fnAt = w.indexOf("function label()");
-    const deferTry = w.indexOf("try {", w.indexOf(`+ "s;"`));
-    expect(fnAt).toBeGreaterThan(-1);
-    expect(fnAt).toBeLessThan(deferTry);
+    const tryAt = r.serverJs.indexOf("try {", r.serverJs.indexOf("_scrml_defers_"));
+    expect(r.serverJs.indexOf("let out = helperS()")).toBeGreaterThan(tryAt);
+    expect(r.serverJs.indexOf("function helperS()")).toBeGreaterThan(tryAt);
+    // server closures are async and awaited (the handler body is async)
+    expect(r.serverJs).toMatch(/_scrml_defers_\d+\.push\(async \(\) => \{/);
   });
 });
 
@@ -862,8 +826,8 @@ describe("§9 F2 — `~` initialised before a defer resolves after it", () => {
       }`, `<button onclick=f()>go</button><button onclick=g()>go2</button><p>\${@trace}</p>`));
     expect(codesOf(r)).not.toContain("E-CG-TILDE-UNRESOLVED");
     expect(r.errors.map((e) => e.code)).toEqual([]);
-    expect(r.clientJs).toMatch(/let (_scrml_tilde_\d+) = _scrml_two_\d+\(5\);\s*try \{\s*return \1 \+ 1;/);
-    expect(r.clientJs).toMatch(/let (_scrml_tilde_\d+) = _scrml_two_\d+\(4\);\s*try \{\s*let r = \1;/);
+    expect(r.clientJs).toMatch(/let (_scrml_tilde_\d+) = _scrml_two_\d+\(5\);[\s\S]*?\}\);\s*return \1 \+ 1;/);
+    expect(r.clientJs).toMatch(/let (_scrml_tilde_\d+) = _scrml_two_\d+\(4\);[\s\S]*?\}\);\s*let r = \1;/);
   });
 });
 
@@ -1011,9 +975,10 @@ describe("§10 H3 — deferred handlers are total; no return from inside the fin
     const fn = findAll(ast, (n) => n.kind === "function-decl" && n.name === "work")[0];
     lowerDefers({ nodes: [fn] }, new Set());
     const js = emitLogicNode(fn.body[0], { insideFunctionBody: true, declaredNames: new Set() });
-    const fin = js.slice(js.indexOf("} finally {"));
-    expect(fin).toContain("__scrml_error");
-    expect(fin).not.toMatch(/\breturn\b/);
+    // the deferred statement is the registered closure's body
+    const clo = js.slice(js.indexOf(".push(() => {"), js.indexOf("} finally {"));
+    expect(clo).toContain("__scrml_error");
+    expect(clo).not.toMatch(/\breturn\b/);
   });
 
   test("the same non-deferred handler still propagates the unmatched error (unchanged)", async () => {
@@ -1027,5 +992,93 @@ describe("§10 H3 — deferred handlers are total; no return from inside the fin
     const fn = findAll(ast, (n) => n.kind === "function-decl" && n.name === "work")[0];
     const js = emitLogicNode(fn.body[0], { insideFunctionBody: true, declaredNames: new Set() });
     expect(js).toMatch(/else \{ return /);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §11 — round 4: the defer STACK runner, executed
+// ---------------------------------------------------------------------------
+
+describe("§11 round 4 — the per-block defer stack, executed", () => {
+  const runStack = (pushes, isAsync = false) => {
+    const lines = deferStackRunnerLines("S", isAsync);
+    const src = `const S = []; const log = [];\n${pushes}\ntry {\n} finally {\n${lines.join("\n")}\n}\nreturn log;`;
+    return new Function(src);
+  };
+
+  test("LIFO: last-registered runs first", () => {
+    const f = runStack(`S.push(() => log.push(1)); S.push(() => log.push(2)); S.push(() => log.push(3));`);
+    expect(f()).toEqual([3, 2, 1]);
+  });
+
+  test("a host error in one deferred statement does not stop the others; the FIRST error is rethrown after all ran", () => {
+    const log = [];
+    const src = `const S = [];
+S.push(() => log.push("a"));
+S.push(() => { log.push("b"); throw new Error("first"); });
+S.push(() => { log.push("c"); throw new Error("second-registered-last"); });
+try {} finally {
+${deferStackRunnerLines("S", false).join("\n")}
+}`;
+    let err = null;
+    try { new Function("log", src)(log); } catch (e) { err = e; }
+    // c runs first (LIFO) and throws; b and a still run; c's error (the first
+    // thrown) is the one rethrown.
+    expect(log).toEqual(["c", "b", "a"]);
+    expect(err && err.message).toBe("second-registered-last");
+  });
+
+  test("async host: the runner awaits each closure in order", async () => {
+    const log = [];
+    const src = `return (async () => { const S = [];
+S.push(async () => { await null; log.push(1); });
+S.push(async () => { await null; log.push(2); });
+try {} finally {
+${deferStackRunnerLines("S", true).join("\n")}
+}
+log.push("after"); })();`;
+    await new Function("log", src)(log);
+    expect(log).toEqual([2, 1, "after"]);
+  });
+
+  test("a loop body is its own block: one stack instance per iteration", () => {
+    const r = compile(wrap(`
+      <trace> = ""
+      function go() {
+        for (const i of [1, 2]) {
+          defer @trace = @trace + "e" + i + ";"
+          @trace = @trace + "b" + i + ";"
+        }
+      }`, `<button onclick=go()>go</button><p>\${@trace}</p>`));
+    expect(r.errors.map((e) => e.code)).toEqual([]);
+    const js = r.clientJs;
+    const forAt = js.indexOf("for (const i of");
+    const stackAt = js.search(/const _scrml_defers_\d+ = \[\];/);
+    expect(forAt).toBeGreaterThan(-1);
+    expect(stackAt).toBeGreaterThan(forAt); // declared INSIDE the loop body
+  });
+
+  test("N3: inDeferredBody does not leak into a function declared in a deferred body", async () => {
+    const { emitLogicNode } = await import("../../src/codegen/emit-logic.ts");
+    const { ast } = liveAST(wrap(`
+      type E:enum = { Busy, Gone }
+      function risky()! -> E { fail E.Gone }
+      function work() {
+        defer {
+          function inner()! -> E {
+            risky() !{
+              | ::Busy :> log("busy")
+            }
+            log("past")
+          }
+          inner() !{ | _ :> log("x") }
+        }
+      }`));
+    const fn = findAll(ast, (n) => n.kind === "function-decl" && n.name === "work")[0];
+    lowerDefers({ nodes: [fn] }, new Set());
+    const js = emitLogicNode(fn.body[0], { insideFunctionBody: true, declaredNames: new Set() });
+    const innerJs = js.slice(js.indexOf("function inner("));
+    // the nested function's own non-total handler keeps its propagation
+    expect(innerJs).toMatch(/else \{ return /);
   });
 });

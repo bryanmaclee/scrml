@@ -1108,44 +1108,106 @@ export function emitContinueStmt(node: any): string {
 // ---------------------------------------------------------------------------
 
 /**
- * §19.16.6 (S430 P3) — emit a LOWERED `defer` scope: a `try-stmt` built by
- * `lower-defer.ts` (`deferLowered: true`). `body` holds the statements that
- * followed the `defer` in its block; `finallyNode.body` holds the deferred
- * statement(s). Unlike the legacy `emitTryStmt` (source try — itself rejected by
- * E-TRY-NOT-IN-SCRML), this threads the caller's `opts` into BOTH halves, so the
- * statements after a `defer` lower exactly as they would have without it
- * (boundary, engine/map bindings, server-fn awaits, tilde context, …). Each half
- * gets a block-scoped copy of `declaredNames` — the `try`/`finally` braces are
- * JS blocks.
+ * §19.16.6 (S430 P3, round 4) — the per-block DEFER STACK.
  *
- * The output is a plain host `try { … } finally { … }`: every JS exit of the
- * `try` (return, break, continue, a thrown host error, the `return` a `fail` /
- * `?` / CPS failure lowers to) runs the `finally` — which is exactly §19.16.2.
+ * A block that contains `defer` statements lowers to
+ *
+ *     const _scrml_defers_N = [];
+ *     try {
+ *       …the whole block, unchanged, in place…
+ *       _scrml_defers_N.push(() => { …deferred statement… });   // at each `defer`
+ *       …
+ *     } finally {
+ *       …run the stack, last-registered first…
+ *     }
+ *
+ * Nothing moves: every declaration stays in its block, so hoisting / scoping /
+ * TDZ are what they are without the `defer`. See lower-defer.ts.
+ *
+ * `async` closures (and an awaited runner) are used exactly when the HOST body
+ * is async — a deferred call to a server function must be awaited before the
+ * function returns, and `await` is only legal in an async closure run from an
+ * async host.
  */
-export function emitDeferScope(node: any, opts: any): string {
-  const lines: string[] = [];
-  lines.push(`try {`);
-  const tryOpts = { ...opts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames) };
-  // §32 (S430 review F2) — the `try` body is the CONTINUATION of the statement
-  // sequence the `defer` sat in, not a new tilde scope: a `~` initialized before
-  // the `defer` and read after it must resolve to the SAME accumulator.
-  // `emitLogicBody` would mint a fresh tilde context (it treats its list as a new
-  // sequence), orphaning the read, so when a context is already live the try body
-  // is emitted statement-by-statement against it instead.
-  const tryCodes: string[] = opts?.tildeContext
-    ? (node.body ?? []).map((n: any) => emitLogicNode(n, tryOpts)).filter((s: string) => s.trim() !== "")
-    : emitLogicBody(node.body ?? [], tryOpts);
-  for (const code of tryCodes) {
-    for (const line of code.split("\n")) lines.push(`  ${line}`);
-  }
+export interface DeferStackCtx {
+  /** The stack variable name (`_scrml_defers_N`). */
+  name: string;
+  /** The lowered block's deferred statements (`finallyNode.body`); markers index into it. */
+  bodies: any[];
+  /** Whether the host body is async (closures `async`, runner `await`s). */
+  async: boolean;
+}
+
+/** Is the body being emitted an async host (see DeferStackCtx.async)? */
+export function deferHostIsAsync(opts: any): boolean {
+  if (opts && typeof opts.deferAsync === "boolean") return opts.deferAsync;
+  return opts?.clientAsyncBody === true || opts?.boundary === "server";
+}
+
+/** The `finally` body that runs a defer stack (without the `} finally {` braces). */
+export function deferStackRunnerLines(name: string, isAsync: boolean): string[] {
+  const aw = isAsync ? "await " : "";
+  return [
+    `// run this block's deferred statements, last-registered first (§19.16.2);`,
+    `// a host error in one does not stop the rest — the first is rethrown after.`,
+    `let ${name}_threw = false, ${name}_err;`,
+    `for (let ${name}_i = ${name}.length - 1; ${name}_i >= 0; ${name}_i--) {`,
+    `  try {`,
+    `    ${aw}${name}[${name}_i]();`,
+    `  } catch (${name}_e) {`,
+    `    if (!${name}_threw) { ${name}_threw = true; ${name}_err = ${name}_e; }`,
+    `  }`,
+    `}`,
+    `if (${name}_threw) throw ${name}_err;`,
+  ];
+}
+
+/**
+ * The registration a `defer` statement lowers to: push a closure whose body is
+ * the deferred statement(s), emitted with `inDeferredBody` set (a deferred
+ * `!{}` never propagates out) and WITHOUT the surrounding tilde context (§32 —
+ * the deferred statement runs at exit, it is not a `~` continuation).
+ */
+export function emitDeferRegistration(stmts: any[], stack: DeferStackCtx, opts: any): string {
+  const { tildeContext: _t, deferStack: _d, ...rest } = opts ?? {};
+  const inner = emitLogicBody(stmts, {
+    ...rest,
+    declaredNames: blockScopedDeclaredNames(opts?.declaredNames),
+    inDeferredBody: true,
+  });
+  const lines: string[] = [`${stack.name}.push(${stack.async ? "async " : ""}() => {`];
+  for (const code of inner) for (const line of code.split("\n")) lines.push(`  ${line}`);
+  lines.push(`});`);
+  return lines.join("\n");
+}
+
+/**
+ * Emit a LOWERED defer block (`try-stmt{deferLowered}`, lower-defer.ts). The
+ * whole block is the `try` body, emitted with the caller's `opts` (so it lowers
+ * exactly as it would without the defer) plus the stack context the in-place
+ * `defer-stmt` markers register against. `emitBody` lets a caller with special
+ * tail semantics (the `fn` implicit return) supply the body emission.
+ */
+export function emitDeferScope(node: any, opts: any, emitBody?: (bodyOpts: any) => string[]): string {
+  const name = genVar("defers");
+  const stack: DeferStackCtx = {
+    name,
+    bodies: node.finallyNode && Array.isArray(node.finallyNode.body) ? node.finallyNode.body : [],
+    async: deferHostIsAsync(opts),
+  };
+  const bodyOpts = { ...opts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames), deferStack: stack };
+  // §32 — the block is the same statement sequence it was without the defer:
+  // a live tilde context is reused (emitLogicBody would mint a fresh one and
+  // orphan a `~` read).
+  const codes: string[] = emitBody
+    ? emitBody(bodyOpts)
+    : opts?.tildeContext
+      ? (node.body ?? []).map((n: any) => emitLogicNode(n, bodyOpts)).filter((s: string) => s.trim() !== "")
+      : emitLogicBody(node.body ?? [], bodyOpts);
+  const lines: string[] = [`const ${name} = [];`, `try {`];
+  for (const code of codes) for (const line of code.split("\n")) lines.push(`  ${line}`);
   lines.push(`} finally {`);
-  const deferred = node.finallyNode && Array.isArray(node.finallyNode.body) ? node.finallyNode.body : [];
-  // The deferred body is NOT a tilde-capture continuation of the surrounding
-  // statements (§32 — it runs at exit); drop any inherited tilde context.
-  const { tildeContext: _dropTilde, ...deferOpts } = opts ?? {};
-  for (const code of emitLogicBody(deferred, { ...deferOpts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames), inDeferredBody: true })) {
-    for (const line of code.split("\n")) lines.push(`  ${line}`);
-  }
+  for (const line of deferStackRunnerLines(name, stack.async)) lines.push(`  ${line}`);
   lines.push(`}`);
   return lines.join("\n");
 }

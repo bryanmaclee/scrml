@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -133,6 +133,10 @@ export interface EmitLogicOpts {
    * is unreachable; this flag keeps the lowering safe regardless.
    */
   inDeferredBody?: boolean;
+  /** §19.16.6 — the enclosing block's defer stack (emit-control-flow.ts DeferStackCtx). */
+  deferStack?: any;
+  /** §19.16.6 — whether the host body is async (defer closures `async`, runner awaits). */
+  deferAsync?: boolean;
   derivedNames?: Set<string> | null;
   /**
    * g-assignment-emits-init-set-inverting-reset (§6.8) — file-level set of cell
@@ -4252,13 +4256,23 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       if (node.deferLowered === true) return emitDeferScope(node, opts);
       return emitTryStmt(node);
 
-    case "defer-stmt":
-      // Every `defer-stmt` is lowered before emission (codegen/index.ts ->
-      // lower-defer.ts), and the CPS wrappers lower their own top level. An
-      // un-lowered one reaching here is a compiler bug: emit a statement that
-      // fails the emitted-JS parse gate LOUDLY rather than silently running the
-      // deferred body in place (which would be a wrong lowering, §19.16.2).
-      return `/* scrml internal: unlowered defer */ defer_not_lowered!;`;
+    case "defer-stmt": {
+      // §19.16.6 — a `defer` registers its deferred statement on the enclosing
+      // block's stack (lower-defer.ts / emitDeferScope; the CPS wrappers set up
+      // their own stack for a split function's top level). A lowered marker's
+      // statements live in the block's `finallyNode.body`; an un-lowered one
+      // (CPS top level) still carries them in `body`.
+      const stack = (opts as any).deferStack;
+      if (!stack) {
+        // No stack in scope: a compiler bug. Fail the emitted-JS parse gate
+        // LOUDLY rather than run the deferred body in place (a wrong lowering).
+        return `/* scrml internal: defer outside a defer block */ defer_not_lowered!;`;
+      }
+      const stmts: any[] = node.lowered === true
+        ? stack.bodies.slice(node.deferStart ?? 0, (node.deferStart ?? 0) + (node.deferCount ?? 0))
+        : (Array.isArray(node.body) ? node.body : []);
+      return emitDeferRegistration(stmts, stack, opts);
+    }
 
     case "match-stmt":
     case "match-expr":
@@ -4354,22 +4368,38 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // back out and make the enclosing scope think they are already bound. Shadowing
       // still works — a local `let x` inside this body adds `x` to the child copy and
       // emits as a declaration, exactly as before.
+      // §19.16.3 rule 1 (S430 round 4, N3) — a nested function is its OWN
+      // control-flow scope: it is never "inside a deferred body" (its `!{}`
+      // keeps its unmatched-error propagation) and never registers on an
+      // enclosing block's defer stack.
       const fnOpts: EmitLogicOpts = {
         ...opts,
         declaredNames: new Set<string>(opts.declaredNames ?? []),
         insideFunctionBody: true,
+        inDeferredBody: false,
       };
+      delete (fnOpts as any).deferStack;
+      // §19.16.6 — a nested function's own defer closures are sync unless its
+      // body turns out to need `await` (it is then emitted `async`, below).
+      (fnOpts as any).deferAsync = false;
       // s427 round 2 (H1): a function body is a new function scope with a set of its
       // own, as it always had — not a lift scope (see declared-name-marks.ts).
       clearLiftScope(fnOpts.declaredNames);
       const body: any[] = node.body ?? [];
 
-      const bodyCodes = emitFnShortcutBody(body, fnOpts, node.fnKind, node.hasReturnType);
-      const fnBodyLines: string[] = [];
-      for (const code of bodyCodes) {
-        for (const line of code.split("\n")) {
-          fnBodyLines.push(`  ${line}`);
+      const _emitNestedBody = (o: EmitLogicOpts): string[] => {
+        const out: string[] = [];
+        for (const code of emitFnShortcutBody(body, o, node.fnKind, node.hasReturnType)) {
+          for (const line of code.split("\n")) out.push(`  ${line}`);
         }
+        return out;
+      };
+      let fnBodyLines: string[] = _emitNestedBody(fnOpts);
+      // A body with a defer stack that ALSO awaits (a server-side nested body)
+      // is emitted `async` below; re-emit so its defer closures are async too.
+      if (!node.isGenerator && fnBodyLines.some((l) => /_scrml_defers_\d+ = \[\]/.test(l)) &&
+          fnBodyLines.some((l) => /(^|[^.\w$])await\s/.test(l))) {
+        fnBodyLines = _emitNestedBody({ ...fnOpts, declaredNames: new Set<string>(opts.declaredNames ?? []), deferAsync: true } as any);
       }
 
       // g-sql-in-nested-function-client-leak (S225): when a nested function is
@@ -4463,18 +4493,11 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
     if (!stmt) continue;
     let code: string;
     if (i === deferTailIdx) {
-      // Recurse: the try body keeps the implicit-tail-return semantics (the
-      // return value is computed BEFORE the finally runs — §19.16.2).
-      const inner = emitFnShortcutBody(stmt.body ?? [], { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames) }, fnKind, hasReturnType, true);
-      const deferredOpts: any = { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames), inDeferredBody: true };
-      delete deferredOpts.tildeContext;
-      const deferred = emitLogicBody(stmt.finallyNode?.body ?? [], deferredOpts);
-      const out2: string[] = ["try {"];
-      for (const c of inner) for (const l of c.split("\n")) out2.push(`  ${l}`);
-      out2.push("} finally {");
-      for (const c of deferred) for (const l of c.split("\n")) out2.push(`  ${l}`);
-      out2.push("}");
-      code = out2.join("\n");
+      // §19.16.6 — a trailing lowered defer block holds the function's tail:
+      // emit its body with the same implicit-tail-return semantics (the value
+      // is computed BEFORE the `finally` runs the stack — §19.16.2).
+      code = emitDeferScope(stmt, bodyOpts, (inner) =>
+        emitFnShortcutBody(stmt.body ?? [], inner, fnKind, hasReturnType, true));
     } else if (i === tailIdx) {
       if (stmt.kind === "bare-expr") {
         const exprCtx = _makeExprCtx(bodyOpts);
