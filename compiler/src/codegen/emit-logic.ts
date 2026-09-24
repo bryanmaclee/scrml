@@ -124,6 +124,15 @@ function _wrapDeepReactive(rewrittenExpr: string, rawExpr: string, initExpr?: an
 // ---------------------------------------------------------------------------
 
 export interface EmitLogicOpts {
+  /**
+   * §19.16.3 (S430 round 3, H3) — true while emitting a DEFERRED body (the
+   * `finally` of a lowered `defer`). A `!{}` handler there must never emit the
+   * unmatched-error `return` (it would leave the function from inside the
+   * `finally`, overriding its real return value). The checker already requires
+   * a `_` arm on a deferred handler (E-DEFER-UNHANDLED-FAILABLE), so the branch
+   * is unreachable; this flag keeps the lowering safe regardless.
+   */
+  inDeferredBody?: boolean;
   derivedNames?: Set<string> | null;
   /**
    * g-assignment-emits-init-set-inverting-reset (§6.8) — file-level set of cell
@@ -3964,11 +3973,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // unhandled error simply remains the value of resultVar (and of any
           // `var binding = resultVar` emitted below), which is the correct
           // top-level semantics — no statement is needed.
-          if (opts.insideFunctionBody) {
+          if (opts.insideFunctionBody && !opts.inDeferredBody) {
             lines.push(`  else { return ${resultVar}; }`);
           }
         }
-      } else if (opts.insideFunctionBody) {
+      } else if (opts.insideFunctionBody && !opts.inDeferredBody) {
         lines.push(`  return ${resultVar};`);
       }
 
@@ -4457,7 +4466,7 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
       // Recurse: the try body keeps the implicit-tail-return semantics (the
       // return value is computed BEFORE the finally runs — §19.16.2).
       const inner = emitFnShortcutBody(stmt.body ?? [], { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames) }, fnKind, hasReturnType, true);
-      const deferredOpts: any = { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames) };
+      const deferredOpts: any = { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames), inDeferredBody: true };
       delete deferredOpts.tildeContext;
       const deferred = emitLogicBody(stmt.finallyNode?.body ?? [], deferredOpts);
       const out2: string[] = ["try {"];

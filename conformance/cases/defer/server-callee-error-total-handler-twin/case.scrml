@@ -1,0 +1,33 @@
+<program db="sqlite::memory:">
+<schema>
+    locks { id: integer primary key, held: integer }
+</schema>
+${
+    type RelError:enum = {
+        Busy
+    }
+    <out> = ""
+    <trace> = ""
+
+    server function release(id: number)! -> RelError {
+        ?{`UPDATE locks SET held = 0 WHERE id = ${id}`}.run()
+        return 1
+    }
+
+    function work() {
+        @trace = @trace + "work;"
+        release(1) !{
+            | ::Busy :> @trace = @trace + "busy;"
+            | _ :> @trace = @trace + "release-failed;"
+        }
+        return "OK"
+    }
+
+    function go() {
+        @out = work()
+    }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@out}</p>
+<p id="trace">${@trace}</p>
+</program>

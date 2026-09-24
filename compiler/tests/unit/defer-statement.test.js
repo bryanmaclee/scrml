@@ -29,7 +29,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { compileScrml } from "../../src/api.js";
-import { runDeferChecks, scanRawControlFlow } from "../../src/validators/lint-defer.ts";
+import { runDeferChecks } from "../../src/validators/lint-defer.ts";
 import { lowerDeferList, lowerDefers, isDeferLoweredTry } from "../../src/codegen/lower-defer.ts";
 import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 
@@ -360,6 +360,7 @@ describe("§4 failable calls in a deferred body must be handled in place", () =>
       function work() {
         defer closeAll() !{
           | ::Busy :> log("close failed")
+          | _ :> log("other")
         }
         log("w")
       }`, `<button onclick=work()>go</button>`));
@@ -648,7 +649,7 @@ describe("§9 F3 — E-DEFER-CONTROL-FLOW reaches value-form arms and handler ar
     expect(check(header + `
       function f() {
         defer risky() !{
-          | ::Bad :> { return 9 }
+          | _ :> { return 9 }
         }
         return 1
       }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
@@ -668,15 +669,76 @@ describe("§9 F3 — E-DEFER-CONTROL-FLOW reaches value-form arms and handler ar
       }`)).toEqual([]);
   });
 
-  test("scanner unit: keywords in strings/comments, property names, `?.`, ternaries and loops are not control transfers", () => {
-    expect(scanRawControlFlow(`{ log("return fail") // return\n }`)).toEqual([]);
-    expect(scanRawControlFlow(`{ x.return = a?.b ?? (c ? d : e) }`)).toEqual([]);
-    expect(scanRawControlFlow(`{ for (const i of xs) { if (i) { break } continue } }`)).toEqual([]);
-    expect(scanRawControlFlow(`{ function g() { return 1 } }`)).toEqual([]);
-    expect(scanRawControlFlow(`{ return 1 }`)).toEqual(["`return`"]);
-    expect(scanRawControlFlow(`{ let v = risky()? }`)).toEqual(["a `?` propagation"]);
-    expect(scanRawControlFlow(`{ break }`)).toEqual(["a `break` that leaves it"]);
-    expect(scanRawControlFlow(`{ break }`, true, true)).toEqual([]);
+  // Round 3 — the text path (a body carried as text: a `!{}` handler arm or a
+  // value-form match arm) is PARSED and walked by the same structural check the
+  // tree path (the same body in an `if` block) goes through: same answer, pair
+  // by pair.
+  const TREE = (body) => `
+      function f(m: Mode, x: number) {
+        defer {
+          if (x > 0) {
+${body}
+          }
+        }
+        return 1
+      }`;
+  const HANDLER = (body) => `
+      function f(m: Mode, x: number) {
+        defer risky() !{
+          | _ :> {
+${body}
+          }
+        }
+        return 1
+      }`;
+  const MATCH_ARM = (body) => `
+      function f(m: Mode, x: number) {
+        defer {
+          let k = match m {
+            .A :> {
+${body}
+            }
+            .B :> 3
+          }
+        }
+        return 1
+      }`;
+  const bodies = {
+    "return": `return 5`,
+    "fail-free plain": `log("x")`,
+    "regex with a quote": `let s = "a".replace(/'/g, "x")\nlog(s)`,
+    "regex with a quote + return": `let s = "a".replace(/'/g, "x")\nreturn s`,
+    "regex with a double quote + return": `let s = "q".replace(/"/g, "x")\nreturn s`,
+    "regex [/*] + return": `let s = "a/*b".replace(/[/*]/g, "x")\nreturn s`,
+    "backtick in a template + return": "let s = `a${\"`\"}b`\nreturn s",
+    "object key named return": `let o = { return: 1 }\nlog(o.return)`,
+    "end-of-line ternary": `let t = x > 0 ?\n "p" : "n"\nlog(t)`,
+    "keywords inside a string": `log("return fail ? break")`,
+    "lambda return (a boundary)": `let q = [1, 2].map((v) => { return v + 1 })\nlog(q)`,
+    "inner loop break": `for (const i of [1, 2]) {\n if (i == 2) { break }\n log(i)\n}`,
+    "break leaving the defer": `break`,
+  };
+  for (const [name, body] of Object.entries(bodies)) {
+    test(`tree vs text parity — ${name}`, () => {
+      const tree = check(header + TREE(body));
+      const handler = check(header + HANDLER(body)).filter((c) => c !== "E-DEFER-UNHANDLED-FAILABLE");
+      const arm = check(header + MATCH_ARM(body));
+      // `break` with no loop is illegal in a statement position the TREE path
+      // can't even build without a loop (the parser keeps it); every other body
+      // must give the same answer on all three paths.
+      expect(handler).toEqual(tree);
+      expect(arm).toEqual(tree);
+    });
+  }
+  test("a text body that does not parse FAILS CLOSED (never silently accepted)", () => {
+    const codes = check(header + `
+      function f() {
+        defer risky() !{
+          | _ :> { let = = = }
+        }
+        return 1
+      }`);
+    expect(codes).toContain("E-DEFER-CONTROL-FLOW");
   });
 });
 
@@ -900,5 +962,70 @@ describe("§9 F6 — the in-place handling hint uses a form that compiles", () =
         @trace = @trace + "w;"
       }`, `<button onclick=work()>go</button><p>\${@trace}</p>`));
     expect(good.errors.map((x) => x.code)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §10 — S430 round 3 (H3): a deferred `!{}` handler is TOTAL, and the lowering
+// never propagates out of the `finally`
+// ---------------------------------------------------------------------------
+
+describe("§10 H3 — deferred handlers are total; no return from inside the finally", () => {
+  const base = `
+    type CloseError:enum = { Busy, Gone }
+    <trace> = ""
+    function closeAll()! -> CloseError { fail CloseError.Busy }`;
+
+  test("a deferred handler without a `_` arm -> E-DEFER-UNHANDLED-FAILABLE (even if it lists every declared variant)", () => {
+    const r = compile(wrap(`${base}
+      function work() {
+        defer closeAll() !{
+          | ::Busy :> @trace = @trace + "b;"
+          | ::Gone :> @trace = @trace + "g;"
+        }
+        @trace = @trace + "w;"
+      }`, `<button onclick=work()>go</button><p>\${@trace}</p>`));
+    expect(count(r, "E-DEFER-UNHANDLED-FAILABLE")).toBe(1);
+  });
+
+  test("the same handler NOT deferred is unaffected (the rule is scoped to deferred bodies)", () => {
+    const r = compile(wrap(`${base}
+      function work() {
+        closeAll() !{
+          | ::Busy :> @trace = @trace + "b;"
+          | ::Gone :> @trace = @trace + "g;"
+        }
+      }`, `<button onclick=work()>go</button><p>\${@trace}</p>`));
+    expect(count(r, "E-DEFER-UNHANDLED-FAILABLE")).toBe(0);
+  });
+
+  test("lowering: a deferred handler never emits `return` inside the finally (even without a `_` arm)", async () => {
+    const { emitLogicNode } = await import("../../src/codegen/emit-logic.ts");
+    const { ast } = liveAST(wrap(`${base}
+      function work() {
+        defer closeAll() !{
+          | ::Busy :> @trace = @trace + "b;"
+        }
+        @trace = @trace + "w;"
+      }`));
+    const fn = findAll(ast, (n) => n.kind === "function-decl" && n.name === "work")[0];
+    lowerDefers({ nodes: [fn] }, new Set());
+    const js = emitLogicNode(fn.body[0], { insideFunctionBody: true, declaredNames: new Set() });
+    const fin = js.slice(js.indexOf("} finally {"));
+    expect(fin).toContain("__scrml_error");
+    expect(fin).not.toMatch(/\breturn\b/);
+  });
+
+  test("the same non-deferred handler still propagates the unmatched error (unchanged)", async () => {
+    const { emitLogicNode } = await import("../../src/codegen/emit-logic.ts");
+    const { ast } = liveAST(wrap(`${base}
+      function work() {
+        closeAll() !{
+          | ::Busy :> @trace = @trace + "b;"
+        }
+      }`));
+    const fn = findAll(ast, (n) => n.kind === "function-decl" && n.name === "work")[0];
+    const js = emitLogicNode(fn.body[0], { insideFunctionBody: true, declaredNames: new Set() });
+    expect(js).toMatch(/else \{ return /);
   });
 });

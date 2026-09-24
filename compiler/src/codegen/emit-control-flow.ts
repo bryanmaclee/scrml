@@ -1143,7 +1143,7 @@ export function emitDeferScope(node: any, opts: any): string {
   // The deferred body is NOT a tilde-capture continuation of the surrounding
   // statements (§32 — it runs at exit); drop any inherited tilde context.
   const { tildeContext: _dropTilde, ...deferOpts } = opts ?? {};
-  for (const code of emitLogicBody(deferred, { ...deferOpts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames) })) {
+  for (const code of emitLogicBody(deferred, { ...deferOpts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames), inDeferredBody: true })) {
     for (const line of code.split("\n")) lines.push(`  ${line}`);
   }
   lines.push(`}`);

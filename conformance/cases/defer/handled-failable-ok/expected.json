@@ -1,16 +1,16 @@
 {
   "id": "defer-handled-failable-ok",
-  "description": "§19.16.3 rule 3 — a failable deferred call handled in place with `!{}` is legal and its handler runs at exit: `defer closeAll() !{ ::Busy :> … }` compiles clean; at exit closeAll fails with Busy and the in-place handler records it: trace = \"work;close-failed;\".",
+  "description": "§19.16.3 rule 3 — a failable deferred call handled in place with a TOTAL `!{}` handler (a variant arm plus the required `| _ :>` catch-all) is legal and its handler runs at exit: closeAll fails with Busy, the `::Busy` arm records it: trace = \"work;close-busy;\".",
   "language-version": "1.0",
   "spec": "§19.16.3",
   "provenance": "ruling:user-voice-S430-P3",
-  "rationale": "§19.16.3 rule 3: the canonical in-place handling is an inline `!{}` handler; the `!{}` binds to the deferred call (not to the `defer`), so it runs when the deferred body runs — at the block's exit.",
+  "rationale": "§19.16.3 rule 3: a failable call inside a deferred body is handled in place with a `!{}` handler that is total (it has a `_` arm, so a failure outside the declared enum cannot escape); the `!{}` binds to the deferred call, so it runs when the deferred body runs — at the block's exit.",
   "expect": {
     "codes": [],
     "notCodePrefixes": ["E-DEFER-"],
     "notCodes": ["E-ERROR-002"],
     "input": [{ "click": "#go" }],
-    "state": { "trace": "work;close-failed;" },
-    "domAnchored": [{ "selector": "#out", "text": "work;close-failed;" }]
+    "state": { "trace": "work;close-busy;" },
+    "domAnchored": [{ "selector": "#out", "text": "work;close-busy;" }]
   }
 }

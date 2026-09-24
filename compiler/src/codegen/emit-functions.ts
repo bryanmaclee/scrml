@@ -1,6 +1,8 @@
 import { genVar } from "./var-counter.ts";
 import { routePath, paramName, paramSignature } from "./utils.ts";
 import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.js";
+import { mayReferenceAny } from "./lower-defer.ts";
+import { listDeclaredNames } from "../validators/defer-structure.ts";
 import { CGError } from "./errors.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
@@ -304,7 +306,7 @@ function openCpsDeferScope(
   opts: Record<string, unknown>,
 ): void {
   const deferred = Array.isArray((deferNode as { body?: unknown }).body) ? (deferNode as { body: ASTNode[] }).body : [];
-  const deferredCode = emitLogicBody(deferred, { ...opts, declaredNames: new Set<string>((opts.declaredNames as Set<string> | undefined) ?? []) } as any);
+  const deferredCode = emitLogicBody(deferred, { ...opts, declaredNames: new Set<string>((opts.declaredNames as Set<string> | undefined) ?? []), inDeferredBody: true } as any);
   lines.push(`${pad}try {`);
   stack.push({ openAt: lines.length, pad, deferredCode });
 }
@@ -326,13 +328,22 @@ function hoistCpsFunctionDecls(
   hoisted: Set<number>,
   opts: Record<string, unknown>,
 ): void {
+  // Round 3 (H2) — the same structural rule as lower-defer.ts: a function that
+  // references a local declared later in the walk stays with that binding.
+  const laterDecls = listDeclaredNames(order.map((i) => body[i]).filter((x) => x && !isServerIdxSafe(isServerIdx, body, x)));
   for (const idx of order) {
     const s = body[idx];
     if (!s || s.kind !== "function-decl" || isServerIdx(idx) || hoisted.has(idx)) continue;
+    if (mayReferenceAny(s as any, laterDecls)) continue;
     const code = emitLogicNode(s, opts as any);
     if (code) for (const line of code.split("\n")) lines.push(`${pad}${line}`);
     hoisted.add(idx);
   }
+}
+
+function isServerIdxSafe(isServerIdx: (i: number) => boolean, body: ASTNode[], node: ASTNode): boolean {
+  const i = body.indexOf(node);
+  return i >= 0 && isServerIdx(i);
 }
 
 function closeCpsDeferScopes(lines: string[], stack: OpenCpsDefer[]): void {

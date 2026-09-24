@@ -46,6 +46,8 @@
  * @module lower-defer
  */
 
+import { functionFreeRefs, listDeclaredNames } from "../validators/defer-structure.ts";
+
 type Node = Record<string, unknown> & { kind?: string; span?: unknown };
 
 /** Is this the compiler-lowered form of a `defer` (not a source try)? */
@@ -62,34 +64,37 @@ export function lowerDeferList(list: unknown[]): unknown[] {
   const idx = list.findIndex((s) => !!s && typeof s === "object" && (s as Node).kind === "defer-stmt");
   if (idx < 0) return list;
   const d = list[idx] as Node;
-  // S430 review F1 — a nested `function` declaration written AFTER the `defer`
-  // is visible to the WHOLE block in scrml (as in JS, a function declaration is
-  // hoisted to the top of its block), so code BEFORE the `defer` may call it.
-  // Wrapping it inside the `try` would scope it to the try block and that
-  // earlier call would throw. Such declarations are moved out, in front of the
-  // `try`, where block hoisting still reaches the whole original block.
+  // S430 review F1 / round 3 (H2, M1) — a nested `function` declaration
+  // written AFTER the `defer` is visible to the WHOLE block in scrml (as in JS,
+  // a function declaration is hoisted to the top of its block), so code BEFORE
+  // the `defer` may call it. Wrapping it inside the `try` would scope it to the
+  // try block and that earlier call would throw. Such declarations are moved
+  // out, in front of the `try`, where block hoisting still reaches the whole
+  // original block.
   //
-  // One exception keeps a declaration INSIDE: a body that mentions a `let` /
-  // `const` / `lin` binding declared in the rest-of-block. That binding lives in
-  // the `try` block, so a hoisted function could not see it; kept inside, the
-  // function still works for every call made after the `defer` (a call made
-  // before it would already have hit that binding's temporal dead zone in the
-  // un-deferred program too). The name test is textual and conservative — a
-  // false match only means the declaration stays where it was.
+  // One exception keeps a declaration INSIDE: the function REFERENCES a local
+  // binding declared in the rest-of-block. That binding lives in the `try`
+  // block, so a hoisted function would silently bind whatever same-named
+  // binding is in the OUTER scope instead (or throw). Kept inside, the function
+  // still works for every call made after the `defer` (a call made before it
+  // would already have hit that binding's temporal dead zone in the un-deferred
+  // program too).
+  //
+  // Both halves are STRUCTURAL (contract Rule 7): the declared names come from
+  // the destructure-aware binding iterator (`let {a}` / `const [p, q]` declare
+  // `a` / `p`, `q`), and the references from a scope-aware walk of the
+  // function's TREE (`functionFreeRefs`) — a local that shadows the name is not
+  // a reference, and neither is an object key, a property name or string
+  // content. When the walk cannot see part of the body structurally it answers
+  // "unknown", and the declaration stays inside (the only choice that cannot
+  // silently rebind a name).
   const tail = list.slice(idx + 1);
-  const tailDeclNames = new Set<string>();
-  for (const s of tail) {
-    const sn = s as Node;
-    if (!sn || typeof sn !== "object") continue;
-    if ((sn.kind === "let-decl" || sn.kind === "const-decl" || sn.kind === "lin-decl" || sn.kind === "tilde-decl") && typeof sn.name === "string") {
-      tailDeclNames.add(sn.name);
-    }
-  }
+  const tailDeclNames = listDeclaredNames(tail);
   const hoisted: unknown[] = [];
   const kept: unknown[] = [];
   for (const s of tail) {
     const sn = s as Node;
-    if (sn && typeof sn === "object" && sn.kind === "function-decl" && !referencesAny(sn, tailDeclNames)) {
+    if (sn && typeof sn === "object" && sn.kind === "function-decl" && !mayReferenceAny(sn, tailDeclNames)) {
       hoisted.push(s);
     } else {
       kept.push(s);
@@ -109,19 +114,16 @@ export function lowerDeferList(list: unknown[]): unknown[] {
   return [...list.slice(0, idx), ...hoisted, tryNode];
 }
 
-/** Does `fn`'s body text mention any of `names` as a whole identifier? */
-function referencesAny(fn: Node, names: Set<string>): boolean {
+/**
+ * Could `fn` reference any of `names`? Structural: the function's free
+ * identifiers from a scope-aware tree walk. `true` when the walk reports
+ * "unknown" (part of the body is not visible as a tree).
+ */
+export function mayReferenceAny(fn: Node, names: Set<string>): boolean {
   if (names.size === 0) return false;
-  let text: string;
-  try {
-    text = JSON.stringify(fn.body ?? [], (k, v) => (k === "span" ? undefined : v));
-  } catch {
-    return true; // cannot inspect -> conservative: keep it inside
-  }
-  for (const n of names) {
-    const esc = n.replace(/[$]/g, "\\$");
-    if (new RegExp(`(?:^|[^\\w$])${esc}(?![\\w$])`).test(text)) return true;
-  }
+  const free = functionFreeRefs(fn);
+  if (free === null) return true;
+  for (const n of names) if (free.has(n)) return true;
   return false;
 }
 

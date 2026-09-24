@@ -28,3 +28,16 @@
 - nested `function` declared inside an `if` block and called before it: E-SCOPE-001 (scope checker does not hoist block-level fn decls) — independent of defer.
 - a nested function declared inside a CPS-split function is placed server-side / missing: `@x = @x + label()` became a reactive-server stmt calling `label()` server-side where `label` is not defined.
 - multi-line statements in a function body are indented only on their first line (emit-functions scheduled-body loop).
+
+## Round 3 (re-review of b61e3ac4) — Rule 7: structure, not text
+- merged origin/main (#1046 b904818d, #1045 4b8ccdb8) as b120fcb8 — no conflicts; SPEC-INDEX regen unchanged; defer suite green.
+- 1 (H1): lint-defer's text scanner (`blankLiterals` / `scanRawControlFlow` / `afterArmArrow`) DELETED. New `validators/defer-structure.ts`: text-carried arm/handler bodies are PARSED (block-splitter + ast-builder, the `_emitNestedGuardedArmBody` precedent; match arms split by codegen's own `parseMatchArm`) and walked by the SAME structural walker; unparseable -> E-DEFER-CONTROL-FLOW "could not be verified" (fail closed). Lambda / on-mount `defer` detection also switched from a regex to a native-parser parse (`textContainsDeferStatement`). Unit tests: tree-vs-handler-arm-vs-match-arm parity over 13 bodies (regex with `'` / `"` / `[/*]`, backtick in template, `{ return: 1 }`, EOL ternary, keywords in strings, lambda boundary, inner loop).
+- 2 (H2+M1): lower-defer hoisting analysis structural — declared names via `iterDestructuredNames` (type-system), references via a scope-aware tree walk (`functionFreeRefs`; unknown -> keep inside). Same rule applied to the CPS-wrapper hoist. Conformance `hoist-structural` + no-defer twin `hoist-structural-twin` (identical trace); adversarial name-only revert -> "OUTER;D1;D2;".
+- 3 (H3): a deferred `!{}` handler must carry `| _ :>` (E-DEFER-UNHANDLED-FAILABLE, lint-defer) and the lowering never emits the unmatched-error `return` inside a `finally` (`EmitLogicOpts.inDeferredBody`). Conformance `server-callee-error-total-handler` + twin (server callee answers CpsError/ServerError; @out = "OK" in both). Unit: adversarial removal of the guard fails the lowering test.
+- SPEC §19.16.3 (rule 1 parse-verify + fail closed; rule 3 totality), §19.16.6 (structural hoisting), §19.16.8 (native divergence for handler arms stated), §19.13/§34 rows; index regenerated.
+
+## Pre-existing (recorded, not fixed) — round 3 additions
+- h11/h12: a `//` comment inside a `!{}` handler arm reaches the tree with its `//` stripped (`handler: "{\n return here\n…"`) — the front-end mangles it; codegen would emit that text as code. The defer checker now reports what codegen would emit (a `return`), which is at least not silent.
+- h08: `for await` inside a handler arm slips past E-FOR-AWAIT-NOT-IN-SCRML (handler text is never walked by the async/await validator).
+- native: `!{}` handler arms are dropped (`arms: []`) -> native compiles of deferred handlers get E-TYPE-080 + (now) E-DEFER-UNHANDLED-FAILABLE; §19.16.8 records the divergence.
+- block-level nested function called before its declaration inside an `if` block -> E-SCOPE-001 (scope checker does not hoist block-level fn decls).

@@ -15,20 +15,28 @@
  *   - `E-DEFER-CONTROL-FLOW`     — a deferred body contains `return`, `fail`, `?`,
  *     or a `break`/`continue` whose target is outside the deferred body. §19.16.3 (1).
  *
- * Two further §19.16 codes are NOT here because they need information this
- * purely-structural pass does not have:
- *   - `E-DEFER-UNHANDLED-FAILABLE` (§19.16.3 (3)) needs the failable-function
- *     set — emitted by the type system (`type-system.ts`, the E-ERROR-002 site).
- *   - `E-DEFER-SERVER-IN-SPLIT` (§19.16.5) needs the CPS split — emitted by
- *     route inference (`route-inference.ts`, `analyzeCPSEligibility`).
+ *   - `E-DEFER-UNHANDLED-FAILABLE` (§19.16.3 (3), totality limb) — a `!{}`
+ *     handler on a deferred call without a catch-all `| _ :>` arm. (The
+ *     bare-call limb needs the failable-function set and is emitted by the
+ *     type system, `type-system.ts`, at the E-ERROR-002 site.)
+ *
+ * `E-DEFER-SERVER-IN-SPLIT` (§19.16.5) needs the CPS split — emitted by route
+ * inference (`route-inference.ts`).
+ *
+ * NO TEXT SCANNING (S430 round 3, contract Rule 7). Arm / handler bodies the
+ * front-end carries as text are PARSED into statement trees
+ * (`defer-structure.ts` `parseStatementText`) and walked by this same walker;
+ * a body that does not parse fails closed. A `defer` inside a lambda /
+ * `on mount` body carried as text is found by PARSING that text
+ * (`textContainsDeferStatement`), not by matching the word.
  *
  * Function boundaries: a `function-decl` body (covers `function`, `fn`,
  * `server function`) is where `defer` is legal. A `lambda` (arrow / function
  * expression) body is a fresh control-flow scope but does NOT admit `defer` in
  * stage 1 (§19.16.3 rule 4) — both front-ends carry a block-bodied lambda as
- * host-expression TEXT (an `escape-hatch`), as they do an `on mount { }` body,
- * so a `defer` there is found by a statement-anchored scan of that text and
- * reported as E-DEFER-OUTSIDE-FUNCTION instead of reaching codegen verbatim.
+ * host-expression TEXT (an `escape-hatch`), as they do an `on mount { }` body;
+ * a `defer` there is reported as E-DEFER-OUTSIDE-FUNCTION instead of reaching
+ * codegen verbatim.
  * A nested function inside a deferred body is its OWN control-flow scope: its
  * `return` / `fail` / `?` are legal.
  *
@@ -38,12 +46,14 @@
  * @module lint-defer
  */
 import { isMetaKind } from "../types/ast.ts";
+import { parseStatementText, textBodiesOf, textContainsDeferStatement } from "./defer-structure.ts";
 import type { FileAST, Span } from "../types/ast.ts";
 
 export type DeferCode =
   | "E-DEFER-OUTSIDE-FUNCTION"
   | "E-DEFER-NESTED"
-  | "E-DEFER-CONTROL-FLOW";
+  | "E-DEFER-CONTROL-FLOW"
+  | "E-DEFER-UNHANDLED-FAILABLE";
 
 export interface DeferDiagnostic {
   code: DeferCode;
@@ -73,193 +83,10 @@ interface WalkState {
   inLambda?: boolean;
 }
 
-/**
- * A `defer` statement lead inside RAW host-expression text — the body of a
- * block-bodied arrow / function expression, or an `on mount { … }` body, both of
- * which the front-ends carry as text (an `escape-hatch` / a raw `bare-expr`)
- * rather than as a parsed statement list. Anchored at a statement boundary
- * (`{`, `;`, newline, start) and followed by a statement-lead character, so
- * `defer(x)` / `defer = 1` / `x.defer` never match.
- */
-const RAW_DEFER_LEAD_RE =
-  /(?:^|[{;\n])\s*defer[ \t]+(?!(?:or|and|is|as|of|in|instanceof|else)\b)(?:[A-Za-z_$@{]|\?\{)/;
-
-/** Escape-hatch kinds that carry a FUNCTION-EXPRESSION body as raw text. */
-function isRawFunctionExpression(n: Node): boolean {
-  if (n.kind !== "escape-hatch" || typeof n.raw !== "string") return false;
-  const nk = n.nativeKind;
-  if (nk === "ArrowFunctionExpression" || nk === "FunctionExpression") return true;
-  // The live expression parser gives up on a block-bodied lambda containing a
-  // scrml-only statement (`ParseError`); recognise the lambda by its text.
-  return /^\s*(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/.test(n.raw as string);
-}
-
 const LOOP_KINDS = new Set(["for-stmt", "while-stmt", "do-while-stmt"]);
 
 function spanOf(n: Node, filePath: string): Span {
   return (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span;
-}
-
-/**
- * The raw-TEXT statement bodies a node carries (S430 review F3) — fields whose
- * content codegen splices as statements but that no structural walk can see:
- *   - a live `bare-expr` `.expr` (a value-form `match` arm with a block body is a
- *     `bare-expr` whose text is `<pattern> :> { … }`);
- *   - a live `match-arm-inline` `.result`;
- *   - a `!{}` handler arm's `.handler` (block-bodied handlers are text);
- *   - the native parser's `match-expr` `.rawArms[]`.
- */
-function rawBodyTexts(n: Node): string[] {
-  const out: string[] = [];
-  if (n.kind === "bare-expr" && typeof n.expr === "string") out.push(afterArmArrow(n.expr));
-  if (n.kind === "match-arm-inline" && typeof n.result === "string") out.push(n.result);
-  if (Array.isArray(n.rawArms)) for (const a of n.rawArms) if (typeof a === "string") out.push(afterArmArrow(a));
-  if (Array.isArray(n.arms)) {
-    for (const a of n.arms as unknown[]) {
-      if (a && typeof a === "object" && typeof (a as Node).handler === "string") out.push((a as Node).handler as string);
-    }
-  }
-  return out;
-}
-
-/**
- * A match ARM's text is `<pattern> <arrow> <body>`; its arm arrow (`:>`, or the
- * deprecated `=>` / `->`) is the FIRST arrow at paren/bracket depth 0. Return the
- * body after it (or the whole text when there is none), so the scanner never
- * mistakes a legacy `=>` arm arrow for an arrow-function head. An arrow nested
- * in parentheses (`list.map((x) => { … })`) is not depth 0 and is left alone.
- */
-function afterArmArrow(text: string): string {
-  const src = blankLiterals(text);
-  let depth = 0;
-  for (let i = 0; i < src.length - 1; i++) {
-    const c = src[i];
-    if (c === "(" || c === "[") depth++;
-    else if (c === ")" || c === "]") depth--;
-    else if (c === "{") return text; // a block before any arrow: not an arm head
-    else if (depth === 0 && (c === ":" || c === "=" || c === "-") && src[i + 1] === ">") {
-      return text.slice(i + 2);
-    }
-  }
-  return text;
-}
-
-/**
- * Blank out string / template literals and comments (same length), so the
- * scanner never sees a keyword inside `"return"` or a `// fail` comment.
- */
-function blankLiterals(src: string): string {
-  let out = "";
-  let i = 0;
-  while (i < src.length) {
-    const c = src[i];
-    if (c === "/" && src[i + 1] === "/") {
-      while (i < src.length && src[i] !== "\n") { out += " "; i++; }
-      continue;
-    }
-    if (c === "/" && src[i + 1] === "*") {
-      const end = src.indexOf("*/", i + 2);
-      const stop = end < 0 ? src.length : end + 2;
-      out += " ".repeat(stop - i);
-      i = stop;
-      continue;
-    }
-    if (c === '"' || c === "'" || c === "`") {
-      out += " ";
-      i++;
-      while (i < src.length && src[i] !== c) {
-        if (src[i] === "\\") { out += " "; i++; }
-        out += src[i] === "\n" ? "\n" : " ";
-        i++;
-      }
-      out += " ";
-      i++;
-      continue;
-    }
-    out += c;
-    i++;
-  }
-  return out;
-}
-
-/**
- * Find the control transfers a deferred raw-text body contains that would leave
- * the deferred body: `return`, `fail`, a postfix `?` propagation, and a
- * `break` / `continue` with no enclosing loop (or `switch`, for `break`) — either
- * inside the text or around it (`loopOutside` / `breakTargetOutside`, the
- * structural context the text sits in, still INSIDE the deferred body).
- *
- * Brace-aware: a `{` opened by an arrow (`=> {`) or a `function (…) {` head is a
- * function body — nothing inside it is reported (its own `return` is legal,
- * §19.16.3 rule 1). A `{` opened by a `for` / `while` / `do` head is a loop, a
- * `switch (…) {` a break target.
- */
-export function scanRawControlFlow(text: string, loopOutside = false, breakTargetOutside = false): string[] {
-  const src = blankLiterals(text);
-  const found: string[] = [];
-  type Frame = "fn" | "loop" | "switch" | "block";
-  const stack: Frame[] = [];
-  const inFn = () => stack.includes("fn");
-  const inLoop = () => loopOutside || stack.includes("loop");
-  const inBreakTarget = () => breakTargetOutside || stack.includes("loop") || stack.includes("switch");
-
-  // Classify a `{` at index i from the text before it.
-  const classify = (i: number): Frame => {
-    let j = i - 1;
-    while (j >= 0 && /\s/.test(src[j])) j--;
-    if (j >= 1 && src[j] === ">" && src[j - 1] === "=") return "fn";
-    if (j >= 1 && /[A-Za-z_$]/.test(src[j])) {
-      const m = /([A-Za-z_$][\w$]*)$/.exec(src.slice(0, j + 1));
-      if (m && m[1] === "do") return "loop";
-      if (m && m[1] === "else") return "block";
-    }
-    if (j >= 0 && src[j] === ")") {
-      // Walk back to the matching `(`.
-      let depth = 0;
-      let k = j;
-      for (; k >= 0; k--) {
-        if (src[k] === ")") depth++;
-        else if (src[k] === "(") { depth--; if (depth === 0) break; }
-      }
-      const head = src.slice(0, Math.max(0, k)).replace(/\s+$/, "");
-      if (/(?:^|[^\w$.])function(?:\s*\*)?(?:\s+[A-Za-z_$][\w$]*)?$/.test(head)) return "fn";
-      if (/(?:^|[^\w$.])(?:for|while)$/.test(head)) return "loop";
-      if (/(?:^|[^\w$.])switch$/.test(head)) return "switch";
-      // `(x) => {` — the arrow sits AFTER the paren group, handled above; a
-      // method-shorthand `name(…) {` inside an object literal is a function body.
-      if (/[A-Za-z_$][\w$]*$/.test(head) && !/(?:^|[^\w$.])(?:if|catch|with)$/.test(head)) return "fn";
-    }
-    return "block";
-  };
-
-  const re = /[{}]|\b(return|fail|break|continue)\b|\?/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(src)) !== null) {
-    const tok = m[0];
-    const at = m.index;
-    if (tok === "{") { stack.push(classify(at)); continue; }
-    if (tok === "}") { stack.pop(); continue; }
-    if (inFn()) continue;
-    // A keyword used as a property name (`x.return`) is not a statement.
-    let p = at - 1;
-    while (p >= 0 && /[ \t]/.test(src[p])) p--;
-    if (tok !== "?" && p >= 0 && src[p] === ".") continue;
-    if (tok === "return") found.push("`return`");
-    else if (tok === "fail") found.push("`fail`");
-    else if (tok === "break") { if (!inBreakTarget()) found.push("a `break` that leaves it"); }
-    else if (tok === "continue") { if (!inLoop()) found.push("a `continue` that leaves it"); }
-    else if (tok === "?") {
-      // Postfix `?` propagation: `?` after an operand, ending the statement —
-      // NOT `?.` / `??` / a ternary `a ? b : c` / a `?{` SQL opener.
-      const next = src.slice(at + 1);
-      if (/^[.?{]/.test(next)) continue;
-      if (at > 0 && src[at - 1] === "?") continue;
-      if (!/^[ \t]*(?:$|[\n;}])/.test(next)) continue;
-      if (p < 0 || !/[\w$)\]]/.test(src[p])) continue;
-      found.push("a `?` propagation");
-    }
-  }
-  return found;
 }
 
 const TOP_LEVEL_MSG =
@@ -310,14 +137,17 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     if (typeof kind === "string" && (isMetaKind(kind) || kind === "foreign" || kind === "Foreign")) return;
 
     // --- raw-text bodies: a `defer` inside text the front-end did not parse as
-    // statements would reach codegen verbatim (an E-CODEGEN-INVALID-LOGIC with no
-    // root cause). Name the actual rule instead.
-    if (isRawFunctionExpression(n) && RAW_DEFER_LEAD_RE.test(n.raw as string)) {
+    // statements (a block-bodied lambda / function expression carried as an
+    // escape-hatch, an `on mount { }` body) would reach codegen verbatim (an
+    // E-CODEGEN-INVALID-LOGIC with no root cause). The text is PARSED (native
+    // statement parser) and a `Defer` node looked for — no word matching.
+    if (kind === "escape-hatch" && typeof n.raw === "string" && n.raw.includes("defer") &&
+        textContainsDeferStatement(n.raw as string, true)) {
       report("E-DEFER-OUTSIDE-FUNCTION", n, LAMBDA_MSG);
       return;
     }
     if (kind === "bare-expr" && n._onMountEffect === true && typeof n.expr === "string" &&
-        RAW_DEFER_LEAD_RE.test(n.expr as string)) {
+        (n.expr as string).includes("defer") && textContainsDeferStatement(n.expr as string, false)) {
       report("E-DEFER-OUTSIDE-FUNCTION", n, TOP_LEVEL_MSG);
       return;
     }
@@ -365,19 +195,40 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
 
     const d = st.defer;
     if (d) {
-      // Raw-text arm / handler bodies (S430 review F3). A value-form `match` arm
-      // with a block body (`.A :> { return 5 }`), an inline match arm's result, a
-      // `!{}` handler arm, and the native parser's `rawArms` are carried as TEXT,
-      // not as statement nodes — the structural checks below cannot see a
-      // `return` / `fail` / `?` / `break` / `continue` inside them, and codegen
-      // splices that text verbatim into the lowered `finally`. Scan each such
-      // field with the brace-aware scanner (function / arrow bodies are skipped;
-      // loops inside the text are their own break/continue targets).
-      for (const text of rawBodyTexts(n)) {
-        for (const what of scanRawControlFlow(text, d.loopDepth > 0, d.loopDepth + d.switchDepth > 0)) {
-          controlFlow(n, what);
+      // Text-carried arm / handler bodies (S430 round 3): PARSE each into a
+      // statement tree and run this same walk over it, in the current deferred
+      // context (so a loop around the arm is still a break/continue target). A
+      // body that does not parse fails closed.
+      for (const tb of textBodiesOf(n)) {
+        const parsed = tb.text === null ? { ok: false as const } : parseStatementText(tb.text, filePath);
+        if (!parsed.ok) {
+          report("E-DEFER-CONTROL-FLOW", n,
+            `the control flow of ${tb.label} inside this deferred statement could not be verified — ` +
+            `its body did not parse as scrml statements, and a deferred statement must be proven ` +
+            `not to \`return\` / \`fail\` / \`?\` / \`break\` / \`continue\` out of it (§19.16.3). ` +
+            `Simplify the arm body, or move the logic into a named function and call it.`);
+          continue;
+        }
+        walk(parsed.stmts, st);
+      }
+
+      // §19.16.3 rule 3 (S430 round 3, H3) — a `!{}` handler on a deferred call
+      // must be TOTAL: every failure, including a transport failure that is not
+      // in the callee's declared error enum (a CPS / server-function call's
+      // CpsError), must land in an arm. Without a `_` arm the lowering would
+      // propagate the unmatched error with a `return` from inside the `finally`,
+      // overriding the function's real return value.
+      if (kind === "guarded-expr") {
+        const arms = Array.isArray(n.arms) ? (n.arms as Node[]) : [];
+        if (!arms.some((a) => a && a.pattern === "_")) {
+          report("E-DEFER-UNHANDLED-FAILABLE", n,
+            "a `!{}` handler on a deferred call must handle EVERY failure in place, including ones " +
+            "not listed in the callee's error type (a network / server failure of a server call) — " +
+            "an unmatched failure has nowhere to go from a block that is already exiting (§19.16.3). " +
+            "Add a catch-all arm: `| _ :> …`.");
         }
       }
+
       if (kind === "return-stmt") controlFlow(n, "`return`");
       else if (kind === "fail-expr") controlFlow(n, "`fail`");
       else if (kind === "propagate-expr") controlFlow(n, "a `?` propagation");
