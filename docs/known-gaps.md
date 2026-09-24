@@ -17923,3 +17923,42 @@ mechanism, and it had no real program exercising it until today.
 
 — NEW S428-bryan (PA-VERIFIED BY EXECUTION — cloud gate caught it, PA isolated it by reverting B1 alone and re-running the suite locally to 1016/0)
 <!-- @gap id=g-the-two-front-ends-disagree-about-the-guard-form sev=HIGH status=open locus=searched:compiler/native-parser,compiler/src/ast-builder.js,compiler/src/codegen/compat/parser-workarounds.js prov=empirical:meta-checker-with-zero-A1-sites-and-one-B1-site-produced-nine-field-level-divergences-and-reverting-B1-takes-the-suite-to-1016-pass-0-fail -->
+
+### G-ENUM-VARIANT-PAYLOAD-MAY-STORE-A-FUNCTION — the passed-vs-stored rule is enforced for struct fields only
+
+**PA-VERIFIED BY EXECUTION on `15e60e4b` (S430).** `type Op:enum = { Run(f: (x: int) -> int), Stop }` + `<op>: Op = .Stop`
+compiles at exit 0 with no diagnostic about the function-typed payload. Governing sentence, §15.11.5.1: *"A function may
+be PASSED (a component prop) or CALLED (an event handler, inline), but it SHALL NEVER be STORED as value data (a struct
+field or a state cell)."* An enum payload is stored value data (held in cells, `==`-compared, serialized). Only
+`E-STRUCT-FUNCTION-FIELD` (§14.3) enforces the rule. Direction of the fix: newly-rejecting → candidate for the S385
+PA-ruling class once the corpus is COMPILED to zero. Also the anti-virtual-function stance bryan stated S430.
+
+<!-- @gap id=g-enum-variant-payload-may-store-a-function sev=MED status=open locus=searched:compiler/src/type-system.ts(E-STRUCT-FUNCTION-FIELD-site-only) prov=spec:§15.11.5.1-SHALL-NEVER-be-STORED-as-value-data -->
+
+### G-IMPORT-HOST-IS-UNIMPLEMENTED-AND-RENDERS-AS-PAGE-TEXT — a normative §21.3.1 declaration compiles to visible body text
+
+**PA-VERIFIED BY EXECUTION on `15e60e4b` (S430).** `import:host { tokenize } from "./tok.js"` at file top compiles at
+exit 0, zero diagnostics, and the declaration appears VERBATIM in the emitted `<body>`. `grep -rn 'import:host\|E-IMPORT-008'
+compiler/src` → zero hits. §21.3.1 is normative (S114) with `E-IMPORT-008` / `E-IMPORT-009` in §34 and no implementation.
+Ruled to BUILD at S430 (P4). The bootstrap's host-module bridge.
+
+<!-- @gap id=g-import-host-is-unimplemented-and-renders-as-page-text sev=HIGH status=open locus=searched:compiler/src,compiler/native-parser prov=ruling:user-voice-S430-P4 -->
+
+### G-DEV-CREATES-EMPTY-DB-STUBS-THAT-BREAK-LATER-COMPILES — `scrml dev` leaves zero-byte `.db` files beside sources
+
+**Adopter-reported (flogence S49, 2026-09-23), RELAYED-UNVERIFIED — reproduction dispatched S430 (`s430-dev-db-stub`).**
+`db="./flogence.db"` with the real store at the repo root: `dev` creates zero-byte `src/flogence.db` + `src/ports/flogence.db`;
+every later `compile` resolves against the source dir, opens the stub, and fails `E-PA-004` naming tables — not the path it
+opened. Two defects: the side-effect create + resolution mismatch, and a diagnostic that does not name the resolved path.
+
+<!-- @gap id=g-dev-creates-empty-db-stubs-that-break-later-compiles sev=HIGH status=open locus=compiler/src/commands/dev.js prov=adopter:flogence-S49 -->
+
+### G-EACH-ROW-STALE-AFTER-AN-AWAITED-SERVER-CALL — a cell reassigned after an async boundary repaints a `${}` but not a keyed `<each>` row
+
+**Adopter-reported (flogence S49, 2026-09-23), RELAYED-UNVERIFIED.** A click handler awaits a server fn, reassigns the
+backing cell, recomputes `@findHits`; `<each in=@findHits as h key=h.k>` rows do not repaint until the next keystroke, while
+`${@findMsg}` outside the each updates. Positive control: the same recompute called synchronously from `oninput` repaints.
+Four non-fixes reported (empty-then-refill, mutable key, setTimeout defer, combinations). Possibly the same root as the
+flogence S11 hidden-initial-subtree note. Reproduce before dispatching.
+
+<!-- @gap id=g-each-row-stale-after-an-awaited-server-call sev=HIGH status=open locus=searched:none-yet prov=adopter:flogence-S49 -->
