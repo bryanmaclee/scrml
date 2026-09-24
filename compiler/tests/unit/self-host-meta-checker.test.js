@@ -10,9 +10,9 @@
  */
 
 import { parseExprToNode } from "../../src/expression-parser.ts";
+import { compileScrml } from "../../src/api.js";
 import { fileURLToPath } from "node:url";
 import { describe, test, expect } from "bun:test";
-import { execSync } from "child_process";
 import { resolve, dirname } from "path";
 import { existsSync } from "fs";
 
@@ -95,21 +95,31 @@ describe("self-host: meta-checker.scrml compilation", () => {
   // top-level fn handler at line ~7760, adapted for nested bodies via
   // parseRecursiveBody. SPEC §7.3.1 + §48.11. Meta-checker compile is now
   // clean (no E-SCOPE-001 errors).
-  test("compiles without errors", () => {
-    const compilerRoot = resolve(dirname(fileURLToPath(new URL(import.meta.url))), "../../../compiler");
-    const cli = resolve(compilerRoot, "src/cli.js");
-
-    if (!existsSync(cli)) {
-      console.log("Skipping compilation test — compiler CLI not available in this worktree");
-      return;
-    }
-
+  // ⚑ S430 P2 — this used to assert "compiles without errors", and that was only
+  // ever true because the export re-parse SWALLOWED every diagnostic inside an
+  // `export function` body. With the swallow closed, the file reports its three
+  // forbidden-vocabulary sites. They are NOT migrated (see
+  // docs/changes/s430-p2-export-swallow/progress.md):
+  //   :297  try/catch around extractIdentifiersFromAST — the canonical
+  //         `safeCall(...) !{}` form miscompiles a later reassignment of the
+  //         guarded `let` (emitted as a shadowing `const`), and trips the
+  //         within-node parser-parity gate;
+  //   :455, :460  `throw` inside the reflect() closure — reflect()'s throw IS the
+  //         E-META-003 reporting channel; `fail` would make every user `reflect(T)`
+  //         call site need `!{}`. A contract decision, not a syntax migration.
+  // The test pins EXACTLY that residue: a new error class here fails the test,
+  // and so does a migration that clears a site without updating this pin.
+  test("compiles with exactly the known unmigrated forbidden-vocabulary residue", () => {
     const outDir = resolve(dirname(scrmlFile), "dist");
-    const result = execSync(`bun ${cli} compile ${scrmlFile} -o ${outDir}`, {
-      encoding: "utf-8",
-      timeout: 30000,
+    const r = compileScrml({
+      inputFiles: [scrmlFile], outputDir: outDir, write: false, verbose: false, log: () => {},
     });
-    expect(result).toContain("Compiled");
+    const got = (r.errors ?? []).map((e) => `${e.code}@${e.span?.line ?? e.tabSpan?.line}`).sort();
+    expect(got).toEqual([
+      "E-THROW-NOT-IN-SCRML@455",
+      "E-THROW-NOT-IN-SCRML@460",
+      "E-TRY-NOT-IN-SCRML@297",
+    ]);
   });
 });
 

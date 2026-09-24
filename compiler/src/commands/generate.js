@@ -45,6 +45,7 @@
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "fs";
 import { resolve, join, relative, dirname } from "path";
 import { fileURLToPath } from "url";
+import { SecretRedactor } from "../diagnostic-secrets.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -280,7 +281,8 @@ function generateAuth(opts) {
   const loginRedirect = explicitLoginRedirect || "/login";
 
   if (dbSrc) {
-    console.log(c.dim(`  detected <db src="${dbSrc}"> — template will be wired to this DB`));
+    // s430-dev-db-stub R2-2 — the detected value passes the value-based redactor.
+    console.log(new SecretRedactor([dbSrc]).redact(c.dim(`  detected <db src="${dbSrc}"> — template will be wired to this DB`)));
   } else {
     console.log(c.dim(`  no <db> declaration detected — template ships with default 'app.db' placeholder`));
   }

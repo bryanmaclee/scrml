@@ -11212,13 +11212,23 @@ function annotateNodes(
         }
         {
           const bindSpan = (n.span as Span | undefined) ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-          checkLinShadowing(
-            typeof n.name === "string" ? n.name : undefined,
-            bindSpan,
-            scopeChain,
-            errors,
-            (n.kind === "const-decl") ? "const" : "let",
-          );
+          // s430 — every name a DESTRUCTURED declaration yields is checked too:
+          // `lin tok = …; if (…) { const { tok } = o }` shadows the `lin` exactly
+          // as `const tok = …` does (before, a pattern name was skipped).
+          const _linShadowNames: string[] = typeof n.name === "string"
+            ? [n.name]
+            : isDestructurePattern(n.name)
+              ? [...iterDestructuredNames(n.name as DestructurePatternShape)]
+              : [];
+          for (const _nm of _linShadowNames) {
+            checkLinShadowing(
+              _nm,
+              bindSpan,
+              scopeChain,
+              errors,
+              (n.kind === "const-decl") ? "const" : "let",
+            );
+          }
         }
         // A5 (2026-05-17) — `n.name` is either a bare-ident string OR a
         // structured DestructurePattern (replaces A1's bare-expr scrape).
@@ -11244,14 +11254,24 @@ function annotateNodes(
         }
         const _isConstBinding = n.kind === "const-decl";
         if (n.name && isDestructurePattern(n.name)) {
+          // A destructured declaration is a DECLARATION of every name it
+          // yields — each binds in the CURRENT scope and shadows any outer
+          // binding of the same name, exactly as the plain `let x` / `const x`
+          // arm below does (§7.3.1 block scoping; §50.9 `let` is the only
+          // mutable declaration form). Bind UNCONDITIONALLY.
+          //
+          // ⚑ Do NOT guard with `!scopeChain.lookup(bind)`. `lookup` walks the
+          // WHOLE chain, so that guard skipped the bind whenever ANY outer
+          // scope held the name, and the inner name then resolved to the OUTER
+          // entry: `const a = 0; function f(o) { let { a } = o; a = 1 }` fired
+          // a false E-ASSIGN-004, and the mirror `let a = 0; … const { a } = o;
+          // a = 1` compiled clean and threw at runtime (s430-destructure-shadow).
           for (const bind of iterDestructuredNames(n.name as DestructurePatternShape)) {
-            if (!scopeChain.lookup(bind)) {
-              scopeChain.bind(bind, {
-                kind: "variable",
-                resolvedType: tAsIs(),
-                ...(_isConstBinding ? { isConst: true } : {}),
-              });
-            }
+            scopeChain.bind(bind, {
+              kind: "variable",
+              resolvedType: tAsIs(),
+              ...(_isConstBinding ? { isConst: true } : {}),
+            });
           }
         } else if (n.name) {
           scopeChain.bind(n.name as string, {
@@ -13243,20 +13263,32 @@ function annotateNodes(
         // for-of / for-in form: `variable` is a string name, OR a structured
         // DestructurePattern (A5 2026-05-17), OR null for C-style headers.
         const forVar = (n as Record<string, unknown>).variable;
+        // s430 — §50.8.5 / §50.9: an EXPLICIT `const` binder (`for (const x of …)`,
+        // plain or destructured; the parser records it as `constBinder: true`) is
+        // immutable, so a write to it in the body is E-ASSIGN-004 in EVERY loop,
+        // not only a rendering one. A `let` binder is mutable. A KEYWORDLESS binder
+        // (`for (x of …)`) is deliberately left mutable here, exactly as before:
+        // whether it is `const` is a language ruling still pending with bryan.
+        const _forBinderConst = (n as Record<string, unknown>).constBinder === true
+          ? { isConst: true as const }
+          : {};
         if (typeof forVar === "string" && forVar.length > 0) {
           // §14.8.8 (T2a) — when the iterated collection is a SQL-projection
           // `Row[]`, bind `forVar` to the row STRUCT (so `forVar.id` types and
           // `forVar.bogus` → E-TYPE-004). Bounded to sql-row provenance; every
           // other collection keeps the permissive `asIs` binding.
           const _forRow = resolveIterableRowElement((n as Record<string, unknown>).iterable);
-          scopeChain.bind(forVar, { kind: "variable", resolvedType: _forRow ?? tAsIs() });
+          scopeChain.bind(forVar, { kind: "variable", resolvedType: _forRow ?? tAsIs(), ..._forBinderConst });
         } else if (isDestructurePattern(forVar)) {
           // A5 — structural destructuring walk. Each bound name enters scope
-          // as a plain `asIs` variable (same semantics as A1's regex extractor).
+          // as a plain `asIs` variable in the loop's own scope (pushed above),
+          // shadowing any outer binding — the same unconditional bind the
+          // single-identifier arm does. A `!scopeChain.lookup(bind)` guard here
+          // resolved a shadowing binder to the OUTER entry (a false
+          // E-ASSIGN-004 on `const name = ""; for (let { name } of rows) {
+          // name = … }`) — s430-destructure-shadow.
           for (const bind of iterDestructuredNames(forVar as DestructurePatternShape)) {
-            if (!scopeChain.lookup(bind)) {
-              scopeChain.bind(bind, { kind: "variable", resolvedType: tAsIs() });
-            }
+            scopeChain.bind(bind, { kind: "variable", resolvedType: tAsIs(), ..._forBinderConst });
           }
         }
         // C-style form: extract the declared counter name from the initExpr
@@ -21203,6 +21235,16 @@ let _letReparseHandles: {
 const _REPARSE_ID_BASE = 0x40000000; // 1_073_741_824 — disjoint from real ids
 const _REPARSE_ID_STRIDE = 0x100000; //     1_048_576 — per-re-parse id room
 let _reparseIdCursor = _REPARSE_ID_BASE;
+/**
+ * s430-emit-state-leak — restart the re-parse id allocator. Called once per
+ * compile (api.js compileScrml head): the cursor was process-monotonic, so the
+ * ids of re-parsed each-in-match-arm nodes depended on how many re-parses the
+ * process had done before, and after ~1000 re-parses the stride walked the
+ * range past 2^31. Disjointness is only required within one compile.
+ */
+export function resetReparseIdCursor(): void {
+  _reparseIdCursor = _REPARSE_ID_BASE;
+}
 function _nextReparseIdBase(): number {
   const base = _reparseIdCursor;
   _reparseIdCursor += _REPARSE_ID_STRIDE;
@@ -25456,6 +25498,15 @@ export function runTS(input: {
   const typedFiles: TypedFileAST[] = [];
   const allErrors: TSError[] = [];
   let lastStateTypeRegistry: Map<string, ResolvedType> | undefined;
+
+  // s430-emit-state-leak — every id allocator TS drives restarts per run, so the
+  // ids it stamps are a function of THIS compilation unit (runTS is called once
+  // per compile by api.js, and repeatedly in one process by the LSP): the
+  // each-in-match-arm re-parse cursor and the formFor / tableFor synth-node
+  // counters (lazy-required, same as their other TS call sites).
+  resetReparseIdCursor();
+  (require("./codegen/emit-form-for.ts") as typeof import("./codegen/emit-form-for.ts"))._resetSynthIdCounter();
+  (require("./codegen/emit-table-for.ts") as typeof import("./codegen/emit-table-for.ts"))._resetSynthIdCounter();
 
   // §52.11 — APPLICATION-scope, computed ONCE over the whole compilation unit and
   // threaded down, never re-derived per file. `E-AUTH-005` asks whether the
