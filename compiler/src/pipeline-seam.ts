@@ -37,9 +37,11 @@
  *
  * Every element of a `nodes` / `children` / `body` array reachable from a FileAST (excluding
  * `_`-prefixed compiler-private keys) is an object with a string `kind` and a `span` whose `start`
- * and `end` are numbers. Measured over the tracked corpus at the base of this change: 49,968 node
- * array elements, zero exceptions. PIPELINE.md's "Span loss" integration failure mode is the
- * reason it is enforced — a node without a span makes every downstream diagnostic unlocatable.
+ * and `end` are numbers. Measured over the tracked corpus at the base of this change: 49,968
+ * object node-array elements, zero exceptions; the one non-object exception is a `~{}` test case's
+ * `body` (raw statement strings), which is checked as exactly that. PIPELINE.md's "Span loss"
+ * integration failure mode is the reason it is enforced — a node without a span makes every
+ * downstream diagnostic unlocatable.
  *
  * ═══ WHAT THIS DOES NOT DO ═══
  *
@@ -166,7 +168,7 @@ const diagnostics = arr(diagnostic);
 function astNodes(): Check {
   return (v, p) => walkAst(v, p, new Set(), false);
 }
-function walkAst(v: unknown, p: string, seen: Set<unknown>, isNodeSlot: boolean): Divergence {
+function walkAst(v: unknown, p: string, seen: Set<unknown>, isNodeSlot: boolean, isTestCase = false): Divergence {
   if (!v || typeof v !== "object") {
     return isNodeSlot ? fail(p, "an AST node {kind, span}", v) : null;
   }
@@ -174,7 +176,7 @@ function walkAst(v: unknown, p: string, seen: Set<unknown>, isNodeSlot: boolean)
   seen.add(v);
   if (Array.isArray(v)) {
     for (let i = 0; i < v.length; i++) {
-      const d = walkAst(v[i], `${p}[${i}]`, seen, isNodeSlot);
+      const d = walkAst(v[i], `${p}[${i}]`, seen, isNodeSlot, isTestCase);
       if (d) return d;
     }
     return null;
@@ -189,8 +191,16 @@ function walkAst(v: unknown, p: string, seen: Set<unknown>, isNodeSlot: boolean)
   for (const k of Object.keys(o)) {
     if (k.startsWith("_")) continue;
     const child = o[k];
+    // The one measured exception to the node invariant: a `~{}` test case record
+    // (`testGroup.tests[i]`, ast-builder.js parseTestBody) keeps its `body` as the raw
+    // statement STRINGS (`"assert x == 1"`), not nodes. It is checked as exactly that.
+    if (isTestCase && k === "body") {
+      const d = arr(str)(child, `${p}.body`);
+      if (d) return { path: d.path, detail: `${d.detail} (a ~{} test case's body is its raw statement strings)` };
+      continue;
+    }
     const slot = (k === "nodes" || k === "children" || k === "body") && Array.isArray(child);
-    const d = walkAst(child, `${p}.${k}`, seen, slot);
+    const d = walkAst(child, `${p}.${k}`, seen, slot, k === "tests" && Array.isArray(child));
     if (d) return d;
   }
   return null;
@@ -209,11 +219,21 @@ const fileAst = obj({
 /** A per-file result carrying a FileAST (`tabResult` / CE file / TS file / META file). */
 const fileWithAst = obj({ filePath: str, ast: fileAst });
 
-/** PIPELINE.md Stage 2 Block, recursive. `name` / `closerForm` are optional per BS. */
-const BLOCK_TYPES = ["markup", "state", "logic", "sql", "css", "error-effect", "meta", "text", "comment"] as const;
+/**
+ * Stage 2 Block, recursive. `name` / `closerForm` are optional per BS.
+ *
+ * The `type` vocabulary is the one block-splitter.js EMITS (every `pushBraceContext(...)` kind plus
+ * the literal `type:` sites), not PIPELINE.md's table: the doc omits `"test"` (`~{}`) and
+ * `"foreign"` (`_{}`), and block-splitter.js's own header omits `"foreign"`. Found by the S430
+ * calibration run (TS-through-its-own-seam over the corpus). A substitute emitting a type outside
+ * this set is feeding TAB a block kind TAB has no case for.
+ */
+const BLOCK_TYPES = [
+  "markup", "state", "logic", "sql", "css", "error-effect", "meta", "test", "foreign", "text", "comment",
+] as const;
 const block: Check = lazy(() =>
   obj({
-    type: str,
+    type: oneOf(BLOCK_TYPES),
     raw: str,
     span,
     depth: num,
@@ -221,16 +241,19 @@ const block: Check = lazy(() =>
   }),
 );
 
-/** CG per-file artifact record: every known artifact slot is string-or-absent. */
-const CG_ARTIFACT_FIELDS = [
-  "html", "css", "clientJs", "serverJs", "libraryJs", "testJs", "machineTestJs",
-  "clientJsMap", "serverJsMap", "workerBundles",
+/**
+ * CG per-file output record — `CgFileOutput` in codegen/index.ts: `sourceFile` plus text artifact
+ * slots that are each a string, null, or absent, and an optional `workerBundles` Map of strings.
+ */
+const CG_TEXT_FIELDS = [
+  "html", "css", "clientJs", "serverJs", "libraryJs", "toolJs", "testJs", "machineTestJs",
+  "clientJsMap", "serverJsMap",
 ] as const;
 const cgFileOutput: Check = (v, p) => {
-  if (!v || typeof v !== "object") return fail(p, "a per-file CG output object", v);
+  const d0 = obj({ sourceFile: str, workerBundles: optional(mapOf(str, str)) })(v, p);
+  if (d0) return d0;
   const o = v as Record<string, unknown>;
-  for (const k of CG_ARTIFACT_FIELDS) {
-    if (k === "workerBundles") continue; // a Map-or-absent side table, not a text artifact
+  for (const k of CG_TEXT_FIELDS) {
     const x = o[k];
     if (x !== undefined && x !== null && typeof x !== "string") return fail(`${p}.${k}`, "a string, null, or absent", x);
   }
@@ -251,6 +274,8 @@ export type SeamArgs = unknown[];
 export interface StageSeam {
   /** Stage name as used by `--swap <NAME>=…` and `stageOverrides` keys. */
   name: string;
+  /** The TS implementation's module, relative to compiler/src (the stage's default). */
+  tsModule: string;
   /** PIPELINE.md stage number / label this seam sits at. */
   pipeline: string;
   /** Named export a substitute module must provide (or `default`). */
@@ -270,55 +295,55 @@ const recheckFiles = (label: string, pick: (args: SeamArgs) => unknown): ((args:
 
 export const STAGE_SEAMS: readonly StageSeam[] = [
   {
-    name: "LINT-GHOST", pipeline: "pre-BS lint", entry: "lintGhostPatterns",
+    name: "LINT-GHOST", tsModule: "./lint-ghost-patterns.js", pipeline: "pre-BS lint", entry: "lintGhostPatterns",
     signature: "(source, filePath) -> LintDiagnostic[]", output: diagnostics,
   },
   {
-    name: "BS", pipeline: "Stage 2", entry: "splitBlocks", selfHostKey: "splitBlocks",
+    name: "BS", tsModule: "./block-splitter.js", pipeline: "Stage 2", entry: "splitBlocks", selfHostKey: "splitBlocks",
     signature: "(filePath, source) -> { filePath, blocks, errors }",
     output: obj({ filePath: str, blocks: arr(block), errors: optional(diagnostics) }),
   },
   {
-    name: "BS-LINT-RAW-INTERP", pipeline: "Stage 2.5", entry: "runWInterpInRawContent",
+    name: "BS-LINT-RAW-INTERP", tsModule: "./lint-w-interp-in-raw-content.js", pipeline: "Stage 2.5", entry: "runWInterpInRawContent",
     signature: "(bsResults) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "BS-LINT-INPUT-STATE", pipeline: "Stage 2.5b", entry: "runWInputStateMarkupNonreactive",
+    name: "BS-LINT-INPUT-STATE", tsModule: "./lint-w-input-state-markup-nonreactive.js", pipeline: "Stage 2.5b", entry: "runWInputStateMarkupNonreactive",
     signature: "(bsResults) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "BS-LINT-STMT-FORM", pipeline: "Stage 2.5c", entry: "runEStateBlockStatementForm",
+    name: "BS-LINT-STMT-FORM", tsModule: "./lint-e-state-block-statement-form.js", pipeline: "Stage 2.5c", entry: "runEStateBlockStatementForm",
     signature: "(bsResults) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "TAB", pipeline: "Stage 3", entry: "buildAST", selfHostKey: "buildAST",
+    name: "TAB", tsModule: "./ast-builder.js", pipeline: "Stage 3", entry: "buildAST", selfHostKey: "buildAST",
     signature: "(bsResult, tokenizerOverride|null) -> { filePath, ast: FileAST, errors }",
     output: obj({ filePath: optional(str), ast: fileAst, errors: diagnostics }),
   },
   {
-    name: "PRECG", pipeline: "Stage 3.004", entry: "runPRECG",
+    name: "PRECG", tsModule: "./precg.ts", pipeline: "Stage 3.004", entry: "runPRECG",
     signature: "(fileAST) -> void   (stamps has*/authConfig/middlewareConfig/fileShape/mcpConfig in place)",
     output: anyValue,
     mutated: (args) => fileAst(args[0], "fileAST"),
   },
   {
-    name: "GCP1", pipeline: "Stage 3.005", entry: "runGauntletPhase1Checks",
+    name: "GCP1", tsModule: "./gauntlet-phase1-checks.js", pipeline: "Stage 3.005", entry: "runGauntletPhase1Checks",
     signature: "(bsResult, tabResult) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "GCP3", pipeline: "Stage 3.006", entry: "runGauntletPhase3EqChecks",
+    name: "GCP3", tsModule: "./gauntlet-phase3-eq-checks.js", pipeline: "Stage 3.006", entry: "runGauntletPhase3EqChecks",
     signature: "(tabResult) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "LINT-TRY-CATCH", pipeline: "Stage 3.007", entry: "runTryCatchLint",
+    name: "LINT-TRY-CATCH", tsModule: "./validators/lint-try-catch.ts", pipeline: "Stage 3.007", entry: "runTryCatchLint",
     signature: "(fileAST) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "REJECT-ASYNC-AWAIT", pipeline: "Stage 3.008", entry: "runAsyncAwaitReject",
+    name: "REJECT-ASYNC-AWAIT", tsModule: "./validators/lint-async-user-source.ts", pipeline: "Stage 3.008", entry: "runAsyncAwaitReject",
     signature: "(fileAST) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "MOD", pipeline: "Stage 3.1", entry: "resolveModules", selfHostKey: "resolveModules",
+    name: "MOD", tsModule: "./module-resolver.js", pipeline: "Stage 3.1", entry: "resolveModules", selfHostKey: "resolveModules",
     signature: "(tabResults) -> { compilationOrder, exportRegistry, importGraph, errors }",
     output: obj({
       compilationOrder: arr(str),
@@ -328,55 +353,57 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
     }),
   },
   {
-    name: "NR", pipeline: "Stage 3.05", entry: "runNRBatch",
+    name: "NR", tsModule: "./name-resolver.ts", pipeline: "Stage 3.05", entry: "runNRBatch",
     signature: "(files, exportRegistry, importGraph) -> { errors }[]   (stamps resolvedKind/resolvedCategory in place)",
     output: arr(obj({ errors: diagnostics })),
     mutated: recheckFiles("files", (a) => a[0]),
   },
   {
-    name: "TC", pipeline: "Stage 3.055", entry: "runTCBatch",
+    name: "TC", tsModule: "./tag-canonicalizer.ts", pipeline: "Stage 3.055", entry: "runTCBatch",
     signature: "(files) -> { filePath, rewrites }[]   (canonicalizes tags in place)",
     output: arr(obj({ filePath: str, rewrites: arr(anyValue) })),
     mutated: recheckFiles("files", (a) => a[0]),
   },
   {
-    name: "SYM", pipeline: "Stage 3.06", entry: "runSYMBatch",
+    name: "SYM", tsModule: "./symbol-table.ts", pipeline: "Stage 3.06", entry: "runSYMBatch",
     signature: "(files, exportRegistry) -> { errors, stats }[]   (attaches _record/_scope in place)",
     output: arr(obj({ errors: diagnostics, stats: obj({ totalRecords: num, totalScopes: num }) })),
     mutated: recheckFiles("files", (a) => a[0]),
   },
   {
-    name: "CE", pipeline: "Stage 3.2", entry: "runCE",
+    name: "CE", tsModule: "./component-expander.ts", pipeline: "Stage 3.2", entry: "runCE",
     signature: "({ files, exportRegistry, fileASTMap, importGraph }) -> { files, errors }",
     output: obj({ files: arr(fileWithAst), errors: diagnostics }),
   },
   {
-    name: "VP-2", pipeline: "Stage 3.3", entry: "runPostCEInvariant",
+    name: "VP-2", tsModule: "./validators/post-ce-invariant.ts", pipeline: "Stage 3.3", entry: "runPostCEInvariant",
     signature: "({ files }) -> { errors }", output: obj({ errors: diagnostics }),
   },
   {
-    name: "VP-3", pipeline: "Stage 3.3", entry: "runAttributeInterpolation",
+    name: "VP-3", tsModule: "./validators/attribute-interpolation.ts", pipeline: "Stage 3.3", entry: "runAttributeInterpolation",
     signature: "({ files }) -> { errors }", output: obj({ errors: diagnostics }),
   },
   {
-    name: "VP-1", pipeline: "Stage 3.3", entry: "runAttributeAllowlist",
+    name: "VP-1", tsModule: "./validators/attribute-allowlist.ts", pipeline: "Stage 3.3", entry: "runAttributeAllowlist",
     signature: "({ files }) -> { errors }", output: obj({ errors: diagnostics }),
   },
   {
-    name: "CSS-CONFLICT", pipeline: "Stage 3.4", entry: "checkCssConflicts",
+    name: "CSS-CONFLICT", tsModule: "./codegen/css-conflict-check.ts", pipeline: "Stage 3.4", entry: "checkCssConflicts",
     signature: "(ceFile) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "PA", pipeline: "Stage 4", entry: "runPA", selfHostKey: "runPA",
+    name: "PA", tsModule: "./protect-analyzer.ts", pipeline: "Stage 4", entry: "runPA", selfHostKey: "runPA",
     signature: "({ files }) -> { protectAnalysis, errors }",
     output: obj({ protectAnalysis: obj({ views: mapOf(anyValue) }), errors: diagnostics }),
   },
   {
-    name: "RI", pipeline: "Stage 5", entry: "runRI", selfHostKey: "runRI",
+    name: "RI", tsModule: "./route-inference.ts", pipeline: "Stage 5", entry: "runRI", selfHostKey: "runRI",
     signature: "({ files, protectAnalysis }) -> { routeMap, errors }",
     output: obj({
       routeMap: obj({
-        functions: mapOf(obj({ boundary: oneOf(["client", "server"]) }), str),
+        // "middleware" is the handle() boundary (route-inference.ts FunctionRoute.boundary);
+        // PIPELINE.md Stage 5 documents only client | server — doc drift, found by calibration.
+        functions: mapOf(obj({ boundary: oneOf(["client", "server", "middleware"]) }), str),
         pages: mapOf(anyValue),
         authMiddleware: mapOf(anyValue),
       }),
@@ -384,7 +411,7 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
     }),
   },
   {
-    name: "MC", pipeline: "Stage 5.5", entry: "analyzeMonotonicity",
+    name: "MC", tsModule: "./monotonicity-analyzer.ts", pipeline: "Stage 5.5", entry: "analyzeMonotonicity",
     signature: "(routeMap, fnNodes, functionIndex) -> { verdicts, diagnostics }",
     output: obj({
       verdicts: mapOf(oneOf(["monotone", "non-monotone", "machine-intrinsic"]), str),
@@ -392,42 +419,42 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
     }),
   },
   {
-    name: "TS", pipeline: "Stage 6", entry: "runTS", selfHostKey: "runTS",
+    name: "TS", tsModule: "./type-system.ts", pipeline: "Stage 6", entry: "runTS", selfHostKey: "runTS",
     signature: "({ files, protectAnalysis, routeMap, importedTypesByFile }) -> { files, errors, stateTypeRegistry }",
     output: obj({ files: arr(fileWithAst), errors: diagnostics, stateTypeRegistry: optional(mapOf(anyValue)) }),
   },
   {
-    name: "LINT-MATCH-PROMOTABLE", pipeline: "Stage 6.4", entry: "runIMatchPromotable",
+    name: "LINT-MATCH-PROMOTABLE", tsModule: "./lint-i-match-promotable.js", pipeline: "Stage 6.4", entry: "runIMatchPromotable",
     signature: "(tsFiles, stateTypeRegistry) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "LINT-FN-PROMOTABLE", pipeline: "Stage 6.4b", entry: "runIFnPromotable",
+    name: "LINT-FN-PROMOTABLE", tsModule: "./lint-i-fn-promotable.js", pipeline: "Stage 6.4b", entry: "runIFnPromotable",
     signature: "(tsFiles, stateTypeRegistry, inferredServerKeys) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "LINT-EACH-PROMOTABLE", pipeline: "Stage 6.4c", entry: "runWEachPromotable",
+    name: "LINT-EACH-PROMOTABLE", tsModule: "./lint-w-each-promotable.js", pipeline: "Stage 6.4c", entry: "runWEachPromotable",
     signature: "(tsFiles) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "LINT-EACH-KEY", pipeline: "Stage 6.4d", entry: "runWEachKey",
+    name: "LINT-EACH-KEY", tsModule: "./lint-w-each-key.js", pipeline: "Stage 6.4d", entry: "runWEachKey",
     signature: "(tsFiles, stateTypeRegistry) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "LINT-MAP-ITERATION-ORDER", pipeline: "Stage 6.4e", entry: "runWMapIterationOrder",
+    name: "LINT-MAP-ITERATION-ORDER", tsModule: "./lint-w-map-iteration-order.js", pipeline: "Stage 6.4e", entry: "runWMapIterationOrder",
     signature: "(tsFiles) -> Diagnostic[]", output: diagnostics,
   },
   {
-    name: "META-CHECK", pipeline: "Stage 6.5 (MC sub-pass)", entry: "runMetaChecker", selfHostKey: "runMetaChecker",
+    name: "META-CHECK", tsModule: "./meta-checker.ts", pipeline: "Stage 6.5 (MC sub-pass)", entry: "runMetaChecker", selfHostKey: "runMetaChecker",
     signature: "({ files }) -> { errors }", output: obj({ errors: diagnostics }),
   },
   {
-    name: "META-EVAL", pipeline: "Stage 6.5 (ME sub-pass)", entry: "runMetaEval",
+    name: "META-EVAL", tsModule: "./meta-eval.ts", pipeline: "Stage 6.5 (ME sub-pass)", entry: "runMetaEval",
     signature: "({ files }) -> { errors }   (splices ^{} emit() results into the ASTs in place)",
     output: obj({ errors: diagnostics }),
     mutated: (args) => arr(obj({ ast: fileAst }))((args[0] as { files?: unknown })?.files, "input.files"),
   },
   {
-    name: "DG", pipeline: "Stage 7", entry: "runDG", selfHostKey: "runDG",
+    name: "DG", tsModule: "./dependency-graph.ts", pipeline: "Stage 7", entry: "runDG", selfHostKey: "runDG",
     signature: "({ files, routeMap, debugPerf, log }) -> { depGraph, errors }",
     output: obj({
       depGraph: obj({
@@ -438,7 +465,7 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
     }),
   },
   {
-    name: "BP", pipeline: "Stage 7.5", entry: "runBatchPlanner",
+    name: "BP", tsModule: "./batch-planner.ts", pipeline: "Stage 7.5", entry: "runBatchPlanner",
     signature: "({ files, depGraph, routeMap, protectAnalysis }) -> { batchPlan, errors }",
     output: obj({
       batchPlan: obj({ coalescedHandlers: mapOf(anyValue), loopHoists: arr(anyValue), nobatchSites: set }),
@@ -446,17 +473,17 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
     }),
   },
   {
-    name: "AG", pipeline: "Stage 7.55", entry: "runAuthGraph", selfHostKey: "runAuthGraph",
+    name: "AG", tsModule: "./auth-graph.ts", pipeline: "Stage 7.55", entry: "runAuthGraph", selfHostKey: "runAuthGraph",
     signature: "(files, routeMap) -> { graph, errors }",
     output: obj({ graph: obj({ gates: mapOf(anyValue) }), errors: diagnostics }),
   },
   {
-    name: "RS", pipeline: "Stage 7.6", entry: "runReachabilitySolver",
+    name: "RS", tsModule: "./reachability-solver.ts", pipeline: "Stage 7.6", entry: "runReachabilitySolver",
     signature: "({ depGraph, routeMap, batchPlan, files, authGraph, debugPerf, log }) -> { record, errors }",
     output: obj({ record: obj({ closures: mapOf(anyValue) }), errors: diagnostics }),
   },
   {
-    name: "CG", pipeline: "Stage 8", entry: "runCG", selfHostKey: "runCG",
+    name: "CG", tsModule: "./code-generator.js", pipeline: "Stage 8", entry: "runCG", selfHostKey: "runCG",
     signature: "({ files, routeMap, depGraph, protectAnalysis, batchPlan, … }) -> { outputs: Map<source, FileOutput>, errors }",
     output: obj({ outputs: mapOf(cgFileOutput, str), errors: diagnostics }),
   },
@@ -609,6 +636,3 @@ export function createStageSeams(stageOverrides: unknown, selfHostModules: unkno
     },
   };
 }
-
-/** Silence the unused-export lint for BLOCK_TYPES — documented vocabulary, checked loosely. */
-export const SEAM_BS_BLOCK_TYPES = BLOCK_TYPES;
