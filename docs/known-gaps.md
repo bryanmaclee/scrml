@@ -18057,3 +18057,19 @@ and the destructuring assignment `[x] = [x * 3]` emit invalid JS. The validate-e
 E-CODEGEN-INVALID-LOGIC ("compiler defect") — a diagnostic that does not name the root cause is itself a diagnostic bug.
 
 <!-- @gap id=g-labeled-loops-and-same-scope-redeclaration-reach-codegen-as-defects sev=LOW status=open locus=compiler/src/codegen/emit-control-flow.ts prov=review:S430-destructure-round2 -->
+
+### G-FILE-TOP-JS-IMPORT-IN-A-PAGE-EMITS-AN-ES-IMPORT-INTO-A-CLASSIC-SCRIPT — the page dies with a SyntaxError on load
+
+**Agent-reproduced (S430 `s430-import-host`), same on base.** A plain file-top `import { x } from "./x.js"` in a browser-mode page
+compiles at exit 0 and emits an ES `import` statement at the top of the classic-script `client.js` → SyntaxError at page load;
+the specifier is also not re-based to the output directory. Loud at runtime, silent at compile.
+
+<!-- @gap id=g-file-top-js-import-in-a-page-emits-an-es-import-into-a-classic-script sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts prov=empirical:agent-s430-import-host -->
+
+### G-DB-OPENER-SPLITS-SINGLE-QUOTED-AND-UNQUOTED-ATTRIBUTE-VALUES — `<db src='…'>` / `db=scheme://…` become attribute names
+
+**Agent-reproduced (S430 `s430-dev-db-stub` round 3), same on base.** The `<db>` state opener mis-tokenizes a single-quoted
+`src='…'` and an unquoted `db=scheme://…` into bare attribute NAMES. The round-3 credential redaction covers the leak via a
+narrow source read; the parser defect itself remains (§5 attribute quoting).
+
+<!-- @gap id=g-db-opener-splits-single-quoted-and-unquoted-attribute-values sev=MED status=open locus=compiler/src/ast-builder.js prov=empirical:agent-s430-dev-db-stub -->
