@@ -15,3 +15,12 @@
 - COMPILED corpus (2,577 tracked .scrml, default parser, base vs build): 19 newly failing
   (4 compiler/self-host + 15 stdlib/compiler), 7 already-failing gained codes. 16 E-CLASS + 46 E-DYNAMIC-IMPORT hits.
   Zero hits outside compiler/self-host + stdlib/compiler.
+- f428de0d impl + tests + re-pins + allowlist (pre-commit gate PASS: 30,745 pass).
+- d1005d43 SPEC §7.2 / NEW §7.2.1 / NEW §21.3.2 / §34 two rows / §34.1 E-STMT-CLASS-* closed; SPEC-INDEX regen; FACTS --write.
+- Final `bun run test`: 32,502 pass / 55 fail / 127 skip. All 55 pre-existing or env: browser tier fails identically
+  on a base-tree extract (bug60 E-TYPE-031 `email`, transitions, navigate-*, engine-*); dev-command + detector +
+  esm tests pass in isolation (full-suite timing). CI-side gates run locally: corpus-compile-floor PASS,
+  snippet-gate 110/110, facts PASS, SPEC-INDEX --check PASS, s34 --check-new PASS, delta-lint PASS,
+  conflict-marker PASS. types-gate reports 21 NEW TS diagnostics, none in a touched file (pre-existing/env).
+- STOPPED before landing per brief: gated tests + the within-node canary consume compiler/self-host and
+  stdlib/compiler; PA decides on the allowlist regen + residue re-pins vs sequencing behind import:host.
