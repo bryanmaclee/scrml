@@ -18105,3 +18105,13 @@ only W-TYPE-031-UNPROVEN. Same on base (the codes did not exist) — a gap, not 
 produced by a stage `analyzeText` does not run.
 
 <!-- @gap id=g-lsp-never-publishes-forbidden-vocabulary-codes sev=MED status=open locus=lsp/handlers.js prov=empirical:review-S430-rcl4 -->
+
+### G-NESTED-ASYNC-FUNCTION-CALLED-WITHOUT-AWAIT-LOSES-ITS-FAILURE — a transport error from a nested server-calling fn is silently dropped
+
+**Reviewer-reproduced (S430 defer round-4 review, F6), same on base, SILENT.** A function declared inside another function
+becomes `async` because it calls a server function, but its call site is emitted without `await` (`let r = inner();`). The
+caller's `!{}` then tests a Promise, so a `CpsError.ServerError` is never handled: expected trace `work;inner-failed;`, observed
+`work;`. The no-defer twin is identically wrong. §13.2's await mandate is violated at a nested-declaration call site — the
+auto-await injector does not see locally-declared async functions.
+
+<!-- @gap id=g-nested-async-function-called-without-await-loses-its-failure sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts prov=review:S430-defer-round4-F6 -->
