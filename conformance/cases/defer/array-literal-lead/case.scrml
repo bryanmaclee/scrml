@@ -1,0 +1,17 @@
+${
+    <trace> = ""
+
+    function D(s: string) {
+        @trace = @trace + s
+    }
+
+    function f() {
+        defer ["a;", "b;"].forEach((s) => D(s))
+        let defer = [7]
+        D("v" + defer[0] + ";")
+    }
+}
+<program>
+    <button id="go" onclick=f()>Go</>
+    <p id="out">${@trace}</p>
+</program>

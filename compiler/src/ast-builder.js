@@ -6479,9 +6479,53 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // Only a `?{}` SQL block leads a deferred statement (§19.16.1) — the same
       // set the native parser admits (TokenKind.SqlBlock).
       case "BLOCK_REF": return !!(next.block && next.block.type === "sql");
-      case "PUNCT": return next.text === "{";
+      // `defer [ … ]…` (S430 round 6): a `[` SEPARATED from `defer` by whitespace
+      // opens an array-literal statement (`defer ["a"].forEach(f)`); an
+      // ADJACENT `defer[0]` stays an index on an identifier named `defer`.
+      case "PUNCT":
+        if (next.text === "{") return true;
+        if (next.text === "[") {
+          const tokEnd = tok.span && typeof tok.span.end === "number" ? tok.span.end : null;
+          const nextStart = next.span && typeof next.span.start === "number" ? next.span.start : null;
+          return tokEnd !== null && nextStart !== null && nextStart > tokEnd;
+        }
+        return false;
       default: return false;
     }
+  }
+
+  /**
+   * §19.16.2 (S430 round 6) — is the `defer` at the cursor the UNBRACED body of
+   * an `if` / `else` / `for` / `while` / `do` arm? Decided from the token stream
+   * (the token before `defer`): `else` / `do`, or a `)` whose matching `(`
+   * follows an `if` / `for` / `while` keyword. Such a defer is not a stage-1
+   * defer site (E-DEFER-UNSUPPORTED-SITE) — notably the live parser drops an
+   * unbraced `else` arm, which would attach the defer to the enclosing block.
+   */
+  function deferIsUnbracedArmBody() {
+    let k = i - 1;
+    while (k >= 0 && tokens[k] && tokens[k].kind === "COMMENT") k--;
+    const prev = k >= 0 ? tokens[k] : null;
+    if (!prev) return false;
+    if (prev.kind === "KEYWORD" && (prev.text === "else" || prev.text === "do")) return true;
+    if (prev.kind === "PUNCT" && prev.text === ")") {
+      let depth = 0;
+      for (let j = k; j >= 0; j--) {
+        const t = tokens[j];
+        if (!t || t.kind !== "PUNCT") continue;
+        if (t.text === ")") depth++;
+        else if (t.text === "(") {
+          depth--;
+          if (depth === 0) {
+            let h = j - 1;
+            while (h >= 0 && tokens[h] && tokens[h].kind === "COMMENT") h--;
+            const head = h >= 0 ? tokens[h] : null;
+            return !!head && head.kind === "KEYWORD" && (head.text === "if" || head.text === "for" || head.text === "while");
+          }
+        }
+      }
+    }
+    return false;
   }
 
   /**
@@ -6495,6 +6539,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * so the live and native front-ends share one checker.
    */
   function parseDeferStmt() {
+    const unbracedArm = deferIsUnbracedArmBody();
     const startTok = consume(); // consume `defer`
     let body = [];
     let blockForm = false;
@@ -6526,6 +6571,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       kind: "defer-stmt",
       body,
       blockForm,
+      ...(unbracedArm ? { unbracedArm: true } : {}),
       span: spanOf(startTok, peek()),
     };
   }

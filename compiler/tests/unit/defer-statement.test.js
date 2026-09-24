@@ -1356,3 +1356,152 @@ describe("§12 value-producing arms are not defer sites (the value would be capt
       }`)).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// §13 — round 6: the narrow fail-closed set
+// ---------------------------------------------------------------------------
+
+describe("§13 round 6", () => {
+  const live = (logic) => runDeferChecks(liveAST(wrap(logic)).ast);
+  const nat = (logic) => runDeferChecks(nativeAST(wrap(logic)).ast);
+  const codesOfDiags = (ds) => ds.map((d) => d.code);
+
+  test("B: duplicate function declarations in a block WITH a defer -> E-DEFER-DUPLICATE-FUNCTION naming both (live + native)", () => {
+    const logic = `
+      function go2() { log("g2") }
+      function f() {
+        defer go2()
+        function g() { return 1 }
+        function g() { return 2 }
+        return g()
+      }`;
+    const ds = live(logic);
+    expect(codesOfDiags(ds)).toEqual(["E-DEFER-DUPLICATE-FUNCTION"]);
+    expect(ds[0].message).toMatch(/function g.*line \d+.*first at line \d+/s);
+    expect(codesOfDiags(nat(logic))).toEqual(["E-DEFER-DUPLICATE-FUNCTION"]);
+  });
+  test("B: the same duplicates WITHOUT a defer are untouched (§7.3.3 unchanged)", () => {
+    const logic = `
+      function f() {
+        function g() { return 1 }
+        function g() { return 2 }
+        return g()
+      }`;
+    expect(codesOfDiags(live(logic))).toEqual([]);
+    expect(runRedeclareChecks(liveAST(wrap(logic)).ast)).toEqual([]);
+  });
+
+  test("F: a defer as the unbraced body of if / else / for / while -> E-DEFER-UNSUPPORTED-SITE (live + native)", () => {
+    const logic = `
+      function D(s) { log(s) }
+      function a(c) {
+        if (c) defer D("a;")
+        D("x;")
+      }
+      function b(c) {
+        if (c) {
+          D("y;")
+        } else defer D("b;")
+      }
+      function l() {
+        for (const i of [1, 2]) defer D("l;")
+      }
+      function w(c) {
+        while (c) defer D("w;")
+      }`;
+    expect(codesOfDiags(live(logic))).toEqual(Array(4).fill("E-DEFER-UNSUPPORTED-SITE"));
+    expect(codesOfDiags(nat(logic))).toEqual(Array(4).fill("E-DEFER-UNSUPPORTED-SITE"));
+  });
+  test("F: a braced arm and a defer after a call's `)` are still defer sites", () => {
+    expect(codesOfDiags(live(`
+      function D(s) { log(s) }
+      function a(c) {
+        if (c) {
+          defer D("a;")
+        }
+        D("x")
+        defer D("y")
+      }`))).toEqual([]);
+  });
+
+  test("A (native): a declaration inside a bare block shadowing an outer one is NOT E-SCOPE-REDECLARE", () => {
+    const logic = `
+      function f() {
+        let x = 1
+        {
+          let x = 2
+          log(x)
+        }
+        return x
+      }`;
+    expect(runRedeclareChecks(nativeAST(wrap(logic)).ast)).toEqual([]);
+    expect(runRedeclareChecks(liveAST(wrap(logic)).ast)).toEqual([]);
+  });
+
+  test("D (live): a doubly-nested bare block reports ONE unsupported site, no spurious lambda error", () => {
+    expect(codesOfDiags(live(`
+      function D(s) { log(s) }
+      function dd() {
+        {
+          {
+            defer D("x;")
+          }
+        }
+      }`))).toEqual(["E-DEFER-UNSUPPORTED-SITE"]);
+  });
+
+  test("E (native): a single-statement match-arm defer is E-DEFER-UNSUPPORTED-SITE, not a parse-error cascade", () => {
+    const src = wrap(`
+      type Mode:enum = { A, B }
+      function D(s) { log(s) }
+      function arm(m: Mode) {
+        match m {
+          .A :> defer D("a;")
+          .B :> D("b;")
+        }
+      }`);
+    const r = nativeAST(src);
+    const all = [...(r.errors ?? []).map((e) => e.code), ...codesOfDiags(runDeferChecks(r.ast))];
+    expect(all).toContain("E-DEFER-UNSUPPORTED-SITE");
+    expect(all.filter((c) => c.startsWith("E-EXPR-MATCH"))).toEqual([]);
+  });
+
+  test("G (live): a yield inside a parenthesised expression is reported at its statement's line", () => {
+    const ds = live(`
+      function* gen() {
+        defer {
+          let v = (yield 5)
+        }
+        yield 1
+      }`);
+    expect(codesOfDiags(ds)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+    expect(ds[0].span.line).toBeGreaterThan(1);
+  });
+
+  test("`defer [` — a separated `[` is a defer statement, an adjacent `defer[0]` is an index (live + native)", () => {
+    const src = wrap(`
+      function f() {
+        defer ["a"].forEach((s) => log(s))
+        let defer = [7]
+        log(defer[0])
+      }`);
+    for (const r of [liveAST(src), nativeAST(src)]) {
+      const body = fnBody(r.ast, "f");
+      expect(body[0].kind).toBe("defer-stmt");
+      expect(body.slice(1).some((s) => s.kind === "defer-stmt")).toBe(false);
+    }
+  });
+
+  test("C: the unanalysable later-shadow message tells the author how to fix it", () => {
+    const ds = live(`
+      function D(s) { log(s) }
+      function f() {
+        defer D([1].map((x) => { return x }))
+        const late = 1
+        return late
+      }`);
+    expect(codesOfDiags(ds)).toEqual(["E-DEFER-LATER-SHADOW"]);
+    expect(ds[0].message).toMatch(/move the later declaration/);
+    expect(ds[0].message).toMatch(/rename/);
+  });
+});

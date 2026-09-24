@@ -1,0 +1,13 @@
+{
+  "id": "defer-duplicate-function-neg",
+  "description": "§19.16.6 (S430 round 6, B) — a block that contains a `defer` and declares `function g` twice is E-DEFER-DUPLICATE-FUNCTION (exactly once, naming both declarations) instead of an E-CODEGEN-INVALID-LOGIC crash. The same function WITHOUT the defer compiles (duplicate-function-no-defer-ok) — this is one of the listed fail-closed exceptions to 'a defer does not change what compiles'.",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.6: the lowered block is a host try block, where a second declaration of the same function name is not allowed; the compiler SHALL name both declarations rather than fail at codegen. §7.3.3 (duplicate functions outside this case) is unchanged.",
+  "expect": {
+    "codes": ["E-DEFER-DUPLICATE-FUNCTION"],
+    "codeCounts": { "E-DEFER-DUPLICATE-FUNCTION": 1 },
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC", "E-SCOPE-REDECLARE"]
+  }
+}

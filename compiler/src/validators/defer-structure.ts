@@ -178,6 +178,43 @@ export function textContainsNativeKind(text: string, asExpression: boolean, kind
   return found;
 }
 
+/**
+ * Does expression TEXT contain a `defer` statement INSIDE a function / arrow
+ * body (parsed with the native parser; see textContainsNativeKind)? Used for a
+ * lambda escape-hatch: a `defer` that is NOT inside a function body in that
+ * text (e.g. the escape-hatch of a bare `{ … }` block) is some other site's
+ * concern, not a lambda's (S430 round 6, D).
+ */
+export function textLambdaContainsDefer(text: string): boolean {
+  if (!text.includes("defer")) return false;
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { lex } = require("../../native-parser/lex.js") as { lex: (s: string) => unknown[] };
+  const { parseProgram } = require("../../native-parser/parse-stmt.js") as {
+    parseProgram: (t: unknown[], s: string) => { body: unknown[]; errors: unknown[] };
+  };
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const src = "function* __scrml_probe__() {\nlet __scrml_probe_value__ = " + text + "\n}";
+  let tree: { body: unknown[] };
+  try {
+    tree = parseProgram(lex(src), src);
+  } catch {
+    return false;
+  }
+  let found = false;
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown, depth: number): void => {
+    if (found || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c, depth); return; }
+    const k = (n as Node).kind;
+    if (k === "Defer" && depth > 1) { found = true; return; } // depth 1 = the probe generator itself
+    const d = k === "Arrow" || k === "Function" || k === "FunctionDecl" ? depth + 1 : depth;
+    for (const key of Object.keys(n as object)) if (key !== "span") walk((n as Node)[key], d);
+  };
+  walk(tree.body, 0);
+  return found;
+}
+
 /** Does TEXT contain a `defer` statement (parsed; see textContainsNativeKind)? */
 export function textContainsDeferStatement(text: string, asExpression: boolean): boolean {
   return text.includes("defer") && textContainsNativeKind(text, asExpression, ["Defer"]);

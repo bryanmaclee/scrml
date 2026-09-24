@@ -53,7 +53,7 @@
  * @module lint-defer
  */
 import { isMetaKind } from "../types/ast.ts";
-import { parseStatementText, textBodiesOf, textContainsDeferStatement, textContainsNativeKind } from "./defer-structure.ts";
+import { parseStatementText, textBodiesOf, textContainsDeferStatement, textContainsNativeKind, textLambdaContainsDefer } from "./defer-structure.ts";
 import { iterDestructuredNames } from "../type-system.ts";
 import type { FileAST, Span } from "../types/ast.ts";
 
@@ -63,7 +63,8 @@ export type DeferCode =
   | "E-DEFER-CONTROL-FLOW"
   | "E-DEFER-UNHANDLED-FAILABLE"
   | "E-DEFER-UNSUPPORTED-SITE"
-  | "E-DEFER-LATER-SHADOW";
+  | "E-DEFER-LATER-SHADOW"
+  | "E-DEFER-DUPLICATE-FUNCTION";
 
 export interface DeferDiagnostic {
   code: DeferCode;
@@ -131,16 +132,56 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
   const filePath = (ast as { filePath?: string }).filePath ?? "";
   const seen = new WeakSet<object>();
 
+  // The nearest enclosing node with a real source line — used when a diagnostic
+  // lands on a node the front-end left without one (an expression escape-hatch
+  // inside a statement; S430 round 6, G).
+  let anchor: Node | null = null;
+  const hasLine = (x: Node | null | undefined): boolean => {
+    const sp = x && (x.span as { line?: number; start?: number } | undefined);
+    return !!sp && typeof sp.line === "number" && (sp.line > 1 || (typeof sp.start === "number" && sp.start > 0));
+  };
+  const isStatementNode = (x: Node): boolean => {
+    const k = typeof x.kind === "string" ? x.kind : "";
+    return k.endsWith("-stmt") || k.endsWith("-decl") ||
+      k === "bare-expr" || k === "guarded-expr" || k === "propagate-expr" || k === "fail-expr" || k === "lift-expr";
+  };
   const report = (code: DeferCode, n: Node, message: string) => {
-    diagnostics.push({ code, severity: "error", span: spanOf(n, filePath), message: `${code}: ${message}` });
+    // An expression node's span can be relative to its own source snippet; a
+    // statement's is a real source position.
+    const at = hasLine(n) && isStatementNode(n) ? n : (anchor ?? n);
+    diagnostics.push({ code, severity: "error", span: spanOf(at, filePath), message: `${code}: ${message}` });
   };
 
   const controlFlow = (n: Node, what: string) =>
     report("E-DEFER-CONTROL-FLOW", n, `a deferred statement cannot contain ${what} — ${CONTROL_FLOW_WHY}`);
 
+  // §19.16.6 (S430 round 6, B) — the defer lowering wraps the whole block in a
+  // host `try { … }`, where two `function` declarations of one name are a
+  // SyntaxError (strict-mode block scope). §7.3.3 deliberately leaves duplicate
+  // functions alone elsewhere; in a block that contains a `defer` they are
+  // rejected here, naming both, instead of crashing codegen.
+  const checkDuplicateFunctions = (list: unknown[]): void => {
+    const firstByName = new Map<string, Node>();
+    for (const c of list) {
+      const cn = c as Node;
+      if (!cn || typeof cn !== "object" || cn.kind !== "function-decl" || typeof cn.name !== "string" || cn.fromExport === true) continue;
+      const prev = firstByName.get(cn.name);
+      if (!prev) { firstByName.set(cn.name, cn); continue; }
+      const ln = (x: Node) => { const sp = x.span as { line?: number } | undefined; return sp && typeof sp.line === "number" ? `line ${sp.line}` : "an earlier line"; };
+      report("E-DEFER-DUPLICATE-FUNCTION", cn,
+        `\`function ${cn.name}\` (${ln(cn)}) is declared twice in a block that contains a \`defer\` ` +
+        `(first at ${ln(prev)}). A block with a \`defer\` becomes a host \`try\` block (§19.16.6), where a ` +
+        `second declaration of the same function name is not allowed. Rename one of them, or remove the ` +
+        `duplicate.`);
+    }
+  };
+
   function walk(node: unknown, st: WalkState): void {
     if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) {
+      if (st.inFunction && !st.defer && node.some((c) => c && typeof c === "object" && (c as Node).kind === "defer-stmt")) {
+        checkDuplicateFunctions(node as unknown[]);
+      }
       for (const c of node) walk(c, st);
       return;
     }
@@ -148,6 +189,16 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     seen.add(node as object);
     const n = node as Node;
     const kind = n.kind;
+    const prevAnchor = anchor;
+    if (hasLine(n) && isStatementNode(n)) anchor = n;
+    try {
+      walkNode(n, kind, st);
+    } finally {
+      anchor = prevAnchor;
+    }
+  }
+
+  function walkNode(n: Node, kind: string | undefined, st: WalkState): void {
 
     // `^{}` meta and `_{}` foreign bodies are host-adjacent / opaque — not scrml
     // logic statement lists, so `defer` has no meaning there.
@@ -159,7 +210,7 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     // E-CODEGEN-INVALID-LOGIC with no root cause). The text is PARSED (native
     // statement parser) and a `Defer` node looked for — no word matching.
     if (kind === "escape-hatch" && typeof n.raw === "string" && n.raw.includes("defer") &&
-        textContainsDeferStatement(n.raw as string, true)) {
+        textLambdaContainsDefer(n.raw as string)) {
       report("E-DEFER-OUTSIDE-FUNCTION", n, LAMBDA_MSG);
       return;
     }
@@ -204,6 +255,13 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     }
 
     if (kind === "defer-stmt") {
+      if (n.unbracedArm === true && !st.defer) {
+        // §19.16.2 (S430 round 6) — the unbraced body of an if / else / loop arm.
+        report("E-DEFER-UNSUPPORTED-SITE", n, UNSUPPORTED_SITE_MSG(
+          "the unbraced body of an `if` / `else` / loop",
+          "an unbraced arm has no written block for the deferred statement to attach to (and the live " +
+          "front-end does not keep an unbraced `else` arm at all)"));
+      }
       if (n.inBareBlock === true && !st.defer) {
         // Native front-end: a `defer` DIRECTLY inside a bare `{ }` block (the
         // bridge flattens bare blocks — translate-stmt.js). Not a stage-1 defer
@@ -520,6 +578,9 @@ function checkLaterShadow(root: unknown, filePath: string, report: ReportFn): vo
         const s = f.list[j] as Node;
         if (!s || typeof s !== "object" || typeof s.kind !== "string" || !LATER_DECL_KINDS.has(s.kind)) continue;
         if (s._bareAssign === true) continue; // keywordless `x = ?{…}`: an assignment, not a declaration
+        // native bridge: a declaration flattened out of a bare `{ }` block lives in
+        // that (lost) inner block, not in this one (translate-stmt.js).
+        if (s.bareBlockScope !== undefined && s.bareBlockScope !== (f.list as Node[])[f.i]?.bareBlockScope) continue;
         for (const nm of declNames(s.name)) if (!out.has(nm)) out.set(nm, s);
       }
     }
@@ -535,8 +596,9 @@ function checkLaterShadow(root: unknown, filePath: string, report: ReportFn): vo
         `this deferred statement could not be analysed for the names it reads, and its block ` +
         `declares ${[...later.keys()].map((x) => "`" + x + "`").join(", ")} after the \`defer\`. A deferred ` +
         `statement sees only the bindings in scope at the \`defer\` (§19.16.2) and must be proven not to ` +
-        `read a later declaration. Simplify the deferred statement, or move the later declaration(s) ` +
-        `above the \`defer\`.`);
+        `read a later declaration; this one could not be (e.g. it contains a block-bodied arrow function, ` +
+        `which the front-end keeps as text). Fix: move the later declaration(s) above the \`defer\`, or ` +
+        `rename them so they cannot collide, or move the arrow's body into a named function.`);
       return;
     }
     for (const nm of free) {

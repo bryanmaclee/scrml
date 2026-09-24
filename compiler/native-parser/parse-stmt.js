@@ -3208,6 +3208,11 @@ function deferLeadFollows(cursor) {
     if (lineOfToken(next) !== lineOfToken(here)) return false;
     if (nk === TokenKind.Ident) return next.name !== "or" && next.name !== "and";
     if (nk === TokenKind.ScrmlAt || nk === TokenKind.SqlBlock || nk === TokenKind.LBrace) return true;
+    // `defer [ … ]…` (S430 round 6): a `[` separated from `defer` by whitespace
+    // opens an array-literal statement; an adjacent `defer[0]` is an index.
+    if (nk === TokenKind.LBracket) {
+        return here && here.span && next.span && next.span.start > here.span.end;
+    }
     if (typeof nk === "string" && nk.startsWith("Kw")) return !DEFER_NON_LEAD_KEYWORD_KINDS.has(nk);
     return false;
 }
@@ -3222,8 +3227,41 @@ function deferLeadFollows(cursor) {
 // The E-DEFER-* restrictions are NOT checked here — they are checked once,
 // post-parse, on the live-shaped AST (compiler/src/validators/lint-defer.ts)
 // so both front-ends share one checker.
+// --- deferIsUnbracedArmBody — is the `defer` at the cursor the unbraced body
+// of an `if` / `else` / `for` / `while` / `do` arm? (§19.16.2, S430 round 6) ---
+// Decided from the token stream: the token before `defer` is `else` / `do`, or
+// a `)` whose matching `(` follows `if` / `for` / `while`. Mirrors the live
+// ast-builder `deferIsUnbracedArmBody`.
+function deferIsUnbracedArmBody(cursor) {
+    const toks = cursor.tokens;
+    const skip = (k) => {
+        while (k >= 0 && toks[k] && (toks[k].kind === TokenKind.Newline || toks[k].kind === TokenKind.Whitespace)) k--;
+        return k;
+    };
+    const k = skip(cursor.idx - 1);
+    const prev = k >= 0 ? toks[k] : null;
+    if (!prev) return false;
+    if (prev.kind === TokenKind.KwElse || prev.kind === TokenKind.KwDoWhile) return true;
+    if (prev.kind !== TokenKind.RParen) return false;
+    let depth = 0;
+    for (let j = k; j >= 0; j--) {
+        const t = toks[j];
+        if (t.kind === TokenKind.RParen) depth++;
+        else if (t.kind === TokenKind.LParen) {
+            depth--;
+            if (depth === 0) {
+                const h = skip(j - 1);
+                const head = h >= 0 ? toks[h] : null;
+                return !!head && (head.kind === TokenKind.KwIf || head.kind === TokenKind.KwFor || head.kind === TokenKind.KwWhile);
+            }
+        }
+    }
+    return false;
+}
+
 export function parseDefer(ctx) {
     const cursor = ctx.cursor;
+    const unbracedArm = deferIsUnbracedArmBody(cursor);
     const kw = advance(cursor);   // consume `defer`
     let body = [];
     let blockForm = false;
@@ -3250,7 +3288,9 @@ export function parseDefer(ctx) {
         }
     }
     const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
-    return makeDefer(body, blockForm, span);
+    const node = makeDefer(body, blockForm, span);
+    if (unbracedArm) node.unbracedArm = true;
+    return node;
 }
 
 // --- typeBodyText — reconstruct the brace-delimited `type` body raw text ---

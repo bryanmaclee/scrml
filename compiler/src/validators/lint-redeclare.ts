@@ -101,7 +101,13 @@ export function runRedeclareChecks(ast: FileAST | null | undefined): RedeclareDi
       const isFn = sn.kind === "function-decl" && typeof sn.name === "string" && sn.fromExport !== true;
       if (!isLexical && !isFn) continue;
       const names = isLexical ? declNames(sn.name) : [sn.name as string];
-      for (const nm of names) {
+      // Native bridge: statements flattened out of a bare `{ }` block carry a
+      // `bareBlockScope` id (translate-stmt.js) — that block was a scope of its
+      // own, so its declarations are keyed separately (legal shadowing, S430
+      // round 6, A).
+      const scopeKey = sn.bareBlockScope === undefined ? "" : `#${String(sn.bareBlockScope)}`;
+      for (const rawName of names) {
+        const nm = rawName + scopeKey;
         const prev = bound.get(nm);
         if (prev) {
           // function vs function in one block: left to the existing checks.
@@ -109,9 +115,9 @@ export function runRedeclareChecks(ast: FileAST | null | undefined): RedeclareDi
           if (!(isFn && prevIsFn)) {
             const where = prev.node === null
               ? `a parameter of ${fnName ? "`" + fnName + "`" : "this function"}`
-              : `a \`${kwOf(prev.node.kind as string)} ${nm}\` in the same block (${lineOf(prev.node)})`;
+              : `a \`${kwOf(prev.node.kind as string)} ${rawName}\` in the same block (${lineOf(prev.node)})`;
             report(sn,
-              `\`${kwOf(sn.kind)} ${nm}\` (${lineOf(sn)}) redeclares \`${nm}\`, which is already ${where}. ` +
+              `\`${kwOf(sn.kind)} ${rawName}\` (${lineOf(sn)}) redeclares \`${rawName}\`, which is already ${where}. ` +
               `A block binds each name once (§7.3.3). Rename one of them, or assign to the existing ` +
               `binding instead of declaring it again.`);
           }

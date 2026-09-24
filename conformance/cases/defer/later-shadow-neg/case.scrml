@@ -1,6 +1,6 @@
 ${
-    const x = "outer"
     <trace> = ""
+    const x = "outer"
 
     function D(s: string) {
         @trace = @trace + s

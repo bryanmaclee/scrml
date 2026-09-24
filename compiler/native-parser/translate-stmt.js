@@ -151,8 +151,24 @@ function appendTranslatedStmt(out, stmt, counter) {
             // block that DOES shadow is vanishingly rare in scrml logic
             // bodies; flatten is the faithful best-effort given no live kind.)
             if (Array.isArray(stmt.body)) {
+                // S430 round 6 — every statement flattened out of this bare block
+                // carries a `bareBlockScope` id, so a checker can tell a legal
+                // shadowing declaration in the (lost) bare block from a
+                // redeclaration in the enclosing block.
+                const bareScope = ++bareBlockScopeCounter;
                 for (const inner of stmt.body) {
+                    const before = out.length;
                     appendTranslatedStmt(out, inner, counter);
+                    for (let q = before; q < out.length; q++) {
+                        if (out[q] && typeof out[q] === "object" && out[q].bareBlockScope === undefined) {
+                            // NON-enumerable: a checker-only annotation, invisible
+                            // to the live<->native within-node parity canary and to
+                            // every field-walking consumer.
+                            Object.defineProperty(out[q], "bareBlockScope", {
+                                value: bareScope, enumerable: false, writable: true, configurable: true,
+                            });
+                        }
+                    }
                     // S430 §19.16.2 — flattening would silently re-attach a
                     // `defer` written directly in the bare block to the
                     // ENCLOSING block. Mark it so the defer checker fails closed
@@ -1369,6 +1385,9 @@ function makeGivenGuardNode(stmt, counter) {
     };
 }
 
+// S430 round 6 — id source for `bareBlockScope` marks (see the Block case).
+let bareBlockScopeCounter = 0;
+
 // --- Defer translation — S430 P3 stage 1 (SPEC §19.16) ----------------------
 
 // makeDeferNode — native `Defer{body, blockForm}` -> live `defer-stmt`
@@ -1387,6 +1406,7 @@ function makeDeferNode(stmt, counter) {
         kind: "defer-stmt",
         body,
         blockForm: stmt.blockForm === true,
+        ...(stmt.unbracedArm === true ? { unbracedArm: true } : {}),
         span: spanOrZero(stmt.span),
     };
 }
