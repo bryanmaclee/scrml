@@ -63,6 +63,7 @@ import { runEStateBlockStatementForm } from "./lint-e-state-block-statement-form
 import { runWInputStateMarkupNonreactive } from "./lint-w-input-state-markup-nonreactive.js";
 import { findUnsupportedTailwindShapes, findUnrecognizedClasses } from "./tailwind-classes.js";
 import { runGauntletPhase1Checks } from "./gauntlet-phase1-checks.js";
+import { readHostImportCapabilities, validateHostImports } from "./host-import.js";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
@@ -580,7 +581,12 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, em
   if (sourceDir === outDir) return jsCode;
 
   return jsCode.replace(
-    /^(import\s+(?:\{[^}]*\}|[^\s]+)\s+from\s+)(["'])(\.\.?\/[^"']+\.js)\2(;?)$/gm,
+    // `.ts` / `.mts` / `.mjs` as well as `.js`: a §21.3.1 `import:host` names a
+    // TypeScript or JavaScript host module and is emitted as this same static
+    // import, so its specifier needs the same source->output re-base. Trailing
+    // blanks are tolerated (the library emitter pads a rewritten `import:host`
+    // line to keep its span splices aligned).
+    /^(import\s+(?:\{[^}]*\}|[^\s]+)\s+from\s+)(["'])(\.\.?\/[^"']+\.(?:js|mjs|ts|mts))\2(;?)[ \t]*$/gm,
     (match, prefix, quote, relPath, semi) => {
       // F-COMPILE-002: skip .server.js / .client.js — these are scrml output
       // artefacts whose specifier is ALREADY expressed in dist coordinates by
@@ -1129,6 +1135,19 @@ export function compileScrml(options = {}) {
     }
   }
 
+  // Stage 1.5: project manifest — `[capabilities] host-import` (SPEC §22.13).
+  // "The manifest entry is read at compile-time before any parse begins." Read
+  // once per compile (not memoized across compiles, so a manifest edit takes
+  // effect on the next build) for every input file; the per-file capability
+  // gates `import:host` (§21.3.1) in `validateHostImports` right after TAB.
+  // An unrecognised `host-import` value is E-MANIFEST-001, reported once per
+  // manifest.
+  const hostImportCaps = stage("MANIFEST", () =>
+    readHostImportCapabilities(inputFiles.map((f) => resolve(f))));
+  for (const e of hostImportCaps.errors) {
+    collectErrors("MANIFEST", [e], e.filePath || null);
+  }
+
   // Stage 2: Block Splitter (per-file)
   // When selfHostModules.splitBlocks is provided, use it instead of the JS original.
   const _splitBlocks = selfHostModules?.splitBlocks ?? splitBlocks;
@@ -1325,6 +1344,13 @@ export function compileScrml(options = {}) {
     const bsResult = bsResults[i];
     const result = stage("TAB", () => _buildAST(bsResult));
     collectErrors("TAB", result.errors, result.filePath || bsResult.filePath);
+    // §21.3.1 `import:host` gate — placement (E-IMPORT-003), host-tag
+    // (E-IMPORT-009) and the §22.13 manifest allow-list (E-IMPORT-008). Shared
+    // by both front-ends, run before any later stage consumes the AST.
+    {
+      const _fp = result.filePath || bsResult.filePath;
+      collectErrors("TAB", validateHostImports(result.ast, _fp, hostImportCaps.byFile.get(_fp) || null), _fp);
+    }
     // issue #12 blast radius — a `?{}` SQL block inside a CONCISE / curried arrow
     // body (`(x) => ?{...}`, `(a)=>(b)=>{?{...}}`, `.map(x => ?{...})`) leaks as the
     // generic E-CODEGEN-INVALID-LOGIC (and, when the fn does not escalate to server,

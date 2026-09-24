@@ -851,6 +851,16 @@ const BARE_DECL_NAME_EQ_AT_END_RE =
 // yet; deferred to scrml-language v1.next).
 const USE_FOREIGN_LIFT_RE = /^\s*use\s+foreign:/;
 
+// §21.3.1 — `import:<host-tag> { ... } from "..."`. A file-top declaration
+// OUTSIDE any `${}` block, so it arrives as a bare TEXT block; BARE_DECL_RE's
+// `import\s+` term does not match `import:`, and without this gate the line
+// leaked into `<body>` as page text at exit 0. Lifted like `use foreign:` so
+// parseLogicBody's `import` handler builds the `import-decl` (with `hostTag`);
+// placement / host-tag / manifest are then enforced by host-import.js's
+// post-parse gate. Any host-tag is lifted (a non-`host` tag is E-IMPORT-009
+// there, not page text here).
+const IMPORT_HOST_LIFT_RE = /^\s*import\s*:/;
+
 // ---------------------------------------------------------------------------
 // P2 Form 1 desugaring helpers — body-root absorbs outer attrs (SPEC §21.2)
 //
@@ -1662,7 +1672,8 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // E-FOREIGN-SIDECAR-NOMINAL — instead of leaking the line (and any following
     // bare `server function`) as literal HTML. ONLY the `use foreign:` form
     // routes here; plain `use scrml:ui` / CSS `use`/`using` are untouched.
-    if (block.type === "text" && parentType !== "markup" && USE_FOREIGN_LIFT_RE.test(block.raw)) {
+    if (block.type === "text" && parentType !== "markup" &&
+        (USE_FOREIGN_LIFT_RE.test(block.raw) || IMPORT_HOST_LIFT_RE.test(block.raw))) {
       result.push({
         type: "logic",
         raw: "${" + block.raw + "}",
@@ -11528,11 +11539,24 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // IMPORT — parse structured import data per §21.3
     if (tok.kind === "KEYWORD" && tok.text === "import") {
       const startTok = consume();
-      const { expr, span } = collectExpr();
-      const rawStr = "import " + expr;
+      const { expr: rawExpr, span } = collectExpr();
+      const rawStr = "import " + rawExpr;
 
       // Parse structured import: `{ Name1, Name2 } from './path'` or `Name from './path'`
       const importNode = { id: ++counter.next, kind: "import-decl", raw: rawStr, span, names: [], specifiers: [], source: null, isDefault: false };
+
+      // §21.3.1 `import:<host-tag> { ... } from "..."` — record the tag and
+      // parse the rest as the ordinary named-import clause. Placement,
+      // host-tag and manifest rules live in host-import.js (shared with the
+      // native front-end). The grammar admits only the braced named clause.
+      let expr = rawExpr;
+      const hostTagMatch = rawExpr.match(/^\s*:\s*([A-Za-z_$][A-Za-z0-9_$]*)/);
+      if (hostTagMatch) {
+        importNode.hostTag = hostTagMatch[1];
+        importNode.raw = "import:" + hostTagMatch[1] + " " + rawExpr.slice(hostTagMatch[0].length).trim();
+        expr = rawExpr.slice(hostTagMatch[0].length);
+        if (!/^\s*\{/.test(expr)) expr = "";
+      }
 
       // Match: { names } from 'source' or "source"
       const namedMatch = expr.match(/^\s*\{\s*([^}]*)\}\s*from\s+["']([^"']+)["']/);
