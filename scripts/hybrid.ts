@@ -111,7 +111,13 @@ export async function loadSubstitute(stage: string, spec: string): Promise<unkno
     const abs = resolve(spec);
     if (!existsSync(abs)) throw new InvalidRun(`--swap ${stage}=${spec}: no such file ${abs}`);
     const target = extname(abs) === ".scrml" ? compileScrmlSubstitute(abs) : abs;
-    mod = await import(pathToFileURL(target).href);
+    try {
+      mod = await import(pathToFileURL(target).href);
+    } catch (e) {
+      throw new InvalidRun(
+        `--swap ${stage}=${spec}: the substitute module failed to load (${target}): ${String((e as Error)?.message ?? e).split("\n")[0]}`,
+      );
+    }
   }
   // Fail at load time, not mid-run, when the module lacks the entry export.
   try {
@@ -290,7 +296,7 @@ function spawnSide(files: string[], swapArgs: string[], outDir: string): Promise
     stdout: "ignore",
     stderr: "pipe",
   });
-  return proc.exited.then(async (code) => {
+  return proc.exited.then(async (code: number) => {
     if (code !== 0) {
       const err = await new Response(proc.stderr).text();
       throw new InvalidRun(`differential side worker (${swapArgs.length ? "hybrid" : "pure TS"}) exited ${code}:\n${err.slice(-2000)}`);
