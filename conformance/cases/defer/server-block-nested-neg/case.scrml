@@ -1,0 +1,29 @@
+<program db="sqlite::memory:">
+<schema>
+    tasks { id: integer primary key, done: integer }
+</schema>
+${
+    <busy> = false
+    function save(id: number) {
+        @busy = true
+        if (id > 0) {
+            defer @busy = false
+            ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
+        }
+    }
+    function pureHelper(x: number) {
+        return x + 1
+    }
+    function other(id: number) {
+        @busy = true
+        defer @busy = false
+        if (id > 0) {
+            @busy = true
+        }
+        ?{`UPDATE tasks SET done = 1 WHERE id = ${id}`}.run()
+    }
+}
+<button id="go" onclick=save(1)>go</button>
+<button id="go2" onclick=other(1)>go2</button>
+<p id="out">${@busy}</p>
+</program>

@@ -1125,7 +1125,17 @@ export function emitContinueStmt(node: any): string {
 export function emitDeferScope(node: any, opts: any): string {
   const lines: string[] = [];
   lines.push(`try {`);
-  for (const code of emitLogicBody(node.body ?? [], { ...opts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames) })) {
+  const tryOpts = { ...opts, declaredNames: blockScopedDeclaredNames(opts?.declaredNames) };
+  // §32 (S430 review F2) — the `try` body is the CONTINUATION of the statement
+  // sequence the `defer` sat in, not a new tilde scope: a `~` initialized before
+  // the `defer` and read after it must resolve to the SAME accumulator.
+  // `emitLogicBody` would mint a fresh tilde context (it treats its list as a new
+  // sequence), orphaning the read, so when a context is already live the try body
+  // is emitted statement-by-statement against it instead.
+  const tryCodes: string[] = opts?.tildeContext
+    ? (node.body ?? []).map((n: any) => emitLogicNode(n, tryOpts)).filter((s: string) => s.trim() !== "")
+    : emitLogicBody(node.body ?? [], tryOpts);
+  for (const code of tryCodes) {
     for (const line of code.split("\n")) lines.push(`  ${line}`);
   }
   lines.push(`} finally {`);

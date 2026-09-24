@@ -274,6 +274,15 @@ interface ServerErrorDirective {
   __serverError: { type: string; variant: string; data?: unknown; status?: number };
 }
 
+/** `{ "__batches": [...] }` — per-batch serverStub responses (see installServerStubFetch). */
+function isBatchesDirective(v: unknown): v is { __batches: unknown[] } {
+  return (
+    v !== null &&
+    typeof v === "object" &&
+    Array.isArray((v as { __batches?: unknown }).__batches)
+  );
+}
+
 function isServerErrorDirective(v: unknown): v is ServerErrorDirective {
   return (
     v !== null &&
@@ -326,12 +335,21 @@ function installServerStubFetch(serverStub: ServerStub): () => void {
   // (`_<counter>` + optional `__batch_<i>` + end) still matches; a name that
   // itself contains `_<digits>` (`load_2` -> `__ri_route_load_2_5`) still
   // resolves, because the shorter candidate fails the `$` anchor.
-  const ROUTE_RE = /^\/_scrml\/__ri_route_(.+?)_\d+(?:__batch_\d+)?$/;
+  const ROUTE_RE = /^\/_scrml\/__ri_route_(.+?)_\d+(?:__batch_(\d+))?$/;
   g.fetch = async (input: any): Promise<any> => {
     const url = typeof input === "string" ? input : (input && input.url) || String(input);
     const m = String(url).match(ROUTE_RE);
     const fnName = m ? m[1] : null;
     let body: unknown = fnName !== null && fnName in serverStub ? serverStub[fnName] : null;
+    // Per-BATCH responses (S430): `{ "__batches": [r0, r1, …] }` answers the
+    // i-th server batch of a §19.9.9 multi-batch split with `r_i` (a batch
+    // ordinal is a normative §19.9.9.3 concept — `batchIndex` — not an impl
+    // route detail). A single-batch / non-split route is batch 0. Each `r_i`
+    // takes every form a plain stub value takes (value, absence, `__serverError`).
+    if (isBatchesDirective(body)) {
+      const bi = m && m[2] !== undefined ? Number(m[2]) : 0;
+      body = bi < body.__batches.length ? body.__batches[bi] : null;
+    }
     let status = 200;
     if (isServerErrorDirective(body)) {
       const e = body.__serverError;

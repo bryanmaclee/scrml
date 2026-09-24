@@ -309,6 +309,32 @@ function openCpsDeferScope(
   stack.push({ openAt: lines.length, pad, deferredCode });
 }
 
+/**
+ * S430 review F1 — before a CPS wrapper opens a `defer`'s `try`, emit the
+ * CLIENT-side `function` declarations that come LATER in the walk, so they stay
+ * visible to the whole wrapper body (block hoisting), exactly as lower-defer.ts
+ * does for an ordinary statement list. `order` is the remaining walk order;
+ * `isServerIdx` excludes statements that belong to a server batch. Emitted
+ * indices are added to `hoisted` so the walk skips them.
+ */
+function hoistCpsFunctionDecls(
+  lines: string[],
+  pad: string,
+  body: ASTNode[],
+  order: number[],
+  isServerIdx: (i: number) => boolean,
+  hoisted: Set<number>,
+  opts: Record<string, unknown>,
+): void {
+  for (const idx of order) {
+    const s = body[idx];
+    if (!s || s.kind !== "function-decl" || isServerIdx(idx) || hoisted.has(idx)) continue;
+    const code = emitLogicNode(s, opts as any);
+    if (code) for (const line of code.split("\n")) lines.push(`${pad}${line}`);
+    hoisted.add(idx);
+  }
+}
+
 function closeCpsDeferScopes(lines: string[], stack: OpenCpsDefer[]): void {
   while (stack.length > 0) {
     const d = stack.pop()!;
@@ -460,9 +486,12 @@ function emitMultiBatchWrapper(opts: {
   // §19.16.5 — open `defer` scopes of this wrapper's top-level walk.
   const deferStack: OpenCpsDefer[] = [];
 
-  for (const stmtIndex of schedule) {
+  const hoistedFnIdx = new Set<number>();
+  for (let si = 0; si < schedule.length; si++) {
+    const stmtIndex = schedule[si];
     const stmt = body[stmtIndex];
     if (!stmt) continue;
+    if (hoistedFnIdx.has(stmtIndex)) continue;
 
     const owningBatch = batchOfIndex.get(stmtIndex);
     if (owningBatch !== undefined) {
@@ -520,6 +549,7 @@ function emitMultiBatchWrapper(opts: {
     // §19.16.5 — a top-level client-tier `defer`: open its scope here; it
     // closes after the whole walk (after the LAST batch await).
     if (stmt.kind === "defer-stmt") {
+      hoistCpsFunctionDecls(lines, "    ", body, schedule.slice(si + 1), (i) => batchOfIndex.has(i), hoistedFnIdx, cpsOptsBase);
       openCpsDeferScope(lines, deferStack, "    ", stmt, cpsOptsBase);
       continue;
     }
@@ -1211,9 +1241,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     };
     // §19.16.5 — open `defer` scopes of this wrapper's top-level walk.
     const deferStack: OpenCpsDefer[] = [];
+    const hoistedFnIdx = new Set<number>();
     for (let i = 0; i < body.length; i++) {
       const stmt = body[i];
       if (!stmt) continue;
+      if (hoistedFnIdx.has(i)) continue;
 
       if (cpsSplit.serverStmtIndices.includes(i)) {
         // This is a server statement — replace with a call to the server stub.
@@ -1244,6 +1276,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       } else if ((stmt as ASTNode).kind === "defer-stmt") {
         // §19.16.5 — a top-level client-tier `defer`: its scope closes after
         // the whole walk, i.e. after the server await and every continuation.
+        hoistCpsFunctionDecls(lines, "    ", body, body.map((_, k) => k).slice(i + 1), (k) => cpsSplit.serverStmtIndices.includes(k), hoistedFnIdx, cpsOpts);
         openCpsDeferScope(lines, deferStack, "    ", stmt as ASTNode, cpsOpts);
       } else {
         // Client statement — emit it directly.

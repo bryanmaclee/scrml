@@ -1,0 +1,15 @@
+{
+  "id": "defer-function-hoist-across-defer",
+  "description": "§19.16.6 — lowering a `defer` does not change the meaning of the rest of the block: a nested `function` declared AFTER the `defer` is still visible to code BEFORE it (block hoisting). f() calls helper() before any defer; helper is declared after two defers. trace = \"H;body;D2;D1;\" (no TypeError).",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.6: a nested function declaration written after the `defer` stays visible to the whole block, as it is without the `defer`; deferred bodies then run LIFO at exit (§19.16.2).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "H;body;D2;D1;" },
+    "domAnchored": [{ "selector": "#out", "text": "H;body;D2;D1;" }]
+  }
+}

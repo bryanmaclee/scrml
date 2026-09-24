@@ -10768,7 +10768,7 @@ function annotateNodes(
                   `is not handled. A deferred statement runs while its block is already exiting, so its ` +
                   `error cannot propagate: '?' is not allowed in a deferred statement and the enclosing ` +
                   `function's '!' does not cover it (§19.16.3). Handle it in place: ` +
-                  `'defer ${bareCallee}(...) !{ else :> ... }' or 'match' on the result.`,
+                  `'defer ${bareCallee}(...) !{ | _ :> ... }' (or one arm per variant), or 'match' on the result.`,
                   (stmt.span ?? n.span) as Span,
                 ));
               } else if (bareCallee && fnCanFail.has(bareCallee)) {

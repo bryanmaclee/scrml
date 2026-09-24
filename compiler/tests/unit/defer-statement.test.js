@@ -29,7 +29,7 @@ import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
 import { nativeParseFile } from "../../native-parser/parse-file.js";
 import { compileScrml } from "../../src/api.js";
-import { runDeferChecks } from "../../src/validators/lint-defer.ts";
+import { runDeferChecks, scanRawControlFlow } from "../../src/validators/lint-defer.ts";
 import { lowerDeferList, lowerDefers, isDeferLoweredTry } from "../../src/codegen/lower-defer.ts";
 import { normalizeChunkToken } from "../helpers/chunk-scope.js";
 
@@ -576,5 +576,329 @@ describe("§8 live and native front-ends emit the same client JS for defer", () 
     expect(live.errors.map((e) => e.code)).toEqual([]);
     expect(nat.errors.map((e) => e.code)).toEqual([]);
     expect(normalizeChunkToken(nat.clientJs)).toBe(normalizeChunkToken(live.clientJs));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 — S430 review fix round (F1-F6)
+// ---------------------------------------------------------------------------
+
+describe("§9 F3 — E-DEFER-CONTROL-FLOW reaches value-form arms and handler arms", () => {
+  const check = (logic) => runDeferChecks(liveAST(wrap(logic)).ast).map((d) => d.code);
+  const header = `type Mode:enum = { A, B }\ntype E:enum = { Bad }\nfunction risky()! -> E { fail E.Bad }\n`;
+
+  test("return in a value-form match arm block (`:>`)", () => {
+    expect(check(header + `
+      function f(m: Mode) {
+        defer {
+          let k = match m {
+            .A :> { return 5 }
+            .B :> 3
+          }
+        }
+        return 1
+      }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+  });
+  test("return in a value-form match arm block with the legacy `=>` arm arrow (not mistaken for a lambda)", () => {
+    expect(check(header + `
+      function f() {
+        defer {
+          let k = match 1 {
+            1 => { return 5 }
+            else => 3
+          }
+        }
+        return 1
+      }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+  });
+  test("fail in a value-form match arm block", () => {
+    expect(check(header + `
+      function f(m: Mode)! -> E {
+        defer {
+          let k = match m {
+            .A :> { fail E.Bad }
+            .B :> 3
+          }
+        }
+        return 1
+      }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+  });
+  test("return in an if-as-expression arm", () => {
+    expect(check(header + `
+      function f(x: number) {
+        defer {
+          let k = if (x > 0) { return 7 } else { 2 }
+        }
+        return 1
+      }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+  });
+  test("return in a match-STATEMENT arm", () => {
+    expect(check(header + `
+      function f(m: Mode) {
+        defer {
+          match m {
+            .A :> { return 9 }
+            .B :> { log("b") }
+          }
+        }
+        return 1
+      }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+  });
+  test("return in a `!{}` handler arm on the deferred call", () => {
+    expect(check(header + `
+      function f() {
+        defer risky() !{
+          | ::Bad :> { return 9 }
+        }
+        return 1
+      }`)).toEqual(["E-DEFER-CONTROL-FLOW"]);
+  });
+  test("a lambda inside a value arm is a boundary; plain value arms are clean", () => {
+    expect(check(header + `
+      function f(m: Mode) {
+        defer {
+          let k = match m {
+            .A :> { [1].map((x) => { return x }) }
+            .B :> 3
+          }
+          let q = [1, 2].map((x) => { return x + 1 })
+          let t = m == .A ? 1 : 2
+        }
+        return 1
+      }`)).toEqual([]);
+  });
+
+  test("scanner unit: keywords in strings/comments, property names, `?.`, ternaries and loops are not control transfers", () => {
+    expect(scanRawControlFlow(`{ log("return fail") // return\n }`)).toEqual([]);
+    expect(scanRawControlFlow(`{ x.return = a?.b ?? (c ? d : e) }`)).toEqual([]);
+    expect(scanRawControlFlow(`{ for (const i of xs) { if (i) { break } continue } }`)).toEqual([]);
+    expect(scanRawControlFlow(`{ function g() { return 1 } }`)).toEqual([]);
+    expect(scanRawControlFlow(`{ return 1 }`)).toEqual(["`return`"]);
+    expect(scanRawControlFlow(`{ let v = risky()? }`)).toEqual(["a `?` propagation"]);
+    expect(scanRawControlFlow(`{ break }`)).toEqual(["a `break` that leaves it"]);
+    expect(scanRawControlFlow(`{ break }`, true, true)).toEqual([]);
+  });
+});
+
+describe("§9 F1 — a nested function declared after a defer stays hoisted", () => {
+  test("lowerDeferList moves later function-decls in front of the try", () => {
+    const S = (name) => ({ kind: "bare-expr", expr: name });
+    const fn = (name, body = []) => ({ kind: "function-decl", name, body });
+    const out = lowerDeferList([S("a"), { kind: "defer-stmt", body: [S("D")] }, S("b"), fn("helper"), { kind: "defer-stmt", body: [S("D2")] }, fn("h2")]);
+    expect(out.map((s) => s.kind)).toEqual(["bare-expr", "function-decl", "function-decl", "try-stmt"]);
+    expect(out[1].name).toBe("helper");
+    expect(out[2].name).toBe("h2");
+  });
+  test("a function that references a binding declared after the defer stays with that binding (inside the try)", () => {
+    const S = (name) => ({ kind: "bare-expr", expr: name });
+    const out = lowerDeferList([
+      { kind: "defer-stmt", body: [S("D")] },
+      { kind: "let-decl", name: "late", init: "1" },
+      { kind: "function-decl", name: "useLate", body: [{ kind: "return-stmt", expr: "late + 1" }] },
+    ]);
+    expect(out.length).toBe(1);
+    expect(isDeferLoweredTry(out[0])).toBe(true);
+    expect(out[0].body.map((s) => s.kind)).toEqual(["let-decl", "function-decl"]);
+  });
+  test("client: the helper is declared before the try", () => {
+    const r = compile(wrap(`
+      <trace> = ""
+      function add(s: string) { @trace = @trace + s }
+      function f() {
+        add(helper())
+        defer add("D")
+        function helper() { return "H" }
+      }`, `<button onclick=f()>go</button><p>\${@trace}</p>`));
+    expect(r.errors.map((e) => e.code)).toEqual([]);
+    const js = r.clientJs;
+    expect(js.indexOf("function helper()")).toBeGreaterThan(-1);
+    expect(js.indexOf("function helper()")).toBeLessThan(js.indexOf("try {", js.indexOf("function _scrml_f_")));
+  });
+  test("server: the helper is declared before the try in the server handler", () => {
+    const r = compile(`<program db="sqlite::memory:">
+<schema>
+    t { id: integer primary key, x: integer }
+</schema>
+\${
+    <srv> = ""
+    server function sv() {
+        let out = helperS()
+        defer log("deferred")
+        function helperS() {
+            return "S"
+        }
+        return out
+    }
+    function go() { @srv = sv() }
+}
+<button onclick=go()>go</button>
+<p>\${@srv}</p>
+</program>`);
+    expect(r.errors.map((e) => e.code)).toEqual([]);
+    const i = r.serverJs.indexOf("function helperS()");
+    expect(i).toBeGreaterThan(-1);
+    expect(i).toBeLessThan(r.serverJs.indexOf("try {", r.serverJs.indexOf("let out = helperS()")));
+  });
+  test("nested block: the helper is hoisted within its own block", () => {
+    const fnNode = {
+      kind: "function-decl", name: "outer", body: [
+        { kind: "if-stmt", consequent: [
+          { kind: "defer-stmt", body: [{ kind: "bare-expr", expr: "D" }] },
+          { kind: "bare-expr", expr: "x" },
+          { kind: "function-decl", name: "inner", body: [] },
+        ] },
+      ],
+    };
+    lowerDefers({ nodes: [fnNode] }, new Set());
+    const cons = fnNode.body[0].consequent;
+    expect(cons.map((s) => s.kind)).toEqual(["function-decl", "try-stmt"]);
+  });
+  test("CPS split wrapper: a client function-decl after the defer is emitted before the wrapper's try", () => {
+    const r = compile(`<program db="sqlite::memory:">
+<schema>
+    t { id: integer primary key, x: integer }
+</schema>
+\${
+    <trace> = ""
+    function save(id: number) {
+        @trace = @trace + "s;"
+        defer @trace = @trace + "D;"
+        ?{\`UPDATE t SET x = 1 WHERE id = \${id}\`}.run()
+        @trace = @trace + "end;"
+        function label() {
+            return "L;"
+        }
+    }
+}
+<button onclick=save(1)>go</button>
+<p>\${@trace}</p>
+</program>`);
+    const w = r.clientJs.slice(r.clientJs.indexOf("async function _scrml_cps_save"));
+    const fnAt = w.indexOf("function label()");
+    const deferTry = w.indexOf("try {", w.indexOf(`+ "s;"`));
+    expect(fnAt).toBeGreaterThan(-1);
+    expect(fnAt).toBeLessThan(deferTry);
+  });
+});
+
+describe("§9 F2 — `~` initialised before a defer resolves after it", () => {
+  test("return ~ + 1 and let r = ~ lower to the SAME accumulator (no E-CG-TILDE-UNRESOLVED)", () => {
+    const r = compile(wrap(`
+      <trace> = ""
+      function add(s: string) { @trace = @trace + s }
+      function two(x: number) { return x * 2 }
+      function f() {
+        two(5)
+        defer add("D")
+        return ~ + 1
+      }
+      function g() {
+        two(4)
+        defer add("E")
+        let r = ~
+        return r
+      }`, `<button onclick=f()>go</button><button onclick=g()>go2</button><p>\${@trace}</p>`));
+    expect(codesOf(r)).not.toContain("E-CG-TILDE-UNRESOLVED");
+    expect(r.errors.map((e) => e.code)).toEqual([]);
+    expect(r.clientJs).toMatch(/let (_scrml_tilde_\d+) = _scrml_two_\d+\(5\);\s*try \{\s*return \1 \+ 1;/);
+    expect(r.clientJs).toMatch(/let (_scrml_tilde_\d+) = _scrml_two_\d+\(4\);\s*try \{\s*let r = \1;/);
+  });
+});
+
+describe("§9 F4 — a defer nested in a server-side statement of a split function fails closed", () => {
+  test("`if (…) { defer @busy = false; ?{…} }` -> E-DEFER-SERVER-IN-SPLIT, and nothing is lowered into the server batch", () => {
+    const r = compile(`<program db="sqlite::memory:">
+<schema>
+    tasks { id: integer primary key, done: integer }
+</schema>
+\${
+    <busy> = false
+    function save(id: number) {
+        @busy = true
+        if (id > 0) {
+            defer @busy = false
+            ?{\`UPDATE tasks SET done = 1 WHERE id = \${id}\`}.run()
+        }
+    }
+}
+<button onclick=save(1)>go</button>
+<p>\${@busy}</p>
+</program>`);
+    expect(count(r, "E-DEFER-SERVER-IN-SPLIT")).toBe(1);
+    const msg = r.errors.find((e) => e.code === "E-DEFER-SERVER-IN-SPLIT").message;
+    expect(msg).toContain("`if` statement");
+  });
+  test("a defer nested in a CLIENT-side statement of a split function is fine", () => {
+    const r = compile(`<program db="sqlite::memory:">
+<schema>
+    tasks { id: integer primary key, done: integer }
+</schema>
+\${
+    <busy> = false
+    <n> = 0
+    function save(id: number) {
+        @busy = true
+        if (id > 0) {
+            defer @n = @n + 1
+            @busy = true
+        }
+        ?{\`UPDATE tasks SET done = 1 WHERE id = \${id}\`}.run()
+    }
+}
+<button onclick=save(1)>go</button>
+<p>\${@busy} \${@n}</p>
+</program>`);
+    expect(count(r, "E-DEFER-SERVER-IN-SPLIT")).toBe(0);
+    expect(r.errors.map((e) => e.code)).toEqual([]);
+  });
+});
+
+describe("§9 F5 — E-DEFER-SERVER-IN-SPLIT names the concrete trigger", () => {
+  test("a callee the compiler placed server-side is named, without claiming it does server work", () => {
+    const r = compile(`<program db="sqlite::memory:">
+<schema>
+    tasks { id: integer primary key, done: integer }
+</schema>
+\${
+    <busy> = false
+    function save(id: number) {
+        @busy = true
+        defer note(id)
+        ?{\`UPDATE tasks SET done = 1 WHERE id = \${id}\`}.run()
+        function note(x: number) {
+            return x + 1
+        }
+    }
+}
+<button onclick=save(1)>go</button>
+<p>\${@busy}</p>
+</program>`);
+    const e = r.errors.find((x) => x.code === "E-DEFER-SERVER-IN-SPLIT");
+    expect(e).toBeDefined();
+    expect(e.message).toContain("calls `note`, which the compiler placed server-side");
+    expect(e.message).not.toContain("runs server-side work");
+  });
+});
+
+describe("§9 F6 — the in-place handling hint uses a form that compiles", () => {
+  test("E-DEFER-UNHANDLED-FAILABLE suggests `!{ | _ :> … }`, and that form compiles and runs at exit", () => {
+    const base = `
+      type CloseError:enum = { Busy, Gone }
+      <trace> = ""
+      function closeAll()! -> CloseError { fail CloseError.Busy }`;
+    const bad = compile(wrap(`${base}
+      function work() {
+        defer closeAll()
+        @trace = @trace + "w;"
+      }`, `<button onclick=work()>go</button><p>\${@trace}</p>`));
+    const e = bad.errors.find((x) => x.code === "E-DEFER-UNHANDLED-FAILABLE");
+    expect(e.message).toContain("!{ | _ :> ... }");
+    expect(e.message).not.toContain("else :>");
+    const good = compile(wrap(`${base}
+      function work() {
+        defer closeAll() !{ | _ :> @trace = @trace + "close-failed;" }
+        @trace = @trace + "w;"
+      }`, `<button onclick=work()>go</button><p>\${@trace}</p>`));
+    expect(good.errors.map((x) => x.code)).toEqual([]);
   });
 });

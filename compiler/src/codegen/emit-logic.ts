@@ -4355,7 +4355,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
  *
  * Returns emitted JS code strings (each entry may be multi-line; caller indents).
  */
-export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: string | undefined, hasReturnType?: boolean): string[] {
+export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: string | undefined, hasReturnType?: boolean, _inheritTilde?: boolean): string[] {
   const TAIL_KINDS = new Set(["bare-expr", "match-stmt", "match-expr", "switch-stmt"]);
   let tailIdx = -1;
   // §19.16.6 — index of a trailing compiler-lowered `defer` scope whose `try`
@@ -4381,7 +4381,10 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
   // consume sites lower `~` to that var. Without this, a `function f() {
   // inner(2); return ~ }` shape emits a literal `~` in the return-stmt
   // (parsed as JS bitwise-NOT — produces NaN at runtime).
-  const tildeUsed = nodeListContainsTildeRef(body);
+  // §19.16.6 (S430 review F2) — `_inheritTilde`: the recursive call for a
+  // trailing lowered `defer` scope is the SAME statement sequence continuing, so
+  // it must keep the caller's live tilde context rather than mint a new one.
+  const tildeUsed = nodeListContainsTildeRef(body) && !(_inheritTilde && opts.tildeContext);
   const bodyOpts: EmitLogicOpts = tildeUsed
     ? { ...opts, tildeContext: { var: null, mode: "single" } }
     : opts;
@@ -4393,7 +4396,7 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
     if (i === deferTailIdx) {
       // Recurse: the try body keeps the implicit-tail-return semantics (the
       // return value is computed BEFORE the finally runs — §19.16.2).
-      const inner = emitFnShortcutBody(stmt.body ?? [], { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames) }, fnKind, hasReturnType);
+      const inner = emitFnShortcutBody(stmt.body ?? [], { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames) }, fnKind, hasReturnType, true);
       const deferredOpts: any = { ...bodyOpts, declaredNames: blockScopedDeclaredNames(bodyOpts.declaredNames) };
       delete deferredOpts.tildeContext;
       const deferred = emitLogicBody(stmt.finallyNode?.body ?? [], deferredOpts);
