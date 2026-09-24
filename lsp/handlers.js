@@ -37,6 +37,11 @@ import {
 import { splitBlocks } from "../compiler/src/block-splitter.js";
 import { buildAST } from "../compiler/src/ast-builder.js";
 import { runPA } from "../compiler/src/protect-analyzer.js";
+import {
+  SecretRedactor,
+  collectFromAst as collectConnectionValuesFromAst,
+  harvestFromSource as harvestConnectionValues,
+} from "../compiler/src/diagnostic-secrets.ts";
 import { runRI } from "../compiler/src/route-inference.js";
 import { runTS } from "../compiler/src/type-system.js";
 import { runDG } from "../compiler/src/dependency-graph.js";
@@ -287,6 +292,20 @@ export function getErrorSource(code) {
  * line.
  */
 export function analyzeText(filePath, text, logger, workspace) {
+  // s430-dev-db-stub F4 — the LSP diagnostic sink. Every message shown in the
+  // editor (and every PA note written to the server log) passes the same
+  // value-based redactor compileScrml uses, built from this file's own
+  // connection values (source harvest + the tree once it exists).
+  const redactor = new SecretRedactor(harvestConnectionValues(text));
+  const out = analyzeTextUnredacted(filePath, text, logger, workspace, redactor);
+  if (out.analysis?.ast) redactor.addValues(collectConnectionValuesFromAst(out.analysis.ast));
+  for (const d of out.diagnostics) {
+    if (typeof d.message === "string") d.message = redactor.redact(d.message);
+  }
+  return out;
+}
+
+function analyzeTextUnredacted(filePath, text, logger, workspace, redactor) {
   const log = logger || (() => {});
   const diagnostics = [];
   const analysis = {
@@ -336,7 +355,10 @@ export function analyzeText(filePath, text, logger, workspace) {
 
   let paResult = { protectAnalysis: { views: new Map() }, errors: [] };
   try {
-    paResult = runPA({ files });
+    paResult = runPA({
+      files,
+      onNote: (line) => { process.stderr.write(redactor.redact(line)); },
+    });
     if (paResult.errors?.length > 0) {
       for (const e of paResult.errors) pushError(diagnostics, e, text);
     }
