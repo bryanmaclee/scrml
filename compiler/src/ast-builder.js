@@ -6380,6 +6380,86 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
   }
 
   /**
+   * §19.16 — is the current token the lead of a `defer <statement>` scope-exit
+   * statement? `defer` is a CONTEXTUAL keyword (it lexes as an IDENT): it opens a
+   * defer statement ONLY at statement start, and ONLY when the next token sits on
+   * the SAME source line and can begin a statement — an identifier (not a word
+   * infix operator), an `@`-cell, a statement-capable keyword, a `?{}`-style
+   * child block, or a `{` block. Every other shape keeps `defer` an ordinary
+   * identifier: `defer(x)` is a call, `defer = 1` / `defer.x = 1` / `defer += 1`
+   * are writes, a lone `defer` is a bare read, and the HTML `<script defer>`
+   * attribute never reaches this parser at all (§19.16.1).
+   */
+  const DEFER_NON_LEAD_IDENTS = new Set(["or", "and"]);
+  const DEFER_NON_LEAD_KEYWORDS = new Set([
+    "is", "as", "of", "in", "instanceof", "else", "from", "extends",
+    "case", "catch", "finally", "default",
+  ]);
+  function isDeferStatementLead() {
+    const tok = peek();
+    if (tok.kind !== "IDENT" || tok.text !== "defer") return false;
+    const next = peek(1);
+    if (!next || next.kind === "EOF") return false;
+    const tokLine = tok.span && typeof tok.span.line === "number" ? tok.span.line : null;
+    const nextLine = next.span && typeof next.span.line === "number" ? next.span.line : null;
+    if (tokLine === null || nextLine === null || tokLine !== nextLine) return false;
+    switch (next.kind) {
+      case "IDENT": return !DEFER_NON_LEAD_IDENTS.has(next.text);
+      case "AT_IDENT": return true;
+      case "KEYWORD": return !DEFER_NON_LEAD_KEYWORDS.has(next.text);
+      case "BLOCK_REF": return !!(next.block && next.block.type !== "error-effect");
+      case "PUNCT": return next.text === "{";
+      default: return false;
+    }
+  }
+
+  /**
+   * §19.16 — parse `defer <statement>` / `defer { <statements> }`. Assumes
+   * `isDeferStatementLead()` is true. The deferred statement(s) land in `body`
+   * (always an array, so every walker that descends a `body` sees them). A
+   * `!{}` handler written after the deferred statement binds to THAT statement
+   * (it is the in-place handling §19.16.3 requires), not to the defer.
+   * Called from both parseLogicBody's top-level loop and parseOneStatement.
+   * The restrictions (E-DEFER-*) are checked post-parse by validators/lint-defer.ts
+   * so the live and native front-ends share one checker.
+   */
+  function parseDeferStmt() {
+    const startTok = consume(); // consume `defer`
+    let body = [];
+    let blockForm = false;
+    if (peek().kind === "PUNCT" && peek().text === "{") {
+      consume(); // consume `{`
+      body = parseRecursiveBody();
+      blockForm = true;
+    } else {
+      const inner = parseOneStatement();
+      if (inner) {
+        const nextTok = peek();
+        if (nextTok.kind === "BLOCK_REF" && nextTok.block && nextTok.block.type === "error-effect") {
+          consume();
+          const errBlock = buildBlock(nextTok.block, filePath, parentBlock.type, counter, errors);
+          body = [{
+            id: ++counter.next,
+            kind: "guarded-expr",
+            guardedNode: inner,
+            arms: errBlock ? errBlock.arms : [],
+            span: { ...inner.span, end: nextTok.block.span.end },
+          }];
+        } else {
+          body = [inner];
+        }
+      }
+    }
+    return {
+      id: ++counter.next,
+      kind: "defer-stmt",
+      body,
+      blockForm,
+      span: spanOf(startTok, peek()),
+    };
+  }
+
+  /**
    * Parse a `fail` statement — `fail EnumType.Variant(args)` or `fail EnumType::Variant(args)`.
    * Called from both parseLogicBody's top-level loop and parseOneStatement (nested bodies).
    * Assumes peek() is the `fail` keyword.
@@ -8240,6 +8320,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // FAIL: `fail EnumType.Variant(args)` (§19.3)
     if (tok.kind === "KEYWORD" && tok.text === "fail") {
       return parseFailStmt();
+    }
+
+    // DEFER: `defer <statement>` — §19.16 scope-exit statement (contextual keyword)
+    if (isDeferStatementLead()) {
+      return parseDeferStmt();
     }
 
     // LET
@@ -12856,6 +12941,14 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // (§19.3 — `.` is canonical, `::` is alias)
     if (tok.kind === "KEYWORD" && tok.text === "fail") {
       nodes.push(parseFailStmt());
+      continue;
+    }
+
+    // DEFER: `defer <statement>` — §19.16 scope-exit statement (contextual keyword).
+    // Parsed here too so a top-level `defer` becomes a node that the §19.16
+    // checker can reject (E-DEFER-OUTSIDE-FUNCTION) rather than a bare-expr.
+    if (isDeferStatementLead()) {
+      nodes.push(parseDeferStmt());
       continue;
     }
 
