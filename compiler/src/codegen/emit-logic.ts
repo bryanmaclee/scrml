@@ -3718,7 +3718,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           bindingName = guardedNode.name;
           initExpr = emitExprField(guardedNode.initExpr, guardedNode.init ?? "null", _makeExprCtx(opts));
         } else {
-          const bodyCode = emitLogicNode(guardedNode);
+          // s430-emit-state-leak — lower the guarded statement with THIS
+          // statement's opts. It was called with none, so a reactive assignment
+          // `@cell = f() !{…}` inside a function lost `insideFunctionBody` and
+          // registered a §6.8 reset init-thunk from inside the function (and, for
+          // an implicit cell, consumed the file's first-write slot so the
+          // top-level declaration lost its thunk). The `~` context is NOT passed:
+          // the guarded expression's value is `resultVar`, and the `~` rewire to
+          // it happens below (§32 Gap 5) — letting the inner emit repoint `~` too
+          // would claim the slot for the unguarded raw call.
+          const bodyCode = emitLogicNode(guardedNode, { ...opts, tildeContext: undefined });
           if (bodyCode) {
             initExpr = bodyCode.replace(/;\s*$/, "").replace(/^\s*return\s+/, "");
           }
