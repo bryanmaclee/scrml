@@ -12100,11 +12100,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               ? { kind: "EOF", text: "", span: { start: lastTok.span?.end ?? 0, end: lastTok.span?.end ?? 0, line: lastTok.span?.line ?? 1, col: lastTok.span?.col ?? 1 } }
               : { kind: "EOF", text: "", span: { start: 0, end: 0, line: 1, col: 1 } };
             subToks = subToks.concat([eofTok]);
-            // Capture the re-parse errors instead of discarding them, so the ONE fatal
-            // syntax error the outer export parse cannot see — E-FN-EQUALS-BODY, the
-            // unsanctioned `export fn NAME() = <expr>` shorthand — is surfaced. Every
-            // OTHER re-parse error stays suppressed (the "must not double-emit" intent):
-            // the outer parse of the export statement re-reports those.
+            // Capture the re-parse diagnostics so they can be surfaced below. This
+            // re-parse is the ONLY statement-level parse the exported declaration's
+            // body ever receives: the outer export path reads the whole declaration
+            // with collectExpr(), which does not parse statements. So every
+            // parse-layer diagnostic inside an exported function / fn / server
+            // function — and inside any function nested within one — exists ONLY
+            // here. (S430 P2: this site used to keep just E-FN-EQUALS-BODY and drop
+            // the rest, on the belief that the outer parse re-reported them. It did
+            // not: E-TRY-NOT-IN-SCRML, E-THROW-NOT-IN-SCRML,
+            // E-CONDITION-HEAD-UNPARENTHESIZED, E-FOR-UNPARENTHESIZED-HEAD … were all
+            // silently lost, so an exported function compiled at exit 0 with source
+            // the same function un-exported is rejected for.)
             const _subErrors = [];
             const subNodes = parseLogicBody(
               subToks,
@@ -12112,7 +12119,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               [],
               parentBlock,
               counter,
-              _subErrors,    // captured — only E-FN-EQUALS-BODY is surfaced below (others suppressed)
+              _subErrors,    // captured — ALL surfaced below (deduplicated)
               blockContext,
             );
             const innerFn = Array.isArray(subNodes)
@@ -12126,12 +12133,20 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
               synthHasReturnType = !!innerFn.hasReturnType;
               synthReturnTypeAnnotation = innerFn.returnTypeAnnotation;
             }
-            // Surface ONLY the E-FN-EQUALS-BODY fatal from the re-parse (an
-            // `export fn NAME() = <expr>` shorthand) — otherwise the export path
-            // swallows it into a silent empty exported function. All other
-            // re-parse errors stay suppressed (the outer parse re-reports them).
-            const _eqBodyErr = _subErrors.find((e) => e && e.code === "E-FN-EQUALS-BODY");
-            if (_eqBodyErr) errors.push(_eqBodyErr);
+            // Surface EVERY re-parse diagnostic. The sub-parse runs over the
+            // original token slice, so each diagnostic's span already points at
+            // the real source position — no remapping is needed. A diagnostic
+            // already present in `errors` (same code at the same source offset)
+            // is not pushed twice.
+            for (const _se of _subErrors) {
+              if (!_se) continue;
+              const _seStart = _se.tabSpan?.start ?? _se.span?.start;
+              const _dup = errors.some((e) =>
+                e && e.code === _se.code &&
+                (e.tabSpan?.start ?? e.span?.start) === _seStart,
+              );
+              if (!_dup) errors.push(_se);
+            }
           }
         } catch (_synthErr) {
           // Fall back to empty params/body on re-parse failure — preserves

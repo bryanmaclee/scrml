@@ -43,42 +43,23 @@
  * code with no producer is this project's recurring failure — E-TILDE-001/002 sat dead
  * for the project's whole life behind passing unit tests.
  *
- * ⚑ SURFACING (pre-existing, NOT introduced here) — THE AXIS IS `export`, AND IT COVERS
- * THE WHOLE LEXICAL INTERIOR OF AN EXPORTED DECLARATION. An earlier revision of this
- * banner blamed the `<program>` shell; that attribution was WRONG. A later one listed
- * only `export function`; that was too NARROW. Measured, this revision:
+ * ⚑ SURFACING — HISTORY. Until S430 this diagnostic was SILENT inside an `export`-ed
+ * `function` / `fn` / `server function` (and any function nested in one): the export
+ * synth re-parse in ast-builder.js kept only E-FN-EQUALS-BODY from its sub-parse and
+ * discarded the rest. S430 P2 closed that swallow; the code now fires there too —
+ * pinned in `export-decl-diagnostics-not-swallowed.test.js`. (The S414 measurement
+ * also listed `export const g = () => { ... }` as silent. That row was a different
+ * gap: a block-bodied arrow body is an escape-hatch expression that is never
+ * statement-parsed, exported or not — for this code it surfaces as
+ * E-CODEGEN-INVALID-LOGIC instead.)
  *
- *   top-level ................................. FIRES
- *   function .................................. FIRES
- *   fn ........................................ FIRES
- *   server function ........................... FIRES
- *   export function ........................... SILENT
- *   export fn ................................. SILENT
- *   export const g = () => { ... } ............ SILENT
- *   export server function .................... SILENT
- *   function NESTED inside an export function . SILENT
+ * ⚑ Recovery had to go rather than be tightened again: round 3 made it strictly WORSE
+ * than doing nothing — base truncated `while (i) < n >> 1` to `while (i) { }`, which
+ * TERMINATES, while the recovery emitted `while (i < n) { }`, which HANGS, at exit 0.
  *
- * (The `<program>` shell makes no difference in any row — both file shapes behave the
- * same.) An ast-builder parse-path diagnostic raised anywhere inside an `export`-ed
- * declaration is swallowed by the `export` re-parse site and reaches neither
- * `result.errors` nor `result.warnings`. That last row is the one that matters most:
- * real library code puts its loops in helpers nested inside exported functions.
- *
- * It is NOT general — `E-EQ-004` surfaces from both `function` and `export function` —
- * and it predates this change: the ratified S308 E-FOR-UNPARENTHESIZED-HEAD is
- * swallowed identically. Measured cost of closing it: 22 of 2,553 corpus files would
- * newly report an error, including ten shipped stdlib modules, so it is a migration
- * needing a ruling and is deliberately NOT fixed here.
- *
- * ⚑ In that exported region the diagnostic is swallowed EITHER WAY, which is a further
- * reason recovery had to go rather than be tightened again: there it bought nothing, and
- * round 3 made it strictly WORSE than doing nothing — base truncated
- * `while (i) < n >> 1` to `while (i) { }`, which TERMINATES, while the recovery emitted
- * `while (i < n) { }`, which HANGS, at exit 0.
- *
- * The diagnostic cases below therefore avoid `export`; the control cases use the library
- * harness (which needs `export` to import the result back) and assert the EMITTED JS and
- * the EXECUTED VALUE.
+ * The diagnostic cases below avoid `export` (they predate S430); the control cases use
+ * the library harness (which needs `export` to import the result back) and assert the
+ * EMITTED JS and the EXECUTED VALUE.
  */
 import { describe, test, expect } from "bun:test";
 import { compileScrml } from "../../src/api.js";
