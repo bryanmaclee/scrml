@@ -22,10 +22,8 @@ ${
     // relative paths only.
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { resolve, dirname, join } = await import("path");
-        const { existsSync } = await import("fs");
-    }
+    import { resolve, dirname, join } from "scrml:path"
+    import { existsSync } from "scrml:fs"
 
     // ---------------------------------------------------------------------------
     // Error type

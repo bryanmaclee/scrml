@@ -1,3 +1,5 @@
+import:host { extractIdentifiersFromAST } from "../../compiler/src/expression-parser.ts"
+
 <program>
 ${
     // ---------------------------------------------------------------------------
@@ -44,9 +46,6 @@ ${
     // Self-hosted: this is the second compiler module translated to scrml (M3 milestone).
     // ---------------------------------------------------------------------------
 
-    ^{
-        const { extractIdentifiersFromAST } = await import("./expression-parser.js");
-    }
 
     // ---------------------------------------------------------------------------
     // Error type

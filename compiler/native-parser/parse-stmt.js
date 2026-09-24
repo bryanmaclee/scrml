@@ -110,6 +110,9 @@ import {
     parseBinding, parseBindingIdent, parseObjectPattern, parseArrayPattern,
     // M4.2 — `noIn` scope helpers (the for-head deferral closure).
     enterNoInScope, exitNoInScope,
+    // S430 P1 / P4 — the shared forbidden-construct messages.
+    CLASS_NOT_IN_SCRML_MESSAGE,
+    setClassExprParser,
 } from "./parse-expr.js";
 import {
     VarDeclKind, MethodKind,
@@ -758,8 +761,11 @@ export function parseStatement(ctx) {
         return parseClassDecl(ctx);
     }
 
-    // An `import` statement.
-    if (kind === TokenKind.KwImport) {
+    // An `import` statement. A dynamic `import(...)` at statement position is
+    // an EXPRESSION statement (S430 P4) — route it to parseExprStatement, where
+    // parse-expr.js:parsePostfix fires E-DYNAMIC-IMPORT-NOT-IN-SCRML, instead of
+    // mis-parsing it as a static import (the pre-S430 E-STMT-EXPECT-FROM noise).
+    if (kind === TokenKind.KwImport && peekKind(cursor, 1) !== TokenKind.LParen) {
         return parseImport(ctx);
     }
 
@@ -2174,9 +2180,22 @@ export function parseScrmlFunctionDecl(ctx, allowAnonymous) {
 // --- parseClassDecl — a `class Name extends Base { ... }` declaration ---
 // `allowAnonymous` is true ONLY for `export default class {}` (a
 // default-exported class may be anonymous); a plain declaration always names.
+//
+// S430 P1 — `class` is NOT scrml vocabulary (SPEC §7.2.1; bryan: "I really
+// want to reject class ... but the word is not at fault"). parseClassDecl
+// fires E-CLASS-NOT-IN-SCRML at the `class` keyword and RECOVERS by parsing
+// the construct anyway (the M4.3 `E-ASYNC-NOT-IN-SCRML` / B7 `E-TRY-NOT-IN-SCRML`
+// posture), so the rest of the program still surfaces its own diagnostics.
+// This single site covers every declaration position: a statement-level
+// `class`, `export class`, and `export default class`. A class EXPRESSION
+// fires the same code in parse-expr.js:parsePostfix. The E-STMT-CLASS-* codes
+// below are retained as the complementary malformed-construct diagnostics
+// guarding the recovery parse (SPEC §34.1 — the S117 open decision is closed).
 export function parseClassDecl(ctx, allowAnonymous) {
     const cursor = ctx.cursor;
     const kw = advance(cursor);   // consume `class`
+
+    recordError(ctx, "E-CLASS-NOT-IN-SCRML", CLASS_NOT_IN_SCRML_MESSAGE, kw.span);
 
     // The name. A plain declaration always names; `export default class` may
     // be anonymous (`name` is "" — ESTree's null id). A class name is never
@@ -4610,5 +4629,64 @@ export function parseStmt(tokens, source) {
 export function parseProgram(tokens, source) {
     const ctx = makeParseStmtContext(tokens, source);
     const body = parseStatementList(ctx, undefined);
-    return { body, errors: ctx.errors };
+    return { body, errors: ctx.errors.concat(collectBlockStubBodyErrors(body, ctx.errors)) };
 }
+
+// collectBlockStubBodyErrors — calculation. The diagnostics of every
+// BlockStub body re-entered inside THIS parse (an arrow / function-expression /
+// match-arm block body), which reenterBlockStubs parks on `stub.bodyErrors`.
+// Before S430 nothing read that field: every diagnostic inside a block body was
+// silently dropped (the native twin of the live `export` re-parse swallow closed
+// in S430 P2 — e.g. a `class` in a match arm inside a function never reported
+// E-CLASS-NOT-IN-SCRML). Collected HERE, at the parse that owns the stubs, so
+// the errors are in this parse's own coordinate space and ride out with
+// result.errors — whoever consumes the result applies the one span shift that
+// parse needs. The walk does NOT cross a MarkupValue: a `${ }` inside markup is
+// a separately-lexed body with its own parseProgram, which reports its own
+// stubs in its own coordinates (crossing it double-reported them at a
+// mis-shifted span). Nested stubs (inside a stub's parsedBody) share this
+// parse's tokens and are collected. Source order; exact duplicates of an error
+// already in `already` are skipped.
+export function collectBlockStubBodyErrors(root, already) {
+    const out = [];
+    const have = new Set();
+    if (Array.isArray(already)) {
+        for (const e of already) {
+            if (e !== undefined && e !== null) {
+                have.add(String(e.code) + "@" + String(e.span !== undefined && e.span !== null ? e.span.start : ""));
+            }
+        }
+    }
+    const seen = new Set();
+    const stack = [root];
+    while (stack.length > 0) {
+        const cur = stack.pop();
+        if (cur === undefined || cur === null || typeof cur !== "object" || seen.has(cur)) continue;
+        seen.add(cur);
+        if (Array.isArray(cur)) {
+            for (const el of cur) stack.push(el);
+            continue;
+        }
+        if (cur.kind === "MarkupValue") continue;
+        if (cur.kind === "BlockStub" && Array.isArray(cur.bodyErrors)) {
+            for (const e of cur.bodyErrors) {
+                if (e === undefined || e === null) continue;
+                const key = String(e.code) + "@" + String(e.span !== undefined && e.span !== null ? e.span.start : "");
+                if (have.has(key)) continue;
+                have.add(key);
+                out.push(e);
+            }
+        }
+        for (const key of Object.keys(cur)) {
+            const v = cur[key];
+            if (v !== null && typeof v === "object") stack.push(v);
+        }
+    }
+    out.sort((a, b) => ((a.span && a.span.start) || 0) - ((b.span && b.span.start) || 0));
+    return out;
+}
+
+// S430 P1 — a class EXPRESSION (parse-expr.js parsePostfix) parses through the
+// same class parser as a declaration, so its body — and anything forbidden in
+// it — is parsed, not skipped.
+setClassExprParser(parseClassDecl);

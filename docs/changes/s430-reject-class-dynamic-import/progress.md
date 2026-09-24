@@ -1,0 +1,111 @@
+# progress — s430-reject-class-dynamic-import
+
+- 2026-09-24 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a11f430a99fe27edf, base 585261d9 (includes 3676d2ae)
+- Locus check: ast-builder.js E-THROW sites held (:9311 / :13928 region), but the default parser never builds a
+  class node (class decl -> bare-expr escape-hatch ClassExpression; `export class` / unannotated `export const`
+  keep raw text only). Chosen mechanism: a TOKEN scan at parseLogicBody entry (dedup on code+offset) +
+  a raw-text scan at the three attribute-value sites that bypass the logic token stream (E-SWITCH-FORBIDDEN shape).
+- Native: parseClassDecl (single site for stmt/export/export default) + parsePostfix arms for class expr and
+  `import(`; stmt-head `import(` routed to expression statement. Fixed a pre-existing native bug: keyword-spelled
+  destructure key `{ class: c } = o` panic-resynced into parseClassDecl. .scrml mirrors updated.
+- Gate impact (the STOP condition): within-node canary (parses compiler/self-host + stdlib/compiler) moved —
+  native had been MIS-PARSING every `^{ await import() }` block; allowlist 23 rows regenerated.
+  compiler-api §90/§91, self-host-meta-checker, self-host-module-resolver, emit-library §7 compile
+  stdlib/compiler/*.scrml -> re-pinned to exact residue (P2 precedent). PA decision flagged.
+- COMPILED corpus (2,577 tracked .scrml, default parser, base vs build): 19 newly failing
+  (4 compiler/self-host + 15 stdlib/compiler), 7 already-failing gained codes. 16 E-CLASS + 46 E-DYNAMIC-IMPORT hits.
+  Zero hits outside compiler/self-host + stdlib/compiler.
+- f428de0d impl + tests + re-pins + allowlist (pre-commit gate PASS: 30,745 pass).
+- d1005d43 SPEC §7.2 / NEW §7.2.1 / NEW §21.3.2 / §34 two rows / §34.1 E-STMT-CLASS-* closed; SPEC-INDEX regen; FACTS --write.
+- Final `bun run test`: 32,502 pass / 55 fail / 127 skip. All 55 pre-existing or env: browser tier fails identically
+  on a base-tree extract (bug60 E-TYPE-031 `email`, transitions, navigate-*, engine-*); dev-command + detector +
+  esm tests pass in isolation (full-suite timing). CI-side gates run locally: corpus-compile-floor PASS,
+  snippet-gate 110/110, facts PASS, SPEC-INDEX --check PASS, s34 --check-new PASS, delta-lint PASS,
+  conflict-marker PASS. types-gate reports 21 NEW TS diagnostics, none in a touched file (pre-existing/env).
+- STOPPED before landing per brief: gated tests + the within-node canary consume compiler/self-host and
+  stdlib/compiler; PA decides on the allowlist regen + residue re-pins vs sequencing behind import:host.
+- PA decision: land TOGETHER with the stdlib/compiler migration. Merged origin/main (#1045 import:host, #1046) at 9f67a65d (FACTS conflict regenerated).
+- 32ea0f3e repo-root scrml.toml (host-import = "self-host-only") + 30 stdlib/compiler dynamic-import sites migrated
+  (27 -> import:host; meta-checker's non-resolving "./expression-parser.js" -> import:host from compiler/src/expression-parser.ts;
+  module-resolver's "path"/"fs" -> static scrml:path / scrml:fs, since import:host rejects builtins). Manifest A/B: only the 15
+  import:host files differ, only by losing E-IMPORT-008, 0 artifact diffs. Runtime proof test: compiled umbrella + 13 stages
+  re-export the TS compiler's own functions. User `scrml:compiler` import compiles byte-identical to base. Pins dropped.
+- 656aecc1 review fixes: default check is now tree-counted + keyword-placed (no prose FPs); native attrs checked; native
+  BlockStub body diagnostics forwarded (were dropped); native class-expr parses its body; native ${}/^{} first-line col fix;
+  exact-duplicate native diagnostics collapsed. All 41 review probes + 2 new pinned both parsers. Quoted attr = data (PA).
+- c5067e21 within-node allowlist tightened by the 899 SPAN-COORD the col fix removed (312 rows, none up).
+- 3f3ac6c9 self-host-smoke strips the new static scrml:path/fs imports (surfaced only in the full run).
+- Full `bun run test`: 32,664 pass / 56 fail (55 = the same pre-existing browser/dev/detector/esm set; 1 = self-host-smoke, fixed in 3f3ac6c9).
+
+## Review round 3 (on f12cd07c) — 2026-09-24
+- Merged origin/main (#1047 74f64bef) at 79779497; only docs/FACTS.md conflicted (regenerated).
+- F1 (placement on prose): default parser no longer ranks tokens. Each parse records on its ROOT
+  ExprNode (non-enumerable, expression-parser.ts readForbiddenJsRecord) the constructs ACORN found +
+  the parsed text. parseLogicBody registers every joined expression text with the token behind each
+  part (collectExpr / collectBracedBody / collectLiftExpr / collectIfCondition / when bodies; the
+  markup-value skeleton registers with markup-region parts removed). A construct maps to the k-th
+  construct-shaped keyword token of its text; template-literal interpolations are tokenized in place.
+  Count mismatch => the enclosing statement's start (the recorded gap; never a prose token).
+  NOTE for the reviewer: "expression-text start + node.start" is not available as stated — the
+  default parser's expression text is a RE-JOINED token string and acorn offsets are in a
+  preprocessed copy of it (preprocessForAcorn rewrites `::`, `is not`, …), so offsets map to the
+  file only through the token registry; that is what is used.
+- F2: (a) `when` bodies parse as statements when not an expression; (b) top-level markup `${}` fires;
+  (c) template interpolations fire (acorn tree) and are placed inside the template; (d) typed exports:
+  valueInitExpr is walked. All pinned on both parsers.
+- F3: native block-body errors are now collected by the parseProgram that owns the stubs (its own
+  coordinates) and NOT across a MarkupValue; the parse-markup.js forwarding is removed. No double report.
+- F4: parse-expr.scrml writer is a `function`; parse-stmt.scrml collectBlockStubBodyErrors is `fn`;
+  both mirrors compile to their base error set (E-EQ-005 / E-CG-ENUM-BINDING-COLLISION only).
+- Corpus A/B vs HEAD (2,582 files, both parsers): default 0 class/import diffs, 0 artifact diffs
+  (only rows moving: the stdlib async carve-out resolving against the extract's own stdlib root —
+  measurement artifact); native 0 diffs. Totals: 16 class + 16 import, identical positions on both parsers.
+
+### Gaps / open questions (filed, not fixed)
+- F5 (native FP): the native lexer tokenizes `as` as a keyword, so `let as = …` fails natively; SPEC
+  reserves no such keyword. Also a `</>` closer inside lift markup is a native false positive.
+- F6 (pre-existing): E-IMPORT-003 fires with a misleading message for an `import` inside a markup `${}`.
+- Native: an anonymous `class { }` inside a template interpolation also reports E-STMT-CLASS-NAME
+  (the interpolation is parsed as a statement list natively).
+- Native: a `${}` inside markup-as-value in a logic body is parsed on two paths and forwarded twice;
+  nativeParseFile collapses exact (code+span) duplicates — the double parse itself is unfixed.
+- OPEN DESIGN QUESTION for bryan: a QUOTED inline event-handler attribute (`onclick="import('./x.js')"`)
+  is treated as data (PA decision S430, no fire) — but the browser executes it as JavaScript. Should
+  quoted inline event-handler attributes be raw JS at all?
+
+## Round 4 — PA direction change (on fbab1a9d) — 2026-09-24
+- Review F-A (cross-statement registry lookup) + F-B (markup-value `${}` misses) were in the default-parser
+  reconstruction. PA decision: stop reconstructing; decide the family on the NATIVE tree in both pipelines.
+- NEW compiler/src/native-walker/forbidden-js-native.ts: default pipeline runs nativeParseFile per file (only
+  when the source contains `class`/`import`) and keeps ONLY E-CLASS / E-DYNAMIC-IMPORT; native-parses every
+  non-logic attribute expression (parseProgram on the attr text, shifted); drops a diagnostic inside a
+  default-recognised `_={}=` foreign region (native has no production there); fallback at statement start where
+  a default statement holds an acorn-found construct and the native tree reports none there.
+- REMOVED from the default parser: the registry / token mapping / forbiddenJs record (ast-builder.js and
+  expression-parser.ts back to origin/main, except the independent `import(` statement-head routing fix);
+  attrvalue-exprnode-walker.ts back to origin/main. KEPT: native bodyErrors collection, native column fix,
+  native duplicate collapse, keyword destructure key, class-expr via parseClassDecl, `.scrml` mirror fixes.
+- Gates (compiled): (a) default 2,582 files vs origin/main compiler on the same tree: 32 family sites (16+16)
+  in 12 bootstrap files; exit changes = 4 self-host files, each carrying a family code; non-family diffs = 2
+  E-SCOPE-001 column corrections (+2, CE's native re-parse; the column fix); 0 artifact diffs. Fallback: 0 units,
+  native never threw. (b) 71 probe rows, default == native, exactly once, pinned. (c) added stage ~230 ms
+  median over 876 files (examples + samples/compilation-tests), end-to-end ~3-10% in noisy runs.
+
+## Round 5 (on dee37465) — 2026-09-24
+- F1 (HIGH): attribute values are parsed as an EXPRESSION (`(` + text + `)`, offsets shifted back by 1), so
+  `data-cfg=${{ class: "primary" }}` is an object literal, not a block + class declaration. Only an event-handler
+  value (`on…=`) that does not parse as an expression is re-parsed as a statement list. Six FP cases + the
+  reviewer's clean set + three true positives pinned (r5-*).
+- F2 (MED-HIGH): the default pipeline BLANKS the default-parser-recognised foreign spans (spaces; newlines kept, so
+  offsets/lines/cols are unchanged) before the native parse, so a native lexer desync inside `_={ }=` cannot
+  mis-lex code after the region. The veto stays as a belt. Reproducer pinned (default []).
+- Gate (a) re-run: unchanged — 16+16 in 12 files, 4 exit changes (all with family codes), 2 E-SCOPE-001 column
+  corrections, 0 artifact diffs.
+
+### Gaps (not fixed)
+- Native PIPELINE (`--parser=scrml-native`) still lexes inline `_={ }=` natively (the F2 reproducer reports
+  E-CLASS@8:18 there); the native pipeline already rejects these programs on base (unclosed-brace errors), so
+  nothing that compiled breaks. Fix belongs with native foreign-code support.
+- Unbalanced braces inside foreign code push a real construct to the statement-start fallback (still fires).
+- The LSP never publishes these two codes (base or fix): `analyzeText` calls TAB directly, not compileScrml.
+  Follow-up: route the LSP through forbiddenJsDiagnosticsForDefault.

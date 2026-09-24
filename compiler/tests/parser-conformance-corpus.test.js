@@ -108,7 +108,14 @@ const SCRML = enumerateScrmlCorpus();
 // them for diagnostic recovery (the `r.ok` no-throw gate still holds) but
 // fires these codes. The `stmt-try-catch.js` bench fixture exercises the
 // `try`/`catch` parse SHAPE — it carries `E-TRY-NOT-IN-SCRML` by design.
-const FORBIDDEN_VOCAB_CODES = ["E-TRY-NOT-IN-SCRML", "E-THROW-NOT-IN-SCRML"];
+// S430 P1 / P4 add `E-CLASS-NOT-IN-SCRML` (the `decl-class.js` and
+// `stmt-import-export.js` fixtures exercise the class-declaration parse SHAPE,
+// which the native parser still builds for recovery) and
+// `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, on the same by-design footing.
+const FORBIDDEN_VOCAB_CODES = [
+  "E-TRY-NOT-IN-SCRML", "E-THROW-NOT-IN-SCRML",
+  "E-CLASS-NOT-IN-SCRML", "E-DYNAMIC-IMPORT-NOT-IN-SCRML",
+];
 
 describe("M4.3 — bench corpus parses cleanly through the native parser (raw source, no preprocess shim)", () => {
   for (const row of BENCH) {

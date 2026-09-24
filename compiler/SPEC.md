@@ -5945,12 +5945,50 @@ Logic contexts are valid inside markup contexts and state blocks.
 
 ### 7.2 Content
 
-The content of a `${ }` logic context is JavaScript, passed to the Bun runtime. All JavaScript that is valid in a Bun execution context is valid inside `${ }`. scrml-specific extensions to logic context content are:
+The content of a `${ }` logic context is JavaScript, passed to the Bun runtime. All JavaScript that is valid in a Bun execution context is valid inside `${ }`, **except the constructs §7.2.1 excludes** — scrml's logic is JavaScript-shaped, but scrml is not a JavaScript superset. scrml-specific extensions to logic context content are:
 
 - The `lift` keyword (Section 10)
 - Markup-as-expression syntax (Section 7.4)
 - SQL contexts `?{ }` (Section 8)
 - The `@variable` reactive sigil (Section 6)
+
+#### 7.2.1 JavaScript constructs that are not scrml
+
+**Added 2026-09-24 (S430).** `provenance: ruling:user-voice-S430-P1 (user-voice-scrml.md S430 "I really want to reject class. I do not care for OOP and "class" is canonical OOP. but the word is not at fault.")`
+
+§7.2's "all JavaScript is valid" sentence has exclusions, and they are rejected at the parse layer, each under a code of the `E-*-NOT-IN-SCRML` family. This section is the one place that lists them; each is governed by its home section, including that section's carve-outs:
+
+| Construct | Code | Home |
+|---|---|---|
+| a `class` declaration or class expression | `E-CLASS-NOT-IN-SCRML` | this section |
+| `try` / `catch` / `finally` | `E-TRY-NOT-IN-SCRML` | §19 |
+| `throw` | `E-THROW-NOT-IN-SCRML` | §19.3 |
+| `async` / `await` / `for await` | `E-ASYNC-NOT-IN-SCRML` / `E-AWAIT-NOT-IN-SCRML` / `E-FOR-AWAIT-NOT-IN-SCRML` | §19.9.8 |
+| `switch` | `E-SWITCH-FORBIDDEN` | §17 |
+| a dynamic `import(...)` | `E-DYNAMIC-IMPORT-NOT-IN-SCRML` | §21.3.2 |
+
+**`class` is not scrml (S430 P1).** scrml has no object-oriented construct: no classes, no methods, no virtual dispatch. Data is a struct value (§14); behaviour is a free function over that value; a value changes by the function RETURNING A NEW VALUE, which the caller rebinds. Behaviour selection is a `match` at the use site (exhaustive by construction, §18), never a function looked up on the value. (user-voice S430 P1: *"I am against virtual functions. I don't believe that "methods" clean the code, more than stand alone funtions."* P1b ratified the return-a-new-value shape.)
+
+```scrml
+type Counter:struct = { n: number }
+
+fn stepped(c: Counter) -> Counter {
+    return { n: c.n + 1 }
+}
+
+let c: Counter = { n: 0 }
+c = stepped(c)
+```
+
+**Normative statements:**
+
+- A class DECLARATION (`class Name { … }`, `class Name extends Base { … }`, `export class Name { … }`, `export default class { … }`) or a class EXPRESSION (`const C = class { … }`) anywhere in scrml logic — a `${ }` body, a function body, a `^{ }` meta body, or an attribute-value expression — SHALL be a compile error (`E-CLASS-NOT-IN-SCRML`), reported at the `class` keyword. There is no stdlib carve-out and no `^{ }` carve-out (contrast §19.9.8, whose `await` carve-out exists because a host Promise crosses those boundaries; a class does not).
+- **The word is not at fault.** The rejection is of the construct, not of the token. `class` SHALL remain valid as an HTML attribute name (`<div class="a">`), as a member name (`x.class`, `x?.class`), as an object-literal or destructuring key (`{ class: 1 }`, `const { class: c } = o`), and as a struct field name (`type T:struct = { class: string }`). A diagnostic on any of these is a compiler defect.
+- Code inside `_{ }` foreign code is opaque (§23.2.3) and is never examined for this code.
+- Whether a construct is present SHALL be decided from the parsed program, never from source text: the word `class` in markup text, a string, a comment, CSS, SQL, or a quoted attribute value is not a class construct. (S430 review: a text scan fired on `<p>Every class Foo needs a seat.</p>` inside logic.) Both pipelines decide it on the native parser's tree — the default pipeline runs the native parser over the file for this diagnostic family only — so the two pipelines report the same construct at the same position. Where the native tree cannot speak for a statement that the default parser found a construct in, the default pipeline reports it at that statement's start rather than passing it.
+- Both front-ends SHALL fire the code: the default pipeline and `--parser=scrml-native`. The native parser's `E-STMT-CLASS-*` codes (§34.1) remain as the complementary malformed-construct diagnostics guarding its recovery parse; they do not admit `class` (the S117 open decision recorded on `E-STMT-CLASS-NAME` is CLOSED by this section).
+
+**Why this section, not §19 or §21.** §7.2 is where logic content is defined as "all JavaScript" — the exclusion belongs next to the claim it qualifies. `class` is not an error-handling concept (§19, the home of `try`/`throw`/`async`) nor a module concept (§21, the home of the dynamic-import rule).
 
 ### 7.3 Function Declaration Forms
 
@@ -17074,6 +17112,21 @@ Files that use `import:host` MAY also use `^{}` blocks. `import:host` replaces t
 
 `import:host` is distinct from `use foreign:` (§23 — runtime-evaluated foreign-code block) and from §29 vanilla-interop (Nominal/spec-ahead — disposition: defer per S131 Q-W3-4 / reframed S132; not yet implemented). `import:host` is compile-time named-bindings; `use foreign:` is runtime opaque-block. The three mechanisms compose without overlap.
 
+### 21.3.2 Dynamic `import(...)` is not scrml
+
+**Added 2026-09-24 (S430).** `provenance: ruling:user-voice-S430-P4 (user-voice-scrml.md S430 P4 "yes, 1-4" — item (2): REJECT dynamic import() in scrml source)`
+
+A module's bindings reach scrml source through exactly two forms: the static `import { … } from "…"` (§21.3) and, for a host-language module, the manifest-gated `import:host` declaration (§21.3.1). A dynamic `import(specifier)` is neither. It evaluates to a JavaScript Promise that scrml source has no way to name — scrml has no `await` (§19.9.8) — so before this rule the compiler emitted an un-awaited Promise and reported nothing.
+
+**Normative statements:**
+
+- A dynamic `import(specifier)` expression anywhere in scrml logic — a `${ }` body, a function body, a `^{ }` meta body, or an attribute-value expression — SHALL be a compile error (`E-DYNAMIC-IMPORT-NOT-IN-SCRML`), reported at the `import` keyword. There is no stdlib carve-out.
+- The `^{ }` case is not a new restriction: §21.3.1 already states that "the `^{}` body MUST NOT contain dynamic `await import(...)` calls"; this section gives that sentence its diagnostic. The self-host bootstrap's bridge files (`stdlib/compiler/**`, and the frozen `compiler/self-host/` tree) use exactly that pattern today; they are `import:host` migration backlog, not an exception.
+- The static `import` declaration (§21.3), `import:host` (§21.3.1), and a member named `import` (`x.import(…)`) are unaffected. `import.meta` is not a dynamic import.
+- Code inside `_{ }` foreign code is opaque (§23.2.3); host JavaScript there may use `import()`.
+- A QUOTED attribute value (`onclick="import('./x.js')"`) is a string literal emitted as data (§5), not scrml source, and SHALL NOT fire this code. An attribute EXPRESSION (`onclick=${…}`, `if=(…)`, `onclick={…}`, a call-ref `onclick=f(…)`) is scrml source and does.
+- Both front-ends SHALL fire the code: the default pipeline and `--parser=scrml-native`.
+
 ### 21.4 Re-export
 
 A file MAY re-export bindings from another file:
@@ -20297,6 +20350,8 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ASYNC-NOT-IN-SCRML | §19.9.8 | The `async` keyword appears on any function or arrow declaration in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted at the native parser's expression / declaration heads — `compiler/native-parser/parse-stmt.js` + `parse-expr.js`.) | Error |
 | E-AWAIT-NOT-IN-SCRML | §19.9.8 | The `await` keyword appears in any expression context in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted in `parseUnary` at `compiler/native-parser/parse-expr.js`.) | Error |
 | E-FOR-AWAIT-NOT-IN-SCRML | §19.9.8 | The form `for await ... of` appears in scrml source. scrml has no `async`/`await` (S114 standing rule); the canonical async surface is the body-split / CPS (§19.9.3). (Catalog addition S114 M4.3 retraction; emitted in the for-statement parse path at `compiler/native-parser/parse-stmt.js`.) | Error |
+| E-CLASS-NOT-IN-SCRML | §7.2.1 | `provenance: ruling:user-voice-S430-P1` A class declaration (`class Name { … }`, incl. `extends`, `export class`, `export default class`) or a class expression (`const C = class { … }`) appears in scrml logic — including a function body, a `^{ }` meta body, or an attribute-value expression. scrml has no `class`: data is a struct value, behaviour is a free function over it, and a value changes by returning a new value (§7.2.1). **The word is not at fault:** `class=` attributes, `x.class`, a `class` object/destructuring key, and a `class` struct field do NOT fire; `_{ }` foreign code is never examined. **Closes the S117 R4 open decision recorded on `E-STMT-CLASS-NAME`** (§34.1) — `class` earns a parse-layer rejection, here; the `E-STMT-CLASS-*` codes are retained as the native parser's complementary malformed-construct diagnostics. Measured S430 by compiling all 2,577 tracked `.scrml` files: 16 sites, all in `compiler/self-host/` and `stdlib/compiler/` (bootstrap-track migration backlog, P1b). *(Catalog addition S430 P1; decided on the NATIVE parser's tree in both pipelines: emitted at `compiler/native-parser/parse-stmt.js` `parseClassDecl` (declarations, and class expressions via `compiler/native-parser/parse-expr.js` `parsePostfix`) + `compiler/src/native-walker/forbidden-js-native.ts` (attribute expressions; in the default pipeline, `forbiddenJsDiagnosticsForDefault` runs the native parser for this family only, with a statement-start fallback where the native tree is silent).)* | Error |
+| E-DYNAMIC-IMPORT-NOT-IN-SCRML | §21.3.2 | `provenance: ruling:user-voice-S430-P4` A dynamic `import(specifier)` expression appears in scrml logic — including a `^{ }` meta body (§21.3.1 already closes the `^{ await import(...) }` path; this code is its diagnostic) and an attribute-value expression. Use a static `import { … } from "…"` (§21.3), or `import:host` (§21.3.1) for a host-language module. Before this code a bare `import("./x.js")` compiled to an un-awaited Promise with no diagnostic. The static `import` declaration, `import:host`, `x.import(…)`, `import.meta` and a QUOTED attribute value (`onclick="import('./x.js')"` — data, §5) do NOT fire; `_{ }` foreign code is never examined. Measured S430 by compiling all 2,577 tracked `.scrml` files: 46 sites, all in `compiler/self-host/` and `stdlib/compiler/` (the `^{ await import(...) }` bridge — `import:host` migration backlog). *(Catalog addition S430 P4; decided on the NATIVE parser's tree in both pipelines: emitted at `compiler/native-parser/parse-expr.js` `parsePostfix` + `compiler/src/native-walker/forbidden-js-native.ts` (attribute expressions; the default pipeline's `forbiddenJsDiagnosticsForDefault`).)* | Error |
 | ~~E-FN-006~~ | §48.4, §54.6.1 | **Retired 2026-04-20 (S32).** Relocated to E-STATE-COMPLETE (§54.6.1) — fires at every state literal's closing tag. | — |
 | E-STATE-COMPLETE | §54.6.1 | State literal reaches closing tag with declared field unassigned on some evaluation path | Error |
 | E-STATE-FIELD-MISSING | §54.6.2 | Read of a field declared on a different substate than the binding is narrowed to | Error |
@@ -20867,11 +20922,11 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-STMT-EXPORT-NAME | §21 | Expected an exported name, or a name after `as`. | Error |
 | E-STMT-EXPORT-DECL | §21 | Expected a declaration after `export`. | Error |
 | E-STMT-UNCLOSED-EXPORT | §21 | Expected `}` to close an export clause. | Error |
-| E-STMT-CLASS-NAME | §19 | Expected a name after `class`. **Cross-ref (S117 R4 item X1):** the native parser parses a JS `class` head and fires this code only on a *malformed* construct; `class` is not scrml vocabulary, and whether `class` earns a parse-layer `E-*-NOT-IN-SCRML` rejection (mirroring `E-ASYNC-NOT-IN-SCRML`) is an open R1 statement-catalog-bridge decision. A later rejection code would be a separate additive amendment and does not retro-invalidate this row. | Error |
-| E-STMT-CLASS-BODY | §19 | Expected `{` to open a class body. **Cross-ref (S117 R4 item X1):** see `E-STMT-CLASS-NAME` — `class` is not scrml vocabulary; the parse-layer admission question belongs to R1. | Error |
-| E-STMT-UNCLOSED-CLASS-BODY | §19 | Expected `}` to close a class body. **Cross-ref (S117 R4 item X1):** see `E-STMT-CLASS-NAME` — `class` is not scrml vocabulary; the parse-layer admission question belongs to R1. | Error |
-| E-STMT-CLASS-MEMBER | §19 | Expected `(` after a class method head. **Cross-ref (S117 R4 item X1):** see `E-STMT-CLASS-NAME` — `class` is not scrml vocabulary; the parse-layer admission question belongs to R1. | Error |
-| E-STMT-CLASS-MEMBER-NAME | §19 | Expected a class member name. **Cross-ref (S117 R4 item X1):** see `E-STMT-CLASS-NAME` — `class` is not scrml vocabulary; the parse-layer admission question belongs to R1. | Error |
+| E-STMT-CLASS-NAME | §19 | Expected a name after `class`. **Cross-ref (S117 R4 item X1):** the native parser parses a JS `class` head and fires this code only on a *malformed* construct; `class` is not scrml vocabulary. ~~Whether `class` earns a parse-layer `E-*-NOT-IN-SCRML` rejection (mirroring `E-ASYNC-NOT-IN-SCRML`) is an open R1 statement-catalog-bridge decision.~~ **CLOSED S430 (P1, bryan):** it does — `E-CLASS-NOT-IN-SCRML` (§7.2.1, §34) fires at the `class` keyword of every class declaration and expression, on both front-ends. This row is retained as the complementary malformed-construct diagnostic guarding the native parser's recovery parse (the `E-TRY-NOT-IN-SCRML` / `E-STMT-TRY-NO-HANDLER` pairing). *(Emitted at `compiler/native-parser/parse-stmt.js` `parseClassDecl`.)* | Error |
+| E-STMT-CLASS-BODY | §19 | Expected `{` to open a class body. **Cross-ref (S117 R4 item X1):** see `E-STMT-CLASS-NAME` — `class` is not scrml vocabulary; ~~the parse-layer admission question belongs to R1~~ **CLOSED S430: `E-CLASS-NOT-IN-SCRML` (§7.2.1)**; this row is a malformed-construct recovery diagnostic. *(Emitted at `compiler/native-parser/parse-stmt.js` `parseClassBody`.)* | Error |
+| E-STMT-UNCLOSED-CLASS-BODY | §19 | Expected `}` to close a class body. **Cross-ref (S117 R4 item X1):** see `E-STMT-CLASS-NAME` — `class` is not scrml vocabulary; ~~the parse-layer admission question belongs to R1~~ **CLOSED S430: `E-CLASS-NOT-IN-SCRML` (§7.2.1)**; this row is a malformed-construct recovery diagnostic. *(Emitted at `compiler/native-parser/parse-stmt.js` `parseClassBody`.)* | Error |
+| E-STMT-CLASS-MEMBER | §19 | Expected `(` after a class method head. **Cross-ref (S117 R4 item X1):** see `E-STMT-CLASS-NAME` — `class` is not scrml vocabulary; ~~the parse-layer admission question belongs to R1~~ **CLOSED S430: `E-CLASS-NOT-IN-SCRML` (§7.2.1)**; this row is a malformed-construct recovery diagnostic. *(Emitted at `compiler/native-parser/parse-stmt.js` `parseClassMember`.)* | Error |
+| E-STMT-CLASS-MEMBER-NAME | §19 | Expected a class member name. **Cross-ref (S117 R4 item X1):** see `E-STMT-CLASS-NAME` — `class` is not scrml vocabulary; ~~the parse-layer admission question belongs to R1~~ **CLOSED S430: `E-CLASS-NOT-IN-SCRML` (§7.2.1)**; this row is a malformed-construct recovery diagnostic. *(Emitted at `compiler/native-parser/parse-stmt.js` `parseClassMemberName`.)* | Error |
 | E-STMT-TRY-NO-HANDLER | §19 | A `try` needs a `catch` or a `finally`. **Cross-ref (S117 R4 item X1):** `try` / `catch` / `finally` are forbidden scrml vocabulary (the error model is `fail` / `?` / `!` / `<errorBoundary>`, §19); the native parser fires this only on a *malformed* `try` construct. Whether `try` earns a parse-layer `E-*-NOT-IN-SCRML` rejection is an open R1 decision; a later rejection code is a separate additive amendment and does not retro-invalidate this row. | Error |
 | E-STMT-THROW-NO-ARGUMENT | §19.3 | `throw` must be followed by an expression on the same line. **Cross-ref (S117 R4 item X1):** `throw` is forbidden scrml vocabulary (scrml uses `fail`, §19.3); the native parser fires this only on a *malformed* `throw`. Whether `throw` earns a parse-layer `E-*-NOT-IN-SCRML` rejection is an open R1 decision; a later rejection code is a separate additive amendment and does not retro-invalidate this row. | Error |
 | E-STMT-LIN-NAME | §35.2 | Expected a name after `lin`. *(M5-swap Wave 1 — B4: the native-parser `lin`-declaration production.)* | Error |

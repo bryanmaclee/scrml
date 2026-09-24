@@ -170,6 +170,9 @@ ${
         parseBinding, parseBindingIdent, parseObjectPattern, parseArrayPattern,
         // M4.2 — `noIn` scope helpers (the for-head deferral closure).
         enterNoInScope, exitNoInScope,
+        // S430 P1 / P4 — the shared forbidden-construct messages.
+        CLASS_NOT_IN_SCRML_MESSAGE,
+        setClassExprParser,
     } from "./parse-expr.scrml"
     import {
         VarDeclKind, MethodKind,
@@ -630,8 +633,10 @@ ${
             return parseClassDecl(ctx, false)
         }
 
-        // An `import` statement.
-        if (kind == TokenKind.KwImport) {
+        // An `import` statement. A dynamic `import(...)` at statement
+        // position is an EXPRESSION statement (S430 P4) — parse-expr fires
+        // E-DYNAMIC-IMPORT-NOT-IN-SCRML. Mirrors parse-stmt.js.
+        if (kind == TokenKind.KwImport && peekKind(cursor, 1) != TokenKind.LParen) {
             return parseImport(ctx)
         }
 
@@ -1642,9 +1647,16 @@ ${
     // -- parseClassDecl — a `class Name extends Base { ... }` declaration --
     // `allowAnonymous` is true ONLY for `export default class {}`; a plain
     // declaration always names.
+    //
+    // S430 P1 — `class` is NOT scrml vocabulary (SPEC §7.2.1). Fire
+    // E-CLASS-NOT-IN-SCRML at the `class` keyword and RECOVER by parsing the
+    // construct anyway; covers statement, `export class`, and
+    // `export default class`. Mirrors parse-stmt.js.
     export fn parseClassDecl(ctx, allowAnonymous) {
         const cursor = ctx.cursor
         const kw = advance(cursor)
+
+        recordError(ctx, "E-CLASS-NOT-IN-SCRML", CLASS_NOT_IN_SCRML_MESSAGE, kw.span)
 
         let name = ""
         if (currentKind(cursor) == TokenKind.Ident) {
@@ -3071,6 +3083,55 @@ ${
     export fn parseProgram(tokens) {
         const ctx = makeParseStmtContext(tokens)
         const body = parseStatementList(ctx, not)
-        return { body, errors: ctx.errors }
+        return { body, errors: ctx.errors.concat(collectBlockStubBodyErrors(body, ctx.errors)) }
     }
+
+    // -- collectBlockStubBodyErrors — the diagnostics of every BlockStub body
+    // re-entered inside THIS parse (parked on `stub.bodyErrors` by
+    // reenterBlockStubs), in this parse's own coordinates. Does not cross a
+    // MarkupValue (a separately-parsed body). S430 — mirrors parse-stmt.js.
+    export fn collectBlockStubBodyErrors(root, already) {
+        const out = []
+        const have = new Set()
+        if (Array.isArray(already)) {
+            for (const e of already) {
+                if (e is some) {
+                    have.add(String(e.code) + "@" + String(e.span is some ? e.span.start : ""))
+                }
+            }
+        }
+        const seen = new Set()
+        const stack = [root]
+        while (stack.length > 0) {
+            const cur = stack.pop()
+            if (cur is not || typeof cur != "object" || seen.has(cur)) { continue }
+            seen.add(cur)
+            if (Array.isArray(cur)) {
+                for (const el of cur) { stack.push(el) }
+                continue
+            }
+            if (cur.kind == "MarkupValue") { continue }
+            if (cur.kind == "BlockStub" && Array.isArray(cur.bodyErrors)) {
+                for (const e of cur.bodyErrors) {
+                    if (e is some) {
+                        const key = String(e.code) + "@" + String(e.span is some ? e.span.start : "")
+                        if (have.has(key) == false) {
+                            have.add(key)
+                            out.push(e)
+                        }
+                    }
+                }
+            }
+            for (const key of Object.keys(cur)) {
+                const v = cur[key]
+                if (v is some && typeof v == "object") { stack.push(v) }
+            }
+        }
+        out.sort((a, b) => ((a.span is some ? a.span.start : 0) - (b.span is some ? b.span.start : 0)))
+        return out
+    }
+
+    // S430 P1 — a class EXPRESSION parses through the same class parser as a
+    // declaration (parse-expr's parsePostfix). Mirrors parse-stmt.js.
+    setClassExprParser(parseClassDecl)
 }

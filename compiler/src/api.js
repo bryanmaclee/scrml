@@ -23,6 +23,7 @@ import { runAttributeInterpolation } from "./validators/attribute-interpolation.
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
+import { SecretRedactor, collectFromAst as collectConnectionValuesFromAst } from "./diagnostic-secrets.ts";
 import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
@@ -71,6 +72,7 @@ import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 import { runDeferChecks } from "./validators/lint-defer.ts";
+import { forbiddenJsDiagnosticsForDefault, nativeForbiddenJsAttrDiagnostics } from "./native-walker/forbidden-js-native.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -804,6 +806,72 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * }}
  */
 export function compileScrml(options = {}) {
+  // s430-dev-db-stub F4 — THE OUTPUT CHOKEPOINT for a compile.
+  //
+  // The compile unit's connection values (`<program db>`, `<page db>`,
+  // `<db src>`, `idempotency-store=`) are collected by VALUE — from the inputs
+  // up front, again after BS and after TAB inside the compile — and every piece
+  // of text the compile emits passes the redactor, which replaces each WHOLE
+  // value by its display form (userinfo + password parameters -> <redacted>):
+  //   - returned diagnostics (every string field of errors / warnings / lints);
+  //   - a thrown compiler error — re-thrown as a NEW redacted object (message,
+  //     stack, cause, filePath, …), since the original may be frozen;
+  //   - EVERYTHING written to the terminal during the compile: the `log`
+  //     callback (`--verbose` stage lines echo diagnostic messages), and any
+  //     console / process.std{out,err} write a stage makes directly (Note(PA),
+  //     expression-parser warnings, perf lines) — intercepted for the duration
+  //     of this synchronous call and restored in `finally`.
+  // Consumers that print text the compiler did not produce get
+  // `result.redact(text)` for messages and `result.redactSource(text)` for the
+  // source excerpt under a diagnostic (redacted by attribute SPAN, never by
+  // substring search over code).
+  const redactor = options._secretRedactor ?? new SecretRedactor();
+  for (const f of options.inputFiles ?? []) {
+    try { redactor.addSource(readFileSync(resolve(f), "utf8")); } catch { /* a directory / unreadable — BS reports it */ }
+  }
+  const userLog = typeof options.log === "function" ? options.log : console.log;
+  const log = (...args) => userLog(...args.map((a) => (typeof a === "string" ? redactor.redact(a) : a)));
+  const restoreOutput = interceptCompileOutput(redactor);
+  let result;
+  try {
+    result = compileScrmlUnredacted({ ...options, log, _secretRedactor: redactor });
+  } catch (err) {
+    throw redactor.redactThrown(err);
+  } finally {
+    restoreOutput();
+  }
+  for (const list of [result.errors, result.warnings, result.lintDiagnostics]) {
+    if (Array.isArray(list)) for (const d of list) redactor.redactDiagnostic(d);
+  }
+  result.redact = (text) => redactor.redact(text);
+  result.redactSource = (text) => redactor.redactSource(text);
+  return result;
+}
+
+/**
+ * Route every console / process.std{out,err} write made during a compile
+ * through the redactor. Returns the restore function. The compile is
+ * synchronous, so nothing else writes while the patch is in place.
+ */
+function interceptCompileOutput(redactor) {
+  const red = (a) => (typeof a === "string" ? redactor.redact(a) : a);
+  const saved = {
+    log: console.log, error: console.error, warn: console.warn, info: console.info,
+    out: process.stdout.write, err: process.stderr.write,
+  };
+  console.log = (...a) => saved.log.apply(console, a.map(red));
+  console.error = (...a) => saved.error.apply(console, a.map(red));
+  console.warn = (...a) => saved.warn.apply(console, a.map(red));
+  console.info = (...a) => saved.info.apply(console, a.map(red));
+  process.stdout.write = function (chunk, ...rest) { return saved.out.call(process.stdout, red(chunk), ...rest); };
+  process.stderr.write = function (chunk, ...rest) { return saved.err.call(process.stderr, red(chunk), ...rest); };
+  return () => {
+    console.log = saved.log; console.error = saved.error; console.warn = saved.warn; console.info = saved.info;
+    process.stdout.write = saved.out; process.stderr.write = saved.err;
+  };
+}
+
+function compileScrmlUnredacted(options = {}) {
   // s430-emit-state-leak — a compile's output MUST be a pure function of its
   // input, never of what this process compiled before (the P5 hybrid
   // differential compiles a corpus in one process). Compile-scoped module state
@@ -826,6 +894,7 @@ export function compileScrml(options = {}) {
 }
 
 function _compileScrmlImpl(options = {}) {
+  const _secretRedactor = options._secretRedactor;
   let {
     inputFiles = [],
   } = options;
@@ -1262,6 +1331,9 @@ function _compileScrmlImpl(options = {}) {
       source = convertLegacyCssSource(source);
     }
     sourceByFile.set(filePath, source);
+    // s430-dev-db-stub F4 — register this file's connection values BEFORE any
+    // stage can echo them (a gathered import was not in the up-front harvest).
+    if (_secretRedactor) _secretRedactor.addSource(source);
     try {
       const result = stage("BS", () => _splitBlocks(filePath, source));
       bsResults.push(result);
@@ -1478,12 +1550,33 @@ function _compileScrmlImpl(options = {}) {
     // parser-agnostic + escalation-independent. BRACED-body arrows stay with the
     // emit-server.ts E-SQL-009 site (the concise gate keeps the two disjoint).
     collectErrors("CG", detectSqlInConciseArrowBody(result.ast, result.filePath || bsResult.filePath), result.filePath || bsResult.filePath);
+    // §7.2.1 / §21.3.2 (S430 P1 + P4) — E-CLASS-NOT-IN-SCRML /
+    // E-DYNAMIC-IMPORT-NOT-IN-SCRML are decided on the NATIVE parser's tree in
+    // both pipelines (native-walker/forbidden-js-native.ts). The native path
+    // already carries the parse-level codes in result.errors; attribute
+    // expressions are added here. The default path runs the native parser over
+    // the file for THIS family only (every other native code is discarded).
+    {
+      const _fp = result.filePath || bsResult.filePath;
+      const _src = sourceByFile.get(_fp) ?? "";
+      if (useNativeParser) {
+        collectErrors("TAB", nativeForbiddenJsAttrDiagnostics(result.ast, _src, _fp), _fp);
+      } else {
+        const _fj = stage("REJECT-CLASS-DYNAMIC-IMPORT", () => forbiddenJsDiagnosticsForDefault(_fp, _src, result.ast));
+        collectErrors("TAB", _fj.diagnostics, _fp);
+        if (verbose && (_fj.fallbackUsed > 0 || _fj.nativeFailed)) {
+          log(`  [TAB] ${_fp}: E-CLASS/E-DYNAMIC-IMPORT native fallback — ${_fj.nativeFailed ? "native parse threw" : `${_fj.fallbackUsed} statement(s)`}`);
+        }
+      }
+    }
     // Attach source text for library-mode codegen (export-decl span extraction)
     if (result.filePath && sourceByFile.has(result.filePath)) {
       result._sourceText = sourceByFile.get(result.filePath);
     }
     tabResults.push(result);
     bsByTab.set(result, bsResult);
+    // s430-dev-db-stub F4 — connection values straight from the tree.
+    if (_secretRedactor) _secretRedactor.addValues(collectConnectionValuesFromAst(result.ast));
     if (verbose) log(`  [TAB] ${result.filePath}: ${result.ast?.nodes?.length ?? 0} nodes`);
   }
 
@@ -2070,7 +2163,13 @@ function _compileScrmlImpl(options = {}) {
 
   // Stage 4: PA (all files)
   const _runPA = seams.pick("PA", runPA);
-  const paResult = stage("PA", () => _runPA({ files: ceResults }));
+  const paResult = stage("PA", () => _runPA({
+    files: ceResults,
+    // s430-dev-db-stub F4 — `Note(PA):` lines pass the output chokepoint.
+    onNote: _secretRedactor
+      ? (line) => { process.stderr.write(_secretRedactor.redact(line)); }
+      : undefined,
+  }));
   collectErrors("PA", paResult.errors);
   if (verbose) {
     const viewCount = paResult.protectAnalysis?.views?.size ?? 0;
