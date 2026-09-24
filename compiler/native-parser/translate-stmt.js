@@ -417,6 +417,14 @@ function appendTranslatedStmt(out, stmt, counter) {
             out.push(makeGivenGuardNode(stmt, counter));
             return;
 
+        // --- S430 P3 stage 1 — `defer` scope-exit statement (SPEC §19.16) ---
+        case StmtKind.Defer:
+            // `defer stmt` / `defer { stmt* }` -> live `defer-stmt`
+            // (ast-builder.js parseDeferStmt — `{kind:"defer-stmt", body,
+            // blockForm, span}`). The deferred body is translated recursively.
+            out.push(makeDeferNode(stmt, counter));
+            return;
+
         default:
             // An unrecognized native StmtKind. The native catalog is closed at
             // 20 kinds (ast-stmt.js StmtKind) — this arm should be
@@ -1350,6 +1358,28 @@ function makeGivenGuardNode(stmt, counter) {
         kind: "given-guard",
         variables: Array.isArray(stmt.variables) ? stmt.variables.slice() : [],
         body,
+        span: spanOrZero(stmt.span),
+    };
+}
+
+// --- Defer translation — S430 P3 stage 1 (SPEC §19.16) ----------------------
+
+// makeDeferNode — native `Defer{body, blockForm}` -> live `defer-stmt`
+// (`{kind:"defer-stmt", body, blockForm, span}`, the ast-builder.js
+// parseDeferStmt shape). The deferred statements translate recursively so they
+// bridge to their live LogicStatement kinds.
+function makeDeferNode(stmt, counter) {
+    const body = [];
+    if (Array.isArray(stmt.body)) {
+        for (const inner of stmt.body) {
+            appendTranslatedStmt(body, inner, counter);
+        }
+    }
+    return {
+        id: stampId(counter),
+        kind: "defer-stmt",
+        body,
+        blockForm: stmt.blockForm === true,
         span: spanOrZero(stmt.span),
     };
 }

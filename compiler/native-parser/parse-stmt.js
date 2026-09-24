@@ -131,6 +131,8 @@ import {
     makeTildeDecl,
     // M6.7-D7 — `given` presence-guard node constructor (SPEC §42.2.3).
     makeGivenGuard,
+    // S430 P3 — `defer` scope-exit statement constructor (SPEC §19.16).
+    makeDefer,
 } from "./ast-stmt.js";
 import {
     // FIX-NATIVE (leaf-gap Group P, §6.7.1b) — expression-node makers for the
@@ -601,6 +603,18 @@ export function parseStatement(ctx) {
         if (secondName === "mount" || secondName === "dismount") {
             return parseOnLifecycleBlock(ctx, secondName);
         }
+    }
+
+    // S430 P3 stage 1 — a `defer <statement>` scope-exit statement (SPEC
+    // §19.16). `defer` lexes as a plain `Ident`; it is a statement lead ONLY
+    // when a same-line statement-capable token follows (deferLeadFollows).
+    // `defer(x)` / `defer = 1` / `defer.x` / a lone `defer` keep the ordinary
+    // identifier reading and fall through. Mirrors the live ast-builder
+    // `isDeferStatementLead` predicate token-for-token.
+    if (kind === TokenKind.Ident
+        && current(cursor).name === "defer"
+        && deferLeadFollows(cursor)) {
+        return parseDefer(ctx);
     }
 
     // M5-swap Wave 2 — a `~name = pipeline` tilde declaration (B3, SPEC §32).
@@ -3100,6 +3114,74 @@ export function parseGivenGuard(ctx) {
 
     const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
     return makeGivenGuard(variables, body, span);
+}
+
+// --- deferLeadFollows — is the `defer` Ident at the cursor a statement lead? ---
+// SPEC §19.16.1: `defer` is contextual. It leads a defer statement only when
+// the NEXT token sits on the SAME source line and can begin a statement: an
+// identifier (not a word infix operator `or`/`and`), an `@`-cell, a `?{}` SQL
+// block, a `{` block, or a statement-capable keyword. Infix-only / clause
+// keywords (`is`, `as`, `of`, `in`, `instanceof`, `else`, `from`, `extends`,
+// `catch`, `finally`, `default`) never lead a statement, so `defer is some`
+// stays an expression. Mirrors live ast-builder `isDeferStatementLead`.
+const DEFER_NON_LEAD_KEYWORD_KINDS = new Set([
+    TokenKind.KwIs, TokenKind.KwAs, TokenKind.KwOf, TokenKind.KwIn,
+    TokenKind.KwInstanceof, TokenKind.KwElse, TokenKind.KwFrom,
+    TokenKind.KwExtends, TokenKind.KwCatch, TokenKind.KwFinally,
+    TokenKind.KwDefault,
+]);
+function deferLeadFollows(cursor) {
+    const here = current(cursor);
+    const next = peek(cursor, 1);
+    if (next === undefined || next === null) return false;
+    const nk = next.kind;
+    if (nk === TokenKind.EOF) return false;
+    if (lineOfToken(next) !== lineOfToken(here)) return false;
+    if (nk === TokenKind.Ident) return next.name !== "or" && next.name !== "and";
+    if (nk === TokenKind.ScrmlAt || nk === TokenKind.SqlBlock || nk === TokenKind.LBrace) return true;
+    if (typeof nk === "string" && nk.startsWith("Kw")) return !DEFER_NON_LEAD_KEYWORD_KINDS.has(nk);
+    return false;
+}
+
+// --- parseDefer — a `defer stmt` / `defer { stmt* }` statement (SPEC §19.16) ---
+//   defer-stmt ::= 'defer' ( '{' statement* '}' | statement )
+// The single-statement form parses ONE statement via parseStatement (which
+// consumes its own terminator); a `!{}` handler after it is part of that
+// statement's expression (GuardedExpr), so it binds to the deferred statement
+// — the in-place handling §19.16.3 requires. The braced form parses the block
+// contents as a FLAT statement list (same shape as the live `defer-stmt.body`).
+// The E-DEFER-* restrictions are NOT checked here — they are checked once,
+// post-parse, on the live-shaped AST (compiler/src/validators/lint-defer.ts)
+// so both front-ends share one checker.
+export function parseDefer(ctx) {
+    const cursor = ctx.cursor;
+    const kw = advance(cursor);   // consume `defer`
+    let body = [];
+    let blockForm = false;
+    let endE = kw.span.end;
+    if (currentKind(cursor) === TokenKind.LBrace) {
+        blockForm = true;
+        const open = advance(cursor);   // consume `{`
+        const prior = enterMode(ctx, ParseMode.InBlock);
+        body = parseStatementList(ctx, TokenKind.RBrace);
+        exitMode(ctx, prior);
+        endE = open.span.end;
+        if (currentKind(cursor) === TokenKind.RBrace) {
+            const close = advance(cursor);   // consume `}`
+            endE = close.span.end;
+        } else {
+            recordError(ctx, "E-STMT-UNCLOSED-BLOCK",
+                "expected '}' to close the `defer` block", open.span);
+        }
+    } else {
+        const inner = parseStatement(ctx);
+        if (inner !== null && inner !== undefined) {
+            body = [inner];
+            endE = nodeEnd(inner);
+        }
+    }
+    const span = makeSpan(kw.span.start, endE, kw.span.line, kw.span.col);
+    return makeDefer(body, blockForm, span);
 }
 
 // --- typeBodyText — reconstruct the brace-delimited `type` body raw text ---
