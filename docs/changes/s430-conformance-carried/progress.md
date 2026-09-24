@@ -46,3 +46,10 @@ Target case: conformance/cases/api/api-clean-pos (a passing case). Probe gap id:
       `XFAIL  api/api-clean-pos  [xfail impl1-ts: g-s430-bite-probe]` + `(expected) missing [...]`.
 3. restore both files from backup -> bridge 908 pass / 0 fail, `0 xfail of 906 cases`; state.ts --check gap-counts PASS.
    Top-level wrapper `bun test ./conformance/conformance-corpus.test.js` also 908/0.
+
+## Verification
+- pre-commit gate on 45a1de24 (unit + integration + conformance): 30603 pass / 84 skip / 0 fail; post-commit hook exit 0.
+- `bun run test` (full compiler/tests incl. browser): HEAD 32499 pass / 179 skip / 59 fail; BASE 15e60e4b (my
+  files reverted in place) 32480 pass / 179 skip / 59 fail. The (fail) sets are IDENTICAL (comm both ways empty):
+  browser/happy-dom runtime, dev-server hot-reload, transition-001, self-host tokenizer parity — pre-existing,
+  not introduced here. +19 pass = the new tests.
