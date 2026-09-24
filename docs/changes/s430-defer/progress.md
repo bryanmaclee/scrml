@@ -86,3 +86,4 @@
 - conformance +4 (duplicate-function-neg, duplicate-function-no-defer-ok, unbraced-arm-neg, array-literal-lead); unit +11.
 - corpus A/B (2584 tracked .scrml excl. the defer cases, base 5c4bb974 vs build, BOTH pipelines, compiled): live 2584/2584 identical, native 2584/2584 identical (stdlib async/await harness artifact excluded).
 - round 6 commit attempt 1 was stopped by the pre-commit hook: parser-conformance-within-node (self-host/ast.scrml residual 1) — the native bridge's new bareBlockScope mark was an ENUMERABLE extra field on flattened statements. Now non-enumerable (checker-only annotation); canary 1016/1016.
+- landing checks (after merging origin/main #1050 as 4048cac6): conformance 956/956; full `bun run test` 33043 pass / 127 skip / 55 fail = 48 browser FAILURE-BASELINE + 7 load flakes (dev-watcher x5, S426 detector, esm module negative-control) that pass 257/257 in isolation — the same 7 as round 1.
