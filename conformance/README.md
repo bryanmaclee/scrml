@@ -75,7 +75,9 @@ exists (the browser-harness is a working prototype of two-thirds of it):
     "domAnchored": [{ "selector": "#display", "text": "Count: 2" }],
     // (b) §52 server-fn responses — keyed by the IMPL-NEUTRAL source fn name ----
     "serverStub":  { "loadTasks": [{ "id": 1, "text": "a" }] }
-  }
+  },
+  // (c) optional: expected-to-fail on impl#1 for a status=carried gap (S430 P7) --
+  "xfail": { "impl1-ts": { "gap": "g-some-carried-gap", "fails": { "codes": ["missing:E-X"] } } }
 }
 ```
 
@@ -298,6 +300,107 @@ it from the entry's import graph (§21.3). A case with `import { x } from
 `E-IMPORT-*` family stays silent). NOTE: the adapter's `run()` executes only the
 ENTRY bundle, so cross-file imports are gated at the CODES level today; the
 runtime half of multi-file (sibling-bundle loading) is a later wave.
+
+### Per-implementation expected failure (`xfail`) — carried gaps (S430 P7)
+
+The ruling (bryan, S430 P7): impl#1 (the TS compiler) is fixed only for cause —
+bootstrap-blocking, adopter-reported, or security. Every other gap is **carried**:
+converted into a conformance case that pins the **correct** behaviour, is
+expected to fail on impl#1, and is required of the bootstrap (impl#2).
+
+A case marks itself with a top-level `xfail` block (beside `expect`, not inside it).
+The mark names the carried gap AND records **how** impl#1 fails the case — its
+failure signature — so a carried case that starts failing for a different reason
+is a plain FAIL, not a silently-absorbed XFAIL:
+
+```jsonc
+{
+  "id": "some-correct-behaviour",
+  "expect": { "codes": ["E-SOMETHING"], "state": { "n": 2 } },   // the CORRECT contract
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-the-carried-gap-id",                  // a status=carried gap
+      "fails": {                                      // the recorded failure signature
+        "codes":   ["missing:E-SOMETHING"],           // exact set of failed codes-half assertions
+        "runtime": "sha256:0123456789abcdef"          // digest of the runtime-half failure lines
+      }
+    }
+  }
+}
+```
+
+The signature is derived from the case's own two contract halves:
+
+- **`codes`** — the exact, sorted set of failed codes-half assertions, one string
+  each: `missing:<code>`, `forbidden:<code>`, `prefix:<violation>`,
+  `severity:<mismatch>`, `codeCounts:<mismatch>` — PLUS the multiset of every
+  `E-*` code the compile emitted, `emitted:<code>=<n>`. `missing:E-X` alone does
+  not say what the compiler emits INSTEAD, so without it a new, unrelated error on
+  a carried case would stay XFAIL. Multiplicity counts (a double fire is a
+  different failure). `W-*`/`I-*` are not pinned. Readable on purpose.
+- **`runtime`** — `sha256:` + 16 hex of the sorted runtime-half failure KEYS: each
+  DOM / state / anchored failure line RAW, and for a `kind="tool"` run a
+  STRUCTURED record — expected stdout, actual stdout (RAW), exit code, and the
+  error head (`TypeError: …`) — never the raw stderr. A thrown runtime half is
+  keyed by the error's name + message. Only CRASH text (the stderr error head, a
+  thrown message) is normalised, and only for what is actually volatile there:
+  paths inside the adapter's own `scrml-conf-*` temp dirs (+ the `:line:col`
+  after them), a whole-line `Bun vX.Y.Z (…)` banner, and the `NN | ` frame gutter
+  at a line start. Program output is never normalised — a program that prints
+  `/tmp/alpha.txt` and one that prints `/tmp/beta.txt` fail differently. The keys carry the DOM / state diff (which
+  cell, expected vs got; which anchored selector), so any change to the runtime
+  failure moves the digest, and nothing else does. The run prints the lines
+  themselves under every XFAIL.
+
+Omit a key when that half passes. An empty `fails`, a missing `fails`, and the
+bare-string form `"impl1-ts": "<gap-id>"` are all REJECTED ("xfail needs a failure
+signature") — nobody can mark a case without pinning how it fails.
+
+**Record it mechanically, never by hand:**
+
+```sh
+bun conformance/run.ts --xfail-signature <case-id | case dir>
+```
+
+prints a paste-ready `{ "xfail": { "impl1-ts": { "gap": …, "fails": … } } }` on
+stdout (the failures it pins, human-readable, on stderr). `gap` is the case's
+existing mark or the literal `<carried-gap-id>`, which the runner rejects until you
+put a real `status=carried` id there. Exit 1 when the case passes (nothing to pin).
+
+| on the named impl | outcome | gate |
+|---|---|---|
+| fails WITH the recorded signature | **XFAIL** — reported with the gap id and what failed | green |
+| fails with a DIFFERENT signature | **FAIL** — the diff is printed (new failure / recorded failure gone / runtime digest moved) | **red** |
+| the case PASSES | **XPASS** — the gap is fixed here; remove the mark, resolve the gap | **red** |
+| bare-string mark / no `fails` / empty `fails` / malformed signature | failure | **red** |
+| the gap id has no `@gap` marker in `docs/known-gaps.md` | failure | **red** |
+| the gap's marker is not `status=carried` | failure | **red** |
+| `xfail` is empty / not an object / names an unknown impl id | failure | **red** |
+| the `expect` block is malformed (S365 container policy) | failure — never absorbable | **red** |
+
+And the reverse direction: **every `status=carried` gap must be pinned by at
+least one xfail case** (a carried gap with no case is an untested claim, not a
+triaged defect) — the gated bridge asserts the unpinned list is empty.
+
+- Implementation ids: `impl1-ts` only (`KNOWN_IMPL_IDS` in `run.ts`, sourced from
+  the adapter's `IMPL_ID`). Under P7 the bootstrap must pass every case, so an
+  impl#2 xfail is a ruling change, not a missing feature.
+- Every entry point prints **`conformance (impl1-ts): N xfail of M cases`** — the
+  ratio, so an escape hatch absorbing the suite is a visible number rather than
+  something one has to inspect (pa-base §8, the absorbed escape hatch).
+- The gap ledger is read through `scripts/state.ts`'s own marker parser and
+  integrity guards (one parser for the marker grammar). `status=carried` is
+  counted in its own §0 column there — owed by the bootstrap, never in Open.
+- An XFAIL still prints what failed (`(expected) missing [...]`).
+- When a carried gap's failure legitimately changes shape (the TS compiler moved,
+  but the gap is still open), re-record with `--xfail-signature`; the diff the
+  FAIL printed is what the reviewer checks.
+- **Hybrid runs (P5 × P7).** `bun scripts/hybrid.ts --conformance` runs every
+  case through the same `evaluateCase`: a hybrid still contains TS stages, so the
+  `impl1-ts` marks apply. XFAIL is ok and a different failure is red, but an XPASS
+  is REPORTED and counted, NOT red — the swapped stage may be what fixed the
+  carried gap (the pure-impl1 gate still turns that same case red). A stage-seam
+  violation is never absorbable by a mark.
 
 ## OQ1 — whole-tree vs anchored (the default-mode resolution)
 

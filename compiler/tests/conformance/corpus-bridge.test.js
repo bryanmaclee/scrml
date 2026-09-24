@@ -17,33 +17,86 @@
  *       post-run normalized DOM + state snapshot satisfy the contract
  *       (compile + execute in happy-dom — see conformance/adapters/impl1-ts.ts).
  *
+ * (c) XFAIL (S430 P7) — a case carrying
+ *     `"xfail": { "impl1-ts": { "gap": "<gap-id>", "fails": <signature> } }` is EXPECTED
+ *     to fail on impl#1 for a `status=carried` gap, in exactly the recorded way. It is
+ *     green here iff it still fails WITH that signature (XFAIL); it goes RED if it fails
+ *     DIFFERENTLY (a new failure is not covered by the carried gap), if it passes (XPASS
+ *     — the gap is fixed and the mark must come off), if the mark has no signature, if
+ *     the gap id is missing from docs/known-gaps.md, or if the gap is not
+ *     `status=carried`. A carried gap that no case pins is red too.
+ *     The `N xfail of M` ratio is printed after the run so an escape hatch absorbing
+ *     the suite is a visible number, not something one has to go and inspect.
+ *
  * The corpus is DETERMINISTIC (settle-based; no real-time waits) — verified
  * stable across repeated runs before gating.
  */
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, afterAll } from "bun:test";
 import {
   loadCases,
   runCase,
   runCaseRuntime,
   hasRuntimeHalf,
+  evaluateCase,
+  failureSummary,
+  loadGapStatusIndex,
+  unpinnedCarriedGaps,
+  xfailRatioLine,
 } from "../../../conformance/run.ts";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 describe("conformance corpus (gated bridge) — impl#1 codes + runtime", () => {
   const cases = loadCases();
+  const gaps = loadGapStatusIndex();
+  const tally = { ran: 0, xfail: 0, xpass: 0 }; // `ran` = cases actually executed (honours -t)
 
   test("corpus is non-empty (cases discovered under conformance/cases/)", () => {
     expect(cases.length).toBeGreaterThan(0);
   });
 
+  // S430 P7 — the reverse half of the carried/xfail pairing. A `status=carried` gap promises the
+  // bootstrap an executable statement of the correct behaviour; one with no pinning case promises
+  // nothing and must not read as triaged.
+  test("every status=carried gap in docs/known-gaps.md is pinned by at least one xfail case", () => {
+    expect(unpinnedCarriedGaps(cases, gaps)).toEqual([]);
+  });
+
+  afterAll(() => {
+    // The ratio, every run — an absorbing hatch is a number going up, visible without inspection.
+    console.log(xfailRatioLine(tally.xfail, tally.ran, tally.xpass));
+  });
+
   for (const c of cases) {
     const runtime = hasRuntimeHalf(c);
-    const tag = c.expected["runtime-half-pending"]
-      ? " [runtime-half-pending]"
-      : runtime
-        ? " [runtime]"
-        : "";
+    const marked = "xfail" in c.expected;
+    const tag =
+      (c.expected["runtime-half-pending"] ? " [runtime-half-pending]" : runtime ? " [runtime]" : "") +
+      (marked ? " [xfail]" : "");
     test(`${c.relDir} (${c.expected.id})${tag}`, async () => {
+      tally.ran++;
+      if (marked) {
+        // (c) an xfail-marked case: the verdict is the OUTCOME, and each way it can be wrong is a
+        // distinct, named failure.
+        const r = await evaluateCase(c, gaps);
+        expect(r.shapeErrors).toEqual([]); // a malformed contract is never absorbable by a mark
+        expect(r.xfailErrors).toEqual([]); // the mark names a real, status=carried gap
+        if (r.outcome === "xpass") tally.xpass++;
+        if (r.outcome === "xfail") tally.xfail++;
+        const why =
+          r.outcome === "xpass"
+            ? `XPASS — every assertion holds on impl1-ts, so gap '${r.xfailGap}' is FIXED here. ` +
+              `Remove the xfail mark and resolve the gap.`
+            : r.outcome === "xfail"
+              ? `XFAIL (${r.xfailGap}): ${failureSummary(r).join(" | ")}`
+              : r.signatureMismatch.length > 0
+                ? `FAILS DIFFERENTLY from the recorded signature for '${r.xfailGap}': ` +
+                  r.signatureMismatch.join(" | ") + ` — observed ${JSON.stringify(r.observedSignature)}` +
+                  ` — now failing with: ${failureSummary(r).join(" | ")}`
+                : `outcome ${r.outcome}`;
+        expect({ outcome: r.outcome, why }).toEqual({ outcome: "xfail", why: expect.any(String) });
+        if (r.outcome === "xfail") console.log(`  ${c.relDir}: ${why}`);
+        return;
+      }
       // (a) codes half — presence + absence + family-prefix + §34 severity.
       const r = runCase(c);
       // S365 — the CONTRACT itself must be well-formed before any assertion means anything. A

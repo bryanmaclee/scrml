@@ -7,6 +7,10 @@
  *   (b) when the case carries any of { input, dom, domAnchored, state }, the
  *       post-run state snapshot + normalized DOM satisfy the runtime contract
  *       (compile + execute in happy-dom — see conformance/adapters/impl1-ts.ts).
+ *   (c) S430 P7 — an `"xfail": { "impl1-ts": { "gap", "fails" } }` case must still FAIL
+ *       with its recorded signature (XFAIL) for a `status=carried` gap; failing
+ *       differently / XPASS / a dangling gap / no signature is red. Same
+ *       semantics as the gated bridge (compiler/tests/conformance/corpus-bridge.test.js).
  *
  * NOTE: this file lives under the top-level conformance/ dir (SCOPE OQ5 — the
  * suite's eventual impl-agnostic home), which is OUTSIDE bunfig.toml's
@@ -18,15 +22,33 @@
  * (Wiring it into the gated suite is a full-W2/W4 decision — see the dispatch
  * report's extraction-friction section + SCOPE §6 D-1.)
  */
-import { describe, test, expect } from "bun:test";
-import { loadCases, runCase, runCaseRuntime, hasRuntimeHalf } from "./run.ts";
+import { describe, test, expect, afterAll } from "bun:test";
+import {
+  loadCases,
+  runCase,
+  runCaseRuntime,
+  hasRuntimeHalf,
+  evaluateCase,
+  failureSummary,
+  loadGapStatusIndex,
+  unpinnedCarriedGaps,
+  xfailRatioLine,
+} from "./run.ts";
 
 describe("scrml conformance corpus — impl#1 (codes + runtime)", () => {
   const cases = loadCases();
+  const gaps = loadGapStatusIndex();
+  const tally = { ran: 0, xfail: 0, xpass: 0 }; // `ran` = cases actually executed (honours -t)
 
   test("corpus is non-empty (cases loaded)", () => {
     expect(cases.length).toBeGreaterThan(0);
   });
+
+  test("every status=carried gap is pinned by at least one xfail case", () => {
+    expect(unpinnedCarriedGaps(cases, gaps)).toEqual([]);
+  });
+
+  afterAll(() => console.log(xfailRatioLine(tally.xfail, tally.ran, tally.xpass)));
 
   for (const c of cases) {
     const runtime = hasRuntimeHalf(c);
@@ -37,6 +59,22 @@ describe("scrml conformance corpus — impl#1 (codes + runtime)", () => {
         : "";
     const label = `${c.relDir} (${c.expected.id})${tag}`;
     test(label, async () => {
+      tally.ran++;
+      if ("xfail" in c.expected) {
+        const r = await evaluateCase(c, gaps);
+        expect(r.shapeErrors).toEqual([]);
+        expect(r.xfailErrors).toEqual([]);
+        if (r.outcome === "xfail") tally.xfail++;
+        if (r.outcome === "xpass") tally.xpass++;
+        const why =
+          r.outcome === "xpass"
+            ? `XPASS — gap '${r.xfailGap}' is FIXED on impl1-ts; remove the xfail mark and resolve the gap.`
+            : r.signatureMismatch.length > 0
+              ? `FAILS DIFFERENTLY for '${r.xfailGap}': ${r.signatureMismatch.join(" | ")}`
+              : `XFAIL (${r.xfailGap}): ${failureSummary(r).join(" | ")}`;
+        expect({ outcome: r.outcome, why }).toEqual({ outcome: "xfail", why: expect.any(String) });
+        return;
+      }
       // (a) codes half.
       const r = runCase(c);
       expect(r.missing).toEqual([]); // PRESENCE: every required code fired.

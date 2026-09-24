@@ -411,41 +411,86 @@ export interface ConformanceReport {
   total: number;
   passed: number;
   failures: Array<{ relDir: string; reasons: string[] }>;
+  /** Cases carrying an impl1-ts xfail mark that still fail WITH their recorded signature — ok. */
+  xfailed: Array<{ relDir: string; gap: string }>;
+  /** Cases carrying an impl1-ts xfail mark that PASS through the hybrid. REPORTED, NOT RED (see below). */
+  xpassed: Array<{ relDir: string; gap: string }>;
 }
 
-export async function runHybridConformance(stageOverrides: Record<string, unknown>, filter: string | null = null): Promise<ConformanceReport> {
+/**
+ * P5 x P7 (PA ruling S430, consistent with bryan's P5 + P7): a HYBRID is the TS pipeline with one
+ * stage swapped, so it still contains TS stages and the impl1-ts xfail marks APPLY to it. Every case
+ * therefore goes through the runner's own `evaluateCase` (the same outcome table the gated bridge
+ * uses), with ONE deliberate difference in how the outcome is read:
+ *
+ *   pass  -> passed                                   xfail -> ok (listed in `xfailed`)
+ *   fail  -> RED (incl. a marked case that fails DIFFERENTLY from its recorded signature, a
+ *            dangling/non-carried/unsigned mark, a malformed contract, a seam violation, a crash)
+ *   xpass -> REPORTED and counted in `xpassed`, but NOT red: the swapped stage may be the very one
+ *            that fixes the carried gap. The pure-impl1 gate still turns that same case red, so the
+ *            mark cannot go stale unnoticed.
+ *
+ * The full-bootstrap requirement (no xfail for impl#2) is unchanged: KNOWN_IMPL_IDS admits impl1-ts
+ * only. Before this, the runner called runCase/runCaseRuntime directly and ignored xfail, so the
+ * first carried gap would have made the P5 module-done gate unreachable.
+ *
+ * `opts.casesDir` / `opts.gaps` exist so a test can drive a synthetic carried case through the real
+ * hybrid path; the CLI never sets them.
+ */
+export async function runHybridConformance(
+  stageOverrides: Record<string, unknown>,
+  filter: string | null = null,
+  opts: { casesDir?: string; gaps?: ReadonlyMap<string, string> } = {},
+): Promise<ConformanceReport> {
   const { installHybrid, uninstallHybrid } = await import("../conformance/adapters/hybrid.ts");
-  const { loadCases, runCase, runCaseRuntime } = await import("../conformance/run.ts");
+  const { loadCases, evaluateCase, loadGapStatusIndex } = await import("../conformance/run.ts");
+  const gaps = opts.gaps ?? loadGapStatusIndex();
   installHybrid(stageOverrides);
   const failures: ConformanceReport["failures"] = [];
+  const xfailed: ConformanceReport["xfailed"] = [];
+  const xpassed: ConformanceReport["xpassed"] = [];
   let total = 0;
   let passed = 0;
   try {
-    for (const c of loadCases()) {
+    for (const c of opts.casesDir ? loadCases(opts.casesDir) : loadCases()) {
       if (filter && !c.relDir.includes(filter)) continue;
       total++;
       const reasons: string[] = [];
       try {
-        const r = runCase(c);
+        const r = await evaluateCase(c, gaps);
+        if (r.outcome === "pass") {
+          passed++;
+          continue;
+        }
+        if (r.outcome === "xfail") {
+          xfailed.push({ relDir: c.relDir, gap: r.xfailGap as string });
+          continue;
+        }
+        if (r.outcome === "xpass") {
+          xpassed.push({ relDir: c.relDir, gap: r.xfailGap as string });
+          continue;
+        }
+        for (const s of r.xfailErrors) reasons.push(`xfail: ${s}`);
+        if (r.signatureMismatch.length > 0) {
+          reasons.push(`FAILS DIFFERENTLY from the recorded impl1-ts xfail signature for '${r.xfailGap}':`);
+          for (const s of r.signatureMismatch) reasons.push(`  ${s}`);
+        }
         for (const s of r.shapeErrors) reasons.push(`MALFORMED expect: ${s}`);
         if (r.missing.length) reasons.push(`missing required codes: ${JSON.stringify(r.missing)} (emitted ${JSON.stringify(r.emitted)})`);
         if (r.forbidden.length) reasons.push(`forbidden codes present: ${JSON.stringify(r.forbidden)}`);
         for (const s of r.prefixViolations) reasons.push(`forbidden-prefix: ${s}`);
         for (const s of r.severityMismatches) reasons.push(`severity: ${s}`);
         for (const s of r.countMismatches) reasons.push(`codeCounts: ${s}`);
-        if (r.hasRuntimeHalf) {
-          for (const s of await runCaseRuntime(c)) reasons.push(`runtime: ${s}`);
-        }
+        for (const s of r.runtimeFailures) reasons.push(`runtime: ${s}`);
       } catch (e) {
         reasons.push(`${e instanceof StageSeamError ? "SEAM VIOLATION" : "CRASH"}: ${String((e as Error)?.message ?? e).split("\n")[0]}`);
       }
-      if (reasons.length === 0) passed++;
-      else failures.push({ relDir: c.relDir, reasons });
+      failures.push({ relDir: c.relDir, reasons });
     }
   } finally {
     uninstallHybrid();
   }
-  return { total, passed, failures };
+  return { total, passed, failures, xfailed, xpassed };
 }
 
 // ---------------------------------------------------------------------------
@@ -548,9 +593,17 @@ async function main(argv: string[]): Promise<number> {
       console.log(`FAIL  ${f.relDir}`);
       for (const r of f.reasons) console.log(`        ${r}`);
     }
+    for (const x of rep.xpassed) {
+      console.log(
+        `XPASS ${x.relDir}  [impl1-ts xfail: ${x.gap}] — passes through this hybrid (reported, not red: the ` +
+          `swapped stage may be what fixes the carried gap)`,
+      );
+    }
     console.log(
       `\nhybrid conformance [${swapLabel}]: ${rep.passed} of ${rep.total} cases pass` +
         (rep.failures.length ? `, ${rep.failures.length} FAILED` : "") +
+        `, ${rep.xfailed.length} xfail of ${rep.total}` +
+        (rep.xpassed.length ? `, ${rep.xpassed.length} XPASS (reported, not red)` : "") +
         `  (${((performance.now() - t0) / 1000).toFixed(1)}s)`,
     );
     if (rep.failures.length) red = true;
