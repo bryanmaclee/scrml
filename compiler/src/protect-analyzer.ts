@@ -63,6 +63,7 @@ import { resolve, dirname } from "node:path";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
 import { redactDbUri } from "./db-uri-redact.ts";
+import { displayConnectionValue } from "./diagnostic-secrets.ts";
 import { classifyDbTarget, type DbTargetClass } from "./db-target.ts";
 import {
   parseSchemaBlock,
@@ -227,6 +228,28 @@ function srcTargetKind(cls: DbTargetClass): SrcTargetKind {
   return "file";
 }
 
+/**
+ * The form of a `<db src=>` target that MESSAGES show (s430-dev-db-stub round 5).
+ *
+ * The raw value is resolved only to OPEN the file. For display, the value's
+ * secret spans are replaced FIRST (`displayConnectionValue` on the whole
+ * trimmed value, then the same `sqlite:` prefix cut) and only that display
+ * form is resolved against the source directory. Resolving the raw value and
+ * redacting afterwards is unsound: `path.resolve` normalises `//`, `/./` and
+ * `/../` INSIDE a password (`app:k3J9//Xq8…@` -> `app:k3J9/Xq8…@`), so the
+ * printed path no longer contains the value a redactor would look for.
+ *
+ * A file target with no secret shows its real (realpath'd) `dbPath`.
+ */
+function displayDbTarget(cls: DbTargetClass, kind: SrcTargetKind, sourceDir: string, dbPath: string): string {
+  const shownFull = displayConnectionValue(cls.trimmed);
+  if (kind !== "file") return shownFull;
+  if (shownFull === cls.trimmed) return dbPath;
+  const stripped = cls.sqlitePath ?? cls.trimmed;
+  const shownStripped = shownFull.slice(cls.trimmed.length - stripped.length);
+  return resolve(sourceDir, shownStripped);
+}
+
 // ---------------------------------------------------------------------------
 // SQLite schema introspection
 // ---------------------------------------------------------------------------
@@ -274,6 +297,7 @@ export function describeDbSource(
   isDriverUri: boolean,
   db: Database | null = null,
   isUnsupportedTarget: boolean = false,
+  displayPath: string = dbPath,
 ): DbSourceDescription {
   if (isUnsupportedTarget) {
     return {
@@ -291,7 +315,7 @@ export function describeDbSource(
   if (!existsSync(dbPath)) {
     return {
       where: SHADOW_WHERE,
-      detail: `The database file \`${dbPath}\` does not exist, so it was not read. `,
+      detail: `The database file \`${displayPath}\` does not exist, so it was not read. `,
     };
   }
   let size = -1;
@@ -322,8 +346,8 @@ export function describeDbSource(
     // "EMPTY" (and "ZERO-BYTE") is front-loaded ahead of the (possibly long)
     // path: `scrml dev` and `scrml build` print only the first 120 characters.
     where:
-      `the ${isEmpty ? (size === 0 ? "EMPTY (ZERO-BYTE) " : "EMPTY ") : ""}database \`${dbPath}\` ` +
-      `(\`src="${srcRaw}"\` resolved against the source file's directory \`${sourceDir}\`)`,
+      `the ${isEmpty ? (size === 0 ? "EMPTY (ZERO-BYTE) " : "EMPTY ") : ""}database \`${displayPath}\` ` +
+      `(\`src="${displayConnectionValue(srcRaw)}"\` resolved against the source file's directory \`${sourceDir}\`)`,
     detail: emptyDetail,
   };
 }
@@ -458,7 +482,7 @@ class SchemaCache {
    * NOTE: This method assumes the file exists. Callers should use resolveDb()
    * which handles the "file missing" case by checking for shadow DB eligibility.
    */
-  openDb(dbPath: string, blockSpan: Span, errors: PAError[]): Database | null {
+  openDb(dbPath: string, blockSpan: Span, errors: PAError[], displayPath: string = dbPath): Database | null {
     if (this._dbs.has(dbPath)) return this._dbs.get(dbPath)!;
 
     let db: Database;
@@ -467,7 +491,7 @@ class SchemaCache {
     } catch (err) {
       errors.push(new PAError(
         "E-PA-003",
-        `E-PA-003: Failed to open SQLite database at \`${dbPath}\`: ${(err as Error).message}`,
+        `E-PA-003: Failed to open SQLite database at \`${displayPath}\`: ${(err as Error).message}`,
         blockSpan,
       ));
       this._dbs.set(dbPath, null);
@@ -942,12 +966,13 @@ function resolveDb(
   errors: PAError[],
   srcIsDriverUri: boolean = false,
   srcIsUnsupported: boolean = false,
+  displayPath: string = srcIsDriverUri ? redactDbUri(dbPath) : dbPath,
 ): Database | null {
   // Driver URI (postgres:// / mysql://) — skip the filesystem check entirely.
   // Schema validation at compile time happens via the shadow-DB path. Real
   // driver introspection is deferred to a later phase.
   if (!srcIsDriverUri && existsSync(dbPath)) {
-    return cache.openDb(dbPath, blockSpan, errors);
+    return cache.openDb(dbPath, blockSpan, errors, displayPath);
   }
 
   // File is missing OR src= is a driver URI. Check shadow DB eligibility.
@@ -972,8 +997,12 @@ function resolveDb(
     // echoed verbatim. The `db-migrate` remedy stays copy-pasteable when the URI
     // carries no credentials; when it does, a redacted URI would not run, so the
     // remedy names a placeholder instead.
-    const shownTarget = srcIsDriverUri ? redactDbUri(dbPath) : dbPath;
-    const migrateTarget = srcIsDriverUri && shownTarget !== dbPath ? "<your connection string>" : dbPath;
+    // s430-dev-db-stub round 5: every path/URI in a message is the DISPLAY
+    // form built by processDbBlock (`displayDbTarget`) — never the raw value
+    // resolved for display, since path normalisation (`//`, `/./`, `/../`)
+    // rewrites a secret inside a raw resolved path past any value match.
+    const shownTarget = displayPath;
+    const migrateTarget = shownTarget !== dbPath ? "<your connection string>" : dbPath;
     const what = srcIsUnsupported
       ? `Database target \`${shownTarget}\` uses a URI scheme no \`?{}\` driver accepts ` +
         `(E-SQL-005 — supported: \`postgres://\`, \`postgresql://\`, \`mysql://\`, \`sqlite:\`), ` +
@@ -1001,8 +1030,8 @@ function resolveDb(
 
   // All tables have CREATE TABLE statements. Build shadow DB.
   const what = srcIsUnsupported
-    ? `Unsupported database target '${redactDbUri(dbPath)}' (no \`?{}\` driver accepts its URI scheme — E-SQL-005)`
-    : srcIsDriverUri ? `Driver URI '${redactDbUri(dbPath)}'` : `Database file '${dbPath}' does not exist`;
+    ? `Unsupported database target '${displayPath}' (no \`?{}\` driver accepts its URI scheme — E-SQL-005)`
+    : srcIsDriverUri ? `Driver URI '${displayPath}'` : `Database file '${displayPath}' does not exist`;
   cache.note(
     `Note(PA): ${what}. ` +
     `Using in-memory schema from ?{} blocks for compile-time validation.\n`,
@@ -1235,7 +1264,8 @@ function processDbBlock(
   //   - file missing + no CREATE TABLE → E-PA-002
   //   - driver URI (postgres:// / mysql://) → forced shadow DB; no file check
   // ------------------------------------------------------------------
-  const db = resolveDb(dbPath, tableNames, createTableMap, cache, blockSpan, errors, isDriverConnectionUri, srcKind === "unsupported");
+  const displayPath = displayDbTarget(srcClass, srcKind, sourceDir, dbPath);
+  const db = resolveDb(dbPath, tableNames, createTableMap, cache, blockSpan, errors, isDriverConnectionUri, srcKind === "unsupported", displayPath);
   if (db === null) return;
 
   // ------------------------------------------------------------------
@@ -1249,7 +1279,7 @@ function processDbBlock(
   let anyTableFailed = false;
 
   const dbSource = (): DbSourceDescription =>
-    describeDbSource(dbPath, srcRaw, sourceDir, isDriverConnectionUri, db, srcKind === "unsupported");
+    describeDbSource(dbPath, srcRaw, sourceDir, isDriverConnectionUri, db, srcKind === "unsupported", displayPath);
   for (const tableName of tableNames) {
     const schema = readTableSchema(db, tableName, blockSpan, errors, dbSource);
     if (schema === null) {

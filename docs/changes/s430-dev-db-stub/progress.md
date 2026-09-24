@@ -153,6 +153,20 @@
     stderr (self-host out of scope; api's interception would still catch it when run under compileScrml);
     db-migrate.js error prints and dev.js:1074 route-handler error print are RUNTIME error text, not compile
     diagnostics — follow-up.
+- 2026-09-24 ROUND 5 (re-review of 302af4d3: interception sound; one MEDIUM, one LOW).
+  Merged origin/main 585261d9 (#1043 stage seams) -> 0ac1af47. Conflict in api.js Stage 4: kept main's
+    seams.pick("PA", runPA) + this branch's onNote. The seam wraps a substitute's throw in StageSeamError, which
+    the old always-wrap redactThrown turned into a plain Error (hybrid-stage-swap red) — LOW fix landed IN the
+    merge commit because the merged tree is red without it: redactThrown returns the ORIGINAL value when nothing
+    is registered or nothing changes, else a new object with the SAME prototype (Object.create(proto) + own
+    props; class/name preserved; original may be frozen).
+  MEDIUM (normalised-path leak), fixed at the root: displayDbTarget() in protect-analyzer — every message path is
+    resolve(sourceDir, <display form of the value, sqlite: prefix cut>); the raw value is resolved ONLY to open
+    the file. Applies to E-PA-002 (path + --db remedy, placeholder when the display differs), Note(PA), E-PA-003,
+    E-PA-004 (path + src= shown via displayConnectionValue). This also retires the round-4 "known residue".
+    Tests db-uri-redaction-r5.test.js: 4 inputs (`//` userinfo, `//` ?password=, `/./` ?pwd=, `/../` ?password=)
+    x {CLI E-PA-002, CLI Note(PA), LSP} + runPA-alone; every normalisation fragment asserted absent.
+    Mutation: file-branch display resolves the raw value again -> 13/13 red.
   DECLARED BEHAVIOUR CHANGES riding this arc (for the PR description):
     1. `sqlite:` prefix strip in the protect-analyzer: `<db src="sqlite:./x.db">` now behaves exactly like
        `<db src="./x.db">` (SPEC §8.1.1 L6512 + L6533). Base resolved it to the nonexistent `<dir>/sqlite:/x.db`
