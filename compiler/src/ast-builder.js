@@ -11613,8 +11613,18 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // host-tag and manifest rules live in host-import.js (shared with the
       // native front-end). The grammar admits only the braced named clause.
       let expr = rawExpr;
-      const hostTagMatch = rawExpr.match(/^\s*:\s*([A-Za-z_$][A-Za-z0-9_$]*)/);
-      if (hostTagMatch) {
+      const hostColon = /^\s*:/.exec(rawExpr);
+      const hostTagMatch = hostColon ? rawExpr.match(/^\s*:\s*([A-Za-z_$][A-Za-z0-9_$]*)/) : null;
+      if (hostColon && (!hostTagMatch || (hostTagMatch[1] !== "host" && !/^\s*\{/.test(rawExpr.slice(hostTagMatch[0].length))))) {
+        // Not the declaration shape at all — the tag is not `host` AND no
+        // `{ ... }` clause follows (typically file-top PROSE such as
+        // `import: this page documents ...`, which §40.8 lifts as code).
+        // Record what was found; the shared gate reports ONE E-IMPORT-009
+        // and nothing else (no grammar / manifest cascade).
+        importNode.hostTag = hostTagMatch ? hostTagMatch[1] : "";
+        importNode.hostProse = ("import: " + rawExpr.slice(hostColon[0].length).trim()).trim();
+        expr = "";
+      } else if (hostTagMatch) {
         importNode.hostTag = hostTagMatch[1];
         importNode.raw = "import:" + hostTagMatch[1] + " " + rawExpr.slice(hostTagMatch[0].length).trim();
         expr = rawExpr.slice(hostTagMatch[0].length);
@@ -11695,7 +11705,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // statement collector ended it at a newline before `from`) would
       // otherwise vanish silently and surface only as E-SCOPE-001 on each use.
       // Same code the native parser reports for the shape (§34).
-      if (typeof importNode.hostTag === "string" && !importNode.source) {
+      if (typeof importNode.hostTag === "string" && !importNode.source && typeof importNode.hostProse !== "string") {
         errors.push(new TABError(
           "E-STMT-EXPECT-FROM",
           `E-STMT-EXPECT-FROM: \`import:${importNode.hostTag}\` must be \`import:${importNode.hostTag} { a, b as c } from "<module>"\` ` +

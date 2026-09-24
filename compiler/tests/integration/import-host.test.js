@@ -603,3 +603,84 @@ describe("F9 — the allow-list is judged on REAL paths", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// S430 re-review of d130c878
+// ---------------------------------------------------------------------------
+
+describe("re-review 1 — a .js host module is parsed the way Bun loads it", () => {
+  test("decorators and JSX in a .js host: no false E-IMPORT-006, names checked, runs", () => {
+    for (const parser of PARSERS) {
+      const root = project({
+        "scrml.toml": SELF_HOST_TOML,
+        "host/dec.js":
+          "function logged(c) { return c }\n@logged export class D { static tag() { return \"D\" } }\nexport const x = 1\n",
+        "host/view.js":
+          "export const n = 2\nexport function V() { return <div id=\"v\">hi</div> }\n",
+        "stdlib/compiler/c.scrml":
+          'import:host { D, x } from "../../host/dec.js"\n' +
+          'import:host { n } from "../../host/view.js"\n' +
+          "export const out = D.tag() + x + n\n",
+      });
+      const r = compileMany(root, ["stdlib/compiler/c.scrml"], { parser });
+      expect(errorCodes(r)).toEqual([]);
+      const run = runModule(root, "run.mjs", 'import { out } from "./dist/c.js";\nconsole.log(JSON.stringify(out));\n');
+      expect(run.stderr).toBe("");
+      expect(run.value).toBe("D12");
+    }
+  });
+
+  test("JSX in a .mjs host is rejected (E-IMPORT-006) — exactly as Bun rejects it at load", () => {
+    for (const parser of PARSERS) {
+      const root = project({
+        "scrml.toml": SELF_HOST_TOML,
+        "host/view.mjs": "export function V() { return <b/> }\n",
+        "stdlib/compiler/c.scrml": 'import:host { V } from "../../host/view.mjs"\nexport const v = V\n',
+      });
+      const r = compile(root, "stdlib/compiler/c.scrml", { parser, mode: "library" });
+      expect(count(r, "E-IMPORT-006")).toBe(1);
+    }
+  });
+
+  test("the export list is still checked for such modules (E-IMPORT-004)", () => {
+    for (const parser of PARSERS) {
+      const root = project({
+        "scrml.toml": SELF_HOST_TOML,
+        "host/view.js": "export function V() { return <b/> }\n",
+        "stdlib/compiler/c.scrml": 'import:host { V, nope } from "../../host/view.js"\nexport const v = V\n',
+      });
+      const r = compile(root, "stdlib/compiler/c.scrml", { parser, mode: "library" });
+      expect(count(r, "E-IMPORT-004")).toBe(1);
+      expect(errorCodes(r)).not.toContain("E-IMPORT-006");
+    }
+  });
+});
+
+describe("re-review 2 — `import:` prose that is not a declaration gives ONE diagnostic", () => {
+  const PROSE = [
+    "import: this page documents the bridge.",
+    "import : this page documents the bridge.",
+    "import: 3 things matter here.",
+    "import:notes about the build",
+  ];
+  for (const parser of PARSERS) {
+    test(`${parser ?? "live"} parser`, () => {
+      for (const line of PROSE) {
+        const root = project({ "a.scrml": `${line}\n<program>\n<p>hi</p>\n</program>\n` });
+        const r = compile(root, "a.scrml", { parser });
+        expect({ line, codes: errorCodes(r) }).toEqual({ line, codes: ["E-IMPORT-009"] });
+        const msg = r.errors.find((e) => e.code === "E-IMPORT-009").message;
+        expect(msg).toContain("is not an `import:host` declaration");
+      }
+    });
+  }
+
+  test("a real non-host tag with a clause is still the host-tag error (+ manifest)", () => {
+    for (const parser of PARSERS) {
+      const root = project({ "a.scrml": 'import:wasm { f } from "./m.js"\n<program>\n<p>${f}</p>\n</program>\n' });
+      const r = compile(root, "a.scrml", { parser });
+      expect(count(r, "E-IMPORT-009")).toBe(1);
+      expect(errorCodes(r)).toContain("E-IMPORT-008");
+    }
+  });
+});

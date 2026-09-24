@@ -2532,6 +2532,28 @@ export function parseImport(ctx) {
     // compiler/src/host-import.js (shared with the live front-end).
     if (currentKind(cursor) === TokenKind.Colon) {
         advance(cursor);   // consume :
+        // Not the declaration shape at all — the tag is not `host` AND no
+        // `{ ... }` clause follows it (typically file-top PROSE such as
+        // `import: this page documents ...`, which §40.8 lifts as code).
+        // Consume the rest of the line and record what was found; the shared
+        // gate reports it as ONE E-IMPORT-009, with no grammar cascade.
+        const tagIsIdent = currentKind(cursor) === TokenKind.Ident;
+        const tagName = tagIsIdent ? current(cursor).name : "";
+        if (tagName !== "host" && !(tagIsIdent && peekKind(cursor, 1) === TokenKind.LBrace)) {
+            const words = [];
+            while (atEnd(cursor) === false
+                && currentKind(cursor) !== TokenKind.Semicolon
+                && current(cursor).span.line === kw.span.line) {
+                const t = advance(cursor);
+                words.push(typeof t.text === "string" ? t.text : "");
+            }
+            const proseEnd = finishStatementTerminator(ctx, kw);
+            const proseNode = makeImport(specifiers, "",
+                makeSpan(kw.span.start, proseEnd, kw.span.line, kw.span.col));
+            proseNode.hostTag = tagName;
+            proseNode.hostProse = ("import: " + words.join(" ")).trim();
+            return proseNode;
+        }
         let hostTag = "";
         if (currentKind(cursor) === TokenKind.Ident) {
             hostTag = advance(cursor).name;

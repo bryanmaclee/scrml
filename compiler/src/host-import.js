@@ -26,7 +26,9 @@
  *                         `<program>` / `<page>` / `<channel>` body, or any
  *                         nested scope);
  *           E-IMPORT-009  host-tag other than `host`, OR a `host` target that
- *                         is not a TypeScript / JavaScript module;
+ *                         is not a TypeScript / JavaScript module, OR an
+ *                         `import:` line that is not the declaration shape at
+ *                         all (prose) — then ALONE, with no other code;
  *           E-IMPORT-008  file outside the manifest allow-list.
  *       * the host-module record (`scanHostModule`) the module resolver uses
  *         for E-IMPORT-006 / E-IMPORT-004 / E-IMPORT-002 on host imports.
@@ -66,10 +68,17 @@ export const HOST_TAG = "host";
 
 /**
  * Host-module file extensions the `host` tag binds (§21.3.1 — "a host-language
- * module (TypeScript or JavaScript)").
+ * module (TypeScript or JavaScript)"), mapped to the Bun.Transpiler loader
+ * that parses them the way Bun's runtime does (verified on bun 1.3.14): Bun
+ * accepts JSX in a plain `.js` file — which its `"js"` transpiler loader
+ * rejects — so `.js` uses `"jsx"`; Bun REJECTS JSX in `.mjs`, so `.mjs` keeps
+ * `"js"`. `.ts` / `.mts` keep `"ts"` (no JSX — `<T>x` is a cast there).
+ * Decorators parse under every one of these loaders.
+ * `.jsx` / `.tsx` are deliberately NOT admitted: §21.3.1 names TS and JS
+ * modules only.
  */
 const HOST_MODULE_LOADERS = Object.freeze({
-  ".js": "js",
+  ".js": "jsx",
   ".mjs": "js",
   ".ts": "ts",
   ".mts": "ts",
@@ -409,6 +418,27 @@ export function validateHostImports(ast, filePath, cap) {
     const shown = `import:${tag}`;
     let rejected = false;
 
+    // Not the declaration shape at all (a non-`host` tag with no `{ ... }`
+    // clause — typically file-top prose like `import: this page documents
+    // ...`). Exactly ONE diagnostic, naming what was found: the placement and
+    // manifest rules are about import:host DECLARATIONS, and reporting them
+    // (or a grammar cascade) for prose only obscures the real problem.
+    if (typeof node.hostProse === "string") {
+      const found = node.hostProse.length > 80 ? node.hostProse.slice(0, 77) + "..." : node.hostProse;
+      errors.push({
+        code: "E-IMPORT-009",
+        message:
+          `E-IMPORT-009: \`${found}\` is not an \`import:host\` declaration. After \`import:\` v1 recognises only the ` +
+          "host-tag `host`, followed by a braced named clause: `import:host { a, b as c } from \"./module.ts\"` (§21.3.1). " +
+          "If this line is prose, it is being read as code because it starts with the `import` keyword at a declaration " +
+          "site (§40.8) — reword it, or put it inside a markup element such as `<p>`.",
+        span: spanOf(node),
+        severity: "error",
+      });
+      reject(entry);
+      continue;
+    }
+
     if (!entry.fileTop) {
       rejected = true;
       errors.push({
@@ -432,7 +462,7 @@ export function validateHostImports(ast, filePath, cap) {
         span: spanOf(node),
         severity: "error",
       });
-    } else if (typeof node.source === "string" && !(extensionOf(node.source) in HOST_MODULE_LOADERS)) {
+    } else if (typeof node.source === "string" && node.source.length > 0 && !(extensionOf(node.source) in HOST_MODULE_LOADERS)) {
       rejected = true;
       errors.push({
         code: "E-IMPORT-009",
@@ -474,10 +504,13 @@ export function validateHostImports(ast, filePath, cap) {
  * during scrml parse. The host module is loaded and named exports are
  * extracted at compile time only.").
  *
- * The module is PARSED, never run: a TypeScript module is first type-stripped
- * by `Bun.Transpiler.transformSync` (a syntax transform, no evaluation), then
- * the resulting JavaScript is parsed as an ES module and its export / import
- * declarations are read off the tree. Everything is structural — a comment
+ * The module is PARSED, never run: it is first lowered by
+ * `Bun.Transpiler.transformSync` with the loader for its extension (a syntax
+ * transform, no evaluation) — so every shape Bun itself accepts at import
+ * time (TS types, decorators, JSX in a `.js` file) is accepted here, and a
+ * module is never falsely reported unparseable — then the resulting plain
+ * JavaScript is parsed as an ES module and its export / import declarations
+ * are read off the tree. Everything is structural — a comment
  * or string that merely looks like `export * from` changes nothing.
  *
  * `exports` is null (the name check is skipped, never false-rejected) when the
@@ -505,15 +538,15 @@ export function scanHostModule(absPath) {
   }
   const loader = HOST_MODULE_LOADERS[extensionOf(absPath)] || "js";
   let code = text;
-  if (loader === "ts") {
-    if (typeof Bun === "undefined" || typeof Bun.Transpiler !== "function") {
-      return { ok: true, parseError: null, exports: null, imports: [], error: null };
-    }
-    try {
-      code = new Bun.Transpiler({ loader: "ts" }).transformSync(text);
-    } catch (e) {
-      return { ok: true, parseError: e && e.message ? e.message : String(e), exports: null, imports: [], error: null };
-    }
+  if (typeof Bun === "undefined" || typeof Bun.Transpiler !== "function") {
+    // No Bun transpiler: the export list cannot be derived the way Bun will
+    // load the module, so skip the name check rather than risk a false reject.
+    return { ok: true, parseError: null, exports: null, imports: [], error: null };
+  }
+  try {
+    code = new Bun.Transpiler({ loader }).transformSync(text);
+  } catch (e) {
+    return { ok: true, parseError: e && e.message ? e.message : String(e), exports: null, imports: [], error: null };
   }
   let program;
   try {
