@@ -24,6 +24,11 @@
  * No I/O. No URL parsing beyond prefix matching. This function is pure.
  */
 
+import { redactDbUri } from "../db-uri-redact.ts";
+import { classifyDbTarget } from "../db-target.ts";
+export { classifyDbTarget, isDriverConnectionUri } from "../db-target.ts";
+export type { DbTargetKind, DbTargetClass } from "../db-target.ts";
+
 export type DbDriver = "sqlite" | "postgres" | "mysql";
 
 export interface DbDriverInfo {
@@ -62,10 +67,11 @@ export function resolveDbDriver(uri: string): DbDriverResult {
     };
   }
 
-  const trimmed = uri.trim();
+  const cls = classifyDbTarget(uri);
+  const trimmed = cls.trimmed;
 
   // PostgreSQL — both prefix forms are aliases (Bun.SQL accepts either).
-  if (trimmed.startsWith("postgres://") || trimmed.startsWith("postgresql://")) {
+  if (cls.kind === "postgres") {
     return {
       ok: true,
       info: { driver: "postgres", connectionString: trimmed },
@@ -74,24 +80,15 @@ export function resolveDbDriver(uri: string): DbDriverResult {
 
   // MySQL — Phase 3. Recognize the prefix so codegen can plumb it through;
   // downstream stages may still bail out with their own diagnostics.
-  if (trimmed.startsWith("mysql://")) {
+  if (cls.kind === "mysql") {
     return {
       ok: true,
       info: { driver: "mysql", connectionString: trimmed },
     };
   }
 
-  // SQLite — explicit `sqlite:` prefix, in-memory `:memory:`, or any path-like
-  // value. The path-like check is intentionally permissive: Bun.SQL treats any
-  // bare string Bun.SQL doesn't otherwise recognize as a filesystem path.
-  if (trimmed === ":memory:") {
-    return {
-      ok: true,
-      info: { driver: "sqlite", connectionString: trimmed },
-    };
-  }
-
-  if (trimmed.startsWith("sqlite:")) {
+  // SQLite — explicit `sqlite:` prefix or in-memory `:memory:`.
+  if (cls.kind === "sqlite-memory" || (cls.kind === "sqlite-file" && cls.scheme === "sqlite")) {
     return {
       ok: true,
       info: { driver: "sqlite", connectionString: trimmed },
@@ -100,13 +97,13 @@ export function resolveDbDriver(uri: string): DbDriverResult {
 
   // Reject explicit non-relational schemes — these are not for `?{}`.
   // §44.2 normative: `mongo://` / `mongodb://` are invalid for `?{}`.
-  if (trimmed.startsWith("mongo://") || trimmed.startsWith("mongodb://")) {
+  if (cls.kind === "mongo") {
     return {
       ok: false,
       error: {
         code: "E-SQL-005",
         message:
-          `E-SQL-005: \`<program db="${trimmed}">\` uses an unsupported prefix for \`?{}\`. ` +
+          `E-SQL-005: \`<program db="${redactDbUri(trimmed)}">\` uses an unsupported prefix for \`?{}\`. ` +
           `MongoDB (\`mongo://\` / \`mongodb://\`) is not a SQL driver — use the meta ` +
           `context \`^{}\` for non-SQL data sources. See SPEC §44.2.`,
       },
@@ -116,14 +113,13 @@ export function resolveDbDriver(uri: string): DbDriverResult {
   // Reject obvious URL schemes we don't support so typos surface early.
   // A relative path like `./app.db` matches the path heuristic below; a typo'd
   // scheme like `postgress://` (note the extra s) reaches this branch.
-  const schemeMatch = trimmed.match(/^([a-z][a-z0-9+.\-]*):\/\//i);
-  if (schemeMatch !== null) {
+  if (cls.kind === "unsupported-scheme") {
     return {
       ok: false,
       error: {
         code: "E-SQL-005",
         message:
-          `E-SQL-005: \`<program db="${trimmed}">\` uses an unrecognized URI scheme \`${schemeMatch[1]}://\`. ` +
+          `E-SQL-005: \`<program db="${redactDbUri(trimmed)}">\` uses an unrecognized URI scheme \`${cls.scheme}://\`. ` +
           `Supported schemes: \`postgres://\`, \`postgresql://\`, \`mysql://\`, \`sqlite:\`. ` +
           `For local files use a relative path (e.g. \`./app.db\`) or \`:memory:\`. ` +
           `See SPEC §44.2.`,
