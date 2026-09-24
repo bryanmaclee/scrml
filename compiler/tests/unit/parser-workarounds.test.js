@@ -1,77 +1,25 @@
 /**
- * Self-Host BPP (Body Pre-Parser) — Parity Tests
+ * parser-workarounds.js (legacy BPP recovery helpers) — unit tests.
  *
- * Validates the JS original (compiler/src/codegen/compat/parser-workarounds.js)
- * against representative inputs for all exported functions. When the scrml build
- * pipeline produces compiled output, these tests should also import the compiled
- * scrml version and assert identical results.
+ * MOVED from compiler/tests/self-host/bpp.test.js by s430-stage-swap. That file lived under
+ * `compiler/tests/self-host/`, which is not in the test gate, but it never tested the self-host
+ * module at all: every assertion exercises the JS original
+ * (compiler/src/codegen/compat/parser-workarounds.js); its only `bpp.scrml` checks read the scrml
+ * SOURCE TEXT for export names. Those three source-text checks were dropped with the move; the
+ * behavioural tests below are unchanged. Self-host / bootstrap verification now goes through the
+ * hybrid-compiler harness (`bun scripts/hybrid.ts`, bryan S430 P5), not per-module parity files.
+ *
+ * Retirement: parser-workarounds.js's own header schedules the file (and these tests) for
+ * deletion at M6.8.
  */
 
 import { describe, test, expect } from "bun:test";
-import { fileURLToPath } from "node:url";
-import { resolve, dirname } from "path";
-import { existsSync } from "fs";
-import { execSync } from "child_process";
-
-// ---------------------------------------------------------------------------
-// Resolve paths (works in both main repo and worktrees)
-// ---------------------------------------------------------------------------
-
-const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
-
-function findProjectRoot() {
-  // In a worktree, --show-toplevel returns the worktree root which has the files
-  // Unset GIT_DIR so -C works correctly when invoked from pre-commit hooks
-  const gitEnv = { ...process.env };
-  delete gitEnv.GIT_DIR;
-  delete gitEnv.GIT_WORK_TREE;
-  return execSync(
-    "git -C " + testDir + " rev-parse --show-toplevel",
-    { encoding: "utf-8", env: gitEnv },
-  ).trim();
-}
-
-function findMainProjectRoot() {
-  // Prefer the local worktree if it has parser-workarounds.js (so that a
-  // cross-cut rename / refactor under development tests its own SUT, not the
-  // out-of-date main worktree's SUT). Fall back to main worktree if local is
-  // missing the file (some worktrees only modify .scrml without the JS).
-  const localRoot = findProjectRoot();
-  if (existsSync(resolve(localRoot, "compiler/src/codegen/compat/parser-workarounds.js"))) {
-    return localRoot;
-  }
-  const gitEnv = { ...process.env };
-  delete gitEnv.GIT_DIR;
-  delete gitEnv.GIT_WORK_TREE;
-  try {
-    const wtList = execSync("git -C " + testDir + " worktree list --porcelain", { encoding: "utf-8", env: gitEnv });
-    const firstLine = wtList.split("\n").find(l => l.startsWith("worktree "));
-    if (firstLine) {
-      const mainRoot = firstLine.replace("worktree ", "");
-      if (existsSync(resolve(mainRoot, "compiler/src/codegen/compat/parser-workarounds.js"))) {
-        return mainRoot;
-      }
-    }
-  } catch { /* fall through */ }
-  return localRoot;
-}
-
-const projectRoot = findMainProjectRoot();
-const localRoot = findProjectRoot();
-const jsPath = resolve(projectRoot, "compiler/src/codegen/compat/parser-workarounds.js");
-// scrml file is in the local worktree (may differ from main repo)
-const scrmlPath = resolve(localRoot, "compiler/self-host/bpp.scrml");
-
-// ---------------------------------------------------------------------------
-// Import JS original
-// ---------------------------------------------------------------------------
-
-const {
+import {
   isLeakedComment,
   stripLeakedComments,
   splitBareExprStatements,
   splitMergedStatements,
-} = await import(jsPath);
+} from "../../src/codegen/compat/parser-workarounds.js";
 
 // ---------------------------------------------------------------------------
 // isLeakedComment
@@ -271,30 +219,5 @@ describe("splitMergedStatements", () => {
     // First is the let declaration, second is the trailing call
     expect(lines[0]).toContain("let x =");
     expect(lines[1]).toContain("saveTodos()");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Compilation smoke test — scrml file exists
-// ---------------------------------------------------------------------------
-
-describe("bpp.scrml", () => {
-  test("scrml source file exists", () => {
-    expect(existsSync(scrmlPath)).toBe(true);
-  });
-
-  test("scrml source contains all exported function names", () => {
-    const { readFileSync } = require("fs");
-    const source = readFileSync(scrmlPath, "utf-8");
-    expect(source).toContain("export function isLeakedComment");
-    expect(source).toContain("export function stripLeakedComments");
-    expect(source).toContain("export function splitBareExprStatements");
-    expect(source).toContain("export function splitMergedStatements");
-  });
-
-  test("scrml source imports rewriteExpr", () => {
-    const { readFileSync } = require("fs");
-    const source = readFileSync(scrmlPath, "utf-8");
-    expect(source).toContain("rewriteExpr");
   });
 });
