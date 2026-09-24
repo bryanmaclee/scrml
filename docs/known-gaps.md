@@ -17992,3 +17992,23 @@ file-level `let`, exit 0 on both builds. That silent half is the real defect (§
 ignores `letBinder`) — its fix is entangled with peter's pending Q1 (is a keywordless binder mutable?).
 
 <!-- @gap id=g-non-rendering-loop-write-to-its-own-binder-emits-a-tdz-referenceerror sev=HIGH status=open locus=compiler/src/codegen/emit-control-flow.ts prov=empirical:agent-s430-destructure-shadow -->
+
+### G-LET-BOUND-THROUGH-A-GUARDED-EXPRESSION-IS-NOT-A-DECLARED-LOCAL — a later bare write becomes a `const` shadow and is lost
+
+**Agent-reproduced (S430 `s430-p2-export-swallow`, found along the way), RELAYED.** `let v = safeCall(() => JSON.parse(x)) !{ | ::Thrown(message, name) :> 0 }`
+then `if (v == 0) v = 1` → the nested write is emitted as `const v = 1` (a block-local shadow) and the outer `let` is never
+written, exit 0. Same silent-lost-write shape as the underlying half of `g-e-assign-004-blames-a-forward-declared-let` — a
+binding the typer/emitter does not register as a declared local. `!{}` is the language's only error-handling surface.
+
+<!-- @gap id=g-let-bound-through-a-guarded-expression-is-not-a-declared-local sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts prov=empirical:agent-s430-p2-export-swallow -->
+
+### G-EXPORT-SWALLOW-CLOSURE-LEAVES-UNMIGRATABLE-THROW-SITES — six corpus files newly fail and each needs a design call
+
+**S430 P2 arc (`s430-p2-export-swallow`).** Closing the export-declaration diagnostic swallow newly fails 6 files whose sites
+cannot be migrated without a ruling: `stdlib/test/index.scrml` (15 sites — the assertion library's contract IS "throw to the
+runner"), the `reflect()` closure throws that report E-META-003 in both meta-checker copies, meta-checker :297 `try` (canonical
+safeCall form hits the let-through-guard lost-write gap), and precondition throws in non-failable functions
+(oauth google:52/github:48/discord:40/microsoft:51 `opts required`, pkce:37 length 43–128, crypto:65 algorithm). scrml has no
+panic primitive for programmer-error preconditions. None affects importers (stdlib runs from JS shims). Awaiting bryan.
+
+<!-- @gap id=g-export-swallow-closure-leaves-unmigratable-throw-sites sev=MED status=open locus=stdlib/test/index.scrml prov=ruling:user-voice-S430-P2 -->
