@@ -24,3 +24,15 @@
   conflict-marker PASS. types-gate reports 21 NEW TS diagnostics, none in a touched file (pre-existing/env).
 - STOPPED before landing per brief: gated tests + the within-node canary consume compiler/self-host and
   stdlib/compiler; PA decides on the allowlist regen + residue re-pins vs sequencing behind import:host.
+- PA decision: land TOGETHER with the stdlib/compiler migration. Merged origin/main (#1045 import:host, #1046) at 9f67a65d (FACTS conflict regenerated).
+- 32ea0f3e repo-root scrml.toml (host-import = "self-host-only") + 30 stdlib/compiler dynamic-import sites migrated
+  (27 -> import:host; meta-checker's non-resolving "./expression-parser.js" -> import:host from compiler/src/expression-parser.ts;
+  module-resolver's "path"/"fs" -> static scrml:path / scrml:fs, since import:host rejects builtins). Manifest A/B: only the 15
+  import:host files differ, only by losing E-IMPORT-008, 0 artifact diffs. Runtime proof test: compiled umbrella + 13 stages
+  re-export the TS compiler's own functions. User `scrml:compiler` import compiles byte-identical to base. Pins dropped.
+- 656aecc1 review fixes: default check is now tree-counted + keyword-placed (no prose FPs); native attrs checked; native
+  BlockStub body diagnostics forwarded (were dropped); native class-expr parses its body; native ${}/^{} first-line col fix;
+  exact-duplicate native diagnostics collapsed. All 41 review probes + 2 new pinned both parsers. Quoted attr = data (PA).
+- c5067e21 within-node allowlist tightened by the 899 SPAN-COORD the col fix removed (312 rows, none up).
+- 3f3ac6c9 self-host-smoke strips the new static scrml:path/fs imports (surfaced only in the full run).
+- Full `bun run test`: 32,664 pass / 56 fail (55 = the same pre-existing browser/dev/detector/esm set; 1 = self-host-smoke, fixed in 3f3ac6c9).
