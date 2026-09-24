@@ -859,7 +859,22 @@ const USE_FOREIGN_LIFT_RE = /^\s*use\s+foreign:/;
 // placement / host-tag / manifest are then enforced by host-import.js's
 // post-parse gate. Any host-tag is lifted (a non-`host` tag is E-IMPORT-009
 // there, not page text here).
-const IMPORT_HOST_LIFT_RE = /^\s*import\s*:/;
+// Comments (block or line) may sit anywhere before the `:` — the tokenizer
+// drops them, so the lift gate must too (else `import /* c */ :host` leaked
+// as page text). The run may also open with comment lines.
+const IMPORT_HOST_LIFT_RE =
+  /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*import(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*:/;
+// A run that OPENS with the `import` keyword (optionally after comments) — the
+// candidate for the host-import lift; and one that is still nothing but that
+// keyword plus comments (BS cut it at a `//` comment; join the next sibling).
+const IMPORT_HOST_HEAD_RE =
+  /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*import(?![A-Za-z0-9_$])/;
+const IMPORT_HOST_UNDECIDED_RE =
+  /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*import(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*$/;
+// The lifted run holds a complete declaration once its `from "<specifier>"`
+// has been seen (comments may sit between `from` and the string).
+const IMPORT_HOST_COMPLETE_RE =
+  /\bfrom(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(?:"[^"\n]*"|'[^'\n]*')/;
 
 // ---------------------------------------------------------------------------
 // P2 Form 1 desugaring helpers — body-root absorbs outer attrs (SPEC §21.2)
@@ -1672,8 +1687,7 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // E-FOREIGN-SIDECAR-NOMINAL — instead of leaking the line (and any following
     // bare `server function`) as literal HTML. ONLY the `use foreign:` form
     // routes here; plain `use scrml:ui` / CSS `use`/`using` are untouched.
-    if (block.type === "text" && parentType !== "markup" &&
-        (USE_FOREIGN_LIFT_RE.test(block.raw) || IMPORT_HOST_LIFT_RE.test(block.raw))) {
+    if (block.type === "text" && parentType !== "markup" && USE_FOREIGN_LIFT_RE.test(block.raw)) {
       result.push({
         type: "logic",
         raw: "${" + block.raw + "}",
@@ -1687,6 +1701,50 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         _bareDeclLift: true,
       });
       continue;
+    }
+
+    // §21.3.1 — `import:<host-tag> { ... } from "..."` at a declaration site.
+    // BS splits a text run at every `//` line comment into its own `comment`
+    // block, so `import // c\n :host { a } from "m"` arrives as text + comment
+    // + text. Re-join the following comment/text siblings (a) while the run is
+    // still just `import` + comments (undecided), then (b) once it is known to
+    // be `import ... :`, until its `from "<specifier>"` is complete — so the
+    // whole declaration lifts instead of its tail leaking as page text.
+    if (block.type === "text" && parentType !== "markup" && IMPORT_HOST_HEAD_RE.test(block.raw)) {
+      let liftRaw = block.raw;
+      let liftSpan = block.span;
+      let j = i + 1;
+      const canJoin = (b) => b && (b.type === "comment" || b.type === "text") && typeof b.raw === "string";
+      const join = () => {
+        liftRaw += blocks[j].raw;
+        if (blocks[j].span && liftSpan) liftSpan = { ...liftSpan, end: blocks[j].span.end };
+        j++;
+      };
+      while (IMPORT_HOST_UNDECIDED_RE.test(liftRaw) && j < blocks.length && canJoin(blocks[j])) join();
+      if (IMPORT_HOST_LIFT_RE.test(liftRaw)) {
+        while (!IMPORT_HOST_COMPLETE_RE.test(liftRaw) && j < blocks.length && canJoin(blocks[j])) join();
+        if (!IMPORT_HOST_COMPLETE_RE.test(liftRaw)) {
+          // Never completes: lift only this block (the parser reports the
+          // malformed declaration) and leave the siblings untouched.
+          liftRaw = block.raw;
+          liftSpan = block.span;
+          j = i + 1;
+        }
+        result.push({
+          type: "logic",
+          raw: "${" + liftRaw + "}",
+          span: liftSpan,
+          depth: block.depth,
+          children: [],
+          name: null,
+          closerForm: null,
+          isComponent: false,
+          _synthetic: true,
+          _bareDeclLift: true,
+        });
+        i = j - 1;
+        continue;
+      }
     }
 
     // Convert text blocks that start with a bare declaration keyword.
@@ -11626,6 +11684,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           importNode.source = defaultMatch[2];
           importNode.isDefault = true;
         }
+      }
+
+      // §21.3.1 — a host import whose clause did not parse (e.g. the live
+      // statement collector ended it at a newline before `from`) would
+      // otherwise vanish silently and surface only as E-SCOPE-001 on each use.
+      // Same code the native parser reports for the shape (§34).
+      if (typeof importNode.hostTag === "string" && !importNode.source) {
+        errors.push(new TABError(
+          "E-STMT-EXPECT-FROM",
+          `E-STMT-EXPECT-FROM: \`import:${importNode.hostTag}\` must be \`import:${importNode.hostTag} { a, b as c } from "<module>"\` ` +
+          `— the braced named clause followed by \`from\` and the module specifier on the same statement (§21.3.1).`,
+          span,
+        ));
       }
 
       nodes.push(importNode);

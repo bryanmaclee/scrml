@@ -2207,9 +2207,18 @@ export function braceIsInStringLiteral(cursor) {
 // changes, this copy must change in lockstep (re-synced this session).
 const BARE_DECL_RE = /^\s*(?:export\s+)?(server\s+(?:fn|function)[*\s]|type\s+\w|fn[*\s]\w?|function[*\s]\w?|let\s+[A-Za-z_]|const\s+[A-Za-z_]|import\s+[{a-zA-Z_*"'])/;
 
-// IMPORT_HOST_LIFT_RE — VERBATIM copy of ast-builder.js's IMPORT_HOST_LIFT_RE.
-// A text run opening with the §21.3.1 `import:<host-tag>` declaration.
-const IMPORT_HOST_LIFT_RE = /^\s*import\s*:/;
+// IMPORT_HOST_{HEAD,UNDECIDED,LIFT,COMPLETE}_RE — VERBATIM copies of the
+// ast-builder.js regexes of the same names. A text run opening with the
+// §21.3.1 `import:<host-tag>` declaration (comments allowed anywhere before
+// the `:`), and the `from "<specifier>"` that completes it.
+const IMPORT_HOST_HEAD_RE =
+    /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*import(?![A-Za-z0-9_$])/;
+const IMPORT_HOST_UNDECIDED_RE =
+    /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*import(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*$/;
+const IMPORT_HOST_COMPLETE_RE =
+    /\bfrom(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(?:"[^"\n]*"|'[^'\n]*')/;
+const IMPORT_HOST_LIFT_RE =
+    /^(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*import(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*:/;
 
 // TOPLEVEL_STATE_DECL_RE — VERBATIM copy of ast-builder.js L369. A text run
 // opening with a `<Ident ...>` then `=` / `:` / a nested `<Ident` (a Variant C
@@ -2733,10 +2742,38 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             // IMPORT_HOST_LIFT_RE — §21.3.1 `import:<host-tag> { ... }` (the
             // live oracle's IMPORT_HOST_LIFT_RE lift). Without it the line is
             // page text.
-            if (IMPORT_HOST_LIFT_RE.test(raw)) {
-                result.push(synthLiftedLogicBlock(block, source, ctx));
-                i = i + 1;
-                continue;
+            // The trampoline cuts a text run at every `//` line comment (a
+            // `Comment` block), so the declaration may span Text + Comment +
+            // Text siblings: widen the span over them (the live oracle's
+            // re-join) — first while the run is still only `import` +
+            // comments, then until its `from "<specifier>"` is complete.
+            if (IMPORT_HOST_HEAD_RE.test(raw)) {
+                let j = i + 1;
+                let endPos = block.span.end;
+                const canJoin = (b) => b !== undefined && b !== null
+                    && (b.kind === "Text" || b.kind === "Comment")
+                    && b.span !== undefined && b.span !== null;
+                let joined = raw;
+                while (IMPORT_HOST_UNDECIDED_RE.test(joined) && j < blocks.length && canJoin(blocks[j])) {
+                    endPos = blocks[j].span.end;
+                    joined = source.slice(block.span.start, endPos);
+                    j = j + 1;
+                }
+                if (IMPORT_HOST_LIFT_RE.test(joined)) {
+                    while (IMPORT_HOST_COMPLETE_RE.test(joined) === false && j < blocks.length && canJoin(blocks[j])) {
+                        endPos = blocks[j].span.end;
+                        joined = source.slice(block.span.start, endPos);
+                        j = j + 1;
+                    }
+                    if (IMPORT_HOST_COMPLETE_RE.test(joined) === false) {
+                        endPos = block.span.end;
+                        j = i + 1;
+                    }
+                    const widened = { ...block, span: { ...block.span, end: endPos } };
+                    result.push(synthLiftedLogicBlock(widened, source, ctx));
+                    i = j;
+                    continue;
+                }
             }
             // TOPLEVEL_STATE_DECL_RE — a `<Ident ...>` opener then `=`/`:`.
             if (TOPLEVEL_STATE_DECL_RE.test(raw)) {

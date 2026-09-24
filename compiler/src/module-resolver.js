@@ -542,8 +542,22 @@ function checkHostImport(imp, absSource, importerPath, compileSet, hostRecords) 
         scrmlTargets.push(abs.replace(/\.js$/, ".scrml"));
       }
     }
-    record = { exports: scan.exports, scrmlTargets };
+    record = { exports: scan.exports, scrmlTargets, parseError: scan.parseError || null };
     hostRecords.set(absSource, record);
+  }
+  // A host module that does not parse cannot be loaded, at compile time or at
+  // run time. Reported under E-IMPORT-006 ("import target cannot be
+  // resolved") rather than a new code: the SPEC (§21.6 / §34) has no
+  // unparseable-target code, and minting one is a SPEC amendment — the
+  // message names the parse failure precisely instead.
+  if (record.parseError) {
+    errors.push(new ModuleError(
+      "E-IMPORT-006",
+      `E-IMPORT-006: Cannot load \`import:host\` target \`${imp.source}\` — the host module could not be parsed ` +
+      `(${record.parseError}). Fix the syntax error in \`${absSource}\`.`,
+      span,
+    ));
+    return errors;
   }
   if (record.exports) {
     const importedNames = Array.isArray(imp.specifiers) && imp.specifiers.length > 0

@@ -36,8 +36,9 @@
  * resolver does not load the host module for it.
  */
 
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, realpathSync } from "fs";
 import { dirname, join, relative, resolve, sep } from "path";
+import { parse as acornParse } from "acorn";
 
 // ---------------------------------------------------------------------------
 // Manifest — `[capabilities] host-import` (§22.13)
@@ -74,6 +75,16 @@ const HOST_MODULE_LOADERS = Object.freeze({
   ".mts": "ts",
 });
 
+/** `realpathSync`, falling back to the resolved path for a file not on disk. */
+export function realPathOf(p) {
+  const abs = resolve(p);
+  try {
+    return realpathSync(abs);
+  } catch {
+    return abs;
+  }
+}
+
 function extensionOf(p) {
   const m = /\.[A-Za-z0-9]+$/.exec(p);
   return m ? m[0].toLowerCase() : "";
@@ -88,12 +99,17 @@ function extensionOf(p) {
  * (codegen/chunk-namespace.ts), without its process-lifetime memo: the manifest
  * is re-read on every compile so an edit takes effect on the next one.
  *
+ * The walk starts from the file's REAL path (symlinks resolved): the
+ * capability is a property of the file itself, so a symlinked alias is judged
+ * where it really lives, and a symlink planted at `stdlib/compiler` that points
+ * elsewhere does not make the files behind it bootstrap files.
+ *
  * @param {string} filePath
  * @returns {{ projectRoot: string, manifestPath: string|null }|null}
  */
 export function findManifest(filePath) {
   if (!filePath) return null;
-  let dir = dirname(resolve(filePath));
+  let dir = dirname(realPathOf(filePath));
   for (;;) {
     const candidate = join(dir, MANIFEST_FILE_NAME);
     if (existsSync(candidate)) return { projectRoot: dir, manifestPath: candidate };
@@ -234,7 +250,9 @@ export function readHostImportCapabilities(filePaths) {
  */
 export function isHostImportPermitted(filePath, cap) {
   if (!cap || cap.value !== "self-host-only" || !cap.projectRoot) return false;
-  const rel = relative(cap.projectRoot, resolve(filePath)).split(sep).join("/");
+  // Both sides are REAL paths (see findManifest), so neither a symlinked
+  // directory nor a symlinked file can place a file inside the allow-list.
+  const rel = relative(realPathOf(cap.projectRoot), realPathOf(filePath)).split(sep).join("/");
   return rel.startsWith(SELF_HOST_PATH_PREFIX);
 }
 
@@ -451,26 +469,30 @@ export function validateHostImports(ast, filePath, cap) {
 // ---------------------------------------------------------------------------
 
 /**
- * A host module's re-export-all marker. `Bun.Transpiler.scan` lists the names
- * a module declares but not the names an `export * from "..."` forwards, so
- * the export list is incomplete when one is present and a missing name cannot
- * be reported without traversing into the host module's own imports (which
- * §21.3.1 forbids). Matched on the host module's TEXT because the scan result
- * carries no such marker.
- */
-const EXPORT_STAR_RE = /(^|[;{}\s])export\s*\*/;
-
-/**
  * Load a host module's named-export record WITHOUT evaluating it (§21.3.1:
  * "The compiler SHALL NOT inline or evaluate the host-language module's body
  * during scrml parse. The host module is loaded and named exports are
  * extracted at compile time only.").
  *
+ * The module is PARSED, never run: a TypeScript module is first type-stripped
+ * by `Bun.Transpiler.transformSync` (a syntax transform, no evaluation), then
+ * the resulting JavaScript is parsed as an ES module and its export / import
+ * declarations are read off the tree. Everything is structural — a comment
+ * or string that merely looks like `export * from` changes nothing.
+ *
+ * `exports` is null (the name check is skipped, never false-rejected) when the
+ * export list cannot be known statically:
+ *   - the module has an `export * from "..."` (the forwarded names live in a
+ *     module this record does not traverse into), or
+ *   - the module has no ES import/export syntax at all — a CommonJS or plain
+ *     script module, whose names Bun derives at load time.
+ *
  * @param {string} absPath
  * @returns {{
- *   ok: boolean,
+ *   ok: boolean,                 // false: the file could not be read
+ *   parseError: string|null,     // the module does not parse
  *   exports: Set<string>|null,   // null when the list is not authoritative
- *   imports: string[],           // the module's own static import specifiers
+ *   imports: string[],           // the module's own static import / re-export specifiers
  *   error: string|null,
  * }}
  */
@@ -479,21 +501,81 @@ export function scanHostModule(absPath) {
   try {
     text = readFileSync(absPath, "utf8");
   } catch (e) {
-    return { ok: false, exports: null, imports: [], error: e && e.message ? e.message : String(e) };
-  }
-  if (typeof Bun === "undefined" || typeof Bun.Transpiler !== "function") {
-    return { ok: true, exports: null, imports: [], error: null };
+    return { ok: false, parseError: null, exports: null, imports: [], error: e && e.message ? e.message : String(e) };
   }
   const loader = HOST_MODULE_LOADERS[extensionOf(absPath)] || "js";
-  let scanned;
-  try {
-    scanned = new Bun.Transpiler({ loader }).scan(text);
-  } catch (e) {
-    return { ok: true, exports: null, imports: [], error: e && e.message ? e.message : String(e) };
+  let code = text;
+  if (loader === "ts") {
+    if (typeof Bun === "undefined" || typeof Bun.Transpiler !== "function") {
+      return { ok: true, parseError: null, exports: null, imports: [], error: null };
+    }
+    try {
+      code = new Bun.Transpiler({ loader: "ts" }).transformSync(text);
+    } catch (e) {
+      return { ok: true, parseError: e && e.message ? e.message : String(e), exports: null, imports: [], error: null };
+    }
   }
-  const exports = EXPORT_STAR_RE.test(text) ? null : new Set(scanned.exports || []);
-  const imports = (scanned.imports || [])
-    .map((i) => (i && typeof i.path === "string" ? i.path : null))
-    .filter((p) => p !== null);
-  return { ok: true, exports, imports, error: null };
+  let program;
+  try {
+    program = acornParse(code, { ecmaVersion: "latest", sourceType: "module", allowHashBang: true });
+  } catch (e) {
+    return { ok: true, parseError: e && e.message ? e.message : String(e), exports: null, imports: [], error: null };
+  }
+
+  const names = new Set();
+  const imports = [];
+  let hasStar = false;
+  let isEsm = false;
+  const addPattern = (pat) => {
+    if (!pat) return;
+    switch (pat.type) {
+      case "Identifier": names.add(pat.name); break;
+      case "ObjectPattern":
+        for (const prop of pat.properties) addPattern(prop.type === "RestElement" ? prop.argument : prop.value);
+        break;
+      case "ArrayPattern": for (const el of pat.elements) addPattern(el); break;
+      case "RestElement": addPattern(pat.argument); break;
+      case "AssignmentPattern": addPattern(pat.left); break;
+      default: break;
+    }
+  };
+  const exportedName = (n) => (n.type === "Literal" ? String(n.value) : n.name);
+  for (const node of program.body) {
+    switch (node.type) {
+      case "ImportDeclaration":
+        isEsm = true;
+        imports.push(node.source.value);
+        break;
+      case "ExportAllDeclaration":
+        isEsm = true;
+        imports.push(node.source.value);
+        if (node.exported) names.add(exportedName(node.exported));   // `export * as ns from`
+        else hasStar = true;
+        break;
+      case "ExportDefaultDeclaration":
+        isEsm = true;
+        names.add("default");
+        break;
+      case "ExportNamedDeclaration":
+        isEsm = true;
+        if (node.source) imports.push(node.source.value);
+        if (node.declaration) {
+          const d = node.declaration;
+          if (d.type === "VariableDeclaration") for (const decl of d.declarations) addPattern(decl.id);
+          else if (d.id) names.add(d.id.name);
+        }
+        for (const spec of node.specifiers || []) names.add(exportedName(spec.exported));
+        break;
+      default:
+        break;
+    }
+  }
+  const exports = hasStar || !isEsm ? null : names;
+  return {
+    ok: true,
+    parseError: null,
+    exports,
+    imports: imports.filter((p) => typeof p === "string"),
+    error: null,
+  };
 }

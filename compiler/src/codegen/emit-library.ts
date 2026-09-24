@@ -1630,11 +1630,14 @@ function cleanFnSignatures(text: string): string {
  * verbatim as `import:host { ... }` (invalid JS). Its emitted form is the
  * static ES import `import { ... } from "..."`, i.e. the source minus the
  * `:<tag>` suffix. Blank the suffix with same-length spaces (so every other
- * absolute-span splice that runs on this slice stays aligned), anchored on
- * each host `import-decl` node's span (which starts on the `:` or on the
- * `import` keyword, per front-end) — not on a text search, so a string literal that
- * happens to contain `import:host` is never touched.
+ * absolute-span splice that runs on this slice stays aligned). Each edit is
+ * driven by a host `import-decl` NODE and anchored at its span, so only real
+ * declarations are touched — a string literal that happens to contain
+ * `import:host` is not (there is no node for it).
  */
+const HOST_IMPORT_GAP = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*`;
+const HOST_TAG_SUFFIX_RE = new RegExp(`^${HOST_IMPORT_GAP}:${HOST_IMPORT_GAP}[A-Za-z_$][A-Za-z0-9_$]*`);
+
 function blankHostImportTags(blockText: string, blockStart: number, body: unknown): string {
   if (!Array.isArray(body)) return blockText;
   let out = blockText;
@@ -1642,13 +1645,23 @@ function blankHostImportTags(blockText: string, blockStart: number, body: unknow
     if (!n || n.kind !== "import-decl" || typeof n.hostTag !== "string") continue;
     const s = n.span;
     if (!s || typeof s.start !== "number") continue;
-    let rel = s.start - blockStart;
-    if (rel < 0 || rel >= out.length) continue;
-    // The live parser's span starts on the `:`; the native parser's on the
-    // `import` keyword itself — step over it.
-    if (/^import(?![A-Za-z0-9_$])/.test(out.slice(rel))) rel += "import".length;
-    const m = /^\s*:\s*[A-Za-z_$][A-Za-z0-9_$]*/.exec(out.slice(rel));
-    if (!m || !/import\s*$/.test(out.slice(0, rel))) continue;
+    const anchor = s.start - blockStart;
+    if (anchor < 0 || anchor >= out.length) continue;
+    // Locate the declaration's own `import` keyword: the native parser's span
+    // starts ON it; the live parser's starts just after it, and — when a
+    // comment sits between `import` and `:` — inside that comment. So walk
+    // back from the span start to the nearest `import` that actually opens an
+    // `import <gap> : <gap> <tag>` run. Comments may sit in either gap (the
+    // tokenizer drops them), so the gap is whitespace OR block/line comments.
+    let rel = -1;
+    let m: RegExpExecArray | null = null;
+    for (let kw = out.lastIndexOf("import", anchor); kw >= 0; kw = out.lastIndexOf("import", kw - 1)) {
+      if (kw > 0 && /[A-Za-z0-9_$]/.test(out[kw - 1])) continue;
+      const after = kw + "import".length;
+      const hit = HOST_TAG_SUFFIX_RE.exec(out.slice(after));
+      if (hit) { rel = after; m = hit; break; }
+    }
+    if (rel < 0 || !m) continue;
     // Drop the tag and move the freed width to the END of the declaration, so
     // the emitted line reads `import { a } from "./m.js"` (not `import      {`).
     const end = typeof s.end === "number" && s.end - blockStart > rel ? s.end - blockStart : rel + m[0].length;
