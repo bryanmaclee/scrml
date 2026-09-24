@@ -58,7 +58,7 @@
  *   - No mutation of the input AST.
  */
 
-import { Database } from "bun:sqlite";
+import { Database, constants as sqliteConstants } from "bun:sqlite";
 import { resolve, dirname } from "node:path";
 import { existsSync, realpathSync, statSync } from "node:fs";
 import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
@@ -240,49 +240,75 @@ interface DbSourceDescription {
   detail: string;
 }
 
+/** Where a shadow (in-memory) schema's tables come from — both sources feed createTableMap. */
+const SHADOW_WHERE =
+  "the in-memory schema built from this file's `CREATE TABLE` declarations " +
+  "(its `?{}` blocks and its `<schema>` block)";
+
 /**
  * Describe the database a `< db>` block's schema was read from, for E-PA-004.
  *
  *  - A real file: its resolved absolute path, the `src=` it was resolved from
- *    and the directory it was resolved against, and — when the file is zero
- *    bytes — an explicit statement that it is an empty stub with no tables.
+ *    and the directory it was resolved against. When the database holds NO
+ *    tables at all it is called out explicitly (front-loaded "EMPTY") with its
+ *    byte size and how such stubs arise.
  *  - The shadow schema (file absent, or a driver URI): says so. A driver URI is
  *    NOT echoed — it can carry credentials.
+ *
+ * Empty detection (s430-dev-db-stub F5) asks SQLite, not the byte size. Measured
+ * on bun:sqlite: a 0- or 1-byte file opens as an empty database, while ANY
+ * other non-database file of 2+ bytes (zero-filled or not, up to and past 512)
+ * fails to open with "file is not a database" — E-PA-003, never E-PA-004. A
+ * real database file with no tables (e.g. 4096 bytes after `PRAGMA
+ * journal_mode=WAL`) is just as empty. So "has no tables" is the true
+ * predicate; `sqlite_master` answers it for every case.
+ *
+ * Exported for unit tests.
  */
-function describeDbSource(
+export function describeDbSource(
   dbPath: string,
   srcRaw: string,
   sourceDir: string,
   isDriverUri: boolean,
+  db: Database | null = null,
 ): DbSourceDescription {
   if (isDriverUri) {
     return {
-      where: "the in-memory schema built from the `CREATE TABLE` statements in this file's `?{}` blocks",
+      where: SHADOW_WHERE,
       detail: "A driver-URI `src=` is not introspected at compile time. ",
     };
   }
   if (!existsSync(dbPath)) {
     return {
-      where: "the in-memory schema built from the `CREATE TABLE` statements in this file's `?{}` blocks",
+      where: SHADOW_WHERE,
       detail: `The database file \`${dbPath}\` does not exist, so it was not read. `,
     };
   }
   let size = -1;
   try { size = statSync(dbPath).size; } catch { /* size stays unknown */ }
-  const zeroByte = size === 0
-    ? `That file is ZERO BYTES — an empty database with no tables at all. A zero-byte ` +
+  let tableCount = -1;
+  if (db !== null) {
+    try {
+      const row = db.query("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'").get() as { n: number } | null;
+      if (row) tableCount = row.n;
+    } catch { /* count stays unknown */ }
+  }
+  const isEmpty = tableCount === 0;
+  const sizeText = size === 0 ? "zero bytes" : size === 1 ? "1 byte" : `${size} bytes`;
+  const emptyDetail = isEmpty
+    ? `That database is EMPTY — it has no tables at all (the file is ${sizeText}). An empty ` +
       `database is usually a stub created as a side effect when some other process (for ` +
       `example a running server that resolves the same relative path from a different ` +
       `working directory) opened this path before a real database existed there. If your ` +
       `real database lives elsewhere, delete this file and point \`src=\` at the real one. `
     : "";
   return {
-    // "ZERO-BYTE" is front-loaded ahead of the (possibly long) path: `scrml dev`
-    // and `scrml build` print only the first 120 characters of a message.
+    // "EMPTY" (and "ZERO-BYTE") is front-loaded ahead of the (possibly long)
+    // path: `scrml dev` and `scrml build` print only the first 120 characters.
     where:
-      `the ${size === 0 ? "ZERO-BYTE " : ""}database \`${dbPath}\` ` +
+      `the ${isEmpty ? (size === 0 ? "EMPTY (ZERO-BYTE) " : "EMPTY ") : ""}database \`${dbPath}\` ` +
       `(\`src="${srcRaw}"\` resolved against the source file's directory \`${sourceDir}\`)`,
-    detail: zeroByte,
+    detail: emptyDetail,
   };
 }
 
@@ -306,7 +332,7 @@ function readTableSchema(
   tableName: string,
   blockSpan: Span,
   errors: PAError[],
-  source: DbSourceDescription = { where: "the database", detail: "" },
+  describeSource: () => DbSourceDescription = () => ({ where: "the database", detail: "" }),
 ): ColumnDef[] | null {
   let rows: PAPragmaRow[];
   try {
@@ -327,6 +353,7 @@ function readTableSchema(
     // database was read (s430-dev-db-stub): an adopter whose relative `src=`
     // resolved to a different file than they meant — or to a zero-byte stub
     // some other process created — could not tell from "the database" alone.
+    const source = describeSource();
     errors.push(new PAError(
       "E-PA-004",
       `E-PA-004: Table \`${tableName}\` was not found in ${source.where}. ` +
@@ -348,6 +375,46 @@ function readTableSchema(
 // ---------------------------------------------------------------------------
 // Schema cache: one open per unique dbPath (I/O deduplication per PIPELINE §4)
 // ---------------------------------------------------------------------------
+
+/**
+ * Open an EXISTING SQLite file for compile-time schema reading, such that the
+ * read leaves no trace on disk. Always SQLITE_OPEN_READONLY (a write through
+ * this handle throws). Two cases (s430-dev-db-stub F1):
+ *
+ *  - No `<path>-wal` beside the file: open with the URI parameter
+ *    `immutable=1`. SQLite then takes no locks and creates NO side files. A
+ *    plain read-only open of a WAL-mode database creates `-wal` + `-shm` and,
+ *    being read-only, cannot delete them on close — they persisted. With no
+ *    `-wal` file the main file holds the whole committed database, so
+ *    immutable reads it completely.
+ *  - A `-wal` file exists (a live writer, e.g. a running dev server): a plain
+ *    read-only open. `immutable=1` would ignore the WAL and miss committed but
+ *    un-checkpointed schema (a table created a moment ago). The side files
+ *    here belong to the writer; the read creates nothing that was not there.
+ *
+ * Exported for the unit tests that pin both properties.
+ */
+export function openSchemaReadHandle(dbPath: string): Database {
+  if (existsSync(`${dbPath}-wal`)) {
+    return new Database(dbPath, { readonly: true });
+  }
+  return new Database(
+    `${sqliteFileUri(dbPath)}?immutable=1`,
+    sqliteConstants.SQLITE_OPEN_READONLY | sqliteConstants.SQLITE_OPEN_URI,
+  );
+}
+
+/**
+ * A `file:` URI for an absolute path. SQLite's URI parser treats `?` as the
+ * query start, `#` as the fragment and `%` as an escape, so those three are
+ * percent-encoded; Windows separators become `/` and a drive path gets the
+ * leading `/` SQLite expects (`file:/C:/…`).
+ */
+function sqliteFileUri(absPath: string): string {
+  let p = absPath.replace(/\\/g, "/");
+  if (/^[A-Za-z]:\//.test(p)) p = "/" + p;
+  return "file:" + p.replace(/%/g, "%25").replace(/\?/g, "%3F").replace(/#/g, "%23");
+}
 
 /**
  * Lightweight schema cache. Keyed by resolved dbPath. Each entry is either an
@@ -377,8 +444,7 @@ class SchemaCache {
 
     let db: Database;
     try {
-      // Open read-only. Bun SQLite flag 0x00000001 = SQLITE_OPEN_READONLY.
-      db = new Database(dbPath, { readonly: true });
+      db = openSchemaReadHandle(dbPath);
     } catch (err) {
       errors.push(new PAError(
         "E-PA-003",
@@ -395,8 +461,15 @@ class SchemaCache {
 
   /**
    * Build an in-memory SQLite database from the provided CREATE TABLE statements
-   * and cache it under dbPath (so the same shadow DB is reused across multiple
-   * < db> blocks pointing to the same nonexistent file).
+   * and cache it under dbPath PLUS the exact statement set, so it is reused only
+   * by a < db> block that needs precisely the same tables from the same DDL.
+   *
+   * s430-dev-db-stub F2: the key used to be dbPath alone. The cache lives for
+   * the whole runPA() call (all files) while the statement set is per block
+   * (its tables= subset of its own file's DDL), so a second < db> block on the
+   * same src= with a different tables= — in the same file or another — got the
+   * FIRST block's shadow and a false E-PA-004 for every table the first block
+   * had not asked for.
    *
    * Emits E-PA-003 if any CREATE TABLE statement fails to execute.
    * Returns the in-memory Database on success, or null on failure.
@@ -407,7 +480,9 @@ class SchemaCache {
     blockSpan: Span,
     errors: PAError[],
   ): Database | null {
-    if (this._dbs.has(dbPath)) return this._dbs.get(dbPath)!;
+    // "\0" cannot occur in a path or in SQL text, so the key is unambiguous.
+    const key = `shadow\0${dbPath}\0${[...createStatements].sort().join("\0")}`;
+    if (this._dbs.has(key)) return this._dbs.get(key)!;
 
     let db: Database;
     try {
@@ -418,7 +493,7 @@ class SchemaCache {
         `E-PA-003: Failed to create in-memory SQLite database for shadow schema: ${(err as Error).message}`,
         blockSpan,
       ));
-      this._dbs.set(dbPath, null);
+      this._dbs.set(key, null);
       return null;
     }
 
@@ -433,12 +508,12 @@ class SchemaCache {
           blockSpan,
         ));
         try { db.close(); } catch { /* ignore */ }
-        this._dbs.set(dbPath, null);
+        this._dbs.set(key, null);
         return null;
       }
     }
 
-    this._dbs.set(dbPath, db);
+    this._dbs.set(key, db);
     return db;
   }
 
@@ -1145,7 +1220,8 @@ function processDbBlock(
   const tableSchemas = new Map<string, ColumnDef[]>();
   let anyTableFailed = false;
 
-  const dbSource = describeDbSource(dbPath, srcRaw, sourceDir, isDriverConnectionUri);
+  const dbSource = (): DbSourceDescription =>
+    describeDbSource(dbPath, srcRaw, sourceDir, isDriverConnectionUri, db);
   for (const tableName of tableNames) {
     const schema = readTableSchema(db, tableName, blockSpan, errors, dbSource);
     if (schema === null) {
