@@ -72,3 +72,21 @@
 - OPEN DESIGN QUESTION for bryan: a QUOTED inline event-handler attribute (`onclick="import('./x.js')"`)
   is treated as data (PA decision S430, no fire) — but the browser executes it as JavaScript. Should
   quoted inline event-handler attributes be raw JS at all?
+
+## Round 4 — PA direction change (on fbab1a9d) — 2026-09-24
+- Review F-A (cross-statement registry lookup) + F-B (markup-value `${}` misses) were in the default-parser
+  reconstruction. PA decision: stop reconstructing; decide the family on the NATIVE tree in both pipelines.
+- NEW compiler/src/native-walker/forbidden-js-native.ts: default pipeline runs nativeParseFile per file (only
+  when the source contains `class`/`import`) and keeps ONLY E-CLASS / E-DYNAMIC-IMPORT; native-parses every
+  non-logic attribute expression (parseProgram on the attr text, shifted); drops a diagnostic inside a
+  default-recognised `_={}=` foreign region (native has no production there); fallback at statement start where
+  a default statement holds an acorn-found construct and the native tree reports none there.
+- REMOVED from the default parser: the registry / token mapping / forbiddenJs record (ast-builder.js and
+  expression-parser.ts back to origin/main, except the independent `import(` statement-head routing fix);
+  attrvalue-exprnode-walker.ts back to origin/main. KEPT: native bodyErrors collection, native column fix,
+  native duplicate collapse, keyword destructure key, class-expr via parseClassDecl, `.scrml` mirror fixes.
+- Gates (compiled): (a) default 2,582 files vs origin/main compiler on the same tree: 32 family sites (16+16)
+  in 12 bootstrap files; exit changes = 4 self-host files, each carrying a family code; non-family diffs = 2
+  E-SCOPE-001 column corrections (+2, CE's native re-parse; the column fix); 0 artifact diffs. Fallback: 0 units,
+  native never threw. (b) 71 probe rows, default == native, exactly once, pinned. (c) added stage ~230 ms
+  median over 876 files (examples + samples/compilation-tests), end-to-end ~3-10% in noisy runs.

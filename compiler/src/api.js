@@ -71,6 +71,7 @@ import { parse as acornParse } from "acorn";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
+import { forbiddenJsDiagnosticsForDefault, nativeForbiddenJsAttrDiagnostics } from "./native-walker/forbidden-js-native.ts";
 
 // ---------------------------------------------------------------------------
 // Stdlib runtime directory
@@ -1497,8 +1498,7 @@ function _compileScrmlImpl(options = {}) {
         if (result && result.ast) {
           if (Array.isArray(result.errors) === false) result.errors = [];
           populateNativeAttrValueExprNodes(
-            result.ast, result.filePath || bsResult.filePath, result.errors,
-            sourceByFile.get(bsResult.filePath) ?? "");
+            result.ast, result.filePath || bsResult.filePath, result.errors);
           // M5-swap — native string-`.expr`/`.init`/`.condition` backfill. The
           // native make*/translate* builders set these legacy string fields empty
           // (carrying the structured exprNode/initExpr/condExpr sibling instead).
@@ -1549,6 +1549,25 @@ function _compileScrmlImpl(options = {}) {
     // parser-agnostic + escalation-independent. BRACED-body arrows stay with the
     // emit-server.ts E-SQL-009 site (the concise gate keeps the two disjoint).
     collectErrors("CG", detectSqlInConciseArrowBody(result.ast, result.filePath || bsResult.filePath), result.filePath || bsResult.filePath);
+    // §7.2.1 / §21.3.2 (S430 P1 + P4) — E-CLASS-NOT-IN-SCRML /
+    // E-DYNAMIC-IMPORT-NOT-IN-SCRML are decided on the NATIVE parser's tree in
+    // both pipelines (native-walker/forbidden-js-native.ts). The native path
+    // already carries the parse-level codes in result.errors; attribute
+    // expressions are added here. The default path runs the native parser over
+    // the file for THIS family only (every other native code is discarded).
+    {
+      const _fp = result.filePath || bsResult.filePath;
+      const _src = sourceByFile.get(_fp) ?? "";
+      if (useNativeParser) {
+        collectErrors("TAB", nativeForbiddenJsAttrDiagnostics(result.ast, _src, _fp), _fp);
+      } else {
+        const _fj = stage("REJECT-CLASS-DYNAMIC-IMPORT", () => forbiddenJsDiagnosticsForDefault(_fp, _src, result.ast));
+        collectErrors("TAB", _fj.diagnostics, _fp);
+        if (verbose && (_fj.fallbackUsed > 0 || _fj.nativeFailed)) {
+          log(`  [TAB] ${_fp}: E-CLASS/E-DYNAMIC-IMPORT native fallback — ${_fj.nativeFailed ? "native parse threw" : `${_fj.fallbackUsed} statement(s)`}`);
+        }
+      }
+    }
     // Attach source text for library-mode codegen (export-decl span extraction)
     if (result.filePath && sourceByFile.has(result.filePath)) {
       result._sourceText = sourceByFile.get(result.filePath);

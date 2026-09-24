@@ -169,7 +169,8 @@ describe("a quoted attribute value is data, not scrml source", () => {
 });
 
 // Attribute values never enter a logic token stream (the E-SWITCH-FORBIDDEN
-// bypass shape) — the construct is counted from the parsed attribute expression.
+// bypass shape) — native-walker/forbidden-js-native.ts parses each attribute
+// expression with the native parser (both pipelines).
 describe("default parser — attribute-value expressions are scanned", () => {
   test("onclick=${() => import(\"x\")} fires at the keyword", () => {
     const src = `<program>\n<button onclick=\${() => import("x")}>go</button>\n</program>`;

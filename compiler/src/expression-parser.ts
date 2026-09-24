@@ -2945,87 +2945,6 @@ function makeEscapeHatch(node: ESNode, span: ExprSpan, rawSource: string): Escap
   } satisfies EscapeHatchExpr;
 }
 
-// ---------------------------------------------------------------------------
-// S430 P1 / P4 (SPEC §7.2.1 / §21.3.2) — the forbidden-construct record.
-//
-// E-CLASS-NOT-IN-SCRML / E-DYNAMIC-IMPORT-NOT-IN-SCRML are decided from the
-// PARSED tree. The converted ExprNode cannot answer that on its own: it keeps
-// whole subtrees only as raw text (a block-bodied arrow, a function expression,
-// a class body, a template literal's interpolations). ACORN'S tree always can.
-// So every parse records, on the ROOT ExprNode it returns, the list of
-// construct nodes acorn found anywhere in the text — `word` + `start` (acorn's
-// offset in the text it parsed; used for ORDER only, never as a file position)
-// — plus the text itself and whether the record COVERS the whole text (false
-// when acorn stopped early on trailing content, or could not parse the text as
-// an expression OR as a statement list). ast-builder.js reads the record
-// (`readForbiddenJsRecord`) and maps each construct to its source token.
-//
-// The record is a NON-ENUMERABLE property: the ExprNode shape every other
-// consumer (codegen, the within-node canary, snapshot tests) sees is unchanged.
-// ---------------------------------------------------------------------------
-
-export interface ForbiddenJsRecord {
-  /** The text that was parsed (trimmed, pre-preprocessing). */
-  text: string;
-  /** Constructs in source order. `start` is an offset in the parsed text. */
-  sites: Array<{ word: "class" | "import"; start: number }>;
-  /** False when the record does not account for the whole `text`. */
-  covered: boolean;
-}
-
-const FORBIDDEN_JS_RECORD = "__scrmlForbiddenJs";
-
-/** Collect every ClassDeclaration / ClassExpression / ImportExpression in an ESTree tree. */
-export function collectForbiddenJsSites(root: unknown): Array<{ word: "class" | "import"; start: number }> {
-  const sites: Array<{ word: "class" | "import"; start: number }> = [];
-  const seen = new Set<object>();
-  const visit = (n: unknown): void => {
-    if (!n || typeof n !== "object" || seen.has(n as object)) return;
-    seen.add(n as object);
-    if (Array.isArray(n)) { for (const c of n) visit(c); return; }
-    const t = (n as { type?: unknown }).type;
-    const start = (n as { start?: unknown }).start;
-    if ((t === "ClassDeclaration" || t === "ClassExpression") && typeof start === "number") sites.push({ word: "class", start });
-    if (t === "ImportExpression" && typeof start === "number") sites.push({ word: "import", start });
-    for (const k of Object.keys(n as object)) {
-      if (k === "loc" || k === "range") continue;
-      visit((n as Record<string, unknown>)[k]);
-    }
-  };
-  visit(root);
-  sites.sort((x, y) => x.start - y.start);
-  return sites;
-}
-
-function attachForbiddenJsRecord(node: unknown, record: ForbiddenJsRecord): void {
-  if (!node || typeof node !== "object") return;
-  Object.defineProperty(node, FORBIDDEN_JS_RECORD, { value: record, enumerable: false, configurable: true, writable: true });
-}
-
-/** The record a parse attached to its root ExprNode, or undefined. */
-export function readForbiddenJsRecord(node: unknown): ForbiddenJsRecord | undefined {
-  if (!node || typeof node !== "object") return undefined;
-  return (node as Record<string, ForbiddenJsRecord | undefined>)[FORBIDDEN_JS_RECORD];
-}
-
-/**
- * Text the expression parser could not take as an expression may still be a
- * statement list (a `when` body, a multi-statement handler). Parse it as one
- * to find the constructs; `undefined` when that fails too.
- */
-function forbiddenJsSitesFromStatements(text: string): Array<{ word: "class" | "import"; start: number }> | undefined {
-  try {
-    // Same scrml → acorn preprocessing an expression parse gets (`is not`,
-    // `::`, `not`, …); the statement parser itself only strips SQL / `<#id>`.
-    let r = parseStatements(preprocessForAcorn(text, {}));
-    if (!r || !r.ast || r.error) r = parseStatements(text);
-    if (!r || !r.ast || r.error) return undefined;
-    return collectForbiddenJsSites(r.ast);
-  } catch {
-    return undefined;
-  }
-}
-
 /** Convert ESTree parameter nodes to LambdaParam[]. */
 function convertParams(params: ESNode[], filePath: string, baseOffset: number): LambdaParam[] {
   return params.map(p => {
@@ -3157,7 +3076,7 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
     // of `**`, carry the structured diagnostic so ast-builder surfaces a LOUD
     // E-CODEGEN-INVALID-LOGIC (mirrors the sqlDiagnostic escape-hatch path).
     const span: ExprSpan = { file: filePath, start: offset, end: offset + trimmed.length, line: 1, col: 1 };
-    const failed = {
+    return {
       kind: "escape-hatch",
       span,
       nativeKind: "ParseError",
@@ -3168,11 +3087,6 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
       exponentDiagnostic?: { code: string; message: string; offset: number };
       fnArrowDiagnostic?: { code: string; message: string; offset: number };
     };
-    // S430 — not an expression; may still be a statement list (see
-    // forbiddenJsSitesFromStatements). Uncovered when that fails too.
-    const stmtSites = forbiddenJsSitesFromStatements(trimmed);
-    attachForbiddenJsRecord(failed, { text: trimmed, sites: stmtSites ?? [], covered: stmtSites !== undefined });
-    return failed;
   }
 
   try {
@@ -3186,17 +3100,7 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
     // through rewriteExpr's string-rewrite pipeline, which idempotently
     // handles preprocessed forms (e.g. `Mode.A` is valid JS for what was
     // originally `Mode::A`).
-    const root = esTreeToExprNode(estree, filePath, offset, processed);
-    // S430 — the forbidden-construct record (see collectForbiddenJsSites). A
-    // parse that stopped on trailing content does not cover the whole text —
-    // unless that content holds no word at all (a stray `)`), where no
-    // construct can hide.
-    attachForbiddenJsRecord(root, {
-      text: trimmed,
-      sites: collectForbiddenJsSites(estree),
-      covered: !trailingContent || !/[A-Za-z_$]/.test(trailingContent),
-    });
-    return root;
+    return esTreeToExprNode(estree, filePath, offset, processed);
   } catch (e) {
     const span: ExprSpan = { file: filePath, start: offset, end: offset + trimmed.length, line: 1, col: 1 };
     return {

@@ -1,7 +1,8 @@
 // GENERATED from the S430 adversarial-review probes (round 1: rcl/probes;
-// round 3: r3-*) + two extra mixed-statement / call-ref probes. Each row:
-// [name, source, expected-default, expected-native]. `null` = native not
-// asserted (see the note at the use site).
+// round 3: r3-*; round 4: r4-*) + two extra mixed-statement / call-ref probes.
+// Each row: [name, source, expected-default, expected-native]. `null` =
+// native not asserted (see the note at the use site). Since S430 round 4 the
+// default pipeline takes this family from the native tree, so the two agree.
 export const S430_REVIEW_PROBES = [
   ["cs01", "<program>\n${\n  function f() {\n    return <div>\n      #{ .class { color: red; } }\n      <p>hi</p>\n    </div>\n  }\n}\n<p>x</p>\n</program>\n", [], []],
   ["fn01", "<program>\n${\n  class A { }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:3"], ["E-CLASS-NOT-IN-SCRML@3:3"]],
@@ -61,4 +62,17 @@ export const S430_REVIEW_PROBES = [
   ["r3-f2d3", "<program>\n${\n  export let s: any = () => { return class { } }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:38"], ["E-CLASS-NOT-IN-SCRML@3:38"]],
   ["r3-f3a", "<program>\n${\n  function f() {\n    lift <li>${ (() => { const K = class { }; return 1 })() }</li>\n  }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@4:36"], ["E-CLASS-NOT-IN-SCRML@4:36"]],
   ["r3-f3b", "<program>\n${\n  function f() {\n    lift <li>${ (() => {\n      const z = 0\n      const q = 1 +;\n      return 1 })() }</li>\n  }\n}\n<p>x</p>\n</program>\n", [], []],
+  ["r4-fa1", "<program>\n${\n  const a = class { }\n  const b = class { }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:13","E-CLASS-NOT-IN-SCRML@4:13"], ["E-CLASS-NOT-IN-SCRML@3:13","E-CLASS-NOT-IN-SCRML@4:13"]],
+  ["r4-fa2", "<program>\n${\n  const a = import(\"x\")\n  const b = import(\"x\")\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:13","E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:13"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:13","E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:13"]],
+  ["r4-fa3", "<program>\n${\n  const a = import ( \"a\" )\n  const v = <p>see import ( \"a\" ) now</p>\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:13"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:13"]],
+  ["r4-fa4", "<program>\n${\n  const a = class A { }\n  const v = <p>the class A { } here</p>\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:13"], ["E-CLASS-NOT-IN-SCRML@3:13"]],
+  ["r4-fa5", "<program>\n${\n  function f() { return class { } }\n  function g() { return class { } }\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:25","E-CLASS-NOT-IN-SCRML@4:25"], ["E-CLASS-NOT-IN-SCRML@3:25","E-CLASS-NOT-IN-SCRML@4:25"]],
+  ["r4-fa6", "<program>\n${\n  let x = import(\"a\")\n  x = import(\"a\")\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:11","E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:7"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:11","E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:7"]],
+  ["r4-fb1", "<program>\n${\n  const v = <p>${ import(\"x\") }</p>\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:19"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:19"]],
+  ["r4-fb2", "<program>\n${\n  let v = <p>${ import(\"x\") }</p>\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:17"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:17"]],
+  ["r4-fb3", "<program>\n${\n  let v = 1\n  v = <p>${ import(\"x\") }</p>\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:13"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:13"]],
+  ["r4-fb4", "<program>\n${\n  const v = <p title=${ import(\"x\") }>t</p>\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:25"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@3:25"]],
+  ["r4-fb5", "<program>\n${\n  const v = <p>class Foo is ${ (class K { }).name }</p>\n}\n<p>x</p>\n</program>\n", ["E-CLASS-NOT-IN-SCRML@3:33"], ["E-CLASS-NOT-IN-SCRML@3:33"]],
+  ["r4-fb6", "<program>\n${\n  function f() {\n    return <div>${ <b>${ import(\"x\") }</b> }</div>\n  }\n}\n<p>x</p>\n</program>\n", ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:26"], ["E-DYNAMIC-IMPORT-NOT-IN-SCRML@4:26"]],
+  ["r4-g1_letas", "<program>\n${\n  let as = 1\n  const cls = { class: as }\n}\n<p>${cls.class}</p>\n</program>\n", [], []],
 ];
