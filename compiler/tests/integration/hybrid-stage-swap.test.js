@@ -22,8 +22,8 @@
  * docs/changes/s430-stage-swap/progress.md; these are the bounded, gated regression pins.
  */
 import { describe, test, expect } from "bun:test";
-import { resolve, dirname } from "path";
-import { readFileSync } from "fs";
+import { resolve, dirname, relative } from "path";
+import { readFileSync, readdirSync, statSync } from "fs";
 import { fileURLToPath } from "url";
 import { compileScrml } from "../../src/api.js";
 import { buildAST } from "../../src/ast-builder.js";
@@ -33,6 +33,7 @@ import {
   StageSeamError,
   createStageSeams,
   checkStageOutput,
+  PARSE_REENTRY_FILES,
 } from "../../src/pipeline-seam.ts";
 import {
   buildStageOverrides,
@@ -103,6 +104,30 @@ describe("2. registry <-> api.js <-> TS modules agree", () => {
       if (typeof mod[s.entry] !== "function") missing.push(`${s.name}: ${s.tsModule} lacks ${s.entry}`);
     }
     expect(missing).toEqual([]);
+  });
+
+  test("the BS/TAB direct re-entry inventory (PARSE_REENTRY_FILES) matches the source", () => {
+    // A swapped BS/TAB does not reach these call sites; a NEW one must be inventoried, not missed.
+    const root = resolve(REPO, "compiler/src");
+    const found = new Set();
+    const walk = (dir) => {
+      for (const e of readdirSync(dir)) {
+        const p = resolve(dir, e);
+        if (statSync(p).isDirectory()) {
+          if (e !== "commands") walk(p);
+          continue;
+        }
+        if (!/\.(js|ts)$/.test(e) || e === "ast-builder.js" || e === "block-splitter.js") continue;
+        const hit = readFileSync(p, "utf8").split("\n").some((line) =>
+          /\b(splitBlocks|buildAST|runBlockSplitter)\(/.test(line) &&
+          !/^\s*(\/\/|\*|\/\*)/.test(line) &&
+          !/function (splitBlocks|buildAST|runBlockSplitter)\(/.test(line));
+        if (hit) found.add(relative(REPO, p).replace(/\\/g, "/"));
+      }
+    };
+    walk(root);
+    expect([...found].sort()).toEqual([...PARSE_REENTRY_FILES].sort());
+    expect(STAGE_SEAMS.filter((s) => s.reentry).map((s) => s.name)).toEqual(["BS", "TAB"]);
   });
 
   test("stage names are unique", () => {

@@ -288,7 +288,35 @@ export interface StageSeam {
   output: Check;
   /** Optional post-call re-check of mutated inputs. */
   mutated?: (args: SeamArgs) => Divergence;
+  /**
+   * Places OUTSIDE the pipeline's own call to this stage that invoke the TS implementation
+   * directly, and therefore still run TS even when the stage is substituted (see
+   * PARSE_REENTRY_FILES). Empty/absent means the pipeline call is the only call.
+   */
+  reentry?: readonly string[];
 }
+
+/**
+ * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Seven files re-enter the TS block splitter / AST builder
+ * directly — re-parsing a synthesized snippet mid-stage — instead of going through the pipeline's
+ * BS / TAB call. A hybrid with BS or TAB substituted still parses THOSE snippets with TS, so its
+ * FileASTs are of mixed provenance. Every other stage has exactly one caller (api.js).
+ * Measured at the base of s430-stage-swap by `\b(splitBlocks|buildAST|runBlockSplitter)\(` over
+ * compiler/src, excluding comments, the definitions, TAB's own internal recursion
+ * (ast-builder.js / block-splitter.js) and the CLI-only `commands/`. Pinned by
+ * compiler/tests/integration/hybrid-stage-swap.test.js so a NEW re-entry site cannot land unseen.
+ * Routing these through the seam is a design decision (a compile-scoped parse capability threaded
+ * into CE / TS / CG) that must precede gating a BS or TAB bootstrap module.
+ */
+export const PARSE_REENTRY_FILES: readonly string[] = [
+  "compiler/src/api.js",                        // STDLIB-EXPORT-SEED: _parseStdlibExports
+  "compiler/src/component-expander.ts",
+  "compiler/src/type-system.ts",
+  "compiler/src/codegen/emit-engine.ts",
+  "compiler/src/codegen/emit-error-boundary.ts",
+  "compiler/src/codegen/emit-logic.ts",
+  "compiler/src/codegen/emit-match.ts",
+];
 
 const recheckFiles = (label: string, pick: (args: SeamArgs) => unknown): ((args: SeamArgs) => Divergence) =>
   (args) => arr(obj({ ast: fileAst }))(pick(args), label);
@@ -301,6 +329,7 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
   {
     name: "BS", tsModule: "./block-splitter.js", pipeline: "Stage 2", entry: "splitBlocks", selfHostKey: "splitBlocks",
     signature: "(filePath, source) -> { filePath, blocks, errors }",
+    reentry: PARSE_REENTRY_FILES,
     output: obj({ filePath: str, blocks: arr(block), errors: optional(diagnostics) }),
   },
   {
@@ -318,6 +347,7 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
   {
     name: "TAB", tsModule: "./ast-builder.js", pipeline: "Stage 3", entry: "buildAST", selfHostKey: "buildAST",
     signature: "(bsResult, tokenizerOverride|null) -> { filePath, ast: FileAST, errors }",
+    reentry: PARSE_REENTRY_FILES,
     output: obj({ filePath: optional(str), ast: fileAst, errors: diagnostics }),
   },
   {

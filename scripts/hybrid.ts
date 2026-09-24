@@ -501,6 +501,15 @@ async function main(argv: string[]): Promise<number> {
   if (opts.swaps.length === 0) throw new InvalidRun("no --swap given: a hybrid run with no substituted stage is pure TS");
 
   const stageOverrides = await buildStageOverrides(opts.swaps);
+  for (const name of Object.keys(stageOverrides)) {
+    const seam = stageSeam(name);
+    if (seam?.reentry?.length && opts.swaps.every(([s]) => s !== "all")) {
+      console.error(
+        `hybrid: NOTE — ${name} is re-entered directly (TS implementation) from ${seam.reentry.length} file(s) outside the ` +
+          `pipeline call: ${seam.reentry.join(", ")}. Those re-parses still run TS; see PARSE_REENTRY_FILES in pipeline-seam.ts.`,
+      );
+    }
+  }
   const swapLabel = opts.swaps.map(([s, m]) => `${s}=${m}`).join(" ");
   let red = false;
 
