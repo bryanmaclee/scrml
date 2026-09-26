@@ -3524,3 +3524,11 @@ RULED (bryan S435):
 OPEN (not answered): **does the constraint live on the CELL or on the TYPE?** PA lean: TYPE — it travels across calls
 (`fn pushEdit(s: Edit[end], e: Edit) -> Edit[end]`), a callee cannot be handed a looser value than it declared.
 Also open: cell REASSIGNMENT vs value MUTATION — one axis or two.
+
+**S435 follow-up — RULED:** placement = **TYPE** (bryan: *"type"*) — the permission set is part of the sequence
+type and travels across calls; a callee can only do what its parameter type grants (subset check at each call).
+**AND there is NO `any`/all permission in the language** — bryan: *"we are not adding any, correct? (all must go
+because it is a leaky abstraction."* The legacy all-grant is TRANSITIONAL ONLY; the PA's `Todo[any]` sketch is
+RETRACTED. A fully-mutable sequence is spelled with every axis granted explicitly. PA proposal (unratified): the
+`scrml fix` codemod infers each legacy cell's MINIMAL grant from its actual writes, so migration lands on the
+least permission set used rather than a blanket one.
