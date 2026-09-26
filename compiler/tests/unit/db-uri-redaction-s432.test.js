@@ -422,3 +422,70 @@ describe("§6 r2: drive-letter exemption, long-secret precision, file params, fa
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// §7 round 3 — local-file params are an ALLOWLIST; host-shaped values are not files
+// ---------------------------------------------------------------------------
+
+describe("§7 r3: SQLite URI-param allowlist, host-shaped scheme-less values, sqlite://C:/", () => {
+  test("every non-SQLite param on a local file value is hidden (unknown key over-redacts, never leaks)", () => {
+    for (const k of ["jwt", "sig", "sessionid", "session", "credential", "passphrase", "key", "whatever"]) {
+      const v = `./data/app.db?mode=ro&${k}=LfSec9${k}`;
+      const shown = displayConnectionValue(v);
+      expect(shown).not.toContain(`LfSec9${k}`);
+      expect(shown).toContain("?mode=ro&");
+      expect(shown).toContain(`${k}=<redacted>`);
+    }
+  });
+
+  test("SQLite's documented URI params stay visible on a local file", () => {
+    for (const v of ["sqlite:./a.db?mode=ro&cache=shared&vfs=unix-dotfile", "file:./a.db?psow=1&nolock=1&immutable=1", "data/app.db?mode=ro", "app.db?mode=ro"]) {
+      expect(displayConnectionValue(v)).toBe(v);
+    }
+  });
+
+  test("a scheme-less value whose first segment is a HOST is a network value — every param hidden", () => {
+    expect(displayConnectionValue("db.internal/app?x=y")).toBe("db.internal/app?x=<redacted>");
+    expect(displayConnectionValue("db.internal/app?mode=Hm1")).not.toContain("Hm1");
+    expect(displayConnectionValue("localhost/app?cache=Hm2")).not.toContain("Hm2");
+    expect(displayConnectionValue("h.example:5432/app?mode=Hm3")).not.toContain("Hm3");
+  });
+
+  test("sqlite://C:/… and file://C:/… are drive paths (unredacted); postgres://u:/… stays userinfo", () => {
+    expect(displayConnectionValue("sqlite://C:/data/a@b.db")).toBe("sqlite://C:/data/a@b.db");
+    expect(displayConnectionValue("file://C:/x/a@b.db")).toBe("file://C:/x/a@b.db");
+    expect(displayConnectionValue("postgres://u:/etc/PathSec6@h/app")).toBe("postgres://<redacted>@h/app");
+    expect(displayConnectionValue("sqlite://admin:SecA5@x.db")).toBe("sqlite://<redacted>@x.db");
+  });
+
+  const BARE = [
+    ["bare.scrml: host-shaped scheme-less src", "db.internal/app?sslmode=require&jwt=BareSec1eyJ", "BareSec1eyJ"],
+    ["bare2.scrml: ./path?passphrase=", "./data/app.db?passphrase=BareSec2", "BareSec2"],
+  ];
+  for (const [name, v, secret] of BARE) {
+    test(`e2e ${name}`, () => {
+      const dir = mkdtempSync(join(tmpdir(), "scrml-s432-bare-"));
+      try {
+        const f = join(dir, "app.scrml");
+        writeFileSync(f, `<program db="./a.db">\n  < db src="${v}" tables="users">\n    function getUsers() {\n        return ?{\`SELECT id FROM users\`}.all()\n    }\n  </>\n</program>\n`);
+        const out = run(["compile", f, "-o", join(dir, "out")], dir);
+        expect(out).toContain("E-PA-002");
+        expect(out).not.toContain(secret);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test("redactSource reuses its result for the same text (frame-per-diagnostic cost), and re-computes after new values", () => {
+    const r = new SecretRedactor();
+    const src = `<program db="postgres://u:CacheS1@h/app">\n</program>`;
+    const a = r.redactSource(src);
+    expect(r.redactSource(src)).toBe(a);
+    expect(a).not.toContain("CacheS1");
+    const src2 = `<!-- postgres://u:CacheS2@h/app -->\n`;
+    expect(r.redactSource(src2)).toContain("CacheS2"); // not a registered value, not an attribute
+    r.addValues(["postgres://u:CacheS2@h/app"]);
+    expect(r.redactSource(src2)).not.toContain("CacheS2");
+  });
+});

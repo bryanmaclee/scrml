@@ -67,9 +67,11 @@ const REDACTED = "<redacted>";
  *
  *   - LOCAL FILE values (`./x.db`, `/abs/x.db`, `C:\x.db`, `sqlite:./x.db`,
  *     `file:…`, `:memory:` — never a `scheme://` URI or another `scheme:`
- *     value) keep ordinary open flags visible (`?mode=ro`, `cache=shared`),
- *     so the path stays copy-pasteable; only a key/password/secret/token/
- *     auth parameter is hidden there (SQLCipher's `key=` — FILE_SECRET_KEY_RE).
+ *     value, never a value whose first segment is a HOST) keep SQLite's
+ *     documented URI parameters visible (SQLITE_URI_PARAMS: `mode=ro`,
+ *     `cache=shared`, ...) so the path stays copy-pasteable; EVERY other
+ *     parameter value is hidden (an ALLOWLIST: an unknown key over-redacts,
+ *     it can never leak — `passphrase=`, `jwt=`, `key=` are all hidden).
  *
  * Scheme, host, port, path and parameter names are left visible.
  *
@@ -152,7 +154,11 @@ function userinfoSpanInView(t: string): [number, number] | null {
   let start: number;
   let authority = false;
   const dbl = head.search(/[\/\\]{2}/);
-  if (dbl >= 0) {
+  if (dbl >= 0 && /^\s*(?:sqlite|file):$/i.test(head.slice(0, dbl)) && /^[A-Za-z]:[\/\\]/.test(head.slice(dbl + 2))) {
+    // `sqlite://C:/x/a@b.db` / `file://C:/…`: a drive path after `//` — ONLY
+    // for these two file schemes (`postgres://u:/pw@h` stays userinfo).
+    start = dbl + 2;
+  } else if (dbl >= 0) {
     start = dbl + 2;
     authority = true;
   } else {
@@ -198,26 +204,34 @@ function isLocalFileValue(t: string): boolean {
     v = v.slice(pre[0].length);
     // `sqlite:///abs` / `file:///C:/x` — an EMPTY authority is still a path.
     if (v.startsWith("///")) v = v.slice(2);
+    // `sqlite://C:/data/a.db` — malformed but common: a drive path, not an
+    // authority (only for sqlite:/file:, never another scheme).
+    else if (/^\/\/[A-Za-z]:[\/\\]/.test(v)) v = v.slice(2);
     else if (v.startsWith("//")) return false;
   }
   if (v === ":memory:") return true;
   if (/^(?:\.{1,2}[\/\\]|[\/\\]|~[\/\\]|[A-Za-z]:[\/\\])/.test(v)) return !v.startsWith("//") && !v.startsWith("\\\\");
   // A bare filename: nothing before the first `?` that makes it a scheme
-  // (`:`) or a keyword DSN (`=` — `host=h password=x` is NOT a file).
+  // (`:`) or a keyword DSN (`=` — `host=h password=x` is NOT a file) ...
   const head = v.split("?")[0];
-  return head.length > 0 && !head.includes(":") && !head.includes("=");
+  if (head.length === 0 || head.includes(":") || head.includes("=")) return false;
+  // ... and no first segment that looks like a HOST (`db.internal/app`,
+  // `localhost/app`): a scheme-less network URI, not a file.
+  const first = head.split(/[\/\\]/)[0];
+  if (/^localhost$/i.test(first)) return false;
+  if (first.includes(".") && head.length > first.length) return false;
+  return true;
 }
 
 /**
- * On a LOCAL FILE value, only these parameter values are secret. A file
- * database's parameters are ordinary open flags (`mode=ro`, `cache=shared`,
- * `immutable=1`) that a copy-pasteable path must keep; the one secret a file
- * DSN carries is an encryption key or credential — SQLCipher's `key=` /
- * `hexkey=`, and the password/secret/token/auth family. This is a narrow
- * list scoped to FILE values only; every non-file value redacts EVERY
- * parameter value (no key list there).
+ * On a LOCAL FILE value, the parameters whose values stay VISIBLE: SQLite's
+ * documented URI query parameters (https://www.sqlite.org/uri.html, "URI
+ * Parameters": vfs, mode, cache, psow, nolock, immutable). They are open
+ * flags, not secrets, and a copy-pasteable path must keep them. EVERY other
+ * parameter value is redacted — an allowlist, so an unrecognised key
+ * (`passphrase=`, `jwt=`, SQLCipher's `key=`) can only over-redact.
  */
-const FILE_SECRET_KEY_RE = /^(?:key|hexkey|rekey|hexrekey|password|pass|passwd|pwd|secret|token|auth.*|.*(?:password|secret|token|apikey|api_key))$/i;
+const SQLITE_URI_PARAMS = new Set(["vfs", "mode", "cache", "psow", "nolock", "immutable"]);
 
 /** Heuristic "looks like a credential" for a value with no secret-named key. */
 function isTokenLike(v: string): boolean {
@@ -260,7 +274,13 @@ function analyzeConnectionValue(value: string): ValueAnalysis {
       const v = ind?.[2];
       if (!k || !v || v[1] <= v[0]) continue;
       const key = safeDecode(pm[1]);
-      if (local && !FILE_SECRET_KEY_RE.test(key)) continue;
+      if (local) {
+        // A local file's parameters live only in its `?` query; before it is
+        // the PATH (`./my db=1.db` is a file name, not a `db=` parameter).
+        const q = view.text.indexOf("?");
+        if (q < 0 || k[0] < q) continue;
+        if (SQLITE_URI_PARAMS.has(key.trim().toLowerCase())) continue;
+      }
       const ov = toOriginal(view, v[0], v[1]);
       const ow = toOriginal(view, k[0], v[1]);
       if (ov && ow) out.params.push({ whole: ow, value: ov, key });
@@ -750,6 +770,8 @@ export class SecretRedactor {
   private longSecrets: string[] = [];             // longest first
   private fragments: FragmentSite[] = [];         // s432 F3 — unquoted-value fragment attrs
   private fragmentKeys = new Set<string>();
+  private version = 0;
+  private lastSource: [string, string, number] | null = null;
 
   constructor(values?: Iterable<string>) {
     if (values) this.addValues(values);
@@ -788,6 +810,7 @@ export class SecretRedactor {
         for (const s of deriveSecrets(v)) if (isLongUnusualSecret(s)) longs.add(s);
       }
     }
+    this.version++;
     this.forms = [...forms.entries()].sort((a, b) => b[0].length - a[0].length);
     this.wholeForms = [...wholeForms.entries()].sort((a, b) => b[0].length - a[0].length);
     this.longSecrets = [...longs].sort((a, b) => b.length - a.length);
@@ -824,7 +847,12 @@ export class SecretRedactor {
    * are ordinary code).
    */
   redactSource(text: string): string {
-    return this.applyForms(redactSourceText(text), this.wholeForms, false);
+    // A frame printer redacts the whole file once per diagnostic; the result
+    // depends only on (text, registered values), so reuse the last one.
+    if (this.lastSource !== null && this.lastSource[0] === text && this.lastSource[2] === this.version) return this.lastSource[1];
+    const out = this.applyForms(redactSourceText(text), this.wholeForms, false);
+    this.lastSource = [text, out, this.version];
+    return out;
   }
 
   /** Redact every string field of a diagnostic object, in place (top level). */
