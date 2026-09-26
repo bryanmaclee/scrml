@@ -1197,7 +1197,7 @@ function reparseSynthesizedFile(
   return { ast: result.ast, errors };
 }
 
-function parseComponentBody(
+export function parseComponentBody(
   raw: string,
   componentName: string,
   filePath: string

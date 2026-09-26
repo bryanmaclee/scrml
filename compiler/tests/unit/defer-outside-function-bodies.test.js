@@ -84,6 +84,49 @@ const ROWS = [
   { name: "arrow in a handler attribute", src: page("", `    <button id="go" onclick=\${() => { defer note("d"); note("a") }}>Go</>`), live: OUT, native: OUT },
   { name: "function expression in a handler attribute", src: page("", `    <button id="go" onclick=\${function() { defer note("d"); note("a") }}>Go</>`), live: OUT, native: OUT },
   { name: "`${ }` in markup", src: page("", `    <div>\${ defer note("d") }</div>`), live: OUT, native: OUT },
+  // --- S432 review A-1: component-def bodies are TEXT (`component-def.raw`) until expansion ---
+  { name: "component-def: handler attribute `defer [1].forEach(f)` (was CLEAN + runtime ReferenceError)", src: `\${
+    <trace> = ""
+    function f(x) { @trace = @trace + "f" + x + ";" }
+    const Btn = <button id="go" onclick=\${ defer [1].forEach(f) }>Go</>
+}
+<program>
+    <Btn/>
+    <p id="out">\${@trace}</p>
+</program>
+`, live: OUT, native: OUT },
+  { name: "component-def: handler attribute `defer f()` (was a codegen crash)", src: `\${
+    <trace> = ""
+    function f() { @trace = @trace + "f;" }
+    const Btn = <button id="go" onclick=\${ defer f(); @trace = @trace + "c;" }>Go</>
+}
+<program>
+    <Btn/>
+    <p id="out">\${@trace}</p>
+</program>
+`, live: OUT, native: OUT },
+  { name: "component-def: `\${ }` logic in the body", src: page(`    const Card = <div>\${ defer [1].forEach(note) }</div>`, `    <Card/>`), live: OUT, native: OUT },
+  { name: "component-def: arrow in a handler", src: page(`    const Btn = <button onclick=\${() => { defer note("d") }}>x</button>`, `    <Btn/>`), live: OUT, native: OUT },
+  // --- <match> block arms (native carries them as text only: `match-block.armsRaw`) ---
+  { name: "<match> block arm: `\${ }` logic", src: page(`    type P:enum = { Idle, Busy }
+    <ph>: P = .Idle`, `    <match for=P on=@ph>
+        <Idle>
+            <p>\${ defer note("d") }</p>
+        </>
+        <_>
+            <p>"x"</p>
+        </>
+    </match>`), live: OUT, native: OUT },
+  { name: "<match> block arm: handler attribute", src: page(`    type P:enum = { Idle, Busy }
+    <ph>: P = .Idle`, `    <match for=P on=@ph>
+        <Idle>
+            <button onclick=\${ defer [1].forEach(note) }>x</button>
+        </>
+        <_>
+            <p>"x"</p>
+        </>
+    </match>`), live: OUT, native: OUT },
+  { name: "`one=\${ … }` — codegen wires every on-prefixed \${} attribute as an event binding", src: page("", `    <button one=\${ defer [1].forEach(note) }>x</button>`), live: OUT, native: OUT },
   { name: "engine state-child body", src: `\${\n    <trace> = ""\n    function note(x) { @trace = @trace + x + ";" }\n    type P:enum = { Idle, Busy }\n}\n<program>\n    <engine for=P initial=.Idle>\n        <Idle>\${ defer note("d") }</>\n        <Busy>"busy"</>\n    </engine>\n    <p id="out">\${@trace}</p>\n</program>\n`, live: OUT, native: OUT },
 ];
 
@@ -119,6 +162,32 @@ describe("§19.16.3 rule 4 — every non-function body kind × both front-ends",
     const hits = r.errors.filter((e) => e.code === OUT);
     expect(hits.length).toBe(1);
     expect(hits[0].message).not.toContain("arrow-function");
+  });
+
+  test("a function DECLARED in a handler attribute: the handler-attribute message, anchored on the element (review A-2)", () => {
+    for (const opts of [{}, { parser: "scrml-native" }]) {
+      const r = compile(page("", `    <button id="go" onclick=\${ function h() { defer note("d"); note("h") } h() }>Go</>`), opts);
+      const hits = r.errors.filter((e) => e.code === OUT);
+      expect(hits.length).toBe(1);
+      expect(hits[0].message).toContain("event-handler attribute");
+      expect(hits[0].message).not.toContain("arrow-function");
+      expect(hits[0].span?.line).toBe(8);
+    }
+  });
+
+  test("a component-def diagnostic fires once and anchors on the definition", () => {
+    const r = compile(`\${
+    <trace> = ""
+    function f(x) { @trace = @trace + "f" + x + ";" }
+    const Btn = <button id="go" onclick=\${ defer [1].forEach(f) }>Go</>
+}
+<program>
+    <Btn/>
+</program>
+`);
+    const hits = r.errors.filter((e) => e.code === OUT);
+    expect(hits.length).toBe(1);
+    expect(hits[0].span?.line).toBe(4);
   });
 
   test("`defer` as an identifier in a when body / handler attribute is untouched (§19.16.1)", () => {

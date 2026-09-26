@@ -120,6 +120,31 @@ const LOWERED_TEXT_MSG = (label: string, anyDepth: boolean): string =>
       `that function from here.`
     : `. Move the handler body into a named function declaration and reference it (\`onclick=handler()\`).`);
 
+/**
+ * S432 review A-3 — a text probe that could not analyse its text (`null`)
+ * fails CLOSED: the diagnostic is reported, saying the body could not be
+ * verified rather than claiming a `defer` was seen.
+ */
+const unverified = (probe: boolean | null, message: string): string =>
+  probe === null
+    ? `${message} (This body could not be parsed to verify that it contains no \`defer\`, so it is rejected ` +
+      `rather than passed to code generation unchecked.)`
+    : message;
+
+/** Parse a `component-def.raw` markup body the way the component expander does; `null` on failure. */
+function parseComponentMarkup(raw: string, name: string, filePath: string): unknown[] | null {
+  try {
+    /* eslint-disable-next-line @typescript-eslint/no-require-imports */
+    const ce = require("../component-expander.ts") as {
+      parseComponentBody: (r: string, n: string, f: string) => { nodes: unknown[]; errors: unknown[] };
+    };
+    const out = ce.parseComponentBody(raw, name, filePath);
+    return Array.isArray(out.nodes) && out.nodes.length > 0 ? out.nodes : null;
+  } catch {
+    return null;
+  }
+}
+
 const UNSUPPORTED_SITE_MSG = (where: string, why?: string): string =>
   `\`defer\` is not supported in ${where} in this stage (§19.16.2): ` +
   (why ?? `the front-end carries that body as text, not as a scrml statement list, so there is no block ` +
@@ -145,6 +170,9 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
   // lands on a node the front-end left without one (an expression escape-hatch
   // inside a statement; S430 round 6, G).
   let anchor: Node | null = null;
+  // Set while walking a tree re-parsed from a node's TEXT (a component body):
+  // its spans are relative to the synthesized source, so report at the owner.
+  let forcedAnchor: Node | null = null;
   const hasLine = (x: Node | null | undefined): boolean => {
     const sp = x && (x.span as { line?: number; start?: number } | undefined);
     return !!sp && typeof sp.line === "number" && (sp.line > 1 || (typeof sp.start === "number" && sp.start > 0));
@@ -157,7 +185,7 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
   const report = (code: DeferCode, n: Node, message: string) => {
     // An expression node's span can be relative to its own source snippet; a
     // statement's is a real source position.
-    const at = hasLine(n) && isStatementNode(n) ? n : (anchor ?? n);
+    const at = forcedAnchor ?? (hasLine(n) && isStatementNode(n) ? n : (anchor ?? n));
     diagnostics.push({ code, severity: "error", span: spanOf(at, filePath), message: `${code}: ${message}` });
   };
 
@@ -218,14 +246,50 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     // escape-hatch, an `on mount { }` body) would reach codegen verbatim (an
     // E-CODEGEN-INVALID-LOGIC with no root cause). The text is PARSED (native
     // statement parser) and a `Defer` node looked for — no word matching.
-    if (kind === "escape-hatch" && typeof n.raw === "string" && n.raw.includes("defer") &&
-        textLambdaContainsDefer(n.raw as string)) {
-      report("E-DEFER-OUTSIDE-FUNCTION", n, LAMBDA_MSG);
-      return;
+    if (kind === "escape-hatch" && typeof n.raw === "string" && n.raw.includes("defer")) {
+      const r = textLambdaContainsDefer(n.raw as string);
+      if (r !== false) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(r, LAMBDA_MSG));
+        return;
+      }
     }
     if (kind === "bare-expr" && n._onMountEffect === true && typeof n.expr === "string" &&
-        (n.expr as string).includes("defer") && textContainsDeferStatement(n.expr as string, false)) {
-      report("E-DEFER-OUTSIDE-FUNCTION", n, TOP_LEVEL_MSG);
+        (n.expr as string).includes("defer")) {
+      const r = textContainsDeferStatement(n.expr as string, false);
+      if (r !== false) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(r, TOP_LEVEL_MSG));
+        return;
+      }
+    }
+    // §19.16.3 rule 4 (S432 review A-1) — a `const Name = <markup>` component
+    // definition is carried as RAW markup text (`component-def.raw`) until the
+    // component expander re-parses it at each use. Parse it the same way here
+    // and walk the markup with this walker (not in a function: a component
+    // body is markup), so its handler attributes / `${ }` logic are checked
+    // like any other markup. Diagnostics anchor on the definition.
+    // The same for a `<match>` block whose arms reached the AST only as TEXT
+    // (`armsRaw` without the live front-end's structured `armBodyChildren` —
+    // the native front-end): parse the arm markup and walk it in place.
+    if (kind === "match-block" && typeof n.armsRaw === "string" && !Array.isArray(n.armBodyChildren) &&
+        (n.armsRaw as string).includes("defer")) {
+      const parsed = parseComponentMarkup(n.armsRaw as string, "MatchArms", filePath);
+      if (parsed === null) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(null, TOP_LEVEL_MSG));
+      } else {
+        const prevForced = forcedAnchor;
+        forcedAnchor = n;
+        try { walk(parsed, st); } finally { forcedAnchor = prevForced; }
+      }
+    }
+    if (kind === "component-def" && typeof n.raw === "string" && (n.raw as string).includes("defer")) {
+      const parsed = parseComponentMarkup(n.raw as string, typeof n.name === "string" ? n.name : "Component", filePath);
+      if (parsed === null) {
+        report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(null, TOP_LEVEL_MSG));
+      } else {
+        const prevForced = forcedAnchor;
+        forcedAnchor = n;
+        try { walk(parsed, { inFunction: false, defer: null }); } finally { forcedAnchor = prevForced; }
+      }
       return;
     }
     // §19.16.3 rule 4 (S432, A1) — statement bodies a node carries AND codegen
@@ -237,9 +301,12 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       let loweredHit = false;
       for (const tb of textLoweredBodiesOf(n)) {
         const hit = tb.anyDepth ? textContainsDeferStatement(tb.text, false) : textContainsDirectDeferStatement(tb.text);
-        if (hit) {
-          report("E-DEFER-OUTSIDE-FUNCTION", n, LOWERED_TEXT_MSG(tb.label, tb.anyDepth));
+        if (hit !== false) {
+          report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(hit, LOWERED_TEXT_MSG(tb.label, tb.anyDepth)));
           loweredHit = true;
+          // The handler attribute's own value (its `exprNode` escape-hatch) is
+          // the same text: do not walk it again under the lambda rule (review A-2).
+          if (tb.owner && typeof tb.owner === "object") seen.add(tb.owner as object);
         }
       }
       // A `when` node's only other child is `bodyExpr`, a best-effort EXPRESSION
@@ -350,9 +417,8 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       // there reached codegen verbatim (live: an inline arm / `!{}` arm / bare
       // block; native: every statement-position match arm).
       for (const tb of textBodiesOf(n)) {
-        if (tb.text !== null && textContainsDeferStatement(tb.text, false)) {
-          report("E-DEFER-OUTSIDE-FUNCTION", n, TOP_LEVEL_MSG);
-        }
+        const r = tb.text === null ? false : textContainsDeferStatement(tb.text, false);
+        if (r !== false) report("E-DEFER-OUTSIDE-FUNCTION", n, unverified(r, TOP_LEVEL_MSG));
       }
     }
     if (!d && st.inFunction && !st.inLambda) {
@@ -362,9 +428,8 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       // reach codegen verbatim). Not a stage-1 defer site: fail closed. The text
       // is PARSED (native statement parser) and a `Defer` node looked for.
       for (const tb of textBodiesOf(n)) {
-        if (tb.text !== null && textContainsDeferStatement(tb.text, false)) {
-          report("E-DEFER-UNSUPPORTED-SITE", n, UNSUPPORTED_SITE_MSG(tb.label));
-        }
+        const r = tb.text === null ? false : textContainsDeferStatement(tb.text, false);
+        if (r !== false) report("E-DEFER-UNSUPPORTED-SITE", n, unverified(r, UNSUPPORTED_SITE_MSG(tb.label)));
       }
     }
     if (d) {
@@ -407,7 +472,7 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       if (kind === "yield-stmt") controlFlow(n, "`yield`");
       else if (kind === "escape-hatch" && n.nativeKind === "Yield") controlFlow(n, "`yield`");
       else if (kind === "escape-hatch" && typeof n.raw === "string" && (n.raw as string).includes("yield") &&
-               textContainsNativeKind(n.raw as string, true, ["Yield"])) controlFlow(n, "`yield`");
+               textContainsNativeKind(n.raw as string, true, ["Yield"]) !== false) controlFlow(n, "`yield`");
       if (kind === "return-stmt") controlFlow(n, "`return`");
       else if (kind === "fail-expr") controlFlow(n, "`fail`");
       else if (kind === "propagate-expr") controlFlow(n, "a `?` propagation");
