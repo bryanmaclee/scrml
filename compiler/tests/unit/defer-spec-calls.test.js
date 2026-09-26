@@ -91,6 +91,35 @@ describe("B2 §19.16.1 — `defer [` while `defer` is a binding in scope", () =>
             defer [0].forEach(note)
         }
     }`,
+    "a match-arm PAYLOAD binder (review B-1)": `    type M:enum = { A(defer: string), B }
+    function h(m: M) {
+        match m {
+            .A(defer) :> {
+                defer [1].split("").forEach(note)
+                note("a")
+            }
+            .B :> {
+                note("b")
+            }
+        }
+    }
+    function go() { h(M.A("xy")) }`,
+    "a `given`-narrowed binding (review B-1)": `    function go2(v) {
+        let defer = v
+        given defer => {
+            defer [0].forEach(note)
+        }
+    }
+    function go() { go2([[1]]) }`,
+    "a destructured for-of binder": `    function go() {
+        for (const [defer] of [[[[1]]]]) {
+            defer [0].forEach(note)
+        }
+    }`,
+    "a destructured parameter": `    function go2({ defer }) {
+        defer [0].forEach(note)
+    }
+    function go() { go2({ defer: [[1]] }) }`,
     "a for-of binder": `    function go() {\n        for (const defer of [[[1]]]) {\n            defer [0].forEach(note)\n        }\n    }`,
   };
   for (const [name, logic] of Object.entries(bindings)) {

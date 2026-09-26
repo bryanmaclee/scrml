@@ -16013,10 +16013,14 @@ binding named `defer` is in scope, a single-statement `defer` led by an array li
 compile error naming both spellings: `defer[…]` (no space) indexes the binding, `defer { […]… }`
 defers the statement. With no such binding the `[` lead is the defer statement (the identifier
 reading would be an undeclared name). "In scope" means VISIBLE at the `defer` — what the identifier
-reading would resolve to without a temporal-dead-zone error: a parameter of an enclosing function or
-lambda, an enclosing loop binder, a `function defer` anywhere in an enclosing block (hoisted), a
-`let` / `const` / `lin` / `~` declared EARLIER in an enclosing block, or any file-level declaration or
-import (a function body runs after the file's top level). A `let defer` written LATER in the block is
+reading would resolve to without a temporal-dead-zone error: a parameter of an enclosing function,
+lambda or transition; an enclosing loop binder; a PATTERN binder of an enclosing construct — a `match`
+arm payload (`.A(defer) :> { … }`, including nested / destructured payloads), a `!{}` or error-effect
+arm binder, a `given` binding, a `when message (…)` binding, an `<each … as …>` name (S432 review
+B-1); a `function defer` anywhere in an enclosing block (hoisted); a `let` / `const` / `lin` / `~`
+(or `let x = f()?`) declared EARLIER in an enclosing block; or any file-level declaration or import (a
+function body runs after the file's top level). The binder constructs are one table in the compiler,
+checked against every binder the front-ends produce, so a new binding form cannot be silently missed. A `let defer` written LATER in the block is
 not visible at the `defer` — the identifier reading could only throw — so the statement reading
 stands (`conformance/cases/defer/array-literal-lead`). (Precedent: the §18 `match` contextual keyword — deterministic token
 disambiguation wherever the tokens decide, and a diagnostic, never a silent choice, where a binding
@@ -16125,15 +16129,16 @@ return value already computed or an error already in flight — so it SHALL NOT 
    the body of a function DECLARATION — `function`, `fn`, `server function` — including any block nested
    in one. It is E-DEFER-OUTSIDE-FUNCTION in every other position:
    - the top level of a `${ }` logic block, a `<program>` / `<page>` / `<channel>` body, a state-block
-     body, or an `on mount { }` body (§6.7.1a).
-   - a reactive-effect or handler body that is not a function declaration: a `when … changes { }` or
-     `when message { }` body, an `on*=${ … }` event-handler attribute, a `~{}` `test` body, and a
-     `match` / `!{}` arm or bare block at the top level (S432). These bodies are lowered as text, so a
-     `defer` inside a function DECLARED in a `when` or `test` body is rejected too — declare the
-     function outside the body and call it. That code is page/module initialisation, which the
+     body, or an `on mount { }` body (§6.7.1a). That code is page/module initialisation, which the
      compiler reorders and distributes (§6.9 hoisting, §40.8 auto-lift, §12 placement), so there is no
      single block exit to attach the deferred body to. `defer` in markup is therefore always an error,
      never a silently inert statement.
+   - a reactive-effect or handler body that is not a function declaration (S432): a `when … changes { }`
+     or `when message { }` body, an `on*=${ … }` event-handler attribute (wherever the markup is — a
+     page, a `<match>` block arm, an `<each>` body, a component definition `const C = <…>`), a `~{}`
+     `test` body, and a `match` / `!{}` arm or bare block at the top level. These bodies are lowered as
+     text, so a `defer` inside a function or arrow DECLARED in a `when` / `test` body or a handler
+     attribute is rejected too — declare the function outside the body and call it.
    - the body of an arrow function or function expression (`() => { … }`, `function () { … }`).
      **Stage-1 limitation, recorded as such:** both front-ends carry a block-bodied function
      expression as host-expression text rather than as a scrml statement list, so there is no list to

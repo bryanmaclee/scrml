@@ -787,11 +787,84 @@ function bindingName(raw: string): string {
   return raw.replace(/^\s*(const|let|var|lin)\s+/, "").split(":")[0].split("=")[0].trim();
 }
 
-function paramBindsDefer(params: unknown): boolean {
-  for (const p of (Array.isArray(params) ? params : []) as unknown[]) {
-    if (typeof p === "string" && bindingName(p) === DEFER_NAME) return true;
-    if (p && typeof p === "object") {
-      const nm = (p as Node).name;
+/**
+ * S432 review B-1 — every construct that introduces a binding, as
+ * `owner-kind` + path (`a.b`, `arms[].binding`) + SCOPE:
+ *   - "list"    — a declaration: visible to the statements AFTER it in its
+ *                 statement list (and, at file level, everywhere);
+ *   - "subtree" — a parameter / pattern / loop / handler binder: visible in the
+ *                 owner node's whole subtree (over-approximated to the whole
+ *                 owner where the precise region is an arm of it — fail closed).
+ * `text: true` marks a binder list the front-end keeps as TEXT (a parameter list,
+ * a payload pattern); it is read as a list of identifiers.
+ *
+ * The table is CHECKED: defer-binder-completeness.test.js censuses every
+ * binder-like field the two front-ends produce over the corpus and requires
+ * each to be here or in its explicit exclusion list.
+ */
+export type BinderField = { kind: string; path: string; scope: "list" | "subtree"; text?: boolean };
+export const DEFER_BINDER_FIELDS: readonly BinderField[] = [
+  // declarations
+  { kind: "let-decl", path: "name", scope: "list" },
+  { kind: "const-decl", path: "name", scope: "list" },
+  { kind: "lin-decl", path: "name", scope: "list" },
+  { kind: "tilde-decl", path: "name", scope: "list" },
+  { kind: "propagate-expr", path: "binding", scope: "list" },     // `let x = f()?` carried as propagate-expr
+  { kind: "import-decl", path: "names", scope: "list" },
+  { kind: "import-decl", path: "specifiers[].local", scope: "list" },
+  { kind: "use-decl", path: "names", scope: "list" },
+  // function-decl.name is hoisted to the top of its block (checkAmbiguousLead)
+  // parameters, loop and pattern binders
+  { kind: "function-decl", path: "params", scope: "subtree" },
+  { kind: "lambda", path: "params", scope: "subtree" },
+  { kind: "transition-decl", path: "paramsRaw", scope: "subtree", text: true },
+  { kind: "for-stmt", path: "variable", scope: "subtree" },
+  { kind: "for-expr", path: "variable", scope: "subtree" },
+  { kind: "given-guard", path: "variables", scope: "subtree" },
+  { kind: "match-arm-block", path: "binding", scope: "subtree" },
+  { kind: "match-arm-block", path: "payloadBindings", scope: "subtree" },
+  { kind: "match-arm-inline", path: "binding", scope: "subtree" },
+  { kind: "match-arm-inline", path: "productPatterns", scope: "subtree", text: true },
+  { kind: "guarded-expr", path: "arms[].binding", scope: "subtree" },
+  { kind: "error-effect", path: "arms[].binding", scope: "subtree" },
+  { kind: "endpoint-decl", path: "arms[].payloadBindingsRaw", scope: "subtree", text: true },
+  { kind: "onchange-decl", path: "arms[].payloadBindingsRaw", scope: "subtree", text: true },
+  { kind: "try-stmt", path: "catchNode.header", scope: "subtree", text: true },
+  { kind: "when-message", path: "binding", scope: "subtree" },
+  { kind: "when-worker-message", path: "binding", scope: "subtree" },
+  { kind: "when-worker-error", path: "binding", scope: "subtree" },
+  { kind: "each-block", path: "asName", scope: "subtree" },
+  { kind: "each-block", path: "asNames", scope: "subtree" },
+];
+
+function valuesAt(n: unknown, path: string): unknown[] {
+  let cur: unknown[] = [n];
+  for (const seg of path.split(".")) {
+    const arr = seg.endsWith("[]");
+    const key = arr ? seg.slice(0, -2) : seg;
+    const next: unknown[] = [];
+    for (const c of cur) {
+      if (!c || typeof c !== "object") continue;
+      const v = (c as Record<string, unknown>)[key];
+      if (arr) { if (Array.isArray(v)) next.push(...v); } else if (v !== undefined && v !== null) next.push(v);
+    }
+    cur = next;
+  }
+  return cur;
+}
+
+/** Does a binder VALUE (a name, a name list, a parameter / destructuring shape) bind `defer`? */
+function binderValueBindsDefer(v: unknown, text: boolean): boolean {
+  if (typeof v === "string") {
+    // A binder list kept as text holds only names / patterns: read its identifiers.
+    return text ? /(^|[^\w$.@])defer(?![\w$])/.test(v) : bindingName(v) === DEFER_NAME;
+  }
+  if (Array.isArray(v)) return v.some((x) => binderValueBindsDefer(x, text));
+  if (v && typeof v === "object") {
+    const o = v as Node;
+    if (o.kind === "destructure-array" || o.kind === "destructure-object") return declNames(o).includes(DEFER_NAME);
+    for (const key of ["name", "local", "bindName"]) {
+      const nm = o[key];
       if (typeof nm === "string" && bindingName(nm) === DEFER_NAME) return true;
       if (nm && typeof nm === "object" && declNames(nm).includes(DEFER_NAME)) return true;
     }
@@ -799,19 +872,11 @@ function paramBindsDefer(params: unknown): boolean {
   return false;
 }
 
-/** Does THIS node itself introduce a binding named `defer`? */
-function nodeBindsDefer(n: Node): boolean {
-  const k = n.kind;
-  if (k === "let-decl" || k === "const-decl" || k === "lin-decl" || k === "tilde-decl") {
-    return typeof n.name === "string" ? bindingName(n.name) === DEFER_NAME : declNames(n.name).includes(DEFER_NAME);
+function bindsDeferIn(n: Node, scope: "list" | "subtree"): boolean {
+  for (const f of DEFER_BINDER_FIELDS) {
+    if (f.kind !== n.kind || f.scope !== scope) continue;
+    if (valuesAt(n, f.path).some((v) => binderValueBindsDefer(v, f.text === true))) return true;
   }
-  if (k === "function-decl") return n.name === DEFER_NAME || paramBindsDefer(n.params);
-  if (k === "lambda") return paramBindsDefer(n.params);
-  if (k === "for-stmt") {
-    const v = n.variable;
-    return typeof v === "string" ? bindingName(v) === DEFER_NAME : declNames(v).includes(DEFER_NAME);
-  }
-  if (k === "import-decl" && Array.isArray(n.names)) return (n.names as unknown[]).includes(DEFER_NAME);
   return false;
 }
 
@@ -855,7 +920,7 @@ function checkAmbiguousLead(root: unknown, report: ReportFn): void {
     const nn = x as Node;
     if (nn.kind === "function-decl") { if (nn.name === DEFER_NAME) fileBinds = true; return; }
     if (nn.kind === "lambda") return;
-    if (nodeBindsDefer(nn)) { fileBinds = true; return; }
+    if (bindsDeferIn(nn, "list")) { fileBinds = true; return; }
     for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") scanTop(nn[key]);
   };
   scanTop(root);
@@ -871,8 +936,7 @@ function checkAmbiguousLead(root: unknown, report: ReportFn): void {
     for (const c of list) {
       walk(c, b);
       const cn = c as Node;
-      if (!b && cn && typeof cn === "object" && cn.kind !== "function-decl" && cn.kind !== "for-stmt" &&
-          cn.kind !== "lambda" && nodeBindsDefer(cn)) {
+      if (!b && cn && typeof cn === "object" && bindsDeferIn(cn, "list")) {
         b = true; // declared here: visible to the statements after it
       }
     }
@@ -887,9 +951,7 @@ function checkAmbiguousLead(root: unknown, report: ReportFn): void {
       return;
     }
     const nn = x as Node;
-    let inner = bound;
-    if (nn.kind === "function-decl" || nn.kind === "lambda") inner = bound || paramBindsDefer(nn.params);
-    else if (nn.kind === "for-stmt") inner = bound || nodeBindsDefer(nn);
+    const inner = bound || bindsDeferIn(nn, "subtree");
     if (nn.kind === "defer-stmt" && bound && deferIsBracketLed(nn)) {
       report("E-DEFER-AMBIGUOUS-LEAD", nn,
         `\`defer [\` is ambiguous here: a binding named \`defer\` is in scope, so this could index it ` +
