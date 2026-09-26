@@ -1,0 +1,16 @@
+{
+  "id": "lifecycle-when-changes-body-top-after-markup",
+  "description": "§40.8 / §6.7.4 (S432) — a bare `when @n changes { … }` at the `<program>` default-logic body-top, written AFTER the first markup child, is a registered reactive effect — not literal page text. Pre-fix it lifted only when it shared a text run with a preceding declaration; after markup (or a `${}` block, or a `//` comment) it shipped as page text at exit 0 with zero diagnostics.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/tests/unit/when-stmt-body-top-lift.test.js",
+  "rationale": "§40.8: the `<program>` body parses in default-logic mode; the lifecycle statements `on mount {}` / `on dismount {}` / `when … changes {}` are lifted at its body-top like declarations, by their grammar head, wherever they sit among the body's children. §6.7.4: \"A `when` statement declares a reactive effect. The body executes whenever any listed dependency changes value.\" Two #inc clicks drive @n 0 → 2; the effect writes @doubled = 4; the statement's source never reaches the DOM.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#inc" }, { "click": "#inc" }],
+    "state": { "n": 2, "doubled": 4 },
+    "dom": "<button id=\"inc\">inc</button><p id=\"d\">4</p>",
+    "domAnchored": [{ "selector": "#d", "text": "4" }]
+  }
+}

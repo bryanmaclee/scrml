@@ -766,6 +766,32 @@ const TOPLEVEL_ON_LIFECYCLE_RE =
   /^\s*on\s+(?:mount|dismount)\s*\{/;
 
 /**
+ * S432 — bare `when … {` reactive-effect / worker-handler STATEMENT at a
+ * <program> / <page> / <channel> default-logic-body direct-child TEXT position
+ * (SPEC §40.8 lifecycle-statement lift; §6.7.4 when-stmt; §4.12.4 when message).
+ *
+ * The same defect class as GITI-029 above, for the sibling lifecycle statement.
+ * A `when` statement only reached the logic-body parser when it SHARED a BS
+ * text run with a preceding declaration (`<x> = 0\nwhen @x changes {…}` lifts
+ * the whole run via TOPLEVEL_STATE_DECL_RE). Written after the first markup
+ * child, after a `${}` block, after a `//` comment, or as the FIRST statement
+ * of a run, it is a standalone text block led by `when` — a contextual keyword
+ * none of the gates above match — so it fell through to `result.push(block)`
+ * and shipped RAW into the DOM as page text, never registering the effect, at
+ * exit 0 with zero diagnostics. (A leading `when` also dragged every following
+ * declaration in its run down to text with it.) Identical source meant logic
+ * or text depending only on what preceded it.
+ *
+ * The signature is the §6.7.4 grammar head, not a keyword: `when` + a dep-list
+ * (`@name` or `( @a, @b … )`) + `changes` [+ `reads @…`] + `{`, or the §4.12.4
+ * worker-handler head `when message|error [from <worker>] [(binding)] {`.
+ * Prose such as `when the value changes, …` or `when @x changes you will …`
+ * has no `@`-dep-list-then-`{` / no `{` and never matches.
+ */
+const TOPLEVEL_WHEN_STMT_RE =
+  /^\s*when\s+(?:(?:@[A-Za-z_$][\w$]*\s+|\(\s*@[A-Za-z_$][\w$]*(?:\s*,\s*@[A-Za-z_$][\w$]*)*\s*\)\s*)changes\b(?:\s+reads\s+@[A-Za-z_$][\w$]*(?:\s*,\s*@[A-Za-z_$][\w$]*)*)?|(?:message|error)(?:\s+from\s+(?:<#[A-Za-z_][\w-]*>|[A-Za-z_$][\w$]*))?\s*(?:\(\s*[A-Za-z_$][\w$]*\s*\))?)\s*\{/;
+
+/**
  * change-id bare-control-flow-in-markup-diagnostic-2026-06-17 (S203).
  *
  * A text run inside a MARKUP body whose leading non-whitespace token is a bare
@@ -1895,7 +1921,17 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // to a cleanup call). Gated `isDefaultLogicBody` — the precise §40.8 surface
     // (a directive only desugars at a default-logic root); the regex requires
     // `on` + `mount`/`dismount` + `{` so prose never matches.
-    if (block.type === "text" && isDefaultLogicBody && TOPLEVEL_ON_LIFECYCLE_RE.test(block.raw)) {
+    //
+    // S432 — the sibling lifecycle statement `when … changes {` / `when message
+    // (…) {` rides the SAME gate (TOPLEVEL_WHEN_STMT_RE; SPEC §40.8 lifecycle-
+    // statement lift). Pre-fix it lifted only when it shared a text run with a
+    // preceding declaration; after markup / `${}` / a comment it shipped as page
+    // text. Reuses the `_onLifecycleLift` marker (same lift-origin class).
+    if (
+      block.type === "text" &&
+      isDefaultLogicBody &&
+      (TOPLEVEL_ON_LIFECYCLE_RE.test(block.raw) || TOPLEVEL_WHEN_STMT_RE.test(block.raw))
+    ) {
       result.push({
         type: "logic",
         raw: "${" + block.raw + "}",

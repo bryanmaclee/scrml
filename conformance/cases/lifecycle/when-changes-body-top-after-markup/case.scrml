@@ -1,0 +1,7 @@
+<program>
+<n> = 0
+<doubled> = 0
+<button id="inc" onclick=${@n = @n + 1}>inc</>
+<p id="d">${@doubled}</p>
+when @n changes { @doubled = @n * 2 }
+</program>
