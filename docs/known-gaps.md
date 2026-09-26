@@ -1293,7 +1293,16 @@ its parser + VP-2 hunks are already on main via this branch and must be dropped 
 <!-- ⚑ S385-bryan filing batch 5 — the "separable defects, file not design" set from dpa-028 (offline/PWA, 2026-08-15). The DD named FOUR; the PA reproduced each by execution before filing rather than relaying, and ONE DID NOT REPRODUCE (recorded below, not filed). bryan: "file those four". -->
 
 ### g-when-changes-effect-fires-eagerly-at-registration — a `when @cell changes { … }` block RUNS ONCE AT BOOT, before anything has changed. **PA-REPRODUCED by emit on `9a0ad569`:** the block lowers to a bare `_scrml_effect(function(){ … })` (observed verbatim: `_scrml_effect(function() { if (_scrml_cs_reactive_get("online")) _scrml_flush_4();; });`), and `_scrml_effect` runs its body immediately at registration to collect dependencies — so the "changes" body executes at module init with the cell's INITIAL value. For the canonical offline shape (`when @online changes { if (@online) flush() }`) that means **a flush fires at page load**, against a queue the author expects to be replayed only on a transition. ⚑ **The name is the contract:** `changes` says "on change", and the S130 axiom is that state fully describes its own transitions — an edge-triggered construct that also level-triggers at boot is the construct disagreeing with its own name. **Spec-intent needs confirming before a fix direction is chosen** — if eager-first-run is intended, the SPEC must say so and the PRIMER must warn, because the emitted `_scrml_effect` is indistinguishable from a `${}` reactive block at the source level. Cosmetic rider observed in the same emit: a doubled statement terminator (`_scrml_flush_4();;`). — `NEW S385-bryan (dpa-028 separable defect 2; PA-reproduced by emit inspection); **MED**; open`
-<!-- @gap id=g-when-changes-effect-fires-eagerly-at-registration sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-event-wiring.ts,compiler/src/runtime-template.js(_scrml_effect) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md-separable-defect-2-PA-reproduced-by-emit-the-when-block-lowers-to-a-bare-scrml-effect-which-runs-at-registration -->
+<!-- @gap id=g-when-changes-effect-fires-eagerly-at-registration sev=HIGH status=resolved locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-event-wiring.ts,compiler/src/runtime-template.js(_scrml_effect) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md-separable-defect-2-PA-reproduced-by-emit-the-when-block-lowers-to-a-bare-scrml-effect-which-runs-at-registration -->
+
+**RESOLVED S432-peter** (`fix/s432-when-changes-dep-list`; P7 criterion 2 — assetManagement `portal.scrml:6656` documents
+working around the eager boot run so it would not silently overwrite a restored offline queue). `when … changes` now lowers
+to one `_scrml_reactive_subscribe` per LISTED dep around `_scrml_when_changes`: no mount run, no auto-tracked reads, body
+untracked, a sync re-entry gets one bounded re-run (cap 1, then an E-LIFECYCLE-006 console.error), an async body's rejection
+is reported, nested server calls are awaited. Fixed with it: §6.5.1 expression-position mutating methods and field/index
+writes now notify (the inline-handler `@items.push` no-notify noted below); the derived-dep half of E-LIFECYCLE-007
+(SPEC §6.7.5) is enforced at codegen. Three S239 rounds: R1 five findings, R2 the cap regression, R3 LAND; full tiers
+186 = 186 identical failure set vs 280ecbdd.
 
 ⛑ **S429-peter — WIDER THAN FILED, RAISED TO HIGH.** PA-verified on `085ddbe8` (program level AND inside `${}`): the
 `_scrml_effect(function(){ body })` lowering breaks all three §6.7.4 clauses, not just the eager run. `when @n changes
@@ -18277,3 +18286,13 @@ A `<` followed by a capital inside `<textarea>` raw text is read as markup, so `
 its closer. Same on base `451296f3` and after the closer-stack fix; markup-level, not state-child-specific in cause (the
 review found it while probing state-child shapes). Silent content loss, but a rare shape. found by: S432 adversarial
 review of fix/s432-closer-in-state-child-parser.
+
+### g-bare-when-after-first-body-child-ships-as-page-text — a bare `when @x changes { … }` written in a `<program>` body AFTER its first `${}` block or markup child is emitted as LITERAL PAGE TEXT; no effect, no diagnostic — `NEW S432-peter; HIGH; open — RULING-GATED (bryan: §40.8 auto-lift set), gift-wrap in progress`
+<!-- @gap id=g-bare-when-after-first-body-child-ships-as-page-text sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(§40.8 default-logic auto-lift at program body-top) prov=empirical:S432-when-changes-dev-agent-and-round-3-reviewer-both-reproduced-on-280ecbdd -->
+
+`<program> <q> = 1  <c> = 0  ${ const <d> = @q * 2 }  when @d changes { @c = @d } </program>` exits 0 and the page
+HTML contains the text `when @d changes { @c = @d }`; no `_scrml_when_changes` is emitted. Same after a `<div>` child.
+The identical `when` placed before any `${}`/markup child compiles to an effect. SPEC §40.8 lists the auto-lifted
+shapes and calls the rest "an open operator question per-shape", so lift-vs-diagnose is bryan's; silent text emission
+is wrong under either answer. Gift-wrap (class table of every silent shape + the recommended fix on
+`hold/s432-bare-when-body-top`) in progress this session. found by: S432 when-changes dev agent while chasing a review finding.
