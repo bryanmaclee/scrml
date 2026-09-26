@@ -53,7 +53,7 @@
  * @module lint-defer
  */
 import { isMetaKind } from "../types/ast.ts";
-import { parseStatementText, textBodiesOf, textContainsDeferStatement, textContainsNativeKind, textLambdaContainsDefer } from "./defer-structure.ts";
+import { isWhenTextKind, parseStatementText, textBodiesOf, textContainsDeferStatement, textContainsDirectDeferStatement, textContainsNativeKind, textLambdaContainsDefer, textLoweredBodiesOf } from "./defer-structure.ts";
 import { iterDestructuredNames } from "../type-system.ts";
 import type { FileAST, Span } from "../types/ast.ts";
 
@@ -110,6 +110,15 @@ const LAMBDA_MSG =
   "`defer` is not supported inside an arrow-function or function-expression body in this stage " +
   "(§19.16.3) — those bodies are lowered as host-expression text, not as a scrml statement list. " +
   "Move the body into a named `function` / `fn` declaration and call it.";
+
+const LOWERED_TEXT_MSG = (label: string, anyDepth: boolean): string =>
+  `\`defer\` is only valid inside a function declaration body (\`function\`, \`fn\`, \`server function\`) ` +
+  `or a block nested in one (§19.16.3). ${label.charAt(0).toUpperCase() + label.slice(1)} is not a function-declaration body` +
+  (anyDepth
+    ? ` — and it is lowered as text, so a \`defer\` anywhere in it (including in a function declared inside ` +
+      `it) has no block exit to run at. Move the cleanup into a named function declared outside it, and call ` +
+      `that function from here.`
+    : `. Move the handler body into a named function declaration and reference it (\`onclick=handler()\`).`);
 
 const UNSUPPORTED_SITE_MSG = (where: string, why?: string): string =>
   `\`defer\` is not supported in ${where} in this stage (§19.16.2): ` +
@@ -219,6 +228,25 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
       report("E-DEFER-OUTSIDE-FUNCTION", n, TOP_LEVEL_MSG);
       return;
     }
+    // §19.16.3 rule 4 (S432, A1) — statement bodies a node carries AND codegen
+    // lowers as TEXT, in any context: `when` handler bodies, `test` bodies, an
+    // `on*=${ … }` handler attribute. None is a function-declaration body. The
+    // text is PARSED and a `Defer` looked for (defer-structure.ts
+    // textLoweredBodiesOf enumerates the node kinds).
+    if (!st.defer) {
+      let loweredHit = false;
+      for (const tb of textLoweredBodiesOf(n)) {
+        const hit = tb.anyDepth ? textContainsDeferStatement(tb.text, false) : textContainsDirectDeferStatement(tb.text);
+        if (hit) {
+          report("E-DEFER-OUTSIDE-FUNCTION", n, LOWERED_TEXT_MSG(tb.label, tb.anyDepth));
+          loweredHit = true;
+        }
+      }
+      // A `when` node's only other child is `bodyExpr`, a best-effort EXPRESSION
+      // parse of the same text; walking it would re-report the same `defer`
+      // under the wrong rule (a function declared in the body reads as a lambda).
+      if (loweredHit && isWhenTextKind(kind)) return;
+    }
 
     // --- function boundaries: a fresh control-flow scope ---
     if (kind === "function-decl") {
@@ -315,6 +343,18 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
     }
 
     const d = st.defer;
+    if (!d && !st.inFunction && !st.inLambda) {
+      // §19.16.3 rule 4 (S432, A1) — the same text-carried bodies (a match / `!{}`
+      // arm, a bare `{ }` block) OUTSIDE any function declaration: top-level
+      // `${ }` logic, which is not a defer site at all. Without this a `defer`
+      // there reached codegen verbatim (live: an inline arm / `!{}` arm / bare
+      // block; native: every statement-position match arm).
+      for (const tb of textBodiesOf(n)) {
+        if (tb.text !== null && textContainsDeferStatement(tb.text, false)) {
+          report("E-DEFER-OUTSIDE-FUNCTION", n, TOP_LEVEL_MSG);
+        }
+      }
+    }
     if (!d && st.inFunction && !st.inLambda) {
       // §19.16.2 (S430 round 5, F3/F4) — a bare `{ }` block and a
       // single-statement `match` / handler arm are carried as TEXT, so a

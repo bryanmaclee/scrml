@@ -219,3 +219,106 @@ export function textLambdaContainsDefer(text: string): boolean {
 export function textContainsDeferStatement(text: string, asExpression: boolean): boolean {
   return text.includes("defer") && textContainsNativeKind(text, asExpression, ["Defer"]);
 }
+
+/**
+ * Does statement TEXT contain a `defer` statement that is NOT inside a function
+ * / arrow body nested in that text (parsed with the native statement parser)?
+ * The complement of `textLambdaContainsDefer` for a statement body: a `defer`
+ * inside a nested lambda in the text is the lambda check's concern (it has its
+ * own escape-hatch / `lambda` node), so it is not reported twice.
+ */
+export function textContainsDirectDeferStatement(text: string): boolean {
+  if (!text.includes("defer")) return false;
+  /* eslint-disable @typescript-eslint/no-require-imports */
+  const { lex } = require("../../native-parser/lex.js") as { lex: (s: string) => unknown[] };
+  const { parseProgram } = require("../../native-parser/parse-stmt.js") as {
+    parseProgram: (t: unknown[], s: string) => { body: unknown[]; errors: unknown[] };
+  };
+  /* eslint-enable @typescript-eslint/no-require-imports */
+  const src = "function* __scrml_probe__() {\n" + text + "\n}";
+  let tree: { body: unknown[] };
+  try {
+    tree = parseProgram(lex(src), src);
+  } catch {
+    return false;
+  }
+  let found = false;
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown, depth: number): void => {
+    if (found || !n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c, depth); return; }
+    const k = (n as Node).kind;
+    if (k === "Defer" && depth === 1) { found = true; return; } // depth 1 = the probe generator's own body
+    const d = k === "Arrow" || k === "Function" || k === "FunctionDecl" ? depth + 1 : depth;
+    for (const key of Object.keys(n as object)) if (key !== "span") walk((n as Node)[key], d);
+  };
+  walk(tree.body, 0);
+  return found;
+}
+
+/**
+ * §19.16.3 rule 4 (S432, A1) — the statement bodies a node carries as TEXT that
+ * codegen LOWERS AS TEXT (`rewriteBlockBody` / the worker / test emitters)
+ * whatever the enclosing context. None of them is a function-declaration body,
+ * so a `defer` in any of them is E-DEFER-OUTSIDE-FUNCTION — and because the
+ * body is lowered as text, a `defer` inside a function DECLARED in that body
+ * cannot be lowered either (`anyDepth`).
+ *
+ * Enumerated by AST node KIND (every text-lowered statement body of the
+ * live-shaped AST that is not already reached structurally), not by scanning
+ * source:
+ *   - `when-effect`            (`when @x changes { … }`)                     .bodyRaw
+ *   - `when-message`           (worker self-handler `when message(d) { … }`) .bodyRaw
+ *   - `when-worker-message` / `when-worker-error`
+ *                              (`when message from <#w> (d) { … }`)          .bodyRaw
+ *   - `test`                   (`~{ test "…" { … } }` bodies, before/after)  .testGroup
+ *   - `markup`                 an `on*=${ … }` event-handler attribute value — a
+ *                              statement body (emit-event-wiring Case C). Only a
+ *                              DIRECT `defer` is reported here; one inside an
+ *                              arrow / function expression in the value is the
+ *                              lambda check's (anyDepth: false).
+ * A non-handler attribute value is an EXPRESSION position, where `defer` is an
+ * ordinary identifier (§19.16.1) — not listed. Match / `!{}` arm bodies and bare
+ * blocks carried as text are `textBodiesOf` (above); `on mount { }` is the
+ * `_onMountEffect` bare-expr; lambda bodies are the escape-hatch / `lambda` check.
+ */
+export type LoweredTextBody = { text: string; label: string; anyDepth: boolean };
+
+const WHEN_TEXT_KINDS = new Set(["when-effect", "when-message", "when-worker-message", "when-worker-error"]);
+
+export function isWhenTextKind(kind: unknown): boolean {
+  return typeof kind === "string" && WHEN_TEXT_KINDS.has(kind);
+}
+
+export function textLoweredBodiesOf(n: Node): LoweredTextBody[] {
+  const out: LoweredTextBody[] = [];
+  const k = n.kind;
+  if (isWhenTextKind(k) && typeof n.bodyRaw === "string") {
+    const label = k === "when-effect" ? "a `when … changes { }` body" : "a `when message { }` handler body";
+    out.push({ text: n.bodyRaw as string, label, anyDepth: true });
+  }
+  if (k === "test" && n.testGroup && typeof n.testGroup === "object") {
+    const g = n.testGroup as { tests?: Array<{ body?: unknown }>; before?: unknown; after?: unknown };
+    const lines = (v: unknown): string | null =>
+      Array.isArray(v) ? v.filter((s) => typeof s === "string").join("\n") : (typeof v === "string" ? v : null);
+    for (const t of Array.isArray(g.tests) ? g.tests : []) {
+      const body = t ? lines(t.body) : null;
+      if (body) out.push({ text: body, label: "a `test` body", anyDepth: true });
+    }
+    for (const v of [g.before, g.after]) {
+      const body = lines(v);
+      if (body) out.push({ text: body, label: "a test `before` / `after` body", anyDepth: true });
+    }
+  }
+  if (k === "markup" && Array.isArray(n.attrs)) {
+    for (const a of n.attrs as Node[]) {
+      if (!a || typeof a.name !== "string" || !/^on[a-z]/i.test(a.name as string)) continue;
+      const v = a.value as Node | undefined;
+      if (v && v.kind === "expr" && typeof v.raw === "string") {
+        out.push({ text: v.raw as string, label: `an event-handler attribute (\`${a.name}=\${ … }\`)`, anyDepth: false });
+      }
+    }
+  }
+  return out;
+}
