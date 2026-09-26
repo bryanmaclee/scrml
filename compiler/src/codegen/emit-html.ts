@@ -703,6 +703,22 @@ function attrIsWiringFree(attr: any, allowName: string | null = null): boolean {
   return true;
 }
 
+/**
+ * §17.1.2 — is this `if=` attribute VALUE one the mount gate accepts?
+ * Mirrors the markup gate's own kind test, so a shape the markup path would
+ * ignore is ignored identically on a structural element.
+ *
+ * MODULE-SCOPE AND EXPORTED (S433) because a SECOND consumer needs the same
+ * answer: `buildSsrEachRenderers` (`emit-ssr-render.ts`) must know whether an
+ * enclosing element lowers to an inert `<template>`, and an each whose mount
+ * lands inside one can never server-render its first paint. A hand-copied
+ * predicate there would drift from this one the next time the gate's accepted
+ * kinds change — the two-spellings/one-lowering hazard. One definition, two
+ * callers.
+ */
+export const isGateableIfValue = (v: any): boolean =>
+  !!v && (v.kind === "variable-ref" || v.kind === "expr" || v.kind === "call-ref");
+
 function isCleanIfNode(node: any): boolean {
   if (!node || typeof node !== "object") return true;
   if (node.kind === "text" || node.kind === "comment") return true;
@@ -1039,6 +1055,57 @@ function checkInputStateDuplicateIds(nodes: any[], errors: CGError[]): void {
 
 // §6.7.8 <timeout> — single-shot timer state type, emits no HTML
 const TIMEOUT_TAGS = new Set(["timeout"]);
+
+/**
+ * Tags whose `emitNode` markup-branch dispatch **`return`s BEFORE the `if=` mount
+ * gate is ever consulted** — so on these, `if=` is SILENTLY IGNORED: no
+ * `<template>` is emitted and whatever they do emit stays in the LIVE first-paint
+ * tree.
+ *
+ * ⚑ EXPORTED, AND THE REASON IS A MEASURED DEFECT (S433). `isGateableIfValue`
+ * answers "would the gate ACCEPT this value" — it does NOT answer "does control
+ * flow REACH the gate for this tag". `buildSsrEachRenderers` (`emit-ssr-render.ts`)
+ * needs the second question: it must suppress an each's server prerender exactly
+ * when the each's mount fence lands inside an inert `<template>`. Keying that on
+ * the gate PREDICATE alone deleted a server first paint that had always worked —
+ * REPRODUCED through `compileScrml` for `<errorBoundary if=…>`, which emits its
+ * children transparently: fence LIVE, yet the renderer was suppressed and a lint
+ * fired whose stated reason was factually false. So the mirror must be of the
+ * DISPATCH, not of the predicate.
+ *
+ * ⛔ DERIVED BY ENUMERATING EVERY `return` IN THE MARKUP BRANCH ABOVE THE GATE,
+ * NOT FROM A REMEMBERED LIST. If you add, remove or REORDER a dispatch in that
+ * branch, this set moves with it. Pinned per-tag — AND as an exact set — by
+ * `compiler/tests/integration/ssr-a-terminus.test.js` describe (g).
+ *
+ * Deliberately ABSENT — verified, not assumed:
+ *   - `outlet` — its dispatch REWRITES the node to `main`/`div` **keeping every
+ *     attribute, `if=` included**, and re-enters `emitNode`, so the generic gate
+ *     DOES fire and an outlet-enclosed subtree IS mount-deferred. (Measured: the
+ *     each fence lands in a `<template>`.)
+ *   - the COMPOUND-PARENT wrapper dispatch, which also returns before the gate
+ *     but is keyed on `lookupStateCell(fileScope, tag) === "compound-parent"` —
+ *     a per-FILE declaration fact no tag set can carry. Its consumer mirrors
+ *     that test directly; see `emit-ssr-render.ts`.
+ */
+export const IF_GATE_BYPASS_TAGS: ReadonlySet<string> = new Set<string>([
+  // §19.6 markup error boundary — emits `<div data-scrml-error-boundary>` and
+  // walks its children LIVE, never consulting `if=`.
+  "errorBoundary", "errorboundary",
+  // §55.8 `<errors of=…/>` — emits its own anchor, returns.
+  "errors",
+  // §19.x `<render of=…/>` — emits its own anchor, returns.
+  "render",
+  // §40.8 default-logic roots — children emitted TRANSPARENTLY (live), no element.
+  "program", "page",
+  // §6.7 lifecycle / input-state / request / timeout state openers — emit no HTML.
+  ...LIFECYCLE_SILENT_TAGS,   // timer, poll
+  ...INPUT_STATE_TAGS,        // keyboard, mouse, gamepad
+  ...REQUEST_TAGS,            // request
+  ...TIMEOUT_TAGS,            // timeout
+  // §4.x `<channel name=…>` — emits no HTML.
+  "channel",
+]);
 
 /**
  * A1c C3 — Lower a state-cell's validators to HTML-native attributes for
@@ -1558,14 +1625,6 @@ export function generateHtml(
       registry.addLogicBinding({ placeholderId: markerId, expr: ifVal.raw, isMountToggle: true, templateId, markerId, condExpr: ifVal.raw, condExprNode: ifVal.exprNode, refs: ifVal.refs, ...transitionFields } as any);
     }
   };
-
-  /**
-   * §17.1.2 — is this `if=` attribute VALUE one the mount gate accepts?
-   * Mirrors the markup gate's own kind test, so a shape the markup path would
-   * ignore is ignored identically on a structural element.
-   */
-  const isGateableIfValue = (v: any): boolean =>
-    !!v && (v.kind === "variable-ref" || v.kind === "expr" || v.kind === "call-ref");
 
   /**
    * §17.1.2 — push a structural element's already-built mount HTML, wrapped in

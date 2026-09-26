@@ -1,0 +1,13 @@
+{
+  "id": "ssr-i-ssr-each-client-rendered-if-enclosed-pos",
+  "description": "§52.8/§17.1 — a PUBLIC server-authority <each> (seeded, and with a fully SSR-renderable row template) that is ENCLOSED BY an `if=` element falls back to client-only first-paint render, and the compiler fires I-SSR-EACH-CLIENT-RENDERED (info) naming the enclosure. `if=` lowers to an inert `<template>` (§17.1 — it REMOVES, it does not hide), so the each's mount fence is not in the document tree at first paint and nothing spliced into it can paint. NO E-* — the each compiles and client-renders normally; only the SSR first-paint acceleration is declined.",
+  "language-version": "1.0",
+  "spec": "§52.8",
+  "source-test": "compiler/tests/integration/ssr-a-terminus.test.js",
+  "rationale": "g-ssr-each-under-if-blank-paint (S433). Before this, `buildSsrEachRenderers` threaded only `insideEach`, so an if-enclosed each was classified as a TOP-LEVEL server-render mount: the compose handler rendered the rows and spliced them INSIDE the `<template>`, producing a BLANK first paint on the dominant guarded-list shape (`<div if=@loaded>` around a server-authority list) at exit 0 with ZERO diagnostics. The each now takes the same conservative client-render fallback an unrenderable row template takes, and the existing info-lint names the enclosure instead of the row template (widening the renderable subset would change nothing here). Operator ruling S385: limb (a) — client-render fallback + the lint — NOW; server-rendering the resolvable branch is a separate arc.",
+  "expect": {
+    "codes": ["I-SSR-EACH-CLIENT-RENDERED"],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-EACH-CLIENT-RENDERED": "info" }
+  }
+}
