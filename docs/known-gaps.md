@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 135 | 4 |
-| MED | 301 | 0 |
-| LOW | 111 | 0 |
+| HIGH | 140 | 4 |
+| MED | 309 | 0 |
+| LOW | 114 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -18346,3 +18346,117 @@ PA-verified at HEAD. Half **(a)** (the fail-OPEN `instanceof Response` passthrou
 ### UPDATED — two entries flipped to `resolved` this session, both verified by execution rather than relayed
 - [[g-baseline-csrf-arm-has-no-instanceof-Response-guard]] → **resolved.** The opaque-result guard is now emitted in the baseline-CSRF arm ahead of the CSRF result expression and the JSON serialisation. ⚠ Its *secondary* claim survives: the unmerged rationale correction is still unmerged and main still carries the stale comment — re-file that half as NOMINAL if it matters.
 - [[g-two-language-gaps-a-real-12k-program-hit-that-the-corpus-never-did]] → **resolved.** Both halves were ruled at S430 and BUILT: the scope-exit primitive as `defer` (P3 stage 1, `lower-defer.ts` + `lint-defer.ts`, landed #1051) and the host-module question as `import:host` plus a parse-layer rejection of dynamic `import()` (P4, `E-DYNAMIC-IMPORT-NOT-IN-SCRML` across five files, landed #1048). It had been sitting in the operator's queue as RULING-GATED for a ruling he had already given.
+
+### g-when-reads-clause-not-parsed-e-scope-001 — `when @x changes reads @y { … }` (the §6.7.4 `reads` annotation) fails with E-SCOPE-001 on `reads`; the effect is dropped — `NEW S432-peter; MED; open`
+<!-- @gap id=g-when-reads-clause-not-parsed-e-scope-001 sev=MED status=open locus=compiler/src/ast-builder.js(the when-effect parse — after `changes` it expects `{`; no `reads` dep-list branch) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<program> <x> = 0 <y> = 0 when @x changes reads @y { log(@y) } … </program>` → `E-SCOPE-001: Undeclared identifier
+`reads`, and no effect is emitted. SPEC §6.7.4 documents the form (*"annotate the read with the `reads` declaration in
+the `when` header"* — `when @price changes reads @qty { … }`) as informational, no semantic change. Loud (not silent), so
+MED. Noted in passing under `g-when-changes-effect-fires-eagerly-at-registration`; filed on its own here. Re-verified on
+the #1054 when-changes rewrite. found by: S432 bare-when gift-wrap agent while measuring the when-head class.
+
+### g-when-timer-fired-dep-head-silently-dropped — `when <#id>.fired changes { … }` (the §6.7.x `<timeout>` example) compiles clean and emits NOTHING — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-timer-fired-dep-head-silently-dropped sev=HIGH status=open locus=compiler/src/ast-builder.js(the when-effect parse — the dep-list branch accepts only AT_IDENT / a parenthesised AT_IDENT list; a `<#id>.prop` head leaves dependencies=[] and the node/body are lost) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<program> <timeout id="g" delay=10> ${ log(1) } </> ${ when <#g>.fired changes { console.log("MK") } } <p>x</p> </program>`
+exits 0 with ZERO diagnostics and the client JS contains no `MK` and no `_scrml_when_changes` — the effect silently does
+not exist. SPEC's `<timeout>` section ("Referencing a Timeout Instance") shows exactly this head
+(`when <#paymentGuard>.fired changes { … }`) and states *"`.fired` is reactive … any markup or `when` block that reads
+`<#id>.fired` re-evaluates after the timeout fires."* The §6.7.4 dep-list grammar (`'@' identifier` only) does not admit
+`<#id>.prop`, so SPEC is self-inconsistent here: either the grammar grows a `<#id>.prop` dep-item or the example is wrong —
+but silent acceptance is wrong under both. Silent-drop class → HIGH. Related, not the same:
+`g-malformed-when-dep-list-compiles-clean` (malformed `@`-lists). found by: S432 bare-when gift-wrap agent.
+
+### g-no-program-file-root-ships-when-onmount-and-at-write-as-page-text — in a file with NO `<program>`, a `when … changes {}`, `on mount {}` or `@x = …` written after a markup child ships as LITERAL PAGE TEXT; the only diagnostic is an unrelated W-PROGRAM-001 — `NEW S432-peter; MED; open`
+<!-- @gap id=g-no-program-file-root-ships-when-onmount-and-at-write-as-page-text sev=MED status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the GITI-029 lifecycle gate, the Unit CC @-write gate and the S432 when gate are all `isDefaultLogicBody`, which is true only under <program>/<page>/<channel>; the file root runs with parentType=null, isDefaultLogicBody=false) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<x> = 0 / <p>${@x}</p> / when @x changes { … }` (no `<program>`) → page HTML contains `when @x changes { … }`; same for
+`on mount { … }` and `@x = 4` in that position. Each compiles at exit 0 with only `W-PROGRAM-001`, whose advice ("wrap in
+`<program>`") happens to be the fix but does not name the leaked statement. Declarations (`<n> = …`, `function`) DO lift
+at the file root (BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE gate on `parentType !== "markup"`, not on `isDefaultLogicBody`), so
+the file root is a half-default-logic locus. Ruling-adjacent: whether a `<program>`-less file root is a §40.8 surface at all
+is the parked `docs/pinned-discussions/w-program-001-warning-scope.md` question. Independent of the S432 when ruling (both
+hold branches leave the file root as it is). found by: S432 bare-when gift-wrap agent.
+
+### g-when-from-worker-parent-handler-ships-as-page-text-at-body-top — the parent-side worker hook `when message from <#wk> (r) { … }` (§43.5.3) written BARE at a `<program>` body-top is lost at EVERY position — page text, no handler, no diagnostic; only `${ … }` works — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-from-worker-parent-handler-ships-as-page-text-at-body-top sev=HIGH status=open locus=compiler/src/block-splitter.js(the default-logic body-top text run is CUT at the `<#wk>` token, so no text block carries the whole head)+compiler/src/ast-builder.js(liftBareDeclarations — no gate can see a head split across blocks) prov=empirical:S432-bare-when-gift-wrap-agent-measured-5-positions-on-main-28da69b0-and-on-hold-A-identical;review:S432-PA-adversarial-review-F1 -->
+
+Fixture: a nested `<program name="wk">` + `<got> = 0` + `<p>${@got}</p>`, and the hook `when message from <#wk> (r) { @got = r }`.
+- inside `${ … }`: handler emitted ✔ (the only working form).
+- after markup / first in the body: the whole statement is page text; no handler.
+- after declarations in the same run (the position that lifts every other `when`): the run is cut at `<#wk>`, the
+  `when message from` prefix is swallowed into the lifted declaration run and `<#wk> (r) { @got = r }` renders as page
+  text; no handler.
+All at exit 0 with no diagnostic (only an unrelated E-DG-002). `when error from <#wk> (e) {…}`: same — handler absent at
+every bare position, works in `${}`. `when terminate from <#wk> {…}`: E-SCOPE-001 even inside `${}` (not implemented at
+all). Identical on main and on `hold/s432-bare-when-body-top`, so pre-existing, not introduced; the S432 §40.8 amendment
+names it as an open exception and does NOT claim this form. §43.5.3 shows the hook bare, with no `${}`. found by: S432
+PA adversarial review (F1) of the bare-when gift-wrap; positions measured by the gift-wrap agent.
+
+### g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error — a `when @x changes { … }` body is passed through unvalidated: `when @x changes {see below}` compiles at exit 0 and emits `function() { see below; }` — the client bundle then fails to PARSE at load — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error sev=HIGH status=open locus=compiler/src/ast-builder.js(the when-effect parse — bodyExpr is safeParseExprToNode of the raw body, which parses only the FIRST expression (`see`) and raises nothing)+compiler/src/codegen/emit-logic.ts(case "when-effect" emits bodyRaw verbatim) prov=empirical:S432-bare-when-gift-wrap-agent-on-main-28da69b0-shared-run-position-new-Function-SyntaxError-Unexpected-identifier-below -->
+
+`<program> <x> = 0  when @x changes {see below}  <p>${@x}</p> </program>` (the shared-run position, lifted on main) →
+0 errors; client JS `_scrml_when_changes(…, function() { see below; });` → `SyntaxError: Unexpected identifier 'below'`,
+which kills the whole client script. Also: an undeclared identifier in the body (`{ braces }`) raises no E-SCOPE-001, and
+an undeclared `@dep` (`when @mentions changes`) raises nothing (cf. `g-malformed-when-dep-list-compiles-clean`). Surface
+it widens: under the S432 hold branch A, head-shaped PROSE after markup (`when @x changes {see below}`) reaches this
+path instead of rendering as text — 0 corpus files. found by: S432 bare-when gift-wrap agent measuring review finding F3.
+
+### g-each-nested-peritem-if-not-reactive — an `if=` on a NON-root element of an `<each>` row is evaluated once at row creation and never follows the row's data — `NEW S432-peter; MED; open`
+<!-- @gap id=g-each-nested-peritem-if-not-reactive sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs, the nested per-row if= create-time append gate) prov=empirical:S432-PA-review-of-hold/s432-q5(ifrow.mjs)-reproduced-by-dev-on-764365cc -->
+
+`<each in=@groups key=@.id as g><li><em if=g.hot>HOT</em><s>${g.hot}</s></li></each>` — a field write (`@groups[0].hot = true`, or `g.hot = true` through a loop alias) updates the `<s>` text to `true` but the `<em>HOT</em>` never appears. Same on a literal-initialised and a computed cell, and on main. **LOUD, not silent:** `W-IF-IN-EACH` fires at compile (§34 row names it a "deliberately-deferred §17.1 reactive-surface extension"), and only the sole-item-root `if=` is reactive. Filed so the deferral has a ledger entry the §6.5.6 item 3 carve-out can cite (it lists `<each>` per-item bindings as fine-grained). Closing it = the §17.1 per-row structural swap for nested elements (per-child anchor + reconcile interaction). Workaround in the warning text: a `show=` / `class` toggle, which IS reactive.
+
+### g-each-item-field-bind-no-write-back — `bind:value=r.f` on an `<each>` row renders the value but typing writes nothing back to the row — `NEW S432-peter; MED; open`
+<!-- @gap id=g-each-item-field-bind-no-write-back sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs, the bind:* item-field branch — W-EACH-BIND-ITEM-FIELD-DEFERRED) prov=empirical:S432-PA-review-of-hold/s432-q5(lift.mjs)-reproduced-by-dev-on-764365cc -->
+
+`<each in=@rows key=@.id as r><input bind:value=r.t/>…</each>` — an `input` event with the value `"Q"` leaves `@rows[0].t` at `"a"`. The outer-cell form (`bind:value=@cell`) is wired (i175, GH #175); the ITEM-FIELD half was deferred at S286 and is **LOUD**: `W-EACH-BIND-ITEM-FIELD-DEFERRED` fires. There was no open ledger entry for the deferral, only the resolved Half-1 entry (`g-bindvalue-value-side-dropped-in-each`), so the §6.5.6 carve-out had nothing to cite. With cells now deep-reactive on every write, the write-back is a plain field assignment through the row reference (`r.t = el.value`), which the Proxy set trap turns into a fine-grained update — the obvious lowering. Workaround in the warning text: an explicit `oninput` handler.
+
+### g-user-fn-rename-rewrites-emitted-helper-locals — the user-function rename pass rewrites bare identifiers across the WHOLE client chunk, so a compiler-emitted helper's local that shares a user function's name is silently captured — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-user-fn-rename-rewrites-emitted-helper-locals sev=HIGH status=open locus=searched:compiler/src/codegen(emit-client.ts worker block observed; the rename pass itself not traced) prov=empirical:S432-dev-reproduced-on-9743cfd2-lineage-while-fixing-review-F2 -->
+
+**On main (S432 wrap): unfixed at every site.** The worker send-wrapper site is fixed only on the gift-wrap branch `hold/s432-q5-deep-reactive-cells-spec` (all wrapper/helper locals `_scrml_`-prefixed); the class fix (binding-aware renaming, or a reserved `_scrml_` namespace for all emitted code — ties to Q7) is open.
+
+Measured while fixing S432 review F2. A user `function e()` next to an inline worker: the emitted send wrapper `onmessage = function(e) { resolve(e.data); }` came out as `function(_scrml_e_3) { _scrml_resolve_2(e.data); }` — the parameter renamed, the body's `e` NOT, and `resolve` renamed to the user's `resolve()` when one exists. Every worker reply resolved to `undefined` (the user function's `.data`), silently. A user `function c()` did the same to a `const c` inside an emitted helper (`seen.set(src, _scrml_c_5); return _scrml_c_5;`). **Fixed at the one site on hold/s432-q5-deep-reactive-cells-spec** (every local in the worker wrapper + `_scrml_to_plain` is `_scrml_`-prefixed), NOT as a class: any other emitted code that uses a bare, non-`_scrml_` identifier (callback params, loop vars, temps) is exposed to a same-named user function. Class fix: the rename pass must resolve bindings (skip identifiers bound by an enclosing emitted function/const), or every emitter must use the `_scrml_` namespace (ties to Q7, reserving `_scrml_`). Sweep target: grep the codegen for emitted `function(x)` / `const x` with a bare `x`.
+
+### g-map-insert-chain-lowers-only-the-first-insert — `@a = @a.insert("X", 1).insert("Y", 2)` lowers only the FIRST insert — `_scrml_map_insert(...).insert("Y", 2)` throws TypeError on click; the conformance case pinning order-independent map equality passes only because the throw leaves both maps empty — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-map-insert-chain-lowers-only-the-first-insert sev=HIGH status=open locus=not-traced prov=empirical:S432 -->
+
+PA-reproduced on `61e05f02` by compiling `conformance/cases/maps/order-independent-eq-rt/case.scrml` (0 errors): the handler emits `_scrml_cs_reactive_set("a", _scrml_map_insert(_scrml_cs_reactive_get("a"), "X", 1).insert("Y", 2))` — the chained `.insert` is a method call on a plain runtime Map value, which has none. ⚑ **FALSE GREEN:** the case asserts `eq` after the click; both handlers throw before writing, so `@a` and `@b` stay `[:]` and `eq` is true — the case passes while testing nothing. Fix the lowering to fold the whole chain, and rewrite the case so it asserts the map contents, not only equality. found by: S432 handler gift-wrap agent (side finding); PA-reproduced.
+
+### g-expr-handler-bare-function-ref-emitted-as-dead-expression — `onclick=${handler}` (a bare function reference inside `${}`) emits `function(event) { _scrml_handler_4; }` — a dead expression; the handler never runs (top level AND lift rows); `onclick=handler` (no `${}`) wires correctly — `NEW S432-peter; MED; open`
+<!-- @gap id=g-expr-handler-bare-function-ref-emitted-as-dead-expression sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+SPEC §5.2: "`onclick=${expr}` … SHALL use the `${...}` expression directly as the event handler". Reproduced by the S432 lift-fix adversarial review on both cb38df9d and the fix; pre-existing. Silent (click does nothing).
+
+### g-lift-row-ternary-of-arrows-handler-dead — in a lift row, `onclick=${x > 1 ? () => f(1) : () => f(2)}` (a ternary producing a function) is emitted as a dead expression — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-lift-row-ternary-of-arrows-handler-dead sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Same SPEC §5.2 clause as `g-expr-handler-bare-function-ref-emitted-as-dead-expression`; the callable test only recognises a literal arrow/function expression. Pre-existing (S432 lift-fix review).
+
+### g-lift-row-destructured-param-arrow-unbound-name — in a lift row, `onclick=${({ a }) => f(a)}` emits `(__destructured__) => _scrml_f_5(a)` — `a` unbound → ReferenceError on click — `NEW S432-peter; MED; open`
+<!-- @gap id=g-lift-row-destructured-param-arrow-unbound-name sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Pre-existing (S432 lift-fix review, both cb38df9d and the fix). Silent at compile, throws at click.
+
+### g-expr-handler-juxtaposed-statements-no-separator-drop-second — `onclick=${f() g()}` (two statements on one line, no `;`) silently drops `g()` — `NEW S432-peter; MED; open`
+<!-- @gap id=g-expr-handler-juxtaposed-statements-no-separator-drop-second sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 handler gift-wrap agent (both its hold branches still drop it). The natural fix is the existing `E-STMT-MISSING-SEMICOLON` (S284 ruling) applied to handler `${}` text. Separate from `g-expr-handler-drops-every-statement-after-a-leading-call` (carried; gift-wrapped on `hold/s432-expr-handler-multi-stmt`).
+
+### g-lift-row-bare-multi-statement-handler-no-e-multi-statement — a bare `onclick=f(); f()` in a lift row runs both statements with no §5.2.3 `E-MULTI-STATEMENT-HANDLER` (the top-level bare form errors) — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-lift-row-bare-multi-statement-handler-no-e-multi-statement sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 handler gift-wrap agent. Loud-vs-silent inconsistency across positions, not data loss.
+
+### g-expr-handler-error-propagation-emits-invalid-js — `?`-propagation inside a handler `${}` (`risky()?; f()`, and as a single statement) emits `_scrml_risky()?` — `E-CODEGEN-INVALID-LOGIC` — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-expr-handler-error-propagation-emits-invalid-js sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Loud, pre-existing (S432 handler gift-wrap agent).
+
+### g-let-initializer-markup-with-interpolated-handler-cut-off — inside a function, `let b = <button onclick=${ … }>x</button>` fails `E-CODEGEN-INVALID-LOGIC` on the default parser — the initializer is cut at `<button onclick=`; native handles it — `NEW S432-peter; MED; open`
+<!-- @gap id=g-let-initializer-markup-with-interpolated-handler-cut-off sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 defer dev agent (with a `defer` in the handler the same error also masks the rule-4 diagnostic). Loud; live-parser only.

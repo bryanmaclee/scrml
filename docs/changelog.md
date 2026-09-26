@@ -2,6 +2,49 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S432 — 2026-09-26 (peter · P-Tech1)
+
+**Seven PRs merged, five rulings gift-wrapped for bryan, one aM data bug fixed on a branch.** P7 now governs
+the TS compiler: fix only for bootstrap, adopter or security; anything else is carried with an xfail pin.
+Every code-bearing change got an adversarial pass on a frozen ref. The redaction arc took six rounds, and two
+of its regressions came from my own briefs.
+
+- **#1053 `451296f3` — gaps.** Nine review findings filed. Three silent HIGHs are carried under P7 with xfail
+  pins: a nested-path method call dropped when it isn't the first statement; a `${f(); g()}` handler that
+  drops everything after a leading call; a `${when}` in an `<each>` row that is dropped. Review markers: #1052
+  clean, #1047 finding.
+- **#1054 `96e6c788` — `when … changes` honours its dep-list (§6.7.4).** Closes the HIGH that assetManagement
+  had worked around in production (P7 criterion 2). The block no longer runs at mount, no longer auto-tracks
+  reads, and gets one bounded re-run on re-entry. Nested server calls are now awaited. Two related fixes ride
+  along:
+  - §6.5.1: expression-position mutating methods and field/index writes now notify their cell.
+  - The derived-dep half of E-LIFECYCLE-007 is now enforced.
+  Three review rounds.
+- **#1055 `9743cfd2` — db connection secrets never reach a diagnostic, whatever shape the value has (P7
+  criterion 3).** #1047 recognised only well-formed URIs. Typos, `jdbc:` and `?authToken=` values leaked into
+  messages, source frames, `scrml introspect`, `db-migrate` and the `scrml dev` overlay. Redaction is now
+  fail-safe, with no scheme or key denylist, and multiple readers are unioned. Six review rounds.
+- **#1059 `181e4e51` — two regressions from #1048.** A false E-CLASS inside a string after an
+  `if (s) /re/` head regex; call-ref attribute args skipped by native and misplaced by default. Newly filed:
+  the `}`-then-regex four-lexer HIGH.
+- **#1060 `28da69b0` — the Q6 fork-independent half.** A `</>`-closed component inside an element in a
+  state-child no longer steals the state-child's closer. New `W-ENGINE-MATCH-IN-STATE-CHILD` states the
+  measured blank-on-entry defect honestly, pending bryan's (A)/(B).
+- **#1063 `61e05f02` — a regression I shipped in #1054, fixed.** A lift-row `onclick=${@items.push(9)}` ran
+  at render time, because a prefix regex mistook the §6.5.1 notify wrapper for a callable. It is now decided
+  by parsing.
+- **Gift-wrapped for bryan (hold refs; built and reviewed unless noted):**
+  - `hold/s432-dev-server-localhost-default`
+  - `hold/s432-bare-when-body-top` (+ `-alt`)
+  - `hold/s432-q5-deep-reactive-cells-spec` (round-1 review addressed; the fixes themselves not re-reviewed)
+  - `hold/s432-expr-handler-multi-stmt` (+ `-alt`) (NOT yet reviewed)
+  - `hold/s432-defer-spec-calls` (depends on `fix/s432-defer-review-findings`, which is held on 2 MED
+    review misses)
+- **Post-merge reviews:** #1047, #1048 and #1051 had findings, all fixed or held; #1052 was clean.
+- **assetManagement:** a real offline Pay Period double-count (display only). Fixed on aM branch
+  `fix/offline-bydate-merge-copies-rows` `17ef6ed`. Gauntlet: 17/17 on the fix, red when reverted, 14/14 on
+  the offline set. Not merged.
+
 ## S427 — 2026-09-21 (peter · P-Tech1)
 
 **Five PRs merged, one held on its own review, and the e2e-render-map tier finally gates anything.**
