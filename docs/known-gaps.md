@@ -18263,7 +18263,17 @@ criterion 3 once ruled. found by: S432 redaction dev agent while enumerating sin
 compiles and runs clean (no `children` in the client JS). Under `--parser=scrml-native` it compiles clean too, but the
 client carries `_scrml_lift_el_1.appendChild(document.createTextNode(String((children) ?? "")))` at file scope and throws
 `children is not defined` at boot, killing the rest of the chunk (in an engine program the later setup never runs).
-It throws even when the component is declared and NEVER used; a component without `${children}` (`const Chip =
-<div>C</div>`) is fine. Native-only, pre-existing (reproduced on `451296f3`), not a regression of the closer-stack
+It throws even when the component is declared and NEVER used. ⛑ **WIDER (S432 review, PA-accepted):** the claim that a
+component without `${children}` is fine is FALSE — native turns ANY component definition into code that runs at page
+load: unused `const Chip = <div>C</div>` and `const Wrap = <section><Chip/></section>` emit a boot-time
+`document.createElement("Chip")`. Missing `children` is one symptom of that; a stray component element is another. Native-only, pre-existing (reproduced on `451296f3`), not a regression of the closer-stack
 branch. MED: the native parser is opt-in, but it is the swap target and any `${children}` component breaks the whole
 page there. found by: S432 closer-stack dev agent while running the sibling matrix under both parsers.
+
+### g-textarea-raw-text-with-lt-loses-content-in-state-child — inside an engine state-child, `<textarea>a < B and </> here</textarea>` renders as `a here`; the text between is lost — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-textarea-raw-text-with-lt-loses-content-in-state-child sev=LOW status=open locus=searched:the markup-level scan of raw-text elements (textarea) — not the S432 closer stack; identical on 451296f3 prov=review:S432-closer-stack-adversarial-happy-dom -->
+
+A `<` followed by a capital inside `<textarea>` raw text is read as markup, so `B and </>` is consumed as an element and
+its closer. Same on base `451296f3` and after the closer-stack fix; markup-level, not state-child-specific in cause (the
+review found it while probing state-child shapes). Silent content loss, but a rare shape. found by: S432 adversarial
+review of fix/s432-closer-in-state-child-parser.
