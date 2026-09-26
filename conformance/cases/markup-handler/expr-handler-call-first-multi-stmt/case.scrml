@@ -1,0 +1,9 @@
+<items> = []
+<last> = 0
+${
+    function f() { @last = @last + 1 }
+    function g() { @last = @last * 10 }
+}
+<button id="x" onclick=${@items.push(1); @last = 2}>x</>
+<button id="y" onclick=${f(); g()}>y</>
+<p id="last">${@last}</p>
