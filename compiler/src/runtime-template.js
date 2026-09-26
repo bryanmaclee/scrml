@@ -4508,6 +4508,76 @@ function _scrml_effect_static(fn) {
 }
 
 /**
+ * §6.7.4 \`when <dep-list> changes { body }\` — a reactive effect keyed on an
+ * EXPLICIT dependency list. Unlike _scrml_effect it does NOT run at registration
+ * and does NOT auto-track the body's reads:
+ *
+ *   - subscribe(handler) is the emitted per-dep \`_scrml_reactive_subscribe(dep, h)\`
+ *     calls (emitted in the chunk so the chunk-cell-scope rename namespaces each
+ *     dep key exactly as it namespaces the body's own reads). It returns the
+ *     unsubscribe functions. The subscriber list is the same one every
+ *     _scrml_reactive_set write fans out to, so change detection is reference
+ *     identity on the write (a §6.5 array mutation is a clone-replace write).
+ *   - The body runs with tracking PAUSED: a write that happens while an outer
+ *     _scrml_effect is running must not hand the body's reads to that effect.
+ *   - Subscribers fire after _scrml_propagate_dirty, so a derived read in the
+ *     body pulls the post-change value (the §6.7.4 flush-ordering contract).
+ *   - A synchronous re-entry is not recursed: the effect is marked pending and
+ *     re-runs ONCE after the current run (keeps an acyclic chain through a
+ *     second effect whole). Trade-off: a self-loop (E-LIFECYCLE-006, not yet
+ *     a compile error — this cap is the only guard) gets one re-run, then the
+ *     next pending re-run is dropped and reported; a longer chain re-entering
+ *     the same effect twice in one write loses the second re-entry, also
+ *     reported via console.error, never silently.
+ *   - An async (CPS, §13) body's rejection is reported here; it does not reach
+ *     the writer (§6.7.4 "does NOT propagate to the enclosing scope").
+ *   - The disposer is registered against the if= mount being wired, if any
+ *     (§6.7.2 step 1), and returned so any other host can own it.
+ *
+ * @param {function(function): Array<function>} subscribe — registers the handler
+ * @param {function} body — the lowered effect body
+ * @returns {function} dispose
+ */
+const _SCRML_WHEN_RERUN_CAP = 1;
+function _scrml_when_changes(subscribe, body) {
+  let running = false;
+  let pending = false;
+  let disposed = false;
+  function handler() {
+    if (disposed) return;
+    if (running) { pending = true; return; }
+    running = true;
+    const wasPaused = _scrml_tracking_paused;
+    _scrml_tracking_paused = true;
+    let reruns = 0;
+    try {
+      do {
+        pending = false;
+        const r = body();
+        if (r && typeof r.then === "function") {
+          r.then(null, function (e) { console.error("scrml when-effect error:", e); });
+        }
+        if (pending && !disposed && ++reruns > _SCRML_WHEN_RERUN_CAP) {
+          console.error("scrml when-effect error: E-LIFECYCLE-006 — re-triggered during its re-run; dropped.");
+          break;
+        }
+      } while (pending && !disposed);
+    } finally {
+      _scrml_tracking_paused = wasPaused;
+      running = false;
+      pending = false;
+    }
+  }
+  const unsubs = subscribe(handler) || [];
+  function dispose() {
+    if (disposed) return;
+    disposed = true;
+    for (let i = 0; i < unsubs.length; i++) unsubs[i]();
+  }
+  return _scrml_mount_track(dispose);
+}
+
+/**
  * Create a computed reactive value.
  *
  * Lazily evaluates fn when .value is accessed. Caches result until a tracked
