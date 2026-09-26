@@ -1,0 +1,11 @@
+<program db="sqlite:./app.db">
+${
+  <Account authority="server" table="users">
+    id: number
+    name: string
+  </>
+  <Account> @accounts
+  <loaded> = true
+}
+<div show=@loaded><ul><each in=@accounts key=@.id><li : @.name></each></ul></div>
+</program>

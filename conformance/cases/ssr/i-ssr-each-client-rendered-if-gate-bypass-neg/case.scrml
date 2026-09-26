@@ -1,0 +1,11 @@
+<program db="sqlite:./app.db">
+${
+  <Account authority="server" table="users">
+    id: number
+    name: string
+  </>
+  <Account> @accounts
+  <loaded> = true
+}
+<errorBoundary if=@loaded fallback={<div>bad</>}><ul><each in=@accounts key=@.id><li : @.name></each></ul></errorBoundary>
+</program>
