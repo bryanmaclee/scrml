@@ -82,6 +82,15 @@ const REDACTED = "<redacted>";
  *   - a KEYLESS query token (`…?SECRET`, no `=`);
  *   - fullwidth / homoglyph separators (`＠`, `：`) — not NFKC-normalised;
  *     a driver does not read them as structure either.
+ *
+ * OVER-REDACTED BY DESIGN (fail safe where a reading is ambiguous):
+ *   - `sqlite://C:/data/a@b.db` / `file://C:/x/a@b.db` — a drive path after
+ *     `//` that contains `@` reads the same as `sqlite://u:/pw@h`, so it shows
+ *     `sqlite://<redacted>@b.db` (without an `@` it is shown unchanged);
+ *   - a query value containing `@` pulls the userinfo span to it, hiding the
+ *     host (`postgres://u:p@h/db?email=a@b` → `postgres://<redacted>@b`);
+ *   - a scheme-less value whose first segment looks like a host
+ *     (`my.dir/app.db`) is treated as a network value: all params hidden.
  */
 const INVISIBLE_CHAR_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/;
 
@@ -154,11 +163,13 @@ function userinfoSpanInView(t: string): [number, number] | null {
   let start: number;
   let authority = false;
   const dbl = head.search(/[\/\\]{2}/);
-  if (dbl >= 0 && /^\s*(?:sqlite|file):$/i.test(head.slice(0, dbl)) && /^[A-Za-z]:[\/\\]/.test(head.slice(dbl + 2))) {
-    // `sqlite://C:/x/a@b.db` / `file://C:/…`: a drive path after `//` — ONLY
-    // for these two file schemes (`postgres://u:/pw@h` stays userinfo).
-    start = dbl + 2;
-  } else if (dbl >= 0) {
+  // s432 r4 — no drive-letter reading after `//`, not even for sqlite:/file:.
+  // This function only runs when the value has an `@`, and then
+  // `sqlite://u:/pw@h` (user `u`, password `/pw`) and `sqlite://C:/a@b.db` are
+  // indistinguishable: FAIL SAFE and redact (the rare Windows path with `@`
+  // is over-redacted, by design). Without an `@` there is no userinfo, and
+  // `sqlite://C:/data/app.db` displays unchanged.
+  if (dbl >= 0) {
     start = dbl + 2;
     authority = true;
   } else {

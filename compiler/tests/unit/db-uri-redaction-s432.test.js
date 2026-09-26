@@ -451,9 +451,14 @@ describe("§7 r3: SQLite URI-param allowlist, host-shaped scheme-less values, sq
     expect(displayConnectionValue("h.example:5432/app?mode=Hm3")).not.toContain("Hm3");
   });
 
-  test("sqlite://C:/… and file://C:/… are drive paths (unredacted); postgres://u:/… stays userinfo", () => {
-    expect(displayConnectionValue("sqlite://C:/data/a@b.db")).toBe("sqlite://C:/data/a@b.db");
-    expect(displayConnectionValue("file://C:/x/a@b.db")).toBe("file://C:/x/a@b.db");
+  test("sqlite://X:/… fails SAFE: with an `@` it reads as userinfo (redacted); without one it is shown", () => {
+    expect(displayConnectionValue("sqlite://u:/pw@h")).toBe("sqlite://<redacted>@h");
+    expect(displayConnectionValue("file://u:/pw@h/x.db")).toBe("file://<redacted>@h/x.db");
+    expect(displayConnectionValue("sqlite://C:/data/app.db")).toBe("sqlite://C:/data/app.db");
+    expect(displayConnectionValue("file://C:/x/app.db?mode=ro")).toBe("file://C:/x/app.db?mode=ro");
+    // Documented over-redaction: a Windows drive path containing `@`.
+    expect(displayConnectionValue("sqlite://C:/data/a@b.db")).toBe("sqlite://<redacted>@b.db");
+    expect(displayConnectionValue("file://C:/x/a@b.db")).toBe("file://<redacted>@b.db");
     expect(displayConnectionValue("postgres://u:/etc/PathSec6@h/app")).toBe("postgres://<redacted>@h/app");
     expect(displayConnectionValue("sqlite://admin:SecA5@x.db")).toBe("sqlite://<redacted>@x.db");
   });
