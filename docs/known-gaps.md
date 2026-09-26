@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 135 | 4 |
-| MED | 296 | 0 |
+| MED | 297 | 0 |
 | LOW | 108 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -18224,3 +18224,13 @@ LOUD (compile fails). Likely the mutating-method (`sort`) lowering meeting a cha
 same compile also raises a spurious `E-DG-002` ("`@items` … never consumed") although the interpolation reads it.
 (Whether a mutating `sort()` in a render expression should be legal at all is its own question — the pin waits for
 that.) found by: S432 adversarial review of the when-changes branch.
+
+### g-dev-server-binds-all-interfaces — `scrml dev` / `scrml serve` listen on every interface, so the dev server (and its compile-error overlay) is reachable from the LAN — `NEW S432-peter; MED; open — ROUTED to bryan (default-bind is a product decision)`
+<!-- @gap id=g-dev-server-binds-all-interfaces sev=MED status=open locus=compiler/src/commands/dev.js(buildServeConfig,runDevChildServer,the parent proxy Bun.serve),compiler/src/commands/serve.js — no `hostname` passed to Bun.serve prov=empirical:S432-redaction-dev-agent-netstat-0.0.0.0-LISTENING -->
+
+No `Bun.serve` call in `dev.js` or `serve.js` passes `hostname`; on this machine `Bun.serve({port:0})` shows in `netstat`
+as `TCP 0.0.0.0:<port> LISTENING` (while `server.hostname` reports "localhost"). The compile-error overlay renders
+diagnostics — which carried db connection secrets until `fix/s432-db-secret-redaction-any-shape` — to anyone on the
+network. Not changed unilaterally: some workflows use LAN access deliberately (phone testing), so the default
+(`localhost` + an opt-in `--host`) is bryan's call; `dev.js` is also in his S430 footprint. Security-adjacent → P7
+criterion 3 once ruled. found by: S432 redaction dev agent while enumerating sinks.
