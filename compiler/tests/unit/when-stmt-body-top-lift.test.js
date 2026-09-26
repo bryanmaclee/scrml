@@ -26,6 +26,7 @@ import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { compileScrml } from "../../src/api.js";
+import { TOPLEVEL_WHEN_STMT_RE } from "../../src/ast-builder.js";
 
 const TMP = mkdtempSync(join(tmpdir(), "when-lift-"));
 let seq = 0;
@@ -180,6 +181,56 @@ describe("S432 — measurement table: the other shapes after markup", () => {
       expect(body).toContain(probe);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// S432 review fixes (F1/F2/F3) — alternative B.
+// ---------------------------------------------------------------------------
+describe("S432-B — the head regex: exact coverage, linear time", () => {
+  test("matches the §6.7.4 heads and the INSIDE-worker §43.5.2 heads", () => {
+    for (const s of [
+      "when @x changes {", "when @x changes{", "  when (@a, @b) changes {", "when (@a)changes {",
+      "when @x changes reads @y {", "when @x changes reads @y, @z {",
+      "when message {", "when message(d) {", "when message (d) {", "when error(e) {",
+    ]) expect(TOPLEVEL_WHEN_STMT_RE.test(s)).toBe(true);
+  });
+
+  test("does NOT claim the parent-side `when … from <#w>` head (the splitter cuts the run at `<#w>`)", () => {
+    for (const s of [
+      "when message from <#wk> (r) {", "when error from <#wk> (e) {", "when terminate from <#wk> {",
+      "when message from ", "when message from _scrml_worker_wk (r) {",
+    ]) expect(TOPLEVEL_WHEN_STMT_RE.test(s)).toBe(false);
+  });
+
+  test("F2 — 40K whitespace inside every head shape tests in < 50 ms", () => {
+    const ws = " ".repeat(40000);
+    for (const s of [
+      "when message" + ws + "x", "when error" + ws + "x", "when message(" + ws + "x",
+      "when @x" + ws + "x", "when @x changes" + ws + "x", "when @x changes reads @y" + ws + "x",
+      "when (@a" + ws + "x", "when (@a," + ws + "@b" + ws + "x", ws + "when" + ws + "x",
+    ]) {
+      const t = performance.now();
+      TOPLEVEL_WHEN_STMT_RE.test(s);
+      expect(performance.now() - t).toBeLessThan(50);
+    }
+  });
+});
+
+describe("S432-B F3 — head-shaped PROSE at body-top is now diagnosed (was page text)", () => {
+  for (const p of ["when @mentions changes {see below} and more prose", "when message {x} arrives we reply"]) {
+    test(`LOUD: ${JSON.stringify(p)} → E-WHEN-NOT-IN-LOGIC-CONTEXT`, () => {
+      const { codes } = compile(AT.afterMarkup(p));
+      expect(codes).toContain(WHEN_ERR);
+    });
+  }
+
+  test("parent-side `when message from <#wk> (r) {}` after markup is NOT diagnosed (open exception; `${ … }` works)", () => {
+    const W = `<program name="wk">\n<z> = 0\nwhen message(d) { send(d + 1) }\n</program>\n`;
+    const H = `when message from <#wk> (r) { @got = r }`;
+    const bare = compile(`<program>\n<got> = 0\n${W}<p>\${@got}</p>\n${H}\n</program>\n`);
+    expect(bare.codes).not.toContain(WHEN_ERR);
+    expect(bare.body).toContain("when message from");
+  });
 });
 
 process.on("exit", () => {
