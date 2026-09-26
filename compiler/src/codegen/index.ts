@@ -1864,8 +1864,64 @@ export function runCG(input: CgInput): CgOutput {
   // INCONSISTENTLY on purpose-by-accident — `sessionExpiry` is camelCase,
   // `session-secure` is kebab — and `compute-program-config.ts` reads them exactly
   // that way; this scan mirrors it rather than "fixing" the surface.
+  //
+  // ⛔ SCOPED TO A SINGLE-PROGRAM COMPILE SET (S436) — AND THE COMMENT THIS REPLACES
+  // WAS WRONG IN THE SECURITY DIRECTION. The `session-secure` fallback in emit-server
+  // used to be annotated "strictly ADDITIVE: it is reached only where the answer today
+  // is 'nothing declared → default secure'". That sentence names exactly the case it
+  // breaks: the ONLY reachable effect of a `session-secure` fallback is to turn a
+  // secure default INTO a weaker one. `session-secure="false"` is the sole value that
+  // changes anything, so "additive" here means "additively downgrades".
+  //
+  // Concretely, MEASURED on `c46ebbf8` in BOTH input orders, zero hard errors and an
+  // identical diagnostic set in every run — so nothing told the adopter:
+  //   program B (`<program auth="optional" csrf="off">`, declares NEITHER attribute)
+  //     compiled ALONE          → `__Host-scrml_sid`, Max-Age 3600   (correct)
+  //     compiled beside program A (`session-secure="false" sessionExpiry="7d"`)
+  //                             → `scrml_sid`,        Max-Age 604800 (A's settings)
+  // `__Host-` is BROWSER-ENFORCED hardening (no Domain attribute, Path must be `/`,
+  // always Secure), so an unrelated program in the same compile set silently stripped
+  // B's cookie hardening. This loop walked the WHOLE `files` array with no
+  // program-membership test, so "program-wide" was in fact BUILD-wide.
+  //
+  // There is no reliable unit → owning-`<program>` relation to key this on. The
+  // compiler says so itself at the shell-composition post-pass below: per SPEC §40.8
+  // the entry file is "the file resolved by the build root" — a BUILD fact — this
+  // pipeline infers it from file CONTENT and takes the first match, `E-PROGRAM-002`
+  // is reserved-not-implemented, so a second top-level `<program>` in a compile unit
+  // is silently tolerated. Inventing a membership notion here (by directory, by
+  // import graph) would be guessing at the language.
+  //
+  // So FAIL CLOSED ON THE COUNT, which needs no membership notion to be sound:
+  //   - 0 or 1 `<program>`-bearing file  → inherit exactly as before. This IS the
+  //     #282 / S433 case the pre-scan exists for (ONE program spread over several
+  //     emitted units, where the minting unit carries no declaration of its own and
+  //     MUST pick up the program's, or the writer sets one cookie name while the
+  //     reader's compile-time-specialized regex matches another). Byte-identical.
+  //   - 2 or more                        → NO cross-unit inheritance at all. A unit
+  //     that does not itself declare the attribute falls to the LANGUAGE DEFAULT
+  //     (secure / `__Host-`, 1h expiry), exactly as if compiled alone. A unit that
+  //     DOES declare it still resolves its own, via emit-server's per-unit raw read.
+  // The failure mode this trades into is the safe one: a genuine multi-unit program
+  // that happens to share a compile set with a second `<program>` loses inheritance
+  // and gets the HARDENED default, rather than an unrelated program's downgrade.
+  //
+  // TODO(bryan-ruling): when 2+ `<program>` declarations share a compile set and a
+  // unit's inheritance is therefore suppressed, SHOULD the compiler say so — a new
+  // diagnostic, or the reserved `E-PROGRAM-002` "more than one top-level `<program>`"
+  // itself? Minting a diagnostic decides what the language says and is not this
+  // fix's call; routed separately. Today the suppression is silent by design.
+  const _programDeclFiles = files.filter((f) => {
+    const nodes = (getNodes(f as never) as any[]) ?? [];
+    if (!Array.isArray(nodes)) return false;
+    return nodes.some((n: any) => n && n.kind === "markup" && n.tag === "program");
+  });
+  // Deliberately the SAME node scan the reader below uses, so the count and the read
+  // cannot drift apart into "counted two, read from a third".
+  const _multiProgramCompileSet = _programDeclFiles.length >= 2;
   const _readProgramAttr = (name: string): string | undefined => {
-    for (const f of files) {
+    if (_multiProgramCompileSet) return undefined;
+    for (const f of _programDeclFiles) {
       const nodes = (getNodes(f as never) as any[]) ?? [];
       if (!Array.isArray(nodes)) continue;
       const prog = nodes.find((n: any) => n && n.kind === "markup" && n.tag === "program");

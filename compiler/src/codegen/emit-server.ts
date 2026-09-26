@@ -2673,9 +2673,22 @@ export function generateServerJs(
   // sources are per-unit — `authMiddlewareEntry` is this unit's route-inference
   // output, `_readRawSessionSecure()` walks only THIS file's nodes — so a unit with
   // neither fell to the secure DEFAULT regardless of what the program declared.
-  // The program-wide value the driver pre-scanned is consulted LAST, so this is
-  // strictly ADDITIVE: it is reached only where the answer today is "nothing
-  // declared → default secure".
+  // The program-wide value the driver pre-scanned is consulted LAST.
+  //
+  // ⛔ THIS FALLBACK IS NOT "STRICTLY ADDITIVE" (S436 correction). The comment here
+  // used to claim it was — "it is reached only where the answer today is 'nothing
+  // declared → default secure'" — and that sentence names exactly the case it
+  // breaks. `session-secure="false"` is the ONLY value that changes anything, so the
+  // only reachable effect of this fallback is to turn a secure default into a weaker
+  // one. It is additive in the DOWNGRADE direction, which is the direction that
+  // needed the scrutiny. MEASURED on `c46ebbf8`: a program declaring neither
+  // attribute emitted `__Host-scrml_sid` alone and plain `scrml_sid` when an
+  // unrelated `<program session-secure="false">` shared its compile set — zero hard
+  // errors, identical diagnostics, both input orders. `_programSessionSecure` is
+  // therefore now stamped ONLY for a single-`<program>` compile set (see the guarded
+  // pre-scan in codegen/index.ts); with 2+ declarations it arrives `undefined` and
+  // this expression falls to the secure default, as if the unit were compiled alone.
+  // The genuine multi-unit single-program case (#282 / S433) is unchanged.
   const _sessionSecureSetting =
     (authMiddlewareEntry && authMiddlewareEntry.sessionSecure !== undefined)
       ? authMiddlewareEntry.sessionSecure
@@ -2819,9 +2832,9 @@ export function generateServerJs(
     // on another unit). So `<program sessionExpiry="7d">` silently yielded a 1h
     // cookie on exactly the unit that MINTS it — measured: the `<program>` unit
     // emitted `604800`, the login unit `3600`. The fallback consults the PROGRAM-wide
-    // value the driver pre-scanned (`_programSessionExpiry`). Strictly ADDITIVE: it
-    // is reached only where the answer today is "nothing declared → the 1h default",
-    // so a unit with its own entry is byte-identical.
+    // value the driver pre-scanned (`_programSessionExpiry`). Additive for a unit
+    // with its own entry — those are byte-identical — but see the S436 note below:
+    // "additive" was never a safety argument, it just says the fallback is last.
     //
     // ⛔ THREE STEPS, NOT TWO (S433 fix-round, F1-1) — and the middle one is the fix.
     // The per-unit RAW read must come BEFORE the program-wide stash, exactly as
@@ -2833,6 +2846,16 @@ export function generateServerJs(
     // `maxAge=1800`, in BOTH input orders. That is a worse failure to read than the
     // original defect — "your own declaration is inert" became "another program's
     // declaration governs you" — so the middle step is not optional politeness.
+    //
+    // ⛔ AND THE MIDDLE STEP WAS NOT ENOUGH (S436). It rescues a unit that declares
+    // its OWN `<program sessionExpiry=>`; it does nothing for a unit that declares
+    // NEITHER attribute, which still inherited the first sibling program's value.
+    // MEASURED on `c46ebbf8`: `<program auth="optional" csrf="off">` compiled alone
+    // emitted 3600 and, beside `<program … sessionExpiry="7d">`, emitted 604800 —
+    // both input orders, zero hard errors. Same mechanism as the `session-secure`
+    // downgrade above, so the SAME guard fixes it: `_programSessionExpiry` is now
+    // stamped only for a single-`<program>` compile set, and arrives `null` when 2+
+    // programs share one. See the guarded pre-scan in codegen/index.ts.
     const _sessionMaxAgeSec = parseSessionExpirySeconds(
       authMiddlewareEntry?.sessionExpiry
         ?? _readRawProgramAttr("sessionExpiry")
