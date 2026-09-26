@@ -40,6 +40,7 @@ import { resolve } from "path";
 import { SQL } from "bun";
 import { Database } from "bun:sqlite";
 import { resolveDbDriver } from "../codegen/db-driver.ts";
+import { SecretRedactor } from "../diagnostic-secrets.ts";
 import { splitBlocks } from "../block-splitter.js";
 import { buildAST } from "../ast-builder.js";
 import { extractDesiredSchema } from "../codegen/db-authoritative.ts";
@@ -53,6 +54,11 @@ import {
 import { scanDirectory } from "../api.js";
 
 const isTTY = process.stderr.isTTY;
+
+// s432 — every error line that can echo the --db value (its SQLite path, a
+// driver error, the resolver's E-SQL-005) passes the same value-based
+// redactor compileScrml uses. Set once runDbMigrate knows the value.
+let redactDbText = (text) => text;
 const c = {
   red: (s) => (isTTY ? `\x1b[31m${s}\x1b[0m` : s),
   green: (s) => (isTTY ? `\x1b[32m${s}\x1b[0m` : s),
@@ -377,7 +383,7 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive,
   try {
     sql = new SQL(connectionString);
   } catch (e) {
-    console.error(c.red("error:") + ` failed to connect to Postgres: ${e.message}`);
+    console.error(redactDbText(c.red("error:") + ` failed to connect to Postgres: ${e.message}`));
     process.exit(1);
   }
 
@@ -461,7 +467,7 @@ async function runPgApply({ connectionString, desired, dryRun, allowDestructive,
           : ""),
     );
   } catch (e) {
-    console.error(c.red("error:") + ` migration failed (rolled back): ${e.message}`);
+    console.error(redactDbText(c.red("error:") + ` migration failed (rolled back): ${e.message}`));
     printFailedStatement(e);
     await closeSql(sql);
     process.exit(1);
@@ -482,7 +488,7 @@ function runSqliteApply({ connectionString, desired, dryRun, allowDestructive })
   try {
     db = new Database(path);
   } catch (e) {
-    console.error(c.red("error:") + ` failed to open SQLite database "${path}": ${e.message}`);
+    console.error(redactDbText(c.red("error:") + ` failed to open SQLite database "${path}": ${e.message}`));
     process.exit(1);
   }
 
@@ -520,7 +526,7 @@ function runSqliteApply({ connectionString, desired, dryRun, allowDestructive })
     }
     console.log(c.green(`applied ${plan.length} statement(s) in 1 transaction.`));
   } catch (e) {
-    console.error(c.red("error:") + ` migration failed (rolled back): ${e.message}`);
+    console.error(redactDbText(c.red("error:") + ` migration failed (rolled back): ${e.message}`));
     printFailedStatement(e);
     process.exit(1);
   } finally {
@@ -546,9 +552,12 @@ export async function runDbMigrate(args) {
     process.exit(1);
   }
 
+  const dbRedactor = new SecretRedactor([dbUrl]);
+  redactDbText = (text) => dbRedactor.redact(text);
+
   const resolved = resolveDbDriver(dbUrl);
   if (!resolved.ok) {
-    console.error(c.red("error:") + " " + resolved.error.message);
+    console.error(redactDbText(c.red("error:") + " " + resolved.error.message));
     process.exit(1);
   }
   const driver = resolved.info.driver;
