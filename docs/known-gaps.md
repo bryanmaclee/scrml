@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 135 | 4 |
-| MED | 297 | 0 |
+| HIGH | 136 | 4 |
+| MED | 299 | 0 |
 | LOW | 108 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -1277,7 +1277,16 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 <!-- ⚑ S385-bryan filing batch 5 — the "separable defects, file not design" set from dpa-028 (offline/PWA, 2026-08-15). The DD named FOUR; the PA reproduced each by execution before filing rather than relaying, and ONE DID NOT REPRODUCE (recorded below, not filed). bryan: "file those four". -->
 
 ### g-when-changes-effect-fires-eagerly-at-registration — a `when @cell changes { … }` block RUNS ONCE AT BOOT, before anything has changed. **PA-REPRODUCED by emit on `9a0ad569`:** the block lowers to a bare `_scrml_effect(function(){ … })` (observed verbatim: `_scrml_effect(function() { if (_scrml_cs_reactive_get("online")) _scrml_flush_4();; });`), and `_scrml_effect` runs its body immediately at registration to collect dependencies — so the "changes" body executes at module init with the cell's INITIAL value. For the canonical offline shape (`when @online changes { if (@online) flush() }`) that means **a flush fires at page load**, against a queue the author expects to be replayed only on a transition. ⚑ **The name is the contract:** `changes` says "on change", and the S130 axiom is that state fully describes its own transitions — an edge-triggered construct that also level-triggers at boot is the construct disagreeing with its own name. **Spec-intent needs confirming before a fix direction is chosen** — if eager-first-run is intended, the SPEC must say so and the PRIMER must warn, because the emitted `_scrml_effect` is indistinguishable from a `${}` reactive block at the source level. Cosmetic rider observed in the same emit: a doubled statement terminator (`_scrml_flush_4();;`). — `NEW S385-bryan (dpa-028 separable defect 2; PA-reproduced by emit inspection); **MED**; open`
-<!-- @gap id=g-when-changes-effect-fires-eagerly-at-registration sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-event-wiring.ts,compiler/src/runtime-template.js(_scrml_effect) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md-separable-defect-2-PA-reproduced-by-emit-the-when-block-lowers-to-a-bare-scrml-effect-which-runs-at-registration -->
+<!-- @gap id=g-when-changes-effect-fires-eagerly-at-registration sev=HIGH status=resolved locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/emit-event-wiring.ts,compiler/src/runtime-template.js(_scrml_effect) prov=dd:scrml-support/docs/deep-dives/offline-pwa-native-vs-host-boundary-dpa-028-2026-08-15.md-separable-defect-2-PA-reproduced-by-emit-the-when-block-lowers-to-a-bare-scrml-effect-which-runs-at-registration -->
+
+**RESOLVED S432-peter** (`fix/s432-when-changes-dep-list`; P7 criterion 2 — assetManagement `portal.scrml:6656` documents
+working around the eager boot run so it would not silently overwrite a restored offline queue). `when … changes` now lowers
+to one `_scrml_reactive_subscribe` per LISTED dep around `_scrml_when_changes`: no mount run, no auto-tracked reads, body
+untracked, a sync re-entry gets one bounded re-run (cap 1, then an E-LIFECYCLE-006 console.error), an async body's rejection
+is reported, nested server calls are awaited. Fixed with it: §6.5.1 expression-position mutating methods and field/index
+writes now notify (the inline-handler `@items.push` no-notify noted below); the derived-dep half of E-LIFECYCLE-007
+(SPEC §6.7.5) is enforced at codegen. Three S239 rounds: R1 five findings, R2 the cap regression, R3 LAND; full tiers
+186 = 186 identical failure set vs 280ecbdd.
 
 ⛑ **S429-peter — WIDER THAN FILED, RAISED TO HIGH.** PA-verified on `085ddbe8` (program level AND inside `${}`): the
 `_scrml_effect(function(){ body })` lowering breaks all three §6.7.4 clauses, not just the eager run. `when @n changes
@@ -18234,3 +18243,46 @@ diagnostics — which carried db connection secrets until `fix/s432-db-secret-re
 network. Not changed unilaterally: some workflows use LAN access deliberately (phone testing), so the default
 (`localhost` + an opt-in `--host`) is bryan's call; `dev.js` is also in his S430 footprint. Security-adjacent → P7
 criterion 3 once ruled. found by: S432 redaction dev agent while enumerating sinks.
+
+### g-bare-when-after-first-body-child-ships-as-page-text — a bare `when @x changes { … }` written in a `<program>` body AFTER its first `${}` block or markup child is emitted as LITERAL PAGE TEXT; no effect, no diagnostic — `NEW S432-peter; HIGH; open — RULING-GATED (bryan: §40.8 auto-lift set), gift-wrapped S432 — awaiting ruling`
+<!-- @gap id=g-bare-when-after-first-body-child-ships-as-page-text sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(§40.8 default-logic auto-lift at program body-top) prov=empirical:S432-when-changes-dev-agent-and-round-3-reviewer-both-reproduced-on-280ecbdd -->
+
+`<program> <q> = 1  <c> = 0  ${ const <d> = @q * 2 }  when @d changes { @c = @d } </program>` exits 0 and the page
+HTML contains the text `when @d changes { @c = @d }`; no `_scrml_when_changes` is emitted. Same after a `<div>` child.
+The identical `when` placed before any `${}`/markup child compiles to an effect. SPEC §40.8 lists the auto-lifted
+shapes and calls the rest "an open operator question per-shape", so lift-vs-diagnose is bryan's; silent text emission
+is wrong under either answer. Gift-wrap (class table of every silent shape + the recommended fix on
+`hold/s432-bare-when-body-top`) in progress this session. found by: S432 when-changes dev agent while chasing a review finding.
+**S432 gift-wrap — AWAITING RULING (not resolved).** Two hold branches, neither merged: **(A, recommended)** `hold/s432-bare-when-body-top` lifts a body-top `when` by its §6.7.4 / §4.12.4 grammar head at EVERY position (rides the GITI-029 `on mount` gate; new §40.8 S432 amendment + §6.7.4 placement bullet; unit `when-stmt-body-top-lift` + runtime case `lifecycle/when-changes-body-top-after-markup`); **(B)** `hold/s432-bare-when-body-top-alt` keeps the lift set and fires a new Error `E-WHEN-NOT-IN-LOGIC-CONTEXT` (a `when` sharing a run with a preceding declaration stays silently lifted — the position-dependence remains). Class measured: the trigger is not "after markup" but "not sharing a text run with a preceding declaration" — after markup, after `${}`, after a `//` comment, or FIRST in its run (which also drags the following declarations to text); `<page>`/`<channel>` bodies and a worker `<program>`'s `when message(d) {}` (silently absent from the worker bundle) are the same class. Blast radius measured: 0 of 2,632 tracked `.scrml` hold an affected run.
+
+### g-when-reads-clause-not-parsed-e-scope-001 — `when @x changes reads @y { … }` (the §6.7.4 `reads` annotation) fails with E-SCOPE-001 on `reads`; the effect is dropped — `NEW S432-peter; MED; open`
+<!-- @gap id=g-when-reads-clause-not-parsed-e-scope-001 sev=MED status=open locus=compiler/src/ast-builder.js(the when-effect parse — after `changes` it expects `{`; no `reads` dep-list branch) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<program> <x> = 0 <y> = 0 when @x changes reads @y { log(@y) } … </program>` → `E-SCOPE-001: Undeclared identifier
+`reads`, and no effect is emitted. SPEC §6.7.4 documents the form (*"annotate the read with the `reads` declaration in
+the `when` header"* — `when @price changes reads @qty { … }`) as informational, no semantic change. Loud (not silent), so
+MED. Noted in passing under `g-when-changes-effect-fires-eagerly-at-registration`; filed on its own here. Re-verified on
+the #1054 when-changes rewrite. found by: S432 bare-when gift-wrap agent while measuring the when-head class.
+
+### g-when-timer-fired-dep-head-silently-dropped — `when <#id>.fired changes { … }` (the §6.7.x `<timeout>` example) compiles clean and emits NOTHING — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-timer-fired-dep-head-silently-dropped sev=HIGH status=open locus=compiler/src/ast-builder.js(the when-effect parse — the dep-list branch accepts only AT_IDENT / a parenthesised AT_IDENT list; a `<#id>.prop` head leaves dependencies=[] and the node/body are lost) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<program> <timeout id="g" delay=10> ${ log(1) } </> ${ when <#g>.fired changes { console.log("MK") } } <p>x</p> </program>`
+exits 0 with ZERO diagnostics and the client JS contains no `MK` and no `_scrml_when_changes` — the effect silently does
+not exist. SPEC's `<timeout>` section ("Referencing a Timeout Instance") shows exactly this head
+(`when <#paymentGuard>.fired changes { … }`) and states *"`.fired` is reactive … any markup or `when` block that reads
+`<#id>.fired` re-evaluates after the timeout fires."* The §6.7.4 dep-list grammar (`'@' identifier` only) does not admit
+`<#id>.prop`, so SPEC is self-inconsistent here: either the grammar grows a `<#id>.prop` dep-item or the example is wrong —
+but silent acceptance is wrong under both. Silent-drop class → HIGH. Related, not the same:
+`g-malformed-when-dep-list-compiles-clean` (malformed `@`-lists). found by: S432 bare-when gift-wrap agent.
+
+### g-no-program-file-root-ships-when-onmount-and-at-write-as-page-text — in a file with NO `<program>`, a `when … changes {}`, `on mount {}` or `@x = …` written after a markup child ships as LITERAL PAGE TEXT; the only diagnostic is an unrelated W-PROGRAM-001 — `NEW S432-peter; MED; open`
+<!-- @gap id=g-no-program-file-root-ships-when-onmount-and-at-write-as-page-text sev=MED status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the GITI-029 lifecycle gate, the Unit CC @-write gate and the S432 when gate are all `isDefaultLogicBody`, which is true only under <program>/<page>/<channel>; the file root runs with parentType=null, isDefaultLogicBody=false) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<x> = 0 / <p>${@x}</p> / when @x changes { … }` (no `<program>`) → page HTML contains `when @x changes { … }`; same for
+`on mount { … }` and `@x = 4` in that position. Each compiles at exit 0 with only `W-PROGRAM-001`, whose advice ("wrap in
+`<program>`") happens to be the fix but does not name the leaked statement. Declarations (`<n> = …`, `function`) DO lift
+at the file root (BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE gate on `parentType !== "markup"`, not on `isDefaultLogicBody`), so
+the file root is a half-default-logic locus. Ruling-adjacent: whether a `<program>`-less file root is a §40.8 surface at all
+is the parked `docs/pinned-discussions/w-program-001-warning-scope.md` question. Independent of the S432 when ruling (both
+hold branches leave the file root as it is). found by: S432 bare-when gift-wrap agent.

@@ -88,7 +88,7 @@ describe("S432 — bare `when … changes {}` lifts at every body-top position",
     const src = `when @x changes { @y = @x + 1 }`;
     const a = compile(AT.share(src)).js;
     const b = compile(AT.afterMarkup(src)).js;
-    const effect = s => s.split("\n").filter(l => l.includes("_scrml_effect") || l.includes('"y"')).join("\n");
+    const effect = s => s.split("\n").filter(l => l.includes("_scrml_when_changes") || l.includes("_scrml_effect") || l.includes('"y"')).join("\n");
     expect(effect(b)).toBe(effect(a));
     expect(effect(b)).not.toBe("");
   });
