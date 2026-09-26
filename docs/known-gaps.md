@@ -4723,8 +4723,188 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > it is a few lines against a file that is about to be opened anyway. See
 > `docs/changes/ruling2-bare-call-landing-2026-08-26/DE-RISK.md`.
 
-### g-if-arm-bare-markup-branch-silently-dropped — ⭐ a lift-less MARKUP branch in a value-form `if` renders NOTHING at exit 0 with zero diagnostics, while the identical branch holding a STRING renders correctly
-<!-- @gap id=g-if-arm-bare-markup-branch-silently-dropped sev=HIGH status=open locus=compiler/src/codegen/emit-html.ts:isValueFormIfStmt(the value-form classifier)+compiler/src/codegen/emit-lift.js:emitIfStmtWithContainer(called from compiler/src/codegen/emit-control-flow.ts:725) prov=adopter:S377-peter-dog-food-routed -->
+### g-if-arm-bare-markup-branch-silently-dropped — ⭐ a lift-less MARKUP branch in a value-form `if` renders NOTHING at exit 0 with zero diagnostics, while the identical branch holding a STRING renders correctly — `HIGH; RESOLVED S433`
+<!-- @gap id=g-if-arm-bare-markup-branch-silently-dropped sev=HIGH status=resolved locus=compiler/src/implied-lift-desugar.ts(the pass)+compiler/src/component-expander.ts(runCEFile head — the pipeline seam)+compiler/src/codegen/emit-match.ts(re-applied after the bodyRaw re-parse)+compiler/src/type-system.ts(liftedMarkupChildNodes — the lifecycle-walker hole the desugar newly reached) resolved-by=S433-implied-lift-desugar prov=adopter:S377-peter-dog-food-routed -->
+
+> **⛑ RESOLVED S433 — and the ROUTED LOCUS HYPOTHESIS WAS HALF WRONG, which is the instructive part.**
+> The routed hypothesis named `emit-html.ts:isValueFormIfStmt` as the classifier to widen. It IS the
+> classifier that declines (`isSoleBareExprBranch` requires `kind === "bare-expr"`, and a bare-markup
+> arm parses to `{kind:"html-fragment"}` — AST-dumped, not inferred), **but widening it is the wrong
+> fix, and the sibling `match` limb is the measured proof.** The value-form route lowers an arm to a
+> CONDITIONAL EXPRESSION over the arm's raw text (§17.6.8 latitude), and a markup arm's raw text is not
+> JavaScript: a value-form `match` with markup arms emits `return <p>Yes < / p >;` — INVALID JS —
+> which is exactly why THAT limb carries `E-MATCH-ARM-MARKUP-IN-VALUE` instead of a lowering.
+>
+> **SPEC named the right lowering itself: the arm *carries an implied `lift`*** (§10.1 limb 2, S391
+> amendment, `provenance: ruling:user-voice-scrml.md S371 "value-form b"`; §17.6.10 "A branch body
+> that is exactly one expression SHALL be equivalent to `{ lift <expression> }`"; §1.4/L1 "markup
+> elements may sit anywhere expressions sit"). So the fix makes the implied `lift` EXPLICIT in the
+> tree and the already-correct `lift` pipeline handles it with **no codegen change at all** — render
+> slot (`stmtContainsLiftExpr`), lift group (`stmtContainsLift`), branch lowering
+> (`emitIfStmtWithContainer`). Measured: the desugared emit is **byte-identical to the
+> explicit-`lift` emit** apart from the content-derived chunk-scope id. That identity is the gate:
+> §17.6.10 asserts equivalence to `lift`, so parity with `lift` IS conformance.
+>
+> **Direction of change: newly-ACCEPTING in the compiler, conformance-RESTORING against SPEC.** Two-sided
+> evidence: **877 corpus files under `samples/` emit byte-identically** (the shape occurs nowhere in
+> the corpus, so the pass is inert on everything that already compiled), and the shape INJECTED into a
+> real sample (`combined-002-todo.scrml` + one `${ if (@todos.length > 0) { <p class="hint">…</p> } … }`)
+> goes from `if (get("todos").length > 0) { }` — empty — to the full reactive lift group.
+>
+> **Gates:** `compiler/tests/unit/implied-lift-markup-arm.test.js` (13 tests, bite-tested: 10 fail
+> with the fix reverted) and conformance `control-flow/ctrl-029-value-form-sugar-markup-branch-pos`
+> (the MARKUP-valued sibling of `ctrl-021`, which pins only the STRING limb — the defect was exactly a
+> regression of one limb that every string-branch case was blind to). Full suite: the 9 pre-existing
+> failure names, zero new. Conformance 957/958, 1 xfail.
+>
+> **THREE THINGS THE CLASS PROBE CAUGHT THAT THE REPORTED INSTANCE DID NOT**, all fixed here:
+> 1. **The fragmented arm.** `{ <p>n=${@n}</p> }` is ONE expression but THREE nodes (the block-splitter
+>    hoists the interpolation to a sibling BLOCK_REF `logic`). A node-count shape test declined it and
+>    left that branch silently empty while its sibling rendered. The shape test is at SOURCE level: the
+>    arm's whole span extent is re-parsed and must yield exactly one markup node. **This is the
+>    commonest adopter spelling**; the first cut would have shipped a half-fix.
+> 2. **The half-converted cascade.** Conversion is ALL-OR-NOTHING per cascade — one decline leaves the
+>    whole cascade at pre-existing behaviour, so a shape outside §17.6.10's grammar fails uniformly
+>    rather than arguing by its working half that it is supported.
+> 3. **The `<match for=…>` arm body.** `emit-match` re-parses `entry.bodyRaw` at emit time and discards
+>    the pipeline-desugared `armBodyChildren` copy, so the arm dropped its branches while the identical
+>    interpolation at file level rendered. The pass is re-applied at that re-parse site.
+>
+> **A PARSER-PARITY DIVERGENCE FOUND ON THE WAY, recorded because it is load-bearing for anyone else
+> touching this shape:** the NATIVE parser spells a bare-markup arm
+> `bare-expr{exprNode:{kind:"markup-value", node}}` — markup tree INTACT — where the live `ast-builder`
+> flattens it to a raw `html-fragment` string. The pass handles both, and the native spelling needs no
+> source text (which is what lets it run at source-free seams such as the match-arm re-parse).
+>
+> **SEAM, stated because it is a compromise and not an ideal:** the pass runs at the head of CE
+> (Stage 3.2), not in the TAB where a parse-level equivalence belongs, because **CE is the earliest
+> stage handed both the AST and the file's `_sourceText`** (PRECG / NR / TC / SYM receive only
+> `{filePath, ast}`) and the source is required — the `html-fragment`'s own `content` is the
+> tokenizer-rejoined form (`"<p>Yes < / p >"`), which does not re-parse and has already lost interior
+> whitespace. CE's head still precedes component expansion (so a `<Foo/>` arm IS expanded — measured),
+> VP-2, TS, DG and CG. **The durable placement is the TAB, where there is exactly one parse**; until
+> then a new body-re-parse site needs the pass applied there too.
+> (`ast-builder.js` was under another session's ownership lock this window, which is why not now.)
+>
+> ⛑ **THREE RE-PARSE SITES NEEDED IT, WHICH IS THE ARGUMENT FOR THE TAB, NOT A DETAIL.** The CE head
+> plus `emit-match.ts` (the `<match for=…>` arm body, re-parsed from `entry.bodyRaw`) plus
+> `component-expander.ts:parseComponentBody` (a component definition's body, re-parsed from
+> `normalizeTokenizedRaw(raw)` — found by the S433 adversarial pass, NOT by the class probe, because
+> every probe shape was written outside a component). Each site discards the desugared copy and
+> re-parses raw text, so each needs the pass or the shape silently drops there while rendering
+> everywhere else. **A fourth site is knowingly left un-desugared: `type-system.ts`'s match-arm-each
+> `let` re-parse** sees an `html-fragment` run where CG sees a `lift-expr`. That provenance split is
+> benign for what the site does (it looks for `let` declarations, not markup) and is commented in
+> place rather than fixed — widening a type-check surface for no measured gain. **The count is the
+> point: a pass that has to be re-applied per re-parse site is mis-placed, and only the TAB fixes
+> that structurally.**
+>
+> ⚑ **ONE PRE-EXISTING HOLE HAD TO BE CLOSED TO AVOID TAKING A DIAGNOSTIC AWAY, and the conformance
+> suite — not the unit tests — is what caught it.** `e-type-lifecycle-variant-not-transitioned-pos` is
+> `${ if (@phase is .Draft) { <p>${@phase.publishedAt}</p> } }`, and its diagnostic was firing only
+> because the arm reached the §14.3 lifecycle walkers as a flat `html-fragment` + BLOCK_REF run whose
+> TEXT those walkers scan. Desugaring it to the `lift-expr` SPEC says it is would have silently
+> removed the error. Measured: **the explicit-`lift` spelling never fired it either** — a lifted markup
+> tree hangs off `expr.node` behind two non-array hops and carries no string field, so BOTH walkers
+> missed every `${…}` inside lifted markup. New shared `type-system.ts:liftedMarkupChildNodes` gives
+> both walkers that one hop, so the diagnostic now fires for both spellings and the two cannot drift.
+> **Generalisable: a desugar that replaces a text-shaped node with a structured one can silently
+> disable any diagnostic that was reading the text.**
+>
+> ⛑ **AND THAT HOLE-CLOSING IS A NEWLY-REJECTING SURFACE WIDER THAN THIS ENTRY FIRST SAID. CORRECTED
+> HERE ON MEASUREMENT.** `liftedMarkupChildNodes` is wired into the §14.3 WALKERS, not into the
+> desugar, so the new rejection needs **no `if` and no control flow at all**:
+> `${ lift <p>${@phase.publishedAt}</p> }` on its own goes **exit 0 → exit 1 `E-TYPE-001`**
+> (PA-measured base-vs-fix). **The surface is: any explicit `lift` of markup whose interpolations read
+> a lifecycle-typed cell's post-transition field** — spanning two codes, `E-TYPE-001` and
+> `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` — **not "a control-flow arm"**, which is how this entry
+> originally (and wrongly) scoped it. The rejection is CORRECT: it is a genuine premature read the base
+> compiler missed, so this is conformance-restoring, not a widening. **MIGRATION COST, MEASURED rather
+> than asserted** (repo-wide, `*.scrml`, excluding `node_modules`): **2,669 files; 250 use `lift`; 3
+> declare a variant-progression lifecycle type** (all three are `conformance/cases/type-state-codes/`
+> cases); **the intersection is EMPTY** — verified by grepping `lift` across exactly those three files,
+> zero hits. So the newly-rejecting surface breaks **nothing** in tree. (The adversarial pass measured
+> 190 `lift` files against a narrower root; the counts differ, the empty intersection does not.)
+> ⚠ The adopter clone is not reachable from this worktree, so its side is **unverified here** — the
+> reviewer reports 1 `lift` file / 0 lifecycle types, also empty, and that is RELAYED, not confirmed.
+>
+> ⚠ **"ZERO DIAGNOSTIC CHANGES" WAS WRONG, AND THE WAY IT WAS WRONG MATTERS MORE THAN THE FACT.** A
+> diagnostic is **REMOVED** by the desugar: `${ if (@on) { <p title="${@t}">MARKA</p> } else { … } }`
+> fires `E-DG-002` (`@t` declared but never consumed) at base and does NOT after. Our side is correct —
+> the read IS real once the markup is a tree — but it proves the desugar changes what **every** later
+> stage sees, DG included, not just codegen. **The reason it was missed is a defect in the measuring
+> harness, not in the fix:** the probe used `execFileSync`, whose return value is stdout ONLY, and
+> appended stderr just in the `catch` branch — so on a ZERO-EXIT compile every stderr diagnostic was
+> invisible and the per-file diagnostic set read as complete when it was not. **An assumed-zero was
+> reported as a measured-zero, twice.** Re-measured with `spawnSync` (both streams on every path): the
+> 877-file corpus differential is **877/877 identical on exit code, diagnostic SET *and* per-artifact
+> sha1** — the inertness claim survives, but it is only now actually measured. The lesson is the
+> general one: **state a measurement's REACH, and prove the harness can see the thing it reports zero
+> of.**
+>
+> **CLASS PROBE — 15 shapes, each measured against its explicit-`lift` twin**
+> (`scratch-if-arm/class-probe.mjs` on the S433 branch). **COVERED at `lift` parity:** the reported
+> instance · `else if` cascade · no `else` · nested `if` in an arm · nested markup subtree · void /
+> self-closing element · arm markup carrying an event handler (`addEventListener` wired) · arm holding
+> a COMPONENT (expanded, no phantom tag) · arm markup interpolating a reactive cell · inside an
+> `<each in= key= as >` row (byte-identical to the twin) · inside a `<match for=…>` arm
+> (byte-identical). **NOT desugared, by decision:** an `if` in a `function-decl` body (a `lift` there
+> is not an accumulation into a markup parent, so synthesising one would change meaning) · a
+> mixed-value cascade (`{ if c { <span/> } else { "s" } }`) — that one needs the markup-VALUE lowering
+> (`_scrml_render_value` already accepts a DOM node), not the lift lowering, and stays pinned by
+> `each-inline-value-form-if-interp.test.js`'s residual PIN.
+>
+> ⛑ **WHAT THE ADVERSARIAL PASS FOUND THAT THE 15-SHAPE PROBE DID NOT, and why the probe missed it —
+> both were HIGH, both are fixed, and both were REPRODUCED here before building.**
+> **(F1) The all-or-nothing invariant was stated and not enforced.** `planArm` classified an arm by
+> `pieces[0]` only, so an arm whose markup is not the FIRST piece came back "no markup here" and the
+> cascade converted its OTHER arms and left this one dropped — a HALF-RENDER, at exit 0 with no
+> diagnostic, in BOTH arm positions and in a three-arm cascade's middle arm. `else { log(…) <p>…</p> }`
+> is ordinary adopter code. **The probe missed it because every one of its 15 shapes led with markup.**
+> ⚠ **And the obvious fix would not have worked:** `{ @k = 1  <p>A</p> }` parses to a SINGLE
+> `state-decl` whose `init` string is `"1 < p > MARKA < / p >"` — the markup is **swallowed into the
+> preceding statement's raw text**, so there is no `html-fragment` node to test for. The decline is
+> therefore a TEXT test (exact source extent with a tight `<`-then-name-char regex, plus the piece's own
+> string fields with a looser regex for the rejoined form), run PER PIECE and skipping `if-stmt` pieces
+> because the recursion already owns their markup. The first cut scanned the arm's whole extent and so
+> declined every `else if` cascade and every nested-`if` arm — caught by re-running the class probe, and
+> now pinned by an explicit regression-guard test.
+> **(F2) A component body was still dropping.** `parseComponentBody` re-parses from
+> `normalizeTokenizedRaw(raw)`; base and fix were BYTE-IDENTICAL (a bare `<span data-scrml-logic>`
+> anchor, no branch code) while the component's own explicit-`lift` twin rendered on both sides. Fixed
+> at that site; verified byte-identical to the twin. **The probe missed it because no shape was written
+> inside a component.**
+>
+> **F6 — a DELIBERATE dimension wider than §17.6.10, recorded so it is not mistaken for an oversight:**
+> the pass converts an `if` that is **not the sole content** of the interpolation
+> (`${ let x = 1  if (@on) { <p>A</p> } … }`), which §17.6.10's grammar scopes to sole-content.
+> §10.1 limb 2 carries **no** sole-content condition — it speaks of "an arm body that is exactly one
+> expression" generally — so the wider behaviour is arguably authorized by the other normative sentence.
+> It is also strictly better than the alternative: in a non-sole-content interpolation the bare-markup
+> arm would otherwise still drop silently. Flagged as the one place the implementation is wider than the
+> narrower of the two sentences.
+>
+> **RESIDUALS, each filed as its own entry rather than folded in:**
+> [[g-if-arm-multi-markup-element-silently-dropped]] · [[g-for-arm-bare-markup-silently-dropped]]
+> (this is the S377 RELAYED-UNVERIFIED `for` half, now PA-VERIFIED by execution) ·
+> [[g-lift-markup-adjacent-text-leading-space-dropped]] (found as a FAVOURABLE divergence — the sugar
+> is the faithful one and the pre-existing `lift` path is the defective one).
+>
+> ⚠ **ONE ADVERSARIAL CLAIM DID NOT REPRODUCE AND IS NOT CLAIMED AS A BENEFIT.** The pass was reported
+> to also repair a hard compiler CRASH on `<match for=View>` inside `<each>` with a bare-markup arm.
+> **PA-PROBED, three variants** (`on=r.v` with a struct field; `on=@cell`; an else-less arm), **base
+> side: no crash on any of them** — every one compiles exit 0 with only benign `W-PROGRAM-*` warnings
+> and silently drops the arm, i.e. the ordinary defect this entry is about, lowered through the ordinary
+> path. **A crash-repair claim is therefore NOT written into this entry**; if a real crash repro exists
+> it should be filed with its source, because it would be a different (and worse) defect than the one
+> resolved here.
+>
+> ⚠ **PROBE-METHOD NOTE, because it cost a false negative here.** The first cut of the `<each>` probe
+> wrote `<each rows as row>` — INVALID per §17.7 / SPEC:1074, which require `in=` or `of=` — and it
+> compiles to NOTHING at exit 0 with no diagnostic. That read as "the fix misses `<each>` rows" for a
+> full round; with the canonical `<each in=@rows key=r.id as r>` the shape is byte-identical to its
+> `lift` twin. **A probe on malformed source measures the malformation.** The silent acceptance of an
+> `<each>` missing its required attribute is a separate fail-open finding, reported not fixed.
 
 > **⚑ PA-EXECUTED at S376 with a three-way discriminator — the fix direction the report proposed is NOT the one the evidence supports.** Routed turnkey by S377-peter from a happy-dom dog-food run; the PA reproduced it and then varied the branch VALUE, which changed the diagnosis.
 >
@@ -4743,6 +4923,94 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > **This is the FOURTH measured divergence in the §17.6 value-form area**, after [[g-value-form-control-flow-unspecified]] (RULED S371 limb b), [[g-value-form-if-no-else-renders-nothing]], and the S371 `value-form`-is-not-a-word finding. Repeated review, same class → **converge, do not enumerate**: the amendment should be scoped to state the value-form rule once, over branch VALUES, rather than gaining one clause per witnessed shape.
 >
 > **NOT established by the PA, carried as RELAYED-UNVERIFIED:** the report's second example, a bare-markup body in a `for` arm (`${ for (let x of @xs) { <li>…</li> } }`). §17.4 documents the Tier-0 form WITH `lift`, so "lift required" may be correct there and the defect only the silent drop — a different disposition from the `if` half. The PA's emitted-artifact probes could not discriminate the two `for` shapes and are recorded as inconclusive; **re-derive this half in a DOM before scoping it**, do not inherit it from this entry.
+
+### g-lift-markup-adjacent-text-leading-space-dropped — `lift <div><span>x</span> tail</div>` emits `createTextNode("tail")`, dropping the space, so `BIG 90` renders `BIG90` — `NEW S433; LOW; open`
+<!-- @gap id=g-lift-markup-adjacent-text-leading-space-dropped sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(the markup-tree text-child lowering reached from emitLiftExpr — the `lift` path, NOT the §17.6.10 desugar) prov=empirical:S433-found-as-a-FAVOURABLE-divergence-while-checking-sugar-vs-lift-parity -->
+
+> **⚑ FOUND AS A PARITY FAILURE IN WHICH *OUR NEW PATH IS THE CORRECT ONE*, which is why it is filed
+> against `lift` and not against the sugar.** While gating [[g-if-arm-bare-markup-branch-silently-dropped]]
+> on "the sugar must emit what `lift` emits", one shape diverged in the sugar's FAVOUR:
+>
+> | spelling | emitted | rendered |
+> |---|---|---|
+> | `{ <div class="w"><span>x</span> tail</div> }` (sugar) | `createTextNode(" tail")` | `x tail` ✅ |
+> | `{ lift <div class="w"><span>x</span> tail</div> }` | `createTextNode("tail")` | `xtail` ❌ |
+>
+> The sugar re-parses the author's EXACT source slice, so it keeps the leading space; the `lift` path
+> loses it. Adopter-visible form: `BIG 90` renders `BIG90`.
+>
+> **Strictly, §17.6.10 is violated** — it asserts equivalence of *observable result* between the two
+> spellings, and these differ. **But the fix is on the `lift` side.** Resolving it by making the sugar
+> match `lift` would be propagating a whitespace bug for the sake of a symmetry, which inverts the
+> point of the equivalence clause.
+>
+> **Same family as** [[g-ast-markup-text-interp-adjacent-space-dropped]] (space before a `${…}` in
+> markup text) — both are "a space adjacent to a boundary inside markup text is dropped", and both sit
+> on the whitespace model. ⚠ **Whether HTML-style collapse makes this intentional is exactly the open
+> question there**, so the two should be dispositioned together rather than patched separately, and
+> that entry already names the whitespace-model fork as bryan's. LOW because the workaround is `&nbsp;`
+> or an explicit interpolation, and the sugar path (the one adopters now reach without writing `lift`)
+> is already correct.
+
+### g-if-arm-multi-markup-element-silently-dropped — an `if` arm holding TWO markup elements renders NOTHING at exit 0 with zero diagnostics — `NEW S433; MED; open`
+<!-- @gap id=g-if-arm-multi-markup-element-silently-dropped sev=MED status=open locus=compiler/src/implied-lift-desugar.ts(planArm declines when the arm's source recovers to more than one markup node — DELIBERATE, see the entry)+compiler/src/codegen/emit-logic.ts:1856(case "html-fragment": return "" — where the drop actually happens) prov=empirical:S433-class-probe-of-g-if-arm-bare-markup-branch-silently-dropped -->
+
+> **PA-EXECUTED at S433 by the class probe that landed
+> [[g-if-arm-bare-markup-branch-silently-dropped]]**, and verified two-sided against that fix's base:
+> `${ if (@on) { <p>A</p><p>B</p> } else { <p>No</p> } }` emits NO DOM at all — identical output before
+> and after the S433 fix (exit 0, zero diagnostics). The explicit-`lift` spelling of the same intent,
+> `{ lift <p>A</p> lift <p>B</p> }`, compiles and emits both elements, so the lowering target exists.
+>
+> **WHY S433 DID NOT FIX IT, stated so the next pass does not "just widen the check".** §17.6.10's
+> grammar is `value-form-if ::= 'if' condition '{' expression '}'` — **exactly ONE expression**. Per
+> invariant 83 that is a LOCAL `length !== 1 -> decline`, deliberately NOT §18.5's positional
+> "last expression" tail rule; routing the sugar arm through a tail rule silently admits shapes the
+> grammar does not define. Two elements are outside the grammar, so S433's pass declines them — and
+> declines the whole cascade with them (all-or-nothing), which is why the sibling `else` arm does not
+> half-render either.
+>
+> **SO THIS IS NOT A CODEGEN BUG, IT IS A MISSING DIAGNOSTIC — and that is the fix direction.** The
+> defect is not that the shape is refused; it is that the refusal is SILENT, which violates the S231
+> fail-closed-Nominal invariant (an unsupported form must fail closed with a diagnostic, never render
+> empty). Two candidate dispositions, and the choice is a grammar call, not ours:
+>   **(a)** emit an error naming the one-expression rule and the two fixes (wrap in a single parent
+>   element, or write explicit `lift`s) — the conservative option, symmetric with the sibling
+>   `E-MATCH-ARM-MARKUP-IN-VALUE` steer that already exists for the value-form `match` limb;
+>   **(b)** amend §17.6.10 to admit an arm that is a markup SEQUENCE, desugaring to one implied `lift`
+>   per element — a grammar widening, and it collides with §10's E-LIFT-002 multiplicity rule ("at most
+>   one `lift` on any execution path"), which is exactly why it needs a ruling rather than a patch.
+> **Recommend (a).** Cheap, closes the silence, and does not touch the multiplicity rule.
+>
+> Repro is in the S433 gate as a NEGATIVE assertion already — `compiler/tests/unit/implied-lift-markup-arm.test.js`
+> "an arm holding TWO markup elements is not a value-form and is not converted" pins the current
+> behaviour (including the all-or-nothing rule), so whichever disposition lands has a place to flip.
+
+### g-for-arm-bare-markup-silently-dropped — a bare-markup body in a `${ for … }` loop renders NOTHING at exit 0 with zero diagnostics (the S377 RELAYED half, now PA-VERIFIED) — `NEW S433; MED; ruling-gated`
+<!-- @gap id=g-for-arm-bare-markup-silently-dropped sev=MED status=ruling-gated locus=compiler/src/codegen/emit-logic.ts:1856(case "html-fragment": return "")+compiler/SPEC.md §17.4(documents the Tier-0 form WITH lift; carries no implied-lift sentence for a loop body) prov=adopter:S377-peter-dog-food-routed(relayed)+empirical:S433-PA-verified-by-execution -->
+
+> **⛑ THIS IS THE HALF [[g-if-arm-bare-markup-branch-silently-dropped]] RECORDED AS
+> "RELAYED-UNVERIFIED — re-derive this half before scoping it". S433 RE-DERIVED IT, and it reproduces.**
+> `${ for (let r of @rows) { <li>r</li> } }` emits NO DOM (exit 0, zero diagnostics); the
+> explicit-`lift` spelling `${ for (let r of @rows) { lift <li>r</li> } }` emits the keyed row factory.
+> Identical before and after the S433 fix — the S433 pass does not touch `for` bodies.
+>
+> **AND THE ENTRY'S SUSPICION WAS RIGHT: the disposition is NOT the same as the `if` half.** The `if`
+> half was fixable without a ruling because §10.1 and §17.6.10 say, normatively and unconditionally,
+> that a single-expression control-flow ARM carries an implied `lift`. **§17.4 says no such thing about
+> a loop BODY** — it documents the Tier-0 form WITH `lift`, and a loop body is not a branch arm of a
+> value-producing expression, so the §17.6.10 sugar does not reach it by its own terms. Quoting the
+> `if` half's sentences at this half would be extending a ruling past what it ruled.
+>
+> **So this is a grammar/semantics call and the fork is clean:**
+>   **(a)** `lift` stays REQUIRED in a loop body, and the fix is only to make the drop LOUD (a
+>   diagnostic naming the missing `lift`) — the S231 fail-closed floor, no grammar change;
+>   **(b)** extend the implied-`lift` sugar to a loop body whose body is exactly one markup expression,
+>   amending §17.4 — symmetric with §17.6.10 and the smaller surface for an adopter to learn.
+> **Recommend (a) FIRST regardless of the eventual answer:** (a) is strictly compatible with (b)
+> landing later (a loud refusal becoming an acceptance is not a breaking change), and it removes the
+> silent-wrong TODAY, which is the actual adopter cost. The lowering for (b) already exists —
+> `emitForStmtWithContainer` handles the `lift` spelling — so (b) is a desugar of the same shape as
+> S433's, not new codegen.
 
 ### g-ast-markup-text-interp-adjacent-space-dropped — a space between literal text and an adjacent `${…}` in markup text is dropped: `Saved ${@cell}` renders `Savedhello`
 <!-- @gap id=g-ast-markup-text-interp-adjacent-space-dropped sev=MED status=open locus=searched:compiler/src/tokenizer.ts(~804 read-to-whitespace-or-tag-close),compiler/src/ast-builder.js(text-child construction) — parseLiftContentParts PROVEN INNOCENT by S377-peter (returns [{text:"Saved "},{expr:"@cell"}] with the space intact); the content string reaching the emitter already lacks it prov=adopter:S377-peter-dog-food-routed -->
