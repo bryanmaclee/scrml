@@ -14,11 +14,16 @@
  *
  * Environment:
  *   SCRML_PORT  — port to listen on (default: 3100)
+ *
+ * Binds 127.0.0.1 by default (g-dev-server-binds-all-interfaces): `/compile`
+ * reads and writes paths on this machine and `/shutdown` stops the server, so a
+ * network-reachable compiler server is opt-in via `--host`.
  */
 
 import { compileScrml, scanDirectory } from "../api.js";
 import { resetVarCounter } from "../codegen/var-counter.js";
 import { resolve } from "path";
+import { listen, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -32,6 +37,10 @@ eliminate JIT warmup cost (~64ms) on every compilation request.
 
 Options:
   --port, -p <n>        HTTP port (default: 3100, or SCRML_PORT env var)
+  --host [addr]         Address to listen on (default: 127.0.0.1 — this machine
+                        only). Bare --host listens on every interface (0.0.0.0);
+                        anyone on the network can then compile, read and write
+                        files through it. --host=<addr> for a specific one.
   --verbose, -v         Log per-stage timing for each compilation
   --help, -h            Show this message
 
@@ -52,10 +61,11 @@ Examples:
  * Parse serve-command arguments.
  *
  * @param {string[]} args
- * @returns {{ port: number, verbose: boolean }}
+ * @returns {{ port: number, host: string, verbose: boolean }}
  */
-function parseArgs(args) {
+export function parseArgs(args) {
   let port = parseInt(process.env.SCRML_PORT ?? "3100", 10);
+  let host = DEFAULT_HOST;
   let verbose = false;
 
   for (let i = 0; i < args.length; i++) {
@@ -66,6 +76,14 @@ function parseArgs(args) {
         console.error(`Invalid port: ${args[i]}`);
         process.exit(1);
       }
+    } else if (arg === "--host" || arg.startsWith("--host=")) {
+      const parsed = parseHostFlag(args, i);
+      if (parsed.error) {
+        console.error(parsed.error);
+        process.exit(1);
+      }
+      host = parsed.host;
+      i = parsed.next;
     } else if (arg === "--verbose" || arg === "-v") {
       verbose = true;
     } else if (arg === "--help" || arg === "-h") {
@@ -77,7 +95,7 @@ function parseArgs(args) {
     }
   }
 
-  return { port, verbose };
+  return { port, host, verbose };
 }
 
 /** Track compilation count for diagnostics */
@@ -104,7 +122,7 @@ function cleanupBetweenCompilations() {
 export async function runServe(args) {
   const opts = parseArgs(args);
 
-  const server = Bun.serve({
+  const server = listen({
     port: opts.port,
     async fetch(req) {
       const url = new URL(req.url);
@@ -289,9 +307,11 @@ export async function runServe(args) {
 
       return new Response("Not found", { status: 404 });
     },
-  });
+  }, opts.host);
 
-  console.log(`scrml compiler server listening on http://localhost:${server.port}`);
+  console.log(`scrml compiler server listening on ${displayUrl(opts.host, server.port)}`);
+  const exposed = networkNotice("scrml serve:", opts.host, server.port);
+  if (exposed) console.log(exposed);
   console.log(`Endpoints:`);
   console.log(`  GET  /health         — liveness check`);
   console.log(`  POST /compile        — compile files from disk`);
