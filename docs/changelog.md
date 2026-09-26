@@ -7604,6 +7604,93 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 
 ## Recently Landed
 
+### S433 (2026-09-26, Peter · AdiPDesk — a SECOND peter box, parallel to S432 on the laptop) — every fix that self-reported clean came back with a finding, and four measurement failures shared one shape
+
+**The arc.** First boot on this clone since S423, so it woke seven sessions stale and found the ground had
+moved underneath it: bryan ruled **P1–P7** at S430, and **P7 reframes the whole peter lane** — the TS
+compiler is now fixed only when it blocks the bootstrap, an adopter reported it, or it is security.
+Everything else becomes `status=carried`, a conformance case expected to fail on impl#1. So "work through
+the bug list" stopped meaning 135 open HIGHs and started meaning a much smaller, sharper population. The
+session ran two peter boxes against one branch-protected trunk, which turned out to be its own lesson.
+
+**Seven PRs merged.** Two carry gift-wrapped decisions to bryan; one repairs a gate that could not fail;
+one is a ledger batch; three are fixes, and **every one of those three came back from its adversarial pass
+with a real defect** — in work that was CI-green and self-reported clean.
+
+- **#1062 — one session store per build, and sqlite defaults that survive the contention they exist for.**
+  Two units of one program opened two different `.scrml-sessions.db` files, so a nested page answered
+  `{"auth":false,"uid":null}` at HTTP 200 for a cookie the root unit had just minted — zero diagnostics. The
+  class had **three** members, not one: the store path, `sessionExpiry` falling back to 1h on the minting
+  unit, and — never filed before — **the cookie NAME differing per unit**, which defeats the store fix by
+  itself. ⚑ Its first cut was **inert in exactly the scenario it exists for**: both sqlite pragmas shared one
+  `try` with WAL first, WAL needs a momentary EXCLUSIVE lock, so under contention it threw, the shared
+  `catch` swallowed it, and `busy_timeout` was never reached — measured `delete`/`0` *with the fix
+  installed*. ⚑ And `emit-tool.ts` was uncovered, so a CLI tool sharing the adopter's db still **failed in
+  8ms** while the server path wrote after 1205ms; the tool path additionally needs `await` rather than the
+  server's floating `void`, because §64.3's harness ends in `process.exit()` and kills a pending IIFE — so
+  WAL never landed even on an uncontended tool run. **Side effect worth knowing: this makes the B5
+  CSRF-pinning assertion actually execute on Windows** for the first time. It had been dying at a *setup*
+  assertion because the test computed the store key with `path.join` while the emitter concatenated — a
+  security guard test silently not running on this platform while passing on Linux CI.
+- **#1066 — an `<each>` enclosed by an inert `if=` no longer emits a renderer into a `<template>` nobody
+  paints.** Limb (a) of the ruled S385 A2 fork; the entry stays `narrowed` because limb (b) is bryan's arc.
+  ⚑ Round 1 fixed the bug and **inverted it for fourteen tags**: the predicate mirrored `emit-html`'s `if=`
+  gate CONDITION but not its DISPATCH ORDER, so tags whose emitter returns above the gate were called inert
+  and lost a server first paint that previously worked. Round 2 fixed that, **overruled its own reviewer on
+  `outlet`** (correctly — the reviewer's list would have re-opened the original silence), and found a
+  **fifteenth** route no static tag set can express. Round 3 found round 2's new `<template>` host was itself
+  a false host in one shape.
+- **#1067 — a bare-markup control-flow arm renders.** `${ if (@on) { <p>Yes</p> } else { <p>No</p> } }`
+  rendered nothing at exit 0 while the same arms holding a string or an explicit `lift` both worked. Not the
+  one-line classifier widening it looked like: the value-form route lowers an arm over its RAW TEXT, which
+  for markup is not JS — the sibling value-form `match` limb has the opposite disposition built for exactly
+  that reason. Fixed by making the implied `lift` explicit in the tree, so the existing lift pipeline handles
+  it with zero codegen change and byte-identical output to the `lift` twin. ⚑ Its first cut **half-rendered**:
+  an arm whose markup was not the first piece was dropped while its siblings converted, so
+  `else { log(…) <p>…</p> }` rendered one authored branch and silently not the other.
+- **#1057 — the determinism gate was blind to a whole diagnostic stream and to its own defect's shape.**
+  `digestCompile` hashed `errors` + `warnings` only, so an order-dependent `lintDiagnostics` was invisible —
+  and six such diagnostics exist on the gated sample itself. It also compiled each file ALONE, so the
+  within-unit order axis (the original defect's own shape) was never exercised.
+- **#1056 · #1058 — seven items gift-wrapped for bryan**, each ending in a question answerable in two words.
+  The tenant one **reframed his own question**: he asked what a *two*-qualifier `CREATE TABLE` identity is;
+  PA-verified by execution, the damage is already live at **one** qualifier — two distinct qualified tables
+  collapse to one bare key and **source order decides** whether `tenant_id` survives, so declaring the
+  non-tenant table first silently disables the §14.8.10 floor for a table that *does* carry tenant scoping.
+  Corpus cost of rejecting: zero authored files.
+- **#1061 — three review markers, five filings, two resolutions, one narrowing.** Two entries had been
+  sitting in bryan's queue awaiting rulings he **no longer owed** (both halves of the two-language-gaps entry
+  were ruled at S430 and built at #1048/#1051).
+
+**⚑ THE DURABLE, and it is about measurement rather than code.** Four probe failures this session, four
+different mechanisms, one class — **a probe that cannot see the thing it reports zero of, whose output is
+indistinguishable from a clean result.** (1) The PA's own CI watcher piped `gh` through `jq`, which is not
+installed on this box, so every gate check evaluated to "not green" rather than erroring — it would have
+polled 20 minutes and reported a confident false give-up. (2) Three times the PA chained `&& echo "MERGED"`
+after a piped command, and the echo fired while the merge had conflicted. (3) The if-arm agent's harness used
+`execFileSync` (stdout only) and appended stderr solely on the `catch` path, so a **zero-exit** compile hid
+every stderr diagnostic — two "zero diagnostic changes" claims were assumed-zero wearing measured-zero's
+clothes. (4) The SSR gap entry's evidence came from a harness whose `parseAST` returns `buildAST(...).ast` and
+**discards buildAST's diagnostics**, so a hard `E-PAGE-INVALID-ATTR` was reported as a silent drop. The rule
+that falls out: **prove the harness can see the thing it reports zero of, before quoting the zero.**
+
+**Also durable: `strict:true` makes a merge burst arithmetically impossible.** Every merge invalidates every
+other open PR's green — including your own — so landing N PRs costs N CI cycles regardless of who is landing.
+With two sessions on one trunk this reads like a broken gate and is not one. And a **rebase cannot be
+published from this box at all**: the pre-push hook is relaxed for new-ref pushes but runs the full suite on
+forced ones, and the local baseline is never green — so a rebased PR must be re-opened on a fresh ref (#1064
+→ #1066), never `--no-verify`.
+
+**Baseline correction for this clone: 21 red, not 9.** Two test files build fixed, shared, absolute temp roots
+outside the repo and delete them per test, so they race each other and any concurrent session; they fail in
+BOTH directions and pass 24/24 in isolation. Filed. **Judge a red local tier here by failure NAME SET, never
+by count.**
+
+**Gate at close:** `gate` + `windows` green on all seven merged PRs, `tracking`'s five dev-watcher names
+re-measured against main's own newest run per PR and byte-identical every time. Review floor: three markers
+appended; the session's own landings are recorded rather than left as phantom debt.
+
+
 ### S428 (2026-09-23, bryan · XPS-8950) — the decision was made: do BOTH tracks, and the prerequisites turn out to have been written down since S117
 
 **The arc.** Started as a routine landing session and became the architecture decision. bryan named a
