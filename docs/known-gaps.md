@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 135 | 4 |
-| MED | 301 | 0 |
-| LOW | 110 | 0 |
+| HIGH | 139 | 4 |
+| MED | 311 | 0 |
+| LOW | 115 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -1206,7 +1206,12 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 <!-- @gap id=g-native-sqlite-connection-lacks-wal-and-busy-timeout-config sev=MED status=open locus=compiler/src/codegen/emit-server.ts:727-729(+2438-2441-session-store) prov=adopter:assetManagement-db.js-parity-audit-S387-peter-PA-confirmed-by-execution-scratchpad/dogfood/wal-empirical.mjs-scrml-emitted-new-SQL-reads-journal_mode=delete-busy_timeout=0-vs-db.js-wal/5000 route=bryan:handOffs/incoming/S387-peter-routes.md -->
 
 ### g-ssr-each-under-if-template-silently-blank-first-paint — a server-authority `<each>` wrapped in an `if=` renders its SSR-composed rows into a `data-scrml-each-mount` div that sits INSIDE the `if=`'s inert `<template>`, so the rows never paint — **blank first paint, ZERO diagnostics**. **PA-CONFIRMED by execution** (`scratchpad/dogfood/s387ssr-if-wrap-traps-each-isolation.mjs`, mounted in happy-dom): the identical `<each in=@accounts>` over a seeded server-authority cell paints under a plain `<div>`, no-wrap, and `show=`, but is BLANK under `if=` — all four 0-error/0-warning/0-lint. `if=` lowers to an inert `<template>` + hydrate-marker (`show=` keeps the DOM live, so it is spared). **PA-VERIFIED locus:** `compiler/src/codegen/emit-ssr-render.ts` `buildSsrEachRenderers`→`walk(node, insideEach)` (~404-458) threads only `insideEach`; an each under `<div if=>` has `insideEach===false` → line 413 treats it as a top-level server-render mount → `out.push(r)` (442) emits a renderer for a mount the `if=` template makes inert, and the existing `I-SSR-EACH-CLIENT-RENDERED` fallback lint (429-440) never fires (it keys on an unrenderable ROW TEMPLATE, not if-enclosure). Dominant real-world shape (a guarded list: `if=@loaded`/`if=@currentUser`/`if=@rows.length` around an `<each>`) silently loses its server first paint. **Fork (turnkey in the routing note):** A = thread an `insideInertIf` flag so an if-enclosed each falls back to client-render + fires the existing lint (kills the silence; peter-buildable once ruled) · B = server-render a server-known `if=` branch at first paint (semantics-changed; also closes the sibling `if=@serverState`-never-server-evaluated finding). ROUTED to bryan (design half). — `NEW S387-peter (SSR dog-food Finding 1, PA-confirmed by execution on 551ffcbc)`; **HIGH**; open
-<!-- @gap id=g-ssr-each-under-if-template-silently-blank-first-paint sev=HIGH status=open locus=compiler/src/codegen/emit-ssr-render.ts:404-458-walk-tracks-insideEach-not-if-template-enclosure prov=adopter-shape:assetManagement-guarded-lists-S387-peter-SSR-dogfood-Finding-1-PA-confirmed-by-execution-happy-dom-isolation-each-paints-under-div/no-wrap/show-but-blank-under-if route=bryan:handOffs/incoming/S387-peter-routes-ssr-if-each.md -->
+⛑ **S433 — LIMB A IS LANDED; THE SILENCE IS CLOSED AND THE ENTRY IS NARROWED, NOT RESOLVED.** Per the operator's S385 ruling (*"(a) NOW, (b) AS ITS OWN ARC"*), `walk` now threads an inert-`if=` enclosure reason alongside `insideEach` (`inertIfEnclosureReason`, `emit-ssr-render.ts`), so an if-enclosed each emits NO server renderer and DOES fire `I-SSR-EACH-CLIENT-RENDERED` with the enclosure named and `show=`-shaped advice. **The locus hypothesis in the paragraph above HELD and was WIDENED by a class probe: the misclassification is not limited to `if=` on the immediate parent.** Five shapes reproduced identically and are all now covered — `if=` immediately above · `if=` several levels up (the reason is STICKY) · `if=` on the `<each>` OPENER itself (`node.ifCond`, §17.1.2) · an `else-if=` arm · an `else` arm (an `if`-chain lowers EVERY branch and the else into a `<template>`). ⚠ **What limb A does NOT do: the guarded list still does not paint at FIRST paint** — it paints after hydration, exactly as any client-rendered each does (measured both sides in happy-dom: 0 live rows before hydration, 2 after, identical pre- and post-fix). What changed is that the author is now TOLD, and the compiler stops emitting a renderer whose output it splices into a `<template>` nobody paints. **Direction of change: INERT on the whole shipped corpus** — `scripts/corpus-emit-differential.ts` over 1981 sources / 7698 artifacts: *NO DIFFERENCES* (0 artifact content diffs, 0 diagnostic changes), because no corpus file carries a server-authority each under an `if=`. On the defect shape itself the HTML and client bundle are byte-identical and the server bundle loses only the dead renderer + fill. Gate: `compiler/tests/integration/ssr-a-terminus.test.js` (f) — 9 cases, 6 of them BITE-VERIFIED red against the pre-fix compiler — plus conformance `ssr/i-ssr-each-client-rendered-if-enclosed-pos` and the `show=` control `ssr/i-ssr-each-client-rendered-show-enclosed-neg` (the discriminator is the §17.1 template lowering, NOT "carries a conditional attribute"). **REMAINING (= limb B, the ruled separate arc):** server-render the resolvable `if=` branch at first paint, which also closes the sibling `if=@serverState`-never-server-evaluated finding — `semantics-changed`, bryan's design half, still open. ⚠ **Also MEASURED and deliberately NOT in scope:** an `<each>` inside a `<match>`/`<when>` arm is invisible to `buildSsrEachRenderers` altogether (the arm body arrives as a raw `text` child — the invariant-70 two-parse-origins split), so it emits no renderer AND no lint; that is the conservative client-render fallback, unannounced. Not the blank-paint defect (no wrong renderer is emitted), but a separate residual silence. **Severity re-grade is the PA's call** — the silent-wrong limb is gone; what is left is a loud conservative limitation. ⛑ **S433 FIX ROUND (adversarial review, LAND-WITH-FIXES) — THE FIRST CUT CARRIED AN INVERTED DEFECT OF ITS OWN, AND THE LESSON GENERALISES.** Mirroring emit-html's `if=` **gate PREDICATE** (`isGateableIfValue`) is NOT mirroring its **DISPATCH**: the predicate says whether the gate would accept the value, never whether control flow REACHES the gate. Fourteen tags dispatch to their own handler and `return` first, and there `if=` is silently ignored — no `<template>`, children LIVE. The first cut called them inert and so **DELETED A SERVER FIRST PAINT THAT HAD ALWAYS WORKED**, with a lint whose stated reason was false: REPRODUCED through `compileScrml` for `<errorBoundary if=…>` and for a compound-parent wrapper (2 rows painted → 0, exit 0). ⛑ **A `<page if=…>` reproduction was also claimed in the first draft of this note and is WITHDRAWN — `<page if=…>` hard-errors `E-PAGE-INVALID-ATTR`; the apparent reproduction came from a harness that discards `buildAST`'s diagnostics (see the FIFTEEN-ROUTES entry below for the harness lesson). `page` stays in the bypass set on DISPATCH grounds, which is the only ground the set needs.** Fixed by an exported `IF_GATE_BYPASS_TAGS` derived by **enumerating every `return` above the gate** (`channel errorBoundary errorboundary errors gamepad keyboard mouse page poll program render request timeout timer`), with `outlet` deliberately EXCLUDED — verified, not assumed: outlet REWRITES its node to `main`/`div` keeping `if=` and re-enters `emitNode`, so the gate does fire. ⚑ **AND A THIRD BYPASS THE REVIEW DID NOT FIND: emit-html's COMPOUND-PARENT wrapper dispatch also returns before the gate, and its condition is `lookupStateCell(fileScope, tag) === "compound-parent"` — a per-FILE declaration fact NO TAG SET CAN CARRY.** Reproduced through the real `compileScrml` path (fence LIVE, renderer suppressed); handled by mirroring that test directly off `fileAST._scope`, the same artifact emit-html reads. ⚑ **Second fix-round finding, same silence by a shorter route: an AUTHOR-WRITTEN `<template>` tag**, no `if=` anywhere — renderer emitted, rows in the composed bytes, 0 rows reachable from `document`. Now an inert host in its own right, with its own advice tail (`show=` is no remedy for a literal `<template>`; its content is inert by the HTML standard). **Standing rule this arc earned:** a MISSED inert host costs a missed diagnosis (the pre-existing blank paint, unchanged); a FALSE one costs working output — the two are not symmetric, so every uncertain case must resolve to "not inert". Corpus re-measured after the fix round: over the same 1,985 sources / 7,718 artifacts the ONLY differences are the two new POS conformance cases written to prove the change moves. — `S433-peter (limb A built, reproduced + class-probed + corpus-measured; fix round closed 2 review findings + 1 self-found)`; **HIGH**; narrowed
+<!-- @gap id=g-ssr-each-under-if-template-silently-blank-first-paint sev=HIGH status=narrowed locus=compiler/src/codegen/emit-ssr-render.ts:inertHostFor+walk-threads-inertHost+IF_GATE_BYPASS_TAGS-S433-limb-A-landed;remaining=limb-B-server-render-the-resolvable-branch prov=adopter-shape:assetManagement-guarded-lists-S387-peter-SSR-dogfood-Finding-1-PA-confirmed-by-execution-happy-dom-isolation-each-paints-under-div/no-wrap/show-but-blank-under-if route=bryan:handOffs/incoming/S387-peter-routes-ssr-if-each.md -->
+
+### g-if-has-no-effect-on-fifteen-dispatch-routes-that-return-before-the-mount-gate — `if=` on any of **fifteen** dispatch routes has **NO EFFECT**: the element renders (or its children do) unconditionally. **PA-CONFIRMED by compiling** (S433, through `compileScrml`): `<errorBoundary if=@loaded>` emits `<div data-scrml-error-boundary="…">` with its children in the LIVE tree and **no `<template>`, no mount marker, no binding** — structurally identical output with and without the `if=` (not *byte*-identical: the content-addressed chunk-namespace token moves with any source byte, which is the hash doing its job, not a behaviour difference). **Root, read not inferred:** in `emit-html.ts` `emitNode`'s markup branch, the §17.1 `if=` mount gate is the LAST dispatch (`const ifAttrCheck = attrs.find(a => a.name === "if")`); **fourteen** earlier `return`s hand the node to a tag-specific handler that never consults `if=` — `errorBoundary`/`errorboundary`, `errors`, `render`, `program` (two returns: the named-worker `if (nameAttr) return;` and the transparent-children one), `page`, `channel`, `LIFECYCLE_SILENT_TAGS` (`timer`, `poll`), `INPUT_STATE_TAGS` (`keyboard`, `mouse`, `gamepad`), `REQUEST_TAGS` (`request`), `TIMEOUT_TAGS` (`timeout`) — plus a **FIFTEENTH route, the dynamic one**: a block-form tag resolving to a `compound-parent` cell (a transparent namespace wrapper). The STATIC 14 tag names are exported as `IF_GATE_BYPASS_TAGS` (`emit-html.ts`) because a second consumer needs them; the dynamic route cannot be in a tag set and is mirrored by its own `lookupStateCell` test in `emit-ssr-render.ts`. ⛑ **"SILENTLY" IS FALSE FOR MOST OF THEM, AND THAT WEAKENS FORK A — MEASURED PER TAG (S433 final round), not assumed:** **`W-ATTR-001` ALREADY FIRES and names the attribute** — *"Attribute `if=` is not recognized on `<errorBoundary>` … has no compile-time effect"* — for `errorBoundary`, `errorboundary`, `errors`, `render`, `channel` and `program`. **`<page if=…>` is a hard ERROR, `E-PAGE-INVALID-ATTR`** (plus `W-ATTR-001`) — so `page` is not a silent-drop instance at all. `timer`/`poll`/`keyboard`/`mouse`/`gamepad`/`request`/`timeout` raise no `if=`-naming diagnostic, but every shape that reaches them hard-errors on their own required attributes (`E-LIFECYCLE-009`/`-018`, `E-INPUT-001`/`-002`/`-003`, `E-TIMEOUT-001`, and `E-SCOPE-001` on the `if=` value itself for `timer`/`poll`/`timeout`), so the file does not compile and the drop is not independently observable. ⚑ **THE RESIDUE IS THEREFORE ONE LIMB, NOT FOURTEEN: the compound-parent namespace wrapper — `<signupForm if=@loaded>` compiles CLEAN and diagnostic-free, and its children render unconditionally.** Plus the softer point that on the six `W-ATTR-001` tags an author who does not read warnings gets content rendered that they asked to be conditional. **Fork (a semantics call, not a codegen patch):** A = ESCALATE/EXTEND the existing signal — `W-ATTR-001` covers six of the routes already, so the work is adding the compound-parent wrapper and deciding whether "your predicate does nothing" deserves an error rather than a warning · B = HONOR `if=` on the child-emitting routes by routing them through `emitIfMountGate` (bigger: `<errorBoundary>`'s own `<div>` and the boundary registration would move inside the template, and §17.1.2's `E-IF-IN-DISPATCHED-ARM` interactions need re-checking) · C = document it as intended per route. **Reachability MEASURED: zero instances in 1,985 corpus sources** (0 matches for `<errorBoundary … if=`, 0 for `<page … if=`) and zero `errorBoundary` in the adopter app — LATENT, not live. ⚠ **CARRY THE HARNESS LESSON, NOT JUST THE CORRECTED SENTENCE.** The first draft of this entry claimed `<page if=…>` reproduced the errorBoundary behaviour. It does not, and the reason is the measuring instrument: the round-1 evidence came through `ssr-a-terminus.test.js`'s `compileBundles`, whose `parseAST` returns `buildAST(...).ast` and **DISCARDS buildAST's own diagnostics**, so a FATAL `E-` was invisible to it. Same family as the standing "a probe reading only `result.errors` misses `warnings`/`lintDiagnostics`" lesson, one stage earlier: **a claim about what a compiler says must come from the path that reports everything the compiler says** (`compileScrml`, all three fields). Surfaced as the inverted-defect half of the S433 SSR-each arc; the drop itself is out of that arc's charter. — `NEW S433-peter (found while fixing g-ssr-each-under-if-template-silently-blank-first-paint; per-tag diagnostics MEASURED through compileScrml in the final round)`; **LOW**; open
+<!-- @gap id=g-if-has-no-effect-on-fifteen-dispatch-routes-that-return-before-the-mount-gate sev=LOW status=open locus=compiler/src/codegen/emit-html.ts:emitNode-markup-branch-fourteen-returns-above-the-if-gate+the-dynamic-compound-parent-wrapper-route(static-names-exported-as-IF_GATE_BYPASS_TAGS) prov=PA-confirmed-by-compiling-S433-via-compileScrml:W-ATTR-001-already-names-if-on-6-routes;page-hard-errors-E-PAGE-INVALID-ATTR;the-only-clean-and-diagnostic-free-limb-is-the-compound-parent-wrapper;zero-corpus-instances-in-1985-sources -->
+
 
 ### g-bindvalue-each-select-under-if-drops-initial-value — a `<select bind:value=@cell>` whose `<option>`s come from an `<each>` and that is mounted under `if=` renders with **no option selected** at first paint, though `@cell` matches an option and every option is in the DOM — silent, exit 0, zero diagnostics. **PA-CONFIRMED by execution on HEAD `085570ca`** (happy-dom; minimal repro + class matrix `/tmp/pa-f1.scrml`, aM Fleet Add/Edit form via `scratchpad/am-dogfood/laneA/`). **Class boundary mapped — the discriminator is the conjunction:** each-populated select + `bind:value` + `if=` mount fails; the SAME each-select at TOP LEVEL binds correctly, and a STATIC-option select under `if=` binds correctly. A post-mount `set(cell, …)` DOES update the select — only the INITIAL mount value is dropped. **Root (PA-verified, airtight):** `_scrml_mount_wire` (`compiler/src/runtime-template.js:1667-1668`) runs `rewire` (the emitted `_scrml_bind_rewire` → `select.value = get(cell)`, a no-op while the matching `<option>` does not exist yet) **before** `_scrml_remount_each` (which renders the options); the bind's re-apply effect tracks only the bound cell, never the each's source, so it never re-fires after the options append. Inverse of the correct top-level init order (each renderer runs BEFORE `_scrml_bind_rewire(document)`) — which is why the non-`if=` case works. Same root family as the aM app's imperative-paint-before-`if=`-mount symptom (Lane A Finding 2, MED). Distinct from `#131` (select+bind, general) and RESOLVED S286 `g-bindvalue-value-side-dropped-in-each` (each-item input, no `if=`); NOT gate-covered. **Fork (turnkey in the routing note):** A = swap the mount-wire order so `_scrml_remount_each` runs before `rewire` (minimal, PA-lean; owes the S239 pass for the every-`if=`-subtree blast radius) · B = re-apply the select value after its option children render (surgical; touches `emit-bindings.ts:656/666` + runtime, `<select>`-only). ROUTED to bryan (`if=`-mount effect-ordering = runtime-semantics authority). — `NEW S389-peter (aM client-UI dog-food sweep, PA-confirmed by execution on 085570ca)`; **HIGH**; open
 <!-- @gap id=g-bindvalue-each-select-under-if-drops-initial-value sev=HIGH status=open locus=compiler/src/runtime-template.js:1667-1668-_scrml_mount_wire-calls-rewire(select.value)-before-_scrml_remount_each(renders-options)-inverse-of-top-level-init-order prov=adopter:assetManagement-Fleet-Add/Edit-form-S389-peter-client-UI-dogfood-PA-confirmed-by-execution-085570ca-class-matrix-each-select-under-if-blank-vs-top-level/static-under-if-ok route=bryan:handOffs/incoming/S389-peter-routes-bindvalue-each-select-under-if.md -->
@@ -4718,8 +4723,188 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > it is a few lines against a file that is about to be opened anyway. See
 > `docs/changes/ruling2-bare-call-landing-2026-08-26/DE-RISK.md`.
 
-### g-if-arm-bare-markup-branch-silently-dropped — ⭐ a lift-less MARKUP branch in a value-form `if` renders NOTHING at exit 0 with zero diagnostics, while the identical branch holding a STRING renders correctly
-<!-- @gap id=g-if-arm-bare-markup-branch-silently-dropped sev=HIGH status=open locus=compiler/src/codegen/emit-html.ts:isValueFormIfStmt(the value-form classifier)+compiler/src/codegen/emit-lift.js:emitIfStmtWithContainer(called from compiler/src/codegen/emit-control-flow.ts:725) prov=adopter:S377-peter-dog-food-routed -->
+### g-if-arm-bare-markup-branch-silently-dropped — ⭐ a lift-less MARKUP branch in a value-form `if` renders NOTHING at exit 0 with zero diagnostics, while the identical branch holding a STRING renders correctly — `HIGH; RESOLVED S433`
+<!-- @gap id=g-if-arm-bare-markup-branch-silently-dropped sev=HIGH status=resolved locus=compiler/src/implied-lift-desugar.ts(the pass)+compiler/src/component-expander.ts(runCEFile head — the pipeline seam)+compiler/src/codegen/emit-match.ts(re-applied after the bodyRaw re-parse)+compiler/src/type-system.ts(liftedMarkupChildNodes — the lifecycle-walker hole the desugar newly reached) resolved-by=S433-implied-lift-desugar prov=adopter:S377-peter-dog-food-routed -->
+
+> **⛑ RESOLVED S433 — and the ROUTED LOCUS HYPOTHESIS WAS HALF WRONG, which is the instructive part.**
+> The routed hypothesis named `emit-html.ts:isValueFormIfStmt` as the classifier to widen. It IS the
+> classifier that declines (`isSoleBareExprBranch` requires `kind === "bare-expr"`, and a bare-markup
+> arm parses to `{kind:"html-fragment"}` — AST-dumped, not inferred), **but widening it is the wrong
+> fix, and the sibling `match` limb is the measured proof.** The value-form route lowers an arm to a
+> CONDITIONAL EXPRESSION over the arm's raw text (§17.6.8 latitude), and a markup arm's raw text is not
+> JavaScript: a value-form `match` with markup arms emits `return <p>Yes < / p >;` — INVALID JS —
+> which is exactly why THAT limb carries `E-MATCH-ARM-MARKUP-IN-VALUE` instead of a lowering.
+>
+> **SPEC named the right lowering itself: the arm *carries an implied `lift`*** (§10.1 limb 2, S391
+> amendment, `provenance: ruling:user-voice-scrml.md S371 "value-form b"`; §17.6.10 "A branch body
+> that is exactly one expression SHALL be equivalent to `{ lift <expression> }`"; §1.4/L1 "markup
+> elements may sit anywhere expressions sit"). So the fix makes the implied `lift` EXPLICIT in the
+> tree and the already-correct `lift` pipeline handles it with **no codegen change at all** — render
+> slot (`stmtContainsLiftExpr`), lift group (`stmtContainsLift`), branch lowering
+> (`emitIfStmtWithContainer`). Measured: the desugared emit is **byte-identical to the
+> explicit-`lift` emit** apart from the content-derived chunk-scope id. That identity is the gate:
+> §17.6.10 asserts equivalence to `lift`, so parity with `lift` IS conformance.
+>
+> **Direction of change: newly-ACCEPTING in the compiler, conformance-RESTORING against SPEC.** Two-sided
+> evidence: **877 corpus files under `samples/` emit byte-identically** (the shape occurs nowhere in
+> the corpus, so the pass is inert on everything that already compiled), and the shape INJECTED into a
+> real sample (`combined-002-todo.scrml` + one `${ if (@todos.length > 0) { <p class="hint">…</p> } … }`)
+> goes from `if (get("todos").length > 0) { }` — empty — to the full reactive lift group.
+>
+> **Gates:** `compiler/tests/unit/implied-lift-markup-arm.test.js` (13 tests, bite-tested: 10 fail
+> with the fix reverted) and conformance `control-flow/ctrl-029-value-form-sugar-markup-branch-pos`
+> (the MARKUP-valued sibling of `ctrl-021`, which pins only the STRING limb — the defect was exactly a
+> regression of one limb that every string-branch case was blind to). Full suite: the 9 pre-existing
+> failure names, zero new. Conformance 957/958, 1 xfail.
+>
+> **THREE THINGS THE CLASS PROBE CAUGHT THAT THE REPORTED INSTANCE DID NOT**, all fixed here:
+> 1. **The fragmented arm.** `{ <p>n=${@n}</p> }` is ONE expression but THREE nodes (the block-splitter
+>    hoists the interpolation to a sibling BLOCK_REF `logic`). A node-count shape test declined it and
+>    left that branch silently empty while its sibling rendered. The shape test is at SOURCE level: the
+>    arm's whole span extent is re-parsed and must yield exactly one markup node. **This is the
+>    commonest adopter spelling**; the first cut would have shipped a half-fix.
+> 2. **The half-converted cascade.** Conversion is ALL-OR-NOTHING per cascade — one decline leaves the
+>    whole cascade at pre-existing behaviour, so a shape outside §17.6.10's grammar fails uniformly
+>    rather than arguing by its working half that it is supported.
+> 3. **The `<match for=…>` arm body.** `emit-match` re-parses `entry.bodyRaw` at emit time and discards
+>    the pipeline-desugared `armBodyChildren` copy, so the arm dropped its branches while the identical
+>    interpolation at file level rendered. The pass is re-applied at that re-parse site.
+>
+> **A PARSER-PARITY DIVERGENCE FOUND ON THE WAY, recorded because it is load-bearing for anyone else
+> touching this shape:** the NATIVE parser spells a bare-markup arm
+> `bare-expr{exprNode:{kind:"markup-value", node}}` — markup tree INTACT — where the live `ast-builder`
+> flattens it to a raw `html-fragment` string. The pass handles both, and the native spelling needs no
+> source text (which is what lets it run at source-free seams such as the match-arm re-parse).
+>
+> **SEAM, stated because it is a compromise and not an ideal:** the pass runs at the head of CE
+> (Stage 3.2), not in the TAB where a parse-level equivalence belongs, because **CE is the earliest
+> stage handed both the AST and the file's `_sourceText`** (PRECG / NR / TC / SYM receive only
+> `{filePath, ast}`) and the source is required — the `html-fragment`'s own `content` is the
+> tokenizer-rejoined form (`"<p>Yes < / p >"`), which does not re-parse and has already lost interior
+> whitespace. CE's head still precedes component expansion (so a `<Foo/>` arm IS expanded — measured),
+> VP-2, TS, DG and CG. **The durable placement is the TAB, where there is exactly one parse**; until
+> then a new body-re-parse site needs the pass applied there too.
+> (`ast-builder.js` was under another session's ownership lock this window, which is why not now.)
+>
+> ⛑ **THREE RE-PARSE SITES NEEDED IT, WHICH IS THE ARGUMENT FOR THE TAB, NOT A DETAIL.** The CE head
+> plus `emit-match.ts` (the `<match for=…>` arm body, re-parsed from `entry.bodyRaw`) plus
+> `component-expander.ts:parseComponentBody` (a component definition's body, re-parsed from
+> `normalizeTokenizedRaw(raw)` — found by the S433 adversarial pass, NOT by the class probe, because
+> every probe shape was written outside a component). Each site discards the desugared copy and
+> re-parses raw text, so each needs the pass or the shape silently drops there while rendering
+> everywhere else. **A fourth site is knowingly left un-desugared: `type-system.ts`'s match-arm-each
+> `let` re-parse** sees an `html-fragment` run where CG sees a `lift-expr`. That provenance split is
+> benign for what the site does (it looks for `let` declarations, not markup) and is commented in
+> place rather than fixed — widening a type-check surface for no measured gain. **The count is the
+> point: a pass that has to be re-applied per re-parse site is mis-placed, and only the TAB fixes
+> that structurally.**
+>
+> ⚑ **ONE PRE-EXISTING HOLE HAD TO BE CLOSED TO AVOID TAKING A DIAGNOSTIC AWAY, and the conformance
+> suite — not the unit tests — is what caught it.** `e-type-lifecycle-variant-not-transitioned-pos` is
+> `${ if (@phase is .Draft) { <p>${@phase.publishedAt}</p> } }`, and its diagnostic was firing only
+> because the arm reached the §14.3 lifecycle walkers as a flat `html-fragment` + BLOCK_REF run whose
+> TEXT those walkers scan. Desugaring it to the `lift-expr` SPEC says it is would have silently
+> removed the error. Measured: **the explicit-`lift` spelling never fired it either** — a lifted markup
+> tree hangs off `expr.node` behind two non-array hops and carries no string field, so BOTH walkers
+> missed every `${…}` inside lifted markup. New shared `type-system.ts:liftedMarkupChildNodes` gives
+> both walkers that one hop, so the diagnostic now fires for both spellings and the two cannot drift.
+> **Generalisable: a desugar that replaces a text-shaped node with a structured one can silently
+> disable any diagnostic that was reading the text.**
+>
+> ⛑ **AND THAT HOLE-CLOSING IS A NEWLY-REJECTING SURFACE WIDER THAN THIS ENTRY FIRST SAID. CORRECTED
+> HERE ON MEASUREMENT.** `liftedMarkupChildNodes` is wired into the §14.3 WALKERS, not into the
+> desugar, so the new rejection needs **no `if` and no control flow at all**:
+> `${ lift <p>${@phase.publishedAt}</p> }` on its own goes **exit 0 → exit 1 `E-TYPE-001`**
+> (PA-measured base-vs-fix). **The surface is: any explicit `lift` of markup whose interpolations read
+> a lifecycle-typed cell's post-transition field** — spanning two codes, `E-TYPE-001` and
+> `E-TYPE-LIFECYCLE-VARIANT-NOT-TRANSITIONED` — **not "a control-flow arm"**, which is how this entry
+> originally (and wrongly) scoped it. The rejection is CORRECT: it is a genuine premature read the base
+> compiler missed, so this is conformance-restoring, not a widening. **MIGRATION COST, MEASURED rather
+> than asserted** (repo-wide, `*.scrml`, excluding `node_modules`): **2,669 files; 250 use `lift`; 3
+> declare a variant-progression lifecycle type** (all three are `conformance/cases/type-state-codes/`
+> cases); **the intersection is EMPTY** — verified by grepping `lift` across exactly those three files,
+> zero hits. So the newly-rejecting surface breaks **nothing** in tree. (The adversarial pass measured
+> 190 `lift` files against a narrower root; the counts differ, the empty intersection does not.)
+> ⚠ The adopter clone is not reachable from this worktree, so its side is **unverified here** — the
+> reviewer reports 1 `lift` file / 0 lifecycle types, also empty, and that is RELAYED, not confirmed.
+>
+> ⚠ **"ZERO DIAGNOSTIC CHANGES" WAS WRONG, AND THE WAY IT WAS WRONG MATTERS MORE THAN THE FACT.** A
+> diagnostic is **REMOVED** by the desugar: `${ if (@on) { <p title="${@t}">MARKA</p> } else { … } }`
+> fires `E-DG-002` (`@t` declared but never consumed) at base and does NOT after. Our side is correct —
+> the read IS real once the markup is a tree — but it proves the desugar changes what **every** later
+> stage sees, DG included, not just codegen. **The reason it was missed is a defect in the measuring
+> harness, not in the fix:** the probe used `execFileSync`, whose return value is stdout ONLY, and
+> appended stderr just in the `catch` branch — so on a ZERO-EXIT compile every stderr diagnostic was
+> invisible and the per-file diagnostic set read as complete when it was not. **An assumed-zero was
+> reported as a measured-zero, twice.** Re-measured with `spawnSync` (both streams on every path): the
+> 877-file corpus differential is **877/877 identical on exit code, diagnostic SET *and* per-artifact
+> sha1** — the inertness claim survives, but it is only now actually measured. The lesson is the
+> general one: **state a measurement's REACH, and prove the harness can see the thing it reports zero
+> of.**
+>
+> **CLASS PROBE — 15 shapes, each measured against its explicit-`lift` twin**
+> (`scratch-if-arm/class-probe.mjs` on the S433 branch). **COVERED at `lift` parity:** the reported
+> instance · `else if` cascade · no `else` · nested `if` in an arm · nested markup subtree · void /
+> self-closing element · arm markup carrying an event handler (`addEventListener` wired) · arm holding
+> a COMPONENT (expanded, no phantom tag) · arm markup interpolating a reactive cell · inside an
+> `<each in= key= as >` row (byte-identical to the twin) · inside a `<match for=…>` arm
+> (byte-identical). **NOT desugared, by decision:** an `if` in a `function-decl` body (a `lift` there
+> is not an accumulation into a markup parent, so synthesising one would change meaning) · a
+> mixed-value cascade (`{ if c { <span/> } else { "s" } }`) — that one needs the markup-VALUE lowering
+> (`_scrml_render_value` already accepts a DOM node), not the lift lowering, and stays pinned by
+> `each-inline-value-form-if-interp.test.js`'s residual PIN.
+>
+> ⛑ **WHAT THE ADVERSARIAL PASS FOUND THAT THE 15-SHAPE PROBE DID NOT, and why the probe missed it —
+> both were HIGH, both are fixed, and both were REPRODUCED here before building.**
+> **(F1) The all-or-nothing invariant was stated and not enforced.** `planArm` classified an arm by
+> `pieces[0]` only, so an arm whose markup is not the FIRST piece came back "no markup here" and the
+> cascade converted its OTHER arms and left this one dropped — a HALF-RENDER, at exit 0 with no
+> diagnostic, in BOTH arm positions and in a three-arm cascade's middle arm. `else { log(…) <p>…</p> }`
+> is ordinary adopter code. **The probe missed it because every one of its 15 shapes led with markup.**
+> ⚠ **And the obvious fix would not have worked:** `{ @k = 1  <p>A</p> }` parses to a SINGLE
+> `state-decl` whose `init` string is `"1 < p > MARKA < / p >"` — the markup is **swallowed into the
+> preceding statement's raw text**, so there is no `html-fragment` node to test for. The decline is
+> therefore a TEXT test (exact source extent with a tight `<`-then-name-char regex, plus the piece's own
+> string fields with a looser regex for the rejoined form), run PER PIECE and skipping `if-stmt` pieces
+> because the recursion already owns their markup. The first cut scanned the arm's whole extent and so
+> declined every `else if` cascade and every nested-`if` arm — caught by re-running the class probe, and
+> now pinned by an explicit regression-guard test.
+> **(F2) A component body was still dropping.** `parseComponentBody` re-parses from
+> `normalizeTokenizedRaw(raw)`; base and fix were BYTE-IDENTICAL (a bare `<span data-scrml-logic>`
+> anchor, no branch code) while the component's own explicit-`lift` twin rendered on both sides. Fixed
+> at that site; verified byte-identical to the twin. **The probe missed it because no shape was written
+> inside a component.**
+>
+> **F6 — a DELIBERATE dimension wider than §17.6.10, recorded so it is not mistaken for an oversight:**
+> the pass converts an `if` that is **not the sole content** of the interpolation
+> (`${ let x = 1  if (@on) { <p>A</p> } … }`), which §17.6.10's grammar scopes to sole-content.
+> §10.1 limb 2 carries **no** sole-content condition — it speaks of "an arm body that is exactly one
+> expression" generally — so the wider behaviour is arguably authorized by the other normative sentence.
+> It is also strictly better than the alternative: in a non-sole-content interpolation the bare-markup
+> arm would otherwise still drop silently. Flagged as the one place the implementation is wider than the
+> narrower of the two sentences.
+>
+> **RESIDUALS, each filed as its own entry rather than folded in:**
+> [[g-if-arm-multi-markup-element-silently-dropped]] · [[g-for-arm-bare-markup-silently-dropped]]
+> (this is the S377 RELAYED-UNVERIFIED `for` half, now PA-VERIFIED by execution) ·
+> [[g-lift-markup-adjacent-text-leading-space-dropped]] (found as a FAVOURABLE divergence — the sugar
+> is the faithful one and the pre-existing `lift` path is the defective one).
+>
+> ⚠ **ONE ADVERSARIAL CLAIM DID NOT REPRODUCE AND IS NOT CLAIMED AS A BENEFIT.** The pass was reported
+> to also repair a hard compiler CRASH on `<match for=View>` inside `<each>` with a bare-markup arm.
+> **PA-PROBED, three variants** (`on=r.v` with a struct field; `on=@cell`; an else-less arm), **base
+> side: no crash on any of them** — every one compiles exit 0 with only benign `W-PROGRAM-*` warnings
+> and silently drops the arm, i.e. the ordinary defect this entry is about, lowered through the ordinary
+> path. **A crash-repair claim is therefore NOT written into this entry**; if a real crash repro exists
+> it should be filed with its source, because it would be a different (and worse) defect than the one
+> resolved here.
+>
+> ⚠ **PROBE-METHOD NOTE, because it cost a false negative here.** The first cut of the `<each>` probe
+> wrote `<each rows as row>` — INVALID per §17.7 / SPEC:1074, which require `in=` or `of=` — and it
+> compiles to NOTHING at exit 0 with no diagnostic. That read as "the fix misses `<each>` rows" for a
+> full round; with the canonical `<each in=@rows key=r.id as r>` the shape is byte-identical to its
+> `lift` twin. **A probe on malformed source measures the malformation.** The silent acceptance of an
+> `<each>` missing its required attribute is a separate fail-open finding, reported not fixed.
 
 > **⚑ PA-EXECUTED at S376 with a three-way discriminator — the fix direction the report proposed is NOT the one the evidence supports.** Routed turnkey by S377-peter from a happy-dom dog-food run; the PA reproduced it and then varied the branch VALUE, which changed the diagnosis.
 >
@@ -4738,6 +4923,94 @@ Reuse-inside-iteration is a bread-and-butter UI pattern; the silent-nothing mode
 > **This is the FOURTH measured divergence in the §17.6 value-form area**, after [[g-value-form-control-flow-unspecified]] (RULED S371 limb b), [[g-value-form-if-no-else-renders-nothing]], and the S371 `value-form`-is-not-a-word finding. Repeated review, same class → **converge, do not enumerate**: the amendment should be scoped to state the value-form rule once, over branch VALUES, rather than gaining one clause per witnessed shape.
 >
 > **NOT established by the PA, carried as RELAYED-UNVERIFIED:** the report's second example, a bare-markup body in a `for` arm (`${ for (let x of @xs) { <li>…</li> } }`). §17.4 documents the Tier-0 form WITH `lift`, so "lift required" may be correct there and the defect only the silent drop — a different disposition from the `if` half. The PA's emitted-artifact probes could not discriminate the two `for` shapes and are recorded as inconclusive; **re-derive this half in a DOM before scoping it**, do not inherit it from this entry.
+
+### g-lift-markup-adjacent-text-leading-space-dropped — `lift <div><span>x</span> tail</div>` emits `createTextNode("tail")`, dropping the space, so `BIG 90` renders `BIG90` — `NEW S433; LOW; open`
+<!-- @gap id=g-lift-markup-adjacent-text-leading-space-dropped sev=LOW status=open locus=compiler/src/codegen/emit-lift.js(the markup-tree text-child lowering reached from emitLiftExpr — the `lift` path, NOT the §17.6.10 desugar) prov=empirical:S433-found-as-a-FAVOURABLE-divergence-while-checking-sugar-vs-lift-parity -->
+
+> **⚑ FOUND AS A PARITY FAILURE IN WHICH *OUR NEW PATH IS THE CORRECT ONE*, which is why it is filed
+> against `lift` and not against the sugar.** While gating [[g-if-arm-bare-markup-branch-silently-dropped]]
+> on "the sugar must emit what `lift` emits", one shape diverged in the sugar's FAVOUR:
+>
+> | spelling | emitted | rendered |
+> |---|---|---|
+> | `{ <div class="w"><span>x</span> tail</div> }` (sugar) | `createTextNode(" tail")` | `x tail` ✅ |
+> | `{ lift <div class="w"><span>x</span> tail</div> }` | `createTextNode("tail")` | `xtail` ❌ |
+>
+> The sugar re-parses the author's EXACT source slice, so it keeps the leading space; the `lift` path
+> loses it. Adopter-visible form: `BIG 90` renders `BIG90`.
+>
+> **Strictly, §17.6.10 is violated** — it asserts equivalence of *observable result* between the two
+> spellings, and these differ. **But the fix is on the `lift` side.** Resolving it by making the sugar
+> match `lift` would be propagating a whitespace bug for the sake of a symmetry, which inverts the
+> point of the equivalence clause.
+>
+> **Same family as** [[g-ast-markup-text-interp-adjacent-space-dropped]] (space before a `${…}` in
+> markup text) — both are "a space adjacent to a boundary inside markup text is dropped", and both sit
+> on the whitespace model. ⚠ **Whether HTML-style collapse makes this intentional is exactly the open
+> question there**, so the two should be dispositioned together rather than patched separately, and
+> that entry already names the whitespace-model fork as bryan's. LOW because the workaround is `&nbsp;`
+> or an explicit interpolation, and the sugar path (the one adopters now reach without writing `lift`)
+> is already correct.
+
+### g-if-arm-multi-markup-element-silently-dropped — an `if` arm holding TWO markup elements renders NOTHING at exit 0 with zero diagnostics — `NEW S433; MED; open`
+<!-- @gap id=g-if-arm-multi-markup-element-silently-dropped sev=MED status=open locus=compiler/src/implied-lift-desugar.ts(planArm declines when the arm's source recovers to more than one markup node — DELIBERATE, see the entry)+compiler/src/codegen/emit-logic.ts:1856(case "html-fragment": return "" — where the drop actually happens) prov=empirical:S433-class-probe-of-g-if-arm-bare-markup-branch-silently-dropped -->
+
+> **PA-EXECUTED at S433 by the class probe that landed
+> [[g-if-arm-bare-markup-branch-silently-dropped]]**, and verified two-sided against that fix's base:
+> `${ if (@on) { <p>A</p><p>B</p> } else { <p>No</p> } }` emits NO DOM at all — identical output before
+> and after the S433 fix (exit 0, zero diagnostics). The explicit-`lift` spelling of the same intent,
+> `{ lift <p>A</p> lift <p>B</p> }`, compiles and emits both elements, so the lowering target exists.
+>
+> **WHY S433 DID NOT FIX IT, stated so the next pass does not "just widen the check".** §17.6.10's
+> grammar is `value-form-if ::= 'if' condition '{' expression '}'` — **exactly ONE expression**. Per
+> invariant 83 that is a LOCAL `length !== 1 -> decline`, deliberately NOT §18.5's positional
+> "last expression" tail rule; routing the sugar arm through a tail rule silently admits shapes the
+> grammar does not define. Two elements are outside the grammar, so S433's pass declines them — and
+> declines the whole cascade with them (all-or-nothing), which is why the sibling `else` arm does not
+> half-render either.
+>
+> **SO THIS IS NOT A CODEGEN BUG, IT IS A MISSING DIAGNOSTIC — and that is the fix direction.** The
+> defect is not that the shape is refused; it is that the refusal is SILENT, which violates the S231
+> fail-closed-Nominal invariant (an unsupported form must fail closed with a diagnostic, never render
+> empty). Two candidate dispositions, and the choice is a grammar call, not ours:
+>   **(a)** emit an error naming the one-expression rule and the two fixes (wrap in a single parent
+>   element, or write explicit `lift`s) — the conservative option, symmetric with the sibling
+>   `E-MATCH-ARM-MARKUP-IN-VALUE` steer that already exists for the value-form `match` limb;
+>   **(b)** amend §17.6.10 to admit an arm that is a markup SEQUENCE, desugaring to one implied `lift`
+>   per element — a grammar widening, and it collides with §10's E-LIFT-002 multiplicity rule ("at most
+>   one `lift` on any execution path"), which is exactly why it needs a ruling rather than a patch.
+> **Recommend (a).** Cheap, closes the silence, and does not touch the multiplicity rule.
+>
+> Repro is in the S433 gate as a NEGATIVE assertion already — `compiler/tests/unit/implied-lift-markup-arm.test.js`
+> "an arm holding TWO markup elements is not a value-form and is not converted" pins the current
+> behaviour (including the all-or-nothing rule), so whichever disposition lands has a place to flip.
+
+### g-for-arm-bare-markup-silently-dropped — a bare-markup body in a `${ for … }` loop renders NOTHING at exit 0 with zero diagnostics (the S377 RELAYED half, now PA-VERIFIED) — `NEW S433; MED; ruling-gated`
+<!-- @gap id=g-for-arm-bare-markup-silently-dropped sev=MED status=ruling-gated locus=compiler/src/codegen/emit-logic.ts:1856(case "html-fragment": return "")+compiler/SPEC.md §17.4(documents the Tier-0 form WITH lift; carries no implied-lift sentence for a loop body) prov=adopter:S377-peter-dog-food-routed(relayed)+empirical:S433-PA-verified-by-execution -->
+
+> **⛑ THIS IS THE HALF [[g-if-arm-bare-markup-branch-silently-dropped]] RECORDED AS
+> "RELAYED-UNVERIFIED — re-derive this half before scoping it". S433 RE-DERIVED IT, and it reproduces.**
+> `${ for (let r of @rows) { <li>r</li> } }` emits NO DOM (exit 0, zero diagnostics); the
+> explicit-`lift` spelling `${ for (let r of @rows) { lift <li>r</li> } }` emits the keyed row factory.
+> Identical before and after the S433 fix — the S433 pass does not touch `for` bodies.
+>
+> **AND THE ENTRY'S SUSPICION WAS RIGHT: the disposition is NOT the same as the `if` half.** The `if`
+> half was fixable without a ruling because §10.1 and §17.6.10 say, normatively and unconditionally,
+> that a single-expression control-flow ARM carries an implied `lift`. **§17.4 says no such thing about
+> a loop BODY** — it documents the Tier-0 form WITH `lift`, and a loop body is not a branch arm of a
+> value-producing expression, so the §17.6.10 sugar does not reach it by its own terms. Quoting the
+> `if` half's sentences at this half would be extending a ruling past what it ruled.
+>
+> **So this is a grammar/semantics call and the fork is clean:**
+>   **(a)** `lift` stays REQUIRED in a loop body, and the fix is only to make the drop LOUD (a
+>   diagnostic naming the missing `lift`) — the S231 fail-closed floor, no grammar change;
+>   **(b)** extend the implied-`lift` sugar to a loop body whose body is exactly one markup expression,
+>   amending §17.4 — symmetric with §17.6.10 and the smaller surface for an adopter to learn.
+> **Recommend (a) FIRST regardless of the eventual answer:** (a) is strictly compatible with (b)
+> landing later (a loud refusal becoming an acceptance is not a breaking change), and it removes the
+> silent-wrong TODAY, which is the actual adopter cost. The lowering for (b) already exists —
+> `emitForStmtWithContainer` handles the `lift` spelling — so (b) is a desugar of the same shape as
+> S433's, not new codegen.
 
 ### g-ast-markup-text-interp-adjacent-space-dropped — a space between literal text and an adjacent `${…}` in markup text is dropped: `Saved ${@cell}` renders `Savedhello`
 <!-- @gap id=g-ast-markup-text-interp-adjacent-space-dropped sev=MED status=open locus=searched:compiler/src/tokenizer.ts(~804 read-to-whitespace-or-tag-close),compiler/src/ast-builder.js(text-child construction) — parseLiftContentParts PROVEN INNOCENT by S377-peter (returns [{text:"Saved "},{expr:"@cell"}] with the space intact); the content string reaching the emitter already lacks it prov=adopter:S377-peter-dog-food-routed -->
@@ -18341,6 +18614,120 @@ PA-verified at HEAD. Half **(a)** (the fail-OPEN `instanceof Response` passthrou
 ### UPDATED — two entries flipped to `resolved` this session, both verified by execution rather than relayed
 - [[g-baseline-csrf-arm-has-no-instanceof-Response-guard]] → **resolved.** The opaque-result guard is now emitted in the baseline-CSRF arm ahead of the CSRF result expression and the JSON serialisation. ⚠ Its *secondary* claim survives: the unmerged rationale correction is still unmerged and main still carries the stale comment — re-file that half as NOMINAL if it matters.
 - [[g-two-language-gaps-a-real-12k-program-hit-that-the-corpus-never-did]] → **resolved.** Both halves were ruled at S430 and BUILT: the scope-exit primitive as `defer` (P3 stage 1, `lower-defer.ts` + `lint-defer.ts`, landed #1051) and the host-module question as `import:host` plus a parse-layer rejection of dynamic `import()` (P4, `E-DYNAMIC-IMPORT-NOT-IN-SCRML` across five files, landed #1048). It had been sitting in the operator's queue as RULING-GATED for a ruling he had already given.
+
+### g-when-reads-clause-not-parsed-e-scope-001 — `when @x changes reads @y { … }` (the §6.7.4 `reads` annotation) fails with E-SCOPE-001 on `reads`; the effect is dropped — `NEW S432-peter; MED; open`
+<!-- @gap id=g-when-reads-clause-not-parsed-e-scope-001 sev=MED status=open locus=compiler/src/ast-builder.js(the when-effect parse — after `changes` it expects `{`; no `reads` dep-list branch) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<program> <x> = 0 <y> = 0 when @x changes reads @y { log(@y) } … </program>` → `E-SCOPE-001: Undeclared identifier
+`reads`, and no effect is emitted. SPEC §6.7.4 documents the form (*"annotate the read with the `reads` declaration in
+the `when` header"* — `when @price changes reads @qty { … }`) as informational, no semantic change. Loud (not silent), so
+MED. Noted in passing under `g-when-changes-effect-fires-eagerly-at-registration`; filed on its own here. Re-verified on
+the #1054 when-changes rewrite. found by: S432 bare-when gift-wrap agent while measuring the when-head class.
+
+### g-when-timer-fired-dep-head-silently-dropped — `when <#id>.fired changes { … }` (the §6.7.x `<timeout>` example) compiles clean and emits NOTHING — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-timer-fired-dep-head-silently-dropped sev=HIGH status=open locus=compiler/src/ast-builder.js(the when-effect parse — the dep-list branch accepts only AT_IDENT / a parenthesised AT_IDENT list; a `<#id>.prop` head leaves dependencies=[] and the node/body are lost) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<program> <timeout id="g" delay=10> ${ log(1) } </> ${ when <#g>.fired changes { console.log("MK") } } <p>x</p> </program>`
+exits 0 with ZERO diagnostics and the client JS contains no `MK` and no `_scrml_when_changes` — the effect silently does
+not exist. SPEC's `<timeout>` section ("Referencing a Timeout Instance") shows exactly this head
+(`when <#paymentGuard>.fired changes { … }`) and states *"`.fired` is reactive … any markup or `when` block that reads
+`<#id>.fired` re-evaluates after the timeout fires."* The §6.7.4 dep-list grammar (`'@' identifier` only) does not admit
+`<#id>.prop`, so SPEC is self-inconsistent here: either the grammar grows a `<#id>.prop` dep-item or the example is wrong —
+but silent acceptance is wrong under both. Silent-drop class → HIGH. Related, not the same:
+`g-malformed-when-dep-list-compiles-clean` (malformed `@`-lists). found by: S432 bare-when gift-wrap agent.
+
+### g-no-program-file-root-ships-when-onmount-and-at-write-as-page-text — in a file with NO `<program>`, a `when … changes {}`, `on mount {}` or `@x = …` written after a markup child ships as LITERAL PAGE TEXT; the only diagnostic is an unrelated W-PROGRAM-001 — `NEW S432-peter; MED; open`
+<!-- @gap id=g-no-program-file-root-ships-when-onmount-and-at-write-as-page-text sev=MED status=open locus=compiler/src/ast-builder.js(liftBareDeclarations — the GITI-029 lifecycle gate, the Unit CC @-write gate and the S432 when gate are all `isDefaultLogicBody`, which is true only under <program>/<page>/<channel>; the file root runs with parentType=null, isDefaultLogicBody=false) prov=empirical:S432-bare-when-gift-wrap-agent-compiled-on-main-96e6c788-merge -->
+
+`<x> = 0 / <p>${@x}</p> / when @x changes { … }` (no `<program>`) → page HTML contains `when @x changes { … }`; same for
+`on mount { … }` and `@x = 4` in that position. Each compiles at exit 0 with only `W-PROGRAM-001`, whose advice ("wrap in
+`<program>`") happens to be the fix but does not name the leaked statement. Declarations (`<n> = …`, `function`) DO lift
+at the file root (BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE gate on `parentType !== "markup"`, not on `isDefaultLogicBody`), so
+the file root is a half-default-logic locus. Ruling-adjacent: whether a `<program>`-less file root is a §40.8 surface at all
+is the parked `docs/pinned-discussions/w-program-001-warning-scope.md` question. Independent of the S432 when ruling (both
+hold branches leave the file root as it is). found by: S432 bare-when gift-wrap agent.
+
+### g-when-from-worker-parent-handler-ships-as-page-text-at-body-top — the parent-side worker hook `when message from <#wk> (r) { … }` (§43.5.3) written BARE at a `<program>` body-top is lost at EVERY position — page text, no handler, no diagnostic; only `${ … }` works — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-from-worker-parent-handler-ships-as-page-text-at-body-top sev=HIGH status=open locus=compiler/src/block-splitter.js(the default-logic body-top text run is CUT at the `<#wk>` token, so no text block carries the whole head)+compiler/src/ast-builder.js(liftBareDeclarations — no gate can see a head split across blocks) prov=empirical:S432-bare-when-gift-wrap-agent-measured-5-positions-on-main-28da69b0-and-on-hold-A-identical;review:S432-PA-adversarial-review-F1 -->
+
+Fixture: a nested `<program name="wk">` + `<got> = 0` + `<p>${@got}</p>`, and the hook `when message from <#wk> (r) { @got = r }`.
+- inside `${ … }`: handler emitted ✔ (the only working form).
+- after markup / first in the body: the whole statement is page text; no handler.
+- after declarations in the same run (the position that lifts every other `when`): the run is cut at `<#wk>`, the
+  `when message from` prefix is swallowed into the lifted declaration run and `<#wk> (r) { @got = r }` renders as page
+  text; no handler.
+All at exit 0 with no diagnostic (only an unrelated E-DG-002). `when error from <#wk> (e) {…}`: same — handler absent at
+every bare position, works in `${}`. `when terminate from <#wk> {…}`: E-SCOPE-001 even inside `${}` (not implemented at
+all). Identical on main and on `hold/s432-bare-when-body-top`, so pre-existing, not introduced; the S432 §40.8 amendment
+names it as an open exception and does NOT claim this form. §43.5.3 shows the hook bare, with no `${}`. found by: S432
+PA adversarial review (F1) of the bare-when gift-wrap; positions measured by the gift-wrap agent.
+
+### g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error — a `when @x changes { … }` body is passed through unvalidated: `when @x changes {see below}` compiles at exit 0 and emits `function() { see below; }` — the client bundle then fails to PARSE at load — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error sev=HIGH status=open locus=compiler/src/ast-builder.js(the when-effect parse — bodyExpr is safeParseExprToNode of the raw body, which parses only the FIRST expression (`see`) and raises nothing)+compiler/src/codegen/emit-logic.ts(case "when-effect" emits bodyRaw verbatim) prov=empirical:S432-bare-when-gift-wrap-agent-on-main-28da69b0-shared-run-position-new-Function-SyntaxError-Unexpected-identifier-below -->
+
+`<program> <x> = 0  when @x changes {see below}  <p>${@x}</p> </program>` (the shared-run position, lifted on main) →
+0 errors; client JS `_scrml_when_changes(…, function() { see below; });` → `SyntaxError: Unexpected identifier 'below'`,
+which kills the whole client script. Also: an undeclared identifier in the body (`{ braces }`) raises no E-SCOPE-001, and
+an undeclared `@dep` (`when @mentions changes`) raises nothing (cf. `g-malformed-when-dep-list-compiles-clean`). Surface
+it widens: under the S432 hold branch A, head-shaped PROSE after markup (`when @x changes {see below}`) reaches this
+path instead of rendering as text — 0 corpus files. found by: S432 bare-when gift-wrap agent measuring review finding F3.
+
+### g-each-nested-peritem-if-not-reactive — an `if=` on a NON-root element of an `<each>` row is evaluated once at row creation and never follows the row's data — `NEW S432-peter; MED; open`
+<!-- @gap id=g-each-nested-peritem-if-not-reactive sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateChildToJs, the nested per-row if= create-time append gate) prov=empirical:S432-PA-review-of-hold/s432-q5(ifrow.mjs)-reproduced-by-dev-on-764365cc -->
+
+`<each in=@groups key=@.id as g><li><em if=g.hot>HOT</em><s>${g.hot}</s></li></each>` — a field write (`@groups[0].hot = true`, or `g.hot = true` through a loop alias) updates the `<s>` text to `true` but the `<em>HOT</em>` never appears. Same on a literal-initialised and a computed cell, and on main. **LOUD, not silent:** `W-IF-IN-EACH` fires at compile (§34 row names it a "deliberately-deferred §17.1 reactive-surface extension"), and only the sole-item-root `if=` is reactive. Filed so the deferral has a ledger entry the §6.5.6 item 3 carve-out can cite (it lists `<each>` per-item bindings as fine-grained). Closing it = the §17.1 per-row structural swap for nested elements (per-child anchor + reconcile interaction). Workaround in the warning text: a `show=` / `class` toggle, which IS reactive.
+
+### g-each-item-field-bind-no-write-back — `bind:value=r.f` on an `<each>` row renders the value but typing writes nothing back to the row — `NEW S432-peter; MED; open`
+<!-- @gap id=g-each-item-field-bind-no-write-back sev=MED status=open locus=compiler/src/codegen/emit-each.ts(renderTemplateAttrToJs, the bind:* item-field branch — W-EACH-BIND-ITEM-FIELD-DEFERRED) prov=empirical:S432-PA-review-of-hold/s432-q5(lift.mjs)-reproduced-by-dev-on-764365cc -->
+
+`<each in=@rows key=@.id as r><input bind:value=r.t/>…</each>` — an `input` event with the value `"Q"` leaves `@rows[0].t` at `"a"`. The outer-cell form (`bind:value=@cell`) is wired (i175, GH #175); the ITEM-FIELD half was deferred at S286 and is **LOUD**: `W-EACH-BIND-ITEM-FIELD-DEFERRED` fires. There was no open ledger entry for the deferral, only the resolved Half-1 entry (`g-bindvalue-value-side-dropped-in-each`), so the §6.5.6 carve-out had nothing to cite. With cells now deep-reactive on every write, the write-back is a plain field assignment through the row reference (`r.t = el.value`), which the Proxy set trap turns into a fine-grained update — the obvious lowering. Workaround in the warning text: an explicit `oninput` handler.
+
+### g-user-fn-rename-rewrites-emitted-helper-locals — the user-function rename pass rewrites bare identifiers across the WHOLE client chunk, so a compiler-emitted helper's local that shares a user function's name is silently captured — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-user-fn-rename-rewrites-emitted-helper-locals sev=HIGH status=open locus=searched:compiler/src/codegen(emit-client.ts worker block observed; the rename pass itself not traced) prov=empirical:S432-dev-reproduced-on-9743cfd2-lineage-while-fixing-review-F2 -->
+
+**On main (S432 wrap): unfixed at every site.** The worker send-wrapper site is fixed only on the gift-wrap branch `hold/s432-q5-deep-reactive-cells-spec` (all wrapper/helper locals `_scrml_`-prefixed); the class fix (binding-aware renaming, or a reserved `_scrml_` namespace for all emitted code — ties to Q7) is open.
+
+Measured while fixing S432 review F2. A user `function e()` next to an inline worker: the emitted send wrapper `onmessage = function(e) { resolve(e.data); }` came out as `function(_scrml_e_3) { _scrml_resolve_2(e.data); }` — the parameter renamed, the body's `e` NOT, and `resolve` renamed to the user's `resolve()` when one exists. Every worker reply resolved to `undefined` (the user function's `.data`), silently. A user `function c()` did the same to a `const c` inside an emitted helper (`seen.set(src, _scrml_c_5); return _scrml_c_5;`). **Fixed at the one site on hold/s432-q5-deep-reactive-cells-spec** (every local in the worker wrapper + `_scrml_to_plain` is `_scrml_`-prefixed), NOT as a class: any other emitted code that uses a bare, non-`_scrml_` identifier (callback params, loop vars, temps) is exposed to a same-named user function. Class fix: the rename pass must resolve bindings (skip identifiers bound by an enclosing emitted function/const), or every emitter must use the `_scrml_` namespace (ties to Q7, reserving `_scrml_`). Sweep target: grep the codegen for emitted `function(x)` / `const x` with a bare `x`.
+
+### g-map-insert-chain-lowers-only-the-first-insert — `@a = @a.insert("X", 1).insert("Y", 2)` lowers only the FIRST insert — `_scrml_map_insert(...).insert("Y", 2)` throws TypeError on click; the conformance case pinning order-independent map equality passes only because the throw leaves both maps empty — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-map-insert-chain-lowers-only-the-first-insert sev=HIGH status=open locus=not-traced prov=empirical:S432 -->
+
+PA-reproduced on `61e05f02` by compiling `conformance/cases/maps/order-independent-eq-rt/case.scrml` (0 errors): the handler emits `_scrml_cs_reactive_set("a", _scrml_map_insert(_scrml_cs_reactive_get("a"), "X", 1).insert("Y", 2))` — the chained `.insert` is a method call on a plain runtime Map value, which has none. ⚑ **FALSE GREEN:** the case asserts `eq` after the click; both handlers throw before writing, so `@a` and `@b` stay `[:]` and `eq` is true — the case passes while testing nothing. Fix the lowering to fold the whole chain, and rewrite the case so it asserts the map contents, not only equality. found by: S432 handler gift-wrap agent (side finding); PA-reproduced.
+
+### g-expr-handler-bare-function-ref-emitted-as-dead-expression — `onclick=${handler}` (a bare function reference inside `${}`) emits `function(event) { _scrml_handler_4; }` — a dead expression; the handler never runs (top level AND lift rows); `onclick=handler` (no `${}`) wires correctly — `NEW S432-peter; MED; open`
+<!-- @gap id=g-expr-handler-bare-function-ref-emitted-as-dead-expression sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+SPEC §5.2: "`onclick=${expr}` … SHALL use the `${...}` expression directly as the event handler". Reproduced by the S432 lift-fix adversarial review on both cb38df9d and the fix; pre-existing. Silent (click does nothing).
+
+### g-lift-row-ternary-of-arrows-handler-dead — in a lift row, `onclick=${x > 1 ? () => f(1) : () => f(2)}` (a ternary producing a function) is emitted as a dead expression — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-lift-row-ternary-of-arrows-handler-dead sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Same SPEC §5.2 clause as `g-expr-handler-bare-function-ref-emitted-as-dead-expression`; the callable test only recognises a literal arrow/function expression. Pre-existing (S432 lift-fix review).
+
+### g-lift-row-destructured-param-arrow-unbound-name — in a lift row, `onclick=${({ a }) => f(a)}` emits `(__destructured__) => _scrml_f_5(a)` — `a` unbound → ReferenceError on click — `NEW S432-peter; MED; open`
+<!-- @gap id=g-lift-row-destructured-param-arrow-unbound-name sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Pre-existing (S432 lift-fix review, both cb38df9d and the fix). Silent at compile, throws at click.
+
+### g-expr-handler-juxtaposed-statements-no-separator-drop-second — `onclick=${f() g()}` (two statements on one line, no `;`) silently drops `g()` — `NEW S432-peter; MED; open`
+<!-- @gap id=g-expr-handler-juxtaposed-statements-no-separator-drop-second sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 handler gift-wrap agent (both its hold branches still drop it). The natural fix is the existing `E-STMT-MISSING-SEMICOLON` (S284 ruling) applied to handler `${}` text. Separate from `g-expr-handler-drops-every-statement-after-a-leading-call` (carried; gift-wrapped on `hold/s432-expr-handler-multi-stmt`).
+
+### g-lift-row-bare-multi-statement-handler-no-e-multi-statement — a bare `onclick=f(); f()` in a lift row runs both statements with no §5.2.3 `E-MULTI-STATEMENT-HANDLER` (the top-level bare form errors) — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-lift-row-bare-multi-statement-handler-no-e-multi-statement sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 handler gift-wrap agent. Loud-vs-silent inconsistency across positions, not data loss.
+
+### g-expr-handler-error-propagation-emits-invalid-js — `?`-propagation inside a handler `${}` (`risky()?; f()`, and as a single statement) emits `_scrml_risky()?` — `E-CODEGEN-INVALID-LOGIC` — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-expr-handler-error-propagation-emits-invalid-js sev=LOW status=open locus=not-traced prov=empirical:S432 -->
+
+Loud, pre-existing (S432 handler gift-wrap agent).
+
+### g-let-initializer-markup-with-interpolated-handler-cut-off — inside a function, `let b = <button onclick=${ … }>x</button>` fails `E-CODEGEN-INVALID-LOGIC` on the default parser — the initializer is cut at `<button onclick=`; native handles it — `NEW S432-peter; MED; open`
+<!-- @gap id=g-let-initializer-markup-with-interpolated-handler-cut-off sev=MED status=open locus=not-traced prov=empirical:S432 -->
+
+Found by the S432 defer dev agent (with a `defer` in the handler the same error also masks the rule-4 diagnostic). Loud; live-parser only.
 
 ### G-NESTED-ASYNC-FUNCTION-CALLED-WITHOUT-AWAIT-LOSES-ITS-FAILURE — a transport error from a nested server-calling fn is silently dropped
 

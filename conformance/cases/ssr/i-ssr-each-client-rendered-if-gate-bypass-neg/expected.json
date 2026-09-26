@@ -1,0 +1,13 @@
+{
+  "id": "ssr-i-ssr-each-client-rendered-if-gate-bypass-neg",
+  "description": "§52.8/§19.6 — an `if=` on a tag whose emit dispatch RETURNS BEFORE the §17.1 mount gate (`<errorBoundary>`) never produces a `<template>`: the boundary emits `<div data-scrml-error-boundary>` and walks its children LIVE. So the enclosed server-authority <each> KEEPS its SSR first-paint render and fires NO I-SSR-EACH-CLIENT-RENDERED. The guard against suppressing a server first paint that works.",
+  "language-version": "1.0",
+  "spec": "§52.8",
+  "source-test": "compiler/tests/integration/ssr-a-terminus.test.js",
+  "rationale": "g-ssr-each-under-if-blank-paint (S433 fix round) — the INVERTED defect found by adversarial review. Mirroring emit-html's `if=` gate PREDICATE (`isGateableIfValue`) is not the same as mirroring its DISPATCH: the predicate says whether the gate would accept the value, never whether control flow reaches the gate. The first cut of the fix suppressed the renderer here and emitted a lint whose reason was factually false — measured as 2 rows painted before, 0 after, at exit 0. The bypass set is derived by enumerating every `return` above the gate in emitNode's markup branch; this case fails if that mirror is dropped or if a future dispatch reorder is not carried into it.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["I-SSR-EACH-CLIENT-RENDERED"],
+    "notCodePrefixes": ["E-"]
+  }
+}

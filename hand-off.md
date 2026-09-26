@@ -1,3 +1,124 @@
+# scrml — Session 432 (peter · P-Tech1 Windows) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+> Concurrent this session: **S433-peter on AdiPDesk** (the operator's desktop, same lane). The review
+> floor was split between us on the board (S432 took #1047 #1048 #1051 #1052). S430-bryan's header said
+> LIVE but it had been idle for about 2 days.
+
+## ⏭ NEXT-SESSION PICKUP
+
+### 1. Land `fix/s432-defer-review-findings` (`acc25427`, pushed, NOT merged). This is the one held code branch.
+- **Where it stands:** its round-2 S239 review found **2 MED silent misses** in the rule-4 coverage
+  (E-DEFER-OUTSIDE-FUNCTION).
+  - Everything else holds, and the corpus is clean (cb38df9d→A 0/7719).
+  - It is still strictly better than main; both misses are also live on main. It did not land because
+    "complete coverage" is its claim.
+- **Fix, in C:\wtdefer or a fresh worktree off the branch:**
+  - **(a)** An exported component: `export const Btn = <button onclick=${ defer [1].forEach(f) }>` imported
+    elsewhere compiles clean on BOTH pipelines, then throws a ReferenceError. The `export-decl` value is
+    marked "notStatement" and never re-parsed.
+  - **(b)** A `<channel>` `<onchange>` arm body `{ defer … }`: `onchange-decl.arms[].bodyRaw` is never
+    checked. It compiles clean live.
+  - **(c)** LOW: an engine `effect=${defer …}` gives an internal `defer_not_lowered!` instead of the code.
+- **Root cause:** `defer-text-body-completeness.test.js` reads only direct fields on lowercase-kind nodes, and
+  only in samples/examples/conformance. Make it recurse into plain sub-objects (owner kind + path) and scan
+  every tracked `.scrml` (stdlib, docs, compiler, self-host).
+  - The reviewer's census script + output: `C:\wt432s\rev1051\census.ts` / `census.txt`. It also lists
+    `endpoint-decl.arms[].bodyRaw`, `error-effect.arms[].handler`, `engine-decl.openerEffect`, native
+    engine `bodyText` and `colonShorthandBody`.
+  - Classify or cover each one.
+- **Then** re-review, merge on green, and rebase `hold/s432-defer-spec-calls` (`2d5ed0f9`, B reviewed →
+  LAND) onto it.
+
+### 2. Get the two not-yet-reviewed hold refs through S239 before bryan reads them
+- `hold/s432-expr-handler-multi-stmt` `1b7018e2` (+ `-alt` `121fb74c`): **never reviewed.** The builder's
+  report is thorough (90 unit + 61 browser tests, corpus 2/7390 intended), but that is a self-report.
+- `hold/s432-q5-deep-reactive-cells-spec` `bfcf8e89`: round-1 findings F1–F6 are fixed, but **the fixes are
+  not re-reviewed.**
+  - The code delta is a get-trap descriptor check, Map/Set `_to_plain` recursion, and worker-wrapper local
+    renames.
+  - The runtime is **16,346 B vs the 16,384 gate: 38 B of headroom.**
+- `hold/s432-bare-when-body-top` `f226d21e`: review findings F1–F3 are fixed but not re-reviewed. They're
+  SPEC text plus a regex restructure, so low risk.
+- The routing note already tells bryan each ref's review status:
+  `handOffs/incoming/2026-09-26-from-S432-peter-to-bryan-gift-wrapped-rulings.md`. Update it as reviews land.
+
+### 3. assetManagement: `fix/offline-bydate-merge-copies-rows` (`17ef6ed`, pushed to aM, NOT merged)
+- **The bug:** the offline Pay Period re-adds queued hours on every repaint (10 → 12 → 14h). It is display
+  only; nothing persists it.
+- **The fix:** `out.push({ ...r })` in `obMergeByDate`, plus gauntlet phase 4 in
+  `offline-range-view-check.mjs`.
+- **Gauntlet:** 17/17 on the fix; the red run with the line reverted fails 4b/4c (5 → 7 → 9); the offline set
+  is 14/14.
+- **Peter's call:** merge it, and whether the Week 1/2 split should include pending hours (it currently
+  doesn't; pass the merged `@byDate` to `applyPdSummary` if yes).
+- **Flake noted:** `offline-outbox-wedge-check` fails on its first try intermittently. The assertion moves
+  between runs, and the check never runs the changed code. Not root-caused.
+- **Worktree:** `C:\wtam` holds a gitignored copy of `app.db` that Peter placed. Delete the worktree once the
+  branch is merged.
+
+### 3b. ⚑ S431 LEFT UNRECORDED WORK ON THIS CLONE — found at S432 wrap (S431 never wrapped)
+- `fix/s431-sigil-rewrites-skip-strings` `ca5ecc45` (worktree `C:w431s`): 2 commits fixing the HIGH `g-scrml-sigil-rewrites-reach-inside-every-string-literal` (text rewrite stages mask literal content once; map-literal keys compare on restored text). **Was never pushed — pushed by S432 at wrap so it survives. Review status unknown → treat as UNREVIEWED.** Rebase onto main (#1054/#1063 touched the same rewrite/expression paths), S239 pass, then land.
+- `fix/s431-when-changes-dep-list` `6b757158` (worktree `C:w431`, local only): S431's own when-changes + §6.5.1 fix — **superseded by #1054**; review worktree `C:431w` sits on it. Keep only for diffing, then remove the three `C:w431`/`C:431w`/`C:431*` worktrees.
+
+### 4. Standing directives set this session (in user-voice-pjoliver11 + memory)
+- **Gift-wrap every route to bryan, permanently:**
+  - exhaust our lane first;
+  - each route carries a repro, the SPEC cite, a recommendation, and a pre-built REVIEWED fix on a hold
+    ref.
+- **Resource phases:**
+  - "full throttle" = up to ~6 concurrent agents;
+  - "throttle down" = let in-flight agents finish, spawn nothing new until ≤1–2 are running, and run suites
+    sequentially.
+
+---
+
+## WHAT LANDED — seven PRs
+| PR | What it did |
+|---|---|
+| #1053 | 9 gaps; 3 silent HIGHs carried with xfail pins |
+| #1054 | `when … changes` honours its dep-list + §6.5.1 expression-position notify + E-LIFECYCLE-007 derived half (adopter-driven, P7 criterion 2; 3 review rounds) |
+| #1055 | db secrets never reach a diagnostic, whatever shape the value has (security, P7 criterion 3; 6 review rounds) |
+| #1059 | two #1048 regressions |
+| #1060 | the Q6 parser half + honest warning |
+| #1063 | the lift-row regression I shipped in #1054 |
+| wrap PR | 16 gaps, review markers, this hand-off |
+
+## 🔭 DURABLE
+- **P7 applied for the first time with measurement:**
+  - `when-changes` → criterion 2. aM documented the workaround in production (`portal.scrml:6656`).
+  - Three silent HIGHs → carried (0 adopter/self-host exposure).
+  - The call-first handler drop → carried, then gift-wrapped.
+- **"Fix recreates its class one level away" hit FOUR times this session. Each time the cure was structural
+  (union / completeness test / parse), never another list entry:**
+  - the redaction key list;
+  - my own file-param denylist;
+  - the local-file reader that ignored quotes;
+  - the defer text-body enumeration.
+- **An adversarial pass on a gift-wrap is not optional.** Q5's port would have shipped a Date/Map/Set crash
+  and blown both size gates. The bare-`when` SPEC overclaimed twice.
+
+## ⚑ MISSES (mine)
+- **I shipped a HIGH regression in #1054:** a lift-row mutating handler ran at render time. Three review
+  rounds passed it because none drove a `for … lift` row handler. A later gift-wrap agent found it by
+  accident; fixed in #1063.
+- **My round-1 redaction brief suggested a key denylist for file paths.** It rebuilt the exact class the PR
+  was removing, and the round-2 review caught `jwt`/`passphrase` leaking.
+- **I told Peter "use a component" as the Q6 workaround without measuring it.** The agent measured it: it
+  doesn't work.
+
+## Gate at close
+- **CI on every merged PR:** gate + windows green; tracking identical to main's five known dev-watcher
+  failures.
+- **Local conformance on the wrap branch:** see the delta-log entry.
+- **Review floor after the wrap PR:** ~10 owed (S433 + bryan's split). The board is the authority.
+- **Worktrees:** mine are removed except `C:\wtdefer` (held branch) and `C:\wtam` (aM branch).
+- **Maps:** not regenerated. The scheduled `cloud-maps` job refreshes them. The code changes this session
+  were emit-lift, emit-expr/expression-parser, runtime, diagnostic-secrets, the native lexer and
+  engine-statechild-parser.
+
+---
+
 # scrml — Session 428 (bryan · XPS-8950) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.

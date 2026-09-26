@@ -8,6 +8,29 @@ import { iterableHasReactiveRefs, forBodyLiftsMarkup } from "./reactive-deps.ts"
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { liftScopeDeclaredNames, markDeclaredMutable } from "./declared-name-marks.ts";
 import { CGError } from "./errors.ts";
+import * as acorn from "acorn";
+
+/**
+ * True when emitted-JS `text` is, in its ENTIRETY, one arrow function or function
+ * expression — a value addEventListener can take as-is. Decided by parsing, not by a
+ * prefix regex: the §6.5.1 notify wrapper `((_scrml_m) => (set(k), _scrml_m))(call())`
+ * STARTS like an arrow but is an immediately-invoked call, and the old prefix test
+ * (`\([^)]*\)\s*=>` — `[^)]*` happily eats the leading `(`) called it callable, so a
+ * lift row ran the mutation at RENDER time and registered its return value as the
+ * listener (S432, regression from #1054). Emitted JS only — scrml source (`@x`) does
+ * not parse as JS; the source-side checks keep their own heuristics.
+ */
+function isCallableJsExprText(text) {
+  const t = String(text).trim();
+  if (!/^(?:async\b|function\b|\(|[A-Za-z_$])/.test(t)) return false;
+  try {
+    const n = acorn.parseExpressionAt(t, 0, { ecmaVersion: "latest" });
+    if (!/^[\s;]*$/.test(t.slice(n.end))) return false;
+    return n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression";
+  } catch {
+    return false;
+  }
+}
 import { detectPredicateShapeBind } from "./predicate-bind-detector.js";
 
 // ---------------------------------------------------------------------------
@@ -1324,9 +1347,7 @@ function emitSetAttrs(elVar, attrs, engineCtx = null) {
       // issue was misdiagnosed. Mirrors the emit-event-wiring.ts Case A/B
       // dispatch for top-level event handlers.
       const trimmedHandler = handlerExpr.trim();
-      const isCallable =
-        /^function\s*\(/.test(trimmedHandler) ||
-        /^(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(trimmedHandler);
+      const isCallable = isCallableJsExprText(trimmedHandler);
       if (isCallable) {
         // Bug 73 — callable-direct per-item handler (string-AST path). Inline the
         // arrow inside a re-resolving wrapper (lexical shadow) so it fires against
@@ -1743,9 +1764,7 @@ export function emitCreateElementFromMarkup(node, lines, engineCtx = null, scope
         // (closure-capture-in-iteration) is the same root cause as Bug 11;
         // both collapsed to this single fix at the AST-attrs path.
         const trimmedExpr = rewritten.trim();
-        const isCallable =
-          /^function\s*\(/.test(trimmedExpr) ||
-          /^(?:\([^)]*\)|[A-Za-z_$][A-Za-z0-9_$]*)\s*=>/.test(trimmedExpr);
+        const isCallable = isCallableJsExprText(trimmedExpr);
         if (isCallable) {
           // Bug 73 — callable-direct per-item handler: a separately-defined arrow
           // keeps its create-time closure, so a runtime "rebind" does nothing. The

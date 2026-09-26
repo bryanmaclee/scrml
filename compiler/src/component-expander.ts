@@ -45,6 +45,7 @@
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
 import { buildAST } from "./ast-builder.js";
+import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
 import type {
   Span,
@@ -443,6 +444,13 @@ export interface CEFileInput {
   filePath: string;
   ast: FileAST;
   errors: TABErrorInfo[];
+  /**
+   * The file's original source text, attached to the TAB result in api.js. CE
+   * is the earliest stage handed it (PRECG / NR / TC / SYM receive only
+   * `{filePath, ast}`), which is why the §17.6.10 implied-`lift` desugar runs
+   * here — it has to re-read the arm's markup from the source.
+   */
+  _sourceText?: string;
 }
 
 /** A single file's record output from CE. */
@@ -1206,6 +1214,18 @@ function parseComponentBody(
     const normalized = normalizeTokenizedRaw(raw);
 
     const reparsed = reparseSynthesizedFile(filePath + "#" + componentName, normalized);
+
+    // §17.6.10 / §10.1 — the implied `lift`, re-applied HERE for the same reason
+    // as at `emit-match.ts`'s arm-body site: this body was re-parsed from
+    // `normalizeTokenizedRaw(raw)`, so the copy the CE-head pass desugared is
+    // thrown away and a `const Card = <div>${ if (@on) { <p>a</p> } … }</>` body
+    // dropped its branches while the identical interpolation OUTSIDE a component
+    // rendered (measured: base and fix byte-identical, emitted HTML a bare
+    // `<span data-scrml-logic>` anchor with no branch code, while the
+    // explicit-`lift` twin rendered on both sides — a live asymmetry against the
+    // equivalence §17.6.10 asserts). `normalized` IS the text the re-parsed spans
+    // are relative to, so it is what the pass must be given.
+    desugarImpliedLiftMarkupArms(reparsed.ast, normalized, filePath + "#" + componentName);
 
     // Collect ALL markup nodes from the parsed result (multi-root support)
     const markupNodes = reparsed.ast.nodes.filter(n => n && n.kind === "markup") as MarkupNode[];
@@ -4278,6 +4298,15 @@ export function runCEFile(
   if (!ast) {
     return { filePath, ast, errors: ceErrors };
   }
+
+  // §17.6.10 / §10.1 — the IMPLIED `lift` of a single-markup-expression
+  // control-flow arm (`g-if-arm-bare-markup-branch-silently-dropped`). Runs
+  // BEFORE component expansion so a desugared `<Foo/>` arm is expanded like any
+  // other component reference, and before the CE short-circuit below so a file
+  // with no components still gets it. Raises no diagnostics and leaves the tree
+  // untouched when it cannot recover the arm's markup exactly. See
+  // implied-lift-desugar.ts for why this seam and not the TAB.
+  desugarImpliedLiftMarkupArms(ast, tabOutput._sourceText ?? "", filePath);
 
   // Build the component registry from ast.components (same-file)
   const componentDefs = (ast.components ?? []) as ExtendedComponentDefNode[];
