@@ -16491,10 +16491,61 @@ request/response:
 established on one request is visible to `@currentUser` / `session.userId` on the
 next AND survives a process restart. The READ middleware and the WRITE path SHALL
 consult the SAME durable store (a login that mints a cookie the middleware cannot
-resolve is a defect). The default store location is `.scrml-sessions.db` beside the
-runtime working directory; a `session-store=` attribute to relocate or select the
-backend is a FUTURE extension (out of scope for S265) — as is a login-page
-`sessionExpiry=` (a login page carries no `auth=`, so the 1h default governs there).
+resolve is a defect). The default store location is `.scrml-sessions.db` at the
+**DIST ROOT** of the build, shared by every emitted server unit regardless of the
+subdirectory that unit lands in (S433: keying it beside each unit's own bundle gave a
+nested page a SECOND store and its own session namespace, so `session.isAuth` read
+false forever after a successful login); a `session-store=` attribute to relocate or
+select the backend is a FUTURE extension (out of scope for S265).
+
+⚠ **The store's scope is therefore the DIST ROOT, not the program**, and the two
+coincide only for the ordinary one-`<program>`-per-build shape. When a single build
+contains two or more independent `<program>` files, they share one store file AND the
+single constant `session` namespace, so a session established by one program resolves
+in the other. That is a deliberate consequence of anchoring the store at the dist
+root and it is stated here rather than implied: nothing in the emitted store key or
+namespace discriminates between programs. Whether a multi-program build SHOULD have
+per-program session namespaces is an open question
+(`g-session-store-namespace-not-discriminated-per-program`), not something this
+clause settles.
+
+**Program scope of the session config (S433).** `sessionExpiry=` and
+`session-secure=` are declared ONCE, on the `<program>` opener, and they govern
+EVERY server unit of that program — including a unit that declares neither. In
+particular a login page carries no `auth=` of its own, and the program's
+`sessionExpiry=` SHALL still govern the cookie it mints (operator ruling S385 B5:
+propagate the program setting to the minting unit).
+
+**Resolution order per unit**, in precedence order, first defined answer wins:
+1. the unit's own auth-middleware config (`authMiddleware` entry);
+2. the unit's OWN raw `<program>` / `<page>` attribute (`<program>` wins over
+   `<page>`);
+3. the PROGRAM-wide value — the attribute as declared by any `<program>` file in the
+   compile set.
+
+Step 2 is not optional. Without it, a unit that declares its own setting but carries
+no `auth=` skips to step 3, and step 3 answers with the FIRST declaring file in the
+compile set — so in a two-`<program>` build one unit's own declaration is silently
+governed by its sibling's (S433: `30m` and `7d` both emitted `maxAge=1800`).
+
+⚠ **Step 1 is stronger than it looks, and the `1h` / secure-mode defaults are NOT
+merely last-resort.** Route inference writes a FULLY POPULATED auth-middleware entry,
+substituting `sessionExpiry: "1h"` and secure-mode whenever the unit itself declared
+none — including for a `<page>` auto-escalated to `auth="required"`, which declares
+nothing at all. Because that entry is then *defined*, step 1 wins and steps 2-3 are
+never consulted: **for any unit carrying an auth-middleware entry, the `1h` default
+BEATS a `<program sessionExpiry=>` declared elsewhere in the program.** So the
+propagation above governs units WITHOUT such an entry — which is the minting-unit case
+it was ruled for — and does not override an entry's substituted default. Whether an
+inferred default should outrank an explicit program-level declaration is an open
+question (`g-route-inference-substituted-default-outranks-program-declaration`), not
+something this clause settles.
+
+A per-unit answer is a defect of the same shape as a per-unit store: the unit that
+MINTS the cookie is precisely the one with no `auth=`, so reading the setting per-unit
+made the program's declaration inert exactly where it mattered — and, for
+`session-secure=`, made the write path set one cookie name while the read middleware
+matched the other.
 
 **Context gate (E-SESSION-CONTEXT).** The `session` builtin is available ONLY
 inside a web-app **server route handler** — the request/response context the

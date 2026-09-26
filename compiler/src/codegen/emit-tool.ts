@@ -36,6 +36,8 @@ import { collectDbScopes, SERVER_STRUCTURAL_EQ_HELPER, generateHeadlessServerJs,
 import { getToolServeConfig, isLibraryShapedFile } from "../tool-program.ts";
 import type { ToolServeConfig } from "../tool-program.ts";
 import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
+// §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-server.ts.
+import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./async-combinators.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
@@ -130,7 +132,7 @@ function toolParamSignature(p: unknown, i: number): string {
  * (§44.2), driven by which `_scrml_sql`/`_scrml_sql_<n>` identifiers the emitted
  * body references. Returns "" when the tool uses no `?{}`.
  */
-function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string): string {
+function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigure = false): string {
   const usedIdents = new Set<string>();
   const re = /\b_scrml_sql(?:_\d+)?\b/g;
   let m: RegExpExecArray | null;
@@ -146,6 +148,9 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string): string {
     if (b === "_scrml_sql") return 1;
     return parseInt(a.replace("_scrml_sql_", ""), 10) - parseInt(b.replace("_scrml_sql_", ""), 10);
   });
+  // §44 (S433 fix-round, F2-2) — the file-backed sqlite handles this module declares,
+  // collected as they are emitted and configured in one block after them.
+  const sqliteConfiguredIdents: string[] = [];
   for (const ident of sorted) {
     const scope = dbScopes.get(ident);
     if (!scope) {
@@ -160,6 +165,45 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string): string {
       connStr = "sqlite:" + connStr;
     }
     lines.push(`const ${ident} = new SQL(${JSON.stringify(connStr)});`);
+    if (sqliteWantsDefaults(scope.driver, connStr)) sqliteConfiguredIdents.push(ident);
+  }
+  // §44 (S433 fix-round, F2-2) — WAL + a 5s busy-timeout, the SAME emitter the server
+  // half uses (`codegen/sqlite-defaults.ts`).
+  //
+  // ⛔ THIS CALL SITE WAS MISSED ON THE FIRST PASS AND THE OMISSION WAS NOT COSMETIC.
+  // `buildDbHandleHeader` is reached from `assembleModuleHeaders` by BOTH
+  // `generateToolJs` (`kind="tool"`) and `generateToolLibraryJs`, so a clean-compiling
+  // tool program emitted its sqlite handle bare. MEASURED against a WAL database with a
+  // write lock held by another process: the TOOL handle FAILED after 8ms
+  // (`SQLITE_BUSY`) while the fixed SERVER handle WROTE after 1205ms. `journal_mode=WAL`
+  // persisting in the FILE does not rescue it — **`busy_timeout` is PER-CONNECTION and
+  // the tool's was 0** — so a scrml CLI tool sharing the adopter's database with the
+  // scrml server was still blocked by the exact symptom
+  // `g-native-sqlite-connection-lacks-wal-and-busy-timeout-config` names.
+  //
+  // ⛔ AND THE TOOL MAIN MODULE **AWAITS** IT, WHICH THE SERVER MUST NOT. A tool is
+  // SHORT-LIVED and the §64.3 harness ends with `process.exit(code)` — a HARD exit that
+  // kills a still-pending floating promise. MEASURED with the floating form: the tool's
+  // `busy_timeout` DID land (it is the first statement queued on the connection, so it
+  // is applied before `main()`'s own queries) and the contended write succeeded after
+  // 1235ms — but `journal_mode = WAL` NEVER landed, because `process.exit` fired first
+  // (`journal_mode` still `delete` after an UNCONTENDED tool run). Awaiting makes the
+  // WAL upgrade deterministic for a tool-only adopter, who otherwise would never get it
+  // from anywhere.
+  //
+  // This is safe HERE and would not be in emit-server: `generateToolJs` already emits
+  // an unconditional top-level `await main(...)` in that same harness, so the module is
+  // top-level-await-bearing by construction and nothing evaluates it with
+  // `new Function` (the conformance tool runner spawns `bun <file>` as a real
+  // subprocess; only `.server.js` goes through `evalServerModule`). The LIBRARY caller
+  // keeps the floating form — it is long-lived enough not to need the barrier and it is
+  // imported by other modules, so it gets no top-level await it did not already have.
+  if (sqliteConfiguredIdents.length > 0) {
+    lines.push("");
+    lines.push(...SQLITE_CONFIGURE_HELPER_LINES);
+    for (const ident of sqliteConfiguredIdents) {
+      lines.push(`${awaitConfigure ? "await" : "void"} _scrml_sqlite_configure(${ident});`);
+    }
   }
   lines.push("");
   return lines.join("\n");
@@ -586,7 +630,9 @@ export function generateToolJs(
 
   // Module headers (§21.3 imports · §44.2 Bun.SQL handle · inlined runtime
   // helpers) — shared with generateToolLibraryJs; must LEAD the module.
-  const header = assembleModuleHeaders(fileAST, filePath, body, errors);
+  // `true`: this module's §64.3 harness ends with `process.exit()`, so the sqlite
+  // configure must be AWAITED or the WAL pragma is killed mid-flight (F2-2).
+  const header = assembleModuleHeaders(fileAST, filePath, body, errors, true);
   return header + body + "\n" + harness.join("\n") + "\n";
 }
 
@@ -861,9 +907,19 @@ function buildServeExtraHelperHeader(
  * (from the file's OWN `<db src>` / `<program db=>`), and the inlined runtime
  * helpers the body references — in module-LEADING order (ES imports hoist).
  */
-function assembleModuleHeaders(fileAST: ASTNode, filePath: string, body: string, errors?: unknown[]): string {
+function assembleModuleHeaders(
+  fileAST: ASTNode,
+  filePath: string,
+  body: string,
+  errors?: unknown[],
+  // §44 (S433 fix-round, F2-2) — true ONLY from `generateToolJs`, whose §64.3 harness
+  // already emits a top-level `await main(...)` AND ends with `process.exit(code)`.
+  // That hard exit is what kills a floating configure promise before the WAL pragma
+  // lands, so the tool MAIN module awaits it; the library caller leaves it floating.
+  awaitSqliteConfigure = false,
+): string {
   const runtimeHeader = buildRuntimeHelperHeader(body, filePath, errors);
-  const dbHeader = buildDbHandleHeader(fileAST, body);
+  const dbHeader = buildDbHandleHeader(fileAST, body, awaitSqliteConfigure);
   const importHeader = buildImportHeader(fileAST);
   return (
     (importHeader ? importHeader + "\n" : "") +
