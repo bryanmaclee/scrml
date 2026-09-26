@@ -1,0 +1,13 @@
+{
+  "id": "ssr-i-ssr-each-client-rendered-author-template-pos",
+  "description": "§52.8 — a PUBLIC server-authority <each> (seeded, row template fully SSR-renderable) inside an AUTHOR-WRITTEN <template> element falls back to client-only first-paint render, and the compiler fires I-SSR-EACH-CLIENT-RENDERED (info). No `if=` is involved: a `<template>`'s content is a document fragment by the HTML standard, so nothing inside it is part of any first paint. NO E-* — the each compiles normally; only the SSR first-paint acceleration is declined.",
+  "language-version": "1.0",
+  "spec": "§52.8",
+  "source-test": "compiler/tests/integration/ssr-a-terminus.test.js",
+  "rationale": "g-ssr-each-under-if-blank-paint (S433 fix round). The `if=` lowering was only ONE route into a `<template>`; the author's literal tag is another, and it produced the identical silent signature — a renderer emitted, the rows present in the composed first-paint BYTES, and zero rows reachable from `document`. Measured, not inferred. Covering only the lowered hosts would have left the same silence reachable by a shorter path.",
+  "expect": {
+    "codes": ["I-SSR-EACH-CLIENT-RENDERED"],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-SSR-EACH-CLIENT-RENDERED": "info" }
+  }
+}

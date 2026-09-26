@@ -1,0 +1,13 @@
+{
+  "id": "ssr-i-ssr-each-client-rendered-show-enclosed-neg",
+  "description": "§52.8/§17.2 — the clean control for the if-enclosure fallback: the SAME server-authority <each>, wrapped in `show=` instead of `if=`, KEEPS its SSR first-paint render and fires no I-SSR-EACH-CLIENT-RENDERED. `show=` hides live DOM (a display toggle, §17.2); the subtree IS in the document tree at first paint, so the server-rendered rows paint.",
+  "language-version": "1.0",
+  "spec": "§52.8",
+  "source-test": "compiler/tests/integration/ssr-a-terminus.test.js",
+  "rationale": "g-ssr-each-under-if-blank-paint (S433). The discriminator is the LOWERING, not 'the element carries a conditional attribute': `if=` REMOVES (inert `<template>` + mount marker, §17.1) and `show=` HIDES (display toggle over live DOM, §17.2). A fix keyed on 'a conditional attribute' would silently delete the SSR first paint from every `show=`-guarded server list — this case fails if that happens.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["I-SSR-EACH-CLIENT-RENDERED"],
+    "notCodePrefixes": ["E-"]
+  }
+}
