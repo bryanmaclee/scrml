@@ -1,0 +1,18 @@
+{
+  "id": "engine-statechild-component-generic-closer-in-element-rt",
+  "description": "A component closed with the generic closer </> inside two lowercase elements inside an engine state-child. The state-child parser once let the component's </> pop the innermost lowercase element, consumed the state-child's own </> one level early, and read <Card> as a sibling state-child (false E-ENGINE-STATE-CHILD-MISSING + E-ENGINE-STATE-CHILD-INVALID-VARIANT). Drive On -> Off -> On: the state-child re-renders its component on re-entry and the sibling button after the wrappers stays in the state-child.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/engine-statechild-closer-stack.test.js",
+  "spec": "§51.0.B",
+  "rationale": "§51.0.B a state-child body is markup rendered when the engine is in that variant; a nested <tag> (here a component call closed with </>, which closes the most-recently-opened element) is markup-as-value. The engine has both state-children, so no state-child diagnostic fires, and re-entering .On renders its body again.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ENGINE-STATE-CHILD-MISSING", "E-ENGINE-STATE-CHILD-INVALID-VARIANT"],
+    "input": [{ "click": "#off" }, { "click": "#on" }],
+    "state": { "phase": "On" },
+    "domAnchored": [
+      { "selector": "#phase", "text": "Phase: On" },
+      { "selector": ".card #inner", "text": "inner" }
+    ]
+  }
+}
