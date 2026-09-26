@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 141 | 4 |
-| MED | 311 | 0 |
-| LOW | 115 | 0 |
+| HIGH | 142 | 4 |
+| MED | 317 | 0 |
+| LOW | 117 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -18746,3 +18746,146 @@ pipeline, `if (c) { D("y;") } else D("x;")` emits `if (c) {…}` followed by an 
 detached from its `if`. The native parser is correct. Any program writing a brace-less else runs that branch always, at exit 0.
 
 <!-- @gap id=g-live-parser-drops-an-unbraced-else-arm-and-runs-it-unconditionally sev=HIGH status=open locus=compiler/src/ast-builder.js prov=review:S430-defer-round5-F -->
+
+### G-DETERMINISM-GATE-WITHIN-UNIT-TEST-COMPARES-TWO-IDENTICAL-COMPILES — the F2 half of #1057 gates nothing, and the shape it names is alive
+
+**PA-VERIFIED BY EXECUTION (S436).** `compile-order-independence.test.js`'s second test — *"same file SET in one call:
+forward order == reverse order"* — cannot observe what its own docstring says it gates. `compiler/src/api.js:1127` does
+`resolvedInputFiles = inputFiles.map(resolve).sort(compareInputPathsCanonical)` **unconditionally, before the gather branch
+and before every stage**, and its own comment states the intent: *"the gathered set, and thus every minted id, is a pure
+function of the file SET, not the order it was passed."* So `digestCompileSet(SAMPLE)` and `digestCompileSet([...SAMPLE].reverse())`
+traverse the identical sequence — two byte-identical compiles. PA-verified by reading the sort site and the comparator at
+`:143`; the reviewer additionally measured `gatheredFiles` identical forward and reverse.
+
+**The shape it claims to gate is REAL and still ungated.** Reviewer control (two scratch corpora, same five case contents,
+the probe file's own directory name held fixed so the only variable is its traversal position inside ONE `compileScrml` call):
+probe FIRST emits `_scrml_logic_1`, probe LAST emits `_scrml_logic_31`, and the chunk-cell-scope hash differs — 2 of 5
+artifact fields. Within-unit traversal-order dependence is alive; the canonical sort MASKS it rather than removing it.
+
+**What the test IS worth, stated fairly:** it is a tripwire for the REMOVAL of that canonicalization (open thread
+`compilescrml-input-order-canonical`). That is a narrower property than its docstring and the PR title claim.
+**Do not close this on the presence of the test.** The F1 half of #1057 (folding `lintDiagnostics` into the digest) is
+genuinely load-bearing and is NOT in question — 4 of 5 sample digests change when it is included.
+
+<!-- @gap id=g-determinism-gate-within-unit-test-compares-two-identical-compiles sev=MED status=open locus=compiler/tests/integration/compile-order-independence.test.js:81 prov=review:S436-pr-1057 -->
+
+### G-SESSION-CONFIG-BLEEDS-FROM-A-SIBLING-PROGRAM-AND-DROPS-THE-HOST-PREFIX — one program's `session-secure="false"` downgrades an unrelated program's cookie
+
+**PA-VERIFIED BY EXECUTION WITH A CONTROL (S436). SECURITY. INTRODUCED by #1062.** `<program>`-level session config is
+resolved **BUILD-wide, not PROGRAM-wide**, so a program that declares nothing inherits an unrelated program's declaration.
+
+| compile set | emitted cookie for the non-declaring program |
+|---|---|
+| program B ALONE | `__Host-scrml_sid` — correct, secure default |
+| program A (`session-secure="false"`) + program B | **`scrml_sid`** — `__Host-` and always-Secure lost |
+
+Both input orders, zero hard errors, zero warnings naming it, zero lint. `__Host-` is browser-enforced hardening (no `Domain`,
+path `/`, always `Secure`), so this is a real downgrade. `sessionExpiry` bleeds by the identical mechanism (B inherits A's
+`604800` in place of its own default) — **one fix closes both.**
+
+**TRACED.** `compiler/src/codegen/index.ts:1867` `_readProgramAttr` iterates the whole `files` array and returns the FIRST
+`<program>` carrying the attribute, with **no program-membership test**; `:1878-1883` stamps that single build-wide answer onto
+every fileAST. `compiler/src/codegen/emit-server.ts:2679-2684` consumes it as the last fallback, and `_secureCookieMode` false
+selects `scrml_sid`. ⚑ The comment above the pre-scan claims the fallback is *"strictly ADDITIVE: it is reached only where the
+answer today is 'nothing declared → default secure'"* — that is precisely the case it flips, and the only reachable effect of
+the fallback is to weaken a secure default.
+
+**Not to be confused with** `g-session-store-namespace-not-discriminated-per-program` (two programs sharing one
+`.scrml-sessions.db` and one `"session"` namespace) — different mechanism, disclosed in SPEC §20.5, separate entry.
+Fix in flight at S436; fails CLOSED (a unit that declares nothing gets the secure default when the set holds 2+ programs).
+
+<!-- @gap id=g-session-config-bleeds-from-a-sibling-program-and-drops-the-host-prefix sev=HIGH status=open locus=compiler/src/codegen/index.ts:1867 prov=review:S436-pr-1062-F2 -->
+
+### G-EMITTED-SESSION-STORE-OPENS-SQLITE-WITH-NO-BUSY-TIMEOUT-OR-WAL — the one sqlite handle #1062's sweep did not reach
+
+**RELAYED from the S436 review of #1062 (F4), NOT PA-executed — reproduce before acting.** The durable session store is a
+file-backed sqlite database opened by the emitter and it received **neither** pragma: measured `journal_mode=delete
+busy_timeout=0`, and with a competing writer the login handler throws `database is locked` at **0 ms** — bit-for-bit the
+pre-fix symptom #1062 exists to remove. `sqlite-defaults.ts` sweeps `Bun.SQL` handles; the store is
+`new _ScrmlSessionDatabase(...)`, a raw `bun:sqlite` `Database`, so it fell outside the sweep's framing — the
+fix-recreates-its-class-one-level-away shape again. **Aggravated by #1062**: every unit of a dist now funnels its session
+writes onto ONE store file, so the contention this path cannot survive is exactly what the PR increases.
+Locus reported as `emit-server.ts:generateServerJs`, the `_anySessionWrite` branch.
+
+<!-- @gap id=g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal sev=MED status=open locus=compiler/src/codegen/emit-server.ts prov=review:S436-pr-1062-F4 -->
+
+### G-SCRML-DB-MIGRATE-STILL-DIES-ON-A-LOCKED-DATABASE — the adopter migration the WAL arc was filed to unblock
+
+**RELAYED from the S436 review of #1062 (F5), NOT PA-executed — a fix agent is reproducing it first.** ADOPTER-FACING
+(P7 criterion 2). The gap that motivated #1062 states *"That blocked the adopter's DB migration."* The migrator itself opens
+the adopter's sqlite file with no `busy_timeout`, so the migration still fails the instant anything holds a write lock:
+`error: migration failed (rolled back): database is locked` in ~222 ms, i.e. no wait at all (uncontended: `applied 1
+statement(s) in 1 transaction`). **`grep -rn busy_timeout compiler/src/` hits only `sqlite-defaults.ts` and two comment
+blocks** — nowhere else in the tree. #1062 unblocked the app and not the migration. Other raw opens named but NOT executed by
+the reviewer: `db-migrate.js:384` (postgres), `introspect.js:153`, `protect-analyzer.ts:439/441` (readonly).
+
+<!-- @gap id=g-scrml-db-migrate-still-dies-on-a-locked-database sev=MED status=open locus=compiler/src/commands/db-migrate.js:489 prov=review:S436-pr-1062-F5 -->
+
+### G-WAL-CONVERSION-OF-THE-ADOPTERS-DATABASE-IS-SILENT-AND-NOT-OPT-OUTABLE — semantics-changed on a file the compiler does not own
+
+**RELAYED from the S436 review of #1062 (F6).** Merely importing the emitted server module — no query issued, SELECT-only
+program — flips the adopter's sqlite file to `journal_mode=wal` **persistently in the file**, with no diagnostic and no opt-out
+(`<program journal-mode= busy-timeout=>` is deferred). An adopter who deliberately kept rollback-journal mode (single-file
+atomic copy/backup, a network filesystem where WAL's `-shm` is unsupported, an older consumer library) is converted without
+being asked. Best-effort and swallowed on failure, so it degrades safely. Named here because a semantics-changed effect
+OUTSIDE the compiled artifact owes an explicit record.
+
+<!-- @gap id=g-wal-conversion-of-the-adopters-database-is-silent-and-not-opt-outable sev=LOW status=open locus=compiler/src/codegen/sqlite-defaults.ts prov=review:S436-pr-1062-F6 -->
+
+### G-IMPLIED-LIFT-DESUGAR-MISSES-TWO-RENDER-POSITION-BODY-REPARSE-SITES — the sugar drops where the explicit `lift` renders
+
+**Reviewer-TRACED (S436 review of #1070, F1) by patching a scratch copy and observing both shapes then render; PRE-EXISTING
+(parent and merge both drop), so this is an INCOMPLETE CLOSURE, not a regression.** A bare-markup control-flow arm inside
+**(a)** a parametric snippet fill (`<TabStrip row={ (item) => <span>${ if (@on) { <p>A</p> } else { <p>B</p> } }</span> } />`)
+and **(b)** a `<tableFor>` `<column :let=…>` slot body renders NOTHING, while the byte-adjacent explicit-`lift` twin renders.
+That is the same live asymmetry against §17.6.10's asserted equivalence that justified covering the other sites.
+Loci: `component-expander.ts:parseSnippetBodyNodes` (~:3330) and `type-system.ts:_parseColumnLetArrow` (~:21460); the fix is the
+same one-line `desugarImpliedLiftMarkupArms(...)` call already used twice.
+
+⚑ **The PR's enumeration is falsified and should not be re-quoted.** It claims *"12 body-re-parse sites, 3 render-position, all
+3 covered."* The reviewer's independent count: **14 logical locations (17 parse call-sites), 4 measurably render-position, only
+2 covered** — the third "covered" item is the CE-head pass, which is not a re-parse site at all. `emit-error-boundary.ts:205`
+(`fallback={…}`) is render-position and uncovered but showed no asymmetry (the explicit `lift` does not render there either —
+**unmeasured** whether that path supports `lift`); `meta-eval.ts:397` (`^{}` meta-emit) is render-capable and **unmeasured**.
+
+<!-- @gap id=g-implied-lift-desugar-misses-two-render-position-body-reparse-sites sev=MED status=open locus=compiler/src/component-expander.ts:3330 prov=review:S436-pr-1070-F1 -->
+
+### G-ARMHOLDSMARKUP-DECLINES-ON-MARKUP-INSIDE-A-STRING-LITERAL-OR-COMMENT — a Rule-7 text shortcut makes a feature's availability depend on prose
+
+**Reviewer-TRACED (S436 review of #1070, F2), INTRODUCED by #1070.** Whether `${ if (@on) { <p>A</p> } else { @msg = "…" } }`
+renders depends on the CONTENTS OF THE STRING LITERAL IN THE SIBLING ARM. Silent, exit 0, zero diagnostics in all three fields.
+
+| sibling arm | renders? |
+|---|---|
+| `else { @k = 1 }` · `else { @msg = "plain text" }` · `else { @msg = "<3 love" }` | yes |
+| `else { @msg = "<b>x</b>" }` · `else { @msg = "see the <div /> tag" }` · `else { @k = 1 /* <p>ghost</p> */ }` | **NO** |
+
+Locus: `compiler/src/implied-lift-desugar.ts:armHoldsMarkup` — `MARKUP_OPENER_REJOINED` applied to the string fields of each arm
+piece, plus `MARKUP_OPENER_SRC` over the raw source slice. This is overlay **Rule 7** exactly (*a regex applied to SOURCE TEXT in
+a POST-AST stage*, asking what the parsed tree already answers) and it is the class that has survived five reviews on this
+project. Direction is over-declining, so it never mis-renders — it silently WITHHOLDS the feature.
+
+<!-- @gap id=g-armholdsmarkup-declines-on-markup-inside-a-string-literal-or-comment sev=MED status=open locus=compiler/src/implied-lift-desugar.ts prov=review:S436-pr-1070-F2 -->
+
+### G-EXPLICIT-LIFT-MANGLES-RAW-CONTENT-IN-PRE-AND-CODE — §4.17 holds for the sugar and is broken for the explicit form
+
+**Reviewer-measured (S436 review of #1070, F5), PRE-EXISTING at the parent — and the SUGAR is the correct side.**
+`{ <code>MARKA <p>notmarkup</p></code> }` — the sugar emits one text run `"MARKA <p>notmarkup</p>"` (correct per §4.17, which
+says scrml tokens are NOT parsed inside `<pre>`/`<code>`); the explicit `lift` emits a real `<p>` element (wrong).
+`{ <pre>x</program>MARKA</pre> }` — sugar emits `"x</program>MARKA"` (correct); explicit `lift` emits
+`textContent = "x < / program > MARKA < / pre >"`, tokenizer-rejoined junk. Silent-wrong output in the explicit-`lift` path.
+⚑ Consequence for #1070's own tests: their `expectLiftParity` bar compares against a BROKEN reference for raw-content shapes
+(they happen not to test one).
+
+<!-- @gap id=g-explicit-lift-mangles-raw-content-in-pre-and-code sev=MED status=open locus=searched:implied-lift-desugar.ts,emit-html.ts,ast-builder.js-no-locus-traced prov=review:S436-pr-1070-F5 -->
+
+### G-SSR-EACH-LINT-REASON-IS-WRONG-ON-A-VOID-IF-HOST — the message names an inert `<template>` that was never emitted
+
+**Reviewer-TRACED (S436 review of #1066, LOW-1), INTRODUCED by #1066.** `<param if=@loaded><each …></param>` fires
+`I-SSR-EACH-CLIENT-RENDERED` saying the each is *"enclosed by a `<param if=…>` element, whose subtree is emitted into an inert
+`<template>`"* — but for a VOID host no each mount fence is emitted anywhere (`fence=0`), so the stated reason describes
+something that does not exist. Locus: `emit-ssr-render.ts:inertHostFor`, the generic markup + gateable-`if=` branch, which
+excludes void tags from the compound-parent test but not from the `if=` host test. Painted rows are 0 on both sides and the
+corpus count is 0, so the behaviour is arguably the better one — only the reason string is inaccurate.
+
+<!-- @gap id=g-ssr-each-lint-reason-is-wrong-on-a-void-if-host sev=LOW status=open locus=compiler/src/codegen/emit-ssr-render.ts prov=review:S436-pr-1066-LOW1 -->
