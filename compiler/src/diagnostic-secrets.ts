@@ -283,29 +283,44 @@ interface ValueAnalysis {
 function localFileParams(view: View): ParamSpan[] {
   const out: ParamSpan[] = [];
   const t = view.text;
+  const n = t.length;
   const q = t.indexOf("?");
   if (q < 0) return out;
+  const isSep = (c: string) => c === "&" || c === ";" || c === "?";
   let i = q + 1;
-  while (i <= t.length) {
+  while (i < n) {
     let j = i;
-    while (j < t.length && !/[&;?]/.test(t[j])) j++;
-    const seg = t.slice(i, j);
-    const eq = seg.indexOf("=");
-    if (eq > 0) {
-      const key = safeDecode(seg.slice(0, eq));
-      const val = seg.slice(eq + 1);
-      const vStart = i + eq + 1;
-      const allow = SQLITE_URI_PARAMS.has(key.trim().toLowerCase()) && !/[=?&;\s]/.test(safeDecode(val));
-      if (!allow && val.length > 0) {
-        const ov = toOriginal(view, vStart, j);
-        const ow = toOriginal(view, i, j);
-        if (ov && ow) out.push({ whole: ow, value: ov, key });
-      }
+    while (j < n && !isSep(t[j]) && t[j] !== "=") j++;
+    if (j >= n || t[j] !== "=") { i = j + 1; continue; } // keyless segment
+    const key = safeDecode(t.slice(i, j));
+    const vStart = j + 1;
+    let k = vStart;
+    // Mirror PARAM_RE: a quoted / braced value reads to its matching close
+    // (or to the end when unterminated) — a separator inside it is data.
+    const open = t[k];
+    if (open === "'" || open === '"') {
+      k++;
+      while (k < n && t[k] !== open) k += t[k] === "\\" ? 2 : 1;
+      k = Math.min(n, k + 1);
+    } else if (open === "{") {
+      const close = t.indexOf("}", k);
+      k = close < 0 ? n : close + 1;
     }
-    if (j >= t.length) break;
-    i = j + 1;
+    while (k < n && !isSep(t[k])) k++;
+    const val = t.slice(vStart, k);
+    if (val.length > 0 && !isHarmlessSqliteParam(key, val)) {
+      const ov = toOriginal(view, vStart, k);
+      const ow = toOriginal(view, i, k);
+      if (ov && ow) out.push({ whole: ow, value: ov, key });
+    }
+    i = k + 1;
   }
   return out;
+}
+
+/** An allowlisted SQLite URI parameter with a value no SQLite parameter could not hold. */
+function isHarmlessSqliteParam(key: string, val: string): boolean {
+  return SQLITE_URI_PARAMS.has(key.trim().toLowerCase()) && !/[=?&;\s'"{}]/.test(safeDecode(val));
 }
 
 /** Userinfo and parameter spans of a connection value (original offsets), both views. */
@@ -322,7 +337,27 @@ function analyzeConnectionValue(value: string): ValueAnalysis {
       if (o) out.userinfo.push(o);
     }
     if (local) {
+      // s432 r6 — FAIL SAFE: the UNION of two independent readers of the
+      // query — the local-file reader above and the general quote-aware
+      // PARAM_RE (restricted to pairs that start inside the query, since the
+      // path before the first `?` holds no parameters). A value is left
+      // visible only when the reader that found it judges it a harmless
+      // allowlisted SQLite parameter, so one reader's mis-split can only
+      // over-redact (`cache=shared key=S` hides `shared key=S` — accepted).
       for (const p of localFileParams(view)) out.params.push(p);
+      const q = view.text.indexOf("?");
+      if (q < 0) continue;
+      for (const pm of view.text.matchAll(PARAM_RE)) {
+        const ind = (pm as any).indices as Array<[number, number] | undefined>;
+        const k = ind?.[1];
+        const v = ind?.[2];
+        if (!k || !v || v[1] <= v[0] || k[0] <= q) continue;
+        const key = safeDecode(pm[1]);
+        if (isHarmlessSqliteParam(key, pm[2])) continue;
+        const ov = toOriginal(view, v[0], v[1]);
+        const ow = toOriginal(view, k[0], v[1]);
+        if (ov && ow) out.params.push({ whole: ow, value: ov, key });
+      }
       continue;
     }
     for (const pm of view.text.matchAll(PARAM_RE)) {

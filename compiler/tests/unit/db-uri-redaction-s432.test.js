@@ -500,9 +500,13 @@ describe("§7 r3: SQLite URI-param allowlist, host-shaped scheme-less values, sq
 // ---------------------------------------------------------------------------
 
 describe("§8 r5: local-file query: first `?` only, pairs stop at `?`, allowlisted values fail safe", () => {
-  test("(a) a value stops at a later `?`: ./app.db?mode=ro?key=SEC", () => {
-    expect(displayConnectionValue("./app.db?mode=ro?key=QmSec1")).toBe("./app.db?mode=ro?key=<redacted>");
-    expect(displayConnectionValue("sqlite:./a.db?cache=shared?passphrase=QmSec2&mode=ro")).toBe("sqlite:./a.db?cache=shared?passphrase=<redacted>&mode=ro");
+  test("(a) a secret after a later `?` is hidden: ./app.db?mode=ro?key=SEC", () => {
+    // r6: the general reader (unioned in) reads `ro?key=S` as ONE value, so the
+    // allowlisted flag is over-redacted too — the fail-safe direction.
+    expect(displayConnectionValue("./app.db?mode=ro?key=QmSec1")).toBe("./app.db?mode=<redacted>");
+    const s2 = displayConnectionValue("sqlite:./a.db?cache=shared?passphrase=QmSec2&mode=ro");
+    expect(s2).not.toContain("QmSec2");
+    expect(s2).toContain("&mode=ro");
   });
 
   test("(b) a whitespace-led `k=v` in the PATH does not consume the query: ./my db=1.db?key=SEC", () => {
@@ -526,5 +530,52 @@ describe("§8 r5: local-file query: first `?` only, pairs stop at `?`, allowlist
 
   test("documented: an unencoded `&` inside a value leaves its tail visible (a driver splits it the same way)", () => {
     expect(displayConnectionValue("./a.db?key=Se&cretX")).toBe("./a.db?key=<redacted>&cretX");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §9 round 6 — local-file query: quote/brace-aware reader UNIONED with PARAM_RE
+// ---------------------------------------------------------------------------
+
+describe("§9 r6: quoted / braced local-file values; two-reader union fails safe", () => {
+  const q = '"';
+  for (const [v, secret] of [
+    ["./data/app.db?key={x&QuoteSec1}", "QuoteSec1"],
+    [`./app.db?key=${q}x&QuoteSec2${q}`, "QuoteSec2"],
+    [`./app.db?key=${q}a?bQuoteSec3${q}`, "QuoteSec3"],
+    ["./app.db?key='a;bQuoteSec4'", "QuoteSec4"],
+    ["./app.db?key='unterminated&QuoteSec5", "QuoteSec5"],
+    ["./app.db?mode=ro&key={a;b?QuoteSec6}&cache=shared", "QuoteSec6"],
+  ]) {
+    test(`quoted/braced value hidden whole: ${v}`, () => {
+      const shown = displayConnectionValue(v);
+      expect(shown).not.toContain(secret);
+      expect(shown).toContain("key=<redacted>");
+    });
+  }
+
+  test("a quoted value on an allowlisted key is not harmless (redacted)", () => {
+    expect(displayConnectionValue(`./app.db?mode=${q}ro&QuoteSec7${q}`)).not.toContain("QuoteSec7");
+    expect(displayConnectionValue("./app.db?vfs={x;QuoteSec8}")).not.toContain("QuoteSec8");
+  });
+
+  test("union over-redacts only in the accepted corner; harmless flags stay visible", () => {
+    expect(displayConnectionValue("./app.db?cache=shared key=QuoteSec9")).not.toContain("QuoteSec9");
+    expect(displayConnectionValue("./app.db?mode=ro&cache=shared&vfs=unix-dotfile")).toBe("./app.db?mode=ro&cache=shared&vfs=unix-dotfile");
+    expect(displayConnectionValue("./my db=1.db")).toBe("./my db=1.db");
+    expect(displayConnectionValue("./my db=1.db?key=PathQ3")).toBe("./my db=1.db?key=<redacted>");
+  });
+
+  test("e2e qlocal.scrml: braced key with `&` inside prints no secret", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-s432-qlocal-"));
+    try {
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, `<program db="./a.db">\n  < db src="./data/app.db?key={x&QuoteSec1}" tables="users">\n    function getUsers() {\n        return ?{\`SELECT id FROM users\`}.all()\n    }\n  </>\n</program>\n`);
+      const out = run(["compile", f, "-o", join(dir, "out")], dir);
+      expect(out).toContain("E-PA-002");
+      expect(out).not.toContain("QuoteSec1");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
