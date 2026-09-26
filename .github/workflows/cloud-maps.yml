@@ -69,21 +69,32 @@ jobs:
       # TO REINSTATE: restore a `anthropics/claude-code-action@v1` step here with the project-mapper
       # FULL_COLD_START prompt and set the `ANTHROPIC_API_KEY` repo secret.
 
-      - name: Open maps/@generated PR + enable auto-merge (only if drift)
+      # ⚑ S436 — THE LABEL MUST NAME WHAT THE JOB STILL DOES, NOT WHAT IT USED TO.
+      # Until S436 the commit/PR below said "scheduled nav-map + @generated regen" and "Automated
+      # maps + @generated regen" — eight weeks after Stage 2 was deleted above, i.e. asserting a map
+      # regeneration that had not happened since 2026-08-01. That is not cosmetic: the S432 wrap
+      # deferred its own wrap-6c on the strength of it ("Maps: not regenerated. The scheduled
+      # `cloud-maps` job refreshes them."), S433 then recorded "5+ sessions of map debt", and at
+      # S436 the primary map stamp read `787d4cb4` / 2026-09-18 while HEAD was 79 commits and 57
+      # changed `compiler/src` files past it, including 14 `compiler/src` files no map indexes at
+      # all. pa-base §10: an obligation and the probe that reads it must resolve to the SAME
+      # artifact — here the PR's own name was the probe, and it read the wrong artifact.
+      # If Stage 2 is ever reinstated, put "maps" back in these two strings in the same change.
+      - name: Open @generated-state PR + enable auto-merge (only if drift)
         env:
           GH_TOKEN: ${{ secrets.MAPS_PAT }}
         run: |
           if [ -z "$(git status --porcelain -- .claude/maps master-list.md)" ]; then
-            echo "No maps/@generated drift — nothing to land."; exit 0
+            echo "No @generated drift — nothing to land."; exit 0
           fi
           BR="maps/regen-${{ github.run_id }}"
           git config user.name  "scrml-maps-ci"
           git config user.email "scrml-maps-ci@users.noreply.github.com"
           git checkout -b "$BR"
           git add -f .claude/maps master-list.md      # -f: .claude/ is gitignored (maps are force-tracked)
-          git commit -m "chore(maps): scheduled nav-map + @generated regen"
+          git commit -m "chore(state): scheduled @generated regen (nav-maps NOT refreshed — Stage 2 removed S310)"
           git push -u origin "$BR"
           gh pr create --base main --head "$BR" \
-            --title "chore(maps): scheduled regen" \
-            --body "Automated maps + @generated regen (cloud-maps beachhead). \`gate\` runs on this PR; auto-merges on green. No branch-protection bypass."
+            --title "chore(state): scheduled @generated regen" \
+            --body "Automated \`bun scripts/state.ts --write\` regen of the \`@generated\` state rollup (cloud-maps beachhead). **Nav-maps are NOT refreshed by this job** — the project-mapper stage was removed at S310 on a cost ruling, so map refresh lives with the PA at wrap step 6c. \`gate\` runs on this PR; auto-merges on green. No branch-protection bypass."
           gh pr merge "$BR" --squash --auto --delete-branch
