@@ -271,3 +271,81 @@ ${CARD_DECL}`;
     }
   }
 });
+
+// W-ENGINE-MATCH-IN-STATE-CHILD — a block <match> in a state-child renders only
+// at page load (blank on every later entry until its on= changes). The warning
+// names the limitation without deciding the open (A)/(B) ruling on
+// g-nested-block-match-in-dispatched-arm-silently-drops: (A) upgrades it to an
+// error, (B) deletes it. Fired from the post-CE AST, so both pipelines.
+describe("W-ENGINE-MATCH-IN-STATE-CHILD", () => {
+  const W = "W-ENGINE-MATCH-IN-STATE-CHILD";
+  const NAMED_ARMS = `<match for=Kind on=@k><X><p>X</p></X><Y><p>Y</p></Y></match>`;
+
+  function diagnostics(source, parser) {
+    const dir = mkdtempSync(join(tmpdir(), "sc-warn-"));
+    try {
+      const file = join(dir, "app.scrml");
+      writeFileSync(file, source);
+      const result = compileScrml({ inputFiles: [file], parser, write: true, outputDir: join(dir, "out"), log: () => {} });
+      return [...(result.errors ?? []), ...(result.warnings ?? [])];
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+  const warnings = (src, parser) => diagnostics(src, parser).filter((d) => d.code === W);
+  const errorCodes = (src, parser) =>
+    diagnostics(src, parser).filter((d) => (d.severity ?? "error") === "error").map((d) => d.code);
+
+  const KV_DECL = `  const KV = <div>${MATCH_ARMS}</div>`;
+  const outside = (body) => `<program>
+  type Phase:enum = { Off, On }
+  type Kind:enum = { X, Y }
+  <k>: Kind = .X
+  <engine for=Phase initial=.On>
+    <Off rule=.On><p>off</p></>
+    <On rule=.Off><p>on</p></>
+  </>
+  ${body}
+</program>
+`;
+
+  for (const parser of [undefined, "scrml-native"]) {
+    const label = parser ?? "default";
+    describe(`pipeline: ${label}`, () => {
+      for (const [shape, body, decl] of [
+        ["`</>` arms, directly in the state-child", MATCH_ARMS, ""],
+        ["named `</X>` arms, directly in the state-child", NAMED_ARMS, ""],
+        ["`</>` arms inside a <div>", `<div>${MATCH_ARMS}</div>`, ""],
+        ["named arms inside <section><div>", `<section><div>${NAMED_ARMS}</div></section>`, ""],
+        ["a component whose body is the match", `<KV/>`, KV_DECL],
+        ["a nested engine's state-child", `<engine for=Sub initial=.A><A rule=.B>${MATCH_ARMS}</><B rule=.A><p>b</p></></>`, ""],
+      ]) {
+        test(`warns: ${shape}`, () => {
+          const src = engineWith(body, decl);
+          const w = warnings(src, parser);
+          expect(w.length).toBe(1);
+          expect(w[0].severity).toBe("warning");
+          expect(w[0].message).toContain("g-nested-block-match-in-dispatched-arm-silently-drops");
+          expect(w[0].message).toContain("BLANK on every entry after page load");
+          expect(errorCodes(src, parser)).toEqual([]);
+        });
+      }
+
+      test("does NOT warn: a match outside the engine", () => {
+        expect(warnings(outside(MATCH_ARMS), parser)).toEqual([]);
+      });
+
+      test("does NOT warn: the workaround — the match outside the engine, gated on the engine variable", () => {
+        expect(warnings(outside(`<div if=(@phase == .On)>${NAMED_ARMS}</div>`), parser)).toEqual([]);
+      });
+
+      test("does NOT warn: a component (no match) closed with `</>` inside a state-child", () => {
+        expect(warnings(engineWith(`<div><Card><p>x</p></></div>`, CARD_DECL), parser)).toEqual([]);
+      });
+
+      test("does NOT warn: a match inside an <each> in a state-child (re-mounts on entry; renders correctly)", () => {
+        expect(warnings(engineWith(`<each in=@items key=@.id>${MATCH_ARMS}</each>`, `  <items> = [{ id: 1 }]`), parser)).toEqual([]);
+      });
+    });
+  }
+});

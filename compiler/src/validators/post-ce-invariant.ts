@@ -48,7 +48,7 @@ export interface PostCEInvariantError {
   code: string;
   message: string;
   span: Span;
-  severity: "error";
+  severity: "error" | "warning";
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +184,7 @@ export function runPostCEInvariantFile(file: {
 
   walkFileAst(ast, visitor);
   while (engineQueue.length > 0) {
-    const decl = engineQueue.shift() as { bodyChildren?: unknown[] };
+    const decl = engineQueue.shift() as { bodyChildren?: unknown[]; varName?: string; governedType?: string };
     for (const child of decl.bodyChildren ?? []) {
       const c = child as { kind?: string; tag?: string; children?: unknown[] } | null;
       if (!c || typeof c !== "object") continue;
@@ -193,6 +193,7 @@ export function runPostCEInvariantFile(file: {
         c.kind === "markup" && t.length > 0 && t.charCodeAt(0) >= 65 && t.charCodeAt(0) <= 90;
       if (isStateChildWrapper) {
         for (const inner of c.children ?? []) walkNode(inner, visitor);
+        warnMatchInStateChild(decl, t, c.children ?? [], errors, file.filePath);
       } else {
         walkNode(c, visitor);
       }
@@ -265,6 +266,68 @@ export function runPostCEInvariantFile(file: {
       severity: "error",
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// W-ENGINE-MATCH-IN-STATE-CHILD — a known limitation, pending a ruling
+// ---------------------------------------------------------------------------
+
+/**
+ * A block `<match>` inside an engine state-child body renders only when that
+ * state-child is on screen at page load. The engine writes the state-child with
+ * innerHTML, so every later entry (leaving and coming back, or first entering a
+ * state-child that is not `initial=`) creates a fresh, EMPTY match mount, and the
+ * match dispatches only when its `on=` value changes — the arm area is blank
+ * until then. Measured identically for `</>` and named `</X>` arm closers, bare,
+ * inside a lowercase element, and via a component whose body is the match.
+ *
+ * Whether a block `<match>` belongs in a dispatched arm / engine state-child at
+ * all is the open (A) refuse / (B) support ruling in
+ * `g-nested-block-match-in-dispatched-arm-silently-drops`. This WARNING does not
+ * decide it: (A) upgrades it to an error, (B) deletes it with the fix (the
+ * re-entry re-dispatch on `hold/s429-match-in-engine-state-child`).
+ *
+ * Fired from the post-CE AST, so both parse pipelines and component-expanded
+ * matches are covered. Descends markup only: a `<match>` inside an `<each>` body
+ * (which re-mounts on entry and renders correctly) or inside another match's arm
+ * (the outer match is already warned) is not reached; a nested `<engine>`'s own
+ * state-children are checked when that engine is dequeued.
+ */
+function warnMatchInStateChild(
+  decl: { varName?: string; governedType?: string },
+  variant: string,
+  children: unknown[],
+  errors: PostCEInvariantError[],
+  filePath: string,
+): void {
+  const engineVar = decl.varName ?? "engine";
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { kind?: string; children?: unknown[]; forType?: string; span?: Span };
+    if (n.kind === "match-block") {
+      const forType = n.forType || "Type";
+      errors.push({
+        code: "W-ENGINE-MATCH-IN-STATE-CHILD",
+        message:
+          `W-ENGINE-MATCH-IN-STATE-CHILD: this <match> in state-child <${variant}> is BLANK on every entry after page load ` +
+          `until its on= value changes. Known limitation: the block \`<match for=${forType} ...>\` inside ` +
+          `\`<${variant}>\` of the engine for \`@${engineVar}\` renders only when <${variant}> is on screen at page load; ` +
+          `leaving and re-entering <${variant}> (or first entering it when it is not initial=) shows nothing until the ` +
+          `match's on= value changes. Whether a block <match> is allowed in an engine state-child is an open ruling ` +
+          `(gap g-nested-block-match-in-dispatched-arm-silently-drops): it may become an error or be supported. ` +
+          `Workaround: move the <match> outside the <engine> into an element gated on the engine variable, e.g. ` +
+          `\`<div if=(@${engineVar} == .${variant})> <match ...>...</match> </div>\`. Wrapping the match in a component ` +
+          `does not help. See SPEC §51.0.B and §34.`,
+        span: n.span ?? ({ file: filePath, start: 0, end: 0, line: 1, col: 1 } as Span),
+        severity: "warning",
+      });
+      return;
+    }
+    if (n.kind === "markup" || n.kind === "state") {
+      for (const c of n.children ?? []) visit(c);
+    }
+  };
+  for (const c of children) visit(c);
 }
 
 /**
