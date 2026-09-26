@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `593aa592` — merge origin/main into wrap/s432 — **LOCAL-ONLY**
+- `89385ebd` — wrap(s432): seven landed, five rulings gift-wrapped for bryan, one held on its own review (#1068) — **pushed**
 - `15e60e4b` — wrap(s428): the decision is BOTH tracks — and the four prerequisites turn out to have been open in SPEC since S117 (#1040) — **pushed**
 - `26dca726` — wrap(s429b): two landed, four held — two of the holds were the spec saying no; Q5–Q7 to bryan (#1039) — **pushed**
 - `45749bb1` — wrap(s425): four adopter reports triaged by execution, and the two best findings were corrections to my own work (#1028) — **pushed**
