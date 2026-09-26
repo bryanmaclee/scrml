@@ -64,7 +64,8 @@ export type DeferCode =
   | "E-DEFER-UNHANDLED-FAILABLE"
   | "E-DEFER-UNSUPPORTED-SITE"
   | "E-DEFER-LATER-SHADOW"
-  | "E-DEFER-DUPLICATE-FUNCTION";
+  | "E-DEFER-DUPLICATE-FUNCTION"
+  | "E-DEFER-AMBIGUOUS-LEAD";
 
 export interface DeferDiagnostic {
   code: DeferCode;
@@ -523,6 +524,7 @@ export function runDeferChecks(ast: FileAST | null | undefined): DeferDiagnostic
 
   walk((ast as { nodes?: unknown }).nodes ?? ast, { inFunction: false, defer: null });
   checkLaterShadow((ast as { nodes?: unknown }).nodes ?? ast, filePath, report);
+  checkAmbiguousLead((ast as { nodes?: unknown }).nodes ?? ast, report);
   return diagnostics;
 }
 
@@ -751,4 +753,146 @@ function checkLaterShadow(root: unknown, filePath: string, report: ReportFn): vo
   };
 
   walkNode(root, []);
+}
+
+// ---------------------------------------------------------------------------
+// §19.16.1 (S432, B2) — E-DEFER-AMBIGUOUS-LEAD
+// ---------------------------------------------------------------------------
+//
+// S430 round 6 made `defer` + whitespace + `[` open a defer statement
+// (`defer ["a"].forEach(f)`). Where a binding NAMED `defer` is in scope, the
+// same tokens were — before `defer` existed — an index of that binding:
+// `defer [0] = 9`, `defer [0].m = 5`, `defer [0].forEach(f)`. The parser cannot
+// tell the two apart from the tokens (both readings are well-formed), and
+// choosing the defer reading silently changes what a pre-existing program does.
+// So: a `[`-led single-statement `defer` while a binding named `defer` is in
+// scope is a compile error naming both spellings — `defer[0]` (adjacent) indexes
+// the binding, `defer { [0]… }` defers the statement. With no such binding
+// the round-6 reading stands (the identifier reading would be an undeclared
+// name, which never compiled).
+//
+// "In scope" is decided per outermost function declaration, coarsely and
+// fail-closed: a binding named `defer` ANYWHERE in that function (a parameter,
+// a local `let`/`const`/`lin`/`~`, a nested function's name or parameter, a loop
+// or lambda binder) or at file level (a top-level declaration or import) makes
+// every `[`-led defer in the function ambiguous. Over-approximating only rejects
+// programs that both bind `defer` and write `defer [`; it never mis-reads one.
+
+const DEFER_NAME = "defer";
+
+function bindingName(raw: string): string {
+  return raw.replace(/^\s*(const|let|var|lin)\s+/, "").split(":")[0].split("=")[0].trim();
+}
+
+function paramBindsDefer(params: unknown): boolean {
+  for (const p of (Array.isArray(params) ? params : []) as unknown[]) {
+    if (typeof p === "string" && bindingName(p) === DEFER_NAME) return true;
+    if (p && typeof p === "object") {
+      const nm = (p as Node).name;
+      if (typeof nm === "string" && bindingName(nm) === DEFER_NAME) return true;
+      if (nm && typeof nm === "object" && declNames(nm).includes(DEFER_NAME)) return true;
+    }
+  }
+  return false;
+}
+
+/** Does THIS node itself introduce a binding named `defer`? */
+function nodeBindsDefer(n: Node): boolean {
+  const k = n.kind;
+  if (k === "let-decl" || k === "const-decl" || k === "lin-decl" || k === "tilde-decl") {
+    return typeof n.name === "string" ? bindingName(n.name) === DEFER_NAME : declNames(n.name).includes(DEFER_NAME);
+  }
+  if (k === "function-decl") return n.name === DEFER_NAME || paramBindsDefer(n.params);
+  if (k === "lambda") return paramBindsDefer(n.params);
+  if (k === "for-stmt") {
+    const v = n.variable;
+    return typeof v === "string" ? bindingName(v) === DEFER_NAME : declNames(v).includes(DEFER_NAME);
+  }
+  if (k === "import-decl" && Array.isArray(n.names)) return (n.names as unknown[]).includes(DEFER_NAME);
+  return false;
+}
+
+/**
+ * Is a single-statement deferred body led by an array literal? Structural: the
+ * leftmost operand of the statement's expression tree is an `array` node. When
+ * the front-end could not structure the statement (an escape-hatch — e.g. the
+ * invalid `[0] = 9`), its token text is the parser's own space-joined token
+ * stream, whose first token is the lead.
+ */
+function deferIsBracketLed(d: Node): boolean {
+  if (d.blockForm === true || !Array.isArray(d.body) || d.body.length === 0) return false;
+  const s = d.body[0] as Node;
+  if (!s || typeof s !== "object") return false;
+  let e = (s.exprNode ?? s.initExpr ?? null) as Node | null;
+  for (let guard = 0; e && guard < 64; guard++) {
+    if (e.kind === "array") return true;
+    if (e.kind === "call" || e.kind === "new") e = e.callee as Node;
+    else if (e.kind === "member" || e.kind === "index") e = e.object as Node;
+    else if (e.kind === "assign") e = e.target as Node;
+    else if (e.kind === "binary") e = e.left as Node;
+    else if (e.kind === "ternary") e = e.condition as Node;
+    else break;
+  }
+  if (e && e.kind === "escape-hatch") {
+    const text = typeof s.expr === "string" && s.expr.trim() !== "" ? s.expr : (typeof e.raw === "string" ? e.raw : "");
+    return (text as string).trimStart().startsWith("[");
+  }
+  return false;
+}
+
+function checkAmbiguousLead(root: unknown, report: ReportFn): void {
+  const anyBinds = (n: unknown, stopAtFunctions: boolean): boolean => {
+    let found = false;
+    const seen = new WeakSet<object>();
+    const walk = (x: unknown): void => {
+      if (found || !x || typeof x !== "object" || seen.has(x as object)) return;
+      seen.add(x as object);
+      if (Array.isArray(x)) { for (const c of x) walk(c); return; }
+      const nn = x as Node;
+      if (stopAtFunctions && nn.kind === "function-decl") {
+        // at file level only the function's NAME binds; its body is its own scope
+        if (nn.name === DEFER_NAME) found = true;
+        return;
+      }
+      if (nodeBindsDefer(nn)) { found = true; return; }
+      for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") walk(nn[key]);
+    };
+    walk(n);
+    return found;
+  };
+  const fileBinds = anyBinds(root, true);
+
+  const reportIn = (fn: Node): void => {
+    const seen = new WeakSet<object>();
+    const walk = (x: unknown): void => {
+      if (!x || typeof x !== "object" || seen.has(x as object)) return;
+      seen.add(x as object);
+      if (Array.isArray(x)) { for (const c of x) walk(c); return; }
+      const nn = x as Node;
+      if (nn.kind === "defer-stmt" && deferIsBracketLed(nn)) {
+        report("E-DEFER-AMBIGUOUS-LEAD", nn,
+          `\`defer [\` is ambiguous here: a binding named \`defer\` is in scope, so this could index it ` +
+          `(\`defer[…]\`) or defer a statement that starts with an array literal (§19.16.1). Write ` +
+          `\`defer[…]\` with no space to index the binding, \`defer { […]… }\` to defer the statement, or ` +
+          `rename the binding.`);
+      }
+      for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") walk(nn[key]);
+    };
+    walk(fn.body);
+  };
+
+  // Each OUTERMOST function declaration is one scope unit (its nested functions included).
+  const seen = new WeakSet<object>();
+  const findFns = (x: unknown): void => {
+    if (!x || typeof x !== "object" || seen.has(x as object)) return;
+    seen.add(x as object);
+    if (Array.isArray(x)) { for (const c of x) findFns(c); return; }
+    const nn = x as Node;
+    if (nn.kind === "function-decl") {
+      if (fileBinds || anyBinds(nn, false)) reportIn(nn);
+      return;
+    }
+    for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") findFns(nn[key]);
+  };
+  findFns(root);
 }
