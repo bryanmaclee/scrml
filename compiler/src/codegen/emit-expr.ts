@@ -43,6 +43,7 @@ import { rewriteExpr, rewriteServerExpr, rewriteExprArrowBody, rewriteServerExpr
 import { emitParseVariantCall, isParseVariantCall } from "./emit-parse-variant.ts";
 import { emitMatchExpr as emitStructuredMatchExpr } from "./emit-control-flow.ts";
 import { SYNTH_PROPERTY_NAMES } from "../symbol-table.ts";
+import { ARRAY_MUTATING_METHODS } from "../derived-mutation-ops.ts";
 import { CGError } from "./errors.ts";
 import { clearLiftScope } from "./declared-name-marks.ts";
 import { srcmapMark } from "./srcmap-provenance.ts";
@@ -4017,7 +4018,63 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   }
 
   const call = node.optional ? "?.(" : "(";
-  return `${callee}${call}${args})`;
+  const plainCall = `${callee}${call}${args})`;
+
+  // §6.5.1 — an EXPRESSION-position mutating array method on a reactive cell
+  // (`onclick=${@items.push(v)}`, `const n = @items.push(v)`, a ternary / `&&`
+  // arm, an arrow body) SHALL notify the cell, exactly as the STATEMENT lowering
+  // (`case "reactive-array-mutation"` in emit-logic.ts) does: mutate in place,
+  // then `_scrml_reactive_set(k, _scrml_reactive_get(k))` so COARSE subscribers
+  // (`_scrml_reactive_subscribe` — `when @items changes`, §6.7.4) fire. The
+  // in-place mutation alone reaches only the fine-grained Proxy trap effects.
+  // The call's own value is preserved (push/unshift → new length, pop/shift →
+  // the removed item, splice → the removed array, sort/reverse/fill/copyWithin →
+  // the array): the call is evaluated as the argument of an arrow IIFE — in the
+  // ENCLOSING scope, so an `await` in an argument keeps its meaning — which
+  // notifies once and returns it. A statement-position `@arr.push(x)` never
+  // reaches here (ast-builder lowers it to a `reactive-array-mutation` node whose
+  // args alone route through emitExpr), so there is no double notify.
+  const mutatedCell = reactiveArrayMutationCell(node, ctx);
+  if (mutatedCell !== null) {
+    const key = JSON.stringify(mutatedCell);
+    return `((_scrml_m) => (_scrml_reactive_set(${key}, _scrml_reactive_get(${key})), _scrml_m))(${plainCall})`;
+  }
+  return plainCall;
+}
+
+/**
+ * §6.5.1 — when `node` is `@<cell>.<method>(…)` with `<method>` one of the
+ * ARRAY_MUTATING_METHODS and `@<cell>` a plain mutable reactive cell read on the
+ * CLIENT, return the cell's bare name (the key `emitIdent` reads it by);
+ * otherwise null.
+ *
+ * Deliberately NARROW, mirroring the statement lowering's receiver shape (a
+ * single `@name` segment): a deeper receiver (`@obj.list.push(v)`,
+ * `@rows[0].tags.push(v)`) is NOT a write to the cell (§6.5.6 — no implicit deep
+ * reactivity) and the statement form does not notify it either; a local alias
+ * (`const a = @items; a.push(v)`) is an ordinary JS value. Excluded receivers:
+ * server mode (`_scrml_body[...]` — no reactive store), a derived cell
+ * (read-only, E-DERIVED-VALUE-MUTATE), the ambient `@session` projection, an
+ * engine cell (a variant string), a value-native map/set cell (its methods are
+ * lowered to `_scrml_map_*` above), and an optional call/member (`?.`).
+ */
+function reactiveArrayMutationCell(node: CallExpr, ctx: EmitExprContext): string | null {
+  if (ctx.mode !== "client" || node.optional) return null;
+  const callee = node.callee;
+  if (callee.kind !== "member") return null;
+  const member = callee as MemberExpr;
+  if (member.optional || typeof member.property !== "string") return null;
+  if (!ARRAY_MUTATING_METHODS.has(member.property)) return null;
+  if (member.object.kind !== "ident") return null;
+  const name = (member.object as IdentExpr).name;
+  if (typeof name !== "string" || !name.startsWith("@")) return null;
+  const bare = name.slice(1);
+  if (bare.length === 0) return null;
+  if (ctx.derivedNames && ctx.derivedNames.has(bare)) return null;
+  if (bare === "session" && _sessionProjectionActive) return null;
+  if (ctx.engineVarNames && ctx.engineVarNames.has(bare)) return null;
+  if (mapCellBareName(member.object, ctx) !== null || setCellBareName(member.object, ctx) !== null) return null;
+  return bare;
 }
 
 function emitNew(node: NewExpr, ctx: EmitExprContext): string {

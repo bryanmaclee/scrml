@@ -334,6 +334,142 @@ describe("§6.7.4 runtime helper contract (_scrml_when_changes)", () => {
   });
 });
 
+// §6.5.1 — a mutating array method on a reactive cell SHALL notify the cell. The
+// STATEMENT form always did (`reactive-array-mutation` → mutate + reactive_set);
+// the EXPRESSION forms (an inline handler, an arrow, a value-using position)
+// mutated the Proxy in place and never called `_scrml_reactive_set`, so a COARSE
+// subscriber — `when @items changes`, now a `_scrml_reactive_subscribe` per dep —
+// never fired. Each case clicks once and asserts the body ran exactly once.
+function mutApp(handlerAttr, { init = "[]", extraLogic = "" } = {}) {
+  return mount(`<program>
+  <items> = ${init}
+  <count> = 0
+  <last> = 0
+  <flag> = true
+  when @items changes { @count = @count + 1 }${extraLogic ? "\n  ${\n" + extraLogic + "\n  }" : ""}
+  <p id="count">\${@count}</p>
+  <p id="len">\${@items.length}</p>
+  <button id="go" onclick=${handlerAttr}>go</button>
+</program>
+`);
+}
+
+describe("§6.5.1 expression-position mutation notifies the cell (when … changes fires once)", () => {
+  test("inline handler `${@items.push(1)}`", () => {
+    const app = mutApp("${@items.push(1)}");
+    expect(app.errs).toEqual([]);
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    expect(app.text("count")).toBe("1");
+    expect(app.text("len")).toBe("1");
+    app.click("go");
+    expect(app.get("count")).toBe(2);
+    expect(app.text("len")).toBe("2");
+  });
+
+  test("expression-bodied arrow handler `${() => @items.push(1)}`", () => {
+    const app = mutApp("${() => @items.push(1)}");
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    expect(app.text("len")).toBe("1");
+  });
+
+  test("block-bodied arrow handler `${() => { @items.push(1) }}`", () => {
+    const app = mutApp("${() => { @items.push(1) }}");
+    expect(app.errs).toEqual([]);
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    expect(app.text("len")).toBe("1");
+  });
+
+  test("ternary arms — each arm notifies once", () => {
+    const app = mutApp("${@flag ? @items.push(9) : @items.pop()}", { init: "[1]" });
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    expect(app.get("items").length).toBe(2);
+    app.set("flag", false);
+    app.click("go");
+    expect(app.get("count")).toBe(2);
+    expect(app.get("items").length).toBe(1);
+  });
+
+  test("`&&` right operand", () => {
+    const app = mutApp("${@flag && @items.push(1)}");
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    app.set("flag", false);
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("value-using: `@last = @items.push(7)` keeps push's return (the new length)", () => {
+    const app = mutApp("${@last = @items.push(7)}", { init: "[1, 2]" });
+    app.click("go");
+    expect(app.get("last")).toBe(3);
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("value-using: `@last = @items.pop()` keeps pop's return (the removed item)", () => {
+    const app = mutApp("${@last = @items.pop()}", { init: "[4, 5]" });
+    app.click("go");
+    expect(app.get("last")).toBe(5);
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("returned from a fn and bound to a local (`const n = @items.push(x)`)", () => {
+    const app = mutApp("${take()}", {
+      init: "[1]",
+      extraLogic: "    function take() { const n = @items.push(8); @last = n }",
+    });
+    app.click("go");
+    expect(app.get("last")).toBe(2);
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("`return @items.shift()` from a function expression", () => {
+    const app = mutApp("${@last = g()}", {
+      init: "[6, 7]",
+      extraLogic: "    const g = function() { return @items.shift() }",
+    });
+    app.click("go");
+    expect(app.get("last")).toBe(6);
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("statement form still fires exactly once (no double notify)", () => {
+    const app = mutApp("${add()}", { extraLogic: "    function add() { @items.push(1) }" });
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+  });
+
+  for (const [method, init, args] of [
+    ["push", "[1]", "2"], ["pop", "[1, 2]", ""], ["shift", "[1, 2]", ""],
+    ["unshift", "[1]", "0"], ["splice", "[1, 2, 3]", "0, 1"], ["reverse", "[1, 2]", ""],
+    ["sort", "[2, 1]", ""], ["fill", "[1, 2]", "0"], ["copyWithin", "[1, 2, 3]", "0, 1"],
+  ]) {
+    test(`all nine methods — inline \`@items.${method}(${args})\` fires once`, () => {
+      const app = mutApp(`\${@items.${method}(${args})}`, { init });
+      expect(app.errs).toEqual([]);
+      app.click("go");
+      expect(app.get("count")).toBe(1);
+    });
+  }
+
+  test("a deep receiver is NOT a write to the cell (§6.5.6) — same as the statement form", () => {
+    const app = mount(`<program>
+  <obj> = { list: [] }
+  <count> = 0
+  when @obj changes { @count = @count + 1 }
+  <p id="count">\${@count}</p>
+  <button id="go" onclick=\${@obj.list.push(1)}>go</button>
+</program>
+`);
+    app.click("go");
+    expect(app.get("obj").list.length).toBe(1);
+    expect(app.get("count")).toBe(0);
+  });
+});
+
 // §6.7.4: "A `when` statement is associated with the enclosing element scope. When
 // that scope destroys, the effect is automatically unregistered." The runtime half
 // is proven above. The COMPILER half does not exist in any host yet, and each host
