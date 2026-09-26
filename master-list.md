@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `22fb6d87` — wrap(s433): every fix that self-reported clean came back with a finding, and four measurement failures shared one shape — **LOCAL-ONLY**
 - `89385ebd` — wrap(s432): seven landed, five rulings gift-wrapped for bryan, one held on its own review (#1068) — **pushed**
 - `15e60e4b` — wrap(s428): the decision is BOTH tracks — and the four prerequisites turn out to have been open in SPEC since S117 (#1040) — **pushed**
 - `26dca726` — wrap(s429b): two landed, four held — two of the holds were the spec saying no; Q5–Q7 to bryan (#1039) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `92f40bd4` — wrap(s427): five merged and one held — the held fix's own review found it compiling a const reassignment into a dead page (#1023) — **pushed**
 - `8fbeaf00` — wrap(s426-addendum2): door 3 is built and HELD, and the reviewer's best finding was already in my own output (#1015) — **pushed**
 - `60f8b1fc` — wrap(s424-addendum): correct the wrap's own closing state — five PRs, not three, and two landed after it (#1005) — **pushed**
-- `27a0bb17` — wrap(s423): the detector the tier exists for fires for the first time, after four wrong fix directions and four adversarial passes (#998) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core
