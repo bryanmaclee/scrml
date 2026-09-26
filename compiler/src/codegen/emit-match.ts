@@ -62,6 +62,7 @@
 import type { CompileContext } from "./context.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { ifChainChildNodes } from "../ast-if-chain.js";
+import { desugarImpliedLiftMarkupArms } from "../implied-lift-desugar.ts";
 import { collectDerivedVarNames } from "./reactive-deps.ts";
 
 // Derived-cell name set is file-invariant; memoize per fileAST so resolveOnExpr
@@ -1011,6 +1012,20 @@ function buildMatchArms(
       } catch (_e) {
         // Defensive: same recovery shape as the shorthand path.
       }
+    }
+
+    // §17.6.10 / §10.1 — the implied `lift` of a single-markup-expression
+    // control-flow arm, re-applied HERE because this arm body was re-parsed
+    // from `entry.bodyRaw` at emit time. The pipeline-level pass (CE, see
+    // implied-lift-desugar.ts) desugared the `armBodyChildren` copy of this
+    // body, and every branch above except `consumedExpandedArmBody` throws
+    // that copy away and parses the raw text again — so without this call a
+    // `<match for=…>` arm holding `${ if (@x) { <p>a</p> } }` silently dropped
+    // its branches while the identical interpolation at file level rendered
+    // (measured). `entry.bodyRaw` is the source the spans in `body` are
+    // relative to, so it is what the pass must be given.
+    if (body.length > 0 && entry.bodyRaw) {
+      desugarImpliedLiftMarkupArms({ nodes: body }, entry.bodyRaw, `<match:${matchBlock.id}:${tag}>`);
     }
 
     // Positional payload field-name resolution — mirror engine-side

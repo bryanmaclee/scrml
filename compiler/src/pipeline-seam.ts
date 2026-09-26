@@ -297,7 +297,7 @@ export interface StageSeam {
 }
 
 /**
- * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Eight files re-enter (seven at s430-stage-swap; +1 S430 defer) the TS block splitter / AST builder
+ * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Nine files re-enter (seven at s430-stage-swap; +1 S430 defer; +1 S433 implied-lift) the TS block splitter / AST builder
  * directly — re-parsing a synthesized snippet mid-stage — instead of going through the pipeline's
  * BS / TAB call. A hybrid with BS or TAB substituted still parses THOSE snippets with TS, so its
  * FileASTs are of mixed provenance. Every other stage has exactly one caller (api.js).
@@ -320,6 +320,12 @@ export const PARSE_REENTRY_FILES: readonly string[] = [
   // native parser, lambda / on-mount text) into statement trees so the defer
   // checker reasons about STRUCTURE, never text.
   "compiler/src/validators/defer-structure.ts",
+  // S433 §17.6.10 implied `lift` — recovers a bare-markup control-flow arm's
+  // markup from the file source, because the live TAB flattens such an arm to a
+  // raw `html-fragment` string whose interior whitespace is already lost. (The
+  // native parser keeps the markup tree, and THAT path re-parses nothing — so
+  // this re-entry is the live pipeline's cost, not the pass's.)
+  "compiler/src/implied-lift-desugar.ts",
 ];
 
 const recheckFiles = (label: string, pick: (args: SeamArgs) => unknown): ((args: SeamArgs) => Divergence) =>
