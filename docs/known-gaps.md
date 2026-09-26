@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 137 | 4 |
+| HIGH | 139 | 4 |
 | MED | 300 | 0 |
 | LOW | 109 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -18329,6 +18329,31 @@ at the file root (BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE gate on `parentType !== 
 the file root is a half-default-logic locus. Ruling-adjacent: whether a `<program>`-less file root is a §40.8 surface at all
 is the parked `docs/pinned-discussions/w-program-001-warning-scope.md` question. Independent of the S432 when ruling (both
 hold branches leave the file root as it is). found by: S432 bare-when gift-wrap agent.
+
+### g-when-from-worker-parent-handler-ships-as-page-text-at-body-top — the parent-side worker hook `when message from <#wk> (r) { … }` (§43.5.3) written BARE at a `<program>` body-top is lost at EVERY position — page text, no handler, no diagnostic; only `${ … }` works — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-from-worker-parent-handler-ships-as-page-text-at-body-top sev=HIGH status=open locus=compiler/src/block-splitter.js(the default-logic body-top text run is CUT at the `<#wk>` token, so no text block carries the whole head)+compiler/src/ast-builder.js(liftBareDeclarations — no gate can see a head split across blocks) prov=empirical:S432-bare-when-gift-wrap-agent-measured-5-positions-on-main-28da69b0-and-on-hold-A-identical;review:S432-PA-adversarial-review-F1 -->
+
+Fixture: a nested `<program name="wk">` + `<got> = 0` + `<p>${@got}</p>`, and the hook `when message from <#wk> (r) { @got = r }`.
+- inside `${ … }`: handler emitted ✔ (the only working form).
+- after markup / first in the body: the whole statement is page text; no handler.
+- after declarations in the same run (the position that lifts every other `when`): the run is cut at `<#wk>`, the
+  `when message from` prefix is swallowed into the lifted declaration run and `<#wk> (r) { @got = r }` renders as page
+  text; no handler.
+All at exit 0 with no diagnostic (only an unrelated E-DG-002). `when error from <#wk> (e) {…}`: same — handler absent at
+every bare position, works in `${}`. `when terminate from <#wk> {…}`: E-SCOPE-001 even inside `${}` (not implemented at
+all). Identical on main and on `hold/s432-bare-when-body-top`, so pre-existing, not introduced; the S432 §40.8 amendment
+names it as an open exception and does NOT claim this form. §43.5.3 shows the hook bare, with no `${}`. found by: S432
+PA adversarial review (F1) of the bare-when gift-wrap; positions measured by the gift-wrap agent.
+
+### g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error — a `when @x changes { … }` body is passed through unvalidated: `when @x changes {see below}` compiles at exit 0 and emits `function() { see below; }` — the client bundle then fails to PARSE at load — `NEW S432-peter; HIGH; open`
+<!-- @gap id=g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error sev=HIGH status=open locus=compiler/src/ast-builder.js(the when-effect parse — bodyExpr is safeParseExprToNode of the raw body, which parses only the FIRST expression (`see`) and raises nothing)+compiler/src/codegen/emit-logic.ts(case "when-effect" emits bodyRaw verbatim) prov=empirical:S432-bare-when-gift-wrap-agent-on-main-28da69b0-shared-run-position-new-Function-SyntaxError-Unexpected-identifier-below -->
+
+`<program> <x> = 0  when @x changes {see below}  <p>${@x}</p> </program>` (the shared-run position, lifted on main) →
+0 errors; client JS `_scrml_when_changes(…, function() { see below; });` → `SyntaxError: Unexpected identifier 'below'`,
+which kills the whole client script. Also: an undeclared identifier in the body (`{ braces }`) raises no E-SCOPE-001, and
+an undeclared `@dep` (`when @mentions changes`) raises nothing (cf. `g-malformed-when-dep-list-compiles-clean`). Surface
+it widens: under the S432 hold branch A, head-shaped PROSE after markup (`when @x changes {see below}`) reaches this
+path instead of rendering as text — 0 corpus files. found by: S432 bare-when gift-wrap agent measuring review finding F3.
 
 ### g-regex-statement-after-block-closer-lexed-as-division — a regex literal that starts a statement right after a block `}` is lexed as DIVISION by all three lexers; the default pipeline emits a DIFFERENT regex at exit 0 — `NEW S432-peter; HIGH; open (P7 exposure 0 — carry candidate, pin owed)`
 <!-- @gap id=g-regex-statement-after-block-closer-lexed-as-division sev=HIGH status=open locus=compiler/src/tokenizer.ts(isRegexContext — no `}` handling),compiler/src/codegen/code-segments.ts(text twin),compiler/native-parser/lex-in-code.js(documented NOT HANDLED),compiler/self-host-v2/lex.scrml prov=empirical:S432-PA-reproduced-on-9743cfd2 -->

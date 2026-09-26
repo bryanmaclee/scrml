@@ -783,13 +783,22 @@ const TOPLEVEL_ON_LIFECYCLE_RE =
  * or text depending only on what preceded it.
  *
  * The signature is the §6.7.4 grammar head, not a keyword: `when` + a dep-list
- * (`@name` or `( @a, @b … )`) + `changes` [+ `reads @…`] + `{`, or the §4.12.4
- * worker-handler head `when message|error [from <worker>] [(binding)] {`.
+ * (`@name` or `( @a, @b … )`) + `changes` [+ `reads @…`] + `{`, or the
+ * INSIDE-worker handler head `when message|error [(binding)] {` (§43.5.2).
  * Prose such as `when the value changes, …` or `when @x changes you will …`
  * has no `@`-dep-list-then-`{` / no `{` and never matches.
+ *
+ * NOT covered: the PARENT-side `when message|error|terminate from <#w> (b) {`
+ * (§43.5.3). The block splitter cuts the text run at `<#w>`, so no text block
+ * ever carries that whole head and no regex here can see it; it ships as page
+ * text at every bare body-top position (only `${ … }` works) — filed as
+ * g-when-from-worker-parent-handler-ships-as-page-text-at-body-top.
+ *
+ * Linear-time by construction: no two `\s*`/`\s+` are adjacent without a
+ * required token between them (pinned by a 40K-whitespace perf test).
  */
-const TOPLEVEL_WHEN_STMT_RE =
-  /^\s*when\s+(?:(?:@[A-Za-z_$][\w$]*\s+|\(\s*@[A-Za-z_$][\w$]*(?:\s*,\s*@[A-Za-z_$][\w$]*)*\s*\)\s*)changes\b(?:\s+reads\s+@[A-Za-z_$][\w$]*(?:\s*,\s*@[A-Za-z_$][\w$]*)*)?|(?:message|error)(?:\s+from\s+(?:<#[A-Za-z_][\w-]*>|[A-Za-z_$][\w$]*))?\s*(?:\(\s*[A-Za-z_$][\w$]*\s*\))?)\s*\{/;
+export const TOPLEVEL_WHEN_STMT_RE =
+  /^\s*when\s+(?:(?:@[A-Za-z_$][\w$]*\s+|\(\s*@[A-Za-z_$][\w$]*(?:\s*,\s*@[A-Za-z_$][\w$]*)*\s*\)\s*)changes\b(?:\s+reads\s+@[A-Za-z_$][\w$]*(?:\s*,\s*@[A-Za-z_$][\w$]*)*)?|(?:message|error)(?:\s*\(\s*[A-Za-z_$][\w$]*\s*\))?)\s*\{/;
 
 /**
  * change-id bare-control-flow-in-markup-diagnostic-2026-06-17 (S203).

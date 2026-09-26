@@ -26,6 +26,7 @@ import { writeFileSync, mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { compileScrml } from "../../src/api.js";
+import { TOPLEVEL_WHEN_STMT_RE } from "../../src/ast-builder.js";
 
 const TMP = mkdtempSync(join(tmpdir(), "when-lift-"));
 let seq = 0;
@@ -193,6 +194,85 @@ describe("S432 — measurement table: the other shapes after markup", () => {
       expect(body).toContain(probe);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// S432 review fixes (F1/F2/F3).
+// ---------------------------------------------------------------------------
+describe("S432 — the head regex: exact coverage, linear time", () => {
+  test("matches the §6.7.4 heads and the INSIDE-worker §43.5.2 heads", () => {
+    for (const s of [
+      "when @x changes {", "when @x changes{", "  when (@a, @b) changes {", "when (@a)changes {",
+      "when @x changes reads @y {", "when @x changes reads @y, @z {",
+      "when message {", "when message(d) {", "when message (d) {", "when error(e) {",
+    ]) expect(TOPLEVEL_WHEN_STMT_RE.test(s)).toBe(true);
+  });
+
+  test("does NOT claim the parent-side `when … from <#w>` head (F1 — the splitter cuts the run at `<#w>`)", () => {
+    for (const s of [
+      "when message from <#wk> (r) {", "when error from <#wk> (e) {", "when terminate from <#wk> {",
+      "when message from ", "when message from _scrml_worker_wk (r) {",
+    ]) expect(TOPLEVEL_WHEN_STMT_RE.test(s)).toBe(false);
+  });
+
+  test("does not match prose heads", () => {
+    for (const s of ["when the value changes, {x}", "when @x changes you {", "when x changes {", "whenever @x changes {", "when @x {"])
+      expect(TOPLEVEL_WHEN_STMT_RE.test(s)).toBe(false);
+  });
+
+  test("F2 — 40K whitespace inside every head shape tests in < 50 ms (no adjacent-quantifier backtracking)", () => {
+    const ws = " ".repeat(40000);
+    for (const s of [
+      "when message" + ws + "x", "when error" + ws + "x", "when message(" + ws + "x",
+      "when @x" + ws + "x", "when @x changes" + ws + "x", "when @x changes reads @y" + ws + "x",
+      "when (@a" + ws + "x", "when (@a," + ws + "@b" + ws + "x", ws + "when" + ws + "x",
+    ]) {
+      const t = performance.now();
+      TOPLEVEL_WHEN_STMT_RE.test(s);
+      expect(performance.now() - t).toBeLessThan(50);
+    }
+  });
+});
+
+describe("S432 — the two open exceptions the §40.8 amendment names (characterization)", () => {
+  test("parent-side `when message from <#wk> (r) {}` after markup still ships as page text — g-when-from-worker-parent-handler-ships-as-page-text-at-body-top", () => {
+    const W = `<program name="wk">\n<z> = 0\nwhen message(d) { send(d + 1) }\n</program>\n`;
+    const H = `when message from <#wk> (r) { @got = r }`;
+    const bare = compile(`<program>\n<got> = 0\n${W}<p>\${@got}</p>\n${H}\n</program>\n`);
+    expect(bare.body).toContain("when message from");
+    const wrapped = compile(`<program>\n<got> = 0\n${W}<p>\${@got}</p>\n\${ ${H} }\n</program>\n`);
+    expect(wrapped.body).not.toContain("when message from"); // the documented `${ … }` form works
+  });
+
+  test("a PROSE line before the `when` in the same run disables the lift — g-default-logic-auto-lift-silently-disabled-by-a-preceding-prose-line", () => {
+    const { body } = compile(`<program>\n<x> = 0\n<p>\${@x}</p>\nSome prose line here.\nwhen @x changes { go() }\n</program>\n`);
+    expect(body).toContain("when @x changes");
+  });
+
+  test("declarations before the `when` in the same run DO lift it (a named position)", () => {
+    const { body, js } = compile(`<program>\n<x> = 0\n<p>\${@x}</p>\n<y> = 1\nwhen @x changes { console.log("MK_WHEN") }\n</program>\n`);
+    expect(body).not.toContain("when @x changes");
+    expect(js).toContain("MK_WHEN");
+  });
+});
+
+describe("S432 F3 — head-shaped PROSE at body-top is no longer page text", () => {
+  test("`when message {x} arrives …` after markup is now a LOUD error (was page text)", () => {
+    const { body, r } = compile(AT.afterMarkup("when message {x} arrives we reply"));
+    expect(body).not.toContain("arrives we reply");
+    expect((r.errors ?? []).length).toBeGreaterThan(0);
+    expect((r.errors ?? []).map(e => e.code)).toContain("E-SCOPE-001");
+  });
+
+  test("`when @x changes {see below}` compiles clean to an unparseable body — g-when-body-not-validated-garbage-compiles-to-a-client-syntax-error (pre-existing at the shared-run position)", () => {
+    const shared = compile(AT.share("when @x changes {see below}"));
+    const after = compile(AT.afterMarkup("when @x changes {see below}"));
+    for (const c of [shared, after]) {
+      expect(c.body).not.toContain("see below");
+      expect(c.js).toContain("see below;"); // the garbage body reaches the client verbatim
+    }
+    expect(after.codes.sort()).toEqual(shared.codes.sort()); // same outcome as the always-lifted position
+  });
 });
 
 process.on("exit", () => {
