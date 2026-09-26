@@ -225,11 +225,11 @@ describe("§6.7.4 semantics", () => {
     expect(app.get("log")).toBe("1;2;");
   });
 
-  test("a body writing one of its own deps is BOUNDED: no recursion, capped re-runs, reported", () => {
+  test("a body writing one of its own deps is BOUNDED: one re-run per write, then dropped + reported", () => {
     // E-LIFECYCLE-006 at compile time per SPEC; while that check is absent the
-    // runtime must neither blow the stack nor hang. A re-entry is deferred (not
-    // recursed) and re-run after the current run; a self-loop never settles, so
-    // the re-runs stop at the cap (100) and the drop is reported.
+    // runtime cap is the only guard. A re-entry is deferred (not recursed) and
+    // re-run ONCE; the next pending re-run is dropped and reported — the effect
+    // adds at most 2 writes per external write, never a silent burst.
     const app = mount(`<program>
   <n> = 0
   when @n changes { @n = @n + 1 }
@@ -237,10 +237,31 @@ describe("§6.7.4 semantics", () => {
 </program>
 `);
     app.click("n");
-    // the click's write (1), then the body's first run + 100 capped re-runs.
-    expect(app.get("n")).toBe(102);
+    // the click's write (1), the body's run (2), its one re-run (3).
+    expect(app.get("n")).toBe(3);
     expect(app.errs.filter((e) => /Maximum call stack|RangeError/.test(e))).toEqual([]);
     expect(app.errs.filter((e) => /E-LIFECYCLE-006/.test(e)).length).toBe(1);
+    // a programmatic write is bounded the same way (its report goes to the real
+    // console — `set` does not capture it).
+    const oe = console.error;
+    console.error = () => {};
+    try { app.set("n", 10); } finally { console.error = oe; }
+    expect(app.get("n")).toBe(12);
+  });
+
+  test("a self-looping array push is bounded the same way (2 extra items per write)", () => {
+    const app = mount(`<program>
+  <xs> = []
+  when @xs changes { @xs.push(1) }
+  <button id="go" onclick=\${@xs.push(0)}>go</button>
+</program>
+`);
+    app.click("go");
+    expect(app.get("xs")).toEqual([0, 1, 1]);
+    expect(app.errs.filter((e) => /E-LIFECYCLE-006/.test(e)).length).toBe(1);
+    app.click("go");
+    expect(app.get("xs").length).toBe(6);
+    expect(app.errs.filter((e) => /E-LIFECYCLE-006/.test(e)).length).toBe(2);
   });
 
   test("an ACYCLIC chain through a second effect is not lost (re-entry re-runs, not dropped)", () => {

@@ -4522,14 +4522,13 @@ function _scrml_effect_static(fn) {
  *     _scrml_effect is running must not hand the body's reads to that effect.
  *   - Subscribers fire after _scrml_propagate_dirty, so a derived read in the
  *     body pulls the post-change value (the §6.7.4 flush-ordering contract).
- *   - A synchronous re-entry of the same effect is NOT recursed and NOT dropped:
- *     it marks the effect pending, and the body re-runs once the current run
- *     returns, as many times as re-entries keep arriving. That keeps an ACYCLIC
- *     chain whole — \`when (@a, @b) changes { @x = @a }\` +
- *     \`when @x changes { @b = 1 }\` re-runs the first effect with the new @b.
- *     A true self-loop (the body writing one of its own deps — E-LIFECYCLE-006)
- *     would never settle, so the re-runs are capped at
- *     _SCRML_WHEN_RERUN_CAP; past it the pending run is dropped and reported.
+ *   - A synchronous re-entry is not recursed: the effect is marked pending and
+ *     re-runs ONCE after the current run (keeps an acyclic chain through a
+ *     second effect whole). Trade-off: a self-loop (E-LIFECYCLE-006, not yet
+ *     a compile error — this cap is the only guard) gets one re-run, then the
+ *     next pending re-run is dropped and reported; a longer chain re-entering
+ *     the same effect twice in one write loses the second re-entry, also
+ *     reported via console.error, never silently.
  *   - An async (CPS, §13) body's rejection is reported here; it does not reach
  *     the writer (§6.7.4 "does NOT propagate to the enclosing scope").
  *   - The disposer is registered against the if= mount being wired, if any
@@ -4539,7 +4538,7 @@ function _scrml_effect_static(fn) {
  * @param {function} body — the lowered effect body
  * @returns {function} dispose
  */
-const _SCRML_WHEN_RERUN_CAP = 100;
+const _SCRML_WHEN_RERUN_CAP = 1;
 function _scrml_when_changes(subscribe, body) {
   let running = false;
   let pending = false;
@@ -4559,9 +4558,7 @@ function _scrml_when_changes(subscribe, body) {
           r.then(null, function (e) { console.error("scrml when-effect error:", e); });
         }
         if (pending && !disposed && ++reruns > _SCRML_WHEN_RERUN_CAP) {
-          console.error("scrml when-effect error: E-LIFECYCLE-006 — the effect re-triggered itself " +
-            _SCRML_WHEN_RERUN_CAP + " times in one write (its body keeps changing one of its own " +
-            "dependencies); the pending re-run is dropped.");
+          console.error("scrml when-effect error: E-LIFECYCLE-006 — re-triggered during its re-run; dropped.");
           break;
         }
       } while (pending && !disposed);

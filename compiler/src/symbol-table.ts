@@ -4180,35 +4180,6 @@ function walkDerivedValueMutate(
       checkStateDeclForDerivedWrite(anyN, currentScope, errors, fileFromScope);
     }
 
-    // §6.7.4 EC-1 — E-LIFECYCLE-007 (derived half): a `when` dep-list entry that
-    // names a `const <name>` derived cell. A derived cell has no change event of
-    // its own (it re-evaluates lazily from its upstream cells), so the SPEC
-    // rejects it as a trigger and prescribes listing the upstream `@variables`
-    // instead. Since 544e35c3 the effect subscribes to its listed deps — a
-    // derived dep is never written, so the body would silently never fire. The
-    // undeclared-entry half of E-LIFECYCLE-007 is not implemented here.
-    if (kind === "when-effect" && Array.isArray(anyN.dependencies)) {
-      const reported = new Set<string>();
-      for (const dep of anyN.dependencies as unknown[]) {
-        if (typeof dep !== "string" || dep.length === 0 || reported.has(dep)) continue;
-        const rec = lookupStateCell(currentScope, dep);
-        if (rec && rec.isConst) {
-          reported.add(dep);
-          errors.push({
-            code: "E-LIFECYCLE-007",
-            message:
-              `E-LIFECYCLE-007: \`when\` dep-list entry \`@${dep}\` is a \`const <${dep}>\` `
-              + `derived cell. A derived cell has no change event of its own — it `
-              + `re-evaluates from the cells it reads — so it cannot trigger a \`when\` `
-              + `effect (SPEC §6.7.4 EC-1). Fix: list the mutable \`@variables\` \`@${dep}\` `
-              + `is computed from, and read \`@${dep}\` inside the body.`,
-            span: containerSpan,
-            severity: "error",
-          });
-        }
-      }
-    }
-
     // Scope-aware recursion.
     if (kind === "state-decl") {
       const stateScope = (anyN as ReactiveDeclNode & ScopeAnnotated)._scope;

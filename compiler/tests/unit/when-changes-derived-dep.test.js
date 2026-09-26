@@ -107,6 +107,84 @@ describe("§6.7.4 EC-1 — E-LIFECYCLE-007 on a derived dep", () => {
 `)).toEqual([]);
   });
 
+  // The dep is resolved the way the emitted `_scrml_reactive_subscribe(dep, h)`
+  // resolves it at runtime — one flat cell store keyed by the bare name — not by
+  // lexical scope, so every declaration locus is covered.
+  test("derived in a nested `${ }` inside markup", () => {
+    expect(codes(`<program>
+  <p> = 1
+  <c> = 0
+  when @d changes { @c = @c + 1 }
+  <div>\${ const <d> = @p * 2 }</div>
+</program>
+`)).toEqual(["E-LIFECYCLE-007"]);
+  });
+
+  test("derived in an if= region", () => {
+    expect(codes(`<program>
+  <p> = 1
+  <c> = 0
+  when @d changes { @c = @c + 1 }
+  <div if=@p>\${ const <d> = @p * 2 }</div>
+</program>
+`)).toEqual(["E-LIFECYCLE-007"]);
+  });
+
+  test("derived in one `${ }`, when in another", () => {
+    expect(codes(`<program>
+  <p> = 1
+  <c> = 0
+  \${ const <d> = @p * 2 }
+  \${ when @d changes { @c = @c + 1 } }
+  <p>\${@c}</p>
+</program>
+`)).toEqual(["E-LIFECYCLE-007"]);
+  });
+
+  test("derived in a component body (inlined by CE — same runtime key)", () => {
+    expect(codes(`<program>
+  <c> = 0
+  const Card = <div>\${ const <d> = @c * 2 }<span>\${@d}</span></div>
+  \${ when @d changes { @c = @c + 1 } }
+  <Card/>
+</program>
+`)).toEqual(["E-LIFECYCLE-007"]);
+  });
+
+  test("a non-derived `const <k> = 5` is read-only too (not a mutable @variable)", () => {
+    expect(codes(`<program>
+  <c> = 0
+  const <k> = 5
+  when @k changes { @c = @c + 1 }
+  <p>\${@c}</p>
+</program>
+`)).toEqual(["E-LIFECYCLE-007"]);
+  });
+
+  test("NO false positive: a mutable @d in one `${ }` and a same-named derived elsewhere", () => {
+    // Its writes do fire the effect. (The pair is already E-DERIVED-WRITE on the
+    // write; E-LIFECYCLE-007 must not pile on.)
+    expect(codes(`<program>
+  <c> = 0
+  \${ <d> = 1 }
+  <div>\${ const <d> = 5 }</div>
+  \${ when @d changes { @c = @c + 1 } }
+  <button onclick=\${@d = @d + 1}>b</button>
+</program>
+`)).not.toContain("E-LIFECYCLE-007");
+  });
+
+  test("NO false positive: a mutable @e alongside an unrelated derived", () => {
+    expect(codes(`<program>
+  <e> = 0
+  <c> = 0
+  <div>\${ const <d> = @e * 2 }</div>
+  \${ when @e changes { @c = @c + 1 } }
+  <p>\${@d}</p>
+</program>
+`)).toEqual([]);
+  });
+
   test("a mutable cell dep is clean", () => {
     expect(codes(`<program>
   <p> = 1
