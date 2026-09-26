@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `8a59d608` — wrap(s433): every fix that self-reported clean came back with a finding, and four measurement failures shared one shape — **LOCAL-ONLY**
+- `e2e991fe` — wrap(s433): every fix that self-reported clean came back with a finding, and five measurement failures shared one shape (#1073) — **pushed**
 - `89385ebd` — wrap(s432): seven landed, five rulings gift-wrapped for bryan, one held on its own review (#1068) — **pushed**
 - `15e60e4b` — wrap(s428): the decision is BOTH tracks — and the four prerequisites turn out to have been open in SPEC since S117 (#1040) — **pushed**
 - `26dca726` — wrap(s429b): two landed, four held — two of the holds were the spec saying no; Q5–Q7 to bryan (#1039) — **pushed**

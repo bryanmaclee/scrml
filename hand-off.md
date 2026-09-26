@@ -328,10 +328,13 @@ from separate worktrees (`.claude/worktrees/pa-docs`, `land-*`) — done this se
   branch is merged.
 
 ### 3b. ⚑ S431 LEFT UNRECORDED WORK ON THIS CLONE — found at S432 wrap (S431 never wrapped)
-- `fix/s431-sigil-rewrites-skip-strings` `ca5ecc45` (worktree `C:w431s`): 2 commits fixing the HIGH `g-scrml-sigil-rewrites-reach-inside-every-string-literal` (text rewrite stages mask literal content once; map-literal keys compare on restored text). **Was never pushed — pushed by S432 at wrap so it survives. Review status unknown → treat as UNREVIEWED.** Rebase onto main (#1054/#1063 touched the same rewrite/expression paths), S239 pass, then land.
-- `fix/s431-when-changes-dep-list` `6b757158` (worktree `C:w431`, local only): S431's own when-changes + §6.5.1 fix — **superseded by #1054**; review worktree `C:
-431w` sits on it. Keep only for diffing, then remove the three `C:w431`/`C:
-431w`/`C:431*` worktrees.
+> ⚑ **S436 repair — the four `C:\…` worktree paths below were CONTROL-CHARACTER CORRUPTED when #1068
+> landed this block through a backslash-escape pass** (`\r` → a literal CR that split the line in two,
+> `\b` → a backspace, `\w` → the backslash dropped). Restored by inverting that transform, which is
+> deterministic, so these are reconstructed rather than guessed — but **the laptop owns these paths and
+> should confirm the spellings.** See the `@review pr=1068` marker in `docs/pr-reviews.md`.
+- `fix/s431-sigil-rewrites-skip-strings` `ca5ecc45` (worktree `C:\w431s`): 2 commits fixing the HIGH `g-scrml-sigil-rewrites-reach-inside-every-string-literal` (text rewrite stages mask literal content once; map-literal keys compare on restored text). **Was never pushed — pushed by S432 at wrap so it survives. Review status unknown → treat as UNREVIEWED.** Rebase onto main (#1054/#1063 touched the same rewrite/expression paths), S239 pass, then land.
+- `fix/s431-when-changes-dep-list` `6b757158` (worktree `C:\w431`, local only): S431's own when-changes + §6.5.1 fix — **superseded by #1054**; review worktree `C:\r431w` sits on it. Keep only for diffing, then remove the three `C:\w431`/`C:\r431w`/`C:\b431*` worktrees.
 
 ### 4. Standing directives set this session (in user-voice-pjoliver11 + memory)
 - **Gift-wrap every route to bryan, permanently:**
