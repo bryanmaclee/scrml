@@ -1,0 +1,667 @@
+/**
+ * §6.7.4 `when <dep-list> changes { body }` — RUNTIME drive (happy-dom).
+ *
+ * The effect used to lower to `_scrml_effect(function(){ body })`, which broke
+ * the three core clauses of §6.7.4 at once, silently (exit 0, no diagnostic):
+ *
+ *   (a) "The body does NOT execute on initial mount."          — it ran at boot.
+ *   (b) "The body executes whenever any listed dependency
+ *        changes value."                                        — writing a listed
+ *        dep the body does not READ fired nothing.
+ *   (c) "The compiler does NOT auto-track `@variable` reads
+ *        inside the body."                                      — every read in
+ *        the body became a trigger.
+ *
+ * Each program is compiled to disk and run on the TREE-SHAKEN runtime file the
+ * compiler wrote for it (not the whole SCRML_RUNTIME), so a chunk-gating miss for
+ * the `_scrml_when_changes` helper fails here as a ReferenceError at boot.
+ * Changes are driven by real clicks through the delegated handler wiring.
+ */
+
+import { describe, test, expect, beforeEach, afterEach } from "bun:test";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { compileScrml } from "../../src/api.js";
+import { SCRML_RUNTIME } from "../../src/runtime-template.js";
+import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
+
+if (!globalThis.document) GlobalRegistrator.register();
+
+beforeEach(async () => {
+  if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
+  await GlobalRegistrator.register();
+});
+
+afterEach(() => {
+  delete globalThis.fetch;
+});
+
+function mount(src, { fetchReply } = {}) {
+  const TMP = mkdtempSync(join(tmpdir(), "when-deplist-"));
+  try {
+    const abs = join(TMP, "w.scrml");
+    writeFileSync(abs, src);
+    const out = join(TMP, "dist");
+    const result = compileScrml({ inputFiles: [abs], outputDir: out, write: true, log: () => {} });
+    const realErrors = (result.errors || []).filter((e) => e && (e.severity ?? "error") === "error");
+    expect(realErrors.map((e) => e.code + " " + e.message)).toEqual([]);
+    const html = readFileSync(join(out, "w.html"), "utf8");
+    const clientJs = readFileSync(join(out, "w.client.js"), "utf8");
+    const rtName = readdirSync(out).find((n) => /^scrml-runtime.*\.js$/.test(n));
+    const runtimeJs = readFileSync(join(out, rtName), "utf8");
+
+    if (fetchReply !== undefined) {
+      globalThis.fetch = () =>
+        Promise.resolve().then(() => ({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(fetchReply),
+          text: () => Promise.resolve(JSON.stringify(fetchReply)),
+          headers: { get: () => "application/json" },
+        }));
+    }
+
+    const bodyHtml = (html.match(/<body[^>]*>([\s\S]*)<\/body>/i) || [])[1] || html;
+    document.body.innerHTML = bodyHtml.replace(/<script[^>]*>[\s\S]*?<\/script>/g, "").trim();
+    const errs = [];
+    const oe = console.error;
+    console.error = (...a) => { errs.push(a.map(String).join(" ")); };
+    const code = `(function() {\n${runtimeJs}\n` + captureInsideChunkScope(clientJs,
+      `window.__wg = _scrml_reactive_get; window.__ws = _scrml_reactive_set;\n`) + `\n})();`;
+    try {
+      eval(code);
+      document.dispatchEvent(new Event("DOMContentLoaded", { bubbles: true }));
+    } finally {
+      console.error = oe;
+    }
+    return {
+      clientJs,
+      errs,
+      get: (n) => window.__wg(n),
+      set: (n, v) => window.__ws(n, v),
+      text: (id) => document.getElementById(id)?.textContent,
+      click: (id) => {
+        const prev = console.error;
+        console.error = (...a) => { errs.push(a.map(String).join(" ")); };
+        try { document.getElementById(id).dispatchEvent(new Event("click", { bubbles: true })); }
+        finally { console.error = prev; }
+      },
+    };
+  } finally {
+    rmSync(TMP, { recursive: true, force: true });
+  }
+}
+
+async function settle() {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  await new Promise((r) => setTimeout(r, 0));
+}
+
+// The PA's repro: the body reads @m (unlisted) and not @n (listed).
+const CORE = `<program>
+  <n> = 0
+  <m> = 0
+  <log> = ""
+  when @n changes { @log = @log + "n:" + @m + ";" }
+  <p id="log">\${@log}</p>
+  <button id="n" onclick=\${@n = @n + 1}>n</button>
+  <button id="m" onclick=\${@m = @m + 1}>m</button>
+</program>
+`;
+
+describe("§6.7.4 core clauses (a)(b)(c)", () => {
+  test("(a) the body does NOT run at mount", () => {
+    const app = mount(CORE);
+    expect(app.errs).toEqual([]);
+    expect(app.get("log")).toBe("");
+    expect(app.text("log")).toBe("");
+  });
+
+  test("(b) writing a listed dep the body does not read fires the body", () => {
+    const app = mount(CORE);
+    app.click("n");
+    expect(app.get("log")).toBe("n:0;");
+    app.click("n");
+    expect(app.get("log")).toBe("n:0;n:0;");
+    expect(app.text("log")).toBe("n:0;n:0;");
+  });
+
+  test("(c) writing an UNLISTED @var the body reads does NOT fire it; the body reads its current value", () => {
+    const app = mount(CORE);
+    app.click("m");
+    app.click("m");
+    expect(app.get("log")).toBe("");
+    app.click("n");
+    expect(app.get("log")).toBe("n:2;");
+  });
+
+  test("the same holds inside a ${ } logic block", () => {
+    const app = mount(CORE.replace(
+      `  when @n changes { @log = @log + "n:" + @m + ";" }\n`,
+      `  \${\n    when @n changes { @log = @log + "n:" + @m + ";" }\n  }\n`,
+    ));
+    expect(app.get("log")).toBe("");
+    app.click("m");
+    expect(app.get("log")).toBe("");
+    app.click("n");
+    expect(app.get("log")).toBe("n:1;");
+  });
+});
+
+describe("§6.7.4 semantics", () => {
+  test("multi-dep: fires exactly once per write to ANY listed dep", () => {
+    const app = mount(`<program>
+  <a> = 0
+  <b> = 0
+  <other> = 0
+  <count> = 0
+  when (@a, @b) changes { @count = @count + 1 }
+  <button id="a" onclick=\${@a = @a + 1}>a</button>
+  <button id="b" onclick=\${@b = @b + 1}>b</button>
+  <button id="o" onclick=\${@other = @other + 1}>o</button>
+</program>
+`);
+    expect(app.get("count")).toBe(0);
+    app.click("a");
+    expect(app.get("count")).toBe(1);
+    app.click("b");
+    expect(app.get("count")).toBe(2);
+    app.click("o");
+    expect(app.get("count")).toBe(2);
+  });
+
+  test("change detection is a write, not deep equality: writing the same value fires", () => {
+    const app = mount(`<program>
+  <n> = 0
+  <count> = 0
+  when @n changes { @count = @count + 1 }
+  <button id="z" onclick=\${@n = 0}>z</button>
+</program>
+`);
+    app.click("z");
+    app.click("z");
+    expect(app.get("count")).toBe(2);
+  });
+
+  test("derived flush: the body reads the POST-change value of a derived cell", () => {
+    const app = mount(`<program>
+  <price> = 2
+  <qty> = 3
+  <seen> = ""
+  const <total> = @price * @qty
+  when @price changes { @seen = @seen + @total + ";" }
+  <p id="t">\${@total}</p>
+  <button id="p" onclick=\${@price = @price + 1}>p</button>
+  <button id="q" onclick=\${@qty = @qty + 1}>q</button>
+</program>
+`);
+    expect(app.text("t")).toBe("6"); // the derived is clean (read) before the write
+    app.click("p");
+    expect(app.get("seen")).toBe("9;");
+    app.click("q"); // unlisted — no fire, but dirties @total
+    expect(app.get("seen")).toBe("9;");
+    app.click("p");
+    expect(app.get("seen")).toBe("9;16;");
+  });
+
+  test("§6.5 array writes fire it: full replacement, and an intercepted mutation in a function body", () => {
+    const app = mount(`<program>
+  <items> = []
+  <log> = ""
+  when @items changes { @log = @log + @items.length + ";" }
+  function add() {
+    @items.push(7)
+  }
+  <button id="re" onclick=\${@items = [...@items, 1]}>re</button>
+  <button id="add" onclick=\${add()}>add</button>
+</program>
+`);
+    expect(app.get("log")).toBe("");
+    app.click("re");
+    expect(app.get("log")).toBe("1;");
+    app.click("add");
+    expect(app.get("log")).toBe("1;2;");
+  });
+
+  test("a body writing one of its own deps is BOUNDED: one re-run per write, then dropped + reported", () => {
+    // E-LIFECYCLE-006 at compile time per SPEC; while that check is absent the
+    // runtime cap is the only guard. A re-entry is deferred (not recursed) and
+    // re-run ONCE; the next pending re-run is dropped and reported — the effect
+    // adds at most 2 writes per external write, never a silent burst.
+    const app = mount(`<program>
+  <n> = 0
+  when @n changes { @n = @n + 1 }
+  <button id="n" onclick=\${@n = @n + 1}>n</button>
+</program>
+`);
+    app.click("n");
+    // the click's write (1), the body's run (2), its one re-run (3).
+    expect(app.get("n")).toBe(3);
+    expect(app.errs.filter((e) => /Maximum call stack|RangeError/.test(e))).toEqual([]);
+    expect(app.errs.filter((e) => /E-LIFECYCLE-006/.test(e)).length).toBe(1);
+    // a programmatic write is bounded the same way (its report goes to the real
+    // console — `set` does not capture it).
+    const oe = console.error;
+    console.error = () => {};
+    try { app.set("n", 10); } finally { console.error = oe; }
+    expect(app.get("n")).toBe(12);
+  });
+
+  test("a self-looping array push is bounded the same way (2 extra items per write)", () => {
+    const app = mount(`<program>
+  <xs> = []
+  when @xs changes { @xs.push(1) }
+  <button id="go" onclick=\${@xs.push(0)}>go</button>
+</program>
+`);
+    app.click("go");
+    expect(app.get("xs")).toEqual([0, 1, 1]);
+    expect(app.errs.filter((e) => /E-LIFECYCLE-006/.test(e)).length).toBe(1);
+    app.click("go");
+    expect(app.get("xs").length).toBe(6);
+    expect(app.errs.filter((e) => /E-LIFECYCLE-006/.test(e)).length).toBe(2);
+  });
+
+  test("an ACYCLIC chain through a second effect is not lost (re-entry re-runs, not dropped)", () => {
+    // e1 lists (@a, @b) and writes @x; e2 lists @x and writes @b once. The write
+    // to @b arrives while e1 is still running — it must re-run e1 afterwards
+    // with the new @b, not drop it.
+    const app = mount(`<program>
+  <a> = 0
+  <b> = 0
+  <x> = 0
+  <log> = ""
+  when (@a, @b) changes { @log = @log + "e1(" + @a + "," + @b + ");"
+    @x = @a }
+  when @x changes { if (@b == 0) { @b = 1 } }
+  <button id="a" onclick=\${@a = @a + 1}>a</button>
+</program>
+`);
+    app.click("a");
+    expect(app.get("log")).toBe("e1(1,0);e1(1,1);");
+    expect(app.get("b")).toBe(1);
+    app.click("a");
+    expect(app.get("log")).toBe("e1(1,0);e1(1,1);e1(2,1);");
+    expect(app.errs).toEqual([]);
+  });
+
+  test("a server-fn call in the body is awaited (§6.7.4 'Interaction with Server Functions', §13.2)", async () => {
+    const app = mount(`<program>
+  <n> = 0
+  <log> = ""
+  server function double(x) {
+    return x * 2
+  }
+  when @n changes {
+    const r = double(@n)
+    @log = @log + "r" + r + ";"
+    @log = @log + "e" + double(@n) + ";"
+  }
+  <button id="n" onclick=\${@n = @n + 1}>n</button>
+</program>
+`, { fetchReply: 42 });
+    expect(app.clientJs).toMatch(/_scrml_when_changes\([\s\S]*?async function\(\)/);
+    await settle();
+    expect(app.get("log")).toBe(""); // no boot fetch-and-write
+    app.click("n");
+    await settle();
+    expect(app.get("log")).toBe("r42;e42;");
+    expect(app.errs).toEqual([]);
+  });
+
+  test("a server-fn call nested in `if` / `for` inside a reactive write is awaited too", async () => {
+    // The body's nested statements lower as text (not the AST path), and the
+    // function-body injector fences a call beneath `_scrml_reactive_set` for
+    // emit-client's statement lift — which never reaches a when body. It used to
+    // store "[object Promise]".
+    const app = mount(`<program>
+  <n> = 0
+  <log> = ""
+  server function dbl(x) {
+    return x * 2
+  }
+  when @n changes {
+    if (@n > 0) {
+      @log = @log + "i" + dbl(@n) + ";"
+    }
+    for (const i of [1, 2]) {
+      @log = @log + "f" + dbl(i) + ";"
+    }
+  }
+  <button id="n" onclick=\${@n = @n + 1}>n</button>
+</program>
+`, { fetchReply: 42 });
+    app.click("n");
+    await settle();
+    expect(app.get("log")).toBe("i42;f42;f42;");
+    expect(app.errs).toEqual([]);
+  });
+});
+
+describe("§6.7.4 runtime helper contract (_scrml_when_changes)", () => {
+  // The whole runtime, so the helper can be driven directly.
+  function rt() {
+    const g = {};
+    // eslint-disable-next-line no-eval
+    eval(`(function(){\n${SCRML_RUNTIME}\n` +
+      `g.set = _scrml_reactive_set; g.get = _scrml_reactive_get; g.sub = _scrml_reactive_subscribe;` +
+      `g.when = _scrml_when_changes; g.effect = _scrml_effect; g.destroy = _scrml_destroy_scope;` +
+      `g.setScope = function (s) { _scrml_active_mount_scope = s; };\n})();`);
+    return g;
+  }
+
+  test("the body's reads are untracked even when the triggering write happens inside a running effect", () => {
+    const g = rt();
+    g.set("n", 0); g.set("m", 0);
+    let bodyRuns = 0;
+    g.when((h) => [g.sub("n", h)], () => { bodyRuns++; g.get("m"); });
+    let effectRuns = 0;
+    // An effect that WRITES @n. If the when-body's read of @m leaked into this
+    // effect's tracking context, a later @m write would re-run the effect.
+    g.effect(() => { effectRuns++; g.set("n", g.get("n") === undefined ? 0 : 1); });
+    const afterBoot = effectRuns;
+    expect(bodyRuns).toBe(1);
+    g.set("m", 5);
+    expect(effectRuns).toBe(afterBoot);
+  });
+
+  test("registered inside an if= mount pass, it is torn down with that scope (§6.7.2 step 1)", () => {
+    const g = rt();
+    g.set("n", 0);
+    let runs = 0;
+    g.setScope("if_test_1");
+    g.when((h) => [g.sub("n", h)], () => { runs++; });
+    g.setScope(null);
+    g.set("n", 1);
+    expect(runs).toBe(1);
+    g.destroy("if_test_1");
+    g.set("n", 2);
+    expect(runs).toBe(1);
+  });
+
+  test("the returned disposer unsubscribes every dep, and is idempotent", () => {
+    const g = rt();
+    g.set("a", 0); g.set("b", 0);
+    let runs = 0;
+    const dispose = g.when((h) => [g.sub("a", h), g.sub("b", h)], () => { runs++; });
+    g.set("a", 1); g.set("b", 1);
+    expect(runs).toBe(2);
+    dispose(); dispose();
+    g.set("a", 2); g.set("b", 2);
+    expect(runs).toBe(2);
+  });
+
+  test("an async body's rejection is reported, not thrown at the writer", async () => {
+    const g = rt();
+    g.set("n", 0);
+    const errs = [];
+    const oe = console.error;
+    console.error = (...a) => { errs.push(a.map(String).join(" ")); };
+    try {
+      g.when((h) => [g.sub("n", h)], async () => { await null; throw new Error("boom"); });
+      expect(() => g.set("n", 1)).not.toThrow();
+      await settle();
+    } finally {
+      console.error = oe;
+    }
+    expect(errs.some((e) => /when-effect error/.test(e) && /boom/.test(e))).toBe(true);
+  });
+});
+
+// §6.5.1 — a mutating array method on a reactive cell SHALL notify the cell. The
+// STATEMENT form always did (`reactive-array-mutation` → mutate + reactive_set);
+// the EXPRESSION forms (an inline handler, an arrow, a value-using position)
+// mutated the Proxy in place and never called `_scrml_reactive_set`, so a COARSE
+// subscriber — `when @items changes`, now a `_scrml_reactive_subscribe` per dep —
+// never fired. Each case clicks once and asserts the body ran exactly once.
+function mutApp(handlerAttr, { init = "[]", extraLogic = "" } = {}) {
+  return mount(`<program>
+  <items> = ${init}
+  <count> = 0
+  <last> = 0
+  <flag> = true
+  when @items changes { @count = @count + 1 }${extraLogic ? "\n  ${\n" + extraLogic + "\n  }" : ""}
+  <p id="count">\${@count}</p>
+  <p id="len">\${@items.length}</p>
+  <button id="go" onclick=${handlerAttr}>go</button>
+</program>
+`);
+}
+
+describe("§6.5.1 expression-position mutation notifies the cell (when … changes fires once)", () => {
+  test("inline handler `${@items.push(1)}`", () => {
+    const app = mutApp("${@items.push(1)}");
+    expect(app.errs).toEqual([]);
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    expect(app.text("count")).toBe("1");
+    expect(app.text("len")).toBe("1");
+    app.click("go");
+    expect(app.get("count")).toBe(2);
+    expect(app.text("len")).toBe("2");
+  });
+
+  test("expression-bodied arrow handler `${() => @items.push(1)}`", () => {
+    const app = mutApp("${() => @items.push(1)}");
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    expect(app.text("len")).toBe("1");
+  });
+
+  test("block-bodied arrow handler `${() => { @items.push(1) }}`", () => {
+    const app = mutApp("${() => { @items.push(1) }}");
+    expect(app.errs).toEqual([]);
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    expect(app.text("len")).toBe("1");
+  });
+
+  test("ternary arms — each arm notifies once", () => {
+    const app = mutApp("${@flag ? @items.push(9) : @items.pop()}", { init: "[1]" });
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    expect(app.get("items").length).toBe(2);
+    app.set("flag", false);
+    app.click("go");
+    expect(app.get("count")).toBe(2);
+    expect(app.get("items").length).toBe(1);
+  });
+
+  test("`&&` right operand", () => {
+    const app = mutApp("${@flag && @items.push(1)}");
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+    app.set("flag", false);
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("value-using: `@last = @items.push(7)` keeps push's return (the new length)", () => {
+    const app = mutApp("${@last = @items.push(7)}", { init: "[1, 2]" });
+    app.click("go");
+    expect(app.get("last")).toBe(3);
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("value-using: `@last = @items.pop()` keeps pop's return (the removed item)", () => {
+    const app = mutApp("${@last = @items.pop()}", { init: "[4, 5]" });
+    app.click("go");
+    expect(app.get("last")).toBe(5);
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("returned from a fn and bound to a local (`const n = @items.push(x)`)", () => {
+    const app = mutApp("${take()}", {
+      init: "[1]",
+      extraLogic: "    function take() { const n = @items.push(8); @last = n }",
+    });
+    app.click("go");
+    expect(app.get("last")).toBe(2);
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("`return @items.shift()` from a function expression", () => {
+    const app = mutApp("${@last = g()}", {
+      init: "[6, 7]",
+      extraLogic: "    const g = function() { return @items.shift() }",
+    });
+    app.click("go");
+    expect(app.get("last")).toBe(6);
+    expect(app.get("count")).toBe(1);
+  });
+
+  test("statement form still fires exactly once (no double notify)", () => {
+    const app = mutApp("${add()}", { extraLogic: "    function add() { @items.push(1) }" });
+    app.click("go");
+    expect(app.get("count")).toBe(1);
+  });
+
+  for (const [method, init, args] of [
+    ["push", "[1]", "2"], ["pop", "[1, 2]", ""], ["shift", "[1, 2]", ""],
+    ["unshift", "[1]", "0"], ["splice", "[1, 2, 3]", "0, 1"], ["reverse", "[1, 2]", ""],
+    ["sort", "[2, 1]", ""], ["fill", "[1, 2]", "0"], ["copyWithin", "[1, 2, 3]", "0, 1"],
+  ]) {
+    test(`all nine methods — inline \`@items.${method}(${args})\` fires once`, () => {
+      const app = mutApp(`\${@items.${method}(${args})}`, { init });
+      expect(app.errs).toEqual([]);
+      app.click("go");
+      expect(app.get("count")).toBe(1);
+    });
+  }
+
+  test("a deep receiver is NOT a write to the cell (§6.5.6) — same as the statement form", () => {
+    const app = mount(`<program>
+  <obj> = { list: [] }
+  <count> = 0
+  when @obj changes { @count = @count + 1 }
+  <p id="count">\${@count}</p>
+  <button id="go" onclick=\${@obj.list.push(1)}>go</button>
+</program>
+`);
+    app.click("go");
+    expect(app.get("obj").list.length).toBe(1);
+    expect(app.get("count")).toBe(0);
+  });
+});
+
+// §6.3 / §6.6.18 — a write to a FIELD or INDEX of a reactive cell in expression
+// position (`onclick=${@o.x = @o.x + 1}`) mutated the Proxy in place with no
+// `_scrml_reactive_set`, so `when @o changes` never fired; the statement form
+// (`reactive-nested-assign`) always notified. §6.5.7 is unchanged: mutating an
+// element obtained through a loop alias does not notify the array.
+describe("§6.3 expression-position field / index write notifies the cell", () => {
+  const app = (handler, init = "{ x: 1, n: 0, tmp: 1 }") => mount(`<program>
+  <o> = ${init}
+  <count> = 0
+  <last> = 0
+  when @o changes { @count = @count + 1 }
+  <p id="count">\${@count}</p>
+  <button id="go" onclick=${handler}>go</button>
+</program>
+`);
+
+  for (const [label, handler, check] of [
+    ["`=` (body reads the new value)", "${@o.x = @o.x + 1}", (a) => expect(a.get("o").x).toBe(2)],
+    ["`+=`", "${@o.n += 5}", (a) => expect(a.get("o").n).toBe(5)],
+    ["postfix `++`", "${@o.n++}", (a) => expect(a.get("o").n).toBe(1)],
+    ["prefix `--`", "${--@o.n}", (a) => expect(a.get("o").n).toBe(-1)],
+    ["`delete`", "${delete @o.tmp}", (a) => expect("tmp" in a.get("o")).toBe(false)],
+    ["value-using `@last = (@o.x = 9)`", "${@last = (@o.x = 9)}", (a) => expect(a.get("last")).toBe(9)],
+    ["block-bodied arrow", "${() => { @o.x = 7 }}", (a) => expect(a.get("o").x).toBe(7)],
+  ]) {
+    test(`${label} fires the when once`, () => {
+      const a = app(handler);
+      expect(a.errs).toEqual([]);
+      a.click("go");
+      check(a);
+      expect(a.get("count")).toBe(1);
+      expect(a.text("count")).toBe("1");
+    });
+  }
+
+  test("an index path `@rows[0].done = true` notifies @rows", () => {
+    const a = mount(`<program>
+  <rows> = [{ done: false }]
+  <count> = 0
+  when @rows changes { @count = @count + 1 }
+  <button id="go" onclick=\${@rows[0].done = true}>go</button>
+</program>
+`);
+    a.click("go");
+    expect(a.get("rows")[0].done).toBe(true);
+    expect(a.get("count")).toBe(1);
+  });
+
+  test("§6.5.7 unchanged: a loop-alias element write does NOT notify the array", () => {
+    const a = mount(`<program>
+  <ts> = [{ done: false }, { done: false }]
+  <count> = 0
+  when @ts changes { @count = @count + 1 }
+  \${
+    function all() {
+      for (const t of @ts) { t.done = true }
+    }
+  }
+  <button id="go" onclick=\${all()}>go</button>
+</program>
+`);
+    a.click("go");
+    expect(a.get("ts").every((t) => t.done)).toBe(true);
+    expect(a.get("count")).toBe(0);
+  });
+});
+
+// §6.7.4 EC-1 — a derived dep is E-LIFECYCLE-007 (tests/unit/when-changes-derived-dep
+// .test.js). The prescribed remedy — list the upstream cells, read the derived
+// in the body — must see the POST-change derived value (flush ordering), through
+// a transitive chain and through a deep-path derived written in expression
+// position.
+describe("§6.7.4 EC-1 remedy — upstream dep, derived read in the body", () => {
+  test("transitive derived A → B → C reads post-change", () => {
+    const a = mount(`<program>
+  <p> = 1
+  <log> = ""
+  const <b> = @p + 1
+  const <c> = @b * 2
+  when @p changes { @log = @log + @c + ";" }
+  <button id="go" onclick=\${@p = @p + 1}>go</button>
+</program>
+`);
+    a.click("go");
+    a.click("go");
+    expect(a.get("log")).toBe("6;8;");
+  });
+
+  test("derived over a deep path, written in expression position", () => {
+    const a = mount(`<program>
+  <o> = { x: 1 }
+  <log> = ""
+  const <d> = @o.x * 2
+  when @o changes { @log = @log + @d + ";" }
+  <button id="go" onclick=\${@o.x = @o.x + 1}>go</button>
+</program>
+`);
+    a.click("go");
+    a.click("go");
+    expect(a.get("log")).toBe("4;6;");
+  });
+});
+
+// §6.7.4: "A `when` statement is associated with the enclosing element scope. When
+// that scope destroys, the effect is automatically unregistered." The runtime half
+// is proven above. The COMPILER half does not exist in any host yet, and each host
+// needs a file this change does not own (see the S429 report):
+//   - if=: the `when` is hoisted to file scope and registered once at boot, so it
+//     keeps firing while the region is unmounted (and is not re-registered on
+//     remount — it simply never stopped). Needs emit-html/emit-event-wiring to
+//     register it in the mount wiring pass instead of at file scope.
+//   - component: a `when` in a component body fails to compile (E-COMPONENT-021).
+//   - match arm: a `${ when … }` in an arm body is lowered as markup
+//     interpolation — `ReferenceError: when is not defined` at runtime.
+describe("§6.7.4 teardown with the enclosing scope — compiler hosts", () => {
+  test.todo("if= region: the body stops firing after the region unmounts and resumes on remount");
+  test.todo("component: a `when` in a component body compiles and stops firing when the instance unmounts");
+  test.todo("match arm: a `when` in an arm body compiles and stops firing when the arm is swapped out");
+});

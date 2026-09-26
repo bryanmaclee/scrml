@@ -384,10 +384,11 @@ export function extractInitExpr(stmt: ASTNode): string {
  *
  * Same one-line derivation the injectors in this module each do inline; named
  * here because U1's consumer is an EMITTER context rather than a post-pass over
- * emitted text, and the two must agree on membership. Kept module-local: this is
- * a threading detail, not a new public seam.
+ * emitted text, and the two must agree on membership. Exported (S429) for the one
+ * other emitter host that needs the same file-filtered set: the §6.7.4 `when`
+ * body, threaded by emit-reactive-wiring.ts as `whenServerFnNames`.
  */
-function _clientServerFnNames(routeMap: RouteMap, filePath: string): Set<string> {
+export function _clientServerFnNames(routeMap: RouteMap, filePath: string): Set<string> {
   const names = new Set<string>();
   for (const [id, route] of routeMap.functions) {
     // F5 (S239 round 3) — FILTER ON THE OWNING FILE. `runRI` builds ONE routeMap
@@ -645,7 +646,16 @@ export function injectServerCallAwaitsViaAst(code: string, serverFnNames: Set<st
  * pre-S320 per-statement string injection (fenced by control-flow-boundary shape)
  * never reached. On an acorn parse failure the body is returned UNCHANGED.
  */
-export function injectFnBodyServerCallAwaits(code: string, isPromiseCallee: PromiseCalleePred): string {
+export function injectFnBodyServerCallAwaits(
+  code: string,
+  isPromiseCallee: PromiseCalleePred,
+  // "sink" (default) — a client FUNCTION body: a server call beneath a reactive
+  // sink is owned by emit-client's statement lift (INVARIANT 2). A `when … changes`
+  // body passes "none": it is emitted inside `_scrml_when_changes(…, function(){…})`,
+  // which that lift never reaches, so a sink-nested call (`if (c) { @x = srv() }`)
+  // must be awaited HERE or it stores a Promise (§6.7.4 / §13.2).
+  reactiveSkip: ReactiveSkipMode = "sink",
+): string {
   if (!code) return code;
   const PREFIX = "(async () => {\n";
   let program: any;
@@ -654,7 +664,7 @@ export function injectFnBodyServerCallAwaits(code: string, isPromiseCallee: Prom
   } catch {
     return code;
   }
-  const sites = collectAwaitSites(program, PREFIX.length, isPromiseCallee, "sink", false);
+  const sites = collectAwaitSites(program, PREFIX.length, isPromiseCallee, reactiveSkip, false);
   return applyAwaitSites(code, sites);
 }
 

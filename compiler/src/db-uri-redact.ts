@@ -5,7 +5,7 @@
  * This is NOT the redaction mechanism — that is value-based and lives in
  * `diagnostic-secrets.ts` (the compileScrml chokepoint). This helper decides
  * only how a message DISPLAYS the one value it is about: the value's secret
- * spans (the URI userinfo, every password-parameter value) are replaced
+ * spans (any userinfo, every parameter value — shape-independent, s432) are replaced
  * POSITIONALLY by `<redacted>`; nothing else in the value changes. A plain
  * SQLite path (`./app.db`, `sqlite:./app.db`, `:memory:`) passes through
  * unchanged.

@@ -1,0 +1,39 @@
+{
+  "id": "markup-handler-expr-handler-call-first-multi-stmt",
+  "description": "§5.2.1/§5.2.2 a `${…}` expression-form handler holding two `;`-separated statements runs BOTH when the first one is a call. #x: `@items.push(1); @last = 2`; #y: `f(); g()` (f adds 1, g multiplies by 10). Carried on impl#1 (S432, P7): every statement after a leading call is dropped.",
+  "language-version": "1.0",
+  "spec": "§5.2.1",
+  "rationale": "§5.2.1: \"`onclick=${expr}` on an event attribute SHALL use the `${...}` expression directly as the event handler, with `@var` references rewritten to reactive getters.\" E-MULTI-STATEMENT-HANDLER (§5.2.3) is scoped to the BARE form; the `${}` form carries its logic content verbatim, and impl#1 already runs both statements when the first is an assignment (`${@a = 1; @b = 2}`). Nothing makes the second statement's fate depend on whether the first is a call. After #x then #y: items is [1]; last is 2 after #x, then f → 3, g → 30.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      {
+        "click": "#x"
+      },
+      {
+        "click": "#y"
+      }
+    ],
+    "state": {
+      "items": [
+        1
+      ],
+      "last": 30
+    },
+    "domAnchored": [
+      {
+        "selector": "#last",
+        "text": "30"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-expr-handler-drops-every-statement-after-a-leading-call",
+      "fails": {
+        "runtime": "sha256:4e071db3b79bb887"
+      }
+    }
+  }
+}
