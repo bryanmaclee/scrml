@@ -65,6 +65,10 @@ import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
 import { redactDbUri } from "./db-uri-redact.ts";
 import { displayConnectionValue } from "./diagnostic-secrets.ts";
 import { classifyDbTarget, type DbTargetClass } from "./db-target.ts";
+// Import-free by construction (it takes an already-open handle, duck-typed on `.run`), so it
+// cannot drag `bun:sqlite`/`node:fs` into a stage that avoids them — and it is NOT a codegen
+// module, which this stage deliberately does not pull (see the schema-differ.js note below).
+import { configureSqliteHandle } from "./sqlite-handle-defaults.ts";
 import {
   parseSchemaBlock,
   generateCreateTable,
@@ -436,7 +440,21 @@ function readTableSchema(
  */
 export function openSchemaReadHandle(dbPath: string): Database {
   if (existsSync(`${dbPath}-wal`)) {
-    return new Database(dbPath, { readonly: true });
+    const h = new Database(dbPath, { readonly: true });
+    // §44 (S436) — this is the ONE read-only handle in the tree that takes locks, so it is
+    // the one that gets the busy-timeout. The `-wal` branch exists precisely because a LIVE
+    // WRITER (a running dev server) owns this file. In WAL mode a reader does not block on a
+    // writer's ordinary commits — but it DOES contend for the brief EXCLUSIVE lock a WAL
+    // recovery or a checkpoint-restart/truncate takes, and without a timeout that surfaces as
+    // a compile dying `database is locked`: the same adopter-facing symptom as the migration
+    // this arc fixed, one stage earlier. MEASURED on a real WAL file: a `{readonly:true}`
+    // handle reads back `busy_timeout` 0 -> 5000, i.e. the pragma is accepted and retained on
+    // a read-only connection (it is a connection setting, not a write).
+    // The `immutable=1` branch below is DELIBERATELY excluded: it takes no locks at all, so a
+    // timeout there is inert by construction — measured, it also reports `journal_mode=delete`
+    // because it ignores the WAL entirely.
+    configureSqliteHandle(h);
+    return h;
   }
   return new Database(
     `${sqliteFileUri(dbPath)}?immutable=1`,

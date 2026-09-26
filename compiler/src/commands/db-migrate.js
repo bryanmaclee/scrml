@@ -39,6 +39,7 @@ import { readFileSync, statSync } from "fs";
 import { resolve } from "path";
 import { SQL } from "bun";
 import { Database } from "bun:sqlite";
+import { configureSqliteHandle } from "../sqlite-handle-defaults.ts";
 import { resolveDbDriver } from "../codegen/db-driver.ts";
 import { SecretRedactor } from "../diagnostic-secrets.ts";
 import { splitBlocks } from "../block-splitter.js";
@@ -491,6 +492,17 @@ function runSqliteApply({ connectionString, desired, dryRun, allowDestructive })
     console.error(redactDbText(c.red("error:") + ` failed to open SQLite database "${path}": ${e.message}`));
     process.exit(1);
   }
+
+  // §44 (S436) — the CLI half of `g-native-sqlite-connection-lacks-wal-and-busy-timeout-config`.
+  // #1062 configured the handles the compiler EMITS and missed the ones it OPENS, leaving the
+  // gap's own sentence ("that blocked the adopter's DB migration") literally reachable: MEASURED
+  // before this line existed, a migrate against a database another process held `BEGIN IMMEDIATE`
+  // on died `database is locked` in 129 ms — no wait at all. `busy_timeout` is per-connection, so
+  // it MUST be re-set on this handle every run; `journal_mode = WAL` is deliberately NOT set here
+  // (it is a persistent change to a file the ADOPTER owns — see `sqlite-handle-defaults.ts`).
+  // Immediately after the open and before ANY other statement: the pragma only governs statements
+  // issued after it lands, and `readActualSchema` below is already one.
+  configureSqliteHandle(db);
 
   try {
     const actual = readActualSchema(db);
