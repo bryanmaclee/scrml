@@ -766,6 +766,24 @@ const TOPLEVEL_ON_LIFECYCLE_RE =
   /^\s*on\s+(?:mount|dismount)\s*\{/;
 
 /**
+ * S432 (ALTERNATIVE B — diagnose, do not widen the lift set) — a bare
+ * `when … {` reactive-effect / worker-handler STATEMENT leading a text run at a
+ * <program> / <page> / <channel> default-logic-body direct-child position.
+ *
+ * Such a run is NOT in the §40.8 lift set (declarations only). Pre-fix it
+ * shipped into the DOM as page text at exit 0 with zero diagnostics (the
+ * effect never registered). A `when` that SHARES a run with a preceding
+ * declaration is lifted with that run and never reaches this gate.
+ *
+ * The signature is the §6.7.4 grammar head, not a keyword: `when` + a dep-list
+ * (`@name` or `( @a, @b … )`) + `changes` [+ `reads @…`] + `{`, or the §4.12.4
+ * worker-handler head `when message|error [from <worker>] [(binding)] {`.
+ * Prose (`when the value changes, …`) never matches.
+ */
+const TOPLEVEL_WHEN_STMT_RE =
+  /^\s*when\s+(?:(?:@[A-Za-z_$][\w$]*\s+|\(\s*@[A-Za-z_$][\w$]*(?:\s*,\s*@[A-Za-z_$][\w$]*)*\s*\)\s*)changes\b(?:\s+reads\s+@[A-Za-z_$][\w$]*(?:\s*,\s*@[A-Za-z_$][\w$]*)*)?|(?:message|error)(?:\s+from\s+(?:<#[A-Za-z_][\w-]*>|[A-Za-z_$][\w$]*))?\s*(?:\(\s*[A-Za-z_$][\w$]*\s*\))?)\s*\{/;
+
+/**
  * change-id bare-control-flow-in-markup-diagnostic-2026-06-17 (S203).
  *
  * A text run inside a MARKUP body whose leading non-whitespace token is a bare
@@ -1895,7 +1913,39 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
     // to a cleanup call). Gated `isDefaultLogicBody` — the precise §40.8 surface
     // (a directive only desugars at a default-logic root); the regex requires
     // `on` + `mount`/`dismount` + `{` so prose never matches.
-    if (block.type === "text" && isDefaultLogicBody && TOPLEVEL_ON_LIFECYCLE_RE.test(block.raw)) {
+    //
+    // S432 (ALTERNATIVE B) — a `when … {` statement LEADING a default-logic
+    // body-top text run (TOPLEVEL_WHEN_STMT_RE) is outside the §40.8 lift set
+    // (declarations only; a `when` is not one), so it is REJECTED with
+    // E-WHEN-NOT-IN-LOGIC-CONTEXT instead of shipping as page text. It then
+    // RECOVERS through this same lift, so the rest of its run (declarations that
+    // follow it) still parses and the author is not buried in E-STATE-UNDECLARED
+    // fallout; the error fails the build either way.
+    const _isWhenStmtRun = block.type === "text" && isDefaultLogicBody && TOPLEVEL_WHEN_STMT_RE.test(block.raw);
+    if (_isWhenStmtRun) {
+      const leadWs = (block.raw.match(/^\s*/) || [""])[0];
+      const newlinesBefore = (leadWs.match(/\n/g) || []).length;
+      const lastNlIdx = leadWs.lastIndexOf("\n");
+      const baseStart = block.span && typeof block.span.start === "number" ? block.span.start : 0;
+      errors.push(new TABError(
+        "E-WHEN-NOT-IN-LOGIC-CONTEXT",
+        "E-WHEN-NOT-IN-LOGIC-CONTEXT: a bare `when … {` statement at the " +
+        "<program>/<page>/<channel> body-top is not a declaration, so the §40.8 " +
+        "default-logic lift does not cover it here, and it would ship as page text " +
+        "with the effect never registered. Wrap it in a logic block: " +
+        "`${ when @x changes { ... } }`.",
+        {
+          file: filePath,
+          start: baseStart + leadWs.length,
+          end: baseStart + block.raw.length,
+          line: (block.span && typeof block.span.line === "number" ? block.span.line : 1) + newlinesBefore,
+          col: lastNlIdx === -1
+            ? (block.span && typeof block.span.col === "number" ? block.span.col : 1) + leadWs.length
+            : (leadWs.length - lastNlIdx),
+        },
+      ));
+    }
+    if (_isWhenStmtRun || (block.type === "text" && isDefaultLogicBody && TOPLEVEL_ON_LIFECYCLE_RE.test(block.raw))) {
       result.push({
         type: "logic",
         raw: "${" + block.raw + "}",

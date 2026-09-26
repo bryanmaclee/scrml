@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-when-changes-body-top-after-markup-neg",
+  "description": "§40.8 (S432-B) — a bare `when @n changes { … }` LEADING a `<program>` default-logic body-top text run (here: after the first markup child) is outside the declarations-only lift set and is rejected with E-WHEN-NOT-IN-LOGIC-CONTEXT, rather than shipping as page text at exit 0 with the effect never registered.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/tests/unit/when-stmt-body-top-lift.test.js",
+  "rationale": "§40.8 S123 amendment: default-logic mode auto-lifts DECLARATIONS only; S432-B: a `when … {` statement leading a body-top run is not a declaration and SHALL fire E-WHEN-NOT-IN-LOGIC-CONTEXT; the fix is `${ when … }`.",
+  "expect": {
+    "codes": ["E-WHEN-NOT-IN-LOGIC-CONTEXT"],
+    "notCodes": [],
+    "severity": { "E-WHEN-NOT-IN-LOGIC-CONTEXT": "error" },
+    "codeCounts": { "E-WHEN-NOT-IN-LOGIC-CONTEXT": 1 }
+  }
+}
