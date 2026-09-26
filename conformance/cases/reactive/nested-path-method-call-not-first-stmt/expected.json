@@ -1,0 +1,48 @@
+{
+  "id": "reactive-nested-path-method-call-not-first-stmt",
+  "description": "§6.5.1 a method call on a NESTED reactive path (`@o.list.push(t)`) that is not the first statement of its block still runs. #add runs `const t = 1` then `@o.list.push(t)`; #refill runs `@o.m = [9]` then `@o.m.push(1)`. Carried on impl#1 (S432, P7): the second statement is dropped from the output.",
+  "language-version": "1.0",
+  "spec": "§6.5.1",
+  "rationale": "§6.5.1: a mutating method called on a reactive cell performs that method's ordinary JavaScript mutation and notifies the cell's subscribers. Nothing in §6.5.1 or in the statement grammar makes a statement's effect depend on its position in the block, so both push calls run: after #add then #refill, @o is { list: [1], m: [9, 1] } and the two length readouts show 1 and 2.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [
+      {
+        "click": "#add"
+      },
+      {
+        "click": "#refill"
+      }
+    ],
+    "state": {
+      "o": {
+        "list": [
+          1
+        ],
+        "m": [
+          9,
+          1
+        ]
+      }
+    },
+    "domAnchored": [
+      {
+        "selector": "#n",
+        "text": "1"
+      },
+      {
+        "selector": "#m",
+        "text": "2"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-nested-path-method-call-dropped-when-not-first-statement",
+      "fails": {
+        "runtime": "sha256:575bcf9b9f174367"
+      }
+    }
+  }
+}

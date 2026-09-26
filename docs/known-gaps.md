@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 135 | 1 |
-| MED | 293 | 0 |
-| LOW | 106 | 0 |
+| HIGH | 135 | 4 |
+| MED | 296 | 0 |
+| LOW | 108 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -18118,3 +18118,109 @@ only W-TYPE-031-UNPROVEN. Same on base (the codes did not exist) — a gap, not 
 produced by a stage `analyzeText` does not run.
 
 <!-- @gap id=g-lsp-never-publishes-forbidden-vocabulary-codes sev=MED status=open locus=lsp/handlers.js prov=empirical:review-S430-rcl4 -->
+
+---
+
+## §S432 — gaps filed S432 (2026-09-26, Peter; the S432 adversarial review of the when-changes branch + PA repros, every one re-verified by compile on main `280ecbdd`)
+
+> Classified under S430 P7. Items 1-3 are SILENT at exit 0 and pinned as `status=carried` by an xfail case each (none
+> meets a fix-for-cause criterion: 0 hits in assetManagement, flogenceP and `compiler/self-host/`). Items 4-8 are
+> `open` — 4 and 6 sit on `when … changes`, which is being rewritten on `fix/s432-when-changes-dep-list`, so their
+> pins wait for that branch; 5, 7 and 8 have no clean single-code pin or are loud.
+
+### g-nested-path-method-call-dropped-when-not-first-statement — a bare statement calling a method on a NESTED reactive path (`@o.list.push(1)`) is silently dropped when it is not the first statement of its block — `NEW S432-peter; HIGH; carried (S432)`
+<!-- @gap id=g-nested-path-method-call-dropped-when-not-first-statement sev=HIGH status=carried locus=searched:compiler/src/ast-builder.js(statement-boundary collection of an `@a.b.m(` head after a newline-terminated statement)—not-traced prov=empirical:S432-PA-reproduced-n4c-n4d-re-verified-by-compile-on-280ecbdd -->
+
+`function f() { const t = 1⏎ @o.m.forEach(x => console.log(x)) }` emits `function f() { const t = 1; }`; the same for
+`@o.list = []⏎ @o.list.push(1)` and `const t = []⏎ @o.list.push(1)`. **Zero diagnostics, exit 0.** What survives:
+the call as the FIRST statement; a top-level cell receiver (`@items.push(1)` — emitted with its notify); a read
+(`console.log(@o.m.length)`); an index write (`@o.m[0] = 5`); and a preceding `;` (`@o.list = [];` then
+`@o.list.push(1)` emits). So the defect is the newline statement boundary in front of an `@a.b.m(` head.
+SPEC-required (§6.5.1): the mutating method performs its mutation and notifies — nothing makes a statement's effect
+depend on its position. Repros: `C:\wt432s\pa\n4c.scrml`, `n4d.scrml`. **Exposure: 0** — no `^@a.b….m(` statement
+in assetManagement, flogenceP or `compiler/self-host/` (the one repo-corpus hit, `docs/website/pages/learn/validators.scrml:314`,
+is HTML-escaped sample text inside a `<pre>`). Pinned by `conformance/cases/reactive/nested-path-method-call-not-first-stmt`
+(impl#1: `o` stays `{list:[], m:[9]}`). PA-reproduced.
+
+### g-expr-handler-drops-every-statement-after-a-leading-call — an inline `${…}` handler whose FIRST statement is a call drops every statement after it — `NEW S432-peter; HIGH; carried (S432)`
+<!-- @gap id=g-expr-handler-drops-every-statement-after-a-leading-call sev=HIGH status=carried locus=searched:compiler/src/codegen/emit-event-wiring.ts,compiler/src/ast-builder.js(the `${}` event-attribute value collection)—not-traced prov=empirical:S432-PA-reproduced-semi2-re-verified-by-compile-on-280ecbdd -->
+
+`onclick=${@items.push(1); @last = 2}` emits `function(event) { _scrml_cs_reactive_get("items").push(1); }`;
+`onclick=${f(); g()}` emits `function(event) { _scrml_f_4(); }`. **Zero diagnostics, exit 0.** Assignment-first
+(`${@a = 1; @b = 2}`) runs both. SPEC (§5.2.1): "`onclick=${expr}` … SHALL use the `${...}` expression directly as
+the event handler"; `E-MULTI-STATEMENT-HANDLER` (§5.2.3) is scoped to the BARE form. ⚑ §5.2.1/§5.2.2 never list the
+`${s1; s2}` (non-arrow) shape explicitly — the case pins "both run" because impl#1 already runs both for the
+assignment-first shape; if bryan instead rules the shape illegal, the case flips to a codes-half pin, but a silent
+drop is wrong under either reading. Also visible in the same emit: the in-handler `@items.push(1)` is an in-place
+proxy mutation with no `_scrml_reactive_set` (already recorded under `g-when-changes-effect-fires-eagerly-at-registration`,
+fixed on the when-changes branch by `becfbe96`). Repro `C:\wt432s\pa\semi2.scrml`. **Exposure: 0** (no
+`on*=${ call(…); …}` in assetManagement, flogenceP, `compiler/self-host/` or the repo corpus). Pinned by
+`conformance/cases/markup-handler/expr-handler-call-first-multi-stmt` (impl#1: `last` = 1, not 30). PA-reproduced.
+
+### g-when-changes-in-each-row-body-dropped — a `${ when @n changes { … } }` inside an `<each>` row body is dropped from the output entirely — `NEW S432-peter; HIGH; carried (S432)`
+<!-- @gap id=g-when-changes-in-each-row-body-dropped sev=HIGH status=carried locus=compiler/src/codegen/emit-each.ts(the row-body logic-interpolation arm — emits the comment "each: empty logic interpolation skipped") prov=review:S432-adversarial-review-of-the-when-changes-branch-reproduced-on-280ecbdd-and-the-fix-branch;empirical:re-verified-by-compile-on-280ecbdd -->
+
+The row render emits `// each: empty logic interpolation skipped` where the `when` was; the effect is never
+registered and nothing fires when `@n` changes. **Silent, exit 0.** SPEC (§6.7.4): "A `when` statement declares a
+reactive effect. The body executes whenever any listed dependency changes value"; §6.7.2 binds every `${}` block to
+the nearest enclosing element scope (here `<program>`). **Severity HIGH by precedent:** a construct the author wrote
+silently dropped at exit 0 has been filed HIGH (`g-struct-construction-silently-dropped-to-bare-type-name`,
+`g-nested-block-match-in-dispatched-arm-silently-drops`, `g-lifted-each-if-attribute-silently-ignored` raised MED→HIGH).
+Reproduces identically on `fix/s432-when-changes-dep-list` (reviewer), so that branch does not fix it. Open question
+for the fix, not for the pin: with N rows, is the effect registered once or per row (§6.7.2.1 — an `<each>` row is
+not a scope)? The case uses ONE row so it is ruling-neutral. **Exposure: 0** (no `when … changes` in any `${}` inside
+markup across the repo corpus, assetManagement or flogenceP). Pinned by `conformance/cases/each/when-changes-in-row-body`
+(impl#1: `hits` stays 0). found by: S432 adversarial review of the when-changes branch; PA re-verified.
+
+### g-when-in-if-region-never-unregistered-on-unmount — a `when` declared inside an `if=` region is hoisted to file scope and keeps firing after the region unmounts — `NEW S432-peter; MED; open`
+<!-- @gap id=g-when-in-if-region-never-unregistered-on-unmount sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(case "when-effect" — emitted at file scope, never inside the if= region's mount scope, so `_scrml_mount_track` never sees it) prov=review:S432-adversarial-review-of-the-when-changes-branch;empirical:PA-verified-by-emit-on-280ecbdd -->
+
+`<div if=@show>${ when @n changes { @hits = @hits + 1 } }…</div>` emits `_scrml_effect(function(){ … })` at FILE
+scope, outside the `if=` effect that mounts the region — no `_scrml_mount_track`, no disposer. SPEC §6.7.2 teardown
+step 1: "All `when` effects registered in that scope are unregistered"; §6.7.4: "When that scope destroys, the effect
+is automatically unregistered". Also noted in passing under `g-when-changes-effect-fires-eagerly-at-registration`
+(S429); filed on its own here. **Not carried yet:** on main the `when` ignores its dep-list entirely (it fires at
+mount and on its body's reads), so a runtime case would fail for that reason, not this one — pin it after
+`fix/s432-when-changes-dep-list` lands, when "hide, then change @n → body does not run" isolates this defect.
+found by: S432 adversarial review of the when-changes branch.
+
+### g-malformed-when-dep-list-compiles-clean — `when () changes`, `when (n) changes`, `when (@o.x) changes` and `when @n { }` (no `changes`) all compile clean — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-malformed-when-dep-list-compiles-clean sev=LOW status=open locus=compiler/src/ast-builder.js(the when-effect parse — dep-list is not validated against the §6.7.4 grammar) prov=review:S432-adversarial-review-of-the-when-changes-branch;empirical:PA-re-verified-all-four-compile-at-exit-0-on-280ecbdd -->
+
+All four compile at exit 0 with no diagnostic (on main each lowers to the same auto-tracked `_scrml_effect`; per the review, on the
+when-changes branch `()`/`(n)` become a dead effect and `(@o.x)` silently subscribes to the whole of `@o`). SPEC §6.7.4
+grammar: `dep-list ::= '@' identifier | '(' dep-item (',' dep-item)* ')'`, `dep-item ::= '@' identifier`, and
+`when-stmt` requires the `changes` keyword; Normative Statements: "The `dep-list` SHALL contain at least one entry. An
+empty `dep-list` is a syntax error." and "The compiler SHALL emit E-LIFECYCLE-007 if any `dep-list` entry is not a
+declared mutable `@variable` in the enclosing scope." **Not carried:** the SPEC names no code for the syntax-error half,
+and `(n)` has two defensible codes (E-LIFECYCLE-007 vs §5.2's E-SCOPE-001 for a sigil-less reactive name), so a
+codes-half case would pin a guess. E-LIFECYCLE-007 has no fire site at all on main (the branch implements only its
+derived-cell half). found by: S432 adversarial review of the when-changes branch.
+
+### g-server-call-in-arrow-inside-when-body-stores-a-promise — a server-fn call inside an arrow callback in a `when` body stores `"[object Promise]"`; the same statement in a client `function` body is E-ASYNC-STDLIB-IN-SYNC-CALLBACK — `NEW S432-peter; MED; open`
+<!-- @gap id=g-server-call-in-arrow-inside-when-body-stores-a-promise sev=MED status=open locus=searched:compiler/src/codegen/emit-logic.ts(case "when-effect"),the E-ASYNC-STDLIB-IN-SYNC-CALLBACK check (does not walk when-effect bodies)—not-traced prov=review:S432-adversarial-review-of-the-when-changes-branch;empirical:PA-re-verified-by-compile-on-280ecbdd -->
+
+`when @n changes { [1,2].forEach(v => { @log = @log + dbl(v) }) }` (with `server function dbl`) compiles clean and
+emits `@log + _scrml_fetch_dbl_4(v)` unawaited inside the sync arrow — the cell gets `"[object Promise]"`. The identical
+statement in `function go() { … }` is rejected with E-ASYNC-STDLIB-IN-SYNC-CALLBACK. SILENT value corruption; the
+async-callback check does not reach `when` bodies. **Pin after the when-changes branch lands** — `when … changes` is
+being rewritten on `fix/s432-when-changes-dep-list` (its S429 predecessor awaits server calls at the top level of the
+body; the nested-arrow shape was not checked on the branch here), so no conformance case yet. found by: S432 adversarial review of the
+when-changes branch.
+
+### g-reactive-method-call-after-operator-false-rejects-missing-semicolon — `c ? @items.push(v) : 0`, `c && @items.push(v)` and `const f = () => @items.push(v)` inside a function body raise E-STMT-MISSING-SEMICOLON — `NEW S432-peter; MED; open`
+<!-- @gap id=g-reactive-method-call-after-operator-false-rejects-missing-semicolon sev=MED status=open locus=compiler/src/ast-builder.js(~5060, collectExpr statement-boundary check — an `@x.m(` head is treated as a new statement even immediately after an operator) prov=review:S432-adversarial-review-of-the-when-changes-branch;empirical:PA-re-verified-3x-E-STMT-MISSING-SEMICOLON-on-280ecbdd -->
+
+Each form raises `E-STMT-MISSING-SEMICOLON` ("Two statements appear on one line…") — a false reject; the boundary
+check does not ask whether the previous token is an operator (`?`, `&&`, `=>`). The ternary form ALSO raises
+`E-ERROR-003` (its `?` read as the propagation operator). LOUD, so no xfail case. Workaround: parenthesise the call or
+use an `if`. Related: the S284 ruling that made same-line statement runs this error (search `E-STMT-MISSING-SEMICOLON`
+above) — this is that rule over-firing inside one expression. found by: S432 adversarial review of the when-changes branch.
+
+### g-sort-join-chain-on-cell-in-markup-interp-invalid-logic — `<p>${@items.sort().join(",")}</p>` fails with E-CODEGEN-INVALID-LOGIC — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-sort-join-chain-on-cell-in-markup-interp-invalid-logic sev=LOW status=open locus=searched:compiler/src/codegen/rewrite.ts,compiler/src/codegen/emit-expr.ts(the §6.5.1 mutating-method lowering of `.sort()` in a render-expression position)—not-traced prov=review:S432-adversarial-review-of-the-when-changes-branch;empirical:PA-re-verified-on-280ecbdd -->
+
+LOUD (compile fails). Likely the mutating-method (`sort`) lowering meeting a chained call in a render position. The
+same compile also raises a spurious `E-DG-002` ("`@items` … never consumed") although the interpolation reads it.
+(Whether a mutating `sort()` in a render expression should be legal at all is its own question — the pin waits for
+that.) found by: S432 adversarial review of the when-changes branch.
