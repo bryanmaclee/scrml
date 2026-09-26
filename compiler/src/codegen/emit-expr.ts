@@ -1614,6 +1614,17 @@ function emitMapLit(node: MapLitExpr, ctx: EmitExprContext): string {
 // ---------------------------------------------------------------------------
 
 function emitUnary(node: UnaryExpr, ctx: EmitExprContext): string {
+  // §6.3 / §6.6.18 — `++` / `--` / `delete` on a FIELD or INDEX of a reactive
+  // cell (`@o.n++`, `--@rows[i].qty`, `delete @o.tmp`) writes the cell's value in
+  // place; notify the cell as a field assignment does (emitAssign).
+  if (node.op === "++" || node.op === "--" || node.op === "delete") {
+    const fieldCell = reactiveFieldWriteCell(node.argument, ctx);
+    if (fieldCell !== null) return wrapReactiveNotify(fieldCell, emitUnaryPlain(node, ctx));
+  }
+  return emitUnaryPlain(node, ctx);
+}
+
+function emitUnaryPlain(node: UnaryExpr, ctx: EmitExprContext): string {
   // W14-BB: postfix `@x++` / `@x--` on a reactive var must lower to the
   // canonical setter form (SPEC §6.1.2 + §5.2.3 line 1385). The naive
   // emission `_scrml_reactive_get("x")++` is invalid JS — `++` cannot be
@@ -2729,7 +2740,13 @@ function emitAssign(node: AssignExpr, ctx: EmitExprContext): string {
   }
 
   const lhs = emitExpr(target, ctx);
-  return `${lhs} ${node.op} ${value}`;
+  const assigned = `${lhs} ${node.op} ${value}`;
+  // §6.5.1 / §6.3 — a write to a FIELD or INDEX of a reactive cell in expression
+  // position (`onclick=${@o.x = @o.x + 1}`, `@o.n += 1`, `@rows[i].done = true`)
+  // notifies the cell, as the statement lowering (`reactive-nested-assign` →
+  // `_scrml_reactive_set(k, _scrml_deep_set(…))`) does. See reactiveFieldWriteCell.
+  const fieldCell = reactiveFieldWriteCell(target, ctx);
+  return fieldCell !== null ? wrapReactiveNotify(fieldCell, assigned) : assigned;
 }
 
 function emitTernary(node: TernaryExpr, ctx: EmitExprContext): string {
@@ -4035,11 +4052,72 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   // reaches here (ast-builder lowers it to a `reactive-array-mutation` node whose
   // args alone route through emitExpr), so there is no double notify.
   const mutatedCell = reactiveArrayMutationCell(node, ctx);
-  if (mutatedCell !== null) {
-    const key = JSON.stringify(mutatedCell);
-    return `((_scrml_m) => (_scrml_reactive_set(${key}, _scrml_reactive_get(${key})), _scrml_m))(${plainCall})`;
+  return mutatedCell !== null ? wrapReactiveNotify(mutatedCell, plainCall) : plainCall;
+}
+
+/**
+ * Notify reactive cell `bare` once AFTER `expr` (an in-place write to its value)
+ * has run, yielding `expr`'s own value:
+ *
+ *   ((_scrml_m) => (_scrml_reactive_set(k, _scrml_reactive_get(k)), _scrml_m))(<expr>)
+ *
+ * `expr` is the IIFE's argument, so it is evaluated in the ENCLOSING scope (an
+ * `await` inside it keeps its meaning) and exactly once. The in-place write has
+ * already reached the Proxy's fine-grained effects; this set fans out to the
+ * COARSE subscribers (`_scrml_reactive_subscribe` — `when @cell changes`, §6.7.4).
+ * The string pipeline builds the same shape (expression-parser.ts
+ * wrapReactiveNotifyNode).
+ */
+function wrapReactiveNotify(bare: string, expr: string): string {
+  const key = JSON.stringify(bare);
+  return `((_scrml_m) => (_scrml_reactive_set(${key}, _scrml_reactive_get(${key})), _scrml_m))(${expr})`;
+}
+
+/**
+ * §6.3 / §6.6.18 — when `target` (an assignment / update / `delete` operand) is a
+ * FIELD or INDEX path into a plain mutable reactive cell — `@o.x`, `@o.a.b`,
+ * `@rows[i]`, `@rows[i].done` — on the CLIENT, return the cell's bare name;
+ * otherwise null. A bare `@x` target is NOT matched (it lowers to
+ * `_scrml_reactive_set` already), nor is a path whose root is not an `@` cell —
+ * notably a loop alias (`for (const t of @ts) t.done = true`, §6.5.7: mutating
+ * an element obtained from the array does not notify). Optional links (`?.`) are
+ * not assignable and are refused. Same exclusions as the array-method case
+ * (server, derived, `@session`, engine / map / set cells), plus a synthesized
+ * validity-surface key (`@form.submitted`), which emitMember lowers to its own
+ * dotted cell.
+ */
+function reactiveFieldWriteCell(target: ExprNode, ctx: EmitExprContext): string | null {
+  if (ctx.mode !== "client") return null;
+  if (target.kind !== "member" && target.kind !== "index") return null;
+  if (target.kind === "member" && SYNTH_PROPERTY_NAMES.has((target as MemberExpr).property as any)) {
+    const dotted = synthDottedKey(target as MemberExpr);
+    if (dotted !== null && ctx.synthCellKeys?.has(dotted)) return null;
   }
-  return plainCall;
+  let cursor: ExprNode = target;
+  while (cursor.kind === "member" || cursor.kind === "index") {
+    if ((cursor as MemberExpr | IndexExpr).optional) return null;
+    cursor = (cursor as MemberExpr | IndexExpr).object;
+  }
+  return plainReactiveCellName(cursor, ctx);
+}
+
+/**
+ * The bare name of `node` when it is an `@<cell>` read of a plain mutable
+ * reactive cell on the client; null for anything else (a non-`@` ident, a
+ * derived cell, the ambient `@session` projection, an engine cell, a
+ * value-native map / set cell).
+ */
+function plainReactiveCellName(node: ExprNode, ctx: EmitExprContext): string | null {
+  if (node.kind !== "ident") return null;
+  const name = (node as IdentExpr).name;
+  if (typeof name !== "string" || !name.startsWith("@")) return null;
+  const bare = name.slice(1);
+  if (bare.length === 0) return null;
+  if (ctx.derivedNames && ctx.derivedNames.has(bare)) return null;
+  if (bare === "session" && _sessionProjectionActive) return null;
+  if (ctx.engineVarNames && ctx.engineVarNames.has(bare)) return null;
+  if (mapCellBareName(node, ctx) !== null || setCellBareName(node, ctx) !== null) return null;
+  return bare;
 }
 
 /**
@@ -4065,16 +4143,7 @@ function reactiveArrayMutationCell(node: CallExpr, ctx: EmitExprContext): string
   const member = callee as MemberExpr;
   if (member.optional || typeof member.property !== "string") return null;
   if (!ARRAY_MUTATING_METHODS.has(member.property)) return null;
-  if (member.object.kind !== "ident") return null;
-  const name = (member.object as IdentExpr).name;
-  if (typeof name !== "string" || !name.startsWith("@")) return null;
-  const bare = name.slice(1);
-  if (bare.length === 0) return null;
-  if (ctx.derivedNames && ctx.derivedNames.has(bare)) return null;
-  if (bare === "session" && _sessionProjectionActive) return null;
-  if (ctx.engineVarNames && ctx.engineVarNames.has(bare)) return null;
-  if (mapCellBareName(member.object, ctx) !== null || setCellBareName(member.object, ctx) !== null) return null;
-  return bare;
+  return plainReactiveCellName(member.object, ctx);
 }
 
 function emitNew(node: NewExpr, ctx: EmitExprContext): string {

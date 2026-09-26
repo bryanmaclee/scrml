@@ -4081,8 +4081,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // paren-correct, scope-legal injector every client fn body uses (§13.2).
       if (whenSrvNames && whenSrvNames.size > 0 && [...whenSrvNames].some((n) => body.includes(n))) {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const sched = require("./scheduling.js") as { injectFnBodyServerCallAwaits: (c: string, p: (n: string) => boolean) => string };
-        body = sched.injectFnBodyServerCallAwaits(body, (n) => whenSrvNames.has(n));
+        const sched = require("./scheduling.js") as {
+          injectFnBodyServerCallAwaits: (c: string, p: (n: string) => boolean, skip?: "arg1" | "sink" | "none") => string;
+        };
+        // "none": no statement lift reaches a when body, so a server call nested
+        // in a reactive write inside `if` / `for` (lowered as text, not through the
+        // AST path above) is awaited here too.
+        body = sched.injectFnBodyServerCallAwaits(body, (n) => whenSrvNames.has(n), "none");
       }
       const isAsync = !isServer && /\bawait\b/.test(body);
       const ctx = opts.encodingCtx;

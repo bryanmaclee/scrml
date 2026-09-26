@@ -260,3 +260,61 @@ describe("end to end (compileScrml)", () => {
     expect(js).toMatch(/\blocal\.push\(v\);/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Field / index writes (§6.3, §6.6.18) — same notify shape, root cell key
+// ---------------------------------------------------------------------------
+
+describe("field / index write in expression position notifies the root cell", () => {
+  const rw = (s) => rewriteReactiveRefsAST(s, null).result;
+
+  for (const [src, inner] of [
+    ["@o.x = @o.x + 1", `_scrml_reactive_get("o").x = _scrml_reactive_get("o").x + 1`],
+    ["@o.n += 2", `_scrml_reactive_get("o").n += 2`],
+    ["@o.n++", `_scrml_reactive_get("o").n++`],
+    ["--@o.n", `--_scrml_reactive_get("o").n`],
+    ["delete @o.tmp", `delete _scrml_reactive_get("o").tmp`],
+    ["@o.a.b = 3", `_scrml_reactive_get("o").a.b = 3`],
+    ["@rows[i].done = true", `_scrml_reactive_get("rows")[i].done = true`],
+  ]) {
+    test(`structured: \`${src}\``, () => {
+      const root = src.match(/@(\w+)/)[1];
+      expect(emit(src)).toBe(WRAP(root, inner));
+    });
+    test(`string path: \`${src}\``, () => {
+      const root = src.match(/@(\w+)/)[1];
+      const out = rw(src);
+      expect(count(out, `_scrml_reactive_set("${root}", _scrml_reactive_get("${root}"))`)).toBe(1);
+    });
+  }
+
+  test("a bare `@x = v` / `@x++` keeps its own reactive-set lowering (no wrap)", () => {
+    expect(emit("@x = 1")).toBe(`_scrml_reactive_set("x", 1)`);
+    expect(emit("@x++")).toBe(`_scrml_reactive_set("x", _scrml_reactive_get("x") + 1)`);
+    expect(rw("@x = 1")).not.toContain("_scrml_m");
+  });
+
+  test("§6.5.7: a loop-alias / local path is untouched", () => {
+    expect(emit("t.done = true")).toBe("t.done = true");
+    expect(rw("() => { for (const t of @ts) { t.done = true } }")).not.toContain("_scrml_reactive_set");
+  });
+
+  test("server mode, derived root, optional chain are untouched", () => {
+    expect(emit("@o.x = 1", { mode: "server" })).toBe(`_scrml_body["o"].x = 1`);
+    expect(emit("@d.x = 1", { derivedNames: new Set(["d"]) })).not.toContain("_scrml_m");
+  });
+
+  test("the wrapped assignment keeps its value (assignment-expression result)", () => {
+    const js = rw("n = (@o.x = 9)");
+    const state = { o: { x: 1 } };
+    let sets = 0;
+    const _scrml_reactive_get = (k) => state[k];
+    const _scrml_reactive_set = (k, v) => { sets++; state[k] = v; return v; };
+    let n;
+    // eslint-disable-next-line no-eval
+    eval(js);
+    expect(n).toBe(9);
+    expect(state.o.x).toBe(9);
+    expect(sets).toBe(1);
+  });
+});

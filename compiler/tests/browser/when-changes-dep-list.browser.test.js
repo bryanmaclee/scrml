@@ -225,9 +225,11 @@ describe("§6.7.4 semantics", () => {
     expect(app.get("log")).toBe("1;2;");
   });
 
-  test("a body writing one of its own deps does not recurse (dropped re-entry, no stack overflow)", () => {
-    // E-LIFECYCLE-006 at compile time per SPEC; the runtime must not blow the stack
-    // while that check is absent.
+  test("a body writing one of its own deps is BOUNDED: no recursion, capped re-runs, reported", () => {
+    // E-LIFECYCLE-006 at compile time per SPEC; while that check is absent the
+    // runtime must neither blow the stack nor hang. A re-entry is deferred (not
+    // recursed) and re-run after the current run; a self-loop never settles, so
+    // the re-runs stop at the cap (100) and the drop is reported.
     const app = mount(`<program>
   <n> = 0
   when @n changes { @n = @n + 1 }
@@ -235,8 +237,33 @@ describe("§6.7.4 semantics", () => {
 </program>
 `);
     app.click("n");
-    expect(app.get("n")).toBe(2);
+    // the click's write (1), then the body's first run + 100 capped re-runs.
+    expect(app.get("n")).toBe(102);
     expect(app.errs.filter((e) => /Maximum call stack|RangeError/.test(e))).toEqual([]);
+    expect(app.errs.filter((e) => /E-LIFECYCLE-006/.test(e)).length).toBe(1);
+  });
+
+  test("an ACYCLIC chain through a second effect is not lost (re-entry re-runs, not dropped)", () => {
+    // e1 lists (@a, @b) and writes @x; e2 lists @x and writes @b once. The write
+    // to @b arrives while e1 is still running — it must re-run e1 afterwards
+    // with the new @b, not drop it.
+    const app = mount(`<program>
+  <a> = 0
+  <b> = 0
+  <x> = 0
+  <log> = ""
+  when (@a, @b) changes { @log = @log + "e1(" + @a + "," + @b + ");"
+    @x = @a }
+  when @x changes { if (@b == 0) { @b = 1 } }
+  <button id="a" onclick=\${@a = @a + 1}>a</button>
+</program>
+`);
+    app.click("a");
+    expect(app.get("log")).toBe("e1(1,0);e1(1,1);");
+    expect(app.get("b")).toBe(1);
+    app.click("a");
+    expect(app.get("log")).toBe("e1(1,0);e1(1,1);e1(2,1);");
+    expect(app.errs).toEqual([]);
   });
 
   test("a server-fn call in the body is awaited (§6.7.4 'Interaction with Server Functions', §13.2)", async () => {
@@ -260,6 +287,34 @@ describe("§6.7.4 semantics", () => {
     app.click("n");
     await settle();
     expect(app.get("log")).toBe("r42;e42;");
+    expect(app.errs).toEqual([]);
+  });
+
+  test("a server-fn call nested in `if` / `for` inside a reactive write is awaited too", async () => {
+    // The body's nested statements lower as text (not the AST path), and the
+    // function-body injector fences a call beneath `_scrml_reactive_set` for
+    // emit-client's statement lift — which never reaches a when body. It used to
+    // store "[object Promise]".
+    const app = mount(`<program>
+  <n> = 0
+  <log> = ""
+  server function dbl(x) {
+    return x * 2
+  }
+  when @n changes {
+    if (@n > 0) {
+      @log = @log + "i" + dbl(@n) + ";"
+    }
+    for (const i of [1, 2]) {
+      @log = @log + "f" + dbl(i) + ";"
+    }
+  }
+  <button id="n" onclick=\${@n = @n + 1}>n</button>
+</program>
+`, { fetchReply: 42 });
+    app.click("n");
+    await settle();
+    expect(app.get("log")).toBe("i42;f42;f42;");
     expect(app.errs).toEqual([]);
   });
 });
@@ -467,6 +522,109 @@ describe("§6.5.1 expression-position mutation notifies the cell (when … chang
     app.click("go");
     expect(app.get("obj").list.length).toBe(1);
     expect(app.get("count")).toBe(0);
+  });
+});
+
+// §6.3 / §6.6.18 — a write to a FIELD or INDEX of a reactive cell in expression
+// position (`onclick=${@o.x = @o.x + 1}`) mutated the Proxy in place with no
+// `_scrml_reactive_set`, so `when @o changes` never fired; the statement form
+// (`reactive-nested-assign`) always notified. §6.5.7 is unchanged: mutating an
+// element obtained through a loop alias does not notify the array.
+describe("§6.3 expression-position field / index write notifies the cell", () => {
+  const app = (handler, init = "{ x: 1, n: 0, tmp: 1 }") => mount(`<program>
+  <o> = ${init}
+  <count> = 0
+  <last> = 0
+  when @o changes { @count = @count + 1 }
+  <p id="count">\${@count}</p>
+  <button id="go" onclick=${handler}>go</button>
+</program>
+`);
+
+  for (const [label, handler, check] of [
+    ["`=` (body reads the new value)", "${@o.x = @o.x + 1}", (a) => expect(a.get("o").x).toBe(2)],
+    ["`+=`", "${@o.n += 5}", (a) => expect(a.get("o").n).toBe(5)],
+    ["postfix `++`", "${@o.n++}", (a) => expect(a.get("o").n).toBe(1)],
+    ["prefix `--`", "${--@o.n}", (a) => expect(a.get("o").n).toBe(-1)],
+    ["`delete`", "${delete @o.tmp}", (a) => expect("tmp" in a.get("o")).toBe(false)],
+    ["value-using `@last = (@o.x = 9)`", "${@last = (@o.x = 9)}", (a) => expect(a.get("last")).toBe(9)],
+    ["block-bodied arrow", "${() => { @o.x = 7 }}", (a) => expect(a.get("o").x).toBe(7)],
+  ]) {
+    test(`${label} fires the when once`, () => {
+      const a = app(handler);
+      expect(a.errs).toEqual([]);
+      a.click("go");
+      check(a);
+      expect(a.get("count")).toBe(1);
+      expect(a.text("count")).toBe("1");
+    });
+  }
+
+  test("an index path `@rows[0].done = true` notifies @rows", () => {
+    const a = mount(`<program>
+  <rows> = [{ done: false }]
+  <count> = 0
+  when @rows changes { @count = @count + 1 }
+  <button id="go" onclick=\${@rows[0].done = true}>go</button>
+</program>
+`);
+    a.click("go");
+    expect(a.get("rows")[0].done).toBe(true);
+    expect(a.get("count")).toBe(1);
+  });
+
+  test("§6.5.7 unchanged: a loop-alias element write does NOT notify the array", () => {
+    const a = mount(`<program>
+  <ts> = [{ done: false }, { done: false }]
+  <count> = 0
+  when @ts changes { @count = @count + 1 }
+  \${
+    function all() {
+      for (const t of @ts) { t.done = true }
+    }
+  }
+  <button id="go" onclick=\${all()}>go</button>
+</program>
+`);
+    a.click("go");
+    expect(a.get("ts").every((t) => t.done)).toBe(true);
+    expect(a.get("count")).toBe(0);
+  });
+});
+
+// §6.7.4 EC-1 — a derived dep is E-LIFECYCLE-007 (tests/unit/when-changes-derived-dep
+// .test.js). The prescribed remedy — list the upstream cells, read the derived
+// in the body — must see the POST-change derived value (flush ordering), through
+// a transitive chain and through a deep-path derived written in expression
+// position.
+describe("§6.7.4 EC-1 remedy — upstream dep, derived read in the body", () => {
+  test("transitive derived A → B → C reads post-change", () => {
+    const a = mount(`<program>
+  <p> = 1
+  <log> = ""
+  const <b> = @p + 1
+  const <c> = @b * 2
+  when @p changes { @log = @log + @c + ";" }
+  <button id="go" onclick=\${@p = @p + 1}>go</button>
+</program>
+`);
+    a.click("go");
+    a.click("go");
+    expect(a.get("log")).toBe("6;8;");
+  });
+
+  test("derived over a deep path, written in expression position", () => {
+    const a = mount(`<program>
+  <o> = { x: 1 }
+  <log> = ""
+  const <d> = @o.x * 2
+  when @o changes { @log = @log + @d + ";" }
+  <button id="go" onclick=\${@o.x = @o.x + 1}>go</button>
+</program>
+`);
+    a.click("go");
+    a.click("go");
+    expect(a.get("log")).toBe("4;6;");
   });
 });
 

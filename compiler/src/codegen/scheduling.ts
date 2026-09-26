@@ -646,7 +646,16 @@ export function injectServerCallAwaitsViaAst(code: string, serverFnNames: Set<st
  * pre-S320 per-statement string injection (fenced by control-flow-boundary shape)
  * never reached. On an acorn parse failure the body is returned UNCHANGED.
  */
-export function injectFnBodyServerCallAwaits(code: string, isPromiseCallee: PromiseCalleePred): string {
+export function injectFnBodyServerCallAwaits(
+  code: string,
+  isPromiseCallee: PromiseCalleePred,
+  // "sink" (default) — a client FUNCTION body: a server call beneath a reactive
+  // sink is owned by emit-client's statement lift (INVARIANT 2). A `when … changes`
+  // body passes "none": it is emitted inside `_scrml_when_changes(…, function(){…})`,
+  // which that lift never reaches, so a sink-nested call (`if (c) { @x = srv() }`)
+  // must be awaited HERE or it stores a Promise (§6.7.4 / §13.2).
+  reactiveSkip: ReactiveSkipMode = "sink",
+): string {
   if (!code) return code;
   const PREFIX = "(async () => {\n";
   let program: any;
@@ -655,7 +664,7 @@ export function injectFnBodyServerCallAwaits(code: string, isPromiseCallee: Prom
   } catch {
     return code;
   }
-  const sites = collectAwaitSites(program, PREFIX.length, isPromiseCallee, "sink", false);
+  const sites = collectAwaitSites(program, PREFIX.length, isPromiseCallee, reactiveSkip, false);
   return applyAwaitSites(code, sites);
 }
 

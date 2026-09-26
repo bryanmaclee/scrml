@@ -1,0 +1,11 @@
+{
+  "id": "lifecycle-when-dep-derived-error",
+  "description": "§6.7.4 EC-1 — a `when` dep-list entry that names a `const <name>` derived cell is E-LIFECYCLE-007. A derived cell has no change event of its own; list the mutable @variables it is computed from instead.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/when-changes-derived-dep.test.js",
+  "spec": "§6.7.4",
+  "rationale": "§6.7.4 Edge Case EC-1 + Normative Statements + §34: the compiler SHALL emit E-LIFECYCLE-007 if any dep-list entry names a `const <name>` derived variable. With the dep-list subscription (a derived cell is never written) the body would otherwise silently never fire.",
+  "expect": {
+    "codes": ["E-LIFECYCLE-007"]
+  }
+}
