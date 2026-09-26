@@ -26,7 +26,10 @@
 //      native path with the acorn parser). Here each non-logic attribute
 //      expression is parsed with the NATIVE statement parser (parseProgram —
 //      which also re-enters block bodies) and its family diagnostics are
-//      shifted into file coordinates. An attribute inside a logic body (lift /
+//      shifted into file coordinates — placed by the value NODE's span, never
+//      by searching the file for a rebuilt text; a value that cannot be
+//      placed is reported at the attribute, never skipped (S432 F2,
+//      attrExprSource). An attribute inside a logic body (lift /
 //      markup-as-value) was parsed by the native parser itself and is skipped.
 //      A QUOTED attribute value is data (§5), never parsed here.
 //   2. The foreign-code veto (default pipeline only). The native parser has no
@@ -77,14 +80,38 @@ function toDiag(e: any, filePath: string): Diag | null {
   };
 }
 
-// The expression text of a native attribute value, or null (a quoted value is
+// The expression text of a native attribute value and WHERE it sits: `offset`
+// is the text's start relative to the value's span start, or -1 when the
+// value node does not let it be placed (then the caller reports at the
+// attribute — never a silent skip). null = no expression (a quoted value is
 // data, not source).
-function attrExprText(val: any): string | null {
+//
+// Positions come from the value NODE's span, never from searching the file
+// for a text: the span covers the value's verbatim bytes. A `call-ref` is
+// parsed from those bytes as-is (`name(args)`) — its `args` list is split and
+// trimmed, so a text rebuilt from it is not the source (S432 F2: the rebuilt
+// `go(1, import("x"))` was looked up in `go(1,import("x"))`, missed, and the
+// attribute was silently skipped). An `expr` keeps its unwrapped `raw` inside
+// the verbatim bytes behind at most its wrapper (`"`, `{`, `${`, or none).
+export function attrExprSource(val: any, source: string): { text: string; offset: number } | null {
   if (!val || typeof val !== "object") return null;
-  if (val.kind === "expr" && typeof val.raw === "string") return val.raw;
+  const span = val.span;
+  const hasSpan = span && typeof span.start === "number" && typeof span.end === "number" && span.end >= span.start;
+  const verbatim = hasSpan ? source.slice(span.start, span.end) : null;
   if (val.kind === "call-ref" && typeof val.name === "string") {
+    if (verbatim !== null && verbatim.startsWith(val.name) && verbatim.endsWith(")")) return { text: verbatim, offset: 0 };
     const args = Array.isArray(val.args) ? val.args.join(", ") : "";
-    return `${val.name}(${args})`;
+    return { text: `${val.name}(${args})`, offset: -1 };
+  }
+  if (val.kind === "expr" && typeof val.raw === "string") {
+    const raw = val.raw;
+    if (verbatim === null) return { text: raw, offset: -1 };
+    let off = -1;
+    if (verbatim.startsWith(raw)) off = 0;
+    else if (verbatim.startsWith("${")) off = 2;
+    else if (verbatim.startsWith("\"") || verbatim.startsWith("'") || verbatim.startsWith("{")) off = 1;
+    if (off >= 0 && verbatim.substr(off, raw.length) !== raw) off = -1;
+    return { text: raw, offset: off };
   }
   return null;
 }
@@ -110,18 +137,25 @@ export function nativeForbiddenJsAttrDiagnostics(ast: any, source: string, fileP
       if (Array.isArray(cur.attrs)) for (const a of cur.attrs) if (a && a.value) vals.push({ val: a.value, name: String(a.name ?? "") });
       if (cur.ifCond && typeof cur.ifCond === "object") vals.push({ val: cur.ifCond, name: "if" });
       for (const { val, name } of vals) {
-        const text = attrExprText(val);
-        if (!text || !/\b(?:class|import)\b/.test(text)) continue;
+        const placed = attrExprSource(val, source);
+        if (!placed || !/\b(?:class|import)\b/.test(placed.text)) continue;
+        const errs = parseAttrExprForFamily(placed.text, isHandlerAttrName(name));
+        if (errs === null || errs.length === 0) continue;
         const span = val.span;
-        const start = span && typeof span.start === "number" ? span.start : 0;
-        const end = span && typeof span.end === "number" ? span.end : start + text.length;
-        const at = source.slice(start, end).indexOf(text);
-        if (at < 0) continue; // the text is not the source (a rebuilt call-ref) — cannot place
-        const base = start + at;
-        const errs = parseAttrExprForFamily(text, isHandlerAttrName(name));
-        if (errs === null) continue;
+        const valStart = span && typeof span.start === "number" ? span.start : -1;
+        if (valStart < 0 || placed.offset < 0) {
+          // The value cannot be placed at the construct — report each code
+          // once at the attribute value (conservative, never silent).
+          const at = valStart >= 0 ? valStart : 0;
+          const { line, col } = lineColAt(source, at);
+          const end = span && typeof span.end === "number" ? span.end : at;
+          for (const code of new Set(errs.map((e: any) => e.code))) {
+            out.push({ code, message: MESSAGES[code], span: { file: filePath, start: at, end, line, col }, severity: "error" });
+          }
+          continue;
+        }
+        const base = valStart + placed.offset;
         for (const e of errs) {
-          if (!e || !FORBIDDEN_JS_CODES.has(e.code) || !e.span) continue;
           const abs = base + e.span.start;
           const { line, col } = lineColAt(source, abs);
           out.push({ code: e.code, message: e.message, span: { file: filePath, start: abs, end: base + (e.span.end ?? e.span.start), line, col }, severity: "error" });
