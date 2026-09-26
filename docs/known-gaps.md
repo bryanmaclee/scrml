@@ -18728,3 +18728,21 @@ Loud, pre-existing (S432 handler gift-wrap agent).
 <!-- @gap id=g-let-initializer-markup-with-interpolated-handler-cut-off sev=MED status=open locus=not-traced prov=empirical:S432 -->
 
 Found by the S432 defer dev agent (with a `defer` in the handler the same error also masks the rule-4 diagnostic). Loud; live-parser only.
+
+### G-NESTED-ASYNC-FUNCTION-CALLED-WITHOUT-AWAIT-LOSES-ITS-FAILURE — a transport error from a nested server-calling fn is silently dropped
+
+**Reviewer-reproduced (S430 defer round-4 review, F6), same on base, SILENT.** A function declared inside another function
+becomes `async` because it calls a server function, but its call site is emitted without `await` (`let r = inner();`). The
+caller's `!{}` then tests a Promise, so a `CpsError.ServerError` is never handled: expected trace `work;inner-failed;`, observed
+`work;`. The no-defer twin is identically wrong. §13.2's await mandate is violated at a nested-declaration call site — the
+auto-await injector does not see locally-declared async functions.
+
+<!-- @gap id=g-nested-async-function-called-without-await-loses-its-failure sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts prov=review:S430-defer-round4-F6 -->
+
+### G-LIVE-PARSER-DROPS-AN-UNBRACED-ELSE-ARM-AND-RUNS-IT-UNCONDITIONALLY — `if (c) {…} else D()` always calls `D()`
+
+**Reviewer-reproduced (S430 defer round-5 review, F), same on base, SILENT, affects every program.** In the live (default)
+pipeline, `if (c) { D("y;") } else D("x;")` emits `if (c) {…}` followed by an UNCONDITIONAL `D("x;")` — the unbraced else arm is
+detached from its `if`. The native parser is correct. Any program writing a brace-less else runs that branch always, at exit 0.
+
+<!-- @gap id=g-live-parser-drops-an-unbraced-else-arm-and-runs-it-unconditionally sev=HIGH status=open locus=compiler/src/ast-builder.js prov=review:S430-defer-round5-F -->

@@ -1,3 +1,90 @@
+# scrml — Session 430 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Peter ran S431/S432/S433
+> concurrently (three sessions, two machines) and landed #1052–#1064 while this session was live; read their blocks too.
+
+## ⏭ NEXT-SESSION PICKUP
+
+### 1. ⚑⚑ Bootstrap: every P1–P7 BUILD is on main. The next step is DESIGN, not code.
+- **P1** `class` rejected (#1048) · **P2** export-decl diagnostic swallow closed (#1042) · **P3** `defer` stage 1, SPEC
+  §19.16 (#1051) · **P4** `import:host` built + dynamic `import()` rejected + `stdlib/compiler` migrated (#1045, #1048) ·
+  **P5** stage-swap harness `scripts/hybrid.ts` (#1044) · **P6** process rule · **P7** per-impl xfail pinned to the
+  failure signature + `status=carried` (#1050). Also #1043 (destructure/loop-binder), #1046 (cross-compile state leak),
+  #1047 (db credential redaction + dev stub).
+- **Next = dpa-051, the bootstrap CODEGEN ARCHITECTURE design doc** — banked; it waits on **dpa-050 Q6**. The S430
+  evidence for it (read before running it): FIVE separate fixes this session reasoned over TEXT where the tree already
+  existed (db redaction ×2, import:host gate, defer scanner + name test, class/import token scan) and each failed
+  review; the class/import check was only fixed by moving it onto the NATIVE tree. The architecture must hand every
+  stage a tree for every body (incl. `!{}` arms and value-form arms, raw strings today) and carry scope/declared names
+  structurally (the lost-write / TDZ family).
+- **P3 stage 2** (the must-release obligation checker) is not started. **P7 carried-triage** (~500 gaps → fix-in-TS vs
+  carried) is not started — Peter has begun carrying items under P7 on his side (#1052 et al.).
+
+### 2. ⚑⚑ Language design with bryan — three deliberations, all in `handOffs/dpa-queue.md`
+- **dpa-050** (`<name>` declaration syntax) — **READY; a dPA was FIRED by bryan on it this session and was still
+  running at wrap** (its uncommitted edits live in the ASUS main checkout: `handOffs/dpa-queue.md` + `delta-log.md` —
+  commit its output when it reports). Q1–Q5 RULED in conversation (record: user-voice S430): plain `<name …/>` = new
+  instance; `<*name/>` = THE shared instance, READ-ONLY; writes only through tracked, exhaustive, typed logic; markup via
+  `renders`; defaults inline on the attribute and UNIFORM (`<count:int=0>` replaces `<x> = v`); attributes = data,
+  children = validated fields; `@name` = shared instance's value, instances addressable via `as=`. Retirement pole
+  CLOSED. **Q6 (how an instance writes its own state) is the dPA's to run.**
+- **dpa-052** (value mutability) — banked. bryan's model: immutable by default, mutability only through a CONTRACT, and
+  **lifecycles `(A to B)` ARE the mutability contracts** ("this was the whole point of lifecycles"); arrays unconstrained,
+  tuples = fully constrained (reopens S222 no-tuple). PA spectrum proposed, not ratified: none · `(A to B)` · rule graph ·
+  `let` = unrestricted. It likely answers dpa-050 Q6 too (instance self-write = writes along lifecycles; engines = named
+  lifecycle graphs). **Run 052 and 050-Q6 together or 052 first.**
+- **dpa-051** — see §1.
+
+### 3. ⚑ bryan's ruling queue — 17 items, re-surfaced in detail at S430 (last PA message before wrap), with recs
+1 property writes through `const` — **HELD: dpa-052 answers it** · 2 relative `db=` base (rec: declaring file's dir) ·
+3 `dist/` ownership (rec: load only this compile's outputs) · 4 programmer-error preconditions (rec: types) · 5 `db=` env
+reference (rec: yes; check if a form exists) · 6 keywordless loop binder mutable? (rec: no, const) · 7 URI scheme case
+(rec: keep sensitive + hint) · 8 dpa-049: `[lint]` in scrml.toml (rec: yes + descriptive; ALSO a defect: `scrml build`
+ships `log()` §20.6.8 says SHALL strip — not yet filed) · 9 quoted `onclick="…"` raw JS (rec: warn) · 10 import:host
+non-TS/JS target code (rec: keep E-IMPORT-009) · Peter's: 11 click contracts converge (rec: native bubbling) · 12 engine
+in `<each>` row (rec: refuse) · 13 `initial=` payload (rec: honour) · 14 deep reactivity (rec: amend §6.5.6, land
+hold) · 15 match in engine state-child (rec: land parser part, hold rest for dpa-050) · 16 reserve `_scrml_` (rec: yes)
+· 17 S427 lift-in-if= timing (rec: A) · 18 S420 subdir-shell lint (rec: conformance fix). ⚑ Peter's S432 is actively
+building some of these on hold refs — check his block before acting.
+
+### 4. Open small follow-ups (not started)
+LSP never publishes E-CLASS/E-DYNAMIC-IMPORT (`g-lsp-never-publishes-forbidden-vocabulary-codes`) · types-gate on main:
+**22 NEW + 1 GROWN** TS diagnostics hidden inside the always-red `tracking` job — attribute + triage, do not just
+`--write` · HIGH silent gaps filed this session: unbraced `else` dropped (live parser), nested async fn called without
+await, split fn drops a `let` SQL read, single-batch CPS ignores a server error envelope, hoisted-loop outer-let TDZ,
+`let` through `!{}` loses writes, emit-each/file-top JS import in a page.
+
+## 🔭 DURABLE
+**The text-shortcut is this codebase's default failure, and it happened five times in one session under review.** Every
+one was "the tree doesn't have what I need here, so scan the text" — and every one was reviewed back. The only thing
+that worked each time was going to a structure that already existed (the native tree; a per-block stack instead of
+moving declarations). **When a fix needs a fact the AST lacks, carry the fact through the AST — or use the parser
+that has it.** This is the dpa-051 brief in one sentence.
+
+**Concurrent sessions: my board went stale and three Peter sessions routed around a footprint I no longer held.** Update
+the board the moment a footprint is released, not at wrap. And when a dPA runs in the main checkout, do all PA landings
+from separate worktrees (`.claude/worktrees/pa-docs`, `land-*`) — done this session, zero collisions.
+
+## ⚑ MISSES (mine)
+1. **★★ My `tracking`-job merge check compared only TEST names; the types-gate step inside it was never compared.** 22
+   NEW TS diagnostics sat invisible. Fixed mid-session (types-gate NEW/GROWN now compared per PR) — the S428/S429
+   name-set check has the same blind spot.
+2. **★★ I relayed "P2 is an open decision" from the S428 hand-off at boot without reading the superseding §34 row.**
+3. **★ Two `gh pr checks --json` wait loops polled nothing** (this gh has no `--json` on `pr checks`) — they looked
+   like waits and were no-ops. Parse the text form.
+4. **★ First push of every new branch failed silently under `-q | grep`**; only the unfiltered retry showed success.
+   Never judge a push by filtered output.
+
+## Gate at close
+- main at **origin/main** (Peter's #1064-era), 0/0 at the landing worktrees. Every S430 PR had gate+windows green,
+  `tracking` = main's 5 names, types-gate unchanged vs main, and a clean S239 pass (6 rounds for defer, 5 for class/import,
+  5 for db redaction).
+- Review markers: #996 (finding), #1042/#1043/#1044 in `docs/pr-reviews.md`; S432 claimed #1047/#1048/#1051/#1052.
+- Worktrees: my agent + landing worktrees removed at wrap; the ASUS main checkout carries the RUNNING dPA's uncommitted
+  edits — untouched by design.
+
+---
+
 # scrml — Session 432 (peter · P-Tech1 Windows) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
@@ -59,7 +146,9 @@
 
 ### 3b. ⚑ S431 LEFT UNRECORDED WORK ON THIS CLONE — found at S432 wrap (S431 never wrapped)
 - `fix/s431-sigil-rewrites-skip-strings` `ca5ecc45` (worktree `C:w431s`): 2 commits fixing the HIGH `g-scrml-sigil-rewrites-reach-inside-every-string-literal` (text rewrite stages mask literal content once; map-literal keys compare on restored text). **Was never pushed — pushed by S432 at wrap so it survives. Review status unknown → treat as UNREVIEWED.** Rebase onto main (#1054/#1063 touched the same rewrite/expression paths), S239 pass, then land.
-- `fix/s431-when-changes-dep-list` `6b757158` (worktree `C:w431`, local only): S431's own when-changes + §6.5.1 fix — **superseded by #1054**; review worktree `C:431w` sits on it. Keep only for diffing, then remove the three `C:w431`/`C:431w`/`C:431*` worktrees.
+- `fix/s431-when-changes-dep-list` `6b757158` (worktree `C:w431`, local only): S431's own when-changes + §6.5.1 fix — **superseded by #1054**; review worktree `C:
+431w` sits on it. Keep only for diffing, then remove the three `C:w431`/`C:
+431w`/`C:431*` worktrees.
 
 ### 4. Standing directives set this session (in user-voice-pjoliver11 + memory)
 - **Gift-wrap every route to bryan, permanently:**
