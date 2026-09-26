@@ -1579,7 +1579,7 @@ function rewriteIsPredicates(s: string, detector?: { valueRhsOnIs?: boolean }): 
 /** Pre-process scrml-specific operators for Acorn parsing. Returns transformed string. */
 function preprocessForAcorn(
   raw: string,
-  opts?: { tildeActive?: boolean },
+  opts?: { tildeActive?: boolean; restore?: (t: string) => string },
   detector?: { notPrefixNegation: boolean; valueRhsOnIs?: boolean },
 ): string {
   let s = raw.trim();
@@ -1634,7 +1634,7 @@ function preprocessForAcorn(
   // preprocessMatchExprs so a `[k: v]` inside a match arm is already masked as
   // a JSON string arg and is not re-scanned. Each key/value text round-trips
   // through the full pipeline at unmask time (same as match `rawArms`).
-  s = preprocessMapLiterals(s);
+  s = preprocessMapLiterals(s, opts?.restore);
 
   // ─── `is …` predicate rewriting (Phase A: S99 / Phase B: 2026-05-17) ───
   //
@@ -2015,7 +2015,10 @@ function mapKeyIsStructOrEnum(keyText: string): boolean {
  *
  * Processed right-to-left so earlier indices stay valid after each rewrite.
  */
-function preprocessMapLiterals(s: string): string {
+function preprocessMapLiterals(s: string, restore: (t: string) => string = (t) => t): string {
+  // S431: `s` arrives with literal content MASKED. Keys are COMPARED and diagnostics
+  // RENDERED on restored source text (two masked "DAL" keys are the same key; a
+  // diagnostic is double-JSON-encoded, so it must never carry a mask span).
   // Collect candidate map-literal brackets (left-to-right), then rewrite
   // right-to-left so prior-index slices remain valid.
   const rewrites: Array<{ start: number; end: number; replacement: string }> = [];
@@ -2092,7 +2095,7 @@ function preprocessMapLiterals(s: string): string {
     const seenKeys: string[] = [];
 
     for (const seg of segments) {
-      const segTrim = seg.trim();
+      const segTrim = restore(seg.trim());
       if (segTrim === "") {
         // An empty entry segment (a stray / trailing comma) — count error.
         diags.push({
@@ -2111,6 +2114,7 @@ function preprocessMapLiterals(s: string): string {
         continue;
       }
       const keyText = seg.slice(0, colon).trim();
+      const keyShown = restore(keyText);
       const valText = seg.slice(colon + 1).trim();
       if (keyText === "" || valText === "") {
         // Missing key or value, or a trailing colon (`["k":]`, `[:5]`).
@@ -2125,17 +2129,17 @@ function preprocessMapLiterals(s: string): string {
       if (mapKeyIsStructOrEnum(keyText)) {
         diags.push({
           code: "W-MAP-STRUCT-KEY-LITERAL",
-          message: `W-MAP-STRUCT-KEY-LITERAL: struct/enum-key map literal \`${keyText}: …\` parse-accepts but v1 codegen requires the \`.insert(${keyText}, …)\` form (§59.3/§59.12).`,
+          message: `W-MAP-STRUCT-KEY-LITERAL: struct/enum-key map literal \`${keyShown}: …\` parse-accepts but v1 codegen requires the \`.insert(${keyShown}, …)\` form (§59.3/§59.12).`,
         });
       }
       // §59.3 duplicate depth-1 keys — last-wins; surface the overwrite. Keys
       // are compared by normalized source text (a best-effort structural proxy
       // at parse time; the runtime applies true §45-equality last-wins).
-      const keyNorm = keyText.replace(/\s+/g, " ");
+      const keyNorm = keyShown.replace(/\s+/g, " ");
       if (seenKeys.includes(keyNorm)) {
         diags.push({
           code: "W-MAP-DUPLICATE-LITERAL-KEY",
-          message: `W-MAP-DUPLICATE-LITERAL-KEY: duplicate map-literal key \`${keyText}\` — last entry wins (§59.3).`,
+          message: `W-MAP-DUPLICATE-LITERAL-KEY: duplicate map-literal key \`${keyShown}\` — last entry wins (§59.3).`,
         });
       }
       seenKeys.push(keyNorm);
@@ -3151,7 +3155,7 @@ function _parseMaskedExprToNode(mask: LiteralMask, trimmed: string, filePath: st
   let processed = mask.masked;
 
   // Preprocessing for scrml-specific operators
-  processed = preprocessForAcorn(processed, { tildeActive: opts?.tildeActive }, _notDetector);
+  processed = preprocessForAcorn(processed, { tildeActive: opts?.tildeActive, restore: mask.restore }, _notDetector);
 
   // Standard parseExpression preprocessing (SQL, input-state, worker refs)
   // parseExpression already does this, but we also do it here so we can

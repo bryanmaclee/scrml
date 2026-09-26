@@ -383,3 +383,24 @@ describe("§6 detectors do not read sigils inside strings", () => {
     expect(out.errors.map((e) => e.code)).toContain("E-FN-001");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §7 — passes that COMPARE or RE-ENCODE literal text see the restored source
+// ---------------------------------------------------------------------------
+
+describe("§7 map-literal keys are compared on restored text", () => {
+  test('["DAL": 3, "DAL": 5] still warns W-MAP-DUPLICATE-LITERAL-KEY, message names the key', () => {
+    const n = parseExprToNode('["DAL": 3, "DAL": 5]', "m.scrml", 0);
+    const d = (n.diagnostics ?? []).find((x) => x.code === "W-MAP-DUPLICATE-LITERAL-KEY");
+    expect(d).toBeTruthy();
+    expect(d.message).toContain('`"DAL"`');
+    expect(d.message).not.toMatch(/[\uE001\uE100-\uF8FF]/);
+    expect(n.entries[0].key.value).toBe("DAL");
+  });
+
+  test('["a\\"b": 1, "<#w>": 2] — keys with escapes and sigils survive', () => {
+    const n = parseExprToNode('["a\\"b": 1, "<#w>": 2]', "m.scrml", 0);
+    expect(n.entries[0].key.value).toBe('a"b');
+    expect(n.entries[1].key.value).toBe("<#w>");
+  });
+});
