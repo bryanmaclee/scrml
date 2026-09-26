@@ -87,7 +87,7 @@ import {
 import { renameCellAccessors, CS_PREFIX } from "./cell-accessor-rename.ts";
 
 import { EncodingContext } from "./type-encoding.ts";
-import { collectDerivedVarNames, collectReactiveVarNames, collectStructuralDeclNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
+import { collectDerivedVarNames, collectReactiveVarNames, collectStructuralDeclNames, collectSynthCellKeys, stampCompoundDeepSetTargets, findWhenDepsOnReadOnlyCells } from "./reactive-deps.ts";
 // s430-emit-state-leak — module-state install / reset seams (resetCodegenModuleState).
 import { beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { resetEachModuleState, resetEachLocalIdCounter } from "./emit-each.ts";
@@ -1956,6 +1956,22 @@ export function runCG(input: CgInput): CgOutput {
             ));
           }
         }
+      }
+
+      // §6.7.4 EC-1 — E-LIFECYCLE-007: a `when` dep naming only read-only
+      // (`const <name>`) cells is a dead effect. Resolved over the post-CE tree
+      // by the runtime cell key — see findWhenDepsOnReadOnlyCells.
+      for (const { node: whenNode, dep } of findWhenDepsOnReadOnlyCells(fileAST as Record<string, unknown>)) {
+        const sp = (whenNode.span as Record<string, unknown> | undefined) ?? {};
+        errors.push(new CGError(
+          "E-LIFECYCLE-007",
+          `E-LIFECYCLE-007: \`when\` dep-list entry \`@${dep}\` is a \`const <${dep}>\` cell, ` +
+          `not a mutable \`@variable\`. It is never written — a derived cell re-evaluates from ` +
+          `the cells it reads — so it cannot trigger a \`when\` effect (SPEC §6.7.4 EC-1). ` +
+          `Fix: list the mutable \`@variables\` \`@${dep}\` is computed from, and read ` +
+          `\`@${dep}\` inside the body.`,
+          { file: filePath, ...sp },
+        ));
       }
 
       // Resolve auth middleware for this file (from RI output)
