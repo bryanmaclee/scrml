@@ -1,0 +1,15 @@
+{
+  "id": "fn-scope-redeclare-nested-ok",
+  "description": "§7.3.3 — shadowing in a NESTED block is legal: an `if` body re-declaring parameter `w` and outer `let v` compiles and runs; the outer bindings are unchanged after the block. out = \"shadow-w;shadow-v;v;\".",
+  "language-version": "1.0",
+  "spec": "§7.3.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§7.3.3: shadowing in a nested block (an if / loop / arm body declaring a name the enclosing block or the parameter list binds) is legal and unaffected.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-REDECLARE"],
+    "input": [{ "click": "#go" }],
+    "state": { "out": "shadow-w;shadow-v;v;" },
+    "domAnchored": [{ "selector": "#out", "text": "shadow-w;shadow-v;v;" }]
+  }
+}

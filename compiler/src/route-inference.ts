@@ -391,6 +391,13 @@ interface CPSResult {
    */
   pureServerIndices: number[];
   reactiveServerIndices: number[];
+  /**
+   * §19.16.5 (S430 P3) — body indices of top-level `defer` statements whose
+   * deferred body is server-tier. Non-empty on an eligible split =>
+   * E-DEFER-SERVER-IN-SPLIT (a server batch ends before the later batches, so
+   * the deferred body would run before the function's final exit).
+   */
+  deferServerIndices?: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -2754,6 +2761,75 @@ function describeServerTrigger(reasons: EscalationReason[]): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * §19.16.5 (S430 P3) — every `defer-stmt` nested inside `node` (not crossing a
+ * nested function body). Used for the E-DEFER-SERVER-IN-SPLIT limb 2 check.
+ */
+function findNestedDefers(node: unknown): any[] {
+  const out: any[] = [];
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const k = (n as any).kind;
+    if (k === "function-decl" || k === "lambda") return;
+    if (k === "defer-stmt") { out.push(n); return; }
+    for (const key of Object.keys(n as object)) {
+      if (key === "span") continue;
+      walk((n as any)[key]);
+    }
+  };
+  walk(node);
+  return out;
+}
+
+/**
+ * §19.16.5 (S430 review F5) — say WHY a deferred body was placed server-side,
+ * naming the concrete trigger: a server-placed callee by name (which may be an
+ * over-escalated pure helper — the message says "placed", not "does server
+ * work"), a `?{}` query, or a server-only resource.
+ */
+function describeDeferServerReason(
+  deferNode: any,
+  functionIndex: Map<string, FunctionIndexEntry[]>,
+  resolvedServerFnIds: Set<string>,
+  importedServerFnNames: Set<string>,
+): string {
+  const callees = new Set<string>();
+  let hasSql = false;
+  const seen = new WeakSet<object>();
+  const walk = (n: unknown): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    const nn = n as any;
+    if (nn.kind === "function-decl" || nn.kind === "lambda") return;
+    if (nn.kind === "sql") hasSql = true;
+    if (nn.sqlNode && nn.sqlNode.kind === "sql") hasSql = true;
+    if (nn.kind === "bare-expr") for (const c of extractCalleesFromNode(nn, "expr")) callees.add(c);
+    if (nn.kind === "let-decl" || nn.kind === "const-decl" || nn.kind === "state-decl") {
+      for (const c of extractCalleesFromNode(nn, "init")) callees.add(c);
+    }
+    for (const key of Object.keys(nn)) {
+      if (key === "span") continue;
+      walk(nn[key]);
+    }
+  };
+  walk(deferNode && deferNode.body);
+  const serverCallees = [...callees].filter((c) => {
+    if (importedServerFnNames.has(c)) return true;
+    const entries = functionIndex.get(c);
+    return !!entries && entries.some((e) => resolvedServerFnIds.has(e.fnNodeId));
+  });
+  if (serverCallees.length > 0) {
+    const names = serverCallees.map((c) => "`" + c + "`").join(", ");
+    return `calls ${names}, which the compiler placed server-side`;
+  }
+  if (hasSql) return "contains a `?{}` query";
+  return "touches a server-only resource";
+}
+
+/**
  * Determine whether a function body is eligible for CPS transformation and,
  * if so, compute the split plan.
  *
@@ -2783,6 +2859,7 @@ export function analyzeCPSEligibility(
   const reactiveIndices: number[] = [];
   const reactiveServerIndices: number[] = []; // state-decls whose init calls a server fn
   const mixedIndices: number[] = []; // bare-expr statements that are BOTH server + reactive
+  const deferServerIndices: number[] = []; // §19.16.5 — `defer` stmts whose deferred body is server-tier
 
   for (let i = 0; i < body.length; i++) {
     const node = body[i];
@@ -2808,7 +2885,13 @@ export function analyzeCPSEligibility(
       (hasServerCallInInit(node, functionIndex, resolvedServerFnIds, importedServerFnNames) ||
         hasServerOnlyResourceInInit(node, importedServerNamespaces));
 
-    if (isReactiveServer) {
+    if (isServer && (node as any).kind === "defer-stmt") {
+      // §19.16.5 — a server-tier deferred body. Tier it SERVER (never "mixed")
+      // so the split is still computed and the caller can report the precise
+      // E-DEFER-SERVER-IN-SPLIT instead of a cascading E-RI-002.
+      serverIndices.push(i);
+      deferServerIndices.push(i);
+    } else if (isReactiveServer) {
       reactiveServerIndices.push(i);
     } else if (isReactive && isServer) {
       // bare-expr with both @var= and server resource — truly unsplittable
@@ -2859,6 +2942,7 @@ export function analyzeCPSEligibility(
     // Ext 1 M1.3: tier sub-sets for the multi-batch planner's body-DG.
     pureServerIndices: [...serverIndices].sort((a, b) => a - b),
     reactiveServerIndices: [...reactiveServerIndices].sort((a, b) => a - b),
+    deferServerIndices,
   };
 }
 
@@ -2932,6 +3016,14 @@ function hasServerOnlyResourceInInit(
  */
 function isReactiveStatement(node: LogicStatement): boolean {
   if (node.kind === "state-decl") return true;
+  // §19.16.5 — a `defer` statement takes the tier of its deferred body: it is a
+  // reactive statement when the deferred body writes a reactive cell (so a
+  // function whose only reactive write is `defer @busy = false` is still
+  // CPS-eligible and the write stays on the client).
+  if ((node as any).kind === "defer-stmt") {
+    const inner = (node as any).body;
+    return Array.isArray(inner) && findReactiveAssignment(inner as LogicStatement[]) !== null;
+  }
   if (node.kind === "bare-expr") {
     // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
     const expr = (node as any).exprNode ? emitStringFromTree((node as any).exprNode) : ((node as any).expr ?? "");
@@ -2968,6 +3060,10 @@ const CONTROL_FLOW_TRIGGER_KINDS = new Set([
   "match-stmt",
   "match-expr",
   "try-stmt",
+  // §19.16.5 (S430 P3) — a `defer` statement is server-tier when its deferred
+  // body contains a server trigger; the nested scan classifies it. A server-tier
+  // defer in a split function is then rejected (E-DEFER-SERVER-IN-SPLIT).
+  "defer-stmt",
 ]);
 
 /**
@@ -5847,6 +5943,60 @@ export function runRI(input: RIInput): RIOutput {
             // Insight 26 D2c: per-file server-only imported namespaces.
             perFileImportedServerNamespaces.get(record.filePath) ?? new Set<string>(),
           );
+
+          if (cpsResult && cpsResult.eligible) {
+            // §19.16.5 (S430 P3) — E-DEFER-SERVER-IN-SPLIT, both limbs. The
+            // split itself is still installed below so no cascading E-RI-002
+            // fires on the function's reactive writes.
+            const _fnName = record.fnNode.name ?? "<anonymous>";
+            const _serverIdx = new Set<number>([
+              ...cpsResult.serverStmtIndices,
+            ]);
+            // Limb 1 — a top-level `defer` whose deferred body is server-tier.
+            // It would have to run INSIDE a server batch, and a batch ends
+            // before the later batches and the client continuations: the
+            // release would run before the function's final exit.
+            for (const di of cpsResult.deferServerIndices ?? []) {
+              const dNode = body[di] as any;
+              const reason = describeDeferServerReason(
+                dNode, functionIndex, resolvedServerFnIds, importedServerFnNames,
+              );
+              errors.push(new RIError(
+                "E-DEFER-SERVER-IN-SPLIT",
+                `E-DEFER-SERVER-IN-SPLIT: \`${_fnName}\` is split across the client/server boundary ` +
+                `(§19.9.9), and this \`defer\`'s deferred statement ${reason} — so the deferred ` +
+                `statement itself was placed on the server side of the split. A split function's deferred statement runs after ` +
+                `its LAST continuation (§19.16.5), but a server-side statement can only run inside a ` +
+                `server batch — and a batch ends before the later batches and client statements, so it ` +
+                `would run too early. Keep the acquire/use/release together in a \`server function\` ` +
+                `(its \`defer\` then runs on the server at that function's exit) and call it from here, ` +
+                `or make the deferred statement client-side.`,
+                (dNode && dNode.span) ?? record.fnNode.span,
+              ));
+            }
+            // Limb 2 (S430 review F4) — a `defer` NESTED inside a top-level
+            // statement the split runs server-side (e.g. an `if` whose body
+            // holds a `?{}`). The whole statement, defer included, would be
+            // emitted into the server batch, so even a client-tier deferred
+            // body (`defer @busy = false`) would run on the server and never
+            // reach the client. Fail closed rather than lower it there.
+            for (const si of _serverIdx) {
+              const sNode = body[si] as any;
+              if (!sNode || sNode.kind === "defer-stmt") continue;
+              for (const nested of findNestedDefers(sNode)) {
+                errors.push(new RIError(
+                  "E-DEFER-SERVER-IN-SPLIT",
+                  `E-DEFER-SERVER-IN-SPLIT: \`${_fnName}\` is split across the client/server boundary ` +
+                  `(§19.9.9), and this \`defer\` sits inside the \`${String(sNode.kind).replace(/-(stmt|expr)$/, "")}\` statement ` +
+                  `that the compiler runs server-side (it contains server work). Its deferred ` +
+                  `statement would run inside that server batch — not at the function's final exit on ` +
+                  `the client (§19.16.5). Move the \`defer\` to the function's top level, or move the ` +
+                  `whole block into a \`server function\` and call it.`,
+                  nested.span ?? sNode.span ?? record.fnNode.span,
+                ));
+              }
+            }
+          }
 
           if (cpsResult && cpsResult.eligible) {
             // Ext 1 M1.1: single-batch construction is the back-compat

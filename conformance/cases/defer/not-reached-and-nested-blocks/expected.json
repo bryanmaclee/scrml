@@ -1,0 +1,15 @@
+{
+  "id": "defer-not-reached-and-nested-blocks",
+  "description": "§19.16.2 — an inner block's deferred body runs when the INNER block exits (before the outer block's), and a `defer` control never reached registers nothing. step(1): inner; mid; late registered; end; exit runs late then outer. step(9): the early `return` leaves before `defer late` executes, so only outer runs. trace = \"body;inner;mid;end;late;outer;|body;inner;mid;outer;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: Registration is against the innermost enclosing block (the `if` branch for `inner`); Not reached, not registered (the `late` defer after the early return in step(9)); Order: inner blocks' deferred bodies run when the inner block exits, and within a block LIFO (late before outer).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "body;inner;mid;end;late;outer;|body;inner;mid;outer;" },
+    "domAnchored": [{ "selector": "#out", "text": "body;inner;mid;end;late;outer;|body;inner;mid;outer;" }]
+  }
+}

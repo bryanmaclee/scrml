@@ -1,0 +1,16 @@
+{
+  "id": "defer-cps-batch0-failure",
+  "description": "§19.16.5 — a body-split function whose FIRST server batch (batch 0) fails still runs its deferred bodies on the way out: the batch's error return is an exit of the function body. Every batch is stubbed to fail, so batch 0 fails, the client work after it never runs, but @busy is cleared and \"D;\" is appended exactly once: trace = \"start;D;\", @busy = false. (The true intermediate-batch failure — batch 0 ok, batch 1 fails — is `cps-batch1-failure`.)",
+  "language-version": "1.0",
+  "spec": "§19.16.5",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2 lists the implicit CPS failure return among the exits that run every registered deferred body exactly once; §19.16.5: the deferred body also runs when a batch fails and the function returns its error envelope (§19.6.7).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "serverStub": { "save": { "__serverError": { "type": "CpsError", "variant": "ServerError" } } },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "trace": "start;D;", "busy": false },
+    "domAnchored": [{ "selector": "#out", "text": "start;D;" }]
+  }
+}

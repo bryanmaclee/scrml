@@ -1,0 +1,13 @@
+{
+  "id": "defer-control-flow-in-value-arms-neg",
+  "description": "§19.16.3 rule 1 reaches EVERY statement position inside a deferred body — including value-form arms that the front-end carries as text: a `return` in a value-form `match` arm block (viaMatchArm), a `fail` in one (viaMatchArmFail), a `return` in an if-as-expression arm (viaIfExpr) and a `return` in a `!{}` handler arm (viaHandlerArm) are each E-DEFER-CONTROL-FLOW — four occurrences. A `return` inside an arrow function passed to `.map` (lambdaIsABoundary) is its own scope and does NOT fire. Unchecked, the arm `return` would leave the function from inside the `finally`, overriding its real return value (viaMatchArm would return 5, not 1).",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 1: a deferred body SHALL NOT contain `return` / `fail` / `?` / an escaping `break`/`continue`, at any depth — value-form match / if arms and `!{}` handler arms included; a nested function or lambda body is its own control-flow scope.",
+  "expect": {
+    "codes": ["E-DEFER-CONTROL-FLOW"],
+    "codeCounts": { "E-DEFER-CONTROL-FLOW": 4 },
+    "notCodes": ["E-DEFER-NESTED", "E-DEFER-OUTSIDE-FUNCTION"]
+  }
+}

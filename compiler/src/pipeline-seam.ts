@@ -297,7 +297,7 @@ export interface StageSeam {
 }
 
 /**
- * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Seven files re-enter the TS block splitter / AST builder
+ * ⚠ THE KNOWN LIMIT OF A BS / TAB SWAP. Eight files re-enter (seven at s430-stage-swap; +1 S430 defer) the TS block splitter / AST builder
  * directly — re-parsing a synthesized snippet mid-stage — instead of going through the pipeline's
  * BS / TAB call. A hybrid with BS or TAB substituted still parses THOSE snippets with TS, so its
  * FileASTs are of mixed provenance. Every other stage has exactly one caller (api.js).
@@ -316,6 +316,10 @@ export const PARSE_REENTRY_FILES: readonly string[] = [
   "compiler/src/codegen/emit-error-boundary.ts",
   "compiler/src/codegen/emit-logic.ts",
   "compiler/src/codegen/emit-match.ts",
+  // S430 §19.16 `defer` — parses text-carried arm / handler bodies (and, via the
+  // native parser, lambda / on-mount text) into statement trees so the defer
+  // checker reasons about STRUCTURE, never text.
+  "compiler/src/validators/defer-structure.ts",
 ];
 
 const recheckFiles = (label: string, pick: (args: SeamArgs) => unknown): ((args: SeamArgs) => Divergence) =>

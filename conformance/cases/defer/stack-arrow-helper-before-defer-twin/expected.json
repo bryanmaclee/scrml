@@ -1,0 +1,14 @@
+{
+  "id": "defer-stack-arrow-helper-before-defer-twin",
+  "description": "No-defer TWIN of `stack-arrow-helper-before-defer`: the deferred D is written as the last statement before the return. n1() = 4, trace \"d;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "Reference behaviour the deferred version must match (§19.16.6: lowering a defer does not change the meaning of the rest of the block).",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "out": 4, "trace": "d;" },
+    "domAnchored": [{ "selector": "#out", "text": "4" }]
+  }
+}

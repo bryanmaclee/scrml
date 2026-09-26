@@ -1,0 +1,15 @@
+{
+  "id": "defer-hoist-structural-twin",
+  "description": "No-defer TWIN of `hoist-structural`: the same three functions with each deferred call written as the last statement of its block. The observable trace must be identical: \"INNER;D1;sum3;D2;local1kind;tail;D3;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.6: lowering a defer does not change the meaning of the rest of the block; this twin fixes the reference behaviour the deferred version must match.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-SCOPE-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "INNER;D1;sum3;D2;local1kind;tail;D3;" },
+    "domAnchored": [{ "selector": "#out", "text": "INNER;D1;sum3;D2;local1kind;tail;D3;" }]
+  }
+}

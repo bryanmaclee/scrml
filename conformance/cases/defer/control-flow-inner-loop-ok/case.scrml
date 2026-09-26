@@ -1,0 +1,29 @@
+${
+    <trace> = ""
+
+    function go() {
+        defer {
+            for (const i of [1, 2, 3]) {
+                if (i == 2) {
+                    continue
+                }
+                if (i == 3) {
+                    break
+                }
+                @trace = @trace + "x" + i + ";"
+            }
+            let helper = function(v) {
+                if (v > 0) {
+                    return "pos"
+                }
+                return "neg"
+            }
+            @trace = @trace + helper(1) + ";"
+        }
+        @trace = @trace + "body;"
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

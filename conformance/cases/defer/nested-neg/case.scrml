@@ -1,0 +1,15 @@
+${
+    <n> = 0
+
+    function go() {
+        defer {
+            @n = 1
+            defer @n = 2
+        }
+        @n = 3
+    }
+}
+<program>
+    <button onclick=go()>go</>
+    <p>${@n}</p>
+</program>

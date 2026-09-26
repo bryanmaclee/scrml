@@ -1,0 +1,15 @@
+{
+  "id": "defer-deferred-host-error-runs-rest",
+  "description": "§19.16.2 (S430 round 4) — a deferred statement that raises a HOST error does not stop the block's other deferred statements: they still run, LIFO, and the first host error is rethrown after all of them. work(): \"work;\", then at exit last-registered, then boom (throws a TypeError after writing \"boom;\"), then first-registered STILL runs: trace = \"work;last-registered;boom;first-registered;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: a host error inside a deferred body does not prevent the block's remaining deferred bodies from running; after all have run, the first such error propagates (the runner rethrows it).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "work;last-registered;boom;first-registered;" },
+    "domAnchored": [{ "selector": "#out", "text": "work;last-registered;boom;first-registered;" }]
+  }
+}

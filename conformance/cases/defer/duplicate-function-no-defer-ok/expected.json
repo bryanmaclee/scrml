@@ -1,0 +1,15 @@
+{
+  "id": "defer-duplicate-function-no-defer-ok",
+  "description": "Reference for `duplicate-function-neg`: WITHOUT a defer, two `function g` declarations in one function body compile and the later one wins (f() = 2). §7.3.3 deliberately leaves duplicate `function` declarations alone; neither E-SCOPE-REDECLARE nor E-DEFER-DUPLICATE-FUNCTION fires.",
+  "language-version": "1.0",
+  "spec": "§7.3.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§7.3.3: two function declarations of one name in one block are outside the redeclaration rule; §19.16.6 limits E-DEFER-DUPLICATE-FUNCTION to blocks that contain a defer.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SCOPE-REDECLARE", "E-DEFER-DUPLICATE-FUNCTION"],
+    "input": [{ "click": "#go" }],
+    "state": { "out": 2 },
+    "domAnchored": [{ "selector": "#out", "text": "2" }]
+  }
+}

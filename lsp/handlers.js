@@ -39,7 +39,6 @@ import { buildAST } from "../compiler/src/ast-builder.js";
 import { runPA } from "../compiler/src/protect-analyzer.js";
 import {
   SecretRedactor,
-  collectFromAst as collectConnectionValuesFromAst,
   harvestFromSource as harvestConnectionValues,
 } from "../compiler/src/diagnostic-secrets.ts";
 import { runRI } from "../compiler/src/route-inference.js";
@@ -298,9 +297,11 @@ export function analyzeText(filePath, text, logger, workspace) {
   // connection values (source harvest + the tree once it exists).
   const redactor = new SecretRedactor(harvestConnectionValues(text));
   const out = analyzeTextUnredacted(filePath, text, logger, workspace, redactor);
-  if (out.analysis?.ast) redactor.addValues(collectConnectionValuesFromAst(out.analysis.ast));
+  if (out.analysis?.ast) redactor.addAst(out.analysis.ast);
   for (const d of out.diagnostics) {
-    if (typeof d.message === "string") d.message = redactor.redact(d.message);
+    // s432 F3: `redactAt` also removes a mis-tokenized connection-value fragment
+    // echoed by a diagnostic positioned ON that fragment (pushError keeps the span).
+    if (typeof d.message === "string") d.message = redactor.redactAt(d.message, SPAN_OF.get(d) ?? null);
   }
   return out;
 }
@@ -416,15 +417,20 @@ function analyzeTextUnredacted(filePath, text, logger, workspace, redactor) {
   return { diagnostics, analysis };
 }
 
+/** s432 — the source span each pushed diagnostic came from (for `redactAt`). */
+const SPAN_OF = new WeakMap();
+
 function pushError(diagnostics, e, text, fallbackCode) {
   const span = extractSpan(e);
-  diagnostics.push({
+  const d = {
     severity: getDiagnosticSeverity(e),
     range: spanToRange(span, text),
     message: e.message || String(e),
     source: getErrorSource(e.code),
     code: e.code || fallbackCode || "E-UNKNOWN",
-  });
+  };
+  if (span && typeof span === "object") SPAN_OF.set(d, span);
+  diagnostics.push(d);
 }
 
 /**

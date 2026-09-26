@@ -1,0 +1,12 @@
+{
+  "id": "defer-later-shadow-neg",
+  "description": "§19.16.2 (S430 round 5, F1) — a deferred statement that reads a name (re)declared LATER in its enclosing block chain is E-DEFER-LATER-SHADOW: shadowing a file-level `x` (shadow — would silently read \"inner\" instead of \"outer\"), the TDZ variant behind an early return (tdz — would throw ReferenceError from the finally), a later declaration in an ENCLOSING block (outerChain), and a destructured later declaration (destructured). Four occurrences.",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: a deferred statement sees only the bindings in scope at the `defer`; a read of a name a later let/const/lin declaration in its block chain (re)binds SHALL be rejected (fail closed) rather than capture the later binding.",
+  "expect": {
+    "codes": ["E-DEFER-LATER-SHADOW"],
+    "codeCounts": { "E-DEFER-LATER-SHADOW": 4 }
+  }
+}

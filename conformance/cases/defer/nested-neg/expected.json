@@ -1,0 +1,13 @@
+{
+  "id": "defer-nested-neg",
+  "description": "§19.16.3 rule 2 — a deferred body SHALL NOT contain a `defer`: E-DEFER-NESTED, exactly once.",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 2: a deferred body runs while its block is already exiting, so there is no block to attach an inner `defer` to.",
+  "expect": {
+    "codes": ["E-DEFER-NESTED"],
+    "codeCounts": { "E-DEFER-NESTED": 1 },
+    "notCodes": ["E-DEFER-CONTROL-FLOW", "E-DEFER-OUTSIDE-FUNCTION"]
+  }
+}

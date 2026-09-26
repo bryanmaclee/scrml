@@ -23,7 +23,7 @@ import { runAttributeInterpolation } from "./validators/attribute-interpolation.
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
-import { SecretRedactor, collectFromAst as collectConnectionValuesFromAst } from "./diagnostic-secrets.ts";
+import { SecretRedactor } from "./diagnostic-secrets.ts";
 import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
@@ -71,6 +71,8 @@ import { parse as acornParse } from "acorn";
 import { runGauntletPhase3EqChecks } from "./gauntlet-phase3-eq-checks.js";
 import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
+import { runDeferChecks } from "./validators/lint-defer.ts";
+import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
 import { forbiddenJsDiagnosticsForDefault, nativeForbiddenJsAttrDiagnostics } from "./native-walker/forbidden-js-native.ts";
 
 // ---------------------------------------------------------------------------
@@ -1249,7 +1251,8 @@ function _compileScrmlImpl(options = {}) {
           }
         }
         allErrors.push(enriched);
-        if (verbose) log(`  [${stageName}] ${e.code}: ${e.message}`);
+        // s432 F3 — positioned redaction (a fragment attribute's echoed name).
+        if (verbose) log(`  [${stageName}] ${e.code}: ${_secretRedactor ? _secretRedactor.redactAt(e.message, enriched.span) : e.message}`);
       }
     }
   }
@@ -1525,6 +1528,10 @@ function _compileScrmlImpl(options = {}) {
   for (let i = 0; i < bsResults.length; i++) {
     const bsResult = bsResults[i];
     const result = stage("TAB", () => _buildAST(bsResult));
+    // s432 F3 — register the tree (connection values + unquoted-value fragment
+    // attributes) BEFORE its errors are collected: `--verbose` echoes each
+    // collected message immediately.
+    if (_secretRedactor && result && result.ast) _secretRedactor.addAst(result.ast);
     collectErrors("TAB", result.errors, result.filePath || bsResult.filePath);
     // §21.3.1 `import:host` gate — placement (E-IMPORT-003), host-tag
     // (E-IMPORT-009) and the §22.13 manifest allow-list (E-IMPORT-008). Shared
@@ -1575,7 +1582,7 @@ function _compileScrmlImpl(options = {}) {
     tabResults.push(result);
     bsByTab.set(result, bsResult);
     // s430-dev-db-stub F4 — connection values straight from the tree.
-    if (_secretRedactor) _secretRedactor.addValues(collectConnectionValuesFromAst(result.ast));
+    if (_secretRedactor) _secretRedactor.addAst(result.ast);
     if (verbose) log(`  [TAB] ${result.filePath}: ${result.ast?.nodes?.length ?? 0} nodes`);
   }
 
@@ -1772,6 +1779,23 @@ function _compileScrmlImpl(options = {}) {
   for (const tabResult of tabResults) {
     const asyncDiags = stage("REJECT-ASYNC-AWAIT", () => _runAsyncAwaitReject(tabResult.ast));
     collectErrors("REJECT-ASYNC-AWAIT", asyncDiags);
+  }
+
+  // §19.16.3 (S430 P3 stage 1) — structural `defer` restrictions:
+  // E-DEFER-OUTSIDE-FUNCTION / E-DEFER-NESTED / E-DEFER-CONTROL-FLOW. Runs on the
+  // live-shaped AST so the live and native front-ends share one checker.
+  for (const tabResult of tabResults) {
+    const deferDiags = stage("DEFER-CHECKS", () => runDeferChecks(tabResult.ast));
+    collectErrors("DEFER-CHECKS", deferDiags);
+  }
+
+  // §7.3.3 (S430 round 5) — a block binds each name once: a `let`/`const`/`lin`/
+  // `function` redeclaring a same-block binding or a parameter is
+  // E-SCOPE-REDECLARE (before this it failed at codegen as an unexplained
+  // E-CODEGEN-INVALID-LOGIC — and a `defer` made it silently legal).
+  for (const tabResult of tabResults) {
+    const redeclDiags = stage("SCOPE-REDECLARE", () => runRedeclareChecks(tabResult.ast));
+    collectErrors("SCOPE-REDECLARE", redeclDiags);
   }
 
   // Stage 3.1: Module Resolution

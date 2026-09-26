@@ -244,6 +244,68 @@ export function regexAllowedAfter(lastKind) {
     return true;
 }
 
+// --- Statement closers (S432 F1) ---
+//
+// regexAllowedAfter decides regex-vs-division from the previous token's KIND
+// alone, and a `)` is a value closer there (division). The `)` of a
+// control-statement head is not: a statement follows it, so a `/` after it
+// opens a regex. Paren frames remember whether they opened a head (bounded
+// lookback at the opener, the same class of decision as regexAllowedAfter),
+// and `ctx.lastCloser` records the frame the most recent `)` popped.
+//
+// NOT HANDLED (S432, deliberately): the `}` of a statement BLOCK is also
+// followed by a statement (`if (a) { }⏎/re/.test(s)` is a regex), but every
+// lexer in the repo — this one, self-host-v2/lex.scrml (whose parity corpus
+// pins `if (a) {}⏎/re/g` as division) and the default tokenizer.ts +
+// code-segments.ts twin — reads it as division. Changing one alone breaks
+// their agreement; it is a coordinated fix across all of them.
+
+// The control-statement heads after whose `)` a `/` opens a regex. MIRRORS
+// compiler/src/codegen/code-segments.ts REGEX_AFTER_CLOSE_PAREN_KEYWORDS (the
+// set the default tokenizer's closesControlFlowHead and codegen's text-level
+// regexAllowedAfter share) — the native parser is host-independent so it
+// cannot import it; a unit test pins the two sets equal
+// (compiler/tests/unit/native-lex-regex-after-statement-closer.test.js).
+export const CONTROL_HEAD_KEYWORDS = new Set(["if", "for", "while", "switch", "catch"]);
+
+function isWordToken(tok) {
+    return tok.kind === TokenKind.Ident || (typeof tok.kind === "string" && tok.kind.startsWith("Kw"));
+}
+
+// Does a `(` about to be pushed open a control-statement head? True after a
+// CONTROL_HEAD_KEYWORDS word (and `for await`), unless the word is a member
+// name (`a.if(`, `a?.for(`).
+export function opensControlHead(tokens) {
+    const n = tokens.length;
+    if (n === 0) return false;
+    let kwIdx = n - 1;
+    const last = tokens[kwIdx];
+    if (last.kind === TokenKind.KwAwait && n >= 2 && tokens[n - 2].text === "for") kwIdx = n - 2;
+    const kw = tokens[kwIdx];
+    if (!isWordToken(kw) || !CONTROL_HEAD_KEYWORDS.has(kw.text)) return false;
+    if (kwIdx > 0) {
+        const before = tokens[kwIdx - 1].kind;
+        if (before === TokenKind.Dot || before === TokenKind.OptionalChain) return false;
+    }
+    return true;
+}
+
+// The frame the closer `tok` popped, when `tok` is the most recent closer.
+function closerFrame(ctx, tok) {
+    if (tok === null || tok === undefined || tok.span === undefined || tok.span === null) return null;
+    const lc = ctx.lastCloser;
+    if (lc === null || lc === undefined || lc.at !== tok.span.start) return null;
+    return lc.frame;
+}
+
+// Is `tok` (the last token) the `)` of a control-statement head, after which
+// a STATEMENT begins?
+export function closerEndsStatement(ctx, tok) {
+    if (tok === null || tok === undefined || tok.kind !== TokenKind.RParen) return false;
+    const frame = closerFrame(ctx, tok);
+    return frame !== null && frame !== undefined && frame.controlHead === true;
+}
+
 // --- markupValueAllowedAfter — PUNCH-LIST P4 (R1 seam spike §1.2 / §6 P4) ---
 //
 // Given the most-recently-emitted token kind, may a `<` at the current
@@ -507,7 +569,15 @@ export function dispatchInCode(cursor, ctx) {
             lastTok.span !== undefined &&
             lastTok.span !== null &&
             lastTok.span.end === startPos;
-        if (regexAllowedAfter(lastKind) && isCloseTagSlash === false) {
+        // A `)` that closes a control-statement HEAD (`if (…)`, `for (…)`,
+        // `while (…)`) ends a statement head, not a value, so a `/` after it
+        // opens a regex (`if (s) /"/.test(s)`), exactly as at a statement
+        // start. regexAllowedAfter(RParen) is false (an expression `(a) / 2`
+        // is division), so this is the one closer that needs its bracket
+        // frame's memory (S432 F1: reading the `/` as division opened a
+        // phantom string at the `"` and desynchronised the rest of the file).
+        const isStatementCloser = closerEndsStatement(ctx, lastTok);
+        if ((regexAllowedAfter(lastKind) || isStatementCloser) && isCloseTagSlash === false) {
             setMode(ctx, LexMode.InRegexBody);
             dispatchInRegexBody(cursor, ctx);
             return true;
@@ -805,12 +875,14 @@ export function dispatchInCode(cursor, ctx) {
     // Brackets
     if (c0 === "(") {
         push(ctx.brackets, BracketKind.Paren, makeSpan(startPos, startPos + 1, startLine, startCol));
+        const parenFrame = ctx.brackets.frames[ctx.brackets.frames.length - 1];
+        parenFrame.controlHead = opensControlHead(ctx.tokens);
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.LParen, "(", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === ")") {
-        pop(ctx.brackets);
+        ctx.lastCloser = { at: startPos, frame: pop(ctx.brackets) };
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.RParen, ")", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;

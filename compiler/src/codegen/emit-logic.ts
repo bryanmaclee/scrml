@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -124,6 +124,19 @@ function _wrapDeepReactive(rewrittenExpr: string, rawExpr: string, initExpr?: an
 // ---------------------------------------------------------------------------
 
 export interface EmitLogicOpts {
+  /**
+   * §19.16.3 (S430 round 3, H3) — true while emitting a DEFERRED body (the
+   * `finally` of a lowered `defer`). A `!{}` handler there must never emit the
+   * unmatched-error `return` (it would leave the function from inside the
+   * `finally`, overriding its real return value). The checker already requires
+   * a `_` arm on a deferred handler (E-DEFER-UNHANDLED-FAILABLE), so the branch
+   * is unreachable; this flag keeps the lowering safe regardless.
+   */
+  inDeferredBody?: boolean;
+  /** §19.16.6 — the enclosing block's defer stack (emit-control-flow.ts DeferStackCtx). */
+  deferStack?: any;
+  /** §19.16.6 — whether the host body is async (defer closures `async`, runner awaits). */
+  deferAsync?: boolean;
   derivedNames?: Set<string> | null;
   /**
    * g-assignment-emits-init-set-inverting-reset (§6.8) — file-level set of cell
@@ -281,6 +294,13 @@ export interface EmitLogicOpts {
    * pre-fix behavior). Sibling to `mapVarNames` / `requestIds`.
    */
   serverFnNames?: Set<string> | null;
+  /**
+   * §6.7.4 / §13.2 (S429): the file's server-fn names, threaded by
+   * emit-reactive-wiring.ts for the `when-effect` branch ONLY — a `when` body is a
+   * CPS host, so its server calls are awaited inside an async wrapper. A separate
+   * key (not `serverFnNames`) so no other top-level statement's lowering changes.
+   */
+  whenServerFnNames?: Set<string> | null;
   /**
    * #284: names of LOCAL ALIAS bindings that resolve to a sibling server-fn PEER
    * through a first-class reference (`const p = groupByJob; … p(rows)` / a
@@ -3964,11 +3984,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // unhandled error simply remains the value of resultVar (and of any
           // `var binding = resultVar` emitted below), which is the correct
           // top-level semantics — no statement is needed.
-          if (opts.insideFunctionBody) {
+          if (opts.insideFunctionBody && !opts.inDeferredBody) {
             lines.push(`  else { return ${resultVar}; }`);
           }
         }
-      } else if (opts.insideFunctionBody) {
+      } else if (opts.insideFunctionBody && !opts.inDeferredBody) {
         lines.push(`  return ${resultVar};`);
       }
 
@@ -4024,15 +4044,62 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // through rewriteBlockBody's multi-statement lowering so every statement runs when
       // the dependency changes. `bodyRaw` carries faithful, parser-derived statement
       // boundaries and is comment-free (ast-builder drops COMMENT tokens).
-      // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
-      // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
-      // so a server-fn / async-peer call cannot strand an `await` in the sync
-      // wrapper (S374 review #1 — latent: top-level when-sites carry no async
-      // colour today, but this makes the sync-wrapper invariant explicit and
-      // future-proof; matches the pre-#693 string path, which never awaited).
-      const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
-      return `_scrml_effect(function() { ${body}; });`;
+      //
+      // §6.7.4 (S429) — the effect is keyed on the EXPLICIT dep-list, never on the
+      // body's reads. It used to lower to `_scrml_effect(function(){ body })`, which
+      // broke all three clauses at once: `_scrml_effect` runs its fn at
+      // registration (the body fired at boot), auto-tracks every read in it (an
+      // unlisted `@var` read became a trigger), and the dep-list was never
+      // consulted (writing a listed dep that the body does not read fired nothing).
+      // Now each listed dep gets a plain `_scrml_reactive_subscribe` — the
+      // mechanism every `_scrml_reactive_set` fans out to, already used by the
+      // variant-guard dispatcher and the lift binds — and `_scrml_when_changes`
+      // runs the body UNTRACKED, dedups a same-effect re-entry, and owns teardown.
+      // The subscribe calls are emitted HERE (not inside the runtime helper) so the
+      // chunk cell-scope rename namespaces each dep key exactly as it namespaces
+      // the body's own `_scrml_reactive_get` of the same cell.
+      //
+      // §6.7.4 "Interaction with Server Functions": the body is a CPS host (§13).
+      // It is lowered with `clientAsyncBody:true` + the file's server-fn names so a
+      // server call is awaited, and the wrapper is `async` exactly when an `await`
+      // was emitted. (Before this, the forced-sync wrapper handed the body an
+      // unawaited Promise — `@log = srv()` stored "[object Promise]".) The
+      // runtime helper reports an async body's rejection; it never reaches the
+      // writer. Server-boundary emission keeps the old sync lowering.
+      const isServer = opts.boundary === "server";
+      const baseCtx = _makeExprCtx(opts);
+      const whenSrvNames: Set<string> | null = isServer
+        ? null
+        : (opts.whenServerFnNames ?? baseCtx.serverFnNames ?? null);
+      const whenCtx = isServer || !whenSrvNames
+        ? { ...baseCtx, clientAsyncBody: false }
+        : { ...baseCtx, clientAsyncBody: true, serverFnNames: whenSrvNames };
+      let body = rewriteBlockBody(node.bodyRaw ?? "", null, null, isServer ? "server" : "client", whenCtx).replace(/;\s*$/, "");
+      // The expression-level await (above) covers a call in an expression the body
+      // lowers through the AST path (`@x = srv()`); a statement the block lowering
+      // passes through as text (`const r = srv()`) is reached by the same
+      // paren-correct, scope-legal injector every client fn body uses (§13.2).
+      if (whenSrvNames && whenSrvNames.size > 0 && [...whenSrvNames].some((n) => body.includes(n))) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const sched = require("./scheduling.js") as {
+          injectFnBodyServerCallAwaits: (c: string, p: (n: string) => boolean, skip?: "arg1" | "sink" | "none") => string;
+        };
+        // "none": no statement lift reaches a when body, so a server call nested
+        // in a reactive write inside `if` / `for` (lowered as text, not through the
+        // AST path above) is awaited here too.
+        body = sched.injectFnBodyServerCallAwaits(body, (n) => whenSrvNames.has(n), "none");
+      }
+      const isAsync = !isServer && /\bawait\b/.test(body);
+      const ctx = opts.encodingCtx;
+      const seen = new Set<string>();
+      const subs: string[] = [];
+      for (const dep of (Array.isArray(node.dependencies) ? node.dependencies : []) as string[]) {
+        if (typeof dep !== "string" || dep.length === 0 || seen.has(dep)) continue;
+        seen.add(dep);
+        const encodedDep = ctx ? ctx.encode(dep) : dep;
+        subs.push(`_scrml_reactive_subscribe(${JSON.stringify(encodedDep)}, _h)`);
+      }
+      return `_scrml_when_changes(function(_h) { return [${subs.join(", ")}]; }, ${isAsync ? "async " : ""}function() { ${body}; });`;
     }
 
     case "when-worker-message": {
@@ -4051,7 +4118,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `@cell` write inside a worker handler is not routed through the transition
       // guard (a narrow shared limitation, not specific to this path).
       // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
+      // (`worker.onmessage` / `worker.onerror`), so no `await`
       // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
       // so a server-fn / async-peer call cannot strand an `await` in the sync
       // wrapper (S374 review #1 — latent: top-level when-sites carry no async
@@ -4068,7 +4135,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const workerVar = `_scrml_worker_${node.workerName}`;
       const binding = node.binding ?? "e";
       // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`_scrml_effect` / `worker.onmessage` / `worker.onerror`), so no `await`
+      // (`worker.onmessage` / `worker.onerror`), so no `await`
       // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
       // so a server-fn / async-peer call cannot strand an `await` in the sync
       // wrapper (S374 review #1 — latent: top-level when-sites carry no async
@@ -4237,7 +4304,29 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
     }
 
     case "try-stmt":
+      // §19.16.6 — a compiler-lowered `defer` scope (lower-defer.ts) threads
+      // opts into both halves; a SOURCE try (E-TRY-NOT-IN-SCRML) keeps the
+      // legacy emitter.
+      if (node.deferLowered === true) return emitDeferScope(node, opts);
       return emitTryStmt(node);
+
+    case "defer-stmt": {
+      // §19.16.6 — a `defer` registers its deferred statement on the enclosing
+      // block's stack (lower-defer.ts / emitDeferScope; the CPS wrappers set up
+      // their own stack for a split function's top level). A lowered marker's
+      // statements live in the block's `finallyNode.body`; an un-lowered one
+      // (CPS top level) still carries them in `body`.
+      const stack = (opts as any).deferStack;
+      if (!stack) {
+        // No stack in scope: a compiler bug. Fail the emitted-JS parse gate
+        // LOUDLY rather than run the deferred body in place (a wrong lowering).
+        return `/* scrml internal: defer outside a defer block */ defer_not_lowered!;`;
+      }
+      const stmts: any[] = node.lowered === true
+        ? stack.bodies.slice(node.deferStart ?? 0, (node.deferStart ?? 0) + (node.deferCount ?? 0))
+        : (Array.isArray(node.body) ? node.body : []);
+      return emitDeferRegistration(stmts, stack, opts);
+    }
 
     case "match-stmt":
     case "match-expr":
@@ -4333,22 +4422,38 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // back out and make the enclosing scope think they are already bound. Shadowing
       // still works — a local `let x` inside this body adds `x` to the child copy and
       // emits as a declaration, exactly as before.
+      // §19.16.3 rule 1 (S430 round 4, N3) — a nested function is its OWN
+      // control-flow scope: it is never "inside a deferred body" (its `!{}`
+      // keeps its unmatched-error propagation) and never registers on an
+      // enclosing block's defer stack.
       const fnOpts: EmitLogicOpts = {
         ...opts,
         declaredNames: new Set<string>(opts.declaredNames ?? []),
         insideFunctionBody: true,
+        inDeferredBody: false,
       };
+      delete (fnOpts as any).deferStack;
+      // §19.16.6 — a nested function's own defer closures are sync unless its
+      // body turns out to need `await` (it is then emitted `async`, below).
+      (fnOpts as any).deferAsync = false;
       // s427 round 2 (H1): a function body is a new function scope with a set of its
       // own, as it always had — not a lift scope (see declared-name-marks.ts).
       clearLiftScope(fnOpts.declaredNames);
       const body: any[] = node.body ?? [];
 
-      const bodyCodes = emitFnShortcutBody(body, fnOpts, node.fnKind, node.hasReturnType);
-      const fnBodyLines: string[] = [];
-      for (const code of bodyCodes) {
-        for (const line of code.split("\n")) {
-          fnBodyLines.push(`  ${line}`);
+      const _emitNestedBody = (o: EmitLogicOpts): string[] => {
+        const out: string[] = [];
+        for (const code of emitFnShortcutBody(body, o, node.fnKind, node.hasReturnType)) {
+          for (const line of code.split("\n")) out.push(`  ${line}`);
         }
+        return out;
+      };
+      let fnBodyLines: string[] = _emitNestedBody(fnOpts);
+      // A body with a defer stack that ALSO awaits (a server-side nested body)
+      // is emitted `async` below; re-emit so its defer closures are async too.
+      if (!node.isGenerator && fnBodyLines.some((l) => /_scrml_defers_\d+ = \[\]/.test(l)) &&
+          fnBodyLines.some((l) => /(^|[^.\w$])await\s/.test(l))) {
+        fnBodyLines = _emitNestedBody({ ...fnOpts, declaredNames: new Set<string>(opts.declaredNames ?? []), deferAsync: true } as any);
       }
 
       // g-sql-in-nested-function-client-leak (S225): when a nested function is
@@ -4403,9 +4508,13 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
  *
  * Returns emitted JS code strings (each entry may be multi-line; caller indents).
  */
-export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: string | undefined, hasReturnType?: boolean): string[] {
+export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: string | undefined, hasReturnType?: boolean, _inheritTilde?: boolean): string[] {
   const TAIL_KINDS = new Set(["bare-expr", "match-stmt", "match-expr", "switch-stmt"]);
   let tailIdx = -1;
+  // §19.16.6 — index of a trailing compiler-lowered `defer` scope whose `try`
+  // body carries the function's tail expression (`fn f() { let c = open();
+  // defer close(c); compute(c) }` — the tail `compute(c)` is INSIDE the try).
+  let deferTailIdx = -1;
   // Bug H fix: apply implicit tail-expression return for both `fn` shorthand and
   // `function` declarations with return-type annotations (`-> T` or `: T`).
   // When a function declares its return type, the tail match/switch/bare-expr is
@@ -4415,6 +4524,7 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
       const s = body[i];
       if (!s || s._compileTimeOnly) continue;
       if (TAIL_KINDS.has(s.kind)) tailIdx = i;
+      else if (s.kind === "try-stmt" && s.deferLowered === true) deferTailIdx = i;
       break;
     }
   }
@@ -4424,7 +4534,10 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
   // consume sites lower `~` to that var. Without this, a `function f() {
   // inner(2); return ~ }` shape emits a literal `~` in the return-stmt
   // (parsed as JS bitwise-NOT — produces NaN at runtime).
-  const tildeUsed = nodeListContainsTildeRef(body);
+  // §19.16.6 (S430 review F2) — `_inheritTilde`: the recursive call for a
+  // trailing lowered `defer` scope is the SAME statement sequence continuing, so
+  // it must keep the caller's live tilde context rather than mint a new one.
+  const tildeUsed = nodeListContainsTildeRef(body) && !(_inheritTilde && opts.tildeContext);
   const bodyOpts: EmitLogicOpts = tildeUsed
     ? { ...opts, tildeContext: { var: null, mode: "single" } }
     : opts;
@@ -4433,7 +4546,13 @@ export function emitFnShortcutBody(body: any[], opts: EmitLogicOpts, fnKind: str
     const stmt = body[i];
     if (!stmt) continue;
     let code: string;
-    if (i === tailIdx) {
+    if (i === deferTailIdx) {
+      // §19.16.6 — a trailing lowered defer block holds the function's tail:
+      // emit its body with the same implicit-tail-return semantics (the value
+      // is computed BEFORE the `finally` runs the stack — §19.16.2).
+      code = emitDeferScope(stmt, bodyOpts, (inner) =>
+        emitFnShortcutBody(stmt.body ?? [], inner, fnKind, hasReturnType, true));
+    } else if (i === tailIdx) {
       if (stmt.kind === "bare-expr") {
         const exprCtx = _makeExprCtx(bodyOpts);
         const exprCode = stmt.exprNode

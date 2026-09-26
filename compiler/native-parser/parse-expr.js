@@ -2926,6 +2926,23 @@ export function parseMatchArm(ctx) {
     // contents are parsed as statements (M3 BlockStub) and explicitly
     // delimited by `{` / `}`, so no newline-as-separator ambiguity arises.
     let body;
+    // S430 round 6 — a `defer` written as a single-statement (unbraced) arm body
+    // is not a stage-1 defer site (§19.16.2). Report it here (the arm body is an
+    // expression position, where `defer <stmt>` would otherwise misparse into a
+    // cascade of match-arm errors) and parse the deferred statement as the body.
+    if (currentKind(cursor) === TokenKind.Ident && current(cursor).name === "defer") {
+        const nx = peek(cursor, 1);
+        const here = current(cursor);
+        if (nx && here && nx.span && here.span && nx.span.line === here.span.line &&
+            nx.kind !== TokenKind.LParen && nx.kind !== TokenKind.Dot && nx.kind !== TokenKind.Assign) {
+            recordError(ctx, "E-DEFER-UNSUPPORTED-SITE",
+                "`defer` is not supported in a `match` arm in this stage (§19.16.2): a " +
+                "single-statement arm has no block for the deferred statement to attach to. Write the arm as a " +
+                "braced block, or move the `defer` to the enclosing function's block.",
+                here.span);
+            advance(cursor);   // consume `defer`
+        }
+    }
     if (currentKind(cursor) === TokenKind.LBrace) {
         body = parseBlockStub(ctx);
     } else {

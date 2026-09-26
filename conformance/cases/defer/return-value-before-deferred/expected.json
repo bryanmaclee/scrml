@@ -1,0 +1,15 @@
+{
+  "id": "defer-return-value-before-deferred",
+  "description": "§19.16.2 — on a `return` exit the return value is evaluated FIRST, then the deferred bodies run; a deferred body cannot change the value already returned. take() returns @count (7) and its deferred body then sets @count = 99: @got = 7, @count = 99, the other deferred body ran too (trace = \"d\").",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2 Exit: `return` (after the return value has been evaluated — the deferred body cannot change it). The returned value is the pre-defer @count; the deferred write is still observable afterwards.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "got": 7, "count": 99, "trace": "d" },
+    "domAnchored": [{ "selector": "#got", "text": "7" }, { "selector": "#count", "text": "99" }]
+  }
+}

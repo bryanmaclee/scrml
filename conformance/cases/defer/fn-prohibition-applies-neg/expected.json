@@ -1,0 +1,12 @@
+{
+  "id": "defer-fn-prohibition-applies-neg",
+  "description": "§19.16.4 — `defer` is legal in a pure `fn`, but the deferred body is subject to every §48.3 prohibition as if written at each exit: a deferred reactive write `defer @n = 5` in a `fn` is E-FN-003. The `defer` itself is not the violation (no E-DEFER-* fires).",
+  "language-version": "1.0",
+  "spec": "§19.16.4",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.4: `defer` is control flow, not an effect, so it is legal in `fn`; the deferred body is an ordinary part of the `fn` body and a deferred outer-state mutation is E-FN-003 (§48.3.3).",
+  "expect": {
+    "codes": ["E-FN-003"],
+    "notCodePrefixes": ["E-DEFER-"]
+  }
+}

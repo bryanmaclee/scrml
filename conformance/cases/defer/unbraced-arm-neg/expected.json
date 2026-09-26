@@ -1,0 +1,12 @@
+{
+  "id": "defer-unbraced-arm-neg",
+  "description": "§19.16.2 (S430 round 6) — a `defer` that is the whole UNBRACED body of an `if` (a), an `else` (b) or a loop (l) is E-DEFER-UNSUPPORTED-SITE — three occurrences. For `else` this is load-bearing: the live front-end drops an unbraced `else` arm (a separate gap), which would otherwise attach the defer to the function block and run it whether or not `c` holds.",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: the unbraced body of an if / else / for / while / do arm is not a stage-1 defer site; it SHALL be a compile error, never silently mis-scoped.",
+  "expect": {
+    "codes": ["E-DEFER-UNSUPPORTED-SITE"],
+    "codeCounts": { "E-DEFER-UNSUPPORTED-SITE": 3 }
+  }
+}

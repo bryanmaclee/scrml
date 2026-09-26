@@ -1,0 +1,15 @@
+{
+  "id": "defer-fail-path",
+  "description": "§19.16.2 — a `fail` exit runs the block's deferred bodies. save(0) registers `defer @cleaned = @cleaned + 1`, then fails with Rejected(\"non-positive\"); the deferred body still runs (@cleaned = 1) and the caller's `!{}` handler recovers (@result = \"failed: non-positive\").",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2 Exit lists `fail` (§19.3) among the exit paths that run every registered deferred body exactly once. The failure itself is unchanged by the defer — it still reaches the caller's handler (§19.4.3).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "cleaned": 1, "result": "failed: non-positive" },
+    "domAnchored": [{ "selector": "#out", "text": "failed: non-positive" }, { "selector": "#cleaned", "text": "1" }]
+  }
+}

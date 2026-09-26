@@ -1,0 +1,13 @@
+{
+  "id": "defer-server-block-nested-neg",
+  "description": "§19.16.5 — in a split function, a `defer` nested inside a top-level statement the split places on the SERVER (save: an `if` whose branch holds a `?{}`) is E-DEFER-SERVER-IN-SPLIT, exactly once — even though its deferred body (`@busy = false`) is client-tier: lowered there it would run inside the server batch and the client's @busy would stay true. A `defer` at the top level of a split function whose nested `if` stays client-side (other) is fine.",
+  "language-version": "1.0",
+  "spec": "§19.16.5",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.5: a `defer` inside a server-side statement of a split function SHALL be rejected (fail closed) rather than lowered into the server batch.",
+  "expect": {
+    "codes": ["E-DEFER-SERVER-IN-SPLIT"],
+    "codeCounts": { "E-DEFER-SERVER-IN-SPLIT": 1 },
+    "notCodes": ["E-DEFER-CONTROL-FLOW"]
+  }
+}

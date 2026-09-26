@@ -87,7 +87,7 @@ import {
 import { renameCellAccessors, CS_PREFIX } from "./cell-accessor-rename.ts";
 
 import { EncodingContext } from "./type-encoding.ts";
-import { collectDerivedVarNames, collectReactiveVarNames, collectStructuralDeclNames, collectSynthCellKeys, stampCompoundDeepSetTargets } from "./reactive-deps.ts";
+import { collectDerivedVarNames, collectReactiveVarNames, collectStructuralDeclNames, collectSynthCellKeys, stampCompoundDeepSetTargets, findWhenDepsOnReadOnlyCells } from "./reactive-deps.ts";
 // s430-emit-state-leak — module-state install / reset seams (resetCodegenModuleState).
 import { beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { resetEachModuleState, resetEachLocalIdCounter } from "./emit-each.ts";
@@ -99,6 +99,7 @@ import type { ReachabilityRecord } from "../types/reachability.ts";
 import { resolveDbDriver } from "./db-driver.ts";
 import { parseSchemaBlock } from "../schema-differ.js";
 import { lintCompiledForUndefined } from "./lint-undefined-interpolation.ts";
+import { lowerDefers } from "./lower-defer.ts";
 import {
   emitPerRouteChunks,
   type ChunkKey,
@@ -1342,6 +1343,35 @@ export function runCG(input: CgInput): CgOutput {
     setBatchLoopHoists(null);
   }
 
+  // §19.16.6 (S430 P3) — lower every `defer` statement to its compiler-emitted
+  // host `try { … } finally { … }` form BEFORE analysis/emission, so every
+  // statement-list emitter (client, server, library, nested bodies) sees a
+  // plain `try-stmt{deferLowered}` it already knows how to walk. The TOP-LEVEL
+  // body of a CPS-split function is skipped: route inference addressed it by
+  // statement INDEX, so the CPS client wrappers lower it themselves in their
+  // sequential walk (emit-functions.ts) — see lower-defer.ts.
+  for (const fileAST of files) {
+    const fp = (fileAST as any)?.filePath as string | undefined;
+    const splitFnNodes = new Set<unknown>();
+    const collectSplit = (node: unknown, seen: WeakSet<object>): void => {
+      if (!node || typeof node !== "object" || seen.has(node as object)) return;
+      seen.add(node as object);
+      if (Array.isArray(node)) { for (const c of node) collectSplit(c, seen); return; }
+      const n = node as Record<string, unknown>;
+      if (n.kind === "function-decl" && fp) {
+        const start = (n.span as { start?: number } | undefined)?.start;
+        const route = safeRouteMap.functions.get(`${fp}::${start}`) as { cpsSplit?: unknown } | undefined;
+        if (route && route.cpsSplit) splitFnNodes.add(n);
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "span" || key === "parent") continue;
+        collectSplit(n[key], seen);
+      }
+    };
+    collectSplit(fileAST, new WeakSet());
+    lowerDefers(fileAST, splitFnNodes);
+  }
+
   // Analysis pass: collect all data from AST before emission begins.
   const { fileAnalyses, protectedFields } = analyzeAll({
     files,
@@ -1808,6 +1838,50 @@ export function runCG(input: CgInput): CgOutput {
   const _programAnySessionWrite = files.some((f) => astUsesSessionWrite(f));
   for (const f of files) (f as any)._programAnySessionWrite = _programAnySessionWrite;
 
+  // §20.5 / §20.5.1 (S433) — TWO MORE SESSION FACTS THAT ARE PROGRAM-SCOPED AND WERE
+  // BEING READ PER-UNIT, the same defect shape as #282 immediately above.
+  //
+  // `sessionExpiry` (the session cookie Max-Age + durable-store TTL) and
+  // `session-secure` (which decides the cookie NAME: `__Host-scrml_sid` vs plain
+  // `scrml_sid`) are declared ONCE, on the `<program>` opener. But emit-server read
+  // both from PER-UNIT sources — `authMiddlewareEntry` (this unit's route-inference
+  // output) and a node walk over THIS file's own nodes — so a unit that declares
+  // neither fell to the DEFAULT no matter what the program said. Measured on a
+  // two-unit program (`<program auth="required" sessionExpiry="7d"
+  // session-secure="false">` + a separate `pages/login.scrml` that mints):
+  //   - Max-Age: `604800` on the program unit, `3600` on the MINTING unit
+  //     (g-program-sessionexpiry-inert-on-separate-login-unit; operator ruling
+  //     S385 B5 = "(a) PROPAGATE the program setting to the minting unit");
+  //   - cookie name: `scrml_sid` on the program unit, `__Host-scrml_sid` on the
+  //     minting unit — the writer set one name and the reader matched the other.
+  // Pre-scan ALL units once here, exactly as #282 does, and stash the program-wide
+  // answer on each fileAST; emit-server consults it as the LAST fallback, so a unit
+  // that already resolves the value is byte-identical.
+  //
+  // Read from the RAW `<program>` attributes rather than `authConfig`, because
+  // `authConfig` is built ONLY when `auth=` is present (compute-program-config.ts)
+  // and a session-only program has none. Note the two attributes are spelled
+  // INCONSISTENTLY on purpose-by-accident — `sessionExpiry` is camelCase,
+  // `session-secure` is kebab — and `compute-program-config.ts` reads them exactly
+  // that way; this scan mirrors it rather than "fixing" the surface.
+  const _readProgramAttr = (name: string): string | undefined => {
+    for (const f of files) {
+      const nodes = (getNodes(f as never) as any[]) ?? [];
+      if (!Array.isArray(nodes)) continue;
+      const prog = nodes.find((n: any) => n && n.kind === "markup" && n.tag === "program");
+      if (!prog) continue;
+      const a = ((prog.attrs ?? []) as any[]).find((x: any) => x && x.name === name);
+      if (a && a.value && a.value.kind === "string-literal") return a.value.value;
+    }
+    return undefined;
+  };
+  const _programSessionExpiry = _readProgramAttr("sessionExpiry") ?? null;
+  const _programSessionSecure = _readProgramAttr("session-secure");
+  for (const f of files) {
+    (f as any)._programSessionExpiry = _programSessionExpiry;
+    (f as any)._programSessionSecure = _programSessionSecure;
+  }
+
   // §38 transition keyframes — the APP-WIDE union + the shell entry that carries it.
   //
   // A §20.8.2 soft navigation swaps the target route's markup into the SHELL's
@@ -1926,6 +2000,22 @@ export function runCG(input: CgInput): CgOutput {
             ));
           }
         }
+      }
+
+      // §6.7.4 EC-1 — E-LIFECYCLE-007: a `when` dep naming only read-only
+      // (`const <name>`) cells is a dead effect. Resolved over the post-CE tree
+      // by the runtime cell key — see findWhenDepsOnReadOnlyCells.
+      for (const { node: whenNode, dep } of findWhenDepsOnReadOnlyCells(fileAST as Record<string, unknown>)) {
+        const sp = (whenNode.span as Record<string, unknown> | undefined) ?? {};
+        errors.push(new CGError(
+          "E-LIFECYCLE-007",
+          `E-LIFECYCLE-007: \`when\` dep-list entry \`@${dep}\` is a \`const <${dep}>\` cell, ` +
+          `not a mutable \`@variable\`. It is never written — a derived cell re-evaluates from ` +
+          `the cells it reads — so it cannot trigger a \`when\` effect (SPEC §6.7.4 EC-1). ` +
+          `Fix: list the mutable \`@variables\` \`@${dep}\` is computed from, and read ` +
+          `\`@${dep}\` inside the body.`,
+          { file: filePath, ...sp },
+        ));
       }
 
       // Resolve auth middleware for this file (from RI output)

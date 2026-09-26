@@ -1,0 +1,27 @@
+${
+    <trace> = ""
+    <out> = 0
+
+    function D(s: string) {
+        @trace = @trace + s
+    }
+
+    function n1() {
+        let n = count([1, 2, 3])
+        let total = n * 2
+        function count(xs) {
+            return xs.filter((x) => { return x > 1 }).length
+        }
+        D("d;")
+        return total
+    }
+
+    function go() {
+        @out = n1()
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@out}</p>
+    <p id="trace">${@trace}</p>
+</program>

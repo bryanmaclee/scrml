@@ -1,0 +1,14 @@
+{
+  "id": "defer-stack-fn-calls-fn-before-defer-twin",
+  "description": "No-defer TWIN of `stack-fn-calls-fn-before-defer`: n2() = \"21\", trace \"e;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "Reference behaviour the deferred version must match.",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "out": "21", "trace": "e;" },
+    "domAnchored": [{ "selector": "#out", "text": "21" }]
+  }
+}

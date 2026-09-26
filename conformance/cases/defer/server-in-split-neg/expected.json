@@ -1,0 +1,13 @@
+{
+  "id": "defer-server-in-split-neg",
+  "description": "§19.16.5 — a SERVER-tier deferred body (its own `?{}` SQL) in a function the compiler body-splits is E-DEFER-SERVER-IN-SPLIT, exactly once: it would have to run inside a server batch, which ends before the later continuations — the premature release §19.16.5 forbids. Rejected rather than lowered wrongly.",
+  "language-version": "1.0",
+  "spec": "§19.16.5",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.5: a deferred body that is itself server-tier in a function that the compiler splits SHALL be a compile error (E-DEFER-SERVER-IN-SPLIT).",
+  "expect": {
+    "codes": ["E-DEFER-SERVER-IN-SPLIT"],
+    "codeCounts": { "E-DEFER-SERVER-IN-SPLIT": 1 },
+    "notCodes": ["E-RI-002", "E-CG-006"]
+  }
+}

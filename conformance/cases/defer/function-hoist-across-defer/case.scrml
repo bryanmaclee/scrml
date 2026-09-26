@@ -1,0 +1,25 @@
+${
+    <trace> = ""
+
+    function add(s: string) {
+        @trace = @trace + s + ";"
+    }
+
+    function f() {
+        add(helper())
+        defer add("D1")
+        add("body")
+        defer add("D2")
+        function helper() {
+            return "H"
+        }
+    }
+
+    function go() {
+        f()
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

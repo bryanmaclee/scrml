@@ -1,0 +1,24 @@
+${
+    type CloseError:enum = {
+        Busy
+        Gone
+    }
+
+    <trace> = ""
+
+    function closeAll()! -> CloseError {
+        fail CloseError.Busy
+    }
+
+    function work() {
+        defer closeAll() !{
+            | ::Busy :> @trace = @trace + "close-busy;"
+            | _ :> @trace = @trace + "close-other;"
+        }
+        @trace = @trace + "work;"
+    }
+}
+<program>
+    <button id="go" onclick=work()>go</>
+    <p id="out">${@trace}</p>
+</program>

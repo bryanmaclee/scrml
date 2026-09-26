@@ -1,0 +1,40 @@
+${
+    <trace> = ""
+    const x = "outer"
+
+    function D(s: string) {
+        @trace = @trace + s
+    }
+
+    function shadow() {
+        defer D("x=" + x + ";")
+        const x = "inner"
+        return x
+    }
+
+    function tdz(c: boolean) {
+        defer D(x)
+        if (c) {
+            return "early"
+        }
+        const x = "inner"
+        return x
+    }
+
+    function outerChain(c: boolean) {
+        if (c) {
+            defer D(y)
+        }
+        let y = "later"
+        return y
+    }
+
+    function destructured() {
+        defer D(a)
+        const { a } = { a: "A" }
+        return a
+    }
+}
+<program>
+    <p>${@trace}</p>
+</program>

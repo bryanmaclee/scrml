@@ -1,0 +1,15 @@
+{
+  "id": "defer-array-literal-lead",
+  "description": "§19.16.1 (S430 round 6) — `defer [ … ]…` with whitespace before `[` is a defer statement (the array-literal statement runs at exit), while an ADJACENT `defer[0]` indexes an identifier named `defer`. f(): body writes \"v7;\", then the deferred forEach writes \"a;b;\": trace = \"v7;a;b;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.1",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.1: a `[` separated from `defer` by whitespace is a statement lead; an adjacent `defer[0]` keeps `defer` an ordinary identifier (the word is not at fault).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "v7;a;b;" },
+    "domAnchored": [{ "selector": "#out", "text": "v7;a;b;" }]
+  }
+}

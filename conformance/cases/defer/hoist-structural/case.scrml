@@ -1,0 +1,55 @@
+${
+    <trace> = ""
+
+    function add(s: string) {
+        @trace = @trace + s + ";"
+    }
+
+    // H2 — a destructured binding after the defer: `show` must see the INNER `a`.
+    function destructObj() {
+        let a = "OUTER"
+        if (true) {
+            defer add("D1")
+            const { a } = { a: "INNER" }
+            function show() {
+                return a
+            }
+            add(show())
+        }
+    }
+
+    // H2 — an array-destructured pair after the defer.
+    function destructArr() {
+        defer add("D2")
+        const [p, q] = [1, 2]
+        add("sum" + sum())
+        function sum() {
+            return p + q
+        }
+    }
+
+    // M1 — the helper mentions `kind` only as an object KEY, a STRING and a
+    // SHADOWING local; it does not reference the tail's `kind`, so it stays
+    // callable BEFORE the defer.
+    function shadowed() {
+        add(helper())
+        defer add("D3")
+        let kind = "tail"
+        add(kind)
+        function helper() {
+            let kind = "local"
+            let o = { kind: 1 }
+            return kind + o.kind + "kind"
+        }
+    }
+
+    function go() {
+        destructObj()
+        destructArr()
+        shadowed()
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

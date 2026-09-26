@@ -1,0 +1,55 @@
+{
+  "id": "reactive-mutating-method-string-arg",
+  "description": "§6.5.1 intercepted mutating methods keep their arguments verbatim: a string literal inside an object-literal argument to `@cell.splice(...)` / `@cell.push(...)` stays a string. #rep replaces row 1 with name \"S\"; #add appends a row named \"tag\". Carried on impl#1 (S431, P7).",
+  "language-version": "1.0",
+  "spec": "§6.5.1",
+  "rationale": "§6.5.1: a mutating method called on a reactive cell performs that method's ordinary JavaScript mutation and notifies the cell's subscribers. Nothing in §6.5.1 rewrites the method's arguments, so `{ name: \"S\" }` is the string \"S\", never a reference to a binding named S. After #rep then #add the list is one→S, two, tag, the program compiles with no scope error, and the <each> shows three rows.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-SCOPE-001"
+    ],
+    "input": [
+      {
+        "click": "#rep"
+      },
+      {
+        "click": "#add"
+      }
+    ],
+    "state": {
+      "groups": [
+        {
+          "id": 1,
+          "name": "S"
+        },
+        {
+          "id": 2,
+          "name": "two"
+        },
+        {
+          "id": 3,
+          "name": "tag"
+        }
+      ]
+    },
+    "domAnchored": [
+      {
+        "selector": ".g",
+        "count": 3
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-mutating-method-string-args-lose-their-quotes",
+      "fails": {
+        "codes": [
+          "emitted:E-SCOPE-001=1",
+          "forbidden:E-SCOPE-001"
+        ],
+        "runtime": "sha256:544f4ba2a34579a1"
+      }
+    }
+  }
+}

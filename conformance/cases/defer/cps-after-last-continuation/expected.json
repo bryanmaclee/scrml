@@ -1,0 +1,16 @@
+{
+  "id": "defer-cps-after-last-continuation",
+  "description": "§19.16.5 — THE body-split hazard. save() is split into two server batches (the UPDATE, then the INSERT) with client work between and after them. Its deferred bodies MUST run after the LAST continuation — after batch 1's result and the trailing client write — never when batch 0's stub returns. trace = \"start;mid;end;D;\" and @busy is back to false. A lowering that closed the defer scope around the first stub (or ran the deferred body in place) yields \"start;D;mid;end;\" or \"start;mid;D;end;\" and fails this case.",
+  "language-version": "1.0",
+  "spec": "§19.16.5",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.5: in a function whose body is split across the client/server boundary, the enclosing block of a top-level `defer` is the whole function body and its deferred body SHALL run after the LAST continuation completes, not when an earlier batch's stub returns. Both server batches are stubbed to succeed (serverStub keyed by the source fn name).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "serverStub": { "save": null },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "trace": "start;mid;end;D;", "busy": false },
+    "domAnchored": [{ "selector": "#out", "text": "start;mid;end;D;" }]
+  }
+}

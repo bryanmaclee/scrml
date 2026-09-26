@@ -1,0 +1,27 @@
+${
+    <trace> = ""
+
+    function step(x: number) {
+        defer @trace = @trace + "outer;"
+        if (x > 0) {
+            defer @trace = @trace + "inner;"
+            @trace = @trace + "body;"
+        }
+        @trace = @trace + "mid;"
+        if (x > 5) {
+            return
+        }
+        defer @trace = @trace + "late;"
+        @trace = @trace + "end;"
+    }
+
+    function go() {
+        step(1)
+        @trace = @trace + "|"
+        step(9)
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="out">${@trace}</p>
+</program>

@@ -1,0 +1,59 @@
+${
+    type Mode:enum = { A, B }
+    type E:enum = { Bad }
+    <out> = 0
+    <mode>: Mode = .A
+
+    function risky()! -> E {
+        fail E.Bad
+    }
+
+    function viaMatchArm(m: Mode) {
+        defer {
+            let k = match m {
+                .A :> { return 5 }
+                .B :> 3
+            }
+        }
+        return 1
+    }
+
+    function viaMatchArmFail(m: Mode)! -> E {
+        defer {
+            let k = match m {
+                .A :> { fail E.Bad }
+                .B :> 3
+            }
+        }
+        return 1
+    }
+
+    function viaIfExpr(x: number) {
+        defer {
+            let k = if (x > 0) { return 7 } else { 2 }
+        }
+        return 1
+    }
+
+    function viaHandlerArm() {
+        defer risky() !{
+            | ::Bad :> { return 9 }
+        }
+        return 1
+    }
+
+    function lambdaIsABoundary() {
+        defer {
+            let q = [1, 2].map((x) => { return x + 1 })
+        }
+        return 1
+    }
+
+    function go() {
+        @out = viaMatchArm(@mode) + viaIfExpr(1) + viaHandlerArm() + lambdaIsABoundary()
+    }
+}
+<program>
+    <button onclick=go()>go</>
+    <p>${@out}</p>
+</program>

@@ -1,0 +1,14 @@
+{
+  "id": "defer-nested-fn-handler-in-defer-twin",
+  "description": "No-defer TWIN of `nested-fn-handler-in-defer`: the same `inner` function and call written as the last statements. trace = \"work;inner-failed;\".",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "Reference behaviour: a non-total `!{}` in a function propagates the unmatched error to its caller (§19.4.3).",
+  "expect": {
+    "codes": [],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "work;inner-failed;" },
+    "domAnchored": [{ "selector": "#out", "text": "work;inner-failed;" }]
+  }
+}

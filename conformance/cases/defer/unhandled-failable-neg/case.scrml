@@ -1,0 +1,26 @@
+${
+    type CloseError:enum = {
+        Busy
+    }
+
+    <n> = 0
+
+    function closeAll()! -> CloseError {
+        fail CloseError.Busy
+    }
+
+    function work()! -> CloseError {
+        defer closeAll()
+        @n = 1
+    }
+
+    function go() {
+        work() !{
+            | ::Busy :> @n = 2
+        }
+    }
+}
+<program>
+    <button onclick=go()>go</>
+    <p>${@n}</p>
+</program>

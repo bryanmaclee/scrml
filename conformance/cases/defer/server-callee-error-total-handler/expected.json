@@ -1,0 +1,16 @@
+{
+  "id": "defer-server-callee-error-total-handler",
+  "description": "§19.16.3 rules 1 + 3 (S430 round 3, H3) — a deferred call to a failable SERVER function whose server answers with a transport error (CpsError.ServerError, which is NOT in the callee's declared RelError enum). The deferred handler is total (`| _ :>`), so the failure lands in the catch-all IN PLACE and the function's own return value stands: @out = \"OK\" (identical to the no-defer twin `server-callee-error-total-handler-twin`), trace = \"work;release-failed;\". Before the fix the lowering emitted `else { return <error envelope> }` inside the `finally`, and @out became the ServerError envelope.",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 3: a deferred failable call is handled in place by a TOTAL handler; rule 1: nothing in a deferred body may transfer control out of it — so a failure the declared arms do not list goes to `_`, never propagates out of the `finally`.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "serverStub": { "release": { "__serverError": { "type": "CpsError", "variant": "ServerError" } } },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "out": "OK", "trace": "work;release-failed;" },
+    "domAnchored": [{ "selector": "#out", "text": "OK" }]
+  }
+}

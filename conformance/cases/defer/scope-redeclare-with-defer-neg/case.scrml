@@ -1,0 +1,17 @@
+${
+    <trace> = ""
+
+    function D(s: string) {
+        @trace = @trace + s
+    }
+
+    function f(x) {
+        defer D("x=" + x + ";")
+        let x = "inner"
+        return x
+    }
+}
+<program>
+    <button onclick=f("a")>go</>
+    <p>${@trace}</p>
+</program>

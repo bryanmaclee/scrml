@@ -1,0 +1,13 @@
+{
+  "id": "fn-scope-redeclare-neg",
+  "description": "§7.3.3 — a block binds each name once. `let x` redeclaring parameter `x` (p1), a second `let y` in the same block (p2), and `function z` redeclaring `const z` in the same block (p3) are each E-SCOPE-REDECLARE — three occurrences — instead of reaching codegen and failing there as an unexplained E-CODEGEN-INVALID-LOGIC.",
+  "language-version": "1.0",
+  "spec": "§7.3.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§7.3.3: inside a function body a let/const/lin/function declaration SHALL NOT redeclare a name already bound in the same block (another declaration, or a parameter in the function's top-level block).",
+  "expect": {
+    "codes": ["E-SCOPE-REDECLARE"],
+    "codeCounts": { "E-SCOPE-REDECLARE": 3 },
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"]
+  }
+}

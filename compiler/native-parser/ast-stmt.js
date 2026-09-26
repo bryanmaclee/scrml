@@ -82,6 +82,14 @@ export const StmtKind = Object.freeze({
     // leads a production — an expression-position `given` is unaffected (no
     // parsePrimary arm), matching live's STMT_KEYWORDS-gated recognition.
     GivenGuard:   "GivenGuard",    // `given x [, y]* => { body }`
+
+    // --- S430 P3 stage 1 — `defer <statement>` scope-exit statement (§19.16) ---
+    // `defer` is a CONTEXTUAL keyword (lexes as `Ident`); parse-stmt.js
+    // recognizes it only at statement head with a same-line statement lead.
+    // `body` is the deferred statement list (a single statement for
+    // `defer stmt`, the block contents for `defer { ... }`); `blockForm`
+    // records which. Translated to the live `defer-stmt` by translate-stmt.js.
+    Defer:        "Defer",         // `defer stmt` / `defer { stmt* }`
 });
 
 // VarDeclKind — the `let` / `const` / `var` declaration keyword (M3.1).
@@ -434,6 +442,13 @@ export function makeTildeDecl(name, init, span) {
 // both the standalone and the in-match given positions.
 export function makeGivenGuard(variables, body, span) {
     return { kind: StmtKind.GivenGuard, variables, body, span };
+}
+
+// makeDefer — a `defer stmt` / `defer { stmt* }` scope-exit statement (SPEC
+// §19.16, S430 P3 stage 1). `body` is the FLAT deferred statement array (one
+// entry for the single-statement form); `blockForm` is true for the braced form.
+export function makeDefer(body, blockForm, span) {
+    return { kind: StmtKind.Defer, body, blockForm, span };
 }
 
 // =============================================================================

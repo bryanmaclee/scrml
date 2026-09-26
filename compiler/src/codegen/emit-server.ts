@@ -14,6 +14,8 @@ import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUse
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
+// §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
+import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
@@ -188,6 +190,54 @@ function distLocalPathOf(relSource: string, targetExt: string): string {
   const dir = stripPagesPrefix(_pathDirname(relSource));
   const file = _pathBasename(relSource, ".scrml") + targetExt;
   return dir === "." || dir === "" ? file : dir + "/" + file;
+}
+
+/**
+ * §20.5 (S433, g-session-store-keyed-per-compilation-unit-not-per-program) — the
+ * `../` ascent that takes an emitted `.server.js` unit from its OWN directory back
+ * to the DIST ROOT, as a `/`-separated chain (`""` for a unit that already lands at
+ * the dist root).
+ *
+ * WHY THIS EXISTS. The durable session store is keyed by its file path, and that
+ * path was built from `import.meta.dir` — the EMITTING MODULE's own directory. But
+ * §20.5 scopes the store to the PROGRAM: *"The READ middleware and the WRITE path
+ * SHALL consult the SAME durable store (a login that mints a cookie the middleware
+ * cannot resolve is a defect)."* A nested page emits to `dist/admin/` (api.js
+ * `pathFor`: `targetDir = join(outputDir, relDir)`), so it opened a SECOND
+ * `.scrml-sessions.db` with its own session namespace — a user logged in on the
+ * root unit read `session.isAuth === false` forever, at HTTP 200, with zero
+ * diagnostics. Anchoring every unit at the dist root restores ONE store per
+ * program while KEEPING the S239 FIX 9 property that made `import.meta.dir` the
+ * base in the first place: the store sits beside the build output, never at the
+ * launch CWD (which "vanishes"/collides).
+ *
+ * This is the session-store instance of the SAME defect `_outputBaseDir` was
+ * introduced for on the `<db src=>` side (ss19 #9,
+ * `g-db-src-compile-vs-runtime-path`: "a <page> in a subdir and the root entry
+ * reference the same physical db at compile time but emit DIFFERENT runtime
+ * paths"). Both answers are now dist-root-anchored.
+ *
+ * Mirrors api.js `pathFor` through the SHARED `stripPagesPrefix`, so the ascent
+ * counts the unit's TRUE dist depth: `pages/login.scrml` lands at
+ * `dist/login.server.js` (the `pages/` segment is stripped) and therefore ascends
+ * ZERO levels, while `admin/panel.scrml` lands at `dist/admin/panel.server.js` and
+ * ascends one. Counting SOURCE depth instead would overshoot by exactly one segment
+ * for every file under `pages/` and hoist the store ABOVE the dist root.
+ *
+ * Returns `""` (no ascent) for the two cases with no dist coordinate to express:
+ * no `outputBaseDir` (legacy single-file callers) and a source OUTSIDE the output
+ * base (no artifact is written for it). Both degrade to the pre-fix "beside my own
+ * bundle" answer, which for a single-unit build is the same directory anyway.
+ */
+function distRootAscentOf(filePath: string, outputBaseDir: string | null | undefined): string {
+  if (!outputBaseDir || !filePath) return "";
+  const relSource = _pathRelative(outputBaseDir, filePath);
+  if (isOutsideBase(relSource)) return "";
+  const relDir = stripPagesPrefix(_pathDirname(relSource));
+  if (relDir === "." || relDir === "") return "";
+  const depth = relDir.split("/").filter((s) => s.length > 0 && s !== ".").length;
+  if (depth === 0) return "";
+  return new Array(depth).fill("..").join("/");
 }
 
 /**
@@ -2580,7 +2630,18 @@ export function generateServerJs(
   // `session-secure=` attribute on the `<program>` (preferred) or a `<page>` node.
   // `!== false` and `!== "false"` both default a missing / typo'd value to the
   // safe secure mode.
-  const _readRawSessionSecure = (): string | undefined => {
+  // §20.5 / §20.5.1 (S433 fix-round, F1-1) — GENERALIZED from the `session-secure`-only
+  // reader this used to be. `sessionExpiry` needs the IDENTICAL per-unit raw step and
+  // did not have it, and the asymmetry was a live defect rather than a tidiness
+  // question: with two `<program>` files in one compile, a unit that declares its OWN
+  // `sessionExpiry` but carries no `auth=` has no auth-middleware entry, so resolution
+  // skipped straight to the program-wide stash — which answers with the FIRST file
+  // carrying the attribute. MEASURED before this fix: `aaa.scrml` declaring `30m` and
+  // `zzz.scrml` declaring `7d` BOTH emitted `maxAge=1800`, order-insensitively, so
+  // `zzz`'s own declaration was governed by its sibling's. The control in the same
+  // measurement was the cookie name, which came out correct per unit precisely
+  // because `session-secure` already had this step. Two readers, one shape.
+  const _readRawProgramAttr = (attrName: string): string | undefined => {
     let progVal: string | undefined;
     let pageVal: string | undefined;
     const visit = (ns: any[]): void => {
@@ -2588,7 +2649,7 @@ export function generateServerJs(
       for (const n of ns) {
         if (!n || n.kind !== "markup") continue;
         if (n.tag === "program" || n.tag === "page") {
-          const a = (n.attrs ?? []).find((x: any) => x && x.name === "session-secure");
+          const a = (n.attrs ?? []).find((x: any) => x && x.name === attrName);
           if (a && a.value && a.value.kind === "string-literal") {
             if (n.tag === "program") progVal = a.value.value;
             else if (pageVal === undefined) pageVal = a.value.value;
@@ -2600,10 +2661,25 @@ export function generateServerJs(
     visit(getNodes(fileAST));
     return progVal ?? pageVal; // program-level wins over page-level
   };
+  const _readRawSessionSecure = (): string | undefined => _readRawProgramAttr("session-secure");
+  // §20.5.1 (S433) — THE COOKIE NAME IS A PROGRAM FACT TOO, and this was the third
+  // member of the per-unit/per-program class found while probing the store-keying
+  // defect (measured on a two-unit program: `<program session-secure="false">`
+  // emitted `scrml_sid` on the program unit and `__Host-scrml_sid` on the separate
+  // minting unit). It is the WORST of the three, because it defeats the store fix on
+  // its own: `_scrml_read_session_id`'s regex is compile-time specialized to ONE
+  // name, so the writer set `scrml_sid` while the reader matched `__Host-scrml_sid`
+  // and the session was unresolvable even with a single shared store. Both earlier
+  // sources are per-unit — `authMiddlewareEntry` is this unit's route-inference
+  // output, `_readRawSessionSecure()` walks only THIS file's nodes — so a unit with
+  // neither fell to the secure DEFAULT regardless of what the program declared.
+  // The program-wide value the driver pre-scanned is consulted LAST, so this is
+  // strictly ADDITIVE: it is reached only where the answer today is "nothing
+  // declared → default secure".
   const _sessionSecureSetting =
     (authMiddlewareEntry && authMiddlewareEntry.sessionSecure !== undefined)
       ? authMiddlewareEntry.sessionSecure
-      : _readRawSessionSecure();
+      : (_readRawSessionSecure() ?? (fileAST as any)._programSessionSecure);
   const _secureCookieMode = _sessionSecureSetting !== false && _sessionSecureSetting !== "false";
   const _sessionCookieName = _secureCookieMode ? "__Host-scrml_sid" : "scrml_sid";
 
@@ -2730,8 +2806,39 @@ export function generateServerJs(
     // When csrf is auto the middleware mints + surfaces it (see below); otherwise
     // the middleware is byte-identical to a non-CSRF session-infra app.
     const _csrfAuto = authMiddlewareEntry?.csrf === "auto";
+    // §20.5 (S433) — the compile-time `../` ascent from THIS unit's emitted
+    // directory to the dist root, so every unit of one program keys the durable
+    // session store on the SAME path. See `distRootAscentOf`.
+    const _sessionStoreDistAscent = distRootAscentOf(filePath, (fileAST as any)._outputBaseDir);
     // §20.5 (S265, i29e) — session cookie Max-Age + durable-store TTL, in seconds.
-    const _sessionMaxAgeSec = parseSessionExpirySeconds(authMiddlewareEntry?.sessionExpiry ?? null);
+    //
+    // §20.5 (S433, g-program-sessionexpiry-inert-on-separate-login-unit; operator
+    // ruling S385 B5 = "(a) PROPAGATE the program setting to the minting unit") —
+    // `authMiddlewareEntry` is this unit's OWN route-inference output, and a minting
+    // unit carries none (a login page declares no `auth=`; the guard it feeds lives
+    // on another unit). So `<program sessionExpiry="7d">` silently yielded a 1h
+    // cookie on exactly the unit that MINTS it — measured: the `<program>` unit
+    // emitted `604800`, the login unit `3600`. The fallback consults the PROGRAM-wide
+    // value the driver pre-scanned (`_programSessionExpiry`). Strictly ADDITIVE: it
+    // is reached only where the answer today is "nothing declared → the 1h default",
+    // so a unit with its own entry is byte-identical.
+    //
+    // ⛔ THREE STEPS, NOT TWO (S433 fix-round, F1-1) — and the middle one is the fix.
+    // The per-unit RAW read must come BEFORE the program-wide stash, exactly as
+    // `session-secure` already did, because `_programSessionExpiry` answers with the
+    // FIRST file in the compile set carrying the attribute. Without this step, a unit
+    // declaring its own `<program sessionExpiry=>` but no `auth=` (so: no
+    // auth-middleware entry) had its declaration governed by a SIBLING program's.
+    // MEASURED before the fix: `aaa.scrml` (`30m`) and `zzz.scrml` (`7d`) both emitted
+    // `maxAge=1800`, in BOTH input orders. That is a worse failure to read than the
+    // original defect — "your own declaration is inert" became "another program's
+    // declaration governs you" — so the middle step is not optional politeness.
+    const _sessionMaxAgeSec = parseSessionExpirySeconds(
+      authMiddlewareEntry?.sessionExpiry
+        ?? _readRawProgramAttr("sessionExpiry")
+        ?? (fileAST as any)._programSessionExpiry
+        ?? null,
+    );
     lines.push("// --- §52 / §20.5 Session store + request-context middleware (compiler-generated) ---");
     if (_anySessionWrite) {
       // §20.5 (S265, i29e) — the RULED-durable session store (emitted ONLY for an
@@ -2754,8 +2861,34 @@ export function generateServerJs(
       // build output — a REBUILD re-creates it (a deploy logs users out); a
       // RESTART reuses it (the durability that matters). A `session-store=`
       // attribute to point it at a data dir is a follow-up (SPEC §20.5).
+      //
+      // §20.5 (S433, g-session-store-keyed-per-compilation-unit-not-per-program) —
+      // the base is the DIST ROOT, not this unit's own directory, and it is reached
+      // by a COMPILE-TIME ascent (`distRootAscentOf`). `import.meta.dir` is a
+      // PER-MODULE fact; the store is normatively PER-PROGRAM (§20.5: "the READ
+      // middleware and the WRITE path SHALL consult the SAME durable store"). A
+      // nested page emits to `dist/admin/`, so the old per-unit base opened a SECOND
+      // `.scrml-sessions.db` and `session.isAuth` read false forever after a
+      // successful login — HTTP 200, zero diagnostics.
+      //
+      // AND THE KEY IS NOW NORMALIZED, WHICH IS A SECOND FIX IN THE SAME LINE. The
+      // old expression CONCATENATED a literal `/` onto `import.meta.dir`, so on
+      // Windows the cache key came out MIXED-SEPARATOR (`C:\…\dist/.scrml-sessions.db`)
+      // and no consumer computing the same path with `path.join` — every test that
+      // reaches into `globalThis.__scrml_session_stores` does — could ever find it.
+      // `path.resolve` yields the platform-native normal form, so the emitted key and
+      // a `join(distRoot, ".scrml-sessions.db")` key are the SAME string. That
+      // mismatch is why `session-secure-b4b5-roundtrip.test.js`'s `B5 runtime guard`
+      // case died at its SETUP assertion on Windows while passing on Linux CI — its
+      // CSRF-pinning assertion never executed. A path key must be compared in ONE
+      // normal form; string concatenation cannot promise that.
+      lines.push('import { resolve as _scrmlSessionPathResolve } from "node:path";');
       lines.push('import { Database as _ScrmlSessionDatabase } from "bun:sqlite";');
-      lines.push('const _scrml_session_db_path = ((import.meta && import.meta.dir) ? import.meta.dir : ".") + "/.scrml-sessions.db";');
+      lines.push(
+        `const _scrml_session_db_path = _scrmlSessionPathResolve(` +
+        `(import.meta && import.meta.dir) ? import.meta.dir : ".", ` +
+        `${JSON.stringify(_sessionStoreDistAscent)}, ".scrml-sessions.db");`,
+      );
       lines.push("const _scrml_session_store = (((globalThis.__scrml_session_stores ??= {}))[_scrml_session_db_path] ??= (() => {");
       lines.push("  const _db = new _ScrmlSessionDatabase(_scrml_session_db_path);");
       lines.push('  _db.run("CREATE TABLE IF NOT EXISTS kv_store (namespace TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (namespace, key))");');
@@ -6457,6 +6590,10 @@ export function generateServerJs(
     // avoids mislabeling it E-SQL-004. Computed once; the error is file-level.
     const eSqlFireEligible = containsSql(fileAST) && !isLibraryShapedFile(fileAST);
     let eSql004Fired = false;
+    // §44 (S433) — the FILE-backed sqlite handles that get the WAL + busy-timeout
+    // defaults, collected as the declarations are emitted and configured in one
+    // block after them.
+    const sqliteConfiguredIdents: string[] = [];
     const declLines: string[] = [];
     declLines.push("");
     declLines.push("// --- Bug 3a (§44.2): Bun.SQL handle declarations (compiler-generated) ---");
@@ -6558,6 +6695,29 @@ export function generateServerJs(
         connStr = "sqlite:" + connStr;
       }
       declLines.push(`const ${ident} = new SQL(${JSON.stringify(connStr)});`);
+      // §44 (S433, g-native-sqlite-connection-lacks-wal-and-busy-timeout-config;
+      // operator ruling S385 A1 = "(c) BOTH … WAL + 5s busy-timeout as the safe
+      // default", grounded in what the adopter's own `db.js` already does) — a
+      // FILE-backed sqlite handle gets the durability/concurrency defaults. See
+      // `codegen/sqlite-defaults.ts` for why these are awaited STATEMENTS rather than
+      // constructor options, and why `busy_timeout` must come first.
+      if (sqliteWantsDefaults(scope.driver, connStr)) {
+        sqliteConfiguredIdents.push(ident);
+      }
+    }
+    // §44 (S433) — SQLITE DURABILITY / CONCURRENCY DEFAULTS. The full rationale, the
+    // measurements, and the three traps (constructor options are ignored; the `await` is
+    // load-bearing; top-level await is forbidden) live in `codegen/sqlite-defaults.ts`,
+    // which is SHARED with `emit-tool.ts` — the tool path was missed on the first pass
+    // and left the gap's own symptom reachable for a `kind="tool"` program.
+    if (sqliteConfiguredIdents.length > 0) {
+      declLines.push("");
+      declLines.push(...SQLITE_CONFIGURE_HELPER_LINES);
+      for (const ident of sqliteConfiguredIdents) {
+        // `void` marks the floating promise deliberate; the helper already swallows
+        // every rejection, so there is no unhandled-rejection path.
+        declLines.push(`void _scrml_sqlite_configure(${ident});`);
+      }
     }
     declLines.push("");
     const declBlock = declLines.join("\n");

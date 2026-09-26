@@ -1,0 +1,13 @@
+{
+  "id": "defer-unsupported-site-neg",
+  "description": "§19.16.2 (S430 round 5, F3/F4) — a bare `{ }` block and a single-statement (unbraced) `match` arm are not stage-1 defer sites: each is E-DEFER-UNSUPPORTED-SITE (two occurrences), never an unexplained E-CODEGEN-INVALID-LOGIC and never a defer silently attached to the enclosing block.",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: a bare block and an unbraced match / handler arm are carried as text, so a `defer` there has no block to attach to; it SHALL be a compile error.",
+  "expect": {
+    "codes": ["E-DEFER-UNSUPPORTED-SITE"],
+    "codeCounts": { "E-DEFER-UNSUPPORTED-SITE": 2 },
+    "notCodes": ["E-CODEGEN-INVALID-LOGIC"]
+  }
+}

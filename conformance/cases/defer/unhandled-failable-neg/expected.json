@@ -1,0 +1,13 @@
+{
+  "id": "defer-unhandled-failable-neg",
+  "description": "§19.16.3 rule 3 — a failable call in a deferred body must be handled in place. `defer closeAll()` (closeAll is `!`) is E-DEFER-UNHANDLED-FAILABLE even though the enclosing function is itself `!` — and the generic E-ERROR-002 does NOT also fire for the same call.",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 3: `?` is excluded and an enclosing `!` does not satisfy the requirement (the block is already exiting); inside a deferred body this code REPLACES E-ERROR-002 for the same call.",
+  "expect": {
+    "codes": ["E-DEFER-UNHANDLED-FAILABLE"],
+    "codeCounts": { "E-DEFER-UNHANDLED-FAILABLE": 1 },
+    "notCodes": ["E-ERROR-002", "E-DEFER-CONTROL-FLOW"]
+  }
+}

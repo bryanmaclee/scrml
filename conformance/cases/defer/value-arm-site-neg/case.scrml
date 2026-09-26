@@ -1,0 +1,22 @@
+${
+    type Mode:enum = { A, B }
+    <trace> = ""
+    <got> = 0
+    function D(s: string) { @trace = @trace + s }
+    function f(m: Mode) {
+        let k = match m {
+            .A :> {
+                defer D("a;")
+                let t = 7
+                t
+            }
+            .B :> 2
+        }
+        return k
+    }
+    function go() { @got = f(.A) }
+}
+<program>
+    <button id="go" onclick=go()>go</>
+    <p id="out">${@got} ${@trace}</p>
+</program>

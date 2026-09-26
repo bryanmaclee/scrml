@@ -1,0 +1,13 @@
+{
+  "id": "defer-control-flow-neg",
+  "description": "§19.16.3 rule 1 — a deferred body SHALL NOT contain `return` (a), `fail` (b), `?` propagation (c), or a `break` whose target loop lies outside the deferred body (d). Each fires E-DEFER-CONTROL-FLOW: four occurrences.",
+  "language-version": "1.0",
+  "spec": "§19.16.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.3 rule 1: a deferred body runs while its block is already exiting, so it cannot redirect control; each of the four forms is E-DEFER-CONTROL-FLOW.",
+  "expect": {
+    "codes": ["E-DEFER-CONTROL-FLOW"],
+    "codeCounts": { "E-DEFER-CONTROL-FLOW": 4 },
+    "notCodes": ["E-DEFER-NESTED", "E-DEFER-OUTSIDE-FUNCTION"]
+  }
+}

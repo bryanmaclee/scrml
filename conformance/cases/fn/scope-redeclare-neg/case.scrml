@@ -1,0 +1,30 @@
+${
+    <out> = ""
+
+    function p1(x) {
+        let x = "inner"
+        return x
+    }
+
+    function p2() {
+        let y = 1
+        let y = 2
+        return y
+    }
+
+    function p3() {
+        const z = 1
+        function z() {
+            return 2
+        }
+        return z
+    }
+
+    function go() {
+        @out = p1("a") + p2() + p3()
+    }
+}
+<program>
+    <button onclick=go()>go</>
+    <p>${@out}</p>
+</program>

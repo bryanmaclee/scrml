@@ -1,0 +1,15 @@
+{
+  "id": "defer-propagate-path",
+  "description": "§19.16.2 — a `?` propagation exit runs the block's deferred bodies. outer() writes \"open;\", registers the \"close;\" write, then `load(\"k1\")?` propagates Missing(\"k1\"); the statement after it never runs, the deferred body does: trace = \"open;close;\", @result = \"missing k1\".",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2 Exit lists `?` propagation (§19.5) — it returns the error from the enclosing function, which is an exit of the function body block, so the registered deferred body runs before the error reaches the caller's `!{}` handler.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "open;close;", "result": "missing k1" },
+    "domAnchored": [{ "selector": "#trace", "text": "open;close;" }, { "selector": "#out", "text": "missing k1" }]
+  }
+}

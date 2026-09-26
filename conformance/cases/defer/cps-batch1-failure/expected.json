@@ -1,0 +1,16 @@
+{
+  "id": "defer-cps-batch1-failure",
+  "description": "§19.16.5 — the TRUE intermediate case: batch 0 (the UPDATE) succeeds, the client continuation after it runs (\"mid;\"), then batch 1 (the INSERT) fails. The deferred bodies run exactly once, AFTER that — never when batch 0's stub returned: trace = \"start;mid;D;\", @busy = false. A lowering that ran the deferred body at batch 0's return would give \"start;D;mid;\" (or run it twice).",
+  "language-version": "1.0",
+  "spec": "§19.16.5",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.5: the deferred body runs after the LAST continuation and SHALL NOT run when an earlier batch's stub returns; it also runs when an intermediate batch fails and the function returns its error envelope (§19.6.7 — batch 0's commit stands). serverStub answers batch 0 with success and batch 1 with an impl-neutral server error (`__batches`, keyed by the §19.9.9.3 batch ordinal).",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "serverStub": { "save": { "__batches": [null, { "__serverError": { "type": "CpsError", "variant": "ServerError" } }] } },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "trace": "start;mid;D;", "busy": false },
+    "domAnchored": [{ "selector": "#out", "text": "start;mid;D;" }]
+  }
+}

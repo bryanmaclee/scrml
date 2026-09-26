@@ -1,0 +1,30 @@
+${
+    type E:enum = {
+        Busy
+        Gone
+    }
+    <trace> = ""
+
+    function risky()! -> E {
+        fail E.Gone
+    }
+
+    function work() {
+        defer {
+            function inner()! -> E {
+                risky() !{
+                    | ::Busy :> @trace = @trace + "busy;"
+                }
+                @trace = @trace + "past;"
+            }
+            inner() !{
+                | _ :> @trace = @trace + "inner-failed;"
+            }
+        }
+        @trace = @trace + "work;"
+    }
+}
+<program>
+    <button id="go" onclick=work()>Go</>
+    <p id="out">${@trace}</p>
+</program>

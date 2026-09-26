@@ -1,0 +1,20 @@
+${
+    <count> = 7
+    <got> = 0
+    <trace> = ""
+
+    function take() {
+        defer @count = 99
+        defer @trace = @trace + "d"
+        return @count
+    }
+
+    function go() {
+        @got = take()
+    }
+}
+<program>
+    <button id="go" onclick=go()>Go</>
+    <p id="got">${@got}</p>
+    <p id="count">${@count}</p>
+</program>

@@ -1,0 +1,15 @@
+{
+  "id": "defer-stack-arrow-helper-before-defer",
+  "description": "§19.16.6 (S430 round 4, N1) — a nested helper whose body holds a block-bodied arrow is CALLED BEFORE the defer and DECLARED after it. The per-block defer stack keeps the whole block in place, so the helper is hoisted within its own block exactly as without the defer: n1() = 4 and the deferred D runs at exit (trace \"d;\"). Identical to the no-defer twin. (The round-3 lowering moved code across the try boundary and threw `count is not a function`.)",
+  "language-version": "1.0",
+  "spec": "§19.16.6",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.6: the lowering wraps the whole block in place; every declaration stays in its original block, so function hoisting is exactly what it is without the defer.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "out": 4, "trace": "d;" },
+    "domAnchored": [{ "selector": "#out", "text": "4" }]
+  }
+}

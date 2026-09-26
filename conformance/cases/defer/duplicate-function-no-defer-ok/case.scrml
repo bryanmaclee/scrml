@@ -1,0 +1,21 @@
+${
+    <out> = 0
+
+    function f() {
+        function g() {
+            return 1
+        }
+        function g() {
+            return 2
+        }
+        return g()
+    }
+
+    function go() {
+        @out = f()
+    }
+}
+<program>
+    <button id="go" onclick=go()>go</>
+    <p id="out">${@out}</p>
+</program>

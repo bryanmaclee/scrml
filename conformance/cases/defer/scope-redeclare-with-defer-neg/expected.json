@@ -1,0 +1,12 @@
+{
+  "id": "defer-scope-redeclare-with-defer-neg",
+  "description": "§7.3.3 + §19.16.6 (S430 round 5, F2) — adding a `defer` must not change which programs compile. `let x` redeclaring parameter `x` is E-SCOPE-REDECLARE with the defer present exactly as without it (the defer lowering's `try` would otherwise have turned the illegal redeclaration into legal shadowing and the program would have run).",
+  "language-version": "1.0",
+  "spec": "§7.3.3",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§7.3.3 rejects a let redeclaring a parameter in the function's top-level block; §19.16.6: lowering a defer does not change the meaning (or legality) of the rest of the block.",
+  "expect": {
+    "codes": ["E-SCOPE-REDECLARE"],
+    "codeCounts": { "E-SCOPE-REDECLARE": 1 }
+  }
+}

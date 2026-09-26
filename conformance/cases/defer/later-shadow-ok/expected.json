@@ -1,0 +1,15 @@
+{
+  "id": "defer-later-shadow-ok",
+  "description": "§19.16.2 — what E-DEFER-LATER-SHADOW does NOT reject: a name declared BEFORE the defer (z), a name the deferred body declares itself (its own `q`, independent of the block's later `q`), and a later FUNCTION declaration (hoisted, so in scope at the defer). Runs: body writes \"other;\", then LIFO helper \"h;\", inner \"q;\", \"z;\": trace = \"other;h;q;z;\".",
+  "language-version": "1.0",
+  "spec": "§19.16.2",
+  "provenance": "ruling:user-voice-S430-P3",
+  "rationale": "§19.16.2: only a read of a name re-bound by a LATER let/const/lin declaration is rejected; a deferred body's own declarations and hoisted function declarations are in scope as written.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-DEFER-"],
+    "input": [{ "click": "#go" }],
+    "state": { "trace": "other;h;q;z;" },
+    "domAnchored": [{ "selector": "#out", "text": "other;h;q;z;" }]
+  }
+}
