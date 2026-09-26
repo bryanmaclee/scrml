@@ -59,6 +59,9 @@ function tcpProbe(host, port, timeoutMs = 1500) {
 
 const okFetch = () => new Response("ok");
 
+let HAS_V6 = false;
+try { const p = Bun.serve({ port: 0, hostname: "::1", fetch: okFetch }); p.stop(true); HAS_V6 = true; } catch { /* no IPv6 */ }
+
 // ---------------------------------------------------------------------------
 // §1
 // ---------------------------------------------------------------------------
@@ -158,12 +161,20 @@ describe("§4 loopback classification, display URL, network notice", () => {
       expect(isLoopbackHost(h)).toBe(false);
     }
   });
-  test("displayUrl prints localhost only for 127.0.0.1 / ::1 / localhost and wildcards (harnesses parse it)", () => {
+  test("displayUrl prints localhost only when BOTH loopbacks are served (the planned pairs; harnesses parse it)", () => {
     expect(displayUrl("127.0.0.1", 3000)).toBe("http://localhost:3000");
-    expect(displayUrl("::1", 3000)).toBe("http://localhost:3000");
     expect(displayUrl("localhost", 3000)).toBe("http://localhost:3000");
     expect(displayUrl("0.0.0.0", 3000)).toBe("http://localhost:3000");
-    expect(displayUrl("::", 3000)).toBe("http://localhost:3000");
+  });
+  test("displayUrl prints the literal address when only one family is bound (R2-1 / R2-2)", () => {
+    expect(displayUrl("::1", 3000)).toBe("http://[::1]:3000");
+    expect(displayUrl("[::1]", 3000)).toBe("http://[::1]:3000");
+    expect(displayUrl("::", 3000)).toBe("http://[::1]:3000");
+    // what was actually bound wins over the plan:
+    expect(displayUrl("127.0.0.1", 3000, ["127.0.0.1"])).toBe("http://127.0.0.1:3000");
+    expect(displayUrl("0.0.0.0", 3000, ["0.0.0.0"])).toBe("http://127.0.0.1:3000");
+    expect(displayUrl("127.0.0.1", 3000, ["127.0.0.1", "::1"])).toBe("http://localhost:3000");
+    expect(displayUrl("0.0.0.0", 3000, ["0.0.0.0", "::"])).toBe("http://localhost:3000");
   });
   test("displayUrl prints any other address as itself, incl. other 127.x (F3)", () => {
     expect(displayUrl("127.0.0.2", 3000)).toBe("http://127.0.0.2:3000");
@@ -240,7 +251,10 @@ describe("§5b unbindable host → a ListenError naming the host (F2)", () => {
       expect(err.code).toBe("E_SCRML_LISTEN");
       expect(err.message).toContain(`host "${host}"`);
       expect(err.message).toContain(`tried ${host}`);
-      expect(err.message).not.toContain("Is port 0 in use");
+      expect(err.message.startsWith(`Could not listen on host "${host}"`)).toBe(true);
+      // R2-3: the runtime's own reason is kept, after the host attribution.
+      expect(err.message).toContain("Underlying error:");
+      expect(err.message).toContain(err.cause.message);
     });
   }
   test("a taken port names host, port and both families tried", () => {
@@ -262,8 +276,6 @@ describe("§5b unbindable host → a ListenError naming the host (F2)", () => {
 // ---------------------------------------------------------------------------
 
 const LAN = lanIPv4Addresses();
-let HAS_V6 = false;
-try { const p = Bun.serve({ port: 0, hostname: "::1", fetch: okFetch }); p.stop(true); HAS_V6 = true; } catch { /* no IPv6 */ }
 
 /** One raw HTTP/1.1 GET over TCP; resolves the full response text. */
 function rawGet(host, port) {
@@ -277,6 +289,47 @@ function rawGet(host, port) {
     sock.on("error", fail);
   });
 }
+
+describe("§5c the printed URL follows what listen() actually bound", () => {
+  test.skipIf(!HAS_V6)("both loopbacks bound → localhost; after stop() the record is dropped", () => {
+    const s = listen({ port: 0, fetch: okFetch }, DEFAULT_HOST);
+    const port = s.port;
+    expect(displayUrl(DEFAULT_HOST, port)).toBe(`http://localhost:${port}`);
+    s.stop(true);
+    // no record → falls back to the plan (unchanged text), proving the entry is gone
+    expect(displayUrl("127.0.0.1", port, undefined)).toBe(`http://localhost:${port}`);
+  });
+
+  test.skipIf(!HAS_V6)("R2-1: ::1 twin held by another process → http://127.0.0.1:<port>, never localhost", () => {
+    const hog = Bun.serve({ port: 0, hostname: "::1", fetch: okFetch });
+    let s;
+    try {
+      s = listen({ port: hog.port, fetch: okFetch }, DEFAULT_HOST, { warn: () => {} });
+      expect(displayUrl(DEFAULT_HOST, s.port)).toBe(`http://127.0.0.1:${s.port}`);
+    } finally {
+      s?.stop(true);
+      hog.stop(true);
+    }
+  });
+
+  test.skipIf(!HAS_V6)("R2-2: --host=::1 → http://[::1]:<port>", () => {
+    const s = listen({ port: 0, fetch: okFetch }, "::1");
+    try {
+      expect(displayUrl("::1", s.port)).toBe(`http://[::1]:${s.port}`);
+    } finally {
+      s.stop(true);
+    }
+  });
+
+  test("ipv6Twin:false (the dev child) → http://127.0.0.1:<port>", () => {
+    const s = listen({ port: 0, fetch: okFetch }, "127.0.0.1", { ipv6Twin: false });
+    try {
+      expect(displayUrl("127.0.0.1", s.port)).toBe(`http://127.0.0.1:${s.port}`);
+    } finally {
+      s.stop(true);
+    }
+  });
+});
 
 describe("§6 empirical: loopback on both families by default, never the network", () => {
   test("default bind accepts 127.0.0.1", async () => {

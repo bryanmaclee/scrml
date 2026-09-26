@@ -103,21 +103,48 @@ function isWildcardHost(host) {
 }
 
 /**
- * The URL to print for a bound server. `localhost` is printed only when it is
- * exactly what was bound (127.0.0.1 / ::1 / localhost — the address pair
- * `localhost` resolves to) or for a wildcard bind (the local user's URL; the
- * network URLs are in the notice line). Any other address prints itself.
+ * Addresses `listen()` actually bound, by port (cleared on `stop()`), so the
+ * printed URL describes what IS listening — not what was planned. A failed
+ * `::1` twin must not print `localhost`: clients resolve it `::1`-first and
+ * would reach whatever other process holds `[::1]:<port>`.
+ * @type {Map<number, string[]>}
+ */
+const boundOnPort = new Map();
+
+/** Wrap a literal address for a URL (`::1` → `[::1]`). */
+function urlHost(addr) {
+  const h = norm(addr);
+  return h.includes(":") ? `[${h}]` : h;
+}
+
+/**
+ * The URL to print for a bound server. `localhost` only when BOTH loopbacks are
+ * served by us (127.0.0.1 or 0.0.0.0, AND ::1 or ::) — `localhost` resolves to
+ * both. Otherwise the literal bound address, IPv6 bracketed; a lone wildcard
+ * prints its loopback (0.0.0.0 → 127.0.0.1, :: → [::1]).
+ *
+ * `bound` defaults to what `listen()` recorded for `port`, else to the plan for
+ * `host` (every planned socket assumed bound).
  *
  * @param {string} host
  * @param {number} port
+ * @param {string[]} [bound]
  * @returns {string}
  */
-export function displayUrl(host, port) {
-  const h = norm(host);
-  if (h === "127.0.0.1" || h === "::1" || h === "localhost" || isWildcardHost(h)) {
-    return `http://localhost:${port}`;
-  }
-  return `http://${h.includes(":") ? `[${h}]` : h}:${port}`;
+export function displayUrl(host, port, bound) {
+  const addrs = (bound ?? boundOnPort.get(port) ?? plannedAddresses(host)).map(norm);
+  const v4Loop = addrs.includes("127.0.0.1") || addrs.includes("0.0.0.0");
+  const v6Loop = addrs.includes("::1") || addrs.includes("::");
+  if (v4Loop && v6Loop) return `http://localhost:${port}`;
+  const a = addrs[0] ?? norm(host);
+  if (a === "0.0.0.0") return `http://127.0.0.1:${port}`;
+  if (a === "::") return `http://[::1]:${port}`;
+  return `http://${urlHost(a)}:${port}`;
+}
+
+function plannedAddresses(host) {
+  const plan = bindPlan(host);
+  return plan.twin ? [plan.primary, plan.twin.host] : [plan.primary];
 }
 
 /**
@@ -241,15 +268,15 @@ export function listen(config, host, opts = {}) {
     try {
       primary = Bun.serve({ ...config, hostname: plan.primary });
     } catch (err) {
-      throw new ListenError(listenFailureMessage(host, plan.primary, requestedPort, twin), err);
+      throw new ListenError(listenFailureMessage(host, plan.primary, requestedPort, twin, err), err);
     }
-    if (!twin) return primary;
+    if (!twin) return record(primary, [plan.primary]);
 
     let second = null;
     try {
       second = Bun.serve({ ...config, port: primary.port, hostname: twin.host, ipv6Only: twin.ipv6Only });
     } catch {
-      if (!canBindIPv6()) return primary; // no IPv6 on this machine — IPv4 alone is complete
+      if (!canBindIPv6()) return record(primary, [plan.primary]); // no IPv6 on this machine — IPv4 alone is complete
       if (requestedPort === 0 && attempt < TWIN_RETRIES) {
         // An ephemeral port free on IPv4 but taken on IPv6 — pick another pair.
         primary.stop(true);
@@ -260,10 +287,22 @@ export function listen(config, host, opts = {}) {
         `[${twin.host}]:${primary.port} (in use by another process?). http://localhost:${primary.port} ` +
         `may reach that process over IPv6; use http://127.0.0.1:${primary.port}.`,
       );
-      return primary;
+      return record(primary, [plan.primary]);
     }
-    return joinListeners(primary, second);
+    return record(joinListeners(primary, second), [plan.primary, twin.host]);
   }
+}
+
+/** Remember what `server` bound (for displayUrl) until it is stopped. */
+function record(server, addrs) {
+  const port = server.port;
+  boundOnPort.set(port, addrs);
+  const stop = server.stop.bind(server);
+  server.stop = (closeActive) => {
+    if (boundOnPort.get(port) === addrs) boundOnPort.delete(port);
+    return stop(closeActive);
+  };
+  return server;
 }
 
 /** Make `primary` act for both sockets: stop() closes both, publish() reaches both. */
@@ -282,13 +321,16 @@ function joinListeners(primary, second) {
   return primary;
 }
 
-function listenFailureMessage(host, primary, port, twin) {
+function listenFailureMessage(host, primary, port, twin, cause) {
   const families = twin ? `${primary} (IPv4; its IPv6 twin ${twin.host} was not reached)` : primary;
   const portText = port === 0 ? "an ephemeral port" : `port ${port}`;
   return (
     `Could not listen on host "${host}" at ${portText} — tried ${families}. ` +
     `The address is not one of this machine's, the name does not resolve, or the port is already in use. ` +
-    `Use --host with an address this machine owns (bare --host = every interface), or pick another --port.`
+    `Use --host with an address this machine owns (bare --host = every interface), or pick another --port.` +
+    // R2-3: keep the runtime's own reason, so a failure that is NOT about the
+    // host/port (a bad TLS config, a resource limit) is not misattributed.
+    (cause ? ` Underlying error: ${[cause.code, cause.message].filter(Boolean).join(" ")}` : "")
   );
 }
 

@@ -134,7 +134,8 @@ describe("§4 an unbindable --host fails with a message naming the host, not Bun
     expect(code).toBe(1);
     await waitFor(() => live.out.includes("Could not listen"), 5_000); // drain piped output
     expect(live.out).toContain('Could not listen on host "192.168.99.99"');
-    expect(live.out).not.toContain("Is port 0 in use");
+    expect(live.out).toContain("Underlying error:"); // R2-3: runtime reason kept
+    expect(live.out).not.toMatch(/^\s+at .*\(/m); // a message, not an uncaught stack
   }, 30_000);
 
   test("scrml dev --host=myhost.invalid → exit 1, names the host", async () => {
@@ -144,6 +145,30 @@ describe("§4 an unbindable --host fails with a message naming the host, not Bun
     expect(code).toBe(1);
     await waitFor(() => live.out.includes("Could not listen"), 5_000); // drain piped output
     expect(live.out).toContain('[dev] Could not listen on host "myhost.invalid"');
-    expect(live.out).not.toContain("Is port 0 in use");
+    expect(live.out).toContain("Underlying error:"); // R2-3: runtime reason kept
+    expect(live.out).not.toMatch(/^\s+at .*\(/m); // a message, not an uncaught stack
   }, 45_000);
+});
+
+describe("§5 the printed URL is what is actually bound (R2-1 / R2-2)", () => {
+  test.skipIf(!HAS_V6)("scrml serve --host=::1 prints http://[::1]:<port>", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-serve-v6-"));
+    live = new Cli(["serve", "--port", "0", "--host=::1"], dir);
+    const port = await live.port(/listening on http:\/\/\[::1\]:(\d+)/);
+    expect(await tcpProbe("::1", port)).toBe("connected");
+    expect(live.out).not.toContain("http://localhost:");
+  }, 30_000);
+
+  test.skipIf(!HAS_V6)("::1 twin held by another process → prints http://127.0.0.1:<port>, not localhost", async () => {
+    const hog = Bun.serve({ port: 0, hostname: "::1", fetch: () => new Response("OTHER PROCESS") });
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "scrml-serve-hog-"));
+      live = new Cli(["serve", "--port", String(hog.port)], dir);
+      const port = await live.port(/listening on http:\/\/127\.0\.0\.1:(\d+)/);
+      expect(port).toBe(hog.port);
+      expect(live.out).not.toMatch(/listening on http:\/\/localhost:/); // (the twin warning may name localhost as the hazard)
+    } finally {
+      hog.stop(true);
+    }
+  }, 30_000);
 });
