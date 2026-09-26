@@ -16,6 +16,7 @@
 import * as acorn from "acorn";
 // @ts-ignore — astring ships its own types
 import { generate as astringGenerate } from "astring";
+import { ARRAY_MUTATING_METHODS } from "./derived-mutation-ops.ts";
 // GITI-017 (S125): shared regex/comment/string fence. preprocessForAcorn's
 // `not `→`!` lowering must skip regex-literal / comment / string interiors or
 // it corrupts `/not a jj repo/i` → `/!a jj repo/i` (silent-corruption class).
@@ -809,6 +810,131 @@ export function astToJs(node: ESNode): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * The bare cell name when `node` is an `@<cell>` Identifier naming a plain
+ * (non-derived) reactive cell; null otherwise.
+ */
+function reactiveCellIdentName(node: ESNode | undefined, derivedNames: Set<string> | null): string | null {
+  if (!node || node.type !== "Identifier" || typeof node.name !== "string" || !node.name.startsWith("@")) return null;
+  const varName = node.name.slice(1);
+  if (!varName || !/^[A-Za-z_$]/.test(varName)) return null;
+  if (derivedNames && derivedNames.has(varName)) return null;
+  return varName;
+}
+
+/**
+ * The root cell of a FIELD / INDEX path (`@o.x`, `@rows[i].done`) — a
+ * non-optional MemberExpression chain of at least one link ending at an
+ * `@<cell>` Identifier; null for anything else (a bare `@x`, a loop alias
+ * `t.done`, an optional chain).
+ */
+function reactiveFieldPathRoot(node: ESNode | undefined, derivedNames: Set<string> | null): string | null {
+  if (!node || node.type !== "MemberExpression") return null;
+  let cursor: ESNode | undefined = node;
+  while (cursor && cursor.type === "MemberExpression") {
+    if (cursor.optional) return null;
+    cursor = cursor.object as ESNode | undefined;
+  }
+  return reactiveCellIdentName(cursor, derivedNames);
+}
+
+/**
+ * §6.5.1 / §6.3 — find every IN-PLACE write to a plain reactive cell's value in
+ * `ast`. Must run on the PRE-rename tree (the `@` identifier is the reactive
+ * signature). The string-pipeline twin of emit-expr.ts's structured cases, with
+ * the same receiver shapes:
+ *
+ *   - a mutating array method (ARRAY_MUTATING_METHODS) called directly on the
+ *     cell — `@items.push(v)`. A deeper receiver (`@obj.list.push(v)`) is not a
+ *     write to the cell (§6.5.6) and the statement form does not notify it.
+ *   - an assignment (any operator), `++` / `--`, or `delete` whose target is a
+ *     FIELD / INDEX path into the cell — `@o.x = v`, `@o.n += 1`, `@rows[i].n++`.
+ *     A bare `@x = v` is not matched (reactive-assign lowering owns it), nor a
+ *     loop alias (`t.done = true`, §6.5.7).
+ *
+ * Optional calls / chains are left untouched.
+ */
+function collectReactiveInPlaceWrites(
+  ast: ESNode,
+  derivedNames: Set<string> | null,
+): Array<{ node: ESNode; varName: string }> {
+  const found: Array<{ node: ESNode; varName: string }> = [];
+  walk(ast, (node) => {
+    let varName: string | null = null;
+    if (node.type === "CallExpression" && !node.optional) {
+      const callee = node.callee as ESNode | undefined;
+      if (callee && callee.type === "MemberExpression" && !callee.computed && !callee.optional) {
+        const prop = callee.property as ESNode | undefined;
+        if (prop && prop.type === "Identifier" && typeof prop.name === "string"
+            && ARRAY_MUTATING_METHODS.has(prop.name)) {
+          varName = reactiveCellIdentName(callee.object as ESNode | undefined, derivedNames);
+        }
+      }
+    } else if (node.type === "AssignmentExpression") {
+      varName = reactiveFieldPathRoot(node.left as ESNode | undefined, derivedNames);
+    } else if (node.type === "UpdateExpression") {
+      varName = reactiveFieldPathRoot(node.argument as ESNode | undefined, derivedNames);
+    } else if (node.type === "UnaryExpression" && node.operator === "delete") {
+      varName = reactiveFieldPathRoot(node.argument as ESNode | undefined, derivedNames);
+    }
+    if (varName !== null) found.push({ node, varName });
+  });
+  return found;
+}
+
+/**
+ * Rewrite a collected in-place write IN PLACE so the cell is notified once after
+ * it runs and the expression's own value is preserved — the string-pipeline
+ * twin of `emit-expr.ts wrapReactiveNotify`, the same JS shape modulo astring's
+ * formatting:
+ *
+ *   ((_scrml_m) => (_scrml_reactive_set("k", _scrml_reactive_get("k")), _scrml_m))(<write>)
+ *
+ * The original expression becomes the IIFE's argument, so it is evaluated in the
+ * enclosing scope (an `await` in it keeps its meaning). A nested write inside it
+ * (`@a.push(@b.pop())`) is its own collected node, shared by reference with the
+ * copy made here, so each is wrapped exactly once.
+ */
+function wrapReactiveNotifyNode(node: ESNode, varName: string): void {
+  const inner: ESNode = { ...node };
+  for (const k of Object.keys(node)) delete (node as Record<string, unknown>)[k];
+  const key = (): ESNode => ({ type: "Literal", value: varName });
+  const temp = (): ESNode => ({ type: "Identifier", name: "_scrml_m" });
+  Object.assign(node, {
+    type: "CallExpression",
+    optional: false,
+    callee: {
+      type: "ArrowFunctionExpression",
+      id: null,
+      params: [temp()],
+      async: false,
+      generator: false,
+      expression: true,
+      body: {
+        type: "SequenceExpression",
+        expressions: [
+          {
+            type: "CallExpression",
+            optional: false,
+            callee: { type: "Identifier", name: "_scrml_reactive_set" },
+            arguments: [
+              key(),
+              {
+                type: "CallExpression",
+                optional: false,
+                callee: { type: "Identifier", name: "_scrml_reactive_get" },
+                arguments: [key()],
+              },
+            ],
+          },
+          temp(),
+        ],
+      },
+    },
+    arguments: [inner],
+  });
+}
+
+/**
  * Rewrite `@varName` reactive references to runtime getter calls using ESTree.
  *
  * Parses the expression with acorn, walks the tree to find @-prefixed Identifiers,
@@ -841,6 +967,11 @@ export function rewriteReactiveRefsAST(expr: string, derivedNames: Set<string> |
   const hasDerived = derivedNames && derivedNames.size > 0;
   let modified = false;
 
+  // §6.5.1 / §6.3 — collect the in-place writes to a reactive cell's value
+  // (`@items.push(v)`, `@o.x = v`, `@o.n++`) BEFORE the `@var` rename below
+  // erases the `@` receiver shape. See `wrapReactiveNotifyNode`.
+  const mutationCalls = collectReactiveInPlaceWrites(ast, hasDerived ? derivedNames : null);
+
   // Walk and replace @var Identifiers in-place
   walk(ast, (node, parent) => {
     if (node.type !== "Identifier" || typeof node.name !== "string" || !node.name.startsWith("@")) return;
@@ -867,6 +998,8 @@ export function rewriteReactiveRefsAST(expr: string, derivedNames: Set<string> |
   });
 
   if (!modified) return { result: expr, ok: true };
+
+  for (const m of mutationCalls) wrapReactiveNotifyNode(m.node, m.varName);
 
   try {
     const js = astToJs(ast);
