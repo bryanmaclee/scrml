@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 136 | 0 |
+| HIGH | 135 | 1 |
 | MED | 293 | 0 |
 | LOW | 106 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -14680,8 +14680,8 @@ payload read in an EVENT HANDLER inside the nested arm is unbound (ReferenceErro
 into a boot crash. ⚑ The parser layer (1) is independently valuable — the likeliest real case is a COMPONENT closed with
 `</>` inside a `<div>` in a state-child — and can be split out once the ruling says how the match case should behave.
 
-### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; open`
-<!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=open locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/rewrite.ts(the §6.5.1 clone-mutate-replace lowering)—not-traced prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
+### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; carried (S431)`
+<!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=carried locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/rewrite.ts(the §6.5.1 clone-mutate-replace lowering)—not-traced prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
 
 `function a() { @groups.splice(0, 1, { id: 1, name: "S" }) }` emits `.splice(0 , 1 , { id : 1 , name : S })` — compiles
 clean, `ReferenceError: S is not defined` on click. `push({ id: 2, name: "P" })` emits `push({id: 2, name: P})` and is
@@ -14698,6 +14698,14 @@ the path deep-set), computed bracket indexes, `upload()` args, and block comment
 client rewrite pass × quoting × emit path). Also makes multi-arg lists scope-checked (undeclared name → E-SCOPE-001,
 was a runtime ReferenceError) and fixes `conformance/cases/loop/loop-006-neg` (a labelled `for` never bound its loop
 var). Next session: adversarial pass on `257dfeca`, then land.
+
+(mutation-arg quotes, S431-peter) **CARRIED under S430 P7.** Classified by measurement, not by severity: none of the three
+fix-for-cause criteria holds. (1) Not bootstrap-blocking — 0 `@cell.<mutator>(…"…")` sites in `compiler/self-host/`.
+(2) Not adopter-reported — 0 reactive-cell mutator calls of any kind in assetManagement `origin/main` (18 files; its many
+`.push("Oil")` calls are on plain locals, which lower correctly) or flogence `upstream/main` (29 files). (3) Not security.
+Pinned by the xfail case `conformance/cases/reactive/mutating-method-string-arg` (impl#1 fails it with `E-SCOPE-001` on the
+`push` half; the `splice` half is the silent one). The built fix stays on `origin/hold/s429-mutation-arg-string-quotes`
+@ `257dfeca` (round 2 unreviewed) — if an adopter reports this shape it becomes criterion 2 and is one review from landing.
 
 ### g-arm-cell-only-binding-dead-after-arm-switch — inside a `<match>` arm, `show=@flag` / `disabled=@flag` (cell-only reads) stop updating once the arm has been switched away and back, or in a non-initial arm — `NEW S429-peter; HIGH; open`
 <!-- @gap id=g-arm-cell-only-binding-dead-after-arm-switch sev=HIGH status=open locus=compiler/src/codegen/emit-variant-guard.ts(emitArmWireFunction — a binding that reads NO arm name stays in boot-time wiring bound to the first-rendered element; re-dispatch replaces the element) prov=empirical:S429-arm-bindings-dev-agent-found-review-agent-confirmed-identical-on-d6d6e55a-and-the-fix-head -->
