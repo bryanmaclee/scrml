@@ -3496,3 +3496,31 @@ does array mutation need a contract or is it deliberately exempt? runtime enforc
 Composes with dpa-050 Q6: an instance's self-write is a write along its fields' lifecycles; an engine is a named
 lifecycle graph — a convergence that does not need to reverse Move 20.
 
+
+### ⚑ S435 (2026-09-26) — SEQUENCES: one kind, constraints à la carte. Three points RULED in conversation; one fork OPEN.
+
+> what if we create a new kind of data structure that is an array/tuple ala-cart. <stuffAr> = [1,2,3] // fully constrained at declaration implicitely by ommission. <stuffAr [push, pop]> = [1,2,3] // you can mutate this array with push, pop, but not with shift, slice, etc. A true tuple might be <aTup [value]> = [:number, "a":string, :(not to date)] // a is deffault for cell 1, only values are changeable. crazy?
+
+PA pushbacks, ACCEPTED by bryan (*"I accept your pushbacks. I guess I menat splce."*):
+- **Permissions are AXES, not JS method names.** A method list is enumerate-forever and is bypassable by a whole-value
+  write (`@a = @a.slice(1)` performs a shift using only non-mutating ops). Axes are checkable on whole writes too:
+  **length** (fixed · bounded `1..10` · free) · **where it changes** (end · front · anywhere) · **positions**
+  (read-only · writable) · **position types** (uniform = array · per-position = tuple). `push`+`pop` = "free length,
+  changes at the end" (a stack). Non-mutating ops (`map`/`filter`/`slice`/`concat`) are always allowed.
+- **Tuple defaults follow the Q3 form** `[:number, :string="a", :(not to date)]` — `"a":string` collides with the §59.3
+  map-entry literal and inverts the ratified `name:type=default` order.
+- **Per-position lifecycles replace `[value]`**: a position's lifecycle IS its write permission; no lifecycle = fixed.
+
+RULED (bryan S435):
+1. **Legacy migration = a temporary "all" grant.** *"I would say that we allow a temporary "all" with a hard
+   deprecation warning and clear dep terms. still a migration but seems most manageble."* PA proposal NOT yet ratified:
+   key the grant on the dpa-050 Q3 syntax migration — a legacy `<x> = v` cell compiles as all-permissions + the
+   deprecation W-code; a new-form `<x:T=v>` cell is locked-by-omission. ⚑ Tension to resolve in the DD: §63.2 says a
+   Stage-1 deprecation MUST NOT name a removal version and §63.3 removes only at a MAJOR — "clear dep terms" must be
+   stated within §63, or §63 amended.
+2. **Reactive notify becomes permission-driven** (§6.5): *"2 yes."* A cell's declared permissions decide which
+   in-place operations the compiler wires to notify.
+
+OPEN (not answered): **does the constraint live on the CELL or on the TYPE?** PA lean: TYPE — it travels across calls
+(`fn pushEdit(s: Edit[end], e: Edit) -> Edit[end]`), a callee cannot be handed a looser value than it declared.
+Also open: cell REASSIGNMENT vs value MUTATION — one axis or two.
