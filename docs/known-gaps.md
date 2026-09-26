@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 135 | 4 |
+| HIGH | 136 | 4 |
 | MED | 297 | 0 |
 | LOW | 108 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -18253,3 +18253,16 @@ The identical `when` placed before any `${}`/markup child compiles to an effect.
 shapes and calls the rest "an open operator question per-shape", so lift-vs-diagnose is bryan's; silent text emission
 is wrong under either answer. Gift-wrap (class table of every silent shape + the recommended fix on
 `hold/s432-bare-when-body-top`) in progress this session. found by: S432 when-changes dev agent while chasing a review finding.
+
+### g-regex-statement-after-block-closer-lexed-as-division — a regex literal that starts a statement right after a block `}` is lexed as DIVISION by all three lexers; the default pipeline emits a DIFFERENT regex at exit 0 — `NEW S432-peter; HIGH; open (P7 exposure 0 — carry candidate, pin owed)`
+<!-- @gap id=g-regex-statement-after-block-closer-lexed-as-division sev=HIGH status=open locus=compiler/src/tokenizer.ts(isRegexContext — no `}` handling),compiler/src/codegen/code-segments.ts(text twin),compiler/native-parser/lex-in-code.js(documented NOT HANDLED),compiler/self-host-v2/lex.scrml prov=empirical:S432-PA-reproduced-on-9743cfd2 -->
+
+`function t(s) { if (s) { s = s + "" }⏎ /a\sb/.test(s) … }` compiles with 0 errors and emits `/ a sb /.test(s)` — the
+tokenizer pads the "division" operands and drops the `\` escape, so a different regex runs (the S412
+`g-unbraced-if-for-body-regex-literal…` symptom, one level away). With a `"` inside that regex the default pipeline ALSO
+fires a false `E-CLASS-NOT-IN-SCRML` on a later string (`if (s) { }⏎/"/.test(s)⏎const msg = "class Foo { }"` → 8:16;
+74f64bef compiled it clean — the #1048 residual the S432 re-review flagged). A fix needs the four lexers moved TOGETHER:
+a native-only fix broke `self-host-v2-lexer-slice4b.test.js`, which pins `if (a) {}\n/re/g` as division. Related parity
+debt: native (impl#1) now reads `/` after an `if (…)` head as a regex (S432 #1048 fix) while self-host-v2 (impl#2) still
+reads division — the slice-4b parity corpus does not cover the shape. Exposure: 0 in compiler/self-host (its one
+line-start regex follows `||`), assetManagement, flogenceP. found by: S432 #1048-fix dev agent; PA-reproduced.
