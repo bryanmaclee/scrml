@@ -30,7 +30,7 @@
 import type { Span, FileAST, MarkupNode } from "../types/ast.ts";
 import { getElementAttrSchema, isOpenAttrPrefix } from "../attribute-registry.js";
 import { walkFileAst } from "./ast-walk.ts";
-import { isConnectionAttr } from "../diagnostic-secrets.ts";
+import { connectionFragmentAttrs } from "../diagnostic-secrets.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape
@@ -90,24 +90,20 @@ function validateMarkup(
   // of it — the userinfo, i.e. the password — becomes a run of attribute NAMES
   // (`u:p`, `w@h`, ...). Echoing those names prints the password in pieces no
   // value-based redactor can recognise (a middle piece need carry no `:` or
-  // `@`). So once a connection attribute on this element has a non-string
-  // value, every UNRECOGNIZED attribute after it is reported without its name.
+  // `@`). So once a connection attribute on this element has an unquoted
+  // TEXT value, every later UNRECOGNIZED non-string attribute is reported
+  // without its name (connectionFragmentAttrs — shared with the chokepoint).
   // Positional, not a name-shape test: a fragment may look like any ordinary
   // name. The cost: a genuinely unknown attribute written after an unquoted
   // `db=` loses its name in W-ATTR-001 — on an element that already fails to
   // compile (the unquoted value is E-SCOPE-001).
-  let afterUnquotedConnection: string | null = null;
+  const frag = connectionFragmentAttrs(tag, node.attrs);
+  const fragments = new Set(frag.fragments);
+  const afterUnquotedConnection = frag.via;
 
   for (const attr of node.attrs ?? []) {
     if (!attr || !attr.name) continue;
     const name = attr.name;
-
-    if (afterUnquotedConnection === null && isConnectionAttr(tag, name)) {
-      const v = attr.value as { kind?: string } | string | null | undefined;
-      const isString = typeof v === "string" || (!!v && typeof v === "object" && v.kind === "string-literal");
-      const isAbsent = !v || (typeof v === "object" && v.kind === "absent");
-      if (!isString && !isAbsent) afterUnquotedConnection = name;
-    }
 
     // Open-prefix attributes (bind:, on:, data-, aria-, etc.) are always
     // allowed — they are runtime-special forms with open-ended names.
@@ -116,7 +112,7 @@ function validateMarkup(
     const spec = schema.allowedAttrs.get(name);
     if (!spec) {
       const span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
-      if (afterUnquotedConnection !== null) {
+      if (fragments.has(attr)) {
         warnings.push({
           code: "W-ATTR-001",
           message:

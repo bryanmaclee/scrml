@@ -303,3 +303,122 @@ describe("§5 scrml dev overlay and LSP", () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// §6 round 2 — regressions the first cut introduced
+// ---------------------------------------------------------------------------
+
+describe("§6 r2: drive-letter exemption, long-secret precision, file params, fail-safe scan, F3 scope", () => {
+  test("a one-letter user + `/`-leading password after `//` is userinfo, not a drive letter", () => {
+    for (const [v, secret] of [
+      ["postgres://u:/etc/PathSec6@h/app", "PathSec6"],
+      ["postgres://x:/S3dr@h", "S3dr"],
+      ["redis://r:/S4dr@h:6379", "S4dr"],
+      [`postgres://u:${BS}S5dr@h/app`, "S5dr"],
+    ]) {
+      const shown = displayConnectionValue(v);
+      expect(shown).not.toContain(secret);
+      expect(shown).toContain("<redacted>@h");
+    }
+  });
+
+  test("a real drive letter at the START of a path stays unredacted", () => {
+    for (const v of [`C:${BS}x${BS}a@b.db`, "C:/x/a@b.db", "sqlite:C:/x/a@b.db", `sqlite:C:${BS}x${BS}a@b.db`, "file:///C:/x/a@b.db"]) {
+      expect(displayConnectionValue(v)).toBe(v);
+    }
+  });
+
+  test("the long-secret backstop never holds a username, db name or ordinary param value", () => {
+    const r = new SecretRedactor([
+      "postgres://orders_service:pw@h/orders_service",
+      "postgres://h/db?application_name=inventory-api-v2",
+    ]);
+    expect(r.redact("SELECT id FROM orders_service")).toBe("SELECT id FROM orders_service");
+    expect(r.redact("app inventory-api-v2 started")).toBe("app inventory-api-v2 started");
+    const src = "  <p>${orders_service + missingThing}</p>\n  ?{`SELECT id FROM orders_service`}";
+    expect(r.redactSource(src)).toBe(src);
+  });
+
+  test("the long-secret backstop keeps password-class material (userinfo password, secret-named or token-shaped param)", () => {
+    const r = new SecretRedactor([
+      "postgres://app:Longpassw0rd!!@h/app",
+      "libsql://t.io?authToken=abc123def456ghi",
+      "redis://h?x=AbCdEf0123456789Zz",
+    ]);
+    const out = r.redact("normalized: Longpassw0rd!! abc123def456ghi AbCdEf0123456789Zz");
+    expect(out).not.toContain("Longpassw0rd");
+    expect(out).not.toContain("abc123def456ghi");
+    expect(out).not.toContain("AbCdEf0123456789Zz");
+  });
+
+  test("e2e: a username equal to a table/identifier name does not shred the frame or messages", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-s432-over-"));
+    try {
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, `<program db="postgres://orders_service:pw@h/orders_service">\n  const orders_service = 1\n  function getUsers() {\n      return ?{\`SELECT id FROM orders_service\`}.all()\n  }\n  <p>\${orders_service + missingThing}</p>\n</program>\n`);
+      const out = run(["compile", f, "-o", join(dir, "out")], dir);
+      expect(out).toContain("missingThing");
+      expect(out).toContain("SELECT id FROM orders_service");
+      expect(out).toContain("${orders_service + missingThing}");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("local file values keep open flags (copy-pasteable); a SQLCipher key is still hidden", () => {
+    for (const v of ["sqlite:./data/app.db?mode=ro", "./my db=1.db", "file:./a.db?cache=shared&immutable=1", "sqlite:///abs/a.db?mode=ro", "app.db?mode=ro"]) {
+      expect(displayConnectionValue(v)).toBe(v);
+    }
+    expect(displayConnectionValue("sqlite:./a.db?key=SqlCiph9")).toBe("sqlite:./a.db?key=<redacted>");
+    expect(displayConnectionValue("file:./a.db?cache=shared&hexkey=ABCD1234")).toBe("file:./a.db?cache=shared&hexkey=<redacted>");
+    // Not a file: a keyword DSN, a typo'd URI, an authority URI — every value hidden.
+    expect(displayConnectionValue("host=h dbname=app")).toBe("host=<redacted> dbname=<redacted>");
+    expect(displayConnectionValue("postgres:/h/app?mode=Mx1")).not.toContain("Mx1");
+    expect(displayConnectionValue("sqlite://h/app?mode=Mx2")).not.toContain("Mx2");
+  });
+
+  test("e2e: E-PA-002 remedy for sqlite:./data/app.db?mode=ro stays copy-pasteable", () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-s432-mode-"));
+    try {
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, `<program db="./a.db">\n  < db src="sqlite:./data/app.db?mode=ro" tables="users">\n${USE_DB}  </>\n</program>\n`);
+      const out = run(["compile", f, "-o", join(dir, "out")], dir);
+      expect(out).toContain("E-PA-002");
+      expect(out).toContain("mode=ro");
+      expect(out).not.toContain("<redacted>");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("the text scan fails SAFE: quotes inside braces, and an unterminated ${, cannot hide db=", () => {
+    const q = '"';
+    for (const [src, secret] of [
+      [`<program x={/${q}/.test(y)} db=${q}postgres://u:R1sc@h${q}>`, "R1sc"],
+      [`<program x={a /* ${q} */} db=${q}postgres://u:R2sc@h${q}>`, "R2sc"],
+      [`<program x={don't} db=${q}postgres://u:R3sc@h${q}>`, "R3sc"],
+      [`<program x=\${\`a\${b}\`} db=${q}postgres://u:R4sc@h${q}>`, "R4sc"],
+      [`<program x={a}}} db=${q}postgres://u:R5sc@h${q}>`, "R5sc"],
+      [`<program x=\${unterminated db=${q}postgres://u:R6sc@h${q}>\n<p>rest</p>`, "R6sc"],
+      [`<program on:load=\${() => a > b} db=${q}postgres://u:R7sc@h${q}>`, "R7sc"],
+    ]) {
+      expect(new SecretRedactor().redactSource(src)).not.toContain(secret);
+    }
+  });
+
+  test("F3 fires only for an unquoted TEXT db= value — not db=${…} or db=@ref", () => {
+    const after = [{ name: "bogusattr", value: { kind: "absent" } }];
+    expect(connectionFragmentAttrs("program", [{ name: "db", value: { kind: "expr", raw: "conn" } }, ...after]).fragments).toEqual([]);
+    expect(connectionFragmentAttrs("program", [{ name: "db", value: { kind: "variable-ref", name: "@conn" } }, ...after]).fragments).toEqual([]);
+    expect(connectionFragmentAttrs("program", [{ name: "db", value: { kind: "variable-ref", name: "postgres" } }, ...after]).fragments.length).toBe(1);
+    const dir = mkdtempSync(join(tmpdir(), "scrml-s432-f3-"));
+    try {
+      const f = join(dir, "app.scrml");
+      writeFileSync(f, "<program db=${conn} bogusattr>\n  <p>x</p>\n</program>\n");
+      const out = run(["compile", f, "-o", join(dir, "out")], dir);
+      expect(out).toContain("Attribute `bogusattr=` is not recognized");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

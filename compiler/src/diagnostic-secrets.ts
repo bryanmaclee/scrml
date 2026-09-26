@@ -65,7 +65,21 @@ const REDACTED = "<redacted>";
  *     view with ASCII `%XX` escapes decoded (`%3F` `%3D` `%40` used as
  *     structure). Every span maps back to the ORIGINAL offsets.
  *
+ *   - LOCAL FILE values (`./x.db`, `/abs/x.db`, `C:\x.db`, `sqlite:./x.db`,
+ *     `file:…`, `:memory:` — never a `scheme://` URI or another `scheme:`
+ *     value) keep ordinary open flags visible (`?mode=ro`, `cache=shared`),
+ *     so the path stays copy-pasteable; only a key/password/secret/token/
+ *     auth parameter is hidden there (SQLCipher's `key=` — FILE_SECRET_KEY_RE).
+ *
  * Scheme, host, port, path and parameter names are left visible.
+ *
+ * DELIBERATELY LEFT VISIBLE (a value that hides a secret in these places is
+ * not recognised; none is a credential slot of a SQL driver URI):
+ *   - a secret PATH segment (`https://h/api/KEY/x`);
+ *   - a URL FRAGMENT (`…#tok`);
+ *   - a KEYLESS query token (`…?SECRET`, no `=`);
+ *   - fullwidth / homoglyph separators (`＠`, `：`) — not NFKC-normalised;
+ *     a driver does not read them as structure either.
  */
 const INVISIBLE_CHAR_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/;
 
@@ -114,9 +128,20 @@ function toOriginal(view: View, from: number, to: number): [number, number] | nu
   return [view.map[from][0], view.map[to - 1][1]];
 }
 
-/** A `:` that is not a drive-letter colon (`C:\`, `/C:/`). */
-function hasCredentialColon(segment: string): boolean {
-  return segment.replace(/(^|[\/\\])[A-Za-z]:(?=[\/\\]|$)/g, "$1").includes(":");
+/**
+ * A `:` that joins a `user:password` pair. `authority` = the segment follows a
+ * `//`: there EVERY colon counts (a drive letter never follows `//` —
+ * `postgres://u:/etc/pw@h` is user `u`, password `/etc/pw`). Otherwise the
+ * segment is at the START of a path-shaped value, and only a drive letter AT
+ * that start (`C:\…`, `C:/…`) is exempt.
+ */
+function hasCredentialColon(segment: string, authority: boolean): boolean {
+  if (authority) {
+    // `///C:/x/a@b.db` — an EMPTY authority: the segment is a path.
+    if (/^[\/\\]/.test(segment)) return segment.replace(/^[\/\\]+(?:[A-Za-z]:(?=[\/\\]|$))?/, "").includes(":");
+    return segment.includes(":");
+  }
+  return segment.replace(/^[A-Za-z]:(?=[\/\\]|$)/, "").includes(":");
 }
 
 /** The userinfo span of a view (view offsets), or null. */
@@ -140,24 +165,75 @@ function userinfoSpanInView(t: string): [number, number] | null {
       if (m[0].length === 2 && /[\/\\]/.test(head[s + 2] ?? "")) break;
       const rest = head.slice(s + m[0].length);
       // Strip a scheme token only when what follows it is still a
-      // `user:password` pair or plainly a path — never the user itself.
-      if (hasCredentialColon(rest) || /^[\/\\.~]/.test(rest)) s += m[0].length;
+      // `user:password` pair or plainly a path (incl. a drive letter) —
+      // never the user itself.
+      if (hasCredentialColon(rest, false) || /^(?:[\/\\.~]|[A-Za-z]:[\/\\])/.test(rest)) s += m[0].length;
       else break;
     }
-    while (s < head.length && /[\/\\]/.test(head[s])) s++;
+    // A drive letter right here starts a path: keep it in the segment so the
+    // start-only exemption sees it.
+    if (!/^[A-Za-z]:[\/\\]/.test(head.slice(s))) {
+      while (s < head.length && /[\/\\]/.test(head[s])) s++;
+    }
     start = s;
   }
   const segment = head.slice(start);
   if (segment.length === 0) return null;
-  const isUserinfo = hasCredentialColon(segment) || (authority && !/[\/\\]/.test(segment));
+  const isUserinfo = hasCredentialColon(segment, authority) || (authority && !/[\/\\]/.test(segment));
   return isUserinfo ? [start, at] : null;
 }
+
+/**
+ * s432 r2 — a LOCAL FILE value: a path (`./x`, `../x`, `/x`, `~/x`, `C:\x`, a
+ * bare `name.db`), `:memory:`, or `sqlite:` / `file:` followed by one of
+ * those. NOT a `scheme://authority` URI and NOT any other `scheme:` value
+ * (a one-slash typo `postgres:/u:p@h` is not a file). Decided on the
+ * invisible-stripped view, so a zero-width prefix cannot turn a URI into a
+ * "file".
+ */
+function isLocalFileValue(t: string): boolean {
+  let v = t.trim();
+  const pre = v.match(/^(?:sqlite|file):/i);
+  if (pre) {
+    v = v.slice(pre[0].length);
+    // `sqlite:///abs` / `file:///C:/x` — an EMPTY authority is still a path.
+    if (v.startsWith("///")) v = v.slice(2);
+    else if (v.startsWith("//")) return false;
+  }
+  if (v === ":memory:") return true;
+  if (/^(?:\.{1,2}[\/\\]|[\/\\]|~[\/\\]|[A-Za-z]:[\/\\])/.test(v)) return !v.startsWith("//") && !v.startsWith("\\\\");
+  // A bare filename: nothing before the first `?` that makes it a scheme
+  // (`:`) or a keyword DSN (`=` — `host=h password=x` is NOT a file).
+  const head = v.split("?")[0];
+  return head.length > 0 && !head.includes(":") && !head.includes("=");
+}
+
+/**
+ * On a LOCAL FILE value, only these parameter values are secret. A file
+ * database's parameters are ordinary open flags (`mode=ro`, `cache=shared`,
+ * `immutable=1`) that a copy-pasteable path must keep; the one secret a file
+ * DSN carries is an encryption key or credential — SQLCipher's `key=` /
+ * `hexkey=`, and the password/secret/token/auth family. This is a narrow
+ * list scoped to FILE values only; every non-file value redacts EVERY
+ * parameter value (no key list there).
+ */
+const FILE_SECRET_KEY_RE = /^(?:key|hexkey|rekey|hexrekey|password|pass|passwd|pwd|secret|token|auth.*|.*(?:password|secret|token|apikey|api_key))$/i;
+
+/** Heuristic "looks like a credential" for a value with no secret-named key. */
+function isTokenLike(v: string): boolean {
+  return v.length >= 16 && /^[A-Za-z0-9+\/=_\-.~]+$/.test(v) && /[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v);
+}
+
+/** A secret-named key (decoded): the password / secret / token / key family. */
+const SECRET_KEY_NAME_RE = /(?:pass|pwd|secret|token|key|auth|cred|sig)/i;
 
 interface ParamSpan {
   /** key start .. value end (original offsets). */
   whole: [number, number];
   /** the value (original offsets). */
   value: [number, number];
+  /** the key, as read in its view (decoded in the decoded view). */
+  key: string;
 }
 
 interface ValueAnalysis {
@@ -171,6 +247,7 @@ function analyzeConnectionValue(value: string): ValueAnalysis {
   if (typeof value !== "string" || value.length === 0) return out;
   const views = [buildView(value, false)];
   if (value.includes("%")) views.push(buildView(value, true));
+  const local = isLocalFileValue(views[0].text);
   for (const view of views) {
     const ui = userinfoSpanInView(view.text);
     if (ui) {
@@ -182,9 +259,11 @@ function analyzeConnectionValue(value: string): ValueAnalysis {
       const k = ind?.[1];
       const v = ind?.[2];
       if (!k || !v || v[1] <= v[0]) continue;
+      const key = safeDecode(pm[1]);
+      if (local && !FILE_SECRET_KEY_RE.test(key)) continue;
       const ov = toOriginal(view, v[0], v[1]);
       const ow = toOriginal(view, k[0], v[1]);
-      if (ov && ow) out.params.push({ whole: ow, value: ov });
+      if (ov && ow) out.params.push({ whole: ow, value: ov, key });
     }
   }
   return out;
@@ -307,9 +386,23 @@ function echoForms(value: string): Array<{ raw: string; shown: string; fragment:
 }
 
 /**
- * Every form of every secret a value carries (raw, unquoted, percent-decoded;
- * the shape-independent userinfo and parameter readings, plus the WHATWG
- * reading when the value parses). Used ONLY for LONG_SECRET_RULE.
+ * The PASSWORD-CLASS secrets a value carries (raw, unquoted, percent-decoded),
+ * for LONG_SECRET_RULE only — the free-text backstop applied to MESSAGES.
+ *
+ * s432 r2: this list is deliberately NARROWER than the spans. The spans hide
+ * every userinfo and every parameter value inside the value's own display
+ * form; this list replaces a string ANYWHERE in a message, so it must never
+ * hold material that is also an ordinary identifier — a username
+ * (`orders_service`), a host, a database name, `application_name=inventory-
+ * api-v2`. It holds only:
+ *   - the userinfo PASSWORD (after the first `:`); a user-only userinfo only
+ *     when it is token-shaped;
+ *   - a parameter value whose DECODED key names a secret (pass / pwd / secret
+ *     / token / key / auth / cred / sig), or whose value is token-shaped
+ *     (16+ URL-safe characters mixing upper, lower and digit).
+ * A key PATTERN here is a precision filter on a backstop, not the redaction
+ * boundary: a secret it misses is still hidden wherever the value itself is
+ * echoed (whole-value forms and positional spans).
  */
 export function deriveSecrets(value: string): string[] {
   if (typeof value !== "string" || value.length === 0) return [];
@@ -325,23 +418,23 @@ export function deriveSecrets(value: string): string[] {
   const a = analyzeConnectionValue(value);
   for (const [from, to] of a.userinfo) {
     const ui = value.slice(from, to);
-    add(ui);
     const colon = ui.indexOf(":");
     if (colon >= 0) add(ui.slice(colon + 1));
+    else if (isTokenLike(safeDecode(ui))) add(ui);
   }
   for (const p of a.params) {
     const raw = value.slice(p.value[0], p.value[1]);
+    const bare = raw.startsWith("{") ? raw.replace(/^\{|\}$/g, "") : unquote(raw);
+    if (!SECRET_KEY_NAME_RE.test(p.key) && !isTokenLike(safeDecode(bare))) continue;
     add(raw);
-    add(unquote(raw));
-    if (raw.startsWith("{")) add(raw.replace(/^\{|\}$/g, ""));
+    add(bare);
     const hash = raw.indexOf("#");
     if (hash > 0) add(raw.slice(0, hash));
   }
   try {
     const u = new URL(value.trim());
     if (u.password) add(u.password);
-    if (u.username && a.userinfo.length > 0) add(u.username);
-    for (const [, v] of u.searchParams) add(v);
+    for (const [k, v] of u.searchParams) if (SECRET_KEY_NAME_RE.test(k) || isTokenLike(v)) add(v);
   } catch { /* not WHATWG-parseable — the readings above do not need it */ }
   return [...out];
 }
@@ -375,72 +468,112 @@ export interface ConnectionAttr {
 
 /**
  * Scan source text for the opening tags of `<program>`, `<page>` and `<db>`
- * and return their connection attributes with exact value offsets. A small
- * attribute tokenizer, not a redaction pattern: quoted values honour `\`
- * escapes; unquoted values run to whitespace or `>`. Tags may span lines.
+ * and return their connection attributes with exact value offsets.
+ *
+ * s432 r2 — this text scan is the BACKUP to the tree (it is what the LSP and a
+ * watch-mode reprint rely on when the tree is absent or stale), so it must
+ * fail SAFE: a mis-read may only OVER-redact, never hide a value. It is the
+ * UNION of three independent readings of each opener:
+ *   1. an attribute tokenizer that skips an unquoted `{…}` / `${…}` value
+ *      balanced (so `on:load=${() => a > b}` does not end the tag at `>`);
+ *   2. the same tokenizer WITHOUT brace skipping (so a quote inside braces —
+ *      a regex `/"/`, a comment, an apostrophe — or an unterminated `${`
+ *      cannot run the scan past the real `db=`);
+ *   3. a plain pattern pass for `db=` / `src=` / `idempotency-store=` over
+ *      the text from the opener to the next `<` (no tokenizing at all).
+ * Quoted values honour `\` escapes; unquoted values run to whitespace or `>`.
+ * Tags may span lines.
  */
 export function scanConnectionAttrs(source: string): ConnectionAttr[] {
-  const out: ConnectionAttr[] = [];
-  if (typeof source !== "string" || source.length === 0) return out;
+  const all: ConnectionAttr[] = [];
+  if (typeof source !== "string" || source.length === 0) return all;
   const tagRe = /<\s*(program|page|db)(?=[\s>\/])/g;
   for (const tm of source.matchAll(tagRe)) {
     const element = tm[1];
-    const wanted = CONNECTION_ATTRS[element];
-    let i = (tm.index ?? 0) + tm[0].length;
-    const n = source.length;
-    for (;;) {
-      while (i < n && /\s/.test(source[i])) i++;
-      if (i >= n || source[i] === ">" || (source[i] === "/" && source[i + 1] === ">")) break;
-      const nameStart = i;
-      while (i < n && !/[\s=>]/.test(source[i]) && !(source[i] === "/" && source[i + 1] === ">")) i++;
-      const name = source.slice(nameStart, i);
-      if (name.length === 0) { i++; continue; }
-      let j = i;
-      while (j < n && /\s/.test(source[j])) j++;
-      if (source[j] !== "=") { continue; }
-      j++;
-      while (j < n && /\s/.test(source[j])) j++;
-      let vStart: number;
-      let vEnd: number;
-      const q = source[j];
-      if (q === '"' || q === "'" || q === "`") {
-        vStart = j + 1;
-        let k = vStart;
-        while (k < n && source[k] !== q) k += source[k] === "\\" ? 2 : 1;
-        vEnd = Math.min(k, n);
-        i = k + 1;
-      } else {
-        vStart = j;
-        let k = j;
-        // s432: an unquoted `${…}` / `{…}` value may hold spaces and `>`
-        // (`on:load=${() => x}`); skip it balanced so the scan does not end the
-        // tag early and miss a connection attribute that follows it.
-        if (source[k] === "{" || (source[k] === "$" && source[k + 1] === "{")) {
-          k = source[k] === "$" ? k + 1 : k;
-          let depth = 0;
-          while (k < n) {
-            const ch = source[k];
-            if (ch === '"' || ch === "'" || ch === "`") {
-              k++;
-              while (k < n && source[k] !== ch) k += source[k] === "\\" ? 2 : 1;
-              k++;
-              continue;
-            }
-            if (ch === "{") depth++;
-            else if (ch === "}") { depth--; if (depth === 0) { k++; break; } }
-            k++;
-          }
-        }
-        while (k < n && !/[\s>]/.test(source[k])) k++;
-        vEnd = k;
-        i = k;
-      }
-      if (wanted.includes(name.toLowerCase()) && vEnd > vStart) {
-        out.push({ element, name, value: source.slice(vStart, vEnd), start: vStart, end: vEnd });
-      }
-    }
+    const from = (tm.index ?? 0) + tm[0].length;
+    tokenizeOpener(source, from, element, true, all);
+    tokenizeOpener(source, from, element, false, all);
+    patternScanOpener(source, from, element, all);
+  }
+  // Dedupe (same span); keep the rest — overlapping readings are resolved by
+  // the consumer taking the widest.
+  const seen = new Set<string>();
+  const out: ConnectionAttr[] = [];
+  for (const a of all.sort((x, y) => x.start - y.start || y.end - x.end)) {
+    const key = `${a.start}:${a.end}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(a);
   }
   return out;
+}
+
+function tokenizeOpener(source: string, from: number, element: string, skipBraces: boolean, out: ConnectionAttr[]): void {
+  const wanted = CONNECTION_ATTRS[element];
+  const n = source.length;
+  let i = from;
+  for (;;) {
+    while (i < n && /\s/.test(source[i])) i++;
+    if (i >= n || source[i] === ">" || (source[i] === "/" && source[i + 1] === ">")) break;
+    const nameStart = i;
+    while (i < n && !/[\s=>]/.test(source[i]) && !(source[i] === "/" && source[i + 1] === ">")) i++;
+    const name = source.slice(nameStart, i);
+    if (name.length === 0) { i++; continue; }
+    let j = i;
+    while (j < n && /\s/.test(source[j])) j++;
+    if (source[j] !== "=") { continue; }
+    j++;
+    while (j < n && /\s/.test(source[j])) j++;
+    let vStart: number;
+    let vEnd: number;
+    const q = source[j];
+    if (q === '"' || q === "'" || q === "`") {
+      vStart = j + 1;
+      let k = vStart;
+      while (k < n && source[k] !== q) k += source[k] === "\\" ? 2 : 1;
+      vEnd = Math.min(k, n);
+      i = k + 1;
+    } else {
+      vStart = j;
+      let k = j;
+      if (skipBraces && (source[k] === "{" || (source[k] === "$" && source[k + 1] === "{"))) {
+        k = source[k] === "$" ? k + 1 : k;
+        let depth = 0;
+        while (k < n) {
+          const ch = source[k];
+          if (ch === '"' || ch === "'" || ch === "`") {
+            k++;
+            while (k < n && source[k] !== ch) k += source[k] === "\\" ? 2 : 1;
+            k++;
+            continue;
+          }
+          if (ch === "{") depth++;
+          else if (ch === "}") { depth--; if (depth === 0) { k++; break; } }
+          k++;
+        }
+      }
+      while (k < n && !/[\s>]/.test(source[k])) k++;
+      vEnd = k;
+      i = k;
+    }
+    if (wanted.includes(name.toLowerCase()) && vEnd > vStart) {
+      out.push({ element, name, value: source.slice(vStart, vEnd), start: vStart, end: vEnd });
+    }
+  }
+}
+
+function patternScanOpener(source: string, from: number, element: string, out: ConnectionAttr[]): void {
+  const wanted = CONNECTION_ATTRS[element];
+  const lt = source.indexOf("<", from);
+  const region = source.slice(from, lt < 0 ? source.length : lt);
+  const re = /(?<![A-Za-z0-9_:\-])([A-Za-z][A-Za-z0-9_\-]*)\s*=\s*(?:"((?:\\.|[^"\\])*)|'((?:\\.|[^'\\])*)|`((?:\\.|[^`\\])*)|([^\s>"'`]+))/dg;
+  for (const m of region.matchAll(re)) {
+    if (!wanted.includes(m[1].toLowerCase())) continue;
+    const ind = (m as any).indices as Array<[number, number] | undefined>;
+    const g = ind[2] ?? ind[3] ?? ind[4] ?? ind[5];
+    if (!g || g[1] <= g[0]) continue;
+    out.push({ element, name: m[1], value: region.slice(g[0], g[1]), start: from + g[0], end: from + g[1] });
+  }
 }
 
 /** Values only (for SecretRedactor.addValues). */
@@ -458,8 +591,18 @@ export function redactSourceText(source: string): string {
   if (attrs.length === 0) return source;
   let out = "";
   let i = 0;
-  for (const a of attrs.sort((x, y) => x.start - y.start)) {
-    if (a.start < i) continue;
+  // Readings may overlap (the scan is a union): take the widest at each start
+  // and redact the rest of an overlapping later reading positionally too.
+  for (const a of attrs.sort((x, y) => x.start - y.start || y.end - x.end)) {
+    if (a.end <= i) continue;
+    if (a.start < i) {
+      // Overlap: redact this reading's secret spans that lie past `i`.
+      const spans = secretSpans(a.value).map(([p, q]) => [a.start + p, a.start + q] as [number, number]);
+      const tail = applySpans(source, spans, i, a.end);
+      out += tail;
+      i = a.end;
+      continue;
+    }
     const shown = displayConnectionValue(a.value);
     out += source.slice(i, a.start) + shown;
     i = a.end;
@@ -479,8 +622,14 @@ function isStringAttrValue(v: any): boolean {
   return typeof v === "string" || (!!v && typeof v === "object" && v.kind === "string-literal");
 }
 
-function isAbsentAttrValue(v: any): boolean {
-  return v === null || v === undefined || (typeof v === "object" && v.kind === "absent");
+/**
+ * An UNQUOTED TEXT value: the parser read `db=postgres…` as a bare
+ * identifier. Not `db=${…}` (an expression) and not `db=@cfg` (a reactive
+ * reference) — those are deliberate forms, not a split connection string.
+ */
+function isUnquotedTextAttrValue(v: any): boolean {
+  return !!v && typeof v === "object" && v.kind === "variable-ref" &&
+    typeof v.name === "string" && !v.name.startsWith("@");
 }
 
 /**
@@ -495,8 +644,8 @@ function isAbsentAttrValue(v: any): boolean {
  * carry no `:` or `@`, and may be one character long).
  *
  * The rule is POSITIONAL, never a test of the name's shape: once a connection
- * attribute has a value that is neither a string nor absent (i.e. it was
- * written unquoted), every later attribute on the element whose value is not
+ * attribute has an unquoted TEXT value (a bare identifier — not `${…}`, not
+ * `@ref`), every later attribute on the element whose value is not
  * a string literal is a fragment. A real attribute after it that carries a
  * quoted value (`tables="users"`) is not.
  */
@@ -509,7 +658,7 @@ export function connectionFragmentAttrs(element: string, attrs: unknown): { via:
       if (!isStringAttrValue(a.value)) out.fragments.push(a);
       continue;
     }
-    if (isConnectionAttr(element, a.name) && !isStringAttrValue(a.value) && !isAbsentAttrValue(a.value)) {
+    if (isConnectionAttr(element, a.name) && isUnquotedTextAttrValue(a.value)) {
       out.via = a.name;
     }
   }
@@ -646,17 +795,19 @@ export class SecretRedactor {
 
   /** Redact a MESSAGE. Text containing no registered value is returned unchanged. */
   redact(text: string): string {
-    return this.applyForms(text, this.forms);
+    return this.applyForms(text, this.forms, true);
   }
 
-  private applyForms(text: string, forms: Array<[string, string]>): string {
+  private applyForms(text: string, forms: Array<[string, string]>, freeText: boolean): string {
     if (typeof text !== "string" || text.length === 0 || this.forms.length === 0) return text;
     let out = text;
     for (const [raw, shown] of forms) {
       if (out.includes(raw)) out = out.split(raw).join(shown);
     }
-    for (const s of this.longSecrets) {
-      if (out.includes(s)) out = out.split(s).join(REDACTED);
+    if (freeText) {
+      for (const s of this.longSecrets) {
+        if (out.includes(s)) out = out.split(s).join(REDACTED);
+      }
     }
     return out;
   }
@@ -665,13 +816,15 @@ export class SecretRedactor {
    * Redact a SOURCE excerpt. First by attribute SPAN (redactSourceText) — which
    * needs no registry, so it is right even when the file on disk changed after
    * the compile that registered its values (watch mode prints what it reads
-   * NOW). Then any other exact copy of a registered WHOLE value (a value pasted
-   * into a comment) — never a bare secret word, so code is not shredded, and
-   * never a credential FRAGMENT (s432: every `k=v` parameter is now a fragment,
-   * and `k=v` is ordinary code).
+   * NOW). Then any other exact copy of a registered WHOLE connection value (a
+   * value pasted into a comment) — a full connection string cannot collide
+   * with code. NO free-text replacement: never a secret word (LONG_SECRET_RULE
+   * — s432 r2: a registered `orders_service` shredded `SELECT id FROM
+   * orders_service` in frames) and never a credential FRAGMENT (`k=v` / `a:b`
+   * are ordinary code).
    */
   redactSource(text: string): string {
-    return this.applyForms(redactSourceText(text), this.wholeForms);
+    return this.applyForms(redactSourceText(text), this.wholeForms, false);
   }
 
   /** Redact every string field of a diagnostic object, in place (top level). */
