@@ -18237,10 +18237,14 @@ criterion 3 once ruled. found by: S432 redaction dev agent while enumerating sin
 
 **RESOLVED (S432, gift-wrapped for bryan's ruling).** Every CLI listener now goes through
 `compiler/src/commands/listen.js` `listen(config, host)`, which requires an explicit host. `scrml dev` (parent
-proxy) and `scrml serve` default to `127.0.0.1`; the `scrml dev` app CHILD always binds `127.0.0.1` (only the
-parent proxy dials it — pre-fix it too sat on `0.0.0.0` on an ephemeral port, un-proxied). `--host <addr>` /
-`--host=<addr>` opt in; bare `--host` = `0.0.0.0` (Vite's convention) and prints one "reachable from the network"
-line naming the LAN URLs. `127.0.0.1` not `"localhost"`: on Windows/Bun 1.3.14 `hostname:"localhost"` binds `[::1]`
-ONLY, refusing every client that dials `127.0.0.1`. Pinned by `compiler/tests/unit/cli-listen-host.test.js` (incl. a
-structural check that no other code-level `Bun.serve(` exists in compiler/src, and an empirical LAN-address probe
-with a 0.0.0.0 control) + `compiler/tests/commands/dev-serve-bind-host.test.js` (the real CLIs).
+proxy) and `scrml serve` default to loopback on BOTH families — `127.0.0.1` + `::1` on the same port, the `::1` twin
+best-effort (skipped silently without IPv6; one warning line if another process holds it). The `scrml dev` app
+CHILD always binds `127.0.0.1` only (only the parent proxy dials it, by IPv4 literal — pre-fix it too sat on
+`0.0.0.0` on an ephemeral port, un-proxied). `--host <addr>` / `--host=<addr>` opt in; bare `--host` = `0.0.0.0` +
+`::` (ipv6Only twin) and prints one "reachable from the network" line naming the LAN URLs. An unbindable host
+exits 1 naming the host and families tried (not Bun's "Is port 0 in use?" stack). Measured on Windows/Bun 1.3.14:
+`hostname:"localhost"` binds `[::1]` ONLY and `"127.0.0.1"` IPv4 only, hence the explicit pair; `::` is dual-stack
+by default so its pairing with `0.0.0.0` needs `ipv6Only:true`. Pinned by `compiler/tests/unit/cli-listen-host.test.js`
+(incl. a structural check that no other listener — `Bun.serve`/`Bun.listen` in any spelling, `createServer`, or an
+http/https/net/tls/http2/dgram import — exists in compiler/src, and an empirical LAN-address probe with a bare-`--host`
+control) + `compiler/tests/commands/dev-serve-bind-host.test.js` (the real CLIs).

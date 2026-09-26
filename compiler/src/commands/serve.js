@@ -15,7 +15,7 @@
  * Environment:
  *   SCRML_PORT  — port to listen on (default: 3100)
  *
- * Binds 127.0.0.1 by default (g-dev-server-binds-all-interfaces): `/compile`
+ * Binds 127.0.0.1 + ::1 by default (g-dev-server-binds-all-interfaces): `/compile`
  * reads and writes paths on this machine and `/shutdown` stops the server, so a
  * network-reachable compiler server is opt-in via `--host`.
  */
@@ -23,7 +23,7 @@
 import { compileScrml, scanDirectory } from "../api.js";
 import { resetVarCounter } from "../codegen/var-counter.js";
 import { resolve } from "path";
-import { listen, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
+import { listenOrExit, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -37,10 +37,11 @@ eliminate JIT warmup cost (~64ms) on every compilation request.
 
 Options:
   --port, -p <n>        HTTP port (default: 3100, or SCRML_PORT env var)
-  --host [addr]         Address to listen on (default: 127.0.0.1 — this machine
-                        only). Bare --host listens on every interface (0.0.0.0);
-                        anyone on the network can then compile, read and write
-                        files through it. --host=<addr> for a specific one.
+  --host [addr]         Address to listen on (default: 127.0.0.1 + ::1 — this
+                        machine only). Bare --host listens on every interface
+                        (0.0.0.0 + ::); anyone on the network can then compile,
+                        read and write files through it. --host=<addr> for a
+                        specific one.
   --verbose, -v         Log per-stage timing for each compilation
   --help, -h            Show this message
 
@@ -122,7 +123,7 @@ function cleanupBetweenCompilations() {
 export async function runServe(args) {
   const opts = parseArgs(args);
 
-  const server = listen({
+  const server = listenOrExit("scrml serve:", {
     port: opts.port,
     async fetch(req) {
       const url = new URL(req.url);

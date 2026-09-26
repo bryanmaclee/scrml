@@ -35,6 +35,9 @@ import {
   displayUrl,
   networkNotice,
   lanIPv4Addresses,
+  bindPlan,
+  ListenError,
+  _setIPv6AvailableForTest,
   DEFAULT_HOST,
   ALL_INTERFACES_HOST,
 } from "../../src/commands/listen.js";
@@ -155,11 +158,19 @@ describe("§4 loopback classification, display URL, network notice", () => {
       expect(isLoopbackHost(h)).toBe(false);
     }
   });
-  test("displayUrl keeps http://localhost:<port> for loopback + wildcard (harnesses parse it)", () => {
+  test("displayUrl prints localhost only for 127.0.0.1 / ::1 / localhost and wildcards (harnesses parse it)", () => {
     expect(displayUrl("127.0.0.1", 3000)).toBe("http://localhost:3000");
+    expect(displayUrl("::1", 3000)).toBe("http://localhost:3000");
+    expect(displayUrl("localhost", 3000)).toBe("http://localhost:3000");
     expect(displayUrl("0.0.0.0", 3000)).toBe("http://localhost:3000");
+    expect(displayUrl("::", 3000)).toBe("http://localhost:3000");
+  });
+  test("displayUrl prints any other address as itself, incl. other 127.x (F3)", () => {
+    expect(displayUrl("127.0.0.2", 3000)).toBe("http://127.0.0.2:3000");
+    expect(displayUrl("127.1.2.3", 3000)).toBe("http://127.1.2.3:3000");
     expect(displayUrl("192.168.1.20", 3000)).toBe("http://192.168.1.20:3000");
     expect(displayUrl("fe80::1", 3000)).toBe("http://[fe80::1]:3000");
+    expect(displayUrl("[fe80::1]", 3000)).toBe("http://[fe80::1]:3000");
   });
   test("no notice for a loopback bind", () => {
     expect(networkNotice("[dev]", "127.0.0.1", 3000)).toBeNull();
@@ -176,6 +187,7 @@ describe("§4 loopback classification, display URL, network notice", () => {
     };
     const n = networkNotice("[dev]", "0.0.0.0", 3000, ifaces);
     expect(n).toContain("reachable from the network");
+    expect(n).toContain("every interface (0.0.0.0 + ::)");
     expect(n).toContain("http://192.168.1.20:3000");
     expect(n).not.toContain("127.0.0.1");
     expect(n.includes("\n")).toBe(false);
@@ -200,13 +212,47 @@ describe("§5 listen() contract", () => {
   test("config.hostname is refused (one source of truth)", () => {
     expect(() => listen({ port: 0, hostname: "0.0.0.0", fetch: okFetch }, DEFAULT_HOST)).toThrow(/not config.hostname/);
   });
-  test("binds the given host", () => {
-    const s = listen({ port: 0, fetch: okFetch }, DEFAULT_HOST);
+  test("bindPlan: 127.0.0.1/localhost → +::1, 0.0.0.0 → +:: (ipv6Only), others exact", () => {
+    expect(bindPlan("127.0.0.1")).toEqual({ primary: "127.0.0.1", twin: { host: "::1", ipv6Only: false } });
+    expect(bindPlan("localhost")).toEqual({ primary: "127.0.0.1", twin: { host: "::1", ipv6Only: false } });
+    expect(bindPlan("0.0.0.0")).toEqual({ primary: "0.0.0.0", twin: { host: "::", ipv6Only: true } });
+    expect(bindPlan("192.168.1.20")).toEqual({ primary: "192.168.1.20", twin: null });
+    expect(bindPlan("[::1]")).toEqual({ primary: "::1", twin: null });
+  });
+  test("binds the given host; ipv6Twin:false opens exactly one socket", () => {
+    const s = listen({ port: 0, fetch: okFetch }, "127.0.0.1", { ipv6Twin: false });
     try {
       expect(s.hostname).toBe("127.0.0.1");
       expect(s.port).toBeGreaterThan(0);
+      expect(s.scrmlListeners).toBeUndefined();
     } finally {
       s.stop(true);
+    }
+  });
+});
+
+describe("§5b unbindable host → a ListenError naming the host (F2)", () => {
+  for (const host of ["192.168.99.99", "myhost.invalid", "0"]) {
+    test(`--host ${host}`, () => {
+      let err;
+      try { listen({ port: 0, fetch: okFetch }, host).stop(true); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(ListenError);
+      expect(err.code).toBe("E_SCRML_LISTEN");
+      expect(err.message).toContain(`host "${host}"`);
+      expect(err.message).toContain(`tried ${host}`);
+      expect(err.message).not.toContain("Is port 0 in use");
+    });
+  }
+  test("a taken port names host, port and both families tried", () => {
+    const hog = listen({ port: 0, fetch: okFetch }, "127.0.0.1", { ipv6Twin: false });
+    try {
+      let err;
+      try { listen({ port: hog.port, fetch: okFetch }, DEFAULT_HOST).stop(true); } catch (e) { err = e; }
+      expect(err).toBeInstanceOf(ListenError);
+      expect(err.message).toContain(`port ${hog.port}`);
+      expect(err.message).toContain("127.0.0.1 (IPv4; its IPv6 twin ::1");
+    } finally {
+      hog.stop(true);
     }
   });
 });
@@ -216,8 +262,23 @@ describe("§5 listen() contract", () => {
 // ---------------------------------------------------------------------------
 
 const LAN = lanIPv4Addresses();
+let HAS_V6 = false;
+try { const p = Bun.serve({ port: 0, hostname: "::1", fetch: okFetch }); p.stop(true); HAS_V6 = true; } catch { /* no IPv6 */ }
 
-describe("§6 empirical: the default listener is not on the network", () => {
+/** One raw HTTP/1.1 GET over TCP; resolves the full response text. */
+function rawGet(host, port) {
+  return new Promise((done, fail) => {
+    const sock = createConnection({ host, port }, () => {
+      sock.write("GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+    });
+    let buf = "";
+    sock.on("data", (d) => { buf += d; });
+    sock.on("end", () => done(buf));
+    sock.on("error", fail);
+  });
+}
+
+describe("§6 empirical: loopback on both families by default, never the network", () => {
   test("default bind accepts 127.0.0.1", async () => {
     const s = listen({ port: 0, fetch: okFetch }, DEFAULT_HOST);
     try {
@@ -227,13 +288,66 @@ describe("§6 empirical: the default listener is not on the network", () => {
     }
   });
 
-  test.skipIf(LAN.length === 0)("default bind REFUSES this machine's LAN address; the 0.0.0.0 control ACCEPTS it", async () => {
+  test.skipIf(!HAS_V6)("default bind ALSO accepts ::1 (F1); stop() closes both sockets", async () => {
+    const s = listen({ port: 0, fetch: okFetch }, DEFAULT_HOST);
+    const port = s.port;
+    expect(s.scrmlListeners.length).toBe(2);
+    expect(await tcpProbe("::1", port)).toBe("connected");
+    s.stop(true);
+    expect(await tcpProbe("127.0.0.1", port)).not.toBe("connected");
+    expect(await tcpProbe("::1", port)).not.toBe("connected");
+  });
+
+  test.skipIf(!HAS_V6)("the ::1 twin serves the same handler", async () => {
+    const s = listen({ port: 0, fetch: () => new Response("same-handler") }, DEFAULT_HOST);
+    try {
+      expect(await rawGet("::1", s.port)).toContain("same-handler");
+      expect(await rawGet("127.0.0.1", s.port)).toContain("same-handler");
+    } finally {
+      s.stop(true);
+    }
+  });
+
+  test.skipIf(!HAS_V6)("twin port taken by another process → one warning, IPv4 still served", async () => {
+    const hog = Bun.serve({ port: 0, hostname: "::1", fetch: okFetch });
+    const warnings = [];
+    let s;
+    try {
+      s = listen({ port: hog.port, fetch: okFetch }, DEFAULT_HOST, { warn: (m) => warnings.push(m) });
+      expect(await tcpProbe("127.0.0.1", s.port)).toBe("connected");
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain(`[::1]:${hog.port}`);
+    } finally {
+      s?.stop(true);
+      hog.stop(true);
+    }
+  });
+
+  test.skipIf(!HAS_V6)("no IPv6 on the machine → the twin is skipped silently", () => {
+    const hog = Bun.serve({ port: 0, hostname: "::1", fetch: okFetch });
+    const warnings = [];
+    _setIPv6AvailableForTest(false);
+    let s;
+    try {
+      s = listen({ port: hog.port, fetch: okFetch }, DEFAULT_HOST, { warn: (m) => warnings.push(m) });
+      expect(warnings).toEqual([]);
+      expect(s.scrmlListeners).toBeUndefined();
+    } finally {
+      _setIPv6AvailableForTest(undefined);
+      s?.stop(true);
+      hog.stop(true);
+    }
+  });
+
+  test.skipIf(LAN.length === 0)("default bind REFUSES this machine's LAN address; the bare --host control ACCEPTS it (and both loopbacks)", async () => {
     const lan = LAN[0];
     const control = listen({ port: 0, fetch: okFetch }, ALL_INTERFACES_HOST);
     try {
       // If the control cannot be reached on the LAN address, the probe cannot
       // see exposure at all and the negative result below would be meaningless.
       expect(await tcpProbe(lan, control.port)).toBe("connected");
+      expect(await tcpProbe("127.0.0.1", control.port)).toBe("connected");
+      if (HAS_V6) expect(await tcpProbe("::1", control.port)).toBe("connected");
     } finally {
       control.stop(true);
     }
@@ -245,17 +359,27 @@ describe("§6 empirical: the default listener is not on the network", () => {
     }
   });
 
-  test.skipIf(process.platform !== "win32")("Windows netstat: the default listener row is 127.0.0.1, never 0.0.0.0/[::]", () => {
-    const s = listen({ port: 0, fetch: okFetch }, DEFAULT_HOST);
-    try {
+  test.skipIf(process.platform !== "win32")("Windows netstat: default rows are 127.0.0.1 (+ [::1]), never a wildcard; bare --host rows are 0.0.0.0 + [::]", () => {
+    const rowsFor = (port) => {
       const out = Bun.spawnSync(["netstat", "-ano", "-p", "TCP"]).stdout.toString()
         + Bun.spawnSync(["netstat", "-ano", "-p", "TCPv6"]).stdout.toString();
-      const rows = out.split(/\r?\n/)
-        .filter((l) => /LISTENING/.test(l) && new RegExp(`:${s.port}\\s`).test(l))
-        .map((l) => l.trim().split(/\s+/)[1]);
-      expect(rows).toEqual([`127.0.0.1:${s.port}`]);
+      const re = new RegExp(`:${port}\\s`);
+      return out.split(/\r?\n/)
+        .filter((l) => /LISTENING/.test(l) && re.test(l))
+        .map((l) => l.trim().split(/\s+/)[1])
+        .sort();
+    };
+    const s = listen({ port: 0, fetch: okFetch }, DEFAULT_HOST);
+    try {
+      expect(rowsFor(s.port)).toEqual(HAS_V6 ? [`127.0.0.1:${s.port}`, `[::1]:${s.port}`] : [`127.0.0.1:${s.port}`]);
     } finally {
       s.stop(true);
+    }
+    const w = listen({ port: 0, fetch: okFetch }, ALL_INTERFACES_HOST);
+    try {
+      expect(rowsFor(w.port)).toEqual(HAS_V6 ? [`0.0.0.0:${w.port}`, `[::]:${w.port}`] : [`0.0.0.0:${w.port}`]);
+    } finally {
+      w.stop(true);
     }
   });
 });
@@ -273,41 +397,151 @@ function* walk(dir) {
   }
 }
 
-/** Real `Bun.serve(...)` / `globalThis.Bun.serve(...)` CALL expressions (not strings/comments). */
-function bunServeCalls(file) {
-  const raw = readFileSync(file, "utf8");
-  if (!raw.includes("Bun.serve")) return [];
-  const js = file.endsWith(".ts") ? new Bun.Transpiler({ loader: "ts" }).transformSync(raw) : raw;
-  const ast = acorn.parse(js, { ecmaVersion: "latest", sourceType: "module", locations: true, allowHashBang: true });
+const NET_MODULES = new Set(["http", "https", "net", "tls", "http2", "dgram"]);
+const isNetModule = (spec) => typeof spec === "string" && NET_MODULES.has(spec.replace(/^node:/, ""));
+const LISTENER_PROPS = new Set(["serve", "listen"]);
+const CREATE_SERVER = new Set(["createServer", "createSecureServer"]);
+
+/** Static string value of a property key / literal / no-substitution template, else null. */
+function staticName(n, computed) {
+  if (!n) return null;
+  if (!computed && n.type === "Identifier") return n.name;
+  if (n.type === "Literal" && typeof n.value === "string") return n.value;
+  if (n.type === "TemplateLiteral" && n.expressions.length === 0) return n.quasis[0].value.cooked;
+  return null;
+}
+
+/** `Bun`, `globalThis.Bun`, `globalThis["Bun"]`. */
+function isBunObject(o) {
+  if (!o) return false;
+  if (o.type === "Identifier") return o.name === "Bun";
+  if (o.type === "MemberExpression") return staticName(o.property, o.computed) === "Bun";
+  return false;
+}
+
+/** Cheap SOUND prefilter: every form the detector flags carries one of these tokens. */
+const PREFILTER = /\bBun\b|create(?:Secure)?Server|['"`](?:node:)?(?:https?|net|tls|http2|dgram)['"`]/;
+
+/**
+ * Every place a source can open a listening socket, as `line:kind`:
+ *   Bun.serve / Bun.listen — dotted, computed (`Bun["serve"]`), via
+ *     `globalThis.Bun`, as a call OR a bare reference (`const s = Bun.serve`);
+ *   `const { serve } = Bun` / `{ listen: l } = globalThis.Bun` destructuring;
+ *   createServer / createSecureServer — any reference (call, import specifier);
+ *   importing / requiring / dynamically importing http, https, net, tls, http2, dgram.
+ * Strings and comments are not code, so emitted-program text (`lines.push("Bun.serve({")`)
+ * is not flagged.
+ */
+function listenerSites(code, isTs = false) {
+  if (!PREFILTER.test(code)) return [];
+  const js = isTs ? new Bun.Transpiler({ loader: "ts" }).transformSync(code) : code;
+  const ast = acorn.parse(js, { ecmaVersion: "latest", sourceType: "module", locations: true, allowHashBang: true, allowReturnOutsideFunction: true });
   const hits = [];
+  const hit = (n, kind) => hits.push(`${n.loc.start.line}:${kind}`);
   const visit = (n) => {
     if (!n || typeof n.type !== "string") return;
-    if (n.type === "CallExpression") {
-      const c = n.callee;
-      if (c && c.type === "MemberExpression" && !c.computed && c.property.name === "serve") {
-        const o = c.object;
-        const isBun = (o.type === "Identifier" && o.name === "Bun")
-          || (o.type === "MemberExpression" && !o.computed && o.property.name === "Bun");
-        if (isBun) hits.push(n.loc.start.line);
+    switch (n.type) {
+      case "MemberExpression": {
+        const name = staticName(n.property, n.computed);
+        if (LISTENER_PROPS.has(name) && isBunObject(n.object)) hit(n, `Bun.${name}`);
+        if (CREATE_SERVER.has(name)) hit(n, name);
+        break;
       }
+      case "VariableDeclarator":
+      case "AssignmentExpression": {
+        const pat = n.type === "VariableDeclarator" ? n.id : n.left;
+        const src = n.type === "VariableDeclarator" ? n.init : n.right;
+        if (pat && pat.type === "ObjectPattern" && isBunObject(src)) {
+          for (const pr of pat.properties) {
+            const key = pr.type === "Property" ? staticName(pr.key, pr.computed) : null;
+            if (LISTENER_PROPS.has(key)) hit(pr, `destructured Bun.${key}`);
+          }
+        }
+        break;
+      }
+      case "Identifier":
+        if (CREATE_SERVER.has(n.name)) hit(n, n.name);
+        break;
+      case "ImportDeclaration":
+      case "ExportNamedDeclaration":
+      case "ExportAllDeclaration":
+        if (n.source && isNetModule(n.source.value)) hit(n, `import ${n.source.value}`);
+        break;
+      case "ImportExpression":
+        if (isNetModule(staticName(n.source, true))) hit(n, `import() ${staticName(n.source, true)}`);
+        break;
+      case "CallExpression":
+        if (n.callee.type === "Identifier" && n.callee.name === "require" && isNetModule(staticName(n.arguments[0], true))) {
+          hit(n, `require ${staticName(n.arguments[0], true)}`);
+        }
+        break;
     }
     for (const k of Object.keys(n)) {
+      if (k === "loc") continue;
       const v = n[k];
       if (Array.isArray(v)) v.forEach(visit);
       else if (v && typeof v === "object" && typeof v.type === "string") visit(v);
     }
   };
   visit(ast);
-  return hits;
+  return [...new Set(hits)];
 }
 
-describe("§7 every CLI Bun.serve goes through listen()", () => {
-  test("the only code-level Bun.serve( call in compiler/src is inside commands/listen.js", () => {
-    const found = [];
+describe("§7 every CLI listener goes through listen()", () => {
+  test("no listener site in compiler/src outside commands/listen.js (which has at least one)", () => {
+    const outside = [];
+    let inListen = 0;
     for (const f of walk(SRC)) {
-      for (const line of bunServeCalls(f)) found.push(`${relative(SRC, f).replace(/\\/g, "/")}:${line}`);
+      const rel = relative(SRC, f).replace(/\\/g, "/");
+      const sites = listenerSites(readFileSync(f, "utf8"), f.endsWith(".ts"));
+      if (rel === "commands/listen.js") inListen = sites.length;
+      else for (const s of sites) outside.push(`${rel}:${s}`);
     }
-    expect(found.length).toBe(1);
-    expect(found[0]).toMatch(/^commands\/listen\.js:\d+$/);
+    expect(outside).toEqual([]);
+    expect(inListen).toBeGreaterThan(0);
+  }, 60_000);
+
+  test("the detector catches every listener form (fixtures)", () => {
+    const caught = {
+      "Bun.serve({ port: 1 })": "Bun.serve",
+      "globalThis.Bun.serve({})": "Bun.serve",
+      'Bun["serve"]({})': "Bun.serve",
+      "Bun[`serve`]({})": "Bun.serve",
+      'globalThis["Bun"].serve({})': "Bun.serve",
+      "const s = Bun.serve; s({});": "Bun.serve",
+      "const { serve } = Bun; serve({});": "destructured Bun.serve",
+      "const { serve: sv } = globalThis.Bun;": "destructured Bun.serve",
+      "let l; ({ listen: l } = Bun);": "destructured Bun.listen",
+      "Bun.listen({ hostname: 'x', port: 1, socket: {} })": "Bun.listen",
+      'import { createServer } from "node:http";': "createServer",
+      'import http from "http"; http.createServer(() => {});': "createServer",
+      'import * as net from "node:net";': "import node:net",
+      'const https = require("https");': "require https",
+      'const m = await import("node:http2");': "import() node:http2",
+      "require('tls').createSecureServer({})": "createSecureServer",
+      'export { createServer } from "node:net";': "createServer",
+    };
+    for (const [code, kind] of Object.entries(caught)) {
+      const sites = listenerSites(code);
+      expect({ code, found: sites.some((s) => s.endsWith(`:${kind}`)) }).toEqual({ code, found: true });
+    }
+    // TypeScript source goes through the transpiler first.
+    // (line numbers are of the transpiled JS, so match the kind only).
+    const ts = listenerSites("const port: number = 1; Bun.serve({ port } as any);", true);
+    expect(ts.length).toBe(1);
+    expect(ts[0]).toMatch(/^\d+:Bun\.serve$/);
+  });
+
+  test("the detector ignores non-code mentions (emitted-program strings, comments, look-alikes)", () => {
+    const clean = [
+      'lines.push("const _scrml_server = Bun.serve({");',
+      "out.push(`Bun.serve({ port: ${p} })`);",
+      "// Bun.serve({ port }) in a comment",
+      "/* const { serve } = Bun */",
+      "export function createServerIR() { return {}; }",
+      "const x = Bun.file('a'); Bun.spawn(['x']);",
+      'const u = "http://localhost"; import("./net-helpers.js");',
+    ];
+    for (const code of clean) expect({ code, sites: listenerSites(code) }).toEqual({ code, sites: [] });
   });
 });

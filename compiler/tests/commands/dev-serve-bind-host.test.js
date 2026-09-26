@@ -10,6 +10,8 @@
  *   §2  `scrml dev --host`     → the LAN address connects; the one-line
  *                                "reachable from the network" notice is printed
  *   §3  `scrml serve` (default)→ 127.0.0.1 connects; the LAN address does not
+ *   §4  an unbindable `--host` exits 1 with a message naming the host
+ * (§1/§3 also require ::1 to connect when the machine has IPv6.)
  *
  * The LAN probes skip when the machine has no non-internal IPv4 address.
  * Commands tier: NOT in the pre-commit gate — run `bun test compiler/tests/commands`.
@@ -24,6 +26,8 @@ import { lanIPv4Addresses } from "../../src/commands/listen.js";
 
 const CLI = resolve(import.meta.dir, "../../bin/scrml.js");
 const LAN = lanIPv4Addresses();
+let HAS_V6 = false;
+try { const p = Bun.serve({ port: 0, hostname: "::1", fetch: () => new Response(null) }); p.stop(true); HAS_V6 = true; } catch { /* no IPv6 */ }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function tcpProbe(host, port, timeoutMs = 1500) {
@@ -85,11 +89,12 @@ afterEach(async () => {
 });
 
 describe("§1 scrml dev binds loopback by default", () => {
-  test("127.0.0.1 connects; LAN address does not; no network notice", async () => {
+  test("127.0.0.1 and ::1 connect; LAN address does not; no network notice", async () => {
     const { dir, entry } = devProject();
     live = new Cli(["dev", entry, "--port", "0", "--output", join(dir, "dist")], dir);
     const port = await live.port(DEV_RE);
     expect(await tcpProbe("127.0.0.1", port)).toBe("connected");
+    if (HAS_V6) expect(await tcpProbe("::1", port)).toBe("connected");
     if (LAN.length > 0) expect(await tcpProbe(LAN[0], port)).not.toBe("connected");
     expect(live.out).not.toContain("reachable from the network");
   }, 45_000);
@@ -115,7 +120,30 @@ describe("§3 scrml serve binds loopback by default", () => {
     live = new Cli(["serve", "--port", "0"], dir);
     const port = await live.port(SERVE_RE);
     expect(await tcpProbe("127.0.0.1", port)).toBe("connected");
+    if (HAS_V6) expect(await tcpProbe("::1", port)).toBe("connected");
     if (LAN.length > 0) expect(await tcpProbe(LAN[0], port)).not.toBe("connected");
     expect(live.out).not.toContain("reachable from the network");
   }, 30_000);
+});
+
+describe("§4 an unbindable --host fails with a message naming the host, not Bun's stack", () => {
+  test("scrml serve --host 192.168.99.99 → exit 1, names the host", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-serve-badhost-"));
+    live = new Cli(["serve", "--port", "0", "--host", "192.168.99.99"], dir);
+    const code = await live.proc.exited;
+    expect(code).toBe(1);
+    await waitFor(() => live.out.includes("Could not listen"), 5_000); // drain piped output
+    expect(live.out).toContain('Could not listen on host "192.168.99.99"');
+    expect(live.out).not.toContain("Is port 0 in use");
+  }, 30_000);
+
+  test("scrml dev --host=myhost.invalid → exit 1, names the host", async () => {
+    const { dir, entry } = devProject();
+    live = new Cli(["dev", entry, "--port", "0", "--host=myhost.invalid", "--output", join(dir, "dist")], dir);
+    const code = await live.proc.exited;
+    expect(code).toBe(1);
+    await waitFor(() => live.out.includes("Could not listen"), 5_000); // drain piped output
+    expect(live.out).toContain('[dev] Could not listen on host "myhost.invalid"');
+    expect(live.out).not.toContain("Is port 0 in use");
+  }, 45_000);
 });

@@ -8,27 +8,42 @@
  * `scrml serve` — whose `/compile` reads and writes arbitrary paths and whose
  * `/shutdown` stops it — were reachable from anyone on the network.
  *
- * Every CLI `Bun.serve` goes through `listen(config, host)`, which REQUIRES an
+ * Every CLI listener goes through `listen(config, host)`, which REQUIRES an
  * explicit host, so a future server cannot silently fall back to all-interfaces.
- * `compiler/tests/unit/cli-listen-host.test.js` pins that no other code-level
- * `Bun.serve(` call exists in compiler/src outside this module.
+ * `compiler/tests/unit/cli-listen-host.test.js` pins that no other listener
+ * call (`Bun.serve`, `Bun.listen`, `createServer`, …) exists in compiler/src.
  *
- * Why the default is the IPv4 literal `127.0.0.1` and not `"localhost"`:
- * measured with Bun 1.3.14 on Windows 11, `hostname: "localhost"` binds `[::1]`
- * ONLY — a client that dials `127.0.0.1` (curl scripts, the dev parent proxy,
- * any tool that pre-resolves to IPv4) gets ECONNREFUSED. `hostname: "127.0.0.1"`
- * binds IPv4 loopback, and `http://localhost:<port>` still connects because
- * clients fall back from `::1` to `127.0.0.1` (Bun fetch, browsers' happy
- * eyeballs). The printed URL therefore stays `http://localhost:<port>`.
+ * Address families (measured with Bun 1.3.14 on Windows 11):
+ *   - `hostname: "localhost"` binds `[::1]` ONLY — a client that dials
+ *     `127.0.0.1` gets ECONNREFUSED — so "localhost" is never handed to Bun.
+ *   - `hostname: "127.0.0.1"` binds IPv4 loopback only — a client that dials
+ *     `::1` (`curl -6`, Node with autoSelectFamily off) gets ECONNREFUSED.
+ *   - `hostname: "::"` + a second `0.0.0.0` on the same port → EADDRINUSE
+ *     (`::` is dual-stack by default); with `ipv6Only: true` the pair coexists.
+ * So an IPv4 loopback / wildcard address is served on BOTH families: the IPv4
+ * listener is required, its IPv6 twin (`::1` / `::` with ipv6Only) is
+ * best-effort — silently skipped on a machine without IPv6. `localhost` is an
+ * alias for `127.0.0.1` (+ `::1`), which is exactly what the printed
+ * `http://localhost:<port>` URL resolves to.
  */
 
 import { networkInterfaces } from "os";
 
-/** Default bind address for `scrml dev` / `scrml serve`: IPv4 loopback only. */
+/** Default bind address for `scrml dev` / `scrml serve`: loopback (+ its ::1 twin). */
 export const DEFAULT_HOST = "127.0.0.1";
 
-/** What a bare `--host` (no value) means — every interface (Vite's convention). */
+/** What a bare `--host` (no value) means — every interface (+ its :: twin). */
 export const ALL_INTERFACES_HOST = "0.0.0.0";
+
+/** Thrown when the REQUIRED listener cannot bind. `message` is user-facing. */
+export class ListenError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = "ListenError";
+    this.code = "E_SCRML_LISTEN";
+    if (cause) this.cause = cause;
+  }
+}
 
 /**
  * Parse a `--host` flag at `args[i]`. Accepted shapes:
@@ -64,6 +79,11 @@ export function parseHostFlag(args, i, isPositional = () => false) {
   return { host: peek, next: i + 1 };
 }
 
+/** Strip IPv6 brackets and lowercase. */
+function norm(host) {
+  return String(host).toLowerCase().replace(/^\[|\]$/g, "");
+}
+
 /**
  * True when `host` binds a loopback interface only (not reachable from the
  * network). Unknown names are treated as NOT loopback so the notice errs on
@@ -73,26 +93,31 @@ export function parseHostFlag(args, i, isPositional = () => false) {
  * @returns {boolean}
  */
 export function isLoopbackHost(host) {
-  const h = String(host).toLowerCase().replace(/^\[|\]$/g, "");
+  const h = norm(host);
   return h === "localhost" || h === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
 }
 
+function isWildcardHost(host) {
+  const h = norm(host);
+  return h === "0.0.0.0" || h === "::";
+}
+
 /**
- * The URL to print for a bound server. Loopback prints `localhost` (what a
- * user types, and what existing harnesses parse from the "Serving" line); an
- * all-interfaces bind also prints `localhost` for the local user (the network
- * URLs are in the notice line); any other explicit address prints itself.
+ * The URL to print for a bound server. `localhost` is printed only when it is
+ * exactly what was bound (127.0.0.1 / ::1 / localhost — the address pair
+ * `localhost` resolves to) or for a wildcard bind (the local user's URL; the
+ * network URLs are in the notice line). Any other address prints itself.
  *
  * @param {string} host
  * @param {number} port
  * @returns {string}
  */
 export function displayUrl(host, port) {
-  const h = String(host);
-  if (isLoopbackHost(h) || h === "0.0.0.0" || h === "::" || h === "[::]") {
+  const h = norm(host);
+  if (h === "127.0.0.1" || h === "::1" || h === "localhost" || isWildcardHost(h)) {
     return `http://localhost:${port}`;
   }
-  return `http://${h.includes(":") && !h.startsWith("[") ? `[${h}]` : h}:${port}`;
+  return `http://${h.includes(":") ? `[${h}]` : h}:${port}`;
 }
 
 /**
@@ -108,16 +133,21 @@ export function displayUrl(host, port) {
  */
 export function networkNotice(label, host, port, ifaces) {
   if (isLoopbackHost(host)) return null;
-  const h = String(host);
-  const wildcard = h === "0.0.0.0" || h === "::" || h === "[::]";
   let where;
-  if (wildcard) {
+  if (isWildcardHost(host)) {
     const urls = lanIPv4Addresses(ifaces).map((a) => `http://${a}:${port}`);
     where = urls.length > 0 ? urls.join(", ") : `every interface on port ${port}`;
   } else {
-    where = displayUrl(h, port);
+    where = displayUrl(host, port);
   }
-  return `${label} --host ${h}: reachable from the network at ${where} — anyone who can reach this machine can use it.`;
+  return `${label} listening on ${hostLabel(host)} — reachable from the network at ${where}. Anyone who can reach this machine can use it.`;
+}
+
+/** Human label for the bind address, naming the IPv6 twin when one is opened. */
+function hostLabel(host) {
+  const plan = bindPlan(host);
+  const addrs = plan.twin ? `${plan.primary} + ${plan.twin.host}` : plan.primary;
+  return isWildcardHost(host) ? `every interface (${addrs})` : addrs;
 }
 
 /**
@@ -142,21 +172,142 @@ export function lanIPv4Addresses(ifaces) {
 }
 
 /**
- * Open a listening server bound to `host`. The ONLY `Bun.serve` call site for
- * the CLI's own servers. `host` is required (no default here) so every caller
+ * Which sockets a host means: the primary address handed to Bun, and the
+ * best-effort IPv6 twin (null when the host has none).
+ *
+ * @param {string} host
+ * @returns {{ primary: string, twin: { host: string, ipv6Only: boolean } | null }}
+ */
+export function bindPlan(host) {
+  const h = norm(host);
+  if (h === "localhost" || h === "127.0.0.1") return { primary: "127.0.0.1", twin: { host: "::1", ipv6Only: false } };
+  if (h === "0.0.0.0") return { primary: "0.0.0.0", twin: { host: "::", ipv6Only: true } };
+  return { primary: h, twin: null };
+}
+
+/** Whether this machine can bind an IPv6 socket at all (probed once). */
+let ipv6Available;
+function canBindIPv6() {
+  if (ipv6Available !== undefined) return ipv6Available;
+  try {
+    const probe = Bun.serve({ port: 0, hostname: "::1", fetch: () => new Response(null) });
+    probe.stop(true);
+    ipv6Available = true;
+  } catch {
+    ipv6Available = false;
+  }
+  return ipv6Available;
+}
+
+/** Test hook: override the IPv6-availability probe (undefined = re-probe). */
+export function _setIPv6AvailableForTest(v) {
+  ipv6Available = v;
+}
+
+const TWIN_RETRIES = 5;
+
+/**
+ * Open a listening server bound to `host`. The ONLY listener call site for the
+ * CLI's own servers. `host` is required (no default here) so every caller
  * states which interface it binds; a config that already carries a `hostname`
  * is rejected so the two can never disagree.
  *
+ * `127.0.0.1` / `localhost` / `0.0.0.0` also open their IPv6 twin (`::1` / `::`)
+ * on the same port with the same handlers, best-effort (see the module doc).
+ * `opts.ipv6Twin: false` opts out (the dev app child, which only the parent
+ * proxy dials, by IPv4 literal). The returned server's `stop()` and
+ * `publish()` act on both sockets; `server.scrmlListeners` lists them.
+ *
  * @param {object} config   a Bun.serve config WITHOUT `hostname`
  * @param {string} host
+ * @param {{ ipv6Twin?: boolean, warn?: (msg: string) => void }} [opts]
  * @returns {import("bun").Server}
+ * @throws {ListenError} when the required (primary) socket cannot bind
  */
-export function listen(config, host) {
+export function listen(config, host, opts = {}) {
   if (typeof host !== "string" || host.length === 0) {
     throw new Error("listen(): an explicit host is required (use DEFAULT_HOST for loopback)");
   }
   if (config && Object.prototype.hasOwnProperty.call(config, "hostname")) {
     throw new Error("listen(): pass the host as listen()'s argument, not config.hostname");
   }
-  return Bun.serve({ ...config, hostname: host });
+  const warn = opts.warn ?? ((m) => console.warn(m));
+  const plan = bindPlan(host);
+  const twin = opts.ipv6Twin === false ? null : plan.twin;
+  const requestedPort = config.port ?? 0;
+
+  for (let attempt = 0; ; attempt++) {
+    let primary;
+    try {
+      primary = Bun.serve({ ...config, hostname: plan.primary });
+    } catch (err) {
+      throw new ListenError(listenFailureMessage(host, plan.primary, requestedPort, twin), err);
+    }
+    if (!twin) return primary;
+
+    let second = null;
+    try {
+      second = Bun.serve({ ...config, port: primary.port, hostname: twin.host, ipv6Only: twin.ipv6Only });
+    } catch {
+      if (!canBindIPv6()) return primary; // no IPv6 on this machine — IPv4 alone is complete
+      if (requestedPort === 0 && attempt < TWIN_RETRIES) {
+        // An ephemeral port free on IPv4 but taken on IPv6 — pick another pair.
+        primary.stop(true);
+        continue;
+      }
+      warn(
+        `[scrml] listening on ${plan.primary}:${primary.port} only — could not also listen on ` +
+        `[${twin.host}]:${primary.port} (in use by another process?). http://localhost:${primary.port} ` +
+        `may reach that process over IPv6; use http://127.0.0.1:${primary.port}.`,
+      );
+      return primary;
+    }
+    return joinListeners(primary, second);
+  }
+}
+
+/** Make `primary` act for both sockets: stop() closes both, publish() reaches both. */
+function joinListeners(primary, second) {
+  const stop1 = primary.stop.bind(primary);
+  const publish1 = primary.publish.bind(primary);
+  primary.stop = (closeActive) => {
+    try { second.stop(closeActive); } catch { /* already stopped */ }
+    return stop1(closeActive);
+  };
+  primary.publish = (...a) => {
+    try { second.publish(...a); } catch { /* no subscribers there */ }
+    return publish1(...a);
+  };
+  primary.scrmlListeners = [primary, second];
+  return primary;
+}
+
+function listenFailureMessage(host, primary, port, twin) {
+  const families = twin ? `${primary} (IPv4; its IPv6 twin ${twin.host} was not reached)` : primary;
+  const portText = port === 0 ? "an ephemeral port" : `port ${port}`;
+  return (
+    `Could not listen on host "${host}" at ${portText} — tried ${families}. ` +
+    `The address is not one of this machine's, the name does not resolve, or the port is already in use. ` +
+    `Use --host with an address this machine owns (bare --host = every interface), or pick another --port.`
+  );
+}
+
+/**
+ * `listen()` for a CLI entry point: a ListenError prints its message (naming
+ * the host, port and address families tried) and exits 1 instead of surfacing
+ * Bun's raw "Is port 0 in use?" stack.
+ *
+ * @param {string} label   e.g. "[dev]" or "scrml serve:"
+ * @param {object} config
+ * @param {string} host
+ * @param {Parameters<typeof listen>[2]} [opts]
+ */
+export function listenOrExit(label, config, host, opts) {
+  try {
+    return listen(config, host, opts);
+  } catch (err) {
+    if (!(err instanceof ListenError)) throw err;
+    console.error(`${label} ${err.message}`);
+    process.exit(1);
+  }
 }

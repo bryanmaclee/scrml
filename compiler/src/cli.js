@@ -66,8 +66,8 @@ Options (compile / dev):
 
 Options (dev):
   --port <n>            HTTP port for dev server (default: 3000)
-  --host [addr]         Listen address (default: 127.0.0.1, this machine only);
-                        bare --host = every interface (0.0.0.0, LAN-reachable)
+  --host [addr]         Listen address (default: 127.0.0.1 + ::1, this machine only);
+                        bare --host = every interface (0.0.0.0 + ::, LAN-reachable)
 
 Options (build):
   --output <dir>        Output directory (default: dist/ next to input)
@@ -76,7 +76,7 @@ Options (build):
 
 Options (serve):
   --port <n>            HTTP port for compiler server (default: 3100, or SCRML_PORT env)
-  --host [addr]         Listen address (default: 127.0.0.1); bare --host = 0.0.0.0
+  --host [addr]         Listen address (default: 127.0.0.1 + ::1); bare --host = 0.0.0.0 + ::
   --verbose, -v         Log per-stage timing for each compilation
 
 Options (migrate):

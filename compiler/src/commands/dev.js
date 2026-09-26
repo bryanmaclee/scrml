@@ -30,7 +30,7 @@ import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
-import { listen, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
+import { listen, listenOrExit, parseHostFlag, networkNotice, displayUrl, DEFAULT_HOST } from "./listen.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -49,11 +49,12 @@ Arguments:
 Options:
   --output, -o <dir>      Output directory (default: dist/ next to input)
   --port, -p <n>          HTTP port for dev server (default: 3000)
-  --host [addr]           Address to listen on (default: 127.0.0.1 — this machine
-                          only). Bare --host listens on every interface (0.0.0.0),
-                          e.g. to open the app from a phone on your LAN; the dev
-                          server and its compile-error page are then reachable
-                          by anyone on the network. --host=<addr> for a specific one.
+  --host [addr]           Address to listen on (default: 127.0.0.1 + ::1 — this
+                          machine only). Bare --host listens on every interface
+                          (0.0.0.0 + ::), e.g. to open the app from a phone on
+                          your LAN; the dev server and its compile-error page are
+                          then reachable by anyone on the network. --host=<addr>
+                          for a specific one; 127.0.0.1 / 0.0.0.0 also open ::1 / ::.
   --idle-timeout <n>      Bun.serve idleTimeout in seconds (default: 120; raises
                           the 10s default so long data-layer routes finish)
   --verbose, -v           Show per-stage timing and counts
@@ -1380,10 +1381,10 @@ export function launchingProcessGone(launchPpid) {
  */
 export async function runDevChildServer(serveDir, opts) {
   await loadServerRoutes(serveDir);
-  // The child is INTERNAL: only the parent proxy (which dials 127.0.0.1) talks to
-  // it, so it binds loopback regardless of `--host` — the browser-facing parent
-  // is the only listener `--host` ever exposes.
-  const server = listen(buildServeConfig({ ...opts, port: 0 }, serveDir), DEFAULT_HOST);
+  // The child is INTERNAL: only the parent proxy (which dials the 127.0.0.1
+  // literal) talks to it, so it binds IPv4 loopback only, regardless of
+  // `--host` — the browser-facing parent is the only listener `--host` exposes.
+  const server = listen(buildServeConfig({ ...opts, port: 0 }, serveDir), "127.0.0.1", { ipv6Twin: false });
   // C18 (§38.6): channel `broadcast()` runs in THIS child; publishing on the
   // child server reaches the parent's upstream proxy socket, which forwards to
   // the browser — so realtime survives the proxy.
@@ -1673,7 +1674,7 @@ export async function runDev(args) {
   // hot-reload SSE stream survives every child respawn); everything else is
   // reverse-proxied to the current app child.
   const host = opts.host ?? DEFAULT_HOST;
-  let server = listen({
+  let server = listenOrExit("[dev]", {
     port: opts.port,
     idleTimeout: opts.idleTimeout ?? 120,
     async fetch(req, srv) {
