@@ -1,0 +1,28 @@
+${
+    type Phase:enum = { Off, On, Busy }
+    type Kind:enum = { X, Y }
+}
+<k>: Kind = .X
+<engine for=Phase initial=.On>
+    <Off rule=.On>
+        <button id="on" onclick=${@phase = .On}>On</>
+    </>
+    <On rule=.Off>
+        <match for=Kind on=@k>
+            <X><p id="x">X</p></>
+            <Y><p id="y">Y</p></>
+        </match>
+        <button id="off" onclick=${@phase = .Off}>Off</>
+    </>
+    <Busy rule=.Off>
+        <div>
+            <match for=Kind on=@k>
+                <X><p>busy X</p></X>
+                <Y><p>busy Y</p></Y>
+            </match>
+        </div>
+    </>
+</>
+<program>
+<p id="phase">Phase: ${@phase}</>
+</program>

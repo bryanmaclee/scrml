@@ -1,0 +1,8 @@
+// §6.7.4 EC-1 — a `when` dep-list entry naming a `const <name>` derived cell.
+<program>
+  <p> = 1
+  <log> = ""
+  const <d> = @p * 2
+  when @d changes { @log = @log + @d + ";" }
+  <p>${@log}</p>
+</program>
