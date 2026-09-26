@@ -2,10 +2,9 @@
  * native-lex-regex-after-statement-closer.test.js — S432 F1.
  *
  * The native lexer decides regex-vs-division from the previous token, and a
- * `)` / `}` read as a VALUE closer makes the next `/` a division. Two closers
- * are not value closers: the `)` of a control-statement head (`if (…)`,
- * `for (…)`, `while (…)`) and the `}` of a statement block — a statement
- * follows each, so a `/` after them opens a regex. Reading
+ * `)` read as a VALUE closer makes the next `/` a division. The `)` of a
+ * control-statement head (`if (…)`, `for (…)`, `while (…)`) is not a value
+ * closer — a statement follows it, so a `/` after it opens a regex. Reading
  * `if (s) /"/.test(s)` as division opened a phantom string at the `"`,
  * desynchronised the rest of the file, and fired E-CLASS-NOT-IN-SCRML inside
  * a later STRING LITERAL (`const msg = "class Foo { }"`) — in the DEFAULT
@@ -62,9 +61,6 @@ describe("lexer — a `/` after a statement closer is a regex", () => {
     ["for await (…)", "for await (const x of xs) /\"/.test(x)"],
     ["while (s)", "while (s) /\"/.test(s)"],
     ["else if (b)", "if (a) { b = 1 } else if (b) /\"/.test(b)"],
-    ["block `}` then a regex statement", "if (s) { s = 1 }\n/\"/.test(s)"],
-    ["function body `}` then a regex statement", "function f(s) { return s }\n/\"/.test(s)"],
-    ["arrow body `}` then a regex statement", "const g = () => { }\n/\"/.test(s)"],
     ["do { } while (c)", "do { s = 0 } while (s) /\"/.test(s)"],
   ];
   for (const [name, code] of REGEX) {
@@ -124,14 +120,10 @@ describe("no E-CLASS-NOT-IN-SCRML inside a later string (both pipelines)", () =>
     });
   }
 
-  // A regex statement after a statement BLOCK's `}`: the native pipeline is
-  // clean. The default pipeline still reports here, through its fallback,
-  // because its OWN front-end (tokenizer.ts isRegexContext) reads that `/` as
-  // division and hands acorn the string's bytes as code — a pre-existing
-  // default-tokenizer defect (it also space-pads the regex in the emitted JS),
-  // outside this family; see the S432 fix report.
-  test("scrml-native: block `}` then a regex statement", () => {
-    const logic = `  function f(s) {\n    if (s) { s = 1 }\n    /"/.test(s)\n    return 1\n  }`;
-    expect(hits(prog(logic + TAIL), "scrml-native")).toEqual([]);
-  });
+  // NOT covered, deliberately: a regex statement after a statement BLOCK's
+  // `}` (`if (s) { }⏎/"/.test(s)`). Every lexer in the repo reads that `/` as
+  // division — this one, self-host-v2/lex.scrml (its slice-4b parity corpus
+  // pins `if (a) {}⏎/re/g` as division) and the default tokenizer.ts (which
+  // also space-pads the regex in the emitted JS). A coordinated fix across
+  // all of them; see the S432 fix report.
 });
