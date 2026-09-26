@@ -1,0 +1,19 @@
+{
+  "id": "engine-match-in-state-child-warns",
+  "description": "A block <match> inside an engine state-child — once with </> arm closers directly in <On>, once with named </X> arm closers inside a <div> in <Busy>. Both spellings get W-ENGINE-MATCH-IN-STATE-CHILD (one each): the match renders when its state-child is on screen at page load, but is blank on every later entry until its on= value changes. The warning names the known limitation without deciding the open (A) refuse / (B) support ruling on g-nested-block-match-in-dispatched-arm-silently-drops. No state-child diagnostic fires (the </> spelling used to mis-parse as a false E-ENGINE-STATE-CHILD-MISSING). The runtime half pins only the page-load render, which is correct under either ruling.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/engine-statechild-closer-stack.test.js",
+  "spec": "§51.0.B",
+  "rationale": "§51.0.B a state-child body is markup rendered when the engine is in that variant; the engine has all three state-children, so no state-child diagnostic fires. §34 W-ENGINE-MATCH-IN-STATE-CHILD is a Warning fired once per block <match> in a state-child body. At page load the engine is in .On and @k is .X, so the X arm is on screen.",
+  "expect": {
+    "codes": ["W-ENGINE-MATCH-IN-STATE-CHILD"],
+    "notCodes": ["E-ENGINE-STATE-CHILD-MISSING", "E-ENGINE-STATE-CHILD-INVALID-VARIANT"],
+    "severity": { "W-ENGINE-MATCH-IN-STATE-CHILD": "warning" },
+    "codeCounts": { "W-ENGINE-MATCH-IN-STATE-CHILD": 2 },
+    "state": { "phase": "On" },
+    "domAnchored": [
+      { "selector": "#phase", "text": "Phase: On" },
+      { "selector": "#x", "text": "X" }
+    ]
+  }
+}
