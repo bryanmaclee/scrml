@@ -30,6 +30,7 @@
 import type { Span, FileAST, MarkupNode } from "../types/ast.ts";
 import { getElementAttrSchema, isOpenAttrPrefix } from "../attribute-registry.js";
 import { walkFileAst } from "./ast-walk.ts";
+import { isConnectionAttr } from "../diagnostic-secrets.ts";
 
 // ---------------------------------------------------------------------------
 // Diagnostic shape
@@ -84,9 +85,29 @@ function validateMarkup(
   const schema = getElementAttrSchema(tag);
   if (!schema) return;
 
+  // s432 F3 — an UNQUOTED connection value (`<program db=postgres://u:p/w@h>`)
+  // is mis-tokenized: only its leading identifier is the value, and the rest
+  // of it — the userinfo, i.e. the password — becomes a run of attribute NAMES
+  // (`u:p`, `w@h`, ...). Echoing those names prints the password in pieces no
+  // value-based redactor can recognise (a middle piece need carry no `:` or
+  // `@`). So once a connection attribute on this element has a non-string
+  // value, every UNRECOGNIZED attribute after it is reported without its name.
+  // Positional, not a name-shape test: a fragment may look like any ordinary
+  // name. The cost: a genuinely unknown attribute written after an unquoted
+  // `db=` loses its name in W-ATTR-001 — on an element that already fails to
+  // compile (the unquoted value is E-SCOPE-001).
+  let afterUnquotedConnection: string | null = null;
+
   for (const attr of node.attrs ?? []) {
     if (!attr || !attr.name) continue;
     const name = attr.name;
+
+    if (afterUnquotedConnection === null && isConnectionAttr(tag, name)) {
+      const v = attr.value as { kind?: string } | string | null | undefined;
+      const isString = typeof v === "string" || (!!v && typeof v === "object" && v.kind === "string-literal");
+      const isAbsent = !v || (typeof v === "object" && v.kind === "absent");
+      if (!isString && !isAbsent) afterUnquotedConnection = name;
+    }
 
     // Open-prefix attributes (bind:, on:, data-, aria-, etc.) are always
     // allowed — they are runtime-special forms with open-ended names.
@@ -95,6 +116,20 @@ function validateMarkup(
     const spec = schema.allowedAttrs.get(name);
     if (!spec) {
       const span = attr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+      if (afterUnquotedConnection !== null) {
+        warnings.push({
+          code: "W-ATTR-001",
+          message:
+            `W-ATTR-001: An attribute (name <redacted>) is not recognized on \`<${tag}>\`. ` +
+            `It follows the unquoted \`${afterUnquotedConnection}=\` value and is most likely a ` +
+            `fragment of it: an unquoted attribute value is read only up to the end of its leading ` +
+            `identifier, so the rest of a connection string (including any password) is read as ` +
+            `further attribute names. Quote the value: \`${afterUnquotedConnection}="…"\`.`,
+          span,
+          severity: "warning",
+        });
+        continue;
+      }
       warnings.push({
         code: "W-ATTR-001",
         message:

@@ -10,8 +10,9 @@
  *      `<img src>` is not a connection) — from the tree AND from a small
  *      opening-tag scanner over the raw source (`scanConnectionAttrs`), which
  *      also records WHERE each value sits;
- *   2. computes each value's DISPLAY form POSITIONALLY: the URI userinfo span
- *      and every password-parameter value span become `<redacted>`; nothing
+ *   2. computes each value's DISPLAY form POSITIONALLY: the userinfo span and
+ *      every parameter-value span become `<redacted>` — found WITHOUT parsing
+ *      the value or naming a scheme or key (s432; see secretSpans); nothing
  *      else in the value changes (so `postgres://postgres:postgres@h` displays
  *      as `postgres://<redacted>@h`, not `<redacted>://…`);
  *   3. in a MESSAGE, replaces each WHOLE value (and the sub-forms a message
@@ -34,13 +35,160 @@ import { classifyDbTarget } from "./db-target.ts";
 
 const REDACTED = "<redacted>";
 
-/** Keys whose value is a password in a URI query or a libpq-style keyword string. */
-const PASSWORD_KEYS = ["password", "pass", "pwd", "passwd", "sslpassword"];
-const PASSWORD_PARAM_RE = new RegExp(
-  `(?:^|[?&;\\s])(?:${PASSWORD_KEYS.join("|")})\\s*(?:=|%3[dD])\\s*` +
-  `('(?:\\\\.|[^'])*'|"(?:\\\\.|[^"])*"|[^&;\\s]*)`,
-  "gid",
-);
+/**
+ * s432 — SHAPE-INDEPENDENT secret spans.
+ *
+ * The round-5 spans recognised a DENYLIST of well-formed shapes: userinfo only
+ * after a leading, well-formed `scheme://`, and only the values of five named
+ * password keys. Every malformed value a diagnostic exists to report fell
+ * outside it (`postgres:/u:p@h`, `jdbc:postgresql://u:p@h`, a zero-width char
+ * before the scheme, `?authToken=`, `?token=`, `?%70assword=`), and those are
+ * exactly the values that reach E-PA-002 / E-SQL-005. So the spans are now
+ * computed without parsing the value and without naming any scheme or key:
+ *
+ *   - USERINFO: the run up to the LAST `@` in the value, starting after the
+ *     first `//` (or, with no `//`, after any leading `scheme:` tokens and
+ *     slashes), is secret when it holds a `:` (a user:password pair — a
+ *     drive-letter colon does not count) or, after a `//`, holds no path
+ *     separator (a user-only userinfo, which is routinely a bearer token:
+ *     `redis://TOKEN@h`, `https://ghp_…@host`). A plain file path containing
+ *     `@` (`./data/me@home.db`, `C:\x\a@b.db`, `sqlite:///abs/a@b.db`) is NOT
+ *     userinfo and stays copy-pasteable.
+ *   - PARAMETERS: the VALUE of EVERY `key=value` pair that starts the value or
+ *     follows `?` `&` `;` `,` or whitespace — URI query, `;k=v` JDBC/ADO forms
+ *     and libpq keyword DSNs alike; quoted (`'…'`, `"…"`, `{…}`, unterminated
+ *     runs to the end) or bare. A diagnostic never needs a parameter's value;
+ *     the NAME stays visible.
+ *   - Both are computed on TWO views of the value and UNIONED (over-redaction
+ *     is the safe direction): the value with invisible characters (zero-width,
+ *     bidi controls, BOM, soft hyphen, variation selectors) removed, and that
+ *     view with ASCII `%XX` escapes decoded (`%3F` `%3D` `%40` used as
+ *     structure). Every span maps back to the ORIGINAL offsets.
+ *
+ * Scheme, host, port, path and parameter names are left visible.
+ */
+const INVISIBLE_CHAR_RE = /[\u00AD\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180F\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/;
+
+/**
+ * Parameter pairs: a key (any run of name characters, percent-escapes
+ * allowed) after a separator or the start, `=`, then a value. Group 1 is the
+ * key, group 2 the value.
+ */
+const PARAM_RE =
+  /(?:^|[?&;,\s])\s*([A-Za-z0-9_.~%+\-]+)\s*=\s*((?:'(?:\\.|[^'\\])*(?:'|$)|"(?:\\.|[^"\\])*(?:"|$)|\{[^}]*(?:\}|$))?[^&;\s]*)/gd;
+
+interface View {
+  text: string;
+  /** map[i] = [origStart, origEnd) of normalized char i. */
+  map: Array<[number, number]>;
+}
+
+function buildView(value: string, decodePercent: boolean): View {
+  let text = "";
+  const map: Array<[number, number]> = [];
+  let i = 0;
+  while (i < value.length) {
+    const cp = value.codePointAt(i)!;
+    const ch = String.fromCodePoint(cp);
+    const w = ch.length;
+    if (INVISIBLE_CHAR_RE.test(ch)) { i += w; continue; }
+    if (decodePercent && ch === "%" && /^[0-9A-Fa-f]{2}$/.test(value.slice(i + 1, i + 3))) {
+      const byte = parseInt(value.slice(i + 1, i + 3), 16);
+      if (byte < 0x80) {
+        text += String.fromCharCode(byte);
+        map.push([i, i + 3]);
+        i += 3;
+        continue;
+      }
+    }
+    text += ch;
+    for (let k = 0; k < w; k++) map.push([i, i + w]);
+    i += w;
+  }
+  return { text, map };
+}
+
+/** Map a [from, to) span of a view back to original offsets. */
+function toOriginal(view: View, from: number, to: number): [number, number] | null {
+  if (to <= from) return null;
+  return [view.map[from][0], view.map[to - 1][1]];
+}
+
+/** A `:` that is not a drive-letter colon (`C:\`, `/C:/`). */
+function hasCredentialColon(segment: string): boolean {
+  return segment.replace(/(^|[\/\\])[A-Za-z]:(?=[\/\\]|$)/g, "$1").includes(":");
+}
+
+/** The userinfo span of a view (view offsets), or null. */
+function userinfoSpanInView(t: string): [number, number] | null {
+  const at = t.lastIndexOf("@");
+  if (at <= 0) return null;
+  const head = t.slice(0, at);
+  let start: number;
+  let authority = false;
+  const dbl = head.search(/[\/\\]{2}/);
+  if (dbl >= 0) {
+    start = dbl + 2;
+    authority = true;
+  } else {
+    let s = 0;
+    while (s < head.length && /\s/.test(head[s])) s++;
+    for (;;) {
+      const m = head.slice(s).match(/^[A-Za-z][A-Za-z0-9+.\-]*:/);
+      if (!m) break;
+      // A drive letter (`C:\` / `C:/`) is a path, not a scheme or a user.
+      if (m[0].length === 2 && /[\/\\]/.test(head[s + 2] ?? "")) break;
+      const rest = head.slice(s + m[0].length);
+      // Strip a scheme token only when what follows it is still a
+      // `user:password` pair or plainly a path — never the user itself.
+      if (hasCredentialColon(rest) || /^[\/\\.~]/.test(rest)) s += m[0].length;
+      else break;
+    }
+    while (s < head.length && /[\/\\]/.test(head[s])) s++;
+    start = s;
+  }
+  const segment = head.slice(start);
+  if (segment.length === 0) return null;
+  const isUserinfo = hasCredentialColon(segment) || (authority && !/[\/\\]/.test(segment));
+  return isUserinfo ? [start, at] : null;
+}
+
+interface ParamSpan {
+  /** key start .. value end (original offsets). */
+  whole: [number, number];
+  /** the value (original offsets). */
+  value: [number, number];
+}
+
+interface ValueAnalysis {
+  userinfo: Array<[number, number]>;
+  params: ParamSpan[];
+}
+
+/** Userinfo and parameter spans of a connection value (original offsets), both views. */
+function analyzeConnectionValue(value: string): ValueAnalysis {
+  const out: ValueAnalysis = { userinfo: [], params: [] };
+  if (typeof value !== "string" || value.length === 0) return out;
+  const views = [buildView(value, false)];
+  if (value.includes("%")) views.push(buildView(value, true));
+  for (const view of views) {
+    const ui = userinfoSpanInView(view.text);
+    if (ui) {
+      const o = toOriginal(view, ui[0], ui[1]);
+      if (o) out.userinfo.push(o);
+    }
+    for (const pm of view.text.matchAll(PARAM_RE)) {
+      const ind = (pm as any).indices as Array<[number, number] | undefined>;
+      const k = ind?.[1];
+      const v = ind?.[2];
+      if (!k || !v || v[1] <= v[0]) continue;
+      const ov = toOriginal(view, v[0], v[1]);
+      const ow = toOriginal(view, k[0], v[1]);
+      if (ov && ow) out.params.push({ whole: ow, value: ov });
+    }
+  }
+  return out;
+}
 
 /**
  * LONG_SECRET_RULE — the only case in which a secret is replaced on its own,
@@ -73,25 +221,15 @@ function unquote(s: string): string {
 }
 
 /**
- * The spans inside `value` that are secret: the URI userinfo (user AND
- * password — the whole run from after `scheme://` to the LAST `@`, so an
- * unencoded `@`/`/`/`#` in a password is covered) and each password
- * parameter's value (quoted values whole; `#` kept in an unquoted value).
- * Returned sorted and merged.
+ * The spans inside `value` that are secret (see "SHAPE-INDEPENDENT secret
+ * spans" above): the userinfo (user AND password — the whole run to the LAST
+ * `@`, so an unencoded `@`/`/`/`#` in a password is covered) and EVERY
+ * parameter's value. Returned sorted and merged, in original offsets.
  */
 export function secretSpans(value: string): Array<[number, number]> {
   if (typeof value !== "string" || value.length === 0) return [];
-  const spans: Array<[number, number]> = [];
-  const m = value.match(/^\s*[a-z][a-z0-9+.\-]*:\/\//i);
-  if (m) {
-    const start = m[0].length;
-    const at = value.lastIndexOf("@");
-    if (at > start) spans.push([start, at]);
-  }
-  for (const pm of value.matchAll(PASSWORD_PARAM_RE)) {
-    const idx = (pm as any).indices?.[1] as [number, number] | undefined;
-    if (idx && idx[1] > idx[0]) spans.push([idx[0], idx[1]]);
-  }
+  const a = analyzeConnectionValue(value);
+  const spans: Array<[number, number]> = [...a.userinfo, ...a.params.map((p) => p.value)];
   spans.sort((a, b) => a[0] - b[0]);
   const merged: Array<[number, number]> = [];
   for (const s of spans) {
@@ -131,43 +269,38 @@ export function displayConnectionValue(value: string): string {
  * The substrings of `value` a diagnostic may echo, each paired with its
  * display form: the value itself, its trimmed form, and (for a `sqlite:`
  * value) the path after the prefix — the form a resolved-path message
- * contains. Only forms that actually carry a secret are returned.
+ * contains — plus the self-anchored credential FRAGMENTS (`fragment: true`).
+ * Only forms that actually carry a secret are returned.
  */
-function echoForms(value: string): Array<[string, string]> {
+function echoForms(value: string): Array<{ raw: string; shown: string; fragment: boolean }> {
   const spans = secretSpans(value);
   if (spans.length === 0) return [];
   const lead = value.length - value.trimStart().length;
   const end = value.trimEnd().length;
-  const cuts: Array<[number, number]> = [[0, value.length], [lead, end]];
+  const cuts: Array<[number, number, boolean]> = [[0, value.length, false], [lead, end, false]];
   const cls = classifyDbTarget(value);
   if (cls.kind === "sqlite-file" && cls.sqlitePath !== null && cls.sqlitePath !== cls.trimmed) {
-    cuts.push([end - cls.sqlitePath.length, end]);
+    cuts.push([end - cls.sqlitePath.length, end, false]);
   }
   // Self-anchored credential fragments: the `user:password` userinfo (the `:`
-  // joins the pair, so it cannot collide with an identifier or a word) and each
-  // `key=value` password parameter. A mis-tokenized value (unquoted
-  // `db=scheme://…` is split into attribute NAMES) reaches messages as such a
-  // fragment, e.g. W-ATTR-001 "Attribute `admin:s3cret@db=` is not recognized".
-  const m = value.match(/^\s*[a-z][a-z0-9+.\-]*:\/\//i);
-  if (m) {
-    const at = value.lastIndexOf("@");
-    if (at > m[0].length && value.slice(m[0].length, at).includes(":")) cuts.push([m[0].length, at]);
+  // joins the pair) and each `key=value` parameter. A message may echo such a
+  // fragment on its own (a mis-tokenized value); they are applied to MESSAGES
+  // only — never to a source excerpt, where `k=v` / `a:b` are ordinary code.
+  // s432: both come from the same shape-independent analysis as the spans.
+  const a = analyzeConnectionValue(value);
+  for (const [from, to] of a.userinfo) {
+    if (value.slice(from, to).includes(":")) cuts.push([from, to, true]);
   }
-  for (const pm of value.matchAll(PASSWORD_PARAM_RE)) {
-    const whole = (pm as any).indices?.[0] as [number, number] | undefined;
-    if (!whole) continue;
-    const from = /[?&;\s]/.test(value[whole[0]] ?? "") ? whole[0] + 1 : whole[0];
-    if (whole[1] > from) cuts.push([from, whole[1]]);
-  }
-  const out: Array<[string, string]> = [];
+  for (const p of a.params) cuts.push([p.whole[0], p.whole[1], true]);
+  const out: Array<{ raw: string; shown: string; fragment: boolean }> = [];
   const seen = new Set<string>();
-  for (const [from, to] of cuts) {
+  for (const [from, to, fragment] of cuts) {
     if (to <= from) continue;
     const raw = value.slice(from, to);
     const shown = applySpans(value, spans, from, to);
     if (raw !== shown && !seen.has(raw)) {
       seen.add(raw);
-      out.push([raw, shown]);
+      out.push({ raw, shown, fragment });
     }
   }
   return out;
@@ -175,7 +308,8 @@ function echoForms(value: string): Array<[string, string]> {
 
 /**
  * Every form of every secret a value carries (raw, unquoted, percent-decoded;
- * WHATWG and last-`@` userinfo readings). Used ONLY for LONG_SECRET_RULE.
+ * the shape-independent userinfo and parameter readings, plus the WHATWG
+ * reading when the value parses). Used ONLY for LONG_SECRET_RULE.
  */
 export function deriveSecrets(value: string): string[] {
   if (typeof value !== "string" || value.length === 0) return [];
@@ -185,39 +319,30 @@ export function deriveSecrets(value: string): string[] {
     out.add(s);
     const d = safeDecode(s);
     if (d.length > 0) out.add(d);
+    const v = d.replace(new RegExp(INVISIBLE_CHAR_RE.source, "g"), "");
+    if (v.length > 0) out.add(v);
   };
-  for (const form of new Set([value, value.trim(), safeDecode(value.trim())])) {
-    const scheme = form.match(/^\s*[a-z][a-z0-9+.\-]*:\/\//i);
-    if (scheme) {
-      const rest = form.slice(scheme[0].length);
-      const lastAt = rest.lastIndexOf("@");
-      if (lastAt >= 0) {
-        const userinfo = rest.slice(0, lastAt);
-        const colon = userinfo.indexOf(":");
-        if (colon >= 0) add(userinfo.slice(colon + 1));
-      }
-      const authEnd = rest.search(/[\/?#]/);
-      const authority = authEnd >= 0 ? rest.slice(0, authEnd) : rest;
-      const at = authority.lastIndexOf("@");
-      if (at >= 0) {
-        const ui = authority.slice(0, at);
-        const colon = ui.indexOf(":");
-        if (colon >= 0) add(ui.slice(colon + 1));
-      }
-      try {
-        const u = new URL(form.trim());
-        if (u.password) add(u.password);
-        for (const k of PASSWORD_KEYS) for (const v of u.searchParams.getAll(k)) add(v);
-      } catch { /* not WHATWG-parseable */ }
-    }
-    for (const pm of form.matchAll(PASSWORD_PARAM_RE)) {
-      const raw = pm[1];
-      add(raw);
-      add(unquote(raw));
-      const hash = raw.indexOf("#");
-      if (hash > 0) add(raw.slice(0, hash));
-    }
+  const a = analyzeConnectionValue(value);
+  for (const [from, to] of a.userinfo) {
+    const ui = value.slice(from, to);
+    add(ui);
+    const colon = ui.indexOf(":");
+    if (colon >= 0) add(ui.slice(colon + 1));
   }
+  for (const p of a.params) {
+    const raw = value.slice(p.value[0], p.value[1]);
+    add(raw);
+    add(unquote(raw));
+    if (raw.startsWith("{")) add(raw.replace(/^\{|\}$/g, ""));
+    const hash = raw.indexOf("#");
+    if (hash > 0) add(raw.slice(0, hash));
+  }
+  try {
+    const u = new URL(value.trim());
+    if (u.password) add(u.password);
+    if (u.username && a.userinfo.length > 0) add(u.username);
+    for (const [, v] of u.searchParams) add(v);
+  } catch { /* not WHATWG-parseable — the readings above do not need it */ }
   return [...out];
 }
 
@@ -231,6 +356,12 @@ const CONNECTION_ATTRS: Record<string, string[]> = {
   page: ["db"],
   db: ["src"],
 };
+
+/** True when `name` carries a connection target on element `tag`. */
+export function isConnectionAttr(tag: string, name: string): boolean {
+  const wanted = CONNECTION_ATTRS[String(tag).toLowerCase()];
+  return !!wanted && wanted.includes(String(name).toLowerCase());
+}
 
 export interface ConnectionAttr {
   element: string;
@@ -281,6 +412,25 @@ export function scanConnectionAttrs(source: string): ConnectionAttr[] {
       } else {
         vStart = j;
         let k = j;
+        // s432: an unquoted `${…}` / `{…}` value may hold spaces and `>`
+        // (`on:load=${() => x}`); skip it balanced so the scan does not end the
+        // tag early and miss a connection attribute that follows it.
+        if (source[k] === "{" || (source[k] === "$" && source[k + 1] === "{")) {
+          k = source[k] === "$" ? k + 1 : k;
+          let depth = 0;
+          while (k < n) {
+            const ch = source[k];
+            if (ch === '"' || ch === "'" || ch === "`") {
+              k++;
+              while (k < n && source[k] !== ch) k += source[k] === "\\" ? 2 : 1;
+              k++;
+              continue;
+            }
+            if (ch === "{") depth++;
+            else if (ch === "}") { depth--; if (depth === 0) { k++; break; } }
+            k++;
+          }
+        }
         while (k < n && !/[\s>]/.test(source[k])) k++;
         vEnd = k;
         i = k;
@@ -317,6 +467,93 @@ export function redactSourceText(source: string): string {
   return out + source.slice(i);
 }
 
+/** The element name a node is, for CONNECTION_ATTRS purposes (a `<db>` state block is "db"). */
+function connectionElementOf(n: any): string | null {
+  if (!n || typeof n !== "object") return null;
+  if (n.kind === "state" && n.stateType === "db") return "db";
+  if (n.kind === "markup" && typeof n.tag === "string") return n.tag.toLowerCase();
+  return null;
+}
+
+function isStringAttrValue(v: any): boolean {
+  return typeof v === "string" || (!!v && typeof v === "object" && v.kind === "string-literal");
+}
+
+function isAbsentAttrValue(v: any): boolean {
+  return v === null || v === undefined || (typeof v === "object" && v.kind === "absent");
+}
+
+/**
+ * s432 F3 — the attributes of one element that are FRAGMENTS of a
+ * mis-tokenized UNQUOTED connection value.
+ *
+ * `<program db=postgres://u:p/w@h/app>` parses as `db=postgres` followed by
+ * attributes NAMED `u:p`, `w@h`, `app`: only the leading identifier is the
+ * value, the rest of the connection string — its password included — becomes
+ * attribute names. Any diagnostic that echoes such a name prints the password
+ * in pieces that no value-based redactor can recognise (a middle piece need
+ * carry no `:` or `@`, and may be one character long).
+ *
+ * The rule is POSITIONAL, never a test of the name's shape: once a connection
+ * attribute has a value that is neither a string nor absent (i.e. it was
+ * written unquoted), every later attribute on the element whose value is not
+ * a string literal is a fragment. A real attribute after it that carries a
+ * quoted value (`tables="users"`) is not.
+ */
+export function connectionFragmentAttrs(element: string, attrs: unknown): { via: string | null; fragments: any[] } {
+  const out: { via: string | null; fragments: any[] } = { via: null, fragments: [] };
+  if (!Array.isArray(attrs)) return out;
+  for (const a of attrs) {
+    if (!a || typeof a.name !== "string") continue;
+    if (out.via !== null) {
+      if (!isStringAttrValue(a.value)) out.fragments.push(a);
+      continue;
+    }
+    if (isConnectionAttr(element, a.name) && !isStringAttrValue(a.value) && !isAbsentAttrValue(a.value)) {
+      out.via = a.name;
+    }
+  }
+  return out;
+}
+
+export interface FragmentSite {
+  file: string | null;
+  start: number;
+  end: number;
+  name: string;
+}
+
+/** Every connection-value fragment attribute in a parsed file's AST, with its span. */
+export function collectFragmentsFromAst(root: unknown): FragmentSite[] {
+  const found: FragmentSite[] = [];
+  const seen = new Set<object>();
+  const stack: unknown[] = [root];
+  while (stack.length > 0) {
+    const n = stack.pop() as any;
+    if (!n || typeof n !== "object" || seen.has(n)) continue;
+    seen.add(n);
+    const element = connectionElementOf(n);
+    if (element !== null && CONNECTION_ATTRS[element]) {
+      for (const a of connectionFragmentAttrs(element, n.attrs).fragments) {
+        const sp = a.span;
+        if (sp && typeof sp.start === "number" && typeof sp.end === "number") {
+          found.push({ file: typeof sp.file === "string" ? sp.file : null, start: sp.start, end: sp.end, name: a.name });
+        }
+      }
+    }
+    for (const k of Object.keys(n)) {
+      const c = n[k];
+      if (c && typeof c === "object") stack.push(c);
+    }
+  }
+  return found;
+}
+
+function normFile(f: unknown): string | null {
+  if (typeof f !== "string" || f.length === 0) return null;
+  return f.replace(/\\/g, "/").toLowerCase();
+}
+
 /**
  * Collect connection values from a parsed file's AST: the string value of
  * `db=` on `<program>` / `<page>`, `idempotency-store=` on `<program>`, and
@@ -330,10 +567,7 @@ export function collectFromAst(root: unknown): string[] {
     const n = stack.pop() as any;
     if (!n || typeof n !== "object" || seen.has(n)) continue;
     seen.add(n);
-    const element: string | null =
-      n.kind === "state" && n.stateType === "db" ? "db"
-      : n.kind === "markup" && typeof n.tag === "string" ? n.tag.toLowerCase()
-      : null;
+    const element = connectionElementOf(n);
     const wanted = element !== null ? CONNECTION_ATTRS[element] : undefined;
     if (wanted && Array.isArray(n.attrs)) {
       for (const a of n.attrs) {
@@ -362,8 +596,11 @@ export function collectFromAst(root: unknown): string[] {
  */
 export class SecretRedactor {
   private values = new Set<string>();
-  private forms: Array<[string, string]> = [];   // longest raw first
+  private forms: Array<[string, string]> = [];   // longest raw first (messages)
+  private wholeForms: Array<[string, string]> = []; // whole-value forms only (source)
   private longSecrets: string[] = [];             // longest first
+  private fragments: FragmentSite[] = [];         // s432 F3 — unquoted-value fragment attrs
+  private fragmentKeys = new Set<string>();
 
   constructor(values?: Iterable<string>) {
     if (values) this.addValues(values);
@@ -391,22 +628,31 @@ export class SecretRedactor {
 
   private rebuild(): void {
     const forms = new Map<string, string>();
+    const wholeForms = new Map<string, string>();
     const longs = new Set<string>();
     for (const v of this.values) {
-      for (const [raw, shown] of echoForms(v)) forms.set(raw, shown);
+      for (const f of echoForms(v)) {
+        forms.set(f.raw, f.shown);
+        if (!f.fragment) wholeForms.set(f.raw, f.shown);
+      }
       if (secretSpans(v).length > 0) {
         for (const s of deriveSecrets(v)) if (isLongUnusualSecret(s)) longs.add(s);
       }
     }
     this.forms = [...forms.entries()].sort((a, b) => b[0].length - a[0].length);
+    this.wholeForms = [...wholeForms.entries()].sort((a, b) => b[0].length - a[0].length);
     this.longSecrets = [...longs].sort((a, b) => b.length - a.length);
   }
 
   /** Redact a MESSAGE. Text containing no registered value is returned unchanged. */
   redact(text: string): string {
+    return this.applyForms(text, this.forms);
+  }
+
+  private applyForms(text: string, forms: Array<[string, string]>): string {
     if (typeof text !== "string" || text.length === 0 || this.forms.length === 0) return text;
     let out = text;
-    for (const [raw, shown] of this.forms) {
+    for (const [raw, shown] of forms) {
       if (out.includes(raw)) out = out.split(raw).join(shown);
     }
     for (const s of this.longSecrets) {
@@ -420,19 +666,55 @@ export class SecretRedactor {
    * needs no registry, so it is right even when the file on disk changed after
    * the compile that registered its values (watch mode prints what it reads
    * NOW). Then any other exact copy of a registered WHOLE value (a value pasted
-   * into a comment) — never a bare secret word, so code is not shredded.
+   * into a comment) — never a bare secret word, so code is not shredded, and
+   * never a credential FRAGMENT (s432: every `k=v` parameter is now a fragment,
+   * and `k=v` is ordinary code).
    */
   redactSource(text: string): string {
-    return this.redact(redactSourceText(text));
+    return this.applyForms(redactSourceText(text), this.wholeForms);
   }
 
   /** Redact every string field of a diagnostic object, in place (top level). */
   redactDiagnostic(d: any): void {
-    if (!d || typeof d !== "object" || this.forms.length === 0) return;
+    if (!d || typeof d !== "object") return;
+    if (this.forms.length === 0 && this.fragments.length === 0) return;
+    const span = d.span && typeof d.span === "object" ? d.span
+      : d.tabSpan && typeof d.tabSpan === "object" ? d.tabSpan : null;
     for (const k of Object.keys(d)) {
       const v = d[k];
-      if (typeof v === "string") d[k] = this.redact(v);
+      if (typeof v === "string") d[k] = this.redactAt(v, span);
     }
+  }
+
+  /** Register the tree of one parsed file: its connection values and fragment sites. */
+  addAst(root: unknown): void {
+    this.addValues(collectFromAst(root));
+    for (const f of collectFragmentsFromAst(root)) {
+      const key = `${f.start}:${f.end}:${normFile(f.file) ?? ""}`;
+      if (this.fragmentKeys.has(key)) continue;
+      this.fragmentKeys.add(key);
+      this.fragments.push(f);
+    }
+  }
+
+  /**
+   * Redact a MESSAGE that a diagnostic positioned at `span` carries. On top of
+   * `redact`: when the span IS a connection-value fragment attribute (s432 F3),
+   * that attribute's NAME — a piece of the connection string — is replaced in
+   * this message only (so a one-character piece cannot shred other messages).
+   */
+  redactAt(text: string, span: any): string {
+    let out = this.redact(text);
+    if (typeof out !== "string" || out.length === 0 || !span || typeof span !== "object") return out;
+    if (typeof span.start !== "number" || typeof span.end !== "number") return out;
+    const file = normFile(span.file);
+    for (const f of this.fragments) {
+      if (f.start !== span.start || f.end !== span.end) continue;
+      const ff = normFile(f.file);
+      if (file !== null && ff !== null && file !== ff) continue;
+      if (out.includes(f.name)) out = out.split(f.name).join(REDACTED);
+    }
+    return out;
   }
 
   /**
