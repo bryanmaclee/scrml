@@ -2,6 +2,17 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S430 — 2026-09-23..26 (bryan · ASUS-Vivobook)
+
+All seven bootstrap prerequisites (P1–P7) ruled, and every buildable one landed: #1042 export-decl diagnostics no longer
+swallowed (P2) · #1044 validated stage-swap seam + `scripts/hybrid.ts` (P5) · #1043 destructured-let shadowing + loop-binder
+TDZ + const binders · #1046 codegen output independent of prior compiles · #1045 `import:host` (§21.3.1) + relative imports
+from nested output dirs · #1047 db connection secrets never reach compiler output; E-PA-004 names the file it opened ·
+#1048 `class` and dynamic `import()` are not scrml (decided on the native tree) + `stdlib/compiler` on `import:host` ·
+#1050 per-implementation xfail pinned to the failure signature + `status=carried` (P7) · #1051 the `defer` statement,
+SPEC §19.16 (P3 stage 1). Docs: #1049, #1065. Language design: dpa-050 (declaration syntax) Q1–Q5 ruled, Q6 with the dPA;
+dpa-051 (bootstrap codegen architecture) and dpa-052 (value mutability — lifecycles as mutability contracts) banked.
+
 ## S432 — 2026-09-26 (peter · P-Tech1)
 
 **Seven PRs merged, five rulings gift-wrapped for bryan, one aM data bug fixed on a branch.** P7 now governs
