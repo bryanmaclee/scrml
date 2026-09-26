@@ -1,0 +1,12 @@
+<rows> = [{ id: 1 }]
+<n> = 0
+<hits> = 0
+<button id="inc" onclick=${@n = @n + 1}>inc</>
+<ul>
+    <each in=@rows key=@.id as r>
+        <li class="row">${r.id}
+            ${ when @n changes { @hits = @hits + 1 } }
+        </li>
+    </each>
+</ul>
+<p id="hits">${@hits}</p>
