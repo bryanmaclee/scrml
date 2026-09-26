@@ -23,7 +23,7 @@ import { runAttributeInterpolation } from "./validators/attribute-interpolation.
 import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
-import { SecretRedactor, collectFromAst as collectConnectionValuesFromAst } from "./diagnostic-secrets.ts";
+import { SecretRedactor } from "./diagnostic-secrets.ts";
 import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
@@ -1251,7 +1251,8 @@ function _compileScrmlImpl(options = {}) {
           }
         }
         allErrors.push(enriched);
-        if (verbose) log(`  [${stageName}] ${e.code}: ${e.message}`);
+        // s432 F3 — positioned redaction (a fragment attribute's echoed name).
+        if (verbose) log(`  [${stageName}] ${e.code}: ${_secretRedactor ? _secretRedactor.redactAt(e.message, enriched.span) : e.message}`);
       }
     }
   }
@@ -1527,6 +1528,10 @@ function _compileScrmlImpl(options = {}) {
   for (let i = 0; i < bsResults.length; i++) {
     const bsResult = bsResults[i];
     const result = stage("TAB", () => _buildAST(bsResult));
+    // s432 F3 — register the tree (connection values + unquoted-value fragment
+    // attributes) BEFORE its errors are collected: `--verbose` echoes each
+    // collected message immediately.
+    if (_secretRedactor && result && result.ast) _secretRedactor.addAst(result.ast);
     collectErrors("TAB", result.errors, result.filePath || bsResult.filePath);
     // §21.3.1 `import:host` gate — placement (E-IMPORT-003), host-tag
     // (E-IMPORT-009) and the §22.13 manifest allow-list (E-IMPORT-008). Shared
@@ -1577,7 +1582,7 @@ function _compileScrmlImpl(options = {}) {
     tabResults.push(result);
     bsByTab.set(result, bsResult);
     // s430-dev-db-stub F4 — connection values straight from the tree.
-    if (_secretRedactor) _secretRedactor.addValues(collectConnectionValuesFromAst(result.ast));
+    if (_secretRedactor) _secretRedactor.addAst(result.ast);
     if (verbose) log(`  [TAB] ${result.filePath}: ${result.ast?.nodes?.length ?? 0} nodes`);
   }
 

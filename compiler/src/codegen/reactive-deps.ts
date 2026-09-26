@@ -249,6 +249,61 @@ export function collectReactiveVarNames(fileAST: Record<string, unknown>): Set<s
 // ---------------------------------------------------------------------------
 
 /**
+ * §6.7.4 EC-1 — E-LIFECYCLE-007 (read-only half): every `when … changes` dep
+ * that names a READ-ONLY cell (a `const <name>` — derived or constant) and no
+ * mutable cell. Returns `{ node, dep }` per offending entry (deduped per node).
+ *
+ * Resolved the way the emitted effect resolves it at RUNTIME, not by lexical
+ * scope: `_scrml_reactive_subscribe(dep, h)` keys the file's ONE flat cell store
+ * by the bare name, and that key only ever changes when a `_scrml_reactive_set`
+ * of it runs — i.e. when SOME mutable cell of that name is written. A read-only
+ * `const <name>` is never written (a derived one is `_scrml_derived_declare`d and
+ * recomputed on read), so a dep that names only read-only cells is a dead
+ * effect wherever the declaration sits — top level, a `${ }` block, nested
+ * markup, an `if=` region, an inlined component body. A name that ALSO has a
+ * mutable declaration anywhere is NOT flagged (its writes do fire the effect).
+ *
+ * Runs on the post-CE tree codegen emits from, and walks EVERY node edge
+ * generically (not a curated container list), so no declaration locus can hide.
+ */
+export function findWhenDepsOnReadOnlyCells(
+  fileAST: Record<string, unknown>,
+): Array<{ node: Record<string, unknown>; dep: string }> {
+  const readOnly = new Set<string>();
+  const mutable = new Set<string>();
+  const whens: Array<Record<string, unknown>> = [];
+  const seen = new WeakSet<object>();
+  const walk = (v: unknown): void => {
+    if (!v || typeof v !== "object") return;
+    if (seen.has(v as object)) return;
+    seen.add(v as object);
+    if (Array.isArray(v)) { for (const x of v) walk(x); return; }
+    const n = v as Record<string, unknown>;
+    if (n.kind === "state-decl" && typeof n.name === "string" && n.name.length > 0) {
+      if (n.isConst === true || n.shape === "derived") readOnly.add(n.name);
+      else mutable.add(n.name);
+    }
+    if (n.kind === "when-effect") whens.push(n);
+    for (const k of Object.keys(n)) {
+      if (k === "span" || k === "parent" || k.startsWith("_")) continue;
+      walk(n[k]);
+    }
+  };
+  walk(getNodes(fileAST));
+  const out: Array<{ node: Record<string, unknown>; dep: string }> = [];
+  for (const w of whens) {
+    const deps = Array.isArray(w.dependencies) ? (w.dependencies as unknown[]) : [];
+    const done = new Set<string>();
+    for (const dep of deps) {
+      if (typeof dep !== "string" || done.has(dep)) continue;
+      done.add(dep);
+      if (readOnly.has(dep) && !mutable.has(dep)) out.push({ node: w, dep });
+    }
+  }
+  return out;
+}
+
+/**
  * Collect all derived reactive variable names declared in a fileAST.
  *
  * Walks logic blocks for derived state-decl nodes and returns their names.

@@ -1,0 +1,15 @@
+<o> = { list: [], m: [] }
+${
+    function add() {
+        const t = 1
+        @o.list.push(t)
+    }
+    function refill() {
+        @o.m = [9]
+        @o.m.push(1)
+    }
+}
+<button id="add" onclick=add()>add</>
+<button id="refill" onclick=refill()>refill</>
+<p id="n">${@o.list.length}</p>
+<p id="m">${@o.m.length}</p>
