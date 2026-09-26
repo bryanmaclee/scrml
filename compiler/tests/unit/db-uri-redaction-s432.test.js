@@ -494,3 +494,37 @@ describe("§7 r3: SQLite URI-param allowlist, host-shaped scheme-less values, sq
     expect(r.redactSource(src2)).not.toContain("CacheS2");
   });
 });
+
+// ---------------------------------------------------------------------------
+// §8 round 5 — local-file query parsing is its own, fail-safe reader
+// ---------------------------------------------------------------------------
+
+describe("§8 r5: local-file query: first `?` only, pairs stop at `?`, allowlisted values fail safe", () => {
+  test("(a) a value stops at a later `?`: ./app.db?mode=ro?key=SEC", () => {
+    expect(displayConnectionValue("./app.db?mode=ro?key=QmSec1")).toBe("./app.db?mode=ro?key=<redacted>");
+    expect(displayConnectionValue("sqlite:./a.db?cache=shared?passphrase=QmSec2&mode=ro")).toBe("sqlite:./a.db?cache=shared?passphrase=<redacted>&mode=ro");
+  });
+
+  test("(b) a whitespace-led `k=v` in the PATH does not consume the query: ./my db=1.db?key=SEC", () => {
+    expect(displayConnectionValue("./my db=1.db?key=PathQ3")).toBe("./my db=1.db?key=<redacted>");
+    expect(displayConnectionValue("./a, b=2.db?jwt=PathQ4&mode=ro")).toBe("./a, b=2.db?jwt=<redacted>&mode=ro");
+    expect(displayConnectionValue("./my db=1.db")).toBe("./my db=1.db");
+  });
+
+  test("(c) an allowlisted key whose value holds = ? & ; or whitespace is redacted (fail safe)", () => {
+    for (const [v, secret] of [
+      ["./a.db?mode=ro=FsA1", "FsA1"],
+      ["./a.db?mode=ro%3Fkey%3DFsA2", "FsA2"],
+      ["./a.db?cache=shared%26key%3DFsA3", "FsA3"],
+      ["./a.db?vfs=unix FsA4", "FsA4"],
+      ["./a.db?mode=ro%3BFsA5", "FsA5"],
+    ]) {
+      expect(displayConnectionValue(v)).not.toContain(secret);
+    }
+    expect(displayConnectionValue("./a.db?mode=ro&cache=shared&vfs=unix-dotfile")).toBe("./a.db?mode=ro&cache=shared&vfs=unix-dotfile");
+  });
+
+  test("documented: an unencoded `&` inside a value leaves its tail visible (a driver splits it the same way)", () => {
+    expect(displayConnectionValue("./a.db?key=Se&cretX")).toBe("./a.db?key=<redacted>&cretX");
+  });
+});

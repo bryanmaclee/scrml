@@ -266,6 +266,48 @@ interface ValueAnalysis {
   params: ParamSpan[];
 }
 
+/**
+ * s432 r5 — the secret parameters of a LOCAL FILE value, parsed on their own
+ * (not with PARAM_RE, whose whitespace/comma-led pairs belong to keyword
+ * DSNs): only the FIRST `?` opens the query — before it is the PATH
+ * (`./my db=1.db?key=S` has one parameter, `key`) — and each pair ends at the
+ * next `&`, `;` or `?` (`./app.db?mode=ro?key=S` → `mode=ro`, `key=S`).
+ * Every value is secret except on an allowlisted SQLite URI parameter
+ * (SQLITE_URI_PARAMS), and even there a value holding `=`, `?`, `&`, `;` or
+ * whitespace is redacted: no SQLite parameter legitimately contains them, so
+ * such a value can only be a mis-split secret (fail safe). A keyless segment
+ * (`?SECRET`) is left visible (see the header). An unencoded `&` inside a
+ * value (`key=Se&cretX`) leaves the tail after it visible; a driver splits the
+ * value there too.
+ */
+function localFileParams(view: View): ParamSpan[] {
+  const out: ParamSpan[] = [];
+  const t = view.text;
+  const q = t.indexOf("?");
+  if (q < 0) return out;
+  let i = q + 1;
+  while (i <= t.length) {
+    let j = i;
+    while (j < t.length && !/[&;?]/.test(t[j])) j++;
+    const seg = t.slice(i, j);
+    const eq = seg.indexOf("=");
+    if (eq > 0) {
+      const key = safeDecode(seg.slice(0, eq));
+      const val = seg.slice(eq + 1);
+      const vStart = i + eq + 1;
+      const allow = SQLITE_URI_PARAMS.has(key.trim().toLowerCase()) && !/[=?&;\s]/.test(safeDecode(val));
+      if (!allow && val.length > 0) {
+        const ov = toOriginal(view, vStart, j);
+        const ow = toOriginal(view, i, j);
+        if (ov && ow) out.push({ whole: ow, value: ov, key });
+      }
+    }
+    if (j >= t.length) break;
+    i = j + 1;
+  }
+  return out;
+}
+
 /** Userinfo and parameter spans of a connection value (original offsets), both views. */
 function analyzeConnectionValue(value: string): ValueAnalysis {
   const out: ValueAnalysis = { userinfo: [], params: [] };
@@ -279,19 +321,16 @@ function analyzeConnectionValue(value: string): ValueAnalysis {
       const o = toOriginal(view, ui[0], ui[1]);
       if (o) out.userinfo.push(o);
     }
+    if (local) {
+      for (const p of localFileParams(view)) out.params.push(p);
+      continue;
+    }
     for (const pm of view.text.matchAll(PARAM_RE)) {
       const ind = (pm as any).indices as Array<[number, number] | undefined>;
       const k = ind?.[1];
       const v = ind?.[2];
       if (!k || !v || v[1] <= v[0]) continue;
       const key = safeDecode(pm[1]);
-      if (local) {
-        // A local file's parameters live only in its `?` query; before it is
-        // the PATH (`./my db=1.db` is a file name, not a `db=` parameter).
-        const q = view.text.indexOf("?");
-        if (q < 0 || k[0] < q) continue;
-        if (SQLITE_URI_PARAMS.has(key.trim().toLowerCase())) continue;
-      }
       const ov = toOriginal(view, v[0], v[1]);
       const ow = toOriginal(view, k[0], v[1]);
       if (ov && ow) out.params.push({ whole: ow, value: ov, key });
