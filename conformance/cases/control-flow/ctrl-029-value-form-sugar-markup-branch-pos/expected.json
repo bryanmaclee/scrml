@@ -1,0 +1,23 @@
+{
+  "id": "ctrl-029-value-form-sugar-markup-branch-pos",
+  "description": "§17.6.10 / §10.1 — the MARKUP-VALUED instance of the value-form sugar. `ctrl-021` pins the sugar for a STRING branch; this case pins it for a branch that is exactly one MARKUP element, which under the §1.4 L1 pillar is an expression by the same rule that admits `\"Admin\"`. `#out-admin` takes the true branch and renders `<p class=\"role\">Admin</p>`, `#out-guest` the false branch and renders `<p class=\"role\">User</p>`, `#out-lift` writes the SAME shape with an explicit `lift` in each branch and renders identically (the equivalence §17.6.10 asserts), and `#out-noelse` pins the else-less form. The discriminator that makes this a distinct case from ctrl-021 is the branch's VALUE TYPE, not the control-flow form: the shape used to be accepted for a string branch and SILENTLY DROPPED for a markup one.",
+  "language-version": "1.0",
+  "spec": "§17.6.10, §10.1, §1.4",
+  "source-test": "compiler/tests/unit/implied-lift-markup-arm.test.js",
+  "rationale": "§10.1 limb 2, as amended S391 (`provenance: ruling:user-voice-scrml.md S371 \"value-form b\"`): \"an arm body that is exactly one expression carries an implied `lift` of that expression\". §17.6.10: \"A branch body that is exactly one expression SHALL be equivalent to `{ lift <expression> }`.\" §1.4 / §6097 (L1 pillar): \"markup elements may sit anywhere expressions sit\" — so a markup element IS such an expression and the two normative sentences reach it. Before S433 they did not describe the compiler: `${ if (@on) { <p>Yes</p> } else { <p>No</p> } }` rendered NOTHING at exit 0 with zero diagnostics (`g-if-arm-bare-markup-branch-silently-dropped`, HIGH, adopter-reported, routed S377), while the identical branches holding a string rendered and `{ lift <p>Yes</p> }` rendered. This case exists so the MARKUP limb of the sugar cannot regress independently of the string limb that ctrl-021 already pins — the defect was exactly such an independent regression, invisible to every case written over string branches. Note the sibling value-form `match` limb is deliberately NOT symmetric: a markup arm there is REJECTED by E-MATCH-ARM-MARKUP-IN-VALUE, because §18.0 splits the two `match` forms by output category and offers `<match for=Type>` for the markup one. §17.6 carries no such split for `if`, which is why the `if` limb accepts. No diagnostic is expected: the form is valid.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MATCH-ARM-MARKUP-IN-VALUE"],
+    "notCodePrefixes": ["E-CTRL-", "E-LIFT-", "E-CODEGEN-", "E-CG-", "E-SCOPE-"],
+    "domAnchored": [
+      { "selector": "#out-admin p.role", "count": 1 },
+      { "selector": "#out-admin p.role", "text": "Admin" },
+      { "selector": "#out-guest p.role", "count": 1 },
+      { "selector": "#out-guest p.role", "text": "User" },
+      { "selector": "#out-lift p.role", "count": 1 },
+      { "selector": "#out-lift p.role", "text": "Admin" },
+      { "selector": "#out-noelse p.role", "count": 1 },
+      { "selector": "#out-noelse p.role", "text": "Admin" }
+    ]
+  }
+}

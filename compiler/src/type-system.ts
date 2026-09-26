@@ -14059,6 +14059,18 @@ function annotateNodes(
               let _reNodes: unknown[] = [];
               try {
                 const { splitBlocks, buildAST } = _loadLetReparseHandles();
+                // ⚑ PROVENANCE SPLIT, KNOWN AND DELIBERATELY NOT CHASED (S433).
+                // This re-parse yields an UN-DESUGARED body: the §17.6.10
+                // implied-`lift` pass (implied-lift-desugar.ts) runs at CE's head
+                // and at the two emit-time body re-parse sites, but NOT here, so a
+                // bare-markup control-flow arm inside this body is an
+                // `html-fragment` run to THIS walk and a `lift-expr` to CG. The
+                // asymmetry is benign for what this site does (it is looking for
+                // `let` declarations, not markup) and adding the pass here would
+                // widen a type-check surface for no measured gain. It IS the fourth
+                // reason the durable placement for that pass is the TAB, where
+                // there is exactly one parse — see implied-lift-desugar.ts.
+                //
                 // [0] pass the REAL filePath (no "#match-arm-each" suffix) so
                 // re-parsed diagnostics report the genuine source file — a
                 // suffixed path breaks build.js/dev.js editor jump-to-location.
@@ -26475,6 +26487,45 @@ function checkFunctionBodyStateCompleteness(
   walkBody(body);
 }
 
+/**
+ * The child nodes of a LIFTED MARKUP value, or null when the statement is not one.
+ *
+ * Both §14.3 lifecycle walkers below recurse through array-valued child keys
+ * (`body` / `children` / `consequent` / `alternate` / …) and read a statement's
+ * TEXT from its string fields. A `lift-expr` whose value is a markup tree
+ * satisfies neither: the tree hangs off `expr.node` (or `exprNode.node`, the
+ * native parser's spelling) behind two non-array hops, and carries no string
+ * field at all. So every `${…}` interpolation inside lifted markup was
+ * invisible to both walkers —
+ *
+ *     ${ if (@phase is .Draft) { lift <p>${@phase.publishedAt}</p> } }
+ *
+ * read a post-variant field inside a source-variant discrimination and fired
+ * NOTHING. This helper is the one hop that closes it, for both walkers, so the
+ * two cannot drift (invariant 83: converge on the leaf question, not the
+ * enclosing shape).
+ *
+ * ⛑ It became load-bearing rather than merely correct when §17.6.10's implied
+ * `lift` landed (S433): `{ <p>${@phase.publishedAt}</p> }` used to reach the
+ * walkers as a flat `html-fragment` + BLOCK_REF `logic` run whose text the
+ * scanners DID see, and desugaring it to the `lift-expr` that SPEC says it is
+ * would otherwise have silently taken the diagnostic away — caught by the
+ * `e-type-lifecycle-variant-not-transitioned-pos` conformance case, which is
+ * exactly the shape above minus the `lift` keyword.
+ */
+function liftedMarkupChildNodes(stmt: ASTNodeLike): ASTNodeLike[] | null {
+  const rec = stmt as unknown as Record<string, unknown>;
+  for (const key of ["expr", "exprNode"]) {
+    const v = rec[key] as Record<string, unknown> | undefined;
+    if (!v || typeof v !== "object") continue;
+    if (v.kind !== "markup" && v.kind !== "markup-value") continue;
+    const node = v.node as Record<string, unknown> | undefined;
+    const kids = node?.children;
+    if (Array.isArray(kids)) return kids as ASTNodeLike[];
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // §14.3 — Per-access lifecycle transition-state checker (E-TYPE-001 fire)
 // ---------------------------------------------------------------------------
@@ -26947,6 +26998,10 @@ function checkLifecycleFieldAccess(
           if (Array.isArray(arm.body)) walk(arm.body as ASTNodeLike[]);
         }
       }
+      // A lifted markup value's interpolations are real reads — see
+      // liftedMarkupChildNodes.
+      const liftKids = liftedMarkupChildNodes(stmt);
+      if (liftKids) walk(liftKids);
     }
   }
 
@@ -28314,6 +28369,12 @@ function checkLifecycleBindingAccess(
           }
         }
       }
+      // A lifted markup value's interpolations are real reads — see
+      // liftedMarkupChildNodes. The lift itself introduces no scope, so its
+      // children are walked with the SAME state map the statement sees (the
+      // enclosing if-branch handler already cloned for the branch).
+      const liftKids = liftedMarkupChildNodes(stmt);
+      if (liftKids) walk(liftKids, localStates, activeVariantDiscrim);
     }
   }
 
