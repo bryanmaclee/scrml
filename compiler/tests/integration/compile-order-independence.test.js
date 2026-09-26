@@ -26,7 +26,7 @@
  */
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
-import { digestCompile } from "../helpers/compile-artifact-digest.js";
+import { digestCompile, digestCompileSet } from "../helpers/compile-artifact-digest.js";
 
 const ROOT = resolve(import.meta.dir, "../../..");
 const HELPER = resolve(import.meta.dir, "../helpers/compile-artifact-digest.js");
@@ -65,5 +65,35 @@ describe("compile output is independent of prior compiles in the same process", 
       }
     }
     expect(mismatches).toEqual([]);
+  }, 120_000);
+
+  /**
+   * The WITHIN-UNIT axis. The test above compiles one file per `compileScrml`
+   * call, so it pins process-history independence and nothing else. The defect
+   * class that motivated this gate — one file's module-level set being read
+   * during the NEXT file's emission — also has a same-call form: the same file
+   * SET, handed to ONE call in a different sequence. Nothing was gating that,
+   * so a regression there would land green. (Open thread:
+   * `compilescrml-input-order-canonical` — same file SET → byte-identical
+   * artifacts.)
+   *
+   * Compared per OUTPUT KEY rather than per source file, so the assertion does
+   * not depend on attributing outputs back to inputs.
+   */
+  test("same file SET in one call: forward order == reverse order", () => {
+    const forward = digestCompileSet(SAMPLE);
+    const reverse = digestCompileSet([...SAMPLE].reverse());
+
+    // Guard the enumeration itself: an empty or shrunken output set would make
+    // the comparison below pass vacuously.
+    expect(forward.byKey.size).toBeGreaterThan(0);
+    expect([...reverse.byKey.keys()].sort()).toEqual([...forward.byKey.keys()].sort());
+
+    const mismatches = [];
+    for (const [key, digest] of forward.byKey) {
+      if (reverse.byKey.get(key) !== digest) mismatches.push(key);
+    }
+    expect(mismatches).toEqual([]);
+    expect(reverse.diagnostics).toBe(forward.diagnostics);
   }, 120_000);
 });
