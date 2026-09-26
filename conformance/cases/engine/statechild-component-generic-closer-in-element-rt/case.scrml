@@ -1,0 +1,16 @@
+${
+    type Phase:enum = { Off, On }
+}
+const Card = <section class="card">${children}</section>
+<engine for=Phase initial=.On>
+    <Off rule=.On>
+        <button id="on" onclick=${@phase = .On}>On</>
+    </>
+    <On rule=.Off>
+        <div class="w1"><div class="w2"><Card><p id="inner">inner</p></></div></div>
+        <button id="off" onclick=${@phase = .Off}>Off</>
+    </>
+</>
+<program>
+<p id="phase">Phase: ${@phase}</>
+</program>
