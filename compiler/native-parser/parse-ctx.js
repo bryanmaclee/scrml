@@ -26,6 +26,7 @@ export function makeParseContext() {
         brackets:          lexCtx.brackets,
         recovery:          lexCtx.recovery,
         templateStack:     lexCtx.templateStack,
+        lastCloser:        lexCtx.lastCloser,
 
         // --- NEW at MK1.1 ---
         // The shared AST-node sink. Whichever layer is active appends

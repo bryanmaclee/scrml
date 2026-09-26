@@ -60,6 +60,9 @@ ${
             brackets:      makeBracketStack(),
             recovery:      makeRecovery(),
             templateStack: [],
+            // The most recent `)` / `}`: { at: start offset, frame: the
+            // bracket frame it popped } — lex-in-code closerEndsStatement.
+            lastCloser:    not,
         }
     }
 

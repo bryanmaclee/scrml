@@ -244,6 +244,94 @@ export function regexAllowedAfter(lastKind) {
     return true;
 }
 
+// --- Statement closers (S432 F1) ---
+//
+// regexAllowedAfter decides regex-vs-division from the previous token's KIND
+// alone, and a `)` / `}` is a value closer there (division). Two closers are
+// not: the `)` of a control-statement head and the `}` of a statement block —
+// a statement follows each, so a `/` after them opens a regex. The lexer's
+// bracket frames remember which kind of group they opened (bounded lookback
+// at the opener, the same class of decision as regexAllowedAfter), and
+// `ctx.lastCloser` records the frame the most recent `)` / `}` popped.
+
+// The control-statement heads after whose `)` a `/` opens a regex. MIRRORS
+// compiler/src/codegen/code-segments.ts REGEX_AFTER_CLOSE_PAREN_KEYWORDS (the
+// set the default tokenizer's closesControlFlowHead and codegen's text-level
+// regexAllowedAfter share) — the native parser is host-independent so it
+// cannot import it; a unit test pins the two sets equal
+// (compiler/tests/unit/native-lex-regex-after-statement-closer.test.js).
+export const CONTROL_HEAD_KEYWORDS = new Set(["if", "for", "while", "switch", "catch"]);
+
+function isWordToken(tok) {
+    return tok.kind === TokenKind.Ident || (typeof tok.kind === "string" && tok.kind.startsWith("Kw"));
+}
+
+// Does a `(` about to be pushed open a control-statement head? True after a
+// CONTROL_HEAD_KEYWORDS word (and `for await`), unless the word is a member
+// name (`a.if(`, `a?.for(`).
+export function opensControlHead(tokens) {
+    const n = tokens.length;
+    if (n === 0) return false;
+    let kwIdx = n - 1;
+    const last = tokens[kwIdx];
+    if (last.kind === TokenKind.KwAwait && n >= 2 && tokens[n - 2].text === "for") kwIdx = n - 2;
+    const kw = tokens[kwIdx];
+    if (!isWordToken(kw) || !CONTROL_HEAD_KEYWORDS.has(kw.text)) return false;
+    if (kwIdx > 0) {
+        const before = tokens[kwIdx - 1].kind;
+        if (before === TokenKind.Dot || before === TokenKind.OptionalChain) return false;
+    }
+    return true;
+}
+
+// The frame the closer `tok` popped, when `tok` is the most recent closer.
+function closerFrame(ctx, tok) {
+    if (tok === null || tok === undefined || tok.span === undefined || tok.span === null) return null;
+    const lc = ctx.lastCloser;
+    if (lc === null || lc === undefined || lc.at !== tok.span.start) return null;
+    return lc.frame;
+}
+
+// Is `tok` (the last token) a closer after which a STATEMENT begins — the `)`
+// of a control-statement head or the `}` of a statement block?
+export function closerEndsStatement(ctx, tok) {
+    if (tok === null || tok === undefined) return false;
+    if (tok.kind !== TokenKind.RParen && tok.kind !== TokenKind.RBrace) return false;
+    const frame = closerFrame(ctx, tok);
+    if (frame === null || frame === undefined) return false;
+    return tok.kind === TokenKind.RParen ? frame.controlHead === true : frame.stmtBlock === true;
+}
+
+// Does a `{` about to be pushed open a statement BLOCK (vs an object literal,
+// a destructuring pattern or a markup/interpolation brace)? A block follows
+// start-of-body, `;`, another block brace, a block's `}`, a `)` (a control /
+// function / catch / switch head — but not a scrml `match (…) {`, which is an
+// expression), `else`, `do`, `try`, `finally`, or `=>` (an arrow body).
+// Everything else (`=`, `(`, `,`, `:`, `return`, an operator …) expects a
+// value, so the brace is an object literal and its `}` stays a value closer.
+export function braceOpensBlock(ctx) {
+    const n = ctx.tokens.length;
+    if (n === 0) return true;
+    const prev = ctx.tokens[n - 1];
+    const k = prev.kind;
+    if (k === TokenKind.Semicolon || k === TokenKind.Arrow) return true;
+    if (k === TokenKind.KwElse || k === TokenKind.KwTry || k === TokenKind.KwFinally) return true;
+    if (k === TokenKind.KwDoWhile) return true;
+    if (k === TokenKind.LBrace) {
+        const top = ctx.brackets.frames.length > 0 ? ctx.brackets.frames[ctx.brackets.frames.length - 1] : null;
+        return top !== null && top.stmtBlock === true;
+    }
+    if (k === TokenKind.RBrace) {
+        const frame = closerFrame(ctx, prev);
+        return frame !== null && frame !== undefined && frame.stmtBlock === true;
+    }
+    if (k === TokenKind.RParen) {
+        const frame = closerFrame(ctx, prev);
+        return frame !== null && frame !== undefined && frame.matchHead !== true;
+    }
+    return false;
+}
+
 // --- markupValueAllowedAfter — PUNCH-LIST P4 (R1 seam spike §1.2 / §6 P4) ---
 //
 // Given the most-recently-emitted token kind, may a `<` at the current
@@ -507,7 +595,17 @@ export function dispatchInCode(cursor, ctx) {
             lastTok.span !== undefined &&
             lastTok.span !== null &&
             lastTok.span.end === startPos;
-        if (regexAllowedAfter(lastKind) && isCloseTagSlash === false) {
+        // A `)` that closes a control-statement HEAD (`if (…)`, `for (…)`,
+        // `while (…)`) or a `}` that closes a statement BLOCK ends a statement
+        // head / a statement, not a value, so a `/` after it opens a regex
+        // (`if (s) /"/.test(s)`, `if (s) { … }⏎/"/.test(s)`), exactly as at a
+        // statement start. regexAllowedAfter(RParen / RBrace) is false (an
+        // expression `(a) / 2`, `{…}.x / 2` is division), so these are the
+        // closers that need their bracket frame's memory (S432 F1: reading the
+        // `/` as division opened a phantom string at the `"` and
+        // desynchronised the rest of the file).
+        const isStatementCloser = closerEndsStatement(ctx, lastTok);
+        if ((regexAllowedAfter(lastKind) || isStatementCloser) && isCloseTagSlash === false) {
             setMode(ctx, LexMode.InRegexBody);
             dispatchInRegexBody(cursor, ctx);
             return true;
@@ -805,24 +903,29 @@ export function dispatchInCode(cursor, ctx) {
     // Brackets
     if (c0 === "(") {
         push(ctx.brackets, BracketKind.Paren, makeSpan(startPos, startPos + 1, startLine, startCol));
+        const parenFrame = ctx.brackets.frames[ctx.brackets.frames.length - 1];
+        parenFrame.controlHead = opensControlHead(ctx.tokens);
+        parenFrame.matchHead = ctx.tokens.length > 0 && ctx.tokens[ctx.tokens.length - 1].kind === TokenKind.KwMatch;
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.LParen, "(", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === ")") {
-        pop(ctx.brackets);
+        ctx.lastCloser = { at: startPos, frame: pop(ctx.brackets) };
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.RParen, ")", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === "{") {
+        const stmtBlock = braceOpensBlock(ctx);
         push(ctx.brackets, BracketKind.Brace, makeSpan(startPos, startPos + 1, startLine, startCol));
+        ctx.brackets.frames[ctx.brackets.frames.length - 1].stmtBlock = stmtBlock;
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.LBrace, "{", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
     }
     if (c0 === "}") {
-        pop(ctx.brackets);
+        ctx.lastCloser = { at: startPos, frame: pop(ctx.brackets) };
         advance(cursor, 1);
         ctx.tokens.push(makeToken(TokenKind.RBrace, "}", makeSpan(startPos, cursor.pos, startLine, startCol), {}));
         return true;
