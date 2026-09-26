@@ -1838,6 +1838,50 @@ export function runCG(input: CgInput): CgOutput {
   const _programAnySessionWrite = files.some((f) => astUsesSessionWrite(f));
   for (const f of files) (f as any)._programAnySessionWrite = _programAnySessionWrite;
 
+  // §20.5 / §20.5.1 (S433) — TWO MORE SESSION FACTS THAT ARE PROGRAM-SCOPED AND WERE
+  // BEING READ PER-UNIT, the same defect shape as #282 immediately above.
+  //
+  // `sessionExpiry` (the session cookie Max-Age + durable-store TTL) and
+  // `session-secure` (which decides the cookie NAME: `__Host-scrml_sid` vs plain
+  // `scrml_sid`) are declared ONCE, on the `<program>` opener. But emit-server read
+  // both from PER-UNIT sources — `authMiddlewareEntry` (this unit's route-inference
+  // output) and a node walk over THIS file's own nodes — so a unit that declares
+  // neither fell to the DEFAULT no matter what the program said. Measured on a
+  // two-unit program (`<program auth="required" sessionExpiry="7d"
+  // session-secure="false">` + a separate `pages/login.scrml` that mints):
+  //   - Max-Age: `604800` on the program unit, `3600` on the MINTING unit
+  //     (g-program-sessionexpiry-inert-on-separate-login-unit; operator ruling
+  //     S385 B5 = "(a) PROPAGATE the program setting to the minting unit");
+  //   - cookie name: `scrml_sid` on the program unit, `__Host-scrml_sid` on the
+  //     minting unit — the writer set one name and the reader matched the other.
+  // Pre-scan ALL units once here, exactly as #282 does, and stash the program-wide
+  // answer on each fileAST; emit-server consults it as the LAST fallback, so a unit
+  // that already resolves the value is byte-identical.
+  //
+  // Read from the RAW `<program>` attributes rather than `authConfig`, because
+  // `authConfig` is built ONLY when `auth=` is present (compute-program-config.ts)
+  // and a session-only program has none. Note the two attributes are spelled
+  // INCONSISTENTLY on purpose-by-accident — `sessionExpiry` is camelCase,
+  // `session-secure` is kebab — and `compute-program-config.ts` reads them exactly
+  // that way; this scan mirrors it rather than "fixing" the surface.
+  const _readProgramAttr = (name: string): string | undefined => {
+    for (const f of files) {
+      const nodes = (getNodes(f as never) as any[]) ?? [];
+      if (!Array.isArray(nodes)) continue;
+      const prog = nodes.find((n: any) => n && n.kind === "markup" && n.tag === "program");
+      if (!prog) continue;
+      const a = ((prog.attrs ?? []) as any[]).find((x: any) => x && x.name === name);
+      if (a && a.value && a.value.kind === "string-literal") return a.value.value;
+    }
+    return undefined;
+  };
+  const _programSessionExpiry = _readProgramAttr("sessionExpiry") ?? null;
+  const _programSessionSecure = _readProgramAttr("session-secure");
+  for (const f of files) {
+    (f as any)._programSessionExpiry = _programSessionExpiry;
+    (f as any)._programSessionSecure = _programSessionSecure;
+  }
+
   // §38 transition keyframes — the APP-WIDE union + the shell entry that carries it.
   //
   // A §20.8.2 soft navigation swaps the target route's markup into the SHELL's
