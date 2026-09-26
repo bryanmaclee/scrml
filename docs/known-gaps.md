@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 136 | 4 |
-| MED | 297 | 0 |
-| LOW | 108 | 0 |
+| MED | 298 | 0 |
+| LOW | 109 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -1256,6 +1256,22 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 
 ### g-nested-block-match-in-dispatched-arm-silently-drops — a block `<match>` nested inside a DISPATCHED `<match>` arm emits no inner dispatcher and **renders nothing at any value**, at exit 0 with zero diagnostics. **PA-REPRODUCED on `bf77be98`:** an outer `<match for=Out on=@outer>` whose `<Show>` arm contains an inner `<match for=In on=@inner>` compiles CLEAN; the emitted client carries `render_Show` and `render_Hide` (2 references each) and **`render_On` / `render_Off` at ZERO**, with exactly **one** `data-scrml-match-mount` div — the outer. The inner match's content is a static string inside the dispatched arm body, and nothing ever wires it. ⚑ **THE REASON THIS IS A RULING AND NOT A FIX IS THAT THE IMPLEMENTATION IS INTERNALLY INCOHERENT AT THIS EXACT POSITION, WHICH I MEASURED RATHER THAN RELAYED:** in the SAME dispatched-arm body, `if=` is LOUDLY REFUSED (`E-IF-IN-DISPATCHED-ARM` — PA-reproduced), `<each>` WORKS, `show=` WORKS, and a nested `<match>` SILENTLY DROPS. Three behaviours across four constructs whose only difference is which one someone got to. A new facet of [[G-IF-MOUNT-INSIDE-DISPATCHED-ARM-BODY]] (open, HIGH, S301); `emit-html.ts:1506` already carries a note that the `if=` guard "APPLIES HERE TOO" for match/engine arm bodies — the note exists, the guard does not. **NOT a duplicate of `g-nested-match-in-arm-body` (RESOLVED S241)**, which is the INLINE value-form `| .X :> match y { … }` — a different construct at a different locus; PA-verified that entry's resolution still holds. **THE FORK IS THE OPERATOR'S** and both limbs move the surface: **(A) REJECT** — extend `refuseConditionalInDispatchedArm` (`emit-html.ts:802`, call sites 1526/1755/2745) to nested `<match>`/`<engine>` and mint `E-MATCH-IN-DISPATCHED-ARM`; newly-rejecting, owes a measured migration, cheap, and makes the four constructs coherent by refusing three of them. **(B) SUPPORT** — emit and wire the nested dispatcher inside the arm's wire fn (`emit-match.ts` + emit-html dispatch), mirroring `<each>`-in-arm which already works; semantics-changed, larger, and per S384's read likely closes the WHOLE G-IF-MOUNT family in one wire-fn redesign rather than one construct at a time. ⚑ **PA recommendation: (B), and the FORK RULE is why.** Row 4 (root vs position) discriminates before row 5 ever gets a vote: (A) is a per-position refusal that leaves the family open and adds a fourth behaviour to a surface that already has three, while (B) fixes the shared wire-fn root that all four constructs hang off. Row 1 (limit-vs-widen) appears to favour (A) and does not actually apply — `<each>` and `show=` already work here, so the position is not a closed surface being widened; it is a partially-implemented one being finished. The cost asymmetry is real and is (B)'s only argument against, which is exactly what row 5 is a tiebreak for and rows 1-4 have already decided. Route: **bryan** — `NEW S383-bryan (routed by S384-peter, PA-reproduced by execution incl. the four-construct incoherence); **HIGH**; open`
 <!-- @gap id=g-nested-block-match-in-dispatched-arm-silently-drops sev=HIGH status=open locus=compiler/src/codegen/emit-html.ts:refuseConditionalInDispatchedArm prov=empirical:S383-PA-reproduced-render_On-and-render_Off-emit-zero-times-one-outer-match-mount-only-exit-0-zero-diagnostics-while-if-equals-is-refused-at-the-identical-position-with-E-IF-IN-DISPATCHED-ARM -->
+
+⛑ **S432-peter — engine-state-child facet: parser half LANDED, WARNING added, fork still open.** Branch
+`fix/s432-closer-in-state-child-parser`. (1) The fork-independent PARSER half of `hold/s429-match-in-engine-state-child`
+(`e0ac22d6`) landed: the engine state-child closer-finders are one open-element stack, so a `</>`-closed capitalised
+element inside a lowercase one no longer steals the state-child's closer (the real case is `<div><Card>…</></div>`;
+9/144 sibling shapes broken on main, all engine-state-child, 0/144 after). (2) That parse fix ALSO stops the false
+`E-ENGINE-STATE-CHILD-MISSING` for a `<match>` with `</>` arms in a state-child, which would have made that spelling
+join the named-`</X>` spelling in the SILENT behaviour (PA-measured on the branch: renders only if the state-child is
+on screen at page load; every later entry — re-entry, or first entry of a non-`initial=` state-child — is BLANK until
+`on=` changes; same via a component or a nested engine; a match inside an `<each>` in the state-child is correct). So
+both spellings now get **`W-ENGINE-MATCH-IN-STATE-CHILD`** (new §34 row, Warning; fired from the post-CE AST in
+`validators/post-ce-invariant.ts`, both pipelines), naming the limitation, this gap, and the working workaround (move
+the match outside the engine into `<div if=(@var == .Variant)>`). **The warning does not decide the fork:** (A)
+promotes it to an error, (B) deletes it with the re-entry fix. (3) The hold ref now carries ONLY the fork-deciding half
+(emit-engine re-entry re-dispatch + emit-match readiness gate / payload reads, its (B)-pinning browser test, MED-1/MED-2);
+its parser + VP-2 hunks are already on main via this branch and must be dropped when it is rebased.
 
 ### g-outgoing-staged-has-no-promotion-step-so-adopter-replies-are-never-delivered — `handOffs/outgoing-staged/` is a **WRITE-ONLY GRAVEYARD**: notes are authored into it and **nothing ever promotes them to the peer's `incoming/`**. The S310 RETURN-LEG RULE says a ruling answering a routed ask is dropped into the asker's `handOffs/incoming/` (write + commit + push); `outgoing-staged/` is a DIFFERENT artifact and no probe, wrap step or contract line reads it. **PA-MEASURED S385 — 4 notes resident, to 3 different adopters:** `2026-08-29-…-flogence-…-match-arm-workaround-and-triage` (`status: staged`, **confirmed never delivered** — flogence's `incoming/` holds only `read/`, and flogence found the reply by READING OUR TREE) · `STAGED-6NZ-resume-dogfooding-v0.6.7` and `STAGED-giti-resume-dogfooding-v0.6.7` (both `status: unread`, dated **2026-05-29 — ~93 days**) · `2026-08-02-…-rediledger-channel-gap-accepted-plus-unblocked` (claims `status: delivered 2026-08-02` but the PA could NOT locate it anywhere in RediLedger's tree). ⚑ **THE ADOPTER DIAGNOSED IT BEFORE WE DID, AND COUNTED IT: "That is now three times, and the failure is always the last hop, never the reasoning."** (flogence S36, 2026-08-30 — the same way they found the S279 ruling and #225/#228.) ⚑ **A `status:` field written by the note's own author is NOT evidence of delivery** — it is the §1 laundered-provenance shape wearing a frontmatter key: the only evidence is the file existing in the PEER's tree, committed and pushed. **This is base §10 exactly — the obligation (`incoming/`) and the artifact that actually holds the work (`outgoing-staged/`) are different files, so the check passes while the message never moves.** Fix direction (unverified): either delete `outgoing-staged/` so the only path is a direct peer-inbox write, or add a wrap step that promotes it and a probe that flags any staged note older than one session. **Cost so far is not hypothetical** — one blocking escalation and two ~3-month-old dogfooding restarts, and in the flogence case our triage was correct and simply never arrived. — `NEW S385-bryan (surfaced by flogence PA S36; PA-MEASURED, 4 notes, 3 adopters); **HIGH**; open`
 <!-- @gap id=g-outgoing-staged-has-no-promotion-step-so-adopter-replies-are-never-delivered sev=HIGH status=open locus=handOffs/outgoing-staged/ prov=adopter:flogence-S36-counted-three-delivery-failures-and-PA-measured-4-resident-notes-to-3-adopters-two-of-them-93-days-old-with-no-promotion-step-anywhere -->
@@ -14689,6 +14705,11 @@ payload read in an EVENT HANDLER inside the nested arm is unbound (ReferenceErro
 into a boot crash. ⚑ The parser layer (1) is independently valuable — the likeliest real case is a COMPONENT closed with
 `</>` inside a `<div>` in a state-child — and can be split out once the ruling says how the match case should behave.
 
+⛑ **S432-peter — PARSER LAYER (1) SPLIT OUT AND LANDED** on `fix/s432-closer-in-state-child-parser` (with the VP-2
+walk of state-child bodies, so an unknown capitalised tag there stays `E-COMPONENT-035`). This entry's misleading
+`E-ENGINE-STATE-CHILD-MISSING` is gone; the shape now compiles with `W-ENGINE-MATCH-IN-STATE-CHILD` (see
+`g-nested-block-match-in-dispatched-arm-silently-drops`). Layers (2) and (3) remain on the hold ref, pending the ruling.
+
 ### g-mutating-method-string-args-lose-their-quotes — a string literal inside an argument to a reactive mutating method (`push`/`splice`/…) is emitted WITHOUT quotes — `NEW S429-peter; HIGH; carried (S431)`
 <!-- @gap id=g-mutating-method-string-args-lose-their-quotes sev=HIGH status=carried locus=searched:compiler/src/codegen/emit-logic.ts,compiler/src/codegen/rewrite.ts(the §6.5.1 clone-mutate-replace lowering)—not-traced prov=empirical:S429-replaced-row-dev-agent-found-PA-reproduced-on-d6d6e55a -->
 
@@ -18243,6 +18264,28 @@ diagnostics — which carried db connection secrets until `fix/s432-db-secret-re
 network. Not changed unilaterally: some workflows use LAN access deliberately (phone testing), so the default
 (`localhost` + an opt-in `--host`) is bryan's call; `dev.js` is also in his S430 footprint. Security-adjacent → P7
 criterion 3 once ruled. found by: S432 redaction dev agent while enumerating sinks.
+
+### g-native-component-def-with-children-throws-at-boot — under `--parser=scrml-native`, a markup-valued component definition that interpolates `${children}` is emitted as boot-time code that evaluates `children`, so the client throws `ReferenceError: children is not defined` at load — `NEW S432-peter; MED; open`
+<!-- @gap id=g-native-component-def-with-children-throws-at-boot sev=MED status=open locus=searched:compiler/native-parser(the native lowering of a `const X = <markup>` component definition — emits the definition body as a lift)—not-traced prov=empirical:S432-dev-agent-happy-dom-default-vs-native-A-B-on-451296f3-and-4d888293 -->
+
+`<program> const Card = <div class="card">${children}</div> <Card><p>x</p></Card> </program>` — the default pipeline
+compiles and runs clean (no `children` in the client JS). Under `--parser=scrml-native` it compiles clean too, but the
+client carries `_scrml_lift_el_1.appendChild(document.createTextNode(String((children) ?? "")))` at file scope and throws
+`children is not defined` at boot, killing the rest of the chunk (in an engine program the later setup never runs).
+It throws even when the component is declared and NEVER used. ⛑ **WIDER (S432 review, PA-accepted):** the claim that a
+component without `${children}` is fine is FALSE — native turns ANY component definition into code that runs at page
+load: unused `const Chip = <div>C</div>` and `const Wrap = <section><Chip/></section>` emit a boot-time
+`document.createElement("Chip")`. Missing `children` is one symptom of that; a stray component element is another. Native-only, pre-existing (reproduced on `451296f3`), not a regression of the closer-stack
+branch. MED: the native parser is opt-in, but it is the swap target and any `${children}` component breaks the whole
+page there. found by: S432 closer-stack dev agent while running the sibling matrix under both parsers.
+
+### g-textarea-raw-text-with-lt-loses-content-in-state-child — inside an engine state-child, `<textarea>a < B and </> here</textarea>` renders as `a here`; the text between is lost — `NEW S432-peter; LOW; open`
+<!-- @gap id=g-textarea-raw-text-with-lt-loses-content-in-state-child sev=LOW status=open locus=searched:the markup-level scan of raw-text elements (textarea) — not the S432 closer stack; identical on 451296f3 prov=review:S432-closer-stack-adversarial-happy-dom -->
+
+A `<` followed by a capital inside `<textarea>` raw text is read as markup, so `B and </>` is consumed as an element and
+its closer. Same on base `451296f3` and after the closer-stack fix; markup-level, not state-child-specific in cause (the
+review found it while probing state-child shapes). Silent content loss, but a rare shape. found by: S432 adversarial
+review of fix/s432-closer-in-state-child-parser.
 
 ### g-bare-when-after-first-body-child-ships-as-page-text — a bare `when @x changes { … }` written in a `<program>` body AFTER its first `${}` block or markup child is emitted as LITERAL PAGE TEXT; no effect, no diagnostic — `NEW S432-peter; HIGH; open — RULING-GATED (bryan: §40.8 auto-lift set), gift-wrap in progress`
 <!-- @gap id=g-bare-when-after-first-body-child-ships-as-page-text sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(§40.8 default-logic auto-lift at program body-top) prov=empirical:S432-when-changes-dev-agent-and-round-3-reviewer-both-reproduced-on-280ecbdd -->
