@@ -81,6 +81,16 @@ describe("B2 §19.16.1 — `defer [` while `defer` is a binding in scope", () =>
   const bindings = {
     "a parameter": `    function go2(defer) {\n        defer [0].forEach(note)\n    }\n    function go() { go2([[1]]) }`,
     "a file-level function": `    function defer(x) { return x }\n    function go() {\n        defer [1].forEach(note)\n    }`,
+    "a hoisted nested `function defer` declared after the use": `    function go() {
+        defer [1].forEach(note)
+        function defer(x) { return x }
+    }`,
+    "an enclosing block's earlier `let`": `    function go() {
+        let defer = [[1]]
+        if (true) {
+            defer [0].forEach(note)
+        }
+    }`,
     "a for-of binder": `    function go() {\n        for (const defer of [[[1]]]) {\n            defer [0].forEach(note)\n        }\n    }`,
   };
   for (const [name, logic] of Object.entries(bindings)) {
@@ -93,6 +103,18 @@ describe("B2 §19.16.1 — `defer [` while `defer` is a binding in scope", () =>
     "adjacent `defer[0]` indexes the binding": `    function go() {\n        let defer = [[7], 2]\n        defer[0].forEach(note)\n        note("x")\n    }`,
     "block form defers an array-lead statement even with a binding": `    function go() {\n        let defer = 1\n        defer { [1].forEach(note) }\n        note("x" + defer)\n    }`,
     "a binding in ANOTHER function does not make this one ambiguous": `    function other() {\n        let defer = 1\n        return defer\n    }\n    function go() {\n        defer ["a"].forEach(note)\n        note("x")\n    }`,
+    "a `let defer` declared LATER in the block is not visible at the `defer` (round-6 array-literal-lead)": `    function go() {
+        defer ["a;", "b;"].forEach(note)
+        let defer = [7]
+        note("v" + defer[0])
+    }`,
+    "a binding in a sibling nested block is not visible": `    function go() {
+        if (true) {
+            let defer = 1
+            note("x" + defer)
+        }
+        defer ["a"].forEach(note)
+    }`,
     "a non-`[` lead with a binding in scope is the defer statement (§19.16.1, unchanged)": `    function go() {\n        let defer = 1\n        defer note("d")\n        note("x")\n    }`,
   };
   for (const [name, logic] of Object.entries(unaffected)) {

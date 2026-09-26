@@ -771,12 +771,15 @@ function checkLaterShadow(root: unknown, filePath: string, report: ReportFn): vo
 // the round-6 reading stands (the identifier reading would be an undeclared
 // name, which never compiled).
 //
-// "In scope" is decided per outermost function declaration, coarsely and
-// fail-closed: a binding named `defer` ANYWHERE in that function (a parameter,
-// a local `let`/`const`/`lin`/`~`, a nested function's name or parameter, a loop
-// or lambda binder) or at file level (a top-level declaration or import) makes
-// every `[`-led defer in the function ambiguous. Over-approximating only rejects
-// programs that both bind `defer` and write `defer [`; it never mis-reads one.
+// "In scope" means VISIBLE at the `defer` (the name the identifier reading
+// would resolve to, and could read without a TDZ error): a parameter of an
+// enclosing function or lambda, an enclosing loop binder, a `function` named
+// `defer` anywhere in an enclosing block (hoisted), a `let` / `const` / `lin` /
+// `~` declared EARLIER in an enclosing block, or any file-level declaration or
+// import (a function body runs after the file's top level). A `let defer`
+// declared LATER in the block is not visible there — the identifier reading
+// could only throw — so the statement reading stands (S430 round 6's own
+// conformance case defer/array-literal-lead declares exactly that).
 
 const DEFER_NAME = "defer";
 
@@ -841,58 +844,61 @@ function deferIsBracketLed(d: Node): boolean {
 }
 
 function checkAmbiguousLead(root: unknown, report: ReportFn): void {
-  const anyBinds = (n: unknown, stopAtFunctions: boolean): boolean => {
-    let found = false;
-    const seen = new WeakSet<object>();
-    const walk = (x: unknown): void => {
-      if (found || !x || typeof x !== "object" || seen.has(x as object)) return;
-      seen.add(x as object);
-      if (Array.isArray(x)) { for (const c of x) walk(c); return; }
-      const nn = x as Node;
-      if (stopAtFunctions && nn.kind === "function-decl") {
-        // at file level only the function's NAME binds; its body is its own scope
-        if (nn.name === DEFER_NAME) found = true;
-        return;
-      }
-      if (nodeBindsDefer(nn)) { found = true; return; }
-      for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") walk(nn[key]);
-    };
-    walk(n);
-    return found;
+  // File level: any top-level binding (in any order) — a function body runs
+  // after the file's top level has executed.
+  let fileBinds = false;
+  const seenTop = new WeakSet<object>();
+  const scanTop = (x: unknown): void => {
+    if (fileBinds || !x || typeof x !== "object" || seenTop.has(x as object)) return;
+    seenTop.add(x as object);
+    if (Array.isArray(x)) { for (const c of x) scanTop(c); return; }
+    const nn = x as Node;
+    if (nn.kind === "function-decl") { if (nn.name === DEFER_NAME) fileBinds = true; return; }
+    if (nn.kind === "lambda") return;
+    if (nodeBindsDefer(nn)) { fileBinds = true; return; }
+    for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") scanTop(nn[key]);
   };
-  const fileBinds = anyBinds(root, true);
+  scanTop(root);
 
-  const reportIn = (fn: Node): void => {
-    const seen = new WeakSet<object>();
-    const walk = (x: unknown): void => {
-      if (!x || typeof x !== "object" || seen.has(x as object)) return;
-      seen.add(x as object);
-      if (Array.isArray(x)) { for (const c of x) walk(c); return; }
-      const nn = x as Node;
-      if (nn.kind === "defer-stmt" && deferIsBracketLed(nn)) {
-        report("E-DEFER-AMBIGUOUS-LEAD", nn,
-          `\`defer [\` is ambiguous here: a binding named \`defer\` is in scope, so this could index it ` +
-          `(\`defer[…]\`) or defer a statement that starts with an array literal (§19.16.1). Write ` +
-          `\`defer[…]\` with no space to index the binding, \`defer { […]… }\` to defer the statement, or ` +
-          `rename the binding.`);
-      }
-      for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") walk(nn[key]);
-    };
-    walk(fn.body);
-  };
-
-  // Each OUTERMOST function declaration is one scope unit (its nested functions included).
   const seen = new WeakSet<object>();
-  const findFns = (x: unknown): void => {
+  const isStmtList = (x: unknown[]): boolean =>
+    x.some((c) => c && typeof c === "object" && typeof (c as Node).kind === "string");
+
+  const walkList = (list: unknown[], bound: boolean): void => {
+    // a function declaration is hoisted to the top of its block
+    let b = bound || list.some((c) => c && typeof c === "object" &&
+      (c as Node).kind === "function-decl" && (c as Node).name === DEFER_NAME);
+    for (const c of list) {
+      walk(c, b);
+      const cn = c as Node;
+      if (!b && cn && typeof cn === "object" && cn.kind !== "function-decl" && cn.kind !== "for-stmt" &&
+          cn.kind !== "lambda" && nodeBindsDefer(cn)) {
+        b = true; // declared here: visible to the statements after it
+      }
+    }
+  };
+
+  const walk = (x: unknown, bound: boolean): void => {
     if (!x || typeof x !== "object" || seen.has(x as object)) return;
     seen.add(x as object);
-    if (Array.isArray(x)) { for (const c of x) findFns(c); return; }
-    const nn = x as Node;
-    if (nn.kind === "function-decl") {
-      if (fileBinds || anyBinds(nn, false)) reportIn(nn);
+    if (Array.isArray(x)) {
+      if (isStmtList(x)) walkList(x, bound);
+      else for (const c of x) walk(c, bound);
       return;
     }
-    for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") findFns(nn[key]);
+    const nn = x as Node;
+    let inner = bound;
+    if (nn.kind === "function-decl" || nn.kind === "lambda") inner = bound || paramBindsDefer(nn.params);
+    else if (nn.kind === "for-stmt") inner = bound || nodeBindsDefer(nn);
+    if (nn.kind === "defer-stmt" && bound && deferIsBracketLed(nn)) {
+      report("E-DEFER-AMBIGUOUS-LEAD", nn,
+        `\`defer [\` is ambiguous here: a binding named \`defer\` is in scope, so this could index it ` +
+        `(\`defer[…]\`) or defer a statement that starts with an array literal (§19.16.1). Write ` +
+        `\`defer[…]\` with no space to index the binding, \`defer { […]… }\` to defer the statement, or ` +
+        `rename the binding.`);
+    }
+    for (const key of Object.keys(nn)) if (key !== "span" && key !== "parent") walk(nn[key], inner);
   };
-  findFns(root);
+
+  walk(root, fileBinds);
 }
