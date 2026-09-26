@@ -156,6 +156,7 @@ ${
             brackets:          lexCtx.brackets,
             recovery:          lexCtx.recovery,
             templateStack:     lexCtx.templateStack,
+            lastCloser:        lexCtx.lastCloser,
 
             // --- NEW at MK1.1 (R1 spike §3.1) ---
             // The shared AST-node sink. Whichever layer is active appends
