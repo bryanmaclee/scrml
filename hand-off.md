@@ -1,3 +1,186 @@
+# scrml — Session 433 (peter · AdiPDesk — a SECOND peter box) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions' and is untouched.
+>
+> ⚑ **THIS IS NOT P-Tech1.** S433 ran on a second Windows box whose clone had not been used since S423 —
+> 53 commits behind scrml, 44 behind scrml-support at boot. **S432-peter was live on the laptop the whole
+> session and landed continuously into the same trunk.** Read the concurrency notes before assuming any
+> single-session habit applies.
+>
+> ⚑ **P7 GOVERNS THE PETER LANE NOW.** bryan ruled P1–P7 at S430: the TS compiler is fixed ONLY when it
+> (1) blocks the bootstrap, (2) an adopter reported it, or (3) is security. Everything else becomes
+> `status=carried` — a conformance case expected to fail on impl#1. So the 135 open HIGHs are no longer a
+> work queue; the P7-eligible population is ~66 markers, of which 11 were verified in-scope and
+> non-colliding this session. **Do not "work the HIGH list" without filtering by criterion first.**
+
+## ⏭ NEXT-SESSION PICKUP
+
+0. **⚑ LEAD: the four ADOPTER reports still sitting in `handOffs/incoming/` — they are P7 criterion 2, i.e.
+   the only unambiguously fixable backlog left in this lane.** They were identified at boot and NOT reached;
+   the session went to security + the two already-ruled render fixes instead.
+   - `2026-09-12-to-scrml-cross-file-server-fn-not-awaited-at-reactive-assignment.md`
+   - `2026-09-07-to-scrml-table-level-primary-key-fails-in-db-src-library.md`
+   - `2026-09-07-to-scrml-regex-literal-with-quote-breaks-codegen-in-foreign-block.md`
+   - `2026-08-22-1542-flint-to-scrml-two-silent-wrong-output-cases.md`
+   **Reproduce each on HEAD before dispatching** (reverse-R26); several are weeks old and a sibling fix may
+   have closed one.
+
+1. **`g-boolean-coercion-does-not-fire-outside-a-db-src-block` (MED, filed S433, PA-verified).** #842's
+   coercion works for the `<db src>` shape (its test passes 5/5) but a raw `?{}` read of a declared
+   `boolean` under a program-level `db=` emits **no wrapper at all**. Two projection shapes measured; the
+   qualification hypothesis is refuted; the deciding condition was **NOT traced**. The sibling entry
+   `g-boolean-column-roundtrips-as-integer-0-1-not-bool-in-raw-select` stays OPEN with a measured boundary —
+   **do not resolve either on the presence of the helper.**
+
+2. **The TAB relocation for the implied-lift desugar.** The pass ships at component-expansion's head because
+   CE is the earliest stage handed both the AST and the source text. Of 12 body-re-parse sites, 3 can carry a
+   render-position arm and all 3 are covered — but the durable home is the TAB, where there is exactly one
+   parse. `ast-builder.js` was bryan's footprint this window. **This is a real follow-up, not a nicety:** the
+   current placement is a POSITION fix where the TAB is the ROOT (fork-rule row 4).
+
+3. **Two gaps filed for bryan with both fork directions, PA-executed:**
+   `g-session-store-namespace-not-discriminated-per-program` (two independent `<program>` files in one dist
+   share one store file AND one `"session"` namespace — program A's login resolves in program B; PA lean:
+   document-as-is now, discriminate only if an adopter hosts two trust domains from one build) and
+   `g-route-inference-substituted-default-outranks-program-declaration` (**flagged source-derived, NOT
+   executed — reproduce first**).
+
+4. **Carry-forward, unchanged:** S432's four `hold/s429-*` refs and its gift-wrap builds are the laptop's.
+   The S429b/S428 pickups below are superseded only where this session's landings closed them.
+
+## WHAT LANDED — eight PRs
+
+| PR | what |
+|---|---|
+| **#1056** | route: the #1045 client-`clientJs` dangling-specifier findings → bryan (his `api.js` footprint) |
+| **#1057** | fix: the determinism gate was blind to `lintDiagnostics` **and** to its own defect's within-unit shape |
+| **#1058** | route: four pre-measured forks → bryan, each answerable in two words |
+| **#1061** | gaps: 3 review markers · 5 filings · 2 resolutions · 1 narrowing |
+| **#1062** | fix(security): one session store per build + sqlite WAL/busy-timeout defaults |
+| **#1066** | fix(ssr): an `<each>` under an inert `if=` no longer emits a renderer into a dead `<template>` |
+| **#1070** | feat(codegen): a bare-markup control-flow arm renders (the implied `lift` made explicit) |
+| — | #1064 and #1067/#1069 closed as superseded refs; see the force-push note below |
+
+## 🔭 DURABLE
+
+**Every one of the three fixes came back from its adversarial pass with a real defect, in work that was
+CI-green and self-reported clean.** Two of the three had a SECOND round find something the first could not
+see from inside. That is the argument for the mandatory pass, stated as a measurement rather than a belief.
+
+**A fix can be INERT in exactly the scenario it exists for, with every confirmatory signal green.** The
+sqlite fix emitted both pragmas inside one `try`, WAL first. `PRAGMA journal_mode = WAL` needs a momentary
+EXCLUSIVE lock, so under contention — the precise situation the gap was filed for — it threw, the SHARED
+`catch` swallowed it, and `busy_timeout` was never reached. Measured **with the fix installed:**
+`journal_mode=delete busy_timeout=0`, bit-for-bit the pre-fix state. Its own tests passed and its emitted
+text asserted correctly. ⚑ **The general form: a fix whose steps share a failure domain has a silent-inert
+mode, and the test that catches it must reproduce the CONTENTION, not the emission.**
+
+**The adjacent half of a fix can leave the adopter exactly where they started.** Same arc covered
+`emit-server.ts` and not `emit-tool.ts`. Measured: a CLI tool sharing the adopter's db **failed after 8ms**
+while the server path wrote after 1205ms. And the tool needs `await`, not the server's floating `void` —
+§64.3's harness ends in `process.exit()`, which kills a pending IIFE, so **WAL never landed even on an
+UNCONTENDED tool run.** "Untested" was really "silently inconsistent", in the scenario the gap names.
+
+**Mirroring a predicate is not mirroring a dispatch, and getting that wrong INVERTS the defect.** The SSR
+fix copied `emit-html`'s `if=` gate CONDITION but not its dispatch ORDER; fourteen `return`s sit above that
+gate, so for `errorBoundary`/`page`/`program` and friends the `if=` never reaches it and the subtree stays
+LIVE — yet the predicate called them inert and **deleted a server first paint that previously worked.** ⚑ The
+asymmetry now written into the code: **a MISSED inert host costs a missed diagnosis; a FALSE one costs
+working output. Uncertain resolves to not-inert.**
+
+**A reviewer's list is a hypothesis too.** The review named `outlet` a gate bypass; it is not (its dispatch
+rewrites the node KEEPING `if=` and re-enters). Adding it would have re-opened the original silence. The
+author found that by reading the dispatch, and in the same pass found a **fifteenth** bypass route keyed on a
+per-file declaration fact that no static tag set can express — **and invisible to the fast `buildAST`
+harness, because `_scope` is only populated by the full pipeline.**
+
+**⚑ THE SESSION'S ONE LESSON, four instances, four mechanisms, one class: a probe that cannot see the thing
+it reports zero of, whose output is indistinguishable from a clean result.** (1) The PA's CI watcher piped
+`gh` through a `jq` that is **not installed on this box**, so every gate check evaluated to "not green"
+rather than erroring — it would have polled 20 minutes and reported a confident false give-up. (2) Three
+times the PA chained `&& echo "MERGED"` after a piped command and the echo fired while the merge had
+CONFLICTED. (3) A dev agent's harness used `execFileSync` (stdout only) and appended stderr solely on the
+`catch` path, so a **zero-exit** compile hid every stderr diagnostic — two "zero diagnostic changes" claims
+were assumed-zero wearing measured-zero's clothes. (4) A gap entry's evidence came from a harness whose
+`parseAST` returns `buildAST(...).ast` and **discards buildAST's diagnostics**, so a hard
+`E-PAGE-INVALID-ATTR` was filed as a silent drop. **Rule: prove the harness can see the thing it reports
+zero of, before quoting the zero.**
+
+**`strict:true` makes a merge burst arithmetically impossible, and a rebase cannot be published from this
+box at all.** Every merge invalidates every other open PR's green — including your own — so N PRs cost N CI
+cycles regardless of who lands. Worse: the pre-push hook is relaxed for NEW-REF pushes and runs the full
+suite on FORCED ones, and this box's local baseline is never green, so **a rebased PR must be re-opened on a
+fresh ref** (#1064→#1066, #1067→#1069→#1070). Never `--no-verify`. ⚑ Do NOT reach for `--auto` to escape
+this: auto-merge fires on green WITHOUT the per-PR `tracking` name-set re-measure that is the actual
+condition of a "merge on green" authorization, and this repo has twice had a parked auto-merge fire out from
+under a session.
+
+**Routed ≠ his.** Five entries carrying `route=bryan` had **already been ruled** (S385 A1/A2/B5, S371
+value-form b) and were sitting in his queue as if open; two more were awaiting rulings he **no longer owed**
+because both halves had been ruled at S430 and built at #1048/#1051. **Check the ruling before routing, and
+before deferring.**
+
+## ⚑ MISSES (mine)
+
+1. **★★★ My own watcher had the exact defect I spent the session auditing.** The `jq` pipe above. Caught
+   only by checking merge state by hand. Every later waiter prints `UNREADABLE probe (NOT a green)` on an
+   empty read, and the final merge checks refuse to treat an empty name-set as identical.
+2. **★★★ I relayed a reviewer's fix DIRECTION to a dev agent as though verified, and it was wrong** — in the
+   same message where I quoted the rule against doing that. "Any piece is an `html-fragment` starting with
+   `<`" cannot catch the reported shape: `{ @k = 1 <p>MARKA</p> }` parses to a single `state-decl` whose
+   `init` is `"1 < p > MARKA < / p >"`, so no fragment node exists. The agent dumped the AST and built the
+   right predicate. **I also told it to write a reviewer's crash-repair claim into the ledger; it could not
+   reproduce it in three variants and correctly refused.** A relayed finding must be marked relayed even
+   when the relayer believes it — especially in a brief, where it anchors the search.
+3. **★★ I briefed two of my own agents onto the same file** (`emit-html.ts`), violating the
+   ingestion-disjoint invariant, **and then reported a merge conflict that never materialised** because the
+   if-arm agent's refined approach left that file alone. Two errors: the overlap, and reporting its
+   consequence from my brief rather than from the result.
+4. **★★ I nearly landed a lost update.** My first file-delta for #1062 pulled all seven files wholesale; the
+   staged diff came back LARGER than the agent's own, which is the tell. `SPEC.md` had moved twice on main
+   and `codegen/index.ts` once. Repaired with a 3-way apply for exactly those two. **The check — is this file
+   unchanged on main since the agent's base? — belongs BEFORE the pull, not after a suspicious diff.**
+5. **★★ I told the operator a gap was fixed on structural evidence and the empirical check said otherwise.**
+   The boolean-column coercion is wired at four `?{}` paths and still emits nothing for a raw read under a
+   program-level `db=`. R26 exists for this; I nearly closed a live gap on a helper's presence.
+6. **★ I briefed three agents with a 9-failure baseline; the real number is 21.** Mine came from one quiet
+   run. No agent was misled (all three compared NAMES), and the correction came from them.
+7. **★ A heredoc broke a ledger append again** — the class recorded three sessions running. Content with
+   backticks and quotes goes through the Write tool. I know this and did it anyway.
+
+## Gate at close
+
+- **Cloud:** `gate` + `windows` GREEN on every merged PR; `tracking`'s five dev-watcher names re-measured
+  against main's own newest run **per PR** and byte-identical every time.
+- **Local pre-commit tier on main:** **25,271 pass / 99 skip / 8 fail** (1,359 files, 268s). The 8 are the
+  known names **minus B5** — ⚑ **`B5 runtime guard` LEFT the failure set**, because #1062's key
+  normalization makes its CSRF-pinning assertion actually EXECUTE on Windows for the first time. PA-verified
+  on merged main: 3 pass / 1 fail, the 1 being the `(unnamed)` EBUSY teardown artifact, not a test.
+- ⚑ **This box's baseline is 21 red, not 9** — `g-two-test-files-share-fixed-absolute-temp-roots-and-race`
+  (filed). They fail in BOTH directions and pass 24/24 in isolation. **Judge a red local tier here by failure
+  NAME SET, never by count.**
+- **Board:** HIGH 135 · MED 301 · LOW 111 · Nominal 7 · **carried 4**. Review floor: 3 markers appended.
+- **Maps: NOT refreshed, and this is now 5+ sessions of debt.** Watermark `787d4cb4` / 2026-09-18. The
+  concurrent peter session was landing continuously into a repo-wide shared surface, and a refresh would have
+  been stale on arrival and conflict-prone. **Code landed this session in:** `emit-server.ts` · `emit-tool.ts`
+  · `sqlite-defaults.ts` (new) · `emit-ssr-render.ts` · `emit-html.ts` · `implied-lift-desugar.ts` (new) ·
+  `component-expander.ts` · `emit-match.ts` · `type-system.ts` · `pipeline-seam.ts` · `codegen/index.ts`.
+  **The next SOLO session should run project-mapper incrementally on exactly those.**
+- **Worktrees:** the two landed agent worktrees removed. **RETAINED:** `agent-a70df0052b281519f` (the if-arm
+  work — its content is committed and pushed, safe to remove once #1070 is merged) and
+  `agent-a17aa5322771d6ebc` (not this session's).
+- **Inbox:** bryan's P1–P7 rulings note archived to `read/` — genuinely processed, P7 governed every lane
+  decision here — though S432's own wrap (#1068) had already archived it on main, so the move was redundant.
+  **12 live at close** (the count moves as both peter sessions drop notes): bryan's queue plus **the 4 adopter
+  reports at item 0**. Nothing was archived that was not read (the S428 lesson).
+- **SPEC:** §20.5 amended (store scope = DIST ROOT, honestly stated; the login-page `sessionExpiry`
+  out-of-scope parenthetical STRUCK because it contradicted bryan's own S385 B5 ruling). The amendment's two
+  overclaims were caught by the adversarial pass and corrected before landing. **It reaches bryan as a
+  review, not a question**, per the S313 review-floor model.
+- **Cross-repo:** scrml-support pushed (board + user-voice). Both repos 0/0 at close.
+
+---
+
 # scrml — Session 430 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Peter ran S431/S432/S433
