@@ -22,7 +22,8 @@ import { generate as astringGenerate } from "astring";
 // `regexAllowedAfter` is the fence's context-tracking regex-vs-division decision
 // (ECMA preceding-token rule), reused by rewriteIsPredicates (S252, #1) to skip
 // the word `is` inside regex-literal interiors without fragmenting its LHS scan.
-import { rewriteCodeSegments, regexAllowedAfter } from "./codegen/code-segments.ts";
+import { rewriteCodeSegments, regexAllowedAfter, maskLiteralContents } from "./codegen/code-segments.ts";
+import type { LiteralMask } from "./codegen/code-segments.ts";
 
 import type {
   ExprNode, ExprSpan,
@@ -485,11 +486,27 @@ function detectFnKeywordArrowBody(
  * Parse a single JS expression string into an ESTree node.
  */
 export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}): ParseResult {
-  const { tolerant = true } = opts;
   if (!raw || typeof raw !== "string") return { ast: null, error: "empty expression" };
+  // S431: every text substitution below runs with literal/comment CONTENT masked
+  // (a `?{` / `<#id>` inside a string is not a sigil); the parsed tree gets the
+  // content back. See code-segments.ts `maskLiteralContents`.
+  const mask = maskLiteralContents(raw.trim());
+  try {
+    const r = _parseExpressionMasked(mask.masked, opts);
+    if (mask.active) {
+      restoreMaskedLiterals(r.ast, mask);
+      if (r.trailingContent) r.trailingContent = mask.restore(r.trailingContent);
+    }
+    return r;
+  } finally {
+    mask.release();
+  }
+}
 
+function _parseExpressionMasked(masked: string, opts: { tolerant?: boolean }): ParseResult {
+  const { tolerant = true } = opts;
   // Pre-process: strip scrml-specific constructs that acorn can't handle
-  let processed = raw.trim();
+  let processed = masked;
 
   // F-SQL-001: replace ?{...} SQL blocks with a placeholder identifier using
   // a bracket-matched scanner (handles ?{`...${expr}...`} correctly).
@@ -540,10 +557,21 @@ export function parseExpression(raw: string, opts: { tolerant?: boolean } = {}):
  * Parse a multi-statement JS body into an ESTree Program node.
  */
 export function parseStatements(raw: string, opts: { tolerant?: boolean } = {}): ParseResult {
-  const { tolerant = true } = opts;
   if (!raw || typeof raw !== "string") return { ast: null, error: "empty body" };
+  // S431: same literal-content mask as parseExpression.
+  const mask = maskLiteralContents(raw.trim());
+  try {
+    const r = _parseStatementsMasked(mask.masked, opts);
+    if (mask.active) restoreMaskedLiterals(r.ast, mask);
+    return r;
+  } finally {
+    mask.release();
+  }
+}
 
-  let processed = raw.trim();
+function _parseStatementsMasked(masked: string, opts: { tolerant?: boolean }): ParseResult {
+  const { tolerant = true } = opts;
+  let processed = masked;
   // F-SQL-001: bracket-matched ?{} placeholder replacement (see replaceSqlBlockPlaceholder).
   const sqlScan = replaceSqlBlockPlaceholder(processed);
   processed = sqlScan.result;
@@ -568,6 +596,95 @@ export function parseStatements(raw: string, opts: { tolerant?: boolean } = {}):
     if (tolerant) return { ast: null, error: (err as Error).message, ...(sqlDiag ? { sqlDiagnostic: sqlDiag } : {}) };
     throw err;
   }
+}
+
+// ---------------------------------------------------------------------------
+// S431 — put masked literal content back into a parsed tree
+// ---------------------------------------------------------------------------
+
+/** The cooked value of a string-literal source text (escapes resolved). */
+function cookStringLiteral(rawLit: string): string | null {
+  try {
+    // Plain acorn — the scrml plugins only act OUTSIDE literals.
+    const n = acorn.parseExpressionAt(rawLit, 0, { ecmaVersion: 2025 }) as unknown as { type: string; value?: unknown; end: number };
+    if (n.type === "Literal" && typeof n.value === "string" && n.end === rawLit.length) return n.value;
+  } catch { /* fall through */ }
+  return null;
+}
+
+/** The cooked value of one template static span (the text between delimiters). */
+function cookTemplateSpan(rawSpan: string): string | null {
+  try {
+    const n = acorn.parseExpressionAt("`" + rawSpan + "`", 0, { ecmaVersion: 2025 }) as unknown as { type: string; quasis?: Array<{ value: { cooked: string | null } }> };
+    if (n.type === "TemplateLiteral" && n.quasis && n.quasis.length === 1) return n.quasis[0].value.cooked;
+  } catch { /* fall through */ }
+  return null;
+}
+
+/**
+ * Restore the literal content a `maskLiteralContents` session hid, everywhere it
+ * can have landed in a tree (an ESTree from acorn, or an ExprNode built from one):
+ *
+ *   - a string Literal whose content IS one masked span gets its original `raw`
+ *     and the `value` cooked from it;
+ *   - a TemplateElement whose raw IS one masked span gets raw + cooked the same way;
+ *   - any other string property (a raw-source slice, an internal placeholder's
+ *     JSON-carried source text) has the masked spans substituted back — they are
+ *     SOURCE text, so the original source content is what belongs there.
+ *
+ * Mutates in place. Cycle-safe.
+ */
+export function restoreMaskedLiterals(root: unknown, mask: LiteralMask): void {
+  if (!mask.active || !root || typeof root !== "object") return;
+  const seen = new WeakSet<object>();
+  const visit = (obj: Record<string, unknown>): void => {
+    if (seen.has(obj)) return;
+    seen.add(obj);
+    if (obj.type === "Literal" && typeof obj.value === "string" && typeof obj.raw === "string") {
+      const r = obj.raw as string;
+      const q = r[0];
+      const orig = (q === '"' || q === "'") && r.length >= 2 && r[r.length - 1] === q ? mask.originalOf(r.slice(1, -1)) : null;
+      if (orig !== null) {
+        const newRaw = q + orig + q;
+        const cooked = cookStringLiteral(newRaw);
+        obj.raw = newRaw;
+        obj.value = cooked !== null ? cooked : orig;
+        return;
+      }
+    }
+    if (obj.type === "TemplateElement" && obj.value && typeof obj.value === "object") {
+      const v = obj.value as { raw?: string; cooked?: string | null };
+      const orig = typeof v.raw === "string" ? mask.originalOf(v.raw) : null;
+      if (orig !== null) {
+        v.raw = orig;
+        v.cooked = cookTemplateSpan(orig);
+        seen.add(v);
+        return;
+      }
+    }
+    for (const key of Object.keys(obj)) {
+      const val = obj[key];
+      if (typeof val === "string") {
+        const restored = mask.restore(val);
+        if (restored !== val) obj[key] = restored;
+      } else if (val && typeof val === "object") {
+        if (Array.isArray(val)) {
+          for (let i = 0; i < val.length; i++) {
+            const it = val[i];
+            if (typeof it === "string") {
+              const restored = mask.restore(it);
+              if (restored !== it) val[i] = restored;
+            } else if (it && typeof it === "object") {
+              visit(it as Record<string, unknown>);
+            }
+          }
+        } else {
+          visit(val as Record<string, unknown>);
+        }
+      }
+    }
+  };
+  visit(root as Record<string, unknown>);
 }
 
 // ---------------------------------------------------------------------------
@@ -3014,8 +3131,24 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
 
   const trimmed = raw.trim();
 
+  // S431 (g-scrml-sigil-rewrites-reach-inside-every-string-literal): EVERY
+  // pre-parse text pass below (`::`, `match`, map literals, `is`, bare
+  // variants, `not`/`or`/`and`, `render`, `~`, and parseExpression's `?{}` /
+  // `<#id>` placeholders) runs over text whose literal/comment CONTENT is
+  // masked; the tree gets it back before and after conversion.
+  const mask = maskLiteralContents(trimmed);
+  try {
+    const node = _parseMaskedExprToNode(mask, trimmed, filePath, offset, opts, _notDetector);
+    if (mask.active) restoreMaskedLiterals(node, mask);
+    return node;
+  } finally {
+    mask.release();
+  }
+}
+
+function _parseMaskedExprToNode(mask: LiteralMask, trimmed: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }, _notDetector?: { notPrefixNegation: boolean; valueRhsOnIs?: boolean }): ExprNode {
   // Apply scrml-specific preprocessing to convert `is`/`match` etc.
-  let processed = trimmed;
+  let processed = mask.masked;
 
   // Preprocessing for scrml-specific operators
   processed = preprocessForAcorn(processed, { tildeActive: opts?.tildeActive }, _notDetector);
@@ -3100,6 +3233,7 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
     // through rewriteExpr's string-rewrite pipeline, which idempotently
     // handles preprocessed forms (e.g. `Mode.A` is valid JS for what was
     // originally `Mode::A`).
+    if (mask.active) restoreMaskedLiterals(estree, mask);
     return esTreeToExprNode(estree, filePath, offset, processed);
   } catch (e) {
     const span: ExprSpan = { file: filePath, start: offset, end: offset + trimmed.length, line: 1, col: 1 };

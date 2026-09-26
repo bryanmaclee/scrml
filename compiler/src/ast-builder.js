@@ -54,6 +54,7 @@ import {
 // this file does not import it.
 
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
+import { withLiteralsMasked, findLiteralContentRanges } from "./codegen/code-segments.ts";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -583,8 +584,13 @@ function preprocessWorkerAndStateRefs(raw, childRanges) {
   ];
 
   // No child context — preserve the original simple sequential-replace contract.
+  // S431: a `<#id>` inside a string literal / comment is TEXT, not a ref — the
+  // replacements run with literal content masked (code-segments.ts).
   if (!childRanges || childRanges.length === 0) {
-    for (const rule of RULES) raw = raw.replace(rule.re, (...args) => rule.build(args));
+    raw = withLiteralsMasked(raw, (masked) => {
+      for (const rule of RULES) masked = masked.replace(rule.re, (...args) => rule.build(args));
+      return masked;
+    });
     return childRanges ? { text: raw, shifts: [] } : raw;
   }
 
@@ -595,8 +601,10 @@ function preprocessWorkerAndStateRefs(raw, childRanges) {
   const shifts = [];
   let out = "";
   let i = 0;
+  // S431: literal/comment content is skipped exactly like a child span.
+  const skipRanges = childRanges.concat(findLiteralContentRanges(raw));
   function inChildRange(relPos) {
-    for (const r of childRanges) {
+    for (const r of skipRanges) {
       if (relPos >= r.start && relPos < r.end) return true;
     }
     return false;

@@ -4,7 +4,7 @@ import { splitBareExprStatements } from "./compat/parser-workarounds.js";
 import { rewriteReactiveRefsAST, rewriteServerReactiveRefsAST, setParserCurrentUserAmbientActive } from "../expression-parser.ts";
 import { CGError } from "./errors.ts";
 // GITI-017 (S125): shared regex/comment/string fence — see code-segments.ts header.
-import { rewriteCodeSegments, regexAllowedAfter } from "./code-segments.ts";
+import { rewriteCodeSegments, regexAllowedAfter, withLiteralsMasked } from "./code-segments.ts";
 // §14.8.9 protected-column egress redaction — resolve the protected OUTPUT
 // columns a lowered `?{}` SELECT carries and wrap its result rows in the
 // `_scrml_protect_tag(...)` descriptor at query-lowering time (server only).
@@ -2755,7 +2755,12 @@ export function rewriteReactiveAssign(expr: string): string {
  * Each pass receives the accumulated string and the shared context.
  */
 function runPasses(input: string, passes: RewritePass[], ctx: RewriteContext): string {
-  return passes.reduce((s, pass) => pass(s, ctx), input);
+  // S431 (g-scrml-sigil-rewrites-reach-inside-every-string-literal): the passes
+  // are TEXT rewrites and most of them cannot tell a string literal from code.
+  // Mask every literal/comment content ONCE here so no pass — present or future —
+  // can reach into it; template `${…}` interpolations and `?{…}` SQL blocks stay
+  // code. See code-segments.ts `maskLiteralContents`.
+  return withLiteralsMasked(input, (masked) => passes.reduce((s, pass) => pass(s, ctx), masked));
 }
 
 // ---------------------------------------------------------------------------

@@ -74,6 +74,7 @@
 
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST } from "./expression-parser.ts";
+import { blankLiteralContents } from "./codegen/code-segments.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
@@ -26084,8 +26085,10 @@ function checkFnBodyProhibitions(
         }
       }
 
-      // Heuristic text checks for E-FN-001, E-FN-002, E-FN-003, E-FN-004 and field tracking
-      const txt = nodeText(stmt);
+      // Heuristic text checks for E-FN-001, E-FN-002, E-FN-003, E-FN-004 and field tracking.
+      // S431: over the CODE only — `"a ?{} b"` / `"Date.now()"` inside a string
+      // literal is text, not a SQL access or a call.
+      const txt = blankLiteralContents(nodeText(stmt));
       if (txt) {
         // E-FN-001: ?{} SQL access (text-heuristic — catches ?{} embedded in let-decl init or return-stmt)
         // S96 Bug 15 fix — pattern must be `?{` with NO whitespace. The pre-fix

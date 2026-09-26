@@ -65,6 +65,7 @@
 
 import type { LogicStatement, ExprNode, LambdaExpr } from "./types/ast.ts";
 import { forEachIdentInExprNode, emitStringFromTree } from "./expression-parser.ts";
+import { blankLiteralContents } from "./codegen/code-segments.ts";
 
 // ---------------------------------------------------------------------------
 // Public types — BodyDG / BodyDGNode / BodyDGEdge
@@ -861,6 +862,8 @@ function hasServerInit(node: Record<string, unknown>): boolean {
     rendered = "";
   }
   if (!rendered) return false;
+  // S431: scan CODE only — a sigil spelled inside a string literal is text.
+  rendered = blankLiteralContents(rendered);
   if (/\?\{`/.test(rendered)) return true;
   // Server-only resource sigils — conservative subset (Bun.*, process.env,
   // env(), the ?{ sql sigil). The body-DG does not need full RI parity here:

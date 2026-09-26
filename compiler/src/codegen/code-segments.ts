@@ -575,3 +575,385 @@ export function rewriteCodeSegments(
 
   return result.join("");
 }
+
+// ---------------------------------------------------------------------------
+// Literal-content MASKING (S431, g-scrml-sigil-rewrites-reach-inside-every-string-literal)
+//
+// `rewriteCodeSegments` above fences ONE substitution at a time: each pass that
+// uses it is safe, each pass that does not is a hole. That is how the class kept
+// coming back — every text pass (`?{}` placeholders, `<#id>` refs, `::`, `match`,
+// `render`, `~`, `fn`, `@cell`, `is`, …) had to opt in separately, and passes that
+// need to see ACROSS literals (match arms, struct literals, call-arg balancing)
+// cannot use a per-segment callback at all.
+//
+// `maskLiteralContents` inverts that. It is applied ONCE at the entry of a stage
+// (the pre-parse preprocessing in expression-parser.ts, the codegen `runPasses`
+// pipeline, the TAB `<#id>` preprocess) and replaces the CONTENT of every string
+// literal, template-literal static span and comment with opaque private-use
+// characters. Every pass in that stage then runs over text in which there is no
+// literal content left to rewrite — whether or not the pass knows about
+// literals. `restore` puts the content back afterwards.
+//
+// What stays CODE (visible to the passes, exactly as before):
+//   - everything outside literals/comments;
+//   - the `${ … }` interpolations of a template literal (nested literals inside
+//     them are masked in turn);
+//   - regex literals (skipped VERBATIM, not masked — status quo; skipping them
+//     only stops a quote inside `/"/` from opening a string);
+//   - `?{ … }` SQL blocks (skipped VERBATIM — the SQL passes read their text).
+//
+// The mask is LENGTH-PRESERVING: content of N UTF-16 units becomes one head char
+// (which names the entry) followed by N-1 filler chars, and line terminators are
+// kept in place. So every offset, span and line count computed over masked text
+// is identical to the unmasked text, and ASI across a multi-line comment is
+// unchanged.
+//
+// Known limits (stated, not hidden):
+//   - A quote that is not a JS string opener (an apostrophe in lift-markup text,
+//     `<p>don't</p>`) is treated as a string opener when a matching quote closes
+//     it on the SAME line; the text between is masked for the stage and restored
+//     verbatim. A `'`/`"` with no close on its line is treated as a plain char.
+//   - Regex-vs-division is decided by `regexAllowedAfter` (errs toward regex).
+//   - Content that already consists of live mask characters is not re-masked.
+// ---------------------------------------------------------------------------
+
+/** Filler char that pads a masked span to its original length. */
+const MASK_FILL = "";
+/** Head chars name a live entry: U+E100 … U+F8FF (6144 ids). */
+const MASK_HEAD_MIN = 0xe100;
+const MASK_HEAD_MAX = 0xf8ff;
+const MASK_ID_SPACE = MASK_HEAD_MAX - MASK_HEAD_MIN + 1;
+
+/** Live entries across (possibly nested) mask sessions: id → original content. */
+const _liveMaskIds = new Set<number>();
+let _nextMaskId = 0;
+
+function _allocMaskId(): number {
+  if (_liveMaskIds.size >= MASK_ID_SPACE) return -1;
+  for (let k = 0; k < MASK_ID_SPACE; k++) {
+    const id = (_nextMaskId + k) % MASK_ID_SPACE;
+    if (!_liveMaskIds.has(id)) {
+      _nextMaskId = (id + 1) % MASK_ID_SPACE;
+      _liveMaskIds.add(id);
+      return id;
+    }
+  }
+  return -1;
+}
+
+function _isMaskChar(ch: string | undefined): boolean {
+  if (!ch) return false;
+  const c = ch.charCodeAt(0);
+  return c === 0xe001 || (c >= MASK_HEAD_MIN && c <= MASK_HEAD_MAX);
+}
+
+/** An opaque region of `src`: [start, end) is the CONTENT to mask. */
+interface LiteralContentRange { start: number; end: number }
+
+/**
+ * Skip a `?{ … }` SQL block starting at `i` (pointing at `?`). Bracket-matched,
+ * string- and template-aware (same discipline as expression-parser.ts
+ * `replaceSqlBlockPlaceholder`). Returns the index one past the closing `}`, or
+ * `src.length` when unterminated.
+ */
+function _skipSqlBlock(src: string, i: number): number {
+  const n = src.length;
+  i += 2;
+  // Frames: "js" (with its own brace depth), "template", or a quote char.
+  const stack: string[] = ["js"];
+  const depth: number[] = [1];
+  while (i < n && stack.length > 0) {
+    const top = stack[stack.length - 1];
+    const c = src[i];
+    if (top === "'" || top === '"') {
+      if (c === "\\") { i += 2; continue; }
+      if (c === top) stack.pop();
+      i++;
+      continue;
+    }
+    if (top === "template") {
+      if (c === "\\") { i += 2; continue; }
+      if (c === "`") { stack.pop(); i++; continue; }
+      if (c === "$" && src[i + 1] === "{") { stack.push("js"); depth.push(1); i += 2; continue; }
+      i++;
+      continue;
+    }
+    if (c === "`") { stack.push("template"); i++; continue; }
+    if (c === "'" || c === '"') { stack.push(c); i++; continue; }
+    if (c === "{") { depth[depth.length - 1]++; i++; continue; }
+    if (c === "}") {
+      depth[depth.length - 1]--;
+      i++;
+      if (depth[depth.length - 1] === 0) { stack.pop(); depth.pop(); }
+      continue;
+    }
+    i++;
+  }
+  return Math.min(i, n);
+}
+
+/** Skip a regex literal whose opening `/` is at `i`. Returns the index past its flags. */
+function _skipRegex(src: string, i: number): number {
+  const n = src.length;
+  i++;
+  while (i < n) {
+    const c = src[i];
+    if (c === "\\") { i += 2; continue; }
+    if (c === "[") {
+      i++;
+      while (i < n) {
+        if (src[i] === "\\") { i += 2; continue; }
+        if (src[i] === "]") { i++; break; }
+        if (src[i] === "\n") return i;
+        i++;
+      }
+      continue;
+    }
+    if (c === "/") {
+      i++;
+      while (i < n && /[A-Za-z0-9_$]/.test(src[i])) i++;
+      return i;
+    }
+    if (c === "\n") return i; // unterminated — back to code at the newline
+    i++;
+  }
+  return n;
+}
+
+/**
+ * Scan CODE from `i`. When `inInterp`, stop after the `}` that closes the
+ * enclosing `${`. Pushes literal-content ranges into `out`. Returns the index
+ * where scanning stopped, or -1 if an interpolation never closed.
+ */
+function _scanCode(src: string, i: number, inInterp: boolean, out: LiteralContentRange[]): number {
+  const n = src.length;
+  let depth = 0;
+  while (i < n) {
+    const c = src[i];
+    if (inInterp) {
+      if (c === "{") { depth++; i++; continue; }
+      if (c === "}") {
+        if (depth === 0) return i + 1;
+        depth--;
+        i++;
+        continue;
+      }
+    }
+    if (c === "?" && src[i + 1] === "{") { i = _skipSqlBlock(src, i); continue; }
+    if (c === "/" && src[i + 1] === "/") {
+      let j = i + 2;
+      while (j < n && src[j] !== "\n" && src[j] !== "\r") j++;
+      if (j > i + 2) out.push({ start: i + 2, end: j });
+      i = j;
+      continue;
+    }
+    if (c === "/" && src[i + 1] === "*") {
+      const close = src.indexOf("*/", i + 2);
+      if (close === -1) return inInterp ? -1 : n; // unterminated — leave as-is
+      if (close > i + 2) out.push({ start: i + 2, end: close });
+      i = close + 2;
+      continue;
+    }
+    if (c === "/" && regexAllowedAfter(src.slice(0, i))) { i = _skipRegex(src, i); continue; }
+    if (c === '"' || c === "'") {
+      // A string ends at its matching quote on the SAME line. No close on the line
+      // → not a string opener (an apostrophe in prose); treat as a plain char.
+      let j = i + 1;
+      let closed = false;
+      while (j < n) {
+        const d = src[j];
+        if (d === "\\") { j += 2; continue; }
+        if (d === "\n" || d === "\r") break;
+        if (d === c) { closed = true; break; }
+        j++;
+      }
+      if (!closed) { i++; continue; }
+      if (j > i + 1) out.push({ start: i + 1, end: j });
+      i = j + 1;
+      continue;
+    }
+    if (c === "`") {
+      // Collect this template's ranges provisionally; commit only if it closes.
+      const local: LiteralContentRange[] = [];
+      let j = i + 1;
+      let segStart = j;
+      let closed = false;
+      while (j < n) {
+        const d = src[j];
+        if (d === "\\") { j += 2; continue; }
+        if (d === "`") { closed = true; break; }
+        if (d === "$" && src[j + 1] === "{") {
+          if (j > segStart) local.push({ start: segStart, end: j });
+          const after = _scanCode(src, j + 2, true, local);
+          if (after === -1) break;
+          j = after;
+          segStart = j;
+          continue;
+        }
+        j++;
+      }
+      if (!closed) return inInterp ? -1 : n; // unterminated template — rest verbatim
+      if (j > segStart) local.push({ start: segStart, end: j });
+      for (const r of local) out.push(r);
+      i = j + 1;
+      continue;
+    }
+    i++;
+  }
+  return inInterp ? -1 : n;
+}
+
+/**
+ * The content ranges of every string literal, template-literal static span and
+ * comment in `src` (see the module note above for what is and is not included).
+ * Ranges are non-overlapping and in source order.
+ */
+export function findLiteralContentRanges(src: string): Array<{ start: number; end: number }> {
+  const out: LiteralContentRange[] = [];
+  if (!src || typeof src !== "string") return out;
+  if (!/["'`]|\/[/*]/.test(src)) return out;
+  _scanCode(src, 0, false, out);
+  out.sort((a, b) => a.start - b.start);
+  return out;
+}
+
+export interface LiteralMask {
+  /** `src` with every literal/comment content replaced by same-length mask chars. */
+  masked: string;
+  /** Put this session's masked content back into any text derived from `masked`. */
+  restore(text: string): string;
+  /**
+   * If `inner` (the text between a literal's delimiters) is EXACTLY one of this
+   * session's masked spans, return the original content; otherwise null.
+   */
+  originalOf(inner: string): string | null;
+  /** True when at least one span was masked. */
+  readonly active: boolean;
+  /** Free this session's entries. Call exactly once, after the last `restore`. */
+  release(): void;
+}
+
+const _INACTIVE_MASK = (src: string): LiteralMask => ({
+  masked: src,
+  restore: (t: string) => t,
+  originalOf: () => null,
+  active: false,
+  release() {},
+});
+
+/**
+ * Mask every string-literal / template-static / comment content in `src`.
+ * See the module note above. Always pair with `release()` (try/finally).
+ */
+export function maskLiteralContents(src: string): LiteralMask {
+  const ranges = findLiteralContentRanges(src);
+  if (ranges.length === 0) return _INACTIVE_MASK(src);
+  const own = new Map<number, string>();
+  const parts: string[] = [];
+  let last = 0;
+  for (const r of ranges) {
+    const content = src.slice(r.start, r.end);
+    // Nothing to protect: all line terminators, or already masked by an outer session.
+    if (!/[^\r\n]/.test(content)) continue;
+    // Head must sit on a non-newline char; leading newlines stay verbatim.
+    let lead = 0;
+    while (content[lead] === "\n" || content[lead] === "\r") lead++;
+    if (_isMaskChar(content[lead])) continue;
+    const id = _allocMaskId();
+    if (id === -1) break; // id space exhausted — leave the rest unmasked (status quo)
+    const body = content.slice(lead);
+    own.set(id, body);
+    let enc = String.fromCharCode(MASK_HEAD_MIN + id);
+    for (let k = 1; k < body.length; k++) {
+      const ch = body[k];
+      enc += ch === "\n" || ch === "\r" ? ch : MASK_FILL;
+    }
+    parts.push(src.slice(last, r.start + lead), enc);
+    last = r.end;
+  }
+  if (own.size === 0) return _INACTIVE_MASK(src);
+  parts.push(src.slice(last));
+  const masked = parts.join("");
+
+  const restore = (text: string): string => {
+    if (!text || typeof text !== "string") return text;
+    let outText = "";
+    let from = 0;
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code < MASK_HEAD_MIN || code > MASK_HEAD_MAX) continue;
+      const body = own.get(code - MASK_HEAD_MIN);
+      if (body === undefined) continue; // another session's head — not ours
+      // Consume the head plus up to body.length-1 filler / line-terminator chars.
+      let j = i + 1;
+      const limit = i + body.length;
+      while (j < limit && j < text.length) {
+        const d = text[j];
+        if (d !== MASK_FILL && d !== "\n" && d !== "\r") break;
+        j++;
+      }
+      outText += text.slice(from, i) + body;
+      from = j;
+      i = j - 1;
+    }
+    return from === 0 ? text : outText + text.slice(from);
+  };
+
+  const originalOf = (inner: string): string | null => {
+    if (!inner) return null;
+    const body = own.get(inner.charCodeAt(0) - MASK_HEAD_MIN);
+    if (body === undefined || inner.length !== body.length) return null;
+    for (let k = 1; k < inner.length; k++) {
+      const d = inner[k];
+      if (d !== MASK_FILL && d !== "\n" && d !== "\r") return null;
+    }
+    return body;
+  };
+
+  let released = false;
+  return {
+    masked,
+    restore,
+    originalOf,
+    active: true,
+    release() {
+      if (released) return;
+      released = true;
+      for (const id of own.keys()) _liveMaskIds.delete(id);
+    },
+  };
+}
+
+/**
+ * Run `fn` over `src` with every literal/comment content masked, and restore the
+ * content in its result. The single wrapper every whole-text rewrite stage uses.
+ */
+export function withLiteralsMasked(src: string, fn: (masked: string) => string): string {
+  if (!src || typeof src !== "string") return fn(src);
+  const mask = maskLiteralContents(src);
+  if (!mask.active) return fn(src);
+  try {
+    return mask.restore(fn(mask.masked));
+  } finally {
+    mask.release();
+  }
+}
+
+/**
+ * A DETECTION view of `src`: every string-literal / template-static / comment
+ * content replaced by spaces (line terminators kept, length preserved). For
+ * read-only text scanners that ask "does the CODE contain X" (`?{`, `Bun.serve(`,
+ * …) — a sigil spelled inside a string is not X. Nothing is restored; never
+ * emit the result.
+ */
+export function blankLiteralContents(src: string): string {
+  const ranges = findLiteralContentRanges(src);
+  if (ranges.length === 0) return src;
+  let out = "";
+  let last = 0;
+  for (const r of ranges) {
+    out += src.slice(last, r.start) + src.slice(r.start, r.end).replace(/[^\r\n]/g, " ");
+    last = r.end;
+  }
+  return out + src.slice(last);
+}

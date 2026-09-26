@@ -82,6 +82,7 @@ import type { MonotonicityVerdict } from "./monotonicity-analyzer.ts";
 import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHandlerNames } from "./codegen/emit-channel.ts";
 // Ext 1 M1.2 + M1.3 — statement-grain body-DG + multi-batch CPS planner.
 import { buildBodyDG } from "./body-dg-builder.ts";
+import { blankLiteralContents } from "./codegen/code-segments.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn } from "./tool-program.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
@@ -692,8 +693,11 @@ export function isEscalationServerOnlyModule(source: string): boolean {
  * Returns the first matching resourceType, or null if none match.
  */
 function detectServerOnlyResource(expr: string): string | null {
+  // S431: scan CODE only — a `?{` / `fs.readFile(` spelled inside a string
+  // literal or comment is not a server-only resource access.
+  const code = blankLiteralContents(expr);
   for (const { pattern, resourceType } of SERVER_ONLY_PATTERNS) {
-    if (pattern.test(expr)) return resourceType;
+    if (pattern.test(code)) return resourceType;
   }
   return null;
 }
@@ -705,8 +709,9 @@ function detectServerOnlyResource(expr: string): string | null {
  * (`exprNodeCallsServerOnlyResource`) is primary and string-literal-FP-free.
  */
 function detectServerOnlyNamespaceString(expr: string): string | null {
+  const code = blankLiteralContents(expr);
   for (const { pattern, resourceType } of SERVER_ONLY_NAMESPACE_FALLBACK_PATTERNS) {
-    if (pattern.test(expr)) return resourceType;
+    if (pattern.test(code)) return resourceType;
   }
   return null;
 }
@@ -2992,9 +2997,11 @@ function hasServerOnlyResourceInInit(
   // Phase 4d: ExprNode-first, string fallback
   const init = (node as any).initExpr ? emitStringFromTree((node as any).initExpr) : (typeof (node as any).init === "string" ? (node as any).init : "");
   if (!init) return false;
+  // S431: the sigil tests below read CODE only — `?{` inside a string literal is text.
+  const initCode = blankLiteralContents(init);
 
   // Check for SQL sigil (?{`)
-  if (/\?\{`/.test(init)) return true;
+  if (/\?\{`/.test(initCode)) return true;
 
   // Check for other server-only resource patterns (Bun.*/process.* via the
   // parsed initExpr — string/comment-safe, S252 — plus the string patterns).
