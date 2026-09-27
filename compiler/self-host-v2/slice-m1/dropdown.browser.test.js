@@ -3,12 +3,12 @@
 // ONE CLICK OPENS ONE DROPDOWN (impl#1 opens all three — CARRIED, §66.15.1).
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
-import { loadBootstrap } from "./harness.js";
+import { loadSuite } from "./cores.js";
 import { loadProgram, expectNoPageErrors, click, instancesOf } from "./load-program.js";
 
-let mods;
+let mods, cores;
 afterEach(() => expectNoPageErrors());
-beforeAll(() => { ({ mods } = loadBootstrap()); }, { timeout: 60000 });
+beforeAll(() => { ({ mods, cores } = loadSuite()); }, { timeout: 120000 });
 
 const dropdowns = () => [...document.querySelectorAll("div.dropdown")];
 const toggles = () => dropdowns().map((d) => d.querySelector("button.dropdown__toggle"));
@@ -27,7 +27,7 @@ function pick(dd, option) {
 }
 
 describe("§66.19.3 — initial render", () => {
-  beforeAll(async () => { await loadProgram(mods["dropdown.core"].dropdownCore(), "dropdown"); });
+  beforeAll(async () => { await loadProgram(cores.dropdown(), "dropdown"); });
 
   test("instances 1 and 2 plus one per row; the conditional instance is absent", () => {
     expect(labels()).toEqual(["Country: US", "Size: M", "Tea: 1", "Milk: 1"]);
@@ -38,7 +38,7 @@ describe("§66.19.3 — initial render", () => {
 });
 
 describe("dpa-050 D1 — one click opens ONE dropdown; every instance toggles independently", () => {
-  beforeAll(async () => { await loadProgram(mods["dropdown.core"].dropdownCore(), "dropdown"); });
+  beforeAll(async () => { await loadProgram(cores.dropdown(), "dropdown"); });
 
   test("clicking Country opens exactly one menu, inside Country", () => {
     click(toggles()[0]);
@@ -93,7 +93,7 @@ describe("dpa-050 D1 — one click opens ONE dropdown; every instance toggles in
 
 describe("as=country — the handle reads/writes instance 1 only", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(mods["dropdown.core"].dropdownCore(), "dropdown")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); });
 
   test("the handle points at the first dropdown instance, and `Shipping to` follows it", () => {
     const program = instancesOf(rt, "program")[0];
@@ -122,9 +122,37 @@ describe("as=country — the handle reads/writes instance 1 only", () => {
   });
 });
 
+describe("L12 (b) — an unconditional instance exists when the program is CONSTRUCTED, before any render", () => {
+  let rt;
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdownEarlyRead(), "dropdown-early")); });
+
+  const early = () => document.querySelector("p.early").textContent;
+
+  test("a seeded field whose initializer calls a function reading @country.value sees the live instance's initial value", () => {
+    // M1 created the instance at render: the construction-time call found no
+    // instance (and re-entered the program's construction). Now the record, its
+    // handle and its seed exist before render.
+    const program = instancesOf(rt, "program")[0];
+    expect(program.fields[2].peek()).toBe("US");
+    expect(early()).toBe("Early US / US");
+  });
+
+  test("a read placed BEFORE the instance in document order is live; the seed stays independent", () => {
+    pick(byLabel("Country"), "CA");
+    expect(early()).toBe("Early CA / US");            // the function call tracks; the seeded field does not
+  });
+
+  test("the unconditional instances were created with the program record (ids 1 and 2), not by render", () => {
+    const program = instancesOf(rt, "program")[0];
+    expect(program.kids.map((k) => k.id)).toEqual([1, 2]);
+    expect(program.handles[0].peek()).toBe(program.kids[0]);
+    expect(program.kids.every((k) => k.scope.parent === program.scope)).toBe(true);
+  });
+});
+
 describe("the conditional Color instance mounts and disposes with showColor", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(mods["dropdown.core"].dropdownCore(), "dropdown")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); });
 
   test("hidden: no instance, handle is `not`; clearColor() is a no-op", () => {
     const program = instancesOf(rt, "program")[0];
@@ -173,20 +201,30 @@ describe("the conditional Color instance mounts and disposes with showColor", ()
     click(appButton("Clear colour"));
     expect(byLabel("Color").querySelector("button").textContent).toBe("Color: ");
     expect(byLabel("Country").querySelector("button").textContent).toBe("Country: US");
-    // Re-showing makes a FRESH instance (a plain tag makes a new one, §66.6.1).
+    // Re-showing makes a FRESH instance (a plain tag makes a new one, §66.6.1;
+    // O59 ruled S437: a conditional instance's record is created AT MOUNT, fresh
+    // on each remount) — its state starts over.
+    pick(byLabel("Color"), "red");
+    click(byLabel("Color").querySelector("button"));          // leave its menu open
     const first = instancesOf(rt, "program")[0].handles[1].peek();
+    expect(first.fields[2].peek()).toBe("red");
+    expect(first.fields[3].peek()).toBe("Opened");
     click(appButton("Colours"));
     click(appButton("Colours"));
     const second = instancesOf(rt, "program")[0].handles[1].peek();
     expect(second).not.toBe(first);
     expect(first.scope.disposed).toBe(true);
+    expect(second.fields[2].peek()).toBe("");                  // fresh: the use site gives no value
+    expect(second.fields[3].peek()).toBe("Closed");            // fresh: the graph field's initial state
+    expect(byLabel("Color").querySelector("button").textContent).toBe("Color: ");
+    expect(menuOf(byLabel("Color"))).toBeNull();
   });
 });
 
 describe("row-scoped qty follows its row on reorder; disposed with its row (§66.7.3/§66.7.4)", () => {
   let rt, program;
   beforeAll(async () => {
-    ({ rt, program } = await loadProgram(mods["dropdown.core"].dropdownReorderCore(), "dropdown-rows",
+    ({ rt, program } = await loadProgram(cores.dropdownReorder(), "dropdown-rows",
       ["reorderLines", "dropTea", "addCoffee", "renameTea"]));
   });
 
@@ -239,7 +277,7 @@ describe("row-scoped qty follows its row on reorder; disposed with its row (§66
 describe("a surviving key whose item CHANGES updates in place (review F2)", () => {
   let rt, program;
   beforeAll(async () => {
-    ({ rt, program } = await loadProgram(mods["dropdown.core"].dropdownReorderCore(), "dropdown-rename", ["renameTea"]));
+    ({ rt, program } = await loadProgram(cores.dropdownReorder(), "dropdown-rename", ["renameTea"]));
   });
 
   test("renaming row 1 updates its span and its dropdown label; the row, its DOM and its instance survive", () => {

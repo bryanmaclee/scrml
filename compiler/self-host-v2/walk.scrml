@@ -146,6 +146,7 @@ ${
             .ArrayOf(elems: elems) :> exprNodes(elems)
             .StructOf(ty: ty, fields: fields) :> exprNodes(fields)
             .Handle(inst: inst) :> [Node.NInst(inst)]
+            .InitOf(decl: d, inst: inst) :> [Node.NInst(inst)]
         }
     }
 

@@ -2,12 +2,13 @@
 //
 // Every edit of a reactive sequence makes a new value (copy-on-write with the
 // copy moved to the write). This measures, with the slice-M1 runtime's actual
-// value representation (frozen arrays of frozen structs in a Cell):
+// value representation (plain arrays of plain structs in a Cell — the dev-mode
+// deep-freeze was DROPPED at S437; its M1 numbers are in slice-m1/progress.md):
 //   append     — rt.append(cell, e): a new array one longer (§66.11.2 end-append)
 //   field-write — rt.setIn(cell, [i, "qty"], v): a new array + a new struct at i
 //                 (a position write into an array of structs)
-// for n = 10 / 1k / 100k, in DEV (values deep-frozen on store) and PROD (no
-// freeze), against an in-place mutable baseline (what impl#1 does today).
+// for n = 10 / 1k / 100k, against an in-place mutable baseline (what impl#1
+// does today).
 //
 // Every append is to an n-element array (the cell is put back to the base
 // array between ops, O(1)), so the numbers are per-op at size n, not a
@@ -39,8 +40,7 @@ function opsFor(n) {
   return 40;
 }
 
-function timeOps(n, dev, kind) {
-  rt.setDev(dev);
+function timeOps(n, kind) {
   const ops = opsFor(n);
   const samples = [];
   for (let rep = 0; rep < 7; rep++) {
@@ -75,8 +75,7 @@ function timeMutable(n, kind) {
   return median(samples);
 }
 
-function bytesPerOp(n, dev, kind) {
-  rt.setDev(dev);
+function bytesPerOp(n, kind) {
   const ops = Math.min(opsFor(n), n >= 100000 ? 20 : 500);
   const cell = rt.cell(makeRows(n));
   const base = cell.peek();
@@ -99,17 +98,14 @@ const fmtNs = (ns) => (ns >= 1e6 ? (ns / 1e6).toFixed(2) + " ms" : ns >= 1e3 ? (
 const fmtB = (b) => (b >= 1024 * 1024 ? (b / 1024 / 1024).toFixed(2) + " MB" : b >= 1024 ? (b / 1024).toFixed(1) + " KB" : b.toFixed(0) + " B");
 
 const lines = [];
-lines.push("| edit | n | immutable DEV (freeze) | immutable PROD | mutable in-place | bytes/op DEV | bytes/op PROD |");
-lines.push("|---|---|---|---|---|---|---|");
+lines.push("| edit | n | immutable (copy on write) | mutable in-place | bytes/op immutable |");
+lines.push("|---|---|---|---|---|");
 for (const kind of ["append", "field-write"]) {
   for (const n of SIZES) {
-    const dev = timeOps(n, true, kind);
-    const prod = timeOps(n, false, kind);
+    const imm = timeOps(n, kind);
     const mut = timeMutable(n, kind);
-    const bDev = bytesPerOp(n, true, kind);
-    const bProd = bytesPerOp(n, false, kind);
-    lines.push(`| ${kind} | ${n} | ${fmtNs(dev)} | ${fmtNs(prod)} | ${fmtNs(mut)} | ${fmtB(bDev)} | ${fmtB(bProd)} |`);
+    const b = bytesPerOp(n, kind);
+    lines.push(`| ${kind} | ${n} | ${fmtNs(imm)} | ${fmtNs(mut)} | ${fmtB(b)} |`);
   }
 }
-rt.setDev(true);
 console.log(lines.join("\n"));

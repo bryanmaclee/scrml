@@ -1,0 +1,13 @@
+<program>
+    <audit:string[free, end]=([])/>      // append-only (⚑ O10: grant spelling; ⚑ O32: `([])`)
+    <let seen:int=0/>
+    function log() {
+        let before = @audit              // a snapshot (§66.10)
+        @audit.push("x")                 // an end-append edit, granted by [free, end]
+        @seen = before.length            // the snapshot did not grow
+    }
+    <main>
+        <button onclick=log()>log</button>
+        <p>${@seen} / ${@audit.length}</p>
+    </main>
+</program>

@@ -65,7 +65,10 @@ ${
 
     // A struct field carries its OWN write contract (O3 ruled: struct fields take
     // per-field `let`; §66.11.4: a field with no contract is fixed). Variant
-    // payload fields carry `noGrants()` (a payload is a value, never written in place).
+    // payload fields carry `noGrants()` (a payload is a value, never written in
+    // place). A `rule=` graph lives on a DECLARATION field (Field.graph); no
+    // source form declares one on a `type … :struct` field, so FieldDef has none
+    // (the M2 fix round removed the unfillable `FieldDef.graph` — progress.md).
     export type FieldDef:struct   = { sym: Sym, ty: Type, grants: GrantSet }
     export type VariantDef:struct = { sym: Sym, fields: FieldDef[] }
     export type TypeDef:enum = {
@@ -141,6 +144,11 @@ ${
         ArrayOf(elems: Expr[]),
         StructOf(ty: Sym, fields: Expr[]),
         Handle(inst: InstRef),
+        // D15 (M2 fix round, F-B): the value field `idx` of `inst` was
+        // CONSTRUCTED with — that instance's own initializer (a use-site value,
+        // L6 / §66.9, else the declared default), evaluated again now. What
+        // `reset(@x.f)` writes (L4) when the instance may have had a use site.
+        InitOf(decl: Sym, inst: InstRef, idx: int),
     }
     export type MatchArm:struct = { pat: Pattern, body: Expr }
 

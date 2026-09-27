@@ -55,20 +55,29 @@ function listClientJs(dir, out = []) {
   return out;
 }
 
-let cached = null;
+const cache = new Map();
 
 /**
  * Compile + load every module. Returns { mods, warnings } where `mods` maps a
  * module base name (e.g. "print") to its export object.
  */
 export function loadBootstrap() {
-  if (cached) return cached;
-  const outDir = mkdtempSync(join(tmpdir(), "self-host-v2-m1-"));
-  const inputFiles = [join(SELF_HOST_V2, "slice-m1", "bundle.scrml"), ...MODULES.map((m) => join(SELF_HOST_V2, m))].filter((f) => existsSync(f));
+  return loadBundle(join(SELF_HOST_V2, "slice-m1", "bundle.scrml"), MODULES);
+}
+
+/**
+ * Compile a `<program>` bundle entry + `modules` (paths relative to
+ * compiler/self-host-v2/) with impl#1 and load every emitted chunk (used by
+ * slice-m1 and slice-m2). Cached per bundle.
+ */
+export function loadBundle(bundle, modules) {
+  if (cache.has(bundle)) return cache.get(bundle);
+  const outDir = mkdtempSync(join(tmpdir(), "self-host-v2-bundle-"));
+  const inputFiles = [bundle, ...modules.map((m) => join(SELF_HOST_V2, m))].filter((f) => existsSync(f));
   const result = compileScrml({ inputFiles, outputDir: outDir, write: true, validateEmit: true, log: () => {} });
   const errs = (result.errors ?? []).filter((e) => e && e.code !== undefined);
   if (errs.length > 0) {
-    throw new Error("slice-m1 bootstrap failed to compile under impl#1:\n" + errs.map((e) => `${e.code} ${e.message ?? ""}`).join("\n"));
+    throw new Error("bootstrap bundle failed to compile under impl#1:\n" + errs.map((e) => `${e.code} ${e.message ?? ""}`).join("\n"));
   }
   const chunks = listClientJs(outDir).map((file) => {
     const src = readFileSync(file, "utf8");
@@ -86,6 +95,7 @@ export function loadBootstrap() {
   }
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;
-  cached = { mods, warnings: result.warnings ?? [] };
-  return cached;
+  const loaded = { mods, warnings: result.warnings ?? [] };
+  cache.set(bundle, loaded);
+  return loaded;
 }

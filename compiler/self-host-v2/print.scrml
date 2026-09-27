@@ -29,8 +29,8 @@ ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
              EditKind, Check, Stmt, Block, Attr, ConstructAttr, CondArm, View, FieldRole, Field,
              Decl, Fn, CoreProgram, CapOwner,
-             findDecl, findTypeDef, capOwner } from "./core.scrml"
-    import { Node, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
+             findDecl, findTypeDef, typeDefSym, capOwner } from "./core.scrml"
+    import { Node, allNodes, sharedRefs, boundSyms, assignedSyms } from "./walk.scrml"
     import { JsOp, JsUnOp, JsExpr, JsProp, JsStmt,
              jid, jstr, jnum, jmember, jcall, jmcall, jthunk, sexpr, printModule } from "./js.scrml"
     import { HAttr, HNode, Page, printPage } from "./html.scrml"
@@ -52,6 +52,7 @@ ${
         shared: SharedLoc[],
         rows: int[],
         slot: JsExpr,
+        prebuilt: boolean,
     }
 
     type Rendered:struct = { stmts: JsStmt[], templates: Template[] }
@@ -278,6 +279,7 @@ ${
             .ArrayOf(elems: es) :> JsExpr.JArray(exprsJs(ctx, es))
             .StructOf(ty: ty, fields: fs) :> structJs(ctx, ty, fs)
             .Handle(inst: i) :> instJs(ctx, i)
+            .InitOf(decl: d, inst: i, idx: x) :> rtCall(ctx, "initial", [instJs(ctx, i), JsExpr.JAnnot(jnum(x), memberName(ctx, d, x))])
         }
     }
 
@@ -579,8 +581,13 @@ ${
             stmts = stmts.concat([JsStmt.SConst(nodeVar(h.path), rtCall(ctx, "at", args))])
         }
         let templates: Template[] = [{ id: tid, nodes: built.nodes }]
+        // Instance holes are numbered in document order — the order in which
+        // the factory created them (mountedInstances) when this is a
+        // declaration's own renders (ctx.prebuilt, L12 (b)).
+        let kid = 0
         for (const h of built.holes) {
-            const w: Rendered = wireHole(ctx, h, tid)
+            const w: Rendered = wireHole(ctx, h, tid, kid)
+            if (isInstanceView(h.v)) kid = kid + 1
             stmts = stmts.concat(w.stmts)
             templates = templates.concat(w.templates)
         }
@@ -590,16 +597,58 @@ ${
 
     fn only(stmts: JsStmt[]) -> Rendered { return { stmts: stmts, templates: [] } }
 
-    fn wireHole(ctx: Ctx, h: Hole, tid: string) -> Rendered {
+    // A nested region (a conditional arm, an <each> row, slot content) creates
+    // its instances when it mounts: those are the conditional ones (§66.7.5).
+    fn nested(ctx: Ctx) -> Ctx {
+        return { p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: ctx.handles, shared: ctx.shared,
+                 rows: ctx.rows, slot: ctx.slot, prebuilt: false }
+    }
+
+    // F16: one arm binds a field (a match over an imported payload enum).
+    fn isInstanceView(v: View) -> boolean {
+        return match v {
+            .Instance(decl: d) :> true
+            .El :> false
+            .Text :> false
+            .Dyn :> false
+            .Cond :> false
+            .Each :> false
+            .Slot :> false
+        }
+    }
+
+    // The instances a renders mounts UNCONDITIONALLY — reached through element
+    // children only, never through a conditional arm, an <each> row or slot
+    // content — in document order (the hole order of buildNodes). L12 (b): these
+    // are created with the declaration's record, before anything renders.
+    fn mountedInstances(views: View[]) -> View[] {
+        let out: View[] = []
+        for (const v of views) { out = out.concat(mountedIn(v)) }
+        return out
+    }
+
+    fn mountedIn(v: View) -> View[] {
+        return match v {
+            .El(kids: ks) :> mountedInstances(ks)
+            .Instance(decl: d) :> [v]
+            .Text :> []
+            .Dyn :> []
+            .Cond :> []
+            .Each :> []
+            .Slot :> []
+        }
+    }
+
+    fn wireHole(ctx: Ctx, h: Hole, tid: string, kid: int) -> Rendered {
         const node: JsExpr = jid(nodeVar(h.path))
         const v: View = h.v
         return match v {
             .El(attrs: attrs) :> only(attrsJs(ctx, attrs, node))
             .Text :> only([])
             .Dyn(e: e) :> only([sexpr(rtCall(ctx, "text", [scopeVar(), node, jthunk(exprJs(ctx, e))]))])
-            .Cond(arms: arms) :> condJs(ctx, arms, node, tid + "/" + pathText(h.path))
+            .Cond(arms: arms) :> condJs(nested(ctx), arms, node, tid + "/" + pathText(h.path))
             .Each(src: src, bind: bind, key: key, row: row) :> eachJs(ctx, src, bind, key, eachHandles(v), row, node, tid + "/" + pathText(h.path))
-            .Instance(decl: d, attrs: attrs, slot: slot, alias: alias) :> instanceJs(ctx, d, attrs, slot, alias, node, h.path, tid)
+            .Instance(decl: d, attrs: attrs, slot: slot, alias: alias) :> instanceJs(ctx, d, attrs, slot, alias, node, h.path, tid, kid)
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
         }
     }
@@ -657,7 +706,7 @@ ${
         }
         const rowCtx: Ctx = {
             p: ctx.p, names: ctx.names, lexical: ctx.lexical, handles: rowHandles,
-            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot,
+            shared: ctx.shared, rows: ctx.rows.concat([bind.id]), slot: ctx.slot, prebuilt: false,
         }
         const r: Rendered = renderViews(rowCtx, row, tid)
         const keyFn: JsExpr = keyJs(ctx, bindName, key)
@@ -713,16 +762,56 @@ ${
         return not
     }
 
-    fn instanceJs(ctx: Ctx, dsym: Sym, attrs: ConstructAttr[], slot: View[], alias: Sym | not, node: JsExpr, path: int[], tid: string) -> Rendered {
-        const d: Decl | not = findDecl(ctx.p, dsym)
-        if (d is not) return only([sexpr(jid("unboundDecl$" + dsym.id))])
-        const iv: string = "i$" + pathText(path)
-        // Factory args: the new record, then one initializer thunk per ATTRIBUTE
-        // (use-site construction, §66.14 rule 4) or `undefined` for its default.
-        let args: JsExpr[] = [rtCall(ctx, "instance", [jid(nameOf(ctx.names, NameKey.DeclInfo(dsym.id))), scopeVar()])]
+    // A field the factory takes a parameter for: every ATTRIBUTE (use-site
+    // construction, §66.14 rule 4), and a CHILD field some use constructs (the
+    // ratified O60 example `<dropdown open=(@x)/>`; ⚑ O43). Decided from Core.
+    fn isParam(p: CoreProgram, d: Decl, idx: int, f: Field) -> boolean {
+        if (isAttribute(f)) return true
+        for (const n of allNodes(Node.NProgram(p))) {
+            if (constructsField(n, d.sym, idx)) return true
+        }
+        return false
+    }
+
+    fn constructsField(n: Node, ds: Sym, idx: int) -> boolean {
+        return match n {
+            .NView(v: v) :> viewConstructs(v, ds, idx)
+            .NProgram(p: q) :> false
+            .NDecl(d: d) :> false
+            .NField(f: f) :> false
+            .NFn(f: f) :> false
+            .NServerFn(f: f) :> false
+            .NBlock(b: b) :> false
+            .NStmt(s: s) :> false
+            .NExpr(e: e) :> false
+            .NPlace(pl: pl) :> false
+            .NInst(i: i) :> false
+            .NPattern(pat: pat) :> false
+            .NEdit(k: k) :> false
+            .NAttr(a: a) :> false
+        }
+    }
+
+    fn viewConstructs(v: View, ds: Sym, idx: int) -> boolean {
+        return match v {
+            .Instance(decl: d, attrs: attrs) :> d.id == ds.id && constructValue(attrs, idx) is some
+            .El(tag: t) :> false
+            .Text(text: t) :> false
+            .Dyn(e: e) :> false
+            .Cond(arms: a) :> false
+            .Each(src: s) :> false
+            .Slot :> false
+        }
+    }
+
+    // `mk_<decl>(rt.instance(decl_<decl>, scope), …)` — a new instance of `d`
+    // owned by `scope`: the new record, then one initializer thunk per factory
+    // parameter (isParam) or `undefined` for its default.
+    fn createJs(ctx: Ctx, d: Decl, attrs: ConstructAttr[], scope: JsExpr) -> JsExpr {
+        let args: JsExpr[] = [rtCall(ctx, "instance", [jid(nameOf(ctx.names, NameKey.DeclInfo(d.sym.id))), scope])]
         let k = 0
         for (const f of d.fields) {
-            if (isAttribute(f)) {
+            if (isParam(ctx.p, d, k, f)) {
                 const v: Expr | not = constructValue(attrs, k)
                 if (v is some) {
                     args = args.concat([jthunk(exprJs(ctx, v))])
@@ -733,15 +822,35 @@ ${
             k = k + 1
         }
         while (args.length > 1 && isUndefined(args[args.length - 1])) { args = args.slice(0, args.length - 1) }
-        let stmts: JsStmt[] = [JsStmt.SConst(iv, jcall(jid(nameOf(ctx.names, NameKey.Factory(dsym.id))), args))]
-        if (alias is some) {
-            stmts = stmts.concat([sexpr(rtCall(ctx, "bindHandle", [handleJs(ctx, alias), jid(iv)]))])
+        return jcall(jid(nameOf(ctx.names, NameKey.Factory(d.sym.id))), args)
+    }
+
+    // `inst$.kids[k /* decl */]` — an instance the factory already created.
+    fn kidSlot(ctx: Ctx, k: int, hint: string) -> JsExpr {
+        return JsExpr.JIndex(jmember(lexicalJs(ctx, 0), "kids"), JsExpr.JAnnot(jnum(k), hint))
+    }
+
+    // An instance hole. In a declaration's own renders (ctx.prebuilt) the
+    // instance was created with the record (L12 (b)) and is only MOUNTED here;
+    // in a nested region it is created now, as the region mounts.
+    fn instanceJs(ctx: Ctx, dsym: Sym, attrs: ConstructAttr[], slot: View[], alias: Sym | not, node: JsExpr, path: int[], tid: string, kid: int) -> Rendered {
+        const d: Decl | not = findDecl(ctx.p, dsym)
+        if (d is not) return only([sexpr(jid("unboundDecl$" + dsym.id))])
+        const iv: string = "i$" + pathText(path)
+        let stmts: JsStmt[] = []
+        if (ctx.prebuilt) {
+            stmts = [JsStmt.SConst(iv, kidSlot(ctx, kid, dsym.hint))]
+        } else {
+            stmts = [JsStmt.SConst(iv, createJs(ctx, d, attrs, scopeVar()))]
+            if (alias is some) {
+                stmts = stmts.concat([sexpr(rtCall(ctx, "bindHandle", [handleJs(ctx, alias), jid(iv)]))])
+            }
         }
         let templates: Template[] = []
         if (d.renders is some) {
             let slotFn: JsExpr = JsExpr.JNull
             if (slot.length > 0) {
-                const r: Rendered = renderViews(ctx, slot, tid + "/" + pathText(path) + ".slot")
+                const r: Rendered = renderViews(nested(ctx), slot, tid + "/" + pathText(path) + ".slot")
                 slotFn = JsExpr.JArrow(["scope$", "anchor$"], r.stmts)
                 templates = r.templates
             }
@@ -755,7 +864,7 @@ ${
     // Declarations (§5.2).
     // -------------------------------------------------------------------------
     fn baseCtx(p: CoreProgram, names: NameTable) -> Ctx {
-        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull }
+        return { p: p, names: names, lexical: [], handles: [], shared: [], rows: [], slot: JsExpr.JNull, prebuilt: false }
     }
 
     fn instCtx(ctx: Ctx, d: Decl) -> Ctx {
@@ -765,7 +874,7 @@ ${
             hs = hs.concat([{ sym: h.id, js: handleSlot(jid("inst$"), k, h.hint) }])
             k = k + 1
         }
-        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$") }
+        return { p: ctx.p, names: ctx.names, lexical: [jid("inst$")], handles: hs, shared: [], rows: [], slot: jid("slot$"), prebuilt: true }
     }
 
     fn declJs(ctx: Ctx, d: Decl, sharedUsed: Sym[]) -> Rendered {
@@ -820,6 +929,23 @@ ${
         return out
     }
 
+    fn structFieldDefs(t: TypeDef) -> FieldDef[] {
+        return match t {
+            .StructDef(fields: fs) :> fs
+            .EnumDef(variants: vs) :> []
+        }
+    }
+
+    fn edgeTableJs(ctx: Ctx, g: TransitionGraph) -> JsExpr {
+        let props: JsProp[] = []
+        for (const e of g.edges) {
+            let targets: JsExpr[] = []
+            for (const t of e.targets) { targets = targets.concat([jstr(variantTag(ctx, g.enumSym, t))]) }
+            props = props.concat([{ key: variantTag(ctx, g.enumSym, e.origin), value: JsExpr.JArray(targets) }])
+        }
+        return rtCall(ctx, "edges", [JsExpr.JObject(props)])
+    }
+
     fn edgeTablesJs(ctx: Ctx, d: Decl) -> JsStmt[] {
         let out: JsStmt[] = []
         let i = 0
@@ -851,10 +977,17 @@ ${
         let i = 0
         for (const f of d.fields) {
             let init: JsExpr = defaultThunk(fctx, d, f)
-            if (isAttribute(f)) {
+            if (isParam(ctx.p, d, i, f)) {
                 const pn: string = f.sym.hint.replaceAll("$", "_") + "$"
                 params = params.concat([pn])
                 init = JsExpr.JBin(JsOp.Nullish, jid(pn), init)
+            }
+            // D15: an initializer something re-evaluates (`InitOf`, a reset) is
+            // kept on the record, so the instance's OWN initializer is re-run.
+            if (reinitUsed(ctx.p, d.sym, i)) {
+                const slot: JsExpr = JsExpr.JIndex(jmember(jid("inst$"), "inits"), JsExpr.JAnnot(jnum(i), fieldHint(d, i)))
+                body = body.concat([JsStmt.SAssign(slot, init)])
+                init = slot
             }
             body = body.concat([JsStmt.SAssign(fieldCell(jid("inst$"), d, i), fieldCtor(fctx, f, init))])
             i = i + 1
@@ -864,8 +997,88 @@ ${
             body = body.concat([JsStmt.SAssign(handleSlot(jid("inst$"), k, h.hint), rtCall(ctx, "handle", []))])
             k = k + 1
         }
-        body = body.concat([JsStmt.SReturn(jid("inst$"))])
-        return JsStmt.SFunc(nameOf(ctx.names, NameKey.Factory(d.sym.id)), params, body)
+        body = body.concat(kidsJs(fctx, d))
+        const run: JsExpr = rtCall(ctx, "construct", [jid("inst$"), JsExpr.JArrow([], body)])
+        return JsStmt.SFunc(nameOf(ctx.names, NameKey.Factory(d.sym.id)), params, [JsStmt.SReturn(run)])
+    }
+
+    // Does any `InitOf(d, _, idx)` appear in the program?
+    fn reinitUsed(p: CoreProgram, d: Sym, idx: int) -> boolean {
+        for (const n of allNodes(Node.NProgram(p))) {
+            if (isInitOf(n, d, idx)) return true
+        }
+        return false
+    }
+
+    fn isInitOf(n: Node, d: Sym, idx: int) -> boolean {
+        return match n {
+            .NExpr(e: e) :> exprIsInitOf(e, d, idx)
+            .NProgram(p: q) :> false
+            .NDecl(d: x) :> false
+            .NField(f: f) :> false
+            .NFn(f: f) :> false
+            .NServerFn(f: f) :> false
+            .NBlock(b: b) :> false
+            .NStmt(s: s) :> false
+            .NPlace(pl: pl) :> false
+            .NInst(i: i) :> false
+            .NPattern(pat: pat) :> false
+            .NEdit(k: k) :> false
+            .NView(v: v) :> false
+            .NAttr(a: a) :> false
+        }
+    }
+
+    fn exprIsInitOf(e: Expr, d: Sym, idx: int) -> boolean {
+        return match e {
+            .InitOf(decl: s, idx: x) :> s.id == d.id && x == idx
+            .Lit(lit: l) :> false
+            .Local(sym: s) :> false
+            .Read(place: pl) :> false
+            .Call(callee: c) :> false
+            .Prim(op: o) :> false
+            .Match(scrut: s) :> false
+            .ArrayOf(elems: es) :> false
+            .StructOf(ty: t) :> false
+            .Handle(inst: i) :> false
+        }
+    }
+
+    // L12 (b): the instances d's renders mounts unconditionally are created
+    // with d's record, in document order, and their `as=` handles bound — so an
+    // unconditional handle names a live instance before any render or user code.
+    fn kidsJs(fctx: Ctx, d: Decl) -> JsStmt[] {
+        const views: View[] | not = d.renders
+        if (views is not) return []
+        if (!fctx.prebuilt) return []
+        let out: JsStmt[] = []
+        let k = 0
+        for (const v of mountedInstances(views)) {
+            out = out.concat(kidJs(fctx, v, k))
+            k = k + 1
+        }
+        return out
+    }
+
+    fn kidJs(fctx: Ctx, v: View, k: int) -> JsStmt[] {
+        return match v {
+            .Instance(decl: ds, attrs: attrs, alias: alias) :> kidCreate(fctx, ds, attrs, alias, k)
+            .El :> []
+            .Text :> []
+            .Dyn :> []
+            .Cond :> []
+            .Each :> []
+            .Slot :> []
+        }
+    }
+
+    fn kidCreate(fctx: Ctx, ds: Sym, attrs: ConstructAttr[], alias: Sym | not, k: int) -> JsStmt[] {
+        const kd: Decl | not = findDecl(fctx.p, ds)
+        if (kd is not) return [sexpr(jid("unboundDecl$" + ds.id))]
+        const slotE: JsExpr = kidSlot(fctx, k, ds.hint)
+        let out: JsStmt[] = [JsStmt.SAssign(slotE, createJs(fctx, kd, attrs, jmember(jid("inst$"), "scope")))]
+        if (alias is some) out = out.concat([sexpr(rtCall(fctx, "bindHandle", [handleJs(fctx, alias), slotE]))])
+        return out
     }
 
     fn defaultThunk(ctx: Ctx, d: Decl, f: Field) -> JsExpr {
@@ -897,7 +1110,7 @@ ${
             prologue = prologue.concat([JsStmt.SConst(local, jcall(jid(nameOf(ctx.names, NameKey.SharedGet(d.id))), []))])
             shared = shared.concat([{ decl: d.id, js: jid(local) }])
         }
-        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull }
+        const fctx: Ctx = { p: ctx.p, names: ctx.names, lexical: [], handles: [], shared: shared, rows: [], slot: JsExpr.JNull, prebuilt: false }
         let params: string[] = []
         for (const p of f.params) { params = params.concat([symName(ctx, p.sym)]) }
         return JsStmt.SFunc(symName(ctx, f.sym), params, prologue.concat(blockJs(fctx, f.body)))
