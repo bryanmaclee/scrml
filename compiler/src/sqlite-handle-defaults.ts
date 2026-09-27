@@ -2,9 +2,9 @@
  * §44 — SQLITE CONCURRENCY DEFAULTS FOR HANDLES **THE COMPILER ITSELF OPENS**.
  *
  * ⛔ WHY THIS MODULE EXISTS AND IS NOT `codegen/sqlite-defaults.ts`.
- * S433/#1062 swept every sqlite handle the compiler *emits* (`codegen/sqlite-defaults.ts`
- * — `Bun.SQL` tagged-template text baked into generated server/tool modules) and shipped
- * it measured-correct. It missed the handles the compiler and its CLI open **in their own
+ * S433/#1062 swept the `Bun.SQL` handles the compiler *emits* (`codegen/sqlite-defaults.ts`
+ * — tagged-template text baked into generated server/tool modules) and shipped it
+ * measured-correct. It missed the handles the compiler and its CLI open **in their own
  * process**, because the sweep's framing was the `Bun.SQL` constructor rather than *"every
  * sqlite handle this compiler opens"*. The gap's own sentence — *"that blocked the
  * adopter's DB migration"* — therefore stayed reachable: MEASURED on S436, `scrml
@@ -56,6 +56,27 @@
  * must not take a CLI down before it has even read the schema. Falling back to sqlite's own
  * settings is exactly the pre-fix behaviour, so a swallowed failure is never worse than not
  * calling this at all.
+ * ⚑ Its `true`/`false` return is currently DISCARDED at both call sites, and the `.run`
+ * duck-type cannot distinguish a configured handle from one whose `run` silently no-ops
+ * (a stub that no-ops returns `true` while being inert). Not reachable from either real
+ * call site — both measured `true` with a 5000 readback, including under live contention —
+ * but do not treat the return value as a guarantee without checking it.
+ *
+ * ⛔ WHAT THIS MODULE DOES **NOT** CLOSE — a THIRD population, found by the S436 adversarial
+ * pass and filed, so nobody reads the two halves above as "the class is now swept".
+ * Neither sweep owns the `bun:sqlite` handles the compiler **ships into the adopter's build
+ * output** — they are neither `Bun.SQL` text (the #1062 framing) nor opened in the
+ * compiler's own process (this module's framing):
+ *   - `codegen/emit-server.ts` — the §20.5 durable session store,
+ *     `new _ScrmlSessionDatabase(_scrml_session_db_path)`. The ALIASED constructor is why a
+ *     `new Database(` grep does not find it. Measured: the emitted store reads back
+ *     `busy_timeout=0 journal_mode=delete`.
+ *   - `compiler/runtime/stdlib/store.js` (and its `.scrml` reference, `stdlib/store/kv.scrml`)
+ *     — copied VERBATIM into `dist/_scrml/store.js` by `runtime-template.js`. Measured: under
+ *     a foreign `BEGIN IMMEDIATE`, `store.set(...)` throws `database is locked` in **0 ms**.
+ * Both are PRE-EXISTING (identical before this change) and both are tracked as gaps. The
+ * lesson worth keeping: each sweep's FRAMING, not its diligence, is what decided what it
+ * missed — three framings so far, three populations.
  */
 
 /**

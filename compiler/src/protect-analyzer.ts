@@ -452,7 +452,24 @@ export function openSchemaReadHandle(dbPath: string): Database {
     // a read-only connection (it is a connection setting, not a write).
     // The `immutable=1` branch below is DELIBERATELY excluded: it takes no locks at all, so a
     // timeout there is inert by construction — measured, it also reports `journal_mode=delete`
-    // because it ignores the WAL entirely.
+    // because it ignores the WAL entirely. (An adversarial pass tried to falsify that: under a
+    // separate process holding BEGIN EXCLUSIVE, the `immutable=1` open returns rows in ~1ms
+    // while a PLAIN readonly open on the same lock throws `database is locked` — so the lock
+    // was real and the exclusion is correct, not a hole.)
+    //
+    // ⚑ THE COST, STATED HONESTLY, BECAUSE THE FIRST VERSION OF THIS COMMENT UNDERSTATED IT.
+    // This is NOT a 5 s ceiling on the compile. `busy_timeout` is PER STATEMENT, and bun:sqlite
+    // budgets prepare and step separately, so one blocked statement measured **~7.4 s** against
+    // the 5000 ms setting (~1.48x). This read path issues roughly TWO statements per referenced
+    // table (the `sqlite_master` count, then a `PRAGMA table_info` each), so against a
+    // pathologically and permanently locked WAL database a compile can now stall on the order of
+    // 7.4 s x statements — UNBOUNDED in table count — and silently, with no progress output,
+    // where before it errored in ~30 ms. Measured end-to-end under a permanent EXCLUSIVE lock:
+    // base rc=1 in 233 ms, with this change rc=1 in 7615 ms.
+    // The trade is still judged right — a transient checkpoint window is far more likely than a
+    // permanent exclusive lock, and failing the compile on the former is the worse outcome — but
+    // it IS a trade, it is not free, and if it ever bites, the answer is a LOWER bound for this
+    // read handle than the migrator's, not removing the timeout.
     configureSqliteHandle(h);
     return h;
   }
