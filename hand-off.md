@@ -1,3 +1,118 @@
+# scrml — Session 437 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. SOLO session (no live sibling).
+
+## ⏭ NEXT-SESSION PICKUP
+
+### 1. ⚑⚑ Bootstrap slice M2 is ON MAIN (#1109, 072741ca9) — start M3
+- **#1109 MERGED at wrap (072741ca9)** — CI gate/windows green, tracking = main's 5 names; `gate` runs slice-m1 (both providers), slice-m2, lexer. It is the **dpa-051 Fork-A proof**:
+  `lower(analyze(parse(lex(src))))` over SPEC §66.19.1/.3 (byte-verbatim) is STRUCTURALLY EQUAL to M1's hand-built
+  Core — first run, no oracle correction. Adversarial-reviewed (comparator caught 26/26 single-dimension mutations,
+  no oracle leakage, 10 new programs + 12 formatting edits correct). The fix round after it (reset=InitOf,
+  reads-require-narrowing, `#{}`/`+=` reported, FieldDef.graph removed, mutations on a mirror) is proven by the
+  mutation harness (23/23 RED), **not** by a second independent review — same footing M1 landed on. PA-verified:
+  slice-m2 74 · slice-m1 73 (both providers) · lexer 337 · lint clean.
+- **M3, in order** (M2 agent's recommendation, PA agrees):
+  1. **The TYPER (first — before the front end grows).** analyze has NO value-type / arity / redeclaration check:
+     `@x = "oops"` into an int, wrong arity, `<each>` over an int, duplicate `<let x>` all lower SILENTLY. 11 shapes
+     are pinned `test.failing` in `compiler/self-host-v2/slice-m2/typer-gap.test.js` — they flip when it lands.
+     Emit E-TYPE-001-family + E-SCOPE-REDECLARE.
+  2. Split the analyze tables by fact family + index by NodeId (lower is 427 match-arm lines of 961 because every
+     accessor lists all 22 `Fact` variants).
+  3. R5 ingest shim + the §8.2 conformance-FOOTPRINT harness — the conformance corpus is pre-§66 syntax the new front
+     end does not parse, so today nothing can GRADE the bootstrap on the corpus. This is the real blocker for §8.4.
+  4. §8.4 step 1 (CSS + `<theme>` T3) → step 2 (static HTML/SSR). In parallel grow the front end to all six §66.19
+     programs (`single`, O52 `:`-bodies, `View.Star`, `bind:`, `<theme>`) as the next oracle set.
+  - Bootstrap-local error codes (`E-PARSE-*`, `E-BOOTSTRAP-UNSUPPORTED`, `E-PARSE-OPENER-EQ-SPACED`, …) owe §34 rows
+    or a mapping to existing codes.
+  - impl#1 miscompiles the bootstrap hits: F11–F16 (`g-impl1-match-miscompiles-hit-by-the-bootstrap`, HIGH, P7
+    criterion 1 — eligible for TS fixes) + **F17** (object-literal match arm drops named payload bindings, M2).
+
+### 2. Language rulings made S437 (authority: `scrml-support/user-voice-scrml.md` S437 — every one verbatim)
+All written into SPEC §66 (#1107, #1108). dpa-051: **R1 = (a)** keep the S233 four-phase re-cut; `compiler/self-host/`
+**FROZEN** (#1104); **R2–R5 = leans** (thin Core · immutable values · program = `single` · build the ingest shim).
+M1 rulings: **L6 (a)** use-site attribute = that instance's initializer (locked+LIVE = derived; `let` = seeded) ·
+**L12 (b)** unconditional instances constructed before any user code · **identities** are not values ·
+**replace**: spread `{ ...@x, f: v }` = a FIELD edit checked by `f`'s contract · **O58 (b)** a genuine replace
+(reset/reload/non-spread) is authoritative · **O57 no** · **O59** conditional/row instances fresh at mount ·
+**O60** grant-carrying locked field is SEEDED by a live use-site value · **O21, O43 closed** · O56 NARROW stands ·
+**reads through a conditional handle require narrowing** (E-DECL-HANDLE-NOT-NARROWED). Also: "fix it" on the
+handler silent-drop (landed #1106). PA decision (vetoable): dev-mode deep-freeze dropped.
+
+### 3. Handler-fix follow-ups (#1106 landed; these are filed, not fixed)
+- **`g-client-template-interpolation-lowering-needs-a-structural-emitter` (HIGH, carried, pinned xfail ×4)** — a
+  template reading `@cell` inside a multi-statement handler fails E-CODEGEN-INVALID-LOGIC (LOUD; broke in the fix's
+  round 3). Also templates in client function bodies never lowered `@cell` (base). Fix = emit from the TemplateLiteral
+  node's quasis/expressions, NEVER re-scan text (round 5 tried a scanner and it silently truncated `/'/g` regexes —
+  reverted). The two silent shapes in the gap are the bar.
+- `g-gt-inside-bare-handler-value-silently-truncates-it` (HIGH) · `g-subparse-error-discard-drops-every-tab-diagnostic-in-each-engine-and-match-bodies`
+  (MED) · native parser has NO E-MULTI-STATEMENT-HANDLER rule · `g-handler-block-does-not-hoist-function-declarations`
+  · `g-this-member-emits-the-whole-expression-as-its-object` · `once=`/`only=` treated as handlers ·
+  `g-ghost-lint-false-fires-on-canonical-block-handler` (LOW).
+- **For bryan:** `g-e-error-002-handler-exemption-depends-on-statement-count` — `{ risky(); @r = 1 }` is E-ERROR-002
+  but `onclick=risky()` / `{ risky() }` are exempt. A spec-consistency question.
+- **Hollow gate:** `g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous` — the conformance
+  adapter compiles `write:false`, so every `notCodes: ["E-CODEGEN-INVALID-LOGIC"]` check is vacuous.
+
+### 4. Peter's lane (notes delivered to his inbox — his to act on)
+- #1094 post-merge review: E-MW-008 counts `kind="tool"` programs (MED, PA-reproduced) + route-inference 8b session
+  defaults outrank the program (MED, relayed) + refusal still writes dist (LOW).
+- `compiler/self-host/` FROZEN → his S436 lead (brace-sigil value-position arc) lost its bootstrap-blocker
+  justification; asked him to re-rank. The three S435 notes to him are still in `handOffs/incoming/` (his to archive).
+
+### 5. Still owed / open
+- **6 peter→bryan notes** in `handOffs/incoming/` (S412 stdlib defects, S420 subdir-shell lint, S427 lift-in-if,
+  S429 Q5–Q7 + two rulings, S432 gift-wrapped rulings) — bryan's ruling queue, NOT processed S437.
+- **types-gate baseline stale BOTH ways** (22 NEW + 1 GROWN, 6 gone) inside the always-red `tracking` job — attribute +
+  triage, never a blind `--write`. Identical on main; not from this session.
+- `g-recent-sessions-index-stale-on-main-after-every-wrap-merge` (LOW) — also causes a conflict on every open PR
+  whenever a wrap or the scheduled regen bot lands (hit twice S437).
+- dpa-053 (block expressions) — COMPLETE advisory, awaiting bryan (a widening; R2).
+- 11 worktrees with uncommitted work were RETAINED at the S437 cleanup (listed in scratchpad `wt-dryrun.txt`,
+  S437 transcript); 17 detached commits pinned as `archive/wt-*` branches.
+
+## 🔭 DURABLE
+**The PA's own restatement is where a ruling gets widened.** Twice this session the PA wrote bryan's terse answer
+into user-voice or a brief WIDER than the text he answered (added "fixed" to "sub-fields' own contracts"; asked
+"replace respects sub-fields?" without showing what the rule does to reload/reset or offering the narrow spread-shape
+answer). Both were caught only by an agent reading the TRANSCRIPT, not the restatement. The S435 durable ("draft the
+SPEC from the answered text, then adversarially review against the transcript") earned its keep again — and it needs
+one addition: **present the consequences and the narrow alternative BEFORE asking, not after.**
+
+**A stated stop condition works.** The handler fix ran five review rounds; each found real defects, and rounds 2 and 5
+both reached for a TEXT scanner (Rule 7) and regressed silently. The PA had said in advance "if round 5's review finds
+a regression of its own making, stop extending — land what held, split the rest." It did, and the landing kept three
+silent-miscompile fixes (unconditional `else` in every function body; `<each>`-row statement drop; leading-call drop)
+while reverting the one widening that broke. Commit to the stop condition before the round, not after.
+
+**Five false zeros from the PA's OWN probes this session** — `git rev-parse --short A B` erroring and short-circuiting
+an `&&` chain into an "empty = identical" diff; `git log --pathspec-from-file` (unsupported) printing 0; `gh run list
+--limit 1` returning an OLD run (ordering is not recency — sort by createdAt); `$?` of `tail` read as the lint's exit;
+a bun invocation mixing `./path` and a bare filter that silently dropped the lexer tests (68 ran, not 405). Every one
+was caught by re-checking with a different observable. **Read exit codes directly; prove the probe can see a
+difference (a control comparison) before quoting identity.**
+
+## ⚑ MISSES (mine)
+1. ★★★ Widened two rulings in my own restatements (above); the replace question lacked its consequences + alternative.
+2. ★★ Five false-zero probes (above); none reached a landing, all caught on re-check.
+3. ★★ Briefed round 2 of the handler fix without forbidding a text splitter — the Rule-7 shape I then had to reject.
+4. ★ Omitted 4 of 7 lexer oracle files from the first CI step draft (caught before commit).
+
+## Gate at close
+- Merged S437: #1102 (bookkeeping + maps) · #1104 (dpa-051 rulings, self-host FROZEN) · #1105 (bootstrap M1) · #1106
+  (handler fix) · #1107 (§66 rulings) · #1108 (reads require narrowing). Cloud `gate` + `windows` GREEN on each;
+  `tracking` = main's same 5 `scrml dev` watcher names each time (name-set compared, newest main push run).
+- Also merged: #1109 (bootstrap M2, 072741ca9). Still open: #939 / #865 / #580 / #579 unchanged; #1110 (this wrap).
+- Review floor: 0 owed (681/681), markers for #1102–#1108 in this wrap.
+- Local hook suite (last full run, #1106 landing): 31,947 pass / 0 fail / 84 skip; conformance 1040/1047 + 7 xfail.
+- Maps: refreshed to d02738767 in #1102; a wrap refresh to the post-#1108 HEAD is in flight (see step 6c note in the
+  changelog / next session).
+- Worktrees: 66 clean spent worktrees removed at S437 (branches kept); this session's agent worktrees removed at wrap
+  except those holding unlanded work (#1109's branch is pushed).
+- Board: S437 WRAPPED (scrml-support).
+
+---
+
 # scrml — Session 435 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent this session:
