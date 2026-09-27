@@ -38887,7 +38887,12 @@ follows the adopted restatement.)
    "a field that needs its own modifiers … is a CHILD" is thereby read as covering validators / renders /
    instances, not the `let` / `export` grants.)
 
-> ⚑ **OPEN (not ruled) — O43: setting a child's value at a use site.** Use-site CHILDREN are slot content
+> ✅ **RULED S437 — O43: a use-site attribute MAY set a child field's value.** `<dropdown open=(@x)/>` (a child
+> field set by a same-named use-site attribute) is legal, and §66.9 rule 8 governs it (that instance's initializer;
+> the O60 exception applies to a grant-carrying locked field). **Provenance:** ruling:user-voice-scrml.md S437 —
+> *"1 yes, 2 yes, 6 yes"* (item 6: O60's example closes O43). The record below is kept as the pre-ruling history.
+>
+> ~~⚑ **OPEN (not ruled) — O43: setting a child's value at a use site.**~~ Use-site CHILDREN are slot content
 > (§66.15, ruled). Whether a child declaration's value may be set at a use site by an attribute of the same name
 > (`<signup email="a@b"/>`, the other half of the DD §7 #11 lean), or only through logic, is not ruled. **Record
 > gap — #11 fell out of the record (positive evidence it was not answered):** the queue's S435 "Still OPEN" list
@@ -39263,9 +39268,9 @@ library is therefore **declarations + named instances — no new construct** (§
    **Exception — a locked field that carries a grant (O60 = the PA lean).** A LOCKED field that still carries a
    grant under rule 1 — a transition graph (§66.13.2) or sequence edit grants (§66.12) — given a LIVE initializer
    at a use site is **SEEDED** from it (as a `let` field is), NOT derived, so the writes its own contract grants
-   (including the declaration's own writes from its `renders`) stay legal. (Whether a CHILD field may be set by a
-   use-site attribute at all is still O43; the exception governs any use-site initializer that reaches such a
-   field.)
+   (including the declaration's own writes from its `renders`) stay legal. (A CHILD field MAY be set by a
+   use-site attribute — O43, RULED S437 by this exception's example; the exception governs any use-site
+   initializer that reaches such a field.)
 
    ```scrml
    // abridged from §66.19.3 — the `renders` is elided
@@ -39412,7 +39417,16 @@ does not let a write to a struct skip the contract a SUB-FIELD carries by spelli
      those do not grant is `E-WRITE-NOT-GRANTED`;
    - a `let` sub-field → its own `replace` grant.
 
-   An overridden sub-field with NO contract (fixed / locked) does not bound the write — rule 3.
+   An overridden sub-field with NO contract (fixed / locked) does not bound the write — rule 3 applies to the
+   spread shape as to a genuine replace, so legality never depends on spelling (`@order = { ...@order, id: 2 }`
+   compiles exactly as the equivalent genuine replace does).
+
+   Because the shape is classified as a FIELD edit, it uses the overridden field's own grant, NOT the struct's
+   `replace` grant: on a struct with no `replace` grant, `@order = { ...@order, status: .Packed }` is legal along
+   `status`'s graph.
+
+   > **Provenance:** ruling:user-voice-scrml.md S437 — *"1 yes, 2 yes, 6 yes"* (items 1 and 2: the two spread-shape
+   > derivations the §66 draft self-flagged, confirmed as written).
 2. **A GENUINE replace is AUTHORITATIVE (O58 = (b)).** A value that is not the spread-override shape of the same
    value (e.g. `@order = loadOrder()`), `reset(@x)`, or a server reload does NOT have to satisfy the contracts its
    sub-fields carry: `reset` restores the declared initial state; a reload takes the server's state. It still
@@ -40288,7 +40302,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O38 | §66.5.4 | Whether a declaration at `<program>` / file top level is in "a markup position" for #19, and which instance renders there. |
 | O41 | §66.2.3 | Collisions of user attribute names with stdlib/structural attribute words (`as`, `key`, `if`, `slot`, `default`, …). |
 | O42 | §66.4 | The attribute→child promotion hint's code and trigger. |
-| O43 | §66.4 | Setting a child declaration's value by a same-named use-site attribute (the un-presented half of #11 — fell out of the record). |
+| ~~O43~~ RULED S437 | §66.4 | Setting a child declaration's value by a same-named use-site attribute (the un-presented half of #11 — fell out of the record). RULED: a use-site attribute MAY set a child field (§66.9 rule 8; O60 exception). Provenance: ruling:user-voice-scrml.md S437 — *"1 yes, 2 yes, 6 yes"*. |
 | O44 | §66.11 | Maps and sets under the transition axis. |
 | O45 | §66.13 | The S178 "final shared-state design" sentence under Q1 + Q6 (#20 — fell out of the record). |
 | O46 | §66.15 | Does the `${...}` children spread survive beside `<slot/>`? |
