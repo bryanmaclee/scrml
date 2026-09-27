@@ -52,12 +52,12 @@ ${
     // Shared substrate — vocabulary types
     // -------------------------------------------------------------------------
 
-    type QuoteKind:enum   = { Single, Double }
+    export type QuoteKind:enum   = { Single, Double }
     type BracketKind:enum = { Paren, Brace, Bracket }
 
     // Token kinds. Nullary variants are NAMED to match the reference lexer's
     // kind strings; payload variants carry the lexeme detail (§14.4 / D3).
-    type TokenKind:enum = {
+    export type TokenKind:enum = {
         // punctuation / brackets
         LParen, RParen, LBrace, RBrace, LBracket, RBracket,
         Semicolon, Comma, Dot, Colon, Arrow, Question,
@@ -84,8 +84,8 @@ ${
         Eof,
     }
 
-    type Span:struct   = { start: int, end: int, line: int, col: int }
-    type Token:struct  = { kind: TokenKind, text: string, span: Span }
+    export type Span:struct   = { start: int, end: int, line: int, col: int }
+    export type Token:struct  = { kind: TokenKind, text: string, span: Span }
     type Cursor:struct = { source: string, pos: int, line: int, col: int }
 
     // The result of one scanner: the produced token + the advanced cursor.
@@ -1063,6 +1063,104 @@ ${
             st = step(st)
         }
         return st.tokens.concat([makeEof(st.cur)])
+    }
+
+    // -------------------------------------------------------------------------
+    // REGION lexing for the bootstrap parser (slice M2, s437). A scrml file is
+    // markup with logic REGIONS in it: a `${…}` block, a parenthesized or braced
+    // attribute value, a bare attribute value, a function / type declaration.
+    // The parser scans the markup itself (text is not tokens); every logic
+    // region is lexed by THIS fold — the same `step` as `lex` — started at the
+    // region's offset and stopped by a rule. No second lexer exists.
+    //
+    // Every run ends with an Eof token (a sentinel for the parser) whose span
+    // is the stop position; `end` is that offset (where markup resumes).
+    // -------------------------------------------------------------------------
+    export type LexStop:enum = {
+        Balanced,    // the region STARTS on an opener: stop after its matching closer
+        BareValue,   // an unquoted attribute value: stop at depth 0 before trivia, `>` or `/>`
+        Statement,   // a `function` / `type` declaration: stop after a `}` that returns to depth 0
+        Line,        // a braceless declaration (`import … from "…"`): stop at depth 0 before a newline
+    }
+    export type LexRun:struct = { tokens: Token[], end: int }
+
+    // The cursor at offset `pos` of `src`, with its line/col.
+    fn cursorAt(src: string, pos: int) -> Cursor {
+        let c: Cursor = makeCursor(src)
+        while (c.pos < pos && !isEof(c)) {
+            c = advance1(c)
+        }
+        return c
+    }
+
+    fn atDepthZero(st: LexState) -> boolean {
+        if (st.bracketStack.length != 0) return false
+        if (st.interpDepths.length != 0) return false
+        return st.mode == LexMode.InCode
+    }
+
+    fn lastIsCloser(st: LexState, closeBrace: boolean) -> boolean {
+        const k: TokenKind | not = lastKind(st)
+        if (k is not) return false
+        if (k is .RBrace) return true
+        if (closeBrace) return false
+        if (k is .RParen) return true
+        if (k is .RBracket) return true
+        return false
+    }
+
+    // Stop BEFORE the next step?
+    fn stopBefore(st: LexState, stop: LexStop) -> boolean {
+        if (st.tokens.length == 0) return false
+        if (!atDepthZero(st)) return false
+        const c0: int = peekCode(st.cur, 0)
+        return match stop {
+            .BareValue :> isTrivia(c0) || c0 == 62 || (c0 == 47 && peekCode(st.cur, 1) == 62)
+            .Line      :> lineEndsAt(skipBlanks(st.cur))
+            .Balanced  :> false
+            .Statement :> false
+        }
+    }
+
+    // Stop AFTER the step just taken?
+    fn stopAfter(st: LexState, stop: LexStop) -> boolean {
+        if (!atDepthZero(st)) return false
+        return match stop {
+            .Balanced  :> lastIsCloser(st, false)
+            .Statement :> lastIsCloser(st, true)
+            .BareValue :> false
+            .Line      :> false
+        }
+    }
+
+    // A newline, or a line comment running to one.
+    fn lineEndsAt(c: Cursor) -> boolean {
+        const c0: int = peekCode(c, 0)
+        if (isNewline(c0)) return true
+        return c0 == 47 && peekCode(c, 1) == 47
+    }
+
+    // Skip spaces/tabs only (not newlines) — the Line rule's lookahead.
+    fn skipBlanks(cur: Cursor) -> Cursor {
+        let c = cur
+        while (isWhitespace(peekCode(c, 0))) {
+            c = advance(c, 1)
+        }
+        return c
+    }
+
+    export fn lexFrom(src: string, pos: int, stop: LexStop) -> LexRun {
+        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], [], [])
+        let done = false
+        while (!done && !isEof(st.cur)) {
+            if (stopBefore(st, stop)) {
+                done = true
+            } else {
+                st = step(st)
+                if (stopAfter(st, stop)) done = true
+            }
+        }
+        return { tokens: st.tokens.concat([makeEof(st.cur)]), end: st.cur.pos }
     }
 }
 </program>

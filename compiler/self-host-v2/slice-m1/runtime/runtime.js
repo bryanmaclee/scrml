@@ -6,14 +6,20 @@
 // code (dpa-051 §8.5). It replaces impl#1's flat `_scrml_state["<chunk>$name"]`
 // keyspace with:
 //
-//   - INSTANCE RECORDS: { id, decl, fields: [Signal], handles: [Cell], scope }.
-//     A field is an array slot in a record the code already holds (§5.1). The
-//     shared instance of a declaration is id 0, created lazily (§66.6.4).
+//   - INSTANCE RECORDS: { id, decl, fields: [Signal], handles: [Cell], kids,
+//     scope }. A field is an array slot in a record the code already holds
+//     (§5.1). The shared instance of a declaration is id 0, created lazily
+//     (§66.6.4). Records are created at CONSTRUCTION, before any render (L12 (b)).
 //   - A SCOPE TREE: root → instance → <each> row → conditional arm. Every
 //     effect and listener is constructed WITH a scope and disposed with it
 //     (§5.6). An unscoped effect cannot be constructed.
-//   - IMMUTABLE VALUES (§6.1, R3): values stored in cells are frozen (dev
-//     build); every edit makes a new value, so a snapshot is free (§66.10).
+//   - IMMUTABLE VALUES (§6.1, R3): every edit makes a new value, so a snapshot
+//     is free (§66.10). Nothing enforces it at runtime: Core never emits an
+//     in-place mutation (every write is a classified `Write`), so the dev-mode
+//     deep-freeze was DROPPED (S437 PA decision — it cost 50–80× on large
+//     sequences, slice-m1/progress.md). The identity/value line stays: instance
+//     records, scopes and `as=` handles are IDENTITIES that hold values (§45.1),
+//     never copied and never compared as values.
 //   - KEYED <each> RECONCILIATION in which a row OWNS a scope, so an instance
 //     created in a row moves with the row and is disposed with it (§5.3).
 //
@@ -22,36 +28,6 @@
 // impl#1 runtime is imported; its reconcile is keyed by DOM expandos and has no
 // scope axis.
 // =============================================================================
-
-// ---------------------------------------------------------------------------
-// Dev mode: values are deep-frozen when stored, so an accidental in-place
-// mutation throws instead of leaking reference semantics (§66.10).
-// ---------------------------------------------------------------------------
-let DEV = true;
-export function setDev(on) { DEV = on; }
-
-// Only VALUES are frozen: arrays and plain objects. Instance records, scopes and
-// signals are IDENTITIES (§45.1: "cells and instances are identities that hold
-// values") and are never frozen.
-function isValue(v) {
-  if (v === null || typeof v !== "object") return false;
-  if (Array.isArray(v)) return true;
-  const proto = Object.getPrototypeOf(v);
-  return proto === Object.prototype || proto === null;
-}
-
-export function freeze(v) {
-  if (!DEV || !isValue(v) || Object.isFrozen(v)) return v;
-  Object.freeze(v);
-  // Children stored earlier are already frozen, so this is one O(n) pass that
-  // stops at every previously-frozen value.
-  if (Array.isArray(v)) {
-    for (let i = 0; i < v.length; i++) freeze(v[i]);
-  } else {
-    for (const k in v) freeze(v[k]);
-  }
-  return v;
-}
 
 // ---------------------------------------------------------------------------
 // Stats — live effect / listener counts, for tests and devtools.
@@ -105,6 +81,11 @@ function requireScope(scope, what) {
 // ---------------------------------------------------------------------------
 let tracking = null;
 let batchDepth = 0;
+// Construction (L12 (b)): the depth of nested factory runs, and the seeds owed
+// until the outermost one ends.
+let constructing = 0;
+let owed = [];
+const SEEDING = Symbol("seeding");
 const queue = new Set();
 
 function track(source) {
@@ -142,16 +123,27 @@ function flush() {
 
 export class Cell {
   constructor(value) {
-    this.value = freeze(value);
+    this.value = value;
     this.observers = new Set();
+    // A seed still owed (an initializer queued during construction, see
+    // `construct`), SEEDING while it runs, or null once the value is settled.
+    this.pending = null;
   }
-  get() { track(this); return this.value; }
+  get() { track(this); if (this.pending !== null) this.settle(); return this.value; }
   /** The current value without subscribing (used by writes). */
-  peek() { return this.value; }
+  peek() { if (this.pending !== null) this.settle(); return this.value; }
   set(v) {
+    this.pending = null;
     if (Object.is(v, this.value)) return;
-    this.value = freeze(v);
+    this.value = v;
     batch(() => invalidate(this));
+  }
+  /** Run an owed seed now (on first demand, or when construction ends). */
+  settle() {
+    const init = this.pending;
+    if (init === SEEDING) throw new Error("a `let` initializer reads itself while the program is being constructed (a seeding cycle)");
+    this.pending = SEEDING;
+    try { this.value = untrack(init); } finally { if (this.pending === SEEDING) this.pending = null; }
   }
 }
 
@@ -182,7 +174,7 @@ export class Derived {
     unsubscribe(this);
     const saved = tracking;
     tracking = this;
-    try { this.value = freeze(this.fn()); } finally { tracking = saved; }
+    try { this.value = this.fn(); } finally { tracking = saved; }
     this.stale = false;
   }
   markStale() {
@@ -227,8 +219,20 @@ export function effect(scope, fn) {
 /** A writable cell holding `v`. */
 export function cell(v) { return new Cell(v); }
 
-/** A `let` / seeded field: evaluated ONCE, untracked, then independent (§66.9). */
-export function seeded(init) { return new Cell(untrack(init)); }
+/**
+ * A `let` / seeded field: evaluated ONCE, untracked, then independent (§66.9).
+ * Outside construction it is evaluated immediately. During construction it is
+ * OWED: evaluated on first demand or when the outermost construction ends —
+ * so a seed may read any record of the construction tree, whatever the order
+ * the factories allocated them in (L12 (b)).
+ */
+export function seeded(init) {
+  if (constructing === 0) return new Cell(untrack(init));
+  const c = new Cell(undefined);
+  c.pending = init;
+  owed.push(c);
+  return c;
+}
 
 /** A locked field: recomputes from its initializer (derived when it reads cells, §66.9). */
 export function derived(scope, init) { return new Derived(scope, init); }
@@ -256,8 +260,31 @@ export class Instance {
     this.decl = decl;
     this.fields = [];
     this.handles = [];
+    // The instances its `renders` mounts UNCONDITIONALLY, created with this
+    // record (L12 (b)) — in document order; render_<decl> mounts them.
+    this.kids = [];
+    // The construction initializer of a field a `reset` re-runs (D15): the
+    // use-site value's thunk, else the declared default's.
+    this.inits = [];
     this.scope = scope;
   }
+}
+
+/**
+ * Run a factory body (L12 (b)): records are allocated and their fields,
+ * handles and unconditional child instances created before any initializer is
+ * evaluated; the seeds owed by the whole construction tree are settled when
+ * the OUTERMOST construction ends, before any render, handler or user call.
+ */
+export function construct(inst, body) {
+  constructing++;
+  try { body(); } finally { constructing--; }
+  if (constructing === 0) {
+    const due = owed;
+    owed = [];
+    for (const c of due) if (c.pending !== null) c.settle();
+  }
+  return inst;
 }
 
 /** Allocate an instance record owned by `parentScope`. The factory seeds its fields. */
@@ -272,18 +299,29 @@ export function instance(decl, parentScope, id) {
   return inst;
 }
 
-/** The declaration's shared instance: id 0, created on first reference (§66.6.4). */
+/**
+ * The declaration's shared instance: id 0, created on first reference
+ * (§66.6.4). It is registered BEFORE its factory runs, so a function the
+ * construction calls (a seed's initializer) reaches this record, not a second one.
+ */
 export function shared(decl, factory) {
-  if (decl.shared === null) decl.shared = factory(instance(decl, root, 0));
+  if (decl.shared === null) {
+    const inst = instance(decl, root, 0);
+    decl.shared = inst;
+    factory(inst);
+  }
   return decl.shared;
 }
 
-/** `@x` of a declaration: a frozen struct snapshot of its fields (§66.7.1, §66.10). */
+/** `@x` of a declaration: a struct snapshot of its fields — a new value (§66.7.1, §66.10). */
 export function snapshot(inst) {
   const out = {};
   inst.decl.fields.forEach((name, i) => { out[name] = inst.fields[i].get(); });
-  return Object.freeze(out);
+  return out;
 }
+
+/** Field `i`'s construction initializer, evaluated again, untracked (a `reset`, L4 / D15). */
+export function initial(inst, i) { return untrack(inst.inits[i]); }
 
 /** An `as=` handle cell: holds an Instance identity or `not` (null), never a value. */
 export function handle() { return new Cell(null); }
@@ -304,7 +342,7 @@ export function noDefault(what) {
 // ---------------------------------------------------------------------------
 
 /** A `rule=` graph edge table, shared by every instance of the declaration (§5.4). */
-export function edges(table) { return freeze(table); }
+export function edges(table) { return table; }
 
 /** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
 export function transition(target, table, to) {

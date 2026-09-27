@@ -1,0 +1,16 @@
+<program>
+    <let count:int=0/>                          // writable: `let` is the replace grant on a scalar (§66.9)
+    <step=1/>                                   // locked constant; the integer literal infers `int` (§66.3)
+    <doubled:int=(@count * 2)/>                 // derived: locked + a reactive initializer (§66.9)
+
+    function bump()    { @count = @count + @step }   // a replace on a `let` scalar — granted
+    function restart() { reset(@count) }             // `reset` is a replace (§66.11.2) — granted by `let`
+
+    <main>
+        <p>Count ${@count} (doubled ${@doubled})</p>
+        <button onclick=bump()>+${@step}</button>
+        <button onclick=restart()>Reset</button>
+        <!-- onclick=(@doubled = 0) → E-DERIVED-WRITE; the message names the `let`-seeding trade-off -->
+        <!-- onclick=(@step = 2)    → E-WRITE-NOT-GRANTED; `step` is locked — declare it `let` -->
+    </main>
+</program>

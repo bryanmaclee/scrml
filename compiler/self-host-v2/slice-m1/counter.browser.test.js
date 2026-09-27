@@ -3,19 +3,19 @@
 //   → slice-M1 runtime in happy-dom.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
-import { loadBootstrap } from "./harness.js";
+import { loadSuite } from "./cores.js";
 import { loadProgram, expectNoPageErrors, click } from "./load-program.js";
 
-let mods;
+let mods, cores;
 afterEach(() => expectNoPageErrors());
-beforeAll(() => { ({ mods } = loadBootstrap()); }, { timeout: 60000 }); // one impl#1 compile of the bootstrap
+beforeAll(() => { ({ mods, cores } = loadSuite()); }, { timeout: 120000 }); // one impl#1 compile of the bootstrap
 
 const p = () => document.querySelector("main > p");
 const buttons = () => [...document.querySelectorAll("main > button")];
 
 describe("§66.19.1 counter — behaviour", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(mods["counter.core"].counterCore(), "counter")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.counter(), "counter")); });
 
   test("renders the initial state", () => {
     expect(p().textContent).toBe("Count 0 (doubled 0)");
@@ -45,7 +45,7 @@ describe("§66.19.1 counter — behaviour", () => {
 
 describe("§66.19.1 counter — a missing grant is a Core-level fact", () => {
   test("only `count` has a write capability; `step` and `doubled` have none", () => {
-    const core = mods["counter.core"].counterCore();
+    const core = cores.counter();
     const fields = core.decls[0].fields;
     expect(fields.map((f) => [f.sym.hint, f.wcap === null ? null : f.wcap.hint])).toEqual([
       ["count", "count"],
@@ -57,7 +57,7 @@ describe("§66.19.1 counter — a missing grant is a Core-level fact", () => {
   });
 
   test("a Write cannot name `doubled` or `step`: there is no capability symbol to name", () => {
-    const core = mods["counter.core"].counterCore();
+    const core = cores.counter();
     const { Stmt, InstRef, EditKind, Check, litInt } = mods.core;
     const fields = core.decls[0].fields;
     // The only symbols a forger could reach for are the FIELD symbols. They are
@@ -76,7 +76,7 @@ describe("§66.19.1 counter — a missing grant is a Core-level fact", () => {
   });
 
   test("giving `doubled` a capability without a grant is itself ill-formed (C1)", () => {
-    const core = mods["counter.core"].counterCore();
+    const core = cores.counter();
     const fields = core.decls[0].fields.slice();
     fields[2] = { ...fields[2], wcap: mods.core.mkSym(99, "doubled") };
     const bad = { ...core, decls: [{ ...core.decls[0], fields }] };
@@ -84,7 +84,7 @@ describe("§66.19.1 counter — a missing grant is a Core-level fact", () => {
   });
 
   test("the runtime shadow: a field without a capability is emitted as a read-only Derived", async () => {
-    const { rt } = await loadProgram(mods["counter.core"].counterCore(), "counter");
+    const { rt } = await loadProgram(cores.counter(), "counter");
     const prog = [...rt.devtools.instances.values()].find((i) => i.decl.name === "program");
     expect(prog.fields[0]).toBeInstanceOf(rt.Cell);
     expect(prog.fields[1]).toBeInstanceOf(rt.Derived);

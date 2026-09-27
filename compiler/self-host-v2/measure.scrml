@@ -74,6 +74,7 @@ ${
             .ArrayOf(elems: x) :> "ArrayOf"
             .StructOf(ty: x) :> "StructOf"
             .Handle(inst: x) :> "Handle"
+            .InitOf(decl: x) :> "InitOf"
         }
     }
 

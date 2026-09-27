@@ -1,0 +1,38 @@
+// FIXTURE (not the oracle): §66.19.3 app.scrml plus user code that reads the unconditional handle
+// `@country` BEFORE the first render (L12 (b)) — M1 dropdownEarlyReadCore.
+// app.scrml
+${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+
+<program>
+    type Line:struct = { id: int, name: string }
+    <lines:Line[]=([{ id: 1, name: "Tea" }, { id: 2, name: "Milk" }])/>   // locked: no grants (§66.12.1)
+    <let showColor:bool=false/>
+    <let firstCountry:string=(countryValue())/>                  // seeded at construction (L12 (b))
+
+    function closeCountry() { @country.open = .Closed }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
+    function clearColor() {
+        given c = @color :> { c.value = "" }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
+    }
+    function countryValue() { return @country.value }
+
+    <main class="filters">
+        <p class="early">Early ${countryValue()} / ${@firstCountry}</p>
+        <dropdown as=country label="Country" options=(["US", "CA", "MX"]) value="US"/>   // instance 1, bound
+        <dropdown label="Size" options=(["S", "M", "L"]) value="M"/>                     // instance 2, anonymous
+        <div if=@showColor>
+            <dropdown as=color label="Color" options=(["red", "blue"])/>                 // instance 3, conditional
+        </div>
+        <p>Shipping to ${@country.value}</p>
+        <button onclick=closeCountry()>Done</button>
+        <button onclick=(@showColor = !@showColor)>Colours</button>
+        <button onclick=clearColor()>Clear colour</button>
+
+        <each in=@lines key=@.id as line>                      // instances keyed by the row key (§66.7.3)
+            <dropdown as=qty label=line.name options=(["1", "2", "3"]) value="1"/>        // `qty` is ROW-SCOPED (§66.7.4)
+            <span>${line.name} × ${@qty.value}</span>
+        </each>
+
+        <!-- @color.value = "" outside a narrowing        → E-DECL-HANDLE-NOT-NARROWED -->
+        <!-- <*dropdown open=.Opened/>                      → E-DECL-STAR-REF-ATTR-WRITE -->
+    </main>
+</program>
