@@ -65,6 +65,26 @@ describe("runtime contracts", () => {
     scope.dispose();
   });
 
+  test("during construction a seed is OWED: it may read a record allocated after it; a cycle is reported (L12 (b))", () => {
+    const decl = rt.declare("probe", ["a", "b"]);
+    const inst = rt.instance(decl, rt.root);
+    let b = null;
+    rt.construct(inst, () => {
+      inst.fields[0] = rt.seeded(() => b.peek() + 1);   // reads a cell that does not exist yet
+      b = rt.seeded(() => 41);
+      inst.fields[1] = b;
+    });
+    expect(inst.fields[0].peek()).toBe(42);
+    expect(inst.fields[0].pending).toBe(null);          // settled when construction ended, not on this read
+    const loop = rt.instance(decl, rt.root);
+    expect(() => rt.construct(loop, () => {
+      loop.fields[0] = rt.seeded(() => loop.fields[1].peek());
+      loop.fields[1] = rt.seeded(() => loop.fields[0].peek());
+    })).toThrow(/seeding cycle/);
+    inst.scope.dispose();
+    loop.scope.dispose();
+  });
+
   test("an event handler runs as ONE batch — an effect reading two cells re-runs once", () => {
     // mutation RED: on() calling the handler without batch()
     const scope = rt.root.child();

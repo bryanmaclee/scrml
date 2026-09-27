@@ -12,9 +12,11 @@
 //   C3  the Write's edit is granted by that field's contract (§66.11, §66.12):
 //       `replace` subsumes the sequence edits (§66.11.3); a Transition needs a
 //       graph; a FieldAt(path) must be a well-typed struct path whose TARGET
-//       field grants a write — or the outer field grants `replace` AND no field
-//       on the path carries a non-replace contract (a replace may not bypass a
-//       contract the equivalent direct edit would have to follow)
+//       field grants a write (per-field `let`) — or the outer field grants
+//       `replace` AND no field on the path carries a non-replace contract (a
+//       replace may not bypass a contract the equivalent direct edit would have
+//       to follow). A genuine `.Replace` is NOT bounded by sub-field contracts
+//       (O58 = (b), ruled S437 — see the Replace arm).
 //   C4  the Write's instance reference resolves to the capability's OWN
 //       declaration (Shared(X) → X; Lexical(k) → the k-th enclosing declaration;
 //       Alias(h) → the declaration of the use that binds h; Narrowed(c) → what
@@ -22,7 +24,7 @@
 //   C5  every cell READ is well-formed the same way (its InstRef resolves to its
 //       declaration; its first path step is a field of that declaration)
 //   C6  a Write's `check` is sound: RuntimeEdge only on a Transition; a
-//       Transition's value, when literal, is a variant of the graph's enum; and
+//       transition's value, when literal, is a variant of the graph's enum; and
 //       `Static` only when the Core itself proves the edge — the value is a
 //       literal variant that every state may move to (or already is: a self-write
 //       is a no-op, §51.0.F.1). No flow facts exist in Core, so a from-state
@@ -69,13 +71,13 @@ ${
         return match n {
             .NStmt(s: s) :> checkStmt(p, encl, s)
             .NPlace(pl: pl) :> checkPlace(p, encl, pl)
+            .NExpr(e: e) :> checkExpr(p, encl, e)
             .NProgram(p: q) :> []
             .NDecl(d: d) :> []
             .NField(f: f) :> []
             .NFn(f: f) :> []
             .NServerFn(f: f) :> []
             .NBlock(b: b) :> []
-            .NExpr(e: e) :> []
             .NInst(i: i) :> []
             .NPattern(pat: pat) :> []
             .NEdit(k: k) :> []
@@ -144,6 +146,13 @@ ${
     fn editProblem(p: CoreProgram, f: Field, edit: EditKind) -> string {
         return match edit {
             .Transition :> transitionGranted(f)
+            // O58 = (b) (RULED S437, user-voice "O58 b"): a GENUINE replace — a
+            // non-spread value, `reset`, a server reload — is AUTHORITATIVE and is
+            // not checked against sub-field contracts (`reset` restores the
+            // declared initial state; a reload takes the server's state). The
+            // spread spelling `@x = { ...@x, f: v }` is not a Replace: lower emits
+            // it as FieldAt edits, judged by `f`'s own contract (C3/C6). O57 = no:
+            // a contract-free sub-field bounds nothing.
             .Replace :> granted(f.grants.replace, "`replace` is not granted")
             .Append :> granted(f.grants.replace || hasEdit(f, EditKind.Append), "an end-append is not granted")
             .Prepend :> granted(f.grants.replace || hasEdit(f, EditKind.Prepend), "a front-prepend is not granted")
@@ -332,6 +341,7 @@ ${
     fn exprHandle(e: Expr) -> InstRef | not {
         return match e {
             .Handle(inst: i) :> i
+            .InitOf(decl: x) :> not
             .Lit(lit: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
@@ -340,6 +350,22 @@ ${
             .Match(scrut: x) :> not
             .ArrayOf(elems: x) :> not
             .StructOf(ty: x) :> not
+        }
+    }
+
+    // C5 for `InitOf`: the instance is one of `decl`, and `idx` is its field.
+    fn checkExpr(p: CoreProgram, encl: Decl[], e: Expr) -> string[] {
+        return match e {
+            .InitOf(decl: d, inst: i, idx: x) :> checkCellRead(p, encl, d, i, [{ owner: d, idx: x }])
+            .Lit(lit: l) :> []
+            .Local(sym: s) :> []
+            .Read(place: pl) :> []
+            .Call(callee: c) :> []
+            .Prim(op: o) :> []
+            .Match(scrut: s) :> []
+            .ArrayOf(elems: es) :> []
+            .StructOf(ty: t) :> []
+            .Handle(inst: i) :> []
         }
     }
 
@@ -391,6 +417,7 @@ ${
         return match e {
             .Lit(lit: l) :> l
             .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
             .Local(sym: x) :> not
             .Read(place: x) :> not
             .Call(callee: x) :> not
@@ -454,12 +481,19 @@ ${
     }
 
     fn checkProblem(p: CoreProgram, f: Field, edit: EditKind, value: Expr, check: Check) -> string {
-        if (!isTransition(edit)) {
-            if (isStatic(check)) return ""
-            return "a RuntimeEdge check on a write that is not a transition"
+        if (isTransition(edit)) {
+            const g: TransitionGraph | not = f.graph
+            if (g is not) return ""                              // already C3
+            return graphCheckProblem(p, g, value, check)
         }
-        const g: TransitionGraph | not = f.graph
-        if (g is not) return ""                                  // already C3
+        if (isStatic(check)) return ""
+        return "a RuntimeEdge check on a write that is not a transition"
+    }
+
+    // A write along graph `g`: a literal value must be one of its variants;
+    // `Static` only when Core proves the edge (every state is the target or has
+    // an edge to it); otherwise the edge is checked at runtime (RuntimeEdge).
+    fn graphCheckProblem(p: CoreProgram, g: TransitionGraph, value: Expr, check: Check) -> string {
         const n: int = enumSize(p, g.enumSym)
         const lit: Literal | not = exprLiteral(value)
         if (lit is some) {

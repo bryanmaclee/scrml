@@ -3,16 +3,16 @@
 // example, valuesem.core.scrml) and instance-level (`@x` of a declaration).
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
-import { loadBootstrap } from "./harness.js";
+import { loadSuite } from "./cores.js";
 import { loadProgram, expectNoPageErrors, click, instancesOf } from "./load-program.js";
 
-let mods;
+let mods, cores;
 afterEach(() => expectNoPageErrors());
-beforeAll(() => { ({ mods } = loadBootstrap()); }, { timeout: 60000 });
+beforeAll(() => { ({ mods, cores } = loadSuite()); }, { timeout: 120000 });
 
 describe("§66.10 — `let before = @audit` then `@audit.push(\"x\")`", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(mods["valuesem.core"].valuesemCore(), "valuesem")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.valuesem(), "valuesem")); });
 
   const p = () => document.querySelector("main > p").textContent;
 
@@ -24,7 +24,7 @@ describe("§66.10 — `let before = @audit` then `@audit.push(\"x\")`", () => {
     expect(p()).toBe("1 / 2");
   });
 
-  test("an append makes a NEW frozen array; the old value is untouched", () => {
+  test("an append makes a NEW array; the old value is untouched", () => {
     const program = instancesOf(rt, "program")[0];
     const old = program.fields[0].peek();
     click(document.querySelector("main > button"));
@@ -32,12 +32,13 @@ describe("§66.10 — `let before = @audit` then `@audit.push(\"x\")`", () => {
     expect(now).not.toBe(old);
     expect(old).toEqual(["x", "x"]);
     expect(now).toEqual(["x", "x", "x"]);
-    expect(Object.isFrozen(old)).toBe(true);
-    expect(() => { old.push("y"); }).toThrow();
+    // No runtime freeze (S437 PA decision): immutability is a Core fact — every
+    // write is a classified Write that builds a new value.
+    expect(Object.isFrozen(old)).toBe(false);
   });
 
   test("the Core classifies the push as an Append edit, granted by the type's [end] axis", () => {
-    const core = mods["valuesem.core"].valuesemCore();
+    const core = cores.valuesem();
     expect(mods.check.checkCore(core)).toEqual([]);
     const audit = core.decls[0].fields[0];
     expect(audit.grants.replace).toBe(false);          // append-only: no replace (§66.11.3)
@@ -47,7 +48,7 @@ describe("§66.10 — `let before = @audit` then `@audit.push(\"x\")`", () => {
 
 describe("§66.10 at the instance level — `@country` is a struct snapshot", () => {
   let rt;
-  beforeAll(async () => { ({ rt } = await loadProgram(mods["dropdown.core"].dropdownCore(), "dropdown")); });
+  beforeAll(async () => { ({ rt } = await loadProgram(cores.dropdown(), "dropdown")); });
 
   test("a snapshot of an instance does not change when a field is later written", () => {
     const country = instancesOf(rt, "program")[0].handles[0].peek();
@@ -56,6 +57,6 @@ describe("§66.10 at the instance level — `@country` is a struct snapshot", ()
     country.fields[2].set("CA");
     expect(snap.value).toBe("US");
     expect(rt.snapshot(country).value).toBe("CA");
-    expect(Object.isFrozen(snap)).toBe(true);
+    expect(rt.snapshot(country)).not.toBe(snap);     // each `@x` read is a new value
   });
 });

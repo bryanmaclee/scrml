@@ -79,16 +79,25 @@ ${
     }
 
     // THE ORACLE: §66.19.3 exactly as written (`lines` is locked — no grants).
-    export fn dropdownCore() -> CoreProgram { return buildDropdown(false) }
+    export fn dropdownCore() -> CoreProgram { return buildDropdown(false, false) }
 
     // A TEST FIXTURE, not an oracle: the same program with `lines` given a
     // `replace` grant (`<lines:Line[replace]=…>`, ⚑ O10 spelling) and three
     // functions that rewrite it, so the runtime's row reconciliation (reorder /
     // remove / insert of rows owning dropdown instances, §66.7.3) can be driven
     // through the program's own writes. §66.19.3 itself never changes `lines`.
-    export fn dropdownReorderCore() -> CoreProgram { return buildDropdown(true) }
+    export fn dropdownReorderCore() -> CoreProgram { return buildDropdown(true, false) }
 
-    fn buildDropdown(reorderable: boolean) -> CoreProgram {
+    // A TEST FIXTURE for L12 (b) (ruled S437): the same program plus user code
+    // that reads the unconditional handle `@country` BEFORE the first render —
+    //   function countryValue() { return @country.value }
+    //   <let firstCountry:string=(countryValue())/>     // seeded at construction
+    //   <p class="early">Early ${countryValue()} / ${@firstCountry}</p>   // placed BEFORE the instances
+    // The instance record must exist when the program is CONSTRUCTED, not when
+    // its DOM mounts.
+    export fn dropdownEarlyReadCore() -> CoreProgram { return buildDropdown(false, true) }
+
+    fn buildDropdown(reorderable: boolean, earlyRead: boolean) -> CoreProgram {
         // ---- symbols ----
         const sOpenness: Sym  = mkSym(0, "Openness")
         const sClosed: Sym    = mkSym(1, "Closed")
@@ -232,7 +241,22 @@ ${
         const qtyValue: Expr = Expr.Read(Place.Cell(sDropdown, InstRef.Alias(hQty), [{ owner: sDropdown, idx: VALUE }]))
         const countryValue: Expr = Expr.Read(Place.Cell(sDropdown, InstRef.Alias(hCountry), [{ owner: sDropdown, idx: VALUE }]))
 
-        const main: View = el("main", [staticAttr("class", "filters")], [
+        // ---- the L12 (b) fixture's additions (earlyRead only) ----
+        const sCountryValue: Sym = mkSym(30, "countryValue")
+        const sFirstCountry: Sym = mkSym(31, "firstCountry")
+        const wFirstCountry: Sym = mkSym(32, "firstCountry")
+        const FIRSTCOUNTRY: int = 2
+        let earlyViews: View[] = []
+        if (earlyRead) {
+            earlyViews = [el("p", [staticAttr("class", "early")], [
+                textView("Early "),
+                dyn(call0(sCountryValue)),
+                textView(" / "),
+                dyn(readField(sProgram, here, FIRSTCOUNTRY)),
+            ])]
+        }
+
+        const main: View = el("main", [staticAttr("class", "filters")], earlyViews.concat([
             View.Instance(sDropdown, [
                 construct(LABEL, litStr("Country")),
                 construct(OPTIONS, strList(["US", "CA", "MX"])),
@@ -275,11 +299,20 @@ ${
                         dyn(qtyValue),
                     ]),
                 ]),
-        ])
+        ]))
+
+        let programFields: Field[] = [fLines, fShowColor]
+        if (earlyRead) {
+            programFields = programFields.concat([{
+                sym: sFirstCountry, ty: Type.Str, init: call0(sCountryValue),
+                mode: FieldMode.Seeded, role: FieldRole.Child, grants: replaceGrant(),
+                graph: not, exported: false, wcap: wFirstCountry,
+            }])
+        }
 
         const program: Decl = {
             sym: sProgram, kind: DeclKind.Program, single: true,
-            fields: [fLines, fShowColor],
+            fields: programFields,
             renders: [main], wiring: [],
             handles: [hCountry, hColor],                 // top-level as= cells live on the program instance (L10)
         }
@@ -316,6 +349,14 @@ ${
                 // Same keys, same order — only row 1's CONTENT changes.
                 rewriteLines(mkSym(29, "renameTea"), wLines, shared, [line(1, "Green tea", sLine), line(2, "Milk", sLine)]),
             ])
+        }
+        if (earlyRead) {
+            // function countryValue() { return @country.value }
+            const fCountryValue: Fn = {
+                sym: sCountryValue, params: [], pure: false,
+                body: block([Stmt.Return(countryValue)]),
+            }
+            fns = fns.concat([fCountryValue])
         }
 
         return {

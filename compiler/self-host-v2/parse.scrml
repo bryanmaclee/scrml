@@ -1,0 +1,1641 @@
+// =============================================================================
+// self-host-v2 / parse.scrml — source → FileAst (bootstrap impl#2, slice M2).
+//
+// Design authority: dpa-051 §3.1, §4; R1 (a) the S233 re-cut (lex · parse ·
+// analyze · lower), ruled S437. Grammar: SPEC §66.2 (declaration openers,
+// termination, the declaration/use marker), §66.5 (`renders`), §66.6 (`<*x>`),
+// §66.7 (`as=`), §17.7 (`<each in= key= as name>`), §27 (comments), §4.14.
+//
+// TWO SCANNERS, ONE LEXER. A scrml file is markup with logic regions in it.
+//   - The MARKUP scanner (this file, char level) reads tags, attribute names,
+//     text and comments — none of which are tokens.
+//   - Every LOGIC region — a `${…}` block or interpolation, a parenthesized /
+//     braced / bare attribute value, an opener value, a `function` / `type` /
+//     `import` declaration — is lexed by lex.scrml's `lexFrom` (the same fold as
+//     `lex`, started at the region's offset and stopped by a rule) and parsed
+//     here from tokens. There is no second lexer.
+//   The opener TYPE (`:string[]`, `:Openness`) is read by the markup scanner: it
+//   is a name + optional bracket grant list and ends at the opener's `=` / space
+//   / `/>`, which no logic-region stop rule sees.
+//
+// OUTPUT: a FileAst whose every node carries a NodeId (`nid`), dense from the
+// `firstId` the driver passes (so the files of one linked program get disjoint
+// ranges), and whose bodies are trees (§4). Diagnostics are data, never thrown.
+//
+// Parse-level diagnostics (codes named in SPEC §66.20 where one exists):
+//   E-DECL-OPENER-EXPR-UNPARENTHESIZED (§66.2.4), E-DECL-ILLEGAL-FIELD-NAME
+//   (§66.2.3), and E-PARSE-* for plain syntax errors (no §34 code is named for
+//   them yet — the house rule is that §34 rows land with the implementation).
+//
+// impl#1 workarounds: F4 (qualified variants in argument / field / element
+// position), F5 (host-method results annotated), F11 (named payload binding),
+// F12 (an alternation arm only first), F14 (no string literal with a brace next
+// to another character — `LB()` / `RB()`), F16 (a match over an imported payload
+// enum binds a field in at least one arm).
+// =============================================================================
+${
+    import { Token, TokenKind, LexStop, LexRun, lexFrom } from "./lex.scrml"
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
+             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl,
+             AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
+
+    fn LB() -> string { return "{" }
+    fn RB() -> string { return "}" }
+
+    // =========================================================================
+    // Tokens, as the parser sees them: one TOTAL classification of TokenKind
+    // (the only match over it), then text-directed parsing.
+    // =========================================================================
+    type TC:enum = { Punct, Ident, Keyword, Num, Str, Variant, At, Other, End }
+
+    // `v` = the payload the parser needs: a name, a cooked string, a raw number.
+    type PTok:struct = { cls: TC, v: string, text: string, start: int, end: int, line: int }
+
+    fn tokClass(k: TokenKind) -> TC {
+        return match k {
+            .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
+                  .Semicolon | .Comma | .Dot | .Colon | .Arrow | .Question |
+                  .Assign | .Equal | .StrictEqual | .NotEqual | .StrictNotEqual |
+                  .Plus | .Minus | .Star | .Slash | .Percent |
+                  .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
+                  .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr :> TC.Punct
+            .TemplateInterpStart :> TC.Other
+            .TemplateInterpEnd :> TC.Other
+            .Eof :> TC.End
+            .NumberLit(raw: r) :> TC.Num
+            .StringLit(cooked: c) :> TC.Str
+            .RegexLit(pattern: p) :> TC.Other
+            .TemplateChunk(cooked: c) :> TC.Other
+            .BareVariant(name: n) :> TC.Variant
+            .Ident(name: n) :> TC.Ident
+            .Keyword(name: n) :> TC.Keyword
+            .Unknown(ch: c) :> unknownClass(c)
+        }
+    }
+
+    fn unknownClass(c: string) -> TC {
+        if (c == "@") return TC.At
+        return TC.Other
+    }
+
+    fn tokPayload(k: TokenKind) -> string {
+        return match k {
+            .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
+                  .Semicolon | .Comma | .Dot | .Colon | .Arrow | .Question |
+                  .Assign | .Equal | .StrictEqual | .NotEqual | .StrictNotEqual |
+                  .Plus | .Minus | .Star | .Slash | .Percent |
+                  .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
+                  .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr |
+                  .TemplateInterpStart | .TemplateInterpEnd | .Eof :> ""
+            .NumberLit(raw: r) :> r
+            .StringLit(cooked: c) :> c
+            .BareVariant(name: n) :> n
+            .Ident(name: n) :> n
+            .Keyword(name: n) :> n
+            .Unknown(ch: c) :> c
+            .RegexLit(pattern: p) :> p
+            .TemplateChunk(cooked: c) :> c
+        }
+    }
+
+    fn toPTok(t: Token) -> PTok {
+        return { cls: tokClass(t.kind), v: tokPayload(t.kind), text: t.text,
+                 start: t.span.start, end: t.span.end, line: t.span.line }
+    }
+
+    fn toPToks(ts: Token[]) -> PTok[] {
+        let out: PTok[] = []
+        for (const t of ts) { out = out.concat([toPTok(t)]) }
+        return out
+    }
+
+    // =========================================================================
+    // The token-level parser state: a value threaded through every function.
+    // =========================================================================
+    type TP:struct = { toks: PTok[], i: int, nid: int, diags: Diag[], file: string }
+
+    type RExpr:struct  = { e: AExpr, tp: TP }
+    type RExprs:struct = { es: AExpr[], tp: TP }
+    type RStmt:struct  = { s: AStmt, tp: TP }
+    type RBlock:struct = { b: ABlock, tp: TP }
+    type RType:struct  = { t: AType, tp: TP }
+    type RItems:struct = { items: AItem[], tp: TP }
+    type RName:struct  = { name: string, tp: TP }
+
+    fn cur(tp: TP) -> PTok {
+        if (tp.i < tp.toks.length) return tp.toks[tp.i]
+        return tp.toks[tp.toks.length - 1]
+    }
+
+    fn peekAt(tp: TP, k: int) -> PTok {
+        const j: int = tp.i + k
+        if (j < tp.toks.length) return tp.toks[j]
+        return tp.toks[tp.toks.length - 1]
+    }
+
+    fn adv(tp: TP) -> TP {
+        if (tp.i >= tp.toks.length - 1) return tp
+        return { toks: tp.toks, i: tp.i + 1, nid: tp.nid, diags: tp.diags, file: tp.file }
+    }
+
+    fn bumpId(tp: TP) -> TP {
+        return { toks: tp.toks, i: tp.i, nid: tp.nid + 1, diags: tp.diags, file: tp.file }
+    }
+
+    fn diagAt(tp: TP, code: string, msg: string, t: PTok) -> TP {
+        const d: Diag = { code: code, message: msg, file: tp.file, span: mkSpan(t.start, t.end) }
+        return { toks: tp.toks, i: tp.i, nid: tp.nid, diags: tp.diags.concat([d]), file: tp.file }
+    }
+
+    fn atEnd(tp: TP) -> boolean { return cur(tp).cls == TC.End }
+
+    // Is the current token the punctuation / word `s`?
+    fn isP(tp: TP, s: string) -> boolean {
+        const t: PTok = cur(tp)
+        if (t.cls == TC.Str) return false
+        return t.text == s
+    }
+
+    fn isWord(tp: TP, s: string) -> boolean {
+        const t: PTok = cur(tp)
+        if (t.cls == TC.Ident || t.cls == TC.Keyword) return t.v == s
+        return false
+    }
+
+    fn expectP(tp: TP, s: string) -> TP {
+        if (isP(tp, s)) return adv(tp)
+        const t: PTok = cur(tp)
+        return diagAt(tp, "E-PARSE-EXPECTED", "expected `" + s + "`, found `" + t.text + "`", t)
+    }
+
+    // Two tokens that touch (no trivia between them): `:>`, `@x`, `->`.
+    fn touching(a: PTok, b: PTok) -> boolean { return a.end == b.start }
+
+    fn spanFrom(tp: TP, start: int) -> ASpan {
+        let end: int = start
+        if (tp.i > 0) end = tp.toks[tp.i - 1].end
+        if (end < start) end = start
+        return mkSpan(start, end)
+    }
+
+    fn mkE(tp: TP, start: int, k: AExprK) -> RExpr {
+        const e: AExpr = { nid: tp.nid, span: spanFrom(tp, start), k: k }
+        return { e: e, tp: bumpId(tp) }
+    }
+
+    // =========================================================================
+    // Expressions — precedence climbing.
+    //   assignment (right) < ternary < `||` < `&&` < `|` < `==` `!=` < relational
+    //   < additive < multiplicative < unary (`!` `-`) < postfix (`.name`, call)
+    // =========================================================================
+    fn binPrec(tp: TP) -> int {
+        const t: PTok = cur(tp)
+        if (t.cls != TC.Punct) return 0
+        if (isCompoundAssign(tp)) return 0
+        return match t.text {
+            "||"  :> 1
+            "&&"  :> 2
+            "|"   :> 3
+            "=="  :> 4
+            "!="  :> 4
+            "===" :> 4
+            "!==" :> 4
+            "<"   :> 5
+            "<="  :> 5
+            ">"   :> 5
+            ">="  :> 5
+            "+"   :> 6
+            "-"   :> 6
+            "*"   :> 7
+            "/"   :> 7
+            "%"   :> 7
+            _     :> 0
+        }
+    }
+
+    fn binOpOf(text: string) -> BinOp {
+        return match text {
+            "||" :> BinOp.Or
+            "&&" :> BinOp.And
+            "|"  :> BinOp.Pipe
+            "==" :> BinOp.Eq
+            "!=" :> BinOp.Ne
+            "<"  :> BinOp.Lt
+            "<=" :> BinOp.Le
+            ">"  :> BinOp.Gt
+            ">=" :> BinOp.Ge
+            "+"  :> BinOp.Add
+            "-"  :> BinOp.Sub
+            "*"  :> BinOp.Mul
+            "/"  :> BinOp.Div
+            "%"  :> BinOp.Mod
+            "===" :> BinOp.Eq
+            "!==" :> BinOp.Ne
+            _    :> BinOp.Eq
+        }
+    }
+
+    // `x += v` — the lexer has no compound-assignment token, so it is an
+    // arithmetic operator TOUCHING a following `=`.
+    fn isCompoundAssign(tp: TP) -> boolean {
+        const t: PTok = cur(tp)
+        const n: PTok = peekAt(tp, 1)
+        if (t.cls != TC.Punct || n.text != "=" || !touching(t, n)) return false
+        return t.text == "+" || t.text == "-" || t.text == "*" || t.text == "/" || t.text == "%"
+    }
+
+    export fn parseAssign(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        const lhs: RExpr = parseTernary(tp)
+        if (isP(lhs.tp, "=")) {
+            const rhs: RExpr = parseAssign(adv(lhs.tp))
+            return mkE(rhs.tp, start, AExprK.Assign(lhs.e, rhs.e))
+        }
+        if (isCompoundAssign(lhs.tp)) {
+            const op: PTok = cur(lhs.tp)
+            const d: TP = diagAt(lhs.tp, "E-BOOTSTRAP-UNSUPPORTED", "compound assignment `" + op.text + "=` is not in bootstrap slice M2 — write `x = x " + op.text + " …`", op)
+            const rhs2: RExpr = parseAssign(adv(adv(d)))
+            return mkE(rhs2.tp, start, AExprK.Assign(lhs.e, rhs2.e))
+        }
+        if (isP(lhs.tp, "++") || isP(lhs.tp, "--")) {
+            const inc: PTok = cur(lhs.tp)
+            const d2: TP = diagAt(lhs.tp, "E-BOOTSTRAP-UNSUPPORTED", "`" + inc.text + "` is not in bootstrap slice M2 — write `x = x " + inc.text.substring(0, 1) + " 1`", inc)
+            return { e: lhs.e, tp: adv(d2) }
+        }
+        return lhs
+    }
+
+    fn parseTernary(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        const test: RExpr = parseBinary(tp, 1)
+        if (!isP(test.tp, "?")) return test
+        const yes: RExpr = parseTernary(adv(test.tp))
+        const t2: TP = expectP(yes.tp, ":")
+        const no: RExpr = parseTernary(t2)
+        return mkE(no.tp, start, AExprK.Ternary(test.e, yes.e, no.e))
+    }
+
+    fn parseBinary(tp: TP, minPrec: int) -> RExpr {
+        const start: int = cur(tp).start
+        let left: RExpr = parseUnary(tp)
+        let going = true
+        while (going) {
+            const prec: int = binPrec(left.tp)
+            if (prec == 0 || prec < minPrec) {
+                going = false
+            } else {
+                const opTok: PTok = cur(left.tp)
+                let t1: TP = left.tp
+                if (opTok.text == "===" || opTok.text == "!==") {
+                    t1 = diagAt(t1, "E-PARSE-STRICT-EQ", "`" + opTok.text + "` is not scrml — `==` is already strict and structural (§45)", opTok)
+                }
+                const right: RExpr = parseBinary(adv(t1), prec + 1)
+                left = mkE(right.tp, start, AExprK.Binary(binOpOf(opTok.text), left.e, right.e))
+            }
+        }
+        return left
+    }
+
+    fn parseUnary(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        if (isP(tp, "!")) {
+            const inner: RExpr = parseUnary(adv(tp))
+            return mkE(inner.tp, start, AExprK.Unary(UnOp.Not, inner.e))
+        }
+        if (isP(tp, "-")) {
+            const inner: RExpr = parseUnary(adv(tp))
+            return mkE(inner.tp, start, AExprK.Unary(UnOp.Neg, inner.e))
+        }
+        return parsePostfix(tp)
+    }
+
+    fn parsePostfix(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        return parsePostfixFrom(parsePrimary(tp), start)
+    }
+
+    fn parsePostfixFrom(first: RExpr, start: int) -> RExpr {
+        let r: RExpr = first
+        let going = true
+        while (going) {
+            const t: PTok = cur(r.tp)
+            const prev: PTok = peekAt(r.tp, -1)
+            if (t.cls == TC.Punct && t.text == "." && peekAt(r.tp, 1).cls == TC.Ident) {
+                const name: string = peekAt(r.tp, 1).v
+                r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, name))
+            } else if (t.cls == TC.Punct && t.text == "." && peekAt(r.tp, 1).cls == TC.Keyword) {
+                const kname: string = peekAt(r.tp, 1).v
+                r = mkE(adv(adv(r.tp)), start, AExprK.Member(r.e, kname))
+            } else if (t.cls == TC.Punct && t.text == "(" && t.line == prev.line) {
+                const args: RExprs = parseList(adv(r.tp), ")")
+                r = mkE(args.tp, start, AExprK.Call(r.e, args.es))
+            } else {
+                going = false
+            }
+        }
+        return r
+    }
+
+    // Comma-separated expressions up to (and consuming) `close`.
+    fn parseList(tp: TP, close: string) -> RExprs {
+        let t: TP = tp
+        let out: AExpr[] = []
+        let going = !isP(t, close) && !atEnd(t)
+        while (going) {
+            const r: RExpr = parseAssign(t)
+            out = out.concat([r.e])
+            t = r.tp
+            if (isP(t, ",")) {
+                t = adv(t)
+                if (isP(t, close)) going = false
+            } else {
+                going = false
+            }
+        }
+        return { es: out, tp: expectP(t, close) }
+    }
+
+    fn parsePrimary(tp: TP) -> RExpr {
+        const t: PTok = cur(tp)
+        const start: int = t.start
+        if (t.cls == TC.Num) return mkE(adv(tp), start, AExprK.Num(t.v))
+        if (t.cls == TC.Str) return mkE(adv(tp), start, AExprK.Str(t.v))
+        if (t.cls == TC.Variant) return mkE(adv(tp), start, AExprK.Variant(t.v))
+        if (t.cls == TC.At) return parseAt(tp)
+        if (t.cls == TC.Keyword) return parseKeywordPrimary(tp)
+        if (t.cls == TC.Ident) {
+            if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
+            return mkE(adv(tp), start, AExprK.Name(t.v))
+        }
+        if (isP(tp, "(")) {
+            const inner: RExpr = parseAssign(adv(tp))
+            return { e: inner.e, tp: expectP(inner.tp, ")") }
+        }
+        if (isP(tp, "[")) {
+            const elems: RExprs = parseList(adv(tp), "]")
+            return mkE(elems.tp, start, AExprK.ArrayLit(elems.es))
+        }
+        if (isP(tp, LB())) return parseObject(tp)
+        const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
+        return mkE(adv(bad), start, AExprK.NotLit)
+    }
+
+    fn parseKeywordPrimary(tp: TP) -> RExpr {
+        const t: PTok = cur(tp)
+        const start: int = t.start
+        if (t.v == "true") return mkE(adv(tp), start, AExprK.Bool(true))
+        if (t.v == "false") return mkE(adv(tp), start, AExprK.Bool(false))
+        if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
+        if (t.v == "null" || t.v == "undefined") {
+            const d: TP = diagAt(tp, "E-PARSE-NO-NULL", "`" + t.v + "` does not exist in scrml — absence is `not` (§42)", t)
+            return mkE(adv(d), start, AExprK.NotLit)
+        }
+        return mkE(adv(tp), start, AExprK.Name(t.v))
+    }
+
+    // `@name` (a cell / handle / declaration reference) or `@.` (the current
+    // <each> item). The `@` must touch what follows it.
+    fn parseAt(tp: TP) -> RExpr {
+        const at: PTok = cur(tp)
+        const nx: PTok = peekAt(tp, 1)
+        if (touching(at, nx) && (nx.cls == TC.Ident || nx.cls == TC.Keyword)) {
+            return mkE(adv(adv(tp)), at.start, AExprK.At(nx.v))
+        }
+        if (touching(at, nx) && nx.cls == TC.Punct && nx.text == ".") {
+            return mkE(adv(tp), at.start, AExprK.AtItem)
+        }
+        const bad: TP = diagAt(tp, "E-PARSE-AT", "`@` must be followed by a name (`@count`) or `.` (`@.field`)", at)
+        return mkE(adv(bad), at.start, AExprK.NotLit)
+    }
+
+    fn isSpread(tp: TP) -> boolean {
+        const a: PTok = cur(tp)
+        const b: PTok = peekAt(tp, 1)
+        const c: PTok = peekAt(tp, 2)
+        if (a.text != "." || b.text != ".") return false
+        if (c.text != "." && c.cls != TC.Variant) return false
+        return touching(a, b) && touching(b, c)
+    }
+
+    // The spread's value: after `..` + `.x` (a bare-variant token, when the
+    // spread names a local) or after `...`.
+    fn parseSpreadValue(tp: TP) -> RExpr {
+        const t2: TP = adv(adv(tp))
+        const c: PTok = cur(t2)
+        if (c.cls == TC.Variant) {
+            const base: RExpr = mkE(adv(t2), c.start, AExprK.Name(c.v))
+            return parsePostfixFrom(base, c.start)
+        }
+        return parseAssign(adv(t2))
+    }
+
+    fn parseObject(tp: TP) -> RExpr {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        let props: AProp[] = []
+        let going = !isP(t, RB()) && !atEnd(t)
+        while (going) {
+            const nameTok: PTok = cur(t)
+            const pstart: int = nameTok.start
+            if (isSpread(t)) {
+                // `...value` — the lexer has no Ellipsis token yet (lex.scrml: deferred), so a
+                // spread is three touching `.` tokens.
+                const sv: RExpr = parseSpreadValue(t)
+                t = sv.tp
+                props = props.concat([{ nid: t.nid, span: spanFrom(t, pstart), spread: true, name: "", value: sv.e }])
+            } else {
+                if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword && nameTok.cls != TC.Str) {
+                    t = diagAt(t, "E-PARSE-OBJECT", "expected a field name, found `" + nameTok.text + "`", nameTok)
+                }
+                t = expectP(adv(t), ":")
+                const v: RExpr = parseAssign(t)
+                t = v.tp
+                props = props.concat([{ nid: t.nid, span: spanFrom(t, pstart), spread: false, name: nameTok.v, value: v.e }])
+            }
+            t = bumpId(t)
+            if (isP(t, ",")) {
+                t = adv(t)
+                if (isP(t, RB())) going = false
+            } else {
+                going = false
+            }
+        }
+        t = expectP(t, RB())
+        return mkE(t, start, AExprK.ObjectLit(props))
+    }
+
+    // =========================================================================
+    // Statements and blocks.
+    // =========================================================================
+    fn mkS(tp: TP, start: int, k: AStmtK) -> RStmt {
+        const s: AStmt = { nid: tp.nid, span: spanFrom(tp, start), k: k }
+        return { s: s, tp: bumpId(tp) }
+    }
+
+    // `{ stmt* }`
+    export fn parseBlock(tp: TP) -> RBlock {
+        const start: int = cur(tp).start
+        let t: TP = expectP(tp, LB())
+        let stmts: AStmt[] = []
+        while (!isP(t, RB()) && !atEnd(t)) {
+            const before: int = t.i
+            const r: RStmt = parseStmt(t)
+            stmts = stmts.concat([r.s])
+            t = r.tp
+            if (isP(t, ";")) t = adv(t)
+            if (t.i == before) t = adv(t)
+        }
+        t = expectP(t, RB())
+        const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: stmts }
+        return { b: b, tp: bumpId(t) }
+    }
+
+    // A block's statements when the region holds them WITHOUT braces (an
+    // attribute handler written `{ … }` is lexed with its braces — parseBlock).
+    fn parseStmt(tp: TP) -> RStmt {
+        const t: PTok = cur(tp)
+        const start: int = t.start
+        if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
+        if (isWord(tp, "return")) {
+            const nx: PTok = peekAt(tp, 1)
+            if (nx.cls == TC.End || nx.line != t.line || nx.text == RB() || nx.text == ";") {
+                return mkS(adv(tp), start, AStmtK.Return(not))
+            }
+            const v: RExpr = parseAssign(adv(tp))
+            return mkS(v.tp, start, AStmtK.Return(v.e))
+        }
+        if (isWord(tp, "if")) return parseIf(tp)
+        if (isWord(tp, "given")) return parseGiven(tp)
+        const e: RExpr = parseAssign(tp)
+        return mkS(e.tp, start, AStmtK.Eval(e.e))
+    }
+
+    fn parseLocal(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        const mutable: boolean = isWord(tp, "let")
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `let` / `const`", nameTok)
+        t = adv(t)
+        if (isP(t, ":")) {
+            const ty: RType = parseType(adv(t))
+            t = ty.tp
+        }
+        t = expectP(t, "=")
+        const init: RExpr = parseAssign(t)
+        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, init.e))
+    }
+
+    fn parseIf(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        let t: TP = expectP(adv(tp), "(")
+        const cond: RExpr = parseAssign(t)
+        t = expectP(cond.tp, ")")
+        const thenB: RBlock = parseBlockOrStmt(t)
+        t = thenB.tp
+        if (isWord(t, "else")) {
+            t = adv(t)
+            if (isWord(t, "if")) {
+                const inner: RStmt = parseIf(t)
+                const eb: ABlock = { nid: inner.tp.nid, span: inner.s.span, stmts: [inner.s] }
+                return mkS(bumpId(inner.tp), start, AStmtK.If(cond.e, thenB.b, eb))
+            }
+            const elseB: RBlock = parseBlockOrStmt(t)
+            return mkS(elseB.tp, start, AStmtK.If(cond.e, thenB.b, elseB.b))
+        }
+        return mkS(t, start, AStmtK.If(cond.e, thenB.b, not))
+    }
+
+    // `if (c) stmt` without braces is one statement in a block of its own.
+    fn parseBlockOrStmt(tp: TP) -> RBlock {
+        if (isP(tp, LB())) return parseBlock(tp)
+        const start: int = cur(tp).start
+        const s: RStmt = parseStmt(tp)
+        const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [s.s] }
+        return { b: b, tp: bumpId(s.tp) }
+    }
+
+    // `given c = @h :> { … }` (§66.7.5)
+    fn parseGiven(tp: TP) -> RStmt {
+        const start: int = cur(tp).start
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-GIVEN", "expected a name after `given`", nameTok)
+        t = expectP(adv(t), "=")
+        const subj: RExpr = parseTernary(t)
+        t = subj.tp
+        const c: PTok = cur(t)
+        const g: PTok = peekAt(t, 1)
+        if (c.text == ":" && g.text == ">" && touching(c, g)) {
+            t = adv(adv(t))
+        } else {
+            t = diagAt(t, "E-PARSE-GIVEN", "expected `:>` after the `given` subject", c)
+        }
+        const body: RBlock = parseBlock(t)
+        return mkS(body.tp, start, AStmtK.Given(nameTok.v, subj.e, body.b))
+    }
+
+    // =========================================================================
+    // Types (in logic): `Name`, `T[]`, `T[g1, g2]`, `T | not`.
+    // =========================================================================
+    fn mkT(tp: TP, start: int, k: ATypeK) -> RType {
+        const ty: AType = { nid: tp.nid, span: spanFrom(tp, start), k: k }
+        return { t: ty, tp: bumpId(tp) }
+    }
+
+    fn parseType(tp: TP) -> RType {
+        const start: int = cur(tp).start
+        const nameTok: PTok = cur(tp)
+        let t: TP = tp
+        if (nameTok.cls != TC.Ident && nameTok.cls != TC.Keyword) {
+            t = diagAt(t, "E-PARSE-TYPE", "expected a type, found `" + nameTok.text + "`", nameTok)
+        }
+        let r: RType = mkT(adv(t), start, ATypeK.TName(nameTok.v))
+        while (isP(r.tp, "[")) {
+            let g: TP = adv(r.tp)
+            let grants: string[] = []
+            while (!isP(g, "]") && !atEnd(g)) {
+                const w: PTok = cur(g)
+                if (w.cls == TC.Ident || w.cls == TC.Keyword) grants = grants.concat([w.v])
+                g = adv(g)
+            }
+            g = expectP(g, "]")
+            r = mkT(g, start, ATypeK.TSeq(r.t, grants))
+        }
+        if (isP(r.tp, "|") && isWord(adv(r.tp), "not")) {
+            r = mkT(adv(adv(r.tp)), start, ATypeK.TMaybe(r.t))
+        }
+        return r
+    }
+
+    // =========================================================================
+    // Logic items: import / type / function / fn, optionally `export`ed.
+    // =========================================================================
+    fn mkItem(tp: TP, start: int, k: AItemK) -> RItems {
+        const it: AItem = { nid: tp.nid, span: spanFrom(tp, start), k: k }
+        return { items: [it], tp: bumpId(tp) }
+    }
+
+    // Items until the end of the token run (or `close`, when not "").
+    export fn parseLogicItems(tp: TP, close: string) -> RItems {
+        let t: TP = tp
+        let out: AItem[] = []
+        let going = true
+        while (going) {
+            if (atEnd(t)) {
+                going = false
+            } else if (close != "" && isP(t, close)) {
+                going = false
+            } else if (isP(t, ";")) {
+                t = adv(t)
+            } else {
+                const before: int = t.i
+                const r: RItems = parseLogicItem(t)
+                out = out.concat(r.items)
+                t = r.tp
+                if (t.i == before) t = adv(t)
+            }
+        }
+        return { items: out, tp: t }
+    }
+
+    fn parseLogicItem(tp: TP) -> RItems {
+        const start: int = cur(tp).start
+        let exported = false
+        let t: TP = tp
+        if (isWord(t, "export")) {
+            exported = true
+            t = adv(t)
+        }
+        if (isWord(t, "import")) return parseImport(t, start)
+        if (isWord(t, "type")) return parseTypeDecl(t, start, exported)
+        if (isWord(t, "function")) return parseFn(t, start, exported, false)
+        if (isWord(t, "fn")) return parseFn(t, start, exported, true)
+        const bad: PTok = cur(t)
+        const d: TP = diagAt(t, "E-PARSE-ITEM", "expected `import`, `type`, `function` or `fn` in a logic block, found `" + bad.text + "` (statements at logic-block level are not in bootstrap slice M2)", bad)
+        return { items: [], tp: skipToLineEnd(d) }
+    }
+
+    // Skip the rest of the current token's line (error recovery).
+    fn skipToLineEnd(tp: TP) -> TP {
+        const line: int = cur(tp).line
+        let t: TP = adv(tp)
+        while (!atEnd(t) && cur(t).line == line) { t = adv(t) }
+        return t
+    }
+
+    fn parseImport(tp: TP, start: int) -> RItems {
+        let t: TP = expectP(adv(tp), LB())
+        let names: AImportName[] = []
+        while (!isP(t, RB()) && !atEnd(t)) {
+            const n: PTok = cur(t)
+            if (n.cls == TC.Ident || n.cls == TC.Keyword) {
+                names = names.concat([{ nid: t.nid, span: mkSpan(n.start, n.end), name: n.v }])
+                t = bumpId(t)
+            } else if (n.text != ",") {
+                t = diagAt(t, "E-PARSE-IMPORT", "expected an imported name, found `" + n.text + "`", n)
+            }
+            t = adv(t)
+        }
+        t = expectP(t, RB())
+        if (!isWord(t, "from")) t = diagAt(t, "E-PARSE-IMPORT", "expected `from` after the import list", cur(t))
+        t = adv(t)
+        const src: PTok = cur(t)
+        if (src.cls != TC.Str) t = diagAt(t, "E-PARSE-IMPORT", "expected the import source string", src)
+        t = adv(t)
+        const imp: AImport = { nid: t.nid, span: spanFrom(t, start), names: names, from: src.v }
+        return mkItem(bumpId(t), start, AItemK.ImportItem(imp))
+    }
+
+    // `type Name:enum = { A, B(f: T) }` / `type Name:struct = { [let] f: T, … }`
+    fn parseTypeDecl(tp: TP, start: int, exported: boolean) -> RItems {
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        t = expectP(adv(t), ":")
+        const kind: PTok = cur(t)
+        t = adv(t)
+        t = expectP(t, "=")
+        let body: ATypeBody = ATypeBody.StructBody([])
+        if (kind.v == "enum") {
+            const r: RVariants = parseVariants(t)
+            body = ATypeBody.EnumBody(r.vs)
+            t = r.tp
+        } else if (kind.v == "struct") {
+            const r2: RFields = parseTypeFields(expectP(t, LB()), RB())
+            body = ATypeBody.StructBody(r2.fs)
+            t = expectP(r2.tp, RB())
+        } else {
+            t = diagAt(t, "E-PARSE-TYPE", "expected `:enum` or `:struct`, found `:" + kind.text + "`", kind)
+        }
+        const td: ATypeDecl = { nid: t.nid, span: spanFrom(t, start), exported: exported, name: nameTok.v, body: body }
+        return mkItem(bumpId(t), start, AItemK.TypeItem(td))
+    }
+
+    type RVariants:struct = { vs: AVariant[], tp: TP }
+    type RFields:struct = { fs: ATypeField[], tp: TP }
+
+    fn parseVariants(tp: TP) -> RVariants {
+        let t: TP = expectP(tp, LB())
+        let vs: AVariant[] = []
+        while (!isP(t, RB()) && !atEnd(t)) {
+            const n: PTok = cur(t)
+            if (n.cls == TC.Ident || n.cls == TC.Keyword) {
+                t = adv(t)
+                let fields: ATypeField[] = []
+                if (isP(t, "(")) {
+                    const r: RFields = parseTypeFields(adv(t), ")")
+                    fields = r.fs
+                    t = expectP(r.tp, ")")
+                }
+                vs = vs.concat([{ nid: t.nid, span: spanFrom(t, n.start), name: n.v, fields: fields }])
+                t = bumpId(t)
+            } else {
+                if (n.text != ",") t = diagAt(t, "E-PARSE-TYPE", "expected a variant name, found `" + n.text + "`", n)
+                t = adv(t)
+            }
+        }
+        return { vs: vs, tp: expectP(t, RB()) }
+    }
+
+    // `[let] name: Type` separated by commas, up to (not consuming) `close`.
+    fn parseTypeFields(tp: TP, close: string) -> RFields {
+        let t: TP = tp
+        let fs: ATypeField[] = []
+        while (!isP(t, close) && !atEnd(t)) {
+            const fstart: int = cur(t).start
+            let isLet = false
+            if (isWord(t, "let")) {
+                isLet = true
+                t = adv(t)
+            }
+            const n: PTok = cur(t)
+            if (n.cls != TC.Ident && n.cls != TC.Keyword) {
+                t = diagAt(t, "E-PARSE-TYPE", "expected a field name, found `" + n.text + "`", n)
+                t = adv(t)
+            } else {
+                t = expectP(adv(t), ":")
+                const ty: RType = parseType(t)
+                t = ty.tp
+                fs = fs.concat([{ nid: t.nid, span: spanFrom(t, fstart), isLet: isLet, name: n.v, ty: ty.t }])
+                t = bumpId(t)
+            }
+            if (isP(t, ",")) t = adv(t)
+        }
+        return { fs: fs, tp: t }
+    }
+
+    // `function name(p, q: T) { … }` / `fn name(p: T) -> T { … }`
+    fn parseFn(tp: TP, start: int, exported: boolean, pure: boolean) -> RItems {
+        let t: TP = adv(tp)
+        const nameTok: PTok = cur(t)
+        if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-FN", "expected a function name", nameTok)
+        t = expectP(adv(t), "(")
+        let params: AParam[] = []
+        while (!isP(t, ")") && !atEnd(t)) {
+            const p: PTok = cur(t)
+            t = adv(t)
+            let ty: AType | not = not
+            if (isP(t, ":")) {
+                const r: RType = parseType(adv(t))
+                ty = r.t
+                t = r.tp
+            }
+            params = params.concat([{ nid: t.nid, span: spanFrom(t, p.start), name: p.v, ty: ty }])
+            t = bumpId(t)
+            if (isP(t, ",")) t = adv(t)
+        }
+        t = expectP(t, ")")
+        let ret: AType | not = not
+        const a: PTok = cur(t)
+        const b: PTok = peekAt(t, 1)
+        if (a.text == "-" && b.text == ">" && touching(a, b)) {
+            const r2: RType = parseType(adv(adv(t)))
+            ret = r2.t
+            t = r2.tp
+        }
+        const body: RBlock = parseBlock(t)
+        t = body.tp
+        const f: AFn = { nid: t.nid, span: spanFrom(t, start), exported: exported, pure: pure,
+                         name: nameTok.v, params: params, ret: ret, body: body.b }
+        return mkItem(bumpId(t), start, AItemK.FnItem(f))
+    }
+
+    // =========================================================================
+    // The MARKUP scanner (char level). State threaded like TP.
+    // =========================================================================
+    type MP:struct = { src: string, pos: int, nid: int, diags: Diag[], file: string }
+
+    type RNodes:struct  = { nodes: ANode[], mp: MP }
+    type RMItems:struct = { items: AItem[], mp: MP }
+    type RValue:struct  = { v: AAttrValue, mp: MP }
+    type RMType:struct  = { t: AType, mp: MP }
+    type RWord:struct   = { w: string, mp: MP }
+
+    fn chAt(mp: MP, k: int) -> string {
+        const s: string = mp.src.charAt(mp.pos + k)
+        return s
+    }
+
+    fn mEof(mp: MP) -> boolean { return mp.pos >= mp.src.length }
+
+    // `#` followed by an opening brace: a CSS block (§5.6).
+    fn atCss(mp: MP) -> boolean { return chAt(mp, 0) == "#" && chAt(mp, 1) == LB() }
+
+    // A `#{…}` block is out of bootstrap slice M2: report it and skip it whole
+    // (balanced by the lexer), never let it through as text.
+    fn skipCss(mp: MP) -> MP {
+        const start: int = mp.pos
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        const m: MP = backToMarkup(mp, tp)
+        return mDiag(mAt(m, lastEnd(tp)), "E-BOOTSTRAP-UNSUPPORTED", "a `#{…}` CSS block is not in bootstrap slice M2", start, lastEnd(tp))
+    }
+
+    fn lastEnd(tp: TP) -> int {
+        const eof: PTok = tp.toks[tp.toks.length - 1]
+        return eof.start
+    }
+
+    // `$` followed by an opening brace: a logic block / interpolation.
+    fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == LB() }
+
+    fn mAdv(mp: MP, n: int) -> MP {
+        return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file }
+    }
+
+    fn mAt(mp: MP, pos: int) -> MP {
+        return { src: mp.src, pos: pos, nid: mp.nid, diags: mp.diags, file: mp.file }
+    }
+
+    fn mBump(mp: MP) -> MP {
+        return { src: mp.src, pos: mp.pos, nid: mp.nid + 1, diags: mp.diags, file: mp.file }
+    }
+
+    fn mDiag(mp: MP, code: string, msg: string, start: int, end: int) -> MP {
+        const d: Diag = { code: code, message: msg, file: mp.file, span: mkSpan(start, end) }
+        return { src: mp.src, pos: mp.pos, nid: mp.nid, diags: mp.diags.concat([d]), file: mp.file }
+    }
+
+    fn mLooking(mp: MP, s: string) -> boolean {
+        const got: string = mp.src.substring(mp.pos, mp.pos + s.length)
+        return got == s
+    }
+
+    fn isSpaceCh(c: string) -> boolean {
+        return c == " " || c == "\t" || c == "\n" || c == "\r"
+    }
+
+    fn isNameCh(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        if (c >= "0" && c <= "9") return true
+        return c == "_" || c == "-" || c == "$"
+    }
+
+    fn isNameStart(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        return c == "_"
+    }
+
+    // Skip whitespace, `//` line comments and `<!-- … -->` comments (§27).
+    fn skipTrivia(mp: MP) -> MP {
+        let m: MP = mp
+        let going = true
+        while (going && !mEof(m)) {
+            if (isSpaceCh(chAt(m, 0))) {
+                m = mAdv(m, 1)
+            } else if (mLooking(m, "//")) {
+                m = skipLineComment(m)
+            } else if (mLooking(m, "<!--")) {
+                m = skipMarkupComment(m)
+            } else {
+                going = false
+            }
+        }
+        return m
+    }
+
+    fn skipLineComment(mp: MP) -> MP {
+        let m: MP = mp
+        while (!mEof(m) && chAt(m, 0) != "\n") { m = mAdv(m, 1) }
+        return m
+    }
+
+    fn skipMarkupComment(mp: MP) -> MP {
+        const close: int = mp.src.indexOf("-->", mp.pos + 4)
+        if (close < 0) {
+            const d: MP = mDiag(mp, "E-PARSE-COMMENT", "unterminated `<!--` comment", mp.pos, mp.src.length)
+            return mAt(d, mp.src.length)
+        }
+        return mAt(mp, close + 3)
+    }
+
+    fn readName(mp: MP) -> RWord {
+        let m: MP = mp
+        while (!mEof(m) && isNameCh(chAt(m, 0))) { m = mAdv(m, 1) }
+        return { w: mp.src.substring(mp.pos, m.pos), mp: m }
+    }
+
+    // Skip spaces/tabs/newlines only (inside an opener).
+    fn skipSpace(mp: MP) -> MP {
+        let m: MP = mp
+        while (!mEof(m) && isSpaceCh(chAt(m, 0))) { m = mAdv(m, 1) }
+        return m
+    }
+
+    // ---- lexing a logic region --------------------------------------------
+    fn regionTP(mp: MP, stop: LexStop) -> TP {
+        const run: LexRun = lexFrom(mp.src, mp.pos, stop)
+        return { toks: toPToks(run.tokens), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+    }
+
+    // Back to markup after a region: the position after the region's last
+    // consumed token (the Eof sentinel's start = where the lexer stopped).
+    fn backToMarkup(mp: MP, tp: TP) -> MP {
+        const eof: PTok = tp.toks[tp.toks.length - 1]
+        return { src: mp.src, pos: eof.start, nid: tp.nid, diags: tp.diags, file: mp.file }
+    }
+
+    // After a region's expression: anything left before the Eof is an error.
+    fn expectRegionEnd(tp: TP) -> TP {
+        if (atEnd(tp)) return tp
+        const t: PTok = cur(tp)
+        return diagAt(tp, "E-PARSE-TRAILING", "unexpected `" + t.text + "` after the expression", t)
+    }
+
+    // ---- attribute values ---------------------------------------------------
+    // At the char after `=`: "…" / '…' · ( expr ) · { stmts } · bare.
+    fn parseAttrValue(mp: MP) -> RValue {
+        const c: string = chAt(mp, 0)
+        if (c == "\"" || c == "'") return parseQuoted(mp, c)
+        if (c == "(") {
+            const tp: TP = regionTP(mp, LexStop.Balanced)
+            const r: RExpr = parsePrimary(tp)
+            const t2: TP = expectRegionEnd(r.tp)
+            return { v: AAttrValue.Paren(r.e), mp: backToMarkup(mp, t2) }
+        }
+        if (c == LB()) {
+            const tp2: TP = regionTP(mp, LexStop.Balanced)
+            const b: RBlock = parseBlock(tp2)
+            const t3: TP = expectRegionEnd(b.tp)
+            return { v: AAttrValue.Braced(b.b), mp: backToMarkup(mp, t3) }
+        }
+        const tp3: TP = regionTP(mp, LexStop.BareValue)
+        if (atEnd(tp3)) {
+            const d: MP = mDiag(mp, "E-PARSE-ATTR", "expected an attribute value after `=`", mp.pos, mp.pos + 1)
+            return { v: AAttrValue.NoValue, mp: d }
+        }
+        const r3: RExpr = parseTernary(tp3)
+        const t4: TP = expectRegionEnd(r3.tp)
+        return { v: AAttrValue.Bare(r3.e), mp: backToMarkup(mp, t4) }
+    }
+
+    fn parseQuoted(mp: MP, q: string) -> RValue {
+        let m: MP = mAdv(mp, 1)
+        let text: string = ""
+        while (!mEof(m) && chAt(m, 0) != q) {
+            if (chAt(m, 0) == "\\" && !mEof(mAdv(m, 1))) {
+                text = text + chAt(m, 1)
+                m = mAdv(m, 2)
+            } else {
+                text = text + chAt(m, 0)
+                m = mAdv(m, 1)
+            }
+        }
+        if (mEof(m)) {
+            const d: MP = mDiag(m, "E-PARSE-ATTR", "unterminated attribute string", mp.pos, m.pos)
+            return { v: AAttrValue.Quoted(text), mp: d }
+        }
+        return { v: AAttrValue.Quoted(text), mp: mAdv(m, 1) }
+    }
+
+    // ---- opener types (char level): Name, Name[g, …][…], Name | not -------------
+    fn parseOpenerType(mp: MP) -> RMType {
+        const start: int = mp.pos
+        const nm: RWord = readName(mp)
+        let m: MP = nm.mp
+        if (nm.w == "") {
+            m = mDiag(m, "E-PARSE-TYPE", "expected a type after `:`", start, start + 1)
+        }
+        let ty: AType = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TName(nm.w) }
+        m = mBump(m)
+        while (chAt(m, 0) == "[") {
+            const close: int = mp.src.indexOf("]", m.pos)
+            let inner: string = ""
+            if (close < 0) {
+                m = mDiag(m, "E-PARSE-TYPE", "unterminated `[` in a type", m.pos, m.pos + 1)
+                m = mAt(m, mp.src.length)
+            } else {
+                inner = mp.src.substring(m.pos + 1, close)
+                m = mAt(m, close + 1)
+            }
+            ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TSeq(ty, grantWords(inner)) }
+            m = mBump(m)
+        }
+        return { t: ty, mp: m }
+    }
+
+    fn grantWords(inner: string) -> string[] {
+        let out: string[] = []
+        for (const part of inner.split(",")) {
+            const w: string = part.trim()
+            if (w != "") out = out.concat([w])
+        }
+        return out
+    }
+
+    // =========================================================================
+    // Openers. One scanner reads every opener; the parser then classifies it
+    // (§66.2.2): a DECLARATION iff it has an own value (`=` after the name or
+    // `name:Type`), an own type, a `let` prefix, or at least one typed
+    // attribute; otherwise a USE (or, in a declaration body, a STATE-CHILD —
+    // O52 ruled).
+    // =========================================================================
+    type Opener:struct = {
+        start: int,
+        star: boolean,
+        isLet: boolean,
+        name: string,
+        ty: AType | not,
+        own: AAttrValue,
+        typed: ADeclAttr[],
+        attrs: AAttr[],
+        selfClosing: boolean,
+    }
+    type ROpener:struct = { o: Opener, mp: MP }
+
+    fn isNamespace(w: string) -> boolean {
+        return w == "bind" || w == "class" || w == "style" || w == "internal" || w == "on"
+    }
+
+    fn hasOwn(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> false
+            .Quoted(v: s) :> true
+            .Bare(e: e) :> true
+            .Paren(e: e) :> true
+            .Braced(b: b) :> true
+        }
+    }
+
+    fn isDeclOpener(o: Opener) -> boolean {
+        if (o.star) return false
+        if (o.isLet) return true
+        if (o.ty is some) return true
+        if (hasOwn(o.own)) return true
+        return o.typed.length > 0
+    }
+
+    // At `<` (not `</`, not `<!--`).
+    fn parseOpener(mp: MP) -> ROpener {
+        const start: int = mp.pos
+        let m: MP = mAdv(mp, 1)
+        let star = false
+        if (chAt(m, 0) == "*") {
+            star = true
+            m = mAdv(m, 1)
+        }
+        let isLet = false
+        let nm: RWord = readName(m)
+        if (nm.w == "let" && isSpaceCh(chAt(nm.mp, 0))) {
+            isLet = true
+            nm = readName(skipSpace(nm.mp))
+        }
+        m = nm.mp
+        if (nm.w == "") m = mDiag(m, "E-PARSE-TAG", "expected a tag name after `<`", start, start + 1)
+        let ty: AType | not = not
+        if (chAt(m, 0) == ":") {
+            const rt: RMType = parseOpenerType(mAdv(m, 1))
+            ty = rt.t
+            m = rt.mp
+        }
+        let own: AAttrValue = AAttrValue.NoValue
+        m = checkSpacedEq(m)
+        if (chAt(m, 0) == "=") {
+            const rv: RValue = parseAttrValue(mAdv(m, 1))
+            own = rv.v
+            m = rv.mp
+        }
+        let typed: ADeclAttr[] = []
+        let attrs: AAttr[] = []
+        let selfClosing = false
+        let going = true
+        while (going) {
+            m = skipSpace(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-TAG", "unterminated tag `<" + nm.w + "`", start, m.pos)
+                going = false
+            } else if (mLooking(m, "/>")) {
+                selfClosing = true
+                m = mAdv(m, 2)
+                going = false
+            } else if (chAt(m, 0) == ">") {
+                m = mAdv(m, 1)
+                going = false
+            } else {
+                const before: int = m.pos
+                const ra: RAttrScan = scanAttr(m)
+                m = ra.mp
+                typed = typed.concat(ra.typed)
+                attrs = attrs.concat(ra.attrs)
+                if (m.pos == before) {
+                    m = mDiag(m, "E-PARSE-TAG", "unexpected `" + chAt(m, 0) + "` in the tag `<" + nm.w + "`", m.pos, m.pos + 1)
+                    m = mAdv(m, 1)
+                }
+            }
+        }
+        const o: Opener = { start: start, star: star, isLet: isLet, name: nm.w, ty: ty, own: own,
+                            typed: typed, attrs: attrs, selfClosing: selfClosing }
+        return { o: o, mp: m }
+    }
+
+    type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], mp: MP }
+
+    // SPEC §66.2.2 (i): "an own value — `=` immediately after the name, or after
+    // `name:Type`". A spaced `=` (`<let count:int = 0/>`) is reported, then read
+    // as the value (so one diagnostic, not a cascade).
+    fn checkSpacedEq(mp: MP) -> MP {
+        if (!isSpaceCh(chAt(mp, 0))) return mp
+        const after: MP = skipSpace(mp)
+        if (chAt(after, 0) != "=") return mp
+        return mDiag(after, "E-PARSE-OPENER-EQ-SPACED", "§66.2.2: an own value / default is `=` IMMEDIATELY after the name or `name:Type` — remove the space", mp.pos, after.pos + 1)
+    }
+
+    // One opener entry: `[export] [let] name:Type[=v]` (typed), `ns:name=v`
+    // (namespaced), `name=v`, `as name` / `as=name`, or a flag.
+    fn scanAttr(mp: MP) -> RAttrScan {
+        const start: int = mp.pos
+        let m: MP = mp
+        let exported = false
+        let isLet = false
+        let nm: RWord = readName(m)
+        if (nm.w == "export" && isSpaceCh(chAt(nm.mp, 0))) {
+            exported = true
+            nm = readName(skipSpace(nm.mp))
+        }
+        if (nm.w == "let" && isSpaceCh(chAt(nm.mp, 0))) {
+            isLet = true
+            nm = readName(skipSpace(nm.mp))
+        }
+        m = nm.mp
+        if (nm.w == "") return { typed: [], attrs: [], mp: mp }
+        // name:…
+        if (chAt(m, 0) == ":" && !isNamespace(nm.w)) {
+            const rt: RMType = parseOpenerType(mAdv(m, 1))
+            m = rt.mp
+            let dflt: AAttrValue = AAttrValue.NoValue
+            m = checkSpacedEq(m)
+            if (chAt(m, 0) == "=") {
+                const rv: RValue = parseAttrValue(mAdv(m, 1))
+                dflt = rv.v
+                m = rv.mp
+            }
+            const da: ADeclAttr = { nid: m.nid, span: mkSpan(start, m.pos), exported: exported, isLet: isLet,
+                                    name: nm.w, ty: rt.t, dflt: dflt }
+            return { typed: [da], attrs: [], mp: mBump(m) }
+        }
+        let name: string = nm.w
+        if (chAt(m, 0) == ":") {
+            const sub: RWord = readName(mAdv(m, 1))
+            name = nm.w + ":" + sub.w
+            m = sub.mp
+        }
+        let v: AAttrValue = AAttrValue.NoValue
+        if (chAt(m, 0) == "=") {
+            const rv2: RValue = parseAttrValue(mAdv(m, 1))
+            v = rv2.v
+            m = rv2.mp
+        } else if (name == "as" && isSpaceCh(chAt(m, 0))) {
+            // `<each … as name>` (§17.7): the binding name follows after a space.
+            const m2: MP = skipSpace(m)
+            const bn: RWord = readName(m2)
+            if (bn.w != "") {
+                const e: AExpr = { nid: bn.mp.nid, span: mkSpan(m2.pos, bn.mp.pos), k: AExprK.Name(bn.w) }
+                v = AAttrValue.Bare(e)
+                m = mBump(bn.mp)
+            }
+        }
+        if (exported || isLet) m = mDiag(m, "E-PARSE-ATTR", "`export` / `let` apply only to a typed attribute (`let " + name + ":Type=…`)", start, m.pos)
+        const a: AAttr = { nid: m.nid, span: mkSpan(start, m.pos), name: name, value: v }
+        return { typed: [], attrs: [a], mp: mBump(m) }
+    }
+
+    // =========================================================================
+    // Elements, declarations, programs.
+    // =========================================================================
+    type RElem:struct = { e: AElem, mp: MP }
+    type RDecl:struct = { d: ADecl, mp: MP }
+    type RChild:struct = { c: ADeclChild, mp: MP }
+
+    // What a tag at `<` turned out to be.
+    type TagKind:enum = { IsElem, IsDecl, IsProgram }
+
+    fn tagKind(o: Opener) -> TagKind {
+        if (!o.star && o.name == "program") return TagKind.IsProgram
+        if (isDeclOpener(o)) return TagKind.IsDecl
+        return TagKind.IsElem
+    }
+
+    fn isVoidTag(t: string) -> boolean {
+        return match t {
+            "input" :> true
+            "br"    :> true
+            "hr"    :> true
+            "img"   :> true
+            "meta"  :> true
+            "link"  :> true
+            _       :> false
+        }
+    }
+
+    // At `</`: consume `</>` or `</name>`; `name` must match the open tag.
+    fn parseCloser(mp: MP, tag: string) -> MP {
+        const start: int = mp.pos
+        let m: MP = mAdv(mp, 2)
+        const nm: RWord = readName(m)
+        m = skipSpace(nm.mp)
+        if (chAt(m, 0) != ">") {
+            m = mDiag(m, "E-PARSE-CLOSER", "expected `>` to end the closer", start, m.pos)
+            return m
+        }
+        m = mAdv(m, 1)
+        if (nm.w != "" && nm.w != tag) {
+            m = mDiag(m, "E-PARSE-CLOSER", "`</" + nm.w + ">` closes `<" + tag + ">`", start, m.pos)
+        }
+        return m
+    }
+
+    fn elemFrom(o: Opener, kids: ANode[], mp: MP) -> RElem {
+        const e: AElem = { nid: mp.nid, span: mkSpan(o.start, mp.pos), star: o.star, tag: o.name, attrs: o.attrs, kids: kids }
+        return { e: e, mp: mBump(mp) }
+    }
+
+    // An element after its opener: children until its closer.
+    fn finishElem(o: Opener, mp: MP) -> RElem {
+        if (o.typed.length > 0 && o.star) {
+            // a typed attribute on `<*x …>` is meaningless — a reference declares nothing
+            return elemFrom(o, [], mDiag(mp, "E-PARSE-TAG", "a `<*" + o.name + ">` reference cannot declare typed attributes", o.start, mp.pos))
+        }
+        if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
+        const kids: RNodes = parseKids(mp, o.name)
+        return elemFrom(o, kids.nodes, kids.mp)
+    }
+
+    // Markup children until `</…>` (consumed).
+    fn parseKids(mp: MP, tag: string) -> RNodes {
+        let m: MP = mp
+        let out: ANode[] = []
+        let text: string = ""
+        let textStart: int = m.pos
+        let going = true
+        while (going) {
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                going = false
+            } else if (mLooking(m, "<!--")) {
+                m = skipMarkupComment(m)
+            } else if (mLooking(m, "//")) {
+                m = skipLineComment(m)
+            } else if (atCss(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                m = skipCss(m)
+                textStart = m.pos
+            } else if (atInterp(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                const ri: RNodeOne = parseInterp(m)
+                out = out.concat([ri.n])
+                m = ri.mp
+                textStart = m.pos
+            } else if (chAt(m, 0) == "<") {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                const rn: RNodeOne = parseMarkupNode(m)
+                out = out.concat([rn.n])
+                m = rn.mp
+                textStart = m.pos
+            } else {
+                if (text == "") textStart = m.pos
+                text = text + chAt(m, 0)
+                m = mAdv(m, 1)
+            }
+        }
+        if (text != "") {
+            out = out.concat([textNode(m, textStart, text)])
+            m = mBump(m)
+        }
+        if (mLooking(m, "</")) m = parseCloser(m, tag)
+        return { nodes: out, mp: m }
+    }
+
+    fn textNode(mp: MP, start: int, text: string) -> ANode {
+        return { nid: mp.nid, span: mkSpan(start, mp.pos), k: ANodeK.Text(text) }
+    }
+
+    type RNodeOne:struct = { n: ANode, mp: MP }
+
+    // `${ expr }` in markup.
+    fn parseInterp(mp: MP) -> RNodeOne {
+        const start: int = mp.pos
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        let t: TP = expectP(tp, LB())
+        const r: RExpr = parseAssign(t)
+        t = expectP(r.tp, RB())
+        t = expectRegionEnd(t)
+        const m: MP = backToMarkup(mp, t)
+        const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(r.e) }
+        return { n: n, mp: mBump(m) }
+    }
+
+    // A tag in markup position: an element, a `<*x>` reference, or a declaration.
+    fn parseMarkupNode(mp: MP) -> RNodeOne {
+        const ro: ROpener = parseOpener(mp)
+        const k: TagKind = tagKind(ro.o)
+        return match k {
+            .IsDecl :> declNode(finishDecl(ro.o, ro.mp, false))
+            .IsElem :> elemNode(finishElem(ro.o, ro.mp))
+            .IsProgram :> elemNode(finishElem(ro.o, mDiag(ro.mp, "E-PARSE-PROGRAM", "`<program>` inside markup", ro.o.start, ro.mp.pos)))
+        }
+    }
+
+    fn declNode(r: RDecl) -> RNodeOne {
+        const n: ANode = { nid: r.mp.nid, span: r.d.span, k: ANodeK.DeclNode(r.d) }
+        return { n: n, mp: mBump(r.mp) }
+    }
+
+    fn elemNode(r: RElem) -> RNodeOne {
+        const n: ANode = { nid: r.mp.nid, span: r.e.span, k: ANodeK.Elem(r.e) }
+        return { n: n, mp: mBump(r.mp) }
+    }
+
+    // ---- declarations -------------------------------------------------------
+    // After the opener: the body (child fields + state-children), the closer,
+    // then an optional `renders <element>`.
+    fn finishDecl(o: Opener, mp: MP, exported: boolean) -> RDecl {
+        let m: MP = mp
+        if (isNamespace(o.name)) {
+            m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "`" + o.name + "` cannot name a declaration or field — it is reserved for namespaced attributes (`" + o.name + ":…`, §66.2.3)", o.start, m.pos)
+        }
+        for (const ta of o.typed) {
+            if (isNamespace(ta.name)) {
+                m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "`" + ta.name + "` cannot name an attribute of a declaration (§66.2.3)", ta.span.start, ta.span.end)
+            }
+            m = checkOpenerValue(m, ta.dflt)
+        }
+        m = checkOpenerValue(m, o.own)
+        for (const a of o.attrs) {
+            if (a.name.indexOf(":") >= 0) {
+                m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "a declaration opener cannot carry `" + a.name + "` — `bind:` / `class:` / `style:` / `internal:` / `on…` are markup attributes; a declaration's markup is its `renders` (§66.2.3, §66.4)", a.span.start, a.span.end)
+            }
+        }
+        let body: ADeclChild[] = []
+        if (!o.selfClosing) {
+            const rb: RChildren = parseDeclBody(m, o.name)
+            body = rb.cs
+            m = rb.mp
+        }
+        const declEnd: int = m.pos
+        // `renders` follows the closer (§66.5.1).
+        let renders: AElem | not = not
+        const after: MP = skipTrivia(m)
+        const rw: RWord = readName(after)
+        if (rw.w == "renders") {
+            const at: MP = skipTrivia(rw.mp)
+            if (chAt(at, 0) == "<" && !mLooking(at, "</")) {
+                const ro: ROpener = parseOpener(at)
+                const re: RElem = finishElem(ro.o, ro.mp)
+                renders = re.e
+                m = re.mp
+            } else {
+                m = mDiag(at, "E-PARSE-RENDERS", "`renders` must be followed by one markup element (§66.5.1)", rw.mp.pos - 7, rw.mp.pos)
+            }
+        }
+        const d: ADecl = {
+            nid: m.nid, span: mkSpan(o.start, declEnd), exported: exported, isLet: o.isLet,
+            name: o.name, ty: o.ty, own: o.own, attrs: o.typed, mods: o.attrs, body: body, renders: renders,
+        }
+        return { d: d, mp: mBump(m) }
+    }
+
+    // §66.2.4: an own value / attribute default is a literal or a plain `@ref`
+    // written bare — anything else must be parenthesized.
+    fn checkOpenerValue(mp: MP, v: AAttrValue) -> MP {
+        return match v {
+            .Bare(e: e) :> checkBareOpenerExpr(mp, e)
+            .NoValue :> mp
+            .Quoted(v: s) :> mp
+            .Paren(e: e) :> mp
+            .Braced(b: b) :> mDiag(mp, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "a declaration's value cannot be a braced block — write an expression, parenthesized (§66.2.4)", b.span.start, b.span.end)
+        }
+    }
+
+    fn checkBareOpenerExpr(mp: MP, e: AExpr) -> MP {
+        if (isBareOpenerExpr(e)) return mp
+        return mDiag(mp, "E-DECL-OPENER-EXPR-UNPARENTHESIZED", "an opener value that is not a literal or a plain `@ref` must be parenthesized (§66.2.4)", e.span.start, e.span.end)
+    }
+
+    fn isBareOpenerExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> true
+            .Str(v: s) :> true
+            .Bool(v: b) :> true
+            .NotLit :> true
+            .Variant(name: n) :> true
+            .At(name: n) :> true
+            .ArrayLit(elems: es) :> es.length == 0
+            .Unary(op: o, e: inner) :> isNegNum(o, inner)
+            .Name(name: n) :> false
+            .AtItem :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ObjectLit(props: ps) :> false
+        }
+    }
+
+    fn isNegNum(o: UnOp, inner: AExpr) -> boolean {
+        const k: AExprK = inner.k
+        const isNeg: boolean = o == UnOp.Neg
+        return match k {
+            .Num(raw: r) :> isNeg
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: x) :> false
+            .Call(callee: x) :> false
+            .Unary(op: x) :> false
+            .Binary(op: x) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: x) :> false
+            .ObjectLit(props: x) :> false
+        }
+    }
+
+    type RChildren:struct = { cs: ADeclChild[], mp: MP }
+
+    // A declaration body: child declarations and state-children (O52), up to
+    // the closer (consumed). A body holds no uses and no text.
+    fn parseDeclBody(mp: MP, tag: string) -> RChildren {
+        let m: MP = mp
+        let out: ADeclChild[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                m = parseCloser(m, tag)
+                going = false
+            } else {
+                let exported = false
+                const w: RWord = readName(m)
+                if (w.w == "export") {
+                    exported = true
+                    m = skipTrivia(w.mp)
+                }
+                if (chAt(m, 0) == "<") {
+                    const rc: RChild = parseDeclChild(m, exported)
+                    out = out.concat([rc.c])
+                    m = rc.mp
+                } else {
+                    const bad: int = m.pos
+                    m = mDiag(m, "E-PARSE-DECL-BODY", "a declaration body holds child declarations and state-children only (§66.4 rule 4, O52)", bad, bad + 1)
+                    m = skipLineComment(mAdv(m, 1))
+                }
+            }
+        }
+        return { cs: out, mp: m }
+    }
+
+    fn parseDeclChild(mp: MP, exported: boolean) -> RChild {
+        const ro: ROpener = parseOpener(mp)
+        const o: Opener = ro.o
+        if (isDeclOpener(o)) {
+            const rd: RDecl = finishDecl(o, ro.mp, exported)
+            return { c: ADeclChild.ChildField(rd.d), mp: rd.mp }
+        }
+        let m: MP = ro.mp
+        if (!o.selfClosing) {
+            m = mDiag(m, "E-PARSE-STATE-CHILD", "a state-child body is not in bootstrap slice M2 — write `<" + o.name + " rule=…/>`", o.start, m.pos)
+            const skip: RChildren = parseDeclBody(m, o.name)
+            m = skip.mp
+        }
+        const sc: AStateChild = { nid: m.nid, span: mkSpan(o.start, m.pos), name: o.name, attrs: o.attrs }
+        return { c: ADeclChild.StateChild(sc), mp: mBump(m) }
+    }
+
+    // ---- items: a file or `<program>` body ----------------------------------
+    // Items until EOF or a closer (consumed when `tag` != "").
+    fn parseMarkupItems(mp: MP, tag: string) -> RMItems {
+        let m: MP = mp
+        let out: AItem[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                if (tag != "") m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                if (tag == "") {
+                    m = mDiag(m, "E-PARSE-CLOSER", "a closer with nothing open", m.pos, m.pos + 2)
+                    m = mAdv(m, 2)
+                } else {
+                    m = parseCloser(m, tag)
+                    going = false
+                }
+            } else {
+                const before: int = m.pos
+                const r: RMItems = parseMarkupItem(m)
+                out = out.concat(r.items)
+                m = r.mp
+                if (m.pos == before) m = mAdv(m, 1)
+            }
+        }
+        return { items: out, mp: m }
+    }
+
+    fn mItem(mp: MP, start: int, k: AItemK) -> RMItems {
+        const it: AItem = { nid: mp.nid, span: mkSpan(start, mp.pos), k: k }
+        return { items: [it], mp: mBump(mp) }
+    }
+
+    fn parseMarkupItem(mp: MP) -> RMItems {
+        const start: int = mp.pos
+        if (atCss(mp)) return { items: [], mp: skipCss(mp) }
+        if (atInterp(mp)) {
+            const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+            const inner: RItems = parseLogicItems(expectP(tp, LB()), RB())
+            const t2: TP = expectRegionEnd(expectP(inner.tp, RB()))
+            return { items: inner.items, mp: backToMarkup(mp, t2) }
+        }
+        if (chAt(mp, 0) == "<") return parseTagItem(mp, false)
+        const w: RWord = readName(mp)
+        if (w.w == "export") {
+            const after: MP = skipTrivia(w.mp)
+            if (chAt(after, 0) == "<") return parseTagItem(after, true)
+            return logicRegionItem(mp, LexStop.Statement)
+        }
+        if (w.w == "function" || w.w == "fn" || w.w == "type") return logicRegionItem(mp, LexStop.Statement)
+        if (w.w == "import") return logicRegionItem(mp, LexStop.Line)
+        const d: MP = mDiag(mp, "E-PARSE-ITEM", "unexpected text at program level", start, start + 1)
+        return { items: [], mp: skipLineComment(d) }
+    }
+
+    fn logicRegionItem(mp: MP, stop: LexStop) -> RMItems {
+        const tp: TP = regionTP(mp, stop)
+        const r: RItems = parseLogicItems(tp, "")
+        return { items: r.items, mp: backToMarkup(mp, r.tp) }
+    }
+
+    fn parseTagItem(mp: MP, exported: boolean) -> RMItems {
+        const ro: ROpener = parseOpener(mp)
+        const o: Opener = ro.o
+        const k: TagKind = tagKind(o)
+        return match k {
+            .IsProgram :> programItem(o, ro.mp)
+            .IsDecl :> declItem(finishDecl(o, ro.mp, exported))
+            .IsElem :> elemItem(finishElem(o, ro.mp), exported)
+        }
+    }
+
+    fn declItem(r: RDecl) -> RMItems {
+        return mItem(r.mp, r.d.span.start, AItemK.DeclItem(r.d))
+    }
+
+    fn elemItem(r: RElem, exported: boolean) -> RMItems {
+        let m: MP = r.mp
+        if (exported) m = mDiag(m, "E-PARSE-EXPORT", "`export` applies to a declaration, not to markup", r.e.span.start, r.e.span.end)
+        const n: ANode = { nid: m.nid, span: r.e.span, k: ANodeK.Elem(r.e) }
+        return mItem(mBump(m), r.e.span.start, AItemK.MarkupItem(n))
+    }
+
+    fn programItem(o: Opener, mp: MP) -> RMItems {
+        let items: AItem[] = []
+        let m: MP = mp
+        if (!o.selfClosing) {
+            const r: RMItems = parseMarkupItems(mp, "program")
+            items = r.items
+            m = r.mp
+        }
+        const p: AProgram = { nid: m.nid, span: mkSpan(o.start, m.pos), attrs: o.attrs, items: items }
+        return mItem(mBump(m), o.start, AItemK.ProgramItem(p))
+    }
+
+    // =========================================================================
+    // Entry.
+    // =========================================================================
+    export type Parsed:struct = { ast: FileAst, diags: Diag[], nextId: int }
+
+    // Parse one file. NodeIds start at `firstId`; `nextId` is the first unused.
+    export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
+        const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path }
+        const r: RMItems = parseMarkupItems(m0, "")
+        return { ast: { path: path, items: r.items }, diags: r.mp.diags, nextId: r.mp.nid }
+    }
+}

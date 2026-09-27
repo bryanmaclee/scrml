@@ -1,0 +1,2555 @@
+// =============================================================================
+// self-host-v2 / analyze.scrml — FileAst[] → TypedProgram (bootstrap impl#2,
+// slice M2). The S233 re-cut's third phase: `TypedProgram = FileAst + NodeId
+// side-tables` (dpa-051 §3.1, R1 (a) ruled S437).
+//
+//   - NAMES ARE SYMBOLS (§3.3). This module is THE BINDER: the only minter of
+//     Syms (core.scrml, THE BINDER'S OBLIGATION). Every identifier the program
+//     uses is bound here — to a declaration, a field (with the InstRef that
+//     reaches it, L1/L2/L10/L11/L12), a write capability (L3), a type, a
+//     variant, a function, a parameter, a local, an `as=` handle or an `<each>`
+//     row binding.
+//   - ONE TABLES RECORD (§3.5): every fact `lower` needs is either a
+//     declaration/type/function record or a `Fact` keyed by the NodeId it is
+//     about. Tables are built once, never mutated (each step returns a new
+//     value), and `lower` consumes them without re-deciding anything.
+//   - THE EDIT CLASSIFIER (§6.2, §66.11.2) runs here: every write becomes a
+//     `WriteFact { cap, inst, edit, check }` or a diagnostic —
+//     E-DERIVED-WRITE, E-WRITE-NOT-GRANTED, E-DECL-HANDLE-NOT-NARROWED,
+//     E-FIELD-PRIVATE-WRITE, E-DECL-RENDERS-BARE-WRITE, E-ENGINE-INVALID-TRANSITION
+//     (§66.20). The spread `@x = { ...@x, f: v }` is a FIELD EDIT (O58 (b)).
+//
+// Scope of slice M2: the §66 subset §66.19.1 (counter) and §66.19.3 (dropdown)
+// use. A construct outside it is reported (`E-BOOTSTRAP-UNSUPPORTED`), never
+// guessed.
+//
+// impl#1 workarounds: F4 (qualified variants), F5 (typed host results), F11
+// (named payload binding), F12 (alternation only first), F13 (≤ 4 bound payload
+// fields), F14 (no brace-adjacent string literal), F15 (no fn named like a
+// payload field of an enum declared in this file), F16 (≥ 1 binding arm over an
+// imported payload enum).
+// =============================================================================
+${
+    import { Sym, Type, SeqAt, LengthGrant, SeqGrants, FieldDef, VariantDef, TypeDef, FieldRef, InstRef,
+             Literal, PrimOp, EditKind, Check, FieldMode, FieldRole, GrantSet, Edge, TransitionGraph,
+             DeclKind, mkSym, noGrants, replaceGrant, typeDefSym } from "./core.scrml"
+    import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
+             ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl,
+             AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
+
+    // =========================================================================
+    // THE TABLES (exported — `lower` consumes them).
+    // =========================================================================
+    // One field of a declaration (Core `Field` minus the lowered initializer;
+    // `init` is the syntax lower lowers, with the facts below).
+    export type FieldInfo:struct = {
+        nid: int,
+        sym: Sym,
+        ty: Type,
+        mode: FieldMode,
+        role: FieldRole,
+        grants: GrantSet,
+        graph: TransitionGraph | not,
+        exported: boolean,
+        wcap: Sym | not,
+        init: AAttrValue,
+        reads: string[],
+    }
+
+    // `nid` = the ADecl (user) / AProgram node. `file` = the defining file (E2).
+    export type DeclInfo:struct = {
+        nid: int,
+        sym: Sym,
+        kind: DeclKind,
+        single: boolean,
+        file: string,
+        fields: FieldInfo[],
+        handles: Sym[],
+    }
+
+    // An `as=` handle (L10): where its cell lives (`owner` = the declaration or
+    // `<each>` element nid), the declaration of the instance it names, and
+    // whether that instance is conditionally mounted (§66.7.5 → `T | not`).
+    export type HandleInfo:struct = { sym: Sym, name: string, target: Sym, owner: int, conditional: boolean }
+
+    export type TypeInfo:struct = { nid: int, name: string, file: string, exported: boolean, def: TypeDef }
+    export type FnInfo:struct = { nid: int, sym: Sym, name: string, file: string, exported: boolean, pure: boolean }
+
+    // A classified write (§6.2): the capability, the instance, the edit, the check.
+    export type WriteFact:struct = { cap: Sym, inst: InstRef, edit: EditKind, check: Check }
+    // One override of a spread write `@x = { ...@x, f: v }` (O58 (b)): a
+    // FieldAt edit whose value is the object literal's prop number `prop`.
+    export type SpreadWrite:struct = { w: WriteFact, prop: int }
+
+    // How an attribute of an element is used.
+    export type AttrKind:enum = {
+        AStatic,                  // a plain HTML attribute with a literal value
+        ABound,                   // a plain HTML attribute bound to an expression
+        AOn(event: string),       // an event handler (onclick → "click")
+        AIf,                      // if= (L5)
+        AConstruct(field: int),   // a use-site construction value (§66.14 rule 4)
+        AAs,                      // as= on a use (the handle is on the element's FUse)
+        AEachIn,
+        AEachKey,
+        AEachAs,
+    }
+
+    // A fact about one node (keyed by its NodeId in `Tables.facts`).
+    export type Fact:enum = {
+        FLocal(sym: Sym),                                // a local / parameter / row binding
+        FField(decl: Sym, inst: InstRef, idx: int),       // a read of a declaration field
+        FInst(decl: Sym, inst: InstRef),                  // an instance (a whole-value read, or a handle)
+        FStruct(owner: Sym, idx: int),                    // a struct-field step
+        FFn(sym: Sym),                                    // a function
+        FVariant(enumSym: Sym, idx: int),                 // a bare variant
+        FLit(lit: Literal),                               // a literal (int vs number resolved)
+        FOp(op: PrimOp),                                  // a unary / binary operator, resolved (§45)
+        FStructOf(ty: Sym, order: int[]),                 // an object literal: prop index per declared field
+        FWrite(w: WriteFact),                             // an assignment
+        FSpread(ws: SpreadWrite[]),                       // a spread assignment: FieldAt edits (O58 (b))
+        FReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
+        FAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
+        FBind(sym: Sym),                                  // a binder: a local statement, a function
+        FParam(sym: Sym, ty: Type),                       // a function parameter and its (annotated) type
+        FGiven(sym: Sym, inst: InstRef),                  // given c = @handle (L11)
+        FUse(decl: Sym, alias: Sym | not),                // an element that is a USE of a declaration
+        FEach(bind: Sym, handles: Sym[]),                 // an <each> element
+        FSlot,
+        FHtml,
+        FAttr(k: AttrKind),
+        FNone,                                            // no fact about this node (factOf's answer)
+    }
+    export type NodeFact:struct = { nid: int, f: Fact }
+
+    export type Tables:struct = {
+        program: Sym,
+        types: TypeInfo[],
+        decls: DeclInfo[],
+        fns: FnInfo[],
+        handles: HandleInfo[],
+        facts: NodeFact[],
+    }
+
+    export type TypedProgram:struct = { files: FileAst[], tables: Tables, diags: Diag[] }
+
+    // The fact about node `nid` (FNone when analyze recorded none — a node it
+    // reported an error on, or one lower never asks about).
+    export fn factOf(t: Tables, nid: int) -> Fact {
+        for (const nf of t.facts) {
+            if (nf.nid == nid) return nf.f
+        }
+        return Fact.FNone
+    }
+
+    export fn declInfo(t: Tables, s: Sym) -> DeclInfo | not {
+        for (const d of t.decls) {
+            if (d.sym.id == s.id) return d
+        }
+        return not
+    }
+
+    // =========================================================================
+    // Analyze state: the facts and diagnostics so far, and the Sym counter.
+    // =========================================================================
+    type AS:struct = { facts: NodeFact[], diags: Diag[], nextSym: int }
+    type RSym:struct = { s: Sym, st: AS }
+
+    fn mint(st: AS, hint: string) -> RSym {
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1 } }
+    }
+
+    fn addFact(st: AS, nid: int, f: Fact) -> AS {
+        return { facts: st.facts.concat([{ nid: nid, f: f }]), diags: st.diags, nextSym: st.nextSym }
+    }
+
+    fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
+        const d: Diag = { code: code, message: msg, file: file, span: span }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym }
+    }
+
+    fn LB() -> string { return "{" }
+    fn RB() -> string { return "}" }
+
+    // =========================================================================
+    // Phase A — the program's shape: types, declarations, functions, fields,
+    // handles. (Everything a body may name, before any body is resolved.)
+    // =========================================================================
+    // A declaration together with its syntax (for Phase B).
+    type DeclSrc:struct = { info: DeclInfo, file: string, isProgram: boolean, d: ADecl | not, p: AProgram | not }
+    type FnSrc:struct = { info: FnInfo, f: AFn }
+
+    type Globals:struct = {
+        program: Sym,
+        entry: string,
+        te: TypeEnv,
+        types: TypeInfo[],
+        decls: DeclSrc[],
+        fns: FnSrc[],
+        handles: HandleInfo[],
+    }
+
+    type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
+
+    // ---- types ---------------------------------------------------------------
+    // A1: mint every type's Sym (and its variants' / fields' Syms). The field
+    // TYPES are resolved in A2, once every type name is known.
+    type TypeStub:struct = { nid: int, name: string, file: string, exported: boolean, sym: Sym,
+                             isEnum: boolean, members: Sym[], src: ATypeDecl }
+
+    type RStubs:struct = { stubs: TypeStub[], st: AS }
+
+    fn typeStubs(files: FileAst[], st0: AS) -> RStubs {
+        let st: AS = st0
+        let out: TypeStub[] = []
+        for (const f of files) {
+            for (const td of typeItems(f.items)) {
+                const rs: RSym = mint(st, td.name)
+                st = rs.st
+                let members: Sym[] = []
+                let isEnum = false
+                const body: ATypeBody = td.body
+                const names: string[] = typeMemberNames(body)
+                isEnum = isEnumBody(body)
+                for (const n of names) {
+                    const rm: RSym = mint(st, n)
+                    st = rm.st
+                    members = members.concat([rm.s])
+                }
+                out = out.concat([{ nid: td.nid, name: td.name, file: f.path, exported: td.exported, sym: rs.s,
+                                    isEnum: isEnum, members: members, src: td }])
+            }
+        }
+        return { stubs: out, st: st }
+    }
+
+    fn isEnumBody(b: ATypeBody) -> boolean {
+        return match b {
+            .EnumBody(variants: vs) :> true
+            .StructBody(fields: fs) :> false
+        }
+    }
+
+    fn typeMemberNames(b: ATypeBody) -> string[] {
+        return match b {
+            .EnumBody(variants: vs) :> variantNames(vs)
+            .StructBody(fields: fs) :> typeFieldNames(fs)
+        }
+    }
+
+    fn variantNames(vs: AVariant[]) -> string[] {
+        let out: string[] = []
+        for (const v of vs) { out = out.concat([v.name]) }
+        return out
+    }
+
+    fn typeFieldNames(fs: ATypeField[]) -> string[] {
+        let out: string[] = []
+        for (const f of fs) { out = out.concat([f.name]) }
+        return out
+    }
+
+    // Every TypeItem of a file, the program's included.
+    fn typeItems(items: AItem[]) -> ATypeDecl[] {
+        let out: ATypeDecl[] = []
+        for (const it of items) { out = out.concat(typeItemOf(it)) }
+        return out
+    }
+
+    fn typeItemOf(it: AItem) -> ATypeDecl[] {
+        const k: AItemK = it.k
+        return match k {
+            .TypeItem(t: t) :> [t]
+            .ProgramItem(p: p) :> typeItems(p.items)
+            .ImportItem(i: i) :> []
+            .FnItem(f: f) :> []
+            .DeclItem(d: d) :> []
+            .MarkupItem(n: n) :> []
+        }
+    }
+
+    // ---- resolving a type expression ------------------------------------------
+    type TypeEnv:struct = { stubs: TypeStub[], declNames: string[], declSyms: Sym[], file: string }
+    type RType:struct = { t: Type, st: AS }
+
+    fn stubNamed(te: TypeEnv, name: string) -> TypeStub | not {
+        for (const s of te.stubs) {
+            if (s.name == name) return s
+        }
+        return not
+    }
+
+    fn resolveType(te: TypeEnv, at: AType, st: AS) -> RType {
+        const k: ATypeK = at.k
+        return match k {
+            .TName(name: n) :> resolveTypeName(te, at, n, st)
+            .TSeq(elem: e, grants: gs) :> resolveSeqType(te, at, e, gs, st)
+            .TMaybe(inner: i) :> resolveMaybe(te, i, st)
+        }
+    }
+
+    fn resolveMaybe(te: TypeEnv, inner: AType, st: AS) -> RType {
+        const r: RType = resolveType(te, inner, st)
+        return { t: Type.Maybe(r.t), st: r.st }
+    }
+
+    fn resolveTypeName(te: TypeEnv, at: AType, n: string, st: AS) -> RType {
+        if (n == "int") return { t: Type.Int, st: st }
+        if (n == "number") return { t: Type.Num, st: st }
+        if (n == "string") return { t: Type.Str, st: st }
+        if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st }
+        const s: TypeStub | not = stubNamed(te, n)
+        if (s is some) return { t: Type.Named(s.sym), st: st }
+        let i = 0
+        while (i < te.declNames.length) {
+            if (te.declNames[i] == n) return { t: Type.Named(te.declSyms[i]), st: st }
+            i = i + 1
+        }
+        return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`") }
+    }
+
+    // `T[g, …]` (⚑ O10 spelling): the grant words are permission AXES (§66.12.2).
+    fn resolveSeqType(te: TypeEnv, at: AType, elem: AType, gs: string[], st0: AS) -> RType {
+        const re: RType = resolveType(te, elem, st0)
+        let st: AS = re.st
+        let length: LengthGrant = LengthGrant.Fixed
+        let where: SeqAt[] = []
+        let writable = false
+        for (const g of gs) {
+            if (g == "free") {
+                length = LengthGrant.Free
+            } else if (g == "end") {
+                where = where.concat([SeqAt.End])
+            } else if (g == "front") {
+                where = where.concat([SeqAt.Front])
+            } else if (g == "anywhere") {
+                where = where.concat([SeqAt.Anywhere])
+            } else if (g == "writable") {
+                writable = true
+            } else if (g == "replace") {
+                // carried on the field's grant set (seqReplace), not on SeqGrants
+            } else {
+                st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", "`" + g + "` is not a permission axis value (§66.12.2; there is no `any` / `all`, §66.12.4)")
+            }
+        }
+        return { t: Type.Seq(re.t, { length: length, at: where, positionsWritable: writable }), st: st }
+    }
+
+    // Does a sequence type expression grant `replace` in its brackets?
+    fn seqReplace(at: AType) -> boolean {
+        const k: ATypeK = at.k
+        return match k {
+            .TSeq(elem: e, grants: gs) :> gs.indexOf("replace") >= 0
+            .TName(name: n) :> false
+            .TMaybe(inner: i) :> false
+        }
+    }
+
+    // The edit grants a (resolved) type carries (§66.12.2 axes → EditKinds).
+    fn typeEdits(t: Type) -> EditKind[] {
+        return match t {
+            .Seq(elem: e, grants: g) :> seqEdits(g)
+            .Int :> []
+            .Num :> []
+            .Str :> []
+            .Bool :> []
+            .Named(sym: s) :> []
+            .Maybe(inner: i) :> []
+        }
+    }
+
+    fn seqEdits(g: SeqGrants) -> EditKind[] {
+        let out: EditKind[] = []
+        for (const a of g.at) { out = out.concat([seqAtEdit(a)]) }
+        if (g.positionsWritable) out = out.concat([EditKind.PositionWrite])
+        return out
+    }
+
+    fn seqAtEdit(a: SeqAt) -> EditKind {
+        return match a {
+            .End :> EditKind.Append
+            .Front :> EditKind.Prepend
+            .Anywhere :> EditKind.Anywhere
+        }
+    }
+
+    // A2: the TypeDefs.
+    fn typeInfos(stubs: TypeStub[], te: TypeEnv, st0: AS) -> RTypeInfos {
+        let st: AS = st0
+        let out: TypeInfo[] = []
+        for (const s of stubs) {
+            const fte: TypeEnv = { stubs: te.stubs, declNames: te.declNames, declSyms: te.declSyms, file: s.file }
+            const body: ATypeBody = s.src.body
+            const r: RTypeDef = typeDefOf(fte, s, body, st)
+            st = r.st
+            out = out.concat([{ nid: s.nid, name: s.name, file: s.file, exported: s.exported, def: r.def }])
+        }
+        return { ts: out, st: st }
+    }
+
+    type RTypeDef:struct = { def: TypeDef, st: AS }
+
+    fn typeDefOf(te: TypeEnv, s: TypeStub, body: ATypeBody, st: AS) -> RTypeDef {
+        return match body {
+            .EnumBody(variants: vs) :> enumDefOf(te, s, vs, st)
+            .StructBody(fields: fs) :> structDefOf(te, s, fs, st)
+        }
+    }
+
+    fn enumDefOf(te: TypeEnv, s: TypeStub, vs: AVariant[], st0: AS) -> RTypeDef {
+        let st: AS = st0
+        let out: VariantDef[] = []
+        let i = 0
+        for (const v of vs) {
+            const r: RFieldDefs = fieldDefsOf(te, v.fields, [], st, true)
+            st = r.st
+            out = out.concat([{ sym: s.members[i], fields: r.fs }])
+            i = i + 1
+        }
+        return { def: TypeDef.EnumDef(s.sym, out), st: st }
+    }
+
+    fn structDefOf(te: TypeEnv, s: TypeStub, fs: ATypeField[], st0: AS) -> RTypeDef {
+        const r: RFieldDefs = fieldDefsOf(te, fs, s.members, st0, false)
+        return { def: TypeDef.StructDef(s.sym, r.fs), st: r.st }
+    }
+
+    type RFieldDefs:struct = { fs: FieldDef[], st: AS }
+
+    // Payload fields (variants) are values: no grants. Struct fields take their
+    // own `let` (O3) and their type's edit grants. `syms` = the member Syms minted
+    // with the type (struct fields); payload fields are minted here.
+    fn fieldDefsOf(te: TypeEnv, fs: ATypeField[], syms: Sym[], st0: AS, payload: boolean) -> RFieldDefs {
+        let st: AS = st0
+        let out: FieldDef[] = []
+        let i = 0
+        for (const f of fs) {
+            const rt: RType = resolveType(te, f.ty, st)
+            st = rt.st
+            let grants: GrantSet = noGrants()
+            if (!payload) grants = { replace: f.isLet || seqReplace(f.ty), edits: typeEdits(rt.t) }
+            let fsym: Sym = mkSym(0, f.name)
+            if (i < syms.length) {
+                fsym = syms[i]
+            } else {
+                const rm: RSym = mint(st, f.name)
+                fsym = rm.s
+                st = rm.st
+            }
+            out = out.concat([{ sym: fsym, ty: rt.t, grants: grants }])
+            i = i + 1
+        }
+        return { fs: out, st: st }
+    }
+
+    // ---- lookups over the global shape ------------------------------------------
+    fn typeInfoNamed(ts: TypeInfo[], name: string) -> TypeInfo | not {
+        for (const t of ts) {
+            if (t.name == name) return t
+        }
+        return not
+    }
+
+    fn typeInfoOf(ts: TypeInfo[], s: Sym) -> TypeInfo | not {
+        for (const t of ts) {
+            if (typeDefSym(t.def).id == s.id) return t
+        }
+        return not
+    }
+
+    fn enumVariants(td: TypeDef) -> VariantDef[] {
+        return match td {
+            .EnumDef(sym: s, variants: vs) :> vs
+            .StructDef(sym: s) :> []
+        }
+    }
+
+    fn structFieldDefs(td: TypeDef) -> FieldDef[] | not {
+        return match td {
+            .StructDef(sym: s, fields: fs) :> fs
+            .EnumDef(sym: s) :> not
+        }
+    }
+
+    // The index of variant `name` in enum `s`, else -1.
+    fn variantIndex(ts: TypeInfo[], s: Sym, name: string) -> int {
+        const t: TypeInfo | not = typeInfoOf(ts, s)
+        if (t is not) return -1
+        let i = 0
+        for (const v of enumVariants(t.def)) {
+            if (v.sym.hint == name) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn isEnumType(ts: TypeInfo[], t: Type) -> Sym | not {
+        const s: Sym | not = namedOf(t)
+        if (s is not) return not
+        const ti: TypeInfo | not = typeInfoOf(ts, s)
+        if (ti is not) return not
+        if (enumVariants(ti.def).length == 0) {
+            const fs: FieldDef[] | not = structFieldDefs(ti.def)
+            if (fs is some) return not
+        }
+        return s
+    }
+
+    fn namedOf(t: Type) -> Sym | not {
+        return match t {
+            .Named(sym: s) :> s
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Seq(elem: e) :> not
+            .Maybe(inner: i) :> not
+        }
+    }
+
+    fn seqElem(t: Type) -> Type | not {
+        return match t {
+            .Seq(elem: e) :> e
+            .Named(sym: s) :> not
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Maybe(inner: i) :> not
+        }
+    }
+
+    fn findDeclSrc(g: Globals, s: Sym) -> DeclSrc | not {
+        for (const d of g.decls) {
+            if (d.info.sym.id == s.id) return d
+        }
+        return not
+    }
+
+    fn declNamed(g: Globals, name: string) -> DeclSrc | not {
+        for (const d of g.decls) {
+            if (!d.isProgram && d.info.sym.hint == name) return d
+        }
+        return not
+    }
+
+    fn fieldIndex(d: DeclInfo, name: string) -> int {
+        let i = 0
+        for (const f of d.fields) {
+            if (f.sym.hint == name) return i
+            i = i + 1
+        }
+        return -1
+    }
+
+    fn fnNamed(g: Globals, name: string) -> FnInfo | not {
+        for (const f of g.fns) {
+            if (f.info.name == name) return f.info
+        }
+        return not
+    }
+
+    // ---- declarations -----------------------------------------------------------
+    // The program (the entry file's `<program>`) and every user declaration
+    // (a top-level `<x …>` with typed attributes / a `renders`, in any file).
+    type DeclStub:struct = { sym: Sym, file: string, isProgram: boolean, d: ADecl | not, p: AProgram | not, nid: int }
+    type RDeclStubs:struct = { ds: DeclStub[], st: AS }
+
+    fn declStubs(files: FileAst[], entry: string, st0: AS) -> RDeclStubs {
+        let st: AS = st0
+        let out: DeclStub[] = []
+        for (const f of files) {
+            for (const it of f.items) {
+                const k: AItemK = it.k
+                const r: RDeclStubs = declStubOf(k, f.path, entry, st)
+                out = out.concat(r.ds)
+                st = r.st
+            }
+        }
+        return { ds: out, st: st }
+    }
+
+    fn declStubOf(k: AItemK, file: string, entry: string, st: AS) -> RDeclStubs {
+        return match k {
+            .DeclItem(d: d) :> userDeclStub(d, file, st)
+            .ProgramItem(p: p) :> programStub(p, file, entry, st)
+            .ImportItem(i: i) :> noStubs(st)
+            .TypeItem(t: t) :> noStubs(st)
+            .FnItem(f: f) :> noStubs(st)
+            .MarkupItem(n: n) :> noStubs(st)
+        }
+    }
+
+    fn noStubs(st: AS) -> RDeclStubs { return { ds: [], st: st } }
+
+    fn userDeclStub(d: ADecl, file: string, st: AS) -> RDeclStubs {
+        const r: RSym = mint(st, d.name)
+        return { ds: [{ sym: r.s, file: file, isProgram: false, d: d, p: not, nid: d.nid }], st: r.st }
+    }
+
+    fn programStub(p: AProgram, file: string, entry: string, st: AS) -> RDeclStubs {
+        let st2: AS = st
+        if (file != entry) st2 = addDiag(st, file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a `<program>` outside the entry file")
+        const r: RSym = mint(st2, "program")
+        return { ds: [{ sym: r.s, file: file, isProgram: true, d: not, p: p, nid: p.nid }], st: r.st }
+    }
+
+    // ---- fields -------------------------------------------------------------------
+    // Does an initializer read cells (§66.9: derived when locked, seeded when
+    // `let`)? A call counts: a function may read cells.
+    fn valueReads(v: AAttrValue) -> string[] {
+        return match v {
+            .Bare(e: e) :> exprReads(e)
+            .Paren(e: e) :> exprReads(e)
+            .NoValue :> []
+            .Quoted(v: s) :> []
+            .Braced(b: b) :> []
+        }
+    }
+
+    // The `@names` an expression reads ("()" for a call), for E-DERIVED-WRITE's message.
+    fn exprReads(e: AExpr) -> string[] {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> ["@" + n]
+            .AtItem :> ["@."]
+            .Member(obj: o) :> exprReads(o)
+            .Call(callee: c, args: args) :> ["()"].concat(listReads(args))
+            .Unary(op: o, e: x) :> exprReads(x)
+            .Binary(op: o, l: l, r: r) :> exprReads(l).concat(exprReads(r))
+            .Ternary(test: t, yes: y, no: n) :> exprReads(t).concat(exprReads(y)).concat(exprReads(n))
+            .Assign(target: t, value: v) :> exprReads(v)
+            .ArrayLit(elems: es) :> listReads(es)
+            .ObjectLit(props: ps) :> propReads(ps)
+            .Name(name: n) :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Variant(name: n) :> []
+        }
+    }
+
+    fn listReads(es: AExpr[]) -> string[] {
+        let out: string[] = []
+        for (const e of es) { out = out.concat(exprReads(e)) }
+        return out
+    }
+
+    fn propReads(ps: AProp[]) -> string[] {
+        let out: string[] = []
+        for (const p of ps) { out = out.concat(exprReads(p.value)) }
+        return out
+    }
+
+    // An own-value type from its literal when no annotation is written (§66.3 rule 3).
+    type RMaybeType:struct = { t: Type | not, st: AS }
+
+    fn inferredType(v: AAttrValue) -> Type | not {
+        return match v {
+            .Bare(e: e) :> literalType(e)
+            .Paren(e: e) :> literalType(e)
+            .Quoted(v: s) :> Type.Str
+            .NoValue :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn literalType(e: AExpr) -> Type | not {
+        const k: AExprK = e.k
+        return match k {
+            .Num(raw: r) :> numType(r)
+            .Str(v: s) :> Type.Str
+            .Bool(v: b) :> Type.Bool
+            .Unary(op: o, e: x) :> literalType(x)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .NotLit :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+        }
+    }
+
+    // L19: an integer literal infers `int`; a non-integer numeric literal `number`.
+    fn numType(raw: string) -> Type {
+        if (raw.indexOf(".") >= 0 || raw.indexOf("e") >= 0 || raw.indexOf("E") >= 0) return Type.Num
+        return Type.Int
+    }
+
+    fn hasFlag(mods: AAttr[], name: string) -> boolean {
+        for (const m of mods) {
+            if (m.name == name) return true
+        }
+        return false
+    }
+
+    type RFields:struct = { fs: FieldInfo[], st: AS }
+    type RField:struct = { f: FieldInfo, st: AS }
+
+    // One field: its type, mode (§66.9), grants (L3/L18, §66.12), graph, capability.
+    fn fieldOf(te: TypeEnv, g: TypeInfo[], nid: int, span: ASpan, name: string, isLet: boolean, exported: boolean,
+               aty: AType | not, init: AAttrValue, body: ADeclChild[], role: FieldRole, st0: AS) -> RField {
+        let st: AS = st0
+        const rs: RSym = mint(st, name)
+        st = rs.st
+        let ty: Type = Type.Str
+        let seqRep = false
+        if (aty is some) {
+            const rt: RType = resolveType(te, aty, st)
+            ty = rt.t
+            st = rt.st
+            seqRep = seqReplace(aty)
+        } else {
+            const inf: Type | not = inferredType(init)
+            if (inf is some) {
+                ty = inf
+            } else {
+                st = addDiag(st, te.file, span, "E-TYPE-ANNOTATION-REQUIRED", "`" + name + "` needs a type annotation (`" + name + ":Type=…`) — its value is not a literal the type can be inferred from (§66.3, ⚑ O35)")
+            }
+        }
+        if (isLet && seqElem(ty) is some) {
+            st = addDiag(st, te.file, span, "E-GRANT-LET-ON-SEQUENCE", "`let` on a sequence — write `replace` in the type's grants (O3 ruled)")
+        }
+        const rg: RGraph = graphOf(te, g, ty, body, st)
+        st = rg.st
+        let edits: EditKind[] = typeEdits(ty)
+        if (rg.graph is some) edits = edits.concat([EditKind.Transition])
+        const grants: GrantSet = { replace: isLet || seqRep, edits: edits.concat(subFieldEdits(g, ty)) }
+        const reads: string[] = valueReads(init)
+        let mode: FieldMode = FieldMode.Locked
+        if (isLet) {
+            if (reads.length > 0) {
+                mode = FieldMode.Seeded
+            } else {
+                mode = FieldMode.Let
+            }
+        } else if (rg.graph is not && reads.length > 0) {
+            mode = FieldMode.Derived
+        }
+        let wcap: Sym | not = not
+        if (grants.replace || grants.edits.length > 0) {
+            const rw: RSym = mint(st, name)
+            wcap = rw.s
+            st = rw.st
+        }
+        const f: FieldInfo = {
+            nid: nid, sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
+            exported: exported, wcap: wcap, init: init, reads: reads,
+        }
+        return { f: f, st: st }
+    }
+
+    // The struct sub-field writes a field of struct type grants (M1 D12: a
+    // field whose writable part is a sub-field lists `FieldAt(path)`): each
+    // sub-field that has its own `let` or `rule=` graph.
+    fn subFieldEdits(g: TypeInfo[], ty: Type) -> EditKind[] {
+        const s: Sym | not = namedOf(ty)
+        if (s is not) return []
+        const ti: TypeInfo | not = typeInfoOf(g, s)
+        if (ti is not) return []
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return []
+        let out: EditKind[] = []
+        let i = 0
+        for (const fd of fs) {
+            if (fd.grants.replace) out = out.concat([EditKind.FieldAt([{ owner: s, idx: i }])])
+            i = i + 1
+        }
+        return out
+    }
+
+    type RGraph:struct = { graph: TransitionGraph | not, st: AS }
+
+    // L18 / §66.13.2: state-children with `rule=` make the field's value a graph
+    // (O52 ruled: a state-child names a variant of the field's enum).
+    fn graphOf(te: TypeEnv, g: TypeInfo[], ty: Type, body: ADeclChild[], st0: AS) -> RGraph {
+        let st: AS = st0
+        let children: AStateChild[] = []
+        for (const c of body) { children = children.concat(stateChildOf(c)) }
+        if (children.length == 0) return { graph: not, st: st }
+        const es: Sym | not = isEnumType(g, ty)
+        if (es is not) {
+            return { graph: not, st: addDiag(st, te.file, children[0].span, "E-DECL-STATE-CHILD", "state-children need an enum-valued field (§66.13.2)") }
+        }
+        let edges: Edge[] = []
+        for (const c of children) {
+            const origin: int = variantIndex(g, es, c.name)
+            if (origin < 0) {
+                st = addDiag(st, te.file, c.span, "E-DECL-STATE-CHILD", "`<" + c.name + ">` is not a variant of `" + es.hint + "` (O52: a state-child names a variant of the enclosing field)")
+            } else {
+                let targets: int[] = []
+                for (const a of c.attrs) {
+                    if (a.name == "rule") {
+                        const names: string[] = ruleNames(a.value)
+                        for (const n of names) {
+                            const ti: int = variantIndex(g, es, n)
+                            if (ti < 0) {
+                                st = addDiag(st, te.file, a.span, "E-DECL-STATE-CHILD", "`rule=." + n + "`: not a variant of `" + es.hint + "`")
+                            } else {
+                                targets = targets.concat([ti])
+                            }
+                        }
+                    }
+                }
+                edges = edges.concat([{ origin: origin, targets: targets }])
+            }
+        }
+        return { graph: { enumSym: es, edges: edges }, st: st }
+    }
+
+    fn stateChildOf(c: ADeclChild) -> AStateChild[] {
+        return match c {
+            .StateChild(s: s) :> [s]
+            .ChildField(d: d) :> []
+        }
+    }
+
+    // `rule=.X` or `rule=(.X | .Y)` → the variant names.
+    fn ruleNames(v: AAttrValue) -> string[] {
+        return match v {
+            .Bare(e: e) :> altNames(e)
+            .Paren(e: e) :> altNames(e)
+            .NoValue :> []
+            .Quoted(v: s) :> []
+            .Braced(b: b) :> []
+        }
+    }
+
+    fn altNames(e: AExpr) -> string[] {
+        const k: AExprK = e.k
+        return match k {
+            .Variant(name: n) :> [n]
+            .Binary(op: o, l: l, r: r) :> altNames(l).concat(altNames(r))
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Member(obj: o) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Ternary(test: t) :> []
+            .Assign(target: t) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+        }
+    }
+
+    fn childFields(body: ADeclChild[]) -> ADecl[] {
+        let out: ADecl[] = []
+        for (const c of body) { out = out.concat(childFieldOf(c)) }
+        return out
+    }
+
+    fn childFieldOf(c: ADeclChild) -> ADecl[] {
+        return match c {
+            .ChildField(d: d) :> [d]
+            .StateChild(s: s) :> []
+        }
+    }
+
+    // A user declaration's fields (L17): attributes in opener order, then child
+    // fields in body order.
+    fn userFields(te: TypeEnv, g: TypeInfo[], d: ADecl, st0: AS) -> RFields {
+        let st: AS = st0
+        let out: FieldInfo[] = []
+        for (const a of d.attrs) {
+            const r: RField = fieldOf(te, g, a.nid, a.span, a.name, a.isLet, a.exported, a.ty, a.dflt, [], FieldRole.Attribute, st)
+            out = out.concat([r.f])
+            st = r.st
+        }
+        for (const c of childFields(d.body)) {
+            const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, st)
+            out = out.concat([r2.f])
+            st = r2.st
+        }
+        return { fs: out, st: st }
+    }
+
+    // The program's fields: the declarations directly in its body (L14).
+    fn programFields(te: TypeEnv, g: TypeInfo[], p: AProgram, st0: AS) -> RFields {
+        let st: AS = st0
+        let out: FieldInfo[] = []
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (d.attrs.length > 0 || d.renders is some) {
+                    st = addDiag(st, te.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration with attributes or a `renders` inside `<program>` (a nested user declaration) is not in bootstrap slice M2 — declare it at file level")
+                } else {
+                    const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, st)
+                    out = out.concat([r.f])
+                    st = r.st
+                }
+            }
+        }
+        return { fs: out, st: st }
+    }
+
+    fn declsOfItem(it: AItem) -> ADecl[] {
+        const k: AItemK = it.k
+        return match k {
+            .DeclItem(d: d) :> [d]
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .FnItem(f: f) :> []
+            .MarkupItem(n: n) :> []
+            .ProgramItem(p: p) :> []
+        }
+    }
+
+    // ---- handles (L10) ---------------------------------------------------------------
+    // Walk a renders: every USE with `as=` binds a handle on the nearest
+    // enclosing `<each>` row, else on the declaration. Conditional = under an
+    // `if=` (inside the same row scope).
+    type RHandles:struct = { hs: HandleInfo[], st: AS }
+    type HWalk:struct = { owner: int, conditional: boolean, file: string }
+
+    fn handlesIn(g0: DeclStub[], nodes: ANode[], w: HWalk, st0: AS) -> RHandles {
+        let st: AS = st0
+        let out: HandleInfo[] = []
+        for (const n of nodes) {
+            const r: RHandles = handlesInNode(g0, n, w, st)
+            out = out.concat(r.hs)
+            st = r.st
+        }
+        return { hs: out, st: st }
+    }
+
+    fn handlesInNode(g0: DeclStub[], n: ANode, w: HWalk, st: AS) -> RHandles {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> handlesInElem(g0, e, w, st)
+            .Text(text: t) :> noHandles(st)
+            .Interp(e: x) :> noHandles(st)
+            .DeclNode(d: d) :> noHandles(st)
+        }
+    }
+
+    fn noHandles(st: AS) -> RHandles { return { hs: [], st: st } }
+
+    fn attrNamed(attrs: AAttr[], name: string) -> AAttr | not {
+        for (const a of attrs) {
+            if (a.name == name) return a
+        }
+        return not
+    }
+
+    fn bareName(v: AAttrValue) -> string {
+        return match v {
+            .Bare(e: e) :> exprName(e)
+            .Paren(e: e) :> exprName(e)
+            .Quoted(v: s) :> ""
+            .NoValue :> ""
+            .Braced(b: b) :> ""
+        }
+    }
+
+    fn exprName(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> n
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+        }
+    }
+
+    fn stubNamedDecl(g0: DeclStub[], name: string) -> DeclStub | not {
+        for (const d of g0) {
+            if (!d.isProgram && d.sym.hint == name) return d
+        }
+        return not
+    }
+
+    fn handlesInElem(g0: DeclStub[], e: AElem, w: HWalk, st0: AS) -> RHandles {
+        let st: AS = st0
+        let out: HandleInfo[] = []
+        const cond: boolean = w.conditional || attrNamed(e.attrs, "if") is some
+        if (e.tag == "each" && !e.star) {
+            // a row scope: handles inside it live on the row, conditional relative to the row
+            const r: RHandles = handlesIn(g0, e.kids, { owner: e.nid, conditional: false, file: w.file }, st)
+            return { hs: r.hs, st: r.st }
+        }
+        const target: DeclStub | not = stubNamedDecl(g0, e.tag)
+        if (target is some && !e.star) {
+            const as: AAttr | not = attrNamed(e.attrs, "as")
+            if (as is some) {
+                const name: string = bareName(as.value)
+                if (name == "") {
+                    st = addDiag(st, w.file, as.span, "E-DECL-AS", "`as=` takes a name")
+                } else {
+                    const rs: RSym = mint(st, name)
+                    st = rs.st
+                    out = out.concat([{ sym: rs.s, name: name, target: target.sym, owner: w.owner, conditional: cond }])
+                }
+            }
+        }
+        const r2: RHandles = handlesIn(g0, e.kids, { owner: w.owner, conditional: cond, file: w.file }, st)
+        return { hs: out.concat(r2.hs), st: r2.st }
+    }
+
+    fn markupNodes(items: AItem[]) -> ANode[] {
+        let out: ANode[] = []
+        for (const it of items) { out = out.concat(markupOf(it)) }
+        return out
+    }
+
+    fn markupOf(it: AItem) -> ANode[] {
+        const k: AItemK = it.k
+        return match k {
+            .MarkupItem(n: n) :> [n]
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .FnItem(f: f) :> []
+            .DeclItem(d: d) :> []
+            .ProgramItem(p: p) :> []
+        }
+    }
+
+    fn rendersNodes(ds: DeclStub) -> ANode[] {
+        const p: AProgram | not = ds.p
+        if (p is some) return markupNodes(p.items)
+        const d: ADecl | not = ds.d
+        if (d is not) return []
+        const r: AElem | not = d.renders
+        if (r is not) return []
+        return [{ nid: -1, span: r.span, k: ANodeK.Elem(r) }]
+    }
+
+    // ---- functions ---------------------------------------------------------------------
+    type RFns:struct = { fs: FnSrc[], st: AS }
+
+    fn fnsOf(files: FileAst[], st0: AS) -> RFns {
+        let st: AS = st0
+        let out: FnSrc[] = []
+        for (const f of files) {
+            for (const af of fnItems(f.items)) {
+                const r: RSym = mint(st, af.name)
+                st = r.st
+                const info: FnInfo = { nid: af.nid, sym: r.s, name: af.name, file: f.path, exported: af.exported, pure: af.pure }
+                st = addFact(st, af.nid, Fact.FBind(r.s))
+                out = out.concat([{ info: info, f: af }])
+            }
+        }
+        return { fs: out, st: st }
+    }
+
+    fn fnItems(items: AItem[]) -> AFn[] {
+        let out: AFn[] = []
+        for (const it of items) { out = out.concat(fnItemOf(it)) }
+        return out
+    }
+
+    fn fnItemOf(it: AItem) -> AFn[] {
+        const k: AItemK = it.k
+        return match k {
+            .FnItem(f: f) :> [f]
+            .ProgramItem(p: p) :> fnItems(p.items)
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .DeclItem(d: d) :> []
+            .MarkupItem(n: n) :> []
+        }
+    }
+
+    // ---- Phase A driver -----------------------------------------------------------------
+    type RGlobals:struct = { g: Globals, st: AS }
+
+    fn phaseA(files: FileAst[], entry: string, st0: AS) -> RGlobals {
+        let st: AS = st0
+        const rs: RStubs = typeStubs(files, st)
+        st = rs.st
+        const rd: RDeclStubs = declStubs(files, entry, st)
+        st = rd.st
+        let declNames: string[] = []
+        let declSyms: Sym[] = []
+        let program: Sym = mkSym(-1, "program")
+        let hasProgram = false
+        for (const d of rd.ds) {
+            if (d.isProgram) {
+                hasProgram = true
+                program = d.sym
+            } else {
+                declNames = declNames.concat([d.sym.hint])
+                declSyms = declSyms.concat([d.sym])
+            }
+        }
+        if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
+        const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, file: entry }
+        const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
+        st = rt.st
+        const rf: RFns = fnsOf(files, st)
+        st = rf.st
+        // fields + handles per declaration
+        let decls: DeclSrc[] = []
+        let handles: HandleInfo[] = []
+        for (const ds of rd.ds) {
+            const te: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, file: ds.file }
+            let fields: FieldInfo[] = []
+            let single = false
+            const p: AProgram | not = ds.p
+            const d: ADecl | not = ds.d
+            if (p is some) {
+                const r: RFields = programFields(te, rt.ts, p, st)
+                fields = r.fs
+                st = r.st
+                single = true
+            } else if (d is some) {
+                const r2: RFields = userFields(te, rt.ts, d, st)
+                fields = r2.fs
+                st = r2.st
+                single = hasFlag(d.mods, "single")
+            }
+            const rh: RHandles = handlesIn(rd.ds, rendersNodes(ds), { owner: ds.nid, conditional: false, file: ds.file }, st)
+            st = rh.st
+            handles = handles.concat(rh.hs)
+            let own: Sym[] = []
+            for (const h of rh.hs) {
+                if (h.owner == ds.nid) own = own.concat([h.sym])
+            }
+            let kind: DeclKind = DeclKind.User
+            if (ds.isProgram) kind = DeclKind.Program
+            const info: DeclInfo = { nid: ds.nid, sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
+            decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
+        }
+        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles }
+        return { g: g, st: st }
+    }
+
+    // =========================================================================
+    // Phase B — resolving bodies: expressions, statements, writes, views.
+    // =========================================================================
+    // Where code sits (L1): a function body, or a declaration's initializers /
+    // renders (the program is one — R4).
+    type CtxK:enum = { InFn, InDecl(owner: Sym, isProgram: boolean) }
+
+    type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not }
+    type RowB:struct = { bind: Sym, ty: Type | not }
+
+    type Env:struct = {
+        g: Globals,
+        file: string,
+        ctx: CtxK,
+        locals: LocalB[],
+        rows: RowB[],
+        handles: HandleInfo[],
+        inRenders: boolean,
+    }
+
+    fn withLocal(env: Env, l: LocalB) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders }
+    }
+
+    fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
+        const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not }
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
+                 handles: env.handles.concat(hs), inRenders: env.inRenders }
+    }
+
+    fn lookupLocal(env: Env, name: string) -> LocalB | not {
+        let i: int = env.locals.length - 1
+        while (i >= 0) {
+            if (env.locals[i].name == name) return env.locals[i]
+            i = i - 1
+        }
+        return not
+    }
+
+    fn lookupHandle(env: Env, name: string) -> HandleInfo | not {
+        let i: int = env.handles.length - 1
+        while (i >= 0) {
+            if (env.handles[i].name == name) return env.handles[i]
+            i = i - 1
+        }
+        return not
+    }
+
+    fn ctxDecl(env: Env) -> DeclSrc | not {
+        const c: CtxK = env.ctx
+        return match c {
+            .InDecl(owner: o) :> findDeclSrc(env.g, o)
+            .InFn :> not
+        }
+    }
+
+    fn inProgramCtx(env: Env) -> boolean {
+        const c: CtxK = env.ctx
+        return match c {
+            .InDecl(owner: o, isProgram: p) :> p
+            .InFn :> false
+        }
+    }
+
+    // L1: the program's fields from here — its own initializers / renders use
+    // the lexically enclosing instance; everything else the shared instance.
+    fn programInst(env: Env) -> InstRef {
+        if (inProgramCtx(env)) return InstRef.Lexical(0)
+        return InstRef.Shared(env.g.program)
+    }
+
+    fn programInfo(env: Env) -> DeclInfo | not {
+        const d: DeclSrc | not = findDeclSrc(env.g, env.g.program)
+        if (d is not) return not
+        return d.info
+    }
+
+    // ---- expression results -------------------------------------------------
+    // `inst` / `iDecl`: the expression names an INSTANCE (a handle, the current
+    // instance, a shared instance, a narrowed local); `maybe`: a conditional
+    // handle, not narrowed (§66.7.5).
+    type XI:struct = { ty: Type | not, inst: InstRef | not, iDecl: Sym | not, maybe: boolean }
+    type RX:struct = { x: XI, st: AS }
+
+    fn plain(t: Type | not, st: AS) -> RX { return { x: { ty: t, inst: not, iDecl: not, maybe: false }, st: st } }
+
+    fn diagX(env: Env, e: AExpr, code: string, msg: string, st: AS) -> RX {
+        return plain(not, addDiag(st, env.file, e.span, code, msg))
+    }
+
+    fn resolveExprs(env: Env, es: AExpr[], expected: Type | not, st0: AS) -> AS {
+        let st: AS = st0
+        for (const e of es) { st = resolveExpr(env, e, expected, st).st }
+        return st
+    }
+
+    fn resolveExpr(env: Env, e: AExpr, expected: Type | not, st: AS) -> RX {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> resolveName(env, e, n, st)
+            .At(name: n) :> resolveAtRead(env, e, n, st)
+            .AtItem :> resolveAtItem(env, e, st)
+            .Num(raw: r) :> resolveNum(e, r, st)
+            .Str(v: s) :> plain(Type.Str, addFact(st, e.nid, Fact.FLit(Literal.Str(s))))
+            .Bool(v: b) :> plain(Type.Bool, addFact(st, e.nid, Fact.FLit(Literal.Bool(b))))
+            .NotLit :> plain(expected, addFact(st, e.nid, Fact.FLit(Literal.Absent)))
+            .Variant(name: n) :> resolveVariant(env, e, n, expected, st)
+            .Member(obj: o, name: n) :> resolveMember(env, e, o, n, st)
+            .Call(callee: c, args: args) :> resolveCall(env, e, c, args, st)
+            .Unary(op: o, e: x) :> resolveUnary(env, e, o, x, st)
+            .Binary(op: o, l: l, r: r) :> resolveBinary(env, e, o, l, r, st)
+            .Ternary(test: t, yes: y, no: n) :> resolveTernary(env, e, t, y, n, expected, st)
+            .Assign(target: t) :> diagX(env, e, "E-ASSIGN-POSITION", "an assignment is a statement — it cannot be used as a value", st)
+            .ArrayLit(elems: es) :> resolveArray(env, e, es, expected, st)
+            .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
+        }
+    }
+
+    fn resolveNum(e: AExpr, raw: string, st: AS) -> RX {
+        const t: Type = numType(raw)
+        const n: number = Number(raw)
+        const isInt: boolean = t == Type.Int
+        if (isInt) return plain(t, addFact(st, e.nid, Fact.FLit(Literal.Int(n))))
+        return plain(t, addFact(st, e.nid, Fact.FLit(Literal.Num(n))))
+    }
+
+    fn resolveName(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        const l: LocalB | not = lookupLocal(env, name)
+        if (l is some) {
+            const st2: AS = addFact(st, e.nid, Fact.FLocal(l.s))
+            if (l.narrowed is some) return { x: { ty: l.ty, inst: l.narrowed, iDecl: l.nDecl, maybe: false }, st: st2 }
+            return plain(l.ty, st2)
+        }
+        // §66.5.2: inside a declaration's renders / initializers, its fields are
+        // bare read-only projections of the current instance.
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is some) {
+            if (!d.isProgram) {
+                const i: int = fieldIndex(d.info, name)
+                if (i >= 0) return plain(d.info.fields[i].ty, addFact(st, e.nid, Fact.FField(d.info.sym, InstRef.Lexical(0), i)))
+            }
+        }
+        const f: FnInfo | not = fnNamed(env.g, name)
+        if (f is some) return plain(not, addFact(st, e.nid, Fact.FFn(f.sym)))
+        const pi: DeclInfo | not = programInfo(env)
+        if (pi is some) {
+            if (fieldIndex(pi, name) >= 0) {
+                return diagX(env, e, "E-SCOPE-001", "`" + name + "` is a cell — read it as `@" + name + "` (V5-strict: bare names are locals)", st)
+            }
+        }
+        return diagX(env, e, "E-SCOPE-001", "`" + name + "` is not declared", st)
+    }
+
+    // A READ through `@h`. RULED S437 (bryan: "yes, reads require narrowing"):
+    // reading through a conditionally-mounted handle (`T | not`, §66.7.5)
+    // outside a narrowing is an error, as a write already is. Same code as the
+    // write (§66.20 E-DECL-HANDLE-NOT-NARROWED names only writes today; the
+    // ruling widens its condition to reads — slice-m2/progress.md).
+    fn resolveAtRead(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        const r: RX = resolveAt(env, e, name, st)
+        if (!r.x.maybe) return r
+        let tn: string = "T"
+        const td: Sym | not = r.x.iDecl
+        if (td is some) tn = td.hint
+        const msg: string = "`@" + name + "` names a conditionally-mounted instance (typed `" + tn + " | not`) — a read through it must be narrowed first: `given c = @" + name + " :> " + LB() + " … c.field … " + RB() + "` (§66.7.5; reads ruled S437)"
+        return { x: r.x, st: addDiag(r.st, env.file, e.span, "E-DECL-HANDLE-NOT-NARROWED", msg) }
+    }
+
+    // A handle as the SUBJECT of a narrowing or a write: no read check (the
+    // `given` narrows it; a write has its own guard, writeGuards).
+    fn resolveHandleSubject(env: Env, e: AExpr, st: AS) -> RX {
+        const n: string = atName(e)
+        if (n != "") return resolveAt(env, e, n, st)
+        return resolveExpr(env, e, not, st)
+    }
+
+    fn atName(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> n
+            .Name(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+        }
+    }
+
+    fn resolveAt(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        // O54 (a): inside x's own renders / initializers, `@x` is the current instance.
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is some) {
+            if (!d.isProgram && d.info.sym.hint == name) {
+                const inst: InstRef = InstRef.Lexical(0)
+                return { x: { ty: Type.Named(d.info.sym), inst: inst, iDecl: d.info.sym, maybe: false },
+                         st: addFact(st, e.nid, Fact.FInst(d.info.sym, inst)) }
+            }
+        }
+        const pi: DeclInfo | not = programInfo(env)
+        if (pi is some) {
+            const i: int = fieldIndex(pi, name)
+            if (i >= 0) return plain(pi.fields[i].ty, addFact(st, e.nid, Fact.FField(pi.sym, programInst(env), i)))
+        }
+        const h: HandleInfo | not = lookupHandle(env, name)
+        if (h is some) {
+            const hi: InstRef = InstRef.Alias(h.sym)
+            return { x: { ty: Type.Named(h.target), inst: hi, iDecl: h.target, maybe: h.conditional },
+                     st: addFact(st, e.nid, Fact.FInst(h.target, hi)) }
+        }
+        const ud: DeclSrc | not = declNamed(env.g, name)
+        if (ud is some) {
+            const si: InstRef = InstRef.Shared(ud.info.sym)
+            return { x: { ty: Type.Named(ud.info.sym), inst: si, iDecl: ud.info.sym, maybe: false },
+                     st: addFact(st, e.nid, Fact.FInst(ud.info.sym, si)) }
+        }
+        return diagX(env, e, "E-SCOPE-001", "`@" + name + "` names no cell, declaration or `as=` handle in scope", st)
+    }
+
+    fn resolveAtItem(env: Env, e: AExpr, st: AS) -> RX {
+        if (env.rows.length == 0) return diagX(env, e, "E-SYNTAX-064", "`@.` outside an `<each>` body (§17.7.3)", st)
+        const row: RowB = env.rows[env.rows.length - 1]
+        return plain(row.ty, addFact(st, e.nid, Fact.FLocal(row.bind)))
+    }
+
+    // A bare variant resolves against the type its position expects; with no
+    // expectation, against the one enum that has it.
+    fn resolveVariant(env: Env, e: AExpr, name: string, expected: Type | not, st: AS) -> RX {
+        if (expected is some) {
+            const es: Sym | not = isEnumType(env.g.types, expected)
+            if (es is some) {
+                const i: int = variantIndex(env.g.types, es, name)
+                if (i >= 0) return plain(expected, addFact(st, e.nid, Fact.FVariant(es, i)))
+                return diagX(env, e, "E-TYPE-VARIANT", "`." + name + "` is not a variant of `" + es.hint + "`", st)
+            }
+        }
+        let found: Sym[] = []
+        let idx: int = -1
+        for (const t of env.g.types) {
+            const s: Sym = typeDefSym(t.def)
+            const i: int = variantIndex(env.g.types, s, name)
+            if (i >= 0) {
+                found = found.concat([s])
+                idx = i
+            }
+        }
+        if (found.length == 1) return plain(Type.Named(found[0]), addFact(st, e.nid, Fact.FVariant(found[0], idx)))
+        if (found.length == 0) return diagX(env, e, "E-TYPE-VARIANT", "`." + name + "` is not a variant of any enum in scope", st)
+        return diagX(env, e, "E-VARIANT-AMBIGUOUS", "`." + name + "` is a variant of more than one enum — qualify it", st)
+    }
+
+    fn isLengthOf(t: Type | not) -> boolean {
+        if (t is not) return false
+        if (seqElem(t) is some) return true
+        return t == Type.Str
+    }
+
+    fn resolveMember(env: Env, e: AExpr, obj: AExpr, name: string, st0: AS) -> RX {
+        const ro: RX = resolveExpr(env, obj, not, st0)
+        const st: AS = ro.st
+        // `.length` of a sequence or a string is a primitive (a read, never a place).
+        if (name == "length" && ro.x.inst is not && isLengthOf(ro.x.ty)) {
+            return plain(Type.Int, addFact(st, e.nid, Fact.FOp(PrimOp.Length)))
+        }
+        const inst: InstRef | not = ro.x.inst
+        const iDecl: Sym | not = ro.x.iDecl
+        if (inst is some && iDecl is some) {
+            const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
+            if (d is not) return diagX(env, e, "E-SCOPE-001", "unknown declaration", st)
+            const i: int = fieldIndex(d.info, name)
+            if (i < 0) return diagX(env, e, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + name + "`", st)
+            return { x: { ty: d.info.fields[i].ty, inst: not, iDecl: not, maybe: ro.x.maybe },
+                     st: addFact(st, e.nid, Fact.FField(iDecl, inst, i)) }
+        }
+        const t: Type | not = ro.x.ty
+        if (t is some) {
+            const s: Sym | not = namedOf(t)
+            if (s is some) {
+                const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
+                if (ti is some) {
+                    const fs: FieldDef[] | not = structFieldDefs(ti.def)
+                    if (fs is some) {
+                        let i = 0
+                        for (const fd of fs) {
+                            if (fd.sym.hint == name) return plain(fd.ty, addFact(st, e.nid, Fact.FStruct(s, i)))
+                            i = i + 1
+                        }
+                        return diagX(env, e, "E-SCOPE-001", "`" + s.hint + "` has no field `" + name + "`", st)
+                    }
+                }
+            }
+        }
+        return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on a value that is not a struct or an instance is not in bootstrap slice M2", st)
+    }
+
+    fn resolveCall(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st0: AS) -> RX {
+        const n: string = exprName(callee)
+        if (n == "reset") return diagX(env, e, "E-RESET-POSITION", "`reset(@x)` is a statement (a write), not a value", st0)
+        if (n == "") return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "only calls of a named function are in bootstrap slice M2", st0)
+        const rc: RX = resolveExpr(env, callee, not, st0)
+        const st: AS = resolveExprs(env, args, not, rc.st)
+        return plain(not, st)
+    }
+
+    fn resolveUnary(env: Env, e: AExpr, op: UnOp, x: AExpr, st0: AS) -> RX {
+        const isNot: boolean = op == UnOp.Not
+        if (isNot) {
+            const r: RX = resolveExpr(env, x, Type.Bool, st0)
+            return plain(Type.Bool, addFact(r.st, e.nid, Fact.FOp(PrimOp.Not)))
+        }
+        const r2: RX = resolveExpr(env, x, not, st0)
+        return plain(r2.x.ty, addFact(r2.st, e.nid, Fact.FOp(PrimOp.Neg)))
+    }
+
+    fn isVariantExpr(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Variant(name: n) :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+        }
+    }
+
+    // `==` is structural (§45): primitive compare for scalars and nullary
+    // enums, the runtime's structural equality for structs and sequences.
+    fn isStructural(env: Env, t: Type | not) -> boolean {
+        if (t is not) return false
+        if (seqElem(t) is some) return true
+        const s: Sym | not = namedOf(t)
+        if (s is not) return false
+        if (isEnumType(env.g.types, t) is some) return false
+        return true
+    }
+
+    fn resolveBinary(env: Env, e: AExpr, op: BinOp, l: AExpr, r: AExpr, st0: AS) -> RX {
+        // operands: a bare variant takes the OTHER operand's type
+        let rl: RX = plain(not, st0)
+        let rr: RX = plain(not, st0)
+        if (isVariantExpr(l) && !isVariantExpr(r)) {
+            rr = resolveExpr(env, r, not, st0)
+            rl = resolveExpr(env, l, rr.x.ty, rr.st)
+            rr = { x: rr.x, st: rl.st }
+        } else {
+            rl = resolveExpr(env, l, not, st0)
+            rr = resolveExpr(env, r, rl.x.ty, rl.st)
+        }
+        const st: AS = rr.st
+        const lt: Type | not = rl.x.ty
+        return match op {
+            .Eq :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(eqOp(isStructural(env, lt), true))))
+            .Ne :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(eqOp(isStructural(env, lt), false))))
+            .Add :> plain(lt, addFact(st, e.nid, Fact.FOp(addOp(lt, rr.x.ty))))
+            .Sub :> plain(lt, addFact(st, e.nid, Fact.FOp(PrimOp.Sub)))
+            .Mul :> plain(lt, addFact(st, e.nid, Fact.FOp(PrimOp.Mul)))
+            .Div :> plain(Type.Num, addFact(st, e.nid, Fact.FOp(PrimOp.Div)))
+            .Mod :> plain(lt, addFact(st, e.nid, Fact.FOp(PrimOp.Mod)))
+            .Lt :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Lt)))
+            .Le :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Le)))
+            .Gt :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Gt)))
+            .Ge :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Ge)))
+            .And :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.And)))
+            .Or :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Or)))
+            .Pipe :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`|` outside a `rule=` alternation is not in bootstrap slice M2", st)
+        }
+    }
+
+    fn eqOp(structural: boolean, eq: boolean) -> PrimOp {
+        if (structural && eq) return PrimOp.EqStruct
+        if (structural) return PrimOp.NeqStruct
+        if (eq) return PrimOp.EqPrim
+        return PrimOp.NeqPrim
+    }
+
+    fn isStrType(t: Type | not) -> boolean {
+        if (t is not) return false
+        return t == Type.Str
+    }
+
+    fn addOp(a: Type | not, b: Type | not) -> PrimOp {
+        if (isStrType(a) || isStrType(b)) return PrimOp.Concat
+        return PrimOp.Add
+    }
+
+    fn resolveTernary(env: Env, e: AExpr, test: AExpr, yes: AExpr, no: AExpr, expected: Type | not, st0: AS) -> RX {
+        const rt: RX = resolveExpr(env, test, Type.Bool, st0)
+        const ry: RX = resolveExpr(env, yes, expected, rt.st)
+        let want: Type | not = expected
+        if (want is not) want = ry.x.ty
+        const rn: RX = resolveExpr(env, no, want, ry.st)
+        let t: Type | not = ry.x.ty
+        if (t is not) t = rn.x.ty
+        return plain(t, rn.st)
+    }
+
+    fn resolveArray(env: Env, e: AExpr, es: AExpr[], expected: Type | not, st0: AS) -> RX {
+        let elem: Type | not = not
+        if (expected is some) elem = seqElem(expected)
+        const st: AS = resolveExprs(env, es, elem, st0)
+        return plain(expected, st)
+    }
+
+    // An object literal is a struct VALUE of the type its position expects,
+    // constructed by field name (§66.18: never positionally).
+    fn resolveObject(env: Env, e: AExpr, ps: AProp[], expected: Type | not, st0: AS) -> RX {
+        let st: AS = st0
+        const s: Sym | not = namedOf(expectedOr(expected))
+        if (s is not) {
+            return diagX(env, e, "E-TYPE-STRUCT-CONTEXT", "an object literal needs a struct type from its position (an annotated declaration or field)", resolvePropValues(env, ps, st))
+        }
+        const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
+        if (ti is not) return diagX(env, e, "E-TYPE-STRUCT-CONTEXT", "`" + s.hint + "` is not a struct type", st)
+        const fs: FieldDef[] | not = structFieldDefs(ti.def)
+        if (fs is not) return diagX(env, e, "E-TYPE-STRUCT-CONTEXT", "`" + s.hint + "` is not a struct type", st)
+        let order: int[] = []
+        for (const fd of fs) {
+            let at: int = -1
+            let j = 0
+            for (const p of ps) {
+                if (!p.spread && p.name == fd.sym.hint) at = j
+                j = j + 1
+            }
+            if (at < 0) st = addDiag(st, env.file, e.span, "E-TYPE-STRUCT-FIELD", "`" + s.hint + "` value is missing field `" + fd.sym.hint + "`")
+            order = order.concat([at])
+        }
+        let j2 = 0
+        for (const p of ps) {
+            if (p.spread) {
+                st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` is in slice M2 only as `@x = " + LB() + " ...@x, f: v " + RB() + "` (a field edit, O58 (b))")
+            } else {
+                let fty: Type | not = not
+                for (const fd of fs) {
+                    if (fd.sym.hint == p.name) fty = fd.ty
+                }
+                if (fty is not) st = addDiag(st, env.file, p.span, "E-TYPE-STRUCT-FIELD", "`" + s.hint + "` has no field `" + p.name + "`")
+                st = resolveExpr(env, p.value, fty, st).st
+            }
+            j2 = j2 + 1
+        }
+        return plain(Type.Named(s), addFact(st, e.nid, Fact.FStructOf(s, order)))
+    }
+
+    fn expectedOr(t: Type | not) -> Type {
+        if (t is some) return t
+        return Type.Str
+    }
+
+    fn resolvePropValues(env: Env, ps: AProp[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const p of ps) { st = resolveExpr(env, p.value, not, st).st }
+        return st
+    }
+
+    // =========================================================================
+    // Writes — THE EDIT CLASSIFIER (§6.2, §66.11.2).
+    // =========================================================================
+    // A write target resolved to a PLACE: field `idx` of declaration `decl`
+    // through `inst`, then struct steps `path` (a FieldAt when non-empty).
+    type WPlace:struct = { decl: DeclInfo, inst: InstRef, idx: int, path: FieldRef[], ty: Type | not, maybe: boolean }
+    type RPlace:struct = { place: WPlace | not, local: LocalB | not, st: AS }
+
+    fn noPlace(st: AS) -> RPlace { return { place: not, local: not, st: st } }
+
+    fn resolvePlace(env: Env, t: AExpr, st: AS) -> RPlace {
+        const k: AExprK = t.k
+        return match k {
+            .At(name: n) :> placeAt(env, t, n, st)
+            .Member(obj: o, name: n) :> placeMember(env, t, o, n, st)
+            .Name(name: n) :> placeName(env, t, n, st)
+            .AtItem :> noPlace(addDiag(st, env.file, t.span, "E-WRITE-NOT-GRANTED", "a row value `@.` is a read-only projection of the row"))
+            .Num(raw: r) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Str(v: s) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Bool(v: b) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .NotLit :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Variant(name: n) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Call(callee: c) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Unary(op: o) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Binary(op: o) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Ternary(test: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Assign(target: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .ArrayLit(elems: es) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .ObjectLit(props: ps) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+        }
+    }
+
+    fn placeAt(env: Env, t: AExpr, name: string, st: AS) -> RPlace {
+        const pi: DeclInfo | not = programInfo(env)
+        if (pi is some) {
+            const i: int = fieldIndex(pi, name)
+            if (i >= 0) {
+                return { place: { decl: pi, inst: programInst(env), idx: i, path: [], ty: pi.fields[i].ty, maybe: false },
+                         local: not, st: st }
+            }
+        }
+        return noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + name + " = …` — writing a whole instance is not in bootstrap slice M2 (write a field: `@" + name + ".f = …`)"))
+    }
+
+    fn placeName(env: Env, t: AExpr, name: string, st: AS) -> RPlace {
+        const l: LocalB | not = lookupLocal(env, name)
+        if (l is some) return { place: not, local: l, st: st }
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is some && env.inRenders) {
+            if (!d.isProgram && fieldIndex(d.info, name) >= 0) {
+                return noPlace(addDiag(st, env.file, t.span, "E-DECL-RENDERS-BARE-WRITE", "`" + name + "` inside a `renders` is a read-only projection — write it as `@" + d.info.sym.hint + "." + name + "` (§66.5.2)"))
+            }
+        }
+        return noPlace(addDiag(st, env.file, t.span, "E-SCOPE-001", "`" + name + "` is not a writable local"))
+    }
+
+    fn placeMember(env: Env, t: AExpr, obj: AExpr, name: string, st0: AS) -> RPlace {
+        // obj names an instance → a field of its declaration
+        const ro: RX = resolveHandleSubject(env, obj, st0)
+        const st: AS = ro.st
+        const inst: InstRef | not = ro.x.inst
+        const iDecl: Sym | not = ro.x.iDecl
+        if (inst is some && iDecl is some) {
+            const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
+            if (d is not) return noPlace(st)
+            const i: int = fieldIndex(d.info, name)
+            if (i < 0) return noPlace(addDiag(st, env.file, t.span, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + name + "`"))
+            return { place: { decl: d.info, inst: inst, idx: i, path: [], ty: d.info.fields[i].ty, maybe: ro.x.maybe },
+                     local: not, st: st }
+        }
+        // obj is itself a place of struct type → a FieldAt step
+        const rp: RPlace = resolvePlace(env, obj, st0)
+        const base: WPlace | not = rp.place
+        if (base is not) return rp
+        const bt: Type | not = base.ty
+        if (bt is some) {
+            const s: Sym | not = namedOf(bt)
+            if (s is some) {
+                const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
+                if (ti is some) {
+                    const fs: FieldDef[] | not = structFieldDefs(ti.def)
+                    if (fs is some) {
+                        let i = 0
+                        for (const fd of fs) {
+                            if (fd.sym.hint == name) {
+                                const p: WPlace = { decl: base.decl, inst: base.inst, idx: base.idx,
+                                                    path: base.path.concat([{ owner: s, idx: i }]), ty: fd.ty, maybe: base.maybe }
+                                return { place: p, local: not, st: rp.st }
+                            }
+                            i = i + 1
+                        }
+                    }
+                }
+            }
+        }
+        return noPlace(addDiag(rp.st, env.file, t.span, "E-ASSIGN-TARGET", "`." + name + "` is not a field of a struct here"))
+    }
+
+    // The FieldDef a FieldAt path ends at.
+    fn pathTarget(env: Env, p: WPlace) -> FieldDef | not {
+        let target: FieldDef | not = not
+        for (const step of p.path) {
+            const ti: TypeInfo | not = typeInfoOf(env.g.types, step.owner)
+            if (ti is not) return not
+            const fs: FieldDef[] | not = structFieldDefs(ti.def)
+            if (fs is not) return not
+            if (step.idx < 0 || step.idx >= fs.length) return not
+            target = fs[step.idx]
+        }
+        return target
+    }
+
+    fn derivedMessage(p: WPlace, f: FieldInfo) -> string {
+        const deps: string = f.reads.join(", ")
+        return "Assignment to derived value `@" + f.sym.hint + "`. `" + f.sym.hint + "` is derived (a locked declaration whose initializer reads " + deps + ") — it recomputes and cannot be written. To change it, write one of its dependencies. If you want a value that STARTS from that expression and is then written independently, declare it `let` — it becomes SEEDED: computed once, and it no longer follows " + deps + " (§66.9)."
+    }
+
+    // L8: a transition is Static only when Core can prove the edge — a literal
+    // every state may move to; otherwise the edge is checked at runtime.
+    // A literal target no state can EVER legally reach (no incoming edge, and
+    // not the field's initial state) is refused here (E-ENGINE-INVALID-TRANSITION).
+    type RCheck:struct = { check: Check, st: AS }
+
+    fn transitionCheck(env: Env, g: TransitionGraph, value: AExpr, initial: int, st: AS) -> RCheck {
+        const k: AExprK = value.k
+        const lit: string = variantLitName(k)
+        if (lit == "") return { check: Check.RuntimeEdge, st: st }
+        const to: int = variantIndex(env.g.types, g.enumSym, lit)
+        if (to < 0) return { check: Check.RuntimeEdge, st: st }
+        let incoming = false
+        for (const e of g.edges) {
+            if (e.origin != to && e.targets.indexOf(to) >= 0) incoming = true
+        }
+        if (!incoming && to != initial) {
+            const st2: AS = addDiag(st, env.file, value.span, "E-ENGINE-INVALID-TRANSITION", "`." + lit + "` has no incoming edge in the `rule=` graph and is not the initial state — no write can reach it (§66.13.2)")
+            return { check: Check.RuntimeEdge, st: st2 }
+        }
+        return { check: Check.RuntimeEdge, st: st }
+    }
+
+    fn variantLitName(k: AExprK) -> string {
+        return match k {
+            .Variant(name: n) :> n
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+        }
+    }
+
+    // The initial variant of a graph field (its own value), for the reachability rule.
+    fn initialVariant(env: Env, g: TransitionGraph, init: AAttrValue) -> int {
+        return match init {
+            .Bare(e: e) :> initialOf(env, g, e)
+            .Paren(e: e) :> initialOf(env, g, e)
+            .NoValue :> -1
+            .Quoted(v: s) :> -1
+            .Braced(b: b) :> -1
+        }
+    }
+
+    fn initialOf(env: Env, g: TransitionGraph, e: AExpr) -> int {
+        const k: AExprK = e.k
+        const n: string = variantLitName(k)
+        if (n == "") return -1
+        return variantIndex(env.g.types, g.enumSym, n)
+    }
+
+    // The checks every write shares: the handle is narrowed (§66.7.5), the field
+    // is writable from this file (E2, §66.14).
+    fn writeGuards(env: Env, p: WPlace, span: ASpan, st0: AS) -> AS {
+        let st: AS = st0
+        if (p.maybe) {
+            st = addDiag(st, env.file, span, "E-DECL-HANDLE-NOT-NARROWED", "this handle names a conditionally-mounted instance (`" + p.decl.sym.hint + " | not`) — narrow it first: `given c = @handle :> " + LB() + " c.field = … " + RB() + "` (§66.7.5)")
+        }
+        const f: FieldInfo = p.decl.fields[p.idx]
+        if (p.decl.file != env.file && !f.exported) {
+            st = addDiag(st, env.file, span, "E-FIELD-PRIVATE-WRITE", "`" + f.sym.hint + "` of `<" + p.decl.sym.hint + ">` is not exported — it is writable only inside its defining file (§66.14)")
+        }
+        return st
+    }
+
+    // `target = value` (statement position).
+    fn resolveAssign(env: Env, e: AExpr, target: AExpr, value: AExpr, st0: AS) -> AS {
+        // `@inst = { ...@inst, f: v }` — the self-spread of an INSTANCE: field
+        // edits of that instance (O58 (b)).
+        if (isSelfSpread(target, value)) {
+            const ri: RX = resolveHandleSubject(env, target, st0)
+            const inst: InstRef | not = ri.x.inst
+            const iDecl: Sym | not = ri.x.iDecl
+            if (inst is some && iDecl is some) return resolveInstanceSpread(env, e, inst, iDecl, ri.x.maybe, value, ri.st)
+        }
+        const rp: RPlace = resolvePlace(env, target, st0)
+        let st: AS = rp.st
+        const l: LocalB | not = rp.local
+        if (l is some) {
+            if (!l.mutable) st = addDiag(st, env.file, target.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local")
+            st = addFact(st, e.nid, Fact.FAssignLocal(l.s))
+            return resolveExpr(env, value, l.ty, st).st
+        }
+        const p: WPlace | not = rp.place
+        if (p is not) return resolveExpr(env, value, not, st).st
+        st = writeGuards(env, p, target.span, st)
+        const f: FieldInfo = p.decl.fields[p.idx]
+        if (p.path.length == 0 && isSelfSpread(target, value)) return resolveSpread(env, e, p, f, value, st)
+        if (p.path.length > 0) return resolveFieldAt(env, e, p, f, value, st)
+        const rv: RX = resolveExpr(env, value, f.ty, st)
+        const rw: RWriteFact = wholeFieldWrite(env, p, f, value, rv.st, e.span)
+        const w: WriteFact | not = rw.w
+        if (w is some) return addFact(rw.st, e.nid, Fact.FWrite(w))
+        return rw.st
+    }
+
+    // A write of a WHOLE field (§66.11): along its graph (a Transition), a
+    // `replace`, or refused — E-DERIVED-WRITE for a derived field (its message
+    // names the `let`-seeding trade-off, §66.9 rule 5), E-WRITE-NOT-GRANTED
+    // for a locked one (its message names `let`).
+    fn wholeFieldWrite(env: Env, p: WPlace, f: FieldInfo, value: AExpr, st: AS, span: ASpan) -> RWriteFact {
+        const g: TransitionGraph | not = f.graph
+        const cap: Sym | not = f.wcap
+        if (g is some && cap is some) {
+            const rc: RCheck = transitionCheck(env, g, value, initialVariant(env, g, f.init), st)
+            return { w: { cap: cap, inst: p.inst, edit: EditKind.Transition, check: rc.check }, st: rc.st }
+        }
+        if (f.grants.replace && cap is some) {
+            return { w: { cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, st: st }
+        }
+        const isDerived: boolean = f.mode == FieldMode.Derived
+        if (isDerived) return { w: not, st: addDiag(st, env.file, span, "E-DERIVED-WRITE", derivedMessage(p, f)) }
+        return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` is locked — nothing grants this write (a whole-value replace). Declare it `let " + f.sym.hint + "` to make it writable (§66.9, §66.11).") }
+    }
+
+    // `@h = { ...@h, f: v, … }` over an instance: one field write per override,
+    // each judged by that field's own contract exactly as `@h.f = v` is.
+    fn resolveInstanceSpread(env: Env, e: AExpr, inst: InstRef, iDecl: Sym, maybe: boolean, value: AExpr, st0: AS) -> AS {
+        let st: AS = st0
+        const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
+        if (d is not) return st
+        const ps: AProp[] = propsOf(value)
+        let ws: SpreadWrite[] = []
+        let j = 1
+        while (j < ps.length) {
+            const pr: AProp = ps[j]
+            const i: int = fieldIndex(d.info, pr.name)
+            if (i < 0) {
+                st = addDiag(st, env.file, pr.span, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + pr.name + "`")
+            } else {
+                const f: FieldInfo = d.info.fields[i]
+                const p: WPlace = { decl: d.info, inst: inst, idx: i, path: [], ty: f.ty, maybe: maybe }
+                st = writeGuards(env, p, pr.span, st)
+                st = resolveExpr(env, pr.value, f.ty, st).st
+                const rw: RWriteFact = wholeFieldWrite(env, p, f, pr.value, st, pr.span)
+                st = rw.st
+                const w: WriteFact | not = rw.w
+                if (w is some) ws = ws.concat([{ w: w, prop: j }])
+            }
+            j = j + 1
+        }
+        return addFact(st, e.nid, Fact.FSpread(ws))
+    }
+
+    // A write at a struct path (`@o.s = v`): the TARGET sub-field's own contract.
+    fn resolveFieldAt(env: Env, e: AExpr, p: WPlace, f: FieldInfo, value: AExpr, st0: AS) -> AS {
+        const rv: RX = resolveExpr(env, value, p.ty, st0)
+        let st: AS = rv.st
+        const r: RWriteFact = fieldAtWrite(env, p, f, value, st, e.span)
+        st = r.st
+        const w: WriteFact | not = r.w
+        if (w is some) st = addFact(st, e.nid, Fact.FWrite(w))
+        return st
+    }
+
+    type RWriteFact:struct = { w: WriteFact | not, st: AS }
+
+    fn fieldAtWrite(env: Env, p: WPlace, f: FieldInfo, value: AExpr, st: AS, span: ASpan) -> RWriteFact {
+        const cap: Sym | not = f.wcap
+        const target: FieldDef | not = pathTarget(env, p)
+        if (target is not || cap is not) {
+            return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "` grants no write") }
+        }
+        const edit: EditKind = EditKind.FieldAt(p.path)
+        if (target.grants.replace) return { w: { cap: cap, inst: p.inst, edit: edit, check: Check.Static }, st: st }
+        if (f.grants.replace && target.grants.edits.length == 0) return { w: { cap: cap, inst: p.inst, edit: edit, check: Check.Static }, st: st }
+        return { w: not, st: addDiag(st, env.file, span, "E-WRITE-NOT-GRANTED", "`" + target.sym.hint + "` is not writable here — its contract grants no replace (§66.11.4)") }
+    }
+
+    // `@x = { ...@x, f: v, … }` — the spread of the SAME place with named
+    // overrides is a FIELD EDIT per override (O58 (b), ruled S437): each is
+    // judged by `f`'s own contract, exactly as `@x.f = v` is.
+    fn isSelfSpread(target: AExpr, value: AExpr) -> boolean {
+        const k: AExprK = value.k
+        return match k {
+            .ObjectLit(props: ps) :> spreadsTarget(target, ps)
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+        }
+    }
+
+    fn spreadsTarget(target: AExpr, ps: AProp[]) -> boolean {
+        if (ps.length == 0) return false
+        if (!ps[0].spread) return false
+        let i = 1
+        while (i < ps.length) {
+            if (ps[i].spread) return false
+            i = i + 1
+        }
+        return samePlaceSyntax(target, ps[0].value)
+    }
+
+    // Two place expressions spelled the same (`@order` / `@order`, `@c.o` / `@c.o`).
+    fn samePlaceSyntax(a: AExpr, b: AExpr) -> boolean {
+        return placeKey(a) != "" && placeKey(a) == placeKey(b)
+    }
+
+    fn placeKey(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .At(name: n) :> "@" + n
+            .Name(name: n) :> n
+            .Member(obj: o, name: n) :> memberKey(placeKey(o), n)
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Variant(name: n) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+        }
+    }
+
+    fn memberKey(base: string, n: string) -> string {
+        if (base == "") return ""
+        return base + "." + n
+    }
+
+    fn resolveSpread(env: Env, e: AExpr, p: WPlace, f: FieldInfo, value: AExpr, st0: AS) -> AS {
+        let st: AS = st0
+        const s: Sym | not = namedOf(f.ty)
+        let fs: FieldDef[] = []
+        if (s is some) {
+            const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
+            if (ti is some) {
+                const d: FieldDef[] | not = structFieldDefs(ti.def)
+                if (d is some) fs = d
+            }
+        }
+        if (s is not || fs.length == 0) return addDiag(st, env.file, e.span, "E-TYPE-STRUCT-CONTEXT", "a spread write needs a struct-typed target")
+        const ps: AProp[] = propsOf(value)
+        // the spread operand reads the place itself
+        st = resolveExpr(env, ps[0].value, f.ty, st).st
+        let ws: SpreadWrite[] = []
+        let j = 1
+        while (j < ps.length) {
+            const pr: AProp = ps[j]
+            let idx: int = -1
+            let i = 0
+            for (const fd of fs) {
+                if (fd.sym.hint == pr.name) idx = i
+                i = i + 1
+            }
+            if (idx < 0) {
+                st = addDiag(st, env.file, pr.span, "E-TYPE-STRUCT-FIELD", "`" + s.hint + "` has no field `" + pr.name + "`")
+            } else {
+                const sub: WPlace = { decl: p.decl, inst: p.inst, idx: p.idx, path: [{ owner: s, idx: idx }], ty: fs[idx].ty, maybe: p.maybe }
+                const rv: RX = resolveExpr(env, pr.value, fs[idx].ty, st)
+                const rw: RWriteFact = fieldAtWrite(env, sub, f, pr.value, rv.st, pr.span)
+                st = rw.st
+                const w: WriteFact | not = rw.w
+                if (w is some) ws = ws.concat([{ w: w, prop: j }])
+            }
+            j = j + 1
+        }
+        return addFact(st, e.nid, Fact.FSpread(ws))
+    }
+
+    fn propsOf(v: AExpr) -> AProp[] {
+        const k: AExprK = v.k
+        return match k {
+            .ObjectLit(props: ps) :> ps
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: t) :> []
+            .Assign(target: t) :> []
+            .ArrayLit(elems: es) :> []
+        }
+    }
+
+    // `reset(@x)` (L4): a replace with x's initializer — needs `replace`
+    // (§66.11.2: reset IS a replace; O58 (b): it restores the declared initial
+    // state authoritatively, bypassing sub-field contracts).
+    fn resolveReset(env: Env, e: AExpr, args: AExpr[], st0: AS) -> AS {
+        if (args.length != 1) return addDiag(st0, env.file, e.span, "E-RESET-ARG", "`reset` takes one cell: `reset(@x)`")
+        const rp: RPlace = resolvePlace(env, args[0], st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        if (p is not) return st
+        st = writeGuards(env, p, args[0].span, st)
+        const f: FieldInfo = p.decl.fields[p.idx]
+        const cap: Sym | not = f.wcap
+        if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-RESET-ARG", "`reset` takes a whole cell, not a sub-field")
+        if (!f.grants.replace || cap is not) {
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`reset(@" + f.sym.hint + ")` is a replace (§66.11.2) and `" + f.sym.hint + "` does not grant `replace` — declare it `let`")
+        }
+        return addFact(st, e.nid, Fact.FReset({ cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, p.decl.sym, p.idx))
+    }
+
+    // =========================================================================
+    // Statements.
+    // =========================================================================
+    type RB:struct = { env: Env, st: AS }
+
+    // A statement-position expression: an assignment, a `reset`, or a value.
+    fn resolveStmtExpr(env: Env, e: AExpr, st: AS) -> AS {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, value: v) :> resolveAssign(env, e, t, v, st)
+            .Call(callee: c, args: args) :> resolveCallStmt(env, e, c, args, st)
+            .Name(name: n) :> resolveExpr(env, e, not, st).st
+            .At(name: n) :> resolveExpr(env, e, not, st).st
+            .AtItem :> resolveExpr(env, e, not, st).st
+            .Num(raw: r) :> resolveExpr(env, e, not, st).st
+            .Str(v: s) :> resolveExpr(env, e, not, st).st
+            .Bool(v: b) :> resolveExpr(env, e, not, st).st
+            .NotLit :> resolveExpr(env, e, not, st).st
+            .Variant(name: n) :> resolveExpr(env, e, not, st).st
+            .Member(obj: o) :> resolveExpr(env, e, not, st).st
+            .Unary(op: o) :> resolveExpr(env, e, not, st).st
+            .Binary(op: o) :> resolveExpr(env, e, not, st).st
+            .Ternary(test: t) :> resolveExpr(env, e, not, st).st
+            .ArrayLit(elems: es) :> resolveExpr(env, e, not, st).st
+            .ObjectLit(props: ps) :> resolveExpr(env, e, not, st).st
+        }
+    }
+
+    fn resolveCallStmt(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st: AS) -> AS {
+        if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
+        const m: MethodCall | not = methodCall(callee)
+        if (m is some) return resolveEditCall(env, e, m, args, st)
+        return resolveExpr(env, e, not, st).st
+    }
+
+    // `@x.push(v)` / `@x.unshift(v)` — a sequence EDIT named by its method
+    // (§66.11.2 classifies mutating method calls): end-append / front-prepend.
+    type MethodCall:struct = { obj: AExpr, method: string }
+
+    fn methodCall(callee: AExpr) -> MethodCall | not {
+        const k: AExprK = callee.k
+        return match k {
+            .Member(obj: o, name: n) :> methodOf(o, n)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Variant(name: n) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+        }
+    }
+
+    fn methodOf(o: AExpr, n: string) -> MethodCall | not {
+        if (n == "push" || n == "unshift") return { obj: o, method: n }
+        return not
+    }
+
+    fn resolveEditCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS {
+        const rp: RPlace = resolvePlace(env, m.obj, st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        if (p is not) return st
+        st = writeGuards(env, p, m.obj.span, st)
+        const f: FieldInfo = p.decl.fields[p.idx]
+        let elem: Type | not = not
+        const pt: Type | not = p.ty
+        if (pt is some) elem = seqElem(pt)
+        if (args.length != 1) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "` with other than one element is not in bootstrap slice M2")
+        st = resolveExpr(env, args[0], elem, st).st
+        if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
+        let edit: EditKind = EditKind.Append
+        let what: string = "an end-append"
+        if (m.method == "unshift") {
+            edit = EditKind.Prepend
+            what = "a front-prepend"
+        }
+        const cap: Sym | not = f.wcap
+        const granted: boolean = f.grants.replace || f.grants.edits.indexOf(edit) >= 0 || hasEditKind(f.grants.edits, edit)
+        if (granted && cap is some) {
+            return addFact(st, e.nid, Fact.FWrite({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
+        }
+        const isDerived: boolean = f.mode == FieldMode.Derived
+        if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
+        return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "." + m.method + "(…)` is " + what + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
+    }
+
+    fn hasEditKind(es: EditKind[], k: EditKind) -> boolean {
+        for (const x of es) {
+            if (x == k) return true
+        }
+        return false
+    }
+
+    fn resolveBlock(env: Env, b: ABlock, st0: AS) -> AS {
+        let st: AS = st0
+        let env2: Env = env
+        for (const s of b.stmts) {
+            const r: RB = resolveStmt(env2, s, st)
+            env2 = r.env
+            st = r.st
+        }
+        return st
+    }
+
+    fn resolveStmt(env: Env, s: AStmt, st: AS) -> RB {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> keepEnv(env, resolveStmtExpr(env, e, st))
+            .Local(name: n, mutable: m, init: i) :> resolveLocal(env, s, n, m, i, st)
+            .Return(e: e) :> keepEnv(env, resolveMaybeExpr(env, e, st))
+            .If(cond: c, thenB: t, elseB: el) :> keepEnv(env, resolveIf(env, c, t, el, st))
+            .Given(name: n, subject: sub, body: b) :> keepEnv(env, resolveGiven(env, s, n, sub, b, st))
+        }
+    }
+
+    // F17: a match arm whose body is an object literal loses its named payload
+    // bindings — arms return through this constructor instead.
+    fn keepEnv(env: Env, st: AS) -> RB { return { env: env, st: st } }
+
+    fn resolveMaybeExpr(env: Env, e: AExpr | not, st: AS) -> AS {
+        if (e is not) return st
+        return resolveExpr(env, e, not, st).st
+    }
+
+    fn resolveLocal(env: Env, s: AStmt, name: string, mutable: boolean, init: AExpr, st0: AS) -> RB {
+        const ri: RX = resolveExpr(env, init, not, st0)
+        const rs: RSym = mint(ri.st, name)
+        const st: AS = addFact(rs.st, s.nid, Fact.FBind(rs.s))
+        const l: LocalB = { name: name, s: rs.s, ty: ri.x.ty, mutable: mutable, narrowed: not, nDecl: not }
+        return { env: withLocal(env, l), st: st }
+    }
+
+    fn resolveIf(env: Env, c: AExpr, t: ABlock, el: ABlock | not, st0: AS) -> AS {
+        let st: AS = resolveExpr(env, c, Type.Bool, st0).st
+        st = resolveBlock(env, t, st)
+        if (el is some) st = resolveBlock(env, el, st)
+        return st
+    }
+
+    // L11: `given c = @handle :> { … }` binds the INSTANCE (§66.7.5, O56 narrow).
+    fn resolveGiven(env: Env, s: AStmt, name: string, subject: AExpr, body: ABlock, st0: AS) -> AS {
+        const rs0: RX = resolveHandleSubject(env, subject, st0)
+        let st: AS = rs0.st
+        const inst: InstRef | not = rs0.x.inst
+        const iDecl: Sym | not = rs0.x.iDecl
+        if (inst is not || iDecl is not) {
+            return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`given` over a value that is not an instance handle is not in bootstrap slice M2 (O56: writes through it would be errors)")
+        }
+        const rs: RSym = mint(st, name)
+        st = addFact(rs.st, s.nid, Fact.FGiven(rs.s, inst))
+        const narrowed: InstRef = InstRef.Narrowed(rs.s)
+        const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl }
+        return resolveBlock(withLocal(env, l), body, st)
+    }
+
+    // =========================================================================
+    // Views (markup).
+    // =========================================================================
+    fn resolveNodes(env: Env, ns: ANode[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const n of ns) { st = resolveNode(env, n, st) }
+        return st
+    }
+
+    fn resolveNode(env: Env, n: ANode, st: AS) -> AS {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> resolveElem(env, e, st)
+            .Text(text: t) :> st
+            .Interp(e: e) :> resolveExpr(env, e, not, st).st
+            .DeclNode(d: d) :> addDiag(st, env.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration inside markup is not in bootstrap slice M2")
+        }
+    }
+
+    fn isChildRole(r: FieldRole) -> boolean {
+        return match r {
+            .Child :> true
+            .Attribute :> false
+        }
+    }
+
+    fn resolveElem(env: Env, e: AElem, st: AS) -> AS {
+        if (e.star) return resolveStar(env, e, st)
+        if (e.tag == "each") return resolveEach(env, e, st)
+        if (e.tag == "slot") return addFact(st, e.nid, Fact.FSlot)
+        const d: DeclSrc | not = declNamed(env.g, e.tag)
+        if (d is some) return resolveUse(env, e, d, st)
+        return resolveHtml(env, e, st)
+    }
+
+    // `<*x …/>` (§66.6.2): the existing instance.
+    fn resolveStar(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        const d: DeclSrc | not = declNamed(env.g, e.tag)
+        if (d is not) {
+            return addDiag(st, env.file, e.span, "E-DECL-STAR-PREDEFINED", "`<*" + e.tag + "/>` — a predefined (HTML) declaration has no shared instance (§66.6.5)")
+        }
+        for (const a of e.attrs) {
+            if (fieldIndex(d.info, a.name) >= 0) {
+                st = addDiag(st, env.file, a.span, "E-DECL-STAR-REF-ATTR-WRITE", "`" + a.name + "=` on `<*" + e.tag + ">` would write the referenced instance — a `<*x>` reference is read-only; write through logic (§66.6.7)")
+            }
+        }
+        if (st.diags.length == st0.diags.length) {
+            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "rendering an existing instance `<*" + e.tag + "/>` is not in bootstrap slice M2 Core (no View.Star yet)")
+        }
+        return st
+    }
+
+    fn eventName(attr: string) -> string {
+        if (attr.length > 2 && attr.substring(0, 2) == "on") return attr.substring(2)
+        return ""
+    }
+
+    // A handler value is a statement (or a block of them).
+    fn resolveHandler(env: Env, v: AAttrValue, st: AS) -> AS {
+        return match v {
+            .Bare(e: e) :> resolveStmtExpr(env, e, st)
+            .Paren(e: e) :> resolveStmtExpr(env, e, st)
+            .Braced(b: b) :> resolveBlock(env, b, st)
+            .Quoted(v: s) :> st
+            .NoValue :> st
+        }
+    }
+
+    fn valueExpr(v: AAttrValue) -> AExpr | not {
+        return match v {
+            .Bare(e: e) :> e
+            .Paren(e: e) :> e
+            .Quoted(v: s) :> not
+            .NoValue :> not
+            .Braced(b: b) :> not
+        }
+    }
+
+    fn resolveValue(env: Env, v: AAttrValue, expected: Type | not, st: AS) -> AS {
+        const e: AExpr | not = valueExpr(v)
+        if (e is not) return st
+        return resolveExpr(env, e, expected, st).st
+    }
+
+    fn resolveHtml(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = addFact(st0, e.nid, Fact.FHtml)
+        // E-DECL-FIELD-TAG-NEEDS-STAR: a bare tag naming a CHILD field of the
+        // enclosing declaration (§66.6.6).
+        const cd: DeclSrc | not = ctxDecl(env)
+        if (cd is some) {
+            if (!cd.isProgram) {
+                const i: int = fieldIndex(cd.info, e.tag)
+                if (i >= 0 && isChildRole(cd.info.fields[i].role)) {
+                    st = addDiag(st, env.file, e.span, "E-DECL-FIELD-TAG-NEEDS-STAR", "`<" + e.tag + "/>` names a field of `<" + cd.info.sym.hint + ">` — did you mean `<*" + e.tag + "/>`? A plain tag makes a new instance (§66.6.6)")
+                }
+            }
+        }
+        for (const a of e.attrs) {
+            const ev: string = eventName(a.name)
+            if (a.name == "if") {
+                st = resolveValue(env, a.value, Type.Bool, st)
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AIf))
+            } else if (ev != "") {
+                st = resolveHandler(env, a.value, st)
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AOn(ev)))
+            } else if (a.name.indexOf(":") >= 0) {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not in bootstrap slice M2")
+            } else if (valueExpr(a.value) is some) {
+                st = resolveValue(env, a.value, not, st)
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.ABound))
+            } else {
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AStatic))
+            }
+        }
+        return resolveNodes(env, e.kids, st)
+    }
+
+    fn handleByOwnerName(env: Env, owner: int, name: string) -> HandleInfo | not {
+        for (const h of env.g.handles) {
+            if (h.owner == owner && h.name == name) return h
+        }
+        return not
+    }
+
+    // A USE of a declaration (§66.6.1): a new instance; its attributes are
+    // construction (§66.14 rule 4, L6 / O60 — the printer seeds a field with a
+    // capability and derives one without).
+    fn resolveUse(env: Env, e: AElem, d: DeclSrc, st0: AS) -> AS {
+        let st: AS = st0
+        let alias: Sym | not = not
+        for (const a of e.attrs) {
+            if (a.name == "as") {
+                const n: string = bareName(a.value)
+                const h: HandleInfo | not = lookupHandle(env, n)
+                if (h is some) alias = h.sym
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AAs))
+            } else if (a.name == "if") {
+                st = resolveValue(env, a.value, Type.Bool, st)
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AIf))
+            } else {
+                const i: int = fieldIndex(d.info, a.name)
+                if (i < 0) {
+                    st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<" + e.tag + ">` has no attribute `" + a.name + "`")
+                } else {
+                    const f: FieldInfo = d.info.fields[i]
+                    st = resolveConstructValue(env, a.value, f.ty, st)
+                    st = addFact(st, a.nid, Fact.FAttr(AttrKind.AConstruct(i)))
+                }
+            }
+        }
+        st = addFact(st, e.nid, Fact.FUse(d.info.sym, alias))
+        return resolveNodes(env, e.kids, st)
+    }
+
+    fn resolveConstructValue(env: Env, v: AAttrValue, t: Type, st: AS) -> AS {
+        return match v {
+            .Quoted(v: s) :> st
+            .Bare(e: e) :> resolveExpr(env, e, t, st).st
+            .Paren(e: e) :> resolveExpr(env, e, t, st).st
+            .NoValue :> st
+            .Braced(b: b) :> addDiag(st, env.file, b.span, "E-DECL-USE-ATTR", "a construction value is an expression, not a block")
+        }
+    }
+
+    // `<each in=… key=… as name>` (§17.7): a row scope with its own binding and handles (§66.7.4).
+    fn resolveEach(env: Env, e: AElem, st0: AS) -> AS {
+        let st: AS = st0
+        let srcTy: Type | not = not
+        let asName: string = ""
+        for (const a of e.attrs) {
+            if (a.name == "in") {
+                const ex: AExpr | not = valueExpr(a.value)
+                if (ex is some) {
+                    const r: RX = resolveExpr(env, ex, not, st)
+                    st = r.st
+                    srcTy = r.x.ty
+                }
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AEachIn))
+            } else if (a.name == "as") {
+                asName = bareName(a.value)
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AEachAs))
+            }
+        }
+        if (asName == "") asName = "item"
+        let elemTy: Type | not = not
+        if (srcTy is some) elemTy = seqElem(srcTy)
+        const rs: RSym = mint(st, asName)
+        st = rs.st
+        let rowHandles: HandleInfo[] = []
+        let hsyms: Sym[] = []
+        for (const h of env.g.handles) {
+            if (h.owner == e.nid) {
+                rowHandles = rowHandles.concat([h])
+                hsyms = hsyms.concat([h.sym])
+            }
+        }
+        const row: RowB = { bind: rs.s, ty: elemTy }
+        const renv: Env = withRow(env, row, asName, rowHandles)
+        for (const a of e.attrs) {
+            if (a.name == "key") {
+                st = resolveValue(renv, a.value, not, st)
+                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AEachKey))
+            } else if (a.name != "in" && a.name != "as") {
+                st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<each " + a.name + "=>` is not in bootstrap slice M2")
+            }
+        }
+        st = addFact(st, e.nid, Fact.FEach(rs.s, hsyms))
+        return resolveNodes(renv, e.kids, st)
+    }
+
+    // =========================================================================
+    // Phase B driver.
+    // =========================================================================
+    fn handlesOwnedBy(g: Globals, owner: int) -> HandleInfo[] {
+        let out: HandleInfo[] = []
+        for (const h of g.handles) {
+            if (h.owner == owner) out = out.concat([h])
+        }
+        return out
+    }
+
+    fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
+        return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
+                 handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders }
+    }
+
+    fn phaseB(g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const ds of g.decls) {
+            // initializers (L2: the instance under construction is Lexical(0))
+            const ienv: Env = declEnv(g, ds, false)
+            for (const f of ds.info.fields) {
+                st = resolveValue(ienv, f.init, f.ty, st)
+            }
+            // renders
+            const renv: Env = declEnv(g, ds, true)
+            st = resolveNodes(renv, rendersNodes(ds), st)
+        }
+        const prog: DeclSrc | not = findDeclSrc(g, g.program)
+        let progHandles: HandleInfo[] = []
+        if (prog is some) progHandles = handlesOwnedBy(g, prog.info.nid)
+        for (const fs of g.fns) {
+            let hs: HandleInfo[] = []
+            if (fs.info.file == g.entry) hs = progHandles
+            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false }
+            const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
+            for (const p of fs.f.params) {
+                const rs: RSym = mint(st, p.name)
+                st = rs.st
+                let pty: Type = Type.Str
+                const at: AType | not = p.ty
+                if (at is some) {
+                    const rt: RType = resolveType(fte, at, st)
+                    pty = rt.t
+                    st = rt.st
+                } else {
+                    st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "an unannotated parameter `" + p.name + "` — bootstrap slice M2 needs `" + p.name + ": Type` (Core parameters are typed)")
+                }
+                st = addFact(st, p.nid, Fact.FParam(rs.s, pty))
+                env = withLocal(env, { name: p.name, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not })
+            }
+            st = resolveBlock(env, fs.f.body, st)
+        }
+        return st
+    }
+
+    // =========================================================================
+    // Entry. `files` in LINK ORDER: every file after the files it imports; the
+    // entry (the file with `<program>`) last.
+    // =========================================================================
+    export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
+        const st0: AS = { facts: [], diags: [], nextSym: 0 }
+        const ra: RGlobals = phaseA(files, entry, st0)
+        let st: AS = checkImports(files, ra.g, ra.st)
+        st = phaseB(ra.g, st)
+        let decls: DeclInfo[] = []
+        for (const d of ra.g.decls) { decls = decls.concat([d.info]) }
+        let fns: FnInfo[] = []
+        for (const f of ra.g.fns) { fns = fns.concat([f.info]) }
+        const t: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns,
+                            handles: ra.g.handles, facts: st.facts }
+        return { files: files, tables: t, diags: st.diags }
+    }
+
+    // Every imported name must be an EXPORTED type / declaration / function of a
+    // file in the link set.
+    fn checkImports(files: FileAst[], g: Globals, st0: AS) -> AS {
+        let st: AS = st0
+        for (const f of files) {
+            for (const it of f.items) {
+                const imp: AImport | not = importOf(it)
+                if (imp is some) {
+                    for (const n of imp.names) {
+                        if (!exportedAnywhere(g, n.name)) {
+                            st = addDiag(st, f.path, n.span, "E-IMPORT-NOT-EXPORTED", "`" + n.name + "` is not exported by `" + imp.from + "`")
+                        }
+                    }
+                }
+            }
+        }
+        return st
+    }
+
+    fn importOf(it: AItem) -> AImport | not {
+        const k: AItemK = it.k
+        return match k {
+            .ImportItem(i: i) :> i
+            .TypeItem(t: t) :> not
+            .FnItem(f: f) :> not
+            .DeclItem(d: d) :> not
+            .MarkupItem(n: n) :> not
+            .ProgramItem(p: p) :> not
+        }
+    }
+
+    fn exportedAnywhere(g: Globals, name: string) -> boolean {
+        for (const t of g.types) {
+            if (t.name == name && t.exported) return true
+        }
+        for (const d of g.decls) {
+            const ad: ADecl | not = d.d
+            if (ad is some) {
+                if (ad.name == name && ad.exported) return true
+            }
+        }
+        for (const f of g.fns) {
+            if (f.info.name == name && f.info.exported) return true
+        }
+        return false
+    }
+}
