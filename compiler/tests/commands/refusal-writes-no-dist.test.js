@@ -9,21 +9,26 @@
  * a refused rebuild over a PREVIOUS good dist overwrote the units in place and left
  * the previous `_server.js` beside them — a runnable server on the refused split.
  *
- * After: the command compiles into a sibling stage (`commands/staged-output.js`)
- * and discards it on refusal, so the output directory is left exactly as it was
- * (absent, or byte-identical to the last good build).
+ * After: the refusal is decided BEFORE ANY WRITE (compileScrml's `beforeWrite`,
+ * `commands/refusal-gate.js`) — E-MW-008 from the compile's diagnostics, E-MW-007
+ * over the unit set dist/ would hold after the write (existing units this build
+ * does not overwrite ∪ planned units) — so the output directory is left exactly as
+ * it was (absent, or byte-identical to the last good build). No staging directory:
+ * nothing beyond the output directory itself needs to be writable, and nothing is
+ * created beside it.
  *
  * SCOPE PIN: every OTHER hard error keeps its pre-existing posture (artifacts land,
- * exit 1). The last test pins that on purpose; widening fail-closed to all hard
- * errors is an open ruling, and flipping that test is how the ruling would land.
+ * exit 1). A test pins that on purpose; widening fail-closed to all hard errors is
+ * an open ruling, and flipping that test is how the ruling would land.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, readFileSync, statSync, renameSync } from "fs";
 import { join, dirname, relative } from "path";
 import { tmpdir } from "os";
-import { execFileSync } from "child_process";
+import { execFileSync, spawnSync } from "child_process";
 import { fileURLToPath } from "url";
+import { compileScrml } from "../../src/api.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI = join(HERE, "..", "..", "bin", "scrml.js");
@@ -82,7 +87,8 @@ function snapshot(dir) {
   if (existsSync(dir)) walk(dir);
   return out;
 }
-const noStageLeft = (p) => readdirSync(p.root).filter((n) => n.includes("scrml-stage"));
+// Nothing is ever created BESIDE the output directory (no stage, no temp dir).
+const nothingBeside = (p) => readdirSync(p.root).filter((n) => n !== "src" && n !== "dist");
 
 describe("an application-scope refusal writes no dist (real CLI)", () => {
   test("scrml build — E-MW-008 exits non-zero and creates no output directory", () => {
@@ -92,7 +98,7 @@ describe("an application-scope refusal writes no dist (real CLI)", () => {
     expect(r.out).toContain("E-MW-008");
     expect(r.out).toContain("No files were written");
     expect(existsSync(p.dist)).toBe(false);
-    expect(noStageLeft(p)).toEqual([]);
+    expect(nothingBeside(p)).toEqual([]);
   });
 
   test("scrml build — E-MW-007 exits non-zero and creates no output directory", () => {
@@ -102,7 +108,7 @@ describe("an application-scope refusal writes no dist (real CLI)", () => {
     expect(r.out).toContain("E-MW-007");
     expect(r.out).toContain("No files were written");
     expect(existsSync(p.dist)).toBe(false);
-    expect(noStageLeft(p)).toEqual([]);
+    expect(nothingBeside(p)).toEqual([]);
   });
 
   test("scrml compile --output-dir — E-MW-008 exits non-zero and creates no output directory", () => {
@@ -111,7 +117,7 @@ describe("an application-scope refusal writes no dist (real CLI)", () => {
     expect(r.code).not.toBe(0);
     expect(r.out).toContain("E-MW-008");
     expect(existsSync(p.dist)).toBe(false);
-    expect(noStageLeft(p)).toEqual([]);
+    expect(nothingBeside(p)).toEqual([]);
   });
 
   test("a refused REBUILD leaves the previous good dist byte-identical (no mixed server)", () => {
@@ -129,7 +135,7 @@ describe("an application-scope refusal writes no dist (real CLI)", () => {
     expect(second.code).not.toBe(0);
     expect(second.out).toContain("E-MW-008");
     expect(snapshot(p.dist)).toEqual(before);
-    expect(noStageLeft(p)).toEqual([]);
+    expect(nothingBeside(p)).toEqual([]);
   });
 
   test("a successful build over an existing dist merges exactly like the in-place write did", () => {
@@ -141,7 +147,7 @@ describe("an application-scope refusal writes no dist (real CLI)", () => {
     expect(readFileSync(join(p.dist, "keep.txt"), "utf8")).toBe("adopter file");
     expect(existsSync(join(p.dist, "_server.js"))).toBe(true);
     expect(existsSync(join(p.dist, "index.server.js"))).toBe(true);
-    expect(noStageLeft(p)).toEqual([]);
+    expect(nothingBeside(p)).toEqual([]);
   });
 
   test("SCOPE PIN — a non-refusal hard error still writes artifacts (pre-existing posture)", () => {
@@ -150,6 +156,88 @@ describe("an application-scope refusal writes no dist (real CLI)", () => {
     expect(r.code).not.toBe(0);
     expect(r.out).not.toContain("No files were written");
     expect(existsSync(join(p.dist, "index.html"))).toBe(true);
-    expect(noStageLeft(p)).toEqual([]);
+    expect(nothingBeside(p)).toEqual([]);
+  });
+
+  test("E-MW-007 counts a STALE unit already in dist, and still writes nothing (rename)", () => {
+    // Build #1: one application with an onion, as index.scrml — legal.
+    const p = project({ "index.scrml": prog(` log="minimal"`, "aGo") });
+    expect(build(p).code).toBe(0);
+    const before = snapshot(p.dist);
+    expect(Object.keys(before)).toContain("index.server.js");
+
+    // Rename the source. dist/ still holds build #1's index.server.js (with its
+    // onion), so the server this dist would become has TWO onions → E-MW-007 —
+    // decided over the post-write unit set, before main.* is written beside it.
+    renameSync(join(p.src, "index.scrml"), join(p.src, "main.scrml"));
+    const r = build(p);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("E-MW-007");
+    expect(r.out).toContain("No files were written");
+    expect(snapshot(p.dist)).toEqual(before);
+  });
+
+  test("E-MW-007 is reported AFTER the warnings, as the post-write check reported it", () => {
+    const p = project({ "index.scrml": prog(` log="minimal"`, "aGo"), "other/zzz.scrml": prog(` log="minimal"`, "bGo") });
+    // stdout and stderr are separate pipes, so order is asserted WITHIN stderr
+    // (warnings and the failure both go there) and presence on stdout.
+    const r = spawnSync("bun", [CLI, "build", p.src, "--output", p.dist], { encoding: "utf8", cwd: p.root });
+    expect(r.status).not.toBe(0);
+    expect(r.stdout).toContain("Compiled 2 file(s)");
+    const warnAt = r.stderr.indexOf("[warn]");
+    const failAt = r.stderr.indexOf("E-MW-007");
+    expect(warnAt).toBeGreaterThan(-1);
+    expect(failAt).toBeGreaterThan(warnAt);
+  });
+
+  // The output directory is writable but its PARENT denies creating entries — a
+  // writable volume mounted under a read-only root (/app/dist, /srv/www). Building
+  // must need write on the output directory only. (icacls: Windows-only.)
+  test.skipIf(process.platform !== "win32")("a build needs no write permission on the output directory's PARENT", () => {
+    const p = project({ "index.scrml": prog("", "aGo") });
+    const locked = join(p.root, "locked");
+    const dist = join(locked, "dist");
+    mkdirSync(dist, { recursive: true });
+    const user = process.env.USERNAME;
+    const deny = spawnSync("icacls", [locked, "/deny", `${user}:(AD,WD)`], { encoding: "utf8" });
+    try {
+      expect(deny.status).toBe(0);
+      // The deny is real: nothing can be created directly in `locked`.
+      expect(() => mkdirSync(join(locked, "probe"))).toThrow();
+      const r = run(["build", p.src, "--output", dist], p.root);
+      expect(r.code).toBe(0);
+      expect(existsSync(join(dist, "_server.js"))).toBe(true);
+      expect(existsSync(join(dist, "index.server.js"))).toBe(true);
+      expect(readdirSync(locked)).toEqual(["dist"]);
+    } finally {
+      spawnSync("icacls", [locked, "/remove:d", user]);
+    }
+  });
+});
+
+describe("beforeWrite (compileScrml) — the planned units ARE the written units", () => {
+  test("every planned .server.js relPath is exactly a written file, nested and pages/-stripped included", () => {
+    const p = project({
+      "index.scrml": prog("", "aGo"),
+      "other/zzz.scrml": prog("", "bGo"),
+      "pages/admin/panel.scrml": prog("", "cGo"),
+    });
+    const inputFiles = ["index.scrml", "other/zzz.scrml", "pages/admin/panel.scrml"].map((f) => join(p.src, f));
+    let planned = null;
+    const res = compileScrml({
+      inputFiles, outputDir: p.dist, write: true, log: () => {},
+      beforeWrite: ({ plannedServerUnits }) => { planned = plannedServerUnits.map((u) => u.relPath).sort(); return true; },
+    });
+    expect(res.errors.filter((e) => !String(e.code).startsWith("W-"))).toEqual([]);
+    const written = Object.keys(snapshot(p.dist)).filter((f) => f.endsWith(".server.js")).sort();
+    expect(planned).toEqual(written);
+    expect(written).toContain("admin/panel.server.js");
+  });
+
+  test("returning false writes nothing at all — not even the stdlib bundle", () => {
+    const p = project({ "index.scrml": `<program>\n  \${ import { formatDate } from "scrml:format" }\n  <p>\${formatDate(new Date())}</p>\n</program>\n` });
+    const res = compileScrml({ inputFiles: [join(p.src, "index.scrml")], outputDir: p.dist, write: true, log: () => {}, beforeWrite: () => false });
+    expect(res.fileCount).toBe(0);
+    expect(existsSync(p.dist)).toBe(false);
   });
 });
