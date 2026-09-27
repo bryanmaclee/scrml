@@ -1965,8 +1965,28 @@ export function runCG(input: CgInput): CgOutput {
   // what the pre-scan exists to prevent. Recursing here closes that.
   // Sites, not bare nodes: `E-MW-008` mirrors `E-MW-007` in NAMING every competing
   // source, so the owning file travels with each declaration.
+  //
+  // A file EMITTED AS A TOOL contributes no site at all (S438,
+  // `g-mw008-counts-headless-tool-programs`). The count exists to find programs that
+  // can own cookie-session units, and a tool cannot: it emits no page (E-TOOL-003),
+  // `session.*` is E-SESSION-CONTEXT there, and a `serve=` tool refuses cookie auth
+  // (E-TOOL-SERVE-AUTH-UNSUPPORTED). Counting it made one web app plus a
+  // `tools/seed.scrml` read as two applications: the member units lost the program's
+  // declarations (the F1 split) and the build was refused with a false E-MW-008.
+  //
+  // ⚑ PER FILE, BY THE EMIT DISPATCH'S OWN PREDICATE — not per `<program>` node. The
+  // first cut skipped nodes whose `kind` was "tool", but the emitter decides
+  // tool-vs-web per FILE (`isToolProgram`, the dispatch below: the file's first
+  // top-level `<program>`). So a tool file carrying a second top-level `<program
+  // session-secure="false" sessionExpiry="7d">` — emitted nowhere, since the whole
+  // file goes to the tool path — became the build's ONE program, and its
+  // declaration was stamped onto every web unit: a previously REFUSED set compiled
+  // clean with `scrml_sid`/604800 (S438 review F1). Asking the dispatch closes that,
+  // and keeps a web file with a misplaced `kind="tool"` node (E-TOOL-002 anyway)
+  // counted exactly as `readRawUnitSessionAttr` reads it.
   const _collectProgramSites = (f: any): Array<{ node: any; filePath: string }> => {
     const acc: Array<{ node: any; filePath: string }> = [];
+    if (isToolProgram(f)) return acc;
     const filePath = (f?.filePath as string) ?? "";
     const visit = (ns: any[]): void => {
       if (!Array.isArray(ns)) return;

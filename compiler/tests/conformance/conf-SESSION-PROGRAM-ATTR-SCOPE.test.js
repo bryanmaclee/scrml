@@ -605,3 +605,111 @@ describe("CONF-SESSION-PROGRAM-ATTR-SCOPE §20.5.1 — program-scoped, not build
     }
   });
 });
+
+// ── S438 — a `kind="tool"` program is not an application (`g-mw008-counts-headless-tool-programs`)
+// A headless tool owns no cookie-session unit (§64: no page, `session.*` is E-SESSION-CONTEXT,
+// a `serve=` tool refuses cookie auth). Counting it as a `<program>` made ONE web app plus a
+// `tools/seed.scrml` read as two applications: E-MW-008 refused the build, and the member unit
+// fell to `__Host-scrml_sid`/3600 while the root kept `scrml_sid`/604800 (the F1 split).
+// Measured on 072741ca, every shape below except the two-app controls reported E-MW-008.
+const TOOL = `<program kind="tool" lang="ts">
+\${
+  function main(args: string[]) {
+    println("seeded")
+  }
+}
+</program>`;
+const TOOL_DECLARING = TOOL.replace(`kind="tool"`, `kind="tool" sessionExpiry="7d" session-secure="false"`);
+const TOOL_SERVE = TOOL.replace(`kind="tool"`, `kind="tool" serve=8099`);
+
+describe("CONF-SESSION-PROGRAM-ATTR-SCOPE §20.5.1 — a kind=\"tool\" program is not counted (S438)", () => {
+  for (const order of ["fwd", "rev"]) {
+    test(`one web app + its member + a headless tool: clean, and the member KEEPS the program's cookie (${order})`, () => {
+      const result = compileFixture("app-member-tool", {
+        "index.scrml": PROG_A, "pages/minter.scrml": MEMBER_MINTER, "tools/seed.scrml": TOOL,
+      }, order);
+      expect(codes(result)).toEqual([]);
+      const member = serverJsFor(result, "pages/minter.scrml");
+      expect(member).toBeTruthy();
+      expect(cookieNames(member)).toEqual(PLAIN);
+      expect(maxAgeSecs(member)).toEqual(SEVEN_DAYS);
+      expect(cookieNames(serverJsFor(result, "/index.scrml"))).toEqual(PLAIN);
+    });
+  }
+
+  test("a serve= tool is not counted either", () => {
+    const result = compileFixture("app-member-servetool", {
+      "index.scrml": PROG_A, "pages/minter.scrml": MEMBER_MINTER, "tools/srv.scrml": TOOL_SERVE,
+    });
+    expect(codes(result)).toEqual([]);
+    expect(cookieNames(serverJsFor(result, "pages/minter.scrml"))).toEqual(PLAIN);
+  });
+
+  test("a tool's OWN session attributes govern nobody: the web app keeps the secure defaults", () => {
+    const result = compileFixture("plainapp-member-decltool", {
+      "index.scrml": PROG_B, "pages/minter.scrml": MEMBER_MINTER, "tools/seed.scrml": TOOL_DECLARING,
+    });
+    expect(codes(result)).toEqual([]);
+    for (const unit of ["/index.scrml", "pages/minter.scrml"]) {
+      const js = serverJsFor(result, unit);
+      expect(js).toBeTruthy();
+      expect(cookieNames(js)).toEqual(SECURE);
+      expect(maxAgeSecs(js)).toEqual(DEFAULT_MAXAGE);
+    }
+  });
+
+  // ── S438 review round (F1/F2): the unit is the FILE the emitter dispatches, not the node ──
+  // `isToolProgram` sends a WHOLE file down the tool path by its first top-level
+  // `<program>`, so any further `<program>` in that file is emitted nowhere.
+  const TOOL_WITH_DEAD_DECLARING_SIBLING =
+    `${TOOL}
+<program session-secure="false" sessionExpiry="7d"></program>`;
+
+  test("F1 — a dead declaring <program> inside a TOOL file governs nobody (was: refused; node-skip made it a silent downgrade)", () => {
+    for (const order of ["fwd", "rev"]) {
+      const result = compileFixture("tool-dead-sibling", {
+        "tools/x.scrml": TOOL_WITH_DEAD_DECLARING_SIBLING, "pages/minter.scrml": MEMBER_MINTER,
+      }, order);
+      const member = serverJsFor(result, "pages/minter.scrml");
+      expect(member).toBeTruthy();
+      // Never `scrml_sid`/604800 — that declaration belongs to no emitted program.
+      expect(cookieNames(member)).toEqual(SECURE);
+      expect(maxAgeSecs(member)).toEqual(DEFAULT_MAXAGE);
+    }
+  });
+
+  test("F1 — a bare <program> inside a tool file does not make a web app + member read as two applications", () => {
+    const result = compileFixture("app-member-tool-bare-sibling", {
+      "index.scrml": PROG_A, "pages/minter.scrml": MEMBER_MINTER,
+      "tools/x.scrml": `${TOOL}
+<program></program>`,
+    });
+    expect(codes(result).filter((c) => c === "E-MW-008")).toEqual([]);
+    expect(cookieNames(serverJsFor(result, "pages/minter.scrml"))).toEqual(PLAIN);
+  });
+
+  test("F2 — a tool's declarations no longer leak into a program-less <page> (ACCEPTED on base, with the tool's plain 7d cookie)", () => {
+    // On 072741ca this compiled clean and the page minted `scrml_sid`/604800 — the
+    // tool's `session-secure="false"` reached a web unit it does not own. Now the
+    // page gets the language default. Secure direction, but a cookie RENAME: an
+    // adopter with this shape is logged out once on upgrade.
+    const result = compileFixture("decltool-page-only", {
+      "pages/minter.scrml": MEMBER_MINTER, "tools/seed.scrml": TOOL_DECLARING,
+    });
+    expect(codes(result)).toEqual([]);
+    const member = serverJsFor(result, "pages/minter.scrml");
+    expect(cookieNames(member)).toEqual(SECURE);
+    expect(maxAgeSecs(member)).toEqual(DEFAULT_MAXAGE);
+  });
+
+  test("control — two web apps are STILL refused with a tool beside them (the exclusion opens no hole)", () => {
+    const result = compileFixture("two-apps-tool", {
+      "aaa.scrml": PROG_A, "sub/zzz.scrml": PROG_B, "tools/seed.scrml": TOOL,
+    });
+    expect(codes(result)).toEqual(["E-MW-008"]);
+    // The census counts web-application programs only.
+    const m = String(hardErrors(result).find((d) => d.code === "E-MW-008").message);
+    expect(m).toMatch(/declares 2 <program>s across 2 files \(/);
+    expect(m).not.toContain("seed.scrml");
+  });
+});

@@ -2,6 +2,18 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S437 — 2026-09-27 (bryan · ASUS)
+
+The bootstrap's first slice landed and its central design claim held: a real parse → analyze → lower front end produces, from SPEC §66's own source, exactly the Core that was hand-built as the oracle (dpa-051 Fork A). dpa-051 was ruled (keep the S233 re-cut; `compiler/self-host/` frozen), and a long run of §66 rulings went into SPEC after two PA restatements were caught widening what bryan had answered. A handler silent-drop fix grew into five adversarial rounds and landed three silent-miscompile fixes, including an `else` that ran unconditionally in every function body.
+
+- **#1102** — bookkeeping: maps refreshed 787d4cb4 → d02738767; review floor 4 → 0; #1094 post-merge review (E-MW-008 counts `kind="tool"` programs; route-inference session defaults outrank the program; refusal still writes dist) → Peter; PRIMER/tutorial/PIPELINE currency pass vs S430/S435 (L19 reversal as current fact, §66 spec-ahead banner, `defer`/`import:host`/class+import() rejection); 66 spent worktrees removed.
+- **#1104** — dpa-051 ruled: R1 = (a) keep the S233 four-phase re-cut; `compiler/self-host/` FROZEN; R2–R5 = the dPA leans.
+- **#1105** — bootstrap slice M1 (`compiler/self-host-v2/`): thin typed Core IR, printer, instance-record runtime, run on hand-built Core; dpa-050 D1 answered by execution (one click opens ONE dropdown). no-default-arm lint + slice suite + v2 lexer oracle now gated in CI.
+- **#1106** — handlers (§5.2.3): a bare `;`-sequence always errors (an assignment-led one compiled silently with its tail emitted as HTML attributes); braced blocks are parsed as statement lists and run every statement in every position (fixes the `<each>`-row and leading-call drops); braceless `else` no longer runs unconditionally in function bodies. 0 corpus files newly fail. Ships one pinned LOUD regression (a template reading `@cell` inside a multi-statement handler) under a HIGH carried gap.
+- **#1107 / #1108** — SPEC §66: L6, L12, identities, spread-shape field edit, O57–O60, O21/O43 closed, reads through a conditional handle require narrowing.
+- **#1109** — bootstrap slice M2: parse → analyze → lower; the lowered Core EQUALS M1's hand-built oracle (the dpa-051 Fork-A proof). M3 starts with the typer (analyze has no value-type/arity/redeclare check; 11 shapes pinned).
+- Gaps filed include `g-impl1-match-miscompiles-hit-by-the-bootstrap` (F11–F16), `g-client-template-interpolation-lowering-needs-a-structural-emitter`, `g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous`, `g-recent-sessions-index-stale-on-main-after-every-wrap-merge`.
+
 ## S435 — 2026-09-26/27 (bryan · ASUS)
 
 A design session. dpa-050 (what a declaration IS) and dpa-052 (value mutability) were ruled through in conversation
