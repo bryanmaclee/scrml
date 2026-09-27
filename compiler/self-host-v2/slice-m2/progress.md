@@ -323,3 +323,22 @@ E-TYPE-001 family, and a scope pass → E-SCOPE-REDECLARE.
   Result this round: 23 mutations, all RED; the unmutated suite on the mirror is green.
 - **check.test F5 hard-coded indices**: fields / declarations / functions / types are looked up BY NAME
   (`field(core, "dropdown", "value")`, `fnNamed`, `withDecl`), never by position.
+
+### Post-merge review of #1109 (S438) — F1/F2/F3 fixed on hold/s438-1109-review-fixes
+- **F1 HIGH — the O58 (b) spread read a moving target.** `spreadStmts` wrote each override in sequence, so a
+  later override's value read an earlier override's write: `@p = { ...@p, x: @p.y, y: @p.x }` from {1,2} gave
+  2,2 (the genuine replace gives 2,1). Violated §66.10 item 1 (one value from one snapshot) and §66.11.3 item 1
+  (meaning never depends on spelling). Now: analyze mints a local per override (`SpreadWrite.tmp`, so lower
+  still decides nothing) and, with two or more overrides, lower emits every `Let tmp = value` before the first
+  `Write … Local(tmp)`. The write CLASSIFICATION (one contract-checked FieldAt / Transition per field) is
+  unchanged. A lone override stays a single Write. Tests: front.test.js "a spread reads ONE snapshot" (struct
+  cell + instance paths; both orders; self-read).
+- **F2 MED — `@h` inside its own `given c = @h :> { … }` was refused.** §66.7.5 (O56 RULED S435; reads S437
+  #1108): inside the narrowed block a direct `@h.f = …` / `@h.f` is legal. analyze's Env now carries the
+  narrowings (`NarrowB`); `resolveAt` resolves a narrowed `@h` to the narrowed instance `Narrowed(c)` with
+  `maybe: false`, so it lowers exactly as `c.f`. Scoped to the block and to the handle named: after the block,
+  or a different handle inside it, is still refused (tests: front.test.js "`@h` is narrowed inside its own
+  given").
+- **F3 LOW — the SPEC drift guard failed on a CRLF checkout** and matched "some scrml block anywhere".
+  parse.test.js now normalizes CRLF and compares each source with the blocks of ITS §66.19 section
+  (§66.19.1: exactly [counter]; §66.19.3: exactly [dropdown, app]); proven RED by editing either SPEC block.

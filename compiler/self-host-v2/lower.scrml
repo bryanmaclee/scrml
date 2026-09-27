@@ -512,16 +512,27 @@ ${
         return [Stmt.Assign(s, lowerExpr(c, value))]
     }
 
-    // O58 (b): `@x = { ...@x, f: v }` → one FieldAt Write per override.
+    // O58 (b): `@x = { ...@x, f: v }` → one FieldAt Write per override. The
+    // literal is ONE value built from one snapshot (§66.10 item 1), so with two
+    // or more overrides every value is evaluated into its local (analyze minted
+    // `tmp`) before the first write — `{ ...@p, x: @p.y, y: @p.x }` swaps, as
+    // the genuine replace does (§66.11.3 item 1). A lone override needs no
+    // local: its value is evaluated before its own write either way.
     fn spreadStmts(c: LC, ws: SpreadWrite[], value: AExpr | not) -> Stmt[] {
         if (value is not) return []
         const ps: AProp[] = objectProps(value)
-        let out: Stmt[] = []
+        if (ws.length == 1) {
+            const w0: WriteFact = ws[0].w
+            return [Stmt.Write(w0.cap, instOf(c, w0.inst), w0.edit, lowerExpr(c, ps[ws[0].prop].value), w0.check)]
+        }
+        let lets: Stmt[] = []
+        let writes: Stmt[] = []
         for (const sw of ws) {
             const w: WriteFact = sw.w
-            out = out.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, ps[sw.prop].value), w.check)])
+            lets = lets.concat([Stmt.Let(sw.tmp, lowerExpr(c, ps[sw.prop].value))])
+            writes = writes.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Local(sw.tmp), w.check)])
         }
-        return out
+        return lets.concat(writes)
     }
 
     fn objectProps(e: AExpr) -> AProp[] {
