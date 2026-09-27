@@ -3037,7 +3037,19 @@ export function runCG(input: CgInput): CgOutput {
         const _plural = (n: number, s: string, p: string) => (n === 1 ? s : p);
         errors.push(new CGError(
           "E-MW-008",
-          `E-MW-008: this build declares ${_nProg} <program>s across ` +
+          // ⚑ THE FIRST ~110 CHARACTERS MUST CARRY THE REMEDY, AND THAT IS NOT A STYLE
+          // CHOICE (S436 round-4 review, F1). `commands/build.js` and `commands/dev.js`
+          // both print a CG error as `…slice(0, 120)`, so everything past that is never
+          // seen through the real CLI. The first cut of this message opened with the
+          // program/file census and was cut mid-word at "…declares session configuration (",
+          // destroying every actionable part: the contested attributes, the blocked units,
+          // and the remedy. The truncation itself is PRE-EXISTING and applies to every
+          // diagnostic — filed separately as `g-cli-truncates-diagnostics-at-120-chars`;
+          // this message is written to survive it rather than to wait for it.
+          // If you reorder this text, re-measure the first 120 characters.
+          `E-MW-008: two applications in one build contest one session cookie; ` +
+          `build one application per output directory.\n` +
+          `  This build declares ${_nProg} <program>s across ` +
           `${_allFiles.length} ${_plural(_allFiles.length, "file", "files")} ` +
           `(${_allFiles.join(", ")}), and ${_nDecl} of ${_plural(_nDecl, "them declares", "them declare")} ` +
           `session configuration (${_attrs.join(" / ")}) in ${_declaringFiles.join(", ")}.\n` +

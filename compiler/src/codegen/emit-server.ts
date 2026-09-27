@@ -2648,13 +2648,16 @@ export function generateServerJs(
   // measurement was the cookie name, which came out correct per unit precisely
   // because `session-secure` already had this step. Two readers, one shape.
   // ⛔ MOVED, NOT REWRITTEN (S436 round 4). The body of this reader, and the whole
-  // three-step order it sits in, now live in `./session-config-resolve.ts` so the
+  // three-step order it sat in, now live in `./session-config-resolve.ts` so the
   // driver can ASK the real resolver instead of re-deriving a fourth approximation
   // of it. Rounds 1-3 each mirrored this dispatch in `codegen/index.ts` and each
-  // mirror was wrong somewhere new. This shim keeps the local call sites reading the
-  // same as before.
-  const _readRawProgramAttr = (attrName: SessionAttrName): string | undefined =>
-    readRawUnitSessionAttr(getNodes(fileAST), attrName);
+  // mirror was wrong somewhere new.
+  // ⚑ The local `_readRawProgramAttr` shim that used to sit here is DELETED (round 4
+  // review, F5). After both call sites moved to `_resolveSessionAttr` it had zero
+  // callers while its own comment still claimed it "keeps the local call sites
+  // reading the same as before" — a dead reader next to a live one is exactly what
+  // makes "is there really only ONE resolution path?" hard to answer by reading.
+  // There is one: `resolveUnitSessionAttr`, via `_resolveSessionAttr` below.
   // Resolve one attribute through the shared order AND record a fall-through, but
   // only from the session-infra emission path below — an attribute nobody emits is
   // not a conflict. See `_resolveSessionAttr` uses.

@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 145 | 4 |
-| MED | 322 | 0 |
+| MED | 323 | 0 |
 | LOW | 121 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -19299,3 +19299,25 @@ Closed by the recursive node scan in the S436 session-config arc; filed so the d
 rather than living only in a fix's commit message.
 
 <!-- @gap id=g-nested-program-declaration-invisible-to-the-session-config-scan sev=MED status=open locus=compiler/src/codegen/index.ts prov=review:S436-pr-1080-F3-regraded -->
+
+### G-CLI-TRUNCATES-DIAGNOSTICS-AT-120-CHARS — every multi-line compiler error loses its remedy in transit
+
+**Reviewer-TRACED (S436 round-4 pass on #1092, F1), PRE-EXISTING.** `compiler/src/commands/build.js:907` and
+`compiler/src/commands/dev.js:630` both print a CG error as `${stripRedundantCode(e.code, e.message)?.slice(0, 120)}`,
+so **everything past 120 characters is never shown through the real CLI.** Measured on a ~1,400-character
+`E-MW-008`: the printed line ends mid-sentence at `…declares session configuration (`, discarding the contested
+attributes, the blocked units, the remedy, and the caveat — i.e. the entire actionable half.
+
+⚑ **The class is wider than one code, and it is invisible to the suite by construction:** every message-content
+assertion in the conformance tier goes through `compileScrml`, which returns the message UNTRUNCATED. A
+diagnostic can therefore be measured "names the blocked unit" in a passing test and show none of that to the
+adopter. `E-MW-007`, the sibling of the code that surfaced this, escapes only because the onion selector uses a
+different, non-truncating printer at `build.js:967` — so the two members of one family print to different rules.
+
+**Interim mitigation, not a fix:** `E-MW-008`'s message was rewritten at S436 to carry its remedy in the first
+111 characters, with a comment at the construction site saying to re-measure on any reorder. Every other
+multi-line diagnostic is still cut. **The real fix is a decision about the printer** — wrap rather than cut,
+cut at a sentence boundary, or print the first line in full plus a pointer — and it should be made once for
+the whole family rather than per-message.
+
+<!-- @gap id=g-cli-truncates-diagnostics-at-120-chars sev=MED status=open locus=compiler/src/commands/build.js:907 prov=review:S436-pr-1092-F1 -->

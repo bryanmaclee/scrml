@@ -61,7 +61,7 @@ const prog = (attrs, fn) => `<program csrf="off"${attrs}>
   <button onclick=${fn}()>go</button>
 </program>`;
 
-describe("E-MW-008 does not mask E-MW-007 (real CLI)", () => {
+describe("E-MW-008 and E-MW-007 are discriminated on disjoint inputs (real CLI)", () => {
   test("a pipeline conflict with NO session config still reports E-MW-007, not E-MW-008", () => {
     // `log=` on both programs is E-MW-007's trigger. Neither declares session config,
     // so E-MW-008 has nothing to contest and must stay silent.
