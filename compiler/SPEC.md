@@ -39114,15 +39114,19 @@ text; the tension with §66.10 is recorded here. Bryan's confirmation of this re
 
 > **Amendment S437 — instance records are created at program construction (bootstrap slice M1, L12).**
 > **Provenance:** ruling:user-voice-scrml.md S437 — *"L6 a, L12 b, identities yes, replace respects sub-fields"*
-> (L12 = option (b) of the PA's M1 ruling message, whose full text the terse answer ratifies: *"Create instance
-> records when the program is constructed, before any user code runs, separately from mounting the DOM. An
-> always-mounted instance then really does always exist, and the type is true by construction. Conditional
-> instances stay `T | not`, as §66.7.5 already says. … effects touching the DOM must wait for mount."*).
+> (L12 = option (b) of the PA's M1 ruling message, whose full text the terse answer ratifies). Option (b): *"Create
+> instance records when the program is constructed, before any user code runs, separately from mounting the DOM.
+> An always-mounted instance then really does always exist, and the type is true by construction. Conditional
+> instances stay `T | not`, as §66.7.5 already says."* The PA's recommendation, in the same message: *"The one
+> design constraint is that effects touching the DOM must wait for mount."*
 > Rejected: (a) type every top-level handle `T | not` outside its own view (a `given` for something that cannot
 > be absent); (c) a compiler proof of mount-before-use for every read.
 
-1. **Instance records are created when the program is CONSTRUCTED** — before any user code runs, and separately
-   from mounting the DOM. Creating an instance and mounting its markup are two distinct steps.
+1. **The record of every UNCONDITIONALLY-mounted instance is created when the program is CONSTRUCTED** — before
+   any user code runs, and separately from mounting the DOM. Creating an instance and mounting its markup are two
+   distinct steps. (When conditionally-mounted and `<each>`-row instances get their records, and how construction
+   is ordered relative to cell initializers and to use-site initializers — which, by §66.9 rule 8, evaluate
+   expressions — is ⚑ O59.)
 2. **An unconditionally-mounted instance therefore always exists**, and an `as=` handle to it is typed **`T`**
    (§66.8), not `T | not` — the type is true by construction.
 3. **A conditionally-mounted instance stays `T | not`** (§66.7.5, unchanged).
@@ -39140,8 +39144,9 @@ function closeCountry() { @country.open = .Closed }   // `@country` is `dropdown
 </main>
 ```
 
-(§66.6.4's lazy materialization of a declaration's unnamed shared instance — only if referenced — is not
-addressed by this ruling.)
+(§66.6.4's lazy materialization of a declaration's unnamed shared instance — "only if referenced" — is a STATIC
+property (whether the program references it), so it is compatible with creating the record at construction; the
+ruling does not otherwise address the shared instance.)
 
 ### 66.8 Declarations are types; named shared instances
 
