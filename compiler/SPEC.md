@@ -39100,6 +39100,14 @@ A write through an un-narrowed `T | not` handle is `E-DECL-HANDLE-NOT-NARROWED` 
 ruling:S435 (PA proposal text answered "yes", #18/#24/#25)** — the two lines above are verbatim from that message,
 which also shows `<dropdown as=country if=@showCountry …/>` (so `if=` is legal on a use; see O18).
 
+> **Amendment S437 — a READ through the handle MUST be narrowed too.** Reading a field (or the value) through an
+> un-narrowed `T | not` handle — in logic (`@color.value`) or in markup (`${@color.value}`) — is a compile error,
+> the same `E-DECL-HANDLE-NOT-NARROWED`; it is never a runtime failure while the instance is unmounted. Narrow first:
+> `given c = @color :> { … c.value … }`. A handle to an UNconditionally-mounted instance is `T` (§66.7.6) and needs
+> no narrowing. This is §42 applied to the handle: a field of a `T | not` value is not readable without
+> discrimination. **Provenance:** ruling:user-voice-scrml.md S437 — *"yes, reads require narrowing"* (surfaced by
+> the bootstrap slice M2 front end, which found the read un-diagnosed).
+
 **The narrowed binding writes the instance.** In the answered text, `c.open = .Closed` inside the `given` block is
 the write that reaches the mounted instance. This is a carve-out from the §66.10 snapshot rule for a narrowed
 instance handle (the lists ruling came after the value-semantics ruling and its text writes through `c`). In
@@ -40222,7 +40230,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-FIELD-TAG-NEEDS-STAR`** | Error | A bare `<f/>` names a child field of the enclosing declaration. Message: *"did you mean `<*f/>`?"* (§66.6.6). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-STAR-PREDEFINED`** | Error | `<*x/>` where `x` is a predefined (HTML) declaration, e.g. `<*div/>` (§66.6.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
