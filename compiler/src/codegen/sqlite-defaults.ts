@@ -73,8 +73,21 @@
  * this block.
  */
 
-/** The 5s busy-timeout, in ms. Named so the two call sites cannot drift. */
-export const SQLITE_BUSY_TIMEOUT_MS = 5000;
+/**
+ * The 5s busy-timeout, in ms. Named so the call sites cannot drift.
+ *
+ * ⛔ DEFINED IN `../sqlite-handle-defaults.ts`, NOT HERE, and re-exported so this module's
+ * existing importers keep their import path. S436 found the OTHER half of this defect: the
+ * handles the compiler and its CLI open in their OWN process (`bun:sqlite` `Database`, e.g.
+ * `scrml db-migrate`) got no timeout at all, so the gap's own sentence — "that blocked the
+ * adopter's DB migration" — stayed reachable after #1062 (MEASURED: `db-migrate` died
+ * `database is locked` in 129 ms against a held lock). Those handles are synchronous objects,
+ * not emitted text, so they need a different HELPER — but the same VALUE. One definition,
+ * two shapes; see `sqlite-handle-defaults.ts` for why the CLI half sets `busy_timeout` only
+ * and must NOT convert an adopter's file to WAL.
+ */
+export { SQLITE_BUSY_TIMEOUT_MS } from "../sqlite-handle-defaults.ts";
+import { SQLITE_BUSY_TIMEOUT_MS } from "../sqlite-handle-defaults.ts";
 
 /**
  * The emitted `_scrml_sqlite_configure` helper, as source lines. Emit ONCE per
