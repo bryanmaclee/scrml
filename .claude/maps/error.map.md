@@ -1,6 +1,42 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 ERROR DELTA ━━━━━━━
+# §34 catalog 819 -> **832** (`bun scripts/s34-census.ts`, range `20294..21197`); census buckets at this SHA: STRUCK 34 ·
+# PINNED 359 · IMPL-SITES 312 · DECLARED-AHEAD 17 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107. 13 codes ADDED to SPEC tables,
+# 0 removed — rowed with emit sites in `## S437 — NEW DIAGNOSTIC CODES` below. ⛔ `E-MANIFEST-001` is emitted
+# (`host-import.js`) and named in §22.13 prose but has **NO §34 catalog row** — see non-compliance.report.md.
+# `E-MULTI-STATEMENT-HANDLER` is NARROWED (not removed) by the §5.2.3 S435 amendment — it now fires only on a bare
+# `;`-sequence with no enclosing braces.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -334,6 +370,36 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S437 — NEW DIAGNOSTIC CODES (`787d4cb4..d02738767`)
+
+Emit site = file(s) containing the code as a string literal at `d02738767`. "conf" = number of files under `conformance/cases/` mentioning the code.
+
+| code | SPEC | emit site | conf | fires when |
+|---|---|---|---|---|
+| E-CLASS-NOT-IN-SCRML | §7.2.1 | `native-parser/parse-stmt.js` + `parse-expr.js` productions, surfaced for the default pipeline by `native-walker/forbidden-js-native.ts` | 0 (unit: `class-dynamic-import-reject.test.js`) | a `class` declaration / expression in scrml logic (never the word in prose/strings/CSS/SQL) |
+| E-DYNAMIC-IMPORT-NOT-IN-SCRML | §21.3.2 | `native-parser/parse-expr.js`, via `forbidden-js-native.ts` | 0 (unit) | a dynamic `import(...)`, incl. inside a `^{}` meta body |
+| E-DEFER-OUTSIDE-FUNCTION | §19.16.3 | `validators/lint-defer.ts` | 4 | `defer` with no enclosing function body |
+| E-DEFER-NESTED | §19.16.3 | `lint-defer.ts` | 4 | `defer` inside a deferred body |
+| E-DEFER-CONTROL-FLOW | §19.16.3 | `lint-defer.ts` | 7 | `return`/`fail`/`?`/escaping `break`/`continue` in a deferred body |
+| E-DEFER-UNHANDLED-FAILABLE | §19.16.3 | `lint-defer.ts` (`!{}` totality limb) + `type-system.ts` (bare-call limb) | 1 | an unhandled failable call in a deferred body |
+| E-DEFER-UNSUPPORTED-SITE | §19.16.2 | `lint-defer.ts`, `native-parser/parse-expr.js` | 3 | `defer` in a bare `{}` block, unbraced arm, or value-position arm |
+| E-DEFER-LATER-SHADOW | §19.16.2 | `lint-defer.ts` | 2 | a deferred statement reads a name a LATER `let`/`const`/`lin` rebinds |
+| E-DEFER-DUPLICATE-FUNCTION | §19.16.6 | `lint-defer.ts` | 2 | a `defer`-bearing block declares the same `function` twice |
+| E-DEFER-SERVER-IN-SPLIT | §19.16.5 | `route-inference.ts` | 2 | server-tier deferred body / `defer` in a server-run statement of a CPS-split fn |
+| E-SCOPE-REDECLARE | §7.3.3 | `validators/lint-redeclare.ts` | 5 | same-block redeclaration (or a param in a fn's top block) — replaces an unexplained `E-CODEGEN-INVALID-LOGIC` |
+| E-MW-008 | §20.5.1 | `codegen/index.ts` (drain of `session-config-resolve.ts`'s unattributable units) | 0 (tests: `commands/mw008-does-not-mask-mw007.test.js`, `conformance/conf-SESSION-PROGRAM-ATTR-SCOPE.test.js`) | a multi-`<program>` build where a session-emitting unit cannot be attributed to one program's `sessionExpiry`/`session-secure` |
+| W-ENGINE-MATCH-IN-STATE-CHILD | §51.0.B | `validators/post-ce-invariant.ts` | 2 | a block `<match>` inside an engine state-child body (known limitation: it renders BLANK) |
+
+**Existing codes whose FIRE PATH changed this window (verify in source before relying on it):**
+- `E-ASSIGN-004` (§50.8.5) now fires at statement position from `type-system.ts` (#996) — bare naming is `const`, mutation needs `let`; `codegen/declared-name-marks.ts` keeps the lowering loud where the type system does not see the write.
+- `E-IMPORT-003` / `E-IMPORT-008` / `E-IMPORT-009` / `E-MANIFEST-001` — `import:host` gate, `host-import.js` `validateHostImports`; `E-IMPORT-006` for an unresolvable host target (`module-resolver.js` `checkHostImport`).
+- `E-AUTH-005` (§52.11) scoped to the APPLICATION, not one file (#995).
+- `E-PA-004` names the file it opened (#1047); every PA/diagnostic message passes the value-based redactor.
+- `E-MULTI-STATEMENT-HANDLER` narrowed (§5.2.3 S435) — see header.
+
+## S437 — secret redaction is now a DIAGNOSTIC-STREAM CHOKEPOINT, not a per-message courtesy
+`compileScrml` builds one `SecretRedactor` (`api.js:829`, overridable via `options._secretRedactor`) from every `<program db=>` / `<page db=>` / `<db src=>` / `idempotency-store=` value, then redacts the user log (`:834`), intercepts compile output for the duration (`interceptCompileOutput`), redacts a thrown error (`:840`) and every entry of `result.errors` / `warnings` / `lintDiagnostics` (`:845`), and exposes `result.redact` / `result.redactSource` (`:847-848`). The unredacted pipeline is `compileScrmlUnredacted`. Display form is POSITIONAL (userinfo + every parameter value → `<redacted>`), never a substring search for the password. `lsp/handlers.js` runs the same redactor over every editor diagnostic and PA note. A new diagnostic that echoes a connection value needs nothing extra — but text printed OUTSIDE those arrays and outside the interception window bypasses the redactor.
 
 ## HOW TO LOOK UP A DIAGNOSTIC CODE (read this first)
 
@@ -1207,6 +1273,7 @@ once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for
 #e-cg-tilde-unresolved #tilde-accumulator #section-32 #fail-closed-floor #narrow-sink #two-drains #reset-once-per-run #process-level-not-filesystem-level #partial-span-position #resolvespanlinecol #spanfromestree-hardcodes-1-1 #cardinality-per-emission #e-tilde-001-zero-fire-sites #zero-producers #cause-traced #815-codes #pinned-344
 #e-type-031-three-positions #section-7-5-1-position-2 #e-contract-001 #e-contract-001-rt #classifypredicatezone #checkpredicateliteral #buckets-sum-to-total #dispositions-redistributed #catalog-flat-815 #range-moved-not-total
 #s405 #818-codes #catalog-19750-20639 #921-e-rows #182-w-rows #786-unique-codes #row-count-is-not-a-code-count #e-protect-004-is-a-lint #e-protect-005 #file-scoped-not-query-scoped #dedup-key-span-plus-name #endpoint-arm-shares-a-span #w-protect-005 #compile-runtime-seam #zero-byte-readablestream #w-schema-no-tables-declared #four-way-conjunction #cry-wolf-gate-gets-deleted #schema-anchor-fixture-declared-nothing #e-cg-enum-binding-collision #e-cg-sql-fn-unverifiable-span #code-with-no-spec-home #catalog-count-measures-the-catalog #emitter-derived-vs-catalog-derived #error-generated-regenerated
+#s437 #d02738767 #s34-832 #e-defer-family #e-class-not-in-scrml #e-dynamic-import-not-in-scrml #e-scope-redeclare #e-mw-008 #w-engine-match-in-state-child #e-manifest-001-no-s34-row #secret-redactor-chokepoint #e-multi-statement-handler-narrowed
 
 ## Links
 - [primary.map.md](./primary.map.md)

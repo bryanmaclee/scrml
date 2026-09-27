@@ -1,6 +1,41 @@
 # infra.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 INFRA DELTA ━━━━━━━
+# NOT a zero-diff row: `ci.yml` gained ONE step in `gate` (15 -> 16) and ONE in `windows` (4 -> 5), both
+# `bun test compiler/tests/e2e-render-map/` (S427, #1019). `cloud-maps.yml` relabelled only (commit/PR titles now
+# `chore(state): …` and state that nav-maps are NOT refreshed). No Dockerfile / compose / IaC / deploy workflow
+# appeared (`git diff --name-only 787d4cb4..HEAD -- 'Dockerfile*' 'docker-compose*' '*.tf' '**/k8s/**'` -> EMPTY).
+# No new repo secret referenced. The job/tier table below is corrected in place for this SHA.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -224,9 +259,9 @@ FROM GREPS THIS SESSION AND THEY POINT IN OPPOSITE DIRECTIONS.**
 
 | job | blocking? | test tiers it runs |
 |---|---|---|
-| `gate` | **YES** (the only branch-protection required check) | `compiler/tests/unit` · `compiler/tests/conformance` · root-level `compiler/tests/*.test.js` |
+| `gate` | **YES** (the only branch-protection required check) | `compiler/tests/unit` · `compiler/tests/conformance` · root-level `compiler/tests/*.test.js` · **`compiler/tests/e2e-render-map/` (S437: added S427, #1019)** |
 | `tracking` | no (`continue-on-error: true`) | `compiler/tests/integration` · `compiler/tests/lsp` · **`compiler/tests/commands`** · `parser-conformance-within-node` |
-| `windows` | no (`continue-on-error: true`) | `compiler/tests/unit` · `compiler/tests/conformance` |
+| `windows` | no (`continue-on-error: true`) | `compiler/tests/unit` · `compiler/tests/conformance` · **`compiler/tests/e2e-render-map/` (S437: added S427)** |
 
 ⚑ **`compiler/tests/commands/` IS ADVISORY-ONLY ON EVERY PLATFORM.** It is in no blocking job here,
 and in no local hook that actually executes on a normal push — a real §52.13 security assertion sat
@@ -237,7 +272,7 @@ that makes the naive statement false) in invariant 87.
 `[test] root = "compiler/tests/"`, so the repo-root `conformance/` dir is outside auto-discovery and
 a workflow grep for it returns nothing. The gate is
 `compiler/tests/conformance/corpus-bridge.test.js`, which sits under the gated root and imports
-`conformance/run.ts`. All 893 corpus cases therefore ride `gate` **and** pre-commit. Invariant 88.
+`conformance/run.ts`. All corpus cases (⛑ S437: **973**, was 893 when this line was written) therefore ride `gate` **and** pre-commit. Invariant 88.
 
 Full stage-by-stage detail lives in build.map.md — not duplicated here.
 Deploy trigger: none — no workflow builds/publishes a deployable artifact. `cloud-maps` is the only one that WRITES to the repo, and it does so through a PR + auto-merge, never a direct push to protected `main`.
@@ -264,6 +299,7 @@ Do not go looking for an App install.
 #scrml #map #infra #ci #github-actions #docs-deploy #no-docker #cloud-maps #maps-pat #anthropic-api-key #scheduled-workflow #branch-protection #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #browser-baseline #failure-name-set #§34.0 #fetch-depth-0 #skipped-step-behind-red-step #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #recovery-lever #ci-yml-15-lines #delta-lint-gate #step-name-truthfulness #no-infra-change #three-workflows #zero-infra-diff
 #zero-diff-window
 #s405 #infra-zero-diff #verified-empty-diff #protect-opaque-refusal-500 #e-protect-005-fails-at-compile-not-runtime #mounthydrate-guarded
+#s437 #d02738767 #gate-16-steps #windows-5-steps #e2e-render-map-gated #cloud-maps-relabel
 
 ## Links
 - [primary.map.md](./primary.map.md)

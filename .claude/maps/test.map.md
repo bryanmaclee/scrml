@@ -1,6 +1,41 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 TEST DELTA ━━━━━━━
+# `git diff --name-status 787d4cb4..HEAD -- compiler/tests`: **56 A · 3 D · 1 R · 28 M**. `.test.js` count by
+# `git ls-files 'compiler/tests/*.test.js'` = **1,505** (== FACTS). Per dir at `d02738767`:
+# `unit 985 · integration 228 · conformance 134 · browser 113 · commands 18 · ROOT 14 · lsp 11 · e2e-render-map 2 ·
+# self-host 0` = 1,505. `compiler/tests/self-host/` is RETIRED (README only). Conformance corpus: 973 cases / 55 dirs;
+# `bun conformance/run.ts` -> **967 pass + 6 XFAIL**. New mechanism: per-implementation `xfail` (S430 P7).
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -278,6 +313,39 @@
 # **62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (a count AND a first-match
 # check) and **all 18 are `count: 1`** — those 18 are exactly what #822 un-blinded.
 #
+
+## S437 — TEST SURFACE CHANGES (`787d4cb4..d02738767`)
+
+### Tier counts (`git ls-files` at `d02738767`)
+| dir | count | note |
+|---|---|---|
+| `unit/` | 985 | +31 this window (defer, class/dynamic-import reject, db-uri redaction ×4, E-ASSIGN-004 ×2, lift-body lowering, implied-lift, `conformance-xfail.test.js`, `parser-workarounds.test.js` moved in from self-host) |
+| `integration/` | 228 | +8 — incl. `hybrid-stage-swap.test.js` (pins `PARSE_REENTRY_FILES`), `hybrid-xfail.test.js`, `import-host.test.js`, `scrml-compiler-import-host-bridge.test.js`, `compile-order-independence.test.js`, `sqlite-wal-busy-timeout-defaults.test.js`, `sqlite-busy-timeout-compiler-opened-handles.test.js`, `session-program-scope-multi-unit.test.js` — **outside the blocking `gate`** (runs in `tracking`) |
+| `browser/` | 113 | +9 (lift-in-row/arm, lift target mount template, match-in-each-row, when-changes dep-list, engine state-child closer, …) |
+| `conformance/` | 134 | +1 `conf-SESSION-PROGRAM-ATTR-SCOPE.test.js` |
+| `commands/` | 18 | +1 `mw008-does-not-mask-mw007.test.js` — advisory-only tier |
+| `e2e-render-map/` | 2 | now **gated** in `gate` + `windows` (S427) |
+| `self-host/` | 0 | RETIRED — `ast/bs/tab.test.js` deleted, `bpp.test.js` → `unit/parser-workarounds.test.js`. Replacement: `bun scripts/hybrid.ts --swap <STAGE>=<module> --conformance` |
+| ROOT · `lsp/` | 14 · 11 | flat |
+
+New helpers: `compiler/tests/helpers/compile-artifact-digest.js`, `helpers/s430-class-import-review-probes.js`. New fixtures: `integration/fixtures/hybrid/{tab-identity,tab-spanless,tab-drop-function-decl}.js` (substitute stage modules for the seam tests), `e2e-render-map/fixtures/d6-nested-each-empty-with-data.scrml`.
+
+### Conformance corpus — `conformance/cases/` 905 → 973 (+68), 54 → 55 dirs
+New dir **`defer/`** (44 cases). Other adds: `markup-handler/` (+6 inline-block-handler cases for §5.2.3 S435 + `expr-handler-call-first-multi-stmt`), `module/` (import:host / E-IMPORT-008 cases), `ssr/`, `reactive/`, `engine/`, `fn/` (`scope-redeclare-neg` / `-nested-ok`), `lifecycle/`, `each/`, `auth/`, `control-flow/`.
+
+### Per-implementation `xfail` (S430 P7, #1050) — `conformance/run.ts`, `conformance/README.md` §"Per-implementation expected failure"
+A case whose impl#1 failure is a `status=carried` gap carries a top-level `xfail` block naming the gap AND the failure signature; a carried case that fails for a DIFFERENT reason is a real failure. `--xfail-signature <case>` prints the block. **The 6 XFAIL cases at `d02738767`:**
+- `each/when-changes-in-row-body` — `g-when-changes-in-each-row-body-dropped`
+- `markup-handler/expr-handler-call-first-multi-stmt` — `g-expr-handler-drops-every-statement-after-a-leading-call`
+- `markup-handler/inline-block-handler-call-first` — same gap
+- `markup-handler/inline-block-handler-in-each-row` — `g-each-row-event-handler-keeps-only-first-statement`
+- `reactive/mutating-method-string-arg` — `g-mutating-method-string-args-lose-their-quotes`
+- `reactive/nested-path-method-call-not-first-stmt` — `g-nested-path-method-call-dropped-when-not-first-statement`
+
+⚑ **Three of the six are §5.2.3 inline-block-handler shapes**: L19's reversal is SPEC-normative and PASSES on impl#1 for the plain / multi-line / engine-state-child shapes, but a handler whose FIRST statement is a call, or one inside an `<each>` row, still drops statements on impl#1 (carried, not fixed).
+
+### Hybrid harness tests
+`integration/hybrid-stage-swap.test.js` pins the seam (incl. a NEW re-entry site cannot land unseen); `integration/hybrid-xfail.test.js` pins that impl1-ts xfail marks apply to a HYBRID (XFAIL ok · fails-differently RED · XPASS reported, not red · mark on a non-carried gap RED).
 
 ## Test Framework
 Runner: `bun:test` (Bun's built-in test runner, no separate package dep)
@@ -949,6 +1017,7 @@ tool is marked `HARD REQ n` at its site so a future editor can see what they wou
 #ctrl-025-028 #tilde-accumulator #codecounts-is-an-emission-property #neg-case-pins-cardinality #case-flipped-sides #integration-tier-is-not-gated #1425-tests #897-conformance
 #1436-tests #897-conformance-flat #normative-widening-zero-conformance-cases #template-literal-classification-suite #unit-pin-is-not-a-conformance-pin
 #s405 #1440-tests #905-conformance #54-category-dirs #root-level-test-files-14 #mapgen-keys-on-first-subdir #definition-boundary-not-stale-figure #conformance-corpus-bridge-outside #engine-statechild-prose-punctuation #already-broken-upstream-pinned #mechanical-seam-test #mediation-marked #the-split-describe-block #protect-case-dir-10 #zero-over-an-unexercised-path #unloweredscrmlsyntax #emitted-bytes-gate #test-generated-regenerated
+#s437 #d02738767 #1505-tests #973-cases #defer-cases #xfail #status-carried #self-host-tests-retired #hybrid-stage-swap-test #e2e-render-map-gated #inline-block-handler-xfail
 
 ## Links
 - [primary.map.md](./primary.map.md)

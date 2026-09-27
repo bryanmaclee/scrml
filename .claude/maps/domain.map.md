@@ -1,6 +1,42 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 DOMAIN DELTA ━━━━━━━
+# The window added ONE language statement (`defer`), removed two JS constructs from scrml (`class`, dynamic
+# `import()`), built `import:host`, reversed L19, restored three silently-dropped render shapes, and wrote a whole
+# SPEC section (§66) that impl#1 deliberately does NOT implement. Each is rowed in `## S437 — DOMAIN CHANGES` below.
+# ⛔ **The single most load-bearing fact for a dev agent: §66 is NORMATIVE and NOMINAL. Do not implement §66 in
+# `compiler/src/` unless the task says so** — impl#1 is fixed only for cause (bootstrap-blocking / adopter-reported /
+# security); every other §66 divergence is `status=carried` (S430 P7).
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -240,6 +276,50 @@
 #
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
+
+## S437 — DOMAIN CHANGES (`787d4cb4..d02738767`)
+
+### Implementation policy — impl#1 is the floor; the SPEC and the bootstrap lead (S430 P5/P7, S435)
+- **P7:** a gap impl#1 will not fix is `status=carried` in `docs/known-gaps.md` and pinned by a conformance case with an impl1-ts `xfail` block (failure signature included). `scripts/state.ts` counts carried gaps in their own column (`GAP_STATUS_CARRIED`). impl#1 is fixed only for cause: bootstrap-blocking, adopter-reported, or security.
+- **P5:** a bootstrap module is DONE when the hybrid compiler (TS pipeline + that one stage swapped via `compiler/src/pipeline-seam.ts`) passes the full conformance suite: `bun scripts/hybrid.ts --swap <STAGE>=<module> --conformance`.
+- **v0.8.0** (`8cd1e0223`, #1099) is the impl#1 floor release tag.
+
+### §66 Declarations, Instances, and Value Contracts — NOMINAL / SPEC-AHEAD (`SPEC.md:38624`, 1,509 lines)
+A declaration is a state kind with typed attributes, a `renders`, and instances (dpa-050); data is immutable unless a contract on the TYPE grants the write (dpa-052). Supersedes (per its §66.0 table) §6.1.1, §6.1.5, §6.2 RHS shapes, §6.3.2, §6.4 render-by-tag, §6.6 `const <x>` spelling, §6.5.1/§6.5.5, §15 components, §16 (partly), §51.0.K (Move 20), §65.3.2/§65.6 `<theme>` body, §6.3.3/§14.11 tier-3 positional. Key rulings: `let` is a PREFIX (`<let count:int=0/>`); locked is the default and **`const <x>` retires** (§66.9); **components retire into declarations** (§66.15); value semantics — aliases snapshot (§66.10); write contracts are the one transition axis (§66.11); engines re-expressed as a `single` declaration whose fields carry transition graphs (§66.13, Q6 = (a)). Retired forms go through the §63 stage machine (§66.21 — e.g. `W-CONST-CELL-DEPRECATED` / reserved `E-CONST-CELL-DEPRECATED`). §66.20 codes get §34 rows only WITH their emitter.
+**impl#1 state at `d02738767`:** none of the §66.20/§66.21 codes is emitted (`grep -rln 'W-CONST-CELL-DEPRECATED\|W-DECL-LEGACY-RHS\|E-DECL-OPENER-EXPR-UNPARENTHESIZED' compiler/src compiler/native-parser` → nothing). `const <x> = expr`, RHS declarations and components all still compile as §6/§15 describe; that is what adopters get until the bootstrap passes P5.
+
+### §5.2.3 — L19 REVERSED (S435, `f5b9fd382`): inline block event handlers are legal and canonical
+`onclick={ @count = 0; @phase = .Idle; track("reset") }` — a brace-delimited statement list with function-body grammar, any number of lines. `E-MULTI-STATEMENT-HANDLER` is NARROWED to a `;`-sequence written BARE (no braces). The `:`-shorthand body rule (§4.14) is unchanged. impl#1 passes the plain / multi-line / engine-state-child cases; three shapes are carried xfails (a leading call drops later statements; an `<each>`-row handler keeps only its first statement) — see test.map.md.
+
+### §19.16 `defer` — scope-exit statement (#1051, S430 P3 stage 1)
+Registers its body against the ENCLOSING BLOCK; every registered body runs exactly once on every exit, LIFO; not reached ⇒ not registered; each loop iteration has its own stack. Lowered by `codegen/lower-defer.ts` (called at `codegen/index.ts:1373`) to `const _scrml_defers_N = []; try { … push(() => { D }) … } finally { run LIFO; rethrow first host error }` — nothing moves across a block boundary, so hoisting/TDZ are unchanged. Restrictions (§19.16.3) checked by `validators/lint-defer.ts` for BOTH front-ends (one `defer-stmt` node shape); the CPS-split limb (§19.16.5) by `route-inference.ts`; the bare-failable-call limb by `type-system.ts`. §7.3.3 `E-SCOPE-REDECLARE` was added alongside because the `try` wrap otherwise turned an illegal param redeclaration into legal shadowing ("a `defer` must not change what compiles").
+
+### §7.2.1 / §21.3.2 — `class` and dynamic `import(...)` are not scrml (#1048, S430 P1/P4)
+Decided on the NATIVE parser's tree in both pipelines (`native-walker/forbidden-js-native.ts`): only a class declaration/expression and a dynamic `import(...)` fire — never the word in prose, strings, comments, CSS, SQL or quoted attribute values. Attribute expressions are re-parsed with the native statement parser and placed by the value node's span. `stdlib/compiler/**` moved its host bridges to `import:host` in the same change.
+
+### §21.3.1 `import:host` + §22.13 manifest (#1045)
+`import:host { a, b as c } from "./mod.ts"` — file-top only (`E-IMPORT-003`), tag must be `host` and target a TS/JS module (`E-IMPORT-009`), manifest-gated (`E-IMPORT-008`; manifest value errors `E-MANIFEST-001`), unresolvable target `E-IMPORT-006`. Otherwise behaves as a plain import: names enter logic scope, codegen emits a static ES import. Same change: relative imports are rebased so they work from nested output dirs. Owner: `compiler/src/host-import.js`; resolution in `module-resolver.js` `checkHostImport`. ⚑ OPEN (MED): `g-clientjs-skips-relative-import-rebasing-so-a-host-import-dangles` — a host import reaching `clientJs` emits a dangling specifier (the `rewriteStdlibImports`-on-`clientJs` limbs in `api.js` skip the rebasing).
+
+### §17.6.10 / §10.1 — a bare-markup control-flow arm renders (implied `lift`, #1070)
+`${ if (@on) { <p>Yes</p> } else { <p>No</p> } }` rendered NOTHING at exit 0; now desugared to `{ lift <p>…</p> }` in the tree by `implied-lift-desugar.ts` (`desugarImpliedLiftMarkupArms`, called from `component-expander.ts` and `codegen/emit-match.ts`). Conformance restoration, not a widening (§10.1 limb 2 / §17.6.10 already required it).
+
+### §6.7.4 — `when … changes` honours its dep-list (#1054)
+Runtime `_scrml_when_changes(subscribe, body)` (`runtime-template.js:4542`): NO boot run, NO auto-tracking of body reads; body runs with tracking paused; fires after `_scrml_propagate_dirty`. `E-LIFECYCLE-007` rejects a dep-list entry that is not a declared mutable `@variable` (or is a derived `const <x>`). §6.5.1 expression-position writes now notify. Carried xfail: `when … changes` inside an `<each>` row body is dropped.
+
+### Codegen render-correctness fixes (all were silent at exit 0)
+- `lift` inside an `<each>` row or engine/match arm renders (#1022); a lift whose host is inside a mount template renders into the mounted node (#1021, TodoMVC); a lifted `<each>` keeps its `as` alias (#1038); lift-body lowering: `let` rebind is an assignment, a write to a `const` stays loud (`codegen/declared-name-marks.ts`, #1032 / s427).
+- `<match>` inside an `<each>` row can read the row (#1033); a match arm's `show=`/`disabled=`/value-form `if`/`textarea` can read arm names (#1037); an `<each>` inside a ternary-markup expression ships its chunk (#1029).
+- SSR: an `<each>` under an inert `if=` no longer gets a server renderer into a `<template>` nobody paints (#1066) — predicate derived from the emitter's own dispatch (`IF_GATE_BYPASS_TAGS`, `codegen/emit-html.ts:1091`); rows paint on hydration.
+- A `</>`-closed component inside an element in an engine state-child no longer steals the state-child's closer; a block `<match>` in a state-child now warns `W-ENGINE-MATCH-IN-STATE-CHILD` (it renders blank) (#1060).
+- **Compile-order independence (#1046):** per-file emit state is installed before first use (`beginEmitLogicFile`, `emit-logic.ts:1134`; `beginTopLevelLogicEmission` `:1153`); `resetCodegenModuleState()` (`codegen/index.ts:1106`) at the head of `runCG`; compile-scoped id allocators restart per compile. Pinned by `integration/compile-order-independence.test.js`.
+
+### Type-system / scope rules that moved
+- §50.8.5 `E-ASSIGN-004` at statement position (#996): bare naming is `const`; mutation needs `let`.
+- A destructured `let` can shadow; a written `let` loop binder no longer dies in TDZ; explicit `const` binders are const (#1043).
+- Exported declarations no longer swallow their diagnostics (`E-TRY`/`E-THROW` inside `export`, exported generators parsed) (#1042).
+
+### Session / sqlite / secrets (security + adopter-blocking)
+See auth.map.md (one session store + cookie per application, `E-MW-008`, `E-AUTH-005` application scope, value-based redaction) and config.map.md (§44 sqlite busy-timeout/WAL defaults — emitted handles get both, compiler-opened handles get busy_timeout only).
 
 ## §14.8.9 — THE PROTECT EGRESS FLOOR IS **THREE LIMBS OF DELIBERATELY DIFFERENT STRENGTH**, plus the Symbol-keyed MEDIATION MARK (NEW section, S405, #896 `b0c251f8`)
 
@@ -3225,6 +3305,7 @@ A returned function-expression closure (`return function name(){…}`, GITI-038)
 #tilde-accumulator #section-32 #section-32-2-1 #section-17-6-2 #liftvar-vs-var #armbodystmts-is-a-set #identity-not-flag #zero-strip-sites #descendoutofarmbody-deleted #read-half-reverted #nodecontainstilderef-is-an-allocation-gate #conditional-reach #array-mode-cross-arm-leak #unruled-widening-declined #dpa-040
 #section-53-4-hole-named #predicate-zones-routed-to-primary #literal-type-only #codegen-zero-diff
 #s405 #§14.8.9-three-limbs #e-protect-004-is-a-lint #e-protect-005-structural #runtime-refusal-is-the-guarantee #the-unit-is-the-body #status-and-headers-not-the-body #mediation-mark #scrml-protect-mediated #provenance-vs-shape #w-protect-005 #markmediatedresponses-throws #gated-on-protectactive #mounthydrate-redaction #enumerate-over-the-serializer #serverload-safe-for-a-reason #walk-unconditional-reconstruction-conditional #tagged-refusal-not-bare-throw #§14.8.10-tenant-floor #four-app-matrix #one-shared-recognizer #schema-differ-owns-it #import-direction-invariant #names-only-column-read #constraint-clauses-name-without-declaring #sourcetext-recovery-deleted #two-individually-correct-fixes-cancelling #extractdesiredschema-two-consumers #rawddl-marker #split-at-the-consumer #diffschema-byte-identical #deferred-migrate-arc #tenanttableset-three-methods #w-schema-no-tables-declared #union-recognition #cry-wolf-gate #§21.5-library-routing #opt-out-not-opt-in #rawfallbackreason #two-standing-exclusions #ifexpr-silent-wrong #verifiedfnremovalrange #sql-splicer-fails-closed #e-cg-sql-fn-unverifiable-span #e-cg-enum-binding-collision #zero-over-an-unexercised-path
+#s437 #d02738767 #section-66-nominal #const-retires #components-retire #l19-reversed #inline-block-handler #defer #section-19-16 #class-not-in-scrml #dynamic-import-not-in-scrml #import-host #implied-lift #when-changes-dep-list #compile-order-independence #p5-p7 #status-carried #impl1-floor-v0-8-0
 
 ## Links
 - [primary.map.md](./primary.map.md)

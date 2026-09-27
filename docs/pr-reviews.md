@@ -1914,3 +1914,7 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1098 verdict=clean by=S435-bryan date=2026-09-27 probe=SPEC-TEXT-ONLY-section-66-three-adversarial-rounds-15-then-13-then-6-findings-all-resolved-transcript-verified-closures-s34-census-PASS-19-codes-marked-spec-ahead -->
 <!-- @review pr=1099 verdict=carve-out by=S435-bryan date=2026-09-27 probe=CONFIG-REBUMP-package-json-version-0-7-1-to-0-8-0-plus-generated-FACTS -->
 <!-- @review pr=1100 verdict=carve-out by=S435-bryan date=2026-09-27 probe=SPEC-TEXT-ONLY-four-OPEN-items-marked-RULED-with-verbatim-rulings-plus-dpa-queue-brief-s34-census-PASS -->
+<!-- @review pr=1091 verdict=carve-out by=S437-bryan date=2026-09-27 probe=DOCS-ONLY-one-path-docs-pr-reviews-md-plus3-minus0-by-gh-pr-view-files -->
+<!-- @review pr=1095 verdict=carve-out by=S437-bryan date=2026-09-27 probe=WRAP-DOCS-ONLY-changelog-hand-off-delta-log-ZERO-compiler-paths-by-gh-pr-view-files -->
+<!-- @review pr=1101 verdict=carve-out by=S437-bryan date=2026-09-27 probe=WRAP-DOCS-ONLY-changelog-known-gaps-pr-reviews-hand-off-delta-log-ZERO-compiler-paths-by-gh-pr-view-files -->
+<!-- @review pr=1094 verdict=finding by=S437-bryan date=2026-09-27 probe=compileScrml-merge-vs-parent-archive-cookie-name-maxage-per-unit-24-shapes-tool-program-false-positive-PA-reproduced-protect-autoescalation-bypass-cli-build-writes-dist-on-E-MW-008 -->

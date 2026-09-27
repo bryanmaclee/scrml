@@ -1,6 +1,41 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# generated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 NON-COMPLIANCE PASS ━━━━━━━
+# scan mode: INCREMENTAL re-scan `787d4cb4..d02738767` (the 10 in-scope `.md` files the window changed) + a targeted
+# currency check of the four reference docs a dev agent is told to trust (`docs/PA-SCRML-PRIMER.md`, `docs/tutorial.md`,
+# `docs/PA-SCRML-REFERENCE.md`, `compiler/PIPELINE.md`) against the two SPEC moves of S435 (§5.2.3 L19 reversal, §66).
+# Findings are in `## Summary — S437 pass` and `## N-S437-*` below; the S422 and earlier passes follow unchanged.
+# Report only — no doc was moved, edited or deleted by this pass.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # scan mode: FULL_COLD_START re-execution (S422 wrap-6c, run from worktree agent-a83548a63b17c0d54)
 #
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`.** MAP-STAMP RULE run at WRITE time:
@@ -51,6 +86,96 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S437 pass (this pass)
+
+Total docs scanned: 14 (10 changed in-window: `compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `compiler/tests/self-host/README.md` (NEW), `conformance/README.md`, `docs/FACTS.md`, `docs/changelog.md`, `docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`, `master-list.md`; + 4 reference docs currency-checked)
+Compliant: 8
+Non-compliant: 5 docs (`docs/PA-SCRML-PRIMER.md`, `docs/tutorial.md`, `compiler/PIPELINE.md`, `master-list.md`, `docs/known-gaps.md` — findings N-S437-1..4) + 2 in-source findings (N-S437-5, N-S437-6)
+Uncertain: 1 doc (`docs/PA-SCRML-REFERENCE.md`, U-S437-2) + 1 gap entry (U-S437-1)
+Standing items re-executed at `d02738767`: 5 (table below)
+
+Gates re-run at this SHA: `bun scripts/facts.ts --check` PASS · `bun scripts/regen-spec-index.ts --check` OK (72/72 sections, 0 stale) · `bun scripts/conflict-marker-gate.ts` PASS (8,541 files, 0 markers) · `bun scripts/state.ts --check` **FAIL** (see N-S437-4).
+
+## ⛔ N-S437-1. `docs/PA-SCRML-PRIMER.md` teaches the RETIRED L19 rule as current — and one row is now false on impl#1 too
+**Reason:** combo (content contradicts SPEC; one claim falsified by execution)
+**Detail:** SPEC §5.2.3 (amended S435, `f5b9fd382`, `SPEC.md:1461`) withdrew L19: an inline block handler `onclick={ a; b }` is legal and canonical; `E-MULTI-STATEMENT-HANDLER` now fires only on a BARE `;`-sequence. The primer (last-updated header: 2026-06-03, S160) still says:
+- `:919` — "Multi-statement handler restriction (§5.2.3, L19) … Multi-statement handlers force a named function. `E-MULTI-STATEMENT-HANDLER`."
+- `:1090` (the reflex-shapes table) — "Inline multi-statement event handler `onclick={ doA(); doB() }` → E-MULTI-STATEMENT-HANDLER; extract to a named function". **Falsified by execution at `d02738767`:** a file with `<button onclick={ @count = @count + 1; @msg = "hi" }>` compiles with NO `E-MULTI-STATEMENT-HANDLER`, and conformance `markup-handler/inline-block-handler-runs-every-statement` / `-multi-line` / `-in-engine-state-child` PASS on impl#1.
+- `:1147` (L-table) — "L19 | Multi-statement event handlers force named function".
+**Suggested disposition:** update to match current (§5.2.3 S435 text; note the three carried impl#1 xfails: leading-call and `<each>`-row handlers drop statements).
+
+## ⛔ N-S437-2. `docs/PA-SCRML-PRIMER.md` presents `const <x>` and components as the canonical model with no §66 notice
+**Reason:** content-heuristic (stale vs normative SPEC; accurate for impl#1 behaviour)
+**Detail:** SPEC §66 (S435, `SPEC.md:38624`) is NORMATIVE: `const` retires (§66.9 — `const <x> = expr` → locked declaration `<x:T=(expr)/>`, `W-CONST-CELL-DEPRECATED` in §66.21), components retire into declarations (§66.15), RHS declarations `<x> = v` retire (§66.3/§66.21), the engine is re-expressed as a `single` declaration (§66.13, Move 20 reversed). §66 is Nominal — impl#1 still compiles every retired form and emits none of the §66 codes (grep-verified) — so the primer is correct about what impl#1 DOES and wrong about what the language IS. It teaches `const <x>` as the canonical derived/markup value at `:84-86`, `:377` (the "teachable rule"), `:423`, `:431`, `:780`, `:1108` ("Canonical form `const <x> = expr` is universal"), `:1143` (L15); and components as one of "five declarative doors" (`:91`) plus `:683`, `:737`, `:915`, `:1092`. It has no mention of §66, `defer` (§19.16), `import:host` (§21.3.1) or the `class`/dynamic-`import()` rejection (§7.2.1/§21.3.2).
+**Suggested disposition:** update to match current — add a §66 Nominal banner (what impl#1 accepts today vs what §66 makes canonical) rather than rewriting examples to a form impl#1 cannot compile.
+
+## ⚠ N-S437-3. `docs/tutorial.md:1115` and `compiler/PIPELINE.md:214` carry the pre-S435 L19 framing
+**Reason:** content-heuristic
+**Detail:** tutorial row "Multi-statement inline handler `onclick=fn(); @x = .Y` → Name the function: `function go() { fn(); @x = .Y }`". The error half is still right (that input is the BARE form, still `E-MULTI-STATEMENT-HANDLER`), but the remedy is no longer the canonical one — §5.2.3 now says wrap it in braces: `onclick={ fn(); @x = .Y }`. `PIPELINE.md:214` labels L19 "Multi-statement event-handler restriction" (now narrowed to the bare form). Separately, `compiler/src/pipeline-seam.ts`'s own header records that `PIPELINE.md` has drifted from the stage contracts (TS documented as `{ typedAst }` but returns `{ files, errors }`; CG documented as `{ outputs: FileOutput[] }` but returns a Map; BS documented as taking a macroTable), and PIPELINE.md has no `defer`, `import:host`, `REJECT-CLASS-DYNAMIC-IMPORT`, `DEFER-CHECKS` or `SCOPE-REDECLARE` stage (`grep` → nothing).
+**Suggested disposition:** update to match current.
+
+## ⚠ N-S437-4. `master-list.md` `@generated:recent-sessions` STILL stale (N-S422-6 carried forward) and known-gaps heading/marker drift GREW 45 → 52
+
+> **RESOLVED on landing (S437 PA):** the same PR that lands this report (`chore/s437-bookkeeping`) regenerates the block; `state.ts --check` PASSES on that branch. Root cause filed as `g-recent-sessions-index-stale-on-main-after-every-wrap-merge` — it recurs after every wrap merge by construction. The heading/marker drift half stands.
+**Reason:** content-heuristic (generated-section currency)
+**Detail:** `bun scripts/state.ts --check` at `d02738767` → `STALE @generated:recent-sessions (master-list.md)` → FAIL; and `known-gaps heading/marker status: 52 DRIFT (heading ≠ marker)` (WARN-only) — up from 45 at S422. Sample: `g-e2e-render-map-tier-runs-in-no-ci-job-at-all` heading=open marker=resolved (the S427 CI step closed it; the heading was never updated).
+**Suggested disposition:** update to match current (`bun scripts/state.ts --write` from the main checkout; heading sweep for the 52).
+
+## ⛔ N-S437-5. IN SOURCE — the ghost-pattern lints false-fire on the S435-canonical inline block handler
+**Reason:** grep-mismatch (a lint contradicts SPEC §5.2.3)
+**Detail:** Compiling `<button id="b" onclick={ @count = @count + 1; @msg = "hi" }>go</>` at `d02738767` emits `W-LINT-007` ("Found '<Comp prop={val}>' — scrml uses '<Comp prop=val>'") and `W-LINT-013` ×2 ("Found '@click=\"handler\"' (Vue event shorthand)"). The bare single-expression form `onclick=@count = 1` fires neither. So the canonical form the SPEC now recommends is flagged as a JSX/Vue ghost. Same class as Bug 44 (`W-LINT-007` on `fallback={<markup/>}`, fixed S137 by an exemption in `compiler/src/lint-ghost-patterns.js`). No `docs/known-gaps.md` entry names it (`grep` for `W-LINT-007` after the S435 entries → none).
+**Suggested disposition:** file a gap; fix is an exemption for `on<event>={ … }` in `lint-ghost-patterns.js` (bug, not doc).
+
+## ⛔ N-S437-6. IN SOURCE — `E-MANIFEST-001` is emitted but has NO §34 catalog row
+**Reason:** grep-mismatch
+**Detail:** `compiler/src/host-import.js:186` pushes `E-MANIFEST-001`; `SPEC.md:18342` (§22.13 prose) names it; the §34 catalog range `20294..21197` contains no `E-MANIFEST-001` row (`grep -n 'E-MANIFEST-001' compiler/SPEC.md` → only `:18342`). Weaker than N-S405-1 (it IS mentioned in SPEC) but invisible to `s34-census.ts` and every catalog-derived count.
+**Suggested disposition:** update to match current (add the §34 row).
+
+## UNCERTAIN — needs human review (S437)
+
+### U-S437-1. `docs/known-gaps.md` `g-library-meta-import-async-not-awaited` (`status=open`)
+**Reason:** its reproducer is `^{ const { safeCallAsync } = await import("scrml:http") }` — a dynamic `import()` in a meta body, which SPEC §21.3.2 (S430) now makes `E-DYNAMIC-IMPORT-NOT-IN-SCRML` ("including a `^{ }` meta body").
+**What to check:** compile the entry's reproducer at HEAD; if it now fails with `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, the entry is moot-by-ruling and should be closed or re-scoped to the static-import shape.
+
+### U-S437-2. `docs/PA-SCRML-REFERENCE.md` B18 rows (`:71`, `:247-256`)
+**Reason:** describe `E-MULTI-STATEMENT-HANDLER` as "load-bearing for L19 multi-statement-handler restriction"; the mechanism (top-level `;` outside brace depth) is still what the code does, so the braced block form is naturally exempt — the framing is stale, the mechanism may not be.
+**What to check:** whether the reference should say "narrowed by §5.2.3 S435" and whether `multi-statement-scan.ts` needs any change for the brace-wrapped form (conformance says no).
+
+## STANDING ITEMS — RE-EXECUTED AT `d02738767`
+
+| item | command | result |
+|---|---|---|
+| N-S405-1 — two live `E-CG-*` codes with zero SPEC mentions | `grep -c 'E-CG-ENUM-BINDING-COLLISION' compiler/SPEC.md`; same for `E-CG-SQL-FN-UNVERIFIABLE-SPAN` | **0 / 0 — STILL LIVE** (emitters `emit-library.ts:1517`, `:713`) |
+| N-S422-1 — `postRe` locus | `grep -n 'const postRe' compiler/src/type-system.ts` | now **`:27908`, `:28852`, `:28977`** (S422 published `:27384/:28322/:28447`) — locate by symbol |
+| N-S422-2 — `scripts/source-text-regex-census.ts` bakes `type-system.ts:26048` | `grep -n 26048 scripts/source-text-regex-census.ts` | **STILL LIVE** at `:38` and `:170` |
+| N-S422-3 — `docs/PA-SCRML-REFERENCE.md` cites `SPEC §55.1 line 24295` | `grep -n 24295 docs/PA-SCRML-REFERENCE.md`; `sed -n 24295p compiler/SPEC.md` | **STILL LIVE** at `:60` and `:131`; line 24295 is now inside §40.9.7 (heading at `:24293`). §55.1 is at `SPEC.md:35516` |
+| N-S422-6 — `@generated:recent-sessions` stale | `bun scripts/state.ts --check` | **STILL FAIL** — see N-S437-4 |
+
+## Docs scanned this window — compliance verdicts
+| doc | verdict |
+|---|---|
+| `compiler/SPEC.md` | compliant (authoritative; §66 correctly self-labels Nominal) |
+| `compiler/SPEC-INDEX.md` | compliant (`--check` OK) |
+| `compiler/tests/self-host/README.md` (NEW) | compliant — matches the deletion/move in the same change |
+| `conformance/README.md` | compliant — `xfail` section matches `conformance/run.ts` (`--xfail-signature` at `:412`) |
+| `docs/FACTS.md` | compliant (`--check` PASS) |
+| `docs/changelog.md` · `docs/pr-reviews.md` · `hand-off.md` | compliant (historical-by-design ledgers) |
+| `docs/known-gaps.md` | non-compliant in part — N-S437-4 (52 heading/marker drifts), U-S437-1 |
+| `master-list.md` | non-compliant — N-S437-4 |
+| `docs/PA-SCRML-PRIMER.md` | non-compliant — N-S437-1, N-S437-2 |
+| `docs/tutorial.md` · `compiler/PIPELINE.md` | non-compliant (partial) — N-S437-3 |
+| `docs/PA-SCRML-REFERENCE.md` | uncertain — U-S437-2 (+ standing N-S422-3) |
+## Tags
+#non-compliance #project-mapper #cleanup #scrml #s437 #d02738767 #pa-scrml-primer-stale #l19-reversed #section-66-nominal #const-retires #components-retire #ghost-lint-false-positive #w-lint-007 #w-lint-013 #e-manifest-001-no-s34-row #recent-sessions-stale #heading-marker-drift-52 #pipeline-md-drift
+
+## Links
+- [primary.map.md](./primary.map.md)
+- [domain.map.md](./domain.map.md)
+- [error.map.md](./error.map.md)
+- [project master-list](../../master-list.md)
+- [project pa.md](../../pa.md)
+- [scrml-support archive convention](../../../scrml-support/pa.md)
 
 ## Summary — S422 pass (this pass)
 
@@ -3249,6 +3374,7 @@ consecutive passes have recommended a deterministic map-currency gate; nothing h
 #s34-census-fixed-everywhere #s320-n1-closed #w-lint-nine-not-eight #generated-md-under-reports-292
 #delete-the-generated-indexes #tutorial-v0.7.0 #spec-index-authored-half #website-over-claim-risk
 #810-codes #883-conformance #1378-tests #watermark-advanced #bunfig-timeout-never-in-force #timeout-wears-fail-marker #pa-scrml-primer-13-5-under-audit #corpus-emptiness-not-evidence #sliding-doors-audit #inputfiles-order-open #528-title-overclaim
+#s437 #d02738767
 
 ## Links
 - [primary.map.md](./primary.map.md)
