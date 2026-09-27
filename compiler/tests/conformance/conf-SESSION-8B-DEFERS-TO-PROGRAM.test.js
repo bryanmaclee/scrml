@@ -322,3 +322,109 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — runtime", () => {
     }
   });
 });
+
+// ── S438 review F1 — 2+ `<program>` nodes in ONE file keep the stamped secure defaults.
+// The resolver's step 2 (`readRawUnitSessionAttr`) answers with the LAST declaring
+// `<program>` in document order (g-two-programs-one-file-session-attr-last-wins; what a
+// second `<program>` in one file means is reserved for E-PROGRAM-002). c9d97065 removed
+// 8b's stamp everywhere, so a protect= unit whose FIRST program declares
+// `session-secure="true" sessionExpiry="15m"` fell through to a LATER program's
+// `session-secure="false" sessionExpiry="30d"`: `scrml_sid` / 2592000, zero diagnostics,
+// and the gate accepted a plain (sibling-subdomain-plantable) `scrml_sid` — the
+// cookie-tossing vector `__Host-` closes (§20.5.1). Measured on 37d1a83a (pre-fix base):
+// `__Host-scrml_sid` / 3600 — which is what these units are pinned to again.
+const SECURE_15M = `<program csrf="off" session-secure="true" sessionExpiry="15m">
+${DB}
+</program>`;
+const PLAIN_30D = `<program csrf="off" auth="optional" session-secure="false" sessionExpiry="30d"><p>x</p></program>`;
+const TWO_IN_FILE = {
+  "sibling-after": `${SECURE_15M}\n${PLAIN_30D}\n`,
+  "nested": SECURE_15M.replace("\n</program>", `\n<div>${PLAIN_30D}</div>\n</program>`),
+};
+
+describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep the stamped secure gate (S438 F1)", () => {
+  // The reverse in-file order (plain 30d program FIRST): the file's `authConfig` is the
+  // first program's `auth="optional"`, so 8b does not escalate at all and registers no
+  // entry — identical on the pre-fix base; that is g-two-programs-one-file-session-attr-
+  // last-wins territory (E-PROGRAM-002), not this fix's. Pinned so the cookie at least
+  // never goes plain: step 2's last-wins lands on the SECURE 15m program here.
+  test("emitted: plain program FIRST → no escalation (as on base), cookie stays __Host-", () => {
+    const r = compileFixture("f1-sibling-before", { "index.scrml": `${PLAIN_30D}\n${SECURE_15M}\n` });
+    expect(codes(r)).toEqual([]);
+    const js = serverJsFor(r, "/index.scrml");
+    expect(cookieNames(js)).toEqual(SECURE);
+    expect(maxAgeSecs(js)).toEqual(["900"]);
+  });
+
+  test("emitted: the `<page auth=\"required\">` limb, nested plain 30d program → __Host-scrml_sid / 3600", () => {
+    // Same carve-out, 8b's other limb. On c9d97065: ["scrml_sid"] / ["2592000"].
+    const src = `<program csrf="off" sessionExpiry="15m">\n<page auth="required">\n${DB}\n</page>\n<div>${PLAIN_30D}</div>\n</program>`;
+    const r = compileFixture("f1-page-req-nested", { "index.scrml": src });
+    expect(codes(r)).toEqual([]);
+    const js = serverJsFor(r, "/index.scrml");
+    expect(js).toContain("function _scrml_auth_check(req)");
+    expect(cookieNames(js)).toEqual(SECURE);
+    expect(maxAgeSecs(js)).toEqual(["3600"]);
+  });
+
+  for (const [shape, src] of Object.entries(TWO_IN_FILE)) {
+    test(`emitted: ${shape} → __Host-scrml_sid / 3600, never the later program's plain 30d`, () => {
+      const r = compileFixture(`f1-${shape}`, { "index.scrml": src });
+      expect(codes(r)).toEqual([]);
+      const js = serverJsFor(r, "/index.scrml");
+      expect(js).toContain("function _scrml_auth_check(req)");
+      // On c9d97065 (sibling-after, nested): ["scrml_sid"] / ["2592000"].
+      expect(cookieNames(js)).toEqual(SECURE);
+      expect(maxAgeSecs(js)).toEqual(["3600"]);
+      expect(expiryConst(js)).toEqual(['"1h"']);
+    });
+  }
+
+  for (const shape of ["sibling-after", "nested"]) {
+    test(`executed: ${shape} — a planted plain scrml_sid is REFUSED (302); the __Host- one is accepted`, async () => {
+      if (typeof globalThis.document !== "undefined") return; // happy-dom-polluted worker
+
+      const { root, inputFiles } = writeFixture(`f1-rt-${shape}`, { "index.scrml": TWO_IN_FILE[shape] }, "fwd");
+      const dist = join(root, "dist");
+      const result = compileScrml({ inputFiles, outputDir: dist, write: true, log: () => {} });
+      expect(codes(result)).toEqual([]);
+      copyFileSync(join(root, "app.db"), join(dist, "app.db"));
+
+      const walk = (d, acc = []) => {
+        for (const e of readdirSync(d, { withFileTypes: true })) {
+          const p = join(d, e.name);
+          if (e.isDirectory()) walk(p, acc); else acc.push(p);
+        }
+        return acc;
+      };
+      const server = walk(dist).map((p) => p.replace(/\\/g, "/")).find((p) => p.endsWith("/index.server.js"));
+      expect(server).toBeTruthy();
+
+      const cwdBefore = process.cwd();
+      process.chdir(dist);
+      try {
+        const mod = await import(`file:///${server}?v=${Date.now()}-${Math.random()}`);
+        // Plant an authenticated session record directly in the durable store the
+        // module just opened (namespace "session", ms expiry) — an attacker who can
+        // toss a cookie needs only a sid the store resolves.
+        const store = walk(dist).find((p) => p.endsWith(".scrml-sessions.db"));
+        expect(store).toBeTruthy();
+        const SID = `planted-${Math.random().toString(36).slice(2)}`;
+        const db = new Database(store);
+        db.run("INSERT OR REPLACE INTO kv_store (namespace, key, value, expires_at) VALUES (?, ?, ?, ?)",
+          ["session", SID, JSON.stringify({ userId: 7 }), Date.now() + 3600_000]);
+        db.close();
+
+        const guard = mod._scrml_protected_document.guard;
+        // On c9d97065 this was null — the plain cookie authenticated.
+        const plain = guard(new Request("http://localhost/", { headers: { Cookie: `scrml_sid=${SID}` } }));
+        expect(plain && plain.status).toBe(302);
+        // Positive control: the plant itself resolves under the hardened name.
+        const hardened = guard(new Request("http://localhost/", { headers: { Cookie: `__Host-scrml_sid=${SID}` } }));
+        expect(hardened).toBeNull();
+      } finally {
+        process.chdir(cwdBefore);
+      }
+    });
+  }
+});

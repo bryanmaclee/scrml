@@ -78,22 +78,47 @@ export interface AuthMiddlewareSessionFields {
 export function readRawUnitSessionAttr(nodes: unknown, attrName: SessionAttrName): string | undefined {
   let progVal: string | undefined;
   let pageVal: string | undefined;
-  const visit = (ns: any[]): void => {
+  walkUnitProgramAndPageNodes(nodes, (n) => {
+    const a = ((n.attrs ?? []) as any[]).find((x: any) => x && x.name === attrName);
+    if (a && a.value && a.value.kind === "string-literal") {
+      if (n.tag === "program") progVal = a.value.value;
+      else if (pageVal === undefined) pageVal = a.value.value;
+    }
+  });
+  return progVal ?? pageVal; // program-level wins over page-level
+}
+
+/**
+ * THE walk step 2 performs — every `<program>` / `<page>` markup node of a unit, in
+ * document order, recursing through `children`. Shared, not mirrored: anything that
+ * must agree with what step 2 can see (e.g. `countUnitProgramNodes`) goes through it.
+ */
+function walkUnitProgramAndPageNodes(nodes: unknown, visit: (n: any) => void): void {
+  const walk = (ns: any[]): void => {
     if (!Array.isArray(ns)) return;
     for (const n of ns) {
       if (!n || n.kind !== "markup") continue;
-      if (n.tag === "program" || n.tag === "page") {
-        const a = ((n.attrs ?? []) as any[]).find((x: any) => x && x.name === attrName);
-        if (a && a.value && a.value.kind === "string-literal") {
-          if (n.tag === "program") progVal = a.value.value;
-          else if (pageVal === undefined) pageVal = a.value.value;
-        }
-      }
-      if (Array.isArray(n.children)) visit(n.children);
+      if (n.tag === "program" || n.tag === "page") visit(n);
+      if (Array.isArray(n.children)) walk(n.children);
     }
   };
-  visit(nodes as any[]);
-  return progVal ?? pageVal; // program-level wins over page-level
+  walk(nodes as any[]);
+}
+
+/**
+ * How many `<program>` nodes step 2 walks in this unit — top-level AND nested, by the
+ * SAME walk `readRawUnitSessionAttr` uses. With 2+, step 2's answer is the LAST
+ * declaring `<program>` in document order (g-two-programs-one-file-session-attr-last-wins,
+ * a question reserved for `E-PROGRAM-002`), so route-inference Step 8b keeps stamping
+ * the secure §20.5 defaults on such a unit rather than letting it fall through to that
+ * last-wins read (S438 review F1). See route-inference.ts Step 8b.
+ */
+export function countUnitProgramNodes(nodes: unknown): number {
+  let count = 0;
+  walkUnitProgramAndPageNodes(nodes, (n) => {
+    if (n.tag === "program") count++;
+  });
+  return count;
 }
 
 /** Steps 1 + 2 only — the per-unit answer, before any build-wide fallback. */

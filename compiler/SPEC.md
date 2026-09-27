@@ -16638,8 +16638,20 @@ unit, and they differ in what the entry carries:
   and 3 answer: its own `<program>`'s declaration governs its cookie lifetime AND its
   cookie NAME, and a `protect=` member page reads the same cookie its program mints.
   Only when nothing in the program declares an attribute does the secure `1h` language
-  default govern — so no unit is ever given a weaker cookie than its own program
+  default govern — so such a unit is never given a weaker cookie than its own program
   declares.
+- **Carve-out — a FILE holding two or more `<program>` nodes** (top-level or nested,
+  counted by the same walk step 2 performs). Step 2 cannot say which of them is the
+  unit's own: it answers with the LAST declaring `<program>` in document order
+  (`g-two-programs-one-file-session-attr-last-wins`), and what a second `<program>` in
+  one file means is reserved for `E-PROGRAM-002`. For such a file the second kind of
+  entry keeps the `1h` / secure defaults (declared page values still apply), exactly as
+  before S438, so a later program's `session-secure="false"` cannot strip `__Host-` from
+  a gated unit. The "never weaker" guarantee above does NOT extend to OTHER session units
+  in such a file: a unit with no auth-middleware entry reaches step 2's last-wins read
+  today (an `auth="optional"` login under a `session-secure="true" sessionExpiry="15m"`
+  program, followed in the same file by a `session-secure="false" sessionExpiry="30d"`
+  program, mints `scrml_sid` / `Max-Age=2592000`) — that gap, not this clause, owns it.
 
 Before S438 the second kind was stamped with the `1h` / secure defaults as well; being
 *defined*, they won step 1 and outranked the program's own declaration (MEASURED: a

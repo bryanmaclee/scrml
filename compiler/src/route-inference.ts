@@ -85,6 +85,8 @@ import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn } from "./tool-program.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
+import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
+import { getNodes } from "./codegen/collect.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
 // direct deps do not import route-inference.
@@ -6285,6 +6287,21 @@ export function runRI(input: RIInput): RIOutput {
       if (decl) explicitAuthByFile.set(fileAST.filePath, decl);
     }
 
+    // §20.5.1 (S438 review F1) — a file holding 2+ `<program>` nodes (top-level or
+    // nested, counted by the resolver's OWN step-2 walk) keeps the pre-S438 stamped
+    // secure defaults below. For such a file the resolver's step 2 answers with the
+    // LAST declaring `<program>` in document order
+    // (g-two-programs-one-file-session-attr-last-wins) — what a second `<program>` in
+    // one file means is reserved for E-PROGRAM-002, a ruling not taken here. Letting
+    // a protect= unit fall through to that read was measured to turn a file whose
+    // FIRST program declares `session-secure="true" sessionExpiry="15m"` into a
+    // plain `scrml_sid` / 30-day gate (a later sibling/nested program's values), so
+    // those units stay byte-identical to the stamped behaviour instead.
+    const multiProgramFile = new Set<string>();
+    for (const fileAST of files) {
+      if (countUnitProgramNodes(getNodes(fileAST as any)) >= 2) multiProgramFile.add(fileAST.filePath);
+    }
+
     for (const filePath of filesWithProtectedFields) {
       // <program auth="required"> registered in 8a — explicit, takes precedence.
       if (authMiddleware.has(filePath)) continue;
@@ -6325,25 +6342,37 @@ export function runRI(input: RIInput): RIOutput {
           loginRedirect: explicit.loginRedirect ?? "/login",
           csrf: explicit.csrf ?? "auto",
         };
-        if (explicit.sessionExpiry != null) pageEntry.sessionExpiry = explicit.sessionExpiry;
-        if (explicit.sessionSecure != null) pageEntry.sessionSecure = explicit.sessionSecure !== "false";
+        if (multiProgramFile.has(filePath)) {
+          // Pre-S438 stamp, byte-identical (see multiProgramFile above).
+          pageEntry.sessionExpiry = explicit.sessionExpiry ?? "1h";
+          pageEntry.sessionSecure = (explicit.sessionSecure ?? "true") !== "false";
+        } else {
+          if (explicit.sessionExpiry != null) pageEntry.sessionExpiry = explicit.sessionExpiry;
+          if (explicit.sessionSecure != null) pageEntry.sessionSecure = explicit.sessionSecure !== "false";
+        }
         authMiddleware.set(filePath, pageEntry);
         continue;
       }
 
       // No explicit auth= anywhere — auto-escalate + warn (correct; preserved).
-      authMiddleware.set(filePath, {
+      // §20.5.1 (S438) — NO sessionExpiry / sessionSecure. Nothing in this unit
+      // declares either (no auth= anywhere), so the shared resolver answers from
+      // the unit's own `<program>` / the program stash, and only when nothing in
+      // the program declares one does the secure 1h language default govern.
+      // Stamping "1h" / secure here outranked the program's own declaration.
+      // EXCEPT a 2+-`<program>` file, which keeps the stamp (see multiProgramFile).
+      const autoEntry: AuthMiddleware = {
         filePath,
         auth: "required",
         loginRedirect: "/login",
         csrf: "auto",
-        // §20.5.1 (S438) — NO sessionExpiry / sessionSecure. Nothing in this unit
-        // declares either (no auth= anywhere), so the shared resolver answers from
-        // the unit's own `<program>` / the program stash, and only when nothing in
-        // the program declares one does the secure 1h language default govern.
-        // Stamping "1h" / secure here outranked the program's own declaration.
         autoEscalated: true,
-      });
+      };
+      if (multiProgramFile.has(filePath)) {
+        autoEntry.sessionExpiry = "1h";
+        autoEntry.sessionSecure = true;
+      }
+      authMiddleware.set(filePath, autoEntry);
       // S299 — CODE SPLIT. This fire previously used `W-AUTH-001`, which §34:19015
       // and §52.11 define as an entirely different guarantee ("`<var server>` has
       // no detectable initial load pattern", fired at `type-system.ts`). One code,
