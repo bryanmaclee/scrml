@@ -215,6 +215,76 @@ describe("an application-scope refusal writes no dist (real CLI)", () => {
   });
 });
 
+// A case-only rename is only a hazard where the FS folds case: a write to the new
+// spelling lands on the old file, which KEEPS its old name. Detected, not assumed
+// from the platform (macOS can be either; Windows dirs can be case-sensitive).
+function fsFoldsCase() {
+  const probe = mkdtempSync(join(tmpdir(), "caseprobe-"));
+  try {
+    writeFileSync(join(probe, "CaseProbe.txt"), "x");
+    return existsSync(join(probe, "caseprobe.txt"));
+  } finally {
+    rmSync(probe, { recursive: true, force: true });
+  }
+}
+const FOLDS_CASE = fsFoldsCase();
+// Rename through a temp name: a direct case-only rename is a no-op on some folding FSes.
+function caseRename(from, to) {
+  const mid = `${to}.case-rename-tmp`;
+  renameSync(from, mid);
+  renameSync(mid, to);
+}
+
+describe("E-MW-007 before the write — a CASE-ONLY rename is not a second onion", () => {
+  // Skipped (with this reason) on a case-SENSITIVE filesystem: there the rename
+  // produces two genuinely distinct files, and base's post-write check counts two.
+  const onFoldingFs = test.skipIf(!FOLDS_CASE);
+
+  onFoldingFs("file case: App.scrml → app.scrml rebuilds clean, as the post-write check did", () => {
+    const p = project({ "App.scrml": prog(` log="minimal"`, "aGo"), "other.scrml": prog("", "bGo") });
+    expect(build(p).code).toBe(0);
+    caseRename(join(p.src, "App.scrml"), join(p.src, "app.scrml"));
+    const r = build(p);
+    expect(r.out).not.toContain("E-MW-007");
+    expect(r.code).toBe(0);
+    expect(existsSync(join(p.dist, "_server.js"))).toBe(true);
+  });
+
+  onFoldingFs("dir case: Web/main.scrml → web/main.scrml rebuilds clean, as the post-write check did", () => {
+    const p = project({ "index.scrml": prog("", "aGo"), "Web/main.scrml": prog(` log="minimal"`, "bGo") });
+    expect(build(p).code).toBe(0);
+    caseRename(join(p.src, "Web"), join(p.src, "web"));
+    const r = build(p);
+    expect(r.out).not.toContain("E-MW-007");
+    expect(r.code).toBe(0);
+    expect(existsSync(join(p.dist, "_server.js"))).toBe(true);
+  });
+});
+
+describe("E-MW-007 names each competing source once", () => {
+  test("two units whose declaring files share a basename are told apart by dist path", async () => {
+    const { selectRequestOnion } = await import("../../src/commands/select-request-onion.js");
+    const mw = { middlewareNames: ["_scrml_mw_pipeline"], middlewareDeclaredIn: "main.scrml" };
+    const { error } = selectRequestOnion([
+      { ...mw, filename: "a/main.server.js" },
+      { ...mw, filename: "b\\main.server.js" },
+    ]);
+    expect(error.code).toBe("E-MW-007");
+    expect(new Set(error.sources).size).toBe(error.sources.length);
+    expect(error.sources).toEqual(["main.scrml (a/main.server.js)", "main.scrml (b/main.server.js)"]);
+    expect(error.message).not.toContain("main.scrml, main.scrml");
+  });
+
+  test("distinct declaring files keep the plain name (message unchanged from base)", async () => {
+    const { selectRequestOnion } = await import("../../src/commands/select-request-onion.js");
+    const { error } = selectRequestOnion([
+      { middlewareNames: ["_scrml_mw_pipeline"], middlewareDeclaredIn: "index.scrml", filename: "index.server.js" },
+      { middlewareNames: ["_scrml_mw_pipeline"], middlewareDeclaredIn: "zzz.scrml", filename: "other/zzz.server.js" },
+    ]);
+    expect(error.sources).toEqual(["index.scrml", "zzz.scrml"]);
+  });
+});
+
 describe("beforeWrite (compileScrml) — the planned units ARE the written units", () => {
   test("every planned .server.js relPath is exactly a written file, nested and pages/-stripped included", () => {
     const p = project({

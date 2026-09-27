@@ -14,8 +14,8 @@
  * Usage: scrml build <dir> [--output dist/] [--embed-runtime] [--minify] [--target <platform>]
  */
 
-import { statSync, readdirSync, readFileSync, writeFileSync, existsSync } from "fs";
-import { resolve, join, basename } from "path";
+import { statSync, readdirSync, readFileSync, writeFileSync, existsSync, realpathSync } from "fs";
+import { resolve, join, basename, relative } from "path";
 import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
@@ -220,6 +220,19 @@ export function discoverServerRoutes(outputDir) {
 export function decideOnionBeforeWrite(outputDir, plannedServerUnits) {
   const posix = (p) => p.replace(/\\/g, "/");
   const plannedPaths = new Set(plannedServerUnits.map((u) => posix(u.relPath)));
+  // On a case-INSENSITIVE filesystem (Windows / macOS default) a write to
+  // `app.server.js` lands on an existing `App.server.js` and keeps the OLD
+  // spelling — so the unit already on disk is the one this build overwrites, not
+  // a stale survivor. Match it by its REAL on-disk spelling (for every segment,
+  // file and directory alike), exactly as the post-write discovery will see it.
+  // On a case-sensitive filesystem the real path IS the planned path: no-op.
+  if (existsSync(outputDir)) {
+    const rootReal = realpathSync.native(outputDir);
+    for (const u of plannedServerUnits) {
+      const abs = join(outputDir, u.relPath);
+      if (existsSync(abs)) plannedPaths.add(posix(relative(rootReal, realpathSync.native(abs))));
+    }
+  }
   const surviving = existsSync(outputDir)
     ? discoverServerRoutes(outputDir).filter((m) => !plannedPaths.has(posix(m.filename)))
     : [];
