@@ -1,6 +1,40 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-27T00:00:00Z  commit: d02738767
+# generated: 2026-09-27T18:00:00Z  commit: 9941a504c
+# ⛑ **S437b STAMP — `d02738767` -> `9941a504c`. 7 COMMITS (#1102-#1108), SAME SESSION (S437, second wrap-6c pass).**
+# MAP-STAMP RULE at write time: `git fetch origin && git merge --ff-only origin/main` -> HEAD **`9941a504c`** (== `origin/main` at fetch;
+# `origin/main` then advanced to `072741ca9` mid-pass — see ⏳);
+# inbound: `d02738767` is an ancestor of `9941a504c`. Pass ran in worktree `agent-a311ef56e25c9326a`; HEAD advances past
+# the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `9941a504c`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **266,005 lines / 211 files** per FACTS (+790 lines, files FLAT;
+# `git ls-files compiler/src | wc -l` = 213, flat) · test files **1,506** (+1) · `compiler/SPEC.md` **40,348** lines (+216) ·
+# conformance **1,047** cases (+74) in **55** dirs (flat) · §34 catalog **832** rows FLAT, range `20294..21197` ·
+# `docs/changes/` 777. PREFIX SERIES set-diffed at both ends: E 943 · W 183 · I 10 · H 2 · unique 800 — ADDED = REMOVED = EMPTY.
+# impl#1 conformance: `bun conformance/run.ts` -> **1040/1047 pass + 7 xfail** (was 967/973 + 6 at `d02738767`).
+# ⛑ **WINDOW HEADLINES (verify in source, not here):** #1106 §5.2.3 handler fix — a multi-statement handler value is PARSED
+# with the function-body statement parser into `value.handlerBlock.stmts` and lowered from those nodes by every emitter;
+# a BARE `;`-sequence is `E-MULTI-STATEMENT-HANDLER` in every position (incl. `<each>`/engine/`<match>` sub-builds);
+# braceless `else` (`if (c) a; else b`) no longer runs `b` unconditionally; a dangling `else` after `};` is
+# `E-STMT-UNEXPECTED-TOKEN`. #1105 bootstrap slice M1 — `compiler/self-host-v2/` Core IR + walk + JS/HTML trees + printer +
+# checker; `slice-m1/` instance-record runtime + 68 tests; new CI step. #1104 — `compiler/self-host/` FROZEN (reference
+# only). #1107/#1108 — SPEC §66 rulings (L6, L12, identities, O57-O60, O21/O43; reads through an un-narrowed handle are
+# `E-DECL-HANDLE-NOT-NARROWED`); §66 stays NOMINAL — impl#1 implements none of it.
+# ⏳ **NOT MAPPED — bootstrap M2 (#1109, `072741ca9`, parse / analyze / lower) LANDED ON `origin/main` MID-PASS, AFTER
+# this stamp.** It adds `compiler/self-host-v2/{parse,lower}.scrml` + `slice-m2/`, MODIFIES `core/check/print/lex/walk/measure.scrml`,
+# `slice-m1/runtime/runtime.js` + its tests, and `ci.yml` (+7/-). This map is deliberately stamped `9941a504c` (the brief's
+# target); `state.ts` will read it 1 commit behind until the next refresh maps M2.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S437b block were grep-derived at `9941a504c`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437b NON-COMPLIANCE PASS ━━━━━━━
+# scan mode: INCREMENTAL re-scan `d02738767..9941a504c` — the in-scope `.md` files the window changed (`compiler/PIPELINE.md`,
+# `compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `compiler/self-host/README.md`, `compiler/self-host-v2/slice-m1/progress.md`,
+# `docs/FACTS.md`, `docs/PA-SCRML-PRIMER.md`, `docs/PA-SCRML-REFERENCE.md`, `docs/tutorial.md`, `docs/known-gaps.md`,
+# `docs/pr-reviews.md`, `master-list.md`, 3 `docs/changes/s437-*` artifacts) + EVERY `N-S437-*` / `U-S437-*` item and the
+# standing table RE-EXECUTED (not carried). Findings: `## Summary — S437b pass` below. Report only — nothing moved or edited.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437 HEADER (stamp `d02738767`, 2026-09-27 AM), CARRIED FOR PROVENANCE. ITS FIGURES ARE `d02738767`-ERA. ━━━━━━━
 # ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
 # `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
 # `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
@@ -86,6 +120,91 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S437b pass (this pass, stamp `9941a504c`)
+
+Total docs scanned: 15 (12 changed in-window in scope + 3 `docs/changes/s437-*` artifacts; `handOffs/` out of scope)
+Compliant: 13
+Non-compliant: 2 docs (`docs/known-gaps.md` — N-S437b-1, N-S437b-2, N-S437-4 remainder; `docs/PA-SCRML-REFERENCE.md` — N-S437b-3 LOW, standing N-S422-3) + 2 in-source (N-S437-5, N-S437-6 reframed)
+Uncertain: 0 new
+Prior S437 items re-executed: 8 — **5 RESOLVED**, 2 STILL LIVE, 1 PROMOTED to non-compliant (table below)
+
+Gates re-run at `9941a504c`: `bun scripts/facts.ts --check` PASS · `bun scripts/regen-spec-index.ts --check` OK (72/72, 0 stale) ·
+`bun scripts/conflict-marker-gate.ts` PASS (8,725 files, 0 markers) · `bun scripts/state.ts --check` **PASS**
+(`@generated:recent-sessions` current; WARN-only: known-gaps heading/marker drift 52; maps watermark `d02738767` pre-refresh).
+
+### Re-execution of the S437 findings
+| item | how re-checked at `9941a504c` | result |
+|---|---|---|
+| N-S437-1 PRIMER teaches retired L19 | `grep -n 'L19\|MULTI-STATEMENT' docs/PA-SCRML-PRIMER.md` | **RESOLVED** (#1102 currency pass): `:967` reflex, `:1140` table row, `:1201` L-table all state the S435 reversal; header `:7` dated 2026-09-27 |
+| N-S437-2 PRIMER has no §66 notice | `sed -n 11p docs/PA-SCRML-PRIMER.md` | **RESOLVED**: §66 Nominal banner at `:11`, per-section `→ §66.x` pointers (`:45`, `:99`, `:728`, `:1039`, L-table) |
+| N-S437-3 tutorial + PIPELINE L19 framing | `docs/tutorial.md:403,1116`; `compiler/PIPELINE.md:214` | **RESOLVED**: tutorial teaches the inline block and the braces fix; PIPELINE L19 row struck through as REVERSED S435 |
+| N-S437-4 recent-sessions stale + heading/marker drift | `bun scripts/state.ts --check` | **HALF RESOLVED**: `@generated:recent-sessions` PASS. Heading/marker drift **STILL 52** (unchanged; e.g. `g-e2e-render-map-tier-runs-in-no-ci-job-at-all` heading=open marker=resolved) |
+| N-S437-5 ghost lints false-fire on the block handler | compiled `<button id="b" onclick={ @count = @count + 1; @msg = "hi" }>` | **STILL LIVE**: 1× `W-LINT-007` + 2× `W-LINT-013`. `compiler/src/lint-ghost-patterns.js` untouched in window. Now FILED: `g-ghost-lint-false-fires-on-canonical-block-handler` (`status=open`) |
+| N-S437-6 `E-MANIFEST-001` no §34 row | `grep -n E-MANIFEST-001 compiler/SPEC.md` | **STILL LIVE, REFRAMED**: only `:18342` (+ a precedent mention at `:36722`). `:18342` itself says the code is "not registered here — manifest validation is owned by the project-config subsystem and surfaces its own error catalog". No such catalog exists in SPEC (grep finds no other `E-MANIFEST-*`), so the code is documented only in prose. Disposition: either add the §34 row or write the project-config catalog the SPEC points to |
+| U-S437-1 `g-library-meta-import-async-not-awaited` moot? | compiled `${ ^{ const { safeCallAsync } = await import("scrml:http") } … }` | **PROMOTED → N-S437b-2** (below) |
+| U-S437-2 REFERENCE B18 framing | `sed -n 249p docs/PA-SCRML-REFERENCE.md` | **RESOLVED** (S437 currency note at `:249`) — but see N-S437b-3 for what #1106 then changed |
+
+### ⛔ N-S437b-1. `docs/known-gaps.md` — two gaps filed `open` in #1102 were FIXED by #1106, same session
+**Reason:** grep-mismatch (gap status contradicts executed behaviour)
+**Detail:** `g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements` (HIGH, `:19625`, `status=open`) — executed at
+`9941a504c`: `<button id="b" onclick=@count = @count + 1; @msg = "hi">` now FAILS with `E-MULTI-STATEMENT-HANDLER` (#1106's
+commit body names this exact root: "the old regex matched `count =` inside the handler value"). `g-multi-statement-handler-
+message-gives-the-retired-l19-fix` (LOW, `:19629`, `status=open`) — the emitted message now reads "Wrap the statements in
+braces — …" (`ast-builder.js:18317`). #1106 resolved its OWN duplicates of both (`g-e-multi-statement-handler-message-steers-
+only-to-a-named-function` → resolved) but not these two, which #1102 had filed from the non-compliance pass.
+**Suggested disposition:** update to match current — flip both markers + headings to `resolved` citing #1106.
+
+### ⛔ N-S437b-2. `docs/known-gaps.md` — `g-library-meta-import-async-not-awaited` (`status=open`, `:12048`) is moot by ruling
+**Reason:** grep-mismatch (reproducer is now a compile error)
+**Detail:** the entry's reproducer — `^{ const { safeCallAsync } = await import("scrml:http") }` in a library module — compiled at
+`9941a504c` FAILS: `E-DYNAMIC-IMPORT-NOT-IN-SCRML` ("… never a runtime `import()` — including inside a `^{}` meta body", §21.3.2).
+The defect it describes (auto-await dropped) cannot be reached through that shape any more.
+**Suggested disposition:** update to match current — close as moot-by-ruling, or re-scope to a static-import shape if one still drops the await (not checked by this pass).
+
+### ⚠ N-S437b-3. `docs/PA-SCRML-REFERENCE.md` B18 section — stale locus after #1106 (LOW)
+**Reason:** content-heuristic (locus drift; mechanism partly changed)
+**Detail:** `:252` places fire-site #1 "around line 8365" of `ast-builder.js`; at `9941a504c` it is at `:18317` (the
+`mshError` push). #1106 also changed how the `;` is attributed to its handler: owner = the latest `ATTR_NAME` token followed
+by `ATTR_EQ` from the tokenizer's attribute tokens (comment block `ast-builder.js:~18225-18245`), replacing the regex that
+misattributed assignment-led sequences. The `:249` currency note ("the B18 mechanism below is otherwise still the live one")
+predates #1106. `scanForTopLevelSemicolon` is still the scan primitive, so the section is not wrong in kind.
+**Suggested disposition:** update to match current (locate by symbol; one line on token-based ownership).
+
+### Standing items — re-executed at `9941a504c`
+| item | command | result |
+|---|---|---|
+| N-S405-1 — two live `E-CG-*` codes, zero SPEC mentions | `grep -c` each in `compiler/SPEC.md` | **0 / 0 — STILL LIVE** (`emit-library.ts:1517`, `:713`) |
+| N-S422-1 — `postRe` locus | `grep -n 'const postRe' compiler/src/type-system.ts` | now **`:27954`, `:28898`, `:29023`** (moved +46 by #1106's `type-system.ts` edit) — locate by symbol |
+| N-S422-2 — census script bakes `type-system.ts:26048` | `grep -n 26048 scripts/source-text-regex-census.ts` | **STILL LIVE** at `:38`, `:170` |
+| N-S422-3 — REFERENCE cites `SPEC §55.1 line 24295` | `grep -n 24295 docs/PA-SCRML-REFERENCE.md` | **STILL LIVE** at `:60`, `:131`; SPEC `:24295` is inside §40.9.7; §55.1 is at `:35516` |
+
+### Docs scanned this window — verdicts
+| doc | verdict |
+|---|---|
+| `compiler/SPEC.md` · `compiler/SPEC-INDEX.md` | compliant (authoritative; §66 amendments self-label NOMINAL and carry provenance; `--check` OK) |
+| `compiler/PIPELINE.md` | compliant for the window's edits (L19 row) |
+| `compiler/self-host/README.md` | compliant — FROZEN marker matches the #1104 ruling and `scripts/hybrid.ts` header |
+| `compiler/self-host-v2/slice-m1/progress.md` | compliant (append-only dispatch log, by design) |
+| `docs/FACTS.md` | compliant (`--check` PASS) |
+| `docs/PA-SCRML-PRIMER.md` · `docs/tutorial.md` | compliant (N-S437-1/2/3 resolved) |
+| `docs/PA-SCRML-REFERENCE.md` | non-compliant (LOW) — N-S437b-3; standing N-S422-3 |
+| `docs/known-gaps.md` | non-compliant in part — N-S437b-1, N-S437b-2, heading/marker drift 52 |
+| `docs/pr-reviews.md` · `master-list.md` | compliant (ledger; `state.ts` PASS) |
+| `docs/changes/s437-*` (3) | compliant (dispatch artifacts, historical by design) |
+
+⏳ Not scanned: anything from bootstrap M2 (#1109, `072741ca9`, incl. `compiler/self-host-v2/slice-m2/progress.md`) — landed after this stamp.
+
+## Tags
+#non-compliance #project-mapper #cleanup #scrml #s437b #9941a504c #gap-status-stale #moot-by-ruling #ghost-lint-false-positive #e-manifest-001 #pa-scrml-reference-locus-drift
+
+## Links
+- [primary.map.md](./primary.map.md)
+- [error.map.md](./error.map.md)
+- [domain.map.md](./domain.map.md)
+- [project master-list](../../master-list.md)
+- [project pa.md](../../pa.md)
+- [scrml-support archive convention](../../../scrml-support/pa.md)
 
 ## Summary — S437 pass (this pass)
 
