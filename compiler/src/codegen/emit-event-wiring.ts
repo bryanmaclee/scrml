@@ -1,5 +1,6 @@
 import { rewriteReactiveRefs, rewriteExprArrowBody, rewriteServerExprArrowBody } from "./rewrite.js";
 import { rewriteBlockBody, emitMatchExpr, emitIfValueExpr, type EngineRewriteCtx } from "./emit-control-flow.ts";
+import { emitHandlerStatementList } from "./emit-logic.ts";
 import { emitExprField, reparseRequestRefEscapeHatch, resolveSynthCellPrefix } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
 import {
@@ -29,6 +30,11 @@ interface EventBinding {
   handlerExpr?: string;
   /** Phase 3: structured ExprNode form of `handlerExpr`. */
   handlerExprNode?: ExprNode;
+  /**
+   * S437 — the handler value parsed as a §5.2.3 statement list, present only when
+   * it holds 2+ statements (`handlerExprNode` then covers only the first).
+   */
+  handlerBlock?: { stmts: any[] };
   /** Phase 4: structured ExprNode for each handler arg. */
   handlerArgExprNodes?: ExprNode[];
   /**
@@ -1014,8 +1020,21 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       // Case C: Plain expression / statement. Rewrite with rewriteBlockBody and
       //   wrap in `function(event) { ... }` so it's a valid callable handler value.
 
-      const fnParsed = parseFnExpression(binding.handlerExpr);
-      if (fnParsed !== null) {
+      // S437 — a §5.2.3 multi-statement handler (`{ a; b }` / `${a; b}`) carries
+      // its PARSED statement list (`handlerBlock.stmts`, ast-builder
+      // attachHandlerStatementLists); `handlerExprNode` holds only the first
+      // statement. Lower the statement nodes as a function body. A 1-statement
+      // value has no handlerBlock and takes the paths below, unchanged.
+      const blockBody = binding.handlerBlock && Array.isArray(binding.handlerBlock.stmts)
+        ? emitHandlerStatementList(binding.handlerBlock.stmts, {
+            ...engineExprCtxExtras,
+            engineBindings: engineRewriteCtx?.engineBindings ?? null,
+          })
+        : null;
+      const fnParsed = blockBody === null ? parseFnExpression(binding.handlerExpr) : null;
+      if (blockBody !== null) {
+        handlerExpr = `function(event) { ${blockBody} }`;
+      } else if (fnParsed !== null) {
         // Case A: fn(params) { body } — rewrite the body, construct function directly.
         // Bug #6 (s83-a7): thread engineCtx so `@engineVar = .X` + `.advance(.X)`
         // inside the body route through the canonical write-guard path.

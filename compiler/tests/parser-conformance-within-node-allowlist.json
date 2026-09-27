@@ -2579,12 +2579,10 @@
     "SPAN-COORD": 5
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-complete-013.scrml": {
-    "COUNT-LENGTH": 1,
-    "EXTRA-FIELD": 15,
-    "FIELD-SHAPE": 6,
-    "KIND-NAME": 3,
-    "MISSING-FIELD": 10,
-    "SPAN-COORD": 9
+    "EXTRA-FIELD": 3,
+    "FIELD-SHAPE": 7,
+    "MISSING-FIELD": 7,
+    "SPAN-COORD": 17
   },
   "samples/compilation-tests/gauntlet-s19-phase2-control-flow/phase2-if-as-expr-tilde-partial-012.scrml": {
     "EXTRA-FIELD": 3,

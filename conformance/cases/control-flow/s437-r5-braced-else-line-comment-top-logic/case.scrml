@@ -1,0 +1,7 @@
+<a> = true
+<r> = 0
+${
+    if (@a) { @r = 1 } // note
+    else { @r = 2 }
+}
+<p id="out">${@r}</p>

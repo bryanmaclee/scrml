@@ -1,0 +1,3 @@
+<c> = "red"
+<div id="box" style=(`color: ${@c}`)>a</div>
+<button id="go" onclick=@c = "blue">go</button>

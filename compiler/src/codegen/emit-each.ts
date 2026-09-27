@@ -2459,8 +2459,33 @@ function renderTemplateAttrToJs(
       // iter-scope-prelowered text (so any `@.field` / `as`-name in args resolves
       // to the factory binding while `@engineVar` survives for engine detection).
       const preLowered = rewriteIterScopeOnly(String(val.raw ?? ""), iterVarName);
-      const engineLowered = engineCtx ? emitEngineHandlerBody(preLowered, engineCtx) : null;
-      if (engineLowered !== null) {
+      // S437 — a §5.2.3 multi-statement handler (`{ a; b }` / `${a; b}`) carries
+      // its PARSED statement list (`val.handlerBlock.stmts`, ast-builder
+      // attachHandlerStatementLists). Pre-S437 this site parsed the text as ONE
+      // expression and kept only the first statement
+      // (g-each-row-event-handler-keeps-only-first-statement). Lower a CLONE of
+      // the statement nodes as a function body through the shared
+      // emitHandlerStatementList, after rewriting the row's `@.` idents to the
+      // factory binding structurally (rewriteEachScopeInExprNode — the same walk
+      // per-item markup values use). A 1-statement value has no handlerBlock and
+      // takes the existing path below. Bug-73 live-keying still wraps the body.
+      let blockBody: string | null = null;
+      if (val.handlerBlock && Array.isArray(val.handlerBlock.stmts)) {
+        const stmts = structuredClone(val.handlerBlock.stmts);
+        rewriteEachScopeInExprNode(stmts, iterVarName);
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { emitHandlerStatementList } = require("./emit-logic.ts") as {
+          emitHandlerStatementList: (stmts: any[], extras: Record<string, unknown>) => string;
+        };
+        blockBody = emitHandlerStatementList(stmts, {
+          ...(engineCtx?.engineExprCtxExtras ?? {}),
+          engineBindings: engineCtx?.engineRewriteCtx?.engineBindings ?? null,
+        });
+      }
+      const engineLowered = blockBody === null && engineCtx ? emitEngineHandlerBody(preLowered, engineCtx) : null;
+      if (blockBody !== null) {
+        handlerBody = blockBody;
+      } else if (engineLowered !== null) {
         handlerBody = `${engineLowered};`;
       } else {
         // g-expr-event-handler-dead-in-each (Family-A Half-2) — route the

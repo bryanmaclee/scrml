@@ -1,0 +1,14 @@
+{
+  "id": "markup-handler-s437-r4-arrow-seq-dollar-each-neg",
+  "description": "#2 — `${ () => @r = 1; @r2 = 2 }`: an arrow followed by `;` and more statements. Pre-round-4 impl#1 kept only the arrow (the `@r2 = 2` dropped at exit 0). The statement parse's own error is reported. Position: each.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"The statement list is logic context — the same statement grammar as a function body (§7.3) … The block MAY span any number of lines.\" and \"No statement of the block SHALL be dropped\".",
+  "expect": {
+    "codes": [
+      "E-STMT-MISSING-SEMICOLON"
+    ],
+    "notCodes": []
+  }
+}

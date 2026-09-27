@@ -1,0 +1,28 @@
+{
+  "id": "markup-handler-s437-r5-handler-map-literal-notice",
+  "description": "S437 round 5 F3: a handler statement carrying a NON-FATAL notice (W-MAP-DUPLICATE-LITERAL-KEY, Info) still lowers from its statement list and runs both statements. Pre-fix the notice was counted as a parse failure: the statement list was dropped and the build failed E-CODEGEN-INVALID-LOGIC.",
+  "language-version": "1.0",
+  "spec": "§59.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§59.3: duplicate map-literal keys are last-wins with an Info notice; §5.2.3: no statement of the block SHALL be dropped.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "r": 7
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "7"
+      }
+    ]
+  }
+}

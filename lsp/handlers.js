@@ -1087,7 +1087,7 @@ export const ERROR_DESCRIPTIONS = {
   "E-NAME-COLLIDES-STATE": "Local identifier shadows a registered state cell name. Rename the local. (SPEC §6.1)",
   "E-NAME-COLLIDES-RESERVED": "Component or state-type name collides with a reserved scrml structural-element identifier (engine, match, errors, onTransition, onTimeout, onIdle). (SPEC §4.15 / §24.4)",
   "E-STRUCTURAL-ELEMENT-MISPLACED": "scrml-defined structural element used outside its owning locus. (SPEC §4.15)",
-  "E-MULTI-STATEMENT-HANDLER": "Inline event handler attribute (or :-shorthand body) contains multiple statements. Extract to a named function and call it. (SPEC §5.2.3 / §4.14)",
+  "E-MULTI-STATEMENT-HANDLER": "A bare (unbraced) event-handler value contains a `;`-separated statement sequence. Wrap the statements in braces — `onclick={ a(); b() }` — or name a function. A multi-statement `:`-shorthand body uses the bare-body form instead. (SPEC §5.2.3 / §4.14)",
   "E-CLOSER-001": "Tag uses :-shorthand body with an explicit closer. Choose one form. (SPEC §4.14)",
   "E-MATCH-EFFECT-FORBIDDEN": "effect= on a state-child inside <match>. Transitions don't occur in match; use <engine>. (SPEC §18.0.2)",
   "E-MATCH-ONTRANSITION-FORBIDDEN": "<onTransition> inside <match>. Transition handlers are engine-only. (SPEC §18.0.2)",

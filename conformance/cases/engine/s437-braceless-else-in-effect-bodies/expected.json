@@ -1,0 +1,31 @@
+{
+  "id": "engine-s437-braceless-else-in-effect-bodies",
+  "description": "A braceless `if (c) a; else b` inside an engine state-child `effect=${…}` and inside an `<onTransition>` `${…}` body keeps its `else`: with `@n == 0` the effect on Idle→Busy writes `neg` (not `pos`), and the Busy→Idle onTransition appends `N` (not `P`).",
+  "language-version": "1.0",
+  "spec": "§17",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§51.0.H effect bodies are logic; §17 if/else — `else` belongs to its braceless `if`.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      },
+      {
+        "click": "#back"
+      }
+    ],
+    "state": {
+      "r": "negN"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "negN"
+      }
+    ]
+  }
+}

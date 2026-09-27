@@ -5738,6 +5738,26 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
 // ---------------------------------------------------------------------------
 
 /**
+ * S437 — emit the body of a §5.2.3 multi-statement event handler from its
+ * parsed statement nodes (`attrValue.handlerBlock.stmts`, produced in
+ * ast-builder by the function-body statement parser). Shared by every handler
+ * emit site — top-level registry wiring (emit-event-wiring.ts), the engine-arm
+ * re-wire (emit-variant-guard.ts) and the per-item `<each>` factory
+ * (emit-each.ts) — so a handler's statements lower exactly as a function
+ * body's do (`insideFunctionBody`: a `@x = …` is a reactive write, not a
+ * declaration), with the caller's engine / map / set / request context.
+ *
+ * Returns the statement text (each statement already `;`/`}`-terminated, one
+ * space between), to be placed inside `function(event) { … }`. Built once from
+ * the nodes; never re-split.
+ */
+export function emitHandlerStatementList(stmts: any[], extras: Partial<EmitLogicOpts> = {}): string {
+  return emitLogicBody(stmts, { ...extras, boundary: "client", insideFunctionBody: true } as EmitLogicOpts)
+    .map((s: string) => s.trim())
+    .join(" ");
+}
+
+/**
  * Emit a sequence of logic nodes with tilde pipeline accumulator tracking (§32).
  *
  * Pre-scans the node list to detect whether `~` is referenced anywhere in the

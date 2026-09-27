@@ -1,0 +1,13 @@
+<program>
+type Phase:enum = { Idle, Busy }
+<n> = 0
+<r> = 0
+<r2> = 0
+${ function h() { @r2 = 9 } }
+<engine for=Phase initial=.Idle>
+  <Idle>
+    <button onclick={ try { h() } catch (e) { h() }; h() }>x</button>
+  </>
+  <Busy><p>b</p></>
+</>
+</program>

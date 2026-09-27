@@ -1147,6 +1147,21 @@ function emitArmWireFunction(
 
   function buildHandlerExpr(binding: any): string {
     if (binding.handlerExpr) {
+      // S437 — a §5.2.3 multi-statement handler carries its PARSED statement
+      // list (`handlerBlock.stmts`); handlerExprNode holds only the first
+      // statement. Lower the nodes as a function body via the shared
+      // emitHandlerStatementList. A 1-statement value has no handlerBlock.
+      if (binding.handlerBlock && Array.isArray(binding.handlerBlock.stmts)) {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { emitHandlerStatementList } = require("./emit-logic.ts") as {
+          emitHandlerStatementList: (stmts: any[], extras: Record<string, unknown>) => string;
+        };
+        const blockBody = emitHandlerStatementList(binding.handlerBlock.stmts, {
+          ..._engineExprCtxExtras,
+          engineBindings: _engineRewriteCtx?.engineBindings ?? null,
+        });
+        return `function(event) { ${blockBody} }`;
+      }
       // Detect fn(params) { body } shorthand.
       const fnMatch = String(binding.handlerExpr).match(/^\s*fn\s*\(/);
       if (fnMatch) {
