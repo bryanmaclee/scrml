@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 142 | 4 |
-| MED | 317 | 0 |
+| MED | 319 | 0 |
 | LOW | 117 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -1232,6 +1232,32 @@ That mis-measurement was made and caught during this fix, and is pinned in the t
 
 ### g-failable-cell-load-fire-and-forget-stale-read-dead-return — a CELL-assigned failable call `@cell = fn() !{ arms }` lowers to `(async () => { … })().catch(_scrml_error_boundary_log)` with NO `await`, and the statements after it are left OUTSIDE the IIFE — so a following read of `@cell` runs SYNCHRONOUSLY against the STALE (pre-fetch) value and the error-arm `return` returns only from the IIFE (dead). **PA-CONFIRMED by execution** (`scratchpad/tool-dogfood/t2/refresh.scrml`+`run-refresh.mjs`, mirrors flogenceP `app.scrml refresh()`): `@needsAttention = @fleet.length` after `@fleet = loadFleet() !{…}` reads 0 over the empty initial cell (expected 2) → the real cockpit "N need attention" header (`app.scrml:1953/2017/2318`, rendered :2966) is PERMANENTLY 0. A bare/const failable in the same fn IS awaited inline (contrast), so the CELL-ASSIGN target is the defect. **Root:** `emit-client.ts:3386-3423` (cell-assigned `!{}` rewrite; continuation left outside per its :3400 comment). **Fork:** A = sequence the continuation (await/hoist) so the return is live + reads see the resolved cell (PA lean) · B = if §52.4 immediate-local-landing must hold, REFUSE/diagnose this form. Ruling owed: await vs refuse. Same fire-and-forget-cell substrate as `g-reactive-write-member-server-call-no-autoawait` (S267) + `G-HANDLER-RECOVERY-INTO-CELL` (S236) — converge. ROUTED to bryan (§52.4 sequencing semantics). — `NEW S389-peter (§64/error-state dog-food, PA-confirmed by execution on 88d59ac9)`; **HIGH**; open
 <!-- @gap id=g-failable-cell-load-fire-and-forget-stale-read-dead-return sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts:3386-3423-cell-assigned-failable-!{}-rewrite-fire-and-forget-async-IIFE-.catch-no-await-continuation-outside prov=adopter:flogenceP-app.scrml-refresh()-S389-peter-dogfood-PA-confirmed-by-execution-88d59ac9-needsAttention-reads-stale-empty-fleet-cockpit-header-permanently-0 route=bryan:handOffs/incoming/S389-peter-routes-tool-surface-4finds.md family=g-reactive-write-member-server-call-no-autoawait+G-HANDLER-RECOVERY-INTO-CELL -->
+
+⚑ **S436 — THE DISCRIMINATOR IS SERVER-ESCALATION, AND IT DECIDES THE MIGRATION DENOMINATOR. PA-VERIFIED BY
+EXECUTION.** bryan RULED this at S435 (option **lift**: await via the straight-line lift, drop the IIFE, so the
+arm's `return` returns from the author's function) and named the pre-work: *"measure flogenceP's 56 arm-`return`
+sites against the new behaviour and tell the flogence side before it lands."* Doing that surfaced a split the
+ruling's framing does not carry, and the PA was one step from relaying a wrong number to flogence:
+
+- **Server-escalated callee** — the shape this entry was filed on (`loadFleet()` doing SQL). The async IIFE,
+  the missing `await` and the dead arm-`return` are all real, exactly as recorded above.
+- **Client-local failable callee** — compiled at S436 (`@fleet = fetchFleet() !{ | ::Boom e :> { …; return } }`
+  where `fetchFleet()` only `fail`s). **There is NO IIFE at all**, the handler is inlined straight into the
+  author's function, and the arm's `return` **already returns from the author's function** — the statement after
+  the handler is genuinely not reached. For this shape the ruling's target behaviour is what already ships.
+
+**So "56 sites change meaning" is wrong as stated.** The affected set is the server-escalated subset. The S436
+census of the population (source-shape, bite-tested after the first classifier counted `return` inside a string
+literal): **flogenceP 55 affected lines / 65 returning arms** — `@cell =` **36**, `const/let =` 10, bare statement
+9 — and **assetManagement 0**, since aM uses no `!{}` handlers at all. **Whoever builds this owes the
+server/client split across those 55 before telling the flogence side anything.**
+
+⚑ **And the same compile shows a distinct silent-wrong on the client path, not previously recorded here:** the
+emitted line is `let _result = _scrml_cs_reactive_set("fleet", _scrml_fetchFleet_4())` — **the cell is assigned
+the ERROR ENVELOPE (`{__scrml_error:true, …}`) before anything checks whether it is an error.** A *handled*
+failure still lands in the cell and every subscriber sees it. The success-path re-assignment then sits after an
+`if`/`else` in which **both** branches `return`, so it is unreachable. Same substrate, same fix arc — recorded
+here rather than filed separately, per converge-don't-enumerate.
 > ⚑ **S391-bryan verification — CONFIRMED (agent-executed, NOT PA-reproduced), with one headline wording correction.** Independently reproduced by execution under happy-dom with a stubbed route: the observed order is `GET fleet -> []` · `SET needsAttention = 0` · `SET phase = "Ready"` and only THEN, after settle, `SET fleet = [...]` — so the stale read and the dead error-arm `return` are both real, and it is **SILENT** (exit 0, zero errors). ⚑ **"a fire-and-forget async IIFE (`.catch`, no await)" is inaccurate as written**: there IS an `await` — `await _scrml_fetch_loadFleet_4()` *inside* the IIFE. What is missing is an `await` on the IIFE **call**, with the continuation pushed after it. The entry's own root-cause prose implies this; the headline overstates it, and the distinction matters because a reader grepping for a missing `await` will not find one. Locus `emit-client.ts:3386-3423` is **decided-here and traced** (instrumented: `resultVar=_scrml__scrml_result_6 nameArg="fleet" interveningLen=61`); current lines have drifted to **3387-3419**. The §52.4 ruling this entry names is still owed and unchanged.
 
 ### g-tool-context-match-emits-await-in-non-async-fn — a `match` inside a non-async `fn` in a `<program kind="tool">` emits `return await (async function() { … })()` — `await` in a NON-async function → runtime `ReferenceError: await is not defined` (exit 1). **PA-CONFIRMED** (`scratchpad/tool-dogfood/t2/tool-simplematch.scrml`, 0 errors; emit `function roleLabel(role) { return await (async function() …`). The PAGE/client path emits a SYNCHRONOUS IIFE for the same match (`return (function(){…})()`) → TOOL-codegen-specific; every tool with a `match` in a helper fn crashes (un-dogfooded because real flogenceP tools branch via `_={…?…:…}=`). **Fork:** mark the wrapping fn `async`, or emit the page path's sync IIFE when arms are sync. ⚑ Likely the SAME incomplete tool-context match emitter as [[g-tool-context-match-loses-enum-field-order]] — one arc, not two patches. ROUTED to bryan (§64 tool codegen). — `NEW S389-peter (§64 tool dog-food, PA-confirmed by execution on 88d59ac9)`; **MED**; open
@@ -18889,3 +18915,39 @@ excludes void tags from the compound-parent test but not from the `if=` host tes
 corpus count is 0, so the behaviour is arguably the better one — only the reason string is inaccurate.
 
 <!-- @gap id=g-ssr-each-lint-reason-is-wrong-on-a-void-if-host sev=LOW status=open locus=compiler/src/codegen/emit-ssr-render.ts prov=review:S436-pr-1066-LOW1 -->
+
+### G-SHIPPED-STORE-SHIM-OPENS-SQLITE-WITH-NO-BUSY-TIMEOUT — the third sqlite population, in code the compiler hands the adopter
+
+**Reviewer-measured (S436 S239 pass on #1081/#1082), PRE-EXISTING.** `compiler/runtime/stdlib/store.js` does
+`new Database(dbPath)` with no `busy_timeout` and no WAL, and `compiler/src/runtime-template.js` copies it
+**verbatim** into the adopter's output as `dist/_scrml/store.js`. Measured behaviourally: compile any program
+importing `scrml:store`, `createStore(p)`, then hold `BEGIN IMMEDIATE` on `p` from a SEPARATE process —
+`store.set(...)` **throws `database is locked` in 0 ms**. No wait at all, in code the compiler ships.
+Its `.scrml` reference implementation `stdlib/store/kv.scrml` has the same shape.
+
+⚑ **This is the THIRD framing, and the framing is the lesson.** #1062 swept *`Bun.SQL` handles the compiler
+EMITS*; #1082 swept *`bun:sqlite` handles the compiler OPENS in its own process*; neither owns *`bun:sqlite`
+handles the compiler SHIPS INTO the adopter's build output*. Each sweep was diligent within its own framing
+and each framing is what decided what it missed. A fourth sweep should be phrased as a question about the
+POPULATION ("every sqlite handle that exists because of this compiler, wherever it runs"), not the constructor.
+
+Sibling, same population, filed separately: `g-emitted-session-store-opens-sqlite-with-no-busy-timeout-or-wal`
+(the §20.5 durable session store, reached via the ALIASED `new _ScrmlSessionDatabase(...)` — the alias is
+precisely why a `new Database(` grep does not find it).
+
+<!-- @gap id=g-shipped-store-shim-opens-sqlite-with-no-busy-timeout sev=MED status=open locus=compiler/runtime/stdlib/store.js:32 prov=review:S436-pr-1081-F1 -->
+
+### G-NESTED-PROGRAM-DECLARATION-INVISIBLE-TO-THE-SESSION-CONFIG-SCAN — a single program splits its own cookie name, no second program required
+
+**PA-relayed then agent-REPRODUCED on `origin/main` (S436), PRE-EXISTING.** ⚑ **Filed LOW during the #1080
+review and RE-GRADED to MED on measurement** — the original filing called it a false comment; it is a live
+defect. The `<program>` pre-scan in `codegen/index.ts` is **top-level-only**, while the reader that actually
+decides (`emit-server.ts:_readRawProgramAttr`) **recurses into children**. So a `<program session-secure="false">`
+nested inside a `<div>` is honoured for its own unit and invisible to the scan. Measured on `c46ebbf8` with
+NO second program in the set: the nesting file emits `scrml_sid` while its own member page emits
+`__Host-scrml_sid` — the #282 writer/reader split, live, in a single-program app.
+
+Closed by the recursive node scan in the S436 session-config arc; filed so the defect has its own record
+rather than living only in a fix's commit message.
+
+<!-- @gap id=g-nested-program-declaration-invisible-to-the-session-config-scan sev=MED status=open locus=compiler/src/codegen/index.ts prov=review:S436-pr-1080-F3-regraded -->
