@@ -3499,7 +3499,7 @@ doc must design. dpa-050 Q6 was re-framed by the PA toward option (a) under dpa-
 S435 — is the normative design target. Read §66 IN FULL (incl. §66.22, the consolidated OPEN list) plus §5.2.3 (L19
 reversed). The dpa-050 / dpa-052 DDs are background only.
 
-**Brief (ratified S435):** (1) design EVERYTHING that does not depend on an OPEN item; (2) for each of the six
+**⚑ UPDATE S435 (later): ALL SIX are now RULED and folded into §66 (O37 = (c) certify the callee · O40 + O56 = narrow · O8 = wiring attributes · O3 = (c) `let` only where no grant list · O52 = body tags classed by opener, glued-vs-spaced `:` · O5 = engine surface re-homed, arm bodies stay, `accepts=` confined). The dPA DESIGNS against them — no cost-each step is owed for these six.** Original brief: **Brief (ratified S435):** (1) design EVERYTHING that does not depend on an OPEN item; (2) for each of the six
 architecture-shaping OPEN items, state what EACH candidate resolution costs the architecture — the PA rules those six
 with bryan IN PARALLEL and feeds the rulings back:
 - **O5** — re-homing the rest of the §51.0 engine surface under `single` (onTransition, history, onTimeout/onIdle,

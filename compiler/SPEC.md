@@ -38756,7 +38756,9 @@ name thus counts as (i) for a declaration type.
 > narrowed the DD lean: DD §7 #1 read *"a tag is a declaration iff it has an **own type** or ≥1 typed
 > attribute"*, whereas the message bryan answered *"yes, :struct,"* speaks of an own VALUE.
 
-> ⚑ **OPEN (not ruled) — O52: `rule=` state-children vs the marker and §66.2.3.** A transition graph's
+> ✅ **RULED S435 — O52** (bryan: *"yes"*): (1) a declaration BODY holds two kinds of child told apart by the opener alone — a tag with an own value or a typed attribute is a CHILD FIELD; a tag with neither is a STATE-CHILD and must name a variant of the enclosing enum-valued field / own value (checked at the type stage; the parser needs no type lookup); a body holds no uses (use-site content lives in `renders`, #11). (2) `:` glued to a name is a TYPE annotation (`count:int`); `:` preceded by whitespace is a `:`-shorthand BODY (`<Idle : "idle">`) — the existing §4.14 rule. No state-child migration. The prior OPEN text follows for the record.
+>
+> *(superseded)* **O52: `rule=` state-children vs the marker and §66.2.3.** A transition graph's
 > state-children (`<Closed rule=.Opened/>`, §66.13) carry neither an own value nor a typed attribute, so by
 > (i)/(ii) they read as USES. How they are distinguished from declarations and uses (by position inside an
 > enum-valued declaration's body, by their variant name, or otherwise) is not ruled. The PA texts bryan answered
@@ -39179,7 +39181,9 @@ library is therefore **declarations + named instances — no new construct** (§
 > declaration. Whether the logic-local `const x = …` binding (and the §50.8.5 rule that a keywordless `x = v`
 > declares a `const`) also retires is not ruled. dpa-053's banked shape itself writes `const t = …` locally.
 
-> ⚑ **OPEN (not ruled) — O3: `let` on a non-scalar.** `let` is ruled as "the `replace` grant on a scalar".
+> ✅ **RULED S435 — O3 = (c)** (bryan: *"c"*): `let` exists only where there is no bracket grant list — it is the `replace` grant on a SCALAR and on a STRUCT as a whole; struct FIELDS take per-field `let`; a SEQUENCE carries every grant, incl. `replace`, in its type brackets, and `let` on a sequence is a compile error ("write `replace` in the type's grants"). One spelling per grant. The prior OPEN text follows for the record.
+>
+> *(superseded)* **O3: `let` on a non-scalar.** `let` is ruled as "the `replace` grant on a scalar".
 > What `let` means on a sequence, tuple or struct-typed declaration — `replace` only (edits then need explicit
 > §66.12 grants), `replace` plus every edit (which would re-create the all-grant §66.12.4 forbids), or an error
 > requiring explicit grants — is not ruled.
@@ -39525,7 +39529,9 @@ carry. The load-bearing invariant survives under its existing code: **`E-COMPONE
 `single` declaration appears inside a multi-instance declaration** (one declaration site inside N instances
 cannot be one instance).
 
-> ⚑ **OPEN (not ruled) — O5: re-homing the §51.0 engine surface.** The ruling re-expresses `<engine>` as a
+> ✅ **RULED S435 — O5** (bryan: *"yes, table, 1i, 2ii"*): `rule=` unchanged; `effect=` / `<onTransition>` / `history` / `internal:rule=` / `<onTimeout>` / `<onIdle>` carry over as features of a field's transition graph — per instance on a non-`single` declaration, timers disposed with the instance; `var=` / `name=` / §51.0.C auto-naming RETIRE (the declaration's name is the variable); `derived=` RETIRES (a locked declaration with a reactive initializer is derived, §66.9); `.advance(.X)` is kept as the loud write; a nested `<engine>` becomes an enum-valued child field with its own graph; cross-file `<EngineName/>` becomes `<*name/>` of an exported `single`; engine `server` becomes the declaration `server` modifier (§66.16). **(1i)** state-child BODIES stay: a state-child's body is that variant's markup, rendered wherever the field renders. **(2ii)** `accepts=` + message arms are KEPT but CONFINED: an arm may only CHOOSE a write, and every write is still checked against `rule=` — a dispatch convenience, not a second transition definition. The prior OPEN text follows for the record.
+>
+> *(superseded)* **O5: re-homing the §51.0 engine surface.** The ruling re-expresses `<engine>` as a
 > `single` declaration whose fields carry transition graphs; it does not say where the rest of the §51.0 surface
 > lands: the state-child BODIES (today the engine's rendered output at its declaration site — do they remain the
 > render of a `single` declaration, or move into its `renders`, and how does that meet #19, §66.5.4?);
@@ -39636,7 +39642,9 @@ Content written between a use's tags is **slot content**, placed inside the decl
 > as the UNNAMED-CHILDREN spread. Whether `${...}` survives beside `<slot/>` as the children spread (two spellings),
 > is replaced by it, or is repurposed as an attribute spread, is not determinable from that text.
 
-> ⚑ **OPEN (not ruled) — O8: function-typed attributes vs the passed-vs-stored rule.** "Callback props =
+> ✅ **RULED S435 — O8** (bryan: *"yes"*): a function-typed attribute on a declaration (e.g. `onOpen:fn()`) is WIRING, bound once at the use site exactly like `onclick=` — it is NOT part of the instance value (not in `@x`, not in equality, not serialized, not writable, not readable from logic) and is invocable only inside the declaration's own `renders`. Consistent with "a function is never stored as data" (it is not data) and with "against virtual functions" (the binding is static at the use site, not looked up on the value). Callbacks are for occurrences; exported fields for state. The prior OPEN text follows for the record.
+>
+> *(superseded)* **O8: function-typed attributes vs the passed-vs-stored rule.** "Callback props =
 > function-typed attributes" is ruled. But an attribute is declaration DATA — part of the declaration's type
 > (§66.8.1) and of `@x`'s struct value — while §15.11.5.1 / §14.3 rule that a function SHALL NEVER be STORED as
 > value data (`E-STRUCT-FUNCTION-FIELD`; `==` on a function-containing type is `E-EQ-003`, §45.2). Whether a
@@ -40064,10 +40072,10 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | # | Where | The question |
 |---|---|---|
 | O2 / O39 | §66.14 | Module `export` vs field `export` on a top-level cell's or a `single` declaration's own value; how cross-file engine writes migrate. |
-| O3 | §66.9 | What `let` means on a sequence / tuple / struct (replace only · replace + every edit · error). |
-| O5 | §66.13 | Where the rest of the §51.0 engine surface lands under `single` (state-child bodies vs `renders`, `accepts=`/arms, `effect=`/`<onTransition>`, `history`, `internal:rule=`, `<onTimeout>`/`<onIdle>`, `derived=`, `server=`, `name=`/`var=`, `.advance`, nested engines, cross-file mount). |
+| ~~O3~~ RULED (c) | §66.9 | What `let` means on a sequence / tuple / struct (replace only · replace + every edit · error). |
+| ~~O5~~ RULED | §66.13 | Where the rest of the §51.0 engine surface lands under `single` (state-child bodies vs `renders`, `accepts=`/arms, `effect=`/`<onTransition>`, `history`, `internal:rule=`, `<onTimeout>`/`<onIdle>`, `derived=`, `server=`, `name=`/`var=`, `.advance`, nested engines, cross-file mount). |
 | O7 | §66.13 | Whether contract kinds combine on one field (lifecycle + graph; `let` + graph — `replace` subsumes edits, §66.11.3, so `let` would make a graph dead); the fate of §14.12.4's carve-out. |
-| O8 | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
+| ~~O8~~ RULED wiring | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
 | O9 | §66.15.2 | Named and parametric slots on a declaration. |
 | O10 | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. |
 | O12 | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). |
@@ -40096,7 +40104,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O46 | §66.15 | Does the `${...}` children spread survive beside `<slot/>`? |
 | O48 | §66.21 | Tier-3 positional: a Stage-1 window that preserves a silent miscompile, vs a §63.4 designer-card removal. |
 | O51 | §66.6.8 | A use or `<*x/>` of a declaration with no `renders`: an error, or a data-only instance (an `as=`-bound instance need not render). |
-| O52 | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
+| ~~O52~~ RULED | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
 | O25 | §66.5.5 | Record gap: implicit bind vs explicit `bind:` in `renders`, and whether validators reach the `renders` input (§6.4.2 steps 3–4). |
 | O54 | §66.6.3 | Record gap: whether `@x` inside `x`'s own `renders` names the current instance (DD #8, not in the answered text). |
 | O55 | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. |
