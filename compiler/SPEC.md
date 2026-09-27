@@ -38633,8 +38633,9 @@ The §34 catalog rows for every `E-STYLE-*`/`W-STYLE-*`/`E-THEME-*`/`E-DEFAULTS-
 > this one supersedes — remains what adopters get; §66 is what the language IS.
 >
 > **Authority.** bryan's verbatim rulings in `scrml-support/user-voice-scrml.md`: the S430 block (from *"P1
-> ruled"* through *"dpa-052 reframed by bryan"*), every S435 block, and the S437 bootstrap-slice-M1 block
-> (*"L6 a, L12 b, identities yes, replace respects sub-fields"*); the queue bodies `[dpa-050]` /
+> ruled"* through *"dpa-052 reframed by bryan"*), every S435 block, the S437 bootstrap-slice-M1 block
+> (*"L6 a, L12 b, identities yes, replace respects sub-fields"*) and its follow-up (*"O58 b, O57 no, O59 lean, O60
+> lean, confirms yes"*); the queue bodies `[dpa-050]` /
 > `[dpa-052]` in `handOffs/dpa-queue.md`. The dPA deep-dive
 > `scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md` is
 > **advisory only**: where a ruling differs from its lean (notably **Q6 was ruled option (a)**, not the DD's
@@ -38689,15 +38690,16 @@ contracts**, and the engine is re-expressed as a `single` declaration whose fiel
 | 66.22 | OPEN items (consolidated) | — |
 | 66.23 | Cross-references | — |
 
-**S437 amendments (bootstrap slice M1 rulings — *"L6 a, L12 b, identities yes, replace respects sub-fields"*).**
-Each is marked in place with an `Amendment S437` banner; none supersedes text outside §66.
+**S437 amendments (bootstrap slice M1 rulings — *"L6 a, L12 b, identities yes, replace respects sub-fields"*; and
+the follow-up *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*).** Each is marked in place with an
+`Amendment S437` banner; none supersedes text outside §66.
 
 | Where | Ruling | Effect on the OPEN list |
 |---|---|---|
-| §66.9 rule 8 (xrefs §66.6.1, §66.14 rule 4) | L6 = (a): a use-site attribute is that field's initializer for that instance; rules 3–4 apply per instance (locked + live expression = derived; `let` = seeded once) | O21 answered |
-| §66.7.6 | L12 = (b): instance records exist from program construction, before user code, separate from DOM mount; an unconditionally-mounted instance's `as=` handle is `T` | — |
-| §66.10 item 6 | Identities are not values: instances and `as=` handles bind live; values snapshot | O56 = NARROW unchanged |
-| §66.11.3 (xrefs §66.11.4, §66.20) | A whole-struct `replace` SHALL satisfy its sub-fields' contracts | O57 opened (fixed sub-fields) |
+| §66.9 rule 8 (xrefs §66.6.1, §66.14 rule 4) | L6 = (a): a use-site attribute is that field's initializer for that instance; rules 3–4 apply per instance (locked + LIVE initializer = derived; `let` = initialized once, seeded if LIVE). O60: a locked field that carries a grant is SEEDED by a live use-site initializer, not derived | O21 ruled (by derivation); O60 ruled |
+| §66.7.6 | L12 = (b): unconditionally-mounted instances' records exist from program construction, before user code, separate from DOM mount; their `as=` handle is `T`. O59: conditional / `<each>`-row records at mount, fresh on remount; construction in document order after the cells it reads; use-site initializers are the one sanctioned user code at construction | O59 ruled |
+| §66.10 item 6 | Identities are not values: an `as=` handle refers to its instance and does not snapshot it; values snapshot | O56 = NARROW confirmed unchanged |
+| §66.11.3 (xrefs §66.11.4, §66.20) | The spread-override shape `@x = { ...@x, f: v }` is a field edit judged by `f`'s own contract; a genuine replace is authoritative (O58 = (b)); a contract-free sub-field does not bound a replace (O57 = no) | O57, O58 ruled |
 
 **Notation.** Every example in §66 uses the ruled spelling: `let` is a PREFIX (`<let count:int=0/>`); the own
 value `=` sits inside the opener; a void declaration closes `/>`, a bodied one `</>`; a non-trivial opener
@@ -39100,6 +39102,9 @@ instance handle (the lists ruling came after the value-semantics ruling and its 
 §66.7.1, where `@x` of a declaration with fields evaluates to a struct value. (Former O40 — closed by the answered
 text; the tension with §66.10 is recorded here. Bryan's confirmation of this reading travels with O56.)
 
+> ✅ **CONFIRMED S437 — O56 NARROW stands** (ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*): the S437 "identities yes" (§66.10 item 6) did NOT
+> re-widen O56.
+
 > ✅ **RULED S435 — O56 = NARROW** (bryan: *"narrow"*): the `given` carve-out covers handles to INSTANCES only (an `as=` handle, a named or unnamed shared instance). Writing through any other `given` binding (a plain `T | not` cell, a value) is a compile ERROR naming the direct form (*"`u` is a copy; write `@user.name`"*). A direct `@handle.field = …` inside the narrowed block is legal; `let d = c` is a snapshot. Chosen as the reversible option. The prior OPEN text follows for the record.
 >
 > *(superseded)* **O56: the SCOPE of the `given` carve-out.** The answered text shows one case (an `as=`
@@ -39124,13 +39129,17 @@ text; the tension with §66.10 is recorded here. Bryan's confirmation of this re
 
 1. **The record of every UNCONDITIONALLY-mounted instance is created when the program is CONSTRUCTED** — before
    any user code runs, and separately from mounting the DOM. Creating an instance and mounting its markup are two
-   distinct steps. (When conditionally-mounted and `<each>`-row instances get their records, and how construction
-   is ordered relative to cell initializers and to use-site initializers — which, by §66.9 rule 8, evaluate
-   expressions — is ⚑ O59.)
+   distinct steps.
 2. **An unconditionally-mounted instance therefore always exists**, and an `as=` handle to it is typed **`T`**
    (§66.8), not `T | not` — the type is true by construction.
 3. **A conditionally-mounted instance stays `T | not`** (§66.7.5, unchanged).
 4. **Effects that touch the DOM run at mount**, not at construction.
+5. **Conditional and row instances, and construction order (O59 = the PA lean).** *Provenance:* ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*.
+   - A conditionally-mounted instance, and an instance in an `<each>` row, gets its record **AT MOUNT**, and a
+     **fresh** record on each remount.
+   - Construction runs in **document order**, after the cells it reads.
+   - **Use-site initializers (§66.9 rule 8) are the one sanctioned user code at construction** — the exception to
+     rule 1's "before any user code runs".
 
 **Observable guarantee.** A function that reads or writes an unconditionally-mounted instance through its handle
 sees the live instance — never `not` — even when it runs before the first render, or the read sits earlier in
@@ -39227,32 +39236,47 @@ library is therefore **declarations + named instances — no new construct** (§
    `scrml fix` rewrite is the locked declaration `<x:T=(expr)/>`, which is derived exactly when `expr` reads
    cells.
 
-> **Amendment S437 — use-site construction values (bootstrap slice M1, L6).**
+> **Amendment S437 — use-site construction values (bootstrap slice M1, L6; O60).**
 > **Provenance:** ruling:user-voice-scrml.md S437 — *"L6 a, L12 b, identities yes, replace respects sub-fields"*
-> (L6 = option (a) of the PA's M1 ruling message, whose full text the terse answer ratifies: *"Apply §66.9's rule
-> per instance. A locked field given a live expression becomes derived, so `label` tracks `line.name`. A `let`
-> field given a value is seeded once, so `value` starts at `"1"` and is then the instance's own. … (a) reads the
-> use-site attribute as that field's initializer for this instance."*). Rejected: (b) every construction value is
-> a one-time snapshot (stale UI); (c) everything tracks, including `let` fields (clobbers user input).
+> (L6 = option (a) of the PA's M1 ruling message, whose full text the terse answer ratifies). Option (a): *"Apply
+> §66.9's rule per instance. A locked field given a live expression becomes derived, so `label` tracks
+> `line.name`. A `let` field given a value is seeded once, so `value` starts at `"1"` and is then the instance's
+> own."* The PA's recommendation, in the same message: *"It adds no new rule: §66.9 already says a locked field
+> with a reactive initializer is derived and a `let` field with one is seeded. (a) reads the use-site attribute as
+> that field's initializer for this instance."* Rejected: (b) every construction value is a one-time snapshot
+> (stale UI); (c) everything tracks, including `let` fields (overwrites user input).
+> **Provenance (the grant-carrying exception, O60; the O21 confirm):** ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*.
 
-8. **A use-site attribute is that field's INITIALIZER FOR THAT INSTANCE, and rules 1–4 apply per instance.** A
+8. **A use-site attribute is that field's INITIALIZER FOR THAT INSTANCE, and rules 3–4 apply per instance.** A
    use `<x f=expr/>` (construction, §66.14 rule 4) gives the new instance's field `f` the initializer `expr`, in
    place of the declaration's default for `f`. Whether that field is derived or seeded is then decided by rules
-   3–4, for that instance, exactly as for a declaration:
-   - a **LOCKED** field given an expression that reads live state is **DERIVED** for that instance — it tracks
-     the expression;
-   - a **`let`** field given such an expression is **SEEDED** once — it starts from the expression and is
-     thereafter the instance's own.
+   3–4, for that instance, exactly as for a declaration. An initializer is **LIVE** when it reads a cell — directly
+   (`@x`) or through a row alias (an `<each … as>` name, or `@.`):
+   - a **LOCKED** field given a LIVE initializer is **DERIVED** for that instance (rule 3) — it tracks the
+     expression;
+   - a **`let`** field given a value is initialized once for that instance and is thereafter the instance's own; if
+     that value is LIVE, the field is **SEEDED** (rule 4) — it does not track the expression afterwards. A literal
+     is simply the field's initial value.
 
-   No new rule is introduced: this is rules 3–4 read at the use site.
+   No new rule is introduced for these: this is rules 3–4 read at the use site.
+
+   **Exception — a locked field that carries a grant (O60 = the PA lean).** A LOCKED field that still carries a
+   grant under rule 1 — a transition graph (§66.13.2) or sequence edit grants (§66.12) — given a LIVE initializer
+   at a use site is **SEEDED** from it (as a `let` field is), NOT derived, so the writes its own contract grants
+   (including the declaration's own writes from its `renders`) stay legal. (Whether a CHILD field may be set by a
+   use-site attribute at all is still O43; the exception governs any use-site initializer that reaches such a
+   field.)
 
    ```scrml
-   <dropdown label:string options:string[] let value:string=""/>          // `label` locked; `value` let (§66.19.3)
+   // abridged from §66.19.3 — the `renders` is elided
+   <dropdown label:string options:string[] let value:string=""/>          // `label` locked; `value` let
 
    <each in=@lines key=@.id as line>
        <dropdown label=line.name options=(["1", "2", "3"]) value="1"/>
-       // `label`: locked + a live expression → DERIVED for this row's instance — renaming the row relabels it
-       // `value`: `let` → SEEDED — starts at "1"; a user's pick is then this instance's own and is not reset
+       // `label`: locked + a LIVE initializer (the row alias `line`) → DERIVED for this row's instance —
+       //          renaming the row relabels it
+       // `value`: `let` + a literal → the initial value "1"; a user's pick is then this instance's own and is
+       //          never reset by the use site
    </each>
    ```
 
@@ -39267,12 +39291,11 @@ library is therefore **declarations + named instances — no new construct** (§
 > §66.12 grants), `replace` plus every edit (which would re-create the all-grant §66.12.4 forbids), or an error
 > requiring explicit grants — is not ruled.
 
-> ✅ **ANSWERED S437 by L6 (rule 8) — O21** (bryan: *"L6 a, …"*): a use-site attribute is that field's
-> initializer for that instance, in place of the declaration's default — so a use MAY set a locked attribute
-> whose default reads a cell; `<swatch hex="#dc2626"/>` gives that instance's `hex` the literal initializer (a
-> constant for that instance), and `let` is not needed to override at construction. (This is O21 read through
-> rule 8's "that field's initializer for this instance"; the L6 text did not name O21.) The prior OPEN text
-> follows for the record.
+> ✅ **RULED S437 — O21, closed by derivation from L6** (bryan: *"L6 a, …"*; confirmed: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*
+> — *"O21 is closed by derivation from L6"*): a use-site attribute is that field's initializer for that instance,
+> in place of the declaration's default — so a use MAY set a locked attribute whose default reads a cell;
+> `<swatch hex="#dc2626"/>` gives that instance's `hex` the literal initializer (a constant for that instance), and
+> `let` is not needed to override at construction. The prior OPEN text follows for the record.
 >
 > *(superseded)* **O21: a derived attribute vs use-site construction.** A locked attribute whose default
 > reads a cell (`<swatch hex:string=@brand/>`) is derived by rule 3. Whether a use-site attribute
@@ -39314,7 +39337,7 @@ library is therefore **declarations + named instances — no new construct** (§
    **What a binding taken from a handle holds is unchanged by this item:** `given c = @handle :> { … }` binds the
    instance (§66.7.5), and any other binding (`let d = c`) is a snapshot — O56 = NARROW. (The ratified text cites
    the S435 O56 *lean*, "anything with identity binds live"; O56 was subsequently ruled NARROW, and this item does
-   not widen it.)
+   not widen it — confirmed: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"* — *"'identities yes' did NOT re-widen O56 (NARROW stands)"*.)
 
 **impl#1 divergence (CARRIED).** impl#1 today leaks JavaScript reference semantics: a `let b = @a` alias compiles
 to a shared object reference, and an in-place `@a.push(3)` is observable through `b` (PA-verified by emission,
@@ -39374,10 +39397,11 @@ sequence is PROVABLE** — `@audit = []` and `reset(@audit)` on an end-append-on
 > says `replace` subsumes edits, but whether a sub-field's transition graph limits a replace isn't ruled."* The
 > PA's lean, in the same message: *"My lean is that it does. Otherwise `@order = { ...@order, status: .Shipped }`
 > skips the status graph entirely, a hole reachable just by spelling the write differently."*
+> **Provenance (O57, O58 — follow-up):** ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"* (the PA's
+> option texts for O57 and O58, whose full text the terse answer ratifies: O58 = (b), O57 = no — see below).
 
 **`replace` subsumes the edits of its OWN field only.** The paragraph above is about the grants on ONE type; it
-does not let a write to a struct skip the contract a SUB-FIELD carries. What the ruling covers is the spelling
-hole:
+does not let a write to a struct skip the contract a SUB-FIELD carries by spelling:
 
 1. **The spread-override shape is a FIELD EDIT.** `@x = { ...@x, f: v }` — a spread of the SAME value with named
    overrides — is a recognized reassignment shape, in the sense of §66.11.2 (as `@x = [...@x, e]` is an
@@ -39388,9 +39412,16 @@ hole:
      those do not grant is `E-WRITE-NOT-GRANTED`;
    - a `let` sub-field → its own `replace` grant.
 
-   An overridden sub-field with NO contract (fixed) is ⚑ O57.
-2. **A GENUINE replace** — a value that is not the spread-override shape of the same value, `reset(@x)`, a server
-   reload — is NOT settled by the ruling. How the contracts its sub-fields carry bind it is ⚑ O58.
+   An overridden sub-field with NO contract (fixed / locked) does not bound the write — rule 3.
+2. **A GENUINE replace is AUTHORITATIVE (O58 = (b)).** A value that is not the spread-override shape of the same
+   value (e.g. `@order = loadOrder()`), `reset(@x)`, or a server reload does NOT have to satisfy the contracts its
+   sub-fields carry: `reset` restores the declared initial state; a reload takes the server's state. It still
+   needs the struct's own `replace` grant, and the invariants apply to it as to every write (§66.11.2). Rejected:
+   (a) always checked (a reload errors, a legitimate server move is rejected, `reset` fails without an edge back to
+   the default); (c) `reset` exempt, reload checked.
+3. **A contract-free sub-field does not bound a replace (O57 = no).** A fixed / locked sub-field (no contract) is
+   written along with its struct under the struct's `replace` grant — otherwise O3's struct-level `let` (§66.9)
+   would be a dead grant.
 
 ```scrml
 type Status:enum = { Placed, Packed, Shipped }
@@ -39413,33 +39444,16 @@ type Status:enum = { Placed, Packed, Shipped }
 **Diagnostic.** No new code: the spread-override shape reports the code the direct sub-field write would get
 (§66.20).
 
-> ⚑ **OPEN (not ruled) — O57: does a contract-free (fixed / locked) sub-field bound a whole-struct write?** The
-> ruling's user-voice restatement lists "fixed" among the sub-field contracts; the PA text bryan answered asks only
-> about "its sub-fields' own contracts", with a transition graph as the case. If a fixed sub-field bounds a
-> replace, O3's ruled `let` on a STRUCT as a whole (§66.9; §66.11.4 "a whole-struct write is a `replace`") can
-> change no field that is not itself `let` — a **dead grant**. Options: **(a)** yes, a fixed sub-field bounds it
-> (and an overridden fixed field in the spread-override shape is `E-WRITE-NOT-GRANTED`); **(b)** no — only
-> sub-fields whose contract grants specific transitions (graph, lifecycle, sequence edit grants) bound it; a fixed
-> field is written along with its struct under the struct's `replace` grant. **PA lean: (b)** — (a) makes O3's
-> struct-level `let` a dead grant. (The user-voice restatement's "fixed" reads toward (a); the lean departs from
-> it, and bryan's confirm is needed.)
-
-> ⚑ **OPEN (not ruled) — O58: how sub-field contracts bind a GENUINE replace.** A value that is not the
-> spread-override shape (e.g. `@order = loadOrder()`), `reset(@x)`, or a server reload. bryan's S437 "yes" was
-> answered on the spread example alone; the consequences below were NOT presented to him. Options: **(a)** blanket
-> — judge every changed contract-carrying sub-field: a reload that changes an append-only or lifecycle sub-field
-> is an error; a graph sub-field is rejected at runtime even when the server legitimately moved it; `reset` fails
-> unless the graph has an edge back to the default; **(b)** a genuine replace is AUTHORITATIVE — `reset` = the
-> declared initial state, a reload = the server's state — and does not consult sub-field contracts (still bounded
-> by the struct's own `replace` grant and invariants); the spread-override shape stays a field edit;
-> **(c)** `reset` exempt, reload checked. **PA lean: (b).**
+> *(The user-voice restatement of the first S437 answer listed "fixed" among the sub-field contracts; O57 = no
+> settles that it does not bound a replace.)*
 
 #### 66.11.4 Structs — the same rule
 
 For a struct-typed value: **a field write is an edit** — a field is writable along its own contract (its
 lifecycle, its transition graph, or `let`); **a field with no contract is fixed**. **A whole-struct write is a
 `replace`** — except the spread-override shape `@x = { ...@x, f: v }`, which is an edit of each overridden
-field, judged by that field's own contract (§66.11.3, S437; fixed sub-fields ⚑ O57; a genuine replace ⚑ O58).
+field, judged by that field's own contract (§66.11.3, S437). A genuine replace is authoritative (O58 = (b)); a
+contract-free sub-field never bounds a replace (O57 = no).
 One rule across sequences, tuples and structs.
 
 #### 66.11.5 Out of scope: local `let` rebinding
@@ -39752,7 +39766,8 @@ cannot be one instance).
 4. **Use-site attributes are CONSTRUCTION** — always allowed, from any file (`<dropdown label="Size"/>` sets the
    new instance's `label` whether or not `label` is exported). Whether a construction value TRACKS its
    expression is §66.9 rule 8 (S437, L6): the use-site attribute is that field's initializer for that instance,
-   so a locked field given a live expression is derived (tracks) and a `let` field is seeded once.
+   so a locked field given a live expression is derived (tracks) and a `let` field is seeded once — except a locked
+   field that carries a grant, which a live use-site initializer seeds (O60).
 5. **A whole-value replace from outside the defining file is an error when the type has any private field**
    (`E-FOREIGN-REPLACE-PRIVATE`, §66.20) — a replace would otherwise write the private fields.
 6. **The exported field's contract IS the public API** — the scrml answer to methods and getters. A library
@@ -40195,7 +40210,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace: ⚑ O58). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
@@ -40209,7 +40224,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2) — including a graph transition on a SUB-FIELD written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace: ⚑ O58). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2) — including a graph transition on a SUB-FIELD written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 
 **Legacy-form codes** — the W-lint + reserved-E pairs of §66.21 (`W-DECL-LEGACY-RHS`, `W-CONST-CELL-DEPRECATED`,
@@ -40261,7 +40276,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O17 | §66.17 | Remaining T3 details: hyphenated token names / non-string CSS values, whether `for=` is still permitted, the `@media` auto-bind, library-file placement. |
 | O18 | §66.6.7 | Beyond `if=` on a use (ruled), which non-writing attributes (`if=`, `class=`, `style=`, `key=`) a `<*x>` reference or a use may carry. |
 | O19 | §66.3 | An own value AND attributes on one declaration; what `@x` then is. |
-| ~~O21~~ ANSWERED S437 (L6) | §66.9 | A derived (locked, reactive-default) attribute vs use-site construction. (Answered by §66.9 rule 8: the use-site attribute is that instance's initializer.) |
+| ~~O21~~ RULED S437 (by derivation from L6) | §66.9 | A derived (locked, reactive-default) attribute vs use-site construction. RULED: a use MAY set it — the use-site attribute is that instance's initializer (§66.9 rule 8). Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 | O24 | §66.5 | The spelling of a markup-typed derived cell. |
 | O31 | §66.2.2 | Whether a bare `name:Type` for a NON-declaration type (`<count:int/>`) is a declaration (`:Decl` and `:struct` are ruled). |
 | O32 | §66.2.4 | Whether compound literals may stand bare in an opener. |
@@ -40283,13 +40298,16 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O25 | §66.5.5 | Record gap: implicit bind vs explicit `bind:` in `renders`, and whether validators reach the `renders` input (§6.4.2 steps 3–4). |
 | O54 | §66.6.3 | Record gap: whether `@x` inside `x`'s own `renders` names the current instance (DD #8, not in the answered text). |
 | O55 | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. |
-| ~~O56~~ RULED narrow | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
+| ~~O56~~ RULED narrow (S437: confirmed not re-widened by "identities yes") | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
 | O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
-| O57 | §66.11.3 | (opened S437) Whether a FIXED (no-contract) sub-field bounds a whole-struct `replace` — the user-voice restatement lists "fixed"; read literally it makes O3's struct-level `let` a dead grant. |
+| ~~O57~~ RULED S437 = no | §66.11.3 | Does a contract-free (fixed / locked) sub-field bound a whole-struct `replace`? RULED no — else O3's struct-level `let` is a dead grant. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
+| ~~O58~~ RULED S437 = (b) | §66.11.3 | How sub-field contracts bind a GENUINE replace (a non-spread value, `reset`, a server reload). RULED (b): a genuine replace is AUTHORITATIVE and does not have to satisfy sub-field contracts (`reset` = the declared initial state; a reload = the server's state); the spread shape `@x = { ...@x, f: v }` stays a checked field edit. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
+| ~~O59~~ RULED S437 = PA lean | §66.7.6 | When conditional and `<each>`-row instances get their records, and how construction is ordered. RULED: at mount, fresh on each remount; construction in document order after the cells it reads; use-site initializers are the one sanctioned user code at construction. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
+| ~~O60~~ RULED S437 = PA lean | §66.9 | A LOCKED field that carries a grant (graph / sequence edits) given a live expression at a use site. RULED: the use-site live expression SEEDS it (like `let`) instead of deriving it, so the declaration's own writes stay legal. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
 
 Closed by the PA proposal text bryan answered (the terse-answer rule, §66 preamble): O6 (`single` is a trailing
 modifier — Q6 "a"), O40 (the `given` binding writes the instance — lists "yes"; its scope is O56), O53 (`let` / `export let` on attributes; `export <child>` —
-Q6 "a", "E2, move on", "yes, :struct,"). Answered S437: O21 (by L6 — §66.9 rule 8).
+Q6 "a", "E2, move on", "yes, :struct,"). Ruled S437 (*"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*): O21 (by derivation from L6), O57, O58, O59, O60.
 
 ### 66.23 Cross-references
 
