@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 142 | 4 |
-| MED | 317 | 0 |
-| LOW | 117 | 0 |
+| HIGH | 145 | 4 |
+| MED | 320 | 0 |
+| LOW | 120 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -18889,3 +18889,322 @@ excludes void tags from the compound-parent test but not from the `if=` host tes
 corpus count is 0, so the behaviour is arguably the better one — only the reason string is inaccurate.
 
 <!-- @gap id=g-ssr-each-lint-reason-is-wrong-on-a-void-if-host sev=LOW status=open locus=compiler/src/codegen/emit-ssr-render.ts prov=review:S436-pr-1066-LOW1 -->
+---
+
+> **S435 — dpa-050 defect intake (D1–D7 + the §9.4 stale comment).** Found by the dpa-050 deliberation
+> (`scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md` §2.3, §9.4) at
+> `b22f5e83`; **every entry below was re-reproduced by compiling on `ea55368da`** (the dPA's measurements were not
+> carried). D5 is filed as TWO entries because its two halves have different roots. **P7 (S430) assessment, measured for
+> all eight at once** — approximate regex over the working trees, not `origin/main`: `compiler/self-host/` (11 `.scrml`
+> files), assetManagement `app/src/` (1 file) and flogence (29 files) contain **0** component definitions, **0** Tier-3
+> positional decls, **0** `<*` refs, **0** `bind` props, **0** `<theme>` blocks. So none is bootstrap-blocking
+> (criterion 1) or adopter-reported (criterion 2) by that measure, and none is security (criterion 3): all eight read
+> as `carried` candidates. **The PA sets `carried`, not this intake.** Caveat for D1/D6: the absence of components in
+> the adopter trees is itself the finding. The component path is the one with the silent-wrong defects, and adopters
+> are not on it yet.
+
+### G-COMPONENT-LOCAL-CELL-SHARED-ACROSS-INSTANCES — a state cell declared inside a component body is ONE cell keyed by its bare name, so every `<Comp/>` instance shares it; clicking one dropdown opens all three — `NEW S435-dpa050; HIGH; open`
+<!-- @gap id=g-component-local-cell-shared-across-instances sev=HIGH status=open locus=compiler/src/component-expander.ts:expandComponentNode+substitutePropsInLogicStmt(case "state-decl" keeps n.name verbatim; no per-instance cell namespace exists) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, silent (exit 0).** Driven in happy-dom: before any click there are 0 `<ul>`; clicking the
+FIRST of three dropdown buttons leaves **3** `<ul>` open.
+
+```scrml
+<program>
+  const Dropdown = <div class="dd" props={ label: string }>
+    ${ <open> = false }
+    <button onclick=(@open = !@open)>${label}</button>
+    <ul if=@open><li>item</li></ul>
+  </>
+  <div>
+    <Dropdown label="A"/>
+    <Dropdown label="B"/>
+    <Dropdown label="C"/>
+  </div>
+</program>
+```
+
+`bun compiler/bin/scrml.js compile p03d.scrml --output-dir out` → exit 0. The client JS holds
+`_scrml_cs_reactive_set("open", false)` **three times on the same key**, and all three toggles write
+`_scrml_cs_reactive_set("open", !_scrml_cs_reactive_get("open"))`. (The bare, un-braced `<open> = false` form does not
+compile at all; that is `g-component-body-bare-state-decl-misclassified`.)
+
+**Expected:** three independent `open` cells, one per instance. **Actual:** one shared cell.
+
+**SPEC contradicted.** §15.13.5 normative: *"Each `<Card/>` tag instantiates a fresh component with its own internal
+state (`@var` declared inside the component body is per-instance)."* Its table row: *"Fresh state per instance — every
+`<Card/>` use-site has its own state."* §15.13.6: *"A component body MAY declare its own state cells (`<localCell> =
+init`) — these are per-instance per V5-strict's structural-form rule."*
+
+**Locus: TRACED.** Components are inlined at compile time by CE. `substitutePropsInLogicStmt`'s `case "state-decl"`
+copies the decl with `n.name` unchanged and only records the name as prop-shadowing, and `expandComponentNode` applies no
+per-instance renaming. No per-instance cell namespace exists anywhere downstream: `codegen/collect.ts:516` states
+*"components are compile-time INLINED, so there is no per-instance runtime element."* The emitted key is therefore the
+bare name, once per inlined copy.
+
+**Direction if fixed:** a behaviour change for accepted programs, from shared to per-instance (silent-wrong → correct).
+It needs a per-instance key or scope mechanism, a design call CE does not have today. This bears directly on the dpa-050
+Q6 ruling (how an instance writes its own state), so the fix shape should wait for that ruling.
+
+### G-COMPONENT-BODY-BARE-STATE-DECL-MISCLASSIFIED — a bare `<x> = v` inside a component body never parses as a declaration: as the FIRST child it turns the component root into text (`E-COMPONENT-035` ×N at every use); later in the body it cascades `E-CTX-001`/`E-CTX-003` — `NEW S435-dpa050; MED; open`
+<!-- @gap id=g-component-body-bare-state-decl-misclassified sev=MED status=open locus=compiler/src/block-splitter.js:splitBlocks(the program-body peekCompoundStateDeclSignal gate ~:3439 then classifyOpenerForCompoundScan reads a div opener whose first child is a bare open-cell decl as a §6.3.2 compound state-decl and lexes the whole component root as TEXT; below the top level the state-decl peeks do not run, so the cell opener opens an element) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, loud, but the diagnostic names the wrong cause.**
+
+```scrml
+<program>
+  const Dropdown = <div class="dd" props={ label: string }>
+    <open> = false
+    <button onclick=(@open = !@open)>${label}</button>
+    <ul if=@open><li>item</li></ul>
+  </>
+  <div><Dropdown label="A"/><Dropdown label="B"/><Dropdown label="C"/></div>
+</program>
+```
+
+`bun compiler/bin/scrml.js compile p03b.scrml --output-dir out` → **exit 1**, `E-COMPONENT-035` ×3: *"Component
+`Dropdown` survived component expansion (CE) but was not resolved … Likely cause: cross-file component import …"*. The
+file has no import. Moving the decl after the `<button>` gives **exit 1** with `W-PROGRAM-001` + `E-CTX-001` (*"'</program>'
+tries to close '<div>'"*) + `E-CTX-003`. Wrapping the decl as `${ <open> = false }` compiles, and then hits
+`g-component-local-cell-shared-across-instances`.
+
+**Root, measured:** `splitBlocks` output for the first form is `text "const Dropdown = "` followed by
+**`text "<div class=\"dd\" props={…}>\n <open> = false …</>"`**. The component's root markup is a text block, so TAB
+builds a `const-decl` plus an `html-fragment` instead of a `component-def`, the registry never gets `Dropdown`, and CE
+reports the post-CE invariant.
+
+**Expected:** a state decl local to the component. **Actual:** the component is destroyed, and the error points at an
+import that does not exist. Under the S95 rule, a diagnostic that does not name the root cause is itself a diagnostic bug.
+
+**SPEC contradicted.** §15.13.6: *"A component body MAY declare its own state cells (`<localCell> = init`) — these are
+per-instance per V5-strict's structural-form rule."*
+
+**Locus: TRACED** at the classification step (`peekCompoundStateDeclSignal` → `classifyOpenerForCompoundScan`,
+program-body gate at `block-splitter.js` ~:3439). The second position's path (inside a markup frame, the state-decl
+peeks are gated on `stack.length === 0 || isProgramBody …`) is located, not traced line by line.
+
+**Direction if fixed:** newly-accepting (currently rejected; SPEC says MAY). At minimum, a diagnostic-correctness fix:
+name the bare decl, not an import.
+
+### G-TIER3-POSITIONAL-STRUCT-INIT-EMITS-JS-COMMA-EXPRESSION — `<brand>: Swatch = ("Brand", "#338967")` (§6.3.3 Tier-3 positional sugar) compiles at exit 0 to a JS comma expression, so the cell holds only the LAST element (`"#338967"`) — `NEW S435-dpa050; HIGH; open`
+<!-- @gap id=g-tier3-positional-struct-init-emits-js-comma-expression sev=HIGH status=open locus=compiler/src/expression-parser.ts:esTreeToExprNode(case "SequenceExpression" then makeEscapeHatch raw passthrough)+searched:compiler/src(no Tier-3 positional lowering exists anywhere — zero implementation hits for the struct-typed tuple init) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, silent miscompile.**
+
+```scrml
+<program>
+  type Swatch:struct = { label: string, hex: string }
+  <brand>: Swatch = ("Brand", "#338967")
+  <p>${@brand.label} ${@brand.hex}</p>
+</program>
+```
+
+`bun compiler/bin/scrml.js compile p11.scrml --output-dir out` → exit 0, no diagnostic. Client JS:
+`_scrml_cs_reactive_set("brand", ( "Brand" , "#338967" ))`. That is a JS comma expression, so `@brand === "#338967"` and
+`@brand.label` is `undefined`. In the dPA's theme app (`cur-iii`), driven in happy-dom, the accent chip's label renders
+`""`. **The untyped form is also accepted:** `<pair> = ("Brand", "#338967")` compiles at exit 0 to the same comma
+expression, although §6.3.3 makes positional binding legal ONLY with a predefined type.
+
+**Expected:** a `Swatch` value `{ label: "Brand", hex: "#338967" }`, and a compile error for the untyped form.
+**Actual:** the string `"#338967"` in both cases.
+
+**SPEC contradicted.** §6.3.3: *"When the compound cell's shape is fixed by a predefined type, positional binding sugar
+is legal: … `<userInfo>: UserInfo = ("alice", 30, true)    // positional sugar`"*, and *"**Tier ladder rule:** positional
+binding `<x> = (a, b, c)` is legal ONLY when the structure is fixed by a predefined type."* Note also that scrml is not a
+JS superset: a JS comma operator reaching the output is not a scrml semantics at all.
+
+**Locus: TRACED for the passthrough, SEARCHED for the missing lowering.** `esTreeToExprNode`'s `case
+"SequenceExpression"` returns `makeEscapeHatch(node, span, rawSource)`, so the raw `( a , b )` text is emitted verbatim.
+A search of `compiler/src` for a positional / Tier-3 lowering finds none: no pass reads the `: Swatch` annotation to map
+the tuple onto the struct fields. Corpus: 0 tracked `.scrml` files use the typed positional form, so the blast radius is
+zero. That is not demand evidence either way.
+
+**Direction if fixed:** the typed form goes from silent-wrong to correct (behaviour change). The untyped form becomes
+newly-rejecting per the tier-ladder rule. Q2/F1 in dpa-050 (`(label: …, hex: …)` named form → `E-CODEGEN-INVALID-LOGIC`)
+is adjacent but loud.
+
+### G-STAR-TAG-REF-PASSES-THROUGH-AS-PAGE-TEXT — `<*count/>` in markup is emitted verbatim into the HTML body at exit 0; the page shows the literal text `<*count/>` — `NEW S435-dpa050; LOW; open`
+<!-- @gap id=g-star-tag-ref-passes-through-as-page-text sev=LOW status=open locus=compiler/src/block-splitter.js:splitBlocks(the less-than dispatch — less-than followed by neither `/`, `#` nor [A-Za-z_] (~:3334) falls through to text; no diagnostic) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`.**
+
+```scrml
+<program>
+  <count> = 0
+  <p><*count/></p>
+</program>
+```
+
+→ exit 0. The only diagnostic is `E-DG-002` (`@count` never consumed), a warning. The emitted HTML line is
+`<p><*count/></p>`. `<*` is not an HTML tag start, so the browser renders it as literal text.
+
+**Expected:** SPEC-silent. **Actual:** silent page-text passthrough of what is plainly a mistyped reference.
+
+**SPEC:** searched §4.1 and §6.4 — no governing sentence. §4.1 classifies only `<` + `[A-Za-z_]` as an element opener,
+and says nothing about `<` + a non-identifier character in free-text mode. `<*[a-z]` has 0 SPEC hits. Filed as
+missing-diagnostic, not spec-vs-impl.
+
+**Locus: LOCATED** (the block-splitter's `<` dispatch; the text fallthrough is the decision).
+
+**Direction if fixed:** newly-rejecting or -warning. **Becomes moot, or turns into newly-accepting, if dpa-050 Q1 adopts
+`<*name/>` as the instance-reference form.** The PA should hold this entry against that ruling rather than fix it
+independently.
+
+### G-COMPONENT-BIND-PROP-REJECTED-E-ATTR-011 — `bind:visible=@x` on a component whose props declare `bind visible: boolean` fails `E-ATTR-011` ("not a supported bind: attribute"); SPEC §15.11.1's OWN Modal worked example does not compile — `NEW S435-dpa050; MED; open`
+<!-- @gap id=g-component-bind-prop-rejected-e-attr-011 sev=MED status=open locus=compiler/src/component-expander.ts:expandComponentNode(callerNonClassAttrs merge ~:3129 carries the caller's bind:PROP attr onto the expanded ROOT element)+compiler/src/codegen/emit-html.ts(the bind: pre-pass SUPPORTED_BIND_NAMES check ~:2735 fires on that root; the _componentPropNames exemption is not consulted) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, loud.** This is the §15.11.1 worked example, inlined:
+
+```scrml
+<program>
+    const Modal = <div class="modal" props={ bind visible: boolean, title: string }>
+        <h2>${title}</h2>
+        <button onclick=${ visible = false }>Close</button>
+    </>
+    <showModal> = false
+    <button onclick=${ @showModal = true }>Open settings</button>
+    <div><Modal bind:visible=@showModal title="Settings"/></div>
+</program>
+```
+
+→ **exit 1**, `E-ATTR-011: \`bind:visible\` is not a supported bind: attribute. Supported: \`bind:value\`, …`.
+
+**Partial machinery exists.** CE parses `bind` props (`PropDecl.bindable`), validates call sites (`E-COMPONENT-013`,
+`E-COMPONENT-014`, `E-ATTR-010`), and records `_bindProps` wiring metadata, which `emit-reactive-wiring.ts` (~:1953)
+consumes. But the caller's `bind:visible` attr is also merged onto the expanded root `<div>`. The HTML-element bind
+validator then rejects it before any of that wiring matters. The write-back half (whether `visible = false` inside the
+body propagates to `@showModal`) is **unmeasured**, because E-ATTR-011 stops the compile first.
+
+**SPEC contradicted.** §15.11.1: *"`bind:propName=@var` SHALL be valid on any component call where `propName` is declared
+as a `bind` prop in the component's `props` block."* Also: *"The compiler SHALL generate bidirectional synchronisation for
+`bind:` component props."*
+
+**Locus: TRACED** to the merge plus the pre-pass. The fix is more than the one-line exemption. The write-back path also
+needs a runtime check once E-ATTR-011 stops blocking the compile.
+
+**Direction if fixed:** newly-accepting (a SPEC SHALL currently rejected). This is the component write-back story
+dpa-050 §3 had to route around with callback props.
+
+### G-COMPONENT-EACH-IN-LITERAL-PROP-UNSUBSTITUTED — inside a component, `<each in=options>` fails `E-SCOPE-001` on `options` when the caller passes an array LITERAL (`options=["a","b"]`); the same body works when the caller passes `@cell`, and the `${ for … lift }` form works with the literal — `NEW S435-dpa050; MED; open`
+<!-- @gap id=g-component-each-in-literal-prop-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts:expandComponentNode(the string `props` map ~:2863 is filled ONLY for string-literal and variable-ref caller values; an `expr` value like an array literal lands only in propExprMap)+substituteProps(each-block raw fields inExprRaw/ofExprRaw/keyExprRaw are rewritten from the string map via substitutePropsInRawExpr, so an expr-valued prop is never substituted) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, loud. Narrower than dpa-050 stated.**
+
+```scrml
+<program>
+  const Menu = <ul props={ options: string[] }>
+    <each in=options as opt><li>${opt}</li></each>
+  </>
+  <div><Menu options=["a","b"]/></div>
+</program>
+```
+
+→ **exit 1**, `E-SCOPE-001: Undeclared identifier \`options\`` at `p27.scrml#Menu:2:1`, stage TS. **Controls:** the same
+component called as `<Menu options=@opts/>` (with `<opts> = ["a", "b"]`) → exit 0. The `${ for (const opt of options) {
+lift … } }` body with the literal caller value (`p28`) → exit 0. dpa-050 M16 recorded this as "`<each in=prop>` fails".
+It fails only for expr-valued (non-string, non-`@`) caller values.
+
+**Expected:** the prop resolves as it does in the for-lift form. **Actual:** unsubstituted raw name, scope error.
+
+**SPEC:** no sentence names `<each in=prop>` inside a component directly. Governing by composition: §15.13.4, *"Non-`bind`
+props SHALL be evaluated at instantiation time"*, which does not depend on the caller value's syntactic kind. The S153
+each-in-enclosing-scope fix (comment at `component-expander.ts` ~:2627) states the intent that component-body `<each
+in=items>` substitutes the prop.
+
+**Locus: TRACED.** `substitutePropsInRawExpr` rewrites the each-block string fields from `props`. `props.set` is called
+only for `string-literal` and `variable-ref` values (~:2864–2867), so an array-literal value never enters it.
+
+**Direction if fixed:** newly-accepting (loud rejection → works). Related open entry:
+`g-snippet-param-in-attr-interp-and-each-raw-unsubstituted` has the same raw-string-field blind spot for snippet params.
+
+### G-COMPONENT-AT-PROP-IN-STRING-ATTR-EMITTED-AS-RAW-TEXT — a component prop passed an `@cell` value (`<Swatch hex=@c/>`) and used as `${hex}` inside a string attribute (`style="background:${hex}"`, `title="t-${hex}"`) is emitted as the literal text `@c` — `NEW S435-dpa050; HIGH; open`
+<!-- @gap id=g-component-at-prop-in-string-attr-emitted-as-raw-text sev=HIGH status=open locus=compiler/src/component-expander.ts:applyPropSubstitutions(replaces a whole `${prop}` segment with the string-map value; for a variable-ref caller value that value is the raw reference text `@c`, spliced in as LITERAL text) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`, silent miscompile, and broader than dpa-050 measured.** dpa-050 M20 showed it for a
+member access (`hex=@accent.hex` → `style="background:@accent.hex"`). A plain cell does the same:
+
+```scrml
+<program>
+  <c> = "#338967"
+  const Swatch = <span class="chip" props={ hex: string }>
+      <i style="background:${hex}" title="t-${hex}"></i>
+  </>
+  <Swatch hex=@c/>
+  <button onclick=(@c = "#dc2626")>x</button>
+</program>
+```
+
+→ exit 0, no diagnostic. Emitted HTML: `<i style="background:@c" title="t-@c">`. The client JS has no `background`
+wiring at all. String-literal caller values are correct: `<Swatch hex="#dc2626"/>` → `style="background:#dc2626"`. Text
+interpolation of the same prop (`${label}` as a child) is also correct, because it goes through the ExprNode map.
+
+**Expected:** at minimum the instantiation-time value (`background:#338967`). **Actual:** the source text `@c` in the
+attribute.
+
+**SPEC contradicted.** §15.13.4: *"Non-`bind` props SHALL be evaluated at instantiation time and SHALL NOT re-evaluate
+when the source value changes in the parent scope."* The prop is never evaluated. Its source text is pasted instead.
+
+**Locus: TRACED.** `applyPropSubstitutions` does
+`text.replace(/\$\{([^}]+)\}/g, … props.get(trimmed))`, and `props` holds `attr.value.name` (`"@c"`) for a variable-ref
+caller value (~:2866). The substitution drops the `${…}` wrapper and leaves `@c` as literal characters.
+
+**Related (resolved):** `g-inlined-component-root-class-interp-raw` (S200) left a literal `${…}` on an inlined root
+`class`, which is a different root. `g-value-attr-component-root-class-style-consumed` (LOW, open) covers `class=(expr)` /
+`style=(expr)` on a component root.
+
+**Direction if fixed:** silent-wrong → correct (behaviour change for accepted programs). Whether the fixed attribute is
+static (evaluated once, per §15.13.4) or reactive is a SPEC question: the §15.13.3 `bind:` split says static. dpa-050's
+Q6 may revisit it.
+
+### G-THEME-TOKEN-AND-SAME-NAMED-CELL-COEXIST-SILENTLY — a `<theme>` token `brand` and a cell `<brand>` in one program compile with no diagnostic; `@brand` then means the TOKEN in `#{}` CSS and the CELL in markup/logic — `NEW S435-dpa050; LOW; open`
+<!-- @gap id=g-theme-token-and-same-named-cell-coexist-silently sev=LOW status=open locus=compiler/src/codegen/emit-theme-reset.ts:lowerCssValueRefs(`themeTokens.has(name)` is checked FIRST then var(--name); a same-named cell is silently shadowed in CSS; no declaration-time collision check exists) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**Reproduced on `ea55368da`.**
+
+```scrml
+<program>
+  <theme>
+      brand = #338967;
+  </theme>
+  <brand> = "x"
+  <p style="color: ${@brand}">${@brand}</p>
+  <div>#{ color: @brand; }hi</div>
+</program>
+```
+
+→ exit 0, no collision diagnostic. CSS: `:root { --brand: #338967; }` and `color: var(--brand)`, so the `#{}` `@brand` is
+the token. Client JS: `_scrml_cs_reactive_set("brand", "x")`, so the markup `@brand` is the cell. One spelling has two
+referents chosen by context. The reverse also holds (dpa-050 M18/p30): with no cell, `${@brand}` in logic is
+`E-STATE-UNDECLARED`, so a token is unreachable from logic.
+
+**SPEC:** searched §65.3.2, §65.9, §25.7 — no governing sentence for the collision. §65.3.2 says *"membership
+disambiguates — a `@name` matching a `<theme>` token lowers to `var(--name)`, otherwise the reactive-cell bridge"*, and is
+silent when both match. §65.9's "collision principle" is about keyword collisions (`<theme>` the element vs a `<theme>`
+cell), not token-vs-cell names. Filed as missing-diagnostic / SPEC ambiguity.
+
+**Locus: LOCATED** (`lowerCssValueRefs` token-first precedence). No collision check exists to trace.
+
+**Direction if fixed:** newly-rejecting or -warning (a collision diagnostic), and it needs a SPEC sentence first. Feeds
+dpa-050 F15.
+
+### G-SYMBOL-TABLE-STALE-COMMENT-NATIVE-WALKER-MESSAGEARMS-EMPTY — `symbol-table.ts` still says the native walker leaves engine `messageArms` empty, so §51.0.S message-arm validation is "a no-op on native-pipeline engine-decls"; both halves are false on HEAD — `NEW S435-dpa050; LOW; open`
+<!-- @gap id=g-symbol-table-stale-comment-native-walker-messagearms-empty sev=LOW status=open locus=compiler/src/symbol-table.ts(the §51.0.S message-arm validation block comment — "the native walker leaves it empty pending batch-1/native wiring … a no-op on native-pipeline engine-decls today", ~:7671-7674) prov=dd:scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md -->
+
+**A comment defect, verified by execution on `ea55368da`.** The comment (authored `c6f323f06`, S155 batch-2) reads:
+*"`messageArms` is populated by the live-pipeline state-child parser (`parseEngineStateChildren`); the native walker
+leaves it empty pending batch-1/native wiring (batch-3 note), so this validation is a no-op on native-pipeline
+engine-decls today."* The wiring landed in `7cbad5dd2` (*"F1-narrow + B2 — §51.0.S engine message-arm parity"*).
+`compiler/src/native-walker/engine-statechild-walker.ts` (~:542) sets
+`messageArms: (isColonShorthand || isSelfClose) ? [] : parseMessageArms(bodyRaw).arms`.
+
+**Empirical:** dpa-050's `p24` (an `accepts=OpenMsg` engine whose `<Closed>` state omits `.Close`) compiled with
+`--parser=scrml-native` → **exit 1**, `I-PARSER-NATIVE-SHADOW` + `E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE` (*"state-child
+`<Closed>` … does not cover every `OpenMsg` variant"*). The validation fires on the native pipeline.
+
+**Why it is filed:** it already misled a reader. dpa-050's architect panelist relayed "the native walker never fills
+`messageArms`" as fact, and the §9.4 verification refuted it. The comment sits on the exhaustiveness logic the bootstrap
+port will read. Line 9's S-era narrative in this ledger ("the native-walker hard-codes `messageArms:[]`") is the same
+historical claim, and is correct only as history.
+
+**SPEC:** not applicable (no behaviour defect). **Locus: TRACED** (the comment's text, and the walker line that
+falsifies it). **Direction if fixed:** comment-only; no behaviour change.
