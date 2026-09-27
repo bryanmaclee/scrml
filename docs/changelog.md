@@ -2,6 +2,19 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S435 — 2026-09-26/27 (bryan · ASUS)
+
+A design session. dpa-050 (what a declaration IS) and dpa-052 (value mutability) were ruled through in conversation
+and written into a new normative SPEC section, **§66 — declarations, instances and value contracts** (Nominal /
+spec-ahead): `<engine>` becomes a `single` declaration with field contracts, components retire into declarations,
+values are immutable by default with permissions on the TYPE, value semantics, one transition axis with a
+`replace` grant, `let` / locked / derived, E2 encapsulation. L19 was reversed (inline block handlers are canonical).
+The TS compiler's role narrowed to serving the bootstrap + security, with **`v0.8.0`** tagged as the adopter safety
+net. dpa-051 (the bootstrap codegen architecture) is running on §66.
+
+PRs: #1074 (dPA dpa-050 output) · #1075 #1097 (Peter routing) · #1078 #1079 #1083 #1084 #1090 #1093 (rulings banked)
+· #1086 (9 dpa-050 defects filed) · #1096 (L19 reversal) · #1098 #1100 (§66) · #1099 (0.8.0).
+
 ## S436 — 2026-09-26/27 (peter · AdiPDesk)
 
 The review floor went from 16 owed to 0 and was held there across three re-drains, and draining it turned out to

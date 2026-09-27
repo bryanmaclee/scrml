@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 145 | 5 |
-| MED | 324 | 0 |
-| LOW | 123 | 0 |
+| MED | 325 | 0 |
+| LOW | 124 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19383,3 +19383,24 @@ defect"). The `:`-shorthand scan is wired for engine state-children only. (2) `<
 — §4.14 names this `E-PARSE-001`; impl#1 fails `E-CODEGEN-INVALID-LOGIC`. Loud (exit 1) in both cases, so no silent
 harm; the defect is that the diagnostic blames the compiler for a user error and does not name the fix. Pre-existing —
 found while measuring whether the L19 reversal reaches `:`-shorthand bodies (it does not; §4.14 is unchanged).
+
+<!-- @gap id=g-dev-compile-throw-test-fails-only-in-full-prepush-run sev=MED status=open locus=compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=review:S435-tag-push -->
+### G-DEV-COMPILE-THROW-TEST-FAILS-ONLY-IN-FULL-PREPUSH-RUN — a dev-server test blocks every tag push, passes alone
+
+**PA-VERIFIED BY EXECUTION (S435).** The pre-push hook's full run (`unit/integration/conformance/lsp/self-host/commands`)
+failed **twice** with `25806 pass, 5 fail`, all five in `dev-compile-throw-fail-closed.test.js` (§1 "compileScrml THROW
+under the watcher → fail CLOSED", §2 "delete-then-restore …"). Run alone, `bun test compiler/tests/commands/` →
+**258 pass, 0 fail** on the same commit, same clean worktree. So a test-ISOLATION defect between dev-server tests in the
+combined run (port / watcher / temp-dir state), not a compiler defect. Consequence: **no tag can be pushed through the
+hook** — `v0.8.0` was created via the GitHub API with bryan's explicit authorization. Second, independent symptom: the
+multi-minute pre-push run drops the SSH push connection (`client_loop: send disconnect: Broken pipe`) — run the suite
+before opening the connection, or raise ServerAliveInterval. Locus = the test file (located, not traced).
+
+<!-- @gap id=g-main-checkout-hangs-corpus-emit-differential-exit-codes sev=LOW status=open locus=searched:compiler/tests/integration/corpus-emit-differential-exit-codes.test.js,ASUS-main-checkout-local-state prov=review:S435-commit-block -->
+### G-MAIN-CHECKOUT-HANGS-CORPUS-EMIT-DIFFERENTIAL-EXIT-CODES — one integration test hangs 300s in one checkout only
+
+**PA-VERIFIED BY EXECUTION (S435).** `corpus-emit-differential-exit-codes.test.js` times out at 300s in the ASUS main
+checkout (a beforeEach/afterEach hook timeout; it blocked the 0.8.0 bump commit twice) but passes **36/36 in 2.7s** in a
+clean worktree at the same `origin/main`. The difference is local checkout state (untracked files / build output the
+enumeration walks). Not traced. Workaround: commit from a clean worktree. Measure with `git status --ignored` on the
+main checkout vs a fresh worktree.
