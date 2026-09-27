@@ -4,14 +4,14 @@
 
 ## ⏭ NEXT-SESSION PICKUP
 
-### 1. ⚑⚑ Merge #1109 — bootstrap slice M2 (parse → analyze → lower), then start M3
-- **#1109 is OPEN, CI pending at wrap** (branch `feat/s437-bootstrap-slice-m2`). It is the **dpa-051 Fork-A proof**:
+### 1. ⚑⚑ Bootstrap slice M2 is ON MAIN (#1109, 072741ca9) — start M3
+- **#1109 MERGED at wrap (072741ca9)** — CI gate/windows green, tracking = main's 5 names; `gate` runs slice-m1 (both providers), slice-m2, lexer. It is the **dpa-051 Fork-A proof**:
   `lower(analyze(parse(lex(src))))` over SPEC §66.19.1/.3 (byte-verbatim) is STRUCTURALLY EQUAL to M1's hand-built
   Core — first run, no oracle correction. Adversarial-reviewed (comparator caught 26/26 single-dimension mutations,
   no oracle leakage, 10 new programs + 12 formatting edits correct). The fix round after it (reset=InitOf,
   reads-require-narrowing, `#{}`/`+=` reported, FieldDef.graph removed, mutations on a mirror) is proven by the
   mutation harness (23/23 RED), **not** by a second independent review — same footing M1 landed on. PA-verified:
-  slice-m2 74 · slice-m1 73 (both providers) · lexer 337 · lint clean. Merge when CI is green (tracking = main's 5 names).
+  slice-m2 74 · slice-m1 73 (both providers) · lexer 337 · lint clean.
 - **M3, in order** (M2 agent's recommendation, PA agrees):
   1. **The TYPER (first — before the front end grows).** analyze has NO value-type / arity / redeclaration check:
      `@x = "oops"` into an int, wrong arity, `<each>` over an int, duplicate `<let x>` all lower SILENTLY. 11 shapes
@@ -102,7 +102,7 @@ difference (a control comparison) before quoting identity.**
 - Merged S437: #1102 (bookkeeping + maps) · #1104 (dpa-051 rulings, self-host FROZEN) · #1105 (bootstrap M1) · #1106
   (handler fix) · #1107 (§66 rulings) · #1108 (reads require narrowing). Cloud `gate` + `windows` GREEN on each;
   `tracking` = main's same 5 `scrml dev` watcher names each time (name-set compared, newest main push run).
-- **Open:** #1109 (M2), CI pending at wrap. #939 / #865 / #580 / #579 unchanged.
+- Also merged: #1109 (bootstrap M2, 072741ca9). Still open: #939 / #865 / #580 / #579 unchanged; #1110 (this wrap).
 - Review floor: 0 owed (681/681), markers for #1102–#1108 in this wrap.
 - Local hook suite (last full run, #1106 landing): 31,947 pass / 0 fail / 84 skip; conformance 1040/1047 + 7 xfail.
 - Maps: refreshed to d02738767 in #1102; a wrap refresh to the post-#1108 HEAD is in flight (see step 6c note in the

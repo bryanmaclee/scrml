@@ -4037,4 +4037,4 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 
 [3565] rule · **§66 rulings** L6 (a) · L12 (b) · identities · spread = field edit · O58 (b) · O57 no · O59/O60 leans · O21/O43 closed · reads through a conditional handle require narrowing → #1107 #1108 · two PA restatement widenings corrected (user-voice S437)
 
-[3566] state · **#1109 bootstrap slice M2 OPEN** — Fork-A proof: lower(analyze(parse(lex(SPEC §66.19)))) == M1 hand-built Core; M3 item 1 = the typer (11 silent shapes pinned test.failing)
+[3566] land · **#1109 bootstrap slice M2 MERGED (072741ca9)** — Fork-A proof: lower(analyze(parse(lex(SPEC §66.19)))) == M1 hand-built Core; M3 item 1 = the typer (11 silent shapes pinned test.failing)

@@ -11,7 +11,7 @@ The bootstrap's first slice landed and its central design claim held: a real par
 - **#1105** — bootstrap slice M1 (`compiler/self-host-v2/`): thin typed Core IR, printer, instance-record runtime, run on hand-built Core; dpa-050 D1 answered by execution (one click opens ONE dropdown). no-default-arm lint + slice suite + v2 lexer oracle now gated in CI.
 - **#1106** — handlers (§5.2.3): a bare `;`-sequence always errors (an assignment-led one compiled silently with its tail emitted as HTML attributes); braced blocks are parsed as statement lists and run every statement in every position (fixes the `<each>`-row and leading-call drops); braceless `else` no longer runs unconditionally in function bodies. 0 corpus files newly fail. Ships one pinned LOUD regression (a template reading `@cell` inside a multi-statement handler) under a HIGH carried gap.
 - **#1107 / #1108** — SPEC §66: L6, L12, identities, spread-shape field edit, O57–O60, O21/O43 closed, reads through a conditional handle require narrowing.
-- **Open at wrap:** #1109 — bootstrap slice M2 (the Fork-A proof), CI pending. M3 starts with the typer (analyze has no value-type/arity/redeclare check; 11 shapes pinned).
+- **#1109** — bootstrap slice M2: parse → analyze → lower; the lowered Core EQUALS M1's hand-built oracle (the dpa-051 Fork-A proof). M3 starts with the typer (analyze has no value-type/arity/redeclare check; 11 shapes pinned).
 - Gaps filed include `g-impl1-match-miscompiles-hit-by-the-bootstrap` (F11–F16), `g-client-template-interpolation-lowering-needs-a-structural-emitter`, `g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous`, `g-recent-sessions-index-stale-on-main-after-every-wrap-merge`.
 
 ## S435 — 2026-09-26/27 (bryan · ASUS)
