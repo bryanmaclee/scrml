@@ -39277,9 +39277,28 @@ library is therefore **declarations + named instances — no new construct** (§
    cells and instances are identities that hold values).
 4. **Carve-out:** the binding a `given` introduces over a conditionally-mounted instance handle writes that
    instance (§66.7.5 — from the later lists ruling's answered text): it binds the instance's identity, not a
-   struct value. Its scope beyond that one case is ⚑ O56.
+   struct value. Its scope is O56 = NARROW (§66.7.5): instance handles only.
 5. *(Non-normative.)* The implementation lean is copy-on-write, so a snapshot costs nothing unless mutated. The
    copy strategy is not part of the contract.
+
+> **Amendment S437 — identities are not values (bootstrap slice M1).**
+> **Provenance:** ruling:user-voice-scrml.md S437 — *"L6 a, L12 b, identities yes, replace respects sub-fields"*
+> (the ratification in the PA's M1 ruling message, whose full text the terse answer ratifies: *"instances and
+> handles are identities, not values. R3 says runtime values are immutable. M1 found that deep-freezing an
+> instance record breaks it, and the fix was to exempt instances and handles. §45.1 already says 'cells and
+> instances are identities that hold values' … It records the line R3 left implicit."*).
+
+6. **Identities are not values.** The snapshot rule (items 1–2) governs VALUES. **Instances and `as=` handles
+   are IDENTITIES that hold values** (§45.1; item 3) — they are not values:
+   - an `as=` handle **refers to its instance; it does not snapshot it**. A read through the handle reads the
+     instance's current value; a write the field's contract grants (§66.13.1, W2) reaches the instance;
+   - the immutability of runtime VALUES (dpa-051 R3) does not extend to instances or handles — an instance record
+     is an identity whose value changes by granted writes, not an immutable value.
+
+   **What a binding taken from a handle holds is unchanged by this item:** `given c = @handle :> { … }` binds the
+   instance (§66.7.5), and any other binding (`let d = c`) is a snapshot — O56 = NARROW. (The ratified text cites
+   the S435 O56 *lean*, "anything with identity binds live"; O56 was subsequently ruled NARROW, and this item does
+   not widen it.)
 
 **impl#1 divergence (CARRIED).** impl#1 today leaks JavaScript reference semantics: a `let b = @a` alias compiles
 to a shared object reference, and an in-place `@a.push(3)` is observable through `b` (PA-verified by emission,
