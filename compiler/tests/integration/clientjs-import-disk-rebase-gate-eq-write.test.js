@@ -2,6 +2,15 @@
  * #1045 F1 — client JS gets relative-import re-basing, in BOTH the write phase
  * and the `validateEmit` gate phase, so the gated bytes are the written bytes.
  *
+ * WHAT THIS PROVES, AND WHAT IT DOES NOT: every assertion here is (1) the
+ * written specifier resolves ON DISK from the written file, and (2) the gated
+ * bytes equal the written bytes. It does NOT prove the page works in a
+ * browser — a classic-format `.client.js` with a top-level `import` is a
+ * SyntaxError as a classic <script>, and an esm specifier re-based into the
+ * source tree 404s under a server that serves only dist. That browser half is
+ * open: docs/known-gaps.md
+ * g-clientjs-skips-relative-import-rebasing-so-a-host-import-dangles.
+ *
  * Pre-fix: `api.js` passed `clientJs` through `rewriteStdlibImports` only, while
  * `toolJs` / `serverJs` / `libraryJs` each got `rewriteRelativeImportPaths`
  * first. A plain `.js` helper — or an `import:host` binding — used client-side
@@ -121,8 +130,8 @@ function expectAllImportsResolve(file) {
 
 const SELF_HOST_TOML = '[capabilities]\nhost-import = "self-host-only"\n';
 
-describe("#1045 F1 — client JS relative imports are re-based, and gated == written", () => {
-  test("an import:host binding used client-side resolves from the written .client.js", () => {
+describe("#1045 F1 — client JS relative specifiers resolve on disk, and gated == written (NOT browser reachability)", () => {
+  test("an import:host specifier in .client.js resolves on disk from the written file; gated == written", () => {
     // Source is two dirs deep, the output one — the source-space `../../host/m.ts`
     // overshoots the project root from `out/`.
     const root = project({
@@ -141,7 +150,7 @@ describe("#1045 F1 — client JS relative imports are re-based, and gated == wri
     expect(gatedFor(g, "page.client.js")).toEqual([readFileSync(file, "utf8")]);
   });
 
-  test("a plain .js helper used client-side, flat and nested pages, deeper output dir", () => {
+  test("a plain .js helper specifier resolves on disk (flat + nested pages, deeper output dir); gated == written", () => {
     const root = project({
       "vendor/util.js": "export function dbl(x) { return x * 2 }\n",
       "app/page.scrml":
@@ -161,7 +170,7 @@ describe("#1045 F1 — client JS relative imports are re-based, and gated == wri
     expect(gatedFor(g, "deep.client.js")).toEqual([readFileSync(deep, "utf8")]);
   });
 
-  test("esm module format: the dist-space runtime import is NOT re-based; the helper is", () => {
+  test("esm: the dist-space runtime specifier is NOT re-based; the helper specifier resolves on disk; gated == written", () => {
     const root = project({
       "vendor/util.js": "export function dbl(x) { return x * 2 }\n",
       "app/page.scrml":
@@ -185,7 +194,7 @@ describe("#1045 F1 — client JS relative imports are re-based, and gated == wri
     expect(gatedFor(g, "deep.client.js")).toEqual([readFileSync(deep, "utf8")]);
   });
 
-  test("content-hashed client bundles carry the re-based specifier too", () => {
+  test("content-hashed client bundles carry the on-disk re-based specifier too", () => {
     const root = project({
       "vendor/util.js": "export function dbl(x) { return x * 2 }\n",
       "app/sub/deep.scrml":
