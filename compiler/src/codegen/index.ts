@@ -63,7 +63,7 @@ import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-mac
 import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
-import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
+import { isToolProgram, isLibraryShapedFile, getProgramKind } from "../tool-program.ts";
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
@@ -1965,6 +1965,14 @@ export function runCG(input: CgInput): CgOutput {
   // what the pre-scan exists to prevent. Recursing here closes that.
   // Sites, not bare nodes: `E-MW-008` mirrors `E-MW-007` in NAMING every competing
   // source, so the owning file travels with each declaration.
+  //
+  // A `kind="tool"` program is NOT a site, and neither is anything beneath it (S438,
+  // `g-mw008-counts-headless-tool-programs`). The count exists to find programs that
+  // can own cookie-session units, and a tool cannot: it emits no page (E-TOOL-003),
+  // `session.*` is E-SESSION-CONTEXT there, and a `serve=` tool refuses cookie auth
+  // (E-TOOL-SERVE-AUTH-UNSUPPORTED). Counting it made one web app plus a
+  // `tools/seed.scrml` read as two applications: the member units lost the program's
+  // declarations (the F1 split) and the build was refused with a false E-MW-008.
   const _collectProgramSites = (f: any): Array<{ node: any; filePath: string }> => {
     const acc: Array<{ node: any; filePath: string }> = [];
     const filePath = (f?.filePath as string) ?? "";
@@ -1972,6 +1980,7 @@ export function runCG(input: CgInput): CgOutput {
       if (!Array.isArray(ns)) return;
       for (const n of ns) {
         if (!n || n.kind !== "markup") continue;
+        if (n.tag === "program" && getProgramKind(n) === "tool") continue;
         if (n.tag === "program") acc.push({ node: n, filePath });
         if (Array.isArray(n.children)) visit(n.children);
       }
