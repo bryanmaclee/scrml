@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 145 | 5 |
+| HIGH | 146 | 5 |
 | MED | 327 | 0 |
-| LOW | 127 | 0 |
+| LOW | 128 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19423,3 +19423,11 @@ So `codegen/index.ts`'s comment "the F1 split is unreachable by construction" ho
 ### g-ghost-lint-false-fires-on-canonical-block-handler — the canonical inline block handler `onclick={ s1; s2 }` (L19 REVERSED S435, §5.2.3) fires `W-LINT-007` ("`<Comp prop={val}>` — scrml uses `<Comp prop=val>`") and `W-LINT-013` twice ("`@click=` Vue event shorthand") on a correct program
 **PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick={ @a = @a + 1; @a = @a * 2 }>go</button>` → one `W-LINT-007` + two `W-LINT-013` on that line. The pre-Stage-2 ghost-pattern pass (PRIMER §12) predates the L19 reversal: `{…}` in attribute position reads as JSX `prop={val}`, and each `@a =` inside the braces reads as a Vue `@event=` inside a tag-opener range (the W14 Unit AA tag-opener gating does not exclude a braced attribute value). Same class as the S137 Bug 44 exemption. Every adopter writing the now-canonical form gets three false warnings, which teaches them to ignore W-LINT. Found by the S437 maps refresh (N-S437-5). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise; but the lint now contradicts a ruling made on 2026-09-26, so it is arguably part of the L19 reversal's own landing. — `NEW S437-bryan`; **LOW**; open
 <!-- @gap id=g-ghost-lint-false-fires-on-canonical-block-handler sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(W-LINT-007 JSX-prop pattern + W-LINT-013 tag-opener gating near :472/:1032; PA-located-verify) prov=empirical:PA-compiled-onclick-block-handler-1x-W-LINT-007-2x-W-LINT-013 -->
+
+### g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements — `onclick=@count = 0; track("reset")` compiles at exit 0 with NO diagnostic: the handler keeps only `@count = 0`, and `track("reset")` is emitted as two bare HTML ATTRIBUTES (`track reset`) on the element
+**PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick=@count = 0; track("reset")>` → emitted `<button data-scrml-bind-onclick="_scrml_attr_onclick_1" track reset>`, and `W-DEAD-FUNCTION` fires on `track` — the compiler reports the dropped call as dead code. A call-led sequence (`onclick=startGame(); track("start")`) correctly fires `E-MULTI-STATEMENT-HANDLER` (currency-pass probe, exit 1). **Governing sentence (§5.2.3):** *"A BARE event-handler value that contains a `;` outside of expression-internal contexts … is compile error `E-MULTI-STATEMENT-HANDLER`"* and *"The error is kept so the unbraced sequence can never be silently read the wrong way."* So this is a conformance defect: the SHALL fires only when the sequence is led by a call; an assignment-led sequence ends the attribute value at the `;`-adjacent whitespace and the tail re-tokenizes as attributes. Silent-wrong-output class. Fix direction is newly-REJECTING toward an existing sentence (the PA-ruled class, IF corpus impact measures zero by compiling). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise. Found by the S437 PRIMER currency pass. — `NEW S437-bryan`; **HIGH**; open
+<!-- @gap id=g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements sev=HIGH status=open locus=searched:compiler/src/multi-statement-scan.ts(fire-site is call-led only per B18),attribute tokenizer in ast-builder.js/block-splitter — not traced prov=spec:§5.2.3-the-unbraced-sequence-can-never-be-silently-read-the-wrong-way -->
+
+### g-multi-statement-handler-message-gives-the-retired-l19-fix — `E-MULTI-STATEMENT-HANDLER`'s message still says "lift the body to a named function and wire by name"; §5.2.3 (L19 reversed S435) says the fix is to wrap the statements in braces — `onclick={ startGame(); track("start") }` — or to name a function
+Found by the S437 PRIMER currency pass (relayed; message text not PA-re-read). The diagnostic teaches the retired rule to every adopter who hits it. Part of the L19 reversal's own landing. — `NEW S437-bryan (relayed)`; **LOW**; open
+<!-- @gap id=g-multi-statement-handler-message-gives-the-retired-l19-fix sev=LOW status=open locus=searched:compiler/src/multi-statement-scan.ts — message site not traced prov=spec:§5.2.3-fix-is-to-wrap-the-statements-in-braces -->
