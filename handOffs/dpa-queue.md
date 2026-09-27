@@ -3473,6 +3473,25 @@ Scope + evidence: see the table row. Deliverable: an architecture a scrml-author
 with each decision grounded in a measured defect family from the TS compiler, and a per-emitter port order under
 the P5 hybrid gate (`scripts/hybrid.ts`, #1044). Anti-goal: a line-for-line port of `compiler/src/codegen/*.ts`.
 
+### S435 — carried in from dpa-050 §8 + §9.2 (Q6-INDEPENDENT — design these regardless of how Q6 rules)
+
+The dpa-050 DD (`scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md` §8)
+names the primitive that does not exist today — per-instance state (D1: a component-local cell compiles to ONE global
+key, so every instance shares it). A declaration must compile to: (1) a TYPE (the struct shape of attributes +
+children); (2) an INSTANCE FACTORY `mk_<decl>(attrs, parentScope) → instanceId` allocating instance-keyed cells
+`key(decl, instanceId, field)` seeded from defaults overridden by use-site attributes; (3) a RENDER FUNCTION
+`render_<decl>(instanceId, mountEl)` with a per-instance effect scope and DISPOSAL on unmount (effects, listeners,
+timers); (4) the SHARED INSTANCE = `instanceId 0`, allocated lazily only if `<*x>`/`@x` is referenced; (5) `as=`
+binding = a scope alias `name → instanceId`, cleared to `not` on unmount; (6) lexical self-resolution inside
+`renders` (`@dropdown` there = the closure's instance, never 0). Panel additions: (7) STABLE INSTANCE KEYING inside
+`<each>` (whose state survives a reorder — Elm's `Html.Keyed` lesson); (8) the KEY-SCHEME INVARIANT: an engine IS
+instance 0 of a declaration in the runtime key scheme, so a later engine/declaration convergence is a re-spelling,
+not a second keying scheme. (9) the HIGH `g-no-reactive-cell-assignment-type-check` gap is a prerequisite of "typed".
+
+⚑ S435 bears on this too: dpa-052 ruled VALUE SEMANTICS (an alias snapshots; copy-on-write lean) and ONE transition
+axis (permissions on the TYPE, checked on every write; `replace` its own grant). Both are codegen obligations this
+doc must design. dpa-050 Q6 was re-framed by the PA toward option (a) under dpa-052 field contracts — PENDING bryan.
+
 ## [dpa-052] deep-dive — value mutability: immutable unless `let`, and whether tuples come back
 `status:    banked`  # S430 2026-09-26. AXIOM-LEVEL (ladder row 7). One question at a time.
 banked:     S430 2026-09-26 (bryan stated the leading model as "IMO"; PA banked on his go-ahead to discuss)
