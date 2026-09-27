@@ -39086,7 +39086,9 @@ instance handle (the lists ruling came after the value-semantics ruling and its 
 §66.7.1, where `@x` of a declaration with fields evaluates to a struct value. (Former O40 — closed by the answered
 text; the tension with §66.10 is recorded here. Bryan's confirmation of this reading travels with O56.)
 
-> ⚑ **OPEN (not ruled) — O56: the SCOPE of the `given` carve-out.** The answered text shows one case (an `as=`
+> ✅ **RULED S435 — O56 = NARROW** (bryan: *"narrow"*): the `given` carve-out covers handles to INSTANCES only (an `as=` handle, a named or unnamed shared instance). Writing through any other `given` binding (a plain `T | not` cell, a value) is a compile ERROR naming the direct form (*"`u` is a copy; write `@user.name`"*). A direct `@handle.field = …` inside the narrowed block is legal; `let d = c` is a snapshot. Chosen as the reversible option. The prior OPEN text follows for the record.
+>
+> *(superseded)* **O56: the SCOPE of the `given` carve-out.** The answered text shows one case (an `as=`
 > handle to a conditionally-mounted instance). Not ruled: **(a)** does the carve-out cover only `as=` / instance
 > handles, or also a named shared instance and a plain `T | not` CELL — where `given u = @user :> { u.name = "x" }`
 > would otherwise be a dead snapshot write; **(b)** are READS through `c` live (tracking the instance) or a
@@ -39357,7 +39359,9 @@ an argument whose type grants MORE than the parameter's is ACCEPTED; the callee 
 grants. (`Edit[any]` in that text was later ruled out — there is no `any`, §66.12.4; the direction survives with any
 superset grant.)
 
-> ⚑ **OPEN (not ruled) — O37: write-back of a helper's result into a `replace`-less sequence.** The same answered
+> ✅ **RULED S435 — O37 = (c)** (bryan: *"c"*): a call's write-back into a cell is an EDIT only when the compiler CERTIFIES the callee — it runs the §66.11.2 edit classifier over the function body once and records the edit kind it performs on its parameter (e.g. `return [...a, e]` → an end-append of `a`) as part of its signature; `@audit = appended(@audit, e)` is then that edit and is checked against the cell's grants. An uncertifiable callee's result is a `replace`. NOT trust-the-return-type (unsound). Direction: a more-permissive argument is accepted where a parameter grants less (answered "type" text). The prior OPEN text follows for the record.
+>
+> *(superseded)* **O37: write-back of a helper's result into a `replace`-less sequence.** The same answered
 > text calls `@undo = pushEdit(@undo, e)` *"fine"* on a cell with no `replace`. The later one-axis ruling (answered
 > *"1 yes, 2 yes"*) says an unclassifiable reassignment is a `replace` (§66.11.2), and a call result is not a
 > recognized reassignment shape — so, as written, that write-back is a `replace` and is not granted. The two
@@ -39912,7 +39916,7 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
     }
     // @audit = []                                   → E-WRITE-NOT-GRANTED (a replace; the type grants none)
     // reset(@audit)                                 → E-WRITE-NOT-GRANTED (reset is a replace)
-    // @audit = appended(@audit, e)                  → ⚑ O37 (OPEN): "fine" in the answered "type" text; a
+    // @audit = appended(@audit, e)                  → legal IF `appended` is certified an end-append (O37 RULED (c)): "fine" in the answered "type" text; a
     //                                                 `replace` under the later one-axis rule — with bryan
     // @audit.shift()                                → E-WRITE-NOT-GRANTED (changes at the front)
     // @audit = @audit.filter(e => e.actor != "x")   → E-WRITE-NOT-GRANTED (shrink-anywhere)
@@ -40000,30 +40004,30 @@ emitter). Every code below is Nominal on impl#1.
 
 | Code | Severity | Fires when |
 |---|---|---|
-| **`E-DECL-ILLEGAL-FIELD-NAME`** | Error | A declaration attribute or child field is named `bind`, `class`, `style`, `internal` or `on` (§66.2.3). |
-| **`E-DECL-OPENER-EXPR-UNPARENTHESIZED`** | Error | An own value or attribute default in an opener is neither a literal nor a plain `@ref` and is not parenthesized — including any unparenthesized `>` or `/` (§66.2.4). |
-| **`E-DECL-RENDERS-BARE-WRITE`** | Error | A write or bind targets a bare attribute/field projection inside a `renders` (they are read-only; write through `@x.field`) (§66.5.2). |
-| **`E-DECL-FIELD-TAG-NEEDS-STAR`** | Error | A bare `<f/>` names a child field of the enclosing declaration. Message: *"did you mean `<*f/>`?"* (§66.6.6). |
-| **`E-DECL-STAR-PREDEFINED`** | Error | `<*x/>` where `x` is a predefined (HTML) declaration, e.g. `<*div/>` (§66.6.5). |
-| **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). |
-| **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). |
-| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. |
-| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path. The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). |
-| **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). |
-| **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). |
-| **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). |
-| **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). |
-| **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). |
+| **`E-DECL-ILLEGAL-FIELD-NAME`** | Error | A declaration attribute or child field is named `bind`, `class`, `style`, `internal` or `on` (§66.2.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-OPENER-EXPR-UNPARENTHESIZED`** | Error | An own value or attribute default in an opener is neither a literal nor a plain `@ref` and is not parenthesized — including any unparenthesized `>` or `/` (§66.2.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-RENDERS-BARE-WRITE`** | Error | A write or bind targets a bare attribute/field projection inside a `renders` (they are read-only; write through `@x.field`) (§66.5.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-FIELD-TAG-NEEDS-STAR`** | Error | A bare `<f/>` names a child field of the enclosing declaration. Message: *"did you mean `<*f/>`?"* (§66.6.6). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-STAR-PREDEFINED`** | Error | `<*x/>` where `x` is a predefined (HTML) declaration, e.g. `<*div/>` (§66.6.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path. The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 
 **Retained codes with a restated condition or message**
 
 | Code | Change |
 |---|---|
-| **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). |
-| **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. |
-| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4). |
-| **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2). |
-| **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. |
+| **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 
 **Legacy-form codes** — the W-lint + reserved-E pairs of §66.21 (`W-DECL-LEGACY-RHS`, `W-CONST-CELL-DEPRECATED`,
 `W-COMPONENT-CONST-DEPRECATED`, `W-ENGINE-ELEMENT-DEPRECATED`, `W-POSITIONAL-STRUCT-DEPRECATED`,
@@ -40082,7 +40086,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O34 | §66.12.5 | A tuple position with no default, with or without a lifecycle. |
 | O35 | §66.3 | The unruled parts of DD §7 #17 (own-value-only inference / required attribute types; annotation required for `not`/`[]`/`{}`; `<x>` in logic). |
 | O36 | §66.11 | Enforcement of an invariant the compiler cannot prove statically. |
-| O37 | §66.12.3 | A helper's result written back into a `replace`-less sequence: "fine" in the answered "type" text vs a `replace` under the one-axis rule (trust return type · certify callee body · leave a replace; PA lean certify). Call direction is ruled. |
+| ~~O37~~ RULED (c) | §66.12.3 | A helper's result written back into a `replace`-less sequence: "fine" in the answered "type" text vs a `replace` under the one-axis rule (trust return type · certify callee body · leave a replace; PA lean certify). Call direction is ruled. |
 | O38 | §66.5.4 | Whether a declaration at `<program>` / file top level is in "a markup position" for #19, and which instance renders there. |
 | O41 | §66.2.3 | Collisions of user attribute names with stdlib/structural attribute words (`as`, `key`, `if`, `slot`, `default`, …). |
 | O42 | §66.4 | The attribute→child promotion hint's code and trigger. |
@@ -40096,7 +40100,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O25 | §66.5.5 | Record gap: implicit bind vs explicit `bind:` in `renders`, and whether validators reach the `renders` input (§6.4.2 steps 3–4). |
 | O54 | §66.6.3 | Record gap: whether `@x` inside `x`'s own `renders` names the current instance (DD #8, not in the answered text). |
 | O55 | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. |
-| O56 | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
+| ~~O56~~ RULED narrow | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
 | O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
 
 Closed by the PA proposal text bryan answered (the terse-answer rule, §66 preamble): O6 (`single` is a trailing
