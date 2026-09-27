@@ -30,9 +30,17 @@
  * recorded facts. There is no second implementation to drift.
  *
  * ── THE ORDER (unchanged; moved, not rewritten) ─────────────────────────────────
- *   1. `authMiddlewareEntry` — THIS unit's route-inference output. Present for any
- *      unit whose `<program>` carries `auth=`, and route-inference fills in the
- *      §20.5 defaults there, which is why such a unit is always attributable.
+ *   1. `authMiddlewareEntry` — THIS unit's route-inference output. For a
+ *      `<program auth="required">` (Step 8a) route-inference fills in the §20.5
+ *      defaults when the program declares none — they ARE that program's own
+ *      answer — which is why such a unit is always attributable. An entry from
+ *      Step 8b (protect= auto-escalation, `<page auth="required">`) carries a
+ *      session field ONLY when the unit itself declares it; otherwise the field is
+ *      undefined and this step MISSES, so the unit's own `<program>` (step 2) or
+ *      the program stash (step 3) answers. S438: 8b used to stamp `"1h"` / secure
+ *      too, which outranked the unit's own program's declaration and hid a
+ *      contested unit from `E-MW-008`
+ *      (g-route-inference-8b-session-defaults-outrank-program-declaration).
  *   2. the unit's OWN raw read — a recursive walk of this unit's nodes accepting
  *      `<program>` (last match wins) or `<page>` (first match wins), program
  *      outranking page.
@@ -70,22 +78,47 @@ export interface AuthMiddlewareSessionFields {
 export function readRawUnitSessionAttr(nodes: unknown, attrName: SessionAttrName): string | undefined {
   let progVal: string | undefined;
   let pageVal: string | undefined;
-  const visit = (ns: any[]): void => {
+  walkUnitProgramAndPageNodes(nodes, (n) => {
+    const a = ((n.attrs ?? []) as any[]).find((x: any) => x && x.name === attrName);
+    if (a && a.value && a.value.kind === "string-literal") {
+      if (n.tag === "program") progVal = a.value.value;
+      else if (pageVal === undefined) pageVal = a.value.value;
+    }
+  });
+  return progVal ?? pageVal; // program-level wins over page-level
+}
+
+/**
+ * THE walk step 2 performs — every `<program>` / `<page>` markup node of a unit, in
+ * document order, recursing through `children`. Shared, not mirrored: anything that
+ * must agree with what step 2 can see (e.g. `countUnitProgramNodes`) goes through it.
+ */
+function walkUnitProgramAndPageNodes(nodes: unknown, visit: (n: any) => void): void {
+  const walk = (ns: any[]): void => {
     if (!Array.isArray(ns)) return;
     for (const n of ns) {
       if (!n || n.kind !== "markup") continue;
-      if (n.tag === "program" || n.tag === "page") {
-        const a = ((n.attrs ?? []) as any[]).find((x: any) => x && x.name === attrName);
-        if (a && a.value && a.value.kind === "string-literal") {
-          if (n.tag === "program") progVal = a.value.value;
-          else if (pageVal === undefined) pageVal = a.value.value;
-        }
-      }
-      if (Array.isArray(n.children)) visit(n.children);
+      if (n.tag === "program" || n.tag === "page") visit(n);
+      if (Array.isArray(n.children)) walk(n.children);
     }
   };
-  visit(nodes as any[]);
-  return progVal ?? pageVal; // program-level wins over page-level
+  walk(nodes as any[]);
+}
+
+/**
+ * How many `<program>` nodes step 2 walks in this unit — top-level AND nested, by the
+ * SAME walk `readRawUnitSessionAttr` uses. With 2+, step 2's answer is the LAST
+ * declaring `<program>` in document order (g-two-programs-one-file-session-attr-last-wins,
+ * a question reserved for `E-PROGRAM-002`), so route-inference Step 8b keeps stamping
+ * the secure §20.5 defaults on such a unit rather than letting it fall through to that
+ * last-wins read (S438 review F1). See route-inference.ts Step 8b.
+ */
+export function countUnitProgramNodes(nodes: unknown): number {
+  let count = 0;
+  walkUnitProgramAndPageNodes(nodes, (n) => {
+    if (n.tag === "program") count++;
+  });
+  return count;
 }
 
 /** Steps 1 + 2 only — the per-unit answer, before any build-wide fallback. */

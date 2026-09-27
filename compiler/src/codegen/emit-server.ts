@@ -3302,7 +3302,18 @@ export function generateServerJs(
   // and NO reserved `_scrml_session_destroy` / `_scrml_session_projection` HTTP
   // routes leak into a headless `routes` array. Headless auth is bearer (later unit).
   if (authMiddlewareEntry && _webAppShape) {
-    const { loginRedirect, csrf, sessionExpiry } = authMiddlewareEntry;
+    const { loginRedirect, csrf } = authMiddlewareEntry;
+    // §20.5 (S438) — through the ONE resolver, never `authMiddlewareEntry.sessionExpiry`
+    // directly: an auto-escalated / `<page auth="required">` entry carries no expiry
+    // of its own (route-inference Step 8b), so a direct read emitted `undefined`
+    // where the program's declared value governs the cookie's Max-Age. Same call as
+    // the Max-Age computation above (not recorded again — that one records); the
+    // `"1h"` is the §20.5 language default `parseSessionExpirySeconds` also lands on.
+    const sessionExpiry =
+      (_resolveSessionAttr("sessionExpiry", (fileAST as any)._programSessionExpiry, false).value as
+        | string
+        | null
+        | undefined) ?? "1h";
 
     lines.push("// --- Session expiry (compiler-generated) ---");
     lines.push(`const _scrml_session_expiry = ${JSON.stringify(sessionExpiry)};`);
