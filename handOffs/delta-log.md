@@ -4028,3 +4028,13 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3560] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/block-expressions-one-off-calculations-dpa-053-2026-09-26.md` · verdict: the residual is mostly DEFECTS, not a missing construct — `${ const t = …; lift e }` already works reactively in markup; reco Pole B (complete that form into attribute / `<each>` row / derived-initializer positions) over the banked tail-valued block (Pole D); a block's value must NOT be `~` (E-TILDE-002 on `{ log(x); x*2 }`); 6 defects routed to PA incl. 2 SILENT (M3 tail-expr stale, M4/M5 arm-only reactive read untracked). ADVISORY — awaiting bryan.)**
 
 [3561] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/bootstrap-codegen-architecture-dpa-051-2026-09-26.md` · verdict: thin typed Core IR (bodies as trees, names as Syms, emitted text write-only, one tables record, total match) + an instance-record runtime (program = `single` decl → one keying scheme; scope-owned effects; immutable values; one edit classifier for grants/notify/O37); every decision mapped to a measured TS defect family. ⚑ R1 ROUTED to bryan — P5's per-stage hybrid vs the ratified S233 re-cut are unreconciled (only LEX + whole-compiler seams are shared); lean: keep S233, footprint-based module-done. Also found: dpa-053 M4/M5 root cause (regex-on-emitted-text branch guard drops arm subscriptions). ADVISORY — awaiting bryan.)**
+
+[3562] rule · **dpa-051 R1 = (a) + `compiler/self-host/` FROZEN; R2–R5 = leans** (bryan S437: "a, freeze self-host" · "leans") → #1104 · user-voice S437
+
+[3563] land · **#1106 handler fix** — bare `;`-sequence always E-MULTI-STATEMENT-HANDLER; braced blocks parsed as statement lists (each-row + leading-call drops fixed); braceless `else` no longer unconditional in function bodies; 5 S239 rounds, round-5 template scanner reverted → `g-client-template-interpolation-lowering-needs-a-structural-emitter` carried
+
+[3564] land · **#1105 bootstrap slice M1** — Core IR + printer + instance-record runtime on hand-built Core; D1 answered (one click, one dropdown); lint + slice + v2 lexer in CI gate
+
+[3565] rule · **§66 rulings** L6 (a) · L12 (b) · identities · spread = field edit · O58 (b) · O57 no · O59/O60 leans · O21/O43 closed · reads through a conditional handle require narrowing → #1107 #1108 · two PA restatement widenings corrected (user-voice S437)
+
+[3566] state · **#1109 bootstrap slice M2 OPEN** — Fork-A proof: lower(analyze(parse(lex(SPEC §66.19)))) == M1 hand-built Core; M3 item 1 = the typer (11 silent shapes pinned test.failing)
