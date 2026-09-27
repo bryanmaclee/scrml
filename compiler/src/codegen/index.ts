@@ -60,7 +60,7 @@ import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-c
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
 import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
-import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-client.js";
+import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
@@ -206,6 +206,15 @@ export interface CgInput {
    * Threaded into per-file `CompileContext.exportRegistry`.
    */
   exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean }>> | null;
+  /**
+   * g-impl1-match-miscompiles-hit-by-the-bootstrap (F11/F16) — the cross-file
+   * type map the TS stage seeds from (api.js `importedTypesByFile`: importing
+   * file → local name → ResolvedType; alias-aware, re-export-chasing). Codegen
+   * reads the imported ENUMS out of it so the per-file variant-payload registry
+   * (positional match binding, tag-vs-`.variant` comparison, bare-dot
+   * constructor lowering) sees the same enums exhaustiveness does.
+   */
+  importedTypesByFile?: { get(filePath: string): Map<string, any> | undefined } | null;
   /**
    * known-gaps-#6 (S152) — MOD's `importGraph` (per-file imports with resolved
    * `absSource` edges). Threaded into per-file `CompileContext.importGraph` so
@@ -1113,6 +1122,8 @@ export function resetCodegenModuleState(): void {
   setBatchLoopHoists(null);
   setBatchInListCap(null);
   setVariantFieldsForFile(null, null);
+  // emit-client — per-compile cross-file imported-types map (F11/F16).
+  setImportedTypesForCodegen(null);
   // rewrite.ts — per-file variant / protect / bool-column / tenant contexts.
   setVariantFieldsForRewriter(null, null);
   setProtectContextForRewriter(null);
@@ -1152,6 +1163,7 @@ export function runCG(input: CgInput): CgOutput {
     batchPlan = null,
     batchPlannerErrors = [],
     exportRegistry: exportRegistryInput = null,
+    importedTypesByFile: importedTypesByFileInput = null,
     importGraph: importGraphInput = null,
     outputBaseDir: cgOutputBaseDir = null,
     reachabilityRecord: reachabilityRecordInput = null,
@@ -1249,6 +1261,9 @@ export function runCG(input: CgInput): CgOutput {
   // function of the input regardless of what this process compiled before (an
   // exception mid-emit in a PREVIOUS compile can otherwise strand a value).
   resetCodegenModuleState();
+  // F11/F16 — install the per-compile cross-file imported-types map (cleared by
+  // resetCodegenModuleState at the head of the next compile).
+  setImportedTypesForCodegen(importedTypesByFileInput ?? null);
 
   const outputs = new Map<string, CgFileOutput>();
   const errors: CGError[] = [];

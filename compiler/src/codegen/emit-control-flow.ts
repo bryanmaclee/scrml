@@ -1319,6 +1319,25 @@ export interface PayloadBinding {
  * Returns [] for an empty/whitespace-only string.
  * Each element is one comma-separated item. Leading/trailing whitespace is trimmed.
  */
+/**
+ * The payload binding text of a block-bodied arm (`match-arm-block`, ast-builder
+ * Form 1b: `.V(bindings) :> { … }`), in the `parseBindingList` shape.
+ *
+ * The node's raw `binding` (the paren interior, e.g. `e : q`) is authoritative:
+ * it keeps the NAMED form. `payloadBindings` holds only the LOCAL names (`["q"]`
+ * — what the type system scopes into the body), so rebuilding the binding from
+ * it turned every named binding into a POSITIONAL one: dropped when the variant's
+ * field order was unknown, or bound to the WRONG field when the named field was
+ * not the one at that position (g-impl1-match-miscompiles-hit-by-the-bootstrap
+ * F17 — the object-literal arm body is what routes an arm through Form 1b).
+ * `payloadBindings` remains the fallback for a node built without `binding`.
+ */
+export function matchArmBlockBinding(child: any): string | null {
+  if (typeof child?.binding === "string" && child.binding.trim().length > 0) return child.binding;
+  const payloadBindings = Array.isArray(child?.payloadBindings) ? child.payloadBindings : [];
+  return payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
+}
+
 export function parseBindingList(raw: string): PayloadBinding[] {
   if (!raw) return [];
   const result: PayloadBinding[] = [];
@@ -2214,6 +2233,11 @@ function emitMultiScrutineeMatch(
     tagVars.push(tagVar);
   }
 
+  // §18.7 / F11 — per-position TS-resolved subject enums (null = unresolved).
+  const perPositionSubject: Array<SubjectVariantFields | null> = Array.isArray(node.__matchScrutineeVariants)
+    ? node.__matchScrutineeVariants.map((list: any) => getMatchSubjectVariantFields({ __matchSubjectVariants: list }))
+    : [];
+
   const body: any[] = node.body ?? [];
   let conditionIndex = 0;
   for (const child of body) {
@@ -2236,7 +2260,7 @@ function emitMultiScrutineeMatch(
         if (!posArm || posArm.kind === "wildcard") continue; // `_` position: no test.
         conds.push(armCondition(posArm, valVars[i], tagVars[i]));
         if (posArm.kind === "variant") {
-          const prelude = emitVariantBindingPrelude(posArm, valVars[i]);
+          const prelude = emitVariantBindingPrelude(posArm, valVars[i], false, perPositionSubject[i] ?? null);
           if (prelude) preludes.push(prelude);
         }
       }
@@ -2464,12 +2488,10 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // the body emit as unbound JS identifiers → ReferenceError at runtime.
     // (B20 fixed parse + typer for this shape at S69; this closes the CG gap.)
     if (child.kind === "match-arm-block") {
-      const payloadBindings = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
-      const binding = payloadBindings.length > 0 ? payloadBindings.join(", ") : null;
       const arm: MatchArm = {
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding,
+        binding: matchArmBlockBinding(child),
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       };
@@ -2545,7 +2567,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // success value is bare, so the `::Ok` arm can only be recognized via the
   // `__scrml_error`-sentinel tag).
   const failableMatch = isFailableOkMatch(arms);
-  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms);
+  const subjectVariants = getMatchSubjectVariantFields(node);
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
 
   const iifeLines: string[] = [];
@@ -2568,7 +2591,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // §19.7.3 — the failable-match `::Ok(v)` arm binds `v` to the whole bare
     // success value (not `tmpVar.data.field`).
     const bindingPrelude = arm.kind === "variant"
-      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok")
+      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants)
       : "";
 
     // Structured body: emit each statement via emitLogicNode (handles lift-expr, etc.)
@@ -2901,7 +2924,16 @@ function armCondition(arm: MatchArm, tmpVar: string, tagVar: string): string {
  * list OR the arm has a binding). When true, callers emit the __tag
  * normalization. When false, unit-only / scalar arms can keep plain equality.
  */
-export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
+export function hasPayloadBindingOrTaggedVariant(
+  arms: MatchArm[],
+  subject?: SubjectVariantFields | null,
+): boolean {
+  // A variant is payload-bearing if the match SUBJECT's enum (TS-resolved,
+  // F16) or the file's variant registry says so. Either source suffices: the
+  // `.variant` normalization is correct for unit values too, so over-including
+  // is safe and under-including is the F16 never-matches miscompile.
+  const isPayload = (t: string): boolean =>
+    (_variantFields?.has(t) ?? false) || (subject?.get(t) != null);
   return arms.some(a => {
     if (a.kind !== "variant") return false;
     if (a.binding) return true;
@@ -2909,10 +2941,35 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
     // (in _variantFields) requires tagVar normalization so the OR-chain compares
     // .variant strings rather than the tagged-object value itself.
     if (a.tests && a.tests.length > 1) {
-      return a.tests.some(t => _variantFields?.has(t));
+      return a.tests.some(t => isPayload(t));
     }
-    return _variantFields?.has(a.test ?? "") ?? false;
+    return isPayload(a.test ?? "");
   });
+}
+
+/**
+ * §18.7 — the match SUBJECT's enum schema, as stamped on the match node by TS
+ * (`__matchSubjectVariants`, type-system.ts checkMatchDiagnostics): variant name
+ * → declared payload field names in declaration order (`null` for a unit
+ * variant). `null` when TS did not resolve the subject to an enum (a literal /
+ * union / failable match, or a node TS never visited) — callers then fall back
+ * to the by-name file registry.
+ *
+ * This is the authority for positional binding: "Bindings are assigned
+ * left-to-right in the order the fields were declared in the enum definition"
+ * (§18.7) — the subject's enum, local or imported, never whichever same-named
+ * variant the file registry happened to hold
+ * (g-impl1-match-miscompiles-hit-by-the-bootstrap F11/F16).
+ */
+export type SubjectVariantFields = Map<string, string[] | null>;
+export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | null {
+  const list = node?.__matchSubjectVariants;
+  if (!Array.isArray(list) || list.length === 0) return null;
+  const out: SubjectVariantFields = new Map();
+  for (const v of list) {
+    if (v && typeof v.name === "string") out.set(v.name, Array.isArray(v.fields) ? v.fields : null);
+  }
+  return out;
 }
 
 /**
@@ -2956,7 +3013,12 @@ export function emitMatchTagDiscriminator(tmpVar: string, tagVar: string, failab
   return `const ${tagVar} = (${tmpVar} != null && typeof ${tmpVar} === "object") ? ${tmpVar}.variant : ${tmpVar};`;
 }
 
-export function emitVariantBindingPrelude(arm: MatchArm, tmpVar: string, failableOk?: boolean): string {
+export function emitVariantBindingPrelude(
+  arm: MatchArm,
+  tmpVar: string,
+  failableOk?: boolean,
+  subject?: SubjectVariantFields | null,
+): string {
   if (!arm.binding) return "";
   const bindings = parseBindingList(arm.binding);
   if (bindings.length === 0) return "";
@@ -2976,8 +3038,14 @@ export function emitVariantBindingPrelude(arm: MatchArm, tmpVar: string, failabl
   }
 
   const variantName = arm.test ?? "";
-  const fieldSchema = _variantFields?.get(variantName) ?? null;
-  const ambiguous = _variantFieldCollisions?.has(variantName) ?? false;
+  // The subject's own enum is exact (F11 — covers imported enums and a variant
+  // name two enums share); the by-name registry is the fallback, where a name
+  // declared by two differently-shaped enums stays ambiguous.
+  const fromSubject = subject != null && subject.has(variantName);
+  const fieldSchema = fromSubject
+    ? (subject!.get(variantName) ?? null)
+    : (_variantFields?.get(variantName) ?? null);
+  const ambiguous = fromSubject ? false : (_variantFieldCollisions?.has(variantName) ?? false);
 
   const statements: string[] = [];
   for (let i = 0; i < bindings.length; i++) {

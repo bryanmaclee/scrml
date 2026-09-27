@@ -2849,6 +2849,10 @@ function _compileScrmlImpl(options = {}) {
     // engine mount sites (`<engineVarName/>` resolving to `category: "engine"`)
     // and emit the §21.8 mount-position marker per SPEC §51.0.D.
     exportRegistry: moduleResult.exportRegistry,
+    // g-impl1-match-miscompiles-hit-by-the-bootstrap (F11/F16) — the SAME
+    // cross-file type map TS seeded from, so codegen's variant-payload registry
+    // sees imported enums (positional binding, tag compare, constructors).
+    importedTypesByFile,
     // known-gaps-#6 (S152) — pass MOD importGraph + dist outputBaseDir so the
     // cross-file _scrml_modules lowering (Approach B, §21.3) can identify
     // exporter files, derive identical registry keys, and emit topo-ordered

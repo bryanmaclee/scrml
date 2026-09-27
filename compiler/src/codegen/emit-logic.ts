@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, matchArmBlockBinding, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -5541,7 +5541,9 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       arms.push({
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding: null,
+        // F17 — a block arm's payload binding (was `null`: every binding of a
+        // block-bodied arm in a `const x = match …` was dropped).
+        binding: matchArmBlockBinding(child),
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       });
@@ -5576,7 +5578,9 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // success value is bare; the `::Ok` arm is recognized only via the
   // `__scrml_error`-sentinel tag).
   const failableMatch = isFailableOkMatch(arms);
-  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms);
+  // §18.7 / F11-F16 — bind + tag-compare against the TS-resolved subject enum.
+  const subjectVariants = getMatchSubjectVariantFields(matchExpr);
+  const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
   if (needsTagNormalization) {
     lines.push(emitMatchTagDiscriminator(tmpVar, tagVar, failableMatch));
@@ -5585,7 +5589,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // Emit arms as if/else-if chain with tilde assignment
   let conditionIndex = 0;
   for (const arm of arms) {
-    const bindingPrelude = arm.kind === "variant" ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok") : "";
+    const bindingPrelude = arm.kind === "variant" ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants) : "";
     // Structured body: emit each statement via emitLogicNode (handles lift via tildeContext)
     if (arm.structuredBody) {
       const bodyCode: string[] = [];

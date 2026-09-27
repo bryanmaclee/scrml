@@ -860,6 +860,16 @@ interface VariantDef {
   renders: { markup: string } | null;
 }
 
+/**
+ * §18.7 — the resolved subject enum of a `match`, stamped by TS on the match
+ * node as `__matchSubjectVariants` for codegen: each variant's name and its
+ * payload field names in declaration order (`null` = unit variant).
+ */
+interface MatchSubjectVariant {
+  name: string;
+  fields: string[] | null;
+}
+
 // §51.3 — Machine type (named override graph for an enum/struct type)
 interface MachineType {
   kind: "machine";
@@ -12900,7 +12910,18 @@ function annotateNodes(
               }
             }
           }
-          for (const child of armBody) visitNode(child);
+          // F17 (g-impl1-match-miscompiles-hit-by-the-bootstrap) — an
+          // OBJECT-LITERAL arm body (`.V(x) :> { k: x }`) parses into a single
+          // `bare-expr` whose exprNode holds only the FIRST key as an ident, so
+          // walking it scope-checked the KEY `k` as a reference (a false
+          // E-SCOPE-001 — or, when a same-named binding was in scope, nothing,
+          // and the value expressions went unchecked). Codegen already lowers
+          // this body as the object value (emit-logic
+          // `_objectLiteralArmFromStructuredBody`, from the node's raw `expr`
+          // text); check the SAME object expression here instead.
+          const objectBody = objectLiteralArmBodyNode(armBody, filePath);
+          if (objectBody) visitNode(objectBody);
+          else for (const child of armBody) visitNode(child);
           scopeChain.pop();
         }
         resolvedType = tAsIs();
@@ -18382,6 +18403,24 @@ function checkMatchDiagnostics(
 
   const isPartial = (node as { partial?: boolean }).partial === true;
 
+  // §18.7 — positional payload binding assigns fields "left-to-right in the order
+  // the fields were declared in the enum definition": the SUBJECT's enum, which
+  // only this stage knows. Stamp it on the match node so codegen binds (and
+  // decides tag-vs-`.variant` comparison) against that enum's own schema rather
+  // than a by-variant-NAME lookup, which cannot tell two enums apart when they
+  // share a variant name (a local `Neg(y, z)` beside an imported `Neg(x)`, or
+  // two imported `Expr`s). g-impl1-match-miscompiles-hit-by-the-bootstrap
+  // F11/F16. A TS-only annotation (post-parse): not part of the parser AST. It
+  // is plain data (names + field-name lists), never a ResolvedType reference —
+  // a recursive enum's type graph is cyclic and generic AST walkers descend
+  // every key.
+  {
+    const subjectVariants = matchSubjectVariantsOf(subjectType);
+    if (subjectVariants) {
+      (node as { __matchSubjectVariants?: MatchSubjectVariant[] }).__matchSubjectVariants = subjectVariants;
+    }
+  }
+
   if (!subjectType) {
     // §19.7.1/.3 — a `match` over a failable-call result. The scrutinee is a
     // bare CALL (never a bound ident), so `resolveMatchSubjectType` yields null;
@@ -18619,6 +18658,18 @@ function checkMultiScrutineeMatch(
     }
   }
 
+  // §18.7 — per-position subject enum schema for codegen's positional binding
+  // (the multi-scrutinee sibling of `__matchSubjectVariants`; F11/F16). Stamped
+  // BEFORE the coverage early-returns: binding needs it even when `partial` /
+  // a whole-product wildcard makes exhaustiveness moot.
+  {
+    const perPosition = scrutinees.map((scrutinee, i) =>
+      matchSubjectVariantsOf(resolveMatchSubjectType(scrutinee, scrutineeExprs[i], scopeChain)));
+    if (perPosition.some((p) => p !== null)) {
+      (node as { __matchScrutineeVariants?: Array<MatchSubjectVariant[] | null> }).__matchScrutineeVariants = perPosition;
+    }
+  }
+
   // (3) Product exhaustiveness — cross-product of per-position variant sets.
   if (isPartial || hasWholeWildcard) return; // `partial` opts out; `_`/`else` covers all.
 
@@ -18695,6 +18746,50 @@ function checkMultiScrutineeMatch(
       span,
     ));
   }
+}
+
+/**
+ * §18.7 — the codegen-facing schema of a match subject's enum (see
+ * MatchSubjectVariant): each variant's name + payload field names in
+ * declaration order. `null` unless the subject resolved to an enum (or an
+ * enum-subset refinement, whose base enum carries the payload shapes).
+ */
+function matchSubjectVariantsOf(subjectType: ResolvedType | null | undefined): MatchSubjectVariant[] | null {
+  if (!subjectType) return null;
+  const subjectEnum = subjectType.kind === "enum"
+    ? subjectType as EnumType
+    : (subjectType.kind === "predicated" &&
+        (subjectType as PredicatedType).baseType === "enum" &&
+        (subjectType as PredicatedType).enumBase)
+      ? (subjectType as PredicatedType).enumBase as EnumType
+      : null;
+  if (!subjectEnum || !Array.isArray(subjectEnum.variants)) return null;
+  return subjectEnum.variants.map((v) => ({
+    name: v.name,
+    fields: v.payload instanceof Map ? Array.from(v.payload.keys()) : null,
+  }));
+}
+
+/**
+ * F17 — when a block-form match arm's body is an OBJECT LITERAL (`{ k: v, … }`,
+ * parsed by the AST builder as ONE `bare-expr` whose raw `expr` is the brace
+ * interior), return a synthetic `bare-expr` carrying the whole object as its
+ * exprNode, so scope/type checks see the object's VALUES and never its keys.
+ * Mirrors codegen's `_objectLiteralArmFromStructuredBody` + the
+ * `_matchArmResultIsBlockBody` classifier (emit-logic.ts): reconstruct
+ * `{ <expr> }` and treat it as a value iff it parses to an `object` node.
+ * `null` for every genuine statement block.
+ */
+function objectLiteralArmBodyNode(armBody: ASTNodeLike[], filePath: string): ASTNodeLike | null {
+  if (armBody.length !== 1) return null;
+  const only = armBody[0] as { kind?: string; expr?: unknown; span?: Span } | undefined;
+  if (!only || only.kind !== "bare-expr" || typeof only.expr !== "string") return null;
+  const candidate = `{ ${only.expr} }`;
+  let parsed: { kind?: string } | null = null;
+  try { parsed = parseExprToNode(candidate, filePath, only.span?.start ?? 0) as { kind?: string } | null; }
+  catch { parsed = null; }
+  if (!parsed || parsed.kind !== "object") return null;
+  return { ...(only as object), expr: candidate, exprNode: parsed } as unknown as ASTNodeLike;
 }
 
 /**
