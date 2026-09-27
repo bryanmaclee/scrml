@@ -9,6 +9,11 @@
  * differential against pure TS runs as TRIAGE: each divergence is classified TS-bug /
  * bootstrap-bug / spec-gap. It is NOT a gate. "It compiles" is NOT a gate.
  *
+ * ⚑ NARROWED S437 (bryan: "a, freeze self-host" — dpa-051 R1). The bootstrap keeps the S233
+ * four-phase re-cut, whose IRs are not impl#1's decorated FileAST, so a single-stage swap exists
+ * only at the LEX seam (tokens) and for the whole compiler. For every other bootstrap module, done =
+ * its conformance footprint. `compiler/self-host/` (what this harness swaps in today) is FROZEN.
+ *
  * ═══ USAGE ═══
  *
  *   bun scripts/hybrid.ts --list
