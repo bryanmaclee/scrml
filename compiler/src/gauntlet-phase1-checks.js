@@ -78,6 +78,7 @@ import {
   findNonLiteralSetItems,
   referencesHint,
   harvestRawCreateTables,
+  findQualifiedCreateTableHeads,
 } from "./schema-differ.js";
 // s430 — destructured-pattern name walk (E-SCOPE-010). Self-contained helpers;
 // route-inference.ts imports them the same way.
@@ -767,6 +768,33 @@ function checkSchemaDeclarations(ast, filePath, errors) {
     // Body-level checks — parse the DSL once via schema-differ.
     const body = schemaBodyText(node);
     if (!body || body.trim().length === 0) continue;
+
+    // E-SCHEMA-012 (SPEC §39.2, bryan RULED S435 "1 both") — a raw `CREATE TABLE`
+    // head in a `<schema>` SHALL NOT carry a schema/database qualifier, at ANY
+    // count. Fail-closed: the two-qualifier form used to match no recognizer and
+    // leave the §14.8.10 tenant floor silently inert (with no warning once a
+    // second table was present); the one-qualifier form was accepted by
+    // stripping, which collapses `a.assets` / `b.assets` onto one key. The heads
+    // come from the SAME structured reader the harvest uses, so the rejection
+    // and the declaration cannot disagree about what a head is. Runs for EVERY
+    // body — a DSL table beside a qualified raw one must not mask it.
+    for (const q of findQualifiedCreateTableHeads(body)) {
+      const shown = q.name ?? "<name>";
+      errors.push(new GauntletError(
+        "E-SCHEMA-012",
+        `E-SCHEMA-012: this \`<schema>\` declares a table with a schema/database qualifier ` +
+        `(\`${q.headText}\` — qualifier ${q.qualifiers.map((p) => `\`${p}\``).join(".")}). ` +
+        `A \`<schema>\` \`CREATE TABLE\` head SHALL name an UNQUALIFIED table. Every ` +
+        `\`<schema>\` consumer — the §14.8.10 tenant-row isolation floor, the §14.8.9 ` +
+        `protect floor and the compile-time shadow database — keys a table by its ` +
+        `unqualified name, so a qualifier could only be dropped (two qualified tables ` +
+        `collapsing onto one) or leave the table undeclared and the tenant floor silently ` +
+        `off. Write \`CREATE TABLE ${shown} (…)\` and select the schema through the ` +
+        `connection instead (e.g. the Postgres \`search_path\`). (See SPEC §39.2, §14.8.10.)`,
+        span,
+      ));
+    }
+
     let parsed;
     try {
       parsed = parseSchemaBlock(body);

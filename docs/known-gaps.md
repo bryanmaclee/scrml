@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 147 | 4 |
+| HIGH | 148 | 4 |
 | MED | 330 | 0 |
 | LOW | 131 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -367,9 +367,30 @@ arc edited. One axis, two instances, one enumerated.
 
 ### g-tenant-floor-inert-for-a-two-qualifier-CREATE-TABLE — `db.schema.table` matches the harvest regex nowhere, so §14.8.10 is silently inert; a second table removes the last warning
 
-<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js:188(CREATE_TABLE_HEAD_RE — ONE optional qualifier only; locate by the regex CONST NAME, not the line)+compiler/src/codegen/tenant-egress.ts(buildTenantContext, the consumer that comes up empty) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE -->
+<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(readCreateTableHead + scanCreateTableHeads + findQualifiedCreateTableHeads — the head regex CREATE_TABLE_HEAD_RE is DELETED)+compiler/src/gauntlet-phase1-checks.js(E-SCHEMA-012 in the <schema> body checks) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE+ruling:user-voice-scrml.md-S435-"1-both"+empirical:S438-re-reproduced-on-072741ca -->
 
-**ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
+**⚑ RESOLVED S438 by branch `fix/s438-tenant-floor-qualified-create-table` — bryan RULED S435
+"1 both": REJECT a qualified `<schema>` `CREATE TABLE` head, both the ≥2-qualifier form (the
+silently inert one) AND the previously-accepted one-qualifier form, fail-closed — new
+`E-SCHEMA-012` (SPEC §39.2 + §39.12 + §34 row).** Re-reproduced on `072741ca` before the fix, by
+compilation, `<schema>`-only app, no `<db>`: 0 qualifiers → floor ACTIVE; 1 → ACTIVE (accepted by
+stripping); 2 → INERT + `W-SCHEMA-NO-TABLES-DECLARED`; 2 + a second recognized table → INERT with
+**no diagnostic at all**, exit 0. After: 0 → unchanged; 1, 2, 2+second → `E-SCHEMA-012`, and the
+floor stays ENGAGED (tenant tag emitted) because the harvest still reads + strips the qualified
+head, so there is no `W-SCHEMA-NO-TABLES-DECLARED` / `E-PA-003` cascade. **The identity-model
+question below was answered by NOT widening:** the head regex is deleted and the head is READ as a
+name chain (`readCreateTableHead`), so the qualifier COUNT is reported rather than a shape the
+pattern can fail to anticipate; the rejection and the three harvests read the same heads. Sibling
+shapes bite-tested (all rejected): `"db"."public"."assets"`, `` `mydb`.[public].assets ``,
+comments/whitespace around the dots, lowercase `if not exists`, `CREATE TEMP TABLE temp.assets`,
+a dangling `public.`, `CREATE TABLE a.b AS SELECT`, a qualified head beside a DSL table. Not
+rejected (correctly): `"a.assets"` (one identifier), a head inside `--`/`/* */`, a qualified
+`REFERENCES` target. The `?{}` walker's acceptance set is held where it was (≤1 qualifier) —
+E-SCHEMA-012 is `<schema>`-scoped. Two sibling residuals this did NOT change are filed below as
+`g-schema-create-temp-table-silently-not-a-declaration` and
+`g-schema-dsl-qualified-table-head-silently-stripped`.
+
+**(Original entry, kept for the record.) ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
 
 The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
 (`e74f5423`); that flip is genuine and was independently reproduced-as-fixed. **But it closed the
@@ -386,7 +407,54 @@ multi-tenant isolation floor that is silently absent.
 `n` qualifiers is the tempting move, but the qualifier is normalized away downstream, so
 `a.assets` and `b.assets` would collapse to one key — the S405 arc already had two of its own fixes
 cancel each other on exactly this seam (#900 round 3). **Decide the identity model before the regex.**
-— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; open
+— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; RESOLVED S438 (branch `fix/s438-tenant-floor-qualified-create-table`, E-SCHEMA-012)
+
+### g-schema-create-temp-table-silently-not-a-declaration — `CREATE TEMP TABLE assets (…, tenant_id)` in a `<schema>` declares nothing; beside a second table the tenant floor is inert with NO diagnostic
+
+<!-- @gap id=g-schema-create-temp-table-silently-not-a-declaration sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(schemaCreateTables — the modifier filter; the head reader already READS TEMP/TEMPORARY/UNLOGGED/GLOBAL/LOCAL)+compiler/src/gauntlet-phase1-checks.js(the <schema> body checks) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**Sibling of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the S438
+bite-test of that fix; NOT changed by it, deliberately.** Same class — a `<schema>` table head the
+recognizer does not count as a declaration — one axis over (a table-kind MODIFIER instead of a
+qualifier). Measured by compilation, `<schema>`-only app, query `SELECT id, name, tenant_id FROM
+assets`, on BOTH `072741ca` and the fix branch:
+
+| `<schema>` body | diagnostics | tenant tag |
+|---|---|---|
+| `CREATE TEMP TABLE assets (id …, tenant_id TEXT)` | `W-SCHEMA-NO-TABLES-DECLARED` | **none** |
+| same + `CREATE TABLE notes (id …, body TEXT)` | **none**, exit 0 | **none** |
+
+**Why not fixed on the S438 branch:** the S435 ruling covers QUALIFIERS; whether a `TEMP`/`UNLOGGED`
+table in a `<schema>` is a DECLARATION (newly-accepting — and `UNLOGGED` would then need stripping
+before the SQLite shadow-DB replay, the #900 seam) or is REJECTED (newly-rejecting) is a language
+call. **PA recommendation: reject** (an `E-SCHEMA-012`-shaped error for a modified head) — a
+schema-as-code declaration of a session-scoped table has no coherent migration meaning, rejecting is
+the recoverable direction (the S290 E-SCHEMA-011 argument), and the reader already sees these heads
+(`findQualifiedCreateTableHeads` rejects `CREATE TEMP TABLE temp.assets` today), so the fix is a
+filter + a message. Corpus use of modified heads in `<schema>`: zero (measured S438, same grep as the
+parent gap). — `NEW S438-peter`; **HIGH**; open
+
+### g-schema-dsl-qualified-table-head-silently-stripped — the DECLARATIVE `mydb.public.assets { … }` is accepted as `assets`, so `a.assets` + `b.assets` collapse and the second (with `tenant_id`) is silently dropped
+
+<!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**The DSL twin of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the
+S438 bite-test; NOT changed by that fix (the S435 ruling names `CREATE TABLE`).** SPEC §39.2's grammar
+is `table-declaration ::= table-name '{' …` — a qualified head is not grammatical — but
+`parseSchemaBlock` recovers from an unrecognized position by advancing ONE character and retrying, so
+it slides past `mydb.public.` and matches `assets {`. The qualifier is silently STRIPPED — exactly
+the identity collapse the S435 ruling rejected for raw DDL. Measured by compilation on BOTH
+`072741ca` and the fix branch, query on `assets`:
+
+| `<schema>` body | diagnostics | tenant tag |
+|---|---|---|
+| `mydb.public.assets { id, name, tenant_id }` | none | emitted (accepted as `assets`) |
+| `a.assets { id, name }` + `b.assets { id, tenant_id }` | **none**, exit 0 | **none** — first wins, the `tenant_id` table is dropped |
+
+**PA recommendation: extend `E-SCHEMA-012` to the DSL head** (the §39.2 grammar already excludes it,
+so this is spec-conformance, not a new rule — and it is the same fail-closed argument). Fix locus:
+detect a `.`-joined identifier chain immediately before a table `{` in `parseSchemaBlock` and report
+it rather than sliding. Corpus use: zero (measured S438). — `NEW S438-peter`; **HIGH**; open
 
 ### g-7.5.2-has-no-row-for-annotated-plus-inference-defeated — the remedy the diagnostic itself recommends routes authors into an unspecified cell
 
