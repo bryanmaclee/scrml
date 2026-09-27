@@ -11,6 +11,12 @@ import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextFor
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
+import {
+  readRawUnitSessionAttr,
+  resolveUnitSessionAttr,
+  recordUnattributableSessionUnit,
+  type SessionAttrName,
+} from "./session-config-resolve.ts";
 import type { CompileContext } from "./context.ts";
 import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicates.ts";
 import { resolveDbDriver } from "./db-driver.ts";
@@ -2641,27 +2647,22 @@ export function generateServerJs(
   // `zzz`'s own declaration was governed by its sibling's. The control in the same
   // measurement was the cookie name, which came out correct per unit precisely
   // because `session-secure` already had this step. Two readers, one shape.
-  const _readRawProgramAttr = (attrName: string): string | undefined => {
-    let progVal: string | undefined;
-    let pageVal: string | undefined;
-    const visit = (ns: any[]): void => {
-      if (!Array.isArray(ns)) return;
-      for (const n of ns) {
-        if (!n || n.kind !== "markup") continue;
-        if (n.tag === "program" || n.tag === "page") {
-          const a = (n.attrs ?? []).find((x: any) => x && x.name === attrName);
-          if (a && a.value && a.value.kind === "string-literal") {
-            if (n.tag === "program") progVal = a.value.value;
-            else if (pageVal === undefined) pageVal = a.value.value;
-          }
-        }
-        if (Array.isArray(n.children)) visit(n.children);
-      }
-    };
-    visit(getNodes(fileAST));
-    return progVal ?? pageVal; // program-level wins over page-level
+  // ⛔ MOVED, NOT REWRITTEN (S436 round 4). The body of this reader, and the whole
+  // three-step order it sits in, now live in `./session-config-resolve.ts` so the
+  // driver can ASK the real resolver instead of re-deriving a fourth approximation
+  // of it. Rounds 1-3 each mirrored this dispatch in `codegen/index.ts` and each
+  // mirror was wrong somewhere new. This shim keeps the local call sites reading the
+  // same as before.
+  const _readRawProgramAttr = (attrName: SessionAttrName): string | undefined =>
+    readRawUnitSessionAttr(getNodes(fileAST), attrName);
+  // Resolve one attribute through the shared order AND record a fall-through, but
+  // only from the session-infra emission path below — an attribute nobody emits is
+  // not a conflict. See `_resolveSessionAttr` uses.
+  const _resolveSessionAttr = (attr: SessionAttrName, stash: unknown, record: boolean) => {
+    const r = resolveUnitSessionAttr(attr, authMiddlewareEntry, getNodes(fileAST), stash);
+    if (record && r.source === "stash") recordUnattributableSessionUnit(filePath, attr);
+    return r;
   };
-  const _readRawSessionSecure = (): string | undefined => _readRawProgramAttr("session-secure");
   // §20.5.1 (S433) — THE COOKIE NAME IS A PROGRAM FACT TOO, and this was the third
   // member of the per-unit/per-program class found while probing the store-keying
   // defect (measured on a two-unit program: `<program session-secure="false">`
@@ -2673,13 +2674,34 @@ export function generateServerJs(
   // sources are per-unit — `authMiddlewareEntry` is this unit's route-inference
   // output, `_readRawSessionSecure()` walks only THIS file's nodes — so a unit with
   // neither fell to the secure DEFAULT regardless of what the program declared.
-  // The program-wide value the driver pre-scanned is consulted LAST, so this is
-  // strictly ADDITIVE: it is reached only where the answer today is "nothing
-  // declared → default secure".
-  const _sessionSecureSetting =
-    (authMiddlewareEntry && authMiddlewareEntry.sessionSecure !== undefined)
-      ? authMiddlewareEntry.sessionSecure
-      : (_readRawSessionSecure() ?? (fileAST as any)._programSessionSecure);
+  // The program-wide value the driver pre-scanned is consulted LAST.
+  //
+  // ⛔ THIS FALLBACK IS NOT "STRICTLY ADDITIVE" (S436 correction). The comment here
+  // used to claim it was — "it is reached only where the answer today is 'nothing
+  // declared → default secure'" — and that sentence names exactly the case it
+  // breaks. `session-secure="false"` is the ONLY value that changes anything, so the
+  // only reachable effect of this fallback is to turn a secure default into a weaker
+  // one. It is additive in the DOWNGRADE direction, which is the direction that
+  // needed the scrutiny. MEASURED on `c46ebbf8`: a program declaring neither
+  // attribute emitted `__Host-scrml_sid` alone and plain `scrml_sid` when an
+  // unrelated `<program session-secure="false">` shared its compile set — zero hard
+  // errors, identical diagnostics, both input orders. `_programSessionSecure` is
+  // therefore now stamped ONLY for a single-`<program>` compile set (see the guarded
+  // pre-scan in codegen/index.ts); with 2+ declarations it arrives `undefined` and
+  // this expression falls to the secure default, as if the unit were compiled alone.
+  // The genuine multi-unit single-program case (#282 / S433) is unchanged.
+  //
+  // The three steps now run in `session-config-resolve.ts`. `record` is gated on
+  // `_needsSessionInfra && _webAppShape` — the same condition that decides whether
+  // the middleware below is emitted at all — so a unit that never mints or reads a
+  // cookie is never reported as unattributable (review finding F-B). The cookie NAME
+  // is computed unconditionally because non-session code paths below still reference
+  // it; only the RECORDING is gated.
+  const _sessionSecureSetting = _resolveSessionAttr(
+    "session-secure",
+    (fileAST as any)._programSessionSecure,
+    _needsSessionInfra && _webAppShape,
+  ).value;
   const _secureCookieMode = _sessionSecureSetting !== false && _sessionSecureSetting !== "false";
   const _sessionCookieName = _secureCookieMode ? "__Host-scrml_sid" : "scrml_sid";
 
@@ -2819,9 +2841,9 @@ export function generateServerJs(
     // on another unit). So `<program sessionExpiry="7d">` silently yielded a 1h
     // cookie on exactly the unit that MINTS it — measured: the `<program>` unit
     // emitted `604800`, the login unit `3600`. The fallback consults the PROGRAM-wide
-    // value the driver pre-scanned (`_programSessionExpiry`). Strictly ADDITIVE: it
-    // is reached only where the answer today is "nothing declared → the 1h default",
-    // so a unit with its own entry is byte-identical.
+    // value the driver pre-scanned (`_programSessionExpiry`). Additive for a unit
+    // with its own entry — those are byte-identical — but see the S436 note below:
+    // "additive" was never a safety argument, it just says the fallback is last.
     //
     // ⛔ THREE STEPS, NOT TWO (S433 fix-round, F1-1) — and the middle one is the fix.
     // The per-unit RAW read must come BEFORE the program-wide stash, exactly as
@@ -2833,11 +2855,26 @@ export function generateServerJs(
     // `maxAge=1800`, in BOTH input orders. That is a worse failure to read than the
     // original defect — "your own declaration is inert" became "another program's
     // declaration governs you" — so the middle step is not optional politeness.
+    //
+    // ⛔ AND THE MIDDLE STEP WAS NOT ENOUGH (S436). It rescues a unit that declares
+    // its OWN `<program sessionExpiry=>`; it does nothing for a unit that declares
+    // NEITHER attribute, which still inherited the first sibling program's value.
+    // MEASURED on `c46ebbf8`: `<program auth="optional" csrf="off">` compiled alone
+    // emitted 3600 and, beside `<program … sessionExpiry="7d">`, emitted 604800 —
+    // both input orders, zero hard errors. Same mechanism as the `session-secure`
+    // downgrade above, so the SAME guard fixes it: `_programSessionExpiry` is now
+    // stamped only for a single-`<program>` compile set, and arrives `null` when 2+
+    // programs share one. See the guarded pre-scan in codegen/index.ts.
+    // The three steps now run in `session-config-resolve.ts` (S436 round 4). This
+    // whole block is already inside `if (_needsSessionInfra && _webAppShape)`, so a
+    // fall-through here is a REAL one — the unit genuinely emits a session cookie it
+    // cannot attribute to a `<program>` — and is recorded unconditionally.
     const _sessionMaxAgeSec = parseSessionExpirySeconds(
-      authMiddlewareEntry?.sessionExpiry
-        ?? _readRawProgramAttr("sessionExpiry")
-        ?? (fileAST as any)._programSessionExpiry
-        ?? null,
+      (_resolveSessionAttr(
+        "sessionExpiry",
+        (fileAST as any)._programSessionExpiry,
+        true,
+      ).value as string | null | undefined) ?? null,
     );
     lines.push("// --- §52 / §20.5 Session store + request-context middleware (compiler-generated) ---");
     if (_anySessionWrite) {

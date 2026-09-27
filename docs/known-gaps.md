@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 145 | 4 |
 | MED | 322 | 0 |
-| LOW | 120 | 0 |
+| LOW | 121 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -10571,6 +10571,35 @@ The session is minted and persisted correctly; every reader looks for it in an e
 **(1).** Option (2) leaves the twin live and thereby converts it into **a silent 1-hour logout the moment the store split is fixed** — trading one silent failure for another, which is the precise trade this project has refused repeatedly.
 
 **Adjacent twin, same root shape, lower severity (folded here deliberately, per the reporter):** `<program sessionExpiry="7d">` reaches only the program unit, so the login unit that actually issues the `Set-Cookie` uses the 1h default and the declaration is **inert with no warning** — `app.server.js` `_scrml_session_max_age = 604800` vs `login.server.js` `= 3600`. §20.5 anticipates the mechanism (*"a login page carries no `sessionExpiry=` … so the 1h default governs there"*). ~~Resolved by (1); left live and made dangerous by (2).~~ **← CORRECTED S339-peter: (1) is the store hoist and NEVER touches expiry (different threading path — verified); the twin is LIVE on HEAD, and §20.5's sentence SANCTIONS the 1h default rather than forbidding it. Re-filed with the true classification below.**
+
+<!-- @gap id=g-two-programs-one-file-session-attr-last-wins sev=LOW status=open locus=compiler/src/codegen/session-config-resolve.ts(readRawUnitSessionAttr) prov=review:S436-round4-F-D -->
+### g-two-programs-one-file-session-attr-last-wins — two `<program>` nodes in ONE file both declaring a session attribute: the LAST in source order wins, silently
+
+**Filed by the S436 round-4 re-review (F-D), PRE-EXISTING, and deliberately NOT fixed there.**
+
+`readRawUnitSessionAttr` (moved verbatim from `emit-server`'s `_readRawProgramAttr`, unchanged
+since S433) walks a unit's nodes and keeps overwriting `progVal` for every `<program>` it finds,
+so when one file carries two top-level `<program>` nodes that both declare `sessionExpiry` or
+`session-secure`, the LAST one in source order governs the whole unit. No diagnostic fires. The
+`<page>` limb of the same function has the opposite precedence (FIRST match wins, `pageVal` is
+only assigned when still `undefined`), so the two halves disagree about which duplicate wins.
+
+**Why it is not fixed with `E-MW-008` (S436 round 4).** `E-MW-008` refuses a build where a unit
+cannot be attributed to an owning `<program>`. This is the *other* half of the same question: a
+unit that has TWO owning `<program>`s and picks one by source position. Answering it means saying
+what a second top-level `<program>` in one file MEANS — which is `E-PROGRAM-002`'s reserved
+territory (§40.8: *"TBD — separate diagnostic; not part of Wave 1"*) and the ownership arc the
+round-4 stopping rule routes to bryan. Picking a winner here, or erroring, is a language ruling,
+not a codegen fix.
+
+**Not currently reachable as a silent wrong answer in a multi-program build**, because a file with
+two `<program>` nodes makes the set multi-program, and if any unit is then unattributable
+`E-MW-008` refuses the build outright. It remains reachable when every session-emitting unit
+resolves for itself — e.g. the two-in-one-file programs are the only session-emitting units and
+both declare. Population in the corpus: measured 0 (no tracked `.scrml` declares either attribute).
+
+**Repro:** one file containing `<program sessionExpiry="30m">…</program>` followed by
+`<program sessionExpiry="7d">…</program>`, compiled alone; the emitted unit takes `7d`.
 
 <!-- @gap id=g-program-sessionexpiry-inert-on-separate-login-unit sev=MED status=open -->
 ### g-program-sessionexpiry-inert-on-separate-login-unit — `<program sessionExpiry="7d">` is silently inert on the login unit that mints the cookie; the minted session lives 1h, not 7d — but §20.5 SANCTIONS the 1h default, so this is a RULING (behaviour-change) or a WARNING, not a bug-fix
