@@ -35,7 +35,7 @@ import {
   harvestRawCreateTables,
   harvestRawCreateTableDecls,
   harvestCreateTables,
-  findQualifiedCreateTableHeads,
+  findRejectedCreateTableHeads,
 } from "../../src/schema-differ.js";
 import { compileScrml } from "../../src/api.js";
 import { extractDesiredSchema } from "../../src/codegen/db-authoritative.ts";
@@ -567,8 +567,8 @@ describe("THE SPLIT — raw tables reach the tenant consumer and NOT the migrate
 });
 
 // ---------------------------------------------------------------------------
-// E-SCHEMA-012 — a `<schema>` CREATE TABLE head SHALL NOT carry a qualifier
-// (SPEC §39.2; bryan RULED S435 "1 both"; gap
+// E-SCHEMA-012 — a `<schema>` CREATE TABLE head SHALL name ONE readable,
+// UNQUALIFIED table (SPEC §39.2; bryan RULED S435 "1 both"; gap
 // g-tenant-floor-inert-for-a-two-qualifier-create-table).
 //
 // THE DEFECT. The head regex had a slot for ZERO OR ONE qualifier, so
@@ -578,28 +578,37 @@ describe("THE SPLIT — raw tables reach the tenant consumer and NOT the migrate
 // quiet. Exit 0, silently inert isolation. The one-qualifier form was accepted
 // by stripping, which collapses `a.assets` / `b.assets` onto one key.
 //
-// THE RULING: reject BOTH, fail-closed. The head is now READ as a name chain, so
-// every qualifier count is SEEN; the compile-level cases below are the verdict,
-// the reader-level cases pin each sibling shape of the head.
+// THE RULING: reject BOTH, fail-closed — and (S438 fix round, F3) a head the
+// reader cannot read is rejected too, never skipped.
+//
+// ⚑ THE INVARIANT (S438 fix round, S239 finding F1): for EVERY `<schema>` body,
+// the harvested table set is a SUPERSET of the pre-S438 harvest, table by table
+// and column by column. The first S438 cut skipped top-level comments without
+// string/regex awareness and a DSL `pattern(/^\/*…/)` swallowed a real tenant
+// table — a floor the base compiler engaged went silently off. The oracle below
+// is the pre-S438 recognizer VERBATIM, kept in this file so the property is
+// checked against base, not against the implementation's own idea of base.
 // ---------------------------------------------------------------------------
 const _tmp = [];
 afterAll(() => { for (const d of _tmp) { try { rmSync(d, { recursive: true, force: true }); } catch {} } });
 
-function compileSchemaApp(schemaText) {
+function compileSchemaApp(schemaText, whole) {
   const dir = mkdtempSync(join(tmpdir(), "e-schema-012-"));
   _tmp.push(dir);
   const dbAbs = join(dir, "app.db").replace(/\\/g, "/");
   const file = join(dir, "app.scrml");
-  writeFileSync(file, `<program db="${dbAbs}">
-  <schema>
-${schemaText}
-  </schema>
-  \${
+  const q = `  \${
+    @open = true
     function loadAssets() {
       const rows = ?{\`SELECT id, name, tenant_id FROM assets\`}.all()
       return rows
     }
-  }
+  }`;
+  writeFileSync(file, whole ? whole(dbAbs, q) : `<program db="${dbAbs}">
+  <schema>
+${schemaText}
+  </schema>
+${q}
   <page>
     <button onclick=loadAssets()>Load</button>
   </page>
@@ -611,23 +620,35 @@ ${schemaText}
   return { r, server };
 }
 const errCodes = (r) => (r.errors ?? []).map((d) => d.code);
+const tagged = (server) => /_scrml_tenant_tag\(await _scrml_sql/.test(server);
 const COLS = "(id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT)";
+const NOTES = "\n    CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)";
 
-describe("E-SCHEMA-012 — compile level: a qualified `<schema>` CREATE TABLE head is REJECTED", () => {
+describe("E-SCHEMA-012 — compile level: a qualified or unreadable `<schema>` CREATE TABLE head is REJECTED", () => {
   const REJECTED = {
     "one qualifier (was ACCEPTED pre-S438)": `    CREATE TABLE public.assets ${COLS}`,
     "two qualifiers (was SILENTLY INERT)": `    CREATE TABLE mydb.public.assets ${COLS}`,
-    "two qualifiers + a second recognized table (was inert with NO warning)":
-      `    CREATE TABLE mydb.public.assets ${COLS}\n    CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`,
+    "two qualifiers + a second recognized table (was inert with NO warning)": `    CREATE TABLE mydb.public.assets ${COLS}${NOTES}`,
     "double-quoted parts": `    CREATE TABLE "db"."public"."assets" ${COLS}`,
     "backtick + bracket parts": "    CREATE TABLE `mydb`.[public].assets " + COLS,
     "whitespace + comments around the dots": `    CREATE TABLE mydb /* x */ . -- y\n      public . assets ${COLS}`,
     "IF NOT EXISTS, lowercase": `    create table if not exists mydb.public.assets ${COLS}`,
     "TEMP modifier + temp. qualifier": `    CREATE TEMP TABLE temp.assets ${COLS}`,
+    "UNLOGGED + two qualifiers": `    CREATE UNLOGGED TABLE a.b.assets ${COLS}${NOTES}`,
     "a dangling qualifier with no name": `    CREATE TABLE public. (id INTEGER)`,
     "CREATE TABLE … AS (no column list)": `    CREATE TABLE a.assets AS SELECT 1`,
-    "a DSL table beside it does not mask it":
-      `    notes {\n      id: integer primary key\n    }\n    CREATE TABLE mydb.public.assets ${COLS}`,
+    "a DSL table beside it does not mask it": `    notes {\n      id: integer primary key\n    }\n    CREATE TABLE mydb.public.assets ${COLS}`,
+    // F3 — Unicode / `$` identifiers are READ (they were not-a-head pre-S438)
+    "Unicode qualifier (données.assets)": `    CREATE TABLE données.assets ${COLS}${NOTES}`,
+    "`$` qualifier (app$v2.assets)": `    CREATE TABLE app$v2.assets ${COLS}${NOTES}`,
+    "digit-leading qualifier": `    CREATE TABLE 1a.b.assets ${COLS}${NOTES}`,
+    // F3 — fail-closed on a head the reader cannot read
+    "UNREADABLE: hyphen in a qualifier": `    CREATE TABLE my-db.public.assets ${COLS}${NOTES}`,
+    "UNREADABLE: empty quoted part": `    CREATE TABLE "".public.assets ${COLS}${NOTES}`,
+    "UNREADABLE: fullwidth dot": `    CREATE TABLE a．b．assets ${COLS}${NOTES}`,
+    "UNREADABLE: zero-width space before the column list": `    CREATE TABLE assets​ ${COLS}${NOTES}`,
+    "UNREADABLE: IF EXISTS typo": `    CREATE TABLE IF EXISTS a.b.assets ${COLS}${NOTES}`,
+    "VIRTUAL + qualifier": `    CREATE VIRTUAL TABLE a.b.assets USING fts5(name, tenant_id)${NOTES}`,
   };
   for (const [label, schema] of Object.entries(REJECTED)) {
     test(`REJECTED: ${label}`, () => {
@@ -636,7 +657,7 @@ describe("E-SCHEMA-012 — compile level: a qualified `<schema>` CREATE TABLE he
     });
   }
 
-  test("each qualified head is reported ONCE, and the error names the qualifier + the fix", () => {
+  test("each rejected head is reported ONCE, and the error names the qualifier + the fix", () => {
     const { r } = compileSchemaApp(
       `    CREATE TABLE public.assets ${COLS}\n    CREATE TABLE mydb.public.orders (id INTEGER PRIMARY KEY, tenant_id TEXT)`,
     );
@@ -649,14 +670,9 @@ describe("E-SCHEMA-012 — compile level: a qualified `<schema>` CREATE TABLE he
   });
 
   test("FAIL-CLOSED even past the error: the qualified table is still declared, so the floor is ENGAGED, not inert", () => {
-    // The pre-fix two-qualifier compile emitted NO tenant tag. The rejection is
-    // the gate; the harvest keeps the floor on regardless.
-    const { r, server } = compileSchemaApp(
-      `    CREATE TABLE mydb.public.assets ${COLS}\n    CREATE TABLE notes (id INTEGER PRIMARY KEY, body TEXT)`,
-    );
+    const { r, server } = compileSchemaApp(`    CREATE TABLE mydb.public.assets ${COLS}${NOTES}`);
     expect(errCodes(r)).toContain("E-SCHEMA-012");
-    expect(/_scrml_tenant_tag\(await _scrml_sql/.test(server)).toBe(true);
-    // …and no misleading cascade: the block DOES declare a table.
+    expect(tagged(server)).toBe(true);
     expect([...(r.warnings ?? []), ...(r.errors ?? [])].map((d) => d.code))
       .not.toContain("W-SCHEMA-NO-TABLES-DECLARED");
   });
@@ -665,14 +681,17 @@ describe("E-SCHEMA-012 — compile level: a qualified `<schema>` CREATE TABLE he
     "an unqualified head": `    CREATE TABLE assets ${COLS}`,
     "an unqualified quoted head": `    CREATE TABLE "assets" ${COLS}`,
     "an unqualified IF NOT EXISTS head, lowercase": `    create table if not exists assets ${COLS}`,
-    "a qualified head inside a -- comment is not a head":
-      `    -- CREATE TABLE old.assets (id INTEGER)\n    CREATE TABLE assets ${COLS}`,
-    "a qualified head inside a /* */ comment is not a head":
-      `    /* CREATE TABLE old.public.assets (id INTEGER) */\n    CREATE TABLE assets ${COLS}`,
+    "a qualified head inside a -- comment is not rejected":
+      `    CREATE TABLE assets ${COLS}\n    -- CREATE TABLE old.assets (id INTEGER)`,
+    "a qualified head inside a /* */ comment is not rejected":
+      `    CREATE TABLE assets ${COLS}\n    /* CREATE TABLE old.public.assets (id INTEGER) */`,
+    "a qualified head inside a DSL string is not rejected (was a false positive)":
+      `    notes {\n      id: integer primary key\n      body: text default("CREATE TABLE x.y.z (a)")\n    }\n    CREATE TABLE assets ${COLS}`,
     "a DOT INSIDE a quoted name is one identifier, not a qualifier":
       `    CREATE TABLE "a.assets" ${COLS}\n    CREATE TABLE assets ${COLS}`,
     "a qualified REFERENCES target inside the column list is not a head":
       `    CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT, tenant_id TEXT REFERENCES public.tenants(id))`,
+    "a Unicode table name is READ (was not-a-head pre-S438)": `    CREATE TABLE "assets" ${COLS}\n    CREATE TABLE données (id INTEGER PRIMARY KEY)`,
     "the declarative DSL form": "    assets {\n      id: integer primary key\n      name: text\n      tenant_id: text\n    }",
   };
   for (const [label, schema] of Object.entries(ACCEPTED)) {
@@ -680,13 +699,87 @@ describe("E-SCHEMA-012 — compile level: a qualified `<schema>` CREATE TABLE he
       const { r, server } = compileSchemaApp(schema);
       expect(errCodes(r)).not.toContain("E-SCHEMA-012");
       expect(r.errors ?? []).toEqual([]);
-      expect(/_scrml_tenant_tag\(await _scrml_sql/.test(server)).toBe(true);
+      expect(tagged(server)).toBe(true);
     });
   }
 });
 
-describe("E-SCHEMA-012 — reader level: findQualifiedCreateTableHeads", () => {
-  const q = (sql) => findQualifiedCreateTableHeads(sql).map((h) => ({ name: h.name, qualifiers: h.qualifiers }));
+// F1 — the executed regressions of the first S438 cut. Every one of these
+// engaged the floor on the base compiler; each must still engage it.
+describe("F1 — a comment-lookalike inside a string or regex never removes a table (tenant floor still ENGAGED)", () => {
+  const F1 = {
+    "DSL pattern(/^\\/*…/) + a later real block comment": `    routes {
+      id: integer primary key
+      path: text pattern(/^\\/*[a-z0-9-]+$/)
+    }
+    CREATE TABLE assets ${COLS}
+    /* audit tables follow */
+    CREATE TABLE audit (id INTEGER PRIMARY KEY, what TEXT)`,
+    "DSL default(\"/api/*\") + a later block comment": `    rules {
+      id: integer primary key
+      glob: text default("/api/*")
+    }
+    CREATE TABLE assets ${COLS}
+    /* end */`,
+    "one-line body: default(\"https://…\") then a head (`//` in a string)":
+      `    links { id: integer primary key  url: text default("https://example.com") } CREATE TABLE assets ${COLS}`,
+    "one-line body: default(\"--\") then a head":
+      `    links { id: integer primary key  d: text default("--") } CREATE TABLE assets ${COLS}`,
+    "raw DEFAULT '/*' then a later comment":
+      `    CREATE TABLE links (id INTEGER PRIMARY KEY, g TEXT DEFAULT '/*')\n    CREATE TABLE assets ${COLS}\n    /* c */`,
+  };
+  for (const [label, schema] of Object.entries(F1)) {
+    test(label, () => {
+      const { r, server } = compileSchemaApp(schema);
+      expect(r.errors ?? []).toEqual([]);
+      expect(tagged(server)).toBe(true);
+    });
+  }
+
+  test("…and a qualified head AFTER such a lookalike is still REJECTED", () => {
+    const { r } = compileSchemaApp(`    routes {
+      id: integer primary key
+      path: text pattern(/^\\/*[a-z0-9-]+$/)
+    }
+    CREATE TABLE a.b.assets ${COLS}
+    /* end */`);
+    expect(errCodes(r)).toContain("E-SCHEMA-012");
+  });
+});
+
+// F2 — the `<schema>` checks descend the markup `if-chain` node.
+describe("F2 — a `<schema>` under an if/else chain is SEEN (E-SCHEMA-003 + E-SCHEMA-012)", () => {
+  const S = `<schema>
+    CREATE TABLE a.assets (id INTEGER PRIMARY KEY, name TEXT)
+    CREATE TABLE b.assets ${COLS}
+  </schema>`;
+  const whole = (inner) => (db, q) => `<program db="${db}">
+${q}
+  ${inner}
+  <page><button onclick=loadAssets()>Load</button></page>
+</program>`;
+  test("if/else chain: both codes fire (was: neither, tag=0, exit 0)", () => {
+    const { r } = compileSchemaApp(null, whole(`<div if=@open>\n  ${S}\n  </div>\n  <div else>x</div>`));
+    expect(errCodes(r)).toContain("E-SCHEMA-003");
+    expect(errCodes(r)).toContain("E-SCHEMA-012");
+  });
+  test("if/else-if/else chain: seen in the middle limb too", () => {
+    const { r } = compileSchemaApp(null, whole(`<div if=@open>x</div>\n  <div else-if=@open>\n  ${S}\n  </div>\n  <div else>y</div>`));
+    expect(errCodes(r)).toContain("E-SCHEMA-003");
+    expect(errCodes(r)).toContain("E-SCHEMA-012");
+  });
+  test("else limb", () => {
+    const { r } = compileSchemaApp(null, whole(`<div if=@open>x</div>\n  <div else>\n  ${S}\n  </div>`));
+    expect(errCodes(r)).toContain("E-SCHEMA-003");
+    expect(errCodes(r)).toContain("E-SCHEMA-012");
+  });
+});
+
+describe("E-SCHEMA-012 — reader level: findRejectedCreateTableHeads", () => {
+  const q = (sql) => findRejectedCreateTableHeads(sql)
+    .filter((h) => h.kind === "qualified")
+    .map((h) => ({ name: h.name, qualifiers: h.qualifiers }));
+  const unreadable = (sql) => findRejectedCreateTableHeads(sql).filter((h) => h.kind === "unreadable").length;
 
   test("every qualifier count is SEEN — 1, 2, 3", () => {
     expect(q("CREATE TABLE a.t (x INT)")).toEqual([{ name: "t", qualifiers: ["a"] }]);
@@ -694,13 +787,15 @@ describe("E-SCHEMA-012 — reader level: findQualifiedCreateTableHeads", () => {
     expect(q("CREATE TABLE a.b.c.t (x INT)")).toEqual([{ name: "t", qualifiers: ["a", "b", "c"] }]);
   });
 
-  test("quoting of every kind, and a doubled-quote escape inside a part", () => {
+  test("quoting of every kind, a doubled-quote escape, Unicode and `$`", () => {
     expect(q('CREATE TABLE "my""db"."t" (x INT)')).toEqual([{ name: "t", qualifiers: ['my"db'] }]);
     expect(q("CREATE TABLE `a`.[b].'c'.t (x INT)")).toEqual([{ name: "t", qualifiers: ["a", "b", "c"] }]);
+    expect(q("CREATE TABLE données.t (x INT)")).toEqual([{ name: "t", qualifiers: ["données"] }]);
+    expect(q("CREATE TABLE app$v2.t (x INT)")).toEqual([{ name: "t", qualifiers: ["app$v2"] }]);
   });
 
-  test("modifiers (TEMP / TEMPORARY / UNLOGGED / GLOBAL TEMPORARY) do not hide a qualifier", () => {
-    for (const mod of ["TEMP", "TEMPORARY", "UNLOGGED", "GLOBAL TEMPORARY", "temp"]) {
+  test("ANY modifier run (TEMP / GLOBAL TEMPORARY / UNLOGGED / OR REPLACE / VIRTUAL) does not hide a qualifier", () => {
+    for (const mod of ["TEMP", "TEMPORARY", "UNLOGGED", "GLOBAL TEMPORARY", "temp", "OR REPLACE", "VIRTUAL"]) {
       expect(q(`CREATE ${mod} TABLE s.t (x INT)`)).toEqual([{ name: "t", qualifiers: ["s"] }]);
     }
   });
@@ -709,19 +804,35 @@ describe("E-SCHEMA-012 — reader level: findQualifiedCreateTableHeads", () => {
     expect(q("CREATE /*a*/ TABLE -- b\n IF /*c*/ NOT EXISTS s -- d\n . /*e*/ t (x INT)"))
       .toEqual([{ name: "t", qualifiers: ["s"] }]);
     // …and the head the DIAGNOSTIC shows is rebuilt from the parts — no comment leaks in.
-    expect(findQualifiedCreateTableHeads('create temp table "s" -- d\n . /*e*/ t (x INT)')[0].headText)
+    expect(findRejectedCreateTableHeads('create temp table "s" -- d\n . /*e*/ t (x INT)')[0].headText)
       .toBe('CREATE TEMP TABLE "s".t');
   });
 
-  test("NEGATIVES — none of these is a qualified head", () => {
-    expect(q("CREATE TABLE t (x INT)")).toEqual([]);
-    expect(q('CREATE TABLE "a.b" (x INT)')).toEqual([]);                        // one quoted identifier
-    expect(q("-- CREATE TABLE a.t (x INT)\n")).toEqual([]);                    // commented out
-    expect(q("/* CREATE TABLE a.b.t (x INT) */")).toEqual([]);
-    expect(q("CREATE TABLE t (x INT REFERENCES s.parent(id))")).toEqual([]);   // body, not head
-    expect(q("CREATE INDEX s.i ON t (x)")).toEqual([]);                        // not a table head
-    expect(q("created_at.x (y)")).toEqual([]);                                 // `created` is not CREATE
-    expect(q("CREATE TABLE if (x INT)")).toEqual([]);                          // a table named `if`
+  test("UNREADABLE heads are reported, not skipped (F3, fail-closed)", () => {
+    expect(unreadable("CREATE TABLE my-db.t (x INT)")).toBe(1);
+    expect(unreadable('CREATE TABLE "" (x INT)')).toBe(1);
+    expect(unreadable("CREATE TABLE a．t (x INT)")).toBe(1);
+    expect(unreadable("CREATE TABLE t​ (x INT)")).toBe(1);
+    expect(unreadable("CREATE TABLE a /* /* nested */ */ . t (x INT)")).toBe(1);
+    expect(unreadable("CREATE TABLE")).toBe(1);
+    // readable heads are not
+    expect(unreadable("CREATE TABLE t (x INT)")).toBe(0);
+    expect(unreadable("CREATE TABLE t AS SELECT 1")).toBe(0);
+    expect(unreadable("CREATE VIRTUAL TABLE t USING fts5(a)")).toBe(0);
+  });
+
+  test("NEGATIVES — none of these is rejected", () => {
+    const none = (sql) => expect(findRejectedCreateTableHeads(sql)).toEqual([]);
+    none("CREATE TABLE t (x INT)");
+    none('CREATE TABLE "a.b" (x INT)');                        // one quoted identifier
+    none("-- CREATE TABLE a.t (x INT)\n");                     // commented out
+    none("/* CREATE TABLE a.b.t (x INT) */");
+    none('notes { body: text default("CREATE TABLE x.y.z (a)") }');   // in a DSL string
+    none("CREATE TABLE t (x INT REFERENCES s.parent(id))");   // body, not head
+    none("CREATE INDEX s.i ON t (x)");                         // not a table head
+    none("created_at.x (y)");                                  // `created` is not CREATE
+    none("CREATE TABLE if (x INT)");                           // a table named `if`
+    none("CREATE VIEW v AS SELECT a FROM t");                  // not a table head
   });
 
   test("a head AFTER a column body carrying a nested `(` is still found (resume past the real end)", () => {
@@ -729,13 +840,127 @@ describe("E-SCHEMA-012 — reader level: findQualifiedCreateTableHeads", () => {
       .toEqual([{ name: "u", qualifiers: ["s"] }]);
   });
 
-  test("an UNTERMINATED /* does not swallow a later qualified head", () => {
-    expect(q("pattern(/a/*/)\nCREATE TABLE s.t (x INT)")).toEqual([{ name: "t", qualifiers: ["s"] }]);
+  test("a lookalike in a string, a regex, or an unbalanced quote never HIDES a later qualified head", () => {
+    for (const pre of [
+      "pattern(/a/*/)",                                      // unterminated-looking `/*` in a regex
+      "people {\n name: text pattern(/o'brien/)\n}",          // lone `'` inside a regex
+      'rules { glob: text default("/api/*") }',             // `/*` inside a string
+      "links { u: text default(\"https://x\") }",           // `//` inside a string
+      "notes -- don't\n",                                    // `'` inside a comment
+      "prose with an apostrophe's\n",                        // unbalanced `'` bounded to its line
+    ]) {
+      expect(q(`${pre}\nCREATE TABLE s.t (x INT)\n/* end */`)).toEqual([{ name: "t", qualifiers: ["s"] }]);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// THE INVARIANT — harvest(branch) ⊇ harvest(base), table by table, column by column.
+// ---------------------------------------------------------------------------
+// The pre-S438 recognizer, VERBATIM (regex + strip + balanced body scan), as the
+// oracle. Deliberately a COPY: the property is "never fewer than base", so the
+// oracle must not move when the implementation does.
+function baseHarvestColumns(text) {
+  const re = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["`'[]?(\w+)["`'\]]?\s*\.\s*)?["`'[]?(\w+)["`'\]]?\s*\(/gi;
+  const bodyEnd = (src, from) => {
+    let depth = 0, i = from;
+    while (i < src.length) {
+      const c = src[i];
+      if (c === "-" && src[i + 1] === "-") { const nl = src.indexOf("\n", i); i = nl === -1 ? src.length : nl + 1; continue; }
+      if (c === "/" && src[i + 1] === "*") { const cl = src.indexOf("*/", i + 2); i = cl === -1 ? src.length : cl + 2; continue; }
+      if (c === "'" || c === '"' || c === "`") { let j = i + 1; while (j < src.length && src[j] !== c) j++; i = j + 1; continue; }
+      if (c === "(") { depth++; i++; continue; }
+      if (c === ")") { if (depth === 0) return i; depth--; i++; continue; }
+      i++;
+    }
+    return -1;
+  };
+  const out = new Map();
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const bs = m.index + m[0].length;
+    const be = bodyEnd(text, bs);
+    if (be === -1) continue;
+    const key = m[2].toLowerCase();
+    if (!out.has(key)) {
+      const t = parseRawCreateTableColumns(`CREATE TABLE x (${text.slice(bs, be)})`);
+      out.set(key, t ? t.columns.map((c) => c.name) : []);
+    }
+    re.lastIndex = be + 1;
+  }
+  return out;
+}
+
+function assertSuperset(body) {
+  const base = baseHarvestColumns(body);
+  const branch = new Map();
+  for (const d of harvestRawCreateTableDecls(body)) {
+    const k = d.name.toLowerCase();
+    if (!branch.has(k)) branch.set(k, d.columns.map((c) => c.name));
+  }
+  const map = new Map();
+  harvestRawCreateTables(body, map);
+  for (const [k, cols] of base) {
+    if (!branch.has(k) || !map.has(k)) return `lost table \`${k}\` in:\n${body}`;
+    for (const c of cols) if (!branch.get(k).includes(c)) return `lost column \`${k}.${c}\` in:\n${body}`;
+  }
+  return null;
+}
+
+describe("THE INVARIANT — harvest ⊇ the pre-S438 harvest, for every body", () => {
+  // Every body shape this file and the S239 review exercised.
+  const NAMED = [
+    ...Object.values({
+      a: `CREATE TABLE assets ${COLS}`,
+      b: `routes {\n id: integer primary key\n path: text pattern(/^\\/*[a-z0-9-]+$/)\n}\nCREATE TABLE assets ${COLS}\n/* audit */\nCREATE TABLE audit (id INTEGER)`,
+      c: `rules { glob: text default("/api/*") }\nCREATE TABLE assets ${COLS}\n/* end */`,
+      d: `links { url: text default("https://example.com") } CREATE TABLE assets ${COLS}`,
+      e: `links { d: text default("--") } CREATE TABLE assets ${COLS}`,
+      f: `-- CREATE TABLE old.assets (id INTEGER)\nCREATE TABLE assets ${COLS}`,
+      g: `/* CREATE TABLE assets ${COLS} */\nCREATE TABLE notes (id INTEGER)`,
+      h: `xCREATE TABLE assets ${COLS}`,
+      i: `CREATE TABLE notes (id INTEGER);CREATE TABLE a.b.assets ${COLS}`,
+      j: `CREATE TABLE notes (id INTEGER, d TEXT DEFAULT $$ ) $$)\nCREATE TABLE a.b.assets ${COLS}`,
+      k: `CREATE TABLE "assets ${COLS}`,
+      l: `CREATE TABLE assets" ${COLS}`,
+    }),
+  ];
+  test("the named review shapes", () => {
+    for (const body of NAMED) expect(assertSuperset(body)).toBeNull();
   });
 
-  test("a lone `'` in DSL text (pattern(/o'brien/)) does not swallow a later qualified head", () => {
-    expect(q("people {\n name: text pattern(/o'brien/)\n}\nCREATE TABLE s.t (x INT)"))
-      .toEqual([{ name: "t", qualifiers: ["s"] }]);
+  test("a generated sweep: 3,000 seeded bodies mixing DSL literals, comments and every head spelling", () => {
+    let seed = 0x5438;
+    const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
+    const pick = (xs) => xs[rnd(xs.length)];
+    const DSL = [
+      'routes {\n  id: integer primary key\n  path: text pattern(/^\\/*[a-z0-9-]+$/)\n}',
+      'rules { glob: text default("/api/*") }',
+      'links { url: text default("https://example.com") }',
+      'm { d: text default("--") }',
+      'p { n: text pattern(/o\'brien/) }',
+      'q { s: text default("CREATE TABLE x.y.z (a)") }',
+      "people {\n  id: integer primary key\n}",
+    ];
+    const TRIVIA = ["/* c */", "-- c", "// c", "/* unterminated", "'", "\"", "*/", "/*", "$$", ""];
+    const NAMES = ["assets", "notes", "orders", "données", "a$b", "Assets"];
+    const QUAL = ["", "public.", "db.public.", '"p".', "`p`.", "[p].", "p /* x */ . ", "p . ", "my-db.", '"".'];
+    const HEAD = ["CREATE TABLE ", "create table ", "CREATE TABLE IF NOT EXISTS ", "CREATE TEMP TABLE ", "CREATE /*x*/ TABLE ", "CREATE\tTABLE\n", "xCREATE TABLE "];
+    const BODY = [COLS, "(id INTEGER, tenant_id TEXT CHECK (tenant_id <> ''))", "(id INTEGER, g TEXT DEFAULT '/*')", "(id INTEGER, u TEXT DEFAULT 'http://x', tenant_id TEXT)", "(id NUMERIC(10,2), tenant_id TEXT)", "(id INTEGER"];
+    const SEP = ["\n", " ", ";", "\n\n", ""];
+    for (let n = 0; n < 3000; n++) {
+      const parts = [];
+      const len = 1 + rnd(6);
+      for (let p = 0; p < len; p++) {
+        const kind = rnd(3);
+        if (kind === 0) parts.push(pick(DSL));
+        else if (kind === 1) parts.push(pick(TRIVIA));
+        else parts.push(pick(HEAD) + pick(QUAL) + pick(NAMES) + " " + pick(BODY));
+      }
+      const body = parts.map((x) => x + pick(SEP)).join("");
+      const failure = assertSuperset(body);
+      if (failure) throw new Error(failure);
+    }
   });
 });
 
@@ -756,7 +981,6 @@ describe("the harvest reads the SAME heads — declaration and rejection cannot 
   });
 
   test("the `?{}` walker's acceptance is UNCHANGED — ≤1 qualifier stripped, ≥2 not harvested", () => {
-    // E-SCHEMA-012 is scoped to `<schema>`; the `?{}` path keeps its pre-S438 set.
     const one = new Map();
     harvestCreateTables("CREATE TABLE public.assets (id INTEGER)", one, true);
     expect([...one.keys()]).toEqual(["assets"]);

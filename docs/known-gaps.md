@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 147 | 4 |
+| HIGH | 148 | 4 |
 | MED | 329 | 0 |
 | LOW | 130 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -390,6 +390,24 @@ E-SCHEMA-012 is `<schema>`-scoped. Two sibling residuals this did NOT change are
 `g-schema-create-temp-table-silently-not-a-declaration` and
 `g-schema-dsl-qualified-table-head-silently-stripped`.
 
+**S438 FIX ROUND (S239 review of `c0327349` = `finding`).** F1 HIGH: the first cut's reader SKIPPED
+top-level comments with no string/regex awareness, so a DSL `pattern(/^\/*[a-z0-9-]+$/)` (or
+`default("/api/*")`, `default("https://…")`, `default("--")`) swallowed a later real
+`CREATE TABLE assets (…, tenant_id)` from all three harvests — a floor base ENGAGED went silently
+off (reviewer-executed via the CLI). Fixed by construction: the `<schema>` harvest is now the
+pre-S438 read (verbatim, comment-agnostic) ∪ the structured reader's extra keys, base winning per
+key; comment/literal awareness (string- and `pattern(/…/)`-aware, via `blankLiteralBodies`'s new
+comment mode) is used ONLY to suppress E-SCHEMA-012 on a dead head. Pinned by an invariant test —
+harvest ⊇ the pre-S438 harvest, table by table and column by column — over the named review shapes
+and a 3,000-body seeded sweep (bite-tested: it fails on `c0327349`). F2 MED: both hand-rolled
+`<schema>` walks in `gauntlet-phase1-checks.js` now descend the markup `if-chain` node via ONE
+shared child list (`schemaWalkChildLists`) — E-SCHEMA-003 was missed there on base too. F3 MED:
+identifier parts read `[\p{L}\p{N}_$]+`; any `CREATE … TABLE` head the reader cannot read through
+to `(` / `AS` / `USING` is now E-SCHEMA-012 (fail-closed) instead of "not a head". Reviewer's 83
+probe shapes: 0 silent tenant-tag losses vs `98d94e96`; 169-file corpus differential: identical.
+A pre-existing sibling found in the round is filed below as
+`g-schema-commented-out-declaration-shadows-live-table`.
+
 **(Original entry, kept for the record.) ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
 
 The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
@@ -433,6 +451,25 @@ the recoverable direction (the S290 E-SCHEMA-011 argument), and the reader alrea
 (`findQualifiedCreateTableHeads` rejects `CREATE TEMP TABLE temp.assets` today), so the fix is a
 filter + a message. Corpus use of modified heads in `<schema>`: zero (measured S438, same grep as the
 parent gap). — `NEW S438-peter`; **HIGH**; open
+
+### g-schema-commented-out-declaration-shadows-live-table — a commented-out earlier declaration of the same table (raw or DSL) wins first-wins, so a live `tenant_id` table is silently NOT tenant-scoped
+
+<!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
+
+**Pre-existing on `98d94e96`, identical on the S438 branch (which deliberately preserves base's
+harvest per key — see the S438 fix-round note above).** The `<schema>` recognizers read declarations
+inside comments, and the harvest is first-wins per table name. So:
+
+| `<schema>` body | tenant tag (query on `assets`) |
+|---|---|
+| `-- CREATE TABLE assets (id INTEGER)` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
+| `/* assets { id: integer primary key } */` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
+
+The commented-out, `tenant_id`-less declaration shadows the live one. **PA recommendation:** for the
+§14.8.10 declaration read, UNION the columns of every same-name declaration (over-declaring only adds
+floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
+base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
+purpose. — `NEW S438-peter`; **HIGH**; open
 
 ### g-schema-dsl-qualified-table-head-silently-stripped — the DECLARATIVE `mydb.public.assets { … }` is accepted as `assets`, so `a.assets` + `b.assets` collapse and the second (with `tenant_id`) is silently dropped
 
