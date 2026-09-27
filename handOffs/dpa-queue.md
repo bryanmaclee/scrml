@@ -3493,6 +3493,26 @@ not a second keying scheme. (9) the HIGH `g-no-reactive-cell-assignment-type-che
 axis (permissions on the TYPE, checked on every write; `replace` its own grant). Both are codegen obligations this
 doc must design. dpa-050 Q6 was re-framed by the PA toward option (a) under dpa-052 field contracts — PENDING bryan.
 
+### S435 — READY TO FIRE once SPEC §66 is on main (bryan: "spec amendments first, then dpa-051"; "yes, do that — lets rule the six")
+
+**Input:** SPEC **§66** (Nominal / spec-ahead) — the declaration / instance / value-contract model ruled across S430 +
+S435 — is the normative design target. Read §66 IN FULL (incl. §66.22, the consolidated OPEN list) plus §5.2.3 (L19
+reversed). The dpa-050 / dpa-052 DDs are background only.
+
+**Brief (ratified S435):** (1) design EVERYTHING that does not depend on an OPEN item; (2) for each of the six
+architecture-shaping OPEN items, state what EACH candidate resolution costs the architecture — the PA rules those six
+with bryan IN PARALLEL and feeds the rulings back:
+- **O5** — re-homing the rest of the §51.0 engine surface under `single` (onTransition, history, onTimeout/onIdle,
+  `accepts=`, derived, cross-file mount) → decides what the per-instance runtime supports.
+- **O8** — callbacks: function-typed attributes vs "a function is never stored as data" + bryan's "against virtual functions".
+- **O37** — RULED S435 = (c): a call's write-back is an edit only if the compiler CERTIFIES the callee body's edit
+  kind (recorded in its signature); uncertifiable → `replace`. Design the certification + where the edit kind lives.
+- **O40 / O56** — narrowing a handle binds the INSTANCE (carve-out to value semantics); scope pending bryan
+  (PA lean: anything with identity binds live; plain values bind a copy).
+- **O3** — what `let` means on sequences / structs.
+- **O52** — `rule=` state-children vs the #1/#2 declaration marker (parser shape).
+The other ~33 OPEN items: leave room, do not block on them.
+
 ## [dpa-052] deep-dive — value mutability: immutable unless `let`, and whether tuples come back
 `status:    banked`  # S430 2026-09-26. AXIOM-LEVEL (ladder row 7). One question at a time.
 banked:     S430 2026-09-26 (bryan stated the leading model as "IMO"; PA banked on his go-ahead to discuss)

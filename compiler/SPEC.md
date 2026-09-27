@@ -106,6 +106,9 @@
 61. [Typed Inbound Endpoint — `<endpoint>`](#61-typed-inbound-endpoint--endpoint)
 62. [Language Versioning](#62-language-versioning--the-scrml-language-semver-axis)
 63. [Deprecation Lifecycle](#63-deprecation-lifecycle--the-stage-machine)
+64. [Standalone Tool Target — `<program kind="tool">`](#64-standalone-tool-target--program-kindtool)
+65. [The scrml-native CSS Model](#65-the-scrml-native-css-model--predictable-cascade-free-styling)
+66. [Declarations, Instances, and Value Contracts](#66-declarations-instances-and-value-contracts)
 
 ---
 
@@ -2091,6 +2094,8 @@ scrml has exactly two access forms for reactive state cells. Every state touch u
 
 #### 6.1.1 The Structural Form — `<varname>`
 
+> ⚑ **Superseded by §66.1 / §66.3 (S435)** — the declaration-site form `<count> = 0` retires for `<count:int=0/>` (locked) / `<let count:int=0/>` (writable); render-by-tag position 2 is §66.6; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 The structural form uses tag syntax. It appears in three distinct positions:
 
 1. **Declaration site** — where the cell is created and given its initial value:
@@ -2179,6 +2184,8 @@ The two-form discipline exists for three reasons:
 
 #### 6.1.5 State Declaration Grammar
 
+> ⚑ **Superseded by §66.2 (S435)** — a declaration now closes like every tag (`/>` / `</>`), its own value `=` sits INSIDE the opener, and the declaration/use marker is an own value or a typed attribute; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 The V-kill structural form (§6.1.1) is governed by a single grammar production. This production lives here in §6.1 (the V-kill normative section) rather than in §7.5 (Type Annotation Grammar) because the state-cell declaration is a foundational element of scrml's reactive surface, not a sub-form of type annotation.
 
 ```
@@ -2213,6 +2220,8 @@ validator-attr   ::= /* per §55.1 universal-core predicate vocabulary */
 ---
 
 ### 6.2 Three RHS Shapes for State Declarations
+
+> ⚑ **Superseded by §66.3 / §66.5 / §66.9 (S435)** — the right-hand-side form retires (uniform inline own value, §66.3); Shape 2's render-spec becomes a `renders` clause (§66.5); Shape 3's `const <x>` becomes a locked declaration with a reactive initializer (§66.9); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 A state cell declaration (`<name> = ...`) has three possible right-hand-side shapes. The shape determines what `@name` returns and whether `<name/>` in markup is legal.
 
@@ -2347,6 +2356,8 @@ Access: `@count` reads the value. No field access.
 
 #### 6.3.2 Tier 2 — Ad-Hoc Compound (Variant C Structural Children)
 
+> ⚑ **Superseded by §66.4 (S435)** — attributes are data and children are validated fields; an attribute-less compound spells `<name:struct>…</>`, its children in the opener form; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 ```scrml
 <formRes>
   <name>  = ""
@@ -2371,6 +2382,8 @@ The cell `formRes` has three fields declared as structural children. Each field 
 **In-compound derived values:** see §6.6 for `const <derived> = expr` inside compound blocks. These are accessed at `@parent.derivedName`.
 
 #### 6.3.3 Tier 3 — Predefined-Shape Compound
+
+> ⚑ **Superseded by §66.18 (S435)** — Tier-3 positional construction is RETIRED (ruling S435 #14); positional data lives in tuples (§66.12.5); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 When the compound cell's shape is fixed by a predefined type, positional binding sugar is legal:
 
@@ -2402,6 +2415,8 @@ The V5-strict access forms apply at every level of the compound hierarchy:
 ---
 
 ### 6.4 Render-By-Tag Semantics
+
+> ⚑ **Superseded by §66.6 (S435)** — a plain `<x/>` is now a NEW instance and `<*x/>` the existing one; the render-by-tag uses migrate `<x/>` → `<*x/>` in the SAME arc (no deprecation window); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 Render-by-tag is the mechanism by which `<varname/>` in markup expands to a cell's render-spec. This section defines exactly when render-by-tag is legal and what it produces.
 
@@ -2452,6 +2467,8 @@ There is no syntax to override a cell's render-spec at a particular render site.
 ---
 
 ### 6.5 Reactive Array Mutation
+
+> ⚑ **Superseded by §66.11 / §66.12 (S435)** — a sequence is immutable unless its TYPE grants edits along axes; reactive notify is permission-driven; granted in-place edits notify like any write (the DQ-2 'not guaranteed in production' posture is withdrawn for granted operations); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 
 
@@ -2875,6 +2892,8 @@ non-conformant extension.
 
 ### 6.6 Derived Reactive Values — `const <name>`
 
+> ⚑ **Superseded by §66.9 (S435)** — `const` retires as a cell prefix; a derived value is a LOCKED declaration whose initializer reads cells (`<total:number=(@price * @qty)/>`); the evaluation semantics below are unchanged; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 **Debate verdict:** Lazy pull with dirty flags (Approach C) wins 49.5/60. This section
 encodes that verdict as normative spec. The previous TODO stub and the `_scrml_reactive_derived`
 runtime stub (which evaluated once and never re-evaluated) are superseded in full by this
@@ -3150,6 +3169,8 @@ behavior (evaluate once, never re-evaluate) is superseded and non-conformant.
 ---
 
 #### 6.6.8 Assignment to a Derived Value — E-DERIVED-WRITE
+
+> ⚑ **Superseded by §66.9 (rule 5) (S435)** — E-DERIVED-WRITE stays an error, but its message SHALL name the `let`-seeding trade-off; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 A `const <name>` binding is immutable. The compiler SHALL reject any attempt to assign a
 new value to a derived reactive variable after its declaration.
@@ -3576,6 +3597,8 @@ A `const <name> = expr` declaration where `expr` reads one or more `@var` refere
 
 #### 6.6.16 In-Compound Derived Values — `const <derived>`
 
+> ⚑ **Superseded by §66.9 (S435)** — the in-compound `const <derived> = expr` spelling becomes a locked child declaration with a reactive initializer; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 **Added:** S56, Lock L15.
 
 Derived reactive values may be declared INSIDE a compound state block using the structural form `const <derived> = expr`. These are scoped to the compound and accessed via the parent's canonical dot-path.
@@ -3613,6 +3636,8 @@ ${ let label = @signup.displayName }
 
 #### 6.6.17 Markup-Typed Derived Cells
 
+> ⚑ **Superseded by §66.9 (S435)** — the `const <badge> = <span…>` spelling retires; the new spelling of a markup-typed derived cell is OPEN (§66.22 O24); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 Both top-level `const <name>` and in-compound `const <name>` may have markup on the right-hand side. The result is a markup-typed derived cell: a reactive cell whose value IS a markup expression.
 
 ```scrml
@@ -3648,6 +3673,8 @@ const <badge>  = <span class="badge">${@signup.name}</span>
 ---
 
 #### 6.6.18 Value-Mutation of a Derived Cell — E-DERIVED-VALUE-MUTATE
+
+> ⚑ **Superseded by §66.9 (S435)** — only the `const <name>` spelling is superseded; the rule itself applies unchanged to derived declarations; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 **Added 2026-05-05 (S59 lock L21).** A `const <name>` declaration is **reference-immutable** (§6.6.8 — reassignment via `@name = newval` is **E-DERIVED-WRITE**) **and value-immutable from the developer's perspective**. The compiler SHALL also reject in-place mutation of the value held by a derived cell.
 
@@ -9709,6 +9736,8 @@ applyMushroom(.Small)                   // bare variant — parameter type fixes
 
 ### 14.11 Positional binding for predefined-shape compound state (Stage 0b D4 — M10)
 
+> ⚑ **Superseded by §66.18 / §66.12 (S435)** — positional struct construction (Move 10) is RETIRED, and the 'NO tuple type' sentence below is overtaken — the language has tuples (bracketed per-position-typed sequences); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 **Added:** 2026-05-04 — formalises tuple-positional binding for compound state whose shape is fixed by a predefined type. This is a NARROW affordance — it applies only when the compound's structure is locked at the type level.
 
 **The shape:**
@@ -9753,6 +9782,8 @@ type Point:struct = { x: number, y: number }
 - §14.10 — bare-variant inference (a different M9 affordance; both are M-moves about reducing redundancy when the type is known).
 
 ### 14.12 Lifecycle Annotation — `(A to B)`
+
+> ⚑ **Superseded by §66.11.6 (S435)** — a lifecycle is a WRITE contract (a write permission along `A → B`), not only the read-side E-TYPE-001 check described here; §14.12.4's engine-cell carve-out is OPEN under §66.13 (O7); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 **Added:** 2026-05-25 (S130 — HU-1 ratifications; promoted from sub-content under §14.3 per Q6=a). Canonical home for the full lifecycle-annotation extension specification. Authority: `docs/heads-up/lifecycle-annotation-extension-2026-05-25.md`; deep-dive `scrml-support/docs/deep-dives/lifecycle-annotation-extension-and-flagship-scope-2026-05-25.md`. Companion to Landing 1's compiler-source fire-implementation at `compiler/src/type-system.ts:1444`.
 
@@ -10049,6 +10080,8 @@ The interaction with `broadcast()` calls (§38.9 — `E-CHANNEL-004`) is unchang
 ---
 
 ## 15. Component System
+
+> ⚑ **Superseded by §66.15 (S435)** — `const X = <root props={…}>` components retire into declarations (typed attributes + `renders`) via the §63 lifecycle; component and engine multiplicity is re-ruled at §66.13; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 ### 15.1 Component Definition
 
@@ -10384,6 +10417,8 @@ calls nor explicit handler wiring belong in scrml source code.
 ---
 
 #### 15.11.1 Mechanism 1: `bind:` on Component Props
+
+> ⚑ **Superseded by §66.14 (S435)** — `bind` props are replaced by E2 exported `let` fields, read and written through an `as=` handle; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 `bind:` extends from DOM form elements (§5.4) to component props. When a caller writes
 `bind:propName=@var` on a component, the compiler generates a two-way synchronisation
@@ -10959,6 +10994,8 @@ A non-`bind` prop is evaluated once when the component instantiates. To pass a r
 
 #### 15.13.5 Components stay distinct from engines (Stage 0b D4 — M20)
 
+> ⚑ **Superseded by §66.13 (S435)** — Move 20 is formally REVERSED — multiplicity is a modifier (`single`), not a vehicle; E-COMPONENT-ENGINE-SCOPE survives as the invariant 'no `single` inside a multi-instance declaration'; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 **Added:** 2026-05-04 — formalises Move 20 (S55 deliberation): components and engines remain distinct vehicles for distinct multiplicities. They are NOT collapsible into a single primitive.
 
 **The distinction.**
@@ -11229,6 +11266,8 @@ For VP-2 (post-CE invariant, residual-component detection), the predicate also i
 
 
 ## 16. Component Slots
+
+> ⚑ **Superseded by §66.15.2 (S435)** — use-site children are slot content placed with `<slot/>` in a declaration's `renders`; named/parametric slots on declarations are OPEN (O9); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 **Revised:** S39, 2026-04-03 — complete rewrite. The provisional whitespace-rule slot syntax (`< slotname>:(<shape>)/`) is **retired**. It created unresolvable parsing ambiguities (SPEC-ISSUE-007) and conflated slots with state object syntax. The new system treats named slots as snippet-typed props with syntactic call-site desugaring. SPEC-ISSUE-007 and SPEC-ISSUE-008 are closed by this revision.
 
@@ -14443,6 +14482,8 @@ head's scrutinee count — otherwise **E-MATCH-SCRUTINEE-ARITY** (§34; row land
 
 #### No-tuple invariant (the parens are grammar, not a value)
 
+> ⚑ **Superseded by §66.12 (S435)** — the language now HAS tuples (bracketed per-position-typed sequences, §66.12.5); the parenthesized forms below remain non-tuples, which is unchanged; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 The parens + commas in the head and in each `product-pattern` are **bounded grammar** — they
 carry NO tuple semantics. There is no tuple VALUE, no `.0` / `.1` accessor, no value of tuple
 type flowing anywhere: `(st.mode, ev)` is a scrutinee LIST, not a constructed pair. `let t =
@@ -14571,6 +14612,8 @@ type PaymentError:enum = {
 - The `renders` clause does NOT affect logic-context behavior. In logic context, all variants (with or without `renders`) participate in exhaustive matching identically.
 
 #### 19.2.3 Normative Statements
+
+> ⚑ **Superseded by §66.5.1 (S435)** — `renders` gains a SECOND contextual-keyword position — after a declaration's closer; the 'SHALL NOT be a reserved word outside this position' sentence below is amended accordingly; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 - The compiler SHALL parse `renders` as a contextual keyword following an enum variant declaration inside a `type:enum` body. `renders` SHALL NOT be a reserved word outside this position.
 - The `renders` clause body SHALL be parsed as markup content (§4.1). The block splitter SHALL treat the content after `renders` as a markup scope.
@@ -28837,6 +28880,8 @@ Cross-references at a glance:
 
 #### 51.0.A Overview — engines as singleton state machines
 
+> ⚑ **Superseded by §66.13 (S435)** — traits 1 ('if you want multi-instance, use a component') and 4 ('Components are distinct — Move 20') are reversed: an engine is re-expressed as a `single` declaration whose fields carry transition graphs; the S178 sentence is OPEN (O45); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 > **North star (§1.5):** the UI of a scrml application SHOULD be a fully-handled state
 > machine. Engines are the implementation surface that delivers it.
 
@@ -29935,6 +29980,8 @@ plain-cell equivalent. Use `<engine derived=>` only when you want the full engin
 
 #### 51.0.K Components vs engines — DO NOT collapse (Move 20)
 
+> ⚑ **Superseded by §66.13.4 (S435)** — REVERSED — engines and components collapse into declarations; multiplicity is the `single` modifier; per-instance state machines are transition-graph FIELDS, not plain cells; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 Engines and components are **distinct constructs**. They MAY NOT be unified.
 
 | | Engine (`<engine>`) | Component (`<ComponentName>`) |
@@ -30944,6 +30991,8 @@ case (§51.0.G.1 step 1) AND the union-typed-argument case (§51.0.G.1 step 3).
 `E-ENGINE-INVALID-TRANSITION` (§51.0.F) — the illegal-target case.
 
 ##### 51.0.S.5 Scope
+
+> ⚑ **Superseded by §66.13.2 (S435)** — per-instance transition graphs are no longer an unscoped sibling arc — a declaration's enum field may carry `rule=` state-children per instance; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 **Covers:** singleton client-side engines — the engine self-describes BOTH the transition graph
 (`rule=`) AND the event→transition map (the `(state × message)` arms), closing the
@@ -36993,6 +37042,8 @@ const have = @fareByLane.has("DAL-001")          // -> bool
 
 ### 59.7 Write / remove — method-native (the grafted hybrid)
 
+> ⚑ **Superseded by §66.12 (S435)** — the 'scrml has no tuple type' premise in `.insertAll` below is overtaken (tuples exist, §66.12.5); maps under the transition axis are OPEN (O44); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 Writes and removals are **method-native** and **reassignment-canonical** — each returns a new map, reassigned to the cell, exactly as array updates reassign (`@arr = [...@arr, x]`, §6.5 DQ-2):
 
 ```scrml
@@ -37023,6 +37074,8 @@ const inner = @feeByLaneByCarrier["ACME"] ?? [:]          // read inner (or empt
 ```
 
 ### 59.8 Iteration — unordered by default + loud
+
+> ⚑ **Superseded by §66.12 / §66.18 (S435)** — the 'no tuple type' premise below is overtaken; whether `as (k, v)` (built on the retired §14.11) survives is OPEN (O15); impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 `.keys()`, `.values()`, `.entries()` each return a **value-native array** (a real scrml array, not a host iterator), composing with `<each>` and every array operation. `.keys()` is `[KeyT]`, `.values()` is `[ValT]`, and **`.entries()` is `[{ key: KeyT, value: ValT }]`** — an array of two-field **entry structs** (scrml has no tuple type, §59.7; the entry is a struct, the language's product type). Iteration uses the ordinary §17.7 `<each in= … as name>` opener — there is **no map-specific `<each>` grammar** (S169 ruling: the `(k, v) in` tuple-opener that earlier drafts showed was rejected — it conflicts with the attribute-only §17.7 opener and would require a tuple type the language does not have):
 
@@ -38243,6 +38296,8 @@ The natively-inherited properties (`color`, `font-*`, `line-height`, `letter-spa
 
 #### 65.3.2 Token-flow — `<theme>` named values → CSS custom properties
 
+> ⚑ **Superseded by §66.17 (S435)** — T3 — tokens are ordinary declarations inside `<theme>` (now a marker); the `name = value;` body grammar retires via §63; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
+
 A **`<theme>`** structural element (§65.9, §D) declares named VALUES referenced **explicitly at use sites**:
 
 ```scrml
@@ -38362,6 +38417,8 @@ applied style=  >  class / id / specific author rule (component-scope `#{}`)  > 
 - Across levels the chain **orders** (never a conflict); *within* a level an unconditional same-property overlap is `E-STYLE-CONFLICT` (§65.2.1).
 
 ### 65.6 Reactive theming — the named-variant reactive selector
+
+> ⚑ **Superseded by §66.17 (S435)** — T3 — a variant is a derived declaration that `match`es over the mode cell, recognized and emitted as the same `:root[data-scrml-theme-<cell>]` CSS; the `.Variant { }` blocks retire via §63; impl#1 behaviour described below remains until the bootstrap implements §66 (divergences carried per S430 P6/P7).
 
 `<theme>` tokens are **reactive**. Theming is a **named-variant reactive selector** (§Rulings row 3): the `<theme>` block declares named **variant sub-blocks** (`.Light`, `.Dark`, …) that each re-bind a subset of tokens **over the shared base**, and binds to an **ordinary adopter-named reactive cell** via **`<theme for=@cell>`** — mirroring the engine `for=` binding. The variant set (`.Light`/`.Dark`) is an **enum-like type**; the bound cell holds the active variant. **`@mode` is a convention, NOT a reserved name** — the adopter names the cell.
 
@@ -38561,3 +38618,1503 @@ The §34 catalog rows for every `E-STYLE-*`/`W-STYLE-*`/`E-THEME-*`/`E-DEFAULTS-
 ### 65.16 Cross-references
 
 §9.1 (scoped `#{}` — KEPT, gains §65.2 + §65.2.5; §A) · §25 (CSS variables — the `<theme>` lowering target; §B) · §26 / §26.6 (`prose` `:where()`-flat — the proven flat-specificity precedent) / §26.7 (composing families — the utility-collision exemption) / §26.8 (`@apply` — OQ-7); the Tailwind `@layer` (§C) · §4.15 / §24.4 (`<theme>`/`<defaults>` structural-element registry; §D) · §5.5.2 (`class:name=expr` — the `style:name=` sibling) · §1.4 (markup-as-value pillar — the style-as-value analog) · §18 (exhaustive `match` — the guarantee analog). Authority: DD `css-scrml-fication-2026-07-07.md` (axes 1–3 LOCKED; §Rulings 2026-07-07) + the ratified 2026-07-07 rulings.
+
+---
+
+## 66. Declarations, Instances, and Value Contracts
+
+> **Status: Nominal / spec-ahead.** This section is NORMATIVE for the scrml language. **impl#1 (the TS
+> compiler, `compiler/src/`) does not implement it.** Per the S430 P6/P7 rulings (`ruling:user-voice-scrml.md
+> S430` — *"yes, move on to P7"* / *"yes, sequence the build and go"*): the SPEC is the authority, not either
+> implementation; the **bootstrap** implements §66; every impl#1 divergence from §66 is **CARRIED** (P7 —
+> `status=carried`, pinned as a conformance case expected-to-fail on impl#1 and required for the bootstrap's
+> P5 track-done gate), and impl#1 is fixed only for cause (it blocks the bootstrap, an adopter reported it, or
+> security). Until the bootstrap passes the P5 gate, impl#1's current behaviour — described in the sections
+> this one supersedes — remains what adopters get; §66 is what the language IS.
+>
+> **Authority.** bryan's verbatim rulings in `scrml-support/user-voice-scrml.md`: the S430 block (from *"P1
+> ruled"* through *"dpa-052 reframed by bryan"*) and every S435 block; the queue bodies `[dpa-050]` /
+> `[dpa-052]` in `handOffs/dpa-queue.md`. The dPA deep-dive
+> `scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md` is
+> **advisory only**: where a ruling differs from its lean (notably **Q6 was ruled option (a)**, not the DD's
+> lean (d)), the ruling governs.
+>
+> **What a terse answer ratifies (standing rule, S130/S276).** A terse *"a"* / *"yes"* / *"go"* ratifies the FULL
+> TEXT OF THE PA MESSAGE IT ANSWERED — not the deep-dive's lean, and not the later user-voice restatement. §66
+> checked each terse S435 answer against the session transcript (`~/.claude/projects/…/bded3ea1-….jsonl`):
+> content that appears in the message bryan answered is cited as **`ruling:S435 (PA proposal text answered
+> "<answer>")`**; content that appears only in the DD or in a restatement is NOT treated as ratified — it is an
+> OPEN item or a **record gap**. The "all the rest, your leans" answer ratified the PA's table of leans for #3,
+> #9, #12, #15, #19 and #21 (#14 and #17 were pulled out and ruled separately); where that table and the DD
+> differ, §66 follows the table (e.g. #3: the DD lean was a LINT for an unparenthesized `>`; the table — and
+> §66.2.4 — make it an ERROR).
+>
+> **Nothing in §66 is invented.** Where two rulings interact in a way no ruling decides, the text says so in a
+> `⚑ OPEN (not ruled)` note that lists the options without choosing; §66.22 consolidates every such note.
+> dpa-053 (block expressions for one-off multi-step calculations) is **banked, not ruled**, and is not
+> specified here.
+
+### 66.0 Reading guide and supersession map
+
+§66 restates, in one place, the model the S430 + S435 rulings give the language: **a declaration is a state
+kind in the tree, with typed attributes, a `renders`, and instances** (dpa-050), and **data is immutable
+unless a contract grants a write; the contract lives on the TYPE and governs every write however it is
+spelled** (dpa-052). The two halves meet at Q6: an instance writes its own state through its **fields'
+contracts**, and the engine is re-expressed as a `single` declaration whose fields carry transition graphs.
+
+| §66 | Rules | Supersedes (banner placed at the superseded text) |
+|---|---|---|
+| 66.1 | What a declaration is | §6.1.1 (declaration-site form) |
+| 66.2 | Termination; declaration vs use; field names; opener expressions | §6.1.5 `state-decl` grammar |
+| 66.3 | Own value, inline defaults, inference, uniform form | §6.2 RHS shapes (the `<x> = v` form) |
+| 66.4 | Attributes are data; children are validated fields | §6.3.2 Variant C spelling |
+| 66.5 | `renders` | §6.2 Shape 2 render-spec coupling (the right-hand-side form); §19.2.3 (second contextual position). NOT §6.4.2 steps 3–4 (implicit bind, validator wiring) — O25 |
+| 66.6 | Instances; `<*x>` the existing one | §6.4 render-by-tag |
+| 66.7 | `@name`, `as=`, instances in lists and conditionals | — (new) |
+| 66.8 | Declarations are types; named shared instances | — (new) |
+| 66.9 | `let`, locked, derived, seeded; `const` retires | §6.6 / §6.6.1 / §6.6.8 / §6.6.16 / §6.6.17 / §6.6.18 (the `const <x>` form) |
+| 66.10 | Value semantics | — (new axiom; impl#1 leaks reference semantics) |
+| 66.11 | Write contracts — the one transition axis | §6.5.1 (DQ-2 notify), §6.5.5; §14.12.1 (lifecycle as a read check only) |
+| 66.12 | Sequences à la carte — arrays and tuples | §6.5 (unconstrained arrays); the S222 no-tuple sentences (§14.11, §18.19, §59.7/§59.8) |
+| 66.13 | Field contracts; `single`; engines | §15.13.5, §51.0.A traits 1 + 4, §51.0.K (Move 20). (§51.0.A's S178 amendment is NOT superseded — it is OPEN, O45.) |
+| 66.14 | Encapsulation (E2) | §15.11.1 `bind` props |
+| 66.15 | Components retire into declarations | §15 (component definition), §16 (slot surface, partially) |
+| 66.16 | `server` / `pinned` on declarations | — (clarifies §6.10 / §52 for multi-instance declarations) |
+| 66.17 | `<theme>` T3 | §65.3.2 / §65.6 `<theme>` body grammar |
+| 66.18 | Tier-3 positional retired | §6.3.3, §14.11 |
+| 66.19 | Worked programs | — |
+| 66.20 | Diagnostics | — (named here; §34 rows land WITH the implementation) |
+| 66.21 | Legacy forms and migration (§63) | — |
+| 66.22 | OPEN items (consolidated) | — |
+| 66.23 | Cross-references | — |
+
+**Notation.** Every example in §66 uses the ruled spelling: `let` is a PREFIX (`<let count:int=0/>`); the own
+value `=` sits inside the opener; a void declaration closes `/>`, a bodied one `</>`; a non-trivial opener
+expression is parenthesized (§66.2.4).
+
+### 66.1 What a declaration is
+
+> **Provenance:** ruling:user-voice-scrml.md S430 · *"Just that we either really  justify the <> syntax, or get
+> rid of it."* · *"my original thought was that when <swatch was in markup it would renter the markup
+> associated with it. <swatch>, when called in a logic context would return a struct of the data. I was also
+> thinking this would be useful for imported component and theme librarys"* · *"yes, hand it to the dPA,
+> retirement pole closed"*.
+> **supersedes:** §6.1.1's reading of the structural form as a declaration-site marker only.
+
+1. A **declaration** is a tag whose opener declares a **state kind**: a named thing in the tree that has
+   **typed attributes** (its data), optionally **child declarations** (its validated fields, §66.4), optionally
+   a **`renders`** clause (its markup, §66.5), and **instances** (§66.6).
+2. The `<>` declaration form is JUSTIFIED by this model and is RETAINED. The keyword-form retirement pole is
+   CLOSED (S430).
+3. **V5-strict survives:** `<x …>` names a *thing in the tree*; `@x` names *its value* (§66.7). A declaration
+   with a `renders` clause renders its markup (§66.5); in logic, `@x` yields its data as a struct value
+   (§66.7.1) — bryan's "returns a struct of the data" folds into `@x` (Q5).
+4. One meaning spans HTML elements, user declarations and components: an HTML element is a **predefined
+   declaration** (every `<div>` is a new instance; a predefined declaration has no shared instance, §66.6.5);
+   a component IS a declaration with typed attributes and a `renders` (§66.15).
+5. Writes to declaration state go **through logic**, **typed**, and — *"if possible"* — through a
+   **tracked, exhaustive** contract (Q1). §66.11 and §66.13 are that contract. Every cell and field write SHALL
+   be type-checked against the target's declared type (the "typed" half of Q1).
+
+### 66.2 Declaration syntax — termination, the declaration/use marker, field names, opener expressions
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (dpa-050 §7 #1 + #2) · *"yes, :struct,"*; S435 (§7 #3, PA
+> lean adopted) · *"those were the only 2 I wanted expounded as I went through them. all the rest, your leans"*.
+> **supersedes:** §6.1.5 `state-decl ::= '<' identifier … '>' [':' type-expr] '=' expr` (a declaration no longer
+> ends at a post-`>` `=`); S430 Q2's *"no closing tag on a declaration"* (overtaken by #1).
+
+#### 66.2.1 Termination
+
+A declaration closes like every tag: **`/>` when void, `</>` when bodied.** There is no declaration-specific
+terminator.
+
+```scrml
+<let count:int=0/>                         // void
+<signup:struct>                            // bodied — the body holds child declarations
+    <let email:string=""/>
+</>
+```
+
+#### 66.2.2 Declaration vs use
+
+A tag is a **DECLARATION** iff its opener has
+
+- **(i) an own value** — `=` immediately after the name, or after `name:Type` (`<count=0/>`, `<count:int=0/>`);
+  or
+- **(ii) at least one typed attribute** — `attr:Type` (`<swatch label:string="Brand"/>`).
+
+Otherwise it is a **USE** (an instance of an existing declaration, §66.6). A pure container with neither an
+own value nor a typed attribute spells its kind explicitly: **`<name:struct>…</>`**.
+
+**`<name:Decl …/>` is a declaration** — ruling:S435 (PA proposal text answered "yes", #16): *"It falls straight
+out of the termination rule: `:swatch` is a typed own value, so it's a declaration."* A `:Decl` type after the
+name thus counts as (i) for a declaration type.
+
+> ⚑ **OPEN (not ruled) — O31 (narrowed): `name:Type` without `=` for a NON-declaration type.** The #16 text
+> ratifies `:Decl` as "a typed own value"; `:struct` is ruled separately. Whether a bare `name:Type` for any other
+> type (`<count:int/>`, the Shape-4 analog) is also a declaration is not ruled. Evidence the termination text
+> narrowed the DD lean: DD §7 #1 read *"a tag is a declaration iff it has an **own type** or ≥1 typed
+> attribute"*, whereas the message bryan answered *"yes, :struct,"* speaks of an own VALUE.
+
+> ⚑ **OPEN (not ruled) — O52: `rule=` state-children vs the marker and §66.2.3.** A transition graph's
+> state-children (`<Closed rule=.Opened/>`, §66.13) carry neither an own value nor a typed attribute, so by
+> (i)/(ii) they read as USES. How they are distinguished from declarations and uses (by position inside an
+> enum-valued declaration's body, by their variant name, or otherwise) is not ruled. The PA texts bryan answered
+> (Q6 "a", termination "yes, :struct,") write state-children ONLY in the void form (`<Idle rule=.Saving/>`);
+> whether the §4.14 `:`-shorthand body (`<Idle rule=.Saving : "">`, which puts a `:` inside an opener where
+> §66.2.3 has the parser read a type) survives there is not ruled. §66's examples that use the `:`-shorthand
+> (§66.13.3, §66.19.2, §66.19.6 `phase`) are marked `⚑ O52`; the void-form blocks carry the mark only for the
+> marker question.
+
+#### 66.2.3 Illegal field names
+
+`bind`, `class`, `style`, `internal` and `on` are **illegal attribute and field names** in a declaration. This
+keeps the namespaced-attribute grammar (`bind:value=`, `class:active=`, `style:invalid=`, `internal:rule=`,
+`on…`) unambiguous against `name:Type`: after `:` in a declaration opener the parser reads a **type
+expression**. Declaring an attribute or child field with one of the five names is `E-DECL-ILLEGAL-FIELD-NAME`
+(§66.20).
+
+> ⚑ **OPEN (not ruled) — O41: other attribute-name collisions.** Only the five names above are ruled. Whether
+> the stdlib / structural attribute names that are also ordinary words — `as`, `key`, `if`, `slot`,
+> `default`, `debounced`, `throttled`, `server`, `pinned`, `single` — are illegal as user attribute names, or
+> are disambiguated another way, is not ruled.
+
+#### 66.2.4 Expressions inside the opener (#3)
+
+An own value or an attribute default in an opener is either **a literal or a plain `@ref`, written bare**, or
+**any other expression, PARENTHESIZED**. An unparenthesized `>` or `/` inside an opener value is an error (it
+cannot be told apart from the opener's end); a non-literal, non-`@ref` opener value that is not parenthesized
+is `E-DECL-OPENER-EXPR-UNPARENTHESIZED` (§66.20). (Source: ruling:S435 (PA proposal text answered "all the rest,
+your leans") — the #3 row of the PA's leans table: *"Unparenthesized `>` or `/` is an error, never a guess."* The
+DD §7 #3 lean proposed only a LINT for an unparenthesized `>`; the adopted restatement makes it an error. §66
+follows the adopted restatement.)
+
+```scrml
+<step=1/>                                  // literal, bare
+<total:int=@count/>                        // plain @ref, bare
+<doubled:int=(@count * 2)/>                // anything else: parenthesized
+<isBig:bool=(@count > 10)/>                // a `>` MUST be inside parens
+```
+
+> ⚑ **OPEN (not ruled) — O32: which literals count as "literal".** Scalar literals and a bare enum variant
+> (`.Light`) plainly are. Whether compound literals — array (`[1, 2, 3]`), struct (`{ … }`), map (`[k: v]`), and
+> the tuple literal of §66.12.5 — may stand bare in an opener, or must be parenthesized, is not ruled. §66's
+> examples parenthesize every compound literal except the empty `[]`.
+
+### 66.3 Own value, inline defaults, and inference
+
+> **Provenance:** ruling:user-voice-scrml.md S430 (Q3) · *"c, and go uniform"*; S435 (#17) · *"retire, int,
+> reverse L19, bank dpa-053"*; S435 (termination) · *"yes, :struct,"*.
+> **supersedes:** §6.2's `<name> = expr` right-hand-side form and §6.1.5's initializer position. (bryan's S430
+> sketch of right-hand-side defaults — *"install the defafault values on the rhs"* — was floated, not ruled,
+> and Q3 rejected it.)
+
+1. **Defaults are INLINE on each attribute**, in the order `name:Type=default`
+   (`<swatch label:string="Brand" hex:string="#338967"/>`). A declaration and a use read alike: `hex="#FF6600"`
+   at a use overrides the default for that instance. Positional right-hand-side defaults are rejected (a
+   reorder silently swaps them).
+2. **Uniform:** a single-value cell is written the same way — **its own value is `=` inside the opener**:
+   `<count:int=0/>`. The `<x> = v` right-hand-side form RETIRES (§66.21), with a mechanical corpus migration
+   owed WITH the build.
+3. **Own-value inference.** The own value's type MAY be inferred from its literal: `<count=0/>` is allowed.
+   **An integer literal infers `int`; a non-integer numeric literal infers `number`; an annotation wins**
+   (`<ratio:number=1/>` is a `number`).
+4. The own value, like every declaration (§66.9), is **locked** unless `let` is written: `<count:int=0/>` is a
+   constant; `<let count:int=0/>` is writable.
+
+> ⚑ **OPEN (not ruled) — O35: the rest of DD §7 #17.** bryan expounded #17 and ruled only its integer-literal
+> half (*"int"*). The rest of the DD's #17 lean is not ruled: **(a)** inference applies to the own value ONLY,
+> and every user attribute MUST carry `:Type` (DD F18; it is also the §66.2.2 (ii) marker); **(b)** an
+> annotation is REQUIRED when the own value is `not`, `[]`, `{}` or a context-less bare variant; **(c)** `<x>`
+> in LOGIC position keeps §14.3.1's meaning — a fresh instance value with defaults (DD F24).
+
+> ⚑ **OPEN (not ruled) — O19: an own value AND attributes on one declaration.** Whether a declaration may carry
+> both an own value and attributes/children (`<count:int=0 step:int=1/>`), and if so whether `@count` is the
+> scalar own value or a struct of its fields, is not ruled. §66's examples never combine them.
+
+> ⚑ **OPEN (not ruled) — O33: attributes with no default.** Whether an attribute declared without a default
+> (`<dropdown label:string …/>`) is REQUIRED at every use (the §15.10 `E-COMPONENT-010` analog) or takes the §6.2
+> Shape-4 canonical empty; and what such an attribute holds in the declaration's shared instance (§66.6.4),
+> where no use supplies it.
+
+### 66.4 Attributes are data; children are validated fields
+
+> **Provenance:** ruling:user-voice-scrml.md S430 (Q4) · *"A, attributes for data, children for validated
+> fields"*.
+> **supersedes:** §6.3.2's Variant C field spelling (`<name> = ""` children); the §6.3.1–§6.3.2 Tier-1/Tier-2
+> presentation is re-expressed by §66.3 (own value) and this subsection (children).
+
+1. An **attribute** is a bare typed value — data. It carries a type and, optionally, a default (§66.3); it
+   carries NO modifiers, validators, `renders` or instances of its own.
+2. A field that needs its own **modifiers / validators / `renders` / instances** is a **CHILD declaration** — a
+   state kind in its own right, declared in the parent's body:
+
+   ```scrml
+   <signup let agree:bool=false>                         // `agree` is data: an attribute (`let` on an attribute: rule 6)
+       <let email:string="" req length(>=5)/>            // `email` is validated: a child declaration
+       <let password:string="" req length(>=8)/>
+   </>
+   ```
+
+3. **Validators and modifiers in an opener bind that declaration's own value**, never an attribute. This removes
+   the ambiguity of `<signup email:string="" req>` (does `req` bind `email` or `signup`?): `req` binds
+   `signup`.
+4. **A declaration's body holds child declarations** (and the transition-graph children of §66.13), never
+   markup. A declaration's markup attaches only through `renders` (§66.5).
+5. **Promotion is mechanical.** Moving an attribute to a child declaration (when it grows validators,
+   modifiers, a render or instances) is a mechanical rewrite offered by a compiler hint and performed by
+   `scrml promote` (§56). The hint's code and its exact trigger are not ruled (OPEN — O42).
+
+6. **`let` and `export let` are legal on an ATTRIBUTE**, and `export` on a child field is written before its tag.
+   Provenance: ruling:S435 (PA proposal text answered "a", "E2, move on", "yes, :struct,") — all three messages
+   write the dropdown's attribute as `let value:string=""` / `export let value:string=""` inside the opener, and
+   the E2 message exports a CHILD field as `export <open:Openness=.Closed> … </>`. (Former O53 — closed. Q4's
+   "a field that needs its own modifiers … is a CHILD" is thereby read as covering validators / renders /
+   instances, not the `let` / `export` grants.)
+
+> ⚑ **OPEN (not ruled) — O43: setting a child's value at a use site.** Use-site CHILDREN are slot content
+> (§66.15, ruled). Whether a child declaration's value may be set at a use site by an attribute of the same name
+> (`<signup email="a@b"/>`, the other half of the DD §7 #11 lean), or only through logic, is not ruled. **Record
+> gap — #11 fell out of the record (positive evidence it was not answered):** the queue's S435 "Still OPEN" list
+> (#3, #9, #12–#17, #19, #21), minus the items ruled later (#13, #14, #16, #17), is exactly the adopted-leans
+> table bryan answered (#3, #9, #12, #15, #19, #21); #11 appears in neither. The transcript shows #11 presented
+> only in the components message answered *"yes, retire it"*, and only its slot half (*"a use-site body becomes
+> slot content (the dPA's #11 lean)"*) — so the slot half IS ruled (§66.15.2) and the child-value half was never
+> put to bryan.
+
+### 66.5 `renders` — a declaration's markup
+
+> **Provenance:** ruling:user-voice-scrml.md S430 (Q2) · *"b, renders reads right"*; S435 (§7 #9, #19, #21 — PA
+> leans adopted) · *"all the rest, your leans"*.
+> **supersedes:** §6.2 Shape 2 (a render-spec coupled to the declaration as a bindable-markup right-hand side,
+> `<x req> = <input/>`), §6.4.2 (Shape-2 expansion), and §19.2.3's sentence *"`renders` SHALL NOT be a reserved
+> word outside this position"* (a second contextual position is added, #21).
+
+#### 66.5.1 Syntax
+
+A declaration's markup is attached by a **`renders` clause** that follows the declaration's closer (`/>` or
+`</>`). It reuses the §19.2 enum-variant vocabulary: `renders` is followed by ONE markup element (the §19.2.1
+`markup-body` production), which is the declaration's markup.
+
+```scrml
+<swatch label:string="Brand" hex:string="#338967"/>
+renders <span class="chip"><i style="background:${hex}"></i> ${label}</span>
+```
+
+`renders` is a **contextual keyword in exactly two positions**: after an enum variant inside a `type:enum` body
+(§19.2) and after a declaration's closer (this section). It is not reserved elsewhere. Rejected alternatives
+(S430): a markup body between the declaration's tags (two grammars in one tag), and an opener `:`-shorthand.
+
+The canonical Q2 example is restated in the uniform form (#21): the S430 sketch
+`<swatch label:string hex:string> = (label: "Brand", hex: "#338967")` used the right-hand-side form Q3 then
+retired; its ruled spelling is the example above.
+
+#### 66.5.2 Names in scope inside `renders` (#9)
+
+Inside a declaration's `renders`, the declaration's **attributes and child fields are bound as bare names that
+are READ-ONLY, reactive projections** of the current instance (the §19.2 payload-field and `<each as>`
+loop-variable precedents). Every **write or bind** goes through `@x.field`, where `@x` names the current
+instance (§66.6.3, ⚑ O54). A bare-name write (`label = "x"`) inside `renders` is an error (the V5-strict rule that bare
+names are not cells; the diagnostic is `E-DECL-RENDERS-BARE-WRITE`, §66.20).
+
+```scrml
+renders <button onclick=(@dropdown.open = open == .Closed ? .Opened : .Closed)>${label}</button>
+//                        ^ write via @x.field                 ^ bare read      ^ bare read
+```
+
+#### 66.5.3 Use-site children in `renders`
+
+Content written between a use's tags is **slot content**; a declaration places it with `<slot/>` inside its
+`renders` (§66.15.2).
+
+#### 66.5.4 Where a declaration renders (#19)
+
+A declaration **renders at its own site iff it sits in a markup position AND it has a `renders` clause.** (This
+is the same rule engines follow today — declaration IS mount, §51.0.D — so the two stay one rule.) Elsewhere a
+declaration's markup appears only where an instance is used (`<x …/>`) or the existing one is referenced
+(`<*x/>`, §66.6).
+
+> ⚑ **OPEN (not ruled) — O38: what "markup position" means at file/`<program>` top level.** `<program>` and
+> `<page>` bodies parse in the §40.8 default-logic mode. Whether a declaration written directly in such a body
+> (the usual place for library declarations and app cells) counts as a markup position for #19 — and so renders
+> there — is not ruled. Which instance renders at the declaration site (the shared instance, by engine parity,
+> is the DD's F20 reading) is likewise not stated by a ruling.
+
+#### 66.5.5 Binding and validators inside `renders`
+
+> ⚑ **OPEN (not ruled) — O25: Shape-2's implicit bind and validator wiring — a RECORD GAP.** Today a Shape-2
+> cell's `<input/>` right-hand side is bound implicitly (§6.4.2 step 3) and its validators are wired onto the
+> input as HTML attributes and into the validity surface (§6.4.2 step 4). The DD §7 #5 lean adds "explicit `bind:`
+> inside `renders`", but the PA message bryan answered *"yes"* for #5–#8 (transcript, S435) proposed only lexical
+> `*`, the bare-own-field-tag error and the same-arc `<x/>` → `<*x/>` migration — it did not present the bind
+> half. So neither is ruled: **(a)** whether a `renders` holding a single bindable element keeps an implicit bind,
+> or the bind is always written (`renders <input type="email" bind:value=@email/>`); **(b)** whether validators
+> on a declaration (`<let email:string="" req length(>=5)/>`) reach the `<input>` in its `renders` as HTML
+> attributes (§6.4.2 step 4) and how that meets a `renders` that is not a single input. §66's examples write the
+> bind explicitly and do not rely on (b).
+
+> ⚑ **OPEN (not ruled) — O24: markup-typed derived cells.** Today `const <badge> = <span …>…</span>` is a
+> markup-valued derived cell (§6.6.17). Under §66.9 a derived cell is a locked declaration with a reactive
+> initializer; whether a markup-valued initializer is written in the opener (parenthesized), or the cell becomes
+> a `renders`-only declaration referenced as `<*badge/>` (DD §7 #4 lean — not in the adopted set), is not ruled.
+
+### 66.6 Instances, and `<*x>` — the existing one
+
+> **Provenance:** ruling:user-voice-scrml.md S430 (Q1) · *"can we say <*swatch ...> to ref everywhere?"* ·
+> *"read-only, writes go through logic. through tracked exhaustive logic if possible, and typed, obviously"*;
+> S435 (§7 #5–#8) · *"yes"* (ratifying: `*` = the existing one, lexical nearest instance; a bare own-field tag is
+> an error; same-arc migration); S435 (§7 #12, PA lean) · *"all the rest, your leans"*.
+> **supersedes:** §6.4 render-by-tag (`<x/>` as a view of THE cell) and §6.4.1's table.
+
+#### 66.6.1 A plain tag makes a new one
+
+A plain markup use `<x …/>` (or `<x …>…</x>`) of a declaration is a **NEW INSTANCE** everywhere. Its attributes
+are that instance's values (construction, §66.14). Its children are slot content (§66.15.2).
+
+#### 66.6.2 `<*x>` is the existing one
+
+`<*x/>` references **the instance that already exists** — it never makes a new one. `*` resolves **lexically to
+the NEAREST ENCLOSING instance**:
+
+- inside a declaration's `renders`, `<*f/>` naming a child field `f` renders THIS instance's own `f`;
+- at top level (outside every `renders`), `<*x/>` is the **global shared instance** of `x` (§66.6.4), or the
+  named shared instance `x` (§66.8).
+
+Rendering the same existing instance at two sites shows ONE instance twice (two `<*x/>` refs open and close
+together).
+
+#### 66.6.3 Self-reference inside `renders` (#8)
+
+> ⚑ **OPEN (not ruled) — O54: what `@x` names inside `x`'s own `renders` — a RECORD GAP.** The DD §7 #8 lean is
+> "inside the renders of `x`, `@x` = this instance; the shared one is reachable there only as `<*x/>`". The PA
+> message bryan answered *"yes"* for #5–#8 stated the lexical rule for `*` only ("This is the dPA's lexical lean
+> on its sub-rulings #7 and #8") and did not state the `@x` half. Evidence toward it, not a ruling: the dropdown
+> examples in the messages answered *"a"* (Q6) and *"E2, move on"* write `@dropdown.value = opt` /
+> `@dropdown.open = …` inside `renders`, which is only coherent per instance if `@dropdown` there names the
+> current instance. Options: **(a)** the DD lean (current instance); **(b)** `@x` always names the shared instance,
+> and self-writes use another spelling. §66's examples follow (a) and mark it `⚑ O54`.
+
+#### 66.6.4 The shared instance
+
+Every USER declaration has **its own unnamed shared instance** (predefined declarations do not, §66.6.5). It is **materialized lazily** — only if it is
+referenced (`<*x/>` or `@x`). There is **no phantom-read lint** (defaults always exist, so reading the shared
+instance of a template-like declaration is always well-defined) — the DD's §7 #16 lint half is NOT adopted
+(S435 #16).
+
+#### 66.6.5 Predefined declarations have no shared instance (#12)
+
+HTML elements are predefined declarations. They have no shared instance: **`<*div/>` is an error**
+(`E-DECL-STAR-PREDEFINED`, §66.20).
+
+#### 66.6.6 A bare own-field tag is an error; the same-arc migration (#5–#7)
+
+Inside a declaration, a bare `<f/>` that names a **child field of the enclosing declaration** is a **compile
+ERROR** — *"did you mean `<*f/>`?"* (`E-DECL-FIELD-TAG-NEEDS-STAR`, §66.20) — never a new instance. The rule
+stays uniform: a plain tag means "make a new one" everywhere, and `*` means "the one that already exists"
+everywhere (the sigil lands on the common case by design).
+
+The existing render-by-tag uses (`<x/>` as a view of a shared cell — measured S435: 57 uses in 36 files) migrate
+`<x/>` → `<*x/>` **in the SAME arc as the grammar change** — there is NO deprecation window in which `<x/>`
+silently changes meaning. This is the one §66 retirement that does NOT go through the §63 soft-deprecation
+window (§66.21).
+
+#### 66.6.7 Attributes on a `<*x>` reference are read-only (Q1)
+
+A `<*x>` reference cannot write: an attribute that would set a value of the referenced instance is a compile
+error (`E-DECL-STAR-REF-ATTR-WRITE`, §66.20). Writes go through logic (§66.11).
+
+> ⚑ **OPEN (not ruled) — O18: which attributes a `<*x>` reference may carry at all.** Q1 forbids writes.
+> `if=` on a plain USE is legal (it appears in the PA text answered "yes" for #18/#24/#25:
+> `<dropdown as=country if=@showCountry …/>`). Whether `if=` / `class=` / `style=` / `key=` are legal on a `<*x>`
+> reference, and whether `class=` / `style=` / `key=` on a plain use are markup attributes or construction
+> (§66.14), is not ruled.
+
+#### 66.6.8 A use of a declaration with no `renders`
+
+> ⚑ **OPEN (not ruled) — O51: a use or `<*x/>` of a declaration that has no `renders`.** Today `<x/>` of a
+> Shape-1 cell is `E-CELL-NO-RENDER-SPEC`. No §66 ruling restates it. Options: **(a)** an error (the carried
+> §6.4.1 reading); **(b)** a data-only instance that renders nothing — note that a Q5 `as=`-bound instance is
+> addressed from logic and need not render at all, so a render-less declaration instantiated for its state
+> (`<counter as=c/>`) is a coherent use. Not decided here.
+
+### 66.7 Addressing instances from logic — `@name`, `as=`, lists and conditionals
+
+> **Provenance:** ruling:user-voice-scrml.md S430 (Q5) · *"1 and 2 yes, park 3 as its own question"*; S435
+> (§7 #18/#24/#25) · *"yes"*.
+
+#### 66.7.1 `@name` is the shared instance's value
+
+In logic, `@x` (and `@x.field`) reads — and, where the field's contract grants it (§66.11), writes — the
+**SHARED** instance of `x` (§66.6.4), or the named shared instance `x` (§66.8). `@x` of a declaration with fields
+is a struct value of those fields (§66.8.1). Inside `x`'s own `renders`, `@x` names the current instance under the DD #8 reading — ⚑ O54 (§66.6.3).
+
+#### 66.7.2 `as=` binds an instance
+
+A markup instance is **anonymous** unless bound: `<dropdown as=country …/>` makes the instance addressable from
+logic as `@country` (reusing the `<each … as>` vocabulary). An unbound instance is not addressable from logic.
+
+#### 66.7.3 Instances inside `<each>` (#18 part 1)
+
+An instance inside an `<each>` row template is **keyed by the row's `key=`** (§17.7.5). Its state follows its row
+when the rows reorder, and it is **disposed** — its effects, listeners and timers — when its row leaves the
+collection.
+
+#### 66.7.4 `as=` inside `<each>` is row-scoped (#25)
+
+`as=` on an instance inside an `<each>` row template is legal and **ROW-SCOPED**: the name is visible within that
+row's template only, and names that row's instance. It is not an error.
+
+#### 66.7.5 A handle to a conditionally-mounted instance is `T | not` (#24)
+
+An `as=` handle to an instance that is conditionally mounted (under `if=`, an engine/`single` state-child, a
+`<match>` arm, …) is typed **`T | not`**, where `T` is the declaration's type (§66.8). A **write through it MUST
+be narrowed first** — a compile-time proof, not a runtime drop:
+
+```scrml
+@country.open = .Closed                       // error: `country` may be not (it is behind if=)
+given c = @country :> { c.open = .Closed }    // fine: only runs while mounted
+```
+
+A write through an un-narrowed `T | not` handle is `E-DECL-HANDLE-NOT-NARROWED` (§66.20). **Provenance:
+ruling:S435 (PA proposal text answered "yes", #18/#24/#25)** — the two lines above are verbatim from that message,
+which also shows `<dropdown as=country if=@showCountry …/>` (so `if=` is legal on a use; see O18).
+
+**The narrowed binding writes the instance.** In the answered text, `c.open = .Closed` inside the `given` block is
+the write that reaches the mounted instance. This is a carve-out from the §66.10 snapshot rule for a narrowed
+instance handle (the lists ruling came after the value-semantics ruling and its text writes through `c`). In
+`given c = @handle :> { … }`, **`c` binds the INSTANCE (its identity), not `@handle`'s struct VALUE** — unlike
+§66.7.1, where `@x` of a declaration with fields evaluates to a struct value. (Former O40 — closed by the answered
+text; the tension with §66.10 is recorded here. Bryan's confirmation of this reading travels with O56.)
+
+> ⚑ **OPEN (not ruled) — O56: the SCOPE of the `given` carve-out.** The answered text shows one case (an `as=`
+> handle to a conditionally-mounted instance). Not ruled: **(a)** does the carve-out cover only `as=` / instance
+> handles, or also a named shared instance and a plain `T | not` CELL — where `given u = @user :> { u.name = "x" }`
+> would otherwise be a dead snapshot write; **(b)** are READS through `c` live (tracking the instance) or a
+> snapshot taken at the narrowing; **(c)** is `let d = c` inside the block a snapshot (§66.10) or another alias;
+> **(d)** is `@country.open = …` written directly inside the narrowed block legal (flow narrowing of `@country`),
+> or must the write go through `c`.
+
+### 66.8 Declarations are types; named shared instances
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (§7 #16) · *"yes"*.
+
+#### 66.8.1 Every declaration registers a type
+
+Every declaration registers a **type of its own name** — the struct shape of its attributes and child fields.
+The type is usable wherever a type is: function signatures, struct fields, other declarations' attributes, and
+sequence element types (`dropdown[]`).
+
+#### 66.8.2 Named shared instances
+
+`<name:Decl …/>` declares a **NAMED shared instance** of declaration `Decl`. Its attributes are that instance's
+defaults. It is reached as `<*name/>` in markup and `@name` in logic, and E2 (§66.14) applies to writes to it.
+
+```scrml
+<swatch let label:string="Brand" let hex:string="#338967"/>
+renders <span class="chip"><i style="background:${hex}"></i> ${label}</span>
+
+<accent:swatch label="Accent" hex="#338967"/>     // a named shared instance of swatch
+<warn:swatch label="Warn" hex="#FF6600"/>         // another
+```
+
+A declaration's own unnamed shared instance (§66.6.4) is still materialized lazily, only if referenced. A theme
+library is therefore **declarations + named instances — no new construct** (§66.17, §66.19.4).
+
+(`<name:Decl …/>` is a declaration by the #16 ruling — "`:swatch` is a typed own value" — §66.2.2.)
+
+### 66.9 Writability — `let`, locked, derived, seeded; `const` retires
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (writable cells) · *"yes"* (ratifying: `<let count:int=0/>` is
+> writable; `const` retires; a locked cell with a reactive initializer is DERIVED; a `let` cell with one is
+> SEEDED; the E-DERIVED-WRITE message names the trade-off); S430 · *"IMO, structs immutable by default, let
+> thing = {...} for mutable. thing = { name: "Bryan", let favFood: "pizza" }"* (the `let`-prefix origin).
+> **supersedes:** §6.2 Shape 3 and §6.6.1's `derived-decl ::= 'const' '<' identifier '>' '=' expression`;
+> §6.6.8's E-DERIVED-WRITE message text; §6.6.16/§6.6.17's `const <derived>` spelling. The derived-value
+> EVALUATION semantics of §6.6.3–§6.6.7, §6.6.10, §6.6.11, §6.6.15, §6.6.18 and §6.6.19 are unchanged and apply
+> to derived declarations as spelled here.
+
+1. **Locked is the default.** A declaration — cell, attribute or child field — written without `let` is
+   **locked**: it has **no `replace` grant**. Any OTHER grant its type or field contract carries still applies —
+   sequence edit grants (§66.12), a lifecycle (§66.11.6), a `rule=` transition graph (§66.13.2), per-position
+   tuple lifecycles (§66.12.5). A locked declaration whose type and field contract carry NO grant at all is a
+   **constant**: `<count:int=0/>`. (What `let` adds on a non-scalar is O3.)
+2. **`let` makes a scalar writable.** `<let count:int=0/>` is writable. `let` is a **PREFIX** — before the name, the
+   same position `export let` takes on a field (§66.14) and bryan's S430 `let favFood:`. On a scalar, `let` IS
+   the **`replace` grant** of §66.11.
+3. **Derived = locked + a reactive initializer.** A locked declaration whose initializer reads cells is
+   **DERIVED**: it recomputes when a dependency changes (the §6.6.3 lazy-pull semantics) and cannot be written:
+
+   ```scrml
+   <let price:number=10/>
+   <let qty:int=1/>
+   <total:number=(@price * @qty)/>           // derived — recomputes; unwritable
+   ```
+
+4. **Seeded = `let` + a reactive initializer.** A `let` declaration whose initializer reads cells is **SEEDED
+   once** from it and is thereafter independent and writable:
+
+   ```scrml
+   <let draft:string=@savedTitle/>           // seeded from @savedTitle once; editable afterwards
+   ```
+
+5. **Writing a derived cell stays a compile ERROR — `E-DERIVED-WRITE`** — and its message SHALL name the
+   `let`-seeding trade-off, so that flipping derived → seeded is a deliberate act. The ruling requires only that
+   the message names that trade-off (ruling:S435 (PA proposal text answered "yes"): *"keeps today's
+   `E-DERIVED-WRITE` with the message 'this cell is derived from @count — to make it editable, seed it with
+   `let`, which stops it tracking @count'"*). ILLUSTRATIVE wording (non-normative):
+   *"Assignment to derived value `@total`. `@total` is derived (a locked declaration whose initializer reads
+   `@price`, `@qty`) — it recomputes and cannot be written. To change it, write one of its dependencies. If you
+   want a value that STARTS from that expression and is then written independently, declare it `let` — it
+   becomes SEEDED: computed once, and it no longer follows `@price` / `@qty`."* In-place mutation of a derived
+   value remains `E-DERIVED-VALUE-MUTATE` (§6.6.18).
+6. **Writing a locked, non-derived declaration** (a constant) is `E-WRITE-NOT-GRANTED` (§66.11, §66.20), whose
+   message names `let` as the fix.
+7. **`const` RETIRES as a cell prefix.** The `const <x> = …` form goes through the §63 lifecycle (§66.21); its
+   `scrml fix` rewrite is the locked declaration `<x:T=(expr)/>`, which is derived exactly when `expr` reads
+   cells.
+
+> ⚑ **OPEN (not ruled) — O13: logic-local `const`.** The ruling retires `const` as the prefix of a CELL
+> declaration. Whether the logic-local `const x = …` binding (and the §50.8.5 rule that a keywordless `x = v`
+> declares a `const`) also retires is not ruled. dpa-053's banked shape itself writes `const t = …` locally.
+
+> ⚑ **OPEN (not ruled) — O3: `let` on a non-scalar.** `let` is ruled as "the `replace` grant on a scalar".
+> What `let` means on a sequence, tuple or struct-typed declaration — `replace` only (edits then need explicit
+> §66.12 grants), `replace` plus every edit (which would re-create the all-grant §66.12.4 forbids), or an error
+> requiring explicit grants — is not ruled.
+
+> ⚑ **OPEN (not ruled) — O21: a derived attribute vs use-site construction.** A locked attribute whose default
+> reads a cell (`<swatch hex:string=@brand/>`) is derived by rule 3. Whether a use-site attribute
+> (`<swatch hex="#dc2626"/>`, construction, §66.14) may still set such an attribute for that instance, or the
+> attribute must be `let` (seeded) to be overridable, is not ruled. §66.19 uses `let` attributes where a use
+> overrides.
+
+### 66.10 Value semantics — aliases snapshot
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (dpa-052, mutation vs reassignment, item 1) · *"1 yes, 2 yes"*
+> (item 1: *value semantics — `let b = @a` is a snapshot*).
+
+1. **AXIOM: scrml has value semantics.** A binding, argument or field initialized from a cell (or from any value)
+   holds a **snapshot** of that value. `let b = @a` followed by `@a.push(3)` leaves `b` unchanged.
+2. No write to a source is observable through a value taken from it earlier; no write through such a value is
+   observable in its source — except item 4.
+3. This is consistent with §45.1 (structural `==` is well-defined because values are immutable and acyclic;
+   cells and instances are identities that hold values).
+4. **Carve-out:** the binding a `given` introduces over a conditionally-mounted instance handle writes that
+   instance (§66.7.5 — from the later lists ruling's answered text): it binds the instance's identity, not a
+   struct value. Its scope beyond that one case is ⚑ O56.
+5. *(Non-normative.)* The implementation lean is copy-on-write, so a snapshot costs nothing unless mutated. The
+   copy strategy is not part of the contract.
+
+**impl#1 divergence (CARRIED).** impl#1 today leaks JavaScript reference semantics: a `let b = @a` alias compiles
+to a shared object reference, and an in-place `@a.push(3)` is observable through `b` (PA-verified by emission,
+S435). Per P7 this is carried as a conformance case expected-to-fail on impl#1.
+
+### 66.11 Write contracts — the one transition axis
+
+> **Provenance:** ruling:user-voice-scrml.md S430 (dpa-052 reframe) · *"this was the whole point of "lifecycles"
+> . Mutability contracts on otherwise immutable data structures"*; S435 (dpa-052, item 2) · *"1 yes, 2 yes"*;
+> S435 (sequences) · *"… 2 yes."* (reactive notify becomes permission-driven).
+> **supersedes:** §6.5.1's DQ-2 paragraph (*"Array mutation methods … do NOT trigger reactivity on their own …
+> NOT guaranteed in production"*) and §6.5.5's *"no semantic distinction between mutation and replacement"*;
+> §14.12.1's framing of `(A to B)` as a read-side type-system check only.
+
+#### 66.11.1 Immutable unless a contract grants the write
+
+Data is **immutable by default**. A write is legal only when the target's **type** grants it. The grants are:
+
+| Contract on the target | What it grants |
+|---|---|
+| none (omission) | nothing — the target is FIXED |
+| a lifecycle `(A to B)` | a write along the declared path `A → B` (a lifecycle IS a write contract — §66.11.6) |
+| a transition graph (`rule=` state-children, §66.13) | a write along the graph's edges |
+| sequence edit grants (§66.12) | the granted edits (end / front / anywhere, positions, length) |
+| `replace` (on a scalar: `let`, §66.9) | replacing the whole value, bounded by the invariants |
+
+#### 66.11.2 Permissions govern the transition, never the spelling
+
+A write is judged by **the old → new transition it performs**, not by how it is spelled. There are three kinds
+of check:
+
+1. **Invariants** — length bounds and per-position types (§66.12) — are checked on **EVERY** write, however it
+   is spelled.
+2. **Edits** — end / front / anywhere / positions-writable — are **classified at compile time**, from mutating
+   method calls AND from **recognized reassignment shapes**:
+   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.push(e)`);
+   - `@x = @x.filter(…)` is a **shrink-anywhere**;
+   - `@x = @x.map(…)` is a **position-write**.
+3. **`replace`** — writing an unrelated whole value, including `reset(@x)` and a server reload of the cell — is
+   its **OWN explicit grant**, still **bounded by the invariants**. `replace` is NOT an "any" grant.
+
+**An unclassifiable reassignment is a `replace`.** A write whose classified transition is not granted by the
+target's type is `E-WRITE-NOT-GRANTED` (§66.20). A write that would break an invariant is `E-WRITE-INVARIANT`
+(§66.20).
+
+#### 66.11.3 `replace` subsumes the edits — the redundancy warning
+
+A type that grants `replace` can already reach every edit (a replace can write any value the invariants admit),
+so granting `replace` together with edit grants on the same type is redundant: the compiler warns
+(`W-GRANT-REDUNDANT`, §66.20). The converse is the point of the axis: **without `replace`, an append-only
+sequence is PROVABLE** — `@audit = []` and `reset(@audit)` on an end-append-only sequence are errors
+(§66.19.5).
+
+#### 66.11.4 Structs — the same rule
+
+For a struct-typed value: **a field write is an edit** — a field is writable along its own contract (its
+lifecycle, its transition graph, or `let`); **a field with no contract is fixed**. **A whole-struct write is a
+`replace`.** One rule across sequences, tuples and structs.
+
+#### 66.11.5 Out of scope: local `let` rebinding
+
+Rebinding a local `let` variable (`let n = 1; n = 2`) is NOT governed by this axis; it stays under §50 (`E-ASSIGN-*`).
+
+#### 66.11.6 Lifecycles are write contracts
+
+A lifecycle annotation `(A to B)` (§14.12) is a **write permission along the declared path**. Today impl#1
+implements it only as a READ check (`E-TYPE-001` on a pre-transition read); under §66 it also governs writes: a
+write that does not follow `A → B` is `E-WRITE-NOT-GRANTED`. Non-mutating operations are always allowed.
+
+#### 66.11.7 Reactive notify is permission-driven (§6.5)
+
+A cell's declared permissions decide which in-place operations the compiler wires to reactive notification:
+every granted in-place edit notifies subscribers exactly as a whole-value write does. A non-granted in-place
+operation is not a reactive-correctness question — it is `E-WRITE-NOT-GRANTED`. (This supersedes §6.5.1's
+"mutation interception is NOT guaranteed in production" posture for granted operations.)
+
+> ⚑ **OPEN (not ruled) — O14: non-cell values and §50.9.** The permissions are on the TYPE (§66.12.3), which
+> suggests the field rule of §66.11.4 applies to a struct held in a local binding too
+> (`const u: User = …; u.name = "x"` would write a fixed field). Whether it does — which reverses §50.9's
+> *"Mutating a property reached through a `const` binding SHALL NOT be E-ASSIGN-004"* by a different code — or
+> the axis governs only cells and declaration fields, is not ruled. **Lean (not a ruling): it does — the write is
+> an error**, since the permission set is on the TYPE and travels with the value. The lean is the PA's S430
+> restatement of bryan's opinion (stated as *"IMO"*: *"structs immutable by default, let thing = {...} for
+> mutable"*), which read it as *"Answers Q1 (property writes through `const`) for structs → an error, reversing
+> #996's §50.9 … sentence"* — a restatement, not a ruling. The §50.9 reversal was
+> explicitly PARKED on dpa-052 at S430 (*"Q1 held until dpa-052 rules"*), and dpa-052 has now ruled its core; the
+> remaining step is bryan confirming that the field rule reaches local values.
+
+> ⚑ **OPEN (not ruled) — O36: invariants the compiler cannot prove.** "Checked on every write" is ruled; how an
+> invariant is enforced where control flow makes a write's effect statically unknowable (a runtime check, a
+> compile-time rejection of the unprovable write, or both) is not ruled.
+
+> ⚑ **OPEN (not ruled) — O44: maps and sets.** §59 maps and sets are immutable values written by
+> method-native reassignment (`@m = @m.insert(k, v)`). Whether a map/set cell needs a grant, and whether
+> `.insert` / `.remove` / `.add` reassignments are recognized edit shapes or `replace`s, is not ruled.
+
+### 66.12 Sequences à la carte — arrays and tuples
+
+> **Provenance:** ruling:user-voice-scrml.md S435 · *"I want to continue on arrays vs tuples. the same thing,
+> vessels for data with constraint options."* (exploratory) · *"I accept your pushbacks. I guess I menat splce.
+> 1 I would say that we allow a temporary "all" with a hard deprecation warning and clear dep terms. still a
+> migration but seems most manageble. 2 yes."* · *"type, and 1 both, 2 lift, 3 C, 4 suppress --- we are not
+> adding any, correct? (all must go because it is a leaky abstraction."*; S435 (#14) · *"retire, int, reverse
+> L19, bank dpa-053"* (*"positional data lives in tuples"*). Note (§66.12.4): *"transitional only"* is the PA's
+> reconciliation of bryan's *"a temporary "all""* with his *"all must go because it is a leaky abstraction"* —
+> recorded in the queue body, not bryan's words.
+> **supersedes:** §6.5's model of a reactive array as unconstrained and freely mutable; S430's opinion *"arrays
+> are mutable"* (stated as "IMO", overtaken by the S435 rulings); the S222 **no-tuple** sentences at §14.11,
+> §18.19 ("No-tuple invariant"), §59.7 and §59.8 (the language now has tuples — bracketed, per-position-typed
+> sequences; the parenthesized forms those sections describe remain non-tuples).
+
+#### 66.12.1 One sequence kind; omission is fully constrained
+
+Arrays and tuples are **ONE sequence kind**. Constraints are opted OUT of by granting permissions; **a sequence
+with no grants is fully constrained** — immutable. Non-mutating operations (`map`, `filter`, `slice`, `concat`,
+`find`, `some`, `every`, `reduce`, …) are always allowed; they return new values.
+
+#### 66.12.2 Permissions are AXES, not method names
+
+A method list is enumerate-forever and is bypassable by a whole-value write (`@a = @a.slice(1)` performs a shift
+using only non-mutating operations). Permissions are therefore **axes**, checkable on whole writes too
+(§66.11.2):
+
+| Axis | Values |
+|---|---|
+| **length** | fixed · bounded (e.g. `1..10`) · free |
+| **where it changes** | end · front · anywhere |
+| **positions** | read-only · writable |
+| **position types** | uniform (an array) · per-position (a tuple) |
+
+`push` + `pop` together are "free length, changes at the end" — a stack. A splice is "changes anywhere".
+
+#### 66.12.3 Permissions live on the TYPE
+
+The permission set is **part of the sequence TYPE** and travels across calls: a callee can do only what its
+parameter type grants, checked at each call.
+
+**Call-site direction — ruled by answered text.** The substantive "cell or type?" message bryan answered *"type"*
+(transcript L362, not the later one-line reminder) reads:
+
+```scrml
+fn pushEdit(s: Edit[end], e: Edit) -> Edit[end] { ... }
+<undo:Edit[end]=[]>
+<log:Edit[any]=[]>
+@undo = pushEdit(@undo, e)     // fine
+@log  = pushEdit(@log, e)      // on the TYPE: fine (any ⊇ end) — the function still can't shift it
+```
+
+with *"permission sets need a subset check at every call"*. So — ruling:S435 (PA proposal text answered "type") —
+an argument whose type grants MORE than the parameter's is ACCEPTED; the callee is limited to its parameter's
+grants. (`Edit[any]` in that text was later ruled out — there is no `any`, §66.12.4; the direction survives with any
+superset grant.)
+
+> ⚑ **OPEN (not ruled) — O37: write-back of a helper's result into a `replace`-less sequence.** The same answered
+> text calls `@undo = pushEdit(@undo, e)` *"fine"* on a cell with no `replace`. The later one-axis ruling (answered
+> *"1 yes, 2 yes"*) says an unclassifiable reassignment is a `replace` (§66.11.2), and a call result is not a
+> recognized reassignment shape — so, as written, that write-back is a `replace` and is not granted. The two
+> answered texts conflict; the question is now with bryan. Options: **(a)** trust the callee's declared return
+> type (a return typed `Edit[end]` from a parameter typed `Edit[end]` counts as an end-edit); **(b)** certify the
+> callee's BODY as an edit kind (the compiler classifies what the function does to its parameter); **(c)** leave
+> it a `replace` (helpers cannot write into `replace`-less sequences). PA lean: (b), certify.
+
+> ⚑ **OPEN (not ruled) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
+> answered *"1 yes, 2 yes"* (the one-axis ruling) are a bracket list on the element type — `Entry[free, end]`
+> (append-only), `Todo[free, anywhere, writable, replace]`, and a tuple with `replace`, `[:number, :number,
+> replace]` — and `Edit[end]` in a parameter appears in an earlier sketch explicitly marked "illustrative, not a
+> proposal". §66's examples use this spelling, citing that text; but the answered message ruled items 1 and 2 (value
+> semantics; one axis), not a grammar, so whether these tokens are the final syntax — and the token for bounded
+> length (`1..10`) — is not ruled.
+
+#### 66.12.4 There is no `any` permission
+
+**There is NO `any` / all permission in the language** — an all-grant is a leaky abstraction. A fully-mutable
+sequence is spelled with **every axis granted explicitly**. An `any` / `all` grant token is rejected
+(`E-GRANT-UNKNOWN`, §66.20).
+
+**The one exception is TRANSITIONAL:** a legacy right-hand-side cell (`<todos> = []`, §66.21) compiles with a
+temporary all-permissions grant and carries a **hard deprecation warning with clear deprecation terms**
+(`W-DECL-LEGACY-RHS`, §66.21) until `scrml fix` rewrites it. **`scrml fix` infers each legacy cell's MINIMAL
+grant from its actual writes**, so migration lands on the least permission set the program uses, not a blanket
+one — ruling:S435 (PA proposal text answered "yes", the let/const message): *"Legacy `<x> = v` cells keep the
+all-grant until `scrml fix` gives them `let`. Per your earlier ruling, it should give them only the smallest
+grant they actually use."* A new-form declaration is locked by omission.
+
+> ⚑ **OPEN (not ruled) — O12: "hard deprecation … clear dep terms" vs §63.** §63.2 forbids a Stage-1
+> deprecation from naming a removal version, and §63.3 removes only at a MAJOR. How "hard" (severity above the
+> usual info-level W — §63.3 permits an optional escalation) and "clear dep terms" are realized within §63, or
+> whether §63 is amended for this case, is not ruled. §66.21 states the treatment §63 already allows. (Evidence,
+> from the same L362 message bryan answered *"type, and 1 both, …"*: the PA wrote *"If it means 'removed at the
+> next MAJOR, and `scrml fix` rewrites it for you', it already fits §63. I'm assuming the second unless you say
+> otherwise"* — bryan did not object. That reading of "clear dep terms" is therefore the answered text; only the
+> "hard" severity remains open.)
+
+#### 66.12.5 Tuples — per-position-typed sequences
+
+A **tuple** is a sequence whose **position types** axis is **per-position**. It is written as a bracketed
+sequence whose positions carry `:Type` and an optional default, **in the Q3 `:Type=default` order**:
+
+```scrml
+<pair=([:int=0, :string="a", :(not to date)])/>      // ⚑ O34: position 3 has no default
+```
+
+- **A position's lifecycle IS its write permission.** `:(not to date)` lets that position be written along
+  `not → date`; a position with **no lifecycle is FIXED**. (This replaces the `[value]` grant floated at S435.)
+- `"a":string` is NOT the tuple-position spelling: it collides with the §59.3 map-entry literal and inverts the
+  ratified `name:Type=default` order.
+- Positional data lives in tuples (§66.18).
+
+> ⚑ **OPEN (not ruled) — O34: a tuple position with no default (with or without a lifecycle).** What a position
+> written `:number` or `:(not to date)` with no default holds — the Shape-4 canonical empty / `not`, or a required
+> construction value — is not ruled.
+
+> ⚑ **OPEN (not ruled) — O16: tuple types in TYPE position.** The one-axis text bryan answered *"1 yes, 2 yes"*
+> writes a tuple TYPE as an annotation: `<coords:[:number, :number]=[0, 0]>`, `<pos:[:number, :number,
+> replace]=[0,0]>` (typed positions in brackets; the value separate). As with O10 that message ruled semantics,
+> not grammar; whether this is the tuple-type spelling everywhere (function parameter / return, struct field,
+> attribute), and how it relates to the typed-literal form above, is not ruled (§18.19's `fn f() -> (A, B)`
+> remains illegal — parentheses are not tuples).
+
+### 66.13 Field contracts, `single`, and engines (Q6 = (a))
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (dpa-050 Q6) · *"a, move on to encapsulation"* (ratifying: instance
+> self-write is governed by FIELD CONTRACTS checked on every write from any writer — not by message arms;
+> `<engine>` becomes a `single` declaration whose fields carry transition graphs; one vehicle; Move 20 / §51.0.K
+> "do not collapse" formally reversed; E-COMPONENT-ENGINE-SCOPE survives as its invariant); S430 (Q1) ·
+> *"through tracked exhaustive logic if possible, and typed, obviously"*; S430 (Q5, parked Q3 → Q6) · *"park 3
+> as its own question"*.
+> **supersedes:** §15.13.5 (*"Components stay distinct from engines"* — the multiplicity-is-a-vehicle table and
+> slogan); §51.0.A defining traits 1 (*"If you want multi-instance, use a component"*) and 4 (*"Components are
+> distinct (Move 20)"*); §51.0.K (*"Components vs engines — DO NOT collapse"*) including its reasoning that
+> per-instance state machines must be plain cells; §51.0.S.5's "per-instance engines … UNSCOPED" (per-instance
+> transition graphs are the §66.13.2 field contract).
+
+#### 66.13.1 Instance state is written through FIELD CONTRACTS
+
+Every write to declaration state — from the instance's own `renders` (W1), from logic through an `as=` handle
+(W2), or from logic to the shared instance (W3) — is governed by the **contract of the field written**, and is
+checked on **every write from any writer**. (W1–W3 are the DD's write paths, relabelled here from its P1–P3 so
+they do not collide with the S430 P1–P7 rulings.) The contract kinds of the Q6 ruling are:
+
+- **fixed** (no contract — §66.11.1);
+- a **lifecycle** `(A to B)` (§66.11.6);
+- a **transition graph** — `rule=` state-children over the value's enum type (§66.13.2);
+- **`let`** — the `replace` grant (§66.9; what it means on a non-scalar is O3).
+
+The Q6 enumeration is those four — ruling:S435 (PA proposal text answered "a", L488): *"Every field's permitted
+changes are declared on its type: fixed, a lifecycle, a transition graph, or `let`/`replace`."* In addition, from dpa-052 (not the Q6 enumeration): a sequence field's **type-carried edit grants** (§66.12) govern
+its edits.
+
+There are no message arms, no methods, and no dispatch-through-the-value (S430 P1 — *"I am against virtual
+functions"*): behaviour is a write the field's contract admits.
+
+#### 66.13.2 A value that carries a transition graph
+
+A declaration whose value — its **OWN value, or a CHILD field's** — is an enum MAY carry **state-children with
+`rule=`** — the engine transition machinery — and then that value IS a transition graph, **per instance**.
+**Provenance: ruling:S435 (PA proposal text answered "a").** The Q6 message bryan answered shows BOTH forms: the
+dropdown's CHILD field `<open:Openness=.Closed>` with `<Closed rule=.Opened/>` / `<Opened rule=.Closed/>`
+(*"its contract IS its transition graph"*), and `<saveState:SaveState=.Idle single>` whose OWN value carries the
+graph (*"`<engine>` becomes a declaration marked `single` whose value carries a transition graph"*). The DD §5.a
+states the same (*"Any declaration whose value (own or child) is an enum may carry state-children"*). The answered
+L488 text uses BOTH phrasings — *"a declaration marked `single` whose value carries a transition graph"* in its
+argument and *"`<engine>` becomes a `single` declaration with transition-graph fields"* in its ruling summary (the
+§66.13 provenance's "fields carry") — so "fields" there includes the own value. A child-field example:
+
+```scrml
+type Openness:enum = { Closed, Opened }
+
+<dropdown label:string>                     // (the full library is §66.19.3)
+    <open:Openness=.Closed>                 // a child field with a transition graph — one per dropdown instance
+        <Closed rule=.Opened/>              // ⚑ O52: state-child marker
+        <Opened rule=.Closed/>
+    </>
+</>
+```
+
+A write to such a field is valid iff it follows an edge of the graph from the current state (the §51.0.F `rule=`
+contract, compile-time where the from-state is static, runtime otherwise). "Exhaustive" (Q1's *"if possible"*)
+applies to enum-typed fields: the graph's coverage of the enum and its edges are checkable; a non-enum field
+(a `value: string`) gets typed writes along its own contract, without exhaustiveness.
+
+#### 66.13.3 `single` — multiplicity is a modifier, not a vehicle
+
+A declaration marked **`single`** is a singleton: singleton-ness is an opt-in MODIFIER, not a separate vehicle
+(ruling:S435 (PA proposal text answered "a") — *"Singleton-ness becomes opt-in"*). Its shared instance (§66.6.4) is
+reached as `<*x/>` in markup and `@x` in logic. That a plain use `<x/>` of a `single` declaration is an ERROR
+(`E-DECL-SINGLE-INSTANTIATED`, §66.20) is the DD §5.a mechanism (*"`single` forbids plain instances"*); the answered
+Q6 text implies it ("singleton") but does not state the error — ⚑ O55.
+
+**`<engine>` is re-expressed as a `single` declaration whose value carries a transition graph** — one vehicle for
+"a typed thing with a transition contract". **Spelling: ruling:S435 (PA proposal text answered "a")** — the Q6
+message writes `<saveState:SaveState=.Idle single>` *"// was <engine for=SaveState initial=.Idle>"*, a trailing
+`single` modifier after the own value (restated in the termination message answered *"yes, :struct,"*). So
+`<engine for=T initial=.X>` ≡ `<t:T=.X single>`:
+
+```scrml
+type SaveState:enum = { Idle, Saving, Saved, Failed }
+
+<saveState:SaveState=.Idle single>          // was: <engine for=SaveState initial=.Idle>
+    <Idle   rule=.Saving : "">              // ⚑ O52: state-child marker + `:`-shorthand body
+    <Saving rule=(.Saved | .Failed) : "Saving…">
+    <Saved  rule=.Saving : "Saved">
+    <Failed rule=.Saving : "Failed">
+</>
+```
+
+The declaration's name IS its variable (`@saveState`); §51.0.C's auto-derived variable name does not apply to
+a `single` declaration.
+
+#### 66.13.4 Move 20 is reversed; its invariant survives
+
+Move 20 / §51.0.K ("components and engines are distinct vehicles — DO NOT collapse") is **formally REVERSED**:
+multiplicity is a MODIFIER (`single`), and transition discipline is a CAPABILITY any declaration's field can
+carry. The load-bearing invariant survives under its existing code: **`E-COMPONENT-ENGINE-SCOPE` fires when a
+`single` declaration appears inside a multi-instance declaration** (one declaration site inside N instances
+cannot be one instance).
+
+> ⚑ **OPEN (not ruled) — O5: re-homing the §51.0 engine surface.** The ruling re-expresses `<engine>` as a
+> `single` declaration whose fields carry transition graphs; it does not say where the rest of the §51.0 surface
+> lands: the state-child BODIES (today the engine's rendered output at its declaration site — do they remain the
+> render of a `single` declaration, or move into its `renders`, and how does that meet #19, §66.5.4?);
+> `accepts=` + `(state × message)` arms (§51.0.S — the Q6 ruling rejects message arms as THE self-write
+> contract, and the panel's message items #22/#23 are superseded, but whether `accepts=` survives on a `single`
+> declaration is not said); `effect=` / `<onTransition>`; `history`; `internal:rule=`; `<onTimeout>` /
+> `<onIdle>`; `derived=`; `server=`; `name=` / `var=`; `.advance(…)`; nested / composite engines (§51.0.Q); and
+> cross-file `<EngineName/>` mounting (§51.0.D — presumably `<*x/>`, not ruled).
+
+*(Former O6 — the spelling of `single` — is CLOSED: the trailing modifier appears in the PA text bryan answered
+"a", above. Note it differs from `let`'s prefix position; that asymmetry is the ruled text, not an OPEN item.)*
+
+> ⚑ **OPEN (not ruled) — O55: a plain use of a `single` declaration.** Whether `<x/>` of a `single` declaration
+> is an error (DD §5.a: *"`single` forbids plain instances"*; `E-DECL-SINGLE-INSTANTIATED`), or renders the one
+> instance (engine parity: `<EngineName/>` mounts the singleton, §51.0.D), is not stated in the answered text.
+
+> ⚑ **OPEN (not ruled) — O7: whether contract kinds combine on one field.** The Q6 enumeration lists the kinds
+> (fixed · lifecycle · transition graph `rule=` · `let`/`replace`) without saying whether one field may carry
+> more than one: a lifecycle `(A to B)` AND a `rule=` graph (and so whether §14.12.4's engine-cell carve-out
+> `E-TYPE-LIFECYCLE-ON-ENGINE-CELL` becomes a transition-graph-field carve-out); or `let` AND a graph — note that
+> by §66.11.3 `replace` subsumes every edit, so `let` on a graph field would make the graph dead.
+
+> ⚑ **OPEN (not ruled) — O45: the S178 "final shared-state design" sentence.** §51.0.A's S178 amendment says
+> genuinely-shared reactive state SHALL be modeled as an engine. Q1 gives EVERY declaration a shared instance,
+> and Q6 re-expresses engines as `single` declarations. Whether the S178 sentence is formally reopened (DD §7 #20;
+> **record gap — #20 fell out of the record:** the queue's S435 "Still OPEN" list minus later-ruled items is
+> exactly the adopted-leans table (#3, #9, #12, #15, #19, #21), and #20 appears in neither; a search of the S435
+> transcript finds no PA message bryan answered that presented #20 or the S178 reopen) or simply re-read as "a `single` declaration or a shared instance", and whether
+> the gated `<shared>`-cell pole (labelled "P3" inside the free-shaped-shared-cell debate — not the S430 P3 ruling) closes as subsumed, is not ruled.
+
+### 66.14 Encapsulation — E2
+
+> **Provenance:** ruling:user-voice-scrml.md S435 · *"E2, move on"*; S430 (P1) · *"I don't believe that
+> "methods" clean the code, more than stand alone funtions."*
+> **supersedes:** §15.11.1 (`bind:` on component props — a parent's two-way link into a child's state is
+> replaced by writes to the child's EXPORTED `let` fields through an `as=` handle); §15.13.2–§15.13.4's
+> bind-prop reactivity rows.
+
+1. **Reads are PUBLIC.** Any file may read any field of a declaration it can name.
+2. **Writes are PRIVATE to the defining FILE by default.** A write lexically inside the file that defines the
+   declaration is governed only by the field's contract (§66.13.1).
+3. **`export` on a field makes it writable from other files** (still along its contract):
+   `export let value:string=""` on an attribute, `export <open:Openness=.Closed>…</>` on a child (§66.4 rule 6). A write from another file to a
+   non-exported field is `E-FIELD-PRIVATE-WRITE` (§66.20).
+4. **Use-site attributes are CONSTRUCTION** — always allowed, from any file (`<dropdown label="Size"/>` sets the
+   new instance's `label` whether or not `label` is exported).
+5. **A whole-value replace from outside the defining file is an error when the type has any private field**
+   (`E-FOREIGN-REPLACE-PRIVATE`, §66.20) — a replace would otherwise write the private fields.
+6. **The exported field's contract IS the public API** — the scrml answer to methods and getters. A library
+   exposes behaviour by exporting a field whose contract (its `rule=` graph, its lifecycle, its `let`) says
+   exactly which writes are allowed.
+
+**Owed before landing (S435):** measure cross-file engine-cell writes in the corpus — under E2 they become errors
+unless the field is exported — and route the count to bryan.
+
+> ⚑ **OPEN (not ruled) — O2 / O39: module `export` vs field `export` on a top-level cell or a `single`.** A
+> top-level scalar cell (`export <let mode:Mode=.Light/>`) or a `single` declaration has an own value rather than
+> named fields. Whether module-level `export` of the declaration makes its own value writable from other files
+> (one `export`, two meanings), or a second marker is required, or cross-file writes to an own value are
+> impossible (writes go through an exported function in the defining file) — and so how today's cross-file
+> engine writes (§21.8) migrate — is not ruled. §66.19 routes every cross-file write of an own value through a
+> function exported from the defining file.
+
+### 66.15 Components retire into declarations
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (dpa-050 §7 #10) · *"yes, retire it, move on"* (ratifying:
+> `const X = <… props={…}>` retires; a declaration with typed attributes + `renders` IS the component; callback
+> props = function-typed attributes; use-site children = slot content via `<slot/>`; §15.11.1 bind props →
+> E2 exported `let` fields; spread / `fixed` / class merging carry over; §63 deprecation, not same-arc).
+> **supersedes:** §15.1 / §15.1.1 / §15.3 / §15.10 (component definition by `const X = <root props={…}>`);
+> §15.12 (component rendering syntax); §15.13.5 (see §66.13); §16's slot-declaration surface as far as §66.15.2
+> states it.
+
+#### 66.15.1 A component IS a declaration
+
+A declaration with typed attributes and a `renders` clause IS the component. There is one multi-instance
+renderable vehicle, not two.
+
+| Component surface (§15/§16) | Declaration equivalent |
+|---|---|
+| `const Card = <div props={ title: string }>…</>` | `<card title:string/>` + `renders <div>…</div>` |
+| a prop with a default (`size: string = "medium"`) | an attribute default (`size:string="medium"`) |
+| a callback prop (`onpick: fn`) | a function-typed attribute (see O8) |
+| `bind name: T` prop + `bind:name=@x` at the call site | an E2 exported `let` field, written/read through an `as=` handle (§66.14) |
+| caller children → `${...}` spread | slot content, placed with `<slot/>` in `renders` (§66.15.2) |
+| `fixed`, static-attribute class merging (§15.5, §15.7), spread | carry over |
+| component-local state (`${ <open> = false }`) | a child field of the declaration — per instance (§66.6.1) |
+
+**impl#1 divergence (CARRIED).** Per-instance state has no runtime substrate in impl#1: a component-local cell
+compiles to ONE global key, so every instance shares it (DD D1, execution-verified — one click opens all three
+dropdowns). §66.6.1's "a plain tag makes a new one" requires instance-keyed state; this is the first primitive
+the bootstrap codegen (dpa-051) designs.
+
+#### 66.15.2 Slot content
+
+Content written between a use's tags is **slot content**, placed inside the declaration's `renders` with
+**`<slot/>`**.
+
+> ⚑ **OPEN (not ruled) — O9: named and parametric slots.** Only use-site children → `<slot/>` is ruled. How §16's
+> NAMED slots (`slot="header"` → a `snippet`-typed prop) and PARAMETRIC slots (slot scope, `${render
+> tabPanel(tab)}`) are expressed on a declaration — including whether `<slot name="…"/>` is the spelling — is not
+> ruled. (The S435 owed measurement of component files the codemod cannot rewrite mechanically names exactly
+> these: snippet slots and lambda slot-fill.)
+
+> ⚑ **OPEN (not ruled) — O46: does the `${...}` children spread survive beside `<slot/>`?** The components text
+> bryan answered *"yes, retire it"* rules `<slot/>` for use-site children and separately lists *"Attribute spread
+> (`${...}`), `fixed`, and class merging: these carry over"* — naming as "attribute spread" the token §16.4 defines
+> as the UNNAMED-CHILDREN spread. Whether `${...}` survives beside `<slot/>` as the children spread (two spellings),
+> is replaced by it, or is repurposed as an attribute spread, is not determinable from that text.
+
+> ⚑ **OPEN (not ruled) — O8: function-typed attributes vs the passed-vs-stored rule.** "Callback props =
+> function-typed attributes" is ruled. But an attribute is declaration DATA — part of the declaration's type
+> (§66.8.1) and of `@x`'s struct value — while §15.11.5.1 / §14.3 rule that a function SHALL NEVER be STORED as
+> value data (`E-STRUCT-FUNCTION-FIELD`; `==` on a function-containing type is `E-EQ-003`, §45.2). Whether a
+> function-typed attribute is a stored field (and the passed-vs-stored rule is amended), a pass-only conduit
+> excluded from the declaration's value type, or something else, is not ruled. A second side of the conflict
+> is bryan's own S430 P1 stance — *"I am against virtual functions"* — under which behaviour is not looked up on
+> the value; a function stored on a declaration instance and invoked through it (`@x.onpick(…)`) is the shape
+> that stance rejects. (The components text bryan answered asserted the opposite reading — *"This isn't a method,
+> just a value passed in, so it's consistent with your S430 stance"* — which ratifies function-typed attributes
+> (`<card title:string onOpen:fn()>`) but not how they meet §15.11.5.1 / `E-EQ-003`.)
+
+### 66.16 `server` and `pinned` on declarations
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (dpa-050 §7 #15, PA lean adopted) · *"all the rest, your leans"*.
+
+`server` (§52) and `pinned` (§6.10) on a declaration **govern its shared instance only**. A plain instance of a
+`server` declaration is a **client-local copy seeded from** the shared instance. *(Non-normative reading, beyond
+the #15 lean: such a copy does not fetch on its own mount and is not server-authoritative.)*
+
+### 66.17 `<theme>` — tokens are declarations (T3)
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (dpa-050 §7 #13) · *"t3"* (ratifying: theme tokens become
+> ordinary declarations inside `<theme>`, which is reduced to a MARKER; the `name = value;` body grammar and
+> `.Variant { }` blocks retire; a locked literal token is a constant → static `:root` CSS; a variant is a derived
+> cell matching over the mode cell, recognized and emitted as `:root[data-scrml-theme-<cell>]` selector CSS; one
+> namespace).
+> **supersedes:** the §65.3.2 / §65.6 `<theme>` body grammar ratified 2026-07-16 (css Wave-1) — the
+> `name = value;` token lines, the `.Variant { … }` re-binding sub-blocks, and §65.6's "variant-type inference
+> from `for=`" (the variant set was owned by the `.Variant` blocks, which retire).
+
+1. **Tokens are ordinary declarations** written inside `<theme>`. `<theme>` is reduced to a **MARKER**: *these
+   declarations lower to CSS custom properties.*
+2. **A locked literal token is a constant** and lowers to static CSS: `<brand:string="#338967"/>` inside `<theme>` →
+   `:root { --brand: #338967; }`.
+3. **A variant is a derived cell matching over the mode cell.** The compiler RECOGNIZES a locked token whose
+   initializer is a `match` over an enum-typed cell and emits it as today's variant selector CSS —
+   `:root[data-scrml-theme-<cell>="<Variant>"] { --<token>: …; }` — so switching the mode cell remains **one
+   attribute write, zero re-render** (§65.6's runtime reflection is preserved):
+
+   ```scrml
+   <let mode:Mode=.Light/>
+   <theme>
+       <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>
+   </theme>
+   ```
+
+4. **One namespace.** A token IS a declaration, so a token and a same-named cell cannot coexist silently (the
+   token/cell collision the DD measured, D7, is gone by construction), and a token is readable from logic as
+   `@brand` like any cell. A CSS-position reference `@brand` resolves as §65.3.2 specifies (→ `var(--brand)`).
+5. **The mode cell is an ordinary `let` declaration** — `<let mode:Mode=.Light/>` (the ruling records the PA's
+   worked-example erratum: `<mode:Mode=.Light let/>` is wrong; `let` is a prefix).
+6. The `name = value;` body grammar and `.Variant { }` blocks go through the §63 lifecycle (§66.21).
+
+7. **From the T3 text bryan answered *"t3"*** (ruling:S435 (PA proposal text answered "t3")): tokens are written as
+   typed string declarations with string-literal values (`<brand:string="#2563eb"/>`); `<theme>` is written with
+   no `for=` (`<theme> … </theme>`); the CSS use site is unchanged (`div { color: @ink; }`); and a match-over-enum
+   token the compiler does NOT recognize for the fast variant CSS still lowers — *"Without it, each token change
+   is a separate `:root` write. That still means zero re-render, but it's N writes instead of 1."* (Inference, not
+   stated: the answered example writes `<mode:Mode=.Light …/>`, so the variant enum is an ordinary declared type
+   `Mode` rather than being owned by `<theme>`.)
+
+> ⚑ **OPEN (not ruled) — O47 (narrowed): other reactive token shapes.** The answered text covers a match-over-enum
+> token (recognized → variant selector CSS; unrecognized → per-token `:root` writes). What a token whose
+> initializer reads cells in any OTHER shape lowers to — e.g. `<ink:string=(@userColor)/>` — is not ruled.
+
+> ⚑ **OPEN (not ruled) — O17 (narrowed): the remaining T3 details.** Not ruled: **(a)** hyphenated token names
+> (`space-4` is not an identifier) and whether a non-string CSS value can be written other than as a string
+> literal; **(b)** whether `for=` is still PERMITTED on `<theme>` (the ruled example omits it; the `match`
+> scrutinee identifies the mode cell); **(c)** how the `@media (prefers-color-scheme: …)` auto-bind variant (§65.6)
+> is expressed; **(d)** §65.9's program-scope-only placement for a `<theme>` in a library file.
+
+### 66.18 Tier-3 positional construction — RETIRED
+
+> **Provenance:** ruling:user-voice-scrml.md S435 (dpa-050 §7 #14) · *"retire, int, reverse L19, bank dpa-053"*.
+> **supersedes:** §6.3.3 (Tier 3 — predefined-shape compound, `<userInfo>: UserInfo = ("alice", 30, true)`) and
+> §14.11 (positional binding for predefined-shape compound state, Move 10).
+
+Tier-3 positional struct construction (Move 10) is **RETIRED**. It carries the silent-reorder hazard Q3 rejected
+for defaults, it never worked (impl#1 compiles `("a", 30)` to a JavaScript comma expression, so the cell holds
+the LAST element — DD D3, a silent miscompile), and the corpus has ~0 uses (approximate). **Positional data lives
+in tuples** (§66.12.5); a struct is constructed by field name.
+
+> ⚑ **OPEN (not ruled) — O15: `<each … as (k, v)>`.** §59.8's `as (k, v)` destructuring of a map entry is
+> specified as §14.11 positional binding. Whether it survives the retirement (it is destructuring, not
+> construction) is not ruled.
+
+### 66.19 Worked programs
+
+Six full programs in the ruled spelling. Lines that depend on an OPEN item carry a `⚑ On` comment; the program
+is otherwise fully determined by the rulings.
+
+#### 66.19.1 A counter
+
+```scrml
+<program>
+    <let count:int=0/>                          // writable: `let` is the replace grant on a scalar (§66.9)
+    <step=1/>                                   // locked constant; the integer literal infers `int` (§66.3)
+    <doubled:int=(@count * 2)/>                 // derived: locked + a reactive initializer (§66.9)
+
+    function bump()    { @count = @count + @step }   // a replace on a `let` scalar — granted
+    function restart() { reset(@count) }             // `reset` is a replace (§66.11.2) — granted by `let`
+
+    <main>
+        <p>Count ${@count} (doubled ${@doubled})</p>
+        <button onclick=bump()>+${@step}</button>
+        <button onclick=restart()>Reset</button>
+        <!-- onclick=(@doubled = 0) → E-DERIVED-WRITE; the message names the `let`-seeding trade-off -->
+        <!-- onclick=(@step = 2)    → E-WRITE-NOT-GRANTED; `step` is locked — declare it `let` -->
+    </main>
+</program>
+```
+
+#### 66.19.2 A validated form (with a `single` save-status declaration)
+
+```scrml
+<program>
+    type SaveState:enum = { Idle, Saving, Saved, Failed }
+
+    <saveState:SaveState=.Idle single>                        // was an <engine> (§66.13.3)
+        <Idle   rule=.Saving : "">              // ⚑ O52: state-child marker + `:`-shorthand body
+        <Saving rule=(.Saved | .Failed) : "Saving…">
+        <Saved  rule=.Saving : "Saved">
+        <Failed rule=.Saving : "Failed">
+    </>
+
+    <signup let agree:bool=false>                             // `agree` is data: an attribute (§66.4)
+        <let email:string="" req length(>=5)/>                // validated fields are CHILD declarations
+        renders <input type="email" bind:value=@email/>       // @email = this field's own instance (⚑ O54); explicit bind (⚑ O25)
+        <let password:string="" req length(>=8)/>
+        renders <input type="password" bind:value=@password/>
+    </>
+    renders <form>
+        <label>Email <*email/></label>                        // THIS signup's own email field (§66.6.2)
+        <label>Password <*password/></label>                  // a bare <password/> here → E-DECL-FIELD-TAG-NEEDS-STAR
+        <label><input type="checkbox" bind:checked=@signup.agree/> I agree</label>   // @signup = this instance
+        <p>${agree ? "" : "Please agree to continue."}</p>    // `agree`: a bare read-only projection (§66.5.2)
+        <button type="button" onclick=save()>Save</button>
+    </form>
+
+    function save() {
+        if (!@signup.agree) return                            // top level: @signup = the shared instance (§66.7.1)
+        @saveState = .Saving                                  // along the rule= graph
+        @saveState = .Saved
+    }
+
+    <main>
+        <*signup/>                                            // render the shared signup instance
+        <p><*saveState/></p>                                  // ⚑ O5: how a `single` declaration's state-child bodies render
+    </main>
+</program>
+```
+
+#### 66.19.3 A component library (`<dropdown>`) consumed three times
+
+```scrml
+// lib/dropdown.scrml
+export type Openness:enum = { Closed, Opened }
+
+export <dropdown label:string options:string[] export let value:string="">   // `value`: exported, writable (E2)
+    export <open:Openness=.Closed>                            // a per-instance transition-graph field (§66.13.2), exported
+        <Closed rule=.Opened/>              // ⚑ O52: state-child marker
+        <Opened rule=.Closed/>
+    </>
+</>
+renders <div class="dropdown">
+    <button class="dropdown__toggle"
+            onclick=(@dropdown.open = open == .Closed ? .Opened : .Closed)>${label}: ${value}</button>
+    <ul class="dropdown__menu" if=(open == .Opened)>
+        <each in=options as opt>
+            <li onclick={ @dropdown.value = opt; @dropdown.open = .Closed }>${opt}</li>
+        </each>
+    </ul>
+    <slot/>                                                   // use-site children, if any (§66.15.2)
+</div>
+```
+
+```scrml
+// app.scrml
+${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+
+<program>
+    type Line:struct = { id: int, name: string }
+    <lines:Line[]=([{ id: 1, name: "Tea" }, { id: 2, name: "Milk" }])/>   // locked: no grants (§66.12.1)
+    <let showColor:bool=false/>
+
+    function closeCountry() { @country.open = .Closed }       // cross-file write to an EXPORTED field, along its graph; from .Closed it is a self-write no-op (§51.0.F.1)
+    function clearColor() {
+        given c = @color :> { c.value = "" }                  // @color is `dropdown | not`: narrowed first; the write goes through `c` (§66.7.5)
+    }
+
+    <main class="filters">
+        <dropdown as=country label="Country" options=(["US", "CA", "MX"]) value="US"/>   // instance 1, bound
+        <dropdown label="Size" options=(["S", "M", "L"]) value="M"/>                     // instance 2, anonymous
+        <div if=@showColor>
+            <dropdown as=color label="Color" options=(["red", "blue"])/>                 // instance 3, conditional
+        </div>
+        <p>Shipping to ${@country.value}</p>
+        <button onclick=closeCountry()>Done</button>
+        <button onclick=(@showColor = !@showColor)>Colours</button>
+        <button onclick=clearColor()>Clear colour</button>
+
+        <each in=@lines key=@.id as line>                      // instances keyed by the row key (§66.7.3)
+            <dropdown as=qty label=line.name options=(["1", "2", "3"]) value="1"/>        // `qty` is ROW-SCOPED (§66.7.4)
+            <span>${line.name} × ${@qty.value}</span>
+        </each>
+
+        <!-- @color.value = "" outside a narrowing        → E-DECL-HANDLE-NOT-NARROWED -->
+        <!-- <*dropdown open=.Opened/>                      → E-DECL-STAR-REF-ATTR-WRITE -->
+    </main>
+</program>
+```
+
+The whole callback apparatus of the §15 form (`current=` / `onpick=` props, a `pickX` function and an app cell
+per use) is gone: each instance owns its state, `as=` gives the app a typed handle, and the library's exported
+fields are its API (§66.14).
+
+#### 66.19.4 A theme library — named swatches and tokens
+
+```scrml
+// lib/brand-theme.scrml   — ⚑ O17(d): a `<theme>` in a library file (§65.9 places it at program scope)
+export type Mode:enum = { Light, Dark }
+export <let mode:Mode=.Light/>
+
+<theme>                                                        // a MARKER: these declarations lower to CSS custom properties
+    export <brand:string="#338967"/>                           // locked literal → :root { --brand: #338967 }
+    export <danger:string="#dc2626"/>
+    export <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>     // recognized match over an enum →
+    export <paper:string=(match @mode { .Light :> "#ffffff"  .Dark :> "#0f172a" })/>   //   :root[data-scrml-theme-mode="Dark"] {…}
+</theme>
+
+export <swatch let label:string="Brand" let hex:string=@brand/>   // `let` + reactive initializer = SEEDED (§66.9)
+renders <span class="chip"><i style="background:${hex}"></i> ${label}</span>
+
+export <accent:swatch label="Accent" hex=@brand/>              // named shared instances (§66.8.2) (a declaration per the #16 ruling, §66.2.2)
+export <warn:swatch label="Warn" hex="#FF6600"/>
+
+export function toggleMode() { @mode = @mode == .Dark ? .Light : .Dark }   // writes stay in the defining file (§66.14; ⚑ O39)
+export function useWarnAsAccent() {
+    @accent.label = "Warn"
+    @accent.hex = "#FF6600"
+}
+```
+
+```scrml
+// app.scrml
+${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } from "./lib/brand-theme.scrml" }
+
+<program>
+    <main>
+        <h1>Palette</h1>
+        <div>
+            <*accent/>                                         // THE accent — live wherever it is referenced
+            <*warn/>
+            <swatch label="Danger" hex=@danger/>               // a fresh chip: a new instance, by construction
+        </div>
+        <p>Brand colour: ${@brand}</p>                         // a token read from logic — one namespace (§66.17)
+        <button onclick=useWarnAsAccent()>Use warn as accent</button>
+        <button onclick=toggleMode()>Toggle theme</button>     // one attribute write; zero re-render (§66.17)
+    </main>
+</program>
+```
+
+#### 66.19.5 An append-only audit log
+
+```scrml
+<program>
+    type Entry:struct = { at: number, actor: string, action: string }   // fields carry no contract → fixed
+
+    <audit:Entry[free, end]=[]/>                    // free length, changes at the end, NO replace — ⚑ O10 spelling
+    <let actor:string="ops"/>
+
+    function record(action: string) {
+        @audit.push({ at: Date.now(), actor: @actor, action: action })            // end-append: granted
+    }
+    function recordBySpread(action: string) {
+        @audit = [...@audit, { at: Date.now(), actor: @actor, action: action }]   // a recognized end-append shape: granted
+    }
+    // @audit = []                                   → E-WRITE-NOT-GRANTED (a replace; the type grants none)
+    // reset(@audit)                                 → E-WRITE-NOT-GRANTED (reset is a replace)
+    // @audit = appended(@audit, e)                  → ⚑ O37 (OPEN): "fine" in the answered "type" text; a
+    //                                                 `replace` under the later one-axis rule — with bryan
+    // @audit.shift()                                → E-WRITE-NOT-GRANTED (changes at the front)
+    // @audit = @audit.filter(e => e.actor != "x")   → E-WRITE-NOT-GRANTED (shrink-anywhere)
+    // @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (positions read-only; Entry.action is fixed)
+    // let snapshot = @audit                         → a SNAPSHOT (§66.10): a later record() does not change it
+
+    <main>
+        <input bind:value=@actor/>
+        <button onclick=record("login")>Log in</button>
+        <ul>
+            <each in=@audit as e>
+                <li>${e.actor}: ${e.action}</li>
+            </each>
+        </ul>
+    </main>
+</program>
+```
+
+Without a `replace` grant the log is provably append-only: no statement in the program can remove or rewrite an
+entry, and the compiler checks that on every write however it is spelled (§66.11.3).
+
+#### 66.19.6 An engine re-expressed as a `single` declaration
+
+Before (§51.0, the form that retires — §66.21):
+
+```scrml
+<program>
+    type Phase:enum = { Idle, Loading, Done, Failed }
+
+    <engine for=Phase initial=.Idle>
+        <Idle    rule=.Loading : "Ready">
+        <Loading rule=(.Done | .Failed) : "Loading…">
+        <Done    rule=.Idle : "Done">
+        <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
+    </>
+
+    function load() { @phase = .Loading }
+    <button onclick=load()>Load</button>
+</program>
+```
+
+After:
+
+```scrml
+<program>
+    type Phase:enum = { Idle, Loading, Done, Failed }
+
+    <phase:Phase=.Idle single>                      // one vehicle; the name IS the variable (§66.13.3)
+        <Idle    rule=.Loading : "Ready">              // ⚑ O52: state-child marker + `:`-shorthand body
+        <Loading rule=(.Done | .Failed) : "Loading…">
+        <Done    rule=.Idle : "Done">
+        <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
+    </>
+
+    <card title:string>                             // a multi-instance declaration
+        <status:Phase=.Idle>                        // a per-instance transition graph — legal
+            <Idle    rule=.Loading/>              // ⚑ O52: state-child marker
+            <Loading rule=(.Done | .Failed)/>
+            <Done    rule=.Idle/>
+            <Failed  rule=.Idle/>
+        </>
+        // writing `single` on `status` here → E-COMPONENT-ENGINE-SCOPE (a single inside a multi-instance declaration)
+    </>
+    renders <article><h3>${title}</h3><p>${status}</p></article>
+
+    function load()   { @phase = .Loading }         // along an edge of the graph
+    function finish() { @phase = .Done }            // legal from .Loading; a no-op from .Done (§51.0.F.1); E-ENGINE-INVALID-TRANSITION otherwise
+
+    <main>
+        <p><*phase/></p>                            // ⚑ O5: how the state-child bodies render
+        <button onclick=load()>Load</button>
+        <card title="One"/>
+        <card title="Two"/>                         // each card has its own `status`
+        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55) -->
+    </main>
+</program>
+```
+
+### 66.20 Diagnostics
+
+Named here; **the §34 catalog rows land WITH the implementation** (house rule — no §34 row precedes its
+emitter). Every code below is Nominal on impl#1.
+
+**New codes**
+
+| Code | Severity | Fires when |
+|---|---|---|
+| **`E-DECL-ILLEGAL-FIELD-NAME`** | Error | A declaration attribute or child field is named `bind`, `class`, `style`, `internal` or `on` (§66.2.3). |
+| **`E-DECL-OPENER-EXPR-UNPARENTHESIZED`** | Error | An own value or attribute default in an opener is neither a literal nor a plain `@ref` and is not parenthesized — including any unparenthesized `>` or `/` (§66.2.4). |
+| **`E-DECL-RENDERS-BARE-WRITE`** | Error | A write or bind targets a bare attribute/field projection inside a `renders` (they are read-only; write through `@x.field`) (§66.5.2). |
+| **`E-DECL-FIELD-TAG-NEEDS-STAR`** | Error | A bare `<f/>` names a child field of the enclosing declaration. Message: *"did you mean `<*f/>`?"* (§66.6.6). |
+| **`E-DECL-STAR-PREDEFINED`** | Error | `<*x/>` where `x` is a predefined (HTML) declaration, e.g. `<*div/>` (§66.6.5). |
+| **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). |
+| **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). |
+| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. |
+| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path. The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). |
+| **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). |
+| **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). |
+| **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). |
+| **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). |
+| **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). |
+
+**Retained codes with a restated condition or message**
+
+| Code | Change |
+|---|---|
+| **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). |
+| **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. |
+| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4). |
+| **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2). |
+| **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. |
+
+**Legacy-form codes** — the W-lint + reserved-E pairs of §66.21 (`W-DECL-LEGACY-RHS`, `W-CONST-CELL-DEPRECATED`,
+`W-COMPONENT-CONST-DEPRECATED`, `W-ENGINE-ELEMENT-DEPRECATED`, `W-POSITIONAL-STRUCT-DEPRECATED`,
+`W-THEME-BODY-DEPRECATED`, and their `E-` twins).
+
+**Codes that retire with their form** (live through the §63 window; they stop firing at Stage 3 because the
+form they police no longer parses): `E-CELL-RENDER-SPEC-NOT-BINDABLE` and `E-DECL-RHS-INTERP-WRAPPED` (the
+right-hand-side form); `E-COMPONENT-010` / `-011` / `-012` / `-013` / `-014` (the `props={…}` block and `bind`
+props); `E-ENGINE-VAR-DUPLICATE` and the §51.0.C auto-naming surface (the `<engine>` element).
+
+### 66.21 Legacy forms and migration — the §63 lifecycle
+
+Every retired form below goes through the §63 stage machine — Stage 1 (SOFT-DEPRECATED): the form **parses
+identically**, a `W-` lint fires at every site naming the canonical form + `scrml fix` + this section, and a
+**reserved `E-`** is named — **except** the render-by-tag rewrite, which was ruled SAME-ARC. No removal version is
+named (§63.2); scheduling is a later §62 version event (§63.3), gated on a verified-landed `scrml fix` rule
+(§63.4).
+
+| Retired form | W-lint (Stage 1) | Reserved E | `scrml fix` rule |
+|---|---|---|---|
+| Right-hand-side declaration `<x> = v`, `<x>: T = v`, and Shape 2 `<x attrs> = <input …/>` | `W-DECL-LEGACY-RHS` — a **hard** deprecation warning with clear deprecation terms (its severity and terms within §63: ⚑ O12); the cell carries the **transitional all-permissions grant** (§66.12.4) | `E-DECL-LEGACY-RHS` | Rewrite to the opener form with the **MINIMAL grant inferred from the cell's actual writes**: never written → locked `<x:T=v/>`; a written scalar → `<let x:T=v/>`; a written sequence → the least set of §66.12 axes its writes use. Shape 2 → a child/own-value declaration with a `renders` (bind and validator wiring: ⚑ O25). |
+| `const <x> = expr` (top level and in-compound) | `W-CONST-CELL-DEPRECATED` | `E-CONST-CELL-DEPRECATED` | `<x:T=(expr)/>` — the locked declaration; derived exactly when `expr` reads cells (§66.9). (`W-CONST-AT-DEPRECATED` for `const @name` is unchanged.) |
+| Component `const X = <root props={…}>…</>` | `W-COMPONENT-CONST-DEPRECATED` | `E-COMPONENT-CONST-DEPRECATED` | `props={a: T, b?: T, c: T = d}` → typed attributes with inline defaults; the root element → the `renders` clause; `${...}` children → `<slot/>`; `bind` props → `export let` fields. **Owed (S435):** count the component files the codemod cannot rewrite mechanically (snippet slots, lambda slot-fill — ⚑ O9); those stay soft until a rule or a designer-card waiver covers them (§63.4). |
+| `<engine for=T initial=.X …>` | `W-ENGINE-ELEMENT-DEPRECATED` | `E-ENGINE-ELEMENT-DEPRECATED` | `<engine for=T initial=.X>` → `<t:T=.X single>` with state-children carried verbatim (⚑ O52: how state-children fit the marker, and whether their `:`-shorthand bodies survive). The rule covers only what §66.13 rules; the rest of the §51.0 surface waits on ⚑ O5, so the rule is partial and the form cannot be scheduled (§63.4) until it is complete. |
+| Tier-3 positional `<x>: T = (a, b, c)` | `W-POSITIONAL-STRUCT-DEPRECATED` | `E-POSITIONAL-STRUCT-DEPRECATED` | Rewrite to a by-name struct value in the predefined type's field order. ⚑ O48: impl#1 miscompiles this form today (D3), so "parses identically" preserves a silent miscompile through the window; with ~0 corpus uses a §63.4 designer-card removal is available — whether to use it is not ruled. |
+| `<theme>` `name = value;` body and `.Variant { }` blocks | `W-THEME-BODY-DEPRECATED` | `E-THEME-BODY-DEPRECATED` | Each token line → a token declaration inside `<theme>`; each variant re-binding → a derived `match` over the mode cell (§66.17). Blocked on the narrowed ⚑ O17 (hyphenated names / non-string values, whether `for=` stays permitted, the `@media` auto-bind). |
+| Render-by-tag `<x/>` as a view of a shared cell | **none — SAME-ARC** | none | `<x/>` → `<*x/>`, applied in the SAME arc as the grammar change. There is no window in which `<x/>` silently changes meaning (§66.6.6). |
+
+### 66.22 OPEN items (not ruled) — consolidated
+
+Each item below is a place where two rulings (or a ruling and existing SPEC) interact and no ruling decides the
+outcome. §66 does not decide them. Labels are stable identifiers, not a count.
+
+| # | Where | The question |
+|---|---|---|
+| O2 / O39 | §66.14 | Module `export` vs field `export` on a top-level cell's or a `single` declaration's own value; how cross-file engine writes migrate. |
+| O3 | §66.9 | What `let` means on a sequence / tuple / struct (replace only · replace + every edit · error). |
+| O5 | §66.13 | Where the rest of the §51.0 engine surface lands under `single` (state-child bodies vs `renders`, `accepts=`/arms, `effect=`/`<onTransition>`, `history`, `internal:rule=`, `<onTimeout>`/`<onIdle>`, `derived=`, `server=`, `name=`/`var=`, `.advance`, nested engines, cross-file mount). |
+| O7 | §66.13 | Whether contract kinds combine on one field (lifecycle + graph; `let` + graph — `replace` subsumes edits, §66.11.3, so `let` would make a graph dead); the fate of §14.12.4's carve-out. |
+| O8 | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
+| O9 | §66.15.2 | Named and parametric slots on a declaration. |
+| O10 | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. |
+| O12 | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). |
+| O13 | §66.9 | Whether logic-local `const` (and §50.8.5's keywordless-binding-is-`const`) retires. |
+| O14 | §66.11 | Whether field contracts govern non-cell (local) values — reversing §50.9's `const`-property-write sentence (lean: yes — an error; the §50.9 reversal was parked on dpa-052, which has ruled). |
+| O15 | §66.18 | Whether `<each … as (k, v)>` (§59.8, built on §14.11) survives the Tier-3 retirement. |
+| O16 | §66.12.5 | Whether the tuple-type annotation in the answered one-axis text (`[:number, :number]`) is the spelling in every type position. |
+| O17 | §66.17 | Remaining T3 details: hyphenated token names / non-string CSS values, whether `for=` is still permitted, the `@media` auto-bind, library-file placement. |
+| O18 | §66.6.7 | Beyond `if=` on a use (ruled), which non-writing attributes (`if=`, `class=`, `style=`, `key=`) a `<*x>` reference or a use may carry. |
+| O19 | §66.3 | An own value AND attributes on one declaration; what `@x` then is. |
+| O21 | §66.9 | A derived (locked, reactive-default) attribute vs use-site construction. |
+| O24 | §66.5 | The spelling of a markup-typed derived cell. |
+| O31 | §66.2.2 | Whether a bare `name:Type` for a NON-declaration type (`<count:int/>`) is a declaration (`:Decl` and `:struct` are ruled). |
+| O32 | §66.2.4 | Whether compound literals may stand bare in an opener. |
+| O33 | §66.3 | Attributes with no default: required at every use, or canonical-empty; their value in the shared instance. |
+| O34 | §66.12.5 | A tuple position with no default, with or without a lifecycle. |
+| O35 | §66.3 | The unruled parts of DD §7 #17 (own-value-only inference / required attribute types; annotation required for `not`/`[]`/`{}`; `<x>` in logic). |
+| O36 | §66.11 | Enforcement of an invariant the compiler cannot prove statically. |
+| O37 | §66.12.3 | A helper's result written back into a `replace`-less sequence: "fine" in the answered "type" text vs a `replace` under the one-axis rule (trust return type · certify callee body · leave a replace; PA lean certify). Call direction is ruled. |
+| O38 | §66.5.4 | Whether a declaration at `<program>` / file top level is in "a markup position" for #19, and which instance renders there. |
+| O41 | §66.2.3 | Collisions of user attribute names with stdlib/structural attribute words (`as`, `key`, `if`, `slot`, `default`, …). |
+| O42 | §66.4 | The attribute→child promotion hint's code and trigger. |
+| O43 | §66.4 | Setting a child declaration's value by a same-named use-site attribute (the un-presented half of #11 — fell out of the record). |
+| O44 | §66.11 | Maps and sets under the transition axis. |
+| O45 | §66.13 | The S178 "final shared-state design" sentence under Q1 + Q6 (#20 — fell out of the record). |
+| O46 | §66.15 | Does the `${...}` children spread survive beside `<slot/>`? |
+| O48 | §66.21 | Tier-3 positional: a Stage-1 window that preserves a silent miscompile, vs a §63.4 designer-card removal. |
+| O51 | §66.6.8 | A use or `<*x/>` of a declaration with no `renders`: an error, or a data-only instance (an `as=`-bound instance need not render). |
+| O52 | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
+| O25 | §66.5.5 | Record gap: implicit bind vs explicit `bind:` in `renders`, and whether validators reach the `renders` input (§6.4.2 steps 3–4). |
+| O54 | §66.6.3 | Record gap: whether `@x` inside `x`'s own `renders` names the current instance (DD #8, not in the answered text). |
+| O55 | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. |
+| O56 | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
+| O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
+
+Closed by the PA proposal text bryan answered (the terse-answer rule, §66 preamble): O6 (`single` is a trailing
+modifier — Q6 "a"), O40 (the `given` binding writes the instance — lists "yes"; its scope is O56), O53 (`let` / `export let` on attributes; `export <child>` —
+Q6 "a", "E2, move on", "yes, :struct,").
+
+### 66.23 Cross-references
+
+§1.6 / §3.4 / §6.1 (V5-strict — `<x>` is a thing, `@x` its value) · §6.2 / §6.3 / §6.4 / §6.5 / §6.6 (the
+superseded declaration, compound, render-by-tag, array and derived surfaces; the derived-evaluation semantics
+carried over) · §6.8 (`reset` — a replace, §66.11.2) · §6.10 / §52 (`pinned` / `server` — §66.16) · §14.3 /
+§14.3.1 (structs; `<Token>` in logic — O35) · §14.11 (positional binding — retired, §66.18) · §14.12 (lifecycles —
+write contracts, §66.11.6) · §15 / §16 (components and slots — retired into declarations, §66.15) · §17.7 (`<each>`
+and `key=` — instance keying, §66.7.3) · §18.19 (multi-scrutinee match — its parentheses remain non-tuples) ·
+§19.2 (`renders` — the second contextual position, §66.5.1) · §42 (`not`; `T | not` handles, §66.7.5) · §45
+(equality over values — §66.10) · §50 (assignment; local `let` rebinding, §66.11.5; §50.9 — O14) · §51.0 (engines
+— re-expressed, §66.13) · §59 (maps and sets — O44; no-tuple sentences superseded, §66.12) · §63 (the deprecation
+lifecycle, §66.21) · §65.3.2 / §65.6 (`<theme>` — T3, §66.17). dpa-053 (block expressions) is banked, not ruled,
+and not specified here. The bootstrap codegen design for §66 (instance-keyed state, per-instance effect scopes and
+disposal, the lazy shared instance, `as=` aliases, lexical self-resolution, keyed instances in `<each>`, value
+semantics and the transition axis) is dpa-051.
