@@ -32,7 +32,7 @@
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 145 | 5 |
 | MED | 327 | 0 |
-| LOW | 126 | 0 |
+| LOW | 127 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19419,3 +19419,7 @@ A compile set of ONE web app (`index.scrml` root `<program auth="optional" sessi
 ### g-session-config-refusal-still-writes-dist — `E-MW-008` (and `E-MW-007`) fail the build by exit code but `scrml build` / `scrml compile --output-dir` still write a complete `dist/`, including the split-cookie server units
 So `codegen/index.ts`'s comment "the F1 split is unreachable by construction" holds only for callers that honour the exit code; a deploy script that ignores it ships the split. Reviewer-executed on the A+B two-program fixture (S437 post-merge review of #1094); `scrml dev` behaviour UNVERIFIED. Shared posture with E-MW-007, not new to #1094. Direction is a ruling: fail-closed = do not write artifacts on a hard session-config refusal. — `NEW S437-bryan (relayed from reviewer)`; **LOW**; open
 <!-- @gap id=g-session-config-refusal-still-writes-dist sev=LOW status=open locus=compiler/src/commands/build.js+compile.js(write phase does not gate on E-MW-007/008; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-cli-build-exit-1-dist-written -->
+
+### g-ghost-lint-false-fires-on-canonical-block-handler — the canonical inline block handler `onclick={ s1; s2 }` (L19 REVERSED S435, §5.2.3) fires `W-LINT-007` ("`<Comp prop={val}>` — scrml uses `<Comp prop=val>`") and `W-LINT-013` twice ("`@click=` Vue event shorthand") on a correct program
+**PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick={ @a = @a + 1; @a = @a * 2 }>go</button>` → one `W-LINT-007` + two `W-LINT-013` on that line. The pre-Stage-2 ghost-pattern pass (PRIMER §12) predates the L19 reversal: `{…}` in attribute position reads as JSX `prop={val}`, and each `@a =` inside the braces reads as a Vue `@event=` inside a tag-opener range (the W14 Unit AA tag-opener gating does not exclude a braced attribute value). Same class as the S137 Bug 44 exemption. Every adopter writing the now-canonical form gets three false warnings, which teaches them to ignore W-LINT. Found by the S437 maps refresh (N-S437-5). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise; but the lint now contradicts a ruling made on 2026-09-26, so it is arguably part of the L19 reversal's own landing. — `NEW S437-bryan`; **LOW**; open
+<!-- @gap id=g-ghost-lint-false-fires-on-canonical-block-handler sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(W-LINT-007 JSX-prop pattern + W-LINT-013 tag-opener gating near :472/:1032; PA-located-verify) prov=empirical:PA-compiled-onclick-block-handler-1x-W-LINT-007-2x-W-LINT-013 -->

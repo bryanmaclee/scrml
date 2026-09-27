@@ -116,6 +116,8 @@ Gates re-run at this SHA: `bun scripts/facts.ts --check` PASS · `bun scripts/re
 **Suggested disposition:** update to match current.
 
 ## ⚠ N-S437-4. `master-list.md` `@generated:recent-sessions` STILL stale (N-S422-6 carried forward) and known-gaps heading/marker drift GREW 45 → 52
+
+> **RESOLVED on landing (S437 PA):** the same PR that lands this report (`chore/s437-bookkeeping`) regenerates the block; `state.ts --check` PASSES on that branch. Root cause filed as `g-recent-sessions-index-stale-on-main-after-every-wrap-merge` — it recurs after every wrap merge by construction. The heading/marker drift half stands.
 **Reason:** content-heuristic (generated-section currency)
 **Detail:** `bun scripts/state.ts --check` at `d02738767` → `STALE @generated:recent-sessions (master-list.md)` → FAIL; and `known-gaps heading/marker status: 52 DRIFT (heading ≠ marker)` (WARN-only) — up from 45 at S422. Sample: `g-e2e-render-map-tier-runs-in-no-ci-job-at-all` heading=open marker=resolved (the S427 CI step closed it; the heading was never updated).
 **Suggested disposition:** update to match current (`bun scripts/state.ts --write` from the main checkout; heading sweep for the 52).
