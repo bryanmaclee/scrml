@@ -658,6 +658,50 @@ describe("CONF-SESSION-PROGRAM-ATTR-SCOPE §20.5.1 — a kind=\"tool\" program i
     }
   });
 
+  // ── S438 review round (F1/F2): the unit is the FILE the emitter dispatches, not the node ──
+  // `isToolProgram` sends a WHOLE file down the tool path by its first top-level
+  // `<program>`, so any further `<program>` in that file is emitted nowhere.
+  const TOOL_WITH_DEAD_DECLARING_SIBLING =
+    `${TOOL}
+<program session-secure="false" sessionExpiry="7d"></program>`;
+
+  test("F1 — a dead declaring <program> inside a TOOL file governs nobody (was: refused; node-skip made it a silent downgrade)", () => {
+    for (const order of ["fwd", "rev"]) {
+      const result = compileFixture("tool-dead-sibling", {
+        "tools/x.scrml": TOOL_WITH_DEAD_DECLARING_SIBLING, "pages/minter.scrml": MEMBER_MINTER,
+      }, order);
+      const member = serverJsFor(result, "pages/minter.scrml");
+      expect(member).toBeTruthy();
+      // Never `scrml_sid`/604800 — that declaration belongs to no emitted program.
+      expect(cookieNames(member)).toEqual(SECURE);
+      expect(maxAgeSecs(member)).toEqual(DEFAULT_MAXAGE);
+    }
+  });
+
+  test("F1 — a bare <program> inside a tool file does not make a web app + member read as two applications", () => {
+    const result = compileFixture("app-member-tool-bare-sibling", {
+      "index.scrml": PROG_A, "pages/minter.scrml": MEMBER_MINTER,
+      "tools/x.scrml": `${TOOL}
+<program></program>`,
+    });
+    expect(codes(result).filter((c) => c === "E-MW-008")).toEqual([]);
+    expect(cookieNames(serverJsFor(result, "pages/minter.scrml"))).toEqual(PLAIN);
+  });
+
+  test("F2 — a tool's declarations no longer leak into a program-less <page> (ACCEPTED on base, with the tool's plain 7d cookie)", () => {
+    // On 072741ca this compiled clean and the page minted `scrml_sid`/604800 — the
+    // tool's `session-secure="false"` reached a web unit it does not own. Now the
+    // page gets the language default. Secure direction, but a cookie RENAME: an
+    // adopter with this shape is logged out once on upgrade.
+    const result = compileFixture("decltool-page-only", {
+      "pages/minter.scrml": MEMBER_MINTER, "tools/seed.scrml": TOOL_DECLARING,
+    });
+    expect(codes(result)).toEqual([]);
+    const member = serverJsFor(result, "pages/minter.scrml");
+    expect(cookieNames(member)).toEqual(SECURE);
+    expect(maxAgeSecs(member)).toEqual(DEFAULT_MAXAGE);
+  });
+
   test("control — two web apps are STILL refused with a tool beside them (the exclusion opens no hole)", () => {
     const result = compileFixture("two-apps-tool", {
       "aaa.scrml": PROG_A, "sub/zzz.scrml": PROG_B, "tools/seed.scrml": TOOL,
