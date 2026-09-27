@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 146 | 5 |
-| MED | 327 | 0 |
-| LOW | 128 | 0 |
+| HIGH | 147 | 4 |
+| MED | 330 | 0 |
+| LOW | 131 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19627,3 +19627,14 @@ So `codegen/index.ts`'s comment "the F1 split is unreachable by construction" ho
 ### g-multi-statement-handler-message-gives-the-retired-l19-fix — `E-MULTI-STATEMENT-HANDLER`'s message still says "lift the body to a named function and wire by name"; §5.2.3 (L19 reversed S435) says the fix is to wrap the statements in braces — `onclick={ startGame(); track("start") }` — or to name a function
 Found by the S437 PRIMER currency pass (relayed; message text not PA-re-read). The diagnostic teaches the retired rule to every adopter who hits it. Part of the L19 reversal's own landing. — `NEW S437-bryan (relayed)`; **LOW**; open
 <!-- @gap id=g-multi-statement-handler-message-gives-the-retired-l19-fix sev=LOW status=open locus=searched:compiler/src/multi-statement-scan.ts — message site not traced prov=spec:§5.2.3-fix-is-to-wrap-the-statements-in-braces -->
+
+### g-impl1-match-miscompiles-hit-by-the-bootstrap — six impl#1 `match`/enum lowering defects found writing the native bootstrap (F11–F16); five are SILENT miscompiles
+Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + the workaround used in `compiler/self-host-v2/slice-m1/progress.md` §F11–F16 (M1's own code carries the workarounds). **P7 criterion 1 (blocks the bootstrap) — eligible for an impl#1 fix.** One entry for the family because F11 and F16 share a root (`_variantFields` holds only the CURRENT file's enums), and the adversarial review of M1 re-confirmed F12 independently (`match m { .B :> "b"\n _ | .A :> "a" }` compiles with no diagnostic and drops the arm — `f(.A)` returns undefined, defeating E-TYPE-020).
+- **F11** positional payload binding in a `match` over an IMPORTED enum is silently dropped (named binding works).
+- **F12** a `|` alternation arm lowers only as the FIRST arm; later it is silently glued onto the previous arm. (The bootstrap's no-default-arm lint now flags a non-first alternation arm, S437.)
+- **F13** a payload pattern binding five or more fields is not recognised as an arm.
+- **F14** a string literal containing `{`/`}` adjacent to other characters breaks `${}` block splitting.
+- **F15** an enum payload FIELD named like a same-file function is silently renamed in the constructor.
+- **F16** tag-only arms over an IMPORTED payload enum compare the value to a string and never match.
+— `NEW S437-bryan (relayed from the M1 build agent; F12 independently re-executed by the M1 adversarial review)`; **HIGH**; open
+<!-- @gap id=g-impl1-match-miscompiles-hit-by-the-bootstrap sev=HIGH status=open locus=searched:compiler/src/codegen/emit-match.ts,type-system.ts(_variantFields holds only the current file's enums — F11/F16 root, per the M1 agent; PA-located-verify) prov=empirical:bootstrap-slice-m1-progress-md-F11-F16-reproducers -->

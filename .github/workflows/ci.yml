@@ -139,6 +139,15 @@ jobs:
       # g-e2e-render-map-tier-runs-in-no-ci-job-at-all.
       - name: e2e-render-map tier assertions (S427 — previously ran in no job)
         run: bun test compiler/tests/e2e-render-map/
+      # S437 — the native bootstrap (impl#2, compiler/self-host-v2/) lives outside the bunfig test root,
+      # so a plain `bun test` never runs it. The no-default-arm lint enforces dpa-051 §3.4 (total matches
+      # over IR enums; exit 1 on a violation, bite proven); the slice suite is M1's oracle for M2's `lower`
+      # (bench/mutations.js proves every acceptance test goes RED under its matching runtime defect).
+      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + v2 lexer oracle
+        run: |
+          bun scripts/lint-no-default-arm.js
+          bun test ./compiler/self-host-v2/slice-m1/
+          bun test compiler/tests/integration/self-host-v2-lexer
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |
           bun run compiler/src/cli.js compile benchmarks/todomvc/app.scrml --convert-legacy-css

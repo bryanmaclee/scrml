@@ -1,0 +1,94 @@
+// =============================================================================
+// self-host-v2 / html.scrml — the HTML output TREE and its one-shot printer.
+//
+// The Core printer builds HNode trees (view templates + the page shell) and
+// prints them once (dpa-051 §3.6). Template content is printed COMPACT — no
+// indentation whitespace — because the client code addresses template holes
+// by child index, and those indices are computed from THIS tree, not from
+// re-reading the text. Printing inter-element whitespace would add text
+// nodes the tree does not have.
+// =============================================================================
+${
+    export type HAttr:struct = { name: string, value: string }
+
+    export type HNode:enum = {
+        HElem(tag: string, attrs: HAttr[], kids: HNode[]),
+        HText(text: string),
+        HComment(text: string),
+    }
+
+    export fn escText(s: string) -> string {
+        const a: string = s.replaceAll("&", "&amp;")
+        const b: string = a.replaceAll("<", "&lt;")
+        const c: string = b.replaceAll(">", "&gt;")
+        return c
+    }
+
+    export fn escAttr(s: string) -> string {
+        const a: string = s.replaceAll("&", "&amp;")
+        const b: string = a.replaceAll("\"", "&quot;")
+        return b
+    }
+
+    // HTML void elements: no closer, no children.
+    export fn isVoid(tag: string) -> boolean {
+        return match tag {
+            "area" :> true
+            "base" :> true
+            "br" :> true
+            "col" :> true
+            "embed" :> true
+            "hr" :> true
+            "img" :> true
+            "input" :> true
+            "link" :> true
+            "meta" :> true
+            "source" :> true
+            "track" :> true
+            "wbr" :> true
+            _ :> false
+        }
+    }
+
+    fn attrsText(attrs: HAttr[]) -> string {
+        let out = ""
+        for (const a of attrs) {
+            out = out + " " + a.name + "=\"" + escAttr(a.value) + "\""
+        }
+        return out
+    }
+
+    // Compact print of one node.
+    export fn printNode(n: HNode) -> string {
+        return match n {
+            .HElem(tag: tag, attrs: attrs, kids: kids) :> elemText(tag, attrs, kids)
+            .HText(text: t) :> escText(t)
+            .HComment(text: t) :> "<!--" + t + "-->"
+        }
+    }
+
+    fn elemText(tag: string, attrs: HAttr[], kids: HNode[]) -> string {
+        const open: string = "<" + tag + attrsText(attrs) + ">"
+        if (isVoid(tag)) return open
+        return open + printNodes(kids) + "</" + tag + ">"
+    }
+
+    export fn printNodes(ns: HNode[]) -> string {
+        let out = ""
+        for (const n of ns) { out = out + printNode(n) }
+        return out
+    }
+
+    // A page: head lines + body lines, one element per line (the SHELL is
+    // printed readably; template content inside it stays compact).
+    export type Page:struct = { title: string, head: HNode[], body: HNode[] }
+
+    export fn printPage(pg: Page) -> string {
+        let out = "<!doctype html>\n<html>\n<head>\n<meta charset=\"utf-8\">\n"
+        out = out + "<title>" + escText(pg.title) + "</title>\n"
+        for (const n of pg.head) { out = out + printNode(n) + "\n" }
+        out = out + "</head>\n<body>\n"
+        for (const n of pg.body) { out = out + printNode(n) + "\n" }
+        return out + "</body>\n</html>\n"
+    }
+}
