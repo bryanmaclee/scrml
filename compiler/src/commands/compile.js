@@ -12,6 +12,7 @@ import { resolve, dirname, join, relative, basename } from "path";
 import { fileURLToPath } from "url";
 import { compileScrml, scanDirectory } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
+import { createStagedOutput, hasApplicationScopeRefusal } from "./staged-output.js";
 import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "./diagnostic-format.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
 
@@ -510,11 +511,17 @@ function runOnce(opts, selfHostModules = null) {
     console.error(c.yellow(line));
   }
 
+  // g-session-config-refusal-still-writes-dist — compile into a sibling STAGE
+  // (see ./staged-output.js) so an E-MW-008 refusal leaves the output directory
+  // as it was. `targetOutputDir` is compileScrml's own default when none is given.
+  const targetOutputDir = outputDir || (inputFiles.length > 0 ? join(dirname(inputFiles[0]), "dist") : outputDir);
+  const staged = targetOutputDir ? createStagedOutput(targetOutputDir) : null;
+
   let result;
   try {
     result = compileScrml({
       inputFiles,
-      outputDir,
+      outputDir: staged ? staged.stageDir : outputDir,
       verbose,
       convertLegacyCss,
       embedRuntime,
@@ -557,6 +564,8 @@ function runOnce(opts, selfHostModules = null) {
       moduleFormat,
     });
   } catch (err) {
+    // A crashed compile's partial writes are not an artifact of anything.
+    if (staged) staged.discard();
     // ENOENT — file not found, not a compiler bug
     if (err.code === "ENOENT") {
       const missingPath = err.path || err.message;
@@ -574,6 +583,18 @@ function runOnce(opts, selfHostModules = null) {
     console.error(c.dim("This is a compiler bug. Please report it."));
     return { success: false };
   }
+
+  // E-MW-008 refuses the build as two applications contesting one session
+  // cookie: the stage IS that split, so it is discarded. Every other outcome —
+  // success, or any other hard error — promotes the stage, the pre-existing
+  // posture (widening this to all hard errors is a separate ruling). E-MW-007
+  // is not raised here: it is a server-entry fact and `compile` emits none.
+  const refused = hasApplicationScopeRefusal(result.errors);
+  if (staged) {
+    if (refused) staged.discard();
+    else staged.promote();
+  }
+  const resultOutputDir = targetOutputDir || result.outputDir;
 
   // Print ghost-pattern lint diagnostics (W-LINT-NNN)
   // Non-fatal — adopter-facing guidance when JSX/Vue/Svelte syntax is detected.
@@ -610,14 +631,15 @@ function runOnce(opts, selfHostModules = null) {
   }
 
   // Summary line
-  const rawOutRel = relative(cwd, result.outputDir) || result.outputDir;
-  const outRel = rawOutRel.startsWith("..") ? result.outputDir : rawOutRel;
+  const rawOutRel = relative(cwd, resultOutputDir) || resultOutputDir;
+  const outRel = rawOutRel.startsWith("..") ? resultOutputDir : rawOutRel;
   if (result.errors.length > 0) {
     const errCount = result.errors.length;
     const warnCount = result.warnings.length;
     const counts = [c.red(`${errCount} error${errCount !== 1 ? "s" : ""}`)];
     if (warnCount > 0) counts.push(c.yellow(`${warnCount} warning${warnCount !== 1 ? "s" : ""}`));
     console.error(c.bold(c.red("FAILED")) + ` — ${counts.join(", ")}`);
+    if (refused && staged) console.error(`No files were written to ${outRel}/ (a refused build leaves it as it was).`);
     return { success: false };
   }
 
@@ -669,7 +691,7 @@ function runOnce(opts, selfHostModules = null) {
   // flag is a CLI-only surface and the api.js write loop stays single-purpose.
   if (emitReachability && typeof result.reachabilityRecordJson === "function") {
     const json = result.reachabilityRecordJson();
-    const destDir = result.outputDir;
+    const destDir = resultOutputDir;
     for (const f of inputFiles) {
       const base = basename(f, ".scrml");
       const dest = join(destDir, `${base}.reachability.json`);
@@ -684,7 +706,7 @@ function runOnce(opts, selfHostModules = null) {
   // set, the keyword vocab, + an fnv1a content fingerprint. Emission lives here
   // (CLI-only); `tokenSetJson` is a lazy projection — no cost unless this fires.
   if (emitTokenSet && typeof result.tokenSetJson === "function") {
-    const dest = join(result.outputDir, "token-set.json");
+    const dest = join(resultOutputDir, "token-set.json");
     writeFileSync(dest, result.tokenSetJson());
     if (verbose) console.log(c.dim(`  [TS] Wrote token-set: token-set.json`));
   }
@@ -698,7 +720,7 @@ function runOnce(opts, selfHostModules = null) {
   // (`{ "engines": [] }`) for files with no engines — never an error.
   if (emitEngineGraph && typeof result.engineGraphJson === "function") {
     const json = result.engineGraphJson();
-    const destDir = result.outputDir;
+    const destDir = resultOutputDir;
     for (const f of inputFiles) {
       const base = basename(f, ".scrml");
       const dest = join(destDir, `${base}.engine-graph.json`);
@@ -724,7 +746,7 @@ function runOnce(opts, selfHostModules = null) {
   // the api.js write loop stays single-purpose.
   if (emitBlockAnalysis && typeof result.blockAnalyses === "function") {
     const analyses = result.blockAnalyses();
-    const destDir = result.outputDir;
+    const destDir = resultOutputDir;
     for (const f of inputFiles) {
       const base = basename(f, ".scrml");
       const absNorm = resolve(f).replace(/\\/g, "/");

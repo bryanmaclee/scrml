@@ -76,11 +76,12 @@ function stdlibModules(): string[] {
  *   - `module-format-notice` — a notice-string helper.
  *   - `diagnostic-format`    — `stripRedundantCode`, imported by build/compile/dev.
  *   - `select-request-onion` — §40.3/§40.8 onion selection, imported by build/dev.
+ *   - `staged-output`        — write-nothing-on-refusal staging, imported by build/compile.
  */
 function cliVerbs(): string[] {
   const d = join(ROOT, "compiler/src/commands");
   if (!existsSync(d)) return [];
-  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion"]);
+  const NOT_A_VERB = new Set(["module-format-notice", "diagnostic-format", "select-request-onion", "staged-output"]);
   return readdirSync(d)
     .filter((e) => extname(e) === ".js")
     .map((e) => e.replace(/\.js$/, ""))

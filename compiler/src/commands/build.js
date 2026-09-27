@@ -20,6 +20,7 @@ import { compileScrml, scanDirectory, findOutputFiles } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
+import { createStagedOutput, hasApplicationScopeRefusal } from "./staged-output.js";
 
 /** Valid deployment target identifiers. */
 const VALID_TARGETS = ["fly", "railway", "render", "static", "docker"];
@@ -872,28 +873,47 @@ export async function runBuild(args) {
     console.error(line);
   }
 
-  const result = compileScrml({
-    inputFiles,
-    outputDir,
-    verbose: opts.verbose,
-    embedRuntime: opts.embedRuntime,
-    write: true,
-    // adopter-#82 — the deploy path content-addresses page bundles + CSS
-    // (`<base>.client.<hash>.js` / `<base>.<hash>.css`) so a redeploy that
-    // changes bundle bytes changes the URL; the generated `_server.js` serves
-    // those hashed assets `immutable` and the HTML entry `no-cache`.
-    contentHashAssets: true,
-    log: console.log,
-    // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml
-    // default; the emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) is especially
-    // valuable for `build` (catches malformed output before deploy).
-    validateEmit: opts.validateEmit,
-    // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
-    // `classic` keeps the shared runtime byte-identical to pre-arc output.
-    moduleFormat: opts.moduleFormat,
-  });
+  // g-session-config-refusal-still-writes-dist — compile into a sibling STAGE and
+  // promote it only once the build is known not to be an application-scope
+  // refusal (E-MW-007 / E-MW-008). A refused build leaves `outputDir` untouched.
+  const staged = createStagedOutput(outputDir);
+
+  let result;
+  try {
+    result = compileScrml({
+      inputFiles,
+      outputDir: staged.stageDir,
+      verbose: opts.verbose,
+      embedRuntime: opts.embedRuntime,
+      write: true,
+      // adopter-#82 — the deploy path content-addresses page bundles + CSS
+      // (`<base>.client.<hash>.js` / `<base>.<hash>.css`) so a redeploy that
+      // changes bundle bytes changes the URL; the generated `_server.js` serves
+      // those hashed assets `immutable` and the HTML entry `no-cache`.
+      contentHashAssets: true,
+      log: console.log,
+      // S142 — `--validate-emit` / `--no-validate-emit`. undefined = compileScrml
+      // default; the emitted-JS parse gate (E-CODEGEN-INVALID-LOGIC) is especially
+      // valuable for `build` (catches malformed output before deploy).
+      validateEmit: opts.validateEmit,
+      // ESM chunks arc (Unit 1) — `--module-format=classic|esm`. Default
+      // `classic` keeps the shared runtime byte-identical to pre-arc output.
+      moduleFormat: opts.moduleFormat,
+    });
+  } catch (err) {
+    // A crashed compile's partial writes are not an artifact of anything.
+    staged.discard();
+    throw err;
+  }
 
   if (result.errors.length > 0) {
+    // E-MW-007 / E-MW-008 refuse the build as two applications in one server:
+    // the stage IS that server, so it is discarded and `outputDir` is left as it
+    // was. Every other hard error keeps its pre-existing posture (artifacts land,
+    // exit 1) — widening this to all hard errors is a separate ruling.
+    const refused = hasApplicationScopeRefusal(result.errors);
+    if (refused) staged.discard();
+    else staged.promote();
     console.error(`\nBuild failed with ${result.errors.length} error(s):`);
     for (const e of result.errors) {
       // Bug 3 fix (S107) — same shape as dev.js error formatter; surface path:line:col.
@@ -906,8 +926,25 @@ export async function runBuild(args) {
       const loc = line ? `:${line}${col ? `:${col}` : ""}` : "";
       console.error(`  [${e.stage}] ${rel}${loc} ${e.code}: ${stripRedundantCode(e.code, e.message)?.slice(0, 120)}`);
     }
+    if (refused) console.error(`No files were written to ${outputDir}/ (a refused build leaves it as it was).`);
     process.exit(1);
   }
+
+  // E-MW-007 is decided from the emitted `.server.js` units, so it is checked
+  // against the STAGE before anything reaches `outputDir`. (The static target
+  // generates no server entry and never raised E-MW-007; unchanged.)
+  if (opts.target !== "static") {
+    const { error: stagedOnionError } = selectRequestOnion(discoverServerRoutes(staged.stageDir));
+    if (stagedOnionError) {
+      staged.discard();
+      console.error(`\nBuild failed with 1 error(s):`);
+      console.error(`  ${formatOnionConflict(stagedOnionError)}`);
+      console.error(`No files were written to ${outputDir}/ (a refused build leaves it as it was).`);
+      process.exitCode = 1;
+      return;
+    }
+  }
+  staged.promote();
 
   if (result.warnings.length > 0) {
     for (const w of result.warnings) {
@@ -925,10 +962,10 @@ export async function runBuild(args) {
 
   // Discover server route modules in the output directory.
   // discoverServerRoutes separates regular routes from _scrml_ws_handlers.
-  const serverModules = discoverServerRoutes(result.outputDir || outputDir);
+  const serverModules = discoverServerRoutes(outputDir);
   const totalRoutes = serverModules.reduce((n, m) => n + (m.routeNames ?? []).length, 0);
   const totalWsChannels = serverModules.reduce((n, m) => n + (m.wsHandlerNames ?? []).length, 0);
-  const resolvedOutputDir = result.outputDir || outputDir;
+  const resolvedOutputDir = outputDir;
 
   // For static target: skip server entry generation, emit warning if server functions exist
   if (opts.target === "static") {
