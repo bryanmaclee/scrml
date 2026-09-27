@@ -400,6 +400,7 @@ The handful of scrml-specific attributes shown in the todo app:
 - **`bind:value=@draft`** — two-way binding on a form control. Typing in the input updates `@draft`; writing to `@draft` from elsewhere updates the input. Works on `<input>`, `<select>`, `<textarea>`, and checkbox/radio inputs.
 - **`class:done=@item.done`** — adds or removes the CSS class `done` based on the truthiness of the expression. Multiple `class:` bindings stack independently; a `class="row"` on the same element remains intact.
 - **`onclick=remove(@item.id)`**, **`onsubmit=add()`**, **`onchange=toggle(@item.id)`** — event handlers as bare call expressions. The handler is a function call, not a string. Inside a `for` loop, you pass the current item to the handler with normal scrml-expression arguments. For the rare case where you need the native event object, use `onclick=${(e) => handle(e)}` — an arrow inside an interpolation slot.
+- **`onclick={ @count = 0; @phase = .Idle; track("reset") }`** — an **inline block** handler (SPEC §5.2.3, S435). When a handler does more than one thing, wrap the statements in braces right where the handler is attached; they run in order on each event, and the block may span as many lines as you like. A named function (`onclick=startOver()`) is an equally valid free choice — reach for it when the logic is reused or deserves a name. What is still rejected is the **unbraced** `;` sequence (`onclick=startGame(); track("start")`, `E-MULTI-STATEMENT-HANDLER`): with no braces, nothing says where the handler ends and the next attribute begins.
 
 There is no `<script>` tag, no JSX braces, no Svelte directives. The shape is "HTML, plus a few attribute-looking names with scrml-specific compile-time meaning."
 
@@ -1112,7 +1113,7 @@ The convergent failures every developer makes coming from another framework. If 
 | `server function f()` (legacy v0.1) | plain `function f()` — body-content inference escalates | §2.2 |
 | `socket.io`, custom WebSocket setup | `<channel name="..."> ... </>` | §8 |
 | `<MyEngine/>` for a same-file engine | The engine renders at its declaration position | §4.3 |
-| Multi-statement inline handler `onclick=fn(); @x = .Y` | Name the function: `function go() { fn(); @x = .Y }` | §3.4 |
+| Unbraced multi-statement handler `onclick=fn(); @x = .Y` (`E-MULTI-STATEMENT-HANDLER`) | Wrap it in braces: `onclick={ fn(); @x = .Y }` (inline block, SPEC §5.2.3, S435) — or name a function if it's reused | §3.4 |
 
 If you don't see your case in the table, default to the shape from §10. Don't invent syntax — when in doubt, the canonical reference is the PA primer (`docs/PA-SCRML-PRIMER.md`).
 
