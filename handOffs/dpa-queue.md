@@ -3473,6 +3473,25 @@ Scope + evidence: see the table row. Deliverable: an architecture a scrml-author
 with each decision grounded in a measured defect family from the TS compiler, and a per-emitter port order under
 the P5 hybrid gate (`scripts/hybrid.ts`, #1044). Anti-goal: a line-for-line port of `compiler/src/codegen/*.ts`.
 
+### S435 — carried in from dpa-050 §8 + §9.2 (Q6-INDEPENDENT — design these regardless of how Q6 rules)
+
+The dpa-050 DD (`scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md` §8)
+names the primitive that does not exist today — per-instance state (D1: a component-local cell compiles to ONE global
+key, so every instance shares it). A declaration must compile to: (1) a TYPE (the struct shape of attributes +
+children); (2) an INSTANCE FACTORY `mk_<decl>(attrs, parentScope) → instanceId` allocating instance-keyed cells
+`key(decl, instanceId, field)` seeded from defaults overridden by use-site attributes; (3) a RENDER FUNCTION
+`render_<decl>(instanceId, mountEl)` with a per-instance effect scope and DISPOSAL on unmount (effects, listeners,
+timers); (4) the SHARED INSTANCE = `instanceId 0`, allocated lazily only if `<*x>`/`@x` is referenced; (5) `as=`
+binding = a scope alias `name → instanceId`, cleared to `not` on unmount; (6) lexical self-resolution inside
+`renders` (`@dropdown` there = the closure's instance, never 0). Panel additions: (7) STABLE INSTANCE KEYING inside
+`<each>` (whose state survives a reorder — Elm's `Html.Keyed` lesson); (8) the KEY-SCHEME INVARIANT: an engine IS
+instance 0 of a declaration in the runtime key scheme, so a later engine/declaration convergence is a re-spelling,
+not a second keying scheme. (9) the HIGH `g-no-reactive-cell-assignment-type-check` gap is a prerequisite of "typed".
+
+⚑ S435 bears on this too: dpa-052 ruled VALUE SEMANTICS (an alias snapshots; copy-on-write lean) and ONE transition
+axis (permissions on the TYPE, checked on every write; `replace` its own grant). Both are codegen obligations this
+doc must design. dpa-050 Q6 was re-framed by the PA toward option (a) under dpa-052 field contracts — PENDING bryan.
+
 ## [dpa-052] deep-dive — value mutability: immutable unless `let`, and whether tuples come back
 `status:    banked`  # S430 2026-09-26. AXIOM-LEVEL (ladder row 7). One question at a time.
 banked:     S430 2026-09-26 (bryan stated the leading model as "IMO"; PA banked on his go-ahead to discuss)
@@ -3524,3 +3543,28 @@ RULED (bryan S435):
 OPEN (not answered): **does the constraint live on the CELL or on the TYPE?** PA lean: TYPE — it travels across calls
 (`fn pushEdit(s: Edit[end], e: Edit) -> Edit[end]`), a callee cannot be handed a looser value than it declared.
 Also open: cell REASSIGNMENT vs value MUTATION — one axis or two.
+
+**S435 follow-up — RULED:** placement = **TYPE** (bryan: *"type"*) — the permission set is part of the sequence
+type and travels across calls; a callee can only do what its parameter type grants (subset check at each call).
+**AND there is NO `any`/all permission in the language** — bryan: *"we are not adding any, correct? (all must go
+because it is a leaky abstraction."* The legacy all-grant is TRANSITIONAL ONLY; the PA's `Todo[any]` sketch is
+RETRACTED. A fully-mutable sequence is spelled with every axis granted explicitly. PA proposal (unratified): the
+`scrml fix` codemod infers each legacy cell's MINIMAL grant from its actual writes, so migration lands on the
+least permission set used rather than a blanket one.
+
+**S435 — mutation vs reassignment — RULED (bryan: *"1 yes, 2 yes"*):**
+1. **VALUE SEMANTICS (axiom, ruled first and alone).** An alias takes a SNAPSHOT: `let b = @a` then `@a.push(3)`
+   leaves `b` unchanged. PA-VERIFIED BY EMISSION that today's impl LEAKS JS reference semantics — the probe
+   compiles `let b = _scrml_cs_reactive_get("a")` + an in-place `.push(3)` on the same object (not executed).
+   Impl lean: copy-on-write, so no copy cost unless mutated. This is now a ruled property the impl violates → owes a
+   gap + a conformance case at build time.
+2. **ONE AXIS — permissions govern the old→new TRANSITION, never the spelling.** Three kinds of write:
+   **invariants** (length bounds, per-position types) checked on EVERY write however spelled; **edits**
+   (end · front · anywhere · positions writable) classified at compile time from method calls AND recognized
+   reassignment shapes (`[...@x, e]` = end-append, `@x.filter` = shrink-anywhere, `@x.map` = position-write);
+   **`replace`** (an unrelated whole value, incl. `reset(@cell)` and a server reload) is its OWN explicit grant,
+   still bounded by the invariants — so it is NOT `any`. An unclassifiable reassignment is a replace. `replace`
+   subsumes the edit grants on the same type → the compiler warns that they are redundant. Without `replace`, an
+   append-only ledger is PROVABLE (`<audit:Entry[free, end]=[]>`: `@audit = []` and `reset(@audit)` are errors).
+   Structs: a field write is an edit (fields writable along their lifecycle; none = fixed), a whole-struct write is
+   a replace — one rule across sequences, tuples, structs. Local `let` rebinding is OUT of scope (stays E-ASSIGN).
