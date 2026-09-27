@@ -1,0 +1,7 @@
+<count> = 5
+<last> = ""
+
+${ function track(name) { @last = name } }
+
+<button id="reset" onclick={ track("reset"); @count = 0 }>Start over</>
+<p id="out">${@count} ${@last}</p>

@@ -1,0 +1,28 @@
+{
+  "id": "markup-handler-inline-block-handler-in-engine-state-child",
+  "description": "§5.2.3 (S435) — an inline block handler on a button inside an engine state-child's bare body runs both statements on click.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "rationale": "§5.2.3 (amended S435): \"No statement of the block SHALL be dropped, whatever its kind or position — in particular, a statement's effect SHALL NOT depend on … whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row (§17.7).\" One click: count 0 → 1, track sets last to \"go\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MULTI-STATEMENT-HANDLER"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "count": 1,
+      "last": "go"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "1 go"
+      }
+    ]
+  }
+}

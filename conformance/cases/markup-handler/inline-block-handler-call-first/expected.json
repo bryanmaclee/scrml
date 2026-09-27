@@ -1,0 +1,36 @@
+{
+  "id": "markup-handler-inline-block-handler-call-first",
+  "description": "§5.2.3 (S435) — an inline block handler whose FIRST statement is a call runs every statement after it. Carried on impl#1 (P7) under the same defect as the `${…}` form (`expr-handler-call-first-multi-stmt`): every statement after a leading call is dropped.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "rationale": "§5.2.3 (amended S435): \"a statement's effect SHALL NOT depend on whether an earlier statement is a call or an assignment\". One click: track sets last to \"reset\", then count 5 → 0.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MULTI-STATEMENT-HANDLER"
+    ],
+    "input": [
+      {
+        "click": "#reset"
+      }
+    ],
+    "state": {
+      "count": 0,
+      "last": "reset"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "0 reset"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-expr-handler-drops-every-statement-after-a-leading-call",
+      "fails": {
+        "runtime": "sha256:7368ee45393d0f0e"
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "markup-handler-inline-block-handler-multi-line",
+  "description": "§5.2.3 (S435) — an inline block handler spanning several lines, newline-separated, with a `const` declaration and an `if` statement, runs every statement on each click. Pins \"no line limit\" and the function-body statement grammar of the block.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "rationale": "§5.2.3 (amended S435): the inline block's \"statement list is logic context — the same statement grammar as a function body (§7.3): statements are separated by `;` or by a newline, and assignments, calls, `const`/`let` declarations, and `if`/loop statements are all legal. The block MAY span any number of lines.\" Three clicks: count 1, 2, 3; the `if` sets msg to \"big\" on the third.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MULTI-STATEMENT-HANDLER"
+    ],
+    "input": [
+      {
+        "click": "#add"
+      },
+      {
+        "click": "#add"
+      },
+      {
+        "click": "#add"
+      }
+    ],
+    "state": {
+      "count": 3,
+      "msg": "big"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "3 big"
+      }
+    ]
+  }
+}
