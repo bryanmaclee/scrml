@@ -1,0 +1,475 @@
+// =============================================================================
+// self-host-v2 / check.scrml — Core well-formedness: the printer's precondition
+// and M2's gate on `lower`'s output.
+//
+// "Grants are symbols": a field has a write capability Sym (Field.wcap) iff its
+// contract grants some write, and every `Stmt.Write` names a capability. So a
+// write to a locked or derived field is not a checked-and-rejected Core node —
+// there is no capability Sym for it to name (see core.scrml, THE BINDER'S
+// OBLIGATION). What this module checks:
+//   C1  wcap is some  ⟺  the field grants a write (replace, an edit, a graph)
+//   C2  every Write's `cap` is some field's wcap (else: a dangling capability)
+//   C3  the Write's edit is granted by that field's contract (§66.11, §66.12):
+//       `replace` subsumes the sequence edits (§66.11.3); a Transition needs a
+//       graph; a FieldAt(path) must be a well-typed struct path whose TARGET
+//       field grants a write — or the outer field grants `replace` AND no field
+//       on the path carries a non-replace contract (a replace may not bypass a
+//       contract the equivalent direct edit would have to follow)
+//   C4  the Write's instance reference resolves to the capability's OWN
+//       declaration (Shared(X) → X; Lexical(k) → the k-th enclosing declaration;
+//       Alias(h) → the declaration of the use that binds h; Narrowed(c) → what
+//       `c` was bound to)
+//   C5  every cell READ is well-formed the same way (its InstRef resolves to its
+//       declaration; its first path step is a field of that declaration)
+//   C6  a Write's `check` is sound: RuntimeEdge only on a Transition; a
+//       Transition's value, when literal, is a variant of the graph's enum; and
+//       `Static` only when the Core itself proves the edge — the value is a
+//       literal variant that every state may move to (or already is: a self-write
+//       is a no-op, §51.0.F.1). No flow facts exist in Core, so a from-state
+//       "proven by a dominating test" is NOT provable here: lower must emit
+//       RuntimeEdge for it (L8).
+// A diagnostic is a message string (§4 permits strings as text).
+// =============================================================================
+${
+    import { Sym, Type, TypeDef, FieldDef, VariantDef, FieldRef, InstRef, Place, Literal, Expr,
+             EditKind, Check, Stmt, View, Field, Decl, CoreProgram, CapOwner, TransitionGraph,
+             capOwner, grantsAnyWrite, findDecl, findTypeDef } from "./core.scrml"
+    import { Node, allNodes } from "./walk.scrml"
+
+    export fn checkCore(p: CoreProgram) -> string[] {
+        let out: string[] = []
+        for (const d of p.decls) {
+            for (const f of d.fields) { out = out.concat(checkField(d, f)) }
+        }
+        // Context = the lexically enclosing declarations (index 0 = nearest). In
+        // Core, declarations do not nest (a child declaration is a Field), so a
+        // node inside declaration d's initializers/renders has context [d], and a
+        // function body has none.
+        for (const d of p.decls) {
+            for (const n of allNodes(Node.NDecl(d))) { out = out.concat(checkNode(p, [d], n)) }
+        }
+        for (const f of p.fns) {
+            for (const n of allNodes(Node.NFn(f))) { out = out.concat(checkNode(p, [], n)) }
+        }
+        for (const s of p.server) {
+            for (const n of allNodes(Node.NServerFn(s))) { out = out.concat(checkNode(p, [], n)) }
+        }
+        return out
+    }
+
+    fn checkField(d: Decl, f: Field) -> string[] {
+        const has: boolean = f.wcap is some
+        const grants: boolean = grantsAnyWrite(f) || f.graph is some
+        if (has && !grants) return ["C1: <" + d.sym.hint + ">." + f.sym.hint + " has a write capability but grants no write"]
+        if (!has && grants) return ["C1: <" + d.sym.hint + ">." + f.sym.hint + " grants a write but has no write capability"]
+        return []
+    }
+
+    fn checkNode(p: CoreProgram, encl: Decl[], n: Node) -> string[] {
+        return match n {
+            .NStmt(s: s) :> checkStmt(p, encl, s)
+            .NPlace(pl: pl) :> checkPlace(p, encl, pl)
+            .NProgram(p: q) :> []
+            .NDecl(d: d) :> []
+            .NField(f: f) :> []
+            .NFn(f: f) :> []
+            .NServerFn(f: f) :> []
+            .NBlock(b: b) :> []
+            .NExpr(e: e) :> []
+            .NInst(i: i) :> []
+            .NPattern(pat: pat) :> []
+            .NEdit(k: k) :> []
+            .NView(v: v) :> []
+            .NAttr(a: a) :> []
+        }
+    }
+
+    fn checkStmt(p: CoreProgram, encl: Decl[], s: Stmt) -> string[] {
+        return match s {
+            .Write(cap: cap, inst: inst, edit: edit, value: v) :> checkWrite(p, encl, cap, inst, edit, v, writeCheck(s))
+            .Let(sym: sym) :> []
+            .Assign(local: l) :> []
+            .If(cond: c) :> []
+            .Return(e: e) :> []
+            .Eval(e: e) :> []
+        }
+    }
+
+    // F13: Stmt.Write has 5 fields; `check` is read through this accessor.
+    fn writeCheck(s: Stmt) -> Check {
+        return match s {
+            .Write(check: c) :> c
+            .Let(sym: x) :> Check.Static
+            .Assign(local: x) :> Check.Static
+            .If(cond: x) :> Check.Static
+            .Return(e: x) :> Check.Static
+            .Eval(e: x) :> Check.Static
+        }
+    }
+
+    fn checkWrite(p: CoreProgram, encl: Decl[], cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check) -> string[] {
+        const owner: CapOwner | not = capOwner(p, cap)
+        if (owner is not) return ["C2: a write names sym " + cap.id + " (`" + cap.hint + "`), which is not a write capability"]
+        const d: Decl = owner.decl
+        const f: Field = d.fields[owner.idx]
+        const where: string = "<" + d.sym.hint + ">." + f.sym.hint
+        let out: string[] = []
+        const target: Decl | not = resolveInst(p, encl, inst)
+        if (target is not) {
+            out = out.concat(["C4: the write to " + where + " goes through an instance reference that does not resolve (" + instText(inst) + ")"])
+        } else {
+            if (target.sym.id != d.sym.id) {
+                out = out.concat(["C4: the write to " + where + " goes through " + instText(inst) + ", an instance of <" + target.sym.hint + ">"])
+            }
+        }
+        const problem: string = editProblem(p, f, edit)
+        if (problem != "") out = out.concat(["C3: " + where + ": " + problem])
+        const cp: string = checkProblem(p, f, edit, value, check)
+        if (cp != "") out = out.concat(["C6: " + where + ": " + cp])
+        return out
+    }
+
+    fn instText(i: InstRef) -> string {
+        return match i {
+            .Shared(decl: d) :> "Shared(" + d.hint + ")"
+            .Lexical(depth: k) :> "Lexical(" + k + ")"
+            .Alias(sym: s) :> "Alias(" + s.hint + ")"
+            .Narrowed(sym: s) :> "Narrowed(" + s.hint + ")"
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // C3 — is the edit granted?  "" = granted, else the reason.
+    // -------------------------------------------------------------------------
+    fn editProblem(p: CoreProgram, f: Field, edit: EditKind) -> string {
+        return match edit {
+            .Transition :> transitionGranted(f)
+            .Replace :> granted(f.grants.replace, "`replace` is not granted")
+            .Append :> granted(f.grants.replace || hasEdit(f, EditKind.Append), "an end-append is not granted")
+            .Prepend :> granted(f.grants.replace || hasEdit(f, EditKind.Prepend), "a front-prepend is not granted")
+            .Anywhere :> granted(f.grants.replace || hasEdit(f, EditKind.Anywhere), "an anywhere-edit is not granted")
+            .PositionWrite :> granted(f.grants.replace || hasEdit(f, EditKind.PositionWrite), "a position write is not granted")
+            .FieldAt(path: path) :> fieldAtProblem(p, f, path)
+        }
+    }
+
+    fn granted(ok: boolean, why: string) -> string {
+        if (ok) return ""
+        return why
+    }
+
+    fn transitionGranted(f: Field) -> string {
+        if (f.graph is some) return ""
+        return "a transition needs a `rule=` graph; this field has none"
+    }
+
+    fn hasEdit(f: Field, k: EditKind) -> boolean {
+        for (const e of f.grants.edits) {
+            if (e == k) return true
+        }
+        return false
+    }
+
+    fn namedSym(t: Type) -> Sym | not {
+        return match t {
+            .Named(sym: s) :> s
+            .Seq(elem: e) :> not
+            .Maybe(inner: i) :> not
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+        }
+    }
+
+    fn structFields(t: TypeDef) -> FieldDef[] | not {
+        return match t {
+            .StructDef(sym: s, fields: fs) :> fs
+            .EnumDef(sym: s) :> not
+        }
+    }
+
+    // A FieldAt path walks STRUCT fields of the field's value. Each step must
+    // name the struct type of the value it steps into. (A step into a sequence
+    // position is not representable by FieldRef in M1 Core — a position write is
+    // `.PositionWrite` on the field; `@rows[i].qty = v` needs a dynamic-index
+    // Core form, recorded for M2.)
+    fn fieldAtProblem(p: CoreProgram, f: Field, path: FieldRef[]) -> string {
+        if (path.length == 0) return "an empty FieldAt path (a whole-field write is `.Replace`)"
+        let ty: Type = f.ty
+        let contractInside = false
+        let targetGrants = false
+        let i = 0
+        for (const step of path) {
+            const s: Sym | not = namedSym(ty)
+            if (s is not) return "FieldAt step " + i + " steps into a value that is not a struct"
+            if (s.id != step.owner.id) return "FieldAt step " + i + " names owner `" + step.owner.hint + "` but the value there is a `" + s.hint + "`"
+            const td: TypeDef | not = findTypeDef(p, s)
+            if (td is not) return "FieldAt step " + i + ": `" + s.hint + "` is not a declared type"
+            const fs: FieldDef[] | not = structFields(td)
+            if (fs is not) return "FieldAt step " + i + ": `" + s.hint + "` is not a struct"
+            if (step.idx < 0 || step.idx >= fs.length) return "FieldAt step " + i + ": `" + s.hint + "` has no field " + step.idx
+            const fd: FieldDef = fs[step.idx]
+            if (fd.grants.edits.length > 0) contractInside = true
+            targetGrants = fd.grants.replace
+            ty = fd.ty
+            i = i + 1
+        }
+        if (targetGrants) return ""
+        if (f.grants.replace && !contractInside) return ""
+        if (f.grants.replace) return "the path reaches a field with its own non-replace contract; an outer `replace` may not bypass it"
+        return "the target struct field grants no write, and the field does not grant `replace`"
+    }
+
+    // -------------------------------------------------------------------------
+    // C4 / C5 — which declaration does an instance reference name?
+    // -------------------------------------------------------------------------
+    fn resolveInst(p: CoreProgram, encl: Decl[], i: InstRef) -> Decl | not {
+        return match i {
+            .Shared(decl: d) :> findDecl(p, d)
+            .Lexical(depth: k) :> lexicalDecl(encl, k)
+            .Alias(sym: h) :> aliasDecl(p, h)
+            .Narrowed(sym: c) :> narrowedDecl(p, encl, c)
+        }
+    }
+
+    fn lexicalDecl(encl: Decl[], k: int) -> Decl | not {
+        if (k >= 0 && k < encl.length) return encl[k]
+        return not
+    }
+
+    // The declaration of the use that binds `as=` handle h.
+    fn aliasDecl(p: CoreProgram, h: Sym) -> Decl | not {
+        for (const n of allNodes(Node.NProgram(p))) {
+            const d: Sym | not = aliasOf(n, h)
+            if (d is some) return findDecl(p, d)
+        }
+        return not
+    }
+
+    fn aliasOf(n: Node, h: Sym) -> Sym | not {
+        return match n {
+            .NView(v: v) :> viewAlias(v, h)
+            .NProgram(p: q) :> not
+            .NDecl(d: d) :> not
+            .NField(f: f) :> not
+            .NFn(f: f) :> not
+            .NServerFn(f: f) :> not
+            .NBlock(b: b) :> not
+            .NStmt(s: s) :> not
+            .NExpr(e: e) :> not
+            .NPlace(pl: pl) :> not
+            .NInst(i: i) :> not
+            .NPattern(pat: pat) :> not
+            .NEdit(k: k) :> not
+            .NAttr(a: a) :> not
+        }
+    }
+
+    fn viewAlias(v: View, h: Sym) -> Sym | not {
+        return match v {
+            .Instance(decl: d, alias: a) :> sameAlias(a, h, d)
+            .El(tag: t) :> not
+            .Text(text: t) :> not
+            .Dyn(e: e) :> not
+            .Cond(arms: a) :> not
+            .Each(src: s) :> not
+            .Slot :> not
+        }
+    }
+
+    fn sameAlias(a: Sym | not, h: Sym, d: Sym) -> Sym | not {
+        if (a is not) return not
+        if (a.id == h.id) return d
+        return not
+    }
+
+    // `.Narrowed(c)`: c must be bound by a Let whose initializer is an instance
+    // Handle; it names whatever that handle names.
+    fn narrowedDecl(p: CoreProgram, encl: Decl[], c: Sym) -> Decl | not {
+        for (const n of allNodes(Node.NProgram(p))) {
+            const i: InstRef | not = letHandle(n, c)
+            if (i is some) return resolveInst(p, encl, i)
+        }
+        return not
+    }
+
+    fn letHandle(n: Node, c: Sym) -> InstRef | not {
+        return match n {
+            .NStmt(s: s) :> stmtLetHandle(s, c)
+            .NProgram(p: q) :> not
+            .NDecl(d: d) :> not
+            .NField(f: f) :> not
+            .NFn(f: f) :> not
+            .NServerFn(f: f) :> not
+            .NBlock(b: b) :> not
+            .NExpr(e: e) :> not
+            .NPlace(pl: pl) :> not
+            .NInst(i: i) :> not
+            .NPattern(pat: pat) :> not
+            .NEdit(k: k) :> not
+            .NView(v: v) :> not
+            .NAttr(a: a) :> not
+        }
+    }
+
+    fn stmtLetHandle(s: Stmt, c: Sym) -> InstRef | not {
+        return match s {
+            .Let(sym: sym, init: init) :> letInitHandle(sym, init, c)
+            .Assign(local: l) :> not
+            .Write(cap: x) :> not
+            .If(cond: x) :> not
+            .Return(e: x) :> not
+            .Eval(e: x) :> not
+        }
+    }
+
+    fn letInitHandle(sym: Sym, init: Expr, c: Sym) -> InstRef | not {
+        if (sym.id != c.id) return not
+        return exprHandle(init)
+    }
+
+    fn exprHandle(e: Expr) -> InstRef | not {
+        return match e {
+            .Handle(inst: i) :> i
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+        }
+    }
+
+    fn checkPlace(p: CoreProgram, encl: Decl[], pl: Place) -> string[] {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> checkCellRead(p, encl, d, i, path)
+            .LocalPath(sym: s) :> []
+        }
+    }
+
+    fn checkCellRead(p: CoreProgram, encl: Decl[], dsym: Sym, i: InstRef, path: FieldRef[]) -> string[] {
+        const d: Decl | not = findDecl(p, dsym)
+        if (d is not) return ["C5: a read names declaration `" + dsym.hint + "`, which does not exist"]
+        const target: Decl | not = resolveInst(p, encl, i)
+        if (target is not) return ["C5: a read of <" + d.sym.hint + "> goes through " + instText(i) + ", which does not resolve"]
+        if (target.sym.id != d.sym.id) return ["C5: a read of <" + d.sym.hint + "> goes through " + instText(i) + ", an instance of <" + target.sym.hint + ">"]
+        if (path.length > 0) {
+            if (path[0].owner.id != d.sym.id || path[0].idx < 0 || path[0].idx >= d.fields.length) {
+                return ["C5: a read of <" + d.sym.hint + "> names field " + path[0].idx + " of `" + path[0].owner.hint + "`"]
+            }
+        }
+        return []
+    }
+
+    // -------------------------------------------------------------------------
+    // C6 — is the write's `check` sound?  "" = sound, else the reason.
+    // -------------------------------------------------------------------------
+    fn isTransition(k: EditKind) -> boolean {
+        return match k {
+            .Transition :> true
+            .FieldAt(path: x) :> false
+            .Replace :> false
+            .Append :> false
+            .Prepend :> false
+            .Anywhere :> false
+            .PositionWrite :> false
+        }
+    }
+
+    fn isStatic(c: Check) -> boolean {
+        return match c {
+            .Static :> true
+            .RuntimeEdge :> false
+        }
+    }
+
+    // The literal behind a `Lit` expression, else not.
+    fn exprLiteral(e: Expr) -> Literal | not {
+        return match e {
+            .Lit(lit: l) :> l
+            .Handle(inst: x) :> not
+            .Local(sym: x) :> not
+            .Read(place: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+        }
+    }
+
+    // -1 = not a variant of `es`; else the variant index.
+    fn variantIdx(l: Literal, es: Sym) -> int {
+        return match l {
+            .Variant(enumSym: s, idx: idx) :> variantIdxOf(s, idx, es)
+            .Int(v: x) :> -1
+            .Num(v: x) :> -1
+            .Str(v: x) :> -1
+            .Bool(v: x) :> -1
+            .Absent :> -1
+        }
+    }
+
+    fn variantIdxOf(s: Sym, idx: int, es: Sym) -> int {
+        if (s.id == es.id) return idx
+        return -1
+    }
+
+    fn enumSize(p: CoreProgram, es: Sym) -> int {
+        const t: TypeDef | not = findTypeDef(p, es)
+        if (t is not) return 0
+        return enumVariantCount(t)
+    }
+
+    fn enumVariantCount(t: TypeDef) -> int {
+        return match t {
+            .EnumDef(sym: s, variants: vs) :> vs.length
+            .StructDef(sym: s) :> 0
+        }
+    }
+
+    fn targetsOf(g: TransitionGraph, origin: int) -> int[] {
+        for (const e of g.edges) {
+            if (e.origin == origin) return e.targets
+        }
+        return []
+    }
+
+    fn hasInt(xs: int[], x: int) -> boolean {
+        for (const y of xs) { if (y == x) return true }
+        return false
+    }
+
+    // Every state either IS `to` (a self-write no-op) or has an edge to `to`.
+    fn reachableFromEveryState(g: TransitionGraph, n: int, to: int) -> boolean {
+        let v = 0
+        while (v < n) {
+            if (v != to && !hasInt(targetsOf(g, v), to)) return false
+            v = v + 1
+        }
+        return true
+    }
+
+    fn checkProblem(p: CoreProgram, f: Field, edit: EditKind, value: Expr, check: Check) -> string {
+        if (!isTransition(edit)) {
+            if (isStatic(check)) return ""
+            return "a RuntimeEdge check on a write that is not a transition"
+        }
+        const g: TransitionGraph | not = f.graph
+        if (g is not) return ""                                  // already C3
+        const n: int = enumSize(p, g.enumSym)
+        const lit: Literal | not = exprLiteral(value)
+        if (lit is some) {
+            const to: int = variantIdx(lit, g.enumSym)
+            if (to < 0 || to >= n) return "the transition value is not a variant of `" + g.enumSym.hint + "`"
+            if (!isStatic(check)) return ""
+            if (reachableFromEveryState(g, n, to)) return ""
+            return "a Static transition to a variant not reachable from every state; the edge needs a RuntimeEdge check"
+        }
+        if (isStatic(check)) return "a Static transition to a non-literal value is not provable in Core; use RuntimeEdge"
+        return ""
+    }
+}

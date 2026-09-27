@@ -1,0 +1,82 @@
+// =============================================================================
+// slice-m1 / valuesem.core.scrml — the HAND-BUILT Core for a §66.10 probe:
+// "an alias snapshot does not change when the source is later written".
+//
+// Neither §66.19 target program takes a snapshot, so this third, minimal program
+// states the §66.10 item-1 example (`let b = @a` then `@a.push(3)`) in the
+// ruled spelling. It also exercises a non-replace sequence edit (`.Append`),
+// used by the §6.1 O(n)-copy measurement.
+//
+//   <program>
+//       <audit:string[free, end]=([])/>      // append-only (⚑ O10: grant spelling; ⚑ O32: `([])`)
+//       <let seen:int=0/>
+//       function log() {
+//           let before = @audit              // a snapshot (§66.10)
+//           @audit.push("x")                 // an end-append edit, granted by [free, end]
+//           @seen = before.length            // the snapshot did not grow
+//       }
+//       <main>
+//           <button onclick=log()>log</button>
+//           <p>${@seen} / ${@audit.length}</p>
+//       </main>
+//   </program>
+// =============================================================================
+${
+    import { Sym, InstRef, PrimOp, Expr, EditKind, Check, Stmt, View, FieldMode, FieldRole,
+             DeclKind, Type, LengthGrant, SeqAt, Field, Decl, Fn, CoreProgram,
+             mkSym, block, replaceGrant, litInt, litStr, readField, prim1, call0,
+             el, textView, dyn, onEvent } from "../core.scrml"
+
+    export fn valuesemCore() -> CoreProgram {
+        const sProgram: Sym = mkSym(0, "program")
+        const sAudit: Sym   = mkSym(1, "audit")
+        const sSeen: Sym    = mkSym(2, "seen")
+        const wAudit: Sym   = mkSym(3, "audit")      // capability from the [free, end] grants
+        const wSeen: Sym    = mkSym(4, "seen")
+        const sLog: Sym     = mkSym(5, "log")
+        const sBefore: Sym  = mkSym(6, "before")
+
+        const AUDIT: int = 0
+        const SEEN: int = 1
+        const here: InstRef = InstRef.Lexical(0)
+        const shared: InstRef = InstRef.Shared(sProgram)
+
+        const fAudit: Field = {
+            sym: sAudit,
+            ty: Type.Seq(Type.Str, { length: LengthGrant.Free, at: [SeqAt.End], positionsWritable: false }),
+            init: Expr.ArrayOf([]),
+            mode: FieldMode.Locked, role: FieldRole.Child,
+            grants: { replace: false, edits: [EditKind.Append] },
+            graph: not, exported: false, wcap: wAudit,
+        }
+        const fSeen: Field = {
+            sym: sSeen, ty: Type.Int, init: litInt(0),
+            mode: FieldMode.Let, role: FieldRole.Child, grants: replaceGrant(),
+            graph: not, exported: false, wcap: wSeen,
+        }
+
+        const log: Fn = {
+            sym: sLog, params: [], pure: false,
+            body: block([
+                Stmt.Let(sBefore, readField(sProgram, shared, AUDIT)),
+                Stmt.Write(wAudit, shared, EditKind.Append, litStr("x"), Check.Static),
+                Stmt.Write(wSeen, shared, EditKind.Replace, prim1(PrimOp.Length, Expr.Local(sBefore)), Check.Static),
+            ]),
+        }
+
+        const main: View = el("main", [], [
+            el("button", [onEvent("click", [Stmt.Eval(call0(sLog))])], [textView("log")]),
+            el("p", [], [
+                dyn(readField(sProgram, here, SEEN)),
+                textView(" / "),
+                dyn(prim1(PrimOp.Length, readField(sProgram, here, AUDIT))),
+            ]),
+        ])
+
+        const program: Decl = {
+            sym: sProgram, kind: DeclKind.Program, single: true,
+            fields: [fAudit, fSeen], renders: [main], wiring: [], handles: [],
+        }
+        return { program: sProgram, decls: [program], types: [], fns: [log], server: [] }
+    }
+}

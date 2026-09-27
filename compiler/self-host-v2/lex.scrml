@@ -321,10 +321,31 @@ ${
     // `if` CONDITION does NOT compile today (E-SCOPE-001: `kw` undeclared; the
     // binding never enters scope — see progress.md finding F10). regexAllowedAfter
     // uses this to split value-keywords from the regex-preceding keywords.
+    // TOTAL over TokenKind with no default arm (dpa-051 §3.4; enforced by
+    // scripts/lint-no-default-arm.js): a new token kind must decide here whether
+    // it carries a keyword. Payload variants are listed one per arm (a `|`
+    // alternation containing a payload pattern is dropped today — F6); the
+    // nullary kinds share one alternation arm, which must be the FIRST arm (an
+    // alternation arm in any later position is glued onto the previous arm's
+    // body — slice-m1/progress.md F12).
     fn keywordName(k: TokenKind) -> string {
         return match k {
-            .Keyword(name) :> name
-            _              :> ""
+            .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
+                  .Semicolon | .Comma | .Dot | .Colon | .Arrow | .Question |
+                  .Assign | .Equal | .StrictEqual | .NotEqual | .StrictNotEqual |
+                  .Plus | .Minus | .Star | .Slash | .Percent |
+                  .LessThan | .LessEqual | .GreaterThan | .GreaterEqual |
+                  .Increment | .Decrement | .NullishCoalesce | .OptionalChain | .Bang |
+                  .LogicalAnd | .LogicalOr | .BitAnd | .BitOr |
+                  .TemplateInterpStart | .TemplateInterpEnd | .Eof :> ""
+            .Keyword(name: name) :> name
+            .NumberLit           :> ""
+            .StringLit           :> ""
+            .RegexLit            :> ""
+            .TemplateChunk       :> ""
+            .BareVariant         :> ""
+            .Ident               :> ""
+            .Unknown             :> ""
         }
     }
 
@@ -882,22 +903,43 @@ ${
         return classify(cur, lastKind(st))
     }
 
-    // The (mode x event) transition table (the DD's `match (st.mode, ev)`).
+    // The (mode x event) transition table (the DD's `match (st.mode, ev)`),
+    // written as a match on the mode and then on the event, so BOTH axes are
+    // total with no default arm (dpa-051 §3.4; scripts/lint-no-default-arm.js).
     // dispatch is reached only for InCode (templateBodyStep owns InTemplateBody;
-    // the atomic-scan modes settle back to InCode within one step) — the
-    // non-InCode arms below keep the product-match TOTAL.
+    // the atomic-scan modes settle back to InCode within one step); the other
+    // modes are routed to dispatchOffMode, which keeps the fold total. (An
+    // alternation arm must come FIRST — F12.)
     fn dispatch(st: LexState, ev: LexEvent) -> LexState {
-        return match (st.mode, ev) {
-            (.InCode, .Ordinary)        :> emitOneToken(st)
-            (.InCode, .SawQuote(q))     :> scanStringStep(st, q)
-            (.InCode, .SawLineComment)  :> scanLineCommentStep(st)
-            (.InCode, .SawBlockComment) :> scanBlockCommentStep(st)
-            (.InCode, .SawRegexSlash)   :> scanRegexStep(st)
-            (.InCode, .SawBareVariant)  :> scanBareVariantStep(st)
-            (.InCode, .SawBacktick)     :> enterTemplateStep(st)
-            (.InCode, .SawInterpClose)  :> closeInterpStep(st)
-            (_, .SawEof)                :> st                  // cursor already at EOF; settle
-            (_, _)                      :> deferAdvance(st)    // unreachable guard (fold stays total)
+        return match st.mode {
+            .InTemplateBody | .InSingleString | .InDoubleString |
+                  .InLineComment | .InBlockComment | .InRegexBody :> dispatchOffMode(st, ev)
+            .InCode :> dispatchInCode(st, ev)
+        }
+    }
+
+    fn dispatchInCode(st: LexState, ev: LexEvent) -> LexState {
+        return match ev {
+            .Ordinary          :> emitOneToken(st)
+            .SawQuote(kind: q) :> scanStringStep(st, q)
+            .SawLineComment    :> scanLineCommentStep(st)
+            .SawBlockComment   :> scanBlockCommentStep(st)
+            .SawRegexSlash     :> scanRegexStep(st)
+            .SawBareVariant    :> scanBareVariantStep(st)
+            .SawBacktick       :> enterTemplateStep(st)
+            .SawInterpClose    :> closeInterpStep(st)
+            .SawEof            :> st                  // cursor already at EOF; settle
+        }
+    }
+
+    // Unreachable in practice (see dispatch); advancing one char keeps the fold
+    // total. At EOF the cursor settles, exactly as in InCode.
+    fn dispatchOffMode(st: LexState, ev: LexEvent) -> LexState {
+        return match ev {
+            .Ordinary | .SawLineComment | .SawBlockComment | .SawRegexSlash |
+                  .SawBareVariant | .SawBacktick | .SawInterpClose :> deferAdvance(st)
+            .SawQuote(kind: q) :> deferAdvance(st)
+            .SawEof            :> st
         }
     }
 
@@ -905,8 +947,9 @@ ${
     // every other mode is InCode-position (trivia skipped, then classified).
     fn step(st: LexState) -> LexState {
         return match st.mode {
+            .InCode | .InSingleString | .InDoubleString |
+                  .InLineComment | .InBlockComment | .InRegexBody :> codeStep(st)
             .InTemplateBody :> templateBodyStep(st)
-            _               :> codeStep(st)
         }
     }
 
