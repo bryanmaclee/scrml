@@ -255,6 +255,11 @@ export function readHostImportCapabilities(filePaths) {
 
 /**
  * Is `filePath` inside the capability's allow-list?
+ *
+ * The allow-list bounds the IMPORTER only; the host module an admitted file
+ * names is unbounded BY DESIGN (the real `stdlib/compiler/*.scrml` import
+ * `../../compiler/src/*.ts`, outside the allow-list) — do not "fix" this into a
+ * target check.
  * @returns {boolean}
  */
 export function isHostImportPermitted(filePath, cap) {
@@ -307,6 +312,8 @@ function describeCapability(cap) {
  * An `import:host` inside a function body is left to the existing
  * gauntlet-phase1 E-IMPORT-003 function-body check (which already catches
  * both the `import-decl` and the bare-expr shape), so it is not double-fired.
+ * It is still held to the manifest (E-IMPORT-008) and always marked
+ * `_hostImportRejected`, so it never reaches the module resolver (fail closed).
  *
  * @param {object} ast — FileAST
  * @param {string} filePath
@@ -333,6 +340,25 @@ export function validateHostImports(ast, filePath, cap) {
     found.set(key !== null ? key : -1 - found.size, { node, fileTop });
   };
 
+  // #1045 review (LOW) — an `import:host` inside a function body. Its
+  // placement diagnostic belongs to the gauntlet-phase1 E-IMPORT-003 check (not
+  // double-fired here), but it used to go UNRECORDED: no E-IMPORT-008 on a
+  // project with host-import disabled, and no `_hostImportRejected` to keep the
+  // module resolver from loading it. It now fails closed — always rejected (the
+  // compile fails on E-IMPORT-003 regardless) and held to the manifest like
+  // every other placement.
+  /** @type {Map<number, { node: object, twins?: object[] }>} */
+  const inFunction = new Map();
+  const recordInFunction = (node) => {
+    const key = hostImportSpanKey(node);
+    const prev = key !== null ? inFunction.get(key) : undefined;
+    if (prev) {
+      (prev.twins || (prev.twins = [])).push(node);
+      return;
+    }
+    inFunction.set(key !== null ? key : -1 - inFunction.size, { node });
+  };
+
   // Generic total walk: node containers differ between the two front-ends and
   // across node kinds (body / children / branches[].element / arms / ...), so
   // descend every object-valued field rather than an enumerated list.
@@ -347,6 +373,7 @@ export function validateHostImports(ast, filePath, cap) {
     const kind = value.kind;
     if (kind === "import-decl" && typeof value.hostTag === "string") {
       if (!insideFunction) record(value, false);
+      else recordInFunction(value);
       return;
     }
     if (
@@ -385,8 +412,11 @@ export function validateHostImports(ast, filePath, cap) {
     if (imp && imp.kind === "import-decl" && typeof imp.hostTag === "string") {
       const key = hostImportSpanKey(imp);
       const prev = key !== null ? found.get(key) : undefined;
+      const prevInFn = key !== null && !prev ? inFunction.get(key) : undefined;
       if (prev) {
         if (prev.node !== imp) (prev.twins || (prev.twins = [])).push(imp);
+      } else if (prevInFn) {
+        if (prevInFn.node !== imp) (prevInFn.twins || (prevInFn.twins = [])).push(imp);
       } else {
         record(imp, false);
       }
@@ -400,6 +430,16 @@ export function validateHostImports(ast, filePath, cap) {
 
   const spanOf = (node) =>
     node && node.span ? { ...node.span, file: node.span.file || filePath } : { file: filePath, start: 0, end: 0, line: 1, col: 1 };
+
+  const manifestError = (node) => ({
+    code: "E-IMPORT-008",
+    message:
+      `E-IMPORT-008: \`import:${node.hostTag}\` is used in a file outside the project's \`[capabilities] host-import\` allow-list. ` +
+      describeCapability(cap) +
+      " Adopter code imports scrml modules with a plain `import`; `import:host` is the self-host bootstrap bridge (§21.3.1).",
+    span: spanOf(node),
+    severity: "error",
+  });
 
   for (const b of misplacedBare) {
     errors.push({
@@ -477,18 +517,15 @@ export function validateHostImports(ast, filePath, cap) {
 
     if (!isHostImportPermitted(filePath, cap)) {
       rejected = true;
-      errors.push({
-        code: "E-IMPORT-008",
-        message:
-          `E-IMPORT-008: \`${shown}\` is used in a file outside the project's \`[capabilities] host-import\` allow-list. ` +
-          describeCapability(cap) +
-          " Adopter code imports scrml modules with a plain `import`; `import:host` is the self-host bootstrap bridge (§21.3.1).",
-        span: spanOf(node),
-        severity: "error",
-      });
+      errors.push(manifestError(node));
     }
 
     if (rejected) reject(entry);
+  }
+
+  for (const entry of inFunction.values()) {
+    if (!isHostImportPermitted(filePath, cap)) errors.push(manifestError(entry.node));
+    reject(entry);
   }
 
   return errors;
