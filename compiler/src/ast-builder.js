@@ -53,12 +53,12 @@ import {
 // `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts
 // this file does not import it.
 
-import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode } from "./expression-parser.ts";
+import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings } from "./expression-parser.ts";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
 import { splitBlocks as _splitBlocksForP2Form1 } from "./block-splitter.js";
-import { scanForTopLevelSemicolon, isEventHandlerAttrName } from "./multi-statement-scan.ts";
+import { scanForTopLevelSemicolon, isEventHandlerAttrName, bareHandlerStatementsText, attrShapedTokenInStatements } from "./multi-statement-scan.ts";
 import { getElementShape } from "./html-elements.js";
 import { parseAfterDuration } from "./codegen/parse-after-duration.ts";
 import { autoDeriveEngineVarName } from "./engine-varname.ts";
@@ -3048,6 +3048,30 @@ function structuralHeaderAnchor(block, header) {
  *   bind: props against the propsDecl and emits E-COMPONENT-013 if prop is not bindable).
  * @returns {AttrNode[]}
  */
+/**
+ * S437 round 4 (#5) — the expression view of an attribute value. For an EVENT
+ * HANDLER, `safeParseExprToNodeGlobal`'s "statement boundary not detected —
+ * trailing content would be silently dropped" warning is HELD (not printed):
+ * whether the trailing statements are dropped is only known once
+ * `attachHandlerStatementLists` has parsed the value as a statement list. That
+ * pass prints the held warning only when no statement list is attached.
+ */
+const _heldHandlerWarnings = new WeakMap();
+function parseHandlerAwareExprNode(name, raw, filePath, startOffset, errors) {
+  if (!isEventHandlerAttrName(name)) return safeParseExprToNodeGlobal(raw, filePath, startOffset, errors);
+  const { result, warnings } = captureTrailingContentWarnings(() => safeParseExprToNodeGlobal(raw, filePath, startOffset, errors));
+  if (warnings.length > 0 && result && typeof result === "object") _heldHandlerWarnings.set(result, warnings);
+  return result;
+}
+function flushHeldHandlerWarnings(value) {
+  const node = value && value.exprNode;
+  if (!node || typeof node !== "object") return;
+  const held = _heldHandlerWarnings.get(node);
+  if (!held) return;
+  _heldHandlerWarnings.delete(node);
+  if (!value.handlerBlock) for (const w of held) console.warn(w);
+}
+
 function parseAttributes(tokens, filePath, errors, isComponent = false, tagName = null) {
   const attrs = [];
   let i = 0;
@@ -3129,7 +3153,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
               // Token text is the inner of `{...}` (delimiter `{` skipped),
               // so baseOffset = valSpan.start + 1.
               emitForbiddenSwitchInRaw(raw, valSpan, (valSpan?.start ?? 0) + 1, filePath, errors);
-              value = { kind: "expr", raw, refs, exprNode: safeParseExprToNodeGlobal(raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
+              value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
             }
           } else if (valTok.kind === "ATTR_EXPR") {
             // Boolean expression for if= attribute (e.g. !@var, @a === 1, @a && @b quoted).
@@ -3150,7 +3174,7 @@ function parseAttributes(tokens, filePath, errors, isComponent = false, tagName 
             // relative index within the token text and the token spans don't
             // overlap across attributes).
             emitForbiddenSwitchInRaw(raw, valSpan, valSpan?.start ?? 0, filePath, errors);
-            value = { kind: "expr", raw, refs, exprNode: safeParseExprToNodeGlobal(raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
+            value = { kind: "expr", raw, refs, exprNode: parseHandlerAwareExprNode(name, raw, filePath, valSpan?.start ?? 0, errors), span: valSpan };
           } else if (valTok.kind === "ATTR_OP_REJECT") {
             // cluster-A (S188 "reject + parens") — an unquoted CONDITION
             // attribute (`if=`/`show=`/`else-if=`) whose value contains a bare
@@ -6372,6 +6396,45 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     }
   }
 
+  /**
+   * S437 round 4 — a DANGLING `else`: an `else` that begins a statement right
+   * after an `if` that did not take it. The only way that happens is a stray
+   * `;` after a BRACED consequent — `if (c) { a }; else b` — which is not an
+   * if/else in scrml or in JS (the `;` is an empty statement). Pre-S437 the
+   * parser silently kept the text `else { … }` as a bare expression, which
+   * either failed later as E-CODEGEN-INVALID-LOGIC or — once the `;` was
+   * dropped — re-read as an if/else in the emitted JS (a newly-accepting
+   * one-way door). Report it: E-STMT-UNEXPECTED-TOKEN ("no statement begins
+   * here", §34). Scoped to "directly after an if-stmt" so an `else` that
+   * legitimately starts an arm in another grammar is never touched. Consumes
+   * only the `else`; the body that follows parses normally (the build fails).
+   */
+  function rejectDanglingElse(prevNode) {
+    const t = peek();
+    if (!(t.kind === "KEYWORD" && t.text === "else")) return false;
+    if (!prevNode || prevNode.kind !== "if-stmt") return false;
+    // Name what actually ended the `if` — the nearest significant token before
+    // this `else` (comments / blank tokens are not separators: S437 round 5 F1).
+    let back = i - 1;
+    while (back >= 0 && tokens[back] && (tokens[back].kind === "COMMENT" || (typeof tokens[back].text === "string" && tokens[back].text.trim() === "" && tokens[back].kind !== "STRING"))) back--;
+    const sep = back >= 0 && tokens[back] ? tokens[back] : null;
+    const isSemi = !!(sep && sep.kind === "PUNCT" && sep.text === ";");
+    const sepText = sep && typeof sep.text === "string" ? sep.text : "?";
+    errors.push(new TABError(
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-STMT-UNEXPECTED-TOKEN: `else` has no `if` to belong to. " +
+      (isSemi
+        ? "The `;` before it ends the `if` statement, so this `else` starts nothing. " +
+          "Remove the `;` between the `if` body and `else`: `if (c) { … } else { … }`."
+        : `The \`if\` before it ended at \`${sepText}\`, so this \`else\` starts nothing. ` +
+          "Write the `else` directly after the `if` body: `if (c) { … } else { … }`.") +
+      " (SPEC §4, §17)",
+      tokenSpan(t, filePath),
+    ));
+    consume(); // the `else`
+    return true;
+  }
+
   function _parseRecursiveBodyInner() {
     const stmts = [];
     while (true) {
@@ -6409,6 +6472,8 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         );
         if (startsArm) { consume(); continue; }
       }
+
+      if (rejectDanglingElse(stmts[stmts.length - 1])) continue;
 
       const node = parseOneStatement();
       if (node) {
@@ -11000,15 +11065,65 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     const startTok = consume(); // consume `if`
     const { expr: condition } = collectIfCondition();
     let consequent = [];
+    let bracelessConsequent = false;
     if (peek().text === "{") {
       consume();
       consequent = parseRecursiveBody();
     } else if (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && (peek().text === "}" || peek().text === ";"))) {
       // Braceless single-statement if-body: `if (cond) stmt`
       const singleStmt = parseOneStatement();
-      if (singleStmt) consequent = [singleStmt];
+      if (singleStmt) { consequent = [singleStmt]; bracelessConsequent = true; }
     }
     let alternate = null;
+    // S437 — a BRACELESS consequent is terminated by `;` and/or a newline, so the
+    // `else` that belongs to it sits AFTER that terminator: `if (c) a(); else b()`
+    // / `if (c) a()\n else b()`. Pre-S437 only a token-adjacent `else` was seen, so
+    // the `else` was left for the NEXT statement, which dropped it and ran its body
+    // unconditionally — a silent miscompile in every function body (and in §5.2.3
+    // inline-block handlers, which share this parser). Look past the terminator
+    // (`;`, comments, blank tokens) and take it ONLY when an `else` follows; any
+    // other token is left exactly where it was.
+    //
+    // ⚑ BRACELESS ONLY. A BRACED consequent ends at its own `}`; a `;` after it is
+    // an empty statement, so `if (c) { a }; else b` is NOT an if/else — JS rejects
+    // it, and base scrml rejected it too. Skipping that `;` would be newly-
+    // accepting (a one-way door), and in value position (`const v = if (c) {…};
+    // else {…}`) it would silently re-shape the program. S437 round-4 review #4.
+    if (bracelessConsequent && consequent.length > 0 && peek().text !== "}" && !(peek().kind === "KEYWORD" && peek().text === "else")) {
+      let k = 0;
+      let sawSemi = false;
+      while (true) {
+        const t = peek(k);
+        if (t.kind === "EOF") break;
+        if (t.kind === "PUNCT" && t.text === ";") {
+          if (sawSemi) break; // `;;` — an empty statement sits between; not ours
+          sawSemi = true; k++; continue;
+        }
+        if (t.kind === "COMMENT" || (t.text.trim() === "" && t.kind !== "STRING")) { k++; continue; }
+        break;
+      }
+      const after = peek(k);
+      if (k > 0 && after.kind === "KEYWORD" && after.text === "else") {
+        for (let s = 0; s < k; s++) consume();
+      }
+    } else if (!bracelessConsequent && peek().kind !== "EOF" && !(peek().kind === "KEYWORD" && peek().text === "else")) {
+      // S437 round 5 (F1) — after a BRACED consequent, a COMMENT (or blank
+      // token) between `}` and `else` is whitespace, as in JS:
+      // `if (c) { a } // note⏎ else { b }` / `} /* c */ else` / an own-line
+      // comment before `else` / `else if`. Skip ONLY those — never a `;`, which
+      // ends the `if` (round 4 #4: `if (c) { a }; else b` stays rejected).
+      let k = 0;
+      while (true) {
+        const t = peek(k);
+        if (t.kind === "EOF") break;
+        if (t.kind === "COMMENT" || (typeof t.text === "string" && t.text.trim() === "" && t.kind !== "STRING")) { k++; continue; }
+        break;
+      }
+      const after = peek(k);
+      if (k > 0 && after.kind === "KEYWORD" && after.text === "else") {
+        for (let s = 0; s < k; s++) consume();
+      }
+    }
     // Check for else / else if
     if (peek().kind === "KEYWORD" && peek().text === "else") {
       consume(); // consume `else`
@@ -11018,6 +11133,11 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       } else if (peek().text === "{") {
         consume();
         alternate = parseRecursiveBody();
+      } else if (peek().kind !== "EOF" && !(peek().kind === "PUNCT" && (peek().text === "}" || peek().text === ";"))) {
+        // S437 — braceless else-body: `else stmt`. Pre-S437 the `else` was consumed
+        // and the statement then parsed as an UNCONDITIONAL sibling.
+        const singleStmt = parseOneStatement();
+        if (singleStmt) alternate = [singleStmt];
       }
     }
     return {
@@ -13949,6 +14069,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       continue;
     }
 
+    // S437 round 4 — dangling `else` after an `if` that ended (see rejectDanglingElse).
+    if (rejectDanglingElse(nodes[nodes.length - 1])) continue;
+
     // IF STATEMENT
     if (tok.kind === "KEYWORD" && tok.text === "if") {
       const node = parseOneIfStmt();
@@ -16212,6 +16335,333 @@ function _rebaseSubparseSpans(nodes, deltaOffset, block) {
   for (const n of nodes) visit(n);
 }
 
+// S437 — codes that must survive the two error-DISCARDING sub-builds (the
+// `<each>` body re-split and the engine state-child body build). Those
+// sub-builds drop their TAB errors on purpose: engine-only attribute syntax and
+// per-item `:`-shorthand openers raise E-ATTR-001 / E-SCOPE-001 / E-CTX-003-
+// shaped false positives there, and the authoritative validators
+// (engine-statechild-parser, the A1b PASS family) re-check those nodes later.
+// A code belongs in this set only when NO downstream validator re-derives it
+// for a node inside those bodies — dropping it is then pure loss, not
+// de-duplication. E-MULTI-STATEMENT-HANDLER qualifies: it is decided only here,
+// from the opener's raw text, and without forwarding a bare `;` sequence in an
+// `<each>` row or an engine state-child compiled at exit 0 with its tail read
+// as HTML attributes (SPEC §5.2.3: "The error is kept so the unbraced sequence
+// can never be silently read the wrong way").
+const SUBPARSE_FORWARDED_CODES = new Set(["E-MULTI-STATEMENT-HANDLER"]);
+
+/**
+ * Forward the SUBPARSE_FORWARDED_CODES errors out of a discarded sub-build
+ * buffer into the file-level `errors`. `deltaOffset` rebases body-local spans
+ * (the `<each>` re-split) to file coordinates exactly as `_rebaseSubparseSpans`
+ * rebases the nodes; pass 0 when the sub-build already used file spans.
+ */
+function _forwardSubparseErrors(subErrors, errors, deltaOffset, block) {
+  for (const err of subErrors) {
+    if (!err || !(SUBPARSE_FORWARDED_CODES.has(err.code) || err.fromHandlerStatementList === true)) continue;
+    if (!deltaOffset || !err.tabSpan) {
+      errors.push(err);
+      continue;
+    }
+    const holder = { span: { ...err.tabSpan } };
+    _rebaseSubparseSpans([holder], deltaOffset, block);
+    if (typeof err.baseMessage !== "string") {
+      // No re-buildable message (a statement-parser error): rebase its span in
+      // place so the diagnostic points at the real file line.
+      err.tabSpan = holder.span;
+      errors.push(err);
+      continue;
+    }
+    const rebased = new TABError(err.code, err.baseMessage, holder.span);
+    rebased.baseMessage = err.baseMessage;
+    if (err.fromHandlerStatementList === true) rebased.fromHandlerStatementList = true;
+    errors.push(rebased);
+  }
+}
+
+/**
+ * S437 — parse an event handler's value as a STATEMENT LIST (SPEC §5.2.3: "The
+ * statement list is logic context — the same statement grammar as a function
+ * body (§7.3)") with the SAME parser function bodies and logic blocks use
+ * (`tokenizeLogic` + `parseLogicBody`), and attach the result as
+ * `value.handlerBlock = { stmts }` when it holds MORE THAN ONE statement.
+ *
+ * Why: `value.exprNode` parses the value as ONE expression, so for
+ * `onclick={ a(); b() }` / `onclick=${a(); b()}` it holds only `a()`; every
+ * handler emit site that trusted it dropped the rest (each rows always; the
+ * top-level and engine-arm sites when the first statement was a call). The
+ * statement count — and so the 1-vs-many decision — comes from THIS parse, never
+ * from scanning the text: comments are not statements, a `;` inside a regex /
+ * string / template / closure / IIFE is not a separator, and a continuation line
+ * (`.then(…)`, a leading `?`/`:`, a trailing operator) is one statement.
+ *
+ * A value that parses to ONE statement gets no `handlerBlock`, so it keeps the
+ * existing single-expression path (§5.2.3: an inline block of one statement "is
+ * legal and equivalent to the bare shape"). A value whose statement parse raises
+ * ANY error also gets none — the parse is a codegen-facing view of `raw`, it must
+ * never be a second (and possibly contradictory) source of diagnostics; `raw` /
+ * `exprNode` stay the canonical fields every other pass reads.
+ *
+ * Node ids come from a SEPARATE counter namespace (`counter._handlerStmtIds`,
+ * starting far above any real file's id range) so parsing handler values never
+ * shifts the ids of the rest of the file (ids surface in emitted names).
+ */
+const HANDLER_STMT_ID_BASE = 1_000_000_000;
+
+/**
+ * Does the logic token stream hold a statement SEPARATOR at depth 0 — a `;`
+ * with another statement after it? Read from TOKENS (strings, templates,
+ * regexes and comments are single tokens), never from the text.
+ */
+function hasTopLevelStatementSeparator(tokens) {
+  if (!Array.isArray(tokens)) return false;
+  let depth = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (!t || t.kind !== "PUNCT") continue;
+    if (t.text === "(" || t.text === "[" || t.text === "{") depth++;
+    else if (t.text === ")" || t.text === "]" || t.text === "}") depth = Math.max(0, depth - 1);
+    else if (t.text === ";" && depth === 0) {
+      for (let j = i + 1; j < tokens.length; j++) {
+        const u = tokens[j];
+        if (!u || u.kind === "EOF") break;
+        if (u.kind === "COMMENT" || (u.kind === "PUNCT" && u.text === ";")) continue;
+        if (typeof u.text === "string" && u.text.trim() === "" && u.kind !== "STRING") continue;
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * A lone statement that IS the handler rather than code the handler runs: an
+ * arrow / function value, a bare reference, or an `fn(…) {…}` shorthand. The
+ * existing single-expression path installs / invokes those (§5.2.1/§5.2.2); as
+ * a statement they would be a dead expression. An unparsed (escape-hatch) lone
+ * statement is also left to the existing path — its shape is unknown here.
+ */
+function isCallableOrOpaqueHandlerStmt(stmt, value) {
+  if (!stmt || typeof stmt !== "object") return true;
+  if (stmt.kind === "function-decl") return true;
+  const vk = value && value.exprNode && value.exprNode.kind;
+  if (vk === "lambda" || vk === "ident") return true;
+  if (stmt.kind === "bare-expr") {
+    const k = stmt.exprNode && stmt.exprNode.kind;
+    if (!k || k === "lambda" || k === "ident" || k === "escape-hatch") return true;
+  }
+  return false;
+}
+
+/**
+ * Parse ONE handler value as a §5.2.3 statement list and decide how it lowers.
+ *
+ *   - Clean parse, 2+ statements          → `value.handlerBlock = { stmts }`.
+ *   - Clean parse, ONE statement:
+ *       · a callable / opaque statement    → existing path (installs/invokes it);
+ *       · a single-LINE statement          → existing path — proven byte-identical;
+ *       · a multi-line statement           → `handlerBlock` (S437 round 4 #1: the
+ *         existing path splits at newlines, so `@r = @n⏎ + 1` became two
+ *         statements — `+ 1;` dropped the addend SILENTLY).
+ *   - Parse ERRORS on a statement SEQUENCE (a braced block, a `${…}` value with a
+ *     top-level `;` in its token stream) → the errors are REPORTED (round 4
+ *     #2). Falling back there dropped every statement after the first at exit 0
+ *     (`${ () => @r = 1; @r2 = 2 }`) and let `{ try {…} … }` bypass
+ *     E-TRY-NOT-IN-SCRML. The errors are tagged `fromHandlerStatementList` so the
+ *     error-discarding sub-builds (`<each>` / engine / `<match>` bodies) forward
+ *     them too. A lone expression the statement grammar rejects (not a sequence)
+ *     keeps the existing single-expression path and adds no diagnostic.
+ *
+ * `opener` is the value's first source char: `{` braced block, `$` for `${…}`,
+ * anything else a bare value (a bare sequence is E-MULTI-STATEMENT-HANDLER's, so
+ * its parse errors are never reported here). `errors` null = report nothing.
+ */
+function attachHandlerStatementList(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol, opener, errors) {
+  if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return;
+  const parseErrors = [];
+  let tokens, stmts;
+  try {
+    // Parse the value as a FUNCTION BODY — §5.2.3: "the same statement grammar
+    // as a function body (§7.3)". The value's own tokens are framed as
+    // `function <synthetic>() { … }` and the body of the resulting
+    // function-decl is taken, so the statements come from the nested-body path
+    // (`parseOneStatement`) exactly as a function body's do: a `@x = …` is a
+    // WRITE (`_isReactiveAssign`, write-checked by SYM like any function-body
+    // write — round-4 #3), not a top-level declaration. The frame tokens borrow
+    // the first real token's span; the statements keep their own file spans.
+    tokens = tokenizeLogic(value.raw, baseOffset, baseLine, baseCol, []);
+    const inner = tokens.slice();
+    const last = inner[inner.length - 1];
+    const eof = last && last.kind === "EOF" ? inner.pop() : null;
+    const frameSpan = (inner[0] ?? eof)?.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol };
+    const frame = (kind, text) => ({ kind, text, span: frameSpan });
+    const framed = [
+      frame("KEYWORD", "function"), frame("IDENT", "__scrml_handler_block__"),
+      frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
+      ...inner,
+      frame("PUNCT", "}"), eof ?? frame("EOF", ""),
+    ];
+    const top = parseLogicBody(framed, filePath, [], parentBlock, idCounter, parseErrors, "logic");
+    // The frame not coming back as ONE function means the value broke out of it
+    // (e.g. an unbalanced `}`): no statement view; parse errors are still judged below.
+    stmts = Array.isArray(top) && top.length === 1 && top[0] && top[0].kind === "function-decl" && Array.isArray(top[0].body)
+      ? top[0].body
+      : null;
+    if (stmts === null && parseErrors.length === 0) return;
+  } catch (_e) {
+    return; // the statement view is optional; the existing single-expression path stands
+  }
+  const count = Array.isArray(stmts) ? stmts.length : 0;
+  // Only a FATAL diagnostic (no severity, or "error") disqualifies the parse.
+  // Warnings / Info (e.g. W-MAP-DUPLICATE-LITERAL-KEY on `@m = ["k": 1, "k": 2]`)
+  // do not — they surface ONCE, as they do in a function body (S437 round 5 F3:
+  // counting them as failures dropped the statement list, forwarded the
+  // warning and left the build to fail E-CODEGEN-INVALID-LOGIC).
+  // (api.js also routes by code prefix — a W-/I- code with no severity is a
+  // warning / info, not an error.)
+  const isFatal = (e) => !!e && typeof e === "object" &&
+    (e.severity === "error" || (e.severity === undefined && !(typeof e.code === "string" && /^[WI]-/.test(e.code))));
+  const fatal = parseErrors.filter(isFatal);
+  const nonFatal = parseErrors.filter((e) => e && typeof e === "object" && !isFatal(e));
+  // Report diagnostics from this parse without duplicating a code an
+  // attribute-level scan (or the value's own expression parse) already
+  // reported for this value (e.g. `emitForbiddenSwitchInRaw` →
+  // E-SWITCH-FORBIDDEN; a map literal in statement 1 → its W-/I- notice).
+  const report = (list) => {
+    if (!Array.isArray(errors) || list.length === 0) return;
+    const vs = value.span && typeof value.span.start === "number" ? value.span.start : null;
+    const ve = value.span && typeof value.span.end === "number" ? value.span.end : null;
+    const already = new Set();
+    if (vs !== null && ve !== null) {
+      for (const prev of errors) {
+        const ps = prev && prev.tabSpan && typeof prev.tabSpan.start === "number" ? prev.tabSpan.start : null;
+        if (ps !== null && ps >= vs && ps <= ve) already.add(prev.code);
+      }
+    }
+    for (const e of list) {
+      if (already.has(e.code)) continue;
+      already.add(e.code);
+      e.fromHandlerStatementList = true;
+      errors.push(e);
+    }
+  };
+  if (fatal.length > 0) {
+    // Report only a real statement SEQUENCE. A value the EXPRESSION parser
+    // consumes whole is one expression and keeps its path, even when the
+    // statement grammar rejects it — `${() => @count = @count + 1}` and the
+    // pinned braced `{() => @count = @count + 1}` (R25 Bug 37) are single arrows.
+    // Sequence evidence, read structurally:
+    //   (a) a top-level `;` separator in the TOKEN stream, or
+    //   (b) the expression view stopped short and left statements on a later
+    //       line (its held trailing-content warning — `{ () => @r = 1⏎ @r2 = 2 }`).
+    // The statement COUNT of an errored parse is not evidence (a rejected arrow
+    // leaves two partial nodes).
+    const heldTrailing = value.exprNode && typeof value.exprNode === "object" && _heldHandlerWarnings.has(value.exprNode);
+    const isSequence = (opener === "{" || opener === "$") && (hasTopLevelStatementSeparator(tokens) || heldTrailing);
+    if (isSequence) report([...fatal, ...nonFatal]);
+    return;
+  }
+  if (count === 0) return;
+  if (count === 1) {
+    if (isCallableOrOpaqueHandlerStmt(stmts[0], value)) return;
+    if (!value.raw.trim().includes("\n")) return;
+  }
+  value.handlerBlock = { stmts };
+  // The statement list is now what compiles: its non-fatal notices surface
+  // (once — the value's own expression parse may already have reported
+  // statement 1's).
+  report(nonFatal);
+}
+
+function attachHandlerStatementLists(attrs, block, filePath, counter, errors) {
+  if (!Array.isArray(attrs)) return;
+  if (!block || typeof block.raw !== "string") {
+    for (const attr of attrs) if (attr && attr.value) flushHeldHandlerWarnings(attr.value);
+    return;
+  }
+  if (!counter._handlerStmtIds) counter._handlerStmtIds = { next: HANDLER_STMT_ID_BASE };
+  for (const attr of attrs) {
+    if (!attr || !isEventHandlerAttrName(attr.name)) continue;
+    const value = attr.value;
+    if (!value || typeof value.raw !== "string") continue;
+    // Locate the value interior in the opener so statement spans are file-true.
+    const relSearch = value.span && typeof value.span.start === "number" && typeof block.span?.start === "number"
+      ? Math.max(0, value.span.start - block.span.start)
+      : 0;
+    const rel = block.raw.indexOf(value.raw, relSearch);
+    let baseOffset = 0, baseLine = 1, baseCol = 1;
+    if (rel >= 0 && typeof block.span?.start === "number") {
+      baseOffset = block.span.start + rel;
+      let nl = 0, lastNl = -1;
+      for (let i = 0; i < rel; i++) if (block.raw.charCodeAt(i) === 10) { nl++; lastNl = i; }
+      baseLine = (block.span.line ?? 1) + nl;
+      baseCol = nl === 0 ? (block.span.col ?? 1) + rel : rel - lastNl;
+    }
+    // The value's first source char tells the form: `{` braced block, `$` `${…}`.
+    let opener = null;
+    if (value.span && typeof value.span.start === "number" && typeof block.span?.start === "number") {
+      const at = value.span.start - block.span.start;
+      if (at >= 0 && at < block.raw.length) opener = block.raw[at];
+    }
+    attachHandlerStatementList(value, filePath, counter._handlerStmtIds, block, baseOffset, baseLine, baseCol, opener, errors);
+    flushHeldHandlerWarnings(value);
+  }
+}
+
+/**
+ * S437 — the same statement-list attach, applied to an ALREADY-BUILT markup tree
+ * that did not come through `buildBlock`. Codegen re-parses some bodies at emit
+ * time with a different front-end — `emit-match.ts` re-parses a `<match>` arm body
+ * with the native parser (`nativeParseFile`, the M6.3 route), which throws away
+ * the TAB copy carrying `handlerBlock`. Walking that tree here keeps ONE parser
+ * (tokenizeLogic + parseLogicBody) as the only source of handler statement lists.
+ * Statement spans are anchored at the value's own span (these re-parsed trees are
+ * body-local anyway). Idempotent: a value that already has `handlerBlock` is left.
+ */
+export function attachHandlerStatementListsInTree(nodes, filePath) {
+  const idCounter = { next: HANDLER_STMT_ID_BASE + 500_000_000 };
+  const seen = new Set();
+  const visit = (n) => {
+    if (!n || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) { for (const x of n) visit(x); return; }
+    const attrs = n.kind === "markup" ? (n.attrs ?? n.attributes) : null;
+    if (Array.isArray(attrs)) {
+      for (const attr of attrs) {
+        if (!attr || !isEventHandlerAttrName(attr.name) || !attr.value || attr.value.handlerBlock) continue;
+        const sp = attr.value.span ?? {};
+        // The native front-end gives a handler value NO `exprNode`, so every
+        // emit-site decision that TAB-built handlers make from it (arrow vs call
+        // vs assignment, structured vs string lowering) fell to the string path
+        // here — which mis-lowers a leading comment or a `;` inside a regex
+        // (`/;/` → `/; /`). Give the value the node TAB itself would have built,
+        // from the same function, so a match-arm handler lowers like any other.
+        if (attr.value.kind === "expr" && typeof attr.value.raw === "string" && !attr.value.exprNode) {
+          try {
+            // Held-warning parse (round 5 F4): the trailing-content warning is
+            // printed below only if no statement list ends up handling it.
+            const node = parseHandlerAwareExprNode(attr.name, attr.value.raw, filePath, typeof sp.start === "number" ? sp.start : 0, []);
+            if (node) attr.value.exprNode = node;
+          } catch (_e) { /* keep the pre-existing (string) path */ }
+        }
+        attachHandlerStatementList(
+          attr.value, filePath, idCounter, null,
+          typeof sp.start === "number" ? sp.start : 0,
+          typeof sp.line === "number" ? sp.line : 1,
+          typeof sp.col === "number" ? sp.col : 1,
+          null, null, // TAB already reported this arm's handler parse errors
+        );
+        flushHeldHandlerWarnings(attr.value);
+      }
+    }
+    for (const k of Object.keys(n)) {
+      const v = n[k];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  visit(nodes);
+}
+
 function buildBlock(block, filePath, parentContextKind, counter, errors, parentStateName = null) {
   // Uniform-opener normalization: rewrite block.type when the BS classification
   // is the wrong half of the markup/state split for this lifecycle keyword. The
@@ -16461,7 +16911,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             const childNode = buildBlock(child, filePath, "markup", counter, _bodyErrors);
             if (childNode) bodyChildren.push(childNode);
           }
-          // _bodyErrors intentionally discarded — see comment block above.
+          // _bodyErrors intentionally discarded — see comment block above —
+          // EXCEPT the codes no downstream validator re-derives (S437).
+          _forwardSubparseErrors(_bodyErrors, errors, 0, block);
         }
 
         // g-formfor-in-match-arm (S177) — assign the match-block's own id
@@ -16573,6 +17025,18 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
                     else { _baseLine = _baseLine + _nl; _baseCol = _local - _lastNl; }
                   }
                 }
+                // S437 — the blanked each-bearing arm is never built at TAB
+                // time, so an opener-level TAB diagnostic inside it (a bare
+                // `;` handler sequence) would never be raised. Run a THROWAWAY
+                // re-parse for diagnostics only: its nodes are discarded (never
+                // attached, so no S153 phantom each-block), and only the
+                // SUBPARSE_FORWARDED_CODES errors are forwarded.
+                try {
+                  const _diagTab = buildAST(_splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw));
+                  if (_diagTab && Array.isArray(_diagTab.errors)) {
+                    _forwardSubparseErrors(_diagTab.errors, errors, _bodyFileStart, block);
+                  }
+                } catch (_e) { /* diagnostics-only re-parse; survivable */ }
                 _reparseStamp = {
                   _reparseEachArmBodyRaw: arm.bodyRaw,
                   _reparseEachArmFileStart: _bodyFileStart,
@@ -16597,6 +17061,16 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
               const reBs = _splitBlocksForP2Form1(filePath || "<match-arm>", arm.bodyRaw);
               const reTab = buildAST(reBs);
               if (reTab && reTab.ast && Array.isArray(reTab.ast.nodes)) armNodes = reTab.ast.nodes;
+              // S437 — this re-parse's errors are otherwise dropped; forward
+              // the codes no downstream validator re-derives, rebased to file
+              // coordinates the same way armNodes are just below.
+              if (reTab && Array.isArray(reTab.errors)) {
+                const _armDelta =
+                  typeof arm.bodyContentStart === "number" && _armsRawFileStart >= 0
+                    ? _armsRawFileStart + arm.bodyContentStart
+                    : 0;
+                _forwardSubparseErrors(reTab.errors, errors, _armDelta, block);
+              }
             } catch (_e) { armNodes = []; }
             // g-subparse-span-not-rebased — armNodes carry body-local spans; add
             // the arm body's file offset (armsRaw's file start + the body's
@@ -17554,7 +18028,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             const subNode = buildBlock(subBlock, filePath, "markup", counter, _subErrors);
             if (subNode) bodyChildren.push(subNode);
           }
-          // _subErrors intentionally discarded — see comment block above.
+          // _subErrors intentionally discarded — see comment block above —
+          // EXCEPT the codes no downstream validator re-derives (S437),
+          // rebased to file coordinates like the nodes below.
+          _forwardSubparseErrors(_subErrors, errors, _bodyRawFileStart >= 0 ? _bodyRawFileStart : 0, block);
           // g-subparse-span-not-rebased — subNodes carry body-local spans; rebase
           // to file coords so diagnostics inside the <each> body report the real
           // line. templateChildren/emptyChild below are filtered VIEWS of these
@@ -17712,6 +18189,8 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         "markup"
       );
       const attrs = parseAttributes(attrTokens, filePath, errors, block.isComponent === true, block.name);
+      // S437 — §5.2.3 statement-list view of multi-statement handler values.
+      attachHandlerStatementLists(attrs, block, filePath, counter, errors);
 
       // ----------------------------------------------------------------
       // A1b B18 fire-site #1 — multi-statement event-handler validation
@@ -17738,40 +18217,75 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           const openerSlice = block.raw.slice(openerScan.attrStart, openerScan.openerEnd);
           const hits = scanForTopLevelSemicolon(openerSlice);
           if (hits.length > 0) {
-            // Pre-compute attribute-name boundaries within `openerSlice`
-            // so each `;` hit maps to its enclosing attribute. We use a
-            // regex-based scan over the slice — for each match of
-            // `name=`, record the `name` and the offset of its `=`. The
-            // owning attribute for a `;` at offset `k` is the latest
-            // `name=` whose `=` offset is `< k`.
+            // S437 — map each `;` hit to the attribute that OWNS it using the
+            // attribute tokenizer's own boundaries (`attrTokens`, above), not a
+            // second, independent guess at where attributes start.
             //
-            // Pattern: identifiers can include `:` (for `on:click`,
-            // `onserver:foo`, `class:active`), letters/digits/`-`/`_`,
-            // and `.` (for `bind:value` etc.). Keep the regex liberal —
-            // we only care about whether the matched `name` later passes
-            // `isEventHandlerAttrName`.
-            const NAME_EQ_RE = /([A-Za-z_][A-Za-z0-9_:\-]*)\s*=/g;
-            const attrBoundaries = [];
-            let nameMatch;
-            while ((nameMatch = NAME_EQ_RE.exec(openerSlice)) !== null) {
-              attrBoundaries.push({
-                name: nameMatch[1],
-                eqEnd: nameMatch.index + nameMatch[0].length,
+            // The pre-S437 owner lookup was a regex over the raw slice —
+            // "latest `name=` before the `;`". That regex also matched the
+            // assignment INSIDE a bare handler's own value: in
+            // `onclick=@count = 0; track("reset")` it found `count =`, made
+            // `count` the owner, saw a non-event name, and skipped — so every
+            // assignment-led bare sequence (`@a = 0; f()`, `@o.x = 1; f()`)
+            // compiled at exit 0 with the tail read as HTML attributes
+            // (`<button … track reset>`), the silent misread §5.2.3 keeps this
+            // error to prevent. Call/compound/postfix leaders happened to
+            // contain no `name =` and fired.
+            //
+            // Owner = the latest ATTR_NAME token that starts before the `;`
+            // AND is followed by ATTR_EQ (a real `name=` attribute head as the
+            // tokenizer read it). The ATTR_EQ requirement skips names the
+            // tokenizer invents from the stranded tail of a value it stopped
+            // reading early (e.g. `f` in `@a == 1 && f(); g()`).
+            //
+            // `:`-shorthand openers: the tokenizer only saw the attribute part
+            // (up to the `:`); a `;` in the shorthand body is §4.14's concern
+            // (symbol-table.ts fire-site #2), so hits past the `:` are skipped.
+            const attrRegionEnd =
+              block.closerForm === "shorthand" && typeof block.shorthandColonOff === "number" && block.shorthandColonOff > 0
+                ? block.shorthandColonOff
+                : Infinity;
+            const sliceBase = block.span.start + openerScan.attrStart; // abs offset of openerSlice[0]
+            const attrHeads = [];
+            for (let ti = 0; ti < attrTokens.length; ti++) {
+              const tk = attrTokens[ti];
+              if (tk.kind !== "ATTR_NAME") continue;
+              const eqTok = attrTokens[ti + 1];
+              if (!eqTok || eqTok.kind !== "ATTR_EQ") continue;
+              const valTok = attrTokens[ti + 2];
+              attrHeads.push({
+                name: tk.text,
+                start: tk.span.start - sliceBase,
+                // Where the bare value begins, for the fix-it text.
+                valueStart: (valTok ? valTok.span.start : eqTok.span.end) - sliceBase,
               });
             }
+            // Group the hits per owning handler — one diagnostic per handler.
+            // Once a handler owns a `;`, the text after it is the ambiguous
+            // tail, and the tokenizer may have read a tail statement as an
+            // attribute head (`@msg = "a"` -> ATTR_NAME `@msg` + ATTR_EQ). A
+            // later `;` stays with that handler until another event-handler
+            // head intervenes, so the fix-it never drops a statement.
+            const byOwner = new Map();
+            let openHandler = null;
             for (const hit of hits) {
-              // Find the latest attrBoundary whose eqEnd <= hit.offset.
+              if (openerScan.attrStart + hit.offset >= attrRegionEnd) continue;
               let owner = null;
-              for (let bi = attrBoundaries.length - 1; bi >= 0; bi--) {
-                if (attrBoundaries[bi].eqEnd <= hit.offset) {
-                  owner = attrBoundaries[bi];
-                  break;
-                }
+              for (let hi = attrHeads.length - 1; hi >= 0; hi--) {
+                if (attrHeads[hi].start < hit.offset) { owner = attrHeads[hi]; break; }
               }
               if (!owner) continue;
-              if (!isEventHandlerAttrName(owner.name)) continue;
+              if (!isEventHandlerAttrName(owner.name)) {
+                if (!openHandler) continue;
+                owner = openHandler;
+              }
+              openHandler = owner;
+              if (!byOwner.has(owner)) byOwner.set(owner, []);
+              byOwner.get(owner).push(hit.offset);
+            }
+            for (const [owner, semis] of byOwner) {
               // Map relative offset back to absolute file offset for span.
-              const absOffset = block.span.start + openerScan.attrStart + hit.offset;
+              const absOffset = sliceBase + semis[0];
               const fireSpan = {
                 file: filePath,
                 start: absOffset,
@@ -17779,18 +18293,32 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
                 line: span.line,
                 col: span.col,
               };
-              errors.push(new TABError(
-                "E-MULTI-STATEMENT-HANDLER",
+              const stmts = bareHandlerStatementsText(openerSlice, owner.valueStart, semis);
+              // The value may have run on into the element's next attribute
+              // (`onclick=@a = "s" hidden=@on;` reads `hidden=@on` as part of the
+              // handler). A braces rewrite built from that text would move the
+              // attribute INTO the handler — wrong advice — so say what happened
+              // instead of offering a rewrite.
+              const swallowedAttr = attrShapedTokenInStatements(stmts);
+              const fixIt = swallowedAttr !== null
+                ? `The handler value runs on into what looks like the next attribute ` +
+                  `(\`${swallowedAttr}=\`): a bare value has no end marker. Brace the ` +
+                  `handler's statements — \`${owner.name}={ … }\` — or quote the value, ` +
+                  `so the handler ends where you mean it to (SPEC §5.2.3).`
+                : `Wrap the statements in braces — \`${stmts.length > 0 ? `${owner.name}={ ${stmts} }` : `${owner.name}={ … }`}\` — ` +
+                  `or name a function and wire it as \`${owner.name}=name()\` (SPEC §5.2.3).`;
+              const mshMessage =
                 `E-MULTI-STATEMENT-HANDLER: Event-handler attribute \`${owner.name}\` on ` +
-                `\`<${block.name}>\` contains multiple statements (semicolon-separated). ` +
-                `A bare-form event handler must be exactly one expression — a call ` +
-                `(\`${owner.name}=fn()\`), an assignment (\`${owner.name}=@phase = .Loading\`), ` +
-                `or a single expression (\`${owner.name}=@count++\`). For multi-statement ` +
-                `intent, lift the body to a named function and wire by name: ` +
-                `\`function name() { ... }\` then \`${owner.name}=name()\` ` +
-                `(SPEC §5.2.3 / §34).`,
-                fireSpan,
-              ));
+                `\`<${block.name}>\` is a bare (unbraced) value holding a \`;\`-separated ` +
+                `sequence of statements. A bare handler value is exactly one expression: ` +
+                `with no braces, nothing marks where the handler ends and the element's ` +
+                `next attribute begins, so the statements after the \`;\` could be read ` +
+                `as attributes. ` + fixIt;
+              const mshError = new TABError("E-MULTI-STATEMENT-HANDLER", mshMessage, fireSpan);
+              // Kept so _forwardSubparseErrors can rebuild the error with a
+              // rebased span when it fires inside an `<each>` body re-split.
+              mshError.baseMessage = mshMessage;
+              errors.push(mshError);
             }
           }
         }
@@ -18519,7 +19047,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
           } finally {
             _engineBodyBuildDepth--;
           }
-          // _bodyErrors intentionally discarded — see comment block above.
+          // _bodyErrors intentionally discarded — see comment block above —
+          // EXCEPT the codes no downstream validator re-derives (S437).
+          _forwardSubparseErrors(_bodyErrors, errors, 0, block);
         }
         // Also extract from raw content after the header line
         if (!rulesRaw && firstLineEnd >= 0) {

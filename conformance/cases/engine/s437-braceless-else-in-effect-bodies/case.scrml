@@ -1,0 +1,15 @@
+type Phase:enum = { Idle, Busy }
+<n> = 0
+<r> = ""
+<engine for=Phase initial=.Idle>
+    <Idle rule=.Busy effect=${ if (@n > 0) @r = "pos"; else @r = "neg" }>
+        <button id="go" onclick=@phase = .Busy>go</button>
+    </>
+    <Busy rule=.Idle>
+        <onTransition to=.Idle>
+            ${ if (@n > 0) @r = @r + "P"; else @r = @r + "N" }
+        </>
+        <button id="back" onclick=@phase = .Idle>back</button>
+    </>
+</>
+<p id="out">${@r}</p>

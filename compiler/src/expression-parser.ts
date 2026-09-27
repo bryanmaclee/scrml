@@ -3111,6 +3111,27 @@ function convertParams(params: ESNode[], filePath: string, baseOffset: number): 
  * @param offset - Byte offset of the expression start in the preprocessed source file
  * @returns A structured ExprNode. Returns EscapeHatchExpr on parse failure.
  */
+/**
+ * S437 round 4 — the "statement boundary not detected" console warning is a
+ * guard against a SILENT drop. For a §5.2.3 event-handler value the drop no
+ * longer happens once the value carries its parsed statement list
+ * (`handlerBlock`), and whether it will is only known AFTER the value's
+ * expression is parsed. `captureTrailingContentWarnings` runs `fn` with the
+ * warning HELD instead of printed and returns it, so the caller (ast-builder)
+ * prints it only when nothing handles the trailing statements.
+ */
+let _trailingWarningSink: string[] | null = null;
+export function captureTrailingContentWarnings<T>(fn: () => T): { result: T; warnings: string[] } {
+  const prev = _trailingWarningSink;
+  const sink: string[] = [];
+  _trailingWarningSink = sink;
+  try {
+    return { result: fn(), warnings: sink };
+  } finally {
+    _trailingWarningSink = prev;
+  }
+}
+
 export function parseExprToNode(raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }): ExprNode {
   // §42.10 ENFORCEMENT (S188 g-not-negation-enforce): a detector object captures
   // whether preprocessForAcorn lowered a prefix-`not`-as-negation (bare `not @x`
@@ -3201,7 +3222,9 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
   // from the space-separated token stream, not from merged statements.
   if (estree && trailingContent && trailingContent.includes("\n") && /[a-zA-Z_$@]/.test(trailingContent)) {
     const preview = trailingContent.length > 60 ? trailingContent.slice(0, 60) + "..." : trailingContent;
-    console.warn(`[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`);
+    const msg = `[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`;
+    if (_trailingWarningSink) _trailingWarningSink.push(msg);
+    else console.warn(msg);
   }
 
   if (!estree) {

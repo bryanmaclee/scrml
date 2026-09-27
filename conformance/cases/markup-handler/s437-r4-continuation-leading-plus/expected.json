@@ -1,0 +1,37 @@
+{
+  "id": "markup-handler-s437-r4-continuation-leading-plus",
+  "description": "A one-statement handler whose next line starts with `+` is ONE statement. Pre-round-4 impl#1 sent a ONE-statement value down the path that splits at newlines: `@r = @n⏎ + 1` became `set(r, n); + 1;` (the addend silently dropped), and the `?`/`:`/`*` forms failed E-CODEGEN-INVALID-LOGIC. Now any multi-line value lowers from its parsed statement list. All four positions: top (#top), engine state-child (#eng), `<match>` arm (#mat), `<each>` row (.row).",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"The statement list is logic context — the same statement grammar as a function body (§7.3) … The block MAY span any number of lines.\" and \"No statement of the block SHALL be dropped\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#top"
+      },
+      {
+        "click": "#eng"
+      },
+      {
+        "click": "#mat"
+      },
+      {
+        "click": ".row"
+      }
+    ],
+    "state": {
+      "log": "T,E,M,R,"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "T,E,M,R,"
+      }
+    ]
+  }
+}

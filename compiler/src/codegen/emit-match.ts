@@ -761,8 +761,9 @@ function buildMatchArms(
     splitBlocks: (filePath: string, src: string) => any;
   };
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { buildAST } = require("../ast-builder.js") as {
+  const { buildAST, attachHandlerStatementListsInTree } = require("../ast-builder.js") as {
     buildAST: (bsOutput: any) => { filePath: string; ast: any; errors: any[] };
+    attachHandlerStatementListsInTree: (nodes: any[], filePath: string) => void;
   };
   // S108 Phase 4 — `:`-shorthand body codegen uses parseExprToNode directly
   // to treat the bodyRaw as an expression (not as markup). The synthesized
@@ -1007,6 +1008,11 @@ function buildMatchArms(
           const synthResult = nativeParseFile(synthLabel, synthSrc);
           if (synthResult && Array.isArray(synthResult.ast?.nodes)) {
             body = synthResult.ast.nodes;
+            // S437 — the native re-parse does not produce the §5.2.3 handler
+            // statement lists (`value.handlerBlock`) the TAB copy of this arm
+            // carried; attach them with the SAME function-body statement parser
+            // so a multi-statement handler in a match arm lowers every statement.
+            attachHandlerStatementListsInTree(body, synthLabel);
           }
         }
       } catch (_e) {
