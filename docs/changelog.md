@@ -2,6 +2,45 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S436 — 2026-09-26/27 (peter · AdiPDesk)
+
+The review floor went from 16 owed to 0 and was held there across three re-drains, and draining it turned out to
+be the session's most productive instrument: two findings came out of PRs nobody would otherwise have re-read, and
+the four code-bearing reviews returned 13 findings including two HIGH security defects. Six PRs landed. The
+operator's scope was bryan's S430 P7 with the adopter criterion promoted — fix TS only where it blocks the
+bootstrap, an adopter reported it (aM and flogence first), or it is security.
+
+- **#1076** — floor 16→4, plus the two things the drain found. `chore(maps): scheduled regen` had been advertising
+  a map regeneration deleted at S310 on a cost ruling; it had already cost a real deferral (S432 skipped wrap-6c
+  citing that job) while the maps drifted 79 commits and 14 unindexed `compiler/src` files. And #1068 had committed
+  `hand-off.md` as CRLF, so git reported one whole-file hunk and that landing had **no reviewable diff**; two lone
+  CRs inside lines corrupted four worktree paths that survived in HEAD. Both fixed; `hand-off.md` pinned `eol=lf`.
+- **#1077** — the four code-bearing S239 passes. #1066 clean on an unusually strong pass (145-tag sweep with zero
+  predicate/dispatch disagreements, 2640-file corpus A/B, three mutation tests proving the guards bite). #1057's
+  claimed repair proven unreachable — `api.js:1127` canonically sorts inputs before any stage, so its new
+  forward-vs-reverse test compares two byte-identical compiles. #1062 returned seven findings, two HIGH, both
+  security. #1070's own site enumeration falsified (14 locations and 4 render-position, not 12 and 3).
+- **#1082** — the compiler now configures the sqlite handles it **opens**, not only those it **emits**. #1062's gap
+  said verbatim *"that blocked the adopter's DB migration"*, and `scrml db-migrate` still died `database is locked`
+  in 129ms with no wait; now rc=0 in 983ms against a real cross-process lock, succeeding by waiting. `busy_timeout`
+  only — no WAL from a CLI path, because that is a persistent change to a file the adopter owns.
+- **#1088**, **#1091** — floor back to 0, two gaps filed, and the correction that matters most: bryan's ruling on
+  the failable-cell load named ~56 flogence arm-`return` sites as changing meaning. Compiling the shape rather than
+  relaying it split the population — a server-escalated callee has the async IIFE exactly as filed, a client-local
+  one has no IIFE at all and already returns from the author's function. The affected set is the server-escalated
+  subset, and the gap now says so before anyone messages flogence.
+- **#1094** — `E-MW-008`. `<program>` session config was resolving build-wide, and the bled `session-secure="false"`
+  dropped the `Secure` attribute itself, so a sibling program's session cookie was transmissible over plain HTTP.
+  Four rounds: the first three each re-derived a resolution the emitter already performs and each was wrong somewhere
+  new. The fix is one shared `session-config-resolve.ts` that both the emitter and the driver call, with the driver
+  deriving nothing. 0 of 1137 corpus sets and 0 of 15 adopter sets newly rejected, positive-controlled.
+
+**Measurement note for anyone reading these numbers.** Five false zeros occurred this session and all five were in
+*probes*, not in the compiler — a wrong `compileScrml` signature twice, `grep -c` returning `0` on empty input,
+`return` matched inside a string literal, and a `tsc.bunx` that cannot execute reporting `0 errors`. Each was caught
+by a bite test or a byte-check and none by a gate. Full-suite failure *counts* on this box are also noise (81 and 98
+on identical commits), so only name sets are quoted here.
+
 ## S430 — 2026-09-23..26 (bryan · ASUS-Vivobook)
 
 All seven bootstrap prerequisites (P1–P7) ruled, and every buildable one landed: #1042 export-decl diagnostics no longer
