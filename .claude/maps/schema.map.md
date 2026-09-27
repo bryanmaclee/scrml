@@ -1,6 +1,41 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 SCHEMA DELTA ━━━━━━━
+# `git diff --stat 787d4cb4..HEAD -- compiler/src/types/` -> **EMPTY** — `types/ast.ts` is byte-unchanged, yet TWO new
+# AST shapes landed (`defer-stmt`, `import-decl.hostTag`), both built in `ast-builder.js` / `native-parser/translate-stmt.js`
+# and declared in NO type file (`grep -n 'defer-stmt\|hostTag' compiler/src/types/ast.ts` -> nothing). See
+# `## S437 — NEW SHAPES` below, which also rows the new codegen/PA-internal interfaces. §66's declaration model is
+# Nominal: NO AST type for it exists in impl#1.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -264,6 +299,39 @@ existing node kinds, or through codegen-internal / schema-differ-internal shapes
 `ast.ts` types (the §38.6.2 constraint-drift record, the D-5 module-const candidate filter's reliance
 on `ConstDeclNode`/`LetDeclNode.initExpr`, `LogicBinding.directiveIsFormValue`, and the S302
 `ifRaw`/`ifCond` pair below), and now the #458 region shapes immediately below.
+
+## S437 — NEW SHAPES (`787d4cb4..d02738767`) — none of them is in `compiler/src/types/`
+
+### `defer-stmt` (AST node, §19.16)  [built `ast-builder.js:6571`; native `native-parser/translate-stmt.js:1406`]
+kind: "defer-stmt"
+body: LogicStatement[]
+blockForm: boolean   — `defer { … }` vs `defer <stmt>`
+span: Span
+Both front-ends produce the SAME node, so `validators/lint-defer.ts` is one checker for both.
+
+### `import-decl.hostTag` (field on the existing `import-decl`, §21.3.1)  [`ast-builder.js`, native parser; see `host-import.js` header]
+hostTag: string   — the identifier after `import:` (v1 accepts only `host`); `_hostImportRejected: true` is set by `validateHostImports` (`host-import.js:397`) when the gate refused it, and `module-resolver.js` then skips the import.
+
+### `StageSeam`  [`compiler/src/pipeline-seam.ts:274`]
+name: string  — `--swap <NAME>=…` / `stageOverrides` key (36 registered, `STAGE_SEAMS` `:334`)
+tsModule: string · pipeline: string (PIPELINE.md label) · entry: string · signature: string
+selfHostKey?: string  — legacy `selfHostModules` key
+output: Check · mutated?: (args) => Divergence · reentry?: readonly string[]
+`PARSE_REENTRY_FILES` (`:311`, 9 files) — modules that call the TS block-splitter / AST builder directly, so a BS/TAB swap yields mixed-provenance ASTs.
+
+### `DbTargetClass`  [`compiler/src/db-target.ts:40`]
+kind: "postgres" | "mysql" | "mongo" | "unsupported-scheme" | "sqlite-memory" | "sqlite-file" | "empty"
+trimmed: string · scheme: string | null · sqlitePath: string | null
+
+### `SessionAttrResolution`  [`compiler/src/codegen/session-config-resolve.ts:55`]
+value: unknown · source: "middleware" | "unit" | "stash"   (`stash` = unattributable → feeds `E-MW-008`)
+`SessionAttrName` = "sessionExpiry" | "session-secure"; `UnattributableUnit` (`:157`) records filePath + attr.
+
+### `ConnectionAttr`  [`compiler/src/diagnostic-secrets.ts:564`]
+element: string · name: string · value: string · start: number · end: number   (value offsets inside quotes)
+
+### `DeferDiagnostic`  [`compiler/src/validators/lint-defer.ts:69`]
+code: DeferCode (7 codes; `E-DEFER-SERVER-IN-SPLIT` is emitted by `route-inference.ts`, not here) · message · span · severity: "error"
 
 ## Codegen-internal region shapes — NOT `ast.ts` types (NEW #458, at `97576f35`)
 
@@ -898,6 +966,7 @@ changed what the compiler can SAY, not what it accepts.
 #tildecontext-shape #liftvar-vs-var #armbodystmts-readonlyset #no-uniform-binder #es6-shorthand-defeats-field-regex #binding-is-raw-paren-text #parsebindinglist #types-dir-empty-is-not-a-currency-probe
 #litexpr-hasinterpolation #carried-not-inferred #raw-value-aliasing #literal-vs-literal-type-only #section-53-4 #section-7-5-1 #fieldtypeassignable #fieldtypeequals #section-14-8-8 #width-subtyping-only #primitives-by-name #int-vs-number #position-3-has-no-code #anchors-re-derived-by-symbol-grep
 #s405 #types-ast-zero-diff #extractdesiredschema #rawddl-marker #names-only #two-consumers-opposite-needs #split-at-the-consumer #diffschema-byte-identical #db-migrate-one-line-decline #parseschemablock-dsl-only #harvestrawcreatetabledecls #parserawcreatetablecolumns-no-production-caller #tenanttableset #case-folds-on-three-methods #deferred-migrate-arc
+#s437 #d02738767 #defer-stmt #hosttag #import-decl #stageseam #parse-reentry-files #dbtargetclass #sessionattrresolution #connectionattr #types-dir-unchanged #section-66-nominal-no-ast
 
 ## Links
 - [primary.map.md](./primary.map.md)

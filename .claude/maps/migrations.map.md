@@ -1,6 +1,38 @@
 # migrations.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 MIGRATIONS DELTA ━━━━━━━
+# NOT a zero-diff row: `compiler/src/commands/db-migrate.js` +31 (665 -> 686L). `schema-differ.js`: unchanged.
+# Two changes, both operational, neither touching the reconcile model: see `## S437 — db-migrate` below.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -242,6 +274,10 @@ schema-migration tool.
 
 This is NOT a Prisma/Knex/Alembic-shaped versioned-migration-file tool. Read the model section below
 before assuming a `migrations/0001_*.sql`-style directory exists — it does not.
+
+## S437 — `scrml db-migrate` (`commands/db-migrate.js`, #1047/#1055/#1082)
+- **SQLite busy timeout on the CLI's own handle** — `configureSqliteHandle(db)` (`:505`, from `compiler/src/sqlite-handle-defaults.ts`) runs immediately after the SQLite open and before `readActualSchema`. Sets `PRAGMA busy_timeout = 5000` ONLY; `journal_mode = WAL` is deliberately NOT set on a CLI-opened handle (it is a persistent change to the adopter's file). Before: a migrate against a database another process held `BEGIN IMMEDIATE` on failed `database is locked` in ~129 ms (measured S436, per the source comment).
+- **Every error line that can echo `--db` is redacted** — `redactDbText` is bound to a `SecretRedactor([dbUrl])` (`compiler/src/diagnostic-secrets.ts`) once `runDbMigrate` knows the value; Postgres connect failures, SQLite open failures, rolled-back migration errors and resolver errors all pass through it.
 
 ## Tool
 Library: none — first-party, `compiler/src/commands/db-migrate.js` (the CLI) +
@@ -505,6 +541,7 @@ inventory and `isEffectivelyImmutable`).
 #scrml #map #migrations #db-migrate #dbauth #db-authoritative #schema-differ #privilege-separation #ledger #never-clobber-fence #rls #secdef #postgres #failing-statement-attribution #auto-immutable #e-schema-010 #e-schema-011 #resolved-gaps #print-failed-statement #queried-table-grants #sql-table-refs #least-privilege #undetermined-sql #column-constraint-drift #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #withheld-plan #run-pg-apply-signature #zero-diff-11-windows #batch-in-list-cap-is-not-an-onion-stage #schema-body-is-ddl #state-block-statement-form-adjacency
 #schema-differ-new-consumer #parseschemablock
 #s405 #rawddl-schema-invisible-to-db-migrate #if-t-rawddl-continue #split-at-the-consumer #diffschema-byte-identical #four-defects-impossible-by-construction #one-shared-recognizer #schema-differ-owns-it #import-direction-invariant #postgres-qualifier-normalized #e-pa-003-shadow-db #overwrite-last-wins-vs-first-wins #sourcetext-recovery-deleted #two-individually-correct-fixes-cancelling #w-schema-no-tables-declared #schema-anchor-fixture #deferred-migrate-arc
+#s437 #d02738767 #db-migrate-busy-timeout #no-wal-on-cli-handle #db-migrate-redaction
 
 ## Links
 - [primary.map.md](./primary.map.md)

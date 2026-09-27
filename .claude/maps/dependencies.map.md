@@ -1,6 +1,39 @@
 # dependencies.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 DEPENDENCIES DELTA ━━━━━━━
+# `git diff 787d4cb4..HEAD -- package.json` -> ONE line: `"version": "0.7.1"` -> `"0.8.0"` (#1099). No dependency,
+# devDependency, script, `engines` or `files` change; `bun.lock` `--name-only` EMPTY. External deps: SIXTH consecutive
+# flat window. The INTERNAL graph moved: 16 new `compiler/src` modules — edges in `## S437 — INTERNAL EDGES` below.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -244,14 +277,39 @@
 # in this window.
 #
 
+## S437 — INTERNAL EDGES ADDED (`787d4cb4..d02738767`, from import statements at `d02738767`)
+
+api.js → pipeline-seam.ts (`createStageSeams`, `StageSeamError`), precg.ts (`runPRECG`), diagnostic-secrets.ts (`SecretRedactor`), host-import.js (`readHostImportCapabilities`, `validateHostImports`), validators/lint-defer.ts (`runDeferChecks`), validators/lint-redeclare.ts (`runRedeclareChecks`), native-walker/forbidden-js-native.ts
+precg.ts → compute-pgo-flags.ts, compute-program-config.ts
+pipeline-seam.ts → (registry of 36 stage modules by `tsModule` path; resolved lazily by name)
+scripts/hybrid.ts → compiler/src/api.js, compiler/src/pipeline-seam.ts
+conformance/adapters/hybrid.ts → conformance/adapters/impl1-ts.ts (`setCompileOverlay`)
+module-resolver.js → host-import.js (`scanHostModule`)
+validators/lint-redeclare.ts → type-system.ts (`iterDestructuredNames`)
+validators/lint-defer.ts → validators/defer-structure.ts → (lazy `require`) block-splitter.js, ast-builder.js, codegen/emit-control-flow.ts
+codegen/index.ts → codegen/lower-defer.ts, codegen/session-config-resolve.ts
+codegen/emit-server.ts → codegen/sqlite-defaults.ts, codegen/session-config-resolve.ts
+codegen/emit-tool.ts → codegen/sqlite-defaults.ts
+codegen/sqlite-defaults.ts → sqlite-handle-defaults.ts (re-exports the timeout VALUE)
+protect-analyzer.ts → sqlite-handle-defaults.ts, db-target.ts, db-uri-redact.ts
+commands/db-migrate.js → sqlite-handle-defaults.ts
+codegen/db-driver.ts → db-target.ts, db-uri-redact.ts
+db-uri-redact.ts → diagnostic-secrets.ts → db-target.ts
+component-expander.ts → implied-lift-desugar.ts; codegen/emit-match.ts → implied-lift-desugar.ts
+codegen/{emit-control-flow.ts, emit-lift.js, emit-reactive-wiring.ts} → codegen/declared-name-marks.ts
+lsp/handlers.js → compiler/src/diagnostic-secrets.ts (`SecretRedactor`, `harvestFromSource`)
+scripts/flograph.ts → scripts/state.ts (`parseGapMarkers`, `classifyGapStatus` — the second @gap regex is gone)
+
+⚑ **Seam invariants stated in the new modules' headers (read them before adding an import):** `sqlite-handle-defaults.ts` imports NOTHING (so `protect-analyzer.ts` never pulls `bun:sqlite`/`node:fs` through it); `db-target.ts` sits outside `codegen/` so the early PA stage does not import a codegen module; `defer-structure.ts` loads the front-end and `emit-control-flow.ts` lazily to avoid a validator→codegen import cycle.
+
 ## MANIFEST SHAPE — one manifest, allowlisted
 
-There is exactly ONE package manifest in the repo (root `package.json`, v0.7.1); `compiler/package.json`
+There is exactly ONE package manifest in the repo (root `package.json`, v0.8.0 as of S437 — was v0.7.1); `compiler/package.json`
 and `"workspaces": ["compiler"]` were deleted at `171f5f23`. `acorn` and `astring` live in the root
 `dependencies`; `"private": true` is gone; a `files` ALLOWLIST governs what publishes. Any doc still
 describing a `compiler/` workspace at v0.2.0 is stale.
 
-## Runtime Dependencies — root package.json (v0.7.1, the SOLE manifest)
+## Runtime Dependencies — root package.json (v0.8.0, the SOLE manifest)
 @modelcontextprotocol/sdk@1.29.0 — MCP server SDK for the scrml MCP integration
 acorn@^8.16.0 — JS parser for escape-hatch (`_{}`) expressions + the E-CG-001 acorn-exact egress scan + the chunk-namespace cell-accessor-rename pass **(HOISTED this window from the deleted compiler manifest)**
 astring@^1.9.0 — JS AST-to-source printer, paired with acorn for re-serializing escape-hatch nodes **(HOISTED this window)**
@@ -801,6 +859,7 @@ if it passed the host-reach limb every export would `ReferenceError`.
 #tilde-diagnostic-sink #narrow-sink-pattern #two-drains #log-loc-two-projections #resolvespanlinecol #drain-or-it-looks-dead #e-sql-006-precedent
 #int-number-census-new-consumer #internal-graph-moved-manifest-did-not #fifth-flat-window
 #s405 #external-deps-zero-diff-sixth-window #internal-graph-moved #schema-differ-is-the-one-recognizer #eight-consumers-one-recognizer #import-direction-invariant #no-bun-sqlite-in-the-pa-stage #protect-analyzer-deleted-its-regex #gauntlet-phase1-imports-the-recognizer #acorn-in-protect-egress #db-authoritative-single-producer #two-consumers-opposite-polarity #a-graph-edge-does-not-show-polarity #701-import-edges #dependencies-generated-regenerated
+#s437 #d02738767 #v0-8-0 #external-deps-flat-6th #pipeline-seam-edges #sqlite-defaults-two-halves #db-target #diagnostic-secrets #lsp-redaction #flograph-uses-state-ts
 
 ## Links
 - [primary.map.md](./primary.map.md)

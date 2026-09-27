@@ -1,6 +1,41 @@
 # build.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 BUILD DELTA ━━━━━━━
+# NOT a zero-diff row. `.github/workflows/ci.yml` +16 lines: **`gate` 15 -> 16 steps** (14 `- name:` + 2 `- uses:`),
+# **`windows` 4 -> 5**, `tracking` FLAT at 8 (counted by awk over `- name:|- uses:` per job at `d02738767`).
+# `cloud-maps.yml` relabelled only (S436): the PR/commit now say `chore(state): scheduled @generated regen (nav-maps NOT
+# refreshed — Stage 2 removed S310)`. `package.json` version 0.8.0; scripts block unchanged. NEW script:
+# `scripts/hybrid.ts`. See `## S437 — CI + SCRIPTS` below.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -253,6 +288,29 @@
 # `conformance/` corpus is gated, and it is gated by a BRIDGE rather than by any workflow naming it.
 # See the CI section and invariant 87 in primary.map.md.
 #
+
+## S437 — CI + SCRIPTS (`787d4cb4..d02738767`)
+
+### CI/CD Pipeline  [.github/workflows/ci.yml] — two NEW blocking steps
+- `gate` — **e2e-render-map tier assertions (S427 — previously ran in no job)**: `bun test compiler/tests/e2e-render-map/`. Before this, `compiler/tests/*.test.js` (root glob) and the pre-commit globs never descended into that dir, so its detector pins pinned nothing. The fast-slice green→red delta inside `e2e-render-map.test.js` stays WARN-only; `generate-baseline.js --check` is NOT run.
+- `windows` — **e2e-render-map tier on Windows (S427 — the S417 separator class)**: same command; the tier was a silent whole-tier no-op on Windows at S417.
+- `gate` now 16 steps: install · browser fixtures · gate suite (unit + conformance) · root-level parser/native conformance · **e2e-render-map** · gauntlet quick check · browser failure name-set · snippet gate · compile-floor · facts · conflict-marker · SPEC-INDEX currency · delta-log sequence · §34.0 row-provenance (+ checkout, setup-bun).
+
+### CI/CD Pipeline  [.github/workflows/cloud-maps.yml]
+Trigger: schedule `17 9 * * *` + manual. Still Stage-1-only (`bun scripts/state.ts --write` → auto-merge PR). **It does NOT refresh `.claude/maps/`** — the label now says so (S436). Nav-map refresh remains a PA wrap-step-6c job.
+
+### `scripts/hybrid.ts` — the HYBRID-COMPILER harness (NEW, #1044, S430 P5) — NOT a CI gate
+- `bun scripts/hybrid.ts --list` — every substitutable stage (36, from `compiler/src/pipeline-seam.ts` `STAGE_SEAMS`).
+- `bun scripts/hybrid.ts --swap <STAGE>=<module> [--swap …] --conformance [--filter <substr>]` — **THE bootstrap module-done gate** (P5): the full conformance suite through `conformance/adapters/hybrid.ts`.
+- `bun scripts/hybrid.ts --swap <STAGE>=<module> --differential [--roots …] [--files …] [--limit N] [--json <path>]` — artifact differential vs pure TS; TRIAGE, not a gate.
+- `<module>` may be `.js`/`.ts`/`.mjs`, a `.scrml` (compiled first in library mode in a child process), or the literal `ts` (calibration: `--swap all=ts`).
+- Exit: 0 green · 1 red · 2 not a valid run.
+
+### `conformance/run.ts` — per-implementation `xfail` (NEW, #1050, S430 P7)
+A case may carry a top-level `"xfail": { "impl1-ts": { "gap": "<status=carried gap id>", "fails": { … } } }` pinning impl#1's FAILURE SIGNATURE. `bun conformance/run.ts --xfail-signature <case>` prints a paste-ready block. At `d02738767`: `bun conformance/run.ts` → **967/973 pass, 6 XFAIL** (see test.map.md).
+
+### `scripts/state.ts` — `status=carried` is its own column (S430 P7)
+`GAP_STATUS_CARRIED = new Set(["carried"])` (`:109`) — "owed by the bootstrap, xfail on impl#1", never folded into open. `scripts/flograph.ts` now parses `@gap` markers through `state.ts` (`parseGapMarkers`, `classifyGapStatus`) instead of its own fixed-order regex. `bun scripts/state.ts --check` at this SHA: **FAIL** on `@generated:recent-sessions` (master-list.md) — recorded in non-compliance.report.md.
 
 ## Development Commands (root package.json scripts)
 compile — `bun run compiler/src/cli.js compile`
@@ -1134,6 +1192,7 @@ None. No Dockerfile / docker-compose in this repo — see infra.map.md.
 #scrml #map #build #types-gate #tsc #typescript-dep #baseline-name-count #tracking-job #test-tier-vs-merge-gate #gap-status-parser #state-ts #fail-loudly #known-gaps #cloud-maps-stage1 #cli-flags #semdiff #ci #ci-gate-layering #pre-commit #pre-push #bun-test #advisory-review #windows-ci #content-hash #cache-headers #adopter-82 #module-format #esm-chunks #snippet-gate #facts-gate #claim-gate #public-claims #dbauth #db-migrate #privilege-separation #migration-apply-seam #cloud-maps #maps-pat #spec-index-gate #generated-doc-currency #pre-push-currency #snippet-corpus-widened #npm-publishable #files-allowlist #gate-topology #gate-hole #root-level-tests #non-blocking-tier #documented-failure-baseline #failure-name-sets #cry-wolf #new-ref-push-skip #set-e-trap #pre-push-scope #b7dda491 #browser-baseline #failure-name-set #bidirectional-baseline #s34-census #§34.0 #row-provenance #fetch-depth-0 #diff-scoped-gate #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #no-scheduled-map-refresh #advisory-review-disabled #skipped-step-behind-red-step #gap-attribute-bag #locus-attr #partial-impl #proven-gate #import-meta-main #review-debt-script #pr-reviews-md #puppeteer-skip-download #windows-ci-flake #boot-step-0.6 #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #script-vs-module-goggle #node-check-blind-to-tla #bun-vm-script-blind #classic-script-no-type-module #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #453-exclusions-printed #exit-code-2-invalid-comparison #compile-failure-is-data #u1-corpus-emit-retired #import-meta-classic-script #workflow-dispatch #manual-refire #dropped-webhook #prospective-not-retroactive #422-target-ref #s34-census-base-fallback #weakens-no-gate #root-vs-position #review-debt-code-bearing #two-rates-one-signal #volume-statistic-not-alarm #directory-whitelist-not-blacklist #scripts-is-code-bearing #count-threshold-not-percentage #bite-test #widen-before-you-count #auto-widen #widen-ceiling #epoch-clearing-not-list-full #cry-wolf-guard-deleted-not-tuned #state-ts-ledger-integrity #marker-truncation-internal-gt #duplicate-gap-id-double-count #throw-on-conflicting-status #heading-marker-drift-13 #warn-only-not-gated #maps-watermark-no-ancestry-check #s34-census-windows-fix-landed #fileurltopath #boot-read-set-gate #a-memory-navigates-it-does-not-gate #pickup-led-digest #delegate-dont-reimplement #detection-not-control #two-failure-classes-enumerated #behind-is-timing-not-a-defect #derive-dont-declare-guarded #needle-driftcheck #honest-residual-reverse-direction #windows-first #fileurltopath-not-url-pathname #dpa-debt-probe #a-channel-the-probe-does-not-read-does-not-exist #bidirectional-probe #stale-table #anchored-not-contains #third-instance-of-unanchored-match #ratification-lives-in-column-3 #run-not-ratify #source-text-regex-census #post-ast-source-text-rule #five-authors-one-substitution #invisible-to-differentials #pre-ast-is-exempt #ratio-not-inspection #reports-a-floor-not-a-count #never-quote-the-raw-regex-count #probe-inherited-its-own-blind-spot #structural-successor-named #new-or-touched-only #not-a-ci-gate #cry-wolf-shape #zero-github-diff #second-window-running #gate-13-steps #delta-lint-gate #delta-log-sequence #checkpoint-cursor #baselined-not-enforced #pa-base-8 #step-name-is-a-coverage-claim #canary-gated-in-gate-job #g-ci-does-not-run-root-level-test-files #corpus-zero-debt #corpus-zero-is-blast-radius-only #reverse-ouroboros #types-gate-NOT-on-main #package-json-zero-diff-11-windows #ctx-ts-not-on-main #gate-13-steps
 #int-number-census #hand-run-instrument #not-gated #gate-flat-14-steps #ci-zero-diff
 #s405 #ci-zero-diff #gate-14-steps #verified-empty-diff #gate-excludes-integration #seven-of-fourteen-outside-the-gate #corpus-bridge-invariant-88 #905-conformance #state-ts-check-exits-0 #maps-staleness-vs-local-head #stamp-tracks-merge-base
+#s437 #d02738767 #gate-16-steps #windows-5-steps #e2e-render-map-gated #hybrid-harness #p5-module-done-gate #xfail #status-carried #cloud-maps-relabel #v0-8-0
 
 ## Links
 - [primary.map.md](./primary.map.md)

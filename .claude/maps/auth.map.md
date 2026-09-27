@@ -1,6 +1,40 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 AUTH DELTA ━━━━━━━
+# NOT a zero-diff row. Keyed surface moved: `codegen/emit-server.ts` (session store + cookie resolution),
+# NEW `codegen/session-config-resolve.ts`, `codegen/index.ts` (`E-MW-008`), `protect-analyzer.ts` (+ NEW
+# `diagnostic-secrets.ts`, `db-target.ts`, `db-uri-redact.ts`), `type-system.ts` (`E-AUTH-005` application scope).
+# `stdlib/auth*` / `stdlib/oauth*`: only `stdlib/oauth/google.scrml` (2-line edit). Detail in `## S437 — SESSION + SECRETS` below.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -262,6 +296,22 @@
 #
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
+
+## S437 — SESSION + SECRETS (`787d4cb4..d02738767`)
+
+### §20.5 session — ONE store and ONE cookie per APPLICATION, not per emitted unit (#1062, #1094)
+- **Store path** (`codegen/emit-server.ts`, `_sessionStoreDistAscent = distRootAscentOf(...)` at `:2837`, used in the `.scrml-sessions.db` emission at `:2930`): anchored at the DIST ROOT via a compile-time ascent, keyed with `path.resolve`. Before: string-concatenated off each unit's `import.meta.dir`, so two units of one program opened two stores and a nested unit answered `auth:false` for a cookie the root had minted (HTTP 200, zero diagnostics); on Windows the key was mixed-separator.
+- **Cookie name + expiry** (`session-secure` → `__Host-scrml_sid` vs `scrml_sid`; `sessionExpiry`) resolve per unit through **`codegen/session-config-resolve.ts`** — ONE three-step order: auth-middleware entry → the unit's own `<program>`/`<page>` raw attr → the build-wide stash. `emit-server` calls `resolveUnitSessionAttr`; a stash fall-through is RECORDED (`recordUnattributableSessionUnit`) and `codegen/index.ts` drains it after emission.
+- **`E-MW-008` (§20.5.1)** — a build with more than one `<program>` where a session-emitting unit can only resolve via the stash is REFUSED rather than guessed. The module header records why the driver must not re-derive the order ("mirroring a predicate is not mirroring a dispatch").
+
+### §52.11 `E-AUTH-005` is APPLICATION-scoped (#995, closes #770)
+`hasProgramDbAttr` ("does THIS FILE declare `<program db=>`?") is retired for an application-scope answer computed once in `runTS`; before, every page file of a canonical multi-file app false-fired, making §52.4.2 `<var server>` unreachable.
+
+### DB connection secrets never reach compiler output (#1047, #1055)
+`diagnostic-secrets.ts` `SecretRedactor` is installed at the `compileScrml` chokepoint (see error.map.md); `protect-analyzer.ts` displays a db target through `redactDbUri`/`displayConnectionValue` and classifies it through `db-target.ts` `classifyDbTarget` (the SAME classifier as `codegen/db-driver.ts`). `E-PA-004` names the file it opened; the PA no longer creates db side files. `lsp/handlers.js` redacts editor diagnostics and PA notes with the same redactor.
+
+### Not changed
+CSRF, `auth="required"` gating, `@currentUser`, protect egress (§14.8.9) and tenant isolation (§14.8.10) sections below are carried; a stat diff over `787d4cb4..d02738767` of `codegen/protect-egress.ts`, `codegen/tenant-egress.ts`, `auth-graph.ts`, `compiler/runtime/`, `stdlib/auth/` is EMPTY.
 
 ## Strategy
 Type: session-cookie auth (declarative, `<program>`-attribute driven, now backed by a compiler-owned `session` server builtin) + stdlib JWT (HS256 self-signed) + JWKS RS256 (external-IdP verification) + OAuth2 (5 providers) + magic-link/email-verify/password-reset (token-store flows).
@@ -699,6 +749,7 @@ Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stor
 #scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental #s738-dev-rewrite #dev-child-process #dev-parent-proxy #run-dev-child-server #serve-dev-infra #child-ready-prefix #issue-724
 #fourth-consecutive-zero-diff #anchors-carry-by-measurement
 #s405 #auth-surface-non-empty #protect-analyzer-deleted-its-regex #import-direction-invariant #e-pa-003-shadow-db #§14.8.9-three-limbs #e-protect-004-is-a-lint #e-protect-005 #runtime-refusal-is-the-guarantee #the-unit-is-the-body #status-and-headers-not-the-body #mediation-mark #provenance-vs-shape #w-protect-005 #zero-byte-readablestream #mounthydrate-was-unguarded #serverload-safe-for-a-reason #enumerate-over-the-serializer #tagged-refusal #soundness-bound-by-origin #§14.8.10-tenant-floor #four-app-matrix #cross-tenant-escape-executed #tenanttableset #w-schema-no-tables-declared #foreign-opener-two-of-five-are-security-floors
+#s437 #d02738767 #session-store-dist-root #session-config-resolve #e-mw-008 #e-auth-005-application-scope #secret-redactor #db-target #cookie-name-per-application
 
 ## Links
 - [primary.map.md](./primary.map.md)

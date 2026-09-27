@@ -1,6 +1,40 @@
 # config.map.md
 # project: scrml
-# updated: 2026-09-18T00:00:00Z  commit: 787d4cb4
+# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
+# `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
+# `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
+# `git merge-base --is-ancestor 787d4cb4 d02738767` -> **exit 0**. Pass ran in worktree `agent-a081239793c7872e1`;
+# `HEAD` advances past the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `d02738767`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (was 0.7.1 — `8cd1e0223` #1099, "the impl#1 floor tag") · `compiler/src` **265,215 lines / 211 files**
+# per FACTS (+11,696 lines, +16 files; `git ls-files compiler/src | wc -l` = 213, 197 at `787d4cb4` — same +16) ·
+# test files **1,505** (+46) · `compiler/SPEC.md` **40,132** lines (+2,139) · conformance **973** cases (+68) in **55**
+# category dirs (+1: `defer/`, 44 cases) · §34 catalog **832** rows (+13), range `20294..21197` · `docs/changes/` 775.
+# ⛑ **PREFIX SERIES SET-DIFFED (`^| X-` rows, both ends):** E **922 -> 943** · W **182 -> 183** · I 10 · H 2 · unique
+# **787 -> 800**. ADDED = {`E-CLASS-NOT-IN-SCRML`, `E-DYNAMIC-IMPORT-NOT-IN-SCRML`, `E-DEFER-CONTROL-FLOW`,
+# `E-DEFER-DUPLICATE-FUNCTION`, `E-DEFER-LATER-SHADOW`, `E-DEFER-NESTED`, `E-DEFER-OUTSIDE-FUNCTION`,
+# `E-DEFER-SERVER-IN-SPLIT`, `E-DEFER-UNHANDLED-FAILABLE`, `E-DEFER-UNSUPPORTED-SITE`, `E-MW-008`, `E-SCOPE-REDECLARE`,
+# `W-ENGINE-MATCH-IN-STATE-CHILD`}; REMOVED = EMPTY.
+# ⛔ **N-S405-1 STILL LIVE, SIX SESSIONS ON:** `E-CG-ENUM-BINDING-COLLISION` (`codegen/emit-library.ts:1517`) and
+# `E-CG-SQL-FN-UNVERIFIABLE-SPAN` (`:713`) still have **0** mentions in `compiler/SPEC.md` (`grep -c` re-run).
+# ⛑ **THE LANGUAGE-LEVEL HEADLINES OF THE WINDOW (verify in SPEC, not here):** `defer` (§19.16) shipped in impl#1;
+# `class` and dynamic `import(...)` are not scrml (§7.2.1 / §21.3.2); `import:host` (§21.3.1 + manifest §22.13) built;
+# L19 REVERSED — inline block handlers `onclick={ a; b }` legal and canonical (§5.2.3, S435); **§66 Declarations,
+# Instances, and Value Contracts added as NOMINAL / SPEC-AHEAD — impl#1 does NOT implement it** (§66 banner at
+# `SPEC.md:38624`); the TS compiler is fixed "only for cause" (bootstrap-blocking / adopter-reported / security), every
+# other divergence is `status=carried` + a conformance `xfail` (S430 P7). impl#1 conformance at this SHA:
+# `bun conformance/run.ts` -> **967/973 pass + 6 xfail**.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`, re-read at `:795`). Do not reformat it.
+# ⚑ `file:line` citations in this S437 block were re-derived by grep at `d02738767`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S437 CONFIG DELTA ━━━━━━━
+# NOT a zero-diff row: a NEW repo-root config file, `scrml.toml` (the §22.13 manifest), and `package.json` version
+# 0.7.1 -> 0.8.0. `bun.lock`, `bunfig.toml`, `tsconfig.json`: `--name-only` EMPTY. Env vars: the added lines of
+# `git diff 787d4cb4..HEAD -- compiler/src scripts lsp conformance` contain **zero** new `process.env.` / `Bun.env.`
+# reads. New compile OPTIONS (API, not env): `stageOverrides` (`api.js` `compileScrml`), `_secretRedactor` (internal).
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S422 HEADER (stamp `787d4cb4`, 2026-09-18), CARRIED FOR PROVENANCE. ITS FIGURES ARE S422-ERA. ━━━━━━━
 # ⛑ **S422 STAMP — `e74f5423` -> `787d4cb4`. THE LONGEST STALE WINDOW THIS FILE HAS EVER CARRIED:
 # 112 COMMITS AND FOUR SESSIONS (S417-S421 ran no wrap-6c).** MAP-STAMP RULE, all three commands
 # executed at write time, not carried:
@@ -205,6 +239,20 @@ No `.env.example` or `.env.template` in the repo. No `.env*` files were read (pe
 
 **Re-verified at `e80b692e` (S313)** by re-enumerating every `process.env.*` / `Bun.env.*` reference across `compiler/src`, `lsp`, `scripts` and `e2e`. **The compiler-side set is UNCHANGED across five sessions** — every landing in this window was compiler source, spec, CI or docs; none introduced or removed a configuration key. The CI-secret table at the bottom is the only part of this map that moved.
 
+## S437 — `scrml.toml` project manifest (SPEC §22.13) — NEW config surface
+
+Located by `findManifest(filePath)` in `compiler/src/host-import.js` (`MANIFEST_FILE_NAME = "scrml.toml"`), read BEFORE any parse (`readHostImportCapabilities`, called from `api.js` ahead of the block splitter).
+
+### `[capabilities]`
+host-import: "disabled" | "self-host-only" — gates `import:host` (§21.3.1). Adopter default is `"disabled"` (no manifest ⇒ disabled); `"self-host-only"` admits `import:host` only in files under `stdlib/compiler/` relative to the manifest. Any other value → `E-MANIFEST-001`. A disallowed use → `E-IMPORT-008`.
+
+### This repo's own `scrml.toml` (root, 9 lines)
+`[capabilities] host-import = "self-host-only"` — the bootstrap `scrml:compiler` family bridges into the TS compiler.
+
+## S437 — compile-time defaults that look like config but are NOT configurable
+- SQLite concurrency defaults, TWO halves: every EMITTED sqlite `Bun.SQL` handle gets `busy_timeout` + `journal_mode = WAL` (`codegen/sqlite-defaults.ts`, `_scrml_sqlite_configure`); every sqlite handle the COMPILER/CLI opens (`protect-analyzer.ts:473`, `commands/db-migrate.js:505`) gets `busy_timeout` ONLY — WAL is deliberately NOT set there because it persistently changes a file the adopter owns (`configureSqliteHandle`, `compiler/src/sqlite-handle-defaults.ts`). One value, `SQLITE_BUSY_TIMEOUT_MS = 5000` (`:86`), re-exported by the codegen half. The operator-ruled `<program journal-mode= busy-timeout=>` override (S385 A1) is **NOT implemented** — `grep -rn 'journal-mode\|busy-timeout' compiler/src` returns only comments.
+- Session cookie config (`sessionExpiry`, `session-secure`) resolves per unit through `codegen/session-config-resolve.ts`; a multi-`<program>` build that cannot attribute a session-emitting unit is refused with `E-MW-008` (§20.5.1).
+
 ## Environment Variables (referenced directly in compiler/src / lsp / scripts / e2e source)
 
 | Key | Where used | Notes |
@@ -281,6 +329,7 @@ No secret VALUE appears anywhere in this map set.
 #scrml #map #config #environment #env-vars #bunfig #allowlist #ci-secrets #compiler-settings #lint-knobs #maps-pat #anthropic-api-key #nav-chunk-timeout #ai-legs-killed #cost-decision #cloud-maps-stage2-deleted #advisory-review-disabled #no-scheduled-map-refresh #env-surface-unchanged #zero-env-diff #new-files-checked-individually #no-env-in-new-modules #bunfig-timeout-never-in-force #invariant-56 #zero-env-diff
 #zero-env-delta-by-grep #argv-not-env
 #s405 #config-zero-diff #ten-json-paths-are-conformance-fixtures #scrml-protect-mediated-is-a-symbol-not-a-setting #scrml-protect-origin #compile-time-literal-not-config #gated-on-protectactive
+#s437 #d02738767 #scrml-toml #manifest #host-import-capability #e-manifest-001 #e-import-008 #sqlite-busy-timeout #journal-mode-override-not-implemented #e-mw-008 #stageoverrides
 
 ## Links
 - [primary.map.md](./primary.map.md)
