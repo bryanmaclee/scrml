@@ -295,11 +295,26 @@ export interface AuthMiddleware {
   auth: string;
   loginRedirect: string;
   csrf: string;
-  sessionExpiry: string;
-  // §20.5.1 (S266, i29e B4b) — session-cookie Secure mode. `true` (default) →
-  // `__Host-scrml_sid` + always-Secure; `false` (`session-secure="false"`) →
-  // plain `scrml_sid`, no Secure. Optional so pre-existing test constructions
-  // that omit it default to the safe secure mode (emit-server reads `!== false`).
+  // §20.5 / §20.5.1 — the unit's OWN session config, and ONLY its own. Both
+  // fields are the first step of `codegen/session-config-resolve.ts`'s order: a
+  // defined value is final for this unit and outranks its `<program>`.
+  //   - 8a (`<program auth="required">`) fills both — the program's declaration,
+  //     or the §20.5 defaults (`"1h"` / secure) when it declares none, which ARE
+  //     that program's own answer.
+  //   - 8b (protect= auto-escalation, and the `<page auth="required">` limb)
+  //     sets a field ONLY when the unit itself declares it. A `<page>` or an
+  //     auto-escalated unit that declares nothing leaves both UNDEFINED so the
+  //     resolver falls through to the unit's own `<program>` / the program stash.
+  //     Stamping `"1h"` / secure there made the defaults outrank the program's
+  //     OWN declaration (S438, g-route-inference-8b-session-defaults-outrank-
+  //     program-declaration): a `<program sessionExpiry="7d"
+  //     session-secure="false">` with a protect= `<db>` emitted
+  //     `__Host-scrml_sid`/3600, and a protect= member page read a different
+  //     cookie name than the program that minted it.
+  // `sessionSecure`: `true` → `__Host-scrml_sid` + always-Secure; `false`
+  // (`session-secure="false"`) → plain `scrml_sid`. When NO step answers, the
+  // resolver's consumer falls to the secure default.
+  sessionExpiry?: string;
   sessionSecure?: boolean;
   autoEscalated?: boolean;
 }
@@ -6298,17 +6313,21 @@ export function runRI(input: RIInput): RIOutput {
         // returned above via the 8a .has() guard). Register the gate from the
         // page's own settings so the protected page stays gated, but do NOT fire
         // W-AUTH-MIDDLEWARE-AUTO-INJECTED — the auth= IS explicit. csrf defaults to "auto" (sensitive
-        // protect= fields present) and sessionExpiry to "1h" (<page> carries no
-        // sessionExpiry= attribute).
-        authMiddleware.set(filePath, {
+        // protect= fields present).
+        // §20.5.1 (S438) — the session fields carry ONLY what this unit itself
+        // declares. A `<page>` carries no `sessionExpiry=`, and one without
+        // `session-secure=` declares no cookie mode, so both stay undefined and
+        // the shared resolver answers from the enclosing `<program>` (or the
+        // program stash, or the secure default). See the AuthMiddleware fields.
+        const pageEntry: AuthMiddleware = {
           filePath,
           auth: "required",
           loginRedirect: explicit.loginRedirect ?? "/login",
           csrf: explicit.csrf ?? "auto",
-          sessionExpiry: explicit.sessionExpiry ?? "1h",
-          // §20.5.1 (i29e B4b) — honor an explicit session-secure="false".
-          sessionSecure: (explicit.sessionSecure ?? "true") !== "false",
-        });
+        };
+        if (explicit.sessionExpiry != null) pageEntry.sessionExpiry = explicit.sessionExpiry;
+        if (explicit.sessionSecure != null) pageEntry.sessionSecure = explicit.sessionSecure !== "false";
+        authMiddleware.set(filePath, pageEntry);
         continue;
       }
 
@@ -6318,9 +6337,11 @@ export function runRI(input: RIInput): RIOutput {
         auth: "required",
         loginRedirect: "/login",
         csrf: "auto",
-        sessionExpiry: "1h",
-        // §20.5.1 (i29e B4b) — auto-escalated auth defaults to the secure mode.
-        sessionSecure: true,
+        // §20.5.1 (S438) — NO sessionExpiry / sessionSecure. Nothing in this unit
+        // declares either (no auth= anywhere), so the shared resolver answers from
+        // the unit's own `<program>` / the program stash, and only when nothing in
+        // the program declares one does the secure 1h language default govern.
+        // Stamping "1h" / secure here outranked the program's own declaration.
         autoEscalated: true,
       });
       // S299 — CODE SPLIT. This fire previously used `W-AUTH-001`, which §34:19015

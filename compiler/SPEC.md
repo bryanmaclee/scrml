@@ -16625,18 +16625,32 @@ no `auth=` skips to step 3, and step 3 answers with the FIRST declaring file in 
 compile set — so in a two-`<program>` build one unit's own declaration is silently
 governed by its sibling's (S433: `30m` and `7d` both emitted `maxAge=1800`).
 
-⚠ **Step 1 is stronger than it looks, and the `1h` / secure-mode defaults are NOT
-merely last-resort.** Route inference writes a FULLY POPULATED auth-middleware entry,
-substituting `sessionExpiry: "1h"` and secure-mode whenever the unit itself declared
-none — including for a `<page>` auto-escalated to `auth="required"`, which declares
-nothing at all. Because that entry is then *defined*, step 1 wins and steps 2-3 are
-never consulted: **for any unit carrying an auth-middleware entry, the `1h` default
-BEATS a `<program sessionExpiry=>` declared elsewhere in the program.** So the
-propagation above governs units WITHOUT such an entry — which is the minting-unit case
-it was ruled for — and does not override an entry's substituted default. Whether an
-inferred default should outrank an explicit program-level declaration is an open
-question (`g-route-inference-substituted-default-outranks-program-declaration`), not
-something this clause settles.
+**Step 1 answers only with a DECLARED value, or with a `<program auth="required">`'s
+own defaults (S438).** Route inference writes an auth-middleware entry for two kinds of
+unit, and they differ in what the entry carries:
+- a `<program auth="required">` — the entry carries that program's `sessionExpiry=` /
+  `session-secure=`, or the `1h` / secure defaults when it declares none. Those defaults
+  ARE that program's own answer, which is why such a unit always resolves for itself
+  (`E-MW-008`).
+- a unit auto-escalated to `auth="required"` by `protect=` columns, and a
+  `<page auth="required">` over them — the entry carries a session field ONLY when the
+  unit itself declares it. A unit that declares nothing leaves step 1 empty, so steps 2
+  and 3 answer: its own `<program>`'s declaration governs its cookie lifetime AND its
+  cookie NAME, and a `protect=` member page reads the same cookie its program mints.
+  Only when nothing in the program declares an attribute does the secure `1h` language
+  default govern — so no unit is ever given a weaker cookie than its own program
+  declares.
+
+Before S438 the second kind was stamped with the `1h` / secure defaults as well; being
+*defined*, they won step 1 and outranked the program's own declaration (MEASURED: a
+`<program sessionExpiry="7d" session-secure="false">` over a `protect=` `<db>` minted
+`__Host-scrml_sid` / `Max-Age=3600`, and a `protect=` member page of a
+`session-secure="false"` root read `__Host-scrml_sid` while the root minted `scrml_sid`,
+so a login on the root never authenticated the page). The stamped entry also made a
+contested unit look attributable, hiding it from `E-MW-008`.
+(`g-route-inference-8b-session-defaults-outrank-program-declaration`, which settles the
+S433 open question `g-route-inference-substituted-default-outranks-program-declaration`:
+an inferred default does NOT outrank a program's declaration.)
 
 A per-unit answer is a defect of the same shape as a per-unit store: the unit that
 MINTS the cookie is precisely the one with no `auth=`, so reading the setting per-unit

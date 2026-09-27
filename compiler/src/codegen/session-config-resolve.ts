@@ -30,9 +30,17 @@
  * recorded facts. There is no second implementation to drift.
  *
  * ── THE ORDER (unchanged; moved, not rewritten) ─────────────────────────────────
- *   1. `authMiddlewareEntry` — THIS unit's route-inference output. Present for any
- *      unit whose `<program>` carries `auth=`, and route-inference fills in the
- *      §20.5 defaults there, which is why such a unit is always attributable.
+ *   1. `authMiddlewareEntry` — THIS unit's route-inference output. For a
+ *      `<program auth="required">` (Step 8a) route-inference fills in the §20.5
+ *      defaults when the program declares none — they ARE that program's own
+ *      answer — which is why such a unit is always attributable. An entry from
+ *      Step 8b (protect= auto-escalation, `<page auth="required">`) carries a
+ *      session field ONLY when the unit itself declares it; otherwise the field is
+ *      undefined and this step MISSES, so the unit's own `<program>` (step 2) or
+ *      the program stash (step 3) answers. S438: 8b used to stamp `"1h"` / secure
+ *      too, which outranked the unit's own program's declaration and hid a
+ *      contested unit from `E-MW-008`
+ *      (g-route-inference-8b-session-defaults-outrank-program-declaration).
  *   2. the unit's OWN raw read — a recursive walk of this unit's nodes accepting
  *      `<program>` (last match wins) or `<page>` (first match wins), program
  *      outranking page.
