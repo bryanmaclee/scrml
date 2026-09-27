@@ -1,0 +1,29 @@
+{
+  "id": "markup-handler-inline-block-handler-runs-every-statement",
+  "description": "§5.2.3 (S435, L19 reversed) — the canonical inline block handler `onclick={ @count = 0; @phase = .Idle; track(\"reset\") }` compiles without E-MULTI-STATEMENT-HANDLER and runs all three statements, in order, on one click. Source is §5.2.3's own inline-block worked example.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "rationale": "§5.2.3 (amended S435): \"An event-handler attribute value MAY be an inline block: a `{`, a statement list, and the matching `}`\"; \"On each dispatch of the event, the statements of an inline block SHALL run in source order, each one exactly once\"; \"An inline block (`{ … }`) never fires\" E-MULTI-STATEMENT-HANDLER (§34 row, narrowed S435). One click: count 5 → 0, phase .Loading → .Idle, track sets last to \"reset\".",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-MULTI-STATEMENT-HANDLER"
+    ],
+    "input": [
+      {
+        "click": "#reset"
+      }
+    ],
+    "state": {
+      "count": 0,
+      "phase": "Idle",
+      "last": "reset"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "0 reset"
+      }
+    ]
+  }
+}

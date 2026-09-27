@@ -1,0 +1,25 @@
+You are landing a ruled SPEC amendment for the scrml language: the reversal of lock L19 (SPEC §5.2.3). SPEC text + conformance only. You do NOT modify `compiler/src/`.
+
+## CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (PATH-DISCIPLINE INCIDENT counter: several prior)
+1. `pwd` MUST start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-`. If not: STOP, report.
+2. `git rev-parse --show-toplevel` == pwd; `git status --short` clean; `git fetch origin` then assert `git merge-base HEAD origin/main` == `git rev-parse origin/main` (if your base is stale, `git merge --ff-only origin/main`).
+3. `bun install`; `bun run pretest` run PLAINLY from the worktree cwd (NOT `bun --cwd <path> run …` — that silently no-ops).
+4. Every Write/Edit uses an absolute path UNDER your worktree. Never write under `/home/bryan-maclee/scrmlMaster/scrml/` outside `.claude/worktrees/`. Never `cd` into the main checkout. Never `git stash`. Never `pkill -f` by command string.
+5. First commit: `WIP(s435-l19-reversal): start at $(pwd)`. Commit after each meaningful change; append-only `docs/changes/s435-l19-reversal/progress.md`. Save this prompt verbatim to `docs/changes/s435-l19-reversal/BRIEF.md` and commit it.
+
+## MAPS — REQUIRED FIRST READ
+`.claude/maps/primary.map.md` (stamp 787d4cb4 / 2026-09-18 — STALE; verify every locus against source). Report whether it was load-bearing.
+
+## The ruling (authority: `/home/bryan-maclee/scrmlMaster/scrml-support/user-voice-scrml.md`, S435 — read the S435 blocks)
+bryan, S435, verbatim: **"reverse L19"**. Meaning: inline multi-statement (block) event handlers are LEGAL and CANONICAL, with no line limit — e.g. `<button onclick={ @count = 0; @phase = .Idle; track("reset") }>`. Rationale: the S206 co-location axiom ("if a thing does a thing, look at the thing"). provenance: `ruling:user-voice-scrml.md S435` · supersedes: L19 (S56 lock) / §5.2.3's "Multi-statement intent … SHALL force a named function" + `E-MULTI-STATEMENT-HANDLER`.
+
+PA-verified by emission at `ea55368da`: `onclick={ @a = 1; @b = 2 }` already compiles at exit 0 with a correct emitted handler, i.e. the TS impl already accepts the braced form while §5.2.3 says it SHALL error.
+
+## Tasks
+1. **Read SPEC §5.2.3 in full** (`compiler/SPEC.md`, find `#### 5.2.3`), plus §4.14 (it says the same single-expression discipline governs `:`-shorthand bodies — decide, and REPORT, whether the reversal reaches `:`-shorthand bodies too; the ruling was about event handlers; if unclear, do NOT extend it — flag it for the PA), plus the §34 `E-MULTI-STATEMENT-HANDLER` row, plus every other SPEC mention (`grep -n 'E-MULTI-STATEMENT-HANDLER\|L19' compiler/SPEC.md`).
+2. **Amend the SPEC**: rewrite §5.2.3 so inline block handlers are legal and canonical; keep the bare single-expression shapes; keep the `${() => {…}}` closure form; state the named-function form as a free choice, not a requirement. Add an amendment banner with `> **Provenance:** ruling:user-voice-scrml.md S435 · supersedes: L19 (S56), the prior §5.2.3 multi-statement rule`. Update the §34 row: retire the code, or narrow it to whatever shape genuinely remains an error (e.g. an unterminated / non-block `;` sequence in a BARE unbraced attribute, if that is truly unparseable) — decide by reading, state why. Update every other SPEC mention consistently. Then `bun run scripts/regen-spec-index.ts` and update the §5 SPEC-INDEX row text if it mentions the rule.
+3. **Measure the TS impl** against the amended SPEC — do NOT change compiler code. Fire sites to check (PA-located, verify): `compiler/src/multi-statement-scan.ts`, `tokenizer.ts`, `symbol-table.ts`, `ast-builder.js`. Compile probes for: braced block handler; bare `onclick=a(); b()` (unbraced); a block handler inside an engine state-child; a block handler inside an `<each>` row; a `:`-shorthand body. Record exit codes + diagnostics (exit status separately from output; W-/I- land in warnings). Any shape the new SPEC makes legal that TS still REJECTS is a divergence: file it in `docs/known-gaps.md` (format: read recent entries; `<!-- @gap … status=carried … -->` is the S430 P7 status for "correct behaviour pinned by a conformance case expected to fail on impl#1" — use `status=carried` ONLY together with an xfail-pinned conformance case per the existing P7 mechanism; read how #1050 / `conformance/` does per-implementation xfail first).
+4. **Conformance**: add case(s) under `conformance/cases/` pinning that a braced multi-statement handler compiles and runs both statements (follow existing case format exactly; read several first). Run `bun conformance/run.ts` and report.
+5. Run `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` if you touched anything a test reads (tests asserting E-MULTI-STATEMENT-HANDLER fires on a now-legal shape must be updated in the SAME commit as the SPEC change — they are one logical unit).
+
+Do NOT push, open a PR, or merge. Final report (short): worktree path, final SHA, files touched, the §4.14 decision, the §34 disposition + why, the TS measurement table, any gaps filed, conformance result, map load-bearing or not.

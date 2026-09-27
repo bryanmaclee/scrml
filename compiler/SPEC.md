@@ -993,7 +993,7 @@ TAB receives the entire lambda as a single `ExprAttrValue`.
 
 - The `:`-shorthand body opens with a single `:` token preceded by at least one whitespace character following the last attribute (or the tag name if there are no attributes), and runs through to the `>` that terminates the opener. There is NO closer (`</>`, `/`, or `/>`).
 - The `:`-shorthand SHALL contain exactly one scrml expression. The expression follows logic-context grammar — bare identifiers, calls, member access, literals, and markup-as-value (cross-ref §1.4) are all legal as the single-expression body.
-- A `:`-shorthand body SHALL NOT contain a statement, multiple semicolon-separated expressions, or a block. Multi-statement intent forces the bare-body form (cross-ref §5.2.2 multi-statement event-handler restriction; the same shape rule applies here).
+- A `:`-shorthand body SHALL NOT contain a statement, multiple semicolon-separated expressions, or a block. Multi-statement intent forces the bare-body form. (Cross-ref §5.2.3. The S435 reversal of L19 made the inline BLOCK legal for event-handler attribute values; it does NOT reach `:`-shorthand bodies, which keep this single-expression rule. The bare, unbraced event-handler value keeps the same single-expression rule as this one.)
 - The closer-presence override: if a tag uses `:`-shorthand, the absence of any closer is REQUIRED. If a writer accidentally writes `<Tag : expr></>`, this is `E-CLOSER-001` (closer present on `:`-shorthand body — choose one form).
 - Mandatory whitespace separates the last attribute (or the tag name) from the `:`. `<Tag:expr>` (no whitespace) is `E-PARSE-001` — the tokenizer treats no-space colon as part of an identifier or as a `bind:` / `class:` / `on:` namespace separator.
 - Whitespace AFTER the `:` is OPTIONAL (S160 — S154 ruling (b)). The `:` token is the body-introducer; the single expression begins at the next non-whitespace character, whether or not whitespace follows the `:`. `<span :@thing>` (no after-`:` whitespace — the tersest form) and `<span : @thing>` (with after-`:` whitespace) are identical: both introduce the `:`-shorthand body `@thing`. There is no after-`:` ambiguity — once the whitespace-preceded `:` is recognized as the body-introducer (the mandatory BEFORE-`:` whitespace is the disambiguator, above), no following token (`@`, `<`, a string literal, or a bare identifier) can retroactively re-bind the `:` as an attribute namespace separator (which requires `name:` with the colon glued AFTER the name, the opposite anchoring). Only the BEFORE-`:` whitespace is required.
@@ -1057,7 +1057,7 @@ Each `:`-shorthand body here is a display-text literal (§4.18.3). `"Loading… 
 
 **What is NOT legal under `:`-shorthand:**
 
-- Multi-statement: `<Idle : startGame(); track()>` — `E-MULTI-STATEMENT-HANDLER` (cross-ref §5.2.2). Use bare-body.
+- Multi-statement: `<Idle : startGame(); track()>` — `E-MULTI-STATEMENT-HANDLER` (cross-ref §5.2.3). Use bare-body.
 - Block expressions: `<Idle : { startGame(); track() }>` — `E-PARSE-001`. Use bare-body.
 - Closer present alongside `:`-shorthand: see `E-CLOSER-001` above.
 
@@ -1359,6 +1359,8 @@ scrml attributes follow a three-way distinction based on quoting:
 | Unquoted identifier | `attr=name` | Variable or scope reference. Value is resolved at runtime from the current scope. |
 | Unquoted call | `attr=fn()` | Logic invocation. Wired as an event listener or called at the expression site. |
 
+An event-handler attribute additionally admits the `${…}` expression form (§5.2.1) and the brace-delimited **inline block** `onclick={ s1; s2 }` (§5.2.3 — S435, L19 reversed).
+
 > **Cross-reference (S111 — quoted-text model).** The attribute quoted-string form is `"`-only (double-quote; single-quote is not an attribute-string delimiter). §4.18.3's display-text literal — the body-position display-text vehicle in code-default bodies — uses the same `"`-only convention; §4.18 cites this section as its precedent. scrml uses one string delimiter, `"`, language-wide.
 
 ### 5.2 Normative Rules
@@ -1386,7 +1388,8 @@ Event handler attributes support two equivalent forms for passing arguments:
 Both forms are valid. The expression form is required when:
 - You need the event object: `onclick=${(e) => handler(e, arg)}`
 - You need closure capture in a loop: `onclick=${() => deleteItem(item.id)}`
-- The handler is a complex expression: `onclick=${() => { validate(); save(); }}`
+
+A handler that runs several statements does NOT need the expression form: the inline block `onclick={ validate(); save() }` (§5.2.3, S435) is the canonical shape for it. `onclick=${() => { validate(); save(); }}` remains valid.
 
 **Normative statements:**
 
@@ -1440,8 +1443,9 @@ All valid event handler binding forms:
 | `onclick=fn()` | Auto-wrapped as `function(event){ fn(); }`. `fn` called on click, not at render. | Simple handler, no args |
 | `onclick=fn(literal)` | Auto-wrapped as `function(event){ fn(literal); }`. Literal args forwarded at click time. | Literal (non-computed) arguments |
 | `onclick=${fn(expr)}` | `${}` expression used as-is as the event handler. `expr` evaluated at click time. | Computed arguments, closure capture |
-| `onclick=${(e) => fn(e, arg)}` | Full closure with access to the event object. | Needs `event` object or multiple statements |
+| `onclick=${(e) => fn(e, arg)}` | Full closure with access to the event object. | Needs `event` object |
 | `onclick=handler` | `handler` wired directly as listener (no auto-wrap). | Pass handler reference directly |
+| `onclick={ s1; s2 }` | Inline block — the statements run in order on each event (§5.2.3, S435). | Handler does more than one thing |
 
 **Normative statements (DQ-4):**
 
@@ -1451,29 +1455,75 @@ All valid event handler binding forms:
 - `onclick=handler` (no parentheses) SHALL wire `handler` directly as the event listener without wrapping.
 - Use `onclick=${() => fn(item.id)}` (expression form) when inside a loop and closure capture is needed — `onclick=fn(item.id)` does not capture `item.id` per-iteration.
 
-#### 5.2.3 Event handler bare-form rule (Stage 0b D4 — L19, M11)
+#### 5.2.3 Event handler forms — bare single-expression and inline block (Stage 0b D4 — M11; L19 REVERSED S435)
 
-**Added:** 2026-05-04 — formalises the v0.next "single-expression in markup; multi-statement forces a named function" rule for inline event handlers.
+**Added:** 2026-05-04 — formalised the v0.next inline event-handler shapes. **Amended:** 2026-09-26 (S435) — L19 reversed: inline multi-statement (block) handlers are legal and canonical.
 
-The bare-form (no `${}` wrapper) accepts exactly three single-expression shapes:
+> **AMENDMENT (S435) — L19 REVERSED.** The prior rule — "multi-statement intent (two or more
+> semicolon-separated expressions, or a block) SHALL force a named function", with
+> `E-MULTI-STATEMENT-HANDLER` on any multi-statement inline handler — is withdrawn. A handler that
+> does several things MAY say so where it is attached: `<button onclick={ @count = 0; @phase = .Idle;
+> track("reset") }>`. There is no line limit. The rationale is the co-location axiom (S206): *"if a
+> thing does a thing, look at the thing"* — a one-off handler body lifted into a function declared
+> elsewhere in the file separates the behaviour from the element that has it. The S190 KEEP ratification
+> (Bug 17, deep-dive `l19-multi-statement-handler-2026-06-13.md`) is superseded by this ruling.
+>
+> What survives: the bare (unbraced) handler value is still exactly one expression, and
+> `E-MULTI-STATEMENT-HANDLER` is NARROWED to the one shape that remains wrong — a `;`-separated
+> sequence written BARE, with no enclosing braces (see "Why the bare form stays single-expression"
+> below). The `:`-shorthand body rule (§4.14) is NOT changed by this amendment.
+>
+> **Provenance:** ruling:user-voice-scrml.md S435 · supersedes: L19 (S56), the prior §5.2.3 multi-statement rule
+
+An event-handler attribute value takes one of the following shapes:
 
 | Shape | Example | Notes |
 |---|---|---|
-| Bare call | `onclick=fn()` or `onclick=fn(literal)` | Most common; auto-wraps as `function(event){ fn(...) }` (cross-ref §5.2.1) |
+| Bare call | `onclick=fn()` or `onclick=fn(literal)` | Auto-wraps as `function(event){ fn(...) }` (cross-ref §5.2.1) |
 | Bare assignment | `onclick=@phase = .Loading` | Assignment-as-expression (§50); the assignment IS the single expression |
 | Bare single-expression | `onclick=@count++` or `onclick=@items.push(item)` | One expression — calls, assignments, compound updates, method invocations |
+| **Inline block** (S435) | `onclick={ @count = 0; @phase = .Idle; track("reset") }` | A brace-delimited statement list. Canonical for a handler that does more than one thing. |
+| `${…}` expression / closure | `onclick=${() => deleteItem(item.id)}` | §5.2.1 / §5.2.2 — the event object, or a closure the handler must capture |
+| Handler reference | `onclick=handler` | §5.2.2 — wires `handler` directly |
 
-**Normative statements (L19):**
+**Normative statements:**
 
-- A bare-form event handler SHALL contain exactly one scrml expression. The same single-expression discipline that governs `:`-shorthand bodies (§4.14) governs bare-form event handlers.
-- Multi-statement intent (two or more semicolon-separated expressions, or a block) SHALL force a named function. The compiler emits `E-MULTI-STATEMENT-HANDLER` when a bare-form handler attribute value contains a `;` outside of expression-internal contexts (e.g., string literals, nested function bodies).
-- Compound logic for an event handler MUST be lifted to a named `function name() { ... }` declaration in a logic block, then wired by name: `onclick=startOver()`. This is the canonical multi-statement form.
-- The `${...}` arrow form (`onclick=${() => { stmt1; stmt2 }}`) remains valid for cases where a closure must capture loop variables (cross-ref §5.2.1) but is NOT the recommended form for general multi-statement work — name the function.
+- An event-handler attribute value MAY be an **inline block**: a `{`, a statement list, and the matching `}`. The statement list is logic context — the same statement grammar as a function body (§7.3): statements are separated by `;` or by a newline, and assignments, calls, `const`/`let` declarations, and `if`/loop statements are all legal. The block MAY span any number of lines.
+- On each dispatch of the event, the statements of an inline block SHALL run in source order, each one exactly once, with `@var` reads and writes lowered exactly as they are in a function body. No statement of the block SHALL be dropped, whatever its kind or position — in particular, a statement's effect SHALL NOT depend on whether an earlier statement is a call or an assignment, or on whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row (§17.7).
+- The inline block is NOT invoked at render time; it runs only when the event fires. An inline block holding a single statement (`onclick={@filter = .All}`) is legal and equivalent to the bare shape of the same statement.
+- The inline block and a named function are a **free choice**. `function startOver() { … }` wired as `onclick=startOver()` remains fully valid — choose it when the logic is reused, when it has a meaningful name, or when it is long enough that the element reads better without it. Neither form is a lint target.
+- The `${...}` arrow form (`onclick=${() => { stmt1; stmt2 }}`) remains valid (cross-ref §5.2.1) and is the form to reach for when the handler needs the event object or must capture a loop variable per iteration. This amendment does not add an event-object binding to the inline block.
+- A BARE (unbraced) event-handler value SHALL contain exactly one scrml expression — one of the three bare shapes in the table above.
+- A BARE event-handler value that contains a `;` outside of expression-internal contexts (string literals, template literals, parentheses, brackets, braces, nested function bodies, comments) is compile error `E-MULTI-STATEMENT-HANDLER`. The fix is to wrap the statements in braces — `onclick={ startGame(); track("start") }` — or to name a function.
 - Assignment-as-expression (§50) composes cleanly with bare-form handlers: `onclick=@phase = .Loading` is a single expression (the assignment-expression evaluates to the assigned value or void per §50). Cross-ref to §50 for assignment-expression semantics.
 
-**Why this rule:** an inline multi-statement handler is the single most common stress point where event-handler bodies grow beyond a glance — accumulating effects, branching, awaits. Forcing names for multi-statement handlers gives every non-trivial handler a stable address and a stack-frame label, which downstream lints, devtools, and reviewers all benefit from.
+**Why the bare form stays single-expression.** A bare attribute value has no closing delimiter of its own; its extent is found by scanning forward, and an attribute boundary is whitespace at depth 0. In `<button onclick=startGame(); track("start") class="x">`, nothing in the source says whether `track("start")` is a second statement of the handler or a further attribute of the `<button>` — the two readings are both plausible and a parser is free to pick either (the native front-end, measured S435, reads `track` and `start` as attributes). Braces remove the ambiguity: the handler is exactly what sits between `{` and its `}`. The error is kept so the unbraced sequence can never be silently read the wrong way.
 
-**Worked example — valid bare-call:**
+**Worked example — inline block (valid, canonical for a handler that does several things):**
+
+```scrml
+type Phase:enum = { Idle, Loading }
+
+<count> = 5
+<phase>: Phase = .Loading
+<last> = ""
+
+${ function track(name) { @last = name } }
+
+<button onclick={ @count = 0; @phase = .Idle; track("reset") }>Start over</>
+```
+
+The three statements run in order on each click. A multi-line block is the same form:
+
+```scrml
+<button onclick={
+    const next = @count + 1
+    @count = next
+    if (next > 2) { @msg = "big" }
+}>Add</>
+```
+
+**Worked example — named function (valid, a free choice):**
 
 ```scrml
 ${ function startOver() {
@@ -1498,21 +1548,21 @@ ${ function startOver() {
 
 The `@phase = .Loading` is a single assignment-expression (§50) — bare-form is legal.
 
-**Worked example — invalid (multi-statement inline):**
+**Worked example — invalid (unbraced statement sequence):**
 
 ```scrml
 <button onclick=startGame(); track("start")>Begin</>
 ```
 
-`E-MULTI-STATEMENT-HANDLER` — the semicolon-separated pair forces a named function. Use the named-function pattern shown above.
+`E-MULTI-STATEMENT-HANDLER` — two statements written bare, with no braces to bound them. Write `onclick={ startGame(); track("start") }`.
 
 **Cross-references:**
-- §4.14 (`:`-shorthand body) — same single-expression discipline applies to engine state-children and match arms.
+- §4.14 (`:`-shorthand body) — keeps its own single-expression rule; the S435 reversal does not reach it. A multi-statement `:`-shorthand body is still `E-MULTI-STATEMENT-HANDLER`, and its escape is the bare-body form.
 - §5.2.1 (event handler argument passing) — call-ref vs expression-form forms.
 - §50 (assignment as expression) — bare-assignment shape and semantics.
-- §6.7 (function declarations and lifecycle) — named-function declarations live in logic blocks.
+- §7.3 (function declaration forms) — named-function declarations live in logic blocks. (The pre-S435 text cited §6.7 here, which is the lifecycle section.)
 
-**Error code:** `E-MULTI-STATEMENT-HANDLER` (§34) — bare-form event handler attribute value contains multiple statements.
+**Error code:** `E-MULTI-STATEMENT-HANDLER` (§34) — a BARE (unbraced) event-handler attribute value contains a top-level `;` statement sequence, or a `:`-shorthand body (§4.14) contains multiple statements. An inline block (`{ … }`) never fires it.
 
 ### 5.3 Boolean HTML Attributes
 
@@ -20672,7 +20722,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-NAME-COLLIDES-RESERVED | §4.15, §24.4 | A user-declared component or state-type name collides with a reserved scrml structural-element identifier (`engine`, `match`, `errors`, `onTransition` — case-sensitive at registry level). (Stage 0b D4) | Error |
 | E-STRUCTURAL-ELEMENT-MISPLACED | §4.15, §51.0.H, §51.0.M, §55.8 | A scrml-defined structural element is used outside its owning locus. Specific cases: `<onTransition>` outside `<engine>`; `<onTimeout>` outside an engine state-child (S67 — §51.0.M); `<errors>` without a parent context that supports it; **a structural-DECLARATION element (`<schema>` / `<engine>` / `<channel>` / `<page>` / `<auth>` / `<errors>` / `<onTransition>` / `<onTimeout>` / `<onIdle>`) appears inside a `${...}` logic body (S135 — silent-swallow class)**; etc. The owning section's error subsection documents the precise condition. **`<match>` (block-form) is the 10th §4.15 entry but is intentionally NOT covered by this code in the `${...}` context — block-form `<match>` is markup-as-value (§18.0.1 + §1.4 L1 pillar) and is canonical inside `${...}` markup-emit contexts (the canonical output of `bun scrml promote --match`, §56.10).** (Stage 0b D4; S67 amendment; S135 amendment — `${...}` logic-body silent-swallow class closed; emitted at `compiler/src/ast-builder.js:parseLogicBody` html-fragment fallback sites.) | Error |
 | E-IF-IN-DISPATCHED-ARM | §17.1, §17.1.1, §18.0.1, §51.0.B | **TEMPORARY IMPLEMENTATION RESTRICTION — not a language rule.** An `if=` element, or an `if=`/`else-if=`/`else` chain, appears inside the body of a DISPATCHED arm: a `<match>` block-form arm (§18.0.1) or an `<engine>` state-child (§51.0.B). Those bodies are emitted as HTML strings and injected with `innerHTML` on dispatch, then wired by a per-arm wire function; §17.1 `if=` puts its subtree inside a `<template>`, which that wire function cannot see into, and the `if=` controller itself is created at boot against a document that does not yet contain the arm. The gated subtree would therefore render empty or never appear, with NO runtime error — so the compiler refuses the composition instead of emitting it. Express the condition as ARM STRUCTURE (a variant for the gated state) until the restriction lifts. NOTE: hoisting the `if=` to wrap the whole `<match>`/`<engine>` is NOT a workaround — that is a separate defect. SPEC places no limit on where `if=` may appear; this row is expected to be REMOVED, not amended, when the arm-dispatch path re-runs the conditional controllers against the injected arm root. (S301 — `if=` Phase 2; emitted at `compiler/src/codegen/emit-html.ts:refuseConditionalInDispatchedArm` — **THREE call sites** as of S302: `:1508` (markup `if=`), `:1737` (`if`/`else-if`/`else` chain), `:2727` (`emitGatedStructural`, added with the §17.1.2 widening so the three structural elements refuse identically). The row previously said *two*; it was written before the structural surface existed. **Revert as a unit** — a partial revert leaves one surface refusing and another silently mis-emitting.) | Error |
-| E-MULTI-STATEMENT-HANDLER | §5.2.3, §4.14 | A bare-form event-handler attribute value (or a `:`-shorthand body) contains multiple statements (semicolon-separated expressions or a block). Multi-statement intent forces a named function: `function startOver() { ... }` then `onclick=startOver()`. (Stage 0b D4) | Error |
+| E-MULTI-STATEMENT-HANDLER | §5.2.3, §4.14 | NARROWED S435 (L19 reversed). Fires on exactly two shapes: (1) a BARE (unbraced) event-handler attribute value containing a top-level `;` statement sequence — `onclick=startGame(); track()` — whose extent cannot be told apart from the opener's following attributes; fix: wrap it in braces, `onclick={ startGame(); track() }`, or name a function; (2) a `:`-shorthand body (§4.14) containing multiple statements; fix: the bare-body form. An inline-block handler value (`onclick={ … }`) never fires it. (Stage 0b D4; narrowed per ruling:user-voice-scrml.md S435) (Emitted at `compiler/src/ast-builder.js:17783` — the unbraced bare `;` sequence on an event-handler attribute — and at `compiler/src/symbol-table.ts:7776` — the multi-statement `:`-shorthand body.) | Error |
 | E-IMPORT-PINNED-INVALID | §21.8.1 | The `pinned` modifier appears on an imported name that is not a state cell or an engine. `pinned` is meaningful only for cell-typed and engine-typed names; remove it for function or type imports. (Stage 0b D4) | Error |
 | E-DERIVED-CIRCULAR-DEP | §31.5, §6.6 | A `const <derived> = expr` cell whose RHS expression depends on itself directly or transitively forms a cycle in the dependency graph. Break the cycle. Distinct from `E-DERIVED-ENGINE-CIRCULAR` (§51.0.J) which is the engine-form cycle. (Stage 0b D4) | Error |
 | E-USE-INVALID-CTX | §41.12 | `registerMessages(map)` (or another project-level registration API) called from a non-top-level context (inside a function body, inside a worker `<program>`). Registration must happen at app initialisation. (Stage 0b D4) | Error |
@@ -28741,7 +28791,7 @@ Inside markup interpolation `${@x = newValue}` is a legal expression position �
 - An assignment-expression to a markup-typed cell IS a legal markup-typed expression at the use-site.
 - The rendering trigger is positional per §1.4 — a markup-typed assignment-expression in a markup parent context renders the assigned value at that position.
 
-### 50.15 Composition with bare-form event handlers (Stage 0b D4 — L19)
+### 50.15 Composition with bare-form event handlers (Stage 0b D4 — §5.2.3)
 
 **Added:** 2026-05-04 — cross-references §5.2.3's bare-form event handler rule.
 
@@ -28751,7 +28801,7 @@ Bare-form event handlers (§5.2.3) accept three single-expression shapes: bare c
 <button onclick=@phase = .Loading>Begin</>
 ```
 
-The expression `@phase = .Loading` is a single assignment-expression whose result value is `.Loading`. The bare-form discipline (§5.2.3) makes this legal because it is one expression. Multi-statement intent (`@phase = .Loading; track()`) forces a named function — assignment-as-expression does not loosen that rule.
+The expression `@phase = .Loading` is a single assignment-expression whose result value is `.Loading`. The bare-form discipline (§5.2.3) makes this legal because it is one expression. Multi-statement intent (`@phase = .Loading; track()`) is written as an inline block — `onclick={ @phase = .Loading; track() }` (§5.2.3, S435 — L19 reversed) — or as a named function; written bare and unbraced it is `E-MULTI-STATEMENT-HANDLER`. Assignment-as-expression does not change which of those applies.
 
 **Cross-references:**
 - §5.2.3 — bare-form event handler shapes (the rule that admits bare-assignment).

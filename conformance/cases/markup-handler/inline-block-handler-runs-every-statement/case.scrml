@@ -1,0 +1,10 @@
+type Phase:enum = { Idle, Loading }
+
+<count> = 5
+<phase>: Phase = .Loading
+<last> = ""
+
+${ function track(name) { @last = name } }
+
+<button id="reset" onclick={ @count = 0; @phase = .Idle; track("reset") }>Start over</>
+<p id="out">${@count} ${@last}</p>

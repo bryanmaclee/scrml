@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 145 | 4 |
-| MED | 323 | 0 |
-| LOW | 121 | 0 |
+| HIGH | 145 | 5 |
+| MED | 324 | 0 |
+| LOW | 123 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -7834,6 +7834,7 @@ L19 forbids multi-statement event handlers (`onclick=` must be a single expressi
 - **Status:** open HU follow-on; small enough to fold into iteration HU or its own sub-session.
 - **RULED S190 (decision pass): COMMISSION A DEEP-DIVE.** Lock-level (L19 + markup-as-value pillar) re-examination — NOT a snap ratify. The deep-dive explores whether modern composition (engines / body-split CPS) changes the single-expression-inline-handler constraint, the markup-as-value tension, prior art (Svelte/Vue/Solid/React inline-handler policies + rationale), cohesion cost, and whether a relaxation earns its surface vs the trivial named-fn workaround. PA lean going in = KEEP L19 (named-fn workaround is trivial+better; engines/CPS reduce the need; serves the pillar + limit-primitives) — but the user wants it explored properly. DD doc → `scrml-support/docs/deep-dives/l19-multi-statement-handler-2026-06-13.md`; possibly feeds a debate; ratification is a SEPARATE deliberate step with the user. Dispatched S190 (background, `scrml-deep-dive`).
 - **RESOLVED S190 — RATIFIED KEEP L19 (user, decision pass).** The deep-dive (`l19-multi-statement-handler-2026-06-13.md`) returned a one-directional KEEP recommendation; user ratified "Keep L19, close bug-17-l19." **L19 stands as-is** (single-expression inline handlers; `E-MULTI-STATEMENT-HANDLER` for multi-statement → named function). NO language change. Evidence: (1) §5.2.3's stated growth-drivers (branching/effects/awaits) each moved to a first-class home since L19's S56 ratification (engines/`rule=` · `<onTransition>`/`effect=` · body-split CPS) → modern composition REDUCES the pressure L19 manages; (2) ZERO multi-statement handlers across 781 corpus inline-handler sites + zero E-MULTI-STATEMENT-HANDLER friction; (3) prior art (Vue/Svelte5/Solid/React) PERMITS inline multi-statement but docs+lint RECOMMEND the named-fn extraction L19 enforces; (4) Pillar-1 + Reach-discipline + limit-primitives align with KEEP; (5) RELAX is MORE compiler work + a §4.14 amendment. Consistent with the S132 prior moot (named-function path stands). Honest steel-man (the trivially-related two-assignment one-off) acknowledged + outweighed (zero corpus instances; `reset()`+`default=` collapse many reset-pairs); bounded-relax considered+rejected (bespoke sub-grammar for a zero-instance case). Debate-live: marginal/lean-NO (the debate framing is parked in the DD's Phase-5 if a future adopter-refugee signal surfaces — OQ-2 corpus-blind-spot). DD doc → `status: ratified`.
+- **SUPERSEDED S435 — L19 REVERSED (bryan: "reverse L19").** Inline multi-statement (block) handlers `onclick={ s1; s2 }` are legal and canonical, no line limit — the S206 co-location axiom. §5.2.3 amended; `E-MULTI-STATEMENT-HANDLER` narrowed to the unbraced bare `;` sequence + the §4.14 `:`-shorthand locus. The S190 KEEP above is history. Measurement + the gaps it found: the "S435 — L19 reversal measurement" block at the end of this file.
 
 ---
 
@@ -18514,6 +18515,12 @@ proxy mutation with no `_scrml_reactive_set` (already recorded under `g-when-cha
 fixed on the when-changes branch by `becfbe96`). Repro `C:\wt432s\pa\semi2.scrml`. **Exposure: 0** (no
 `on*=${ call(…); …}` in assetManagement, flogenceP, `compiler/self-host/` or the repo corpus). Pinned by
 `conformance/cases/markup-handler/expr-handler-call-first-multi-stmt` (impl#1: `last` = 1, not 30). PA-reproduced.
+**S435 extension — the braced inline block reaches the same drop.** Under the §5.2.3 amendment (L19 reversed) the
+canonical multi-statement handler is `onclick={ s1; s2 }`; `onclick={ track("reset"); @count = 0 }` emits
+`function(event) { _scrml_track_4("reset"); }` at exit 0 (assignment-first blocks run every statement). The ⚑ above
+is now settled: §5.2.3 (amended) states *"a statement's effect SHALL NOT depend on whether an earlier statement is a
+call or an assignment"*. Second pin: `conformance/cases/markup-handler/inline-block-handler-call-first` (impl#1:
+`count` stays 5).
 
 ### g-when-changes-in-each-row-body-dropped — a `${ when @n changes { … } }` inside an `<each>` row body is dropped from the output entirely — `NEW S432-peter; HIGH; carried (S432)`
 <!-- @gap id=g-when-changes-in-each-row-body-dropped sev=HIGH status=carried locus=compiler/src/codegen/emit-each.ts(the row-body logic-interpolation arm — emits the comment "each: empty logic interpolation skipped") prov=review:S432-adversarial-review-of-the-when-changes-branch-reproduced-on-280ecbdd-and-the-fix-branch;empirical:re-verified-by-compile-on-280ecbdd -->
@@ -19321,3 +19328,58 @@ cut at a sentence boundary, or print the first line in full plus a pointer — a
 the whole family rather than per-message.
 
 <!-- @gap id=g-cli-truncates-diagnostics-at-120-chars sev=MED status=open locus=compiler/src/commands/build.js:907 prov=review:S436-pr-1092-F1 -->
+> **S435 — L19 reversal measurement (four entries).** §5.2.3 was amended S435 (ruling:user-voice-scrml.md
+> S435, "reverse L19"): the brace-delimited inline block `onclick={ s1; s2 }` is now LEGAL and CANONICAL, and
+> `E-MULTI-STATEMENT-HANDLER` is narrowed to the UNBRACED bare `;` sequence plus the §4.14 `:`-shorthand locus.
+> impl#1 was measured against the amended text on `f89b665dc` (= `996c9aeda` + docs). It ACCEPTS the braced
+> form everywhere tried (exit 0, no code) and runs every statement at top level, inside an engine state-child
+> and across a multi-line block with `const` + `if`. Two positions still lose statements silently (the first
+> entry below, and the extension noted on `g-expr-handler-drops-every-statement-after-a-leading-call`); the
+> other three entries are the diagnostic text, the native front-end, and two pre-existing `:`-shorthand
+> misroutes found on the way. Exposure of the braced multi-statement form today: 0 (assetManagement, flogence,
+> `compiler/self-host/`, `examples/`, `samples/`) — but the SPEC now calls it canonical, so exposure will grow
+> from here; the PA may want to re-weigh P7 fix-for-cause on the first entry.
+
+### g-each-row-event-handler-keeps-only-first-statement — an event handler on an element inside an `<each>` row runs only its FIRST statement; the rest are dropped at exit 0, for the inline block and the `${…}` form alike — `NEW S435; HIGH; carried (S435)`
+<!-- @gap id=g-each-row-event-handler-keeps-only-first-statement sev=HIGH status=carried locus=compiler/src/codegen/emit-each.ts(buildEachExprHandlerBody ~:2206 — parseExprToNode parses ONE expression from the handler text and the remainder of the `;` sequence is discarded; traced by reading, not instrumented) prov=empirical:S435-l19-reversal-probes-p8-p9-p10-p12-on-f89b665dc -->
+
+`<each in=@items key=@.id><li><button onclick={ @a = @a + 1; @b = @b + 2 }>…</></></each>` emits
+`addEventListener("click", function(event) { _scrml_cs_reactive_set("a", _scrml_cs_reactive_get("a") + 1); })` —
+`@b` is never written. **Zero diagnostics, exit 0.** Not specific to the braced form or to a leading call:
+`{ @clicks = @clicks + 1; @picked = @.id }` keeps only the first; `${@picked = @.id; @clicks = @clicks + 1}` keeps
+only the first; a newline-separated block keeps only the first. The same handler at top level or inside an engine
+state-child runs every statement (pinned passing by `markup-handler/inline-block-handler-runs-every-statement` and
+`markup-handler/inline-block-handler-in-engine-state-child`). SPEC §5.2.3 (amended S435): *"No statement of the
+block SHALL be dropped, whatever its kind or position — in particular, a statement's effect SHALL NOT depend on …
+whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row
+(§17.7)."* Severity HIGH by the silent-drop precedent (`g-when-changes-in-each-row-body-dropped`).
+**Exposure: 0** today (see the header). Pinned by `conformance/cases/markup-handler/inline-block-handler-in-each-row`
+(impl#1: `b` stays 0). **Direction if fixed:** newly-correct runtime; no diagnostic change.
+
+### g-e-multi-statement-handler-message-steers-only-to-a-named-function — the diagnostic's fix-it names the named-function form and not the braces the amended SPEC names first — `NEW S435; LOW; open`
+<!-- @gap id=g-e-multi-statement-handler-message-steers-only-to-a-named-function sev=LOW status=open locus=compiler/src/ast-builder.js(the E-MULTI-STATEMENT-HANDLER TABError text, ~:17783) prov=empirical:S435-l19-reversal-probe-p2-on-f89b665dc -->
+
+On `onclick=startGame(); track("start")` impl#1 fires the right code (exit 1) with *"For multi-statement intent,
+lift the body to a named function and wire by name"*. §5.2.3 (amended S435): *"The fix is to wrap the statements in
+braces — `onclick={ startGame(); track(\"start\") }` — or to name a function."* The message text is impl freedom, but
+it now steers every reader away from the canonical form and toward the one the ruling demoted to a free choice.
+**Direction if fixed:** message-only.
+
+### g-native-bare-unbraced-multi-statement-handler-silently-reads-the-rest-as-attributes — under `--parser=scrml-native`, `onclick=startGame(); track("start")` compiles at exit 0; `track` and `start` become boolean attributes and only `startGame()` runs — `NEW S435; MED; open`
+<!-- @gap id=g-native-bare-unbraced-multi-statement-handler-silently-reads-the-rest-as-attributes sev=MED status=open locus=not-traced(native front-end attribute scan) prov=empirical:S435-l19-reversal-probe-p2-native-on-f89b665dc -->
+
+Default pipeline: `E-MULTI-STATEMENT-HANDLER`, exit 1 (correct). Native: exit 0, emitted HTML
+`<button data-scrml-bind-onclick="…" track start>`, handler `function(event) { _scrml_startGame_4(); }`. This is
+exactly the misreading §5.2.3's "Why the bare form stays single-expression" paragraph keeps the error for; §34
+(narrowed S435) SHALL fire on this shape on both front-ends. Native-only; MED rather than HIGH because the default
+pipeline is correct.
+
+### g-colon-shorthand-multi-statement-misroutes-to-codegen-defect-in-each-and-block-body — two §4.14 shapes that SHALL be user errors reach codegen and fail `E-CODEGEN-INVALID-LOGIC` instead — `NEW S435; LOW; open`
+<!-- @gap id=g-colon-shorthand-multi-statement-misroutes-to-codegen-defect-in-each-and-block-body sev=LOW status=open locus=compiler/src/symbol-table.ts(the §4.14 multi-statement scan covers engine state-children only)+not-traced(the `: { … }` block-body shape) prov=empirical:S435-l19-reversal-probes-p5-p6-on-f89b665dc -->
+
+(1) `<each in=@items><li : @.name; @.id></each>` — §17.7.6 names this `E-MULTI-STATEMENT-HANDLER`; impl#1 emits
+`String(_scrml_each_item.name; _scrml_each_item.id)` and fails `E-CODEGEN-INVALID-LOGIC` ("This is a compiler
+defect"). The `:`-shorthand scan is wired for engine state-children only. (2) `<Idle : { startGame(); track("start") }>`
+— §4.14 names this `E-PARSE-001`; impl#1 fails `E-CODEGEN-INVALID-LOGIC`. Loud (exit 1) in both cases, so no silent
+harm; the defect is that the diagnostic blames the compiler for a user error and does not name the fix. Pre-existing —
+found while measuring whether the L19 reversal reaches `:`-shorthand bodies (it does not; §4.14 is unchanged).
