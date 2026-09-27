@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 147 | 4 |
+| HIGH | 146 | 4 |
 | MED | 330 | 0 |
-| LOW | 131 | 0 |
+| LOW | 130 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19621,12 +19621,14 @@ So `codegen/index.ts`'s comment "the F1 split is unreachable by construction" ho
 <!-- @gap id=g-ghost-lint-false-fires-on-canonical-block-handler sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(W-LINT-007 JSX-prop pattern + W-LINT-013 tag-opener gating near :472/:1032; PA-located-verify) prov=empirical:PA-compiled-onclick-block-handler-1x-W-LINT-007-2x-W-LINT-013 -->
 
 ### g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements — `onclick=@count = 0; track("reset")` compiles at exit 0 with NO diagnostic: the handler keeps only `@count = 0`, and `track("reset")` is emitted as two bare HTML ATTRIBUTES (`track reset`) on the element
+**RESOLVED at #1106 (14bce6376), PA-verified by execution S437 wrap:** the assignment-led bare sequence now raises E-MULTI-STATEMENT-HANDLER, and its message gives the §5.2.3 braces fix built from the user's statements.
 **PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick=@count = 0; track("reset")>` → emitted `<button data-scrml-bind-onclick="_scrml_attr_onclick_1" track reset>`, and `W-DEAD-FUNCTION` fires on `track` — the compiler reports the dropped call as dead code. A call-led sequence (`onclick=startGame(); track("start")`) correctly fires `E-MULTI-STATEMENT-HANDLER` (currency-pass probe, exit 1). **Governing sentence (§5.2.3):** *"A BARE event-handler value that contains a `;` outside of expression-internal contexts … is compile error `E-MULTI-STATEMENT-HANDLER`"* and *"The error is kept so the unbraced sequence can never be silently read the wrong way."* So this is a conformance defect: the SHALL fires only when the sequence is led by a call; an assignment-led sequence ends the attribute value at the `;`-adjacent whitespace and the tail re-tokenizes as attributes. Silent-wrong-output class. Fix direction is newly-REJECTING toward an existing sentence (the PA-ruled class, IF corpus impact measures zero by compiling). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise. Found by the S437 PRIMER currency pass. — `NEW S437-bryan`; **HIGH**; open
-<!-- @gap id=g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements sev=HIGH status=open locus=searched:compiler/src/multi-statement-scan.ts(fire-site is call-led only per B18),attribute tokenizer in ast-builder.js/block-splitter — not traced prov=spec:§5.2.3-the-unbraced-sequence-can-never-be-silently-read-the-wrong-way -->
+<!-- @gap id=g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements sev=HIGH status=resolved resolved=14bce6376 locus=searched:compiler/src/multi-statement-scan.ts(fire-site is call-led only per B18),attribute tokenizer in ast-builder.js/block-splitter — not traced prov=spec:§5.2.3-the-unbraced-sequence-can-never-be-silently-read-the-wrong-way -->
 
 ### g-multi-statement-handler-message-gives-the-retired-l19-fix — `E-MULTI-STATEMENT-HANDLER`'s message still says "lift the body to a named function and wire by name"; §5.2.3 (L19 reversed S435) says the fix is to wrap the statements in braces — `onclick={ startGame(); track("start") }` — or to name a function
+**RESOLVED at #1106 (14bce6376), PA-verified by execution S437 wrap:** the assignment-led bare sequence now raises E-MULTI-STATEMENT-HANDLER, and its message gives the §5.2.3 braces fix built from the user's statements.
 Found by the S437 PRIMER currency pass (relayed; message text not PA-re-read). The diagnostic teaches the retired rule to every adopter who hits it. Part of the L19 reversal's own landing. — `NEW S437-bryan (relayed)`; **LOW**; open
-<!-- @gap id=g-multi-statement-handler-message-gives-the-retired-l19-fix sev=LOW status=open locus=searched:compiler/src/multi-statement-scan.ts — message site not traced prov=spec:§5.2.3-fix-is-to-wrap-the-statements-in-braces -->
+<!-- @gap id=g-multi-statement-handler-message-gives-the-retired-l19-fix sev=LOW status=resolved resolved=14bce6376 locus=searched:compiler/src/multi-statement-scan.ts — message site not traced prov=spec:§5.2.3-fix-is-to-wrap-the-statements-in-braces -->
 
 ### g-impl1-match-miscompiles-hit-by-the-bootstrap — six impl#1 `match`/enum lowering defects found writing the native bootstrap (F11–F16); five are SILENT miscompiles
 Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + the workaround used in `compiler/self-host-v2/slice-m1/progress.md` §F11–F16 (M1's own code carries the workarounds). **P7 criterion 1 (blocks the bootstrap) — eligible for an impl#1 fix.** One entry for the family because F11 and F16 share a root (`_variantFields` holds only the CURRENT file's enums), and the adversarial review of M1 re-confirmed F12 independently (`match m { .B :> "b"\n _ | .A :> "a" }` compiles with no diagnostic and drops the arm — `f(.A)` returns undefined, defeating E-TYPE-020).
