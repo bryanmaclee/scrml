@@ -235,6 +235,51 @@ describe("F11 — re-exported enums (one and two hops)", () => {
   });
 });
 
+describe("F11 sibling — an imported enum with an `Ok` payload variant vs the §19.7 failable `::Ok` match", () => {
+  let mods, errors;
+  beforeAll(() => {
+    ({ mods, errors } = build("f11-ok", {
+      "bundle.scrml": ENTRY(`import { res } from "./use.scrml"`),
+      "core.scrml": `\${
+    export type Res:enum = { Ok(v: int), Err(msg: string) }
+    export type DivErr:enum = { DivByZero }
+}
+`,
+      "use.scrml": `import { Res, DivErr } from "./core.scrml"
+\${
+    function safeDiv(a, b)! DivErr {
+        if (b == 0) fail DivErr.DivByZero
+        return a / b
+    }
+    export function compute(b) {
+        return match safeDiv(10, b) {
+            ::Ok(v) :> "ok:" + v
+            ::DivByZero :> "err"
+        }
+    }
+    export fn res(r: Res) -> string {
+        return match r {
+            .Ok(v) :> "rok:" + v
+            .Err(m) :> "rerr:" + m
+        }
+    }
+}
+`,
+    }));
+  });
+  test("compiles clean", () => { expect(errors).toEqual([]); });
+  test("a match over the imported enum binds its `Ok` payload (pre-fix: lowered as a failable match)", () => {
+    expect(mods.use.res(mods.core.Res.Ok(3))).toBe("rok:3");
+    expect(mods.use.res(mods.core.Res.Err("x"))).toBe("rerr:x");
+  });
+  test("a failable-result match in the same file keeps the §19.7 success path", () => {
+    // Guard: the imported `Ok` payload variant must not claim the name for the
+    // bare-success `::Ok(v)` arm of a failable match.
+    expect(mods.use.compute(2)).toBe("ok:5");
+    expect(mods.use.compute(0)).toBe("err");
+  });
+});
+
 describe("F16 — tag-only arms over an IMPORTED payload enum", () => {
   let mods, errors;
   beforeAll(() => {

@@ -64,6 +64,8 @@ function getBatchInListCap(): number {
 
 let _variantFields: Map<string, string[]> | null = null;
 let _variantFieldCollisions: Set<string> | null = null;
+/** Names in `_variantFields` that came from an IMPORTED enum (not a local decl). */
+let _importedVariantNames: Set<string> | null = null;
 
 /**
  * §41.13 — the fixed ParseError payload-variant schema. ParseError is imported
@@ -83,9 +85,11 @@ const PARSE_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
 export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
+  importedNames?: Set<string> | null,
 ): void {
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
+  _importedVariantNames = importedNames ?? null;
   // Seed the ParseError schema for parseVariant binding resolution. Only fill
   // in variants the file does NOT already declare — a file-local enum of the
   // same name always wins (and a genuine cross-enum collision keeps the entry,
@@ -2566,8 +2570,8 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
   // success value is bare, so the `::Ok` arm can only be recognized via the
   // `__scrml_error`-sentinel tag).
-  const failableMatch = isFailableOkMatch(arms);
   const subjectVariants = getMatchSubjectVariantFields(node);
+  const failableMatch = isFailableOkMatch(arms, subjectVariants);
   const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
 
@@ -2986,8 +2990,14 @@ export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | 
  * (it lands in `_variantFields`), so this predicate defers to the regular
  * tagged-object path in that (pathological) collision.
  */
-export function isFailableOkMatch(arms: MatchArm[]): boolean {
-  if (_variantFields?.has("Ok")) return false;
+export function isFailableOkMatch(arms: MatchArm[], subject?: SubjectVariantFields | null): boolean {
+  // A subject TS resolved to an enum is not a failable result (a failable-call
+  // subject never resolves — type-system.ts resolveFailableCallResultType).
+  if (subject) return false;
+  // Only a FILE-LOCAL payload `Ok` claims the name. An imported enum's `Ok`
+  // (now in `_variantFields` too — F11) must not flip every unresolved
+  // `::Ok` match in the importing file off the failable path.
+  if (_variantFields?.has("Ok") && !(_importedVariantNames?.has("Ok") ?? false)) return false;
   return arms.some(a =>
     a.kind === "variant" &&
     (a.test === "Ok" || (Array.isArray(a.tests) && a.tests.includes("Ok"))),

@@ -2006,10 +2006,10 @@ export function generateClientJs(ctx: CompileContext): string {
   // escape-hatch expressions, and other legacy emission surfaces lower to
   // the canonical `{ variant, data }` tagged-object literal (matches the
   // structured AST path in emit-expr.ts:emitCall).
-  const { fields, collisions } = clientStage(ctx, "build-variant-fields-registry", () =>
+  const { fields, collisions, imported } = clientStage(ctx, "build-variant-fields-registry", () =>
     buildVariantFieldsRegistry(fileAST)
   );
-  setVariantFieldsForFile(fields, collisions);
+  setVariantFieldsForFile(fields, collisions, imported);
   setVariantFieldsForRewriter(fields, collisions);
 
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — establish
@@ -4204,9 +4204,12 @@ function sameFieldList(a: string[], b: string[]): boolean {
 export function buildVariantFieldsRegistry(fileAST: any): {
   fields: Map<string, string[]>;
   collisions: Set<string>;
+  /** Names in `fields` contributed by an IMPORTED enum (no local declaration). */
+  imported: Set<string>;
 } {
   const fields = new Map<string, string[]>();
   const collisions = new Set<string>();
+  const imported = new Set<string>();
   const typeDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
 
   // Every variant name a LOCAL enum declares (unit or payload) — local wins.
@@ -4242,11 +4245,11 @@ export function buildVariantFieldsRegistry(fileAST: any): {
       if (localVariantNames.has(v.name)) continue;
       if (v.fieldNames === null) continue; // unit variants have no bindings
       const prev = fields.get(v.name);
-      if (prev === undefined) fields.set(v.name, v.fieldNames);
+      if (prev === undefined) { fields.set(v.name, v.fieldNames); imported.add(v.name); }
       else if (!sameFieldList(prev, v.fieldNames)) collisions.add(v.name);
     }
   }
-  return { fields, collisions };
+  return { fields, collisions, imported };
 }
 
 // ---------------------------------------------------------------------------

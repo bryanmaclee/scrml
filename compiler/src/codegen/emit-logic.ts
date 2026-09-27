@@ -5577,9 +5577,9 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
   // §19.7 — a match over a failable result ALWAYS needs the discriminator (the
   // success value is bare; the `::Ok` arm is recognized only via the
   // `__scrml_error`-sentinel tag).
-  const failableMatch = isFailableOkMatch(arms);
   // §18.7 / F11-F16 — bind + tag-compare against the TS-resolved subject enum.
   const subjectVariants = getMatchSubjectVariantFields(matchExpr);
+  const failableMatch = isFailableOkMatch(arms, subjectVariants);
   const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
   if (needsTagNormalization) {
