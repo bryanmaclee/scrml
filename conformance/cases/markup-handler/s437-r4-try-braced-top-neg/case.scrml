@@ -1,0 +1,7 @@
+<program>
+<n> = 0
+<r> = 0
+<r2> = 0
+${ function h() { @r2 = 9 } }
+<button onclick={ try { h() } catch (e) { h() }; h() }>x</button>
+</program>

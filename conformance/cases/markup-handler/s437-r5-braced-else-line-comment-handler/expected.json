@@ -1,0 +1,29 @@
+{
+  "id": "markup-handler-s437-r5-braced-else-line-comment-handler",
+  "description": "Handler inline block: `} // note⏎ else {`. S437 round 5 F1: round 4's dangling-else check rejected this valid shape (E-STMT-UNEXPECTED-TOKEN) because a COMMENT token sat between `}` and `else`; the else-lookahead after a BRACED consequent now skips comments (never a `;`). `@a` is true, so `r` must be 1 — an `else` running unconditionally would leave 2.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "JS and scrml treat a comment between an `if` body's `}` and `else` as whitespace; only a `;` ends the `if` (S437 round 4 #4). §17: `else` belongs to the `if` whose body it follows.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-STMT-UNEXPECTED-TOKEN",
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#go"
+      }
+    ],
+    "state": {
+      "r": 1
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "1"
+      }
+    ]
+  }
+}

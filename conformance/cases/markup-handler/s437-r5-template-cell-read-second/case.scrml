@@ -1,0 +1,30 @@
+type Phase:enum = { Idle, Loading }
+
+<ph>: Phase = .Idle
+<log> = ""
+<r> = 7
+<items> = [{ id: 1, name: "r" }]
+
+<p id="out">${@log}</p>
+
+<button id="top" onclick={ @r = 7; @log = `${@log}T${@r},` }>top</button>
+
+<engine for=Phase initial=.Idle>
+    <Idle>
+        <button id="eng" onclick={ @r = 7; @log = `${@log}E${@r},` }>engine</button>
+    </>
+    <Loading : "Loading…">
+</>
+
+<match on=@ph>
+    <Idle>
+        <button id="mat" onclick={ @r = 7; @log = `${@log}M${@r},` }>match</button>
+    </>
+    <Loading><p>Loading…</p></>
+</>
+
+<ul>
+    <each in=@items key=@.id>
+        <li><button class="row" onclick={ @r = 7; @log = `${@log}R${@r},` }>${@.name}</button></li>
+    </each>
+</ul>

@@ -1,0 +1,14 @@
+{
+  "id": "markup-handler-s437-r4-try-braced-match-neg",
+  "description": "#2 — `{ try { … } catch (e) { … }; h() }`: pre-round-4 the handler fell back and bypassed E-TRY-NOT-IN-SCRML. Position: match.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"The statement list is logic context — the same statement grammar as a function body (§7.3) … The block MAY span any number of lines.\" and \"No statement of the block SHALL be dropped\".",
+  "expect": {
+    "codes": [
+      "E-TRY-NOT-IN-SCRML"
+    ],
+    "notCodes": []
+  }
+}

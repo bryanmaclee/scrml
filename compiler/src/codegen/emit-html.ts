@@ -3422,6 +3422,7 @@ export function generateHtml(
                 handlerArgs: [],
                 handlerExpr: val.raw,
                 handlerExprNode: val.exprNode,
+                ...(val.handlerBlock ? { handlerBlock: val.handlerBlock } : {}),
               });
             }
           } else if (REACTIVE_BOOL_ATTRS.has(name)) {

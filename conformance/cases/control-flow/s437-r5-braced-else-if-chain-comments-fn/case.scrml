@@ -1,0 +1,13 @@
+<a> = false
+<r> = 0
+${
+    function f() {
+        if (@a) { @r = 1 }
+        // first
+        else if (@r > 5) { @r = 2 }
+        // second
+        else { @r = 3 }
+    }
+}
+<button id="go" onclick=f()>go</button>
+<p id="out">${@r}</p>

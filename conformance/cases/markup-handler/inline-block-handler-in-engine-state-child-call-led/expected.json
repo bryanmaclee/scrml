@@ -1,0 +1,22 @@
+{
+  "id": "markup-handler-inline-block-handler-in-engine-state-child-call-led",
+  "description": "§5.2.3 — a CALL-LED inline block on a button inside an engine state-child runs BOTH statements in source order: `last` is `go:5` (track ran first, before the assignment) and `count` ends 0. Pre-S437 impl#1 kept only the leading call for a call-led block (count stayed 5).",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/codegen/emit-event-wiring.ts",
+  "rationale": "§5.2.3: \"a statement's effect SHALL NOT depend on whether an earlier statement is a call or an assignment, or on whether the handler sits at top level, inside an engine state-child (§51.0.I), or inside an `<each>` row (§17.7).\"",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MULTI-STATEMENT-HANDLER"],
+    "input": [
+      { "click": "#go" }
+    ],
+    "state": {
+      "count": 0,
+      "last": "go:5"
+    },
+    "domAnchored": [
+      { "selector": "#out", "text": "0 go:5" }
+    ]
+  }
+}

@@ -14431,6 +14431,52 @@ function annotateNodes(
       const attrSpan = (value.span ?? attr.span ?? parent?.span ?? {
         file: filePath, start: 0, end: 0, line: 1, col: 1,
       }) as Span;
+      // S437 round 4 (#3) — a §5.2.3 multi-statement handler carries its PARSED
+      // statement list (`handlerBlock.stmts`, the function-body statement
+      // parser's nodes); `exprNode` holds only the first statement, so the check
+      // below never saw statements 2..n (`{ @n = 2; nope(1) }` compiled at exit
+      // 0, and in an `<each>` row the unchecked statement RAN once the row
+      // handler stopped dropping it). Walk the statements exactly as a function
+      // body's are walked (`visitLogicNode`), in a handler scope that binds
+      // `event` (§5.2.2) on top of the current chain — which already carries the
+      // `<each>` item alias / engine-arm payload bindings of this position. The
+      // statement list supersedes `exprNode` (it includes statement 1), so the
+      // expression-only check is skipped to avoid a duplicate diagnostic.
+      const handlerBlock = (value as Record<string, unknown>).handlerBlock as { stmts?: unknown[] } | undefined;
+      if (handlerBlock && Array.isArray(handlerBlock.stmts)) {
+        scopeChain.push(`handler:${attr.name as string}`);
+        scopeChain.bind("event", { kind: "variable", resolvedType: tAsIs() });
+        // WRITE targets. A function body's `@x = …` is write-checked by SYM B3,
+        // which never descends into `<each>` / `<match>` bodies (SPEC §34: SYM is
+        // the wrong layer there — it over-fires on loop locals). This walk
+        // reaches every handler position, so each tagged write target
+        // (`_isReactiveAssign`, nested statements included) is resolved through
+        // the SAME `@name` resolver the read-side E-STATE-UNDECLARED uses —
+        // the resolution a single-statement `${@zz = 3}` gets via its assign
+        // target. `onclick={ @n = 1; @zz = 3 }` → E-STATE-UNDECLARED everywhere.
+        const writeSeen = new Set<unknown>();
+        const collectWrites = (node: unknown): void => {
+          if (!node || typeof node !== "object" || writeSeen.has(node)) return;
+          writeSeen.add(node);
+          if (Array.isArray(node)) { for (const x of node) collectWrites(x); return; }
+          const rec = node as Record<string, unknown>;
+          if (rec.kind === "state-decl" && rec._isReactiveAssign === true && typeof rec.name === "string") {
+            const wSpan = ((rec.span as Span | undefined) ?? attrSpan) as Span;
+            checkLogicExprIdents({ kind: "ident", name: `@${rec.name}`, span: wSpan }, wSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+          }
+          for (const k of Object.keys(rec)) {
+            if (k === "span" || k.endsWith("Expr") || k === "exprNode") continue;
+            const v = rec[k];
+            if (v && typeof v === "object") collectWrites(v);
+          }
+        };
+        collectWrites(handlerBlock.stmts);
+        for (const stmt of handlerBlock.stmts) {
+          if (stmt && typeof stmt === "object") visitLogicNode(stmt as ASTNodeLike, "client");
+        }
+        scopeChain.pop();
+        return;
+      }
       const exprNode = (value as Record<string, unknown>).exprNode;
       if (exprNode) {
         checkLogicExprIdents(exprNode, attrSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);

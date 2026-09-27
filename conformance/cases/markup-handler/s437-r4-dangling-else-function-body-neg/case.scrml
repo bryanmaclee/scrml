@@ -1,0 +1,9 @@
+<program>
+<a> = true
+<r> = 0
+${ function f() {
+  if (@a) { @r = 1 };
+  else { @r = 2 }
+} }
+<button onclick=f()>x</button>
+</program>

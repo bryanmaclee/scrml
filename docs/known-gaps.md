@@ -18504,8 +18504,8 @@ in assetManagement, flogenceP or `compiler/self-host/` (the one repo-corpus hit,
 is HTML-escaped sample text inside a `<pre>`). Pinned by `conformance/cases/reactive/nested-path-method-call-not-first-stmt`
 (impl#1: `o` stays `{list:[], m:[9]}`). PA-reproduced.
 
-### g-expr-handler-drops-every-statement-after-a-leading-call — an inline `${…}` handler whose FIRST statement is a call drops every statement after it — `NEW S432-peter; HIGH; carried (S432)`
-<!-- @gap id=g-expr-handler-drops-every-statement-after-a-leading-call sev=HIGH status=carried locus=searched:compiler/src/codegen/emit-event-wiring.ts,compiler/src/ast-builder.js(the `${}` event-attribute value collection)—not-traced prov=empirical:S432-PA-reproduced-semi2-re-verified-by-compile-on-280ecbdd -->
+### g-expr-handler-drops-every-statement-after-a-leading-call — an inline `${…}` handler whose FIRST statement is a call drops every statement after it — `NEW S432-peter; HIGH; resolved (S437)`
+<!-- @gap id=g-expr-handler-drops-every-statement-after-a-leading-call sev=HIGH status=resolved locus=searched:compiler/src/codegen/emit-event-wiring.ts,compiler/src/ast-builder.js(the `${}` event-attribute value collection)—not-traced prov=empirical:S432-PA-reproduced-semi2-re-verified-by-compile-on-280ecbdd -->
 
 `onclick=${@items.push(1); @last = 2}` emits `function(event) { _scrml_cs_reactive_get("items").push(1); }`;
 `onclick=${f(); g()}` emits `function(event) { _scrml_f_4(); }`. **Zero diagnostics, exit 0.** Assignment-first
@@ -18524,6 +18524,35 @@ canonical multi-statement handler is `onclick={ s1; s2 }`; `onclick={ track("res
 is now settled: §5.2.3 (amended) states *"a statement's effect SHALL NOT depend on whether an earlier statement is a
 call or an assignment"*. Second pin: `conformance/cases/markup-handler/inline-block-handler-call-first` (impl#1:
 `count` stays 5).
+**Disposition — RESOLVED S437 (`1719d1573`, change-id `s437-bare-handler-sequence-drop`; first cut `31ac90379`
+split the text and was replaced — see below).** Shares its root with
+`g-each-row-event-handler-keeps-only-first-statement`: the handler value's `exprNode` parses the statement list as ONE
+expression (first statement only), and the top-level / engine-arm emitters trusted it whenever the first statement was
+not an assignment. **The value is now PARSED as a statement list** by the function-body statement parser
+(`ast-builder.js:attachHandlerStatementLists` → `tokenizeLogic` + `parseLogicBody`, run in `buildBlock` right after
+`parseAttributes`), and a value whose parse holds 2+ statements carries `value.handlerBlock = { stmts }`. The count —
+so the 1-vs-many decision — comes from that parse: comments are not statements; a `;` in a regex / string / template /
+closure / IIFE is not a separator; continuation lines are one statement. Every handler emit site
+(`emit-event-wiring.ts`, `emit-variant-guard.ts`, `emit-each.ts`) lowers those nodes through ONE function-body lowering,
+`emit-logic.ts:emitHandlerStatementList` → `emitLogicBody` (`insideFunctionBody`, with the engine / map / set / request
+ctx). A 1-statement value keeps the single-expression path (§5.2.3: "equivalent to the bare shape"), byte-identical.
+⚑ The first cut (`31ac90379`) split the TEXT on `;`/newline and was reverted after re-review: it broke handlers that
+compiled on base (a `//` comment swallowing the next statement, `.method()` continuation lines, braceless `if … else`)
+and silently changed `${ /;/.test(@s) && … }` to `/; /`. Both pins pass (xfail marks removed); added
+`inline-block-handler-in-engine-state-child-call-led`, `inline-block-handler-in-match-arm`, and the sixteen
+`s437-handler-shape-*` cases (every shape in all four positions). Empirical: `onclick=${f(); g()}` →
+`function(event) { _scrml_f_N(); _scrml_g_N(); }`.
+**S437 round 4 (`622269c1f`)** — review items closed on the same structure: (1) a ONE-statement value
+spanning lines (`{ @r = @n⏎ + 1 }`) also lowers from its parsed statement — the older path split it at the newline
+(`+ 1;` dropped, silently); single-line single statements and callables keep the older path (byte-identical);
+(2) the value is parsed as a FUNCTION BODY (a `function … { }` token frame), so `@x = …` statements are writes; a
+statement SEQUENCE the parser rejects (top-level `;`, or statements left on a later line) is REPORTED —
+`${ () => @r = 1; @r2 = 2 }` E-STMT-MISSING-SEMICOLON, `{ try … ; h() }` E-TRY-NOT-IN-SCRML — instead of silently
+truncated (one arrow like `${() => @n = @n + 1}` is still one expression); (3) statements 2..n get the
+function-body checks: type-system `visitAttr` walks `handlerBlock.stmts` with `visitLogicNode` in a handler scope
+binding `event`, and resolves each `@x =` write target (E-SCOPE-001 / E-STATE-UNDECLARED, all four positions);
+(5) the "statement boundary not detected" warning is held and printed only when no statement list handles the
+trailing statements. Corpus migration: 0 files.
 
 ### g-when-changes-in-each-row-body-dropped — a `${ when @n changes { … } }` inside an `<each>` row body is dropped from the output entirely — `NEW S432-peter; HIGH; carried (S432)`
 <!-- @gap id=g-when-changes-in-each-row-body-dropped sev=HIGH status=carried locus=compiler/src/codegen/emit-each.ts(the row-body logic-interpolation arm — emits the comment "each: empty logic interpolation skipped") prov=review:S432-adversarial-review-of-the-when-changes-branch-reproduced-on-280ecbdd-and-the-fix-branch;empirical:re-verified-by-compile-on-280ecbdd -->
@@ -18804,13 +18833,37 @@ auto-await injector does not see locally-declared async functions.
 
 <!-- @gap id=g-nested-async-function-called-without-await-loses-its-failure sev=HIGH status=open locus=compiler/src/codegen/emit-functions.ts prov=review:S430-defer-round4-F6 -->
 
-### G-LIVE-PARSER-DROPS-AN-UNBRACED-ELSE-ARM-AND-RUNS-IT-UNCONDITIONALLY — `if (c) {…} else D()` always calls `D()`
+### G-LIVE-PARSER-DROPS-AN-UNBRACED-ELSE-ARM-AND-RUNS-IT-UNCONDITIONALLY — `if (c) {…} else D()` always calls `D()` — `resolved (S437)`
 
 **Reviewer-reproduced (S430 defer round-5 review, F), same on base, SILENT, affects every program.** In the live (default)
 pipeline, `if (c) { D("y;") } else D("x;")` emits `if (c) {…}` followed by an UNCONDITIONAL `D("x;")` — the unbraced else arm is
 detached from its `if`. The native parser is correct. Any program writing a brace-less else runs that branch always, at exit 0.
 
-<!-- @gap id=g-live-parser-drops-an-unbraced-else-arm-and-runs-it-unconditionally sev=HIGH status=open locus=compiler/src/ast-builder.js prov=review:S430-defer-round5-F -->
+<!-- @gap id=g-live-parser-drops-an-unbraced-else-arm-and-runs-it-unconditionally sev=HIGH status=resolved locus=compiler/src/ast-builder.js(parseOneIfStmt) prov=review:S430-defer-round5-F -->
+
+**Disposition — RESOLVED S437 (`1719d1573`, change-id `s437-bare-handler-sequence-drop`).** Surfaced again in S437 round 3,
+because §5.2.3 inline-block handlers now parse through this same statement parser. `parseOneIfStmt` had TWO holes: (1) a
+braceless `else stmt` was not handled at all (only `else if` / `else {`), so the `else` was consumed and `stmt` became an
+unconditional sibling — this entry; (2) after a BRACELESS consequent (`if (c) a; else b` / `if (c) a⏎ else b`) the
+`;`/newline terminator sat between it and the `else`, so the `else` was never seen at all. The parser now looks past the
+terminator (`;`, comments, blank tokens — never a second `;`) and takes the `else` only when one follows, and parses
+`else stmt` as a one-statement alternate. Corpus artifact movement (measured vs origin/main `21a469b6b`): the gauntlet
+sample `phase2-if-as-expr-tilde-complete-013` (the else-assignment now sits inside `else {}`) and
+`conformance/cases/defer/unbraced-arm-neg` (still `E-DEFER-UNSUPPORTED-SITE`; its `else` arm is no longer detached) —
+both newly-correct. Pinned by `multi-statement-handler-s437-bare-sequence.test.js` §8c and
+`s437-handler-shape-if-else-braceless`.
+**S437 round 4 (`622269c1f`)** — the lookahead now applies ONLY after a BRACELESS consequent: a `;` after a braced
+`{ … }` ends the `if`, so `if (c) { a }; else b` is not an if/else (JS rejects it). Such a dangling `else` —
+directly after an `if` that did not take it — is now `E-STMT-UNEXPECTED-TOKEN` (§34 "no statement begins here");
+before, the parser kept the text `else { … }` as a bare expression, which either failed E-CODEGEN-INVALID-LOGIC or,
+in a function body (`if (c) { … };⏎ else { … }`), leaked into JS that re-read it as an if/else (compiled at exit
+0). Corpus: 0 files use the shape. Braceless `else` also verified in `!{}` arm bodies and engine `effect=` /
+`<onTransition>` bodies (`control-flow/s437-braceless-else-in-failable-arm`, `engine/s437-braceless-else-in-effect-bodies`).
+**S437 round 5 (`00ba0018e`)** — round 4's check rejected VALID code: a COMMENT between a braced `}` and `else`
+(`} // c⏎ else`, `} /* c */ else`, an own-line comment before `else` / `else if`, value-form `${ if @a {"A"} // x⏎
+else {"B"} }`) left the `if` ended at the comment. After a braced consequent the parser now skips comments and blank
+tokens (never a `;`) before looking for `else`, as JS does; `} ;  else` stays rejected, and the message now names the
+separator it actually found. The corpus had 0 such comments — pinned by eight `s437-r5-*` runtime cases instead.
 
 ### G-DETERMINISM-GATE-WITHIN-UNIT-TEST-COMPARES-TWO-IDENTICAL-COMPILES — the F2 half of #1057 gates nothing, and the shape it names is alive
 
@@ -19343,8 +19396,8 @@ the whole family rather than per-message.
 > `compiler/self-host/`, `examples/`, `samples/`) — but the SPEC now calls it canonical, so exposure will grow
 > from here; the PA may want to re-weigh P7 fix-for-cause on the first entry.
 
-### g-each-row-event-handler-keeps-only-first-statement — an event handler on an element inside an `<each>` row runs only its FIRST statement; the rest are dropped at exit 0, for the inline block and the `${…}` form alike — `NEW S435; HIGH; carried (S435)`
-<!-- @gap id=g-each-row-event-handler-keeps-only-first-statement sev=HIGH status=carried locus=compiler/src/codegen/emit-each.ts(buildEachExprHandlerBody ~:2206 — parseExprToNode parses ONE expression from the handler text and the remainder of the `;` sequence is discarded; traced by reading, not instrumented) prov=empirical:S435-l19-reversal-probes-p8-p9-p10-p12-on-f89b665dc -->
+### g-each-row-event-handler-keeps-only-first-statement — an event handler on an element inside an `<each>` row runs only its FIRST statement; the rest are dropped at exit 0, for the inline block and the `${…}` form alike — `NEW S435; HIGH; resolved (S437)`
+<!-- @gap id=g-each-row-event-handler-keeps-only-first-statement sev=HIGH status=resolved locus=compiler/src/codegen/emit-each.ts(buildEachExprHandlerBody ~:2206 — parseExprToNode parses ONE expression from the handler text and the remainder of the `;` sequence is discarded; traced by reading, not instrumented) prov=empirical:S435-l19-reversal-probes-p8-p9-p10-p12-on-f89b665dc -->
 
 `<each in=@items key=@.id><li><button onclick={ @a = @a + 1; @b = @b + 2 }>…</></></each>` emits
 `addEventListener("click", function(event) { _scrml_cs_reactive_set("a", _scrml_cs_reactive_get("a") + 1); })` —
@@ -19358,15 +19411,29 @@ whether the handler sits at top level, inside an engine state-child (§51.0.I), 
 (§17.7)."* Severity HIGH by the silent-drop precedent (`g-when-changes-in-each-row-body-dropped`).
 **Exposure: 0** today (see the header). Pinned by `conformance/cases/markup-handler/inline-block-handler-in-each-row`
 (impl#1: `b` stays 0). **Direction if fixed:** newly-correct runtime; no diagnostic change.
+**Disposition — RESOLVED S437 (`31ac90379`, change-id `s437-bare-handler-sequence-drop`).** Made urgent by that
+change's own E-MULTI-STATEMENT-HANDLER fix, which now steers every bare each-row sequence to the braced form: the
+adversarial review found following that advice produced a clean compile that dropped code. Root shared with
+`g-expr-handler-drops-every-statement-after-a-leading-call` (see its disposition, which also records why the first cut
+`31ac90379` was replaced): `emit-each.ts` lowers a clone of the PARSED statement nodes through the same
+`emitHandlerStatementList` as top level, after rewriting the row's `@.` idents to the factory binding structurally
+(`rewriteEachScopeInExprNode`), and Bug-73 live-keying still wraps it (final: `1719d1573`). Every shape above re-verified by compile: `{ @clicks = @clicks + 1;
+@picked = @.id }`, `${@picked = @.id; @clicks = @clicks + 1}` and the newline-separated block all emit both
+statements. The pin passes (xfail removed); added `inline-block-handler-in-each-row-call-led-row-item` (call-led +
+`@.name`, order-sensitive) and `expr-handler-in-each-row-call-led`.
 
-### g-e-multi-statement-handler-message-steers-only-to-a-named-function — the diagnostic's fix-it names the named-function form and not the braces the amended SPEC names first — `NEW S435; LOW; open`
-<!-- @gap id=g-e-multi-statement-handler-message-steers-only-to-a-named-function sev=LOW status=open locus=compiler/src/ast-builder.js(the E-MULTI-STATEMENT-HANDLER TABError text, ~:17783) prov=empirical:S435-l19-reversal-probe-p2-on-f89b665dc -->
+### g-e-multi-statement-handler-message-steers-only-to-a-named-function — the diagnostic's fix-it names the named-function form and not the braces the amended SPEC names first — `NEW S435; LOW; resolved (S437)`
+<!-- @gap id=g-e-multi-statement-handler-message-steers-only-to-a-named-function sev=LOW status=resolved locus=compiler/src/ast-builder.js(the E-MULTI-STATEMENT-HANDLER TABError text, ~:17783) prov=empirical:S435-l19-reversal-probe-p2-on-f89b665dc -->
 
 On `onclick=startGame(); track("start")` impl#1 fires the right code (exit 1) with *"For multi-statement intent,
 lift the body to a named function and wire by name"*. §5.2.3 (amended S435): *"The fix is to wrap the statements in
 braces — `onclick={ startGame(); track(\"start\") }` — or to name a function."* The message text is impl freedom, but
 it now steers every reader away from the canonical form and toward the one the ruling demoted to a free choice.
 **Direction if fixed:** message-only.
+**Disposition — RESOLVED S437 (`31ac90379`, change-id `s437-bare-handler-sequence-drop`).** The message now gives
+§5.2.3's fix first, built from the user's own statements (`onclick={ @count = 0; track("reset") }`), then "or name a
+function". When the bare value has run on into the next attribute (`onclick=@a = "s" hidden=@on;`), it says so and does
+not offer a rewrite that would move the attribute into the handler. LSP hover text updated to match.
 
 ### g-native-bare-unbraced-multi-statement-handler-silently-reads-the-rest-as-attributes — under `--parser=scrml-native`, `onclick=startGame(); track("start")` compiles at exit 0; `track` and `start` become boolean attributes and only `startGame()` runs — `NEW S435; MED; open`
 <!-- @gap id=g-native-bare-unbraced-multi-statement-handler-silently-reads-the-rest-as-attributes sev=MED status=open locus=not-traced(native front-end attribute scan) prov=empirical:S435-l19-reversal-probe-p2-native-on-f89b665dc -->
@@ -19376,6 +19443,13 @@ Default pipeline: `E-MULTI-STATEMENT-HANDLER`, exit 1 (correct). Native: exit 0,
 exactly the misreading §5.2.3's "Why the bare form stays single-expression" paragraph keeps the error for; §34
 (narrowed S435) SHALL fire on this shape on both front-ends. Native-only; MED rather than HIGH because the default
 pipeline is correct.
+**S437 extension — the native front-end has NO `E-MULTI-STATEMENT-HANDLER` rule at all** (`grep` over
+`compiler/native-parser/` returns 0 matches). Measured on the S437 19-case should-fire matrix (change-id
+`s437-bare-handler-sequence-drop`): every case compiles at exit 0 under `--parser=scrml-native` — call-, assignment-,
+compound-, postfix-, method- and member-assignment-led sequences, trailing attributes, and the `<each>` row, engine
+state-child and `<match>` arm positions — with the tail emitted as HTML attributes (`<button … track reset>`). The
+default pipeline fires on all 19 after S437. Fix = port the rule into the native attribute scan, both the `.js` and
+`.scrml` mirrors.
 
 ### g-colon-shorthand-multi-statement-misroutes-to-codegen-defect-in-each-and-block-body — two §4.14 shapes that SHALL be user errors reach codegen and fail `E-CODEGEN-INVALID-LOGIC` instead — `NEW S435; LOW; open`
 <!-- @gap id=g-colon-shorthand-multi-statement-misroutes-to-codegen-defect-in-each-and-block-body sev=LOW status=open locus=compiler/src/symbol-table.ts(the §4.14 multi-statement scan covers engine state-children only)+not-traced(the `: { … }` block-body shape) prov=empirical:S435-l19-reversal-probes-p5-p6-on-f89b665dc -->
@@ -19386,6 +19460,128 @@ defect"). The `:`-shorthand scan is wired for engine state-children only. (2) `<
 — §4.14 names this `E-PARSE-001`; impl#1 fails `E-CODEGEN-INVALID-LOGIC`. Loud (exit 1) in both cases, so no silent
 harm; the defect is that the diagnostic blames the compiler for a user error and does not name the fix. Pre-existing —
 found while measuring whether the L19 reversal reaches `:`-shorthand bodies (it does not; §4.14 is unchanged).
+
+### g-match-arm-handler-values-lack-an-exprnode-so-lower-as-text — a `<match>` arm body is re-parsed at emit time by the native front-end, whose handler values carry no `exprNode`, so every arm handler took the string path: a leading comment broke it and a `;` in a regex was rewritten (`/;/` → `/; /`) — `NEW S437; MED; resolved (S437)`
+<!-- @gap id=g-match-arm-handler-values-lack-an-exprnode-so-lower-as-text sev=MED status=resolved locus=compiler/src/codegen/emit-match.ts(the M6.3 nativeParseFile arm-body re-parse)+compiler/src/ast-builder.js(attachHandlerStatementListsInTree) prov=empirical:S437-round3-reproduced-on-origin-main-21a469b6b -->
+
+On origin/main `21a469b6b`, inside a `<match>` arm: `onclick={⏎ // note⏎ t("M")⏎ }` and `onclick=${ t("M"); // tail⏎ }` fail
+`E-CODEGEN-INVALID-LOGIC`; `onclick=${ /;/.test(@s) && t("M") }` compiles with the regex silently changed to `/; /`.
+The same handlers are correct at top level, in an engine state-child and in an `<each>` row. Cause: `emit-match.ts`
+re-parses an arm body without an `<each>` through `nativeParseFile`, which throws away the TAB copy; its handler values
+have no `exprNode`, so emit-event-wiring's string branch lowered them. **Disposition — RESOLVED S437 (`1719d1573`).**
+`attachHandlerStatementListsInTree` (applied to that re-parsed tree) gives each handler value the `exprNode` TAB itself
+builds (`safeParseExprToNodeGlobal`) and its §5.2.3 statement list, so an arm handler lowers exactly like one anywhere
+else. Pinned by the `s437-handler-shape-*` cases (the `#mat` position).
+
+### g-subparse-error-discard-drops-every-tab-diagnostic-in-each-engine-and-match-bodies — the `<each>` body re-split, the engine state-child body build and the `<match>` arm re-parse throw away every TAB diagnostic they raise; only `E-MULTI-STATEMENT-HANDLER` is forwarded — `NEW S437; MED; open`
+<!-- @gap id=g-subparse-error-discard-drops-every-tab-diagnostic-in-each-engine-and-match-bodies sev=MED status=open locus=compiler/src/ast-builder.js(the five `_forwardSubparseErrors` call sites — `<each>` `_subErrors`, engine-decl `_bodyErrors`, match-block `_bodyErrors`, match-arm re-parse `reTab.errors`, and the blanked each-bearing arm's diagnostics-only re-parse — plus `SUBPARSE_FORWARDED_CODES`) prov=empirical:S437-s437-bare-handler-sequence-drop-found-by-matrix-call-led-MSH-did-not-fire-in-each-engine-match -->
+
+Each of these sub-builds collects TAB errors into a local buffer and discards it, because engine-only attribute
+syntax and per-item `:`-shorthand openers raise E-ATTR-001 / E-SCOPE-001 / E-CTX-003-shaped false positives there
+and the authoritative validators re-check the nodes later. S437 found that this also silently dropped
+`E-MULTI-STATEMENT-HANDLER` for EVERY handler in those bodies (even the call-led form fired only at top level) and
+added `_forwardSubparseErrors` with an allow-list of one code. **Every other TAB diagnostic raised only at this
+stage is still dropped in those bodies** — any check that is decided from opener/attribute text in `buildBlock` and
+not re-derived downstream. Not enumerated. **Audit needed:** list the TAB-stage codes, decide per code whether a
+downstream validator re-derives it inside those bodies, and forward the rest (or replace the discard with a
+deny-list of the known false-positive codes).
+
+### g-gt-inside-bare-handler-value-silently-truncates-it — a `>` in a BARE event-handler value ends the opener: `onclick=@a = @b >= 1` compiles as `@a = @b` at exit 0 — `NEW S437; HIGH; open`
+<!-- @gap id=g-gt-inside-bare-handler-value-silently-truncates-it sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts(tokenizeAttributes, the bare-assignment reader — breaks on any depth-0 `>`),compiler/src/block-splitter.js(opener end)—not-traced prov=review:S437-adversarial-review-of-s437-bare-handler-sequence-drop;empirical:PA-dispatch-reproduced-by-compile -->
+
+`<button onclick=@a = @b >= 1>x</button>` → exit 0, handler `function(event) { _scrml_cs_reactive_set("a",
+_scrml_cs_reactive_get("b")); }` — the comparison is gone. `<button onclick=@a = @b > 0 ? 1 : 2; f()>x</button>` →
+exit 0, same truncated handler, and ` 0 ? 1 : 2; f()` becomes the button's TEXT content (the opener closed at the
+`>`); no `E-MULTI-STATEMENT-HANDLER` either, because the `;` is no longer in the opener. A bare value has no end
+marker, so a `>` operator in it is indistinguishable from the tag close — the same ambiguity §5.2.3 cites for `;`.
+Direction: a diagnostic steering to braces / `${…}` / parens (cf. `E-ATTR-UNQUOTED-OPERATOR` for conditions), not
+a guess.
+
+### g-e-error-002-handler-exemption-depends-on-statement-count — an unhandled failable call in a handler is E-ERROR-002 only when it shares the handler with another statement — `NEW S437; LOW; open (spec-consistency question for bryan)`
+<!-- @gap id=g-e-error-002-handler-exemption-depends-on-statement-count sev=LOW status=open locus=compiler/src/type-system.ts(the §19.4.3 unhandled-failable check — reaches a failable call through the §5.2.3 handler statement list; the single-expression handler forms are exempt by an earlier, separate rule) prov=review:S437-round5-review-item-a;empirical:S437-round5-reproduced-by-compile -->
+
+With `function risky()! E`, measured on the S437 round-5 build: `onclick={ risky(); @r = 1 }` → **E-ERROR-002**
+(§19.4.3 — an unhandled failable call), but `onclick=risky()`, `onclick={ risky() }` and `onclick={⏎ risky()⏎ }`
+all compile at exit 0. The exemption for the single-expression handler forms predates S437; S437 only made statement
+lists visible to the check, which is what exposed the split. **Spec-consistency question for bryan:** is a failable
+call as a handler's WHOLE body exempt from §19.4.3 (the event dispatcher is the boundary), and if so, should that
+exemption extend to a failable statement inside a multi-statement handler — or should neither be exempt? Either
+answer makes the rule independent of the statement count; today it is not.
+
+### g-handler-block-does-not-hoist-function-declarations — `onclick={ @r = inner(); function inner() {…} }` is E-SCOPE-001, though a function body hoists the same declaration — `NEW S437; LOW; open`
+<!-- @gap id=g-handler-block-does-not-hoist-function-declarations sev=LOW status=open locus=compiler/src/type-system.ts(visitAttr's §5.2.3 handler-statement walk visits statements in order; the function-decl pre-bind the function-body walk gets is not applied to handlerBlock.stmts) prov=review:S437-round5-review-item-b;empirical:S437-round5-reproduced-by-compile -->
+
+`onclick={ @r = inner(); function inner() { return 1 } }` → E-SCOPE-001 on `inner`; the same two statements in
+`function f() { @r = inner(); function inner() { return 1 } }` compile (§6.9 hoisting). §5.2.3: the inline block is
+"the same statement grammar as a function body (§7.3)", so the forward reference should resolve. Fix = pre-bind the
+block's function-decls (the way a function body's are) before walking `handlerBlock.stmts`.
+
+### g-e-cps-needs-failable-prints-as-error-but-is-nonfatal — E-CPS-NEEDS-FAILABLE prints with an `E-` prefix but does not fail the build on a two-server-call sequence — `NEW S437; LOW; open`
+<!-- @gap id=g-e-cps-needs-failable-prints-as-error-but-is-nonfatal sev=LOW status=open locus=not-traced(the E-CPS-NEEDS-FAILABLE fire site + its severity / stream routing) prov=review:S437-round5-review-item-c(RELAYED-UNVERIFIED — not re-executed by the S437 dispatch) -->
+
+Relayed from the S437 round-5 review, not re-executed: on a handler / body holding two server-call statements,
+`E-CPS-NEEDS-FAILABLE` is printed but the build does not fail. An `E-` code must be fatal (the W-/I- prefix partition
+routes non-fatal diagnostics); either the severity or the code prefix is wrong. Reproduce first.
+
+### g-this-member-emits-the-whole-expression-as-its-object — `this.x = 2` in logic emits `this . x = 2.x = 2` (invalid JS) — `NEW S437; MED; open`
+<!-- @gap id=g-this-member-emits-the-whole-expression-as-its-object sev=MED status=open locus=compiler/src/expression-parser.ts(esTreeToExprNode — a ThisExpression becomes an escape-hatch whose `raw` is the WHOLE rawSource, not the `this` slice; the member emitter then appends `.x`) prov=empirical:S437-round5-reproduced-by-compile-and-parse-probe -->
+
+`function f() { @r = 1; this.x = 2 }` → E-CODEGEN-INVALID-LOGIC, emitted `this . x = 2.x = 2`; the same in a §5.2.3
+handler statement list. Probe: `parseExprToNode("this.x = 2")` gives `assign(target: member(object: escape-hatch
+{ nativeKind: "ThisExpression", raw: "this.x = 2" }, property: "x"))` — the escape-hatch carries the full source
+instead of `this`, so the member emit is `<whole expr>.x`. A separate root from the client template-literal defect (g-client-template-interpolation-lowering-needs-a-structural-emitter)
+(checked, per the review's ask). Fix = give ThisExpression a structured node (or slice `raw` to the node's own span).
+
+### g-client-template-interpolation-lowering-needs-a-structural-emitter — a `${@cell}` inside a client template literal is emitted RAW (invalid JS); since S437 this also breaks multi-statement handlers holding a template — `NEW S437; HIGH; carried (S437)`
+<!-- @gap id=g-client-template-interpolation-lowering-needs-a-structural-emitter sev=HIGH status=carried locus=compiler/src/codegen/emit-expr.ts(emitLit — a client-mode template `lit` returns node.raw verbatim; the server-mode emitServerTemplateLit re-scans template TEXT) prov=review:S437-round5-review(two executed silent-miscompile shapes);empirical:S437-round5+landing-reproduced-by-compile -->
+
+**(a) The regression this change ships.** §5.2.3 multi-statement handlers now lower through the function-body path
+(S437 round 3). That path reaches `emitLit`, which returns a client template literal's `raw` VERBATIM, so
+`onclick={ @r = 7; @s = \`v=${@r}\` }` (template second, or first in a multi-line handler) now fails
+E-CODEGEN-INVALID-LOGIC ("Unexpected character '@'"). On base the handler went down the string rewriter and compiled.
+The failure is LOUD (exit 1), not silent. Pinned XFAIL: `markup-handler/s437-r5-template-cell-read-second`,
+`markup-handler/s437-r5-template-cell-read-first-multiline`.
+**(b) Pre-existing on base.** Templates in client FUNCTION BODIES never lowered `@cell`:
+`function f() { @s = \`v=${@r}\` }` fails E-CODEGEN-INVALID-LOGIC on origin/main `21a469b6b`. A reactive value attr
+`style=(\`color: ${@c}\`)` is dropped with W-CG-VALUE-ATTR-UNLOWERABLE (the i81 fail-closed workaround). Two corpus
+samples (`samples/compilation-tests/helpers/dnd-setup.scrml`, `modern-007-dnd-with-helpers.scrml`) SHIP INVALID JS
+(`\`translate(${@dragX}px, …)\``) and `gauntlet-s20-meta/meta-type-registry-001.scrml` fails the gate — visible only
+when the emitted-JS gate runs (see `g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous`).
+Pinned XFAIL: `reactive/s437-r5-template-cell-read-function-body`, `reactive/s437-r5-template-cell-read-value-attr`.
+**(c) The bar any fix must clear — the S437 round-5 attempt failed it, and was reverted before landing.** Round 5
+reused the server-mode text scanner (`emitServerTemplateLit`) for client mode. Executed by the review, both SILENT:
+(1) the `${…}` scanner treats a quote inside a REGEX literal or a COMMENT as a string opener and runs to the template's
+end, and `parseExprToNode` then parses a valid PREFIX without throwing, so the rest is DROPPED —
+`\`[${s.replace(/'/g, "")}] tail\`` returned `"[its"` (base `"[its] tail"`); `\`${x /* it's */} tail\`` and
+`\`${x // don't⏎ } tail\`` likewise; (2) nested templates are re-emitted from the parser's lit `.raw`, which has lost
+the `\` before `` ` `` and `$` — `\`[${\`\\${s}\`}]\`` returned `"[x]"` (base: the literal `"[${s}]"`), and
+`\`[${\`\\\`\`}]\`` fails the gate. **(d) Fix direction.** Emit from the PARSED TemplateLiteral node's `quasis`
+(cooked AND raw preserved) and `expressions` — never by re-scanning template text (Rule 7). Any interior parse must
+consume the WHOLE interior (a valid prefix is not success). Nested templates keep their SOURCE raw. ⚠ **The
+server-mode `emitServerTemplateLit` is a latent copy of the same scanner** (the regex/comment-quote and nested-escape
+shapes apply there too) — fix both with the one structural emitter.
+
+### g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous — the conformance harness compiles with `write:false`, so the emitted-JS gate never runs; `notCodes: ["E-CODEGEN-INVALID-LOGIC"]` can never fail, and `codes: []` does not reject unlisted fatal errors — `NEW S437; MED; open`
+<!-- @gap id=g-conformance-adapter-skips-the-emitted-js-gate-so-codegen-notcodes-are-vacuous sev=MED status=open locus=conformance/adapters/impl1-ts.ts(compileScrml({ write:false }) at :118/:483/:935/:1030)+conformance/run.ts(the codes half — `emitted ⊇ codes AND emitted ∩ notCodes = ∅`, :6) prov=review:S437-round5-review;read:S437-landing-confirmed-write-false-sites-and-the-superset-rule(the codes:[]-with-fatal-errors pass is relayed, not re-executed) -->
+
+A hollow gate in the conformance harness itself. (1) `compileScrml` runs the emitted-JS parse gate
+(E-CODEGEN-INVALID-LOGIC) only on the WRITE path, and the impl#1 adapter compiles with `write: false`, so a case can
+never observe that code: `notCodes: ["E-CODEGEN-INVALID-LOGIC"]` is vacuous, and a case whose bundle is invalid JS
+only fails if its runtime half happens to execute the broken line. (S437 hit the same blind spot in its own unit
+harness and corpus census; both now run `validateEmittedArtifact` themselves.) (2) The codes half is a superset /
+absence check, so `codes: []` places no constraint on codes it does not name — a case with FATAL errors still passes
+when its runtime half holds (relayed from the review). Fix direction: run `validateEmittedArtifact` on every adapter
+compile (or compile with the gate on), and make any unlisted fatal (`E-*`, severity error) fail a case unless the case
+lists it.
+
+### g-is-event-handler-attr-name-matches-one-once-only — `isEventHandlerAttrName` treats any `on[a-z]+` name as an event handler, so `one=` / `once=` / `only=` / `onward=` are handled as event attributes — `NEW S437; LOW; open`
+<!-- @gap id=g-is-event-handler-attr-name-matches-one-once-only sev=LOW status=open locus=compiler/src/multi-statement-scan.ts(isEventHandlerAttrName — /^on[a-z]+$/i) and its inlined copy compiler/src/tokenizer.ts(isEventHandlerAttrName) prov=review:S437-adversarial-review-of-s437-bare-handler-sequence-drop;empirical:PA-dispatch-reproduced-by-compile -->
+
+`isEventHandlerAttrName` returns true for `one`, `once`, `only`, `onward`. Reproduced: `<div only=a;b>x</div>` fires
+`E-MULTI-STATEMENT-HANDLER` ("Event-handler attribute `only`"), and the tokenizer's copy reads such values with the
+event-handler value rules. Sibling of `g-emit-html-on-prefix-routes-only-once-onward-to-event-wiring` (the emit-side `startsWith("on")`
+routing of the same names). Fix =
+match against the known DOM event-name set (or `on` + a registered event), in both copies.
 
 <!-- @gap id=g-dev-compile-throw-test-fails-only-in-full-prepush-run sev=MED status=open locus=compiler/tests/commands/dev-compile-throw-fail-closed.test.js prov=review:S435-tag-push -->
 ### G-DEV-COMPILE-THROW-TEST-FAILS-ONLY-IN-FULL-PREPUSH-RUN — a dev-server test blocks every tag push, passes alone

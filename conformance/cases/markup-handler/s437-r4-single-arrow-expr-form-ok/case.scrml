@@ -1,0 +1,3 @@
+<count> = 0
+<button id="inc" onclick=${() => @count = @count + 1}>+</>
+<p id="out">${@count}</p>

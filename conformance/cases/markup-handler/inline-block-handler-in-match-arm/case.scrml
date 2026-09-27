@@ -1,0 +1,17 @@
+type Phase:enum = { Idle, Loading }
+
+<ph>: Phase = .Idle
+<count> = 5
+<last> = ""
+
+${ function track(n) { @last = n + ":" + @count } }
+
+<p id="out">${@count} ${@last}</p>
+
+<match on=@ph>
+    <Idle>
+        <button id="mc" onclick={ track("c"); @count = 0 }>call-led</button>
+        <button id="ma" onclick={ @count = 1; track("a") }>assign-led</button>
+    </>
+    <Loading><p>Loading…</p></>
+</>
