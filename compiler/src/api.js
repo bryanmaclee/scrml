@@ -578,9 +578,18 @@ export function bundleStdlibForRun(names, outputDir, log, diagnostics) {
  * @param {string} jsCode — generated JS source code
  * @param {string} sourceFilePath — absolute path of the source .scrml file
  * @param {string} outputDir — absolute path of the output directory
+ * @param {Set<string>|null} [emittedScrmlSources] — the `.scrml` sources this build compiled
+ * @param {string|null} [outputBaseDir] — the dist write root, for dist-space re-basing
+ * @param {Set<string>|null} [distSpaceTargets] — absolute paths of artifacts the
+ *   COMPILER itself writes into dist (e.g. the shared runtime). A specifier that
+ *   already resolves to one of them from `outputDir` is dist-space by construction
+ *   and is left alone. Client output needs this: under `--module-format=esm` its
+ *   header imports `./scrml-runtime.<hash>.js`, a `.js` relative specifier the
+ *   emitter computed in DIST space, which re-basing as if it were source-relative
+ *   would break.
  * @returns {string} — JS code with rewritten import paths
  */
-export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null, outputBaseDir = null) {
+export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, emittedScrmlSources = null, outputBaseDir = null, distSpaceTargets = null) {
   if (!jsCode || !sourceFilePath || !outputDir) return jsCode;
   const sourceDir = dirname(resolve(sourceFilePath));
   const outDir = resolve(outputDir);
@@ -610,6 +619,10 @@ export function rewriteRelativeImportPaths(jsCode, sourceFilePath, outputDir, em
     // `distRelativeServerSpecifier` now emits a dist-space specifier and the
     // client half computes its URLs in dist space too.)
     if (relPath.endsWith(".server.js") || relPath.endsWith(".client.js")) {
+      return null;
+    }
+    // A compiler-written dist artifact (the shared runtime) — already dist-space.
+    if (distSpaceTargets && distSpaceTargets.has(resolve(outDir, relPath))) {
       return null;
     }
     // Resolve the import path from the source file's directory
@@ -700,6 +713,12 @@ function staticImportSources(jsCode) {
     return null;
   }
   const out = [];
+  // ⚠ ImportDeclaration ONLY: an `export … from` (ExportNamedDeclaration /
+  // ExportAllDeclaration with a `source`) and a dynamic `import()` are never
+  // collected, so their specifiers pass through un-rebased — and a re-export
+  // of a `.scrml` module keeps its `.scrml` specifier in emitted JS. Open as
+  // g-export-from-and-dynamic-import-keep-scrml-specifiers-in-emitted-js
+  // (docs/known-gaps.md); collecting the node here is only half of that fix.
   for (const node of program.body) {
     if (node && node.type === "ImportDeclaration" && node.source && typeof node.source.value === "string") {
       out.push({ value: node.source.value, start: node.source.start, end: node.source.end });
@@ -3178,10 +3197,12 @@ function _compileScrmlImpl(options = {}) {
     // build shipping broken JS. In-tree precedent: meta-eval reparseEmitted /
     // E-META-EVAL-002 for ^{} meta output.
     //
-    // Path note: the gate validates with `outputDir` as the bundle dir for the
-    // stdlib-import rewrites. The per-file dist subdir (pathFor) only changes
-    // WHICH relative import path is emitted, never JS syntax validity, so the
-    // simpler outputDir-rooted rewrite is faithful for a SYNTACTIC gate.
+    // Path note: every JS limb is rewritten from its OWN dist directory
+    // (`gateDir`, the same computation as the write phase's `pathFor`), for the
+    // relative re-base AND the stdlib-import rewrite, so the gated bytes are the
+    // written bytes. (#1045 F1: the stdlib rewrite used to be outputDir-rooted
+    // here, on the argument that the specifier never changes syntax validity —
+    // true, but it left the gate checking bytes that are never written.)
     //
     // FLAG-GATED, default OFF. Perf admits always-on (~24 ms over the 8433-line
     // reference app, well inside SS 2.4), but the reference corpus ships
@@ -3201,6 +3222,13 @@ function _compileScrmlImpl(options = {}) {
     // it) and no artifacts are written. We use the same fatal/non-fatal
     // partition as the final result split below (`isNonFatal`): only W-/I-
     // prefixes and warning/info severities are non-fatal.
+    // #1045 F1 — the dist artifacts the compiler itself writes that client JS
+    // may name by a relative specifier already in DIST space (the esm-format
+    // runtime import); `rewriteRelativeImportPaths` must leave those alone.
+    // Shared by the gate phase and the write phase so both rewrite identically.
+    const clientDistSpaceTargets = (outputDir && mode !== "library" && cgResult?.runtimeFilename)
+      ? new Set([resolve(outputDir, cgResult.runtimeFilename)])
+      : null;
     const hasPriorFatalError = allErrors.some((e) =>
       !(e.code?.startsWith("W-")
         || e.code?.startsWith("I-")
@@ -3234,12 +3262,12 @@ function _compileScrmlImpl(options = {}) {
         // §64 — standalone-tool module (kind="tool"): a single runnable `<base>.js`.
         if (output.toolJs) {
           let s = rewriteRelativeImportPaths(output.toolJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir);
-          s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
+          s = rewriteStdlibImports(s, gateDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.js`, s);
         }
         if (output.serverJs) {
           let s = rewriteRelativeImportPaths(output.serverJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir);
-          s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
+          s = rewriteStdlibImports(s, gateDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.server.js`, s);
         }
         // §64 A2 — INDEPENDENT (not else): a library-shaped output writes
@@ -3251,11 +3279,15 @@ function _compileScrmlImpl(options = {}) {
         // so this is byte-identical for both.
         if (output.libraryJs) {
           let s = rewriteRelativeImportPaths(output.libraryJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir);
-          s = rewriteStdlibImports(s, outputDir, outputDir, bundledStdlib);
+          s = rewriteStdlibImports(s, gateDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.js`, s);
         }
+        // #1045 F1 — the SAME two rewrites the write phase applies to client JS,
+        // so the gated bytes are the written bytes (an `import:host` binding or a
+        // plain `.js` helper used client-side lands a source-space specifier here).
         if (output.clientJs) {
-          const c = rewriteStdlibImports(output.clientJs, outputDir, outputDir, bundledStdlib);
+          let c = rewriteRelativeImportPaths(output.clientJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+          c = rewriteStdlibImports(c, gateDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.client.js`, c);
         }
       }
@@ -3403,7 +3435,7 @@ function _compileScrmlImpl(options = {}) {
       //
       // Gated on `contentHashAssets` (build path only). The hash covers the
       // EXACT bytes written to disk (CRITICAL #3): for client.js that is the
-      // post-`rewriteStdlibImports` string, so the pre-pass runs the rewrite
+      // post-rewrite string (relative re-base + stdlib), so the pre-pass runs the rewrites
       // ONCE and caches it for the write loop. Keys are dist-RELATIVE POSIX
       // paths (the artifact's true on-disk location per `pathFor`, incl. the
       // `pages/` strip), so a dependency shared across N page HTMLs resolves
@@ -3447,7 +3479,8 @@ function _compileScrmlImpl(options = {}) {
         for (const [filePath, output] of cgResult.outputs) {
           if (output.clientJs) {
             const { targetDir, fullPath } = pathFor(filePath, ".client.js");
-            const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
+            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+            c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
             const hash = fnv1aHash(c);
             finalClientByFile.set(filePath, { contents: c, hash });
             const relUn = toPosixRel(fullPath);
@@ -3570,14 +3603,16 @@ function _compileScrmlImpl(options = {}) {
           if (writeOutput(filePath, ".js", s)) fileCount++;
         }
         if (output.clientJs) {
-          // Client JS does not currently get GITI-009 relative-path rewrites
-          // (no existing test asserts that contract for client output) but
-          // it MUST get scrml:NAME rewrites — Bun fails to resolve any
-          // unresolved scrml:* in browser-loaded JS just as in server JS.
+          // Client JS gets BOTH rewrites, exactly like the limbs above (#1045 F1):
+          // GITI-009 relative-path re-basing — a plain `.js` helper or an
+          // `import:host` binding used client-side is emitted with its
+          // source-space specifier — and scrml:NAME rewrites. The runtime
+          // import (dist-space already) is exempt via `clientDistSpaceTargets`.
+          // The gate phase applies the same two calls from the same directory.
           const { targetDir } = pathFor(filePath, ".client.js");
           if (hashAssets) {
             // #82 — write the content-addressed name; `finalClientByFile`
-            // already carries the post-`rewriteStdlibImports` bytes + hash.
+            // already carries the post-rewrite (relative + stdlib) bytes + hash.
             const cached = finalClientByFile.get(filePath);
             let c = cached.contents;
             // ESM chunks arc (Unit 3) — rewrite the in-chunk ES `import` URLs to
@@ -3595,7 +3630,8 @@ function _compileScrmlImpl(options = {}) {
             }
             if (writeOutput(filePath, `.client.${cached.hash}.js`, c)) fileCount++;
           } else {
-            const c = rewriteStdlibImports(output.clientJs, targetDir, outputDir, bundledStdlib);
+            let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
+            c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
             if (writeOutput(filePath, ".client.js", c)) fileCount++;
           }
         }
