@@ -38971,7 +38971,8 @@ declaration's markup appears only where an instance is used (`<x …/>`) or the 
 #### 66.6.1 A plain tag makes a new one
 
 A plain markup use `<x …/>` (or `<x …>…</x>`) of a declaration is a **NEW INSTANCE** everywhere. Its attributes
-are that instance's values (construction, §66.14). Its children are slot content (§66.15.2).
+are that instance's values (construction, §66.14) — each is that field's initializer for that instance (§66.9
+rule 8). Its children are slot content (§66.15.2).
 
 #### 66.6.2 `<*x>` is the existing one
 
@@ -39177,6 +39178,35 @@ library is therefore **declarations + named instances — no new construct** (§
    `scrml fix` rewrite is the locked declaration `<x:T=(expr)/>`, which is derived exactly when `expr` reads
    cells.
 
+> **Amendment S437 — use-site construction values (bootstrap slice M1, L6).**
+> **Provenance:** ruling:user-voice-scrml.md S437 — *"L6 a, L12 b, identities yes, replace respects sub-fields"*
+> (L6 = option (a) of the PA's M1 ruling message, whose full text the terse answer ratifies: *"Apply §66.9's rule
+> per instance. A locked field given a live expression becomes derived, so `label` tracks `line.name`. A `let`
+> field given a value is seeded once, so `value` starts at `"1"` and is then the instance's own. … (a) reads the
+> use-site attribute as that field's initializer for this instance."*). Rejected: (b) every construction value is
+> a one-time snapshot (stale UI); (c) everything tracks, including `let` fields (clobbers user input).
+
+8. **A use-site attribute is that field's INITIALIZER FOR THAT INSTANCE, and rules 1–4 apply per instance.** A
+   use `<x f=expr/>` (construction, §66.14 rule 4) gives the new instance's field `f` the initializer `expr`, in
+   place of the declaration's default for `f`. Whether that field is derived or seeded is then decided by rules
+   3–4, for that instance, exactly as for a declaration:
+   - a **LOCKED** field given an expression that reads live state is **DERIVED** for that instance — it tracks
+     the expression;
+   - a **`let`** field given such an expression is **SEEDED** once — it starts from the expression and is
+     thereafter the instance's own.
+
+   No new rule is introduced: this is rules 3–4 read at the use site.
+
+   ```scrml
+   <dropdown label:string options:string[] let value:string=""/>          // `label` locked; `value` let (§66.19.3)
+
+   <each in=@lines key=@.id as line>
+       <dropdown label=line.name options=(["1", "2", "3"]) value="1"/>
+       // `label`: locked + a live expression → DERIVED for this row's instance — renaming the row relabels it
+       // `value`: `let` → SEEDED — starts at "1"; a user's pick is then this instance's own and is not reset
+   </each>
+   ```
+
 > ⚑ **OPEN (not ruled) — O13: logic-local `const`.** The ruling retires `const` as the prefix of a CELL
 > declaration. Whether the logic-local `const x = …` binding (and the §50.8.5 rule that a keywordless `x = v`
 > declares a `const`) also retires is not ruled. dpa-053's banked shape itself writes `const t = …` locally.
@@ -39188,7 +39218,14 @@ library is therefore **declarations + named instances — no new construct** (§
 > §66.12 grants), `replace` plus every edit (which would re-create the all-grant §66.12.4 forbids), or an error
 > requiring explicit grants — is not ruled.
 
-> ⚑ **OPEN (not ruled) — O21: a derived attribute vs use-site construction.** A locked attribute whose default
+> ✅ **ANSWERED S437 by L6 (rule 8) — O21** (bryan: *"L6 a, …"*): a use-site attribute is that field's
+> initializer for that instance, in place of the declaration's default — so a use MAY set a locked attribute
+> whose default reads a cell; `<swatch hex="#dc2626"/>` gives that instance's `hex` the literal initializer (a
+> constant for that instance), and `let` is not needed to override at construction. (This is O21 read through
+> rule 8's "that field's initializer for this instance"; the L6 text did not name O21.) The prior OPEN text
+> follows for the record.
+>
+> *(superseded)* **O21: a derived attribute vs use-site construction.** A locked attribute whose default
 > reads a cell (`<swatch hex:string=@brand/>`) is derived by rule 3. Whether a use-site attribute
 > (`<swatch hex="#dc2626"/>`, construction, §66.14) may still set such an attribute for that instance, or the
 > attribute must be `let` (seeded) to be overridable, is not ruled. §66.19 uses `let` attributes where a use
@@ -39577,7 +39614,9 @@ cannot be one instance).
    `export let value:string=""` on an attribute, `export <open:Openness=.Closed>…</>` on a child (§66.4 rule 6). A write from another file to a
    non-exported field is `E-FIELD-PRIVATE-WRITE` (§66.20).
 4. **Use-site attributes are CONSTRUCTION** — always allowed, from any file (`<dropdown label="Size"/>` sets the
-   new instance's `label` whether or not `label` is exported).
+   new instance's `label` whether or not `label` is exported). Whether a construction value TRACKS its
+   expression is §66.9 rule 8 (S437, L6): the use-site attribute is that field's initializer for that instance,
+   so a locked field given a live expression is derived (tracks) and a `let` field is seeded once.
 5. **A whole-value replace from outside the defining file is an error when the type has any private field**
    (`E-FOREIGN-REPLACE-PRIVATE`, §66.20) — a replace would otherwise write the private fields.
 6. **The exported field's contract IS the public API** — the scrml answer to methods and getters. A library
@@ -40086,7 +40125,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O17 | §66.17 | Remaining T3 details: hyphenated token names / non-string CSS values, whether `for=` is still permitted, the `@media` auto-bind, library-file placement. |
 | O18 | §66.6.7 | Beyond `if=` on a use (ruled), which non-writing attributes (`if=`, `class=`, `style=`, `key=`) a `<*x>` reference or a use may carry. |
 | O19 | §66.3 | An own value AND attributes on one declaration; what `@x` then is. |
-| O21 | §66.9 | A derived (locked, reactive-default) attribute vs use-site construction. |
+| ~~O21~~ ANSWERED S437 (L6) | §66.9 | A derived (locked, reactive-default) attribute vs use-site construction. (Answered by §66.9 rule 8: the use-site attribute is that instance's initializer.) |
 | O24 | §66.5 | The spelling of a markup-typed derived cell. |
 | O31 | §66.2.2 | Whether a bare `name:Type` for a NON-declaration type (`<count:int/>`) is a declaration (`:Decl` and `:struct` are ruled). |
 | O32 | §66.2.4 | Whether compound literals may stand bare in an opener. |
