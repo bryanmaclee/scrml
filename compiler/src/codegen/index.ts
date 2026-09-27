@@ -1864,17 +1864,237 @@ export function runCG(input: CgInput): CgOutput {
   // INCONSISTENTLY on purpose-by-accident — `sessionExpiry` is camelCase,
   // `session-secure` is kebab — and `compute-program-config.ts` reads them exactly
   // that way; this scan mirrors it rather than "fixing" the surface.
+  //
+  // ⛔ SCOPED TO A SINGLE-PROGRAM COMPILE SET (S436) — AND THE COMMENT THIS REPLACES
+  // WAS WRONG IN THE SECURITY DIRECTION. The `session-secure` fallback in emit-server
+  // used to be annotated "strictly ADDITIVE: it is reached only where the answer today
+  // is 'nothing declared → default secure'". That sentence names exactly the case it
+  // breaks: the ONLY reachable effect of a `session-secure` fallback is to turn a
+  // secure default INTO a weaker one. `session-secure="false"` is the sole value that
+  // changes anything, so "additive" here means "additively downgrades".
+  //
+  // Concretely, MEASURED on `c46ebbf8` in BOTH input orders, zero hard errors and an
+  // identical diagnostic set in every run — so nothing told the adopter:
+  //   program B (`<program auth="optional" csrf="off">`, declares NEITHER attribute)
+  //     compiled ALONE          → `__Host-scrml_sid`, Max-Age 3600   (correct)
+  //     compiled beside program A (`session-secure="false" sessionExpiry="7d"`)
+  //                             → `scrml_sid`,        Max-Age 604800 (A's settings)
+  // `__Host-` is BROWSER-ENFORCED hardening (no Domain attribute, Path must be `/`,
+  // always Secure), so an unrelated program in the same compile set silently stripped
+  // B's cookie hardening. This loop walked the WHOLE `files` array with no
+  // program-membership test, so "program-wide" was in fact BUILD-wide.
+  //
+  // There is no reliable unit → owning-`<program>` relation to key this on. The
+  // compiler says so itself at the shell-composition post-pass below: per SPEC §40.8
+  // the entry file is "the file resolved by the build root" — a BUILD fact — this
+  // pipeline infers it from file CONTENT and takes the first match, `E-PROGRAM-002`
+  // is reserved-not-implemented, so a second top-level `<program>` in a compile unit
+  // is silently tolerated. Inventing a membership notion here (by directory, by
+  // import graph) would be guessing at the language.
+  //
+  // So FAIL CLOSED ON THE COUNT, which needs no membership notion to be sound:
+  //   - 0 or 1 `<program>` declaration → inherit exactly as before. This IS the
+  //     #282 / S433 case the pre-scan exists for (ONE program spread over several
+  //     emitted units, where the minting unit carries no declaration of its own and
+  //     MUST pick up the program's, or the writer sets one cookie name while the
+  //     reader's compile-time-specialized regex matches another). Byte-identical.
+  //   - 2 or more                      → NO cross-unit inheritance at all. A unit
+  //     that does not itself declare the attribute falls to the LANGUAGE DEFAULT
+  //     (secure / `__Host-`, 1h expiry), exactly as if compiled alone. A unit that
+  //     DOES declare it still resolves its own, via emit-server's per-unit raw read.
+  //
+  // ⚑ THE PRICE, STATED HONESTLY (S436 fix-round, F1). This is a TRADE, not a
+  // hardening, and an earlier draft of this comment got that wrong — it claimed a
+  // genuine multi-unit program caught by the 2+ branch "gets the HARDENED default".
+  // It does not get a USABLE default: it gets a hardened cookie ITS OWN PROGRAM
+  // CANNOT READ. MEASURED, both input orders, zero diagnostics:
+  //   index.scrml        (program A, `session-secure="false" sessionExpiry="7d"`)
+  //                                                → `scrml_sid`        / 604800
+  //   pages/minter.scrml (A's OWN member, declares nothing, MINTS)
+  //                                                → `__Host-scrml_sid` / 3600
+  //   other/zzz.scrml    (unrelated program B)     → `__Host-scrml_sid` / 3600  ✓
+  // The emitted readers are compile-time specialized to ONE name
+  // (`/(?:^|;\s*)scrml_sid=/` vs `/(?:^|;\s*)__Host-scrml_sid=/`) and are disjoint,
+  // so a login at one of A's routes leaves A's other route logged out. That is the
+  // #282 writer/reader split reached through a new door: the shape WORKED before
+  // this guard and breaks after it. Corpus population 0 of 1137 and 0 in the adopter
+  // clone — but a functional regression at population zero is still a regression.
+  //
+  // ⛔ …AND THAT COST IS NOW REFUSED, NOT PAID — `E-MW-008` below (S436 round 3,
+  // operator ruling: option A of `docs/changes/s436-program-session-config-scope/
+  // fork-f1.md`). The three options were (A) refuse the configuration, (B) warn at
+  // each unit whose answer the suppression changed, (C) revert to build-wide. A was
+  // chosen: it is the only one that CLOSES the split rather than narrating it, and
+  // it extends a settled rule rather than setting one — SPEC §40 (`:23763`) already
+  // makes "two applications in one compiled server" an Error via `E-MW-007`, with
+  // the same remedy, and explicitly frames `E-MW-007` as the emitted-server
+  // consequence of the reserved `E-PROGRAM-002` shape. Contested session config is
+  // the same class of application-scope conflict.
+  //
+  // ⚑ THE INVARIANT THIS BUYS, and it is why the suppression below is now
+  // belt-and-braces rather than the mechanism: after `E-MW-008`, the 2+ branch is
+  // only ever REACHED in a compile set where NO `<program>` declares either
+  // attribute — and in such a set `_readProgramAttr` would answer `undefined`
+  // anyway. So suppression can no longer change any unit's answer, and the F1 split
+  // is unreachable by construction rather than merely unpopulated. The suppression
+  // stays because errors do not necessarily halt emission on every caller path.
+  //
+  // ── the scan itself ──────────────────────────────────────────────────────────
+  // ONE recursive collection of `<program>` NODES, shared by the count and the read.
+  //
+  // NODES, not FILES (S436 fix-round, F2). Counting program-bearing FILES let one
+  // file holding TWO top-level `<program>` nodes count as ONE, so the 2+ branch never
+  // fired and the original cross-program leak survived the guard untouched. MEASURED
+  // on the file-counting version: `ddd.scrml` (two top-level programs, the first
+  // declaring `session-secure="false"`) plus a plain minting `pages/other.scrml` →
+  // `other` emitted `scrml_sid`/604800, identical to the unfixed compiler, while the
+  // same page compiled alone emitted `__Host-`/3600. Note the irony recorded above:
+  // `E-PROGRAM-002` being reserved-not-implemented is exactly WHY a second top-level
+  // `<program>` can sit in one file, so the file-granular count was blind to the very
+  // shape its own rationale cited.
+  //
+  // RECURSIVE (S436 fix-round, F3). A top-level-only scan cannot see a `<program>`
+  // nested inside other markup, but `_readRawProgramAttr` in emit-server — the reader
+  // that actually decides each unit's answer — DOES recurse. That divergence is not
+  // only a stale comment: it is a live PRE-EXISTING #282-class split, measured on
+  // `origin/main` and unchanged by the file-counting guard. A single-program compile
+  // set whose `<program session-secure="false">` sits inside a `<div>`, plus a member
+  // page, emitted `scrml_sid` on the program unit and `__Host-scrml_sid` on the
+  // member — writer and reader disagreeing inside ONE program, which is precisely
+  // what the pre-scan exists to prevent. Recursing here closes that.
+  // Sites, not bare nodes: `E-MW-008` mirrors `E-MW-007` in NAMING every competing
+  // source, so the owning file travels with each declaration.
+  const _collectProgramSites = (f: any): Array<{ node: any; filePath: string }> => {
+    const acc: Array<{ node: any; filePath: string }> = [];
+    const filePath = (f?.filePath as string) ?? "";
+    const visit = (ns: any[]): void => {
+      if (!Array.isArray(ns)) return;
+      for (const n of ns) {
+        if (!n || n.kind !== "markup") continue;
+        if (n.tag === "program") acc.push({ node: n, filePath });
+        if (Array.isArray(n.children)) visit(n.children);
+      }
+    };
+    visit((getNodes(f as never) as any[]) ?? []);
+    return acc;
+  };
+  const _programSites = files.flatMap(_collectProgramSites);
+  const _programDecls = _programSites.map((s) => s.node);
+  const _multiProgramCompileSet = _programDecls.length >= 2;
+
+  // ── E-MW-008 (S436 round 3, option A) ────────────────────────────────────────
+  // A compile set holding 2+ `<program>` declarations is refused WHEN, for either
+  // session attribute, some `<program>` declares it AND some compilation unit cannot
+  // resolve it for itself — i.e. exactly when the compiler would otherwise have to
+  // GUESS that unit's owner. Scoped EXACTLY there, and deliberately NOT to the
+  // general second-`<program>` shape: that is `E-PROGRAM-002`, still reserved, and
+  // implementing it would reject a MEASURED 75 of 1137 corpus compile sets — a
+  // separate and much larger arc.
+  //
+  // ⛔ THE "SOME UNIT CANNOT RESOLVE IT" CLAUSE IS NOT OPTIONAL, and leaving it out
+  // was a real defect in the first cut of this rule. Without it the error fired on a
+  // set where EVERY `<program>` declares both attributes explicitly — a shape with no
+  // unattributable unit, nothing guessed and nothing bled, which S433 deliberately
+  // RULED valid and pinned in `integration/session-program-scope-multi-unit.test.js`
+  // ("a unit's OWN sessionExpiry outranks a SIBLING program's (F1-1)": `aaa` 30m +
+  // `zzz` 7d, each keeping its own). That test went red and caught it. Worse, the
+  // message below advertises "declare it explicitly on every <program>" as the second
+  // escape, so firing there promised a remedy the code did not honour.
+  //
+  // Evaluated PER ATTRIBUTE, because the two are independent: a set where `aaa`
+  // declares only `sessionExpiry` and `zzz` only `session-secure` still has each unit
+  // inheriting the other's — that is the leak, and it fires.
+  //
+  // ⚑ DELIBERATELY CONSERVATIVE in one respect, stated rather than hidden: a unit is
+  // counted as "would have to inherit" whether or not it would actually EMIT session
+  // infrastructure. Testing that too would mean mirroring emit-server's
+  // `_needsSessionInfra && _webAppShape` predicate here, and a mirrored predicate is
+  // exactly what drifts. The cost is over-rejecting a set whose second program never
+  // touches sessions; the measured population of that over-rejection is 0. Note also
+  // that any divergence between `_unitResolvesForItself` and emit-server's
+  // `_readRawProgramAttr` fails CLOSED — missing a self-declaration makes this fire
+  // where it need not, never the reverse.
+  //
+  // Sibling of `E-MW-007` by design, down to the message shape: name the conflict,
+  // name every competing source, say why composing them is not available, then give
+  // the remedy and the second escape.
+  if (_multiProgramCompileSet) {
+    const SESSION_ATTRS = ["sessionExpiry", "session-secure"] as const;
+    const _declares = (node: any, name: string): boolean =>
+      ((node?.attrs ?? []) as any[]).some((x: any) =>
+        x && x.name === name && x.value && x.value.kind === "string-literal");
+    // Mirrors emit-server's `_readRawProgramAttr`: recursive, `<program>` OR `<page>`.
+    const _unitResolvesForItself = (f: any, name: string): boolean => {
+      let found = false;
+      const visit = (ns: any[]): void => {
+        if (!Array.isArray(ns)) return;
+        for (const n of ns) {
+          if (!n || n.kind !== "markup") continue;
+          if ((n.tag === "program" || n.tag === "page") && _declares(n, name)) found = true;
+          if (Array.isArray(n.children)) visit(n.children);
+        }
+      };
+      visit((getNodes(f as never) as any[]) ?? []);
+      return found;
+    };
+    const _contested = _programSites.filter((s) =>
+      SESSION_ATTRS.some((a) => _declares(s.node, a)
+        && files.some((f) => !_unitResolvesForItself(f, a))));
+    if (_contested.length > 0) {
+      const _sources = [...new Set(_contested.map((s) => s.filePath).filter(Boolean))];
+      const _all = [...new Set(_programSites.map((s) => s.filePath).filter(Boolean))];
+      const _span = (_contested[0].node.span ?? {}) as any;
+      errors.push(new CGError(
+        "E-MW-008",
+        `E-MW-008: this build declares ${_programDecls.length} <program>s ` +
+        `(${_all.join(", ")}) and ${_contested.length} of them declare session ` +
+        `configuration — session-secure= / sessionExpiry= in ${_sources.join(", ")}.\n` +
+        `  The session cookie NAME and lifetime are APPLICATION-scope (§20.5.1): a ` +
+        `compiled server mints exactly ONE cookie name, and every unit's session ` +
+        `reader is compile-time specialized to that one name, so two applications in ` +
+        `one build cannot each have their own.\n` +
+        `  The compiler cannot resolve this by attributing each unit to an owning ` +
+        `<program>: §40.8 makes entry identity a BUILD fact, not a file fact, and ` +
+        `E-PROGRAM-002 is reserved-not-implemented, so a unit declaring neither ` +
+        `attribute has no determinable owner. Applying one program's declaration ` +
+        `build-wide silently strips __Host- and Secure from the other's cookie; ` +
+        `withholding it splits one program's own units across two disjoint readers, ` +
+        `so a login on one route leaves that program's other routes logged out.\n` +
+        `  Fix: build one application per output directory, or declare ` +
+        `session-secure=/sessionExpiry= explicitly on every <program> in this build.`,
+        {
+          file: _contested[0].filePath,
+          start: _span.start ?? 0, end: _span.end ?? 0,
+          line: _span.line ?? 1, col: _span.col ?? 1,
+        },
+      ));
+    }
+  }
   const _readProgramAttr = (name: string): string | undefined => {
-    for (const f of files) {
-      const nodes = (getNodes(f as never) as any[]) ?? [];
-      if (!Array.isArray(nodes)) continue;
-      const prog = nodes.find((n: any) => n && n.kind === "markup" && n.tag === "program");
-      if (!prog) continue;
+    if (_multiProgramCompileSet) return undefined;
+    for (const prog of _programDecls) {
       const a = ((prog.attrs ?? []) as any[]).find((x: any) => x && x.name === name);
       if (a && a.value && a.value.kind === "string-literal") return a.value.value;
     }
     return undefined;
   };
+  // ⚑ WHAT "CANNOT DRIFT" DOES AND DOES NOT MEAN HERE (S436 fix-round, F3). The count
+  // and the read above share ONE node list, so those two cannot disagree. They are
+  // NOT identical to emit-server's `_readRawProgramAttr`, and claiming they were was
+  // wrong. Two deliberate differences remain, both stated rather than asserted away:
+  //   1. `_readRawProgramAttr` also accepts a `<page>`-level attribute as a lower
+  //      priority fallback. This scan counts and reads `<program>` ONLY. Counting
+  //      `<page>` would be actively harmful: every ordinary multi-page app has many
+  //      `<page>` units, so the 2+ branch would fire on essentially every composed
+  //      app and suppress the inheritance #282 needs. And a `<page>` attribute is a
+  //      per-page declaration by construction — it is not a program-wide fact and has
+  //      no business propagating to a sibling unit.
+  //   2. `_readRawProgramAttr` takes the LAST matching `<program>` in its file; this
+  //      takes the FIRST in the set. That divergence is UNREACHABLE: the read is
+  //      gated on `!_multiProgramCompileSet`, i.e. on there being at most ONE
+  //      `<program>` node in the whole compile set, and with one node first and last
+  //      are the same node. The orders can only differ in exactly the case where this
+  //      function has already returned `undefined`.
   const _programSessionExpiry = _readProgramAttr("sessionExpiry") ?? null;
   const _programSessionSecure = _readProgramAttr("session-secure");
   for (const f of files) {
