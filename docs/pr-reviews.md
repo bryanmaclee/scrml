@@ -1917,3 +1917,4 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1091 verdict=carve-out by=S437-bryan date=2026-09-27 probe=DOCS-ONLY-one-path-docs-pr-reviews-md-plus3-minus0-by-gh-pr-view-files -->
 <!-- @review pr=1095 verdict=carve-out by=S437-bryan date=2026-09-27 probe=WRAP-DOCS-ONLY-changelog-hand-off-delta-log-ZERO-compiler-paths-by-gh-pr-view-files -->
 <!-- @review pr=1101 verdict=carve-out by=S437-bryan date=2026-09-27 probe=WRAP-DOCS-ONLY-changelog-known-gaps-pr-reviews-hand-off-delta-log-ZERO-compiler-paths-by-gh-pr-view-files -->
+<!-- @review pr=1094 verdict=finding by=S437-bryan date=2026-09-27 probe=compileScrml-merge-vs-parent-archive-cookie-name-maxage-per-unit-24-shapes-tool-program-false-positive-PA-reproduced-protect-autoescalation-bypass-cli-build-writes-dist-on-E-MW-008 -->
