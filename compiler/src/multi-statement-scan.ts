@@ -223,3 +223,103 @@ export function isEventHandlerAttrName(name: string): boolean {
   if (/^onclient:/i.test(name)) return true;
   return false;
 }
+
+/**
+ * S437 — does the statement text of a bare handler hold an ATTRIBUTE-shaped
+ * `name=` token (at depth 0, outside strings) somewhere other than the start of
+ * a statement? That happens when the tokenizer read the handler value on into
+ * the element's next attribute — e.g. `onclick=@a = "s" hidden=@on;` yields
+ * `@a = "s" hidden=@on` — and a braces rewrite built from that text would move
+ * the attribute INTO the handler. Returns the swallowed attribute's name, or
+ * null. A statement's own leading `x=` / `@x = …` is never counted: only a
+ * `name=` preceded by whitespace, after the statement's first token, with the
+ * `=` not part of `==` / `=>`.
+ */
+export function attrShapedTokenInStatements(stmts: string): string | null {
+  if (typeof stmts !== "string" || stmts.length === 0) return null;
+  const len = stmts.length;
+  let depth = 0;
+  let strCh: string | null = null;
+  let atStmtStart = true; // true until the current statement's first token is seen
+  for (let p = 0; p < len; p++) {
+    const c = stmts[p]!;
+    if (strCh !== null) {
+      if (c === "\\") { p++; continue; }
+      if (c === strCh) strCh = null;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === "`") { strCh = c; atStmtStart = false; continue; }
+    if (c === "(" || c === "[" || c === "{") { depth++; atStmtStart = false; continue; }
+    if (c === ")" || c === "]" || c === "}") { if (depth > 0) depth--; continue; }
+    if (depth !== 0) continue;
+    if (c === ";") { atStmtStart = true; continue; }
+    if (/\s/.test(c)) continue;
+    const prevWs = p > 0 && /\s/.test(stmts[p - 1]!);
+    const m = /^[A-Za-z_][A-Za-z0-9_:\-]*=(?![=>])/.exec(stmts.slice(p));
+    if (m && prevWs && !atStmtStart) return m[0].slice(0, -1);
+    atStmtStart = false;
+  }
+  return null;
+}
+
+/**
+ * S437 — build the statement text for the E-MULTI-STATEMENT-HANDLER fix-it
+ * (SPEC §5.2.3: "The fix is to wrap the statements in braces").
+ *
+ * `text` is the opener attribute region; `valueStart` is the offset where the
+ * bare handler value begins (just past `name=` and any whitespace);
+ * `semiOffsets` are the top-level `;` offsets owned by that handler, in order.
+ *
+ * Everything from `valueStart` up to the LAST owned `;` is unambiguously part
+ * of the handler. What follows the last `;` is exactly the ambiguous part (the
+ * reason the bare sequence is an error), so the suggestion takes the most
+ * likely reading: one further statement, read up to the next depth-0
+ * whitespace / tag close, extended across an assignment operator so
+ * `@msg = "a"` is kept whole. The result is suggestion text inside a
+ * diagnostic, never compiled.
+ *
+ * Returns the statement list WITHOUT the braces, e.g. `@count = 0; track("x")`.
+ */
+export function bareHandlerStatementsText(text: string, valueStart: number, semiOffsets: number[]): string {
+  if (typeof text !== "string" || semiOffsets.length === 0) return "";
+  const lastSemi = semiOffsets[semiOffsets.length - 1]!;
+  // Up to and including the last owned `;`.
+  const head = text.slice(valueStart, lastSemi + 1).replace(/\s+$/, "");
+  const len = text.length;
+
+  // Read one depth-0 run starting at `p` (after skipping whitespace).
+  function readRun(p: number): { run: string; end: number } {
+    while (p < len && /\s/.test(text[p]!)) p++;
+    const start = p;
+    let depth = 0;
+    let strCh: string | null = null;
+    while (p < len) {
+      const c = text[p]!;
+      if (strCh !== null) {
+        if (c === "\\" && p + 1 < len) { p += 2; continue; }
+        if (c === strCh) strCh = null;
+        p++;
+        continue;
+      }
+      if (depth === 0) {
+        if (/\s/.test(c) || c === ">" || (c === "/" && text[p + 1] === ">")) break;
+      }
+      if (c === '"' || c === "'" || c === "`") { strCh = c; p++; continue; }
+      if (c === "(" || c === "[" || c === "{") depth++;
+      else if ((c === ")" || c === "]" || c === "}") && depth > 0) depth--;
+      p++;
+    }
+    return { run: text.slice(start, p), end: p };
+  }
+
+  const first = readRun(lastSemi + 1);
+  let tail = first.run;
+  // Assignment continuation: `@msg = "a"` / `@n += 1` spans whitespace.
+  const cont = /^[ \t]*(=(?![=>])|(?:\+|-|\*\*|\*|\/|%|&&|\|\||\?\?|&|\||\^|<<|>>>|>>)=)/.exec(text.slice(first.end));
+  if (tail.length > 0 && cont) {
+    const rhs = readRun(first.end + cont[0].length);
+    if (rhs.run.length > 0) tail = `${tail} ${cont[1]} ${rhs.run}`;
+  }
+  // A trailing `;` with nothing after it (`onclick=@a = 0;`) needs no separator.
+  return tail.length > 0 ? `${head} ${tail}` : head.replace(/;$/, "");
+}

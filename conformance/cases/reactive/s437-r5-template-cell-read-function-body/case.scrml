@@ -1,0 +1,10 @@
+<r> = 7
+<o> = { n: 4 }
+<s> = ""
+${
+    function f() {
+        @s = `v=${@r} n=${@o.n} ${`in${@r}`}`
+    }
+}
+<button id="go" onclick=f()>go</button>
+<p id="out">${@s}</p>

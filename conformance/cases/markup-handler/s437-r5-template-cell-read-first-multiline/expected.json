@@ -1,0 +1,45 @@
+{
+  "id": "markup-handler-s437-r5-template-cell-read-first-multiline",
+  "description": "PINNED XFAIL on impl#1 (g-client-template-interpolation-lowering-needs-a-structural-emitter, carried): this case states the CORRECT behaviour. S437 round 5's client template lowering was reverted before landing because it silently miscompiled other templates; the structural fix is its own arc. S437 round 5 F2: Template statement FIRST in a multi-line handler. Round 3 routed multi-statement handlers through the function-body lowering, which left `${@cell}` inside a template verbatim (E-CODEGEN-INVALID-LOGIC); — the root this pins. All four positions.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/codegen/emit-expr.ts",
+  "rationale": "A `${@cell}` inside a template literal in logic context is a cell read (§6, §5.2.3 statement grammar = function body).",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-CODEGEN-INVALID-LOGIC"
+    ],
+    "input": [
+      {
+        "click": "#top"
+      },
+      {
+        "click": "#eng"
+      },
+      {
+        "click": "#mat"
+      },
+      {
+        "click": ".row"
+      }
+    ],
+    "state": {
+      "log": "T7,E7,M7,R7,"
+    },
+    "domAnchored": [
+      {
+        "selector": "#out",
+        "text": "T7,E7,M7,R7,"
+      }
+    ]
+  },
+  "xfail": {
+    "impl1-ts": {
+      "gap": "g-client-template-interpolation-lowering-needs-a-structural-emitter",
+      "fails": {
+        "runtime": "sha256:2c4d204a6cb1283b"
+      }
+    }
+  }
+}

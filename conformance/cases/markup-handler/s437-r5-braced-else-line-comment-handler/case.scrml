@@ -1,0 +1,5 @@
+<a> = true
+<r> = 0
+<button id="go" onclick={ if (@a) { @r = 1 } // note
+    else { @r = 2 } }>go</button>
+<p id="out">${@r}</p>

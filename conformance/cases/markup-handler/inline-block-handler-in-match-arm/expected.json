@@ -1,0 +1,23 @@
+{
+  "id": "markup-handler-inline-block-handler-in-match-arm",
+  "description": "§5.2.3 — inline block handlers inside a `<match>` arm run every statement in source order, call-led and assignment-led alike. Click #mc (`{ track(\"c\"); @count = 0 }`): last `c:5`, count 0. Then click #ma (`{ @count = 1; track(\"a\") }`): count 1, last `a:1`. A dropped statement or a reordering changes the final `1 a:1`.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/codegen/emit-event-wiring.ts",
+  "rationale": "§5.2.3: \"On each dispatch of the event, the statements of an inline block SHALL run in source order, each one exactly once … No statement of the block SHALL be dropped, whatever its kind or position\".",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MULTI-STATEMENT-HANDLER"],
+    "input": [
+      { "click": "#mc" },
+      { "click": "#ma" }
+    ],
+    "state": {
+      "count": 1,
+      "last": "a:1"
+    },
+    "domAnchored": [
+      { "selector": "#out", "text": "1 a:1" }
+    ]
+  }
+}

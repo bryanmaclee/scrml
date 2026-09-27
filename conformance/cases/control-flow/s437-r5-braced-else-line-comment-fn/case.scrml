@@ -1,0 +1,10 @@
+<a> = true
+<r> = 0
+${
+    function f() {
+        if (@a) { @r = 1 } // note
+        else { @r = 2 }
+    }
+}
+<button id="go" onclick=f()>go</button>
+<p id="out">${@r}</p>

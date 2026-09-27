@@ -410,7 +410,13 @@ describe("§B18.12 diagnostic message shape", () => {
     expect(msg).toContain("onclick");
     expect(msg).toContain("button");
     expect(msg).toContain("§5.2.3");
-    expect(msg).toContain("named function");
+    // S437 — the fix-it is §5.2.3's: braces first (built from the user's own
+    // statements), a named function second. The pre-S435 "lift to a named
+    // function" as the only fix is gone.
+    expect(msg).toContain("Wrap the statements in braces");
+    expect(msg).toContain("`onclick={ fn(); other() }`");
+    expect(msg).toContain("name a function");
+    expect(msg).not.toContain("lift the body");
   });
 
   test("engine state-child fire — message names tag and references §4.14", () => {

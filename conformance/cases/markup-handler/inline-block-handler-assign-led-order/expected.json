@@ -1,0 +1,22 @@
+{
+  "id": "markup-handler-inline-block-handler-assign-led-order",
+  "description": "§5.2.3 — the braced fix for the assignment-led sequence, `onclick={ @count = 0; track(\"reset\") }`, compiles clean and runs BOTH statements IN SOURCE ORDER: `track` reads `@count` after the assignment, so `last` records `reset:0` (it would be `reset:5` if the call ran first, and stay \"\" if the call were dropped).",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "source-test": "compiler/src/ast-builder.js",
+  "rationale": "§5.2.3: \"On each dispatch of the event, the statements of an inline block SHALL run in source order, each one exactly once … No statement of the block SHALL be dropped, whatever its kind or position — in particular, a statement's effect SHALL NOT depend on whether an earlier statement is a call or an assignment\". This is the fix E-MULTI-STATEMENT-HANDLER names for `onclick=@count = 0; track(\"reset\")` (see `multi-stmt-handler-assign-led-pos`).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-MULTI-STATEMENT-HANDLER"],
+    "input": [
+      { "click": "#reset" }
+    ],
+    "state": {
+      "count": 0,
+      "last": "reset:0"
+    },
+    "domAnchored": [
+      { "selector": "#out", "text": "0 reset:0" }
+    ]
+  }
+}

@@ -61,6 +61,11 @@ export interface EventBinding {
   /** Raw expression handler from ${...} attribute values (e.g. "() => fn(arg)"). */
   handlerExpr?: string;
   /**
+   * S437 — the handler value parsed as a §5.2.3 statement list, present only when
+   * it holds 2+ statements (`handlerExprNode` then covers only the first).
+   */
+  handlerBlock?: { stmts: any[] };
+  /**
    * Bug 58 (S140) — formFor synthesized submit binding.
    *
    * Set on the onsubmit `call-ref` binding synthesized by `<formFor>` to the
