@@ -39099,6 +39099,39 @@ text; the tension with §66.10 is recorded here. Bryan's confirmation of this re
 > **(d)** is `@country.open = …` written directly inside the narrowed block legal (flow narrowing of `@country`),
 > or must the write go through `c`.
 
+#### 66.7.6 Instances exist from program construction (L12)
+
+> **Amendment S437 — instance records are created at program construction (bootstrap slice M1, L12).**
+> **Provenance:** ruling:user-voice-scrml.md S437 — *"L6 a, L12 b, identities yes, replace respects sub-fields"*
+> (L12 = option (b) of the PA's M1 ruling message, whose full text the terse answer ratifies: *"Create instance
+> records when the program is constructed, before any user code runs, separately from mounting the DOM. An
+> always-mounted instance then really does always exist, and the type is true by construction. Conditional
+> instances stay `T | not`, as §66.7.5 already says. … effects touching the DOM must wait for mount."*).
+> Rejected: (a) type every top-level handle `T | not` outside its own view (a `given` for something that cannot
+> be absent); (c) a compiler proof of mount-before-use for every read.
+
+1. **Instance records are created when the program is CONSTRUCTED** — before any user code runs, and separately
+   from mounting the DOM. Creating an instance and mounting its markup are two distinct steps.
+2. **An unconditionally-mounted instance therefore always exists**, and an `as=` handle to it is typed **`T`**
+   (§66.8), not `T | not` — the type is true by construction.
+3. **A conditionally-mounted instance stays `T | not`** (§66.7.5, unchanged).
+4. **Effects that touch the DOM run at mount**, not at construction.
+
+**Observable guarantee.** A function that reads or writes an unconditionally-mounted instance through its handle
+sees the live instance — never `not` — even when it runs before the first render, or the read sits earlier in
+document order than the instance's use:
+
+```scrml
+function closeCountry() { @country.open = .Closed }   // `@country` is `dropdown` (not `dropdown | not`)
+                                                       // — valid even if called before the first render
+<main>
+    <dropdown as=country label="Country" options=(["US", "CA", "MX"]) value="US"/>   // always mounted
+</main>
+```
+
+(§66.6.4's lazy materialization of a declaration's unnamed shared instance — only if referenced — is not
+addressed by this ruling.)
+
 ### 66.8 Declarations are types; named shared instances
 
 > **Provenance:** ruling:user-voice-scrml.md S435 (§7 #16) · *"yes"*.
