@@ -3568,3 +3568,25 @@ least permission set used rather than a blanket one.
    append-only ledger is PROVABLE (`<audit:Entry[free, end]=[]>`: `@audit = []` and `reset(@audit)` are errors).
    Structs: a field write is an edit (fields writable along their lifecycle; none = fixed), a whole-struct write is
    a replace — one rule across sequences, tuples, structs. Local `let` rebinding is OUT of scope (stays E-ASSIGN).
+
+### ⚑ S435 (2026-09-26) — dpa-050 RULINGS in conversation (bryan). Authority: `scrml-support/user-voice-scrml.md` S435 (verbatim).
+- **Q6 = (a)**, under dpa-052 field contracts — `<engine>` becomes a `single` declaration whose fields carry transition
+  graphs; Move 20 / §51.0.K "do not collapse" REVERSED; E-COMPONENT-ENGINE-SCOPE survives as its invariant. The PA
+  re-framed the dPA's (d) lean after dpa-052 ruled (fields carry their own contracts; the state↔logic axiom).
+- **Encapsulation = E2** — reads public; writes file-private by default; `export` on a field = externally writable;
+  use-site attributes are construction; whole-value replace from outside is an error when any field is private.
+  OWED: measure cross-file engine-cell writes in the corpus before landing.
+- **§7 #1/#2 termination** — `/>` void, `</>` bodied; a declaration iff own value (`=` after name/type) or ≥1 typed
+  attribute; pure container `<x:struct>…</>`; `bind`/`class`/`style`/`internal`/`on` illegal field names.
+- **§7 #5–#8** — `*` = the existing one, resolved to the NEAREST ENCLOSING instance; a bare tag naming the enclosing
+  declaration's own field is a compile ERROR; the 57 render-by-tag uses migrate to `<*x/>` in the SAME arc.
+- **§7 #10** — components retire into declarations (§63 lifecycle). OWED: count the component files the codemod
+  cannot rewrite mechanically.
+- **§7 #4 + the writable-cell spelling** — `<let count:int=0/>` writable; `<count:int=0/>` locked (constant);
+  `const` retires; a locked cell with a reactive initializer is DERIVED; a `let` cell with one is SEEDED;
+  E-DERIVED-WRITE message names the trade-off. 121 `const <x>` lines / 73 files (approx.) ride the Q3 migration.
+- **§7 #18/#24/#25** — instances in `<each>` keyed by the row's `key=`; conditional `as=` handles are `T | not` and
+  writes must be narrowed; `as=` inside `<each>` is row-scoped.
+- **Superseded by the Q6=(a)/E2 rulings:** panel items #22 (private/exported MESSAGES → E2 private/exported FIELDS) and
+  #23 (message inference — no messages under (a)).
+- **Still OPEN:** §7 #3, #9, #12, #13, #14, #15, #16, #17 (partly — own-value inference ruled), #19, #21.
