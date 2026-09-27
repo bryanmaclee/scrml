@@ -39363,19 +39363,29 @@ so granting `replace` together with edit grants on the same type is redundant: t
 sequence is PROVABLE** — `@audit = []` and `reset(@audit)` on an end-append-only sequence are errors
 (§66.19.5).
 
-> **Amendment S437 — `replace` respects sub-field contracts (bootstrap slice M1).**
-> **Provenance:** ruling:user-voice-scrml.md S437 — *"L6 a, L12 b, identities yes, replace respects sub-fields"*
-> (answering the PA's M1 question, whose full text the terse answer ratifies: *"can a whole-struct replace bypass
-> its sub-fields' own contracts? §66.11.3 says `replace` subsumes edits, but whether a sub-field's transition graph
-> limits a replace isn't ruled. My lean is that it does. Otherwise `@order = { ...@order, status: .Shipped }` skips
-> the status graph entirely, a hole reachable just by spelling the write differently."*).
+> **Amendment S437 — a whole-struct write cannot bypass a sub-field's contract by spelling (bootstrap slice M1).**
+> **Provenance:** ruling:user-voice-scrml.md S437 — *"L6 a, L12 b, identities yes, replace respects sub-fields"*.
+> The PA question that answer ratifies: *"can a whole-struct replace bypass its sub-fields' own contracts? §66.11.3
+> says `replace` subsumes edits, but whether a sub-field's transition graph limits a replace isn't ruled."* The
+> PA's lean, in the same message: *"My lean is that it does. Otherwise `@order = { ...@order, status: .Shipped }`
+> skips the status graph entirely, a hole reachable just by spelling the write differently."*
 
-**`replace` subsumes the edits of its OWN field only.** The paragraph above is about the grants on ONE type. A
-whole-value `replace` of a struct whose SUB-FIELDS carry their own contracts — a transition graph (§66.13.2), a
-lifecycle (§66.11.6), sequence edit grants such as append-only (§66.12) — **SHALL satisfy each sub-field's
-contract**: every sub-field whose value the replace changes is judged exactly as the direct write of that
-sub-field's new value would be. The outer `replace` grant does not license bypassing a sub-field's contract; the
-permission is judged by the transition, never by the spelling (§66.11.2).
+**`replace` subsumes the edits of its OWN field only.** The paragraph above is about the grants on ONE type; it
+does not let a write to a struct skip the contract a SUB-FIELD carries. What the ruling covers is the spelling
+hole:
+
+1. **The spread-override shape is a FIELD EDIT.** `@x = { ...@x, f: v }` — a spread of the SAME value with named
+   overrides — is a recognized reassignment shape, in the sense of §66.11.2 (as `@x = [...@x, e]` is an
+   end-append). Each overridden field is an edit OF THAT FIELD and is judged by that field's own contract, exactly
+   as the direct write `@x.f = v` is:
+   - a sub-field carrying a transition graph (§66.13.2) → off its edges is `E-ENGINE-INVALID-TRANSITION`;
+   - a sub-field carrying a lifecycle (§66.11.6) or sequence edit grants (§66.12, e.g. append-only) → a transition
+     those do not grant is `E-WRITE-NOT-GRANTED`;
+   - a `let` sub-field → its own `replace` grant.
+
+   An overridden sub-field with NO contract (fixed) is ⚑ O57.
+2. **A GENUINE replace** — a value that is not the spread-override shape of the same value, `reset(@x)`, a server
+   reload — is NOT settled by the ruling. How the contracts its sub-fields carry bind it is ⚑ O58.
 
 ```scrml
 type Status:enum = { Placed, Packed, Shipped }
@@ -39385,37 +39395,47 @@ type Status:enum = { Placed, Packed, Shipped }
     <status:Status=.Placed>              // a child field carrying a transition graph (§66.13.2)
         <Placed rule=.Packed/>
         <Packed rule=.Shipped/>
+        <Shipped/>                       // terminal: no outgoing edge
     </>
 </>
 
 // with @order.status == .Placed:
 @order.status = .Shipped                 // off the graph → E-ENGINE-INVALID-TRANSITION
-@order = { ...@order, status: .Shipped } // the SAME check and the same error: the replace changes `status`, so
-                                         // it is judged against `status`'s graph exactly as the line above is
+@order = { ...@order, status: .Shipped } // the spread-override shape: an edit of `status` — the SAME check and
+                                         // the same error as the line above
 ```
 
-**Diagnostic.** No new code: a replace that breaks a sub-field's contract is reported with the code the direct
-sub-field write would get — `E-ENGINE-INVALID-TRANSITION` off a `rule=` graph, `E-WRITE-NOT-GRANTED` for a
-lifecycle path or a sequence edit grant (§66.20). A sub-field whose contract is `let` (`replace`) constrains
-nothing further.
+**Diagnostic.** No new code: the spread-override shape reports the code the direct sub-field write would get
+(§66.20).
 
-> ⚑ **OPEN (not ruled) — O57: FIXED (no-contract) sub-fields under a whole-struct `replace`.** The ruling's
-> user-voice restatement lists "fixed" among the sub-field contracts a replace must satisfy; the PA text bryan
-> answered asks only about "its sub-fields' own contracts", with a transition graph as the case. Read literally for
-> a no-contract field, "satisfy each sub-field's contract" would forbid ANY replace that changes a fixed field —
-> which makes O3's ruled `let` on a STRUCT as a whole (§66.9, "the `replace` grant on … a STRUCT as a whole";
-> §66.11.4 "a whole-struct write is a `replace`") unable to change any field that is not itself `let`, i.e. a dead
-> grant. Options: **(a)** a fixed sub-field bounds a replace too (struct-level `let` then changes only `let`
-> fields — O3's struct-level grant becomes redundant); **(b)** only sub-fields that carry a contract granting
-> specific transitions (graph, lifecycle, sequence edit grants) bound a replace; a fixed field is replaced along
-> with its struct. Not decided here; the normative text above names only the contract-carrying kinds.
+> ⚑ **OPEN (not ruled) — O57: does a contract-free (fixed / locked) sub-field bound a whole-struct write?** The
+> ruling's user-voice restatement lists "fixed" among the sub-field contracts; the PA text bryan answered asks only
+> about "its sub-fields' own contracts", with a transition graph as the case. If a fixed sub-field bounds a
+> replace, O3's ruled `let` on a STRUCT as a whole (§66.9; §66.11.4 "a whole-struct write is a `replace`") can
+> change no field that is not itself `let` — a **dead grant**. Options: **(a)** yes, a fixed sub-field bounds it
+> (and an overridden fixed field in the spread-override shape is `E-WRITE-NOT-GRANTED`); **(b)** no — only
+> sub-fields whose contract grants specific transitions (graph, lifecycle, sequence edit grants) bound it; a fixed
+> field is written along with its struct under the struct's `replace` grant. **PA lean: (b)** — (a) makes O3's
+> struct-level `let` a dead grant. (The user-voice restatement's "fixed" reads toward (a); the lean departs from
+> it, and bryan's confirm is needed.)
+
+> ⚑ **OPEN (not ruled) — O58: how sub-field contracts bind a GENUINE replace.** A value that is not the
+> spread-override shape (e.g. `@order = loadOrder()`), `reset(@x)`, or a server reload. bryan's S437 "yes" was
+> answered on the spread example alone; the consequences below were NOT presented to him. Options: **(a)** blanket
+> — judge every changed contract-carrying sub-field: a reload that changes an append-only or lifecycle sub-field
+> is an error; a graph sub-field is rejected at runtime even when the server legitimately moved it; `reset` fails
+> unless the graph has an edge back to the default; **(b)** a genuine replace is AUTHORITATIVE — `reset` = the
+> declared initial state, a reload = the server's state — and does not consult sub-field contracts (still bounded
+> by the struct's own `replace` grant and invariants); the spread-override shape stays a field edit;
+> **(c)** `reset` exempt, reload checked. **PA lean: (b).**
 
 #### 66.11.4 Structs — the same rule
 
 For a struct-typed value: **a field write is an edit** — a field is writable along its own contract (its
 lifecycle, its transition graph, or `let`); **a field with no contract is fixed**. **A whole-struct write is a
-`replace`** — and it SHALL still satisfy the contracts its sub-fields carry (§66.11.3, S437 amendment; fixed
-sub-fields: ⚑ O57). One rule across sequences, tuples and structs.
+`replace`** — except the spread-override shape `@x = { ...@x, f: v }`, which is an edit of each overridden
+field, judged by that field's own contract (§66.11.3, S437; fixed sub-fields ⚑ O57; a genuine replace ⚑ O58).
+One rule across sequences, tuples and structs.
 
 #### 66.11.5 Out of scope: local `let` rebinding
 
@@ -40170,7 +40190,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including such a transition performed on a sub-field by a whole-struct `replace` (§66.11.3, S437). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace: ⚑ O58). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
@@ -40184,7 +40204,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2) — including a whole-struct `replace` that moves such a sub-field off its edges (§66.11.3, S437). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2) — including a graph transition on a SUB-FIELD written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace: ⚑ O58). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 
 **Legacy-form codes** — the W-lint + reserved-E pairs of §66.21 (`W-DECL-LEGACY-RHS`, `W-CONST-CELL-DEPRECATED`,
