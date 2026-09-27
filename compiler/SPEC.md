@@ -38633,7 +38633,8 @@ The §34 catalog rows for every `E-STYLE-*`/`W-STYLE-*`/`E-THEME-*`/`E-DEFAULTS-
 > this one supersedes — remains what adopters get; §66 is what the language IS.
 >
 > **Authority.** bryan's verbatim rulings in `scrml-support/user-voice-scrml.md`: the S430 block (from *"P1
-> ruled"* through *"dpa-052 reframed by bryan"*) and every S435 block; the queue bodies `[dpa-050]` /
+> ruled"* through *"dpa-052 reframed by bryan"*), every S435 block, and the S437 bootstrap-slice-M1 block
+> (*"L6 a, L12 b, identities yes, replace respects sub-fields"*); the queue bodies `[dpa-050]` /
 > `[dpa-052]` in `handOffs/dpa-queue.md`. The dPA deep-dive
 > `scrml-support/docs/deep-dives/declaration-syntax-instances-and-self-write-dpa-050-2026-09-24.md` is
 > **advisory only**: where a ruling differs from its lean (notably **Q6 was ruled option (a)**, not the DD's
@@ -38687,6 +38688,16 @@ contracts**, and the engine is re-expressed as a `single` declaration whose fiel
 | 66.21 | Legacy forms and migration (§63) | — |
 | 66.22 | OPEN items (consolidated) | — |
 | 66.23 | Cross-references | — |
+
+**S437 amendments (bootstrap slice M1 rulings — *"L6 a, L12 b, identities yes, replace respects sub-fields"*).**
+Each is marked in place with an `Amendment S437` banner; none supersedes text outside §66.
+
+| Where | Ruling | Effect on the OPEN list |
+|---|---|---|
+| §66.9 rule 8 (xrefs §66.6.1, §66.14 rule 4) | L6 = (a): a use-site attribute is that field's initializer for that instance; rules 3–4 apply per instance (locked + live expression = derived; `let` = seeded once) | O21 answered |
+| §66.7.6 | L12 = (b): instance records exist from program construction, before user code, separate from DOM mount; an unconditionally-mounted instance's `as=` handle is `T` | — |
+| §66.10 item 6 | Identities are not values: instances and `as=` handles bind live; values snapshot | O56 = NARROW unchanged |
+| §66.11.3 (xrefs §66.11.4, §66.20) | A whole-struct `replace` SHALL satisfy its sub-fields' contracts | O57 opened (fixed sub-fields) |
 
 **Notation.** Every example in §66 uses the ruled spelling: `let` is a PREFIX (`<let count:int=0/>`); the own
 value `=` sits inside the opener; a void declaration closes `/>`, a bodied one `</>`; a non-trivial opener
@@ -40253,7 +40264,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 
 Closed by the PA proposal text bryan answered (the terse-answer rule, §66 preamble): O6 (`single` is a trailing
 modifier — Q6 "a"), O40 (the `given` binding writes the instance — lists "yes"; its scope is O56), O53 (`let` / `export let` on attributes; `export <child>` —
-Q6 "a", "E2, move on", "yes, :struct,").
+Q6 "a", "E2, move on", "yes, :struct,"). Answered S437: O21 (by L6 — §66.9 rule 8).
 
 ### 66.23 Cross-references
 
