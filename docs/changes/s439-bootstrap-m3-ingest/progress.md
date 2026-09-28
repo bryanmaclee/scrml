@@ -32,3 +32,11 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
 - PARSE_REENTRY sites in the shim: 0 (params carried structured `{name,typeAnnotation}`; the shim never reads
   `init`/`raw`/`args`/`expr` text fields).
 - 2026-09-27T19:42:04-06:00 NOTE: commit a2453f5e5 carries the wrong message (it duplicates f19c4b19f's): it is the client-executor seam + footprint grader + slice-m3 tests commit. Next: primitive-typed cells `<x>: T = v` (§66.21 row 1) + post-NR-synthesized element label.
+- 2026-09-27 FINAL grade (tip 862102be3): 1047 of 1047 · GRADED 29 (17 runtime · 12 codes-only) · pass 27 (16 runtime)
+  · fail 2 · NOT-YET 547 · FRONT-END 471 · exit 1 → footprint-2026-09-27.md.
+- Corruption proof: print.scrml `.Dyn` hole → constant "CORRUPT": runtime-half passes 16 → 2 (the two have no Dyn). Restored.
+- Default pipeline unchanged: `bun conformance/run.ts` with the BASE impl1-ts.ts (8c55f5181, copied to a throwaway
+  sibling dir, removed) vs the new one: both exit 0, 1040/1047 pass, 7 xfail; the 1047 per-case PASS/FAIL/XFAIL lines
+  are identical (diff exit 0); the only text differences are stack-trace line numbers inside impl1-ts.ts.
+- Suites: slice-m1 73/0 · slice-m2 74/0 · SLICE_CORE=lowered slice-m1 73/0 · slice-m3 18/0 · v2 lexer 337/0 ·
+  hybrid-stage-swap + hybrid-xfail 26/0 · lint 28 files 0 violations · pre-commit (862102be3) 31981 pass / 0 fail.
