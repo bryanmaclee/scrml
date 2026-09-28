@@ -254,11 +254,13 @@ describe("negative controls", () => {
   }
   // CLIENT only: on the server a nested fn named like a peer server fn trips the
   // pre-existing E-CG-016 bundle-name collision (unchanged by s440).
-  test("client: a SYNC nested helper SHADOWING the server fn's name is the local — not lifted, not rejected", () => {
+  // Fix round (F1): a call resolving to a SYNC nested fn is never DEMOTED below the
+  // treatment its name gets — a wrong shadow decision was the fail-open direction.
+  // A same-named sync local therefore keeps the async outer name's treatment
+  // (awaited / lifted: harmless on a sync value), and compiles clean.
+  test("client: a SYNC nested helper SHADOWING the server fn's name compiles clean (never demoted)", () => {
     const o = clientApp("function isOk(x) { return x > 1 }\n  const r = [1, 2, 3].some(x => isOk(x))");
     expect(o.codes).toEqual([]);
-    expect(o.clientJs).not.toContain("_scrml_someAsync");
-    expect(o.clientJs).not.toMatch(/const r = await/);
   });
 });
 
@@ -305,6 +307,85 @@ function go() { const q = check("a", ["x"]); console.log(q) }
       expect(o.codes).toContain(STDLIB_CODE);
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// (7b) FIX ROUND — block scope + fail-closed shadowing (F1, F3) and server
+//      block-body callbacks / templates (F2).
+// ---------------------------------------------------------------------------
+describe("fix round — F1: a block-scoped declaration never shadows the async name OUTSIDE its block", () => {
+  const src = (core) => `<program>
+\${
+  import { verifyPassword } from 'scrml:auth'
+}
+server function login(pw, hash) {
+  if (false) { function verifyPassword(a, b) { return false } }
+  ${core}
+}
+function go() { const q = login("x", "y"); console.log(q) }
+<button onclick=go()>go</button>
+</program>
+`;
+  test("server: `if (verifyPassword(pw, hash))` after the block is AWAITED (the first draft left it bare)", () => {
+    const o = compileFile(src(`if (verifyPassword(pw, hash)) { return "accepted" }\n  return "rejected"`));
+    expect(o.codes).toEqual([]);
+    expect(o.serverJs).toContain("if (await verifyPassword(pw, hash))");
+    expect(o.serverJs).not.toMatch(/if \(verifyPassword\(pw, hash\)\)/);
+  });
+  test("server: `.some(p => verifyPassword(p, hash))` after the block is lifted + awaited", () => {
+    const o = compileFile(src(`return ["x", pw].some(p => verifyPassword(p, hash)) ? "accepted" : "rejected"`));
+    expect(o.codes).toEqual([]);
+    expect(o.serverJs).toContain("await verifyPassword(p, hash)");
+  });
+  test("server: a helper `m` calling the real verifyPassword is async — its `.sort` use fails closed", () => {
+    const o = compileFile(src(`function m(p) { return verifyPassword(p, hash) }\n  return [pw].sort((a, b) => m(a) ? -1 : 1)`));
+    expect(o.codes).toContain(STDLIB_CODE);
+  });
+});
+
+describe("fix round — F3: a sibling-block `let` does not hide a nested async helper", () => {
+  for (const [side, compile, jsOf] of SIDES) {
+    test(`${side}: \`if (true) { let inner = 5 }\` + inner(x) in .some → lifted, not bare`, () => {
+      const o = compile(`${NESTED}\n  if (true) { let inner = 5 }\n  const r = [1, 2, 3].some(x => inner(x))`);
+      expect(o.codes).toEqual([]);
+      expect(jsOf(o)).toContain("await _scrml_someAsync([1, 2, 3], async (x) => await inner(x))");
+    });
+    test(`${side}: ... and in .sort → fails closed`, () => {
+      const o = compile(`${NESTED}\n  if (true) { let inner = 5 }\n  const r = [3, 1, 2].sort((a, c) => inner(a) ? -1 : 1)`);
+      expect(o.codes).toContain(SERVER_CODE);
+    });
+  }
+});
+
+describe("fix round — F2: SERVER block-body callbacks and template interpolations fail closed", () => {
+  const cases = [
+    ["block-body .some", `${NESTED}\n  const r = [1, 2, 3].some(x => { return inner(x) })`],
+    ["block-body .forEach with if", `${NESTED}\n  let r = false;\n  [1, 2, 3].forEach(x => { if (inner(x)) { r = true } })`],
+    ["block-body .some with if", `${NESTED}\n  const r = [1, 2, 3].some(x => { if (inner(x)) { return true } return false })`],
+    ["template interpolation", `${NESTED}\n  const s = \`\${inner(1)}\`\n  const r = s == "false" ? false : true`],
+  ];
+  for (const [label, body] of cases) {
+    test(`server: ${label}`, () => {
+      const o = serverApp(body);
+      expect(o.codes).toContain(SERVER_CODE);
+    });
+  }
+  test("server: stdlib-rooted helper in a block-body .some → the STDLIB code", () => {
+    const o = compileFile(`<program>
+\${
+  import { verifyPassword } from 'scrml:auth'
+}
+server function check(pw, hashes) {
+  function m(h) { return verifyPassword(pw, h) }
+  const r = hashes.some(h => { return m(h) })
+  return r ? "accepted" : "rejected"
+}
+function go() { const q = check("x", ["a"]); console.log(q) }
+<button onclick=go()>go</button>
+</program>
+`);
+    expect(o.codes).toContain(STDLIB_CODE);
+  });
 });
 
 // ---------------------------------------------------------------------------

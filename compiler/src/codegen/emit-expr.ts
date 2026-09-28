@@ -3665,21 +3665,18 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
   //     / `?{}` → E-ASYNC-STDLIB-IN-SYNC-CALLBACK). Before s440 this emitted
   //     `xs.some(x => inner(x))` bare with no diagnostic: a Promise per element,
   //     always truthy — `.some` true for EVERY input.
-  //   - SYNC, but its name shadows an async outer name → a plain call (the local
-  //     wins; the outer name's branches below would await — or, in a sync
-  //     callback, fail closed on — a call that is not async at all).
+  // A call resolving to a SYNC nested function carries NO mark (fix round, F1) and
+  // falls through to the name-based branches below: if its name is also an async
+  // outer name it is awaited / failed closed as that name would be. Never demoted
+  // to a plain call — a wrong shadow decision there shipped an unawaited
+  // `verifyPassword` (every password accepted) in the first draft.
   const _localCallee = localCalleeOf(node);
-  if (_localCallee) {
-    if (_localCallee.async) {
-      if (ctx.peerAwaitable === false) {
-        recordAsyncSyncCallSite(_localCallee.name, _localCallee.root, node.span, ctx);
-        return `${callee}(${args})`;
-      }
-      return `await ${callee}(${args})`;
-    }
-    if (node.callee.kind === "ident" && combinatorIsAsyncName((node.callee as IdentExpr).name, ctx)) {
+  if (_localCallee && _localCallee.async) {
+    if (ctx.peerAwaitable === false) {
+      recordAsyncSyncCallSite(_localCallee.name, _localCallee.root, node.span, ctx);
       return `${callee}(${args})`;
     }
+    return `await ${callee}(${args})`;
   }
 
   // §20.5 (S265, i29e) — `session` server-builtin method calls. Inside a

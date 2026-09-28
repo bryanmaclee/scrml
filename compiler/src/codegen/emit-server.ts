@@ -4014,6 +4014,19 @@ export function generateServerJs(
         // accept-all auth bypass), so FAIL CLOSED here too.
         const _asyncHit = _callees.find((c) => _isAsyncStdlibName(c));
         if (_asyncHit) _diagAsyncStdlibSyncCb(_asyncHit, n.span);
+        // s440 fix round (F2) — a NESTED async helper called from a block-body
+        // callback (`hashes.some(h => { return m(h) })`): the raw text is emitted
+        // verbatim, so the call is bare exactly like the peer / stdlib hits above.
+        // Raw text cannot be resolved lexically, so match by name (fail closed).
+        _diagNestedAsyncRaw(_callees, n.span);
+      }
+      // s440 fix round (F2) — a template literal's `${…}` interpolation is re-parsed
+      // from raw text at emit time (emitServerTemplateLit), which awaits PEER calls
+      // but has no nested-helper resolution: `${inner(1)}` rendered
+      // `[object Promise]`. Fail closed.
+      if (n.kind === "lit" && n.litType === "template" && typeof n.raw === "string"
+          && n.raw.includes("${")) {
+        _diagNestedAsyncRaw(extractCalleeNames(n.raw), n.span);
       }
 
       // ss19 #12 (g-sql-in-arrow-body-invalid-js) — DIAGNOSTIC. A `?{}` SQL
@@ -4077,8 +4090,17 @@ export function generateServerJs(
       }
     };
     // s440 — the nested async helpers of every server fn, by name (for the raw-text
-    // param-default scan above, which has no structure to resolve lexically).
+    // scans above — block-body callbacks, template interpolations, param defaults —
+    // which have no structure to resolve lexically).
     const _nestedAsyncByName = new Map<string, AsyncRoot>();
+    function _diagNestedAsyncRaw(callees: Iterable<string>, span: any): void {
+      for (const c of callees) {
+        const _local = _nestedAsyncByName.get(c);
+        if (!_local) continue;
+        if (_local.kind === "stdlib") _diagAsyncStdlibSyncCb(c, span, _local.via);
+        else _diagSyncCb(c, span, _local.via);
+      }
+    }
     {
       const _seenN = new WeakSet<object>();
       const _gather = (n: any): void => {

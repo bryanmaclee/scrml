@@ -119,9 +119,14 @@ export function localAsyncDeclRoot(node: unknown): AsyncRoot | null {
 
 interface Scope {
   parent: Scope | null;
-  /** Nested `function` declarations bound in this scope (hoisted). */
+  /** Nested `function` declarations bound in this scope (hoisted within it). */
   fns: Map<string, ASTNode>;
-  /** Every other binding: params, `let`/`const`/`lin`/tilde decls. */
+  /**
+   * Every other binding this scope CERTAINLY makes: params, and `let`/`const`/`lin`/
+   * tilde decls that are direct statements of the block. Only certain bindings may
+   * shadow a function — a shadow decision is the fail-OPEN direction (it can demote
+   * an async call to a bare one), so an uncertain one is never taken (fix round, F3).
+   */
   others: Set<string>;
 }
 
@@ -146,39 +151,36 @@ function calleeName(call: ASTNode): string | null {
   return null;
 }
 
-/**
- * Register every binding a scope-owning node (`function-decl` or `lambda`) makes in
- * its own scope: its params, and — walking its body without crossing into a nested
- * function or lambda — every nested `function` declaration and every other decl.
- */
+/** A function / lambda owner's own scope: its parameters. */
 function populateScope(owner: ASTNode, scope: Scope): void {
   for (const p of (Array.isArray(owner.params) ? owner.params : [])) {
     const nm = paramIdent(p);
     if (nm) scope.others.add(nm);
   }
-  const seen = new WeakSet<object>();
-  const visit = (node: unknown): void => {
-    if (!node || typeof node !== "object") return;
-    if (seen.has(node as object)) return;
-    seen.add(node as object);
-    if (Array.isArray(node)) { for (const c of node) visit(c); return; }
-    const n = node as ASTNode;
+}
+
+/**
+ * s440 fix round (F1/F3) — a statement ARRAY is a BLOCK scope. A `function`
+ * declaration inside `if (…) { … }` is visible only inside that block (strict-mode
+ * / module semantics — what the compiler emits), and a `let`/`const` in a sibling
+ * block shadows nothing outside it. The first draft registered every nested
+ * declaration at FUNCTION scope, so `if (false) { function verifyPassword(){…} }`
+ * made the REAL `verifyPassword(pw, h)` after it look like a sync local (emitted
+ * unawaited — every password accepted), and a sibling-block `let inner = 5` made a
+ * nested async `inner` look like a plain binding. Registering each block's DIRECT
+ * statements (hoisted within the block) gives both their real extent.
+ */
+function populateBlock(arr: unknown[], scope: Scope): void {
+  for (const c of arr) {
+    if (!c || typeof c !== "object" || Array.isArray(c)) continue;
+    const n = c as ASTNode;
     if (isFnDecl(n)) {
       if (typeof n.name === "string" && n.name) scope.fns.set(n.name, n);
-      return; // its body is its own scope
-    }
-    if (n.kind === "lambda") return; // its own scope
-    if (typeof n.kind === "string" && DECL_KINDS.has(n.kind) && typeof n.name === "string") {
+    } else if (typeof n.kind === "string" && DECL_KINDS.has(n.kind) && typeof n.name === "string") {
       const nm = paramIdent(n.name);
       if (nm) scope.others.add(nm);
     }
-    for (const key of Object.keys(n)) {
-      if (key === "span" || MARK_KEYS.has(key)) continue;
-      const v = n[key];
-      if (v && typeof v === "object") visit(v);
-    }
-  };
-  visit(owner.body);
+  }
 }
 
 type Resolved = { fn: ASTNode } | { binding: true } | null;
@@ -186,12 +188,11 @@ type Resolved = { fn: ASTNode } | { binding: true } | null;
 /** Resolve `name` from `scope` outward. `null` → not bound anywhere in this function. */
 function resolve(name: string, scope: Scope | null): Resolved {
   for (let s = scope; s; s = s.parent) {
-    // A `function` declaration and a same-named `let` in one scope is a JS
-    // redeclaration error; prefer the non-function binding (the conservative read:
-    // it is not promoted to async).
-    if (s.others.has(name)) return { binding: true };
+    // A `function` and a same-named `let` in ONE scope is a JS redeclaration error;
+    // prefer the function (the fail-closed read: it may be async).
     const f = s.fns.get(name);
     if (f) return { fn: f };
+    if (s.others.has(name)) return { binding: true };
   }
   return null;
 }
@@ -199,13 +200,13 @@ function resolve(name: string, scope: Scope | null): Resolved {
 /**
  * Walk every node under `root` with its lexical scope, calling `onCall` for each
  * call and `onIdent` for each ident. `root` is a scope-owning node whose scope is
- * `rootScope`. Nested `function-decl` / `lambda` nodes open child scopes (cached in
- * `scopes` so the fixpoint and the marking pass share them).
+ * `rootScope`. Nested `function-decl` / `lambda` nodes and statement arrays open
+ * child scopes (cached in `scopes` so the fixpoint and the marking pass share them).
  */
 function walkWithScopes(
   root: ASTNode,
   rootScope: Scope,
-  scopes: Map<ASTNode, Scope>,
+  scopes: Map<object, Scope>,
   onCall: (call: ASTNode, scope: Scope) => void,
   onIdent: (ident: ASTNode, scope: Scope) => void,
   stopAtNestedFns: boolean,
@@ -220,11 +221,24 @@ function walkWithScopes(
     }
     return s;
   };
+  const blockFor = (arr: unknown[], parent: Scope): Scope => {
+    let s = scopes.get(arr);
+    if (!s) {
+      s = { parent, fns: new Map(), others: new Set() };
+      populateBlock(arr, s);
+      scopes.set(arr, s);
+    }
+    return s;
+  };
   const visit = (node: unknown, scope: Scope): void => {
     if (!node || typeof node !== "object") return;
     if (seen.has(node as object)) return;
     seen.add(node as object);
-    if (Array.isArray(node)) { for (const c of node) visit(c, scope); return; }
+    if (Array.isArray(node)) {
+      const block = blockFor(node, scope);
+      for (const c of node) visit(c, block);
+      return;
+    }
     const n = node as ASTNode;
     if (isFnDecl(n)) {
       if (stopAtNestedFns) return;
@@ -283,7 +297,7 @@ export interface LocalAsyncAnnotateOpts {
 export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateOpts): number {
   if (!fnNode || typeof fnNode !== "object") return 0;
   const fn = fnNode as ASTNode;
-  const scopes = new Map<ASTNode, Scope>();
+  const scopes = new Map<object, Scope>();
   const rootScope: Scope = { parent: null, fns: new Map(), others: new Set() };
   populateScope(fn, rootScope);
   scopes.set(fn, rootScope);
@@ -291,10 +305,20 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
   // Pass 1 — build every scope and collect every nested function declaration.
   const nestedFns: ASTNode[] = [];
   walkWithScopes(fn, rootScope, scopes, () => {}, () => {}, false);
-  for (const [owner] of scopes) if (owner !== fn && isFnDecl(owner)) nestedFns.push(owner);
+  for (const [owner] of scopes) {
+    if (owner !== fn && !Array.isArray(owner) && isFnDecl(owner as ASTNode)) nestedFns.push(owner as ASTNode);
+  }
   if (nestedFns.length === 0) {
     clearMarks(fn);
     return 0;
+  }
+  // Every nested declaration by name, wherever it sits — for the AMBIGUOUS case.
+  const declsByName = new Map<string, ASTNode[]>();
+  for (const d of nestedFns) {
+    const nm = String(d.name);
+    const list = declsByName.get(nm) ?? [];
+    list.push(d);
+    declsByName.set(nm, list);
   }
 
   // Pass 2 — per nested fn, the async TRIGGERS in its OWN body (not crossing into a
@@ -309,10 +333,17 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
     const dScope = scopes.get(d)!;
     const consider = (name: string, scope: Scope): void => {
       const r = resolve(name, scope);
-      if (r && "fn" in r) { list.push({ fn: r.fn }); return; }
-      if (r) return; // a non-function local: not an async trigger
+      if (r && !("fn" in r)) return; // a certain non-function local: not an async trigger
+      // A SYNC nested fn that shares an async outer name carries no call-site mark,
+      // so the call keeps the outer name's (awaiting) treatment — which makes THIS
+      // body await. Count the outer root either way (fail closed).
       const root = opts.outerAsync(name);
       if (root) list.push({ root });
+      if (r) { list.push({ fn: r.fn }); return; }
+      // Unresolved, but a same-named declaration sits in a NON-enclosing block:
+      // under sloppy-mode (Annex B) hoisting it could be the one called. Ambiguous
+      // → count it (fail closed).
+      for (const other of declsByName.get(name) ?? []) list.push({ fn: other });
     };
     walkWithScopes(
       d, dScope, scopes,
@@ -353,11 +384,24 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
     }
   }
 
-  // Pass 4 — mark. Every call / ident resolving to a nested fn is (re)marked; every
-  // other one has any stale mark from a previous emission removed.
-  const resolutionOf = (d: ASTNode): LocalFnResolution => {
-    const r = asyncRoot.get(d) ?? null;
-    return { name: String(d.name), async: r != null, root: r };
+  // Pass 4 — mark. ONLY an ASYNC resolution is recorded (fix round, F1): a call that
+  // resolves to a SYNC nested function carries no mark and keeps the name-based
+  // treatment every other call gets. A mark can therefore only ever ADD an await or
+  // a rejection — it can never demote an async outer name to a bare call, whatever
+  // the resolver gets wrong. An unresolved name with an async same-named declaration
+  // in a non-enclosing block (the Annex B ambiguity) is marked async too.
+  const asyncResolution = (name: string, scope: Scope): LocalFnResolution | null => {
+    const r = resolve(name, scope);
+    if (r && "fn" in r) {
+      const root = asyncRoot.get(r.fn);
+      return root ? { name, async: true, root } : null;
+    }
+    if (r) return null;
+    for (const other of declsByName.get(name) ?? []) {
+      const root = asyncRoot.get(other);
+      if (root) return { name, async: true, root };
+    }
+    return null;
   };
   for (const d of nestedFns) {
     const r = asyncRoot.get(d);
@@ -368,13 +412,13 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
     fn, rootScope, scopes,
     (call, scope) => {
       const nm = calleeName(call);
-      const r = nm ? resolve(nm, scope) : null;
-      if (r && "fn" in r) call[LOCAL_CALLEE_MARK] = resolutionOf(r.fn);
+      const res = nm ? asyncResolution(nm, scope) : null;
+      if (res) call[LOCAL_CALLEE_MARK] = res;
       else delete call[LOCAL_CALLEE_MARK];
     },
     (ident, scope) => {
-      const r = typeof ident.name === "string" ? resolve(ident.name, scope) : null;
-      if (r && "fn" in r) ident[LOCAL_REF_MARK] = resolutionOf(r.fn);
+      const res = typeof ident.name === "string" ? asyncResolution(ident.name, scope) : null;
+      if (res) ident[LOCAL_REF_MARK] = res;
       else delete ident[LOCAL_REF_MARK];
     },
     false,

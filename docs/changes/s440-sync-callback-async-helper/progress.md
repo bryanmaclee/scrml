@@ -45,3 +45,23 @@ the helper is async at its definition and sync at its call sites.
 - 3 conformance cases (1 runtime `serverStub`, 2 codes) — 0/3 on base (runtime shows "accepted",
   the accept-all), 3/3 on head.
 - types-gate diff vs base: identical.
+
+## 7. Fix round (security review of eb964a2c6: F1 INTRODUCED, F2/F3 in scope)
+- Merged origin/main (048df04db) into the branch first.
+- F1 (introduced): block-level `function` decls were registered at FUNCTION scope and a
+  SYNC-local resolution demoted the call to a plain call → `if (verifyPassword(pw, hash))`
+  after `if (false) { function verifyPassword(){…} }` emitted unawaited. Fix: statement
+  arrays are BLOCK scopes (local-async-fns.ts populateBlock); marks are recorded ONLY for
+  ASYNC resolutions (a sync-local resolution never demotes — the demotion branch in
+  emitCall is removed); an unresolved name with an async same-named decl in a
+  non-enclosing block is marked async (Annex-B ambiguity → fail closed); a nested fn
+  calling a sync-local that shares an async outer name counts the outer root.
+- F3: a `let` only shadows when it is a CERTAIN binding of an enclosing scope (direct
+  block statement / param); fn-vs-let in one scope prefers the fn.
+- F2: emit-server's AST walk now checks block-body callback raw text and template
+  `${…}` raw text against the nested-async names (fail closed, code by root).
+- Verified: tool-mode real hashing (verifyPassword/hashPassword) — all F1/F2/F3 shapes
+  reject; `right`-password controls accept. 12 new unit tests (62 total) red on eb964a2c6;
+  3 new conformance cases red on eb964a2c6 (runtime case "accepted").
+- Corpus (2100 files, origin/main vs head, codes + emitted-JS hash): 0 diffs outside the
+  six s440 conformance cases themselves.
