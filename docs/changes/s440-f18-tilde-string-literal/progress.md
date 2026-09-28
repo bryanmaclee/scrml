@@ -13,3 +13,10 @@
 - Pre-existing, filed: `~` keyword inside a template interpolation emits `${__scrml_tilde__}` (before and after).
 - Corpus emit-differential base vs fix: NO DIFFERENCES over 2072 sources / 7976 artifacts.
 - Gate: 25718 pass / 70 skip / 11 todo / 0 fail. conformance 1041/1048 + 7 xfail.
+- 2026-09-28 FIX ROUND (S239 review F1/F2): merged origin/main 7e4bc8155 (merge e81bf924d; FACTS conflict
+  resolved to theirs + regen). Reproduced F1 (`"8" / 2 + Color::Green` -> `+ Color`, template / i++ / i-- same).
+  Root fix in rewriteCodeSegments: significant-prefix `ctx` (literal -> `0`, comment -> space), mirrored in the
+  template-interpolation brace scanner; regexAllowedAfter: `++`/`--` -> division. F2 closed by the same change.
+  New test file 25 tests (17 red on prior tip). Gate 25743/70/11/0; conformance 1041/1048 + 7 xfail. Corpus
+  differential origin/main vs tip (same dir, swapped sources): NO DIFFERENCES. Filed
+  g-codegen-enum-colon-rewrite-unfenced (pre-existing `/::A/` -> `/"A"/` in rewrite.ts).
