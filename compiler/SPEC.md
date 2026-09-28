@@ -3961,6 +3961,13 @@ navigation (a route region).
   the first**, and its registered `cleanup()` SHALL run on the matching **route-leave**. §6.7.1a's unity
   is preserved without exception: `on mount`, bare lifecycle expressions and `<request>` remain one
   mechanism, differing only in which owner the compiler binds them to. *(Amended S313 — ratified Pole C.)*
+- **A `${…}` block containing `lift` inside an `if=` scope (S439 ruling #12).** Its DECLARATIONS run ONCE,
+  at file init — they are file-scope declarations (§7.6), not per-mount state. Its `lift` statements run
+  on every mount of the `if=` scope, including each remount. The association and remount rules above
+  govern the block's `lift` statements; they do not re-run its declarations. (This is the behaviour that
+  shipped as #1021.)
+  > **Provenance:** ruling:user-voice-scrml.md S439 #12 "all recs" (Rec: A — "Declarations run at file
+  > init (§7.6 file scope) and lift statements run per mount").
 - When a scope destroys, all associated lifecycle resources are torn down in the following
   canonical order:
   1. All `when` effects registered in that scope are unregistered (no further executions
@@ -6564,6 +6571,7 @@ ${ let loud = greeting.toUpperCase() }
 - Reactive variables (`@var`) declared at file level (outside any `${}`) are in scope for all `${}` blocks and markup throughout the file (§6.1).
 - Variables declared inside a function body within a `${}` block are scoped to that function. Only top-level declarations within the `${}` block participate in file scope.
 - Re-declaring a name with `let` in a later file-level `${}` block when that name was already declared at file scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope).
+- A declaration in a `${…lift…}` block nested inside an `if=` element is a file-scope declaration: it runs ONCE, at file init — not once per mount of the `if=` scope. The block's `lift` statements run per mount (§6.7.2.1). **Provenance:** ruling:user-voice-scrml.md S439 #12 "all recs".
 
 #### 7.6.1 File-level scope under V5-strict + hoisting + `pinned` (Stage 0b D4 — M11)
 
