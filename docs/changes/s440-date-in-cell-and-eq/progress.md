@@ -119,3 +119,12 @@ value and == REFLEXIVE (SameValueZero). Now:
 Sizes (gzip-9): counter 16,334 B (50 B headroom under 16,384; base 16,232); shell 26,206 B
 (62 B under the 26,268 ceiling; base 26,035 — the growth is _scrml_deep_set_copy, which ships
 in the shell's utilities chunk).
+
+## 12. Fix-round verification (at e1689d76a) — FINAL sizes supersede §11's
+- The full gate first tripped `v0-3-x-spa-tree-shake-phase-b.test.js` §1: the same counter, but gzipped
+  at the zlib DEFAULT level (16,387 vs 16,384). Shortened the F2 comment to one line. FINAL:
+  counter gzip-9 16,324 (60 B under the aspiration) / gzip-default 16,375 (**9 B** under the Phase-B
+  gate; base was ~100 B under); shell gzip-9 26,206 (62 B under the 26,268 ratchet ceiling).
+- Gate unit+integration+conformance: 25,880 pass / 0 fail / 70 skip / 12 todo (1,370 files).
+- `bun conformance/run.ts`: 1041/1048 + 7 xfail.
+- Browser: identical 48-failure set to base 2126dec1d (timings stripped).
