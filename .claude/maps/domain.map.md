@@ -1,6 +1,68 @@
 # domain.map.md
 # project: scrml
-# updated: 2026-09-27T18:00:00Z  commit: 9941a504c
+# updated: 2026-09-28T04:40:15Z  commit: fb21983a
+# ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
+# `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
+# merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
+# `origin/main` at fetch (no fork this pass). Of the 9 commits, **3 are the PRIOR session's own maps/wrap
+# commits** (`c65f54b4` #1111 maps-refresh-to-9941a504c, `88a75073` #1110 wrap, and the inbox commit `0fc87bf9`
+# #1115 is bookkeeping only) — **6 are source-relevant**: `072741ca` #1109, `98d94e96` #1112, `b7c86323` #1113,
+# `8c55f518` #1114, `afc2308b` #1116, `fb21983a` #1119.
+# ⛑ **FIGURES RE-EXECUTED AT `fb21983a`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat — `package.json` untouched this window) · `compiler/src` **266,944 lines / 211 files**
+# per FACTS (+939 lines, files FLAT vs `9941a504c`'s 266,005/211) · test files **1,509** (+3:
+# `conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js`, `clientjs-import-disk-rebase-gate-eq-write.test.js`,
+# `match-arm-shapes-f12-f14.test.js`, all under `compiler/tests/` — `compiler/self-host-v2/slice-m2` gained 4
+# more `*.test.js` OUTSIDE this count, per FACTS' own stated scope exclusion) · `compiler/SPEC.md` **40,399**
+# lines (+51) · conformance **1047** cases (FLAT) · §34 catalog **835** rows (+3), range `20331..21237`.
+# `bun conformance/run.ts` (impl#1) -> **1040/1047 pass + 7 xfail** — FLAT vs `9941a504c`.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **943 -> 948** · W 183 FLAT · I 10 FLAT · H 2
+# FLAT · unique codes **800 -> 803**. **ADDED = {`E-MATCH-ALT-BINDING`, `E-SCHEMA-012`, `E-SCHEMA-013`}; REMOVED
+# = EMPTY.**
+# ⛑ **WINDOW HEADLINES (verify in source, not here):**
+#   · **#1119** (`g-impl1-match-miscompiles` F12/F13/F14) — a `match` alternation arm (`.A | .B :> r`) is now
+#     recognised at ANY arm position, not only first (`ast-builder.js` `armPatternChainArrowOffset` /
+#     `scanArmPatternAlternate`; `emit-control-flow.ts` Form 0w/0/2 + `armCondition` shared by `emit-logic.ts`);
+#     a NAMED-field payload arm binding 5+ fields is no longer truncated by the old 20-token paren-scan cap
+#     (`scanPastBalancedParens`, and the native-parser mirror `scanPastPayloadParen`); a brace inside a CLOSED
+#     quoted string on the same line no longer mis-scopes a block (`block-splitter.js`
+#     `braceIsQuotedStringContent`, tokenizer-backed, cached per line). A payload-BEARING alternation
+#     (a binding, a named field even when discarded, a nested/literal pattern) now FAILS CLOSED —
+#     **`E-MATCH-ALT-BINDING`** — instead of silently dropping the arm or gluing it onto its neighbor.
+#   · **#1116** (§39.2/§14.8.10 tenant floor) — a `<schema>` raw `CREATE TABLE` head naming a
+#     schema/database-qualified table is rejected (**`E-SCHEMA-012`**); a known-kind head whose name the
+#     compiler cannot read through to a follower is rejected (**`E-SCHEMA-013`**) — both were previously
+#     silent, tenant-isolation-inert gaps (`schema-differ.js` `findRejectedCreateTableHeads`,
+#     `gauntlet-phase1-checks.js` `<schema>` body checks).
+#   · **#1114** (§20.5.1) — route-inference Step 8b (protect= auto-escalation / `<page auth="required">`) no
+#     longer stamps secure session defaults that outrank a unit's OWN `<program>`'s declared session config
+#     (`g-route-inference-8b-session-defaults-outrank-program-declaration`); the session-field resolution order
+#     is unchanged, but Step 8b now leaves its fields undefined unless the unit itself declares them
+#     (`session-config-resolve.ts` `countUnitProgramNodes`, `route-inference.ts`, `emit-server.ts` now reads the
+#     ONE resolver instead of `authMiddlewareEntry.sessionExpiry` directly).
+#   · **#1112** (§20.5.1) — `E-MW-008`'s program-site count no longer counts a `kind="tool"` file as a
+#     competing web application (`g-mw008-counts-headless-tool-programs`; `codegen/index.ts`
+#     `_collectProgramSites` now asks the emit dispatch's own `isToolProgram` per FILE, not per node).
+#   · **#1113** (#1045 F1) — client JS relative-import re-basing now applied in BOTH the gate and the write
+#     phase (`compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, NEW).
+#   · **#1109** (dpa-051 bootstrap slice M2, `compiler/self-host-v2/`) — the front end (`parse.scrml` 1641L,
+#     `lower.scrml` 993L NEW) proves the lowered Core EQUALS M1's hand-built oracle (Fork-A proof); `ast.scrml`
+#     (175L NEW) is the parser's own AST; `core/check/print/lex/walk/measure.scrml` and
+#     `slice-m1/runtime/runtime.js` all took matching edits; `slice-m2/` (16 files, harness + fixtures +
+#     4 `*.test.js`) is the M2 test bed; CI `gate`'s bootstrap step now also runs `slice-m2/` and re-runs the M1
+#     suite over LOWERED programs (`SLICE_CORE=lowered`).
+# ⚑ **RE-RUN AT THIS SHA ON THIS (WINDOWS) CLONE:** `bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass;
+# `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass; `bun scripts/lint-no-default-arm.js`
+# -> 26 files, 0 violations; `bun test ./compiler/self-host-v2/slice-m2/` -> **72/74 pass, 2 FAIL** — both in
+# `parse.test.js`'s "the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)" (`counter.scrml`,
+# `lib/dropdown.scrml`+`app.scrml`), comparing a `\r\n`-checked-out fixture against a bare-`\n` SPEC extract —
+# a WINDOWS-CRLF-CHECKOUT artifact of this clone (same class as the known `scrml-regen-scripts-crlf-broken-on-windows`
+# pattern), NOT a landed defect and NOT reproduced by this session; see test.map.md. Not filed as a new gap (no
+# code moved to cause it; a checkout-line-ending property, orthogonal to #1109's content).
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S438 block were grep-derived at `fb21983a`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437b HEADER (stamp `9941a504c`, 2026-09-27), CARRIED FOR PROVENANCE. ITS FIGURES ARE `9941a504c`-ERA. ━━━━━━━
 # ⛑ **S437b STAMP — `d02738767` -> `9941a504c`. 7 COMMITS (#1102-#1108), SAME SESSION (S437, second wrap-6c pass).**
 # MAP-STAMP RULE at write time: `git fetch origin && git merge --ff-only origin/main` -> HEAD **`9941a504c`** (== `origin/main` at fetch;
 # `origin/main` then advanced to `072741ca9` mid-pass — see ⏳);
@@ -303,6 +365,44 @@
 #
 
 scrml is a single-file full-stack language + compiler (not a web app with a runtime business domain). "Domain concepts" here are the language's own primitives, normatively defined in `compiler/SPEC.md` (§1-§65+). This map is a navigation index into that spec, grouped by concern — not a restatement of the normative text.
+
+## S438 — DOMAIN DELTA (`9941a504c..fb21983a`)
+
+### §14.8.10 tenant floor — the shared recognizer now also REJECTS, not just harvests (extends the S405 section below)
+The ONE-recognizer invariant documented below (`harvestRawCreateTables` et al. in `schema-differ.js`) gains a
+sibling, **`findRejectedCreateTableHeads`**, that answers a DIFFERENT question about the same raw `CREATE TABLE`
+heads: not "what table does this declare" but "is this head SHAPED such that no floor can safely key it by an
+unqualified name". A qualified head (`public.assets`, `mydb.public.assets` — any qualifier count) is now
+**rejected fail-closed** (`E-SCHEMA-012`) rather than silently stripped to its last segment or matched by
+nothing; an unreadable known-kind head is rejected too (`E-SCHEMA-013`). **Same defect SHAPE as the S405 finding
+above — a silently inert tenant floor — closed the same way (reject, don't half-recover).** Both were previously
+either accepted-and-mis-keyed (collapsing two distinct qualified tables onto one unqualified key) or invisible
+to every floor and every warning (`W-SCHEMA-NO-TABLES-DECLARED` did not fire even with a second, valid table
+present). Migration measured at **zero** authored uses across scrml, `flogenceP`, `assetManagement`. Known
+fail-closed false positives (accepted, not gaps to chase): a `//`-commented qualified head, and a qualified/
+unreadable head inside a §14.8.11.2 SECURITY-DEFINER `fn` `"""…"""` body (runtime plpgsql, not a declaration —
+`g-secdef-fn-body-ddl-false-positive`). See schema.map.md / error.map.md for the mechanics.
+
+### §18.2/§18.7 match alternation — dispatch is BY TAG ONLY, and that is now enforced, not assumed
+`g-impl1-match-miscompiles` (F12/F13/F14, #1119) closes a family where an alternation arm (`.A | .B :> r`)
+compiled SILENTLY WRONG rather than refusing: recognised only as the match's FIRST arm (a later `.B | .C :> x`
+glued onto the previous arm's result body, or a leading wildcard alternate `_ | .A :> x` was dropped entirely,
+defeating exhaustiveness checking with no runtime trace). The underlying INVARIANT this surfaces: an
+alternation's lowered form compares variant TAGS only (an OR-chain of `=== "Tag"`), so a payload-BEARING
+alternate — a binding, a named field even when discarded, a nested/literal pattern — has **no lowering that can
+be correct**, and is now a compile error (`E-MATCH-ALT-BINDING`) rather than a silent drop. Only POSITIONAL `_`
+discards survive in an alternation. This is a NEW instance of the standing class this map already tracks under
+"silently wrong beats loud" defects (cf. §12.5 / the `Response`-on-every-path section, and the `<each>` sections
+below) — verify any future alternation-adjacent change against a payload-carrying multi-arm case, not just the
+single-arm regression suite.
+
+### §20.5.1 session-config precedence — see auth.map.md for the full delta (#1114, #1112)
+Not duplicated here in full: route-inference Step 8b no longer stamps secure session defaults that outrank a
+protect= unit's OWN `<program>`'s declared `sessionExpiry`/`session-secure`, and `E-MW-008`'s program-site count
+no longer treats a `kind="tool"` file as a competing web application. Both are precedence/attribution fixes, not
+new business rules — the underlying §20.5 resolution order and the "a session-emitting unit must be attributable
+to exactly one program" invariant are UNCHANGED.
+
 
 ## S437b — DOMAIN DELTA (`d02738767..9941a504c`)
 

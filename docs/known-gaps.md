@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 150 | 4 |
-| MED | 334 | 0 |
-| LOW | 135 | 0 |
+| HIGH | 151 | 4 |
+| MED | 338 | 0 |
+| LOW | 138 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19827,6 +19827,7 @@ Three normative-looking artifacts disagree. (1) SPEC §20.5.1 "`session-secure=`
 ### g-session-config-refusal-still-writes-dist — `E-MW-008` (and `E-MW-007`) fail the build by exit code but `scrml build` / `scrml compile --output-dir` still write a complete `dist/`, including the split-cookie server units
 So `codegen/index.ts`'s comment "the F1 split is unreachable by construction" holds only for callers that honour the exit code; a deploy script that ignores it ships the split. Reviewer-executed on the A+B two-program fixture (S437 post-merge review of #1094); `scrml dev` behaviour UNVERIFIED. Shared posture with E-MW-007, not new to #1094. Direction is a ruling: fail-closed = do not write artifacts on a hard session-config refusal. — `NEW S437-bryan (relayed from reviewer)`; **LOW**; open
 <!-- @gap id=g-session-config-refusal-still-writes-dist sev=LOW status=open locus=compiler/src/commands/build.js+compile.js(write phase does not gate on E-MW-007/008; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-cli-build-exit-1-dist-written -->
+**S438-peter:** a pre-built fail-closed fix sits on **`hold/s438-refusal-writes-no-dist` @ `074f1630`** (three S239 rounds: the refusal is decided before ANY write via a `beforeWrite` hook, E-MW-007 judged over the post-write unit set, success paths byte-identical, 15 tests) — awaiting bryan's ruling (note in `handOffs/incoming/`). ⚑ **Re-grade proposed LOW → MED:** measured on `072741ca`, a refused REBUILD overwrites the split units in place beside the previous `_server.js`, which boots and serves **200** on the split.
 
 ### g-ghost-lint-false-fires-on-canonical-block-handler — the canonical inline block handler `onclick={ s1; s2 }` (L19 REVERSED S435, §5.2.3) fires `W-LINT-007` ("`<Comp prop={val}>` — scrml uses `<Comp prop=val>`") and `W-LINT-013` twice ("`@click=` Vue event shorthand") on a correct program
 **PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick={ @a = @a + 1; @a = @a * 2 }>go</button>` → one `W-LINT-007` + two `W-LINT-013` on that line. The pre-Stage-2 ghost-pattern pass (PRIMER §12) predates the L19 reversal: `{…}` in attribute position reads as JSX `prop={val}`, and each `@a =` inside the braces reads as a Vue `@event=` inside a tag-opener range (the W14 Unit AA tag-opener gating does not exclude a braced attribute value). Same class as the S137 Bug 44 exemption. Every adopter writing the now-canonical form gets three false warnings, which teaches them to ignore W-LINT. Found by the S437 maps refresh (N-S437-5). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise; but the lint now contradicts a ruling made on 2026-09-26, so it is arguably part of the L19 reversal's own landing. — `NEW S437-bryan`; **LOW**; open
@@ -19853,6 +19854,7 @@ Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + t
 - **F16** tag-only arms over an IMPORTED payload enum compare the value to a string and never match.
 — `NEW S437-bryan (relayed from the M1 build agent; F12 independently re-executed by the M1 adversarial review)`; **HIGH**; open
 <!-- @gap id=g-impl1-match-miscompiles-hit-by-the-bootstrap sev=HIGH status=open locus=searched:compiler/src/codegen/emit-match.ts,type-system.ts(_variantFields holds only the current file's enums — F11/F16 root, per the M1 agent; PA-located-verify) prov=empirical:bootstrap-slice-m1-progress-md-F11-F16-reproducers -->
+**S438-peter:** F12/F13/F14 landed #1119. **F11/F15/F16/F17 are fixed on `hold/s438-impl1-imported-enum-match` @ `5bea376e` but HELD** (four S239 rounds): the branch as a whole turns one LOUD failure silent — a bare-dot argument to a cross-file call whose parameter enum TS cannot see (`conv(.Neg(6))`, `Expr.Neg(x)` vs `Other.Neg(y)`) picks up the outer context's enum: main throws `"Neg" is not a function`, the branch returns wrong data. Fix direction: no stamp / no by-name imported lookup for a bare-dot constructor that is an ARGUMENT of a call TS could not type (→ loud), or stop TS pushing the outer context into call arguments. Everything else on the branch is verified (66 probe cases = main, the rest fixes or loud; reviewer harness in the S438 scratch `rv-enum3/`).
 
 ## §S438 — gaps filed S438 (2026-09-27, Peter; surfaced while landing #1045 F1 + the two LOW manifest-gate notes)
 
@@ -19897,3 +19899,38 @@ Loud; pre-existing (base identical).
 ### g-false-e-type-023-bare-variant-arm-body — a match arm whose BODY is a bare variant (`.Z :> .P(1)` / `.Q(_) | .R :> .Z` / `_ :> .R`) raises a false E-TYPE-023 "Duplicate match arm" — `NEW S438; MED; open`
 <!-- @gap id=g-false-e-type-023-bare-variant-arm-body sev=MED status=open locus=searched:compiler/src/type-system.ts(splitMatchArms — a `.Variant` in an arm RESULT is read as a new arm pattern)—not-traced prov=empirical:S438-final-review-rv-arms2-q11 -->
 Loud false rejection, before and after the F12–F14 branch. Same family as g-false-e-type-023-alt-arm-qualified-result (the typer's text arm splitter treats a variant-valued body as a pattern).
+
+## §S438c — gaps filed at the S438 wrap (2026-09-27, Peter; reviewer-executed unless marked)
+
+### g-bootstrap-m2-spread-overrides-write-in-sequence — slice M2 lowers `@p = { ...@p, x: @p.y, y: @p.x }` to sequential field writes with no temporaries, so later overrides read post-write state (1,2 → 2,2; genuine replace → 2,1) — `NEW S438-peter`; **HIGH**; open
+**PA-RE-EXECUTED on `072741ca`.** Also `{ ...@p, y: @p.x + 10, x: @p.y }` → 11,11 (want 2,11). No diagnostic; `checkCore` clean. §66.11.3 item 1 ("compiles exactly as the equivalent genuine replace does") and §66.10 item 1. Found by the S438 S239 review of #1109. Fix pre-built on **`hold/s438-1109-review-fixes` @ `eb3de63d`** (binds each override to a `Let` before the writes; PA re-ran slice-m2 89/0, lowered slice-m1 73/0). Open question for bryan: a spread's writes are still separate, so a runtime-refused later write leaves earlier ones applied — all-or-nothing? Lane: bryan (bootstrap).
+<!-- @gap id=g-bootstrap-m2-spread-overrides-write-in-sequence sev=HIGH status=open locus=compiler/self-host-v2/lower.scrml(spreadStmts) prov=empirical:PA-re-executed-probe3-swap-on-072741ca -->
+
+### g-bootstrap-m2-direct-handle-refused-inside-own-given — a direct `@color.value` read or write inside `given c = @color :> { … }` over a conditional handle is rejected E-DECL-HANDLE-NOT-NARROWED — `NEW S438-peter`; **MED**; open
+§66.7.5 (O56 RULED S435; reads amendment S437 #1108): "A direct `@handle.field = …` inside the narrowed block is legal". The `c.value` form works. Reviewer-executed. Fix on the same hold ref (`Env.narrows`). Lane: bryan.
+<!-- @gap id=g-bootstrap-m2-direct-handle-refused-inside-own-given sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(writeGuards/resolveAtRead) prov=review:S438-S239-of-1109-reviewer-executed -->
+
+### g-bootstrap-m2-spec-drift-guard-fails-on-crlf — slice-m2 `parse.test.js`'s §66.19 drift guard matches ```` ```scrml
+ ```` on raw text, so it finds nothing on a CRLF checkout (2 fails on Windows), and it checks "some block anywhere" not the §66.19.1/.3 blocks — `NEW S438-peter`; **LOW**; open
+Fix on the same hold ref (normalise CRLF, section-scoped). Lane: bryan.
+<!-- @gap id=g-bootstrap-m2-spec-drift-guard-fails-on-crlf sev=LOW status=open locus=compiler/self-host-v2/slice-m2/parse.test.js prov=review:S438-S239-of-1109-reviewer-executed -->
+
+### g-renamed-onion-entry-refuses-every-rebuild — after renaming a source that declares the request onion, every rebuild fails E-MW-007 until dist/ is cleared by hand (the old `.server.js` unit stays in dist and counts as a second onion) — `NEW S438-peter`; **MED**; open
+Reviewer-executed on `072741ca` (build `index.scrml` with `log="minimal"`, rename to `main.scrml`, rebuild). Neither base nor any branch deletes stale dist files. Pre-existing.
+<!-- @gap id=g-renamed-onion-entry-refuses-every-rebuild sev=MED status=open locus=compiler/src/commands/build.js(E-MW-007 over dist units incl. stale) prov=review:S438-dist-refusal-review-probe3 -->
+
+### g-compile-never-checks-e-mw-007 — `scrml compile --output-dir` accepts two request onions at exit 0 with no diagnostic (E-MW-007 is checked only where a server entry is generated, which `compile` never does) — `NEW S438-peter`; **MED**; open
+Reviewer-executed on `072741ca`. `scrml build` refuses the same input.
+<!-- @gap id=g-compile-never-checks-e-mw-007 sev=MED status=open locus=compiler/src/commands/compile.js prov=review:S438-dist-refusal-agent-repro -->
+
+### g-compile-output-dir-dot-eexist — `scrml compile app.scrml --output-dir .` crashes `EEXIST: file already exists, mkdir '.'` — `NEW S438-peter`; **LOW**; open
+Reviewer-executed on `072741ca`. Pre-existing.
+<!-- @gap id=g-compile-output-dir-dot-eexist sev=LOW status=open locus=compiler/src/api.js(mkdirSync(outputDir)) prov=review:S438-dist-refusal-review-F4 -->
+
+### g-derived-circular-dep-still-writes-output — §6.6.10 "A file with a circular derived dependency SHALL NOT produce compiled output", but E-DERIVED-CIRCULAR-DEP builds exit 1 and still write html/client/css/runtime — `NEW S438-peter`; **MED**; open
+Agent-executed on `072741ca` (also E-STATE-UNDECLARED writes). Every hard error writes artifacts today except the §2.2.1 emit gate; the §34 E-CG-TILDE-UNRESOLVED row records the family-wide write gate as deliberately deferred. Conformance defect against an existing SHALL; its fix is the "fail-closed on all hard errors" option in the dist-refusal ruling note to bryan.
+<!-- @gap id=g-derived-circular-dep-still-writes-output sev=MED status=open locus=compiler/src/api.js(write phase gates only on emitGateFailed) prov=spec:§6.6.10-SHALL-NOT-produce-compiled-output -->
+
+### g-types-gate-cannot-find-tsc-on-windows — `scripts/types-gate.ts` looks for `node_modules/.bin/tsc` and fails on this Windows clone (only `tsc.exe`) — `NEW S438-peter`; **LOW**; open
+Seen by two S438 reviewers; running tsc directly with the gate's arguments works. Tooling only.
+<!-- @gap id=g-types-gate-cannot-find-tsc-on-windows sev=LOW status=open locus=scripts/types-gate.ts prov=empirical:S438-two-reviewers -->
