@@ -29414,6 +29414,17 @@ mutually-exclusive value forms:
   is seeded from the snapshot of a reactive `@cell` at engine-construction. See
   "Runtime-cell hydration (`initial=@cell`)" below.
 
+**Payload constructor (S439 ruling #11).** The static form accepts a payload
+constructor for a payload-bearing variant — `initial=.Ready([…])` — and the engine
+starts in that variant WITH that payload: the payload is carried, not dropped. Under
+§66 `initial=` becomes the declaration's own value — the field's initializer, which
+takes any value (§66.3; `<engine for=T initial=.X>` ≡ `<t:T=.X single>`, §66.13.3).
+⚑ **impl#1 divergence (measured S439):** `initial=.Ready(["a", "b"])` compiles at exit 0
+and the payload does not appear in the emitted client JS — impl#1 drops it.
+> **Provenance:** ruling:user-voice-scrml.md S439 #11 "all recs" (Rec: honour it) ·
+> supersedes: nothing normative (the two-form list above named only the bare
+> `.Variant` literal; it did not refuse a payload).
+
 **Lint behavior:**
 - On a NON-derived engine, `initial=` is REQUIRED. If omitted, the compiler emits
   `W-ENGINE-INITIAL-MISSING` (§34) and DEFAULTS to the FIRST state-child's variant.
