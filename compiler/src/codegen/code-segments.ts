@@ -57,6 +57,10 @@ export function regexAllowedAfter(codeBefore: string): boolean {
   // No prior code → expression start → regex.
   if (i < 0) return true;
   const lastCh = codeBefore[i];
+  // S440 f18 fix round — a trailing `++` / `--` is a POSTFIX update (`i++ / 2`):
+  // it ends a value, so a following `/` is division. The prefix reading
+  // (`++/re/`) is not valid JS — a regex literal is not an assignment target.
+  if ((lastCh === "+" || lastCh === "-") && i > 0 && codeBefore[i - 1] === lastCh) return false;
   // After punctuation / operator → regex.
   // `}` is intentionally included: in JS it ends a block-statement (regex
   // follows) far more commonly than an object-literal in expression
@@ -318,6 +322,14 @@ export function rewriteCodeSegments(
   let stringDelim = "";
   let i = 0;
   let segStart = 0;
+  // S440 f18 fix round (F1/F2): the SIGNIFICANT prefix for the regex-vs-division
+  // decision. `segStart` restarts after every literal/comment, so asking
+  // `regexAllowedAfter` about the current segment alone made a `/` right after a
+  // closed string / template / regex (or a block comment) look expression-initial
+  // and open a bogus "regex" — the rest of the expression then passed through
+  // UNTRANSFORMED. `ctx` carries every earlier code span verbatim, a closed
+  // literal as the value token `0`, and a comment as whitespace.
+  let ctx = "";
 
   while (i < expr.length) {
     const ch = expr[i];
@@ -325,6 +337,7 @@ export function rewriteCodeSegments(
     if (mode === "code") {
       // Block comment opener
       if (ch === "/" && expr[i + 1] === "*") {
+        ctx += expr.slice(segStart, i);
         result.push(transform(expr.slice(segStart, i)));
         mode = "block-comment";
         segStart = i;
@@ -333,6 +346,7 @@ export function rewriteCodeSegments(
       }
       // Line comment opener
       if (ch === "/" && expr[i + 1] === "/") {
+        ctx += expr.slice(segStart, i);
         result.push(transform(expr.slice(segStart, i)));
         mode = "line-comment";
         segStart = i;
@@ -340,7 +354,8 @@ export function rewriteCodeSegments(
         continue;
       }
       // Regex literal opener — only when the preceding token-context admits it
-      if (ch === "/" && regexAllowedAfter(expr.slice(segStart, i))) {
+      if (ch === "/" && regexAllowedAfter(ctx + expr.slice(segStart, i))) {
+        ctx += expr.slice(segStart, i);
         result.push(transform(expr.slice(segStart, i)));
         mode = "regex";
         segStart = i;
@@ -350,6 +365,7 @@ export function rewriteCodeSegments(
       // Template-literal opener — hybrid string: static spans opaque, `${...}`
       // interpolations descended into (handled in "template" mode below).
       if (ch === "`") {
+        ctx += expr.slice(segStart, i);
         result.push(transform(expr.slice(segStart, i)));
         result.push("`"); // emit the opening backtick verbatim
         mode = "template";
@@ -359,6 +375,7 @@ export function rewriteCodeSegments(
       }
       // String literal opener (single/double quote — fully opaque)
       if (ch === '"' || ch === "'") {
+        ctx += expr.slice(segStart, i);
         result.push(transform(expr.slice(segStart, i)));
         mode = "string";
         stringDelim = ch;
@@ -378,6 +395,7 @@ export function rewriteCodeSegments(
       if (ch === stringDelim) {
         i++;
         result.push(expr.slice(segStart, i)); // preserve string literal as-is
+        ctx += "0"; // a closed literal is a VALUE — a following `/` divides
         segStart = i;
         mode = "code";
         continue;
@@ -404,26 +422,42 @@ export function rewriteCodeSegments(
         let innerMode: "code" | "string" | "template" | "regex" = "code";
         let innerDelim = "";
         let innerSegStart = interpStart; // start of the current code run (for regexAllowedAfter)
+        // S440 f18 fix round — same significant-prefix discipline as the outer
+        // `ctx`: earlier code verbatim, a closed literal as the value `0`, a
+        // comment as whitespace. Without it `${"a" / b}` opened a bogus regex
+        // that swallowed the closing `}` and lost the interpolation's extent.
+        let innerCtx = "";
         while (j < expr.length && depth > 0) {
           const c = expr[j];
           if (innerMode === "code") {
             if (c === "\\") { j += 2; continue; }
             if (c === "{") { depth++; j++; continue; }
             if (c === "}") { depth--; j++; if (depth === 0) break; continue; }
-            if (c === '"' || c === "'") { innerMode = "string"; innerDelim = c; j++; continue; }
-            if (c === "`") { innerMode = "template"; j++; continue; }
+            if (c === '"' || c === "'") {
+              innerCtx += expr.slice(innerSegStart, j);
+              innerMode = "string"; innerDelim = c; j++; continue;
+            }
+            if (c === "`") {
+              innerCtx += expr.slice(innerSegStart, j);
+              innerMode = "template"; j++; continue;
+            }
             if (c === "/" && expr[j + 1] !== "*" && expr[j + 1] !== "/" &&
-                regexAllowedAfter(expr.slice(innerSegStart, j))) {
+                regexAllowedAfter(innerCtx + expr.slice(innerSegStart, j))) {
+              innerCtx += expr.slice(innerSegStart, j);
+              innerSegStart = j; // re-read from the `/` if the regex turns out unterminated
               innerMode = "regex"; j++; continue;
             }
             // Skip line/block comments inside an interpolation (rare, but keep
             // brace counting honest — a `}` inside a comment must not close).
             if (c === "/" && expr[j + 1] === "/") {
+              innerCtx += expr.slice(innerSegStart, j) + " ";
               j += 2;
               while (j < expr.length && expr[j] !== "\n") j++;
+              innerSegStart = j;
               continue;
             }
             if (c === "/" && expr[j + 1] === "*") {
+              innerCtx += expr.slice(innerSegStart, j) + " ";
               j += 2;
               while (j < expr.length && !(expr[j] === "*" && expr[j + 1] === "/")) j++;
               j += 2;
@@ -435,13 +469,13 @@ export function rewriteCodeSegments(
           }
           if (innerMode === "string") {
             if (c === "\\") { j += 2; continue; }
-            if (c === innerDelim) { innerMode = "code"; j++; innerSegStart = j; continue; }
+            if (c === innerDelim) { innerMode = "code"; j++; innerCtx += "0"; innerSegStart = j; continue; }
             j++;
             continue;
           }
           if (innerMode === "template") {
             if (c === "\\") { j += 2; continue; }
-            if (c === "`") { innerMode = "code"; j++; innerSegStart = j; continue; }
+            if (c === "`") { innerMode = "code"; j++; innerCtx += "0"; innerSegStart = j; continue; }
             // Nested template interpolation — track its braces so the outer
             // depth counter is not corrupted by `}` inside the nested string.
             if (c === "$" && expr[j + 1] === "{") {
@@ -473,10 +507,13 @@ export function rewriteCodeSegments(
             j++;
             while (j < expr.length && /[A-Za-z0-9_$]/.test(expr[j])) j++;
             innerMode = "code";
+            innerCtx += "0"; // a closed regex is a VALUE
             innerSegStart = j;
             continue;
           }
-          if (c === "\n") { innerMode = "code"; innerSegStart = j; continue; }
+          // Unterminated regex — back to code. `innerCtx` already holds the code
+          // before the `/`; the text from the `/` onward is re-read as code.
+          if (c === "\n") { innerMode = "code"; continue; }
           j++;
           continue;
         }
@@ -496,6 +533,7 @@ export function rewriteCodeSegments(
       if (ch === "`") {
         result.push(expr.slice(segStart, i)); // static template text — opaque
         result.push("`");
+        ctx += "0"; // a closed template is a VALUE
         i++;
         segStart = i;
         mode = "code";
@@ -525,6 +563,7 @@ export function rewriteCodeSegments(
         i++;
         while (i < expr.length && /[A-Za-z0-9_$]/.test(expr[i])) i++;
         result.push(expr.slice(segStart, i)); // preserve regex literal as-is
+        ctx += "0"; // a closed regex is a VALUE
         segStart = i;
         mode = "code";
         continue;
@@ -543,6 +582,7 @@ export function rewriteCodeSegments(
     if (mode === "line-comment") {
       if (ch === "\n") {
         result.push(expr.slice(segStart, i)); // preserve comment text, newline stays in segStart slice
+        ctx += " "; // a comment is whitespace to the regex-vs-division decision
         segStart = i;
         mode = "code";
         continue;
@@ -555,6 +595,7 @@ export function rewriteCodeSegments(
       if (ch === "*" && expr[i + 1] === "/") {
         i += 2;
         result.push(expr.slice(segStart, i)); // preserve comment text
+        ctx += " "; // a comment is whitespace to the regex-vs-division decision
         segStart = i;
         mode = "code";
         continue;
