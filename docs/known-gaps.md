@@ -19728,8 +19728,8 @@ dispatched, and the button was clicked. Result: before the click, `"it" in windo
 Fix direction: emit E-ASSIGN-004 (the ruling), and/or lower handler-value loops through the statement
 emitter so the binder gets `const`.
 
-### g-e-error-002-handler-exemption-depends-on-statement-count — an unhandled failable call in a handler is E-ERROR-002 only when it shares the handler with another statement — `NEW S437; LOW; open (spec-consistency question for bryan)`
-<!-- @gap id=g-e-error-002-handler-exemption-depends-on-statement-count sev=LOW status=open locus=compiler/src/type-system.ts(the §19.4.3 unhandled-failable check — reaches a failable call through the §5.2.3 handler statement list; the single-expression handler forms are exempt by an earlier, separate rule) prov=review:S437-round5-review-item-a;empirical:S437-round5-reproduced-by-compile -->
+### g-e-error-002-handler-exemption-depends-on-statement-count — an unhandled failable call in a handler is E-ERROR-002 only when it shares the handler with another statement — `NEW S437; LOW; RESOLVED S440`
+<!-- @gap id=g-e-error-002-handler-exemption-depends-on-statement-count sev=LOW status=resolved locus=compiler/src/type-system.ts(the §19.4.3 unhandled-failable check — reaches a failable call through the §5.2.3 handler statement list; the single-expression handler forms are exempt by an earlier, separate rule) prov=review:S437-round5-review-item-a;empirical:S437-round5-reproduced-by-compile -->
 
 With `function risky()! E`, measured on the S437 round-5 build: `onclick={ risky(); @r = 1 }` → **E-ERROR-002**
 (§19.4.3 — an unhandled failable call), but `onclick=risky()`, `onclick={ risky() }` and `onclick={⏎ risky()⏎ }`
@@ -19738,6 +19738,14 @@ lists visible to the check, which is what exposed the split. **Spec-consistency 
 call as a handler's WHOLE body exempt from §19.4.3 (the event dispatcher is the boundary), and if so, should that
 exemption extend to a failable statement inside a multi-statement handler — or should neither be exempt? Either
 answer makes the rule independent of the statement count; today it is not.
+
+**RESOLVED S440** — ruled "neither is exempt" (S439 #14 + S440 "all recs": restore conformance; §19.4.3 now states
+it). `visitAttr` (type-system.ts) routes the one-statement handler call forms (`call-ref`, and an `expr` whose root
+is a call) through the same `checkUnhandledFailableBareCall` the `bare-expr` statement case uses; references
+(`onclick=f`, `${f}`, an arrow value, the `<formFor onsubmit=fn/>` lowering) are not calls. A one-statement
+`!{}`-guarded handler now takes the statement view (ast-builder), so its guard is emitted instead of dropped. The
+6 measured corpus sites (5 files) were migrated. Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js`
+and `conformance/cases/error/handler-unhandled-failable-*`.
 
 ### g-handler-block-does-not-hoist-function-declarations — `onclick={ @r = inner(); function inner() {…} }` is E-SCOPE-001, though a function body hoists the same declaration — `NEW S437; LOW; open`
 <!-- @gap id=g-handler-block-does-not-hoist-function-declarations sev=LOW status=open locus=compiler/src/type-system.ts(visitAttr's §5.2.3 handler-statement walk visits statements in order; the function-decl pre-bind the function-body walk gets is not applied to handlerBlock.stmts) prov=review:S437-round5-review-item-b;empirical:S437-round5-reproduced-by-compile -->
