@@ -1460,10 +1460,10 @@ All valid event handler binding forms:
 
 **Dispatch contract — one contract, native bubbling (S439 ruling #9).** Every event-handler form above obeys ONE dispatch contract, the same for page markup and for `<each>` rows (§17.7):
 
-- When an event fires on an element nested inside an ancestor that also handles that event, the inner handler SHALL run first and the ancestor's handler after it; both SHALL fire.
+- For an event that bubbles in the DOM: when it fires on an element nested inside an ancestor that also handles that event, the inner handler SHALL run first and the ancestor's handler after it; both SHALL fire. (A non-bubbling event — e.g. `focus`, `blur`, `mouseenter`, `load` — does not reach the ancestor.)
 - A handler that calls `stopPropagation()` on the event SHALL prevent the handlers of its ancestors from running for that event.
 
-⚑ **Carried impl#1 divergence, not the language rule:** impl#1's page-markup delegation runs only the INNERMOST handler (the ancestor's does not fire), while its `<each>` rows bubble natively. The contract above is the language rule; the bootstrap implements it.
+⚑ **Carried impl#1 divergence, not the language rule:** impl#1's page-markup delegation runs only the INNERMOST handler (the ancestor's does not fire), while its `<each>` rows bubble natively. (Both halves measured S439 by executing the compiled bundle in happy-dom: a click on a `<button onclick>` inside a `<div onclick>` fired the button's handler only; the same nesting inside an `<each>` row fired both. Handler order was not measured.) The contract above is the language rule; the bootstrap implements it.
 
 > **Provenance:** ruling:user-voice-scrml.md S439 #9 "all recs" (Rec: one contract, native bubbling — "The inner handler runs first, both fire, and `stopPropagation` is honoured. The SPEC is silent").
 

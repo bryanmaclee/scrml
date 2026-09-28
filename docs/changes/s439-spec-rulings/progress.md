@@ -17,3 +17,4 @@
 - CORRECTION #3: note tightened to the §66.10 sentence (dropped the R3 lean and 'classified write'). #5: added the match-in-match-arm impl#1 divergence line in §18.0.1.
 - CORRECTION #7: 'SHALL NOT declare a binding whose name begins with _scrml_'; OPEN on references + stdlib.
 - CORRECTION #8: cut the SPEC impl note to one line; moved the detail to a new known-gaps entry G-HANDLER-LOOP-BINDER-WRITE-CREATES-WINDOW-GLOBAL (HIGH; locus emit-event-wiring.ts:1140). Window global VERIFIED BY EXECUTION: happy-dom + node:vm, window.it === 4 after the click.
+- CORRECTION #9: added the bubbling-event qualifier and non-bubbling examples. MEASURED both divergence halves (happy-dom): page inner click -> 0|1 (outer did not fire); each-row inner click -> 1|1 (both fired). Order not measured.
