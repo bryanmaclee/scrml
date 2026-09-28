@@ -9,29 +9,34 @@
 //   the build output of the compile under test (impl#1's html + clientJs + runtime, and whatever
 //   stylesheet the CSS seam produced), after optional user-intent clicks.
 //
+// It stays in slice-m3, NOT in the conformance schema (ruling S440 all recs #2, R6).
+//
 // Chromium, not happy-dom: happy-dom 20.8.9 ignores `@layer` entirely (probed: a rule only inside
 // `@layer reset {}` never applies), so it cannot observe the §65.5 layer order. Chromium resolves
 // `@scope` + donut, `@layer`, `:where()`, `var()` and the `:root[data-scrml-theme-*]` switch.
 //
 // An expectation is NEVER taken from impl#1's output: every value is what the cited SPEC sentence says
-// the element's computed style must be. A case whose oracle fails on PURE impl#1 is an impl#1 finding.
+// the element's computed style must be. Where an oracle asserts an unruled CHOICE instead, its spec file
+// says so in a `choice` field (never in `rationale`). A case whose oracle fails on PURE impl#1 is an
+// impl#1 finding.
 //
 // ORACLE FILES (css-oracle/):
 //   conformance/<category>/<case>.json — the css half of an existing conformance case.
-//   sources/<name>.scrml + sources/<name>.json — css-only sources outside conformance (the adversarial
-//       set: nested scopes, two themes, …) — the conformance suite's counts stay untouched.
+//   sources/<name>.json (+ sources/<name>.scrml, or `"from": "<repo-relative .scrml>"` for a real
+//       example) — css-only sources outside conformance; the conformance suite's counts stay untouched.
 //   core/<name>.json — a hand-built stylesheet Core (slice-m3/css.core.scrml `<fn>`) + its page html:
 //       the §66.17 T3 shapes, which impl#1's front end cannot carry (progress.md Phase 0).
-// Spec shape: { spec, rationale, steps: [ { click?: <selector>, rootAttr?: [name, value],
-//               expect: [ { sel, prop, value, index? } ] } ] }
+// Spec shape: { spec, rationale, choice?, files?, pageCharset?, steps: [ { click?, hover?, rootAttr?,
+//               rootStyle?, expect: [ { sel, prop, value, index?, pseudo? } ] } ] }
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { compileScrml } from "../../src/api.js";
 
 export const ORACLE_DIR = join(import.meta.dir, "css-oracle");
+const REPO_ROOT = join(import.meta.dir, "..", "..", "..");
 
 /** The css oracle for a conformance case (by relDir) or a css-only source (`css-oracle/<name>`), or null. */
 export function oracleFor(relDir) {
@@ -45,14 +50,13 @@ export function oracleFor(relDir) {
 export function oracleSources() {
   const dir = join(ORACLE_DIR, "sources");
   if (!existsSync(dir)) return [];
-  return readdirSync(dir).filter((f) => f.endsWith(".scrml")).sort().map((f) => {
-    const name = f.replace(/\.scrml$/, "");
-    return {
-      relDir: `css-oracle/${name}`,
-      source: readFileSync(join(dir, f), "utf8"),
-      auxFiles: {},
-      spec: JSON.parse(readFileSync(join(dir, `${name}.json`), "utf8")),
-    };
+  return readdirSync(dir).filter((f) => f.endsWith(".json")).sort().map((f) => {
+    const name = f.replace(/\.json$/, "");
+    const spec = JSON.parse(readFileSync(join(dir, f), "utf8"));
+    const source = spec.from
+      ? readFileSync(join(REPO_ROOT, spec.from), "utf8")
+      : readFileSync(join(dir, `${name}.scrml`), "utf8");
+    return { relDir: `css-oracle/${name}`, source, auxFiles: {}, spec };
   });
 }
 
@@ -85,23 +89,38 @@ export async function closeBrowser() {
 
 const safe = (s) => s.replace(/[^A-Za-z0-9_-]+/g, "_");
 
-/** Compile `source` (+ aux) with `stageOverrides`, WRITING the build. → { dir, html | null, errors } */
-export function buildCase(relDir, source, auxFiles, stageOverrides) {
-  const dir = join(tmpdir(), "scrml-css-oracle", safe(relDir));
-  rmSync(dir, { recursive: true, force: true });
+/** A fresh per-run directory (review F7): concurrent runs never share or clobber a build. */
+const freshDir = (label) => mkdtempSync(join(tmpdir(), `scrml-css-oracle-${safe(label)}-`));
+
+/**
+ * Compile `source` (+ aux) with `stageOverrides`, WRITING the build into a fresh directory.
+ * → { dir, html | null, errors }. The caller removes `dir`.
+ */
+export function buildCase(relDir, source, auxFiles, stageOverrides, fromPath = null) {
+  const dir = freshDir(relDir);
   const out = join(dir, "dist");
-  mkdirSync(out, { recursive: true });
-  writeFileSync(join(dir, "case.scrml"), source);
-  for (const [n, s] of Object.entries(auxFiles ?? {})) writeFileSync(join(dir, n), s);
-  const r = compileScrml({
-    inputFiles: [join(dir, "case.scrml")],
-    write: true,
-    outputDir: out,
-    log: () => {},
-    ...(stageOverrides ? { stageOverrides } : {}),
-  });
+  // A real example (`from`) compiles IN PLACE — its sibling files (a `<db src=…>`, imports) resolve
+  // against its own directory — and only the build output goes to the fresh directory.
+  const input = fromPath ? join(REPO_ROOT, fromPath) : join(dir, "case.scrml");
+  if (!fromPath) {
+    writeFileSync(input, source);
+    for (const [n, s] of Object.entries(auxFiles ?? {})) writeFileSync(join(dir, n), s);
+  }
+  let r;
+  try {
+    r = compileScrml({
+      inputFiles: [input],
+      write: true,
+      outputDir: out,
+      log: () => {},
+      ...(stageOverrides ? { stageOverrides } : {}),
+    });
+  } catch (e) {
+    rmSync(dir, { recursive: true, force: true });
+    throw e;
+  }
   const errors = (r.errors ?? []).filter((e) => e?.severity !== "warning" && e?.severity !== "info").map((e) => String(e.code));
-  const html = join(out, "case.html");
+  const html = join(out, `${basename(input, ".scrml")}.html`);
   return { dir, html: existsSync(html) ? html : null, errors };
 }
 
@@ -179,15 +198,17 @@ export async function gradePage(htmlPath, spec) {
 
 /** Grade a css text + page html (a Core-level oracle). → { pass, reasons } */
 export async function gradeSheet(css, bodyHtml, spec) {
-  const dir = join(tmpdir(), "scrml-css-oracle", "core", safe(spec.core ?? "sheet"));
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "page.css"), css);
-  // `spec.charset` = the page's own encoding (default UTF-8) — a sheet's `@charset` is observable only
-  // against a referring document of ANOTHER encoding.
-  writeFileSync(join(dir, "page.html"),
-    `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="${spec.charset ?? "UTF-8"}">\n<link rel="stylesheet" href="page.css">\n</head>\n<body>\n${bodyHtml}\n</body>\n</html>\n`);
-  return gradePage(join(dir, "page.html"), spec);
+  const dir = freshDir(`core-${spec.core ?? "sheet"}`);
+  try {
+    writeFileSync(join(dir, "page.css"), css);
+    // `spec.charset` = the page's own encoding (default UTF-8) — a sheet's `@charset` is observable only
+    // against a referring document of ANOTHER encoding.
+    writeFileSync(join(dir, "page.html"),
+      `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="${spec.charset ?? "UTF-8"}">\n<link rel="stylesheet" href="page.css">\n</head>\n<body>\n${bodyHtml}\n</body>\n</html>\n`);
+    return await gradePage(join(dir, "page.html"), spec);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -210,13 +231,24 @@ export async function gradeCssCases(stageOverrides, cases) {
 export async function gradeBuilt(relDir, source, auxFiles, stageOverrides, spec) {
   let built;
   try {
-    built = buildCase(relDir, source, auxFiles, stageOverrides);
+    built = buildCase(relDir, source, auxFiles, stageOverrides, spec.from ?? null);
   } catch (e) {
     return { pass: false, reasons: [`the build threw: ${String(e?.message ?? e).split("\n")[0]}`] };
   }
-  if (built.errors.length > 0) return { pass: false, reasons: [`the build reported ${built.errors.join(", ")}`] };
-  if (!built.html) return { pass: false, reasons: ["the build wrote no case.html"] };
-  // Static files the page loads beside the build (e.g. an `@import`ed stylesheet).
-  for (const [name, text] of Object.entries(spec.files ?? {})) writeFileSync(join(built.dir, "dist", name), text);
-  return gradePage(built.html, spec);
+  try {
+    if (built.errors.length > 0) return { pass: false, reasons: [`the build reported ${built.errors.join(", ")}`] };
+    if (!built.html) return { pass: false, reasons: ["the build wrote no case.html"] };
+    // Static files the page loads beside the build (e.g. an `@import`ed stylesheet).
+    for (const [name, text] of Object.entries(spec.files ?? {})) writeFileSync(join(built.dir, "dist", name), text);
+    // `pageCharset`: re-declare the built page's encoding, so the stylesheet's own `@charset` — which
+    // matters only when it differs from the referring document's — becomes observable. The page's
+    // bytes are ASCII-only markup here; only its declared encoding changes.
+    if (spec.pageCharset) {
+      const h = readFileSync(built.html, "utf8");
+      writeFileSync(built.html, h.replace(/<meta charset="[^"]*">/i, `<meta charset="${spec.pageCharset}">`));
+    }
+    return await gradePage(built.html, spec);
+  } finally {
+    rmSync(built.dir, { recursive: true, force: true });
+  }
 }

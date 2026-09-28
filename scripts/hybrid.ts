@@ -630,7 +630,7 @@ export type CssGrader = (x: {
 }) => Promise<Map<string, { pass: boolean; reasons: string[] } | null>>;
 export interface CssSubstitute {
   gradeCss: CssGrader;
-  cssExtraCases?: () => Array<{ relDir: string; source: string; auxFiles: Record<string, string> }>;
+  cssExtraCases?: () => Array<{ relDir: string; source: string; auxFiles: Record<string, string>; fromPath?: string }>;
   gradeCssCores?: (x: { only?: ReadonlySet<string> }) => Promise<Array<{ relDir: string; constructs: string[]; pass: boolean; reasons: string[] }>>;
 }
 
@@ -685,9 +685,14 @@ export async function runFootprintGrade(
     let emitted = new Set<string>();
     let crash: string | null = null;
     try {
-      const file = join(dir, "case.scrml");
-      writeFileSync(file, c.source);
-      for (const [n, s] of Object.entries(c.auxFiles)) writeFileSync(join(dir, n), s);
+      // A css-only extra may name a real source (`fromPath`, repo-relative): it compiles IN PLACE so its
+      // sibling files (a `<db src=…>`, imports) resolve; nothing is written next to it.
+      const fromPath = (c as { fromPath?: string }).fromPath;
+      const file = fromPath ? join(REPO_ROOT, fromPath) : join(dir, "case.scrml");
+      if (!fromPath) {
+        writeFileSync(file, c.source);
+        for (const [n, s] of Object.entries(c.auxFiles)) writeFileSync(join(dir, n), s);
+      }
       const result = compileScrml({
         inputFiles: [file],
         write: false,

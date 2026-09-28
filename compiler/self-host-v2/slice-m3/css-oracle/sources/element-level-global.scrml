@@ -1,0 +1,27 @@
+<program>
+  <items> = ["a", "b"]
+  <on> = true
+  <div class="wrap">
+    #{
+        .x { color: red; }
+        section .deep { color: green; }
+    }
+    <span class="x" id="inside">in</span>
+  </div>
+  <span class="x" id="outside">out</span>
+  <section><span class="deep" id="deep">d</span></section>
+  <div if=@on>
+    #{ .ify { color: blue; } }
+    <span class="ify" id="ify">i</span>
+  </div>
+  <ul>
+    <each in=@items as it>
+      <li class="row">#{ .row { padding-left: 7px; } }<span>${it}</span></li>
+    </each>
+  </ul>
+  const Card = <div props={}>
+      #{ .x { color: rgb(1, 2, 3); } }
+      <span class="x" id="carded">c</span>
+  </>
+  <Card/>
+</program>

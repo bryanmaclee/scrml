@@ -1,0 +1,18 @@
+<program>
+  <h1 id="h1">h</h1>
+  <h3 id="h3">h</h3>
+  <p id="p">p</p>
+  <ul id="ul"><li>a</li></ul>
+  <ol id="ol"><li>a</li></ol>
+  <figure id="figure">f</figure>
+  <blockquote id="bq">q</blockquote>
+  <hr id="hr"/>
+  <fieldset id="fs"><legend>l</legend></fieldset>
+  <img id="img" alt="i"/>
+  <video id="video"></video>
+  <canvas id="canvas"></canvas>
+  <input id="input" type="text"/>
+  <button id="button">b</button>
+  <textarea id="textarea"></textarea>
+  <select id="select"><option>o</option></select>
+</program>

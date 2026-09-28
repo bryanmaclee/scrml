@@ -1,0 +1,41 @@
+{
+  "from": "examples/03-contact-book.scrml",
+  "spec": "§9.1 (as amended — R4), §65.3.4",
+  "rationale": "A real example whose `#{}` blocks sit inside plain elements (the S86 co-located style): under R4 they are program-global, so each rule applies to its elements — `.contact-book` max-width 640px, the form row is flex, inputs get 0.5rem padding, the list loses its bullets and padding; the reset zeroes the `h1` margin.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".contact-book",
+          "prop": "max-width",
+          "value": "640px"
+        },
+        {
+          "sel": "form",
+          "prop": "display",
+          "value": "flex"
+        },
+        {
+          "sel": "input",
+          "prop": "padding-top",
+          "value": "8px"
+        },
+        {
+          "sel": ".contacts",
+          "prop": "list-style-type",
+          "value": "none"
+        },
+        {
+          "sel": ".contacts",
+          "prop": "padding-left",
+          "value": "0px"
+        },
+        {
+          "sel": "h1",
+          "prop": "margin-top",
+          "value": "0px"
+        }
+      ]
+    }
+  ]
+}

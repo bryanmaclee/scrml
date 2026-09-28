@@ -1,43 +1,12 @@
 {
   "core": "t3Wildcard",
   "spec": "§66.17 item 3",
-  "rationale": "A recognized match with a wildcard arm: the wildcard value holds for every variant the match does not name (and before any variant is reflected); `.Dark` re-binds it.",
+  "rationale": "A recognized match with a wildcard arm: the wildcard value holds for every variant the match does not name (steps 2-3 — match semantics: `.Light` is not named, so `_` applies); `.Dark` re-binds it.",
+  "choice": "Step 1 asserts a CHOICE, not a ruling (review F2): the wildcard arm is emitted as a bare `:root` default, so it also holds BEFORE any variant is reflected on `:root`. §66.17 item 3 names only the `:root[data-scrml-theme-<cell>=\"<V>\"]` blocks; lowering `_` as `:root` is an inference (it is exact for every reflected variant the match does not name, and additionally defines the pre-reflection value).",
   "html": "<div data-scrml=\"Sheet\"><div class=\"sheet\">x</div></div>",
   "steps": [
-    {
-      "expect": [
-        {
-          "sel": ".sheet",
-          "prop": "background-color",
-          "value": "rgb(255, 255, 255)"
-        }
-      ]
-    },
-    {
-      "rootAttr": [
-        "data-scrml-theme-mode",
-        "Dark"
-      ],
-      "expect": [
-        {
-          "sel": ".sheet",
-          "prop": "background-color",
-          "value": "rgb(15, 23, 42)"
-        }
-      ]
-    },
-    {
-      "rootAttr": [
-        "data-scrml-theme-mode",
-        "Light"
-      ],
-      "expect": [
-        {
-          "sel": ".sheet",
-          "prop": "background-color",
-          "value": "rgb(255, 255, 255)"
-        }
-      ]
-    }
+    { "expect": [{ "sel": ".sheet", "prop": "background-color", "value": "rgb(255, 255, 255)" }] },
+    { "rootAttr": ["data-scrml-theme-mode", "Dark"], "expect": [{ "sel": ".sheet", "prop": "background-color", "value": "rgb(15, 23, 42)" }] },
+    { "rootAttr": ["data-scrml-theme-mode", "Light"], "expect": [{ "sel": ".sheet", "prop": "background-color", "value": "rgb(255, 255, 255)" }] }
   ]
 }

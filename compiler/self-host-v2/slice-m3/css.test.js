@@ -61,7 +61,8 @@ describe("emitter — §66.17 T3 (hand-built Cores)", () => {
     const css = C.emitCss(K.t3ScriptWrites());
     expect(css).not.toContain("--ink:");
     expect(css).toContain("color: var(--ink);");
-    expect(C.cssFootprint(K.t3ScriptWrites())).toContain("Token.ScriptWrites");
+    // No stylesheet emission of its own → not a stylesheet construct (review F1; its behaviour is clientJs).
+    expect(C.cssFootprint(K.t3ScriptWrites())).not.toContain("Token.ScriptWrites");
   });
 
   test("two cells switch two tokens independently (one attribute per cell)", () => {
@@ -159,6 +160,25 @@ describe("shim — legacy mappings (graded through the CSS seam)", () => {
     expect(out.split(":where(.card)").length - 1).toBe(1);
   });
 
+  test("R4 (S440): a `#{}` in a plain element is program-global — `@layer global`, no `@scope`, at-rules hoisted", () => {
+    const out = cssOf(`<program>
+  <div class="wrap">
+    #{
+        @import url("a.css");
+        .x { color: red; }
+    }
+    <ul>
+      <li>#{ li .y { color: blue; } }<span class="y">y</span></li>
+    </ul>
+    <span class="x">x</span>
+  </div>
+</program>
+`);
+    expect(out).toContain('@layer reset, global;\n@import url("a.css");');
+    expect(out).toContain("@layer global {\n  .x { color: red; }\n  li .y { color: blue; }\n}");
+    expect(out).not.toContain("@scope");
+  });
+
   test("no `<program>` → no reset (the reset is the app's; §65.3.4 / §65.8 'emitted once')", () => {
     const r = ingest(`<div id="x">hi</div>\n`).results[0];
     expect(r.why).toEqual([]);
@@ -211,7 +231,7 @@ ${body}
     expect(why.some((w) => w.includes("T3")) || r.frontEnd.length > 0).toBe(true);
   });
 
-  test("`!important` (§65.7), an `@media` block, a nesting `&` (lost by impl#1's parser), element-level `#{}`", () => {
+  test("`!important` (§65.7), an `@media` block, a nesting `&` (lost by impl#1's parser), a flat element-level `#{}`", () => {
     const comp = (body) => `<program>
   const Card = <div props={}>
       #{ ${body} }
@@ -223,8 +243,8 @@ ${body}
     expect(whyOf(comp(".btn { color: red !important; }")).some((w) => w.includes("§65.7"))).toBe(true);
     expect(whyOf(comp("@media (min-width: 700px) { .btn { color: red; } }")).some((w) => w.includes("@media"))).toBe(true);
     expect(whyOf(comp(".btn { &:hover { color: red; } }")).some((w) => w.includes("empty value"))).toBe(true);
-    const el = whyOf(`<program>\n  <div>\n    #{ .x { color: red; } }\n    <span class="x">x</span>\n  </div>\n</program>\n`);
-    expect(el.some((w) => w.includes("non-component element"))).toBe(true);
+    const el = whyOf(`<program>\n  <div>\n    #{ color: red; }\n    <span class="x">x</span>\n  </div>\n</program>\n`);
+    expect(el.some((w) => w.includes("at element level"))).toBe(true);
   });
 
   test("a variant re-binding a name with no base value (E-THEME-TOKEN-UNKNOWN is analyze's)", () => {

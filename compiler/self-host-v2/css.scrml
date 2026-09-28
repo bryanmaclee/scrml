@@ -19,8 +19,13 @@
 //     universal selectors, any combinators) is wrapped in `:where()`, never
 //     `:is()`; an arm with an attribute test, a pseudo-class or a
 //     pseudo-element keeps its own specificity (a §65.2.2 layer; `:where(::x)`
-//     matches nothing). Program-level rules are not wrapped (§65.2 scopes the
-//     mechanism to "every author selector inside a scope").
+//     matches nothing).
+//     CHOICE (review F6, unruled): program-global rules are NOT wrapped. The SPEC
+//     pulls both ways — §65.2 opens "All scrml-emitted selectors are
+//     specificity-flat", then scopes the mechanism: "§65 reuses that same
+//     mechanism for every author selector inside a scope (§65.2.5)"; and §65.2.4
+//     gives the global escape hatch "the weaker guarantee". Kept unwrapped (and
+//     so is impl#1); a ruling either way is a one-line change in `plainRule`.
 //   - §65.2.4 R1 / §65.5 — a universal / bare-root arm is a FLOOR that resolves
 //     below specific rules; inside a scope (all arms (0,0,0)) floor arms are
 //     emitted first, so source order ranks them below.
@@ -487,6 +492,9 @@ ${
             }
         }
         for (const d of r.decls) { out = partsNames(out, d.value) }
+        // Declaration ORDER is meaning when a later declaration overrides an earlier one (a longhand
+        // after its shorthand, a repeated property): certified by its own corruption.
+        if (r.decls.length > 1) out = addName(out, "Decl.Order")
         return out
     }
 
@@ -494,7 +502,9 @@ ${
         return match t.init {
             .Constant(value: v) :> partsNames(addName(acc, "Token.Constant"), v)
             .OnVariant(cell: c, arms: arms, otherwise: w) :> variantNames(acc, arms, w)
-            .ScriptWrites(cell: c) :> addName(acc, "Token.ScriptWrites")
+            // No stylesheet emission of its own (review F1): a ScriptWrites token's CSS is nothing, and
+            // its behaviour is the script's `:root` write (the clientJs half) — nothing here to certify.
+            .ScriptWrites(cell: c) :> acc
         }
     }
 
@@ -512,7 +522,15 @@ ${
         if (u.charsets.length > 0) out = addName(out, "Css.Charset")
         if (u.imports.length > 0) out = addName(out, "Css.Import")
         if (u.reset || u.global.length > 0) out = addName(out, "Css.LayerOrder")
-        if (u.reset) out = addName(out, "Css.Reset")
+        if (u.reset) {
+            // One construct per §65.3.4 bullet (review F4): each is certified by its own corruption.
+            out = addName(out, "Css.Reset")
+            out = addName(out, "Reset.BoxSizing")
+            out = addName(out, "Reset.FlowMargin")
+            out = addName(out, "Reset.Body")
+            out = addName(out, "Reset.Media")
+            out = addName(out, "Reset.FormFont")
+        }
         for (const t of u.tokens) { out = tokenNames(out, t) }
         if (u.global.length > 0) out = addName(out, "Css.Global")
         for (const r of u.global) { out = ruleNames(out, r, false) }

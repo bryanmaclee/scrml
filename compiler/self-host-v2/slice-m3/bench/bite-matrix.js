@@ -149,6 +149,25 @@ const CSS_MUTATIONS = [
     to: '        if (u.reset) out = out.concat([CssStmt.Layer("reset", plainRules(resetRules()))])\n        out = out.concat(importStmts(u))\n' },
   { c: "Css.Charset", id: "`@charset` dropped", file: CSSF,
     from: "for (const c of u.charsets) { out = out.concat([CssStmt.Charset(c)]) }", to: "" },
+  { c: "Css.Charset", id: "`@charset` emitted after the `@layer` statement (not byte 0)", file: CSSF,
+    from: '        for (const c of u.charsets) { out = out.concat([CssStmt.Charset(c)]) }\n        const layered: boolean = u.reset || u.global.length > 0\n        if (layered) out = out.concat([CssStmt.LayerOrder(["reset", "global"])])\n',
+    to: '        const layered: boolean = u.reset || u.global.length > 0\n        if (layered) out = out.concat([CssStmt.LayerOrder(["reset", "global"])])\n        for (const c of u.charsets) { out = out.concat([CssStmt.Charset(c)]) }\n' },
+  // ---- review F4: each §65.3.4 reset bullet, on its own ----
+  { c: "Reset.BoxSizing", id: "reset bullet 1: box-sizing rule emptied", file: CSSF,
+    from: 'styleRule(boxArms, [decl("box-sizing", "border-box")])', to: "styleRule(boxArms, [])" },
+  { c: "Reset.FlowMargin", id: "reset bullet 2: the flow-set margin rule matches nothing", file: CSSF,
+    from: 'styleRule(tagArms(["body", "h1", "h2",', to: 'styleRule(tagArms(["x-none", "x-h1", "x-h2",' },
+  { c: "Reset.Body", id: "reset bullet 5: body `min-height` dropped", file: CSSF,
+    from: '[decl("min-height", "100vh"), decl("line-height", "1.5")]', to: '[decl("line-height", "1.5")]' },
+  { c: "Reset.Body", id: "reset bullet 5: body `line-height` dropped", file: CSSF,
+    from: '[decl("min-height", "100vh"), decl("line-height", "1.5")]', to: '[decl("min-height", "100vh")]' },
+  { c: "Reset.Media", id: "reset bullet 3: the replaced-media rule matches nothing", file: CSSF,
+    from: 'styleRule(tagArms(["img", "picture", "video", "canvas", "svg"]),', to: 'styleRule(tagArms(["x-none"]),' },
+  { c: "Reset.FormFont", id: "reset bullet 4: form controls no longer inherit font", file: CSSF,
+    from: '[decl("font", "inherit")]', to: "[]" },
+  // ---- review F3: declaration order within a rule ----
+  { c: "Decl.Order", id: "a rule's declarations printed in reverse order", file: CSSF,
+    from: 'for (const d of ds) { body = body + " " + declText(d) }', to: 'for (const d of ds) { body = " " + declText(d) + body }' },
   { c: "Token.Constant", id: "a constant token's `:root` definition dropped", file: CSSF,
     from: ".Constant(value: v) :> [OutDecl.Custom(t.sym, v)]", to: ".Constant(value: v) :> []" },
   { c: "Token.OnVariant", id: "variant blocks key the wrong attribute", file: CSSF,
@@ -157,7 +176,10 @@ const CSS_MUTATIONS = [
     from: ".OnVariant(cell: c, arms: arms, otherwise: w) :> armGroups(gs, c, t.sym, arms)", to: ".OnVariant(cell: c, arms: arms, otherwise: w) :> gs" },
   { c: "Token.OnVariant.Otherwise", id: "the wildcard / base value dropped", file: CSSF,
     from: "if (w is some) return [OutDecl.Custom(s, w)]", to: "if (false) return [OutDecl.Custom(s, w)]" },
-  { c: "Token.ScriptWrites", id: "an unrecognized token pinned by a static `:root` value", file: CSSF,
+  // Review F1: kept to SHOW it is unobservable — a static value is overridden by the script's inline
+  // `:root` write, so it can only differ before the first write (unruled). Token.ScriptWrites is not a
+  // stylesheet construct (css.scrml footprint); this row is expected to bite nothing.
+  { c: "Token.ScriptWrites", id: "an unrecognized token pinned by a static `:root` value (expected: no bite, F1)", file: CSSF,
     from: ".ScriptWrites(cell: c) :> []", to: '.ScriptWrites(cell: c) :> [OutDecl.Custom(t.sym, [CssPart.CssText("red")])]' },
   { c: "Value.TokenVar", id: "`@token` prints a wrong custom-property name", file: CSSF,
     from: '.TokenVar(token: s) :> "var(--"', to: '.TokenVar(token: s) :> "var(--x-"' },
@@ -186,6 +208,8 @@ const CSS_MUTATIONS = [
     from: "if (r.arms.length == 0) return { init: TokenInit.Constant(base.parts), why: base.why }", to: "if (true) return { init: TokenInit.Constant(base.parts), why: base.why }" },
   { c: "Value.TokenVar", id: "shim: `@token` resolved as a cell", file: CSSI,
     from: "parts = parts.concat([CssPart.TokenVar(tok)])", to: "parts = parts.concat([CssPart.CellVar(tok)])" },
+  { c: "Css.Global", id: "shim: element-level `#{}` dropped (R4 undone)", file: CSSI,
+    from: 'const global: boolean = b.at.level == "program" || b.at.level == "element"', to: 'const global: boolean = b.at.level == "program"' },
   { c: "Css.Import", id: "shim: a program-level `@import` dropped", file: CSSI,
     from: "imports = imports.concat([h.imp])", to: "imports = imports" },
 ];

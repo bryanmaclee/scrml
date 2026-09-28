@@ -11,7 +11,6 @@
 import { compileScrml } from "../../../src/api.js";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..");
@@ -20,13 +19,34 @@ const ARTIFACTS = ["html", "css", "clientJs", "serverJs", "libraryJs"];
 
 const digest = (s) => (s == null ? null : createHash("sha256").update(s).digest("hex").slice(0, 16));
 
+// A FIXED root is required, not a per-run temp dir: impl#1's artifacts depend on the source's absolute
+// path (measured: two identical compiles from two random temp dirs differed in 629 of 1048 cases), so
+// a before/after comparison must compile from the same place. Review F7: the root is therefore
+// WORKTREE-local (the gitignored `.tmp/`, never a directory shared with other worktrees or agents in
+// the system tmpdir), and guarded by a mkdir mutex so two runs in one worktree cannot clobber it.
+const ROOT_DIR = join(ROOT, ".tmp", "css-identity");
+const LOCK = join(ROOT, ".tmp", "css-identity.lock");
+
 function snapshot() {
+  mkdirSync(join(ROOT, ".tmp"), { recursive: true });
+  try {
+    mkdirSync(LOCK);
+  } catch {
+    console.error(`css-identity: another run holds ${LOCK} (remove it if no run is live)`);
+    process.exit(2);
+  }
+  try {
+    return snapshotLocked();
+  } finally {
+    rmSync(LOCK, { recursive: true, force: true });
+  }
+}
+
+function snapshotLocked() {
   const out = {};
   const rels = [...new Bun.Glob("**/case.scrml").scanSync({ cwd: CASES, onlyFiles: true })].map((p) => dirname(p)).sort();
   for (const rel of rels) {
-    // A FIXED path per case: artifacts embed the source path (module keys, source maps), so a random
-    // temp dir would make two identical compiles differ.
-    const dir = join(tmpdir(), "scrml-css-identity", rel);
+    const dir = join(ROOT_DIR, rel);
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     try {

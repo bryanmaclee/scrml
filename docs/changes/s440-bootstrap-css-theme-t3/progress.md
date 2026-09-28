@@ -138,3 +138,58 @@ lower produce the Core css node from `<theme>` + §66 declarations + `#{}`.
 - Suites: slice-m1 73/0 · slice-m2 284/0 · slice-m3 53/0 (css.test 26, css-half 1, bite 3, + s439's) ·
   lint 48 files 0 violations · pre-commit gate (b063a7e0e) 32084 pass / 85 skip / 0 fail.
 - CORRECTION to the line above: slice-m3 is 52/0 across 5 files (re-run at c274821ec), not 53.
+
+## 2026-09-28 — FIX ROUND (S239 review verdict LAND + S440 rulings R4/R5/R6)
+Reproduced first:
+- F1 REPRODUCED by reasoning over the oracle + the matrix row: a script's `:root` write is an INLINE
+  style (`documentElement.style.setProperty`) and beats any stylesheet `:root` rule, so a static
+  definition for a ScriptWrites token is observable only before the first write — which is exactly
+  what step 1 asserted, as if ruled. Fixed: step 1 dropped; the oracle now asserts two successive script
+  writes driving the use site; Token.ScriptWrites is REMOVED from the stylesheet footprint (it has no
+  stylesheet emission of its own — its behaviour is the clientJs half, dpa-051 §8.4 step 3); its old
+  corruption is kept in the matrix, labelled "expected: no bite (F1)".
+- F2: `core/t3-wildcard` step 1 relabelled in a `choice` field (not the rationale). CHOICE: the `_` arm
+  lowers to a bare `:root` default, so it also holds BEFORE any variant is reflected — §66.17 item 3
+  names only the `:root[data-scrml-theme-<cell>="<V>"]` blocks. (Steps 2-3 are match semantics.)
+- F6 CHOICE, now labelled in css.scrml's header: program-global rules are NOT `:where()`-wrapped.
+  Tension quoted: §65.2 "All scrml-emitted selectors are specificity-flat" vs "§65 reuses that same
+  mechanism for every author selector inside a scope (§65.2.5)" and §65.2.4's "weaker guarantee" for the
+  global escape hatch. impl#1 does the same; a ruling is a one-line change in `plainRule`.
+- F3/F4/F5: verified in the re-run matrix below — the new corruptions (declaration order, each reset
+  bullet, `@charset` not at byte 0) are killed ONLY by the new oracle sources (decl-order,
+  reset-bullets, charset-layer-import); no pre-existing oracle kills them, i.e. the reviewer's
+  surviving corruptions reproduce against the old set.
+- F7: css-oracle.js builds into a fresh mkdtemp dir per build (removed after grading), Core pages too.
+  css-identity.js CANNOT use a per-run temp dir: impl#1's artifacts depend on the source's absolute path
+  (two identical compiles from two random temp dirs differed in 629/1048 cases), so a before/after
+  comparison must compile from one place — it now uses a WORKTREE-local `.tmp/css-identity/` (never a
+  directory shared across worktrees/agents in the system tmpdir) behind a mkdir mutex.
+R4 (element-level `#{}` is program-global):
+- css-ingest.scrml: an element-level block goes to `global` (at-rules hoisted, as program-level).
+  Found while doing it: impl#1 holds an each-block's body twice (`bodyChildren` + `templateChildren`),
+  so the generic walk collected one `#{}` twice → blocks are now de-duplicated by node id.
+- SPEC §9.1: the "(inline or scoped per compiler settings)" bullet replaced by the ruled text with
+  `> **Provenance:** ruling:user-voice-scrml.md S440 (all recs #2, item 4)`. ALSO amended (same
+  provenance) the section's lead sentence, which said "inline at the element level when used inside a
+  markup or state context" and would have contradicted the ruling. SPEC-INDEX regenerated (ranges moved).
+- impl#1 vs the ruled text (reported, NOT changed): (1) impl#1 DROPS a `#{}` inside an `<each>` row
+  entirely — `collectCssBlocks` walks only `children` + a logic node's `body`, never an each-block's
+  body (oracle `element-level-global` fails on impl#1: `.row` padding 0px, SPEC 7px); plain elements
+  and `if=` elements ARE emitted program-global in `@layer global`, as ruled. (2) a SELECTOR-LESS
+  element-level block (`<p> #{ color: green; } </p>`) is emitted by impl#1 as a bare `color: green;`
+  inside `@layer global {}` — dead CSS. The ruling places selector rules; a flat element-level block
+  has no selector, so the bootstrap keeps it not-yet ("no selector to apply to") — open question.
+- R26 after R4: all 13 examples that were not-yet on the element reason are now compared and IDENTICAL
+  to impl#1 (whitespace-normalized); of the element-reason samples, 7 remain not-yet on the flat
+  (selector-less) element-level block, 1 on `@supports`, 1 on `@media`; the rest compare.
+- Oracles added: sources/element-level-global.*, sources/example-03-contact-book.json and
+  sources/example-08-chat.json (`from`: real examples compiled IN PLACE — their `<db src>` resolves;
+  hybrid.ts's footprint loop honours `fromPath` the same way).
+R5: §66.20 row `E-THEME-TOKEN-CELL-COLLISION` (no existing code fits — E-NAME-COLLIDES-STATE is a local
+  reusing a cell name, E-SCOPE-REDECLARE is function-body scope) + a pointer from §66.17 item 4; Nominal,
+  no fire site (front-end work: bootstrap analyze fires it once parse.scrml carries T3). The shim's
+  not-yet reason names the code.
+R6: no action (the oracle stays in slice-m3; css-oracle.js header says so).
+New footprint names: `Decl.Order` (a rule with ≥2 declarations), `Reset.BoxSizing/FlowMargin/Body/Media/
+  FormFont` (one per §65.3.4 bullet). New matrix rows: `@charset` after the `@layer` statement, each reset
+  bullet (body split into min-height / line-height), declarations reversed, shim R4 undone.

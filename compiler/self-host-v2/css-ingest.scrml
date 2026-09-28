@@ -12,6 +12,9 @@
 //   - `#{}` directly under `<program>` (or a `${}` there, or the file top level)
 //     → `global` rules (§9.1 DQ-6/DQ-7 program-level; §65.5 `@layer global`);
 //     a top-level `@charset` / `@import` in it → the hoisted statements (§65.8).
+//   - `#{}` inside a markup element that is NOT inside a component → PROGRAM-GLOBAL,
+//     exactly as a program-level block (§9.1 as amended by ruling S440 all recs #2
+//     item 4 — R4): a plain element creates no scope.
 //   - `#{}` anywhere inside a component instance → that component's scope rules
 //     (§9.1 DQ-7). The component is the nearest `_expandedFrom` (impl#1 marks
 //     each expansion root); the FIRST expansion of a component contributes and
@@ -39,9 +42,9 @@
 //   `@name` resolving to nothing (E-THEME-TOKEN-UNKNOWN is analyze's);
 //   `!important` (§65.7: internal vs interop is not classified yet); a computed
 //   `@` expression; `@apply` (§26.8); an at-rule block (`@media`, …); a
-//   selector this shim cannot parse (§65.2.5: fail loud, never forgive); a
-//   `#{}` inside a non-component element (§9.1: "inline or scoped per compiler
-//   settings" — not resolved); a flat declaration at program level; a file with
+//   selector this shim cannot parse (§65.2.5: fail loud, never forgive); a flat
+//   (selector-less) declaration at program or plain-element level (no selector to
+//   apply to — §9.1 inlines flat blocks only on a component root); a file with
 //   no `<program>` (where its reset goes is not specified); a `<style>` block.
 //
 // RULE 7 (text). The css payload IS text in impl#1's AST — a rule's `selector`
@@ -59,7 +62,7 @@
 ${
     import { Sym, SimpleSel, Combinator, Compound, SelLink, ComplexSel, CssPart, CssDecl, StyleRule,
              TokenArm, TokenInit, ThemeToken, CssImport, ScopeSheet, CssUnit, mkSym } from "./core.scrml"
-    import { IVal, INode, IField, strAt, flagAt, nodeAt, listAt, nodesAt, kindAt, hasStr,
+    import { IVal, INode, IField, strAt, numAt, flagAt, nodeAt, listAt, nodesAt, kindAt, hasStr,
              unmapped } from "./ingest.scrml"
 
     fn LB() -> string { return "{" }
@@ -426,9 +429,24 @@ ${
         return { level: "element", scope: "", dup: at.dup }
     }
 
+    fn sameIdSeen(bs: Found[], n: INode) -> boolean {
+        const id: number | not = numAt(n, "id")
+        if (id is not) return false
+        for (const b of bs) {
+            const other: number | not = numAt(b.node, "id")
+            if (other is some) {
+                if (other == id) return true
+            }
+        }
+        return false
+    }
+
     fn visitNode(a: Acc, n: INode, at: Place) -> Acc {
         const k: string = kindAt(n)
         if (k == "css-inline") {
+            // impl#1 can hold ONE node in two places (an each-block's `bodyChildren` and
+            // `templateChildren`): the same node id is the same `#{}`, collected once.
+            if (sameIdSeen(a.blocks, n)) return a
             return { programs: a.programs, cells: a.cells, themes: a.themes, blocks: a.blocks.concat([{ node: n, at: at }]),
                      seen: a.seen, why: a.why }
         }
@@ -497,7 +515,7 @@ ${
             } else if (findRec(recs, name) is some) {
                 why = why.concat(["the theme token `" + name + "` is declared twice (§66.17 item 4: one namespace)"])
             } else if (hasStr(cells, name)) {
-                why = why.concat(["the theme token `" + name + "` and a cell share the name (§66.17 item 4: one namespace)"])
+                why = why.concat(["the theme token `" + name + "` and a cell share the name (§66.17 item 4: one namespace — E-THEME-TOKEN-CELL-COLLISION, analyze's to fire)"])
             } else {
                 recs = recs.concat([{ name: name, sym: mkSym(next, name), base: text, cell: "", arms: [] }])
                 next = next + 1
@@ -770,17 +788,15 @@ ${
                                       ["reactiveRefs"]))
             if (isFlatRule(r)) flat = flat + 1
         }
-        if (b.at.level == "element") {
-            return { charsets: sh.charsets, imports: sh.imports, global: sh.global, scopes: sh.scopes,
-                     why: why.concat(["`#{}` inside a non-component element (§9.1: \"inline or scoped per compiler settings\" — not resolved)"]) }
-        }
+        // R4 (S440): a `#{}` in a plain (non-component) element is program-global.
+        const global: boolean = b.at.level == "program" || b.at.level == "element"
         if (flat == rules.length && b.at.level == "component") {
             // The inline `style=""` form (§9.1) — html's, not the stylesheet's.
             return { charsets: sh.charsets, imports: sh.imports, global: sh.global, scopes: sh.scopes, why: why }
         }
         if (flat > 0) {
             return { charsets: sh.charsets, imports: sh.imports, global: sh.global, scopes: sh.scopes,
-                     why: why.concat(["bare css declarations in a " + b.at.level + "-level `#{}` with no selector to apply to"]) }
+                     why: why.concat(["bare css declarations in a `#{}` at " + b.at.level + " level, with no selector to apply to"]) }
         }
         let charsets: string[] = sh.charsets
         let imports: CssImport[] = sh.imports
@@ -788,7 +804,7 @@ ${
         for (const r of rules) {
             const at: string | not = strAt(r, "atRule")
             if (at is some) {
-                if (b.at.level != "program") {
+                if (!global) {
                     why = why.concat(["the at-rule `" + trimmed(at) + "` in a component `#{}`"])
                 } else {
                     const h: HoistR = hoistOf(at)
@@ -808,7 +824,7 @@ ${
                 rs = rs.concat([rr.rule])
             }
         }
-        if (b.at.level == "program") {
+        if (global) {
             return { charsets: charsets, imports: imports, global: sh.global.concat(rs), scopes: sh.scopes, why: why }
         }
         return { charsets: charsets, imports: imports, global: sh.global, scopes: addScopeRules(sh.scopes, b.at.scope, rs), why: why }

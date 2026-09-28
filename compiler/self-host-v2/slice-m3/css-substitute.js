@@ -86,7 +86,7 @@ export async function gradeCss({ stageOverrides, cases }) {
 
 /** The css-only sources (css-oracle/sources/), classified + graded by the same footprint loop. */
 export function cssExtraCases() {
-  return oracleSources().map(({ relDir, source, auxFiles }) => ({ relDir, source, auxFiles }));
+  return oracleSources().map(({ relDir, source, auxFiles, spec }) => ({ relDir, source, auxFiles, ...(spec.from ? { fromPath: spec.from } : {}) }));
 }
 
 /**
