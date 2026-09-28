@@ -258,7 +258,8 @@ const MIRROR = join(ROOT, ".tmp", `bite-matrix-${process.pid}`);
 rmSync(MIRROR, { recursive: true, force: true });
 mkdirSync(join(MIRROR, "compiler"), { recursive: true });
 cpSync(join(ROOT, SH), join(MIRROR, SH), { recursive: true });
-for (const rel of ["compiler/src", "compiler/native-parser", "compiler/SPEC.md", "bunfig.toml", "package.json"]) {
+// `examples` — css-oracle sources compile real examples in place (`"from"`), resolved from the tree root.
+for (const rel of ["compiler/src", "compiler/native-parser", "compiler/SPEC.md", "bunfig.toml", "package.json", "examples"]) {
   symlinkSync(join(ROOT, rel), join(MIRROR, rel));
 }
 const OUT = join(MIRROR, "grade.json");

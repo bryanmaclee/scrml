@@ -193,3 +193,24 @@ R6: no action (the oracle stays in slice-m3; css-oracle.js header says so).
 New footprint names: `Decl.Order` (a rule with ≥2 declarations), `Reset.BoxSizing/FlowMargin/Body/Media/
   FormFont` (one per §65.3.4 bullet). New matrix rows: `@charset` after the `@layer` statement, each reset
   bullet (body split into min-height / line-height), declarations reversed, shim R4 undone.
+
+## 2026-09-28 — FIX ROUND: merge + re-run (tip after merge aee522d7a)
+- `git merge origin/main` (3 commits: #1125 #1126 #1127; auto-merged SPEC.md + api.js, no conflicts;
+  SPEC-INDEX regen: 0 rows changed).
+- BYTE-IDENTITY (post-merge): the 4 seam files restored from origin/main → snapshot; this tree →
+  snapshot: **1048 compared, 664 carry css, 0 differ**.
+- impl#1 conformance: 1041/1048 + 7 xfail (unchanged).
+- CSS footprint: 1048/1048; GRADED 565 (565/565 run, 299 runtime passes, 0 fail); NOT-YET 36; FRONT-END
+  447. **CSS half 38/38** (17 conformance · 15 sources · 6 core); 7 css-only sources not graded (same list).
+- CG footprint: 18/18 runtime passes, 10 codes-only, NOT-YET 573, FRONT-END 447 (unchanged).
+- Bite matrix (exit 0): CG 32 certified / 0 uncertified. CSS 38 passes, 45 corruptions, **32 certified /
+  0 uncertified**. The reviewer's survivors now die, and ONLY on the new sources (so they reproduce
+  against the old set): body min-height → reset-bullets; body line-height → reset-bullets; media rule →
+  reset-bullets; declarations reversed → decl-order; `@charset` after `@layer` → charset-layer-import.
+  Token.ScriptWrites row: 0 of 38 (expected, F1). First run of this matrix reported "mirror NO": the
+  mirror lacked `examples/` for the `from` sources — `examples` added to the mirror's symlinks.
+- Suites: slice-m1 73/0 · SLICE_CORE=lowered slice-m1 73/0 · slice-m2 284/0 · slice-m3 53/0 · lint 52
+  files 0 violations · css-sub-seam + hybrid-stage-swap 28/0 · pre-commit gate 32084 pass / 85 skip / 0 fail.
+- css-oracle-both (impl#1 vs hybrid) on the new sources: impl#1 FAILS element-level-global (`.row`
+  inside `<each>`: 0px, SPEC 7px — impl#1 drops the block; see R4 note above); every other new source
+  passes on both.

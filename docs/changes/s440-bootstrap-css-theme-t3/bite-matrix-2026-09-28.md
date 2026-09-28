@@ -55,51 +55,60 @@ Clean grade: **18 runtime passes** (codes-only passes excluded — front-end cod
 
 ## CSS — the bootstrap stylesheet pass (css passes: computed style in Chromium against SPEC-derived oracles)
 
-Clean grade: **32 css passes** (conformance css halves + css-only sources + Core-level T3 oracles). Mirror reproduced it: yes.
+Clean grade: **38 css passes** (conformance css halves + css-only sources + Core-level T3 oracles). Mirror reproduced it: yes.
 
 | construct | corruption | css passes killed (still graded, css oracle FAILED) | which |
 |---|---|---|---|
-| Css.Scope | the `@scope` wrapper dropped (component rules land unscoped) | 1 of 32 | `css-oracle/scope-donut-nested` |
-| Css.Scope | the donut limit `to ([data-scrml])` dropped | 1 of 32 | `css-oracle/scope-donut-nested` |
-| Scope.Flat | `:where()` dropped (natural specificity) | 1 of 32 | `css-oracle/where-flat` |
-| Scope.Flat | `:is()` instead of `:where()` (§65.2.5 never-:is) | 1 of 32 | `css-oracle/where-flat` |
-| Scope.Conditional | conditional arms flattened too | 3 of 32 | `css-oracle/selectors`, `css-oracle/where-flat`, `css-core/charset` |
-| Scope.Floor | floor arms emitted AFTER the specific rules | 2 of 32 | `style/r1-universal-star-layer`, `css-oracle/r1-floor-order` |
-| Css.Reset | the reset layer emptied | 7 of 32 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/program-import-hoist-clean`, `style/program-scope-overlap-soft`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/empty-blocks` |
-| Css.LayerOrder | the layer order reversed (`global, reset`) | 2 of 32 | `css-oracle/import-hoist`, `css-oracle/layer-order` |
-| Css.Global | program-global rules emitted unlayered | 1 of 32 | `css-oracle/layer-order` |
-| Css.Import | `@import` emitted after the reset block (not hoisted) | 1 of 32 | `css-oracle/import-hoist` |
-| Css.Charset | `@charset` dropped | 1 of 32 | `css-core/charset` |
-| Token.Constant | a constant token's `:root` definition dropped | 4 of 32 | `style/flat-inline-token-lowering-clean`, `style/theme-tokens-recognized`, `css-oracle/two-themes`, `css-core/t3-worked` |
-| Token.OnVariant | variant blocks key the wrong attribute | 6 of 32 | `style/theme-emission-clean`, `style/theme-for-variant-inference`, `css-oracle/variant-three`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
-| Token.OnVariant | variant arms dropped | 6 of 32 | `style/theme-emission-clean`, `style/theme-for-variant-inference`, `css-oracle/variant-three`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
-| Token.OnVariant.Otherwise | the wildcard / base value dropped | 4 of 32 | `style/theme-emission-clean`, `style/theme-for-variant-inference`, `css-oracle/variant-three`, `css-core/t3-wildcard` |
-| Token.ScriptWrites | an unrecognized token pinned by a static `:root` value | 1 of 32 | `css-core/t3-script-writes` |
-| Value.TokenVar | `@token` prints a wrong custom-property name | 7 of 32 | `style/theme-emission-clean`, `css-oracle/two-themes`, `css-oracle/variant-three`, `css-core/t3-script-writes`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
-| Value.CellVar | `@cell` prints the token form | 1 of 32 | `css-core/cell-var` |
-| Value.Text | literal value text emptied | 30 of 32 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/conditional-hover-layer`, `style/descendant-combinator-preserved`, `style/disjoint-attr-values`, `style/disjoint-different-tag`, `style/flat-inline-token-lowering-clean`, `style/program-import-hoist-clean`, `style/program-scope-overlap-soft`, `style/r1-universal-star-layer`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `style/reset-opt-out-clean`, `style/style-001-scoped-css-neg`, `style/theme-emission-clean`, `style/theme-for-variant-inference`, `style/theme-tokens-recognized`, `css-oracle/empty-blocks`, `css-oracle/import-hoist`, `css-oracle/layer-order`, `css-oracle/r1-floor-order`, `css-oracle/scope-donut-nested`, `css-oracle/selectors`, `css-oracle/two-themes`, `css-oracle/variant-three`, `css-oracle/where-flat`, `css-core/charset`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
-| Sel.Universal | `*` misprinted | 6 of 32 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/program-import-hoist-clean`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/r1-floor-order` |
-| Sel.Tag | a type selector misprinted | 13 of 32 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/disjoint-attr-values`, `style/disjoint-different-tag`, `style/program-import-hoist-clean`, `style/program-scope-overlap-soft`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/empty-blocks`, `css-oracle/import-hoist`, `css-oracle/layer-order`, `css-oracle/selectors`, `css-oracle/where-flat` |
-| Sel.Class | a class selector misprinted | 21 of 32 | `style/clean-single-rule`, `style/conditional-hover-layer`, `style/descendant-combinator-preserved`, `style/program-import-hoist-clean`, `style/r1-universal-star-layer`, `style/reset-opt-out-clean`, `style/style-001-scoped-css-neg`, `style/theme-emission-clean`, `css-oracle/layer-order`, `css-oracle/r1-floor-order`, `css-oracle/scope-donut-nested`, `css-oracle/selectors`, `css-oracle/two-themes`, `css-oracle/variant-three`, `css-oracle/where-flat`, `css-core/cell-var`, `css-core/charset`, `css-core/t3-script-writes`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
-| Sel.Id | an id selector printed as a class | 1 of 32 | `css-oracle/selectors` |
-| Sel.Attr | an attribute test misprinted | 2 of 32 | `style/disjoint-attr-values`, `css-oracle/where-flat` |
-| Sel.PseudoClass | a pseudo-class misprinted | 2 of 32 | `style/conditional-hover-layer`, `css-oracle/selectors` |
-| Sel.PseudoElement | a pseudo-element misprinted | 7 of 32 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/program-import-hoist-clean`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/selectors`, `css-core/charset` |
-| Comb.Descendant | descendant prints as next-sibling | 2 of 32 | `style/descendant-combinator-preserved`, `css-oracle/where-flat` |
-| Comb.Child | child prints as descendant | 1 of 32 | `css-oracle/selectors` |
-| Comb.NextSibling | next-sibling prints as later-sibling | 1 of 32 | `css-oracle/selectors` |
-| Comb.LaterSibling | later-sibling prints as next-sibling | 1 of 32 | `css-oracle/selectors` |
-| Css.Scope | shim: component rules attributed to the program | 2 of 32 | `css-oracle/scope-donut-nested`, `css-oracle/where-flat` |
-| Css.Reset | shim: `reset="none"` ignored | 1 of 32 | `style/reset-opt-out-clean` |
-| Token.OnVariant | shim: legacy `.Variant` re-binds dropped | 3 of 32 | `style/theme-emission-clean`, `style/theme-for-variant-inference`, `css-oracle/variant-three` |
-| Value.TokenVar | shim: `@token` resolved as a cell | 3 of 32 | `style/theme-emission-clean`, `css-oracle/two-themes`, `css-oracle/variant-three` |
-| Css.Import | shim: a program-level `@import` dropped | 1 of 32 | `css-oracle/import-hoist` |
+| Css.Scope | the `@scope` wrapper dropped (component rules land unscoped) | 2 of 38 | `css-oracle/element-level-global`, `css-oracle/scope-donut-nested` |
+| Css.Scope | the donut limit `to ([data-scrml])` dropped | 1 of 38 | `css-oracle/scope-donut-nested` |
+| Scope.Flat | `:where()` dropped (natural specificity) | 1 of 38 | `css-oracle/where-flat` |
+| Scope.Flat | `:is()` instead of `:where()` (§65.2.5 never-:is) | 1 of 38 | `css-oracle/where-flat` |
+| Scope.Conditional | conditional arms flattened too | 3 of 38 | `css-oracle/selectors`, `css-oracle/where-flat`, `css-core/charset` |
+| Scope.Floor | floor arms emitted AFTER the specific rules | 2 of 38 | `style/r1-universal-star-layer`, `css-oracle/r1-floor-order` |
+| Css.Reset | the reset layer emptied | 9 of 38 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/program-import-hoist-clean`, `style/program-scope-overlap-soft`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/empty-blocks`, `css-oracle/example-03-contact-book`, `css-oracle/reset-bullets` |
+| Css.LayerOrder | the layer order reversed (`global, reset`) | 4 of 38 | `css-oracle/charset-layer-import`, `css-oracle/example-08-chat`, `css-oracle/import-hoist`, `css-oracle/layer-order` |
+| Css.Global | program-global rules emitted unlayered | 2 of 38 | `css-oracle/element-level-global`, `css-oracle/layer-order` |
+| Css.Import | `@import` emitted after the reset block (not hoisted) | 2 of 38 | `css-oracle/charset-layer-import`, `css-oracle/import-hoist` |
+| Css.Charset | `@charset` dropped | 2 of 38 | `css-oracle/charset-layer-import`, `css-core/charset` |
+| Css.Charset | `@charset` emitted after the `@layer` statement (not byte 0) | 1 of 38 | `css-oracle/charset-layer-import` |
+| Reset.BoxSizing | reset bullet 1: box-sizing rule emptied | 6 of 38 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/program-import-hoist-clean`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/reset-bullets` |
+| Reset.FlowMargin | reset bullet 2: the flow-set margin rule matches nothing | 8 of 38 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/program-import-hoist-clean`, `style/program-scope-overlap-soft`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/example-03-contact-book`, `css-oracle/reset-bullets` |
+| Reset.Body | reset bullet 5: body `min-height` dropped | 1 of 38 | `css-oracle/reset-bullets` |
+| Reset.Body | reset bullet 5: body `line-height` dropped | 1 of 38 | `css-oracle/reset-bullets` |
+| Reset.Media | reset bullet 3: the replaced-media rule matches nothing | 1 of 38 | `css-oracle/reset-bullets` |
+| Reset.FormFont | reset bullet 4: form controls no longer inherit font | 2 of 38 | `style/clean-single-rule`, `css-oracle/reset-bullets` |
+| Decl.Order | a rule's declarations printed in reverse order | 1 of 38 | `css-oracle/decl-order` |
+| Token.Constant | a constant token's `:root` definition dropped | 4 of 38 | `style/flat-inline-token-lowering-clean`, `style/theme-tokens-recognized`, `css-oracle/two-themes`, `css-core/t3-worked` |
+| Token.OnVariant | variant blocks key the wrong attribute | 6 of 38 | `style/theme-emission-clean`, `style/theme-for-variant-inference`, `css-oracle/variant-three`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
+| Token.OnVariant | variant arms dropped | 6 of 38 | `style/theme-emission-clean`, `style/theme-for-variant-inference`, `css-oracle/variant-three`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
+| Token.OnVariant.Otherwise | the wildcard / base value dropped | 4 of 38 | `style/theme-emission-clean`, `style/theme-for-variant-inference`, `css-oracle/variant-three`, `css-core/t3-wildcard` |
+| Token.ScriptWrites | an unrecognized token pinned by a static `:root` value (expected: no bite, F1) | 0 of 38 | **none — does not bite** |
+| Value.TokenVar | `@token` prints a wrong custom-property name | 7 of 38 | `style/theme-emission-clean`, `css-oracle/two-themes`, `css-oracle/variant-three`, `css-core/t3-script-writes`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
+| Value.CellVar | `@cell` prints the token form | 1 of 38 | `css-core/cell-var` |
+| Value.Text | literal value text emptied | 36 of 38 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/conditional-hover-layer`, `style/descendant-combinator-preserved`, `style/disjoint-attr-values`, `style/disjoint-different-tag`, `style/flat-inline-token-lowering-clean`, `style/program-import-hoist-clean`, `style/program-scope-overlap-soft`, `style/r1-universal-star-layer`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `style/reset-opt-out-clean`, `style/style-001-scoped-css-neg`, `style/theme-emission-clean`, `style/theme-for-variant-inference`, `style/theme-tokens-recognized`, `css-oracle/charset-layer-import`, `css-oracle/decl-order`, `css-oracle/element-level-global`, `css-oracle/empty-blocks`, `css-oracle/example-03-contact-book`, `css-oracle/example-08-chat`, `css-oracle/import-hoist`, `css-oracle/layer-order`, `css-oracle/r1-floor-order`, `css-oracle/reset-bullets`, `css-oracle/scope-donut-nested`, `css-oracle/selectors`, `css-oracle/two-themes`, `css-oracle/variant-three`, `css-oracle/where-flat`, `css-core/charset`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
+| Sel.Universal | `*` misprinted | 7 of 38 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/program-import-hoist-clean`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/r1-floor-order`, `css-oracle/reset-bullets` |
+| Sel.Tag | a type selector misprinted | 19 of 38 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/disjoint-attr-values`, `style/disjoint-different-tag`, `style/program-import-hoist-clean`, `style/program-scope-overlap-soft`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/charset-layer-import`, `css-oracle/decl-order`, `css-oracle/element-level-global`, `css-oracle/empty-blocks`, `css-oracle/example-03-contact-book`, `css-oracle/example-08-chat`, `css-oracle/import-hoist`, `css-oracle/layer-order`, `css-oracle/reset-bullets`, `css-oracle/selectors`, `css-oracle/where-flat` |
+| Sel.Class | a class selector misprinted | 26 of 38 | `style/clean-single-rule`, `style/conditional-hover-layer`, `style/descendant-combinator-preserved`, `style/program-import-hoist-clean`, `style/r1-universal-star-layer`, `style/reset-opt-out-clean`, `style/style-001-scoped-css-neg`, `style/theme-emission-clean`, `css-oracle/charset-layer-import`, `css-oracle/decl-order`, `css-oracle/element-level-global`, `css-oracle/example-03-contact-book`, `css-oracle/example-08-chat`, `css-oracle/layer-order`, `css-oracle/r1-floor-order`, `css-oracle/scope-donut-nested`, `css-oracle/selectors`, `css-oracle/two-themes`, `css-oracle/variant-three`, `css-oracle/where-flat`, `css-core/cell-var`, `css-core/charset`, `css-core/t3-script-writes`, `css-core/t3-two-cells`, `css-core/t3-wildcard`, `css-core/t3-worked` |
+| Sel.Id | an id selector printed as a class | 1 of 38 | `css-oracle/selectors` |
+| Sel.Attr | an attribute test misprinted | 2 of 38 | `style/disjoint-attr-values`, `css-oracle/where-flat` |
+| Sel.PseudoClass | a pseudo-class misprinted | 2 of 38 | `style/conditional-hover-layer`, `css-oracle/selectors` |
+| Sel.PseudoElement | a pseudo-element misprinted | 9 of 38 | `control-flow/ctrl-020-show-ssr-hide-no-duplicate-style-pos`, `style/clean-single-rule`, `style/program-import-hoist-clean`, `style/r2-bem-modifier-soft`, `style/reactive-cell-lowering-clean`, `css-oracle/charset-layer-import`, `css-oracle/reset-bullets`, `css-oracle/selectors`, `css-core/charset` |
+| Comb.Descendant | descendant prints as next-sibling | 3 of 38 | `style/descendant-combinator-preserved`, `css-oracle/element-level-global`, `css-oracle/where-flat` |
+| Comb.Child | child prints as descendant | 1 of 38 | `css-oracle/selectors` |
+| Comb.NextSibling | next-sibling prints as later-sibling | 1 of 38 | `css-oracle/selectors` |
+| Comb.LaterSibling | later-sibling prints as next-sibling | 1 of 38 | `css-oracle/selectors` |
+| Css.Scope | shim: component rules attributed to the program | 3 of 38 | `css-oracle/element-level-global`, `css-oracle/scope-donut-nested`, `css-oracle/where-flat` |
+| Css.Reset | shim: `reset="none"` ignored | 1 of 38 | `style/reset-opt-out-clean` |
+| Token.OnVariant | shim: legacy `.Variant` re-binds dropped | 3 of 38 | `style/theme-emission-clean`, `style/theme-for-variant-inference`, `css-oracle/variant-three` |
+| Value.TokenVar | shim: `@token` resolved as a cell | 3 of 38 | `style/theme-emission-clean`, `css-oracle/two-themes`, `css-oracle/variant-three` |
+| Css.Global | shim: element-level `#{}` dropped (R4 undone) | 3 of 38 | `css-oracle/element-level-global`, `css-oracle/example-03-contact-book`, `css-oracle/example-08-chat` |
+| Css.Import | shim: a program-level `@import` dropped | 2 of 38 | `css-oracle/charset-layer-import`, `css-oracle/import-hoist` |
 
-### CERTIFIED (27) — a corruption kills ≥1 of the css passes
+### CERTIFIED (32) — a corruption kills ≥1 of the css passes
 
-`Comb.Child` · `Comb.Descendant` · `Comb.LaterSibling` · `Comb.NextSibling` · `Css.Charset` · `Css.Global` · `Css.Import` · `Css.LayerOrder` · `Css.Reset` · `Css.Scope` · `Scope.Conditional` · `Scope.Flat` · `Scope.Floor` · `Sel.Attr` · `Sel.Class` · `Sel.Id` · `Sel.PseudoClass` · `Sel.PseudoElement` · `Sel.Tag` · `Sel.Universal` · `Token.Constant` · `Token.OnVariant` · `Token.OnVariant.Otherwise` · `Token.ScriptWrites` · `Value.CellVar` · `Value.Text` · `Value.TokenVar`
+`Comb.Child` · `Comb.Descendant` · `Comb.LaterSibling` · `Comb.NextSibling` · `Css.Charset` · `Css.Global` · `Css.Import` · `Css.LayerOrder` · `Css.Reset` · `Css.Scope` · `Decl.Order` · `Reset.Body` · `Reset.BoxSizing` · `Reset.FlowMargin` · `Reset.FormFont` · `Reset.Media` · `Scope.Conditional` · `Scope.Flat` · `Scope.Floor` · `Sel.Attr` · `Sel.Class` · `Sel.Id` · `Sel.PseudoClass` · `Sel.PseudoElement` · `Sel.Tag` · `Sel.Universal` · `Token.Constant` · `Token.OnVariant` · `Token.OnVariant.Otherwise` · `Value.CellVar` · `Value.Text` · `Value.TokenVar`
 
 ### UNCERTIFIED (0) — exercised by a pass, but no evidence it is implemented
 
 
-(331.2s)
+(470.2s)

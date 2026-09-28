@@ -19,7 +19,7 @@ Cases graded or classified: **1048 of 1048** case directories found by an indepe
 
 ## Constructs exercised by passing RUNTIME cases (candidates — certified only by the bite matrix)
 
-`Css.LayerOrder` · `Css.Reset`
+`Css.LayerOrder` · `Css.Reset` · `Reset.Body` · `Reset.BoxSizing` · `Reset.FlowMargin` · `Reset.FormFont` · `Reset.Media`
 
 ## Fail list (first diverging reason per case)
 
@@ -652,17 +652,17 @@ Cases graded or classified: **1048 of 1048** case directories found by an indepe
 
 ## CSS half — computed style in Chromium against SPEC-derived oracles (s440)
 
-**Headline: 32 CSS passes of 32 graded css-oracle cases** (0 fail).
+**Headline: 38 CSS passes of 38 graded css-oracle cases** (0 fail).
 
 | population | graded with an oracle | pass | fail | graded, no oracle (css unobserved — not evidence) | not graded |
 |---|---|---|---|---|---|
 | conformance | 17 | 17 | 0 | 548 | 0 |
-| source | 9 | 9 | 0 | 0 | 7 |
+| source | 15 | 15 | 0 | 0 | 7 |
 | core | 6 | 6 | 0 | 0 | 0 |
 
 ### Constructs exercised by CSS passes (candidates — certified only by the bite matrix)
 
-`Comb.Child` · `Comb.Descendant` · `Comb.LaterSibling` · `Comb.NextSibling` · `Css.Charset` · `Css.Global` · `Css.Import` · `Css.LayerOrder` · `Css.Reset` · `Css.Scope` · `Scope.Conditional` · `Scope.Flat` · `Scope.Floor` · `Sel.Attr` · `Sel.Class` · `Sel.Id` · `Sel.PseudoClass` · `Sel.PseudoElement` · `Sel.Tag` · `Sel.Universal` · `Token.Constant` · `Token.OnVariant` · `Token.OnVariant.Otherwise` · `Token.ScriptWrites` · `Value.CellVar` · `Value.Text` · `Value.TokenVar`
+`Comb.Child` · `Comb.Descendant` · `Comb.LaterSibling` · `Comb.NextSibling` · `Css.Charset` · `Css.Global` · `Css.Import` · `Css.LayerOrder` · `Css.Reset` · `Css.Scope` · `Decl.Order` · `Reset.Body` · `Reset.BoxSizing` · `Reset.FlowMargin` · `Reset.FormFont` · `Reset.Media` · `Scope.Conditional` · `Scope.Flat` · `Scope.Floor` · `Sel.Attr` · `Sel.Class` · `Sel.Id` · `Sel.PseudoClass` · `Sel.PseudoElement` · `Sel.Tag` · `Sel.Universal` · `Token.Constant` · `Token.OnVariant` · `Token.OnVariant.Otherwise` · `Value.CellVar` · `Value.Text` · `Value.TokenVar`
 
 ### CSS passes
 
@@ -683,10 +683,16 @@ Cases graded or classified: **1048 of 1048** case directories found by an indepe
 - `style/theme-emission-clean` (conformance)
 - `style/theme-for-variant-inference` (conformance)
 - `style/theme-tokens-recognized` (conformance)
+- `css-oracle/charset-layer-import` (source)
+- `css-oracle/decl-order` (source)
+- `css-oracle/element-level-global` (source)
 - `css-oracle/empty-blocks` (source)
+- `css-oracle/example-03-contact-book` (source)
+- `css-oracle/example-08-chat` (source)
 - `css-oracle/import-hoist` (source)
 - `css-oracle/layer-order` (source)
 - `css-oracle/r1-floor-order` (source)
+- `css-oracle/reset-bullets` (source)
 - `css-oracle/scope-donut-nested` (source)
 - `css-oracle/selectors` (source)
 - `css-oracle/two-themes` (source)
@@ -706,7 +712,7 @@ Cases graded or classified: **1048 of 1048** case directories found by an indepe
 ### css-only sources NOT graded (the reason)
 
 - `css-oracle/adv-important` — not-yet: `!important` (§65.7: internal-vs-interop is not classified yet)
-- `css-oracle/adv-token-cell-same-name` — not-yet: the theme token `ink` and a cell share the name (§66.17 item 4: one namespace)
+- `css-oracle/adv-token-cell-same-name` — not-yet: the theme token `ink` and a cell share the name (§66.17 item 4: one namespace — E-THEME-TOKEN-CELL-COLLISION, analyze's to fire)
 - `css-oracle/open-o17a-hyphenated-token` — not-yet: a `<theme>` body impl#1 did not parse (T3 `<name:type=…/>` declarations need the bootstrap front end)
 - `css-oracle/open-o17b-t3-for` — front-end: a `<theme>` body impl#1 did not parse (T3 `<name:type=…/>` declarations need the bootstrap front end)
 - `css-oracle/open-o17c-media-autobind` — not-yet: a `<theme>` `@media (…)` auto-bind (O17(c) — OPEN)
