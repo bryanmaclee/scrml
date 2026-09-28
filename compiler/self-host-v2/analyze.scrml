@@ -160,7 +160,7 @@ ${
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
-        ESpread(ws: SpreadWrite[], inst: Sym),            // a spread assignment: FieldAt edits (O58 (b)); `inst`: the instance local
+        ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
     }
@@ -2212,12 +2212,18 @@ ${
         const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
         if (d is not) return st
         const ps: AProp[] = propsOf(value)
+        // the spread operand `...@h` names the instance (a subject, like a
+        // write target — no read check; writeGuards reports an un-narrowed
+        // handle). lower reads it as the statement's snapshot (S440).
+        st = resolveHandleSubject(env, ps[0].value, st).st
         let ws: SpreadWrite[] = []
         let j = 1
         while (j < ps.length) {
             const pr: AProp = ps[j]
             const i: int = fieldIndex(d.info, pr.name)
-            if (i < 0) {
+            if (overriddenBefore(ps, j)) {
+                st = dupOverride(env, st, pr)
+            } else if (i < 0) {
                 st = addDiag(st, env.file, pr.span, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + pr.name + "`")
             } else {
                 const f: FieldInfo = d.info.fields[i]
@@ -2243,9 +2249,29 @@ ${
     // through `Narrowed(inst)`), so a flush can never make a later write of the
     // same edit re-resolve a handle to a different instance. Minted here so
     // `lower` still decides nothing.
+    // `snap` is the local the spread operand (`...@x`, the pre-statement value)
+    // is read into ONCE, before any override value is evaluated: every `@x`
+    // read inside the override values reads it (RULED S440, strict snapshot) —
+    // so a call in one override that writes `@x` is not seen by another.
     fn spreadEffect(st0: AS, e: AExpr, ws: SpreadWrite[], hint: string) -> AS {
         const m: RSym = mint(st0, hint)
-        return addEffect(m.st, e.nid, EffectFact.ESpread(ws, m.s))
+        const sn: RSym = mint(m.st, "before")
+        return addEffect(sn.st, e.nid, EffectFact.ESpread(ws, m.s, sn.s))
+    }
+
+    // RULED S440: a spread-override literal names each field at most once.
+    fn overriddenBefore(ps: AProp[], j: int) -> boolean {
+        let k = 1
+        while (k < j) {
+            if (ps[k].name == ps[j].name) return true
+            k = k + 1
+        }
+        return false
+    }
+
+    // Provisional bootstrap-local code (§66.20 names none; the §34 row is owed).
+    fn dupOverride(env: Env, st: AS, pr: AProp) -> AS {
+        return addDiag(st, env.file, pr.span, "E-BOOTSTRAP-DUP-OVERRIDE", "`" + pr.name + "` is overridden twice in this spread — a spread-override edits each field once; keep one `" + pr.name + ": …` (ruled S440)")
     }
 
     // A write at a struct path (`@o.s = v`): the TARGET sub-field's own contract.
@@ -2368,7 +2394,9 @@ ${
                 if (fd.sym.hint == pr.name) idx = i
                 i = i + 1
             }
-            if (idx < 0) {
+            if (overriddenBefore(ps, j)) {
+                st = dupOverride(env, st, pr)
+            } else if (idx < 0) {
                 st = addDiag(st, env.file, pr.span, "E-TYPE-STRUCT-FIELD", "`" + s.hint + "` has no field `" + pr.name + "`")
             } else {
                 const sub: WPlace = { decl: p.decl, inst: p.inst, idx: p.idx, path: [{ owner: s, idx: idx }], ty: fs[idx].ty, maybe: p.maybe }

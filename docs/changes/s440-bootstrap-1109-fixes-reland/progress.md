@@ -123,3 +123,45 @@ F3 is test-only → committed alone. F1/F2 tests stay uncommitted until their fi
   1. a duplicate override key `{ ...@g, phase: .Gone, phase: .Live }` — both edges checked from the snapshot.
   2. an override value calling a function that writes the same field (`x: bump()` observed 5,99,99): the value
      Lets run the call before the Commit, so the callee's write lands and the Commit's write then overwrites it.
+  (Both RULED later this round — see the next section.)
+- Committed `1f458ad79`.
+
+## 2026-09-28 — RULING UPDATE (bryan S440 "all recs"): strict snapshot + duplicate key
+- BEFORE (on `1f458ad79`, probe program P = { let x, let y, let z } = {1,2,3}; bump writes @p.z = 99, returns 5;
+  touch writes @p.x = 99, returns 7):
+  ```
+  bump       { ...@p, x: bump(), y: @p.z }            => 5,99,99
+  swap-call  { ...@p, x: @p.y, y: touch(), z: @p.x }  => 2,7,99
+  rotate3    { ...@p, x: @p.y, y: @p.z, z: @p.x }     => 2,3,1   (already right: F1's tmp locals)
+  lone-call  { ...@p, y: bump() + @p.z }              => 1,104,99
+  dup-spread { ...@p, x: 5, x: 6 }                    => accepted, 6,2,3 (last wins)
+  dup-plain  @p = { x: 5, x: 6, y: 1, z: 1 }          => accepted, 6,1,1 (last wins)
+  ```
+- AFTER:
+  ```
+  bump 5,3,99 · swap-call 2,7,1 · rotate3 2,3,1 · lone-call 1,8,99
+  dup-spread → E-BOOTSTRAP-DUP-OVERRIDE ("`x` is overridden twice in this spread …")
+  dup-plain  → still accepted, last wins (NOT changed — the ruling was about the spread shape)
+  ```
+- (1) STRICT SNAPSHOT: ESpread gains `snap: Sym` (analyze `spreadEffect` mints it, hint "before"). The instance
+  spread now resolves its operand `...@h` (resolveHandleSubject — a subject, no read check). lower: the operand
+  lowers to the target's cell read; the override values lower under an LC whose `snap` maps any read of that
+  place (or under it — same decl, same InstRef spelling, path prefix) to the local (`cellRead`). If any value
+  reads it, `Let before = <operand>` is emitted ONCE before every value Let (through the instance local when
+  there is a Commit). Emitted JS: `const before = rt.snapshot(gate); const stage = before.phase; …`.
+  A callee's write to a NON-overridden field survives (the Commit writes only overridden fields) — tested:
+  bump's z = 99 survives; the instance case keeps mark()'s phase: Live. Only reads LEXICALLY in the literal are
+  snapshotted; the callee's own reads of `@x` are live (ruling text: "in a spread-override literal").
+  Tracking note: an INSTANCE snapshot is `rt.snapshot(inst)`, which tracks every field when the spread runs
+  inside an effect (a render hole) — a wider subscription than the individual field reads it replaces. It
+  converges (a re-run writes equal values; `Cell.set` is a no-op on `Object.is`) but can cost one extra re-run.
+- (2) DUPLICATE KEY: §66.20 names no code → provisional `E-BOOTSTRAP-DUP-OVERRIDE`, reported at each repeated key
+  (the repeat is not written). Plain struct literals do NOT reject duplicates today (analyze's `resolveObject`
+  takes the LAST prop with that name; last-wins) — left alone, reported to the PA.
+- OWES-A-§34-ROW: `E-BOOTSTRAP-DUP-OVERRIDE` (provisional, bootstrap-local; the PA writes the SPEC row).
+- Tests (front.test.js): "STRICT SNAPSHOT" ×5 (bump, swap-with-call, rotate-3, lone-call, instance + mark()),
+  "duplicate override key" ×3; shape tests updated (`Let inst, Let before, Let x, Let y, Commit`; values read
+  `LocalPath(before, …)`; a lone override reading `@p` is `Let before, Write`, one that does not is `Write`).
+- Mutations: "STRICT SNAPSHOT off" and "duplicate key accepted" added.
+- Gates: slices 418/0; lowered M1 73/0; lint 0; mutations 81, 0 problems (strict-snapshot RED 6, dup RED 3);
+  bite matrix 32 CERTIFIED / 0 UNCERTIFIED exit 0; footprint 18/18 runtime.

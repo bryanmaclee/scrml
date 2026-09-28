@@ -281,22 +281,33 @@ describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine rep
   test("the classification is unchanged: still one contract-checked FieldAt Write per override, values evaluated first", async () => {
     const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x } }", "snap-shape");
     const st = r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
-    // S440: the instance is resolved once (Let inst = Handle(…)); the writes are grouped in one
-    // all-or-nothing Commit through that local (was: Let, Let, Write, Write)
-    expect(st.map((s) => s.variant)).toEqual(["Let", "Let", "Let", "Commit"]);
+    // S440: the instance is resolved once (Let inst = Handle(…)); the pre-statement value is read
+    // once (Let before = @p, strict snapshot); the writes are grouped in one all-or-nothing Commit
+    // through the instance local (was: Let, Let, Write, Write)
+    expect(st.map((s) => s.variant)).toEqual(["Let", "Let", "Let", "Let", "Commit"]);
     expect(st[0].data.init.variant).toBe("Handle");
-    const ws = st[3].data.writes;
+    const before = st[1].data.sym;
+    expect(st[1].data.init.variant).toBe("Read");
+    const ws = st[4].data.writes;
     expect(ws.map((s) => s.variant)).toEqual(["Write", "Write"]);
     expect(ws.map((s) => [s.data.edit.variant, s.data.check])).toEqual([["FieldAt", "Static"], ["FieldAt", "Static"]]);
     for (const w of ws) expect(w.data.inst).toEqual({ variant: "Narrowed", data: { sym: st[0].data.sym } });
+    // each override value reads the SNAPSHOT (`before.y`, `before.x`), never the live cell
+    for (const k of [2, 3]) {
+      expect(st[k].data.init.variant).toBe("Read");
+      expect(st[k].data.init.data.place.variant).toBe("LocalPath");
+      expect(st[k].data.init.data.place.data.sym).toEqual(before);
+    }
     // each Write stores the local its Let evaluated — the value was read before either write
-    expect(ws[0].data.value).toEqual({ variant: "Local", data: { sym: st[1].data.sym } });
-    expect(ws[1].data.value).toEqual({ variant: "Local", data: { sym: st[2].data.sym } });
+    expect(ws[0].data.value).toEqual({ variant: "Local", data: { sym: st[2].data.sym } });
+    expect(ws[1].data.value).toEqual({ variant: "Local", data: { sym: st[3].data.sym } });
   });
 
-  test("a LONE override stays a single Write (no local, no Commit)", async () => {
-    const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y } }", "snap-lone");
-    expect(r.core.fns.find((f) => f.sym.hint === "go").body.stmts.map((s) => s.variant)).toEqual(["Write"]);
+  test("a LONE override stays a single Write (no Commit); a snapshot Let only when its value reads `@p`", async () => {
+    const lone = (await spreadOutcome("    function go() { @p = { ...@p, x: 4 } }", "snap-lone")).r;
+    expect(lone.core.fns.find((f) => f.sym.hint === "go").body.stmts.map((s) => s.variant)).toEqual(["Write"]);
+    const reads = (await spreadOutcome("    function go() { @p = { ...@p, x: @p.y } }", "snap-lone-reads")).r;
+    expect(reads.core.fns.find((f) => f.sym.hint === "go").body.stmts.map((s) => s.variant)).toEqual(["Let", "Write"]);
   });
 });
 
@@ -463,6 +474,102 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
   test("through a `given`-narrowed handle (`given c = @g :> { @g = { ...@g, … } }`): all-or-nothing too", async () => {
     const o = await atomicRun("    function go() { given c = @g :> { @g = { ...@g, phase: .Gone, stage: .Gone } } }", "atomic-given");
     expect(o.after).toBe(o.before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RULED S440 (bryan, "all recs"): STRICT SNAPSHOT — in a spread-override
+// literal every `@x` read (including reads of fields also being overridden,
+// and reads after a call that writes `@x`) sees the value from BEFORE the
+// statement. A call's own write to a field NOT overridden survives (the
+// Commit writes only the overridden fields).
+// ---------------------------------------------------------------------------
+const TRIPLE = (fns) => ({
+  path: "triple.scrml",
+  src: `<program>
+    type P:struct = { let x: int, let y: int, let z: int }
+    <let p:P=({ x: 1, y: 2, z: 3 })/>
+    function bump() -> int { @p.z = 99
+ return 5 }
+    function touch() -> int { @p.x = 99
+ return 7 }
+${fns}
+    <main>
+        <p class="pt">\${@p.x},\${@p.y},\${@p.z}</p>
+        <button class="go" onclick=go()>go</button>
+    </main>
+</program>
+`,
+});
+
+async function tripleAfter(fn, tag) {
+  const r = run([TRIPLE(fn)]);
+  expect(codes(r)).toEqual([]);
+  expect(mods.check.checkCore(r.core)).toEqual([]);
+  await loadProgram(r.core, tag);
+  click(document.querySelector("button.go"));
+  return document.querySelector("p.pt").textContent;
+}
+
+describe("RULED S440 — STRICT SNAPSHOT: every `@x` read in a spread-override literal sees the pre-statement value", () => {
+  test("the bump case `{ ...@p, x: bump(), y: @p.z }` (bump writes @p.z = 99) → 5,3,99 (was 5,99,99)", async () => {
+    expect(await tripleAfter("    function go() { @p = { ...@p, x: bump(), y: @p.z } }", "strict-bump")).toBe("5,3,99");
+  });
+
+  test("a swap with a call in between `{ ...@p, x: @p.y, y: touch(), z: @p.x }` (touch writes @p.x = 99) → 2,7,1 (was 2,7,99)", async () => {
+    expect(await tripleAfter("    function go() { @p = { ...@p, x: @p.y, y: touch(), z: @p.x } }", "strict-swap-call")).toBe("2,7,1");
+  });
+
+  test("rotate-3 `{ ...@p, x: @p.y, y: @p.z, z: @p.x }` → 2,3,1", async () => {
+    expect(await tripleAfter("    function go() { @p = { ...@p, x: @p.y, y: @p.z, z: @p.x } }", "strict-rotate3")).toBe("2,3,1");
+  });
+
+  test("a LONE override reading after a call in its own value `{ ...@p, y: bump() + @p.z }` → 1,8,99 (was 1,104,99)", async () => {
+    expect(await tripleAfter("    function go() { @p = { ...@p, y: bump() + @p.z } }", "strict-lone")).toBe("1,8,99");
+  });
+
+  test("an INSTANCE spread: `{ ...@g, note: mark(), stage: @g.phase }` (mark moves phase Draft → Live) — stage gets the pre-statement Draft; mark's phase write survives", async () => {
+    const r = run([{
+      path: "strict-inst.scrml",
+      src: `${GATES}
+<program>
+    function mark() -> string { @g.phase = .Live
+ return "m" }
+    function go() { @g = { ...@g, note: mark(), stage: @g.phase } }
+    <main>
+        <gate as=g title="G"/>
+        <button class="go" onclick=go()>go</button>
+    </main>
+</program>
+`,
+    }]);
+    expect(codes(r)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    await loadProgram(r.core, "strict-inst");
+    click(document.querySelector("button.go"));
+    expect(document.querySelector("p.gate").textContent).toBe("G: Live/Draft/m");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RULED S440: a DUPLICATE override key in a spread-override literal is a
+// compile error. §66.20 names no code: provisional bootstrap-local
+// E-BOOTSTRAP-DUP-OVERRIDE (a §34 row is owed — progress.md).
+// ---------------------------------------------------------------------------
+describe("RULED S440 — a duplicate override key is a compile error (E-BOOTSTRAP-DUP-OVERRIDE)", () => {
+  test("an INSTANCE spread `{ ...@g, phase: .Gone, phase: .Live }` is refused, once, at the second key", () => {
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, phase: .Live } }`)]);
+    expect(codes(r)).toEqual(["E-BOOTSTRAP-DUP-OVERRIDE"]);
+    expect(r.diags[0].message).toContain("`phase` is overridden twice");
+  });
+
+  test("a STRUCT-CELL spread `{ ...@p, x: 5, x: 6 }` is refused", () => {
+    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, x: 6 } }")]))).toEqual(["E-BOOTSTRAP-DUP-OVERRIDE"]);
+  });
+
+  test("three of one key report twice; distinct keys are fine", () => {
+    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 1, x: 6, x: 7 } }")]))).toEqual(["E-BOOTSTRAP-DUP-OVERRIDE", "E-BOOTSTRAP-DUP-OVERRIDE"]);
+    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 6 } }")]))).toEqual([]);
   });
 });
 
