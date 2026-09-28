@@ -3,9 +3,12 @@
 // every Core and diagnostic is unchanged (the M2 / typer suites hold that) —
 // so what is proved here is the TABLES' OWN shape:
 //   - ONE FACT PER NODE: every recorded fact is reachable through its
-//     family's index (a second fact about a node would sit in its family's
-//     list unindexed — the count check catches it), and no node is answered
-//     by two families;
+//     family's index (a second fact about a node in the same family would
+//     sit in the list unindexed — the count check catches it), the index
+//     agrees with the key column (`nids[at[nid]] == nid`), and no node is
+//     answered by two families (the binder resolves each node once; this is
+//     what keeps a family lookup equal to the single first-match scan it
+//     replaced);
 //   - each family's facts are about the node KIND that family describes
 //     (names on names / members, values on literals / operators, effects on
 //     statement-position assignments / calls, binders on locals / fns /
@@ -119,6 +122,7 @@ describe("the node facts — one family per node, indexed by NodeId", () => {
         tbl.at.forEach((pos, nid) => {
           if (pos < 0) return;
           expect(pos).toBeLessThan(tbl.facts.length);
+          expect(tbl.nids[pos]).toBe(nid);                  // the index agrees with the key column
           expect(positions.has(pos)).toBe(false);          // injective: one node per fact
           positions.add(pos);
           expect(owner.has(nid) ? `${nid} in ${owner.get(nid)} and ${fam}` : "").toBe("");

@@ -43,3 +43,18 @@
   (A "later fact re-points a claimed node" mutation was NOT added: the binder records no second fact for any node, so
   first-vs-last is unobservable and such a mutation cannot bite; likewise first-vs-last in typingOf — 0 duplicate typing
   entries in the slice programs.) Gate: unit+integration+conformance 25693 pass / 0 fail / 70 skip.
+- UNIT 3 (analyze + tables.test + mutations): MEASURED, then fixed a regression unit 1 introduced. Unit 1 kept each
+  index current on every add (a copy of an O(nodes) array per fact) — lower got 14x faster at scale but ANALYZE got
+  ~1.5x slower (synthetic 400-function program, 13,210 nodes: analyze 270 → 409 ms). Now a family table appends
+  `facts` + its key column `nids` while the binder runs and `indexed` builds every `at` ONCE (nidIndex: one backwards
+  pass, first entry wins) — the one array position write in the bootstrap, confined to a fresh local (the AS arrays
+  are shared by every threaded / discarded-speculative state, so an in-place write there would be a behaviour change).
+  typingOf builds Typing.at the same way. The cross-family "claim" is gone (it guarded an impossible case; tables.test
+  enforces "no node answered by two families" + "every fact indexed" + nids[at[nid]] == nid).
+  Differential 459 programs CHANGED 0 (17,761 facts projected). Mutation sites for the index re-pointed (build skips
+  first fact; empty slot 0 not -1; exprType index one off) — 70 mutations, 0 problems, exit 0.
+  TIMING (analyze / lower, base → new, mean): the 11 slice + §66.19 programs summed 0.42 → 0.48 ms / 0.139 → 0.108 ms
+  (noise-level at these sizes — factOf was NOT the slice suites' cost; impl#1 compiling the bundle is);
+  synthetic K=100 (3,310 nodes) 16.2 → 9.0 ms / 3.8 → 1.1 ms; K=400 (13,210 nodes) 283 → 117 ms / 57.9 → 2.8 ms.
+  Suites (3 runs): slice-m1 1.40/1.54/1.46 s; lowered 4.00/4.26/4.43 s; slice-m2 4.06/4.14/4.60 s (254 tests, +33).
+  Lines: analyze 4491 → 4565 (+74), lower 996 → 747 (−249), check 509 → 509; net −175.

@@ -171,21 +171,25 @@ ${
     }
 
     // A family's side-table: its facts in the order the binder recorded them,
-    // and `at` — the NodeId index: `at[nid]` is the position of node `nid`'s
-    // fact in `facts`, -1 (or past the end) when the family has none. O(1).
-    export type NameTable:struct = { facts: NameFact[], at: int[] }
-    export type ValueTable:struct = { facts: ValueFact[], at: int[] }
-    export type EffectTable:struct = { facts: EffectFact[], at: int[] }
-    export type BindTable:struct = { facts: BindFact[], at: int[] }
-    export type ElemTable:struct = { facts: ElemFact[], at: int[] }
-    export type AttrTable:struct = { facts: AttrKind[], at: int[] }
+    // `nids[i]` the node `facts[i]` is about, and `at` — the NodeId index:
+    // `at[nid]` is the position of node `nid`'s fact, -1 (or past the end)
+    // when the family has none. O(1). Built once, when the binder is done
+    // (`indexed`); a node has one fact (the binder resolves each node once —
+    // tables.test.js checks), and were there two, the first would answer, as
+    // the linear scan this replaces did.
+    export type NameTable:struct = { facts: NameFact[], nids: int[], at: int[] }
+    export type ValueTable:struct = { facts: ValueFact[], nids: int[], at: int[] }
+    export type EffectTable:struct = { facts: EffectFact[], nids: int[], at: int[] }
+    export type BindTable:struct = { facts: BindFact[], nids: int[], at: int[] }
+    export type ElemTable:struct = { facts: ElemFact[], nids: int[], at: int[] }
+    export type AttrTable:struct = { facts: AttrKind[], nids: int[], at: int[] }
 
     // THE TYPER'S TABLE (M3 item 1). `exprs`: the type of every expression
     // node the typer walked, keyed by NodeId (`at`, built once when the typer
-    // settles; of two entries for one node the first is the answer). A
-    // value's type is what the typer can PROVE: `Known(t)`, the absence
-    // literal `not` (`Absent`, §42), or `Unknown` (inference stopped — no
-    // check ever fires on an Unknown).
+    // settles; of two entries for one node the first answers). A value's
+    // type is what the typer can PROVE: `Known(t)`, the absence literal `not`
+    // (`Absent`, §42), or `Unknown` (inference stopped — no check ever fires
+    // on an Unknown).
     export type VType:enum = { Known(t: Type), Absent, Unknown }
     export type ExprType:struct = { nid: int, vt: VType }
     export type Typing:struct = { exprs: ExprType[], at: int[] }
@@ -217,10 +221,26 @@ ${
         return at[nid]
     }
 
-    // `at` with `nid` → `pos` (a new array; the old one is unchanged).
-    fn setSlot(at: int[], nid: int, pos: int) -> int[] {
-        if (nid < at.length) return at.slice(0, nid).concat([pos]).concat(at.slice(nid + 1, at.length))
-        return at.concat(minusOnes(nid - at.length)).concat([pos])
+    // The index over a key column: `at[nid]` = the position of the FIRST
+    // entry for `nid`, -1 for none. Built in one pass into a FRESH local
+    // array — the one place the bootstrap writes an array position: nothing
+    // else holds `at` yet (a position write into a shared array would change
+    // a value another holder already has — every AS the binder threads, a
+    // discarded speculative one included, shares its arrays), and a write per
+    // entry keeps the build O(nodes + entries) where appending is quadratic.
+    fn nidIndex(nids: int[]) -> int[] {
+        let top: int = -1
+        for (const n of nids) {
+            if (n > top) top = n
+        }
+        let at: int[] = minusOnes(top + 1)
+        let i: int = nids.length - 1
+        while (i >= 0) {
+            // backwards: a node's first entry is written last, and stays
+            if (nids[i] >= 0) at[nids[i]] = i
+            i = i - 1
+        }
+        return at
     }
 
     // `n` × -1 (by doubling: O(n)).
@@ -279,6 +299,8 @@ ${
 
     // =========================================================================
     // Analyze state: the facts and diagnostics so far, and the Sym counter.
+    // A family table grows by appending (`at` stays empty); `indexed` builds
+    // every index once, when the binder is done.
     // =========================================================================
     type NodeFacts:struct = { names: NameTable, values: ValueTable, effects: EffectTable, binds: BindTable,
                               elems: ElemTable, attrs: AttrTable }
@@ -286,8 +308,20 @@ ${
     type RSym:struct = { s: Sym, st: AS }
 
     fn noFacts() -> NodeFacts {
-        return { names: { facts: [], at: [] }, values: { facts: [], at: [] }, effects: { facts: [], at: [] },
-                 binds: { facts: [], at: [] }, elems: { facts: [], at: [] }, attrs: { facts: [], at: [] } }
+        return { names: { facts: [], nids: [], at: [] }, values: { facts: [], nids: [], at: [] },
+                 effects: { facts: [], nids: [], at: [] }, binds: { facts: [], nids: [], at: [] },
+                 elems: { facts: [], nids: [], at: [] }, attrs: { facts: [], nids: [], at: [] } }
+    }
+
+    fn indexed(fs: NodeFacts) -> NodeFacts {
+        return {
+            names: { facts: fs.names.facts, nids: fs.names.nids, at: nidIndex(fs.names.nids) },
+            values: { facts: fs.values.facts, nids: fs.values.nids, at: nidIndex(fs.values.nids) },
+            effects: { facts: fs.effects.facts, nids: fs.effects.nids, at: nidIndex(fs.effects.nids) },
+            binds: { facts: fs.binds.facts, nids: fs.binds.nids, at: nidIndex(fs.binds.nids) },
+            elems: { facts: fs.elems.facts, nids: fs.elems.nids, at: nidIndex(fs.elems.nids) },
+            attrs: { facts: fs.attrs.facts, nids: fs.attrs.nids, at: nidIndex(fs.attrs.nids) },
+        }
     }
 
     fn mint(st: AS, hint: string) -> RSym {
@@ -298,57 +332,41 @@ ${
         return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots }
     }
 
-    // A node has ONE fact: the first the binder records for it CLAIMS the
-    // node, in its family's index. A later fact about a claimed node (the
-    // binder records none — tables.test.js checks) is kept in its family's
-    // list but never indexed, so a lookup answers with the first fact, as the
-    // single linear fact list this replaces did.
-    fn claimed(fs: NodeFacts, nid: int) -> boolean {
-        return slotOf(fs.names.at, nid) >= 0 || slotOf(fs.values.at, nid) >= 0 || slotOf(fs.effects.at, nid) >= 0
-            || slotOf(fs.binds.at, nid) >= 0 || slotOf(fs.elems.at, nid) >= 0 || slotOf(fs.attrs.at, nid) >= 0
-    }
-
-    fn claim(fs: NodeFacts, at: int[], nid: int, pos: int) -> int[] {
-        if (claimed(fs, nid)) return at
-        return setSlot(at, nid, pos)
-    }
-
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
         const fs: NodeFacts = st.facts
-        const t: NameTable = { facts: fs.names.facts.concat([f]), at: claim(fs, fs.names.at, nid, fs.names.facts.length) }
+        const t: NameTable = { facts: fs.names.facts.concat([f]), nids: fs.names.nids.concat([nid]), at: [] }
         return withFacts(st, { names: t, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
     }
 
     fn addValue(st: AS, nid: int, f: ValueFact) -> AS {
         const fs: NodeFacts = st.facts
-        const t: ValueTable = { facts: fs.values.facts.concat([f]), at: claim(fs, fs.values.at, nid, fs.values.facts.length) }
+        const t: ValueTable = { facts: fs.values.facts.concat([f]), nids: fs.values.nids.concat([nid]), at: [] }
         return withFacts(st, { names: fs.names, values: t, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
     }
 
     fn addEffect(st: AS, nid: int, f: EffectFact) -> AS {
         const fs: NodeFacts = st.facts
-        const t: EffectTable = { facts: fs.effects.facts.concat([f]), at: claim(fs, fs.effects.at, nid, fs.effects.facts.length) }
+        const t: EffectTable = { facts: fs.effects.facts.concat([f]), nids: fs.effects.nids.concat([nid]), at: [] }
         return withFacts(st, { names: fs.names, values: fs.values, effects: t, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
     }
 
     fn addBind(st: AS, nid: int, f: BindFact) -> AS {
         const fs: NodeFacts = st.facts
-        const t: BindTable = { facts: fs.binds.facts.concat([f]), at: claim(fs, fs.binds.at, nid, fs.binds.facts.length) }
+        const t: BindTable = { facts: fs.binds.facts.concat([f]), nids: fs.binds.nids.concat([nid]), at: [] }
         return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: t, elems: fs.elems, attrs: fs.attrs })
     }
 
     fn addElem(st: AS, nid: int, f: ElemFact) -> AS {
         const fs: NodeFacts = st.facts
-        const t: ElemTable = { facts: fs.elems.facts.concat([f]), at: claim(fs, fs.elems.at, nid, fs.elems.facts.length) }
+        const t: ElemTable = { facts: fs.elems.facts.concat([f]), nids: fs.elems.nids.concat([nid]), at: [] }
         return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: t, attrs: fs.attrs })
     }
 
     fn addAttr(st: AS, nid: int, k: AttrKind) -> AS {
         const fs: NodeFacts = st.facts
-        const t: AttrTable = { facts: fs.attrs.facts.concat([k]), at: claim(fs, fs.attrs.at, nid, fs.attrs.facts.length) }
+        const t: AttrTable = { facts: fs.attrs.facts.concat([k]), nids: fs.attrs.nids.concat([nid]), at: [] }
         return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: t })
     }
-
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
         const d: Diag = { code: code, message: msg, file: file, span: span }
         return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots }
@@ -3233,13 +3251,18 @@ ${
         return t.typing.exprs[i].vt
     }
 
-    // The settled pass's types, indexed by NodeId (the first entry per node).
+    // The settled pass's types, indexed by NodeId (the first entry per node;
+    // the same one-pass build as `nidIndex`, over the entries' own nids).
     fn typingOf(exprs: ExprType[]) -> Typing {
-        let at: int[] = []
-        let i = 0
+        let top: int = -1
         for (const x of exprs) {
-            if (slotOf(at, x.nid) < 0) at = setSlot(at, x.nid, i)
-            i = i + 1
+            if (x.nid > top) top = x.nid
+        }
+        let at: int[] = minusOnes(top + 1)
+        let i: int = exprs.length - 1
+        while (i >= 0) {
+            if (exprs[i].nid >= 0) at[exprs[i].nid] = i
+            i = i - 1
         }
         return { exprs: exprs, at: at }
     }
@@ -4481,7 +4504,7 @@ ${
         // The binder's tables, then the two passes that read them: the scope
         // pass (redeclarations) and the typer (value types). Each returns new
         // values; the final Tables carries the typer's own table.
-        const fs: NodeFacts = st.facts
+        const fs: NodeFacts = indexed(st.facts)
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
                                 attrs: fs.attrs, annots: st.annots, typing: { exprs: [], at: [] } }
