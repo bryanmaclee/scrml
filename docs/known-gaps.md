@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 151 | 4 |
+| HIGH | 152 | 4 |
 | MED | 338 | 0 |
 | LOW | 138 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -19704,6 +19704,29 @@ exit 0, same truncated handler, and ` 0 ? 1 : 2; f()` becomes the button's TEXT 
 marker, so a `>` operator in it is indistinguishable from the tag close — the same ambiguity §5.2.3 cites for `;`.
 Direction: a diagnostic steering to braces / `${…}` / parens (cf. `E-ATTR-UNQUOTED-OPERATOR` for conditions), not
 a guess.
+
+### G-HANDLER-LOOP-BINDER-WRITE-CREATES-WINDOW-GLOBAL — in an event-handler value, a write to a keywordless loop binder silently creates a `window` global — `NEW S439; HIGH; open`
+<!-- @gap id=g-handler-loop-binder-write-creates-window-global sev=HIGH status=open locus=compiler/src/codegen/emit-event-wiring.ts:1140 prov=ruling:user-voice-scrml.md S439 #8 -->
+
+S439 ruling #8 says a keywordless loop binder (`for (it of xs)`) is `const` (§50.8.5), and a write to it is
+E-ASSIGN-004. That diagnostic is Nominal: impl#1 does not emit it. The ruling's premise, "it already fails
+loudly", holds in only ONE of two positions:
+
+- **Function body:** impl#1 emits `for (const it of …)`, so `it = it + 1` throws a JS `TypeError` at runtime.
+- **Event-handler value:** in `onclick=${ for (it of @xs) { it = it + 1; @n = @n + it } }`, the string path
+  (Case C, `rewriteBlockBody` at the locus above) re-emits the loop VERBATIM as `for (it of …)`, with no
+  declaration keyword. The client bundle is loaded as a classic `<script src>` with no `"use strict"`, so it
+  runs in sloppy mode. The write therefore **succeeds silently and creates an implicit `window.it` global**.
+
+**Measured S439 by execution:** compiled with `bun compiler/src/cli.js compile t8b.scrml -o out8b` (exit 0,
+no diagnostics; `<xs> = [1, 2, 3]`, `<n> = 0`, the handler above). The runtime and client JS were then run
+in a happy-dom `Window` via `node:vm` `runInContext` (classic-script global code), `DOMContentLoaded` was
+dispatched, and the button was clicked. Result: before the click, `"it" in window` = false; after it,
+`"it" in window` = true with `window.it === 4`; no error; `<p>` reads `9`. Both bundle files have 0
+`"use strict"`.
+
+Fix direction: emit E-ASSIGN-004 (the ruling), and/or lower handler-value loops through the statement
+emitter so the binder gets `const`.
 
 ### g-e-error-002-handler-exemption-depends-on-statement-count — an unhandled failable call in a handler is E-ERROR-002 only when it shares the handler with another statement — `NEW S437; LOW; open (spec-consistency question for bryan)`
 <!-- @gap id=g-e-error-002-handler-exemption-depends-on-statement-count sev=LOW status=open locus=compiler/src/type-system.ts(the §19.4.3 unhandled-failable check — reaches a failable call through the §5.2.3 handler statement list; the single-expression handler forms are exempt by an earlier, separate rule) prov=review:S437-round5-review-item-a;empirical:S437-round5-reproduced-by-compile -->
