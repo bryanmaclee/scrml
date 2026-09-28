@@ -17,3 +17,17 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
   Expected first-slice graded: roughly 15–35 runtime cases (5–12% of runtime cases). Borderline vs the
   <25 stop line; the kind-level ceiling (29–39) is above it, so CONTINUE, and report the real number.
 - 2026-09-27T19:14:31-06:00 ingest.scrml (shim: legacy cells/const/functions/markup/handlers/if= → Core) + slice-m3/{bundle.scrml,substitute.js} (CG substitute: encode → ingest → check → print; executeClient). counter-increment ingests + prints.
+- 2026-09-27 seam wiring (TS, harness only — no compiler/src change):
+  - conformance/adapters/impl1-ts.ts: `setClientExecutor` (default null → impl#1's IIFE execution, textually unchanged,
+    kept at its original indentation inside the `else`). The bootstrap artifact is an ES module over the bootstrap
+    runtime, which the IIFE cannot run.
+  - conformance/adapters/hybrid.ts: installHybrid(stageOverrides, executor?) / uninstall clears both.
+  - scripts/hybrid.ts: runHybridConformance `only` + `executor`; `clientExecutorOf`; `--footprint` + `--report`;
+    `classifyFootprint` (graded / not-yet / front-end), `runFootprintGrade`, `footprintTable`.
+  - slice-m3/{harness.js, ingest.test.js (12), footprint.test.js (4)} green.
+- First full grade: 1047 of 1047 considered; GRADED 28 (16 runtime · 12 codes-only), 26 pass, 2 fail; NOT-YET 548;
+  FRONT-END 471. Fails: reactive/derived-no-dep-warn (W-DERIVED-001 is impl#1 CG's lint; the bootstrap CG does not
+  emit it — real), reactive/toggle-show (the case's `dom` bakes impl#1's `<template id="_scrml_scrml_tpl_2">`
+  marker — a case/normalizer defect, surfaced not fixed).
+- PARSE_REENTRY sites in the shim: 0 (params carried structured `{name,typeAnnotation}`; the shim never reads
+  `init`/`raw`/`args`/`expr` text fields).
