@@ -1621,7 +1621,11 @@ function preprocessForAcorn(
   // Standalone `::Variant` (shorthand, no enum-type prefix) also normalizes
   // to `.Variant`, which then falls into the existing bare-dot variant
   // placeholder path below.
-  s = s.replace(/::(?=\s*[A-Z])/g, ".");
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments so a string / template /
+  // regex literal containing `::Upper` (`"a::B"`) passes through verbatim —
+  // previously emitted as `"a.B"`.
+  s = rewriteCodeSegments(s, (code) => code.replace(/::(?=\s*[A-Z])/g, "."));
 
   // S142 gate-tail: collapse the BS tokenizer's space-padded optional-chaining
   // operator `? .` back to `?.` so acorn parses `file.ast?.filePath` as an
@@ -1637,7 +1641,10 @@ function preprocessForAcorn(
   // (`cond ? .Active : .Idle`) — its leading char after `.` is UPPERCASE — so
   // gating the collapse on a non-uppercase following char preserves ternaries
   // with bare-variant arms.
-  s = s.replace(/\?\s*\.\s*(?=[a-z_$[(])/g, "?.");
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments so literal content like
+  // `"why? .x"` is not collapsed to `"why?.x"`.
+  s = rewriteCodeSegments(s, (code) => code.replace(/\?\s*\.\s*(?=[a-z_$[(])/g, "?."));
 
   // Replace `match expr { arms }` with placeholder
   // This is processed first because match may contain `is` operators inside arms.
@@ -1876,9 +1883,16 @@ function preprocessForAcorn(
   });
 
   // §14.9/§16.6: render name() → __scrml_render_name__()
-  s = s.replace(
-    /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
-    '__scrml_render_$1__('
+  //
+  // S440 (f18 sibling): fenced via rewriteCodeSegments — previously an unfenced
+  // whole-string replace, so the string literal `"render foo("` was emitted as
+  // `"__scrml_render_foo__("` (silent data corruption, same class as the
+  // bare-variant / `not` / `~` passes).
+  s = rewriteCodeSegments(s, (code) =>
+    code.replace(
+      /(?<![A-Za-z0-9_$])render\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g,
+      '__scrml_render_$1__('
+    )
   );
 
   // §32 tilde accumulator: replace standalone `~` with placeholder identifier.
@@ -1900,7 +1914,23 @@ function preprocessForAcorn(
   // The `opts?.tildeActive` parameter is retained in the signature for backward
   // compatibility and to allow future tilde-scope-aware diagnostics, but is no
   // longer load-bearing for this substitution.
-  s = s.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__");
+  //
+  // S440 f18: fenced via rewriteCodeSegments. This preprocess runs on raw text
+  // BEFORE acorn tokenizes, so there are no tokens to ask yet; the shared
+  // literal/comment-aware splitter is the existing lexer-level fence (the same
+  // one the bare-variant / `not` / `or`/`and` passes above use). Previously the
+  // substitution ran over the WHOLE string, so a string / template / regex
+  // literal whose content was a standalone `~` (`"~"`, `'~'`, `` `~` ``,
+  // `` `a${x}~` ``, `/~/`) was silently emitted as `__scrml_tilde__`. Template
+  // `${…}` interpolations are still descended into as code, so a `~` keyword
+  // inside an interpolation is still the accumulator.
+  //
+  // The reverse mapping (esTreeToExprNode, Identifier arm) is structural — it
+  // fires only on an acorn Identifier node — so a user string literal that
+  // contains the text `__scrml_tilde__` is never turned into `~`.
+  s = rewriteCodeSegments(s, (code) =>
+    code.replace(/(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/g, "__scrml_tilde__")
+  );
 
   return s;
 }
