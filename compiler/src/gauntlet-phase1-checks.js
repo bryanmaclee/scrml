@@ -78,6 +78,7 @@ import {
   findNonLiteralSetItems,
   referencesHint,
   harvestRawCreateTables,
+  findRejectedCreateTableHeads,
 } from "./schema-differ.js";
 // s430 — destructured-pattern name walk (E-SCOPE-010). Self-contained helpers;
 // route-inference.ts imports them the same way.
@@ -527,7 +528,9 @@ function checkFileScopeDuplicateBindings(ast, filePath, errors) {
  * 12-member ASTNode union plus a few project-internal node shapes that hold
  * markup descendants: `children`, `body`, `bodyChildren` (engine-decl),
  * `defChildren` (state-constructor-def), `then`/`else`/`consequent`/`alternate`
- * (control-flow), `arms[].body` (match). Logic-block `body` IS walked via the
+ * (control-flow), `arms[].body` (match), and the markup `if-chain` limbs
+ * `branches[].element` / `elseBranch` — all via `schemaWalkChildLists`, the list
+ * shared with `checkSchemaDeclarations`. Logic-block `body` IS walked via the
  * generic `body` descent, but logic statements never carry a real `<schema>`
  * state node — the parser converts markup-in-logic to an html-fragment string,
  * as documented above.
@@ -536,6 +539,36 @@ function checkFileScopeDuplicateBindings(ast, filePath, errors) {
  * @param {string} filePath
  * @param {GauntletError[]} errors
  */
+/**
+ * The child-node lists a `<schema>` walk descends from `node` — ONE list shared
+ * by `checkSchemaPlacement` and `checkSchemaDeclarations`, so the two cannot see
+ * different trees.
+ *
+ * ⚑ INCLUDES THE MARKUP `if-chain` NODE (S438 S239 finding F2): an if/else chain
+ * with an else limb becomes `{kind:"if-chain", branches:[{element}], elseBranch}`,
+ * whose limbs are single NODES under keys no hand-rolled `children`/`body` walk
+ * visits. Both walks missed a `<schema>` inside `<div if=…>…<div else>` — no
+ * E-SCHEMA-003, no E-SCHEMA-012 — while codegen's all-keys walk still read it.
+ */
+function schemaWalkChildLists(node) {
+  const lists = [];
+  for (const k of ["children", "body", "bodyChildren", "defChildren", "then", "else", "consequent", "alternate"]) {
+    if (Array.isArray(node[k])) lists.push(node[k]);
+  }
+  if (Array.isArray(node.arms)) {
+    for (const arm of node.arms) {
+      if (arm && Array.isArray(arm.body)) lists.push(arm.body);
+    }
+  }
+  if (Array.isArray(node.branches)) {
+    for (const br of node.branches) {
+      if (br && br.element && typeof br.element === "object") lists.push([br.element]);
+    }
+  }
+  if (node.elseBranch && typeof node.elseBranch === "object") lists.push([node.elseBranch]);
+  return lists;
+}
+
 function checkSchemaPlacement(ast, filePath, errors) {
   if (!ast) return;
   const topNodes = ast.nodes ?? [];
@@ -603,19 +636,7 @@ function checkSchemaPlacement(ast, filePath, errors) {
 
       // Push current node onto stack and descend into known container fields.
       const nextStack = [...parentStack, node];
-      if (Array.isArray(node.children))     walk(node.children, nextStack);
-      if (Array.isArray(node.body))         walk(node.body, nextStack);
-      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, nextStack);
-      if (Array.isArray(node.defChildren))  walk(node.defChildren, nextStack);
-      if (Array.isArray(node.then))         walk(node.then, nextStack);
-      if (Array.isArray(node.else))         walk(node.else, nextStack);
-      if (Array.isArray(node.consequent))   walk(node.consequent, nextStack);
-      if (Array.isArray(node.alternate))    walk(node.alternate, nextStack);
-      if (Array.isArray(node.arms)) {
-        for (const arm of node.arms) {
-          if (arm && Array.isArray(arm.body)) walk(arm.body, nextStack);
-        }
-      }
+      for (const list of schemaWalkChildLists(node)) walk(list, nextStack);
     }
   }
 
@@ -706,19 +727,7 @@ function checkSchemaDeclarations(ast, filePath, errors) {
       if (node.kind === "state" && node.stateType === "schema") {
         schemaEntries.push({ node, programRoot: nextProgram });
       }
-      if (Array.isArray(node.children))     walk(node.children, nextProgram);
-      if (Array.isArray(node.body))         walk(node.body, nextProgram);
-      if (Array.isArray(node.bodyChildren)) walk(node.bodyChildren, nextProgram);
-      if (Array.isArray(node.defChildren))  walk(node.defChildren, nextProgram);
-      if (Array.isArray(node.then))         walk(node.then, nextProgram);
-      if (Array.isArray(node.else))         walk(node.else, nextProgram);
-      if (Array.isArray(node.consequent))   walk(node.consequent, nextProgram);
-      if (Array.isArray(node.alternate))    walk(node.alternate, nextProgram);
-      if (Array.isArray(node.arms)) {
-        for (const arm of node.arms) {
-          if (arm && Array.isArray(arm.body)) walk(arm.body, nextProgram);
-        }
-      }
+      for (const list of schemaWalkChildLists(node)) walk(list, nextProgram);
     }
   }
   walk(topNodes, null);
@@ -767,6 +776,54 @@ function checkSchemaDeclarations(ast, filePath, errors) {
     // Body-level checks — parse the DSL once via schema-differ.
     const body = schemaBodyText(node);
     if (!body || body.trim().length === 0) continue;
+
+    // E-SCHEMA-012 (SPEC §39.2, bryan RULED S435 "1 both") — a raw `CREATE TABLE`
+    // head in a `<schema>` SHALL NOT carry a schema/database qualifier, at ANY
+    // count. Fail-closed: the two-qualifier form used to match no recognizer and
+    // leave the §14.8.10 tenant floor silently inert (with no warning once a
+    // second table was present); the one-qualifier form was accepted by
+    // stripping, which collapses `a.assets` / `b.assets` onto one key. The heads
+    // come from the SAME structured reader the harvest uses, so the rejection
+    // and the declaration cannot disagree about what a head is. Runs for EVERY
+    // body — a DSL table beside a qualified raw one must not mask it.
+    // E-SCHEMA-013 (fail-closed) covers a head the reader CANNOT read: an
+    // unreadable head used to mean "not a table" — a silently absent floor.
+    for (const q of findRejectedCreateTableHeads(body)) {
+      const shown = q.name ?? "<name>";
+      if (q.kind === "unreadable") {
+        // E-SCHEMA-013 — a DISTINCT code (S438 round 3, F-B): "the compiler could not
+        // read this head" is a different defect from "this head is qualified", and
+        // sharing the qualifier-worded code would mis-describe it.
+        errors.push(new GauntletError(
+          "E-SCHEMA-013",
+          `E-SCHEMA-013: this \`<schema>\` has a \`CREATE TABLE\` head whose table name the ` +
+          `compiler cannot read (\`${q.headText}\`). A \`<schema>\` \`CREATE TABLE\` head SHALL ` +
+          `name ONE table — a bare identifier (letters, digits, \`_\`, \`$\`) or one quoted ` +
+          `identifier — followed by its column list \`(…)\` or a CREATE TABLE clause keyword ` +
+          `(\`AS\`, \`USING\`, \`WITH\`, \`ON\`, \`TABLESPACE\`, \`PARTITION OF\`, \`OF\`, ` +
+          `\`INHERITS\`). A head the compiler cannot ` +
+          `read declares no table, and an undeclared \`tenant_id\` table leaves the §14.8.10 ` +
+          `tenant-row isolation floor silently off, so it is rejected rather than skipped. ` +
+          `(See SPEC §39.2, §14.8.10.)`,
+          span,
+        ));
+        continue;
+      }
+      errors.push(new GauntletError(
+        "E-SCHEMA-012",
+        `E-SCHEMA-012: this \`<schema>\` declares a table with a schema/database qualifier ` +
+        `(\`${q.headText}\` — qualifier ${q.qualifiers.map((p) => `\`${p}\``).join(".")}). ` +
+        `A \`<schema>\` \`CREATE TABLE\` head SHALL name an UNQUALIFIED table. Every ` +
+        `\`<schema>\` consumer — the §14.8.10 tenant-row isolation floor, the §14.8.9 ` +
+        `protect floor and the compile-time shadow database — keys a table by its ` +
+        `unqualified name, so a qualifier could only be dropped (two qualified tables ` +
+        `collapsing onto one) or leave the table undeclared and the tenant floor silently ` +
+        `off. Write \`CREATE TABLE ${shown} (…)\` and select the schema through the ` +
+        `connection instead (e.g. the Postgres \`search_path\`). (See SPEC §39.2, §14.8.10.)`,
+        span,
+      ));
+    }
+
     let parsed;
     try {
       parsed = parseSchemaBlock(body);
