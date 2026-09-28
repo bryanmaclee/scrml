@@ -21,3 +21,4 @@
 - CORRECTION #10: §66.13.4 + §66.20 row narrowed to 'an <engine> (a single declaration carrying a transition graph)'; OPEN on a plain single. §51.0.K and the §34 row unchanged.
 - CORRECTION #11: 'initial= also accepts'; inline (extended S439 #11) on the .Variant item; OPEN on static-ness; supersedes (extends) names the EXACTLY-ONE sentence.
 - CORRECTION #12: provenance gains 'supersedes (narrows)'; the association bullet and the remount clause are marked in place.
+- CORRECTION regen: SPEC-INDEX, FACTS (SPEC lines 40,481), known-gaps gap-counts (HIGH 146->147, for the new gap).

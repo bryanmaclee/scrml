@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 146 | 4 |
+| HIGH | 147 | 4 |
 | MED | 328 | 0 |
 | LOW | 133 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
