@@ -1458,6 +1458,15 @@ All valid event handler binding forms:
 - `onclick=handler` (no parentheses) SHALL wire `handler` directly as the event listener without wrapping.
 - Use `onclick=${() => fn(item.id)}` (expression form) when inside a loop and closure capture is needed — `onclick=fn(item.id)` does not capture `item.id` per-iteration.
 
+**Dispatch contract — one contract, native bubbling (S439 ruling #9).** Every event-handler form above obeys ONE dispatch contract, the same for page markup and for `<each>` rows (§17.7):
+
+- For an event that bubbles in the DOM: when it fires on an element nested inside an ancestor that also handles that event, the inner handler SHALL run first and the ancestor's handler after it; both SHALL fire. (A non-bubbling event — e.g. `focus`, `blur`, `mouseenter`, `load` — does not reach the ancestor.)
+- A handler that calls `stopPropagation()` on the event SHALL prevent the handlers of its ancestors from running for that event.
+
+⚑ **Carried impl#1 divergence, not the language rule:** impl#1's page-markup delegation runs only the INNERMOST handler (the ancestor's does not fire), while its `<each>` rows bubble natively. (Both halves measured S439 by executing the compiled bundle in happy-dom: a click on a `<button onclick>` inside a `<div onclick>` fired the button's handler only; the same nesting inside an `<each>` row fired both. Handler order was not measured.) The contract above is the language rule; the bootstrap implements it.
+
+> **Provenance:** ruling:user-voice-scrml.md S439 #9 "all recs" (Rec: one contract, native bubbling — "The inner handler runs first, both fire, and `stopPropagation` is honoured. The SPEC is silent").
+
 #### 5.2.3 Event handler forms — bare single-expression and inline block (Stage 0b D4 — M11; L19 REVERSED S435)
 
 **Added:** 2026-05-04 — formalised the v0.next inline event-handler shapes. **Amended:** 2026-09-26 (S435) — L19 reversed: inline multi-statement (block) handlers are legal and canonical.
@@ -2652,6 +2661,8 @@ replacement from the subscriber's perspective — both result in a `_scrml_react
 ---
 
 #### 6.5.6 Nested Reactive Arrays
+
+> **Note:** Not amended toward deep reactivity (S439 #3): for the §66 model the question is dissolved by §66.10 (value semantics) — there is no deep-reactive proxy to specify. **Provenance:** ruling:user-voice-scrml.md S439 #3 "all recs" (Rec: don't amend §6.5.6).
 
 Nested arrays (arrays of arrays) are supported. Only the outermost reactive variable is
 reactive. Mutating an inner array does NOT trigger subscribers of the outer variable unless
@@ -3952,6 +3963,15 @@ navigation (a route region).
   the first**, and its registered `cleanup()` SHALL run on the matching **route-leave**. §6.7.1a's unity
   is preserved without exception: `on mount`, bare lifecycle expressions and `<request>` remain one
   mechanism, differing only in which owner the compiler binds them to. *(Amended S313 — ratified Pole C.)*
+  *(narrowed S439 #12 — declarations in a `${…lift…}` block inside an `if=` scope run once at file init; see the next bullet)*
+- **A `${…}` block containing `lift` inside an `if=` scope (S439 ruling #12).** Its DECLARATIONS run ONCE,
+  at file init — they are file-scope declarations (§7.6), not per-mount state. Its `lift` statements run
+  on every mount of the `if=` scope, including each remount. The association and remount rules above
+  govern the block's `lift` statements; they do not re-run its declarations. (This is the behaviour that
+  shipped as #1021.)
+  > **Provenance:** ruling:user-voice-scrml.md S439 #12 "all recs" (Rec: A — "Declarations run at file
+  > init (§7.6 file scope) and lift statements run per mount") · supersedes (narrows): the association
+  > bullet and the memoryless-remount clause above, for declarations in such a block.
 - When a scope destroys, all associated lifecycle resources are torn down in the following
   canonical order:
   1. All `when` effects registered in that scope are unregistered (no further executions
@@ -3964,7 +3984,8 @@ navigation (a route region).
   sequence before the parent scope begins its teardown sequence.
 - A scope that remounts (i.e., `if=` transitions false → true a second time) SHALL re-run
   all bare expressions and re-start all `<timer>` and `<poll>` instances declared in that
-  scope exactly as if the scope were mounting for the first time.
+  scope exactly as if the scope were mounting for the first time. *(narrowed S439 #12 —
+  does not re-run declarations in a `${…lift…}` block; see the S439 #12 bullet above)*
 
 **Definition — "outside any element scope":** A construct is outside any element scope when
 it appears at the file level without a `<program>` root element ancestor, or when it
@@ -6555,6 +6576,7 @@ ${ let loud = greeting.toUpperCase() }
 - Reactive variables (`@var`) declared at file level (outside any `${}`) are in scope for all `${}` blocks and markup throughout the file (§6.1).
 - Variables declared inside a function body within a `${}` block are scoped to that function. Only top-level declarations within the `${}` block participate in file scope.
 - Re-declaring a name with `let` in a later file-level `${}` block when that name was already declared at file scope SHALL be a compile error (E-SCOPE-010: duplicate binding in file scope).
+- A declaration in a `${…lift…}` block nested inside an `if=` element is a file-scope declaration: it runs ONCE, at file init — not once per mount of the `if=` scope. The block's `lift` statements run per mount (§6.7.2.1). **Provenance:** ruling:user-voice-scrml.md S439 #12 "all recs".
 
 #### 7.6.1 File-level scope under V5-strict + hoisting + `pinned` (Stage 0b D4 — M11)
 
@@ -12078,6 +12100,7 @@ A `for` loop with `lift` MAY include an `else` block. The `else` block executes 
 - If `collection.length === 0` (or `collection is not`), the `for` body does not execute and the `else` body executes exactly once.
 - If `collection.length > 0`, the `for` body executes for each element and the `else` body does not execute.
 - The `else` body is valid only on a `for/lift` loop. A `for` loop without `lift` SHALL NOT accept an `else` block (E-CTRL-010).
+- A keywordless loop binder — `x` in `for (x of collection)` — is `const` (§50.8.5); a write to it SHALL be E-ASSIGN-004. **Provenance:** ruling:user-voice-scrml.md S439 #8 "all recs".
 
 **Worked example:**
 
@@ -13080,6 +13103,15 @@ inside it (§4.18.4). A bare `<Small : Small Mario>` (prose, not a valid express
   (§18.8.1): a `<match>` covering exactly the subset's variants is exhaustive (no `<_>`
   required); a state-child naming an excluded variant is a dead arm
   (`E-MATCH-SUBSET-DEAD-ARM`); a vacuous `<_>` over a fully-covered subset fires `W-MATCH-001`.
+- **Nesting in a dispatched arm (S439 ruling #5).** A block `<match>` MAY appear inside the
+  body of a DISPATCHED arm — a block-form `<match>` arm, or an `<engine>` state-child
+  (§51.0.B) — and SHALL NOT be refused there. (For the state-child case impl#1 carries a
+  divergence under `W-ENGINE-MATCH-IN-STATE-CHILD`, §34; see §51.0.B.)
+  For a block `<match>` nested in a dispatched `<match>` arm, impl#1 emits no inner dispatcher
+  and renders nothing, with no diagnostic (`g-nested-block-match-in-dispatched-arm-silently-drops`).
+  > **Provenance:** ruling:user-voice-scrml.md S439 #5 "all recs" (Rec: B; "Answer the open
+  > nested-block-match-in-dispatched-arm fork (refuse vs support) the same way") · supersedes:
+  > the OPEN fork `g-nested-block-match-in-dispatched-arm-silently-drops`.
 
 **Output category:** the block-form emits MARKUP. Use it inside markup contexts (component
 bodies, `<page>`, anywhere a tag is legal). Use the JS-style form (§18.1+) inside
@@ -14709,6 +14741,12 @@ A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the fol
 4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error
 
 Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002** -- `Result of failable function '{name}' is not handled. Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`
+
+**Event-handler bodies — impl#1's handler exemption follows the call, not the statement count (S439 ruling #14).** The SPEC has NO handler exemption: the E-ERROR-002 sentence above and §19.4.4 ("An unhandled `!` function call SHALL be a compile error") are unconditional. impl#1 alone exempts some handler bodies. The ruling: whatever answer applies to an unhandled `!` call in an event-handler body (§5.2.3) SHALL follow the unhandled failable call, NOT the number of statements in the handler — a handler whose whole body is `risky()` and a handler whose body is `risky(); @r = 1` get the same answer. ⚑ impl#1 today (measured S437) splits on the count: `onclick={ risky(); @r = 1 }` is E-ERROR-002, while `onclick=risky()`, `onclick={ risky() }` and a multi-line `onclick={ risky() }` compile at exit 0. That is the split the ruling rejects.
+
+> ⚑ **OPEN (not ruled) — the direction.** Under the standing SHALLs (§19.4.3, §19.4.4) the SPEC already makes every unhandled `!` call an error, handler bodies included. The "none errors" limb would have to SUPERSEDE those sentences, which would widen the SPEC. So the choice for bryan is: **restore conformance** (impl#1 errors every unhandled handler call, and the files below migrate), or **amend the SPEC** to add a handler exemption. The PA lean is all-error ("closed wins"). It is newly-rejecting on impl#1's exempt forms, so it was made conditional on a measured corpus count, and a non-zero count goes back to bryan. **Measured S439:** the compiler was instrumented at the handler-attribute visit and run over `examples/ samples/ conformance/ stdlib/ benchmarks/` (2071 of 2071 sources); a text cross-check of files the probe did not reach found 0 more. Braced `{ fn() }` / `${fn()}` one-statement shape: **0**. Bare `onX=fn()` call shape: **6 attributes in 5 files** — `conformance/cases/defer/control-flow-neg/case.scrml` (`onclick=b()`, `onclick=c()`), `conformance/cases/error/propagate-in-non-failable-fn-neg/case.scrml` (`onclick=caller()`), `conformance/cases/error/propagate-non-failable-callee-neg/case.scrml` (`onclick=caller()`), `conformance/cases/error/propagate-non-failable-callee-pos/case.scrml` (`onclick=caller()`; a positive case that expects a clean compile), `samples/compilation-tests/gauntlet-s20-error-test/server-failable-001.scrml` (`onclick=getUser(1)`). **Excluded:** five `<formFor onsubmit=persistSignup/>` sites (`conformance/cases/form-for/formfor-*`). These are function REFERENCES, not calls, and §41.14 (`E-FORMFOR-ONSUBMIT-SIGNATURE`) REQUIRES that handler to be failable. The count is non-zero, so the direction is NOT written here.
+>
+> **Provenance:** ruling:user-voice-scrml.md S439 #14 "all recs" (scope note: "#14 is ruled as 'the exemption follows the unhandled failable call, not the statement count'; the direction (all-error) is the PA LEAN and is conditional on the measured corpus count — a non-zero count comes back to bryan").
 
 #### 19.4.4 Normative Statements
 
@@ -20649,7 +20687,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
 | E-ASSIGN-003 | §50.9 | Undeclared identifier as assignment expression target | Error |
-| E-ASSIGN-004 | §50.9 | `const` variable as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`) | Error |
+| E-ASSIGN-004 | §50.9 | `const` variable as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`). Includes a write to a keywordless loop binder (`for (it of xs)`, §50.8.5 — S439 ruling #8) — **Nominal for that case: not yet emitted.** | Error |
 | E-AUTH-001 | §52.11 | Client-local `@var` used as bound parameter in `?{}` INSERT/UPDATE/DELETE outside server function | Error |
 | E-AUTH-002 | §52.11 | `<var server>` initial value directly derived from a client-local `@var` | Error |
 | E-AUTH-003 | §52.11 | State type declares `authority="server"` without `table=` attribute | Error |
@@ -20746,7 +20784,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-VARIANT-AMBIGUOUS | §14.10, §18.0.3 | Bare variant reference (e.g., `let x = .Small` or `<Small>` arm pattern) is ambiguous because the position's type is a union with multiple members declaring the variant, OR the position has no statically-known enum type context. §14.10 covers general expression positions (LHS state-decl / let / const annotations, fn params, fn return); §18.0.3 covers match-arm patterns. Qualify the variant: `TypeName.Small` / `<TypeName.Small>`. | Error |
 | E-ENGINE-INVALID-TRANSITION | §51.0.F, §51.0.G | Direct write to engine variable or `.advance()` violates the from-state's `rule=` contract. Statically rejected when from-state is known; runtime-thrown otherwise. **v0.3 Option-d carve-out:** self-writes (target equals current variant) are NO-OPS, NOT violations — see §51.0.F.1 + W-ENGINE-SELF-WRITE-DETECTED. | Runtime |
 | W-ENGINE-SELF-WRITE-DETECTED | §51.0.F.1 | (v0.3, info-level) The compiler has detected an engine self-write — `@var = .CurrentVariant` or `@var.advance(.CurrentVariant)` where `.CurrentVariant` either matches the enclosing state-child tag (STRICT — inside-state-child fire) OR is a declared variant of the engine and the write site is outside any state-child body (CONSERVATIVE — outside-state-child fire). Per §51.0.F.1, self-writes are runtime NO-OPS: no `<onTransition>` fires, no history capture (§51.0.N), no timer rearm (§51.0.M), no idle-watchdog reset (§51.0.R), no subscriber notification. If the no-op-when-already-in-state behavior is INTENTIONAL (e.g., a defensive `set(.Current)` reachable from multiple variants), the lint is informational only — no action required. If a state change was expected unconditionally, verify the write target or guard the call site. Suppression: rephrase the write target via a derived cell (avoid the literal `.Variant` form), or remove the write entirely. Joins the small `W-PROGRAM-SPA-INFERRED` / `I-MATCH-PROMOTABLE` / `D-BATCH-001` family of synthesis-pattern info lints (Insight 30 closure precedent). (Catalog addition v0.3 Option-d synthesis 2026-05-12; emitted at `compiler/src/symbol-table.ts` PASS 16 fire-site #10 + PASS 12.B `walkEngineSelfWriteOutside`.) | Info |
-| W-ENGINE-MATCH-IN-STATE-CHILD | §51.0.B | (Known-limitation warning, pending a ruling.) A block `<match>` (§18.0.1) appears inside an engine state-child body — directly, inside lowercase elements, or via a component whose body is the match, in the outer engine or a nested one. Measured behaviour: the match renders when its state-child is on screen at page load, but the engine writes the state-child with innerHTML, so every LATER entry (leaving and re-entering the state-child, or first entering a state-child that is not `initial=`) creates a fresh, empty match mount that stays BLANK until the match's `on=` value changes. Identical for `</>` and named `</X>` arm closers. Not fired for a `<match>` inside an `<each>` body in the state-child (the `<each>` re-mounts on entry and renders correctly), nor for a `<match>` outside any state-child. ⚑ Whether a block `<match>` is permitted in a dispatched arm / engine state-child at all is the OPEN (A) refuse / (B) support fork in `g-nested-block-match-in-dispatched-arm-silently-drops`; this row does not decide it — (A) promotes this code to an error, (B) retires it with the re-entry fix. Workaround: move the `<match>` outside the `<engine>` into an element gated on the engine variable, e.g. `<div if=(@phase == .On)> <match …>…</match> </div>`; wrapping the match in a component does not help. Direction-of-change: **newly-warning only** — no predicate, emitted artifact or exit code moves. (Catalog addition S432; emitted at `compiler/src/validators/post-ce-invariant.ts` `warnMatchInStateChild` on the post-CE AST, so both parse pipelines.) | Warning |
+| W-ENGINE-MATCH-IN-STATE-CHILD | §51.0.B | (**Carried impl#1 divergence — NOT the language rule.** The language SUPPORTS a block `<match>` in a state-child, §51.0.B / §18.0.1, S439 ruling #5; bryan approved this row as that divergence's code. **Provenance:** ruling:user-voice-scrml.md S439 #5 "all recs" · supersedes: "Known-limitation warning, pending a ruling" and the ⚑ OPEN-fork sentence below, kept for the record.) A block `<match>` (§18.0.1) appears inside an engine state-child body — directly, inside lowercase elements, or via a component whose body is the match, in the outer engine or a nested one. Measured behaviour: the match renders when its state-child is on screen at page load, but the engine writes the state-child with innerHTML, so every LATER entry (leaving and re-entering the state-child, or first entering a state-child that is not `initial=`) creates a fresh, empty match mount that stays BLANK until the match's `on=` value changes. Identical for `</>` and named `</X>` arm closers. Not fired for a `<match>` inside an `<each>` body in the state-child (the `<each>` re-mounts on entry and renders correctly), nor for a `<match>` outside any state-child. ⚑ *(superseded S439 — ruled (B) support)* ~~Whether a block `<match>` is permitted in a dispatched arm / engine state-child at all is the OPEN (A) refuse / (B) support fork in `g-nested-block-match-in-dispatched-arm-silently-drops`; this row does not decide it — (A) promotes this code to an error, (B) retires it with the re-entry fix.~~ Workaround: move the `<match>` outside the `<engine>` into an element gated on the engine variable, e.g. `<div if=(@phase == .On)> <match …>…</match> </div>`; wrapping the match in a component does not help. Direction-of-change: **newly-warning only** — no predicate, emitted artifact or exit code moves. (Catalog addition S432; emitted at `compiler/src/validators/post-ce-invariant.ts` `warnMatchInStateChild` on the post-CE AST, so both parse pipelines.) | Warning |
 | E-ENGINE-EFFECT-AMBIGUOUS | §51.0.H | `effect=` attribute used on a state-child whose `rule=` is multi-target. Use `<onTransition>` element child(ren) instead — `effect=` requires a single-target rule. | Error |
 | E-ENGINE-EFFECT-ON-DERIVED | §51.0.H, §51.0.J | `effect=` used on the opener of a `derived=` engine (the boot init effect, §51.0.H Form 3). A derived engine has no init→`initial=` edge (its initial value is computed from `derived=expr`, not entered) and its variable is read-only (`E-DERIVED-ENGINE-NO-WRITE`), so a boot effect has nothing to do. Resolution: use a mount-time `${}` effect at the enclosing scope, or a non-derived engine. (Catalog addition S148 — Insight 33 Fork C1 edge-case ruling iii. NB: state-child `effect=` on a derived engine remains LEGAL per §51.0.J — fires on derived state changes.) | Error |
 | E-ENGINE-EFFECT-NOT-INTERPOLATED | §51.0.B, §51.0.H | `effect=` (engine opener Form 3 OR state-child Form 1) is a §7 logic-context block, so the `${...}` form is REQUIRED. A bare value (`effect=load()`) or unbalanced/empty braces was previously captured as null and SILENTLY tree-shaken — the effect never ran. The bare single-expression sugar that a plain event handler permits (`onclick=load()`, §5.2.3) does NOT extend to `effect=`. Resolution: wrap the body in `${...}` — `effect=${ load() }`. (Catalog addition S182 — dog-food round 2; Option B reject-with-diagnostic, user-ratified.) | Error |
@@ -20759,7 +20797,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-DERIVED-ENGINE-NO-WRITE | §51.0.J | Direct write to the auto-declared variable of a derived engine. Derived-engine variables are read-only. | Error |
 | E-DERIVED-ENGINE-INITIAL-ABSENT | §51.0.J | (S90 rename — M-7C-D-12 Track 4 / OQ-6) `derived=expr` returns scrml-absence (`not`) when the source is in its initial state. The derived engine has no initial variant to enter. Add a default arm or use a wildcard arm in the derivation. **Pre-S90 name:** `E-DERIVED-ENGINE-INITIAL-UNDEFINED` (renamed for §42.8 "No scrml program SHALL directly emit JavaScript `undefined`" alignment; the runtime condition is scrml-absence, not JS-`undefined`). | Error |
 | E-DERIVED-ENGINE-CIRCULAR | §51.0.J | Chained derivation (engine A → engine B → engine A) forms a cycle. Detected at compile time by the dependency-graph machinery (§31). Break the cycle. | Error |
-| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. | Error |
+| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. ALSO (S439 ruling #10): an `<engine>` inside an `<each>` row template (a row is a multi-instance context); the message names the per-row form — an ordinary declaration, keyed per row (§66.7.3). **Nominal for the `<each>`-row case — not yet emitted** (impl#1 compiles it at exit 0 and drops the body). | Error |
 | E-ENGINE-MOUNT-NOT-ENGINE | §51.0.D, §21.8 | A self-closing tag `<EngineName/>` mounts an imported binding whose source export is NOT an engine (e.g., a component, channel, type, function, or arbitrary const). Cross-file engine mount via `<EngineName/>` requires the imported name to be the variable of an exported `<engine>` declaration. Either import an engine binding from the source file, or use the appropriate mount form for the imported kind (e.g., component instantiation for components, expression read for const values). (Catalog addition S68 — A1b B14.) | Error |
 | E-ENGINE-STATE-CHILD-MISSING | §51.0.B, §51.0.F | A variant of the engine's `for=Type` has no matching state-child tag in the engine body. Per §51.0.F, every variant must have a corresponding state-child (`<Variant>...</>`) — exhaustiveness over the variant set is what gives `<engine>` its compile-time guarantees. Add the missing `<Variant>` state-child(ren). (Catalog addition S68 — A1b B15.) | Error |
 | E-ENGINE-STATE-CHILD-INVALID-VARIANT | §51.0.B | A state-child tag in the engine body does not match any variant of the engine's `for=Type`. State-child tags are PascalCase variant names; `<UnknownTag>` inside an `<engine for=MarioState>` is rejected because `UnknownTag` is not a `MarioState` variant. Either rename the tag to a valid variant or add the variant to the type. (Catalog addition S68 — A1b B15.) | Error |
@@ -24069,7 +24107,9 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
 - **Application-wide attributes** continue to live on `<program>`. These attributes are app-scope (not per-route): `title=`, `description=`, `version=`, `author=`, `license=` (documentary, §40.7); `cors=`, `cors-max-age=`, `log=`, `headers=`, `idempotency-store=`, `idempotency-ttl=`, `channel-reconnect=` (app-scope middleware, §40.2 + §38.3.1). The `<program>` is the canonical host scope for these concerns.
 - Inside `<program>`, the body parses in **default-logic mode** under v0.3. Bare top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift to the logic context without explicit `${...}` wrapping. The author MAY still write `${...}` explicitly for clarity, but redundant `${...}` at the top level of `<program>` fires `W-PROGRAM-REDUNDANT-LOGIC` (info-level lint; warning in v0.3, error in v0.4 per Q5 deprecation cycle). **S111 amendment (2026-05-20):** `default-logic` mode is a **distinct third body-mode**, owned by this section — it is neither the **free-text mode** nor the **code-default mode** of the quoted-text model's §4.18 body-mode split. The §4.18 free-text / code-default split governs only the three code-bearing loci (engine state-children, match block-form arms, `:`-shorthand bodies) versus plain markup; it does **not** classify or reclassify the `<program>` / `<page>` body. The complete body-mode picture is therefore three-way — free-text / code-default (both §4.18) and `default-logic` (this section). See §4.18.1 for the reciprocal note. (This amendment reconciles §40.8's `default-logic` statement with §4.18.1's body-mode listing; the native-parser charter deep-dive surfaced the inconsistency.)
 - **S123 amendment (2026-05-23) — auto-lift covers DECLARATIONS only, NOT writes.** Per the S122 user-voice Option-2 ratification, `default-logic` mode auto-lifts DECLARATIONS only — the structural state-decl form `<name> = expr`, the structural derived form `const <name> = expr`, function declarations (`function name() { ... }`, `fn name(...) { ... }`), type declarations (`type Name:enum = { ... }`), `let`/`const` local declarations, and `import` declarations. The bare V5-strict reactive WRITE form `@name = expr` is **NOT** a declaration — it is a write to a pre-declared cell, and writes ARE logic; logic goes in `${...}`. Bare `@name = expr` at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-body surface) SHALL fire `E-WRITE-NOT-IN-LOGIC-CONTEXT`. The fix is either (a) wrap in an explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. This is the COMPANION amendment to V-kill (commits `c22b3fda` + `c2d2741a` + `489e5943`): V-kill killed silent auto-state-cell synthesis inside `fn` / `function` / user-written `${...}` body contexts; Unit CC closes the default-logic body-top case that V-kill explicitly carved out. **Scope discrimination:** Unit CC fires ONLY at the IMMEDIATE body-top of the synthetic default-logic auto-lift wrapper. Bare `@name = expr` nested inside a function body (`function f() { @x = 5 }`) is governed by V-kill (the V-kill default-logic-lift carve-out is preserved at the parser level to keep blast radius narrow on the 110-file unmigrated corpus). The `<db>` / `<state>` STATE-block bodies (V5-strict state-block grammar per the per-block body conventions) are NOT default-logic-mode loci and are NOT affected by Unit CC; bare `@x = []` inside `<db>` direct-child position remains canonical. **Per-file exemption surface:** `compiler/src/unit-cc-exemption-list.json` provides a path-based suppression mechanism for the pre-S123 corpus (each adopter source file removes its own entry as migration completes). The exemption is intentionally per-file (not blanket) so migration progress is visible in version control. See `E-WRITE-NOT-IN-LOGIC-CONTEXT` in §34 for the diagnostic row + cross-reference.
-- ⚑ **S378 note (ruling 3) — a bare CONTROL-FLOW statement at this body-top is a KNOWN OPEN HOLE. This bullet records it; it does not close it.** The S123 amendment above enumerates what `default-logic` mode auto-LIFTS and is otherwise silent on the COMPLEMENT, **and that silence was read as coverage**: `E-CONTROL-FLOW-IN-MARKUP`'s §34 row listed a `<program>` / `<page>` / `<channel>` default-logic root under **Does NOT fire**, giving as its reason that *"the §40.8 auto-lift handles it."* Because the lift covers DECLARATIONS only, it does not — the locus is covered by **NEITHER**, and `<program>` + `if (1) { }` compiles at exit 0 and ships the statement into the emitted `<body>` as page text, taking every diagnostic its contents would have raised with it. **This is recorded at THIS locus because its absence here is what let the defect stand.** ⚑ **No SHALL is stated, deliberately.** Ruling 3 (user-voice S375) directed the diagnostic be extended here; that extension is **HELD** (bryan, S383) because the recognizer requires a `{` and therefore cannot separate a braceless control-flow statement from prose — and prose at this body-top renders and is a working shape, which is why S368 refused *"diagnose every non-declaration run"*. Closing it is a grammar-derived arc; see the `E-CONTROL-FLOW-IN-MARKUP` row in §34 and `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. ⚠ **Reading this bullet as narrowing the complement is the mistake to avoid.** `default-logic` mode rejects exactly ONE named shape at this body-top today — a bare write (the S123 amendment above). Everything else outside the lift set becomes page TEXT, which is correct for **prose** and is a working shape. Whether any further shape is logic rather than text is an open operator question per-shape, not an inference from this list.
+- ⚑ **S378 note (ruling 3) — a bare CONTROL-FLOW statement at this body-top is a KNOWN OPEN HOLE. This bullet records it; it does not close it.** The S123 amendment above enumerates what `default-logic` mode auto-LIFTS and is otherwise silent on the COMPLEMENT, **and that silence was read as coverage**: `E-CONTROL-FLOW-IN-MARKUP`'s §34 row listed a `<program>` / `<page>` / `<channel>` default-logic root under **Does NOT fire**, giving as its reason that *"the §40.8 auto-lift handles it."* Because the lift covers DECLARATIONS only, it does not — the locus is covered by **NEITHER**, and `<program>` + `if (1) { }` compiles at exit 0 and ships the statement into the emitted `<body>` as page text, taking every diagnostic its contents would have raised with it. **This is recorded at THIS locus because its absence here is what let the defect stand.** ⚑ **No SHALL is stated, deliberately.** Ruling 3 (user-voice S375) directed the diagnostic be extended here; that extension is **HELD** (bryan, S383) because the recognizer requires a `{` and therefore cannot separate a braceless control-flow statement from prose — and prose at this body-top renders and is a working shape, which is why S368 refused *"diagnose every non-declaration run"*. Closing it is a grammar-derived arc; see the `E-CONTROL-FLOW-IN-MARKUP` row in §34 and `docs/changes/ruling3-grammar-derived/PROBLEM-STATEMENT.md`. ⚠ **Reading this bullet as narrowing the complement is the mistake to avoid.** `default-logic` mode rejects exactly ONE named shape at this body-top today — a bare write (the S123 amendment above). Everything else outside the lift set becomes page TEXT, which is correct for **prose** and is a working shape. *(narrowed S439 #2 — a bare `when` is lifted; see the next bullet)* Whether any further shape is logic rather than text is an open operator question per-shape, not an inference from this list. *(narrowed S439 #2 — a bare `when` is lifted; see the next bullet)*
+- **S439 ruling (#2) — a bare `when` at the body-top of a `<program>` / `<page>` is LOGIC, by its grammar head.** A statement whose grammar head is the `when` keyword (e.g. `when @var changes { … }`, §6.7.4), written directly at the body-top of a `<program>` or `<page>` — in any position among the body's direct children — SHALL be lifted into the logic context by that grammar head, as the ruling states an `on mount {` block is. It SHALL NOT ship as page text. This answers the S378 note's open per-shape operator question (above) **for this one shape only**; every other shape outside the lift set keeps that note's status. The rejected alternative — make a bare `when` here an error — was refused because it leaves a `when` that shares a text run with a declaration silently lifted, a position-dependent rule.
+  > **Provenance:** ruling:user-voice-scrml.md S439 #2 "all recs" (Rec: A — lift it by its grammar head, like `on mount {`) · supersedes: the S378 note's "open operator question per-shape" for the bare-`when` shape only.
 - **Multi-page apps.** A `<program>` MAY contain zero or more `<page>` declarations (§4.15) as direct children. Each `<page>` is a per-route attribute container — its URL is inferred from filesystem location (no `route=` attr; per Pillar 3 compiler-owns-the-wiring, and cross-ref §47.9.2 path-preserve emission). The five per-route attributes are `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive` (§20.8.4); any other attribute on `<page>` fires `E-PAGE-INVALID-ATTR`.
 
 > **Provenance (pa-base v2.10 Rule 4b):** `dd:page-helper-element-design-2026-05-12` · `ruling:` user-voice **S314** (*"accept the 5fth attribute"*) · **supersedes:** the four-set enumeration in that DD. The DD's governing rule is an **app-wide-vs-per-route partition**, not a designed bound — §0.3 enumerated the `<program>` attribute surface *as it stood 2026-05-12* and classified each entry, and the four were that classification's OUTPUT. `keep-alive` did not exist then, and is per-route by construction (§20.8.4: a **route** opts in; §20.8.8 keys the region by `(route, params)`). Admitting it is newly-accepting **toward the contract** (pa-base §8) because §20.8.4 already declared the form legal — a conformance fix, not a widening. The set stays **closed and enumerated** deliberately: a list is mechanically checkable, whereas *"is this attribute per-route?"* is a judgment call that drifts.
@@ -26288,6 +26328,9 @@ seq           ::= 1 or 2 base36 characters [0-9a-z]  (see §47.4)
 ```
 
 - The `_` prefix is reserved for compiler-generated names. User-authored scrml identifiers and vanilla JS identifiers SHALL NOT begin with `_` followed by a `kind` character and 8 base36 characters. The compiler SHALL reject any user-authored identifier that would collide with this pattern (E-CG-012).
+- **S439 ruling (#7) — the `_scrml_` identifier namespace is RESERVED.** A user-authored scrml program SHALL NOT **declare** a binding whose name begins with `_scrml_`; that prefix names compiler/runtime identifiers (`_scrml_reactive_set`, `_scrml_session_destroy`, …). Such a declaration is a compile error: **`E-NAME-COLLIDES-RESERVED-PREFIX`** — **Nominal / spec-ahead — not yet emitted**; its §34 catalog row lands WITH the implementation (house rule — no §34 row precedes its emitter, as §66.20). Newly-rejecting, so reversible, and it limits rather than widens.
+  > ⚑ **OPEN (not ruled):** whether a *reference* to a `_scrml_` name is refused, and the status of stdlib source (which references `_scrml_messages_register`, `_scrml_message_for`, `_scrml_labels_register`), is not ruled.
+  > **Provenance:** ruling:user-voice-scrml.md S439 #7 "all recs" (Rec: yes — a SPEC sentence plus a diagnostic).
 - The full alphabet of the encoded portion (excluding the `$` separator used in debug mode, §47.3) is `[_0-9a-z]`.
 
 #### 47.1.2 Kind Markers
@@ -28694,6 +28737,20 @@ ${
 
 A `let` binding stays mutable for its whole lifetime. Reassigning it any number of times is legal; the FIRST reassignment does not convert it to a `const`.
 
+**S439 ruling (#8) — a keywordless loop binder is `const`.** The binder of a keywordless loop head — `it` in `for (it of xs)` — is created without `let`, so it is `const` by the rule above (matching §66's immutable-by-default). A write to it is **E-ASSIGN-004**:
+
+```scrml
+${
+    for (it of @xs) {
+        it = it + 1        // E-ASSIGN-004 — `it` is a keywordless loop binder, so `const`
+    }
+}
+```
+
+⚑ **Nominal for this case on impl#1** — not yet emitted (measured S439, exit 0).
+
+> **Provenance:** ruling:user-voice-scrml.md S439 #8 "all recs" (Rec: no — it's `const` per §50.8.5; "it just needs a proper diagnostic").
+
 ### 50.9 Normative Statements
 
 - A bare assignment expression `x = value` SHALL produce the assigned value as its result when appearing in any expression position. (§50.3.1)
@@ -29038,6 +29095,17 @@ This declaration:
   spec amendment SHALL cross-reference §51.0.B.1's reserved-name precedence rule and
   SHALL define migration semantics for adopter code whose payload-binding names would
   shadow the new reserved name.
+- **S439 ruling (#5) — a block `<match>` inside a state-child body is SUPPORTED.** A block
+  `<match>` (§18.0.1) MAY appear in an engine state-child body; it SHALL NOT be refused.
+  Under §66 ruling O5 (1i) a state-child's body is ordinary markup (§66.13), and `<match>`
+  is legal in markup. The companion fork — a block `<match>` nested inside a DISPATCHED
+  `<match>` block-form arm — is answered the same way: supported, not refused (§18.0.1).
+  ⚑ **Carried impl#1 divergence, not the language rule:** impl#1 renders such a match only
+  when its state-child is on screen at page load, and warns with `W-ENGINE-MATCH-IN-STATE-CHILD`
+  (§34) — that warning is the divergence's code.
+  > **Provenance:** ruling:user-voice-scrml.md S439 #5 "all recs" (Rec: B) · supersedes: the
+  > OPEN (A) refuse / (B) support fork recorded in the `W-ENGINE-MATCH-IN-STATE-CHILD` row
+  > (§34) and in `g-nested-block-match-in-dispatched-arm-silently-drops`.
 
 #### 51.0.B.1 Payload binding on state-children
 
@@ -29384,10 +29452,24 @@ the body lives at the declaration site. Adding a body at the use-site is a parse
 mutually-exclusive value forms:
 
 - `initial=.Variant` — a STATIC literal (the fixed start state, validated at
-  compile time against the `for=T` variant set).
+  compile time against the `for=T` variant set). *(extended S439 #11 — or a payload
+  constructor; see "Payload constructor" below)*
 - `initial=@cell` — RUNTIME-CELL HYDRATION (S198, Approach F A-leg): the engine
   is seeded from the snapshot of a reactive `@cell` at engine-construction. See
   "Runtime-cell hydration (`initial=@cell`)" below.
+
+**Payload constructor (S439 ruling #11).** `initial=` also accepts a payload
+constructor for a payload-bearing variant — `initial=.Ready([…])` — and the engine
+starts in that variant WITH that payload: the payload is carried, not dropped. Under
+§66 `initial=` becomes the declaration's own value — the field's initializer, which
+takes any value (§66.3; `<engine for=T initial=.X>` ≡ `<t:T=.X single>`, §66.13.3).
+⚑ **impl#1 divergence (measured S439):** `initial=.Ready(["a", "b"])` compiles at exit 0
+and the payload does not appear in the emitted client JS — impl#1 drops it.
+> ⚑ **OPEN (not ruled):** whether payload arguments must be compile-time static.
+>
+> **Provenance:** ruling:user-voice-scrml.md S439 #11 "all recs" (Rec: honour it) ·
+> supersedes (extends): "It accepts EXACTLY ONE of two mutually-exclusive value
+> forms" (above) — its `.Variant` form now includes a payload constructor.
 
 **Lint behavior:**
 - On a NON-derived engine, `initial=` is REQUIRED. If omitted, the compiler emits
@@ -30048,6 +30130,17 @@ declaration contains an `<engine>` element in its body. Reasoning: instantiating
 component multiple times would create multiple "singleton" engines, violating the
 singleton invariant. If you want per-instance state machines, use plain reactive cells
 (`@cell`) inside the component, not engines.
+
+**An `<engine>` inside an `<each>` row is FORBIDDEN (S439 ruling #10).** An `<each>` row
+template (§17.7) is a multi-instance context — the many-instances argument above applies to
+a row word for word — so an `<engine>` declared inside an `<each>` row template SHALL be
+refused with `E-COMPONENT-ENGINE-SCOPE` (§34). The message SHALL name the per-row form:
+per-row state is spelled as an ordinary declaration, which gets a keyed instance per row
+(§66.7.3). **Nominal for this case on impl#1** — impl#1 does not yet emit it (measured
+S439: the program compiles at exit 0 and the engine's body is silently dropped from the
+row).
+> **Provenance:** ruling:user-voice-scrml.md S439 #10 "all recs" (Rec: refuse it) ·
+> supersedes: nothing (the SPEC was silent; impl#1 silently dropped the body).
 
 **Conversely:** an engine body MAY instantiate components. That direction is fine —
 components are presentation factories that engines can use to render variant bodies.
@@ -39789,6 +39882,16 @@ carry. The load-bearing invariant survives under its existing code: **`E-COMPONE
 `single` declaration appears inside a multi-instance declaration** (one declaration site inside N instances
 cannot be one instance).
 
+**An `<each>` row is a multi-instance context (S439 ruling #10).** An engine is a `single` declaration
+(§66.13.3), and the invariant's many-instances argument applies to an `<each>` row word for word: an `<engine>`
+(in §66 terms, a `single` declaration carrying a transition graph) inside an `<each>` row template SHALL be
+refused with `E-COMPONENT-ENGINE-SCOPE`. The message SHALL name the per-row form: an ordinary (non-`single`)
+declaration, which gets a keyed instance per row (§66.7.3). Same rule as §51.0.K.
+> ⚑ **OPEN (not ruled):** whether a plain `single` declaration WITHOUT a transition graph is refused in an
+> `<each>` row.
+>
+> **Provenance:** ruling:user-voice-scrml.md S439 #10 "all recs" (Rec: refuse it).
+
 > ✅ **RULED S435 — O5** (bryan: *"yes, table, 1i, 2ii"*): `rule=` unchanged; `effect=` / `<onTransition>` / `history` / `internal:rule=` / `<onTimeout>` / `<onIdle>` carry over as features of a field's transition graph — per instance on a non-`single` declaration, timers disposed with the instance; `var=` / `name=` / §51.0.C auto-naming RETIRE (the declaration's name is the variable); `derived=` RETIRES (a locked declaration with a reactive initializer is derived, §66.9); `.advance(.X)` is kept as the loud write; a nested `<engine>` becomes an enum-valued child field with its own graph; cross-file `<EngineName/>` becomes `<*name/>` of an exported `single`; engine `server` becomes the declaration `server` modifier (§66.16). **(1i)** state-child BODIES stay: a state-child's body is that variant's markup, rendered wherever the field renders. **(2ii)** `accepts=` + message arms are KEPT but CONFINED: an arm may only CHOOSE a write, and every write is still checked against `rule=` — a dispatch convenience, not a second transition definition. The prior OPEN text follows for the record.
 >
 > *(superseded)* **O5: re-homing the §51.0 engine surface.** The ruling re-expresses `<engine>` as a
@@ -40296,7 +40399,7 @@ emitter). Every code below is Nominal on impl#1.
 |---|---|
 | **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4) — including an `<engine>` (a `single` declaration carrying a transition graph) in an `<each>` row template (S439 ruling #10; the message names the per-row ordinary declaration, §66.7.3; a plain `single` without a graph in a row is OPEN). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2) — including a graph transition on a SUB-FIELD written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 
