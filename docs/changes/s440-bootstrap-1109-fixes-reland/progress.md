@@ -155,6 +155,10 @@ F3 is test-only → committed alone. F1/F2 tests stay uncommitted until their fi
   Tracking note: an INSTANCE snapshot is `rt.snapshot(inst)`, which tracks every field when the spread runs
   inside an effect (a render hole) — a wider subscription than the individual field reads it replaces. It
   converges (a re-run writes equal values; `Cell.set` is a no-op on `Object.is`) but can cost one extra re-run.
+  **CORRECTION (S440 re-review N1): the claim above is FALSE** once an override value has a side effect — the
+  widened subscription + a sibling hole writing an unread field form a re-run loop (guarded probe: box=1,0,39,
+  log 41; unguarded: "Maximum call stack size exceeded"). Fixed in round 3 below; the whole-instance snapshot
+  is gone except where an override reads the whole `@x`.
 - (2) DUPLICATE KEY: §66.20 names no code → provisional `E-BOOTSTRAP-DUP-OVERRIDE`, reported at each repeated key
   (the repeat is not written). Plain struct literals do NOT reject duplicates today (analyze's `resolveObject`
   takes the LAST prop with that name; last-wins) — left alone, reported to the PA.
@@ -167,3 +171,32 @@ F3 is test-only → committed alone. F1/F2 tests stay uncommitted until their fi
   bite matrix 32 CERTIFIED / 0 UNCERTIFIED exit 0; footprint 18/18 runtime.
 - Committed `ece7bc96b`. main moved again (#1125 `7e4bc8155`, touches compiler/src/api.js + commands/) → merged
   as `a6fe0000e`, no conflicts; re-ran on the merged tip: slices 418/0, lowered M1 73/0, lint 0, footprint 18/18.
+
+## 2026-09-28 — FIX ROUND 3 (re-review of c673c39aa): N1 — the snapshot widened the reactive read set
+- Reproduced with the PA's probe (zzr2b) on c673c39aa: `p.box=1,0,39 | p.len=41`.
+- CHOSEN: per-field snapshot of only the lexically-read fields. Each read field gets one local, read ONCE,
+  before any override value, with the SAME tracking the lexical read had (a tracked `.get()` of that field
+  cell); a field no override reads is never read. Why not "untracked snapshot": that would NARROW the read
+  set below the lexical one (a render hole would stop reacting to a field it visibly reads) — the ruling asks
+  for pre-statement values, not for dropping subscriptions. The whole-value snapshot survives only for a read
+  of the WHOLE `@x` inside an override (e.g. `@g == @g`), which reads every field lexically anyway.
+- Struct-cell spreads (`@p = { ...@p, … }` on a struct-typed cell) keep one `before = program.fields[p].get()`:
+  the struct is ONE cell, so `@p.z` lexically is `fields[p].get().z` — the same single subscription, no widening.
+  (The per-field locals analyze mints for a struct target go unused; harmless.)
+- Code: analyze `spreadEffect` mints one `SnapField { ref: FieldRef, local: Sym }` per field of the target
+  (instance fields / struct fields) — ESpread gains `fields`. STOP-CONDITION NOTE: this touches analyze, not only
+  lower/print, because Core Syms are minted only by the binder (lower cannot mint); the change is confined to the
+  snapshot minting — no Commit / batch / duplicate-key / runtime code touched. lower: `cellRead` maps a read
+  under the target to the field's local (`snapFieldOf`), a whole read to `whole`; `snapLets` emits only the
+  locals some value reads.
+- Emitted JS (instance): `const gate = …get(); const before_title = gate.fields[0].get(); const before_phase =
+  gate.fields[2].get(); const stage = before_phase; …` — no `rt.snapshot(`.
+- AFTER: probe guarded `p.box=1,0,1 | p.len=1`; unguarded (`@h.c = @log.length`, was a stack overflow) also
+  `1,0,1 | 1`.
+- Tests (front.test.js "S440 N1"): the probe guarded + unguarded (converges, box=1,0,1, log 1); the JS names only
+  the read fields and has no `rt.snapshot(`; a whole `@g` read takes exactly one whole snapshot.
+- Mutation: "S440 N1: the spread snapshot is the WHOLE instance again" (every field read → whole snapshot).
+  The "STRICT SNAPSHOT off" mutation's anchor moved with this round (`snapOf(operand, snap, fields)`); the first
+  harness run reported it NOT RUN (1 problem) — anchor updated, harness re-run.
+- Gates: slices 422/0; lowered M1 73/0; lint 0; mutations 82, 0 problems (N1 RED 3, strict snapshot RED 8);
+  bite matrix 32 CERTIFIED / 0 UNCERTIFIED exit 0; footprint 18/18 runtime.

@@ -552,6 +552,87 @@ describe("RULED S440 — STRICT SNAPSHOT: every `@x` read in a spread-override l
 });
 
 // ---------------------------------------------------------------------------
+// S440 re-review N1 (PA-reproduced on c673c39aa): the strict snapshot must not
+// WIDEN the reactive read set. A whole-instance snapshot (`rt.snapshot(inst)`)
+// `.get()`s every field, so a spread in a render hole subscribed to fields it
+// never reads; a sibling hole writing one of them re-ran the spread, whose
+// side-effecting override re-ran the sibling… (guarded: box=1,0,39, log 41;
+// unguarded: "Maximum call stack size exceeded"). Only the fields the
+// override values read lexically are snapshotted, each read as that lexical
+// read was.
+// ---------------------------------------------------------------------------
+describe("S440 N1 — the spread snapshot reads only the fields the override values read (no widened subscriptions)", () => {
+  const BOX = `<box title:string export let a:int=0 export let b:int=0 export let c:int=0>
+</>
+renders <p class="box">\${a},\${b},\${c}</p>
+`;
+  const loopProgram = (guard) => ({
+    path: "n1.scrml",
+    src: `${BOX}<program>
+    <let n:int=0/>
+    <log:int[end]=([])/>
+    function stamp() -> int {
+        @log.push(1)
+        return 1
+    }
+    function e1() -> int {
+        if (@n > 0) { @h = { ...@h, a: stamp() + @h.b * 0 } }
+        return 0
+    }
+    function e2() -> int {
+        ${guard ? "if (@log.length < 40) { @h.c = @log.length }" : "@h.c = @log.length"}
+        return 0
+    }
+    function go() { @n = 1 }
+    <main>
+        <box as=h title="B"/>
+        <p class="e1">\${e1()}</p>
+        <p class="e2">\${e2()}</p>
+        <p class="len">\${@log.length}</p>
+        <button class="go" onclick=go()>go</button>
+    </main>
+</program>
+`,
+  });
+
+  for (const guard of [true, false]) {
+    test(`a side-effecting override in a render hole beside a sibling writer converges (${guard ? "guarded" : "unguarded"}): box=1,0,1, log length 1`, async () => {
+      const r = run([loopProgram(guard)]);
+      expect(codes(r)).toEqual([]);
+      expect(mods.check.checkCore(r.core)).toEqual([]);
+      await loadProgram(r.core, guard ? "n1-guarded" : "n1-unguarded");
+      click(document.querySelector("button.go"));
+      expect(document.querySelector("p.box").textContent).toBe("1,0,1");
+      expect(document.querySelector("p.len").textContent).toBe("1");
+    });
+  }
+
+  test("the snapshot Lets name only the fields read (instance spread: `before_phase`, `before_title`; never a whole-instance snapshot)", async () => {
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: @g.phase, note: @g.title } }`)]);
+    expect(codes(r)).toEqual([]);
+    const { out } = await loadProgram(r.core, "n1-shape");
+    const body = /function go\(\) \{([\s\S]*?)\n\}/.exec(out.js)[1];
+    expect(body).not.toContain("rt.snapshot(");
+    expect(body).toContain("const before_phase = ");
+    expect(body).toContain("const before_title = ");
+    expect(body).not.toContain("before_note");
+    expect(body).not.toContain("before_stage");
+  });
+
+  test("a read of the WHOLE `@g` in an override takes the whole snapshot — only then (it reads every field lexically anyway)", async () => {
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: .Live, note: (@g == @g ? "same" : "diff") } }`)]);
+    expect(codes(r)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    const { out } = await loadProgram(r.core, "n1-whole");
+    const body = /function go\(\) \{([\s\S]*?)\n\}/.exec(out.js)[1];
+    expect([...body.matchAll(/rt\.snapshot\(/g)].length).toBe(1);
+    expect(body).not.toContain("before_");
+    click(document.querySelector("button.go"));
+    expect(document.querySelector("p.gate").textContent).toBe("G: Draft/Live/same");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // RULED S440: a DUPLICATE override key in a spread-override literal is a
 // compile error. §66.20 names no code: provisional bootstrap-local
 // E-BOOTSTRAP-DUP-OVERRIDE (a §34 row is owed — progress.md).

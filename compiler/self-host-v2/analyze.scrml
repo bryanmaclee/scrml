@@ -117,6 +117,10 @@ ${
     // non-spread write viewed as one override (the typer's `oneWrite`, prop -1)
     // has no local: `tmp` is `not`.
     export type SpreadWrite:struct = { w: WriteFact, prop: int, tmp: Sym | not }
+    // One per-field snapshot local of a spread's target (RULED S440 strict
+    // snapshot; see spreadEffect): the field (`ref`) and the local it is read
+    // into when an override value reads it.
+    export type SnapField:struct = { ref: FieldRef, local: Sym }
 
     // How an attribute of an element is used.
     export type AttrKind:enum = {
@@ -160,7 +164,7 @@ ${
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
-        ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
+        ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[]), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
     }
@@ -2241,7 +2245,15 @@ ${
             }
             j = j + 1
         }
-        return spreadEffect(st, e, ws, iDecl.hint)
+        let refs: FieldRef[] = []
+        let names: string[] = []
+        let fi = 0
+        for (const fd of d.info.fields) {
+            refs = refs.concat([{ owner: iDecl, idx: fi }])
+            names = names.concat([fd.sym.hint])
+            fi = fi + 1
+        }
+        return spreadEffect(st, e, ws, iDecl.hint, refs, names)
     }
 
     // The spread's effect. `inst` is the local the written instance is resolved
@@ -2249,14 +2261,29 @@ ${
     // through `Narrowed(inst)`), so a flush can never make a later write of the
     // same edit re-resolve a handle to a different instance. Minted here so
     // `lower` still decides nothing.
-    // `snap` is the local the spread operand (`...@x`, the pre-statement value)
-    // is read into ONCE, before any override value is evaluated: every `@x`
-    // read inside the override values reads it (RULED S440, strict snapshot) —
-    // so a call in one override that writes `@x` is not seen by another.
-    fn spreadEffect(st0: AS, e: AExpr, ws: SpreadWrite[], hint: string) -> AS {
+    // STRICT SNAPSHOT (RULED S440): every `@x` read inside the override values
+    // reads a value taken BEFORE any override value is evaluated — so a call in
+    // one override that writes `@x` is not seen by another. The snapshot is
+    // PER FIELD (`fields`: one local per field of the target, the field's
+    // FieldRef beside it), and lower reads only the fields the override values
+    // read lexically: taking a whole-value snapshot would `.get()` — and so
+    // subscribe to — every field when the spread runs inside an effect (S440
+    // re-review N1: a runaway re-run loop). `snap` is the whole-value local,
+    // used only when an override value reads the WHOLE `@x` (which reads every
+    // field lexically anyway).
+    fn spreadEffect(st0: AS, e: AExpr, ws: SpreadWrite[], hint: string, refs: FieldRef[], names: string[]) -> AS {
         const m: RSym = mint(st0, hint)
         const sn: RSym = mint(m.st, "before")
-        return addEffect(sn.st, e.nid, EffectFact.ESpread(ws, m.s, sn.s))
+        let st: AS = sn.st
+        let fields: SnapField[] = []
+        let k = 0
+        for (const r of refs) {
+            const fm: RSym = mint(st, "before_" + names[k])
+            st = fm.st
+            fields = fields.concat([{ ref: r, local: fm.s }])
+            k = k + 1
+        }
+        return addEffect(st, e.nid, EffectFact.ESpread(ws, m.s, sn.s, fields))
     }
 
     // RULED S440: a spread-override literal names each field at most once.
@@ -2412,7 +2439,15 @@ ${
             }
             j = j + 1
         }
-        return spreadEffect(st, e, ws, p.decl.sym.hint)
+        let refs: FieldRef[] = []
+        let names: string[] = []
+        let fi = 0
+        for (const fd of fs) {
+            refs = refs.concat([{ owner: s, idx: fi }])
+            names = names.concat([fd.sym.hint])
+            fi = fi + 1
+        }
+        return spreadEffect(st, e, ws, p.decl.sym.hint, refs, names)
     }
 
     fn propsOf(v: AExpr) -> AProp[] {
