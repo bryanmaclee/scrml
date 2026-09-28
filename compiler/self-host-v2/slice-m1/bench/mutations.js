@@ -17,6 +17,12 @@ const T = (f) => `./${SH}/slice-m1/${f}`;
 const T2 = (f) => `./${SH}/slice-m2/${f}`;
 const RT = `${SH}/slice-m1/runtime/runtime.js`;
 
+// The M3 typer mutations all edit analyze.scrml and are judged by the two
+// typer suites: [id, from, to] triples.
+const TYPER = (rows) => rows.map(([id, from, to]) => ({
+  id, file: `${SH}/analyze.scrml`, from, to, tests: [T2("typer-gap.test.js"), T2("typer.test.js")],
+}));
+
 const MUTATIONS = [
   { id: "F1 self-write no-op removed (throws inside a click handler)", file: RT,
     from: "  if (from === to) return;\n", to: "", tests: [T("dropdown.browser.test.js")] },
@@ -84,6 +90,58 @@ const MUTATIONS = [
   { id: "S437 reads require narrowing: an un-narrowed read through a `T | not` handle accepted", file: `${SH}/analyze.scrml`,
     from: "        if (!r.x.maybe) return r\n", to: "        return r\n",
     tests: [T2("front.test.js")] },
+  // ---- M3 item 1: the typer and the scope pass — one per check family, plus the
+  // REVERSE mutations for the shapes the SPEC makes legal (a "stays silent" test
+  // must go RED when the typer starts rejecting what the SPEC accepts) ----
+  ...TYPER([
+    ["M3 typer: a write's value never checked (§66.1 rule 5 off)",
+     "        if (fitsType(x, target) != Verdict.Fails) return ts\n", "        return ts\n"],
+    ["M3 typer: `not` into a non-optional type accepted (E-TYPE-041 off)",
+     "        if (maybeInner(target) is some) return ts\n        return report(ts, env, span, \"E-TYPE-041\"",
+     "        return ts\n        return report(ts, env, span, \"E-TYPE-041\""],
+    ["M3 typer: call arity never checked",
+     "        if (n != args.length) {", "        if (false) {"],
+    ["M3 typer: `<each in=…>` over a non-sequence accepted",
+     "        if (k == 5 || k == 6) return ts\n", "        return ts\n"],
+    ["M3 typer: use-site construction values never checked (§66.9 rule 8 / §7.5.1 position 2)",
+     "                if (f.annotated) {\n                    ts = checkInit(", "                if (false) {\n                    ts = checkInit("],
+    ["M3 typer: a declaration's own initializer never checked (§7.5.1 position 2)",
+     "            if (f.annotated) ts = checkInit(", "            if (false) ts = checkInit("],
+    ["M3 typer: number → int treated as provably wrong (S404 refinement ignored)",
+     "            if (vk == 1) return Verdict.Unproven", "            if (vk == 1) return Verdict.Fails"],
+    ["M3 typer: `a || b` typed bool whatever its operands (JS operand semantics lost)",
+     "            .Or :> boolPair(a, b)", "            .Or :> known(Type.Bool)"],
+    ["M3 typer: a `T | not` value into a `T` position treated as provably wrong",
+     "            if (r == Verdict.Fails) return Verdict.Fails\n            return Verdict.Unproven\n", "            return Verdict.Fails\n"],
+    ["M3 typer: the Typing table not recorded (no type per expression node)",
+     "        return rvt(r.vt, record(r.ts, e.nid, r.vt))\n", "        return rvt(r.vt, r.ts)\n"],
+    ["M3 REVERSE: a ternary test checked as `bool` (the SPEC makes it boolean-coercible)",
+     "        const rt: RVT = typeExpr(env, test, ts)\n",
+     "        const rt0: RVT = typeExpr(env, test, ts)\n        const rt: RVT = rvt(rt0.vt, checkValue(env, rt0.vt, Type.Bool, test.span, \"a condition\", rt0.ts))\n"],
+    ["M3 REVERSE: an `if=` checked as `bool` (§17.1.1 boolean-coercible)",
+     "                // `if=` is boolean-COERCIBLE (§17.1.1): typed, never checked\n                ts = typeAttrValue(env, a.value, ts).ts\n",
+     "                const cv: RVT = typeAttrValue(env, a.value, ts)\n                ts = cv.ts\n                if (a.name == \"if\") ts = checkValue(env, cv.vt, Type.Bool, a.span, \"a condition\", ts)\n"],
+    ["M3 REVERSE: a call's first argument checked against `int` (§7.5.1 position 3 \"SHALL compile\")",
+     "        const ret: Type | not = fi.ret\n",
+     "        if (args.length > 0) ts = checkValue(env, exprType0(ts, args[0].nid), Type.Int, e.span, \"an argument\", ts)\n        const ret: Type | not = fi.ret\n"],
+    ["M3 scope: duplicate program cells accepted (E-SCOPE-010 off)",
+     "                if (i >= 0) {\n                    const f: FieldInfo = d.fields[j]", "                if (false) {\n                    const f: FieldInfo = d.fields[j]"],
+    ["M3 scope: duplicate file-scope functions accepted",
+     "            if (i >= 0) {\n                const f: FnInfo = t.fns[j]", "            if (false) {\n                const f: FnInfo = t.fns[j]"],
+    ["M3 scope: the §7.3.3 function-block rule off (E-SCOPE-REDECLARE)",
+     "                out = out.concat(blockRedeclares(f.path, af.body, af.params, true))\n", ""],
+    ["M3 scope: inline handler blocks not checked",
+     "            out = out.concat(handlerRedeclares(f.path, fileMarkup(f.items)))\n", ""],
+    ["M3 REVERSE: nested blocks inherit the parameters (shadowing wrongly refused)",
+     "            for (const nb of nestedBlocks(s)) { out = out.concat(blockRedeclares(file, nb, [], inFn)) }",
+     "            for (const nb of nestedBlocks(s)) { out = out.concat(blockRedeclares(file, nb, params, inFn)) }"],
+    ["M3 scope: two `as=` of one name in one scope accepted",
+     "                if (dup is not && o.owner == h.owner && o.name == h.name) dup = o\n", "                if (false) dup = o\n"],
+    ["M3 scope: a program cell named like a declaration accepted",
+     "                } else if (d.sym.id == t.program.id && userDeclNamed(t, names[j])) {", "                } else if (false) {"],
+    ["M3 scope: a handle named like a program cell accepted",
+     "            } else if (h.file == progFile && cells.indexOf(h.name) >= 0) {", "            } else if (false) {"],
+  ]),
   { id: "F8 non-first alternation arm not flagged", file: "scripts/lint-no-default-arm.js",
     from: "if (a.alts.length > 1 && armIndex > 0) {", to: "if (false) {", tests: [T("lint.test.js")] },
   { id: "F8 wildcard inside an alternation not flagged", file: "scripts/lint-no-default-arm.js",

@@ -18,6 +18,12 @@
 //     E-DERIVED-WRITE, E-WRITE-NOT-GRANTED, E-DECL-HANDLE-NOT-NARROWED,
 //     E-FIELD-PRIVATE-WRITE, E-DECL-RENDERS-BARE-WRITE, E-ENGINE-INVALID-TRANSITION
 //     (§66.20). The spread `@x = { ...@x, f: v }` is a FIELD EDIT (O58 (b)).
+//   - Two passes then READ the binder's tables (M3 item 1): THE SCOPE PASS
+//     (a scope binds each name once — E-SCOPE-010, E-SCOPE-REDECLARE) and
+//     THE TYPER (a type per expression node in `Tables.typing`; writes,
+//     initializers, call arity and `<each in=>` checked — E-TYPE-031,
+//     E-TYPE-041). Where the SPEC names no rule they use bootstrap-local
+//     `E-BOOTSTRAP-*` codes; see each section's header for the sentences.
 //
 // Scope of slice M2: the §66 subset §66.19.1 (counter) and §66.19.3 (dropdown)
 // use. A construct outside it is reported (`E-BOOTSTRAP-UNSUPPORTED`), never
@@ -2607,11 +2613,21 @@ ${
                     } else {
                         out = out.concat([mkDiag(d.file, f.span, "E-BOOTSTRAP-REDECLARE", "`<" + d.sym.hint + ">` already has a field `" + names[j] + "` (at " + first + ") — a declaration's fields are named once (the SPEC names no code for this; bootstrap-local)")])
                     }
+                } else if (d.sym.id == t.program.id && userDeclNamed(t, names[j])) {
+                    // `@x` would name both the cell and `<x>`'s shared instance (§66.7.1)
+                    out = out.concat([mkDiag(d.file, d.fields[j].span, "E-BOOTSTRAP-REDECLARE", "`" + names[j] + "` — `@" + names[j] + "` already names the shared instance of `<" + names[j] + ">` (§66.7.1); a program cell cannot take that name (the SPEC names no code for this; bootstrap-local)")])
                 }
                 j = j + 1
             }
         }
         return out
+    }
+
+    fn userDeclNamed(t: Tables, name: string) -> boolean {
+        for (const d of t.decls) {
+            if (d.sym.id != t.program.id && d.sym.hint == name) return true
+        }
+        return false
     }
 
     // Two user declarations of one name.

@@ -137,6 +137,9 @@ describe("a scope binds each name once", () => {
   test("E-BOOTSTRAP-REDECLARE — a handle named like a declaration (`@dropdown` is its shared instance)", () => {
     expect(inApp("", "<dropdown as=dropdown label=\"1\" options=([\"a\"])/>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
   });
+  test("E-BOOTSTRAP-REDECLARE — a program cell named like a declaration (`@dropdown` would name both)", () => {
+    expect(inApp("    <let dropdown:int=0/>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  });
   test("E-BOOTSTRAP-REDECLARE — two handles of one name in one `<each>` row", () => {
     expect(inApp("    type L:struct = { id: int, name: string }\n    <lines:L[]=([{ id: 1, name: \"a\" }])/>",
       "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/><dropdown as=q label=\"2\" options=([\"a\"])/></each>"))
