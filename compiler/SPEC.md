@@ -29532,8 +29532,7 @@ and the payload does not appear in the emitted client JS — impl#1 drops it.
 > below)*
 >
 > ✅ **RULED S440 (#10) — payload arguments take any value.** The arguments of an `initial=` payload
-> constructor are NOT required to be compile-time static: `initial=.Ready(@items)` is as legal as
-> `initial=.Ready(["a", "b"])`. (The variant itself is still validated at compile time against the `for=T`
+> constructor take any value — they are NOT required to be compile-time static. (The variant itself is still validated at compile time against the `for=T`
 > variant set.) **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 10) —
 > *"`initial=` payload args → any value"* · supersedes: the S439 #11 OPEN line above (struck).
 >
