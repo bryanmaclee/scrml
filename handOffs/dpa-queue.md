@@ -3641,3 +3641,36 @@ into SQL `NUMERIC`), or a stdlib `scrml:money` over integer minor units, or neit
 enforcement, dpa-037 (non-finite floats — its four calls are still bryan's), the pending S440 operator rule (Q1), BigInt
 (rejected until designed, S440 #4). Prior art to curate: Java `BigDecimal`, C# `decimal`, Python `decimal`/`fractions`,
 Postgres `NUMERIC`, Dinero.js, the TC39 Decimal proposal, Rust `rust_decimal`.
+
+## [dpa-055] deep-dive — numeric vectors and tensors (open-weight model manipulation) — PRIORITY over dpa-056
+`status:    banked`
+banked:     S440 2026-09-28 (bryan: "bank it as a dpa. both interest me greatly, the vectors/tensors slightly more.")
+
+The question: should scrml have first-class typed numeric buffers — vectors, matrices, tensors — as a VALUE kind, and a
+compute path for them (SIMD / WASM / WebGPU), such that loading, inspecting and manipulating open-weight models (safetensors,
+GGUF; quantized int8/int4, f16/bf16) is expressible in scrml rather than in an opaque `_{}` foreign block?
+PA-verified state (S440): no SIMD/tensor/matrix type; no WebGPU; `scrml:math` is scalar-only; typed arrays
+(`Float32Array`…, `ArrayBuffer`, `DataView`) are Appendix D host pass-throughs with no shape/dtype in the type system —
+and are E-SCOPE-001 in scrml source today (contradicting Appendix D; gap owed); WASM (§23.3) is Nominal
+(`E-WASM-NOMINAL`); `scrml:fs` has no typed binary views.
+Design seeds to evaluate (not decided): a `tape` (§66.12, S440 name) of a numeric element type with a SHAPE axis and a
+DTYPE axis alongside the existing permission axes; value semantics (§66.10) vs zero-copy views over large weight buffers
+(the tension — a 7B model is ~4-14 GB; copy-on-write/immutable-by-default must not mean copying weights); where compute
+runs (client WebGPU compute shaders / WASM SIMD / server Bun + native); the §12 server/client split for model inference;
+dpa-037's NaN/`-0` rulings and dpa-054 (decimal) as the numeric-tower neighbours; memory ownership + `lin` (§35) for buffer
+lifetime. Prior art to curate: NumPy/array-API standard, JAX (immutable arrays + functional updates — the closest fit to
+§66.10), PyTorch, ONNX Runtime Web, transformers.js, WebGPU/WGSL, tinygrad, Futhark, Julia arrays, Mojo, ggml/llama.cpp
+(GGUF), safetensors, TensorFlow.js.
+
+## [dpa-056] deep-dive — atomics and shared memory
+`status:    banked`
+banked:     S440 2026-09-28 (bryan, same line as dpa-055)
+
+The question: should user code get shared memory and atomic operations, or does scrml stay shared-nothing? PA-verified
+state (S440): `Atomics`/`SharedArrayBuffer` appear in SPEC only as the COMPILER's own internals (§2.4); they are not in
+Appendix D's program-available globals; workers (§46) and nested `<program>` (§43, shared-nothing + RPC) are
+message-passing only. Interacts with: dpa-055 (tensor compute across workers is the main shared-memory consumer), the
+state-primacy axiom (a shared cell across workers vs engines/`single` declarations), §52 authority, cross-origin-isolation
+requirements (COOP/COEP headers the compiler would own for `SharedArrayBuffer` in browsers), and determinism (§58).
+Prior art: Rust ownership + atomics, Go channels vs sync/atomic, Erlang/Elixir shared-nothing, JS Atomics.wait/notify,
+Web Locks API, Swift actors + Sendable, Pony reference capabilities.
