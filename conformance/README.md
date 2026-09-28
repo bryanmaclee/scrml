@@ -405,15 +405,26 @@ triaged defect) — the gated bridge asserts the unpinned list is empty.
 ## OQ1 — whole-tree vs anchored (the default-mode resolution)
 
 Both modes ship behind ONE normalization pipeline (strip `data-scrml-*` markers,
-runtime `<script>`s + comment markers; unwrap marker-only zero-attr `<span>`
-binding anchors; canonicalize attr-order / booleans / void / whitespace).
+runtime `<script>`s + comment markers; strip impl#1's EMPTY conditional-mount
+`<template>` anchors; unwrap marker-only zero-attr `<span>` binding anchors;
+canonicalize attr-order / booleans / void / whitespace).
+
+The `<template>` strip is keyed to impl#1's PRIVATE anchor naming: it drops a
+`<template>` only when its id matches `^_scrml_scrml_(chain_)?tpl_\d+$` (what
+impl#1 mints via `genVar("scrml_tpl")` / `genVar("scrml_chain_tpl")`,
+`compiler/src/codegen/emit-html.ts`) AND it has no content. It is a documented
+impl-private exclusion, NOT a language rule — no SPEC sentence reserves those ids.
+Any other `<template>` (another id, or any content) is author content and is kept;
+an implementation that emits no such anchor is unaffected (s439-bootstrap-m3-ingest).
 
 **RECOMMENDED DEFAULT: `domAnchored` is the primary contract; `dom` (whole-tree)
 is the supplementary total-coverage snapshot.** Empirically, across the ~28
 (b) cases authored here, the whole-tree `dom` repeatedly leaked impl#1-private
 structure that the normalizer cannot dissolve without becoming impl#1-shaped:
 
-- if-guard `<template id="_scrml_scrml_tpl_N">` anchors (a counter-id wrapper);
+- ~~if-guard `<template id="_scrml_scrml_tpl_N">` anchors (a counter-id wrapper)~~ —
+  DISSOLVED (s439): the normalizer now strips impl#1's empty anchor, keyed to its
+  private id naming (see the pipeline note above);
 - `<each>`/`<match>`/lift container `<div>` wrappers;
 - the inter-interpolation significant space collapsing (`${a} ${b}` → `ab` in the
   whole-tree serialization, while the live textContent is correct);
