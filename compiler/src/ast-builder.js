@@ -2534,6 +2534,88 @@ function matchArrowGlyphAt(peek, k = 0) {
   return null;
 }
 
+/**
+ * Walk past a balanced `( … )` group that opens at peek-offset `k` and return
+ * the offset of the token AFTER its matching `)`, or -1 when the group does not
+ * close before a token that cannot sit inside a match-arm payload pattern
+ * (`{`, `}`, `;`, EOF). NOT length-capped: a payload pattern binds as many
+ * fields as its variant declares (g-impl1-match-miscompiles F13 — the former
+ * 20-token cap silently dropped any arm binding five or more NAMED fields,
+ * `.W(a: a, b: b, c: c, d: d, e: e)`, gluing it onto the previous arm). The
+ * brace/semicolon stop keeps an unbalanced `(` from scanning the whole file.
+ */
+function scanPastBalancedParens(peek, k) {
+  const open = peek(k);
+  if (!open || open.kind !== "PUNCT" || open.text !== "(") return -1;
+  let depth = 1;
+  let i = k + 1;
+  for (;;) {
+    const tk = peek(i);
+    if (!tk || tk.kind === "EOF") return -1;
+    if (tk.kind === "PUNCT") {
+      if (tk.text === "(") depth++;
+      else if (tk.text === ")") { depth--; if (depth === 0) return i + 1; }
+      else if (tk.text === "{" || tk.text === "}" || tk.text === ";") return -1;
+    }
+    i++;
+  }
+}
+
+/**
+ * Scan ONE §18.2 / §18.16 arm-pattern alternate beginning at peek-offset `k`
+ * and return the offset of the token after it, or -1 when no alternate starts
+ * there. Alternates: `.Variant` / `::Variant` (each with an optional payload
+ * `( … )`), the wildcards `_` / `else`, and the §18.16 literals (string,
+ * number, negative number, `true` / `false`). Token-kind based — the lexer has
+ * already fused `::`, `:>`, `=>` and `||`, so a single-`|` PUNCT here is always
+ * pattern alternation and never logical-or.
+ */
+function scanArmPatternAlternate(peek, k) {
+  const t = peek(k);
+  if (!t) return -1;
+  if ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::")) {
+    const t1 = peek(k + 1);
+    if (!t1 || t1.kind !== "IDENT" || !/^[A-Z]/.test(t1.text ?? "")) return -1;
+    const p = peek(k + 2);
+    if (p && p.kind === "PUNCT" && p.text === "(") return scanPastBalancedParens(peek, k + 2);
+    return k + 2;
+  }
+  if (t.kind === "IDENT" && t.text === "_") return k + 1;
+  if (t.kind === "KEYWORD" && (t.text === "else" || t.text === "true" || t.text === "false")) return k + 1;
+  if (t.kind === "STRING" || t.kind === "NUMBER") return k + 1;
+  if (t.kind === "PUNCT" && t.text === "-") {
+    const n = peek(k + 1);
+    return n && n.kind === "NUMBER" ? k + 2 : -1;
+  }
+  return -1;
+}
+
+/**
+ * Does a match-arm pattern — ONE alternate, or a `|`-chain of them
+ * (`.B | .C`, `_ | .A`, `"p" | "q"`, `.X(a) | .Y(a)`) — begin at peek-offset
+ * `k` and end at an arm arrow (`:>` / `=>` / `->`)? The arm arrow is the anchor:
+ * a chain that does not reach one is not an arm (so `a | b` in an arm body is
+ * never mistaken for a pattern). Shared by the collectExpr arm-boundary
+ * detector (g-impl1-match-miscompiles F12: an alternation arm was recognised
+ * only as the FIRST arm of a match, because the boundary required the arrow
+ * immediately after the first alternate — a later `.B | .C :> x` was glued
+ * onto the previous arm's result, and `_ | .A :> x` was silently dropped).
+ */
+function armPatternChainArrowOffset(peek, k) {
+  let i = scanArmPatternAlternate(peek, k);
+  while (i >= 0) {
+    if (matchArrowGlyphAt(peek, i)) return i;
+    const bar = peek(i);
+    if (!bar || bar.kind !== "PUNCT" || bar.text !== "|") return -1;
+    i = scanArmPatternAlternate(peek, i + 1);
+  }
+  return -1;
+}
+
+function armPatternChainReachesArrow(peek, k) {
+  return armPatternChainArrowOffset(peek, k) >= 0;
+}
+
 // ---------------------------------------------------------------------------
 // §18.19 Multi-Scrutinee Match — shared parse helpers.
 //
@@ -4641,9 +4723,38 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       ));
     };
 
+    // g-impl1-match-miscompiles F12 — the collection's OWN arm head is never
+    // split. When this collection starts at an arm pattern (one alternate or a
+    // `|`-chain) that reaches an arm arrow, every token up to that arrow is the
+    // pattern of ONE arm: no arm boundary can fire inside it. Without this, a
+    // wildcard alternate (`.A | _ :> x`) tripped the leading-`| _` product-
+    // wildcard boundary and tore the arm into a pattern-only bare-expr `.A`
+    // (silently dropped by codegen) plus a separate `_` arm.
+    // A collection that starts right AFTER an arm arrow is that arm's RESULT,
+    // never a pattern head: `(_, .Eof) :> "eof"` followed by `| _ :> "x"` must
+    // still break at the `| _` product wildcard (the result `"eof"` merely looks
+    // like the first alternate of a `"eof" | _ :>` chain).
+    const _prevTok = peek(-1);
+    const _startsAfterArrow = !!_prevTok && (
+      (_prevTok.kind === "OPERATOR" && (_prevTok.text === ":>" || _prevTok.text === "=>")) ||
+      (_prevTok.kind === "PUNCT" && _prevTok.text === ">" && peek(-2)?.kind === "PUNCT" && peek(-2)?.text === "-")
+    );
+    const _headArrowOff = _startsAfterArrow ? -1 : armPatternChainArrowOffset(peek, 0);
+    const _headArrowTok = _headArrowOff >= 0 ? peek(_headArrowOff) : null;
+    let _inArmHead = _headArrowTok !== null;
+    // The first token of that arm's BODY is an operand position, exactly as it
+    // is for the inline-arm forms (whose collectExpr starts AFTER the arrow with
+    // `parts` empty): a body opening with an expression keyword (`match`, `if`)
+    // is the body, not a new statement (a nested `match` in an alternation arm
+    // was otherwise split off as a sibling match-stmt and the arm dropped).
+    const _headBodyTok = _headArrowTok !== null
+      ? peek(_headArrowOff + matchArrowGlyphAt(peek, _headArrowOff).len)
+      : null;
+
     while (true) {
       const tok = peek();
       if (tok.kind === "EOF") break;
+      if (_inArmHead && tok === _headArrowTok) _inArmHead = false;
       // Skip comments — they must not leak as JS statements (BUG-2)
       if (tok.kind === "COMMENT") { consume(); continue; }
       // Cluster-C Bug 2 (S190) — markup-RHS over-consumption boundary.
@@ -4754,7 +4865,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // exhaustiveness checker.
         // Safe as an always-on rule: `.IDENT =>` at depth 0 is unambiguous
         // match-arm syntax — scrml has no other construct with that shape.
-        if (parts.length > 0) {
+        if (parts.length > 0 && !_inArmHead) {
           const startsArmPattern = (() => {
             // Detect an arm arrow at peek-offset `k`. `=>` / `:>` are single
             // OPERATOR tokens; `->` is two adjacent PUNCT tokens (`-` `>`).
@@ -4762,33 +4873,37 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
             // boundary scanner and the arm-construction sites agree on what
             // counts as an arm separator (all three §18.2 glyphs).
             const armArrowAt = (k) => matchArrowGlyphAt(peek, k) != null;
-            // `.IDENT =>` or `.IDENT(…)=>`  — enum-variant arm
-            if ((tok.kind === "PUNCT" && tok.text === ".") || (tok.kind === "OPERATOR" && tok.text === "::")) {
-              const t1 = peek(1);
-              if (!t1 || t1.kind !== "IDENT" || !/^[A-Z]/.test(t1.text ?? "")) return false;
-              // Walk forward past an optional payload binding `(…)`
-              let i = 2;
-              if (peek(i)?.text === "(") {
-                let d = 1;
-                i++;
-                while (i < 20 && d > 0) {
-                  const tk = peek(i);
-                  if (!tk || tk.kind === "EOF") return false;
-                  if (tk.text === "(") d++;
-                  else if (tk.text === ")") d--;
-                  i++;
-                }
-              }
-              return armArrowAt(i);
+            // A §18.2 / §18.16 arm pattern — ONE alternate or a `|`-chain of
+            // them — that reaches an arm arrow: `.V =>`, `.V(…) =>`, `::V =>`,
+            // `else =>`, `_ =>`, `"s" =>`, `1 =>`, `-1 =>`, `true =>`, and
+            // every alternation of those (`.B | .C :>`, `_ | .A :>`,
+            // `"a" | "b" :>`, `.X(a) | .Y(a) :>`). One token-kind walker
+            // (armPatternChainReachesArrow) for every alternate shape and every
+            // chain length.
+            // g-impl1-match-miscompiles F12: the per-shape predicates this replaced
+            // required the arrow IMMEDIATELY after the first alternate (the string
+            // chain alone walked `|`), so a variant/wildcard alternation arm was a
+            // boundary only as the FIRST arm of a match — later it was glued onto
+            // the previous arm's result (`return "a"\n "B" | "C" :> "x"`) or, for
+            // `_ | .A :>`, silently DROPPED (no diagnostic; E-TYPE-020 defeated).
+            // F13: the payload-paren walk was capped at 20 tokens, so an arm
+            // binding five or more NAMED fields was never a boundary either.
+            //
+            // Two literal-arm guards are kept from the per-shape predicates:
+            // `<number> =>` is NOT a boundary when the previous collected part is
+            // a unary `-` (the number is that negative literal's magnitude), and
+            // `- <number> =>` IS one only when the `-` opens a NEW source line
+            // (`-` is otherwise subtraction; match arms are newline-separated).
+            {
+              const _prevPartNum = parts.length > 0 ? (parts[parts.length - 1]?.trim() ?? "") : "";
+              if (tok.kind === "NUMBER" && _prevPartNum === "-") return false;
             }
-            // `else =>` — wildcard arm
-            if (tok.kind === "KEYWORD" && tok.text === "else") {
-              return armArrowAt(1);
+            if (tok.kind === "PUNCT" && tok.text === "-") {
+              const _tokLine = tok.span?.line;
+              const _prevLine = lastTok?.span?.line;
+              if (!(typeof _tokLine === "number" && typeof _prevLine === "number" && _tokLine !== _prevLine)) return false;
             }
-            // `_ =>` — wildcard alias
-            if (tok.kind === "IDENT" && tok.text === "_") {
-              return armArrowAt(1);
-            }
+            if (armPatternChainReachesArrow(peek, 0)) return true;
             // `not …=>` — is-not arm (§42). Scan forward up to 6 tokens
             // for an arm arrow before hitting a block opener.
             if (tok.kind === "KEYWORD" && tok.text === "not") {
@@ -4799,49 +4914,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
                 if (tk.kind === "PUNCT" && tk.text === "{") return false;
               }
               return false;
-            }
-            // `"string" =>` / `'string' =>` — string-literal arm, and the
-            // string-literal ALTERNATION chain `"a" | "b" | … =>`
-            // (g-match-lowering-arm-drop F6). Each alternate is a string literal;
-            // a trailing arm-arrow marks the boundary. Without the chain walk the
-            // first alternate `"a"` (followed by `|`, not an arrow) was NOT seen
-            // as a new arm, so `"a" | "b" :>` was absorbed into the PRECEDING arm's
-            // result → E-CODEGEN-INVALID-LOGIC.
-            if (tok.kind === "STRING") {
-              if (armArrowAt(1)) return true;
-              let si = 1;
-              while (peek(si) && peek(si).kind === "PUNCT" && peek(si).text === "|" &&
-                     peek(si + 1) && peek(si + 1).kind === "STRING") {
-                si += 2;
-                if (armArrowAt(si)) return true;
-              }
-              return false;
-            }
-            // `<number> =>` — number-literal arm (SPEC §18.16;
-            // g-match-lowering-arm-drop F2). Unambiguous at depth 0: a bare number
-            // is not a valid arrow param and `:>` is a match-only separator. NOT a
-            // boundary when the previous collected part is a unary `-` — the number
-            // is that negative literal's magnitude (handled by the `-` branch).
-            {
-              const _prevPartNum = parts.length > 0 ? (parts[parts.length - 1]?.trim() ?? "") : "";
-              if (tok.kind === "NUMBER") {
-                if (_prevPartNum === "-") return false;
-                return armArrowAt(1);
-              }
-            }
-            // `- <number> =>` — NEGATIVE number-literal arm. The `-` is ambiguous
-            // with subtraction (`100 - 1`), so this is a boundary ONLY when the `-`
-            // opens a NEW source line (match arms are newline-separated, §18.2).
-            if (tok.kind === "PUNCT" && tok.text === "-" && peek(1) && peek(1).kind === "NUMBER") {
-              const _tokLine = tok.span?.line;
-              const _prevLine = lastTok?.span?.line;
-              if (typeof _tokLine === "number" && typeof _prevLine === "number" && _tokLine !== _prevLine) {
-                return armArrowAt(2);
-              }
-            }
-            // `true =>` / `false =>` — boolean-literal arm (SPEC §18.16).
-            if (tok.kind === "KEYWORD" && (tok.text === "true" || tok.text === "false")) {
-              return armArrowAt(1);
             }
             // §18.19 — `( p1, p2, … ) :>` product-pattern arm. Unambiguous:
             // ≥ 2 pattern-shaped positions + a depth-1 comma + an arrow after
@@ -4893,7 +4965,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // `obj.x = function() {...}` truncated at `=` and emitted an orphan
         // function-decl. (Function-as-call-arg already worked because it sits inside
         // `(`...`)` and never reached depth 0 here.)
-        if (parts.length > 0 && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
+        if (parts.length > 0 && tok !== _headBodyTok && angleDepth === 0 && tok.kind === "KEYWORD" && STMT_KEYWORDS.has(tok.text) && parts[parts.length - 1]?.trim() !== ".") {
           const _lastPart = parts[parts.length - 1]?.trim() ?? "";
           // RHS context: the previous part is an operator/punctuation that
           // demands a following operand, so the upcoming token belongs to THIS
@@ -10524,17 +10596,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         // Scan forward past optional payload binding `(...)`
         let arrowIdx = 2;
         let bindingText = null;
-        if (peek(arrowIdx)?.text === '(') {
+        if (peek(arrowIdx)?.kind === 'PUNCT' && peek(arrowIdx)?.text === '(') {
           const parenStart = arrowIdx;
-          let d = 1;
-          arrowIdx++;
-          while (arrowIdx < 40 && d > 0) {
-            const tk = peek(arrowIdx);
-            if (!tk || tk.kind === 'EOF') break;
-            if (tk.text === '(') d++;
-            else if (tk.text === ')') d--;
-            arrowIdx++;
-          }
+          // Uncapped balanced walk (F13 — the former 40-token cap is the same
+          // defect class as the 20-token boundary cap; shared helper).
+          const _after = scanPastBalancedParens(peek, arrowIdx);
+          const d = _after >= 0 ? 0 : 1;
+          arrowIdx = _after >= 0 ? _after : arrowIdx + 1;
           // Extract binding text from inside the parens
           if (d === 0) {
             const innerTokens = [];

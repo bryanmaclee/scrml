@@ -3157,13 +3157,18 @@ export function peekStartsArmPattern(cursor) {
 
 // --- scanPastPayloadParen — advance past a `(...)` payload, returning the
 // offset of the token AFTER the matching `)`. Returns -1 on unbalanced /
-// runaway. Bounded at 20 tokens (matches the live S27 helper).
+// runaway. NOT length-capped (mirrors the live ast-builder
+// scanPastBalancedParens): a payload pattern binds as many fields as its
+// variant declares — the former 20-token cap dropped any wider binding list
+// (g-impl1-match-miscompiles F13). A `{` / `}` / `;` cannot sit inside a
+// payload pattern, so reaching one ends the scan as unbalanced.
 function scanPastPayloadParen(cursor, start) {
     let depth = 1;
     let i = start + 1;
-    while (i < start + 20) {
+    while (true) {
         const k = peekKind(cursor, i);
         if (k === TokenKind.EOF) return -1;
+        if (k === TokenKind.LBrace || k === TokenKind.RBrace || k === TokenKind.Semicolon) return -1;
         if (k === TokenKind.LParen) depth = depth + 1;
         else if (k === TokenKind.RParen) {
             depth = depth - 1;
