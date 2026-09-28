@@ -3628,3 +3628,16 @@ non-reactive 2–4 step calculation used once, in expression position.
 - **L19 REVERSED** — SPEC §5.2.3 + the §34 `E-MULTI-STATEMENT-HANDLER` row owe an amendment (provenance
   `ruling:S435 · supersedes: L19`); the TS impl already accepts the braced form, so the landing is SPEC-text + any
   remaining fire-sites (engine `:`-shorthand, B18) measured first.
+
+## [dpa-054] deep-dive — a `decimal` / money numeric type
+`status:    banked`
+banked:     S440 2026-09-28 (bryan: "all recs on 4-12" — ratifying JS-WAT Q7(c) "open a DD on a `decimal`/money type")
+
+Evidence: `scrml-support/docs/deep-dives/js-wat-gauntlet-2026-09-28/REPORT.md` Q7 + `B-numbers-results.md` — every
+money idiom leaks IEEE-754: `19.99 * 100`, `1.005.toFixed(2)` → `"1.00"`, `Math.round(x*100)/100`, `0.1 + 0.2 == 0.3`
+false (lowers to raw `===`); the PRIMER itself teaches `@price.toFixed(2)`. Scope: does scrml ship a fixed-point /
+arbitrary-precision decimal type (literal syntax, arithmetic, rounding modes, `==`, serialization over the §57 wire and
+into SQL `NUMERIC`), or a stdlib `scrml:money` over integer minor units, or neither? Interacts with: S440 #7(a) `int`
+enforcement, dpa-037 (non-finite floats — its four calls are still bryan's), the pending S440 operator rule (Q1), BigInt
+(rejected until designed, S440 #4). Prior art to curate: Java `BigDecimal`, C# `decimal`, Python `decimal`/`fractions`,
+Postgres `NUMERIC`, Dinero.js, the TC39 Decimal proposal, Rust `rust_decimal`.
