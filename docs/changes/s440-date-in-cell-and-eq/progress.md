@@ -88,3 +88,34 @@ Shell ratchet shape unchanged (26,035 B, no deep_reactive/equality in it).
   0 unexplained. The runtime template itself is identical to base after swapping those two regions.
 - Internal-use check: `_scrml_structural_eq` is only emitted for user-written `==`/`!=`; the
   runtime never calls it for change detection, so the invalid-Date self-inequality cannot loop.
+
+## 11. FIX ROUND (S239 review: DO-NOT-LAND) — merged origin/main (merge, not rebase) first
+All four findings REPRODUCED on 24299cae8 before fixing (scratch probe):
+- F1: same invalid Date == itself -> false; two invalid Dates -> false; Float64Array[NaN] -> false; Map value NaN -> false.
+- F3: Set{{a:1},{a:1}} == Set{{a:1},{a:2}} -> TRUE; Map analogue -> TRUE.
+- F4: two Dates from a vm realm (instants 1 and 2) -> TRUE; foreign Date(1) vs local Date(1) -> false; foreign u8 vs local u8 same -> false.
+- F5: _scrml_deep_set(URL, ["pathname"], "/y") -> a plain [object Object], href undefined, silently.
+
+SUPERSEDES §5 (my CHOICE): the S440 dpa-037 ruling (postdates my brief) makes NaN a DEFINED
+value and == REFLEXIVE (SameValueZero). Now:
+- F1: `a === b` fast path is plain `return true` again. Date instants, typed-array elements and
+  JS Map values compare with SameValueZero (`x === y || (x !== x && y !== y)`). ArrayBuffer /
+  DataView stay bytewise (comment says why: byte identity, not numeric equality). The plain
+  number branch is untouched (dpa-037 comparison-family build) — pinned as `test.todo`.
+- F3: Map/Set pair ONE-TO-ONE: primitive keys/elements by the collection's own lookup (their
+  counterpart is unique); object keys/elements against a `used[]`-marked list of b's object
+  entries. Map entries match as (key, value) pairs, so crossed values still pair up.
+- F4: built-ins recognised by BRAND (`Object.prototype.toString`), not instanceof; tag mismatch
+  -> not equal (also fixes the old asymmetric `[1] == {0:1}`). Error compares name+message
+  (constructor identity is realm-local). Blob keeps an instanceof fallback because polyfilled
+  Blobs (happy-dom, jsdom) carry no Blob brand. Plain-object test in deep_reactive and
+  deep_set uses "prototype's prototype is null" so another realm's plain object is plain.
+- F5: `_scrml_deep_set` copies each container through `_scrml_deep_set_copy`, which throws
+  `TypeError("scrml: cannot write .<key> of a <Class> in place; it is a value. Assign the whole
+  cell.")` for any non-array non-plain object. Primitive/absent intermediates keep the old
+  behavior (created as {}). Page test: the click raises the error; the cell keeps its intact URL.
+- F2: code comment at the allow-list (accepted as designed; PA adds the SPEC line).
+
+Sizes (gzip-9): counter 16,334 B (50 B headroom under 16,384; base 16,232); shell 26,206 B
+(62 B under the 26,268 ceiling; base 26,035 — the growth is _scrml_deep_set_copy, which ships
+in the shell's utilities chunk).

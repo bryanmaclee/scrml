@@ -2490,13 +2490,25 @@ function _scrml_remount_each(root) {
   }
 }
 
+// Spreading a Date/URL/Map/class instance would silently re-type it as a plain
+// object. It is a value, not a record: fail loud.
+function _scrml_deep_set_copy(c, key) {
+  if (Array.isArray(c)) return [...c];
+  const proto = c !== null && typeof c === "object" ? Object.getPrototypeOf(c) : null;
+  if (proto !== null && Object.getPrototypeOf(proto) !== null) {
+    const cls = (proto.constructor && proto.constructor.name) || Object.prototype.toString.call(c).slice(8, -1);
+    throw new TypeError("scrml: cannot write ." + String(key) + " of a " + cls + " in place; it is a value. Assign the whole cell.");
+  }
+  return { ...c };
+}
+
 function _scrml_deep_set(obj, path, value) {
   if (!path || path.length === 0) return value;
-  const result = Array.isArray(obj) ? [...obj] : { ...obj };
+  const result = _scrml_deep_set_copy(obj, path[0]);
   let current = result;
   for (let i = 0; i < path.length - 1; i++) {
     const key = path[i];
-    current[key] = Array.isArray(current[key]) ? [...current[key]] : { ...current[key] };
+    current[key] = _scrml_deep_set_copy(current[key], path[i + 1]);
     current = current[key];
   }
   current[path[path.length - 1]] = value;
@@ -4099,76 +4111,70 @@ function _scrml_input_gamepad_destroy(id, scopeId) {
 // between these markers into any .server.js that calls it. Keep it
 // self-contained — it must not call another runtime helper.
 function _scrml_structural_eq(a, b, seen) {
-  if (a === b) {
-    // An invalid Date (NaN instant) is unequal even to itself, the same rule a
-    // NaN number gets from \`===\` below.
-    return !(a instanceof Date && Number.isNaN(a.getTime()));
-  }
+  if (a === b) return true;
   if (a == null || b == null) return false; // loose: null and undefined are both absence
   if (typeof a !== typeof b) return false;
-  if (typeof a !== "object") return a === b;
-  // Built-in classes (S440 ruling #8: date/timestamp are VALUE types, \`==\` by
-  // instant). These keep their value in internal slots, not in own enumerable
+  if (typeof a !== "object") return a === b; // NaN here: the dpa-037 comparison-family build
+  // The value's class, read by BRAND (not instanceof) so a Date from another
+  // realm (an iframe, a vm context) is still a Date. Values of two different
+  // classes are never equal; this also keeps an array from equalling an
+  // object with the same index keys.
+  const tag = Object.prototype.toString.call(a);
+  if (tag !== Object.prototype.toString.call(b)) return false;
+  // SameValueZero, the NaN rule the S440 dpa-037 ruling gives == (NaN is a
+  // defined value and == is reflexive). Used for the number-valued slots below.
+  const sameNum = (x, y) => x === y || (x !== x && y !== y);
+  // An ArrayBuffer / DataView is raw memory, so it compares BYTE for byte (byte
+  // identity, not numeric equality: two NaN bit patterns can differ).
+  const bytesEq = (bufA, offA, bufB, offB, len) => {
+    const x = new Uint8Array(bufA, offA, len);
+    const y = new Uint8Array(bufB, offB, len);
+    for (let i = 0; i < len; i++) {
+      if (x[i] !== y[i]) return false;
+    }
+    return true;
+  };
+  // Built-in classes (S440 ruling #8: date/timestamp are VALUE types, == by
+  // instant). They keep their value in internal slots, not own enumerable
   // keys, so the struct branch at the bottom would see two empty key sets and
-  // call any two of them equal. Each class gets its own rule here. A built-in
-  // never equals a value of a different class.
-  if (a instanceof Date || b instanceof Date) {
-    if (!(a instanceof Date) || !(b instanceof Date)) return false;
-    // NaN !== NaN, so two invalid Dates are not equal.
-    return a.getTime() === b.getTime();
-  }
-  if (a instanceof RegExp || b instanceof RegExp) {
-    if (!(a instanceof RegExp) || !(b instanceof RegExp)) return false;
-    return a.source === b.source && a.flags === b.flags;
-  }
-  if (ArrayBuffer.isView(a) || ArrayBuffer.isView(b)) {
-    // Typed arrays compare element by element (so NaN elements are unequal,
-    // as numbers are); a DataView compares its bytes.
-    if (!ArrayBuffer.isView(a) || !ArrayBuffer.isView(b)) return false;
-    if (a.constructor !== b.constructor || a.byteLength !== b.byteLength) return false;
-    if (a instanceof DataView) {
-      for (let i = 0; i < a.byteLength; i++) {
-        if (a.getUint8(i) !== b.getUint8(i)) return false;
-      }
-      return true;
-    }
-    for (let i = 0; i < a.length; i++) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
-  }
-  if (a instanceof ArrayBuffer || b instanceof ArrayBuffer) {
-    if (!(a instanceof ArrayBuffer) || !(b instanceof ArrayBuffer)) return false;
+  // call any two of them equal. Each gets its own rule.
+  if (ArrayBuffer.isView(a)) {
     if (a.byteLength !== b.byteLength) return false;
-    const aBytes = new Uint8Array(a);
-    const bBytes = new Uint8Array(b);
-    for (let i = 0; i < aBytes.length; i++) {
-      if (aBytes[i] !== bBytes[i]) return false;
+    if (tag === "[object DataView]") return bytesEq(a.buffer, a.byteOffset, b.buffer, b.byteOffset, a.byteLength);
+    // A typed array compares element by element, as numbers.
+    for (let i = 0; i < a.length; i++) {
+      if (!sameNum(a[i], b[i])) return false;
     }
     return true;
   }
-  if (typeof URL !== "undefined" && (a instanceof URL || b instanceof URL)) {
-    if (!(a instanceof URL) || !(b instanceof URL)) return false;
-    return a.href === b.href;
+  switch (tag) {
+    case "[object Date]":
+      return sameNum(Date.prototype.getTime.call(a), Date.prototype.getTime.call(b));
+    case "[object RegExp]":
+      return a.source === b.source && a.flags === b.flags;
+    case "[object ArrayBuffer]":
+      return a.byteLength === b.byteLength && bytesEq(a, 0, b, 0, a.byteLength);
+    case "[object URL]":
+      return a.href === b.href;
+    case "[object URLSearchParams]":
+      return a.toString() === b.toString();
+    // No synchronously readable value: equal only when the same object, which
+    // the a === b check above has already ruled out.
+    case "[object Promise]":
+    case "[object WeakMap]":
+    case "[object WeakSet]":
+    case "[object Blob]":
+    case "[object File]":
+      return false;
+    case "[object Error]":
+      // message is an own NON-enumerable key, so check it (and the name) here;
+      // the struct branch below then compares the enumerable fields (type and
+      // cause on the §19 error classes).
+      if (a.name !== b.name || a.message !== b.message) return false;
+      break;
   }
-  if (typeof URLSearchParams !== "undefined" && (a instanceof URLSearchParams || b instanceof URLSearchParams)) {
-    if (!(a instanceof URLSearchParams) || !(b instanceof URLSearchParams)) return false;
-    return a.toString() === b.toString();
-  }
-  // A Promise, WeakMap, WeakSet or Blob has no value that can be read
-  // synchronously, so two of them are equal only when they are the same
-  // object — which the \`a === b\` check above has already ruled out.
-  if (a instanceof Promise || b instanceof Promise) return false;
-  if (a instanceof WeakMap || b instanceof WeakMap) return false;
-  if (a instanceof WeakSet || b instanceof WeakSet) return false;
+  // A polyfilled Blob (happy-dom, jsdom) carries no Blob brand; catch it by class.
   if (typeof Blob !== "undefined" && (a instanceof Blob || b instanceof Blob)) return false;
-  if (a instanceof Error || b instanceof Error) {
-    // \`message\` is an own NON-enumerable key, so check it (and the class) here;
-    // the struct branch below then compares the enumerable fields (name, type,
-    // cause on the §19 error classes).
-    if (!(a instanceof Error) || !(b instanceof Error)) return false;
-    if (a.constructor !== b.constructor || a.message !== b.message) return false;
-  }
   // Cycle guard: value-cycles are FORBIDDEN in scrml (§6.5.1 reassignment-
   // canonical), but a malformed JS-host value reaching == could still carry
   // one. Track visited (a, b) pairs so a revisit terminates instead of
@@ -4185,39 +4191,41 @@ function _scrml_structural_eq(a, b, seen) {
     return true;
   }
   seenBs.add(b);
-  // JS Map / Set (host interop values — the §59 value-native map is a tagged
-  // plain object and has its own branch below). Two are equal when they have
-  // the same size and every entry of \`a\` has a match in \`b\`: a Set element or
-  // Map key matches by the collection's own key lookup first, then (for an
-  // object) by structural equality. A Map value compares structurally.
-  // Nested trial comparisons pass a FRESH cycle guard: a failed trial must
-  // not leave its pair in \`seen\`, where a later revisit would read it as equal.
-  if (a instanceof Map || b instanceof Map) {
-    if (!(a instanceof Map) || !(b instanceof Map) || a.size !== b.size) return false;
-    for (const [key, aVal] of a) {
-      if (b.has(key)) {
-        if (!_scrml_structural_eq(aVal, b.get(key), seen)) return false;
+  // JS Map / Set (host interop values; the §59 value-native map is a tagged
+  // plain object with its own branch below). Equal when the entries pair up
+  // ONE-TO-ONE. A primitive key/element can only pair with itself, found by
+  // the collection's own SameValueZero lookup. An object key/element pairs
+  // with a not-yet-used structurally-equal one. A Map value compares
+  // structurally, with the NaN rule. Trial comparisons pass a FRESH cycle
+  // guard: a failed trial must not leave its pair in seen, where a later
+  // revisit would read it as equal.
+  if (tag === "[object Map]" || tag === "[object Set]") {
+    if (a.size !== b.size) return false;
+    const isMap = tag === "[object Map]";
+    const valEq = (x, y, s) => sameNum(x, y) || _scrml_structural_eq(x, y, s);
+    const bObjects = [];
+    for (const entry of b) {
+      const key = isMap ? entry[0] : entry;
+      if (key !== null && typeof key === "object") bObjects.push(entry);
+    }
+    const used = new Array(bObjects.length).fill(false);
+    for (const entry of a) {
+      const key = isMap ? entry[0] : entry;
+      if (key === null || typeof key !== "object") {
+        if (!b.has(key)) return false;
+        if (isMap && !valEq(entry[1], b.get(key), seen)) return false;
         continue;
       }
-      if (key === null || typeof key !== "object") return false;
-      let matched = false;
-      for (const [bKey, bVal] of b) {
-        if (_scrml_structural_eq(key, bKey) && _scrml_structural_eq(aVal, bVal)) { matched = true; break; }
+      let found = -1;
+      for (let i = 0; i < bObjects.length && found < 0; i++) {
+        if (used[i]) continue;
+        const bEntry = bObjects[i];
+        if (isMap
+          ? _scrml_structural_eq(key, bEntry[0]) && valEq(entry[1], bEntry[1])
+          : _scrml_structural_eq(key, bEntry)) found = i;
       }
-      if (!matched) return false;
-    }
-    return true;
-  }
-  if (a instanceof Set || b instanceof Set) {
-    if (!(a instanceof Set) || !(b instanceof Set) || a.size !== b.size) return false;
-    for (const item of a) {
-      if (b.has(item)) continue;
-      if (item === null || typeof item !== "object") return false;
-      let matched = false;
-      for (const bItem of b) {
-        if (_scrml_structural_eq(item, bItem)) { matched = true; break; }
-      }
-      if (!matched) return false;
+      if (found < 0) return false;
+      used[found] = true;
     }
     return true;
   }
@@ -4390,10 +4398,10 @@ function _scrml_deep_reactive(value) {
   // Return cached proxy if we already wrapped this object
   if (_scrml_proxy_cache.has(value)) return _scrml_proxy_cache.get(value);
 
-  // Only arrays + plain objects: a Date, Map, class… throws on a Proxy receiver.
+  // Arrays + plain objects only; a Date/class breaks under a Proxy (writes untracked, by design).
   if (!Array.isArray(value)) {
     const proto = Object.getPrototypeOf(value);
-    if (proto !== Object.prototype && proto !== null) return value;
+    if (proto !== null && Object.getPrototypeOf(proto) !== null) return value;
   }
 
   const proxy = new Proxy(value, {

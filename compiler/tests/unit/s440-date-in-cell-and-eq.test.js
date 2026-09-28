@@ -21,8 +21,17 @@
  *   §45.8: "`==` SHALL perform deep structural comparison". A Date's value is
  *   its instant, so `==` compares `getTime()`.
  *
- * CHOICE (dpa-037 unruled): an invalid Date (NaN instant) follows the NaN
- *   rule — it is equal to nothing, itself included.
+ * NaN (S440 dpa-037 ruling, postdates the first round): NaN is a DEFINED value
+ *   and `==` is REFLEXIVE with SameValueZero semantics. So an invalid Date
+ *   (NaN instant) equals itself and any other invalid Date, and typed-array
+ *   elements / JS Map values compare with the same rule. The PLAIN-number
+ *   case (`0/0 == 0/0`) is the separate dpa-037 comparison-family build — it
+ *   is a test.todo below, not a green assertion of the ruled-against result.
+ *
+ * Fix round (S239 review): Map/Set entries pair ONE-TO-ONE (F3); built-in
+ *   classes are recognised by brand, so a Date from another realm is a Date
+ *   (F4); `_scrml_deep_set` fails loud instead of re-typing a URL/Date as a
+ *   plain object (F5).
  *
  * The server copy of `_scrml_structural_eq` was a hand-written duplicate that
  * had drifted (no §59 map branch, no cycle guard, the same Date bug). It is
@@ -32,6 +41,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { resolve } from "path";
+import { runInNewContext } from "vm";
 import { writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from "fs";
 import { compileScrml } from "../../src/api.js";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
@@ -107,7 +117,7 @@ const RT = (() => {
   // eslint-disable-next-line no-new-func
   new Function(
     "box",
-    `${SCRML_RUNTIME}\nbox.deepReactive = _scrml_deep_reactive; box.eq = _scrml_structural_eq; box.effect = _scrml_effect;`,
+    `${SCRML_RUNTIME}\nbox.deepReactive = _scrml_deep_reactive; box.eq = _scrml_structural_eq; box.effect = _scrml_effect; box.deepSet = _scrml_deep_set;`,
   )(box);
   return box;
 })();
@@ -196,8 +206,9 @@ const EQ_CASES = () => {
   return [
     ["Date, different instants", new Date(2020, 0, 1), new Date(1999, 5, 5), false],
     ["Date, same instant, different objects", new Date(2020, 0, 1), new Date(2020, 0, 1), true],
-    ["Date, two invalid Dates (NaN rule)", new Date("x"), new Date("y"), false],
-    ["Date, the SAME invalid Date object (NaN rule)", invalid, invalid, false],
+    ["Date, two invalid Dates (SameValueZero, dpa-037)", new Date("x"), new Date("y"), true],
+    ["Date, the SAME invalid Date object (reflexive, dpa-037)", invalid, invalid, true],
+    ["Date, invalid vs valid", new Date("x"), new Date(0), false],
     ["Date vs plain object", new Date(0), {}, false],
     ["Date vs number of the same instant", new Date(0), 0, false],
     ["struct with Date fields, different instants", { d: new Date(1) }, { d: new Date(2) }, false],
@@ -218,7 +229,14 @@ const EQ_CASES = () => {
     ["Uint8Array, same elements", new Uint8Array([1, 2]), new Uint8Array([1, 2]), true],
     ["Uint8Array, different elements", new Uint8Array([1, 2]), new Uint8Array([1, 3]), false],
     ["Uint8Array vs Int8Array, same elements", new Uint8Array([1]), new Int8Array([1]), false],
-    ["Float64Array holding NaN (NaN rule)", new Float64Array([NaN]), new Float64Array([NaN]), false],
+    ["Float64Array holding NaN (SameValueZero, dpa-037)", new Float64Array([NaN]), new Float64Array([NaN]), true],
+    ["Float64Array, NaN vs number", new Float64Array([NaN]), new Float64Array([1]), false],
+    ["Map values NaN (SameValueZero, dpa-037)", new Map([[1, NaN]]), new Map([[1, NaN]]), true],
+    ["Set, duplicate-shaped members pair one-to-one (F3)", new Set([{ a: 1 }, { a: 1 }]), new Set([{ a: 1 }, { a: 2 }]), false],
+    ["Set, duplicate-shaped members, both sides alike (F3)", new Set([{ a: 1 }, { a: 1 }]), new Set([{ a: 1 }, { a: 1 }]), true],
+    ["Map, duplicate-shaped keys pair one-to-one (F3)", new Map([[{ k: 1 }, 1], [{ k: 1 }, 1]]), new Map([[{ k: 1 }, 1], [{ k: 2 }, 1]]), false],
+    ["Map, same key shape but values crossed (F3)", new Map([[{ k: 1 }, 1], [{ k: 1 }, 2]]), new Map([[{ k: 1 }, 2], [{ k: 1 }, 1]]), true],
+    ["array vs object with the same index keys", [1], { 0: 1 }, false],
     ["ArrayBuffer, same bytes", new Uint8Array([1, 2]).buffer, new Uint8Array([1, 2]).buffer, true],
     ["ArrayBuffer, different bytes", new Uint8Array([1, 2]).buffer, new Uint8Array([1, 9]).buffer, false],
     ["DataView, same bytes", new DataView(new Uint8Array([4]).buffer), new DataView(new Uint8Array([4]).buffer), true],
@@ -240,7 +258,6 @@ const EQ_CASES = () => {
     ["plain structs, unequal", { a: 1 }, { a: 2 }, false],
     ["enum values, same tag + payload", { _tag: "A", v: 1 }, { _tag: "A", v: 1 }, true],
     ["enum values, different tag", { _tag: "A" }, { _tag: "B" }, false],
-    ["NaN number (NaN rule)", NaN, NaN, false],
     ["null vs undefined", null, undefined, false],
     [
       "§59 maps, different insertion order (order-independent, §59.9)",
@@ -265,6 +282,92 @@ describe("s440 §2 — _scrml_structural_eq (client runtime)", () => {
     const c = RT.deepReactive({ d: new Date(2020, 0, 1) });
     expect(RT.eq(a, b)).toBe(false);
     expect(RT.eq(a, c)).toBe(true);
+  });
+
+  // dpa-037 (S440): NaN is a defined value and == is reflexive (SameValueZero),
+  // so `0/0 == 0/0` SHALL be true. The plain-number branch (and emit-expr's
+  // `===` lowering for statically-primitive operands) still gives false: that
+  // is the dpa-037 comparison-family build, a separate dispatch — not this PR.
+  test.todo("NaN number == NaN number is true (dpa-037 comparison-family build)", () => {
+    expect(RT.eq(NaN, NaN)).toBe(true);
+    expect(RT.eq({ n: NaN }, { n: NaN })).toBe(true);
+  });
+});
+
+describe("s440 §2b — built-ins from another realm (F4: brand, not instanceof)", () => {
+  const other = () => runInNewContext(`({
+    d1: new Date(1), d2: new Date(2), bad: new Date("x"),
+    re: /a/g, map: new Map([[1, 2]]), set: new Set([1]),
+    u8: new Uint8Array([1, 2]), buf: new Uint8Array([7]).buffer,
+    err: new TypeError("boom"), arr: [1, 2],
+  })`);
+  const CROSS = () => {
+    const o = other();
+    return [
+      ["foreign Date vs local Date, same instant", o.d1, new Date(1), true],
+      ["foreign Date vs local Date, different instant", o.d1, new Date(2), false],
+      ["two foreign Dates, different instants", o.d1, o.d2, false],
+      ["foreign invalid Date vs local invalid Date", o.bad, new Date("y"), true],
+      ["foreign RegExp vs local, same", o.re, /a/g, true],
+      ["foreign RegExp vs local, different", o.re, /b/g, false],
+      ["foreign Map vs local, same", o.map, new Map([[1, 2]]), true],
+      ["foreign Map vs local, different value", o.map, new Map([[1, 3]]), false],
+      ["foreign Set vs local, different", o.set, new Set([2]), false],
+      ["foreign Uint8Array vs local, same", o.u8, new Uint8Array([1, 2]), true],
+      ["foreign Uint8Array vs local, different", o.u8, new Uint8Array([1, 3]), false],
+      ["foreign ArrayBuffer vs local, same bytes", o.buf, new Uint8Array([7]).buffer, true],
+      ["foreign TypeError vs local, same message", o.err, new TypeError("boom"), true],
+      ["foreign TypeError vs local Error", o.err, new Error("boom"), false],
+      ["foreign array vs local array", o.arr, [1, 2], true],
+      ["foreign Date vs plain object", o.d1, {}, false],
+    ];
+  };
+  for (const [label, a, b, want] of CROSS()) {
+    test(`${label} -> ${want}`, () => {
+      expect(RT.eq(a, b)).toBe(want);
+      expect(RT.eq(b, a)).toBe(want);
+      expect(serverEq(a, b)).toBe(want);
+    });
+  }
+});
+
+describe("s440 §2c — _scrml_deep_set fails loud on a non-plain container (F5)", () => {
+  test("a field write into a URL throws, naming the class and the fix", () => {
+    const u = new URL("https://a.example/x");
+    expect(() => RT.deepSet(u, ["pathname"], "/y")).toThrow(
+      "scrml: cannot write .pathname of a URL in place; it is a value. Assign the whole cell.",
+    );
+    expect(u.href).toBe("https://a.example/x"); // untouched
+  });
+
+  test("a Date nested inside a struct is refused the same way", () => {
+    const s = { when: new Date(0), label: "x" };
+    expect(() => RT.deepSet(s, ["when", "year"], 2030)).toThrow("of a Date in place");
+  });
+
+  test("a class instance from JS interop is refused", () => {
+    class Point { constructor() { this.x = 1; } }
+    expect(() => RT.deepSet(new Point(), ["x"], 2)).toThrow("cannot write .x of a Point in place");
+  });
+
+  test("plain objects and arrays still copy-on-write exactly as before", () => {
+    const s = { a: { b: 1 }, list: [1, 2] };
+    const out = RT.deepSet(s, ["a", "b"], 2);
+    expect(out).toEqual({ a: { b: 2 }, list: [1, 2] });
+    expect(s.a.b).toBe(1);
+    expect(RT.deepSet([1, [2, 3]], [1, 0], 9)).toEqual([1, [9, 3]]);
+    expect(RT.deepSet(Object.assign(Object.create(null), { a: 1 }), ["a"], 2)).toEqual({ a: 2 });
+    // An absent intermediate is still created (unchanged behavior).
+    expect(RT.deepSet({}, ["a", "b"], 1)).toEqual({ a: { b: 1 } });
+  });
+
+  test("a plain object from another realm is still plain: copied, not refused; and proxied", () => {
+    const foreign = runInNewContext(`({ a: { b: 1 } })`);
+    expect(RT.deepSet(foreign, ["a", "b"], 2).a.b).toBe(2);
+    expect(RT.deepReactive(foreign)).not.toBe(foreign);
+    const foreignDate = runInNewContext(`new Date(0)`);
+    expect(RT.deepReactive(foreignDate)).toBe(foreignDate);
+    expect(() => RT.deepSet(foreignDate, ["x"], 1)).toThrow("of a Date in place");
   });
 });
 
@@ -305,7 +408,7 @@ describe("s440 §3 — the server helper is sliced from the client runtime", () 
     expect(errors).toEqual([]);
     expect(serverJs).toContain("_scrml_structural_eq(a, b)");
     expect(serverJs).toContain("function _scrml_structural_eq(a, b, seen) {");
-    expect(serverJs).toContain("return a.getTime() === b.getTime();");
+    expect(serverJs).toContain("return sameNum(Date.prototype.getTime.call(a), Date.prototype.getTime.call(b));");
     expect(warnings.filter((w) => w.code === "W-CG-UNDEFINED-INTERPOLATION")).toEqual([]);
   });
 });
@@ -437,6 +540,29 @@ describe("s440 §5 — the other un-proxied classes, in a cell, in a page", () =
       expect(page.spans()).toEqual({ r: want, ok: "boot" });
     });
   }
+
+  test("F5: `@u.pathname = …` on a URL cell fails loud and leaves the URL intact", async () => {
+    // Before: _scrml_deep_set spread the URL into a plain object — href went
+    // blank, silently. Now the write raises a clear error naming the class.
+    const page = await bootPage(
+      `<program>
+<u> = new URL("https://a.example/x")
+function edit() {
+    @u.pathname = "/y"
+}
+<div><span id="h">\${@u.href}</span><button id="e" onclick=edit()>e</button></div>
+</program>
+`,
+      "s440-url-write",
+    );
+    expect(page.clientJs).toContain("_scrml_deep_set(");
+    expect(page.spans().h).toBe("https://a.example/x");
+    document.getElementById("e").click();
+    expect(page.pageErrors.join(" ")).toContain("cannot write .pathname of a URL in place");
+    expect(Object.prototype.toString.call(page.get("u"))).toBe("[object URL]");
+    expect(page.get("u").href).toBe("https://a.example/x");
+    expect(page.spans().h).toBe("https://a.example/x");
+  });
 
   test("two Map cells with different entries are not ==", async () => {
     const page = await bootPage(
