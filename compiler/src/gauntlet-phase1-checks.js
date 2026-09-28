@@ -786,17 +786,22 @@ function checkSchemaDeclarations(ast, filePath, errors) {
     // come from the SAME structured reader the harvest uses, so the rejection
     // and the declaration cannot disagree about what a head is. Runs for EVERY
     // body — a DSL table beside a qualified raw one must not mask it.
-    // The same code covers a head the reader CANNOT read (fail-closed): an
+    // E-SCHEMA-013 (fail-closed) covers a head the reader CANNOT read: an
     // unreadable head used to mean "not a table" — a silently absent floor.
     for (const q of findRejectedCreateTableHeads(body)) {
       const shown = q.name ?? "<name>";
       if (q.kind === "unreadable") {
+        // E-SCHEMA-013 — a DISTINCT code (S438 round 3, F-B): "the compiler could not
+        // read this head" is a different defect from "this head is qualified", and
+        // sharing the qualifier-worded code would mis-describe it.
         errors.push(new GauntletError(
-          "E-SCHEMA-012",
-          `E-SCHEMA-012: this \`<schema>\` has a \`CREATE TABLE\` head whose table name the ` +
+          "E-SCHEMA-013",
+          `E-SCHEMA-013: this \`<schema>\` has a \`CREATE TABLE\` head whose table name the ` +
           `compiler cannot read (\`${q.headText}\`). A \`<schema>\` \`CREATE TABLE\` head SHALL ` +
-          `name ONE unqualified table — a bare identifier (letters, digits, \`_\`, \`$\`) or one ` +
-          `quoted identifier — followed by its column list \`(…)\`. A head the compiler cannot ` +
+          `name ONE table — a bare identifier (letters, digits, \`_\`, \`$\`) or one quoted ` +
+          `identifier — followed by its column list \`(…)\` or a CREATE TABLE clause keyword ` +
+          `(\`AS\`, \`USING\`, \`WITH\`, \`ON\`, \`TABLESPACE\`, \`PARTITION OF\`, \`OF\`, ` +
+          `\`INHERITS\`). A head the compiler cannot ` +
           `read declares no table, and an undeclared \`tenant_id\` table leaves the §14.8.10 ` +
           `tenant-row isolation floor silently off, so it is rejected rather than skipped. ` +
           `(See SPEC §39.2, §14.8.10.)`,

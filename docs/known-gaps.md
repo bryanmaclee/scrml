@@ -408,6 +408,17 @@ probe shapes: 0 silent tenant-tag losses vs `98d94e96`; 169-file corpus differen
 A pre-existing sibling found in the round is filed below as
 `g-schema-commented-out-declaration-shadows-live-table`.
 
+**S438 ROUND 3 (review of `dccdc1cc`: security core holds; false positives + SPEC accuracy).**
+F-A: SQL inside a multi-line SECURITY-DEFINER `fn` `"""…"""` body no longer raises E-SCHEMA-012 —
+the comment-mode blanker now recognizes `"""…"""` across lines (and `//`, the DSL line comment);
+the harvest is untouched. F-B: `PARTITION OF`, `OF type`, `ON COMMIT`, `WITH`, `TABLESPACE`,
+`INHERITS` are valid name followers; the remaining unreadable heads moved to a DISTINCT code,
+**E-SCHEMA-013** (own §34 + §39.12 rows, newly-rejecting, corpus-measured zero). F-C: `CREATE` must
+start a word, and a head whose modifier words are outside the SQLite/Postgres table-kind set is
+held to the rules only when it reads as a head — prose (`# create the table for tenants`) no longer
+fires. SPEC §39.2 now lists the exempt literal forms and no longer claims a commented-out
+declaration "only adds floor". All new pins are red on `dccdc1cc`.
+
 **(Original entry, kept for the record.) ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
 
 The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
@@ -465,7 +476,11 @@ inside comments, and the harvest is first-wins per table name. So:
 | `-- CREATE TABLE assets (id INTEGER)` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
 | `/* assets { id: integer primary key } */` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
 
-The commented-out, `tenant_id`-less declaration shadows the live one. **PA recommendation:** for the
+The commented-out, `tenant_id`-less declaration shadows the live one. **Same class, noted not fixed
+(S438 round 3):** the harvest also reads a plain `CREATE TABLE x (…)` INSIDE a §14.8.11.2
+SECURITY-DEFINER `fn` `"""…"""` body as a `<schema>` declaration (pre-S438 behaviour, held for
+base parity) — runtime plpgsql becomes a declared table, and can shadow a live one the same way.
+E-SCHEMA-012/013 correctly ignore those heads; only the harvest reads them. **PA recommendation:** for the
 §14.8.10 declaration read, UNION the columns of every same-name declaration (over-declaring only adds
 floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
 base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on

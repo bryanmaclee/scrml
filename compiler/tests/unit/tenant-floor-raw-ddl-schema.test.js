@@ -642,18 +642,30 @@ describe("E-SCHEMA-012 — compile level: a qualified or unreadable `<schema>` C
     "Unicode qualifier (données.assets)": `    CREATE TABLE données.assets ${COLS}${NOTES}`,
     "`$` qualifier (app$v2.assets)": `    CREATE TABLE app$v2.assets ${COLS}${NOTES}`,
     "digit-leading qualifier": `    CREATE TABLE 1a.b.assets ${COLS}${NOTES}`,
-    // F3 — fail-closed on a head the reader cannot read
-    "UNREADABLE: hyphen in a qualifier": `    CREATE TABLE my-db.public.assets ${COLS}${NOTES}`,
-    "UNREADABLE: empty quoted part": `    CREATE TABLE "".public.assets ${COLS}${NOTES}`,
-    "UNREADABLE: fullwidth dot": `    CREATE TABLE a．b．assets ${COLS}${NOTES}`,
-    "UNREADABLE: zero-width space before the column list": `    CREATE TABLE assets​ ${COLS}${NOTES}`,
-    "UNREADABLE: IF EXISTS typo": `    CREATE TABLE IF EXISTS a.b.assets ${COLS}${NOTES}`,
     "VIRTUAL + qualifier": `    CREATE VIRTUAL TABLE a.b.assets USING fts5(name, tenant_id)${NOTES}`,
+    // F-B — a qualified PARTITION OF child is still a qualified head
+    "qualified PARTITION OF child": `    CREATE TABLE assets ${COLS}\n    CREATE TABLE a.assets_p PARTITION OF assets DEFAULT`,
   };
   for (const [label, schema] of Object.entries(REJECTED)) {
     test(`REJECTED: ${label}`, () => {
       const { r } = compileSchemaApp(schema);
       expect(errCodes(r)).toContain("E-SCHEMA-012");
+    });
+  }
+
+  // F3 / round-3 F-B — fail-closed on a head the reader cannot read: its OWN code.
+  const UNREADABLE = {
+    "hyphen in a qualifier": `    CREATE TABLE my-db.public.assets ${COLS}${NOTES}`,
+    "empty quoted part": `    CREATE TABLE "".public.assets ${COLS}${NOTES}`,
+    "fullwidth dot": `    CREATE TABLE a．b．assets ${COLS}${NOTES}`,
+    "zero-width space before the column list": `    CREATE TABLE assets​ ${COLS}${NOTES}`,
+    "IF EXISTS typo": `    CREATE TABLE IF EXISTS a.b.assets ${COLS}${NOTES}`,
+  };
+  for (const [label, schema] of Object.entries(UNREADABLE)) {
+    test(`E-SCHEMA-013 UNREADABLE: ${label}`, () => {
+      const { r } = compileSchemaApp(schema);
+      expect(errCodes(r)).toContain("E-SCHEMA-013");
+      expect(errCodes(r)).not.toContain("E-SCHEMA-012");
     });
   }
 
@@ -775,6 +787,85 @@ ${q}
   });
 });
 
+// Round 3 — false positives, each red on dccdc1cc.
+describe("round 3 — no false E-SCHEMA-012 / E-SCHEMA-013 (F-A, F-B, F-C)", () => {
+  const PG = "postgres://u:p@127.0.0.1:1/x";
+  const secdef = (sql) => (_db, _q) => `<program db="${PG}">
+  <schema>
+    invoices {
+      id: text primary key
+      tenant_id: text not null
+      status: text not null immutable
+      memo: text
+    } db-authoritative
+
+    fn void_invoice(id: uuid) security definer owner(invoice_admin) requires cap("void") {
+      """
+${sql}
+      UPDATE invoices SET status = 'void' WHERE invoices.id = void_invoice.id;
+      """
+    }
+  </schema>
+
+  function listInvoices() {
+    const rows = ?{ select id, tenant_id, status from invoices }
+    rows
+  }
+</program>`;
+  const schemaCodes = (r) => errCodes(r).filter((c) => /^E-SCHEMA-01[23]$/.test(c));
+
+  test("F-A: SQL inside a multi-line SECURITY-DEFINER `\"\"\"` body is not a <schema> head", () => {
+    for (const sql of [
+      "      CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;",
+      "      CREATE TABLE IF NOT EXISTS audit.snap (id uuid, tenant_id uuid);",
+      "      CREATE TABLE archived PARTITION OF invoices DEFAULT;",
+    ]) {
+      const { r } = compileSchemaApp(null, secdef(sql));
+      expect(schemaCodes(r)).toEqual([]);
+    }
+  });
+
+  test("F-A: …but a qualified head AFTER a closed `\"\"\"` body is still rejected", () => {
+    expect(findRejectedCreateTableHeads(
+      'fn f(id: uuid) security definer owner(a) {\n  """\n  CREATE TABLE a.b (x INT);\n  """\n}\nCREATE TABLE s.t (x INT)',
+    ).map((h) => h.name)).toEqual(["t"]);
+  });
+
+  test("F-B: `PARTITION OF` and `OF type` heads read fine — no error", () => {
+    for (const extra of [
+      "    CREATE TABLE assets_default PARTITION OF assets DEFAULT",
+      "    CREATE TABLE assets_2026 PARTITION OF assets FOR VALUES FROM ('2026-01-01') TO ('2027-01-01')",
+      "    CREATE TABLE typed OF mytype",
+      "    CREATE TEMP TABLE scratch ON COMMIT DROP AS SELECT 1",
+    ]) {
+      const { r } = compileSchemaApp(`    CREATE TABLE assets ${COLS}\n${extra}`);
+      expect(schemaCodes(r)).toEqual([]);
+    }
+  });
+
+  test("F-C: `CREATE` must start a word — `precreate table …` / `xCREATE TABLE a.b` are not heads", () => {
+    expect(findRejectedCreateTableHeads("precreate table foo bar")).toEqual([]);
+    expect(findRejectedCreateTableHeads("xCREATE TABLE a.b (x INT)")).toEqual([]);
+    expect(findRejectedCreateTableHeads("_create table a.b (x INT)")).toEqual([]);
+  });
+
+  test("F-C: prose with `create … table` is not a head (modifier words outside the SQL set, name unreadable)", () => {
+    for (const prose of [
+      "# create the table for tenants",
+      "<!-- create the table -->",
+      "we create a new table per tenant, see docs",
+    ]) {
+      expect(findRejectedCreateTableHeads(prose)).toEqual([]);
+    }
+    const { r } = compileSchemaApp(`    # create the table for tenants\n    CREATE TABLE assets ${COLS}`);
+    expect(schemaCodes(r)).toEqual([]);
+  });
+
+  test("F-C: a known modifier with an unreadable name is still E-SCHEMA-013 (fail-closed kept)", () => {
+    expect(findRejectedCreateTableHeads("CREATE TEMP TABLE my-t (x INT)").map((h) => h.kind)).toEqual(["unreadable"]);
+  });
+});
+
 describe("E-SCHEMA-012 — reader level: findRejectedCreateTableHeads", () => {
   const q = (sql) => findRejectedCreateTableHeads(sql)
     .filter((h) => h.kind === "qualified")
@@ -833,6 +924,8 @@ describe("E-SCHEMA-012 — reader level: findRejectedCreateTableHeads", () => {
     none("created_at.x (y)");                                  // `created` is not CREATE
     none("CREATE TABLE if (x INT)");                           // a table named `if`
     none("CREATE VIEW v AS SELECT a FROM t");                  // not a table head
+    none("// CREATE TABLE a.t (x INT)\n");                     // DSL line comment
+    none('fn f() { """\n CREATE TABLE a.b.t (x INT)\n""" }');  // multi-line fn body
   });
 
   test("a head AFTER a column body carrying a nested `(` is still found (resume past the real end)", () => {
