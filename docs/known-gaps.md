@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 152 | 4 |
+| HIGH | 153 | 4 |
 | MED | 338 | 0 |
 | LOW | 138 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -19965,6 +19965,10 @@ A `--emit-per-route` build of pages with no route map writes chunks to `dist/C__
 ### g-handler-alt-arm-body-only-last — a `!{}` handler arm `| ::B | ::C :> "bc"` gives the body only to the LAST alternate; `::B` yields null — `NEW S438; HIGH; open`
 <!-- @gap id=g-handler-alt-arm-body-only-last sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(error-handler arm lowering)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
 Silent wrong value: the alternation in an error-handler arm is not lowered as an OR-chain; the earlier alternates fall through with no body. Sibling of the value-`match` alternation class fixed by g-impl1-match-miscompiles F12 (that fix covers JS-style `match` arms only).
+
+### g-engine-msg-arm-alternation-emits-arms-as-text — an engine `accepts=` message arm with alternation (`| .End | .Drop(_) :> .Idle`) turns the state-child's WHOLE arm list into display text; no handler for that state — `NEW S440; HIGH; open`
+<!-- @gap id=g-engine-msg-arm-alternation-emits-arms-as-text sev=HIGH status=open locus=searched:compiler/src/codegen(engine state-child render / §51.0.S message-arm recognition)—not-traced prov=empirical:S440-review-of-#1119-e_c1-reproducer-PA-reproduced -->
+Silent wrong output (compiles clean). Reproducer (PA-reproduced S440 on `d244a6f3b`): `<engine for=DragPhase initial=.Idle accepts=DragMsg>` with `<Dragging(id) rule=.Idle>` containing `| .End | .Drop(_) :> .Idle` and `| _ :> @dragPhase` — the emitted client.js has no message handler for `Dragging` and instead `return "\n    | .End | .Drop(_) :> .Idle\n    | _ :> @dragPhase\n  ";` (the wildcard is lost with it). A binding alternation (`| .Start(id) | .Restart(id) :>`) behaves the same; the no-alternation control emits handlers correctly; a `${}`-wrapped variant instead raises a spurious E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE despite a `| _` arm. Pre-existing (identical on `fb21983a^1`). §51.0.S.2.3 says the message-arm grammar reuses the match arm grammar "verbatim", so the fix direction is lower-or-reject (E-MATCH-ALT-BINDING's §18.2 scope is JS-style `match` only). Sibling: g-handler-alt-arm-body-only-last (the `!{}` locus of the same alternation class). Under the S435 TS policy impl#1 carries this unless it serves the bootstrap; the bootstrap must implement §51.0.S arms from one arm grammar.
 
 ### g-stmt-match-block-return-falls-through — a statement-position `match` whose arms are `{ return "a" }` blocks returns the fall-through value, not the arm's — `NEW S438; HIGH; open`
 <!-- @gap id=g-stmt-match-block-return-falls-through sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(match-stmt structuredBody IIFE — a `return` inside the arm returns from the IIFE, not the function)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
