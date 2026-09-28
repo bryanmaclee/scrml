@@ -41,3 +41,14 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
 - Suites: slice-m1 73/0 · slice-m2 74/0 · SLICE_CORE=lowered slice-m1 73/0 · slice-m3 18/0 · v2 lexer 337/0 ·
   hybrid-stage-swap + hybrid-xfail 26/0 · lint 28 files 0 violations · pre-commit (862102be3) 31981 pass / 0 fail.
 - 2026-09-27T19:56:53-06:00 executeClient removes its per-run temp dir after the imports settle (no leak); slice-m3 18/0; reactive/ filter grade unchanged (11 graded, same 2 fails).
+
+## Fix round 1 (review of 486771ae3, tag review/s439-ingest)
+- merged origin/main (cb5641427); slice-m3 18/0 after merge.
+- Item 2: conformance/cases/reactive/reset-handler — input inc,inc,reset,inc → end state 1 (≠ initial 0); description +
+  rationale updated. impl#1 still PASSes it.
+- Item 5: conformance/normalize.ts drops an element `<template id="_scrml_…">` (impl#1's if-guard anchor, README OQ1's
+  named leak) from the whole-tree serialization; toggle-show `dom` corrected to the semantic tree. Invariance: pure
+  impl#1 `bun conformance/run.ts` exit 0, 1040/1047 + 7 xfail, and the 1047 per-case outcome lines are IDENTICAL to the
+  pre-fix run (diff exit 0) — toggle-show and reset-handler still PASS, no other case moved. (Round-1 note: the earlier
+  invariance diff was taken on text passed through a `s/[0-9.]*ms//g` filter that also mangled names containing "ms";
+  re-done on the raw lines: base vs round-1 identical, diff exit 0.)

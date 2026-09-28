@@ -100,6 +100,17 @@ function buildNormalized(node: DomNode): NNode[] {
 
     const tag = (k.tagName || "").toLowerCase();
 
+    // impl#1's if-guard anchor: an EMPTY `<template id="_scrml_…">` it leaves in
+    // the live DOM where a conditional arm mounts (README OQ1: the counter-id
+    // wrapper the whole-tree `dom` kept leaking). Impl-private structure, like a
+    // `data-scrml-*` marker — never author content (an author `<template>` has
+    // no `_scrml_` id). Dropped so the whole-tree compare holds at the semantic
+    // level (s439-bootstrap-m3-ingest review item 5).
+    if (tag === "template") {
+      const id = (k.getAttribute && k.getAttribute("id")) || "";
+      if (id.startsWith("_scrml_")) continue;
+    }
+
     if (tag === "script") {
       const src = (k.getAttribute && k.getAttribute("src")) || "";
       if (isRuntimeScriptSrc(src)) continue;

@@ -9,7 +9,7 @@
     "notCodes": [],
     "input": [{ "click": "#toggle" }],
     "state": { "open": true },
-    "dom": "<button id=\"toggle\">Toggle</button><template id=\"_scrml_scrml_tpl_2\"></template><p id=\"panel\">Panel open</p>",
+    "dom": "<button id=\"toggle\">Toggle</button><p id=\"panel\">Panel open</p>",
     "domAnchored": [{ "selector": "#panel", "count": 1, "text": "Panel open" }]
   }
 }
