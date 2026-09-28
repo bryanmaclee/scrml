@@ -814,10 +814,19 @@ ${sql}
 </program>`;
   const schemaCodes = (r) => errCodes(r).filter((c) => /^E-SCHEMA-01[23]$/.test(c));
 
-  test("F-A: SQL inside a multi-line SECURITY-DEFINER `\"\"\"` body is not a <schema> head", () => {
+  // ⚑ FLIPPED by the S438 FINAL commit. Round 3 made these silent via a fn-body
+  // exemption; both exemption attempts opened escapes, so it was REMOVED
+  // fail-closed. A readable, unqualified head in a fn body is still silent; a
+  // qualified/unreadable one is the DOCUMENTED FALSE POSITIVE — gap
+  // g-secdef-fn-body-ddl-false-positive (which records the repair).
+  test("F-A (documented false positive): a qualified head inside a SECDEF `\"\"\"` body IS reported", () => {
+    const { r } = compileSchemaApp(null, secdef("      CREATE TABLE IF NOT EXISTS audit.snap (id uuid, tenant_id uuid);"));
+    expect(schemaCodes(r)).toEqual(["E-SCHEMA-012"]);
+  });
+
+  test("F-A: readable unqualified heads in a SECDEF body stay silent", () => {
     for (const sql of [
       "      CREATE TEMP TABLE staging ON COMMIT DROP AS SELECT * FROM invoices;",
-      "      CREATE TABLE IF NOT EXISTS audit.snap (id uuid, tenant_id uuid);",
       "      CREATE TABLE archived PARTITION OF invoices DEFAULT;",
     ]) {
       const { r } = compileSchemaApp(null, secdef(sql));
@@ -825,10 +834,10 @@ ${sql}
     }
   });
 
-  test("F-A: …but a qualified head AFTER a closed `\"\"\"` body is still rejected", () => {
+  test("F-A: a qualified head AFTER a closed `\"\"\"` body is rejected too", () => {
     expect(findRejectedCreateTableHeads(
       'fn f(id: uuid) security definer owner(a) {\n  """\n  CREATE TABLE a.b (x INT);\n  """\n}\nCREATE TABLE s.t (x INT)',
-    ).map((h) => h.name)).toEqual(["t"]);
+    ).map((h) => h.name)).toEqual(["b", "t"]);
   });
 
   test("F-B: `PARTITION OF` and `OF type` heads read fine — no error", () => {
@@ -907,15 +916,50 @@ describe("round 4 — the round-3 escapes are closed (F1 `$` boundary, F2 mask s
     expect(errCodes(r)).toContain("E-SCHEMA-012");
   });
 
-  test("F2: the fn-body exemption is STRUCTURAL — an unparsed `fn` (no owner) or an unterminated one is not exempt", () => {
+  test("F2 (final): NO fn-body exemption — any `fn` form, parsed or not, leaves a qualified head reported", () => {
     expect(kinds(`fn f() security definer {\n"""\nCREATE TABLE a.b.assets ${C4};\n"""\n}`)).toEqual(["qualified:assets"]);
     expect(kinds(`fn f() {\n"""\nCREATE TABLE a.b.assets ${C4};\n`)).toEqual(["qualified:assets"]);
-    // …while a real, parsed SECDEF fn body is exempt (F-A still holds).
-    expect(kinds(`fn f(id: uuid) security definer owner(a) {\n"""\nCREATE TABLE a.b.assets ${C4};\n"""\n}`)).toEqual([]);
+    // A real, parsed SECDEF fn body: the documented false positive (g-secdef-fn-body-ddl-false-positive).
+    expect(kinds(`fn f(id: uuid) security definer owner(a) {\n"""\nCREATE TABLE a.b.assets ${C4};\n"""\n}`)).toEqual(["qualified:assets"]);
   });
 
   test("F2: a `//`-commented qualified head is the accepted fail-closed false positive", () => {
     expect(kinds(`// CREATE TABLE a.b.assets ${C4}`)).toEqual(["qualified:assets"]);
+  });
+
+  // S438 FINAL — the review's cases15: a forged / commented / braceless `fn` must
+  // never silence a live qualified or unreadable head. Each is red on c59046d2.
+  describe("final — no `fn` shape silences a head (cases15)", () => {
+    const PG = "postgres://u:p@127.0.0.1:1/x";
+    const C15 = "(id TEXT PRIMARY KEY, name TEXT, tenant_id TEXT NOT NULL)";
+    const Q3 = `CREATE TABLE app.public.assets ${C15};`;
+    const Q1 = `CREATE TABLE public.assets ${C15};`;
+    const UNR = `CREATE TABLE my-db.public.assets ${C15};`;
+    const pg = (schema) => (_db, _q) => `<program db="${PG}">
+  <schema>
+${schema}
+  </schema>
+  function loadAssets() {
+    const rows = ?{ select id, name, tenant_id from assets }
+    rows
+  }
+</program>`;
+    const SHAPES = {
+      "fn in -- comment, q3": [`    notes { id: text primary key }\n    -- fn f() owner(r) {\n    ${Q3}\n    -- }`, "E-SCHEMA-012"],
+      "fn in -- comment, q1": [`    notes { id: text primary key }\n    -- fn f() owner(r) {\n    ${Q1}\n    -- }`, "E-SCHEMA-012"],
+      "fn in -- comment, unreadable": [`    notes { id: text primary key }\n    -- fn f() owner(r) {\n    ${UNR}\n    -- }`, "E-SCHEMA-013"],
+      "fn in /* */, q3": [`    notes { id: text primary key }\n    /* fn f() owner(r) { */\n    ${Q3}\n    /* } */`, "E-SCHEMA-012"],
+      "braceless fn + DDL + DSL table, q3": [`    fn f() owner(r)\n    ${Q3}\n    notes { id: text primary key }`, "E-SCHEMA-012"],
+      "braceless fn, unreadable": [`    fn f() owner(r)\n    ${UNR}\n    notes { id: text primary key }`, "E-SCHEMA-013"],
+      "DDL in fn braces outside the `\"\"\"`, q3": [`    fn f() owner(r) { """select 1""" ${Q3} }`, "E-SCHEMA-012"],
+      "real SECDEF + q3 in the `\"\"\"` body (documented false positive)": [`    CREATE TABLE assets ${C15};\n    fn f() owner(r) security definer {\n      """\n      ${Q3}\n      """\n    }`, "E-SCHEMA-012"],
+    };
+    for (const [label, [schema, code]] of Object.entries(SHAPES)) {
+      test(`REJECTED: ${label}`, () => {
+        const { r } = compileSchemaApp(null, pg(schema));
+        expect(errCodes(r)).toContain(code);
+      });
+    }
   });
 
   test("F3: `PARTITION` is a name follower only as `PARTITION OF`", () => {
@@ -982,7 +1026,6 @@ describe("E-SCHEMA-012 — reader level: findRejectedCreateTableHeads", () => {
     none("created_at.x (y)");                                  // `created` is not CREATE
     none("CREATE TABLE if (x INT)");                           // a table named `if`
     none("CREATE VIEW v AS SELECT a FROM t");                  // not a table head
-    none('fn f(id: uuid) security definer owner(a) { """\n CREATE TABLE a.b.t (x INT)\n""" }');  // a parsed SECDEF fn body
   });
 
   test("a head AFTER a column body carrying a nested `(` is still found (resume past the real end)", () => {

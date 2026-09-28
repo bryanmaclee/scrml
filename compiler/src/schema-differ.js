@@ -29,25 +29,6 @@ import { quoteIdent } from "./codegen/sql-ident.ts";
  * @returns {{ tables: TableDecl[], fns: SecdefFnDecl[] }}
  */
 export function parseSchemaBlock(schemaBody) {
-  return scanSchemaBlock(schemaBody, null);
-}
-
-/**
- * The source ranges `[start, end)` of every §14.8.11.2 SECURITY-DEFINER `fn`
- * declaration `parseSchemaBlock` recognizes in a `< schema>` body — the SAME scan,
- * so "is this text inside a fn body" is answered by the parser that defines a fn,
- * never by free-text `"""` pairing (S438 round 4, F2).
- *
- * @param {string} text
- * @returns {Array<[number, number]>}
- */
-export function schemaFnDeclRanges(text) {
-  const ranges = [];
-  scanSchemaBlock(text, ranges);
-  return ranges;
-}
-
-function scanSchemaBlock(schemaBody, fnRanges) {
   const tables = [];
   const fns = [];
   const text = typeof schemaBody === "string" ? schemaBody : (schemaBody?.body ?? "");
@@ -67,7 +48,6 @@ function scanSchemaBlock(schemaBody, fnRanges) {
       const parsed = parseFnDecl(text, i, fnHead);
       if (parsed) {
         fns.push(parsed.fn);
-        if (fnRanges) fnRanges.push([i, parsed.next]);
         i = parsed.next;
         continue;
       }
@@ -529,13 +509,16 @@ export function findRejectedCreateTableHeads(text) {
   const out = [];
   if (typeof text !== "string") return out;
   const masked = blankLiteralBodies(text, { comments: true, backtick: false });
-  // A §14.8.11.2 SECURITY-DEFINER `fn` declaration's body is runtime plpgsql, not
-  // a declaration — identified STRUCTURALLY by the `< schema>` parser's own fn
-  // scan (round 4, F2), never by pairing `"""` in free text.
-  const fnRanges = schemaFnDeclRanges(text);
-  const inFnDecl = (pos) => fnRanges.some(([s, e]) => pos >= s && pos < e);
+  // ⚑ NO SECURITY-DEFINER `fn`-BODY EXEMPTION (S438 final round). Round 4 exempted
+  // the whole span of every `fn` the `< schema>` parser saw — but that scan sees
+  // `fn NAME(…) owner(…)` inside `--` / `/* */` comments, strings, and without a
+  // brace, so a COMMENTED `-- fn f() owner(r) {` … `-- }` wrapped a live
+  // qualified/unreadable head and silenced E-SCHEMA-012/013 at exit 0. Removed,
+  // fail-closed: a qualified/unreadable head inside a real `fn` `"""` body is now
+  // reported — the documented false positive, gap
+  // g-secdef-fn-body-ddl-false-positive (which records the repair).
   for (const h of scanCreateTableHeads(text)) {
-    if (!isLiveHead(masked, h) || inFnDecl(h.start)) continue;
+    if (!isLiveHead(masked, h)) continue;
     // An unknown modifier word (prose: `create the table for tenants`) counts as a
     // head only if the rest PARSES as one — a readable name chain followed by `(`
     // or a clause keyword. Then it is held to every rule; otherwise it is prose.
@@ -996,7 +979,8 @@ function parseFnArgs(argText) {
  *     grammar puts a regex; SQL `a / b` is division), bounded to its line;
  *   · `--` line comments and CLOSED `/* … *\/` block comments.
  * NOT `"""…"""` and NOT `//` (round 4 — see the note in the body). A SECURITY-
- * DEFINER `fn` body is exempted by its caller via `schemaFnDeclRanges`.
+ * DEFINER `fn` body is NOT exempted either (final round) — gap
+ * g-secdef-fn-body-ddl-false-positive.
  * `opts.backtick: false` leaves `` `…` `` LIVE: in a `< schema>` body a backtick
  * is either a quoted identifier inside a head or a `?{`…`}` wrapper around live
  * DDL, never inert text. Defaults reproduce the E-SCHEMA-011 behaviour exactly.
@@ -1015,10 +999,10 @@ function blankLiteralBodies(s, opts = {}) {
     // ⚑ NO `"""` AND NO `//` HANDLING HERE (S438 round 4, F2). Round 3 blanked any
     // `"""…"""` pair and any `//`-to-end-of-line; both are also ordinary RAW-SQL
     // text (`"""a"` … `"b"""` quoted identifiers, `DEFAULT $$http://x$$`), so each
-    // masked a live qualified head and let it escape E-SCHEMA-012. A SECURITY-
-    // DEFINER `fn` body is now exempted STRUCTURALLY by the caller
-    // (`schemaFnDeclRanges`); a `//` line is live (a `//`-commented qualified head
-    // is the accepted fail-closed false positive).
+    // masked a live qualified head and let it escape E-SCHEMA-012. A `//` line and a
+    // SECURITY-DEFINER `fn` `"""` body are both LIVE; a qualified/unreadable head in
+    // either is an accepted fail-closed false positive
+    // (g-secdef-fn-body-ddl-false-positive for the fn body).
     if (comments && ch === "-" && s[i + 1] === "-") {
       let j = i;
       while (j < s.length && s[j] !== "\n") j++;

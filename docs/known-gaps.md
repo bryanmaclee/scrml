@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 148 | 4 |
-| MED | 329 | 0 |
+| MED | 330 | 0 |
 | LOW | 133 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -433,6 +433,14 @@ the same scan as `parseSchemaBlock`), no free-text pairing. F3: `PARTITION` is a
 `PARTITION OF`; the no-column-list acceptance is filed below as
 `g-schema-no-column-list-heads-declare-nothing`. All round-4 pins are red on `38ec0e14`.
 
+**S438 FINAL (review of `c59046d2`; fail-closed REMOVAL only).** Round 4's structural fn-body
+exemption was itself an escape: `scanSchemaBlock` sees `fn NAME(…) owner(…)` inside `--` / `/* */`
+comments, strings, and without a brace, and the exemption covered the whole fn span — so a commented
+`-- fn f() owner(r) {` … `-- }` wrapping `CREATE TABLE my-db.public.assets (…, tenant_id …)`
+compiled at exit 0 with no diagnostic and tag=0. The exemption is REMOVED; a qualified/unreadable
+head inside a real SECDEF `fn` `"""` body is now the loud, documented false positive filed as
+`g-secdef-fn-body-ddl-false-positive`. Every other round-4 narrowing is kept.
+
 **(Original entry, kept for the record.) ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
 
 The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
@@ -494,11 +502,32 @@ The commented-out, `tenant_id`-less declaration shadows the live one. **Same cla
 (S438 round 3):** the harvest also reads a plain `CREATE TABLE x (…)` INSIDE a §14.8.11.2
 SECURITY-DEFINER `fn` `"""…"""` body as a `<schema>` declaration (pre-S438 behaviour, held for
 base parity) — runtime plpgsql becomes a declared table, and can shadow a live one the same way.
-E-SCHEMA-012/013 correctly ignore those heads; only the harvest reads them. **PA recommendation:** for the
+(Since the S438 final commit, E-SCHEMA-012/013 also REPORT a qualified/unreadable head there — the
+false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** for the
 §14.8.10 declaration read, UNION the columns of every same-name declaration (over-declaring only adds
 floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
 base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
 purpose. — `NEW S438-peter`; **HIGH**; open
+
+### g-secdef-fn-body-ddl-false-positive — a qualified or unreadable `CREATE TABLE` inside a SECURITY-DEFINER `fn` `"""` body raises E-SCHEMA-012/013 although it is runtime plpgsql, not a declaration
+
+<!-- @gap id=g-secdef-fn-body-ddl-false-positive sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(findRejectedCreateTableHeads — no fn-body exemption; parseFnDecl, which would supply the body span)+compiler/src/schema-differ.js(parseSchemaBlock — treats a commented `fn … owner() {` as a real fn) prov=review:S438-final-review-of-c59046d2+empirical:reviewer-cases15-by-compilation -->
+
+**Deliberate, fail-closed, filed by the S438 final commit.** A §14.8.11.2 SECURITY-DEFINER `fn`
+body such as `"""\n CREATE TABLE IF NOT EXISTS audit.snap (…);\n …"""` is runtime plpgsql, but the
+`<schema>` head checks now REPORT its qualified (E-SCHEMA-012) or unreadable (E-SCHEMA-013) heads.
+Loud, never silent; corpus-measured zero. Two exemption attempts in S438 each opened an escape
+(round 3: free-text `"""` pairing masked raw SQL; round 4: the parser's whole-fn span, which a
+commented `-- fn f() owner(r) {` … `-- }` could forge around a live head at exit 0), so the
+exemption was removed rather than patched a third time.
+
+**Reviewer's recommended repair (verbatim):** exempt ONLY the `"""…"""` body span of a
+parser-accepted fn (have parseFnDecl return it) AND require the `fn` token to be live in `masked`
+(not in `--`/`/* */`/quotes).
+
+**Pre-existing finding recorded here:** the `<schema>` parser (`parseSchemaBlock` →
+`parseFnDecl`) treats a COMMENTED `-- fn … owner() {` as a real `fn` — measured as E-DBAUTH-SQLITE
+on a SQLite program on base. — `NEW S438-peter`; **MED**; open
 
 ### g-schema-no-column-list-heads-declare-nothing — `CREATE TABLE t OF type` / `PARTITION OF parent` / `AS query` in a `<schema>` compile clean and declare no columns, so a `tenant_id` table reached that way is not tenant-scoped
 
