@@ -37,3 +37,9 @@
   families). Suites green: slice-m1 73/73, slice-m1 lowered 73/73, slice-m2 221/221 + tables.test 33/33; lint 0.
   Lines: analyze 4491 → 4542 (+51 net: the index, six table types, lookups and adders are new here; the typer's 22-arm accessors shrank to family-sized ones);
   lower 996 → 747 (−249); check 509 → 509 (reads Core only — no fact accessor). Total −198.
+- UNIT 2 (slice-m1/bench/mutations.js): no existing site moved (every analyze/lower `from` text kept verbatim). +4 M3-tables
+  mutations judged by tables.test.js (index update inserts, index pads one short, a `given` recorded in the names family,
+  exprType's index one entry off). Harness: 70 mutations, 0 problems, all RED, unmutated mirror suite exit 0 — exit 0.
+  (A "later fact re-points a claimed node" mutation was NOT added: the binder records no second fact for any node, so
+  first-vs-last is unobservable and such a mutation cannot bite; likewise first-vs-last in typingOf — 0 duplicate typing
+  entries in the slice programs.) Gate: unit+integration+conformance 25693 pass / 0 fail / 70 skip.
