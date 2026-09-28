@@ -26304,7 +26304,8 @@ seq           ::= 1 or 2 base36 characters [0-9a-z]  (see §47.4)
 ```
 
 - The `_` prefix is reserved for compiler-generated names. User-authored scrml identifiers and vanilla JS identifiers SHALL NOT begin with `_` followed by a `kind` character and 8 base36 characters. The compiler SHALL reject any user-authored identifier that would collide with this pattern (E-CG-012).
-- **S439 ruling (#7) — the `_scrml_` identifier namespace is RESERVED.** A user-authored scrml identifier SHALL NOT begin with `_scrml_`; that prefix names compiler/runtime identifiers (`_scrml_reactive_set`, `_scrml_session_destroy`, …). An identifier that does is a compile error: **`E-NAME-COLLIDES-RESERVED-PREFIX`** — **Nominal / spec-ahead — not yet emitted**; its §34 catalog row lands WITH the implementation (house rule — no §34 row precedes its emitter, as §66.20). Newly-rejecting, so reversible, and it limits rather than widens.
+- **S439 ruling (#7) — the `_scrml_` identifier namespace is RESERVED.** A user-authored scrml program SHALL NOT **declare** a binding whose name begins with `_scrml_`; that prefix names compiler/runtime identifiers (`_scrml_reactive_set`, `_scrml_session_destroy`, …). Such a declaration is a compile error: **`E-NAME-COLLIDES-RESERVED-PREFIX`** — **Nominal / spec-ahead — not yet emitted**; its §34 catalog row lands WITH the implementation (house rule — no §34 row precedes its emitter, as §66.20). Newly-rejecting, so reversible, and it limits rather than widens.
+  > ⚑ **OPEN (not ruled):** whether a *reference* to a `_scrml_` name is refused, and the status of stdlib source (which references `_scrml_messages_register`, `_scrml_message_for`, `_scrml_labels_register`), is not ruled.
   > **Provenance:** ruling:user-voice-scrml.md S439 #7 "all recs" (Rec: yes — a SPEC sentence plus a diagnostic).
 - The full alphabet of the encoded portion (excluding the `$` separator used in debug mode, §47.3) is `[_0-9a-z]`.
 

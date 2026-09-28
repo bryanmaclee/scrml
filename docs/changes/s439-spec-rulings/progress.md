@@ -15,3 +15,4 @@
 - CORRECTION #14: reframed. The SPEC SHALLs are unconditional and the exemption is impl#1-only. OPEN = restore-conformance vs amend. Recount from the probe log + source: braced 0; bare calls 6 attrs / 5 files (listed); 5 formFor onsubmit references excluded (§41.14 requires them to be failable).
 - CORRECTION #2: marked the two S378 sentences narrowed in place; 'as the ruling states an on mount { block is' (dropped the §6.7.1a claim); added 'in any position among the body's direct children'.
 - CORRECTION #3: note tightened to the §66.10 sentence (dropped the R3 lean and 'classified write'). #5: added the match-in-match-arm impl#1 divergence line in §18.0.1.
+- CORRECTION #7: 'SHALL NOT declare a binding whose name begins with _scrml_'; OPEN on references + stdlib.
