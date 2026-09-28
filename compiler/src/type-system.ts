@@ -75,6 +75,7 @@
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
+import { parseHandlerStatementsForCheck } from "./ast-builder.js";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
@@ -9802,6 +9803,42 @@ function annotateNodes(
   // only when the boundary also lacks a `fallback`.
   const errorBoundaryFallbackStack: boolean[] = [];
 
+  // §19.4.3 (S440) — depth of an event-handler value's check walk. A handler
+  // runs on an event, AFTER render: an enclosing `<errorBoundary>` does not
+  // catch its failure (the boundary contains render-time calls — §19.6), so a
+  // handler walk runs with the boundary context CLEARED — E-ERROR-002 fires for
+  // an unhandled call and E-ERROR-005 (a render-time renderability check) does
+  // not. The depth also turns on scope resolution of the callee.
+  let handlerCheckDepth = 0;
+  function withHandlerCheckContext(fn: () => void): void {
+    const savedDepth = errorBoundaryDepth;
+    const savedFallbacks = errorBoundaryFallbackStack.splice(0);
+    errorBoundaryDepth = 0;
+    handlerCheckDepth++;
+    try {
+      fn();
+    } finally {
+      handlerCheckDepth--;
+      errorBoundaryDepth = savedDepth;
+      errorBoundaryFallbackStack.splice(0, errorBoundaryFallbackStack.length, ...savedFallbacks);
+    }
+  }
+  // True when `name`'s nearest binding is a LOCAL non-function one (an `<each>`
+  // alias, a handler-local `let`, a parameter) — i.e. it shadows any file-level
+  // function of that name. A global-scope binding (incl. the export pre-bind,
+  // which binds exported functions as variables) or no binding is not a shadow.
+  function isShadowedByLocalBinding(name: string): boolean {
+    let scope: Scope | null = scopeChain.current;
+    while (scope !== null) {
+      if (scope.hasOwn(name)) {
+        const entry = scope.bindings.get(name);
+        return scope !== scopeChain.global && !!entry && entry.kind !== "function";
+      }
+      scope = scope.parent;
+    }
+    return false;
+  }
+
   function visitNode(node: unknown): ResolvedType {
     if (!node || typeof node !== "object") return tUnknown({ source: "not-a-node" });
 
@@ -14249,6 +14286,10 @@ function annotateNodes(
     // W-CPS-NEEDS-FAILABLE; E-ERROR-005 (§19.6.6) instead governs whether
     // the boundary can render the variant.
     const inErrorBoundary = errorBoundaryDepth > 0;
+    // In an event-handler value, resolve the callee through scope: `fnCanFail`
+    // is keyed by NAME, so an `<each in=@fns as risky>` row's `onclick=risky()`
+    // would otherwise be taken for the file's failable `risky` (S440 F7).
+    if (bareCallee && handlerCheckDepth > 0 && isShadowedByLocalBinding(bareCallee)) return;
     if (bareCallee && fnCanFail.has(bareCallee) && !inGuarded && !inErrorBoundary) {
       if (fnCpsImplicitFailable.has(bareCallee)) {
         if (!enclosingFnCanFail) {
@@ -14329,26 +14370,53 @@ function annotateNodes(
     // §19.4.3 / §19.4.4 — an unhandled `!` call in an event-handler value is
     // E-ERROR-002 in EVERY form (S439 ruling #14 + S440 "restore conformance").
     // A multi-statement value (`handlerBlock`) is walked statement-by-statement
-    // below through `visitLogicNode`, whose `bare-expr` case runs the check. The
-    // one-statement forms — bare `onclick=f()` (a `call-ref`), braced
-    // `onclick={ f() }` and `onclick=${f()}` (an `expr`) — never reach that
-    // case, which was impl#1's handler exemption: the answer depended on the
-    // statement count. Route them through the SAME check. A function REFERENCE
-    // (`onclick=f`, `onclick=${f}`, `<formFor onsubmit=persist/>`) is not a
-    // call and is not checked (§41.14 requires a failable `onsubmit=`).
+    // in the `expr` branch below through `visitLogicNode`, whose `bare-expr` case
+    // runs the check. A one-statement value keeps the single-expression codegen
+    // path (no `handlerBlock`), so before S440 its statement never reached that
+    // case — impl#1's handler exemption, which made the answer depend on the
+    // statement count. Every one-statement form is now checked the same way:
+    //   - an `expr` value (`{ f() }`, `${f()}`, `{ if (c) f() }`, `{ for … f() }`)
+    //     is parsed as a statement list FOR CHECKING (`parseHandlerStatementsForCheck`
+    //     — the same parser `handlerBlock` comes from) and walked like one;
+    //   - a bare `call-ref` (`onclick=f()`) is checked as a bare call statement.
+    // A function REFERENCE (`onclick=f`, `onclick=${f}`, `<formFor onsubmit=fn/>`)
+    // is not a call. An arrow VALUE (`${() => f()}`) is left unchecked — §19.4.3
+    // records arrow-valued handlers as OPEN, not ruled.
     if (
       typeof attr.name === "string"
       && isEventHandlerAttrName(attr.name)
       && !(value as Record<string, unknown>).handlerBlock
     ) {
-      const call = handlerValueAsBareCall(value, (value.span ?? attr.span ?? parent?.span) as Span | undefined);
-      // Scope: the ruling covers calls to functions DECLARED `!`. A
-      // CPS-implicit-failable callee (a server fn not declared `!`) is still
-      // in its W-CPS-NEEDS-FAILABLE deprecation cycle, and extending that
-      // warning to the one-statement handler forms (`onclick=save()`, the
-      // common server-call shape) is a separate decision — not taken here.
-      const callee = call ? extractCalleeNameFromNode(call) : null;
-      if (call && !(callee && fnCpsImplicitFailable.has(callee))) checkUnhandledFailableBareCall(call);
+      const valueSpan = (value.span ?? attr.span ?? parent?.span) as Span | undefined;
+      const checkStmts = value.kind === "expr" ? parseHandlerStatementsForCheck(value, filePath) : null;
+      if (Array.isArray(checkStmts)) {
+        // Check-only walk: keep ONLY the §19.4.3 diagnostic. Every other check
+        // on this value already ran on the expression path (`checkLogicExprIdents`
+        // below) — re-running them here would double-report — and the
+        // CPS-implicit W-CPS-NEEDS-FAILABLE is out of this ruling's scope.
+        const before = errors.length;
+        scopeChain.push(`handler-check:${attr.name as string}`);
+        scopeChain.bind("event", { kind: "variable", resolvedType: tAsIs() });
+        withHandlerCheckContext(() => {
+          for (const stmt of checkStmts) {
+            if (stmt && typeof stmt === "object") visitLogicNode(stmt as ASTNodeLike, "client");
+          }
+        });
+        scopeChain.pop();
+        const produced = errors.splice(before);
+        for (const e of produced) if (e && e.code === "E-ERROR-002") errors.push(e);
+      } else {
+        const call = handlerValueAsBareCall(value, valueSpan);
+        // Scope: the ruling covers calls to functions DECLARED `!`. A
+        // CPS-implicit-failable callee (a server fn not declared `!`) is still
+        // in its W-CPS-NEEDS-FAILABLE deprecation cycle, and extending that
+        // warning to the one-statement handler forms (`onclick=save()`, the
+        // common server-call shape) is a separate decision — not taken here.
+        const callee = call ? extractCalleeNameFromNode(call) : null;
+        if (call && !(callee && fnCpsImplicitFailable.has(callee))) {
+          withHandlerCheckContext(() => checkUnhandledFailableBareCall(call));
+        }
+      }
     }
 
     if (value.kind === "variable-ref") {
@@ -14516,9 +14584,11 @@ function annotateNodes(
           }
         };
         collectWrites(handlerBlock.stmts);
-        for (const stmt of handlerBlock.stmts) {
-          if (stmt && typeof stmt === "object") visitLogicNode(stmt as ASTNodeLike, "client");
-        }
+        withHandlerCheckContext(() => {
+          for (const stmt of handlerBlock.stmts!) {
+            if (stmt && typeof stmt === "object") visitLogicNode(stmt as ASTNodeLike, "client");
+          }
+        });
         scopeChain.pop();
         return;
       }

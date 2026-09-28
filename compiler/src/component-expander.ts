@@ -44,7 +44,7 @@
 
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
-import { buildAST } from "./ast-builder.js";
+import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
 import type {
@@ -1202,6 +1202,14 @@ function reparseSynthesizedFile(
   const errors = result.errors ?? [];
   upgradeNativePropsDeclsInFileAST(result.ast, errors);
   upgradeNativeCallRefArgExprNodesInFileAST(result.ast, filePath);
+  // §5.2.3 handler statement lists — the native parser gives a handler value
+  // neither `exprNode` nor `handlerBlock`, so a component body's handler fell
+  // to the string lowering: `onclick={ f() !{…} }` emitted a raw `!{`
+  // (E-CODEGEN-INVALID-LOGIC), and the §19.4.3 check never saw its statements
+  // (S440 F2/F4). Attach them with the SAME statement parser the TAB path and
+  // the `<match>` arm re-parse (emit-match.ts) use. The live-fallback branch
+  // above already has them — buildAST attaches while building each block.
+  attachHandlerStatementListsInTree(result.ast.nodes, filePath, { synthesizeExprNode: false });
   return { ast: result.ast, errors };
 }
 
@@ -2505,7 +2513,17 @@ function substituteProps(
           }
         }
         if (propExprMap && attr.value.kind === "expr") {
-          const exprVal = attr.value as { raw: string; refs: string[]; exprNode?: ExprNode; span: ExprSpan };
+          const exprVal = attr.value as { raw: string; refs: string[]; exprNode?: ExprNode; span: ExprSpan; handlerBlock?: { stmts: LogicStatement[] } };
+          // §5.2.3 statement list (`handlerBlock`, attached at the body re-parse):
+          // it is what codegen emits and what the type system checks, so the
+          // props are substituted INTO it — every statement, not just the first
+          // (the `exprNode` below only ever held statement 1). The handler's
+          // `event` binding shadows a same-named prop.
+          if (exprVal.handlerBlock && Array.isArray(exprVal.handlerBlock.stmts)) {
+            const stmts = substitutePropsInLogicStmts(exprVal.handlerBlock.stmts, propExprMap, new Set(["event"]));
+            const first = exprVal.exprNode ? substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set()) : exprVal.exprNode;
+            return { ...attr, value: { ...exprVal, exprNode: first, handlerBlock: { stmts } } };
+          }
           if (exprVal.exprNode) {
             const replaced = substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set());
             if (replaced !== exprVal.exprNode) {

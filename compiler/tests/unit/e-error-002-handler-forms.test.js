@@ -17,9 +17,24 @@
  * (`handlerBlock`), so its guard is EMITTED (it was silently dropped before — the
  * expression view stops at the call) and the call counts as handled.
  *
- * References are not calls: `onclick=risky`, `onclick=${risky}`, the arrow
- * `onclick=${() => risky()}` (a function VALUE) and the compiler's own
- * `<formFor onsubmit=fn/>` lowering never fire.
+ * References are not calls: `onclick=risky`, `onclick=${risky}` and the compiler's
+ * own `<formFor onsubmit=fn/>` lowering never fire.
+ *
+ * S440 fix round (review of cd6089168):
+ *   F1 — the count split survived for control flow: a one-statement
+ *        `{ if (c) risky() }` / `{ for (…) risky() }` compiled at exit 0 while the
+ *        same statement plus a second one errored. One-statement values are now
+ *        parsed as a statement list for checking and walked like `handlerBlock`.
+ *   F2/F4 — component bodies (native re-parse) carried no statement lists: the
+ *        multi-statement form was unchecked and `{ f() !{…} }` emitted a raw `!{`.
+ *   F3 — a `<match>` arm's handler statement parse THREW (null parent block) and
+ *        was swallowed: the guard and every later statement were silently dropped.
+ *   F5 — a handler runs after render; an `<errorBoundary>` does not contain it, so
+ *        E-ERROR-002 fires inside one and the render-time E-ERROR-005 does not.
+ *   F7 — the handler callee resolves through scope (an `<each … as risky>` alias
+ *        is not the failable `risky`).
+ * Arrow-valued handlers (`${() => risky()}`) are OPEN in §19.4.3 (not ruled); the
+ * test below only records the current behaviour.
  */
 
 import { describe, test, expect } from "bun:test";
@@ -71,6 +86,14 @@ describe("§19.4.3 — every handler form with an unhandled `!` call is E-ERROR-
     ["braced multi-statement, call last", `<button onclick={ @r = 1; risky() }>x</>`],
     ["namespaced on:click", `<button on:click=risky()>x</>`],
     ["non-click event", `<input onkeydown=risky()>`],
+    // F1 — control flow in a ONE-statement handler (was exit 0)
+    ["one-statement unbraced if", `<button onclick={ if (@r > 0) risky() }>x</>`],
+    ["one-statement braced if", `<button onclick={ if (@r > 0) { risky() } }>x</>`],
+    ["one-statement if/else, call in else", `<button onclick={ if (@r > 0) { @r = 1 } else { risky() } }>x</>`],
+    ["one-statement for", `<button onclick={ for (const i of [1, 2]) risky() }>x</>`],
+    ["one-statement if in ${}", `<button onclick=\${ if (@r > 0) risky() }>x</>`],
+    ["if + second statement (already fired)", `<button onclick={ if (@r > 0) risky(); @r = 1 }>x</>`],
+    ["multi-line one-statement if", `<button onclick={\n    if (@r > 0) {\n        risky()\n    }\n}>x</>`],
   ];
   for (const [label, body] of FIRES) {
     test(label, () => {
@@ -98,25 +121,82 @@ describe("§19.4.3 — handler positions", () => {
     expect(errors).toContain("E-ERROR-002");
   });
 
-  test("inside <errorBoundary fallback=…> the boundary contains it (§19.4.3 item 4)", () => {
-    const { errors } = compileBody(`<errorBoundary fallback="oops"><button id="eb" onclick=risky()>x</></errorBoundary>`);
-    expect(errors).not.toContain("E-ERROR-002");
+  // F5 — a handler runs on an event, after render; an enclosing boundary does not
+  // contain its failure, so it is NOT exempt, and the render-time E-ERROR-005 does
+  // not apply to it.
+  for (const [label, body] of [
+    ["bare, boundary with fallback", `<errorBoundary fallback="oops"><button id="eb" onclick=risky()>x</></errorBoundary>`],
+    ["braced, boundary without fallback", `<errorBoundary><button id="eb" onclick={ risky() }>x</></errorBoundary>`],
+    ["multi-statement, boundary without fallback", `<errorBoundary><button id="eb" onclick={ risky(); @r = 1 }>x</></errorBoundary>`],
+  ]) {
+    test(`inside <errorBoundary> is NOT exempt — ${label}`, () => {
+      const { errors } = compileBody(body);
+      expect(count(errors, "E-ERROR-002")).toBe(1);
+      expect(errors).not.toContain("E-ERROR-005");
+    });
+  }
+
+  test("a RENDER-time call inside <errorBoundary fallback=…> is still contained (unchanged)", () => {
+    const { errors } = compileBody(`<errorBoundary fallback="oops"><p>\${risky()}</p></errorBoundary>`);
     expect(errors).toEqual([]);
   });
 
-  test("inside <errorBoundary> with no fallback and no `renders` → E-ERROR-005, not E-ERROR-002 (§19.6.6)", () => {
-    const { errors } = compileBody(`<errorBoundary><button id="eb" onclick={ risky() }>x</></errorBoundary>`);
-    expect(errors).not.toContain("E-ERROR-002");
-    expect(errors).toContain("E-ERROR-005");
+  // F2 — component bodies: every form errors (the span is component-relative).
+  for (const [label, handler] of [
+    ["bare", `onclick=risky()`],
+    ["braced one statement", `onclick={ risky() }`],
+    ["braced multi-statement", `onclick={ risky(); @r = 1 }`],
+    ["one-statement if", `onclick={ if (@r > 0) risky() }`],
+  ]) {
+    test(`inside a component body — ${label}`, () => {
+      const { errors } = compileBody(`\${ const Btn = <button ${handler}>go</> }\n<Btn/>`);
+      expect(count(errors, "E-ERROR-002")).toBe(1);
+    });
+  }
+
+  // The statement list attached to a component-body handler must carry the prop
+  // substitution — every statement, and a control-flow statement too.
+  test("component multi-statement handler substitutes props into EVERY statement", () => {
+    const { errors, clientJs } = compileBody(
+      `\${ const B = <button props={ label: string } onclick={ @r = 1; @r = label.length }>\${label}</> }\n<B label="xy"/>`,
+      { emit: true },
+    );
+    expect(errors).toEqual([]);
+    const handler = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'));
+    expect(handler).toMatch(/_reactive_set\("r", 1\)/);
+    expect(handler).toMatch(/"xy"\.length/);
   });
+
+  test("component one-statement `if` handler still substitutes the prop (no raw prop name emitted)", () => {
+    const { errors, clientJs } = compileBody(
+      `\${ const B = <button props={ act: fn } onclick={ if (@r > 0) act() }>go</> }\n<B act=plain/>`,
+      { emit: true },
+    );
+    expect(errors).toEqual([]);
+    const handler = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'), clientJs.indexOf('"_scrml_attr_onclick_') + 200);
+    expect(handler).not.toMatch(/\bact\(\)/);
+  });
+
+  // F7 — the callee resolves through scope.
+  for (const [label, body] of [
+    ["bare", `<ul><each in=@items as risky><li><button onclick=risky()>x</></></each></>`],
+    ["braced", `<ul><each in=@items as risky><li><button onclick={ risky() }>x</></></each></>`],
+    ["multi-statement", `<ul><each in=@items as risky><li><button onclick={ risky(); @r = 1 }>x</></></each></>`],
+  ]) {
+    test(`an <each> alias shadowing the failable name is not the failable call — ${label}`, () => {
+      const { errors } = compileBody(body);
+      expect(errors).not.toContain("E-ERROR-002");
+    });
+  }
 });
 
 describe("§19.4.3 — handled calls and references stay legal", () => {
   const CLEAN = [
     ["reference, bare", `<button onclick=risky>x</>`],
     ["reference, ${}", `<button onclick=\${risky}>x</>`],
-    ["arrow value (function value, not a call)", `<button onclick=\${() => risky()}>x</>`],
     ["braced !{} one statement", `<button onclick={ risky() !{ | .Empty :> @r = 1 } }>x</>`],
+    ["braced !{} inside a one-statement if", `<button onclick={ if (@r > 0) { risky() !{ | .Empty :> @r = 1 } } }>x</>`],
+    ["component body, braced !{}", `\${ const Btn = <button onclick={ risky() !{ | .Empty :> @r = 1 } }>go</> }\n<Btn/>`],
     ["${} !{} one statement", `<button onclick=\${risky() !{ | .Empty :> @r = 2 }}>x</>`],
     ["braced !{} multi-line", `<button onclick={\n    risky() !{ | .Empty :> @r = 1 }\n}>x</>`],
     ["braced !{} multi-statement", `<button onclick={ risky() !{ | .Empty :> @r = 1 }; @r = 5 }>x</>`],
@@ -194,5 +274,34 @@ describe("a `!{}`-guarded one-statement handler emits its guard", () => {
     const { errors } = compileBody(`<button onclick={ risky() !{ | .Other :> @r = 1 } }>x</>`);
     expect(errors).not.toContain("E-ERROR-002");
     expect(errors.length).toBeGreaterThan(0);
+  });
+
+  test("F3 — in a <match> arm, the guard AND the following statement are emitted", () => {
+    const { errors, clientJs } = compileBody(
+      `<match on=@ph>\n<Idle>\n<button id="mc" onclick={ risky() !{ | .Empty :> @r = 7 }; @r = @r + 1 }>x</button>\n</>\n<Loading><p>L</p></>\n</>`,
+      { emit: true },
+    );
+    expect(errors).toEqual([]);
+    const handler = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'));
+    expect(handler).toMatch(/\.variant === "Empty"/);
+    expect(handler).toMatch(/_reactive_set\("r", 7\)/);
+  });
+
+  test("F4 — in a component body, the guard emits (was a raw `!{` → E-CODEGEN-INVALID-LOGIC)", () => {
+    const { errors, clientJs } = compileBody(
+      `\${ const Btn = <button onclick={ risky() !{ | .Empty :> @r = 7 } }>go</> }\n<Btn/>`,
+      { emit: true },
+    );
+    expect(errors).toEqual([]);
+    const handler = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'));
+    expect(handler).toMatch(/\.variant === "Empty"/);
+    expect(handler).not.toMatch(/!\{/);
+  });
+});
+
+describe("arrow-valued handlers — OPEN in §19.4.3 (current behaviour recorded, not a rule)", () => {
+  test("`${() => risky()}` is not checked today", () => {
+    const { errors } = compileBody(`<button onclick=\${() => risky()}>x</>`);
+    expect(errors).not.toContain("E-ERROR-002");
   });
 });

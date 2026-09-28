@@ -16584,6 +16584,94 @@ function isCallableOrOpaqueHandlerStmt(stmt, value) {
 }
 
 /**
+ * Parse ONE handler value's raw text as a §5.2.3 statement list — the function-body
+ * statement grammar (§7.3). Shared by `attachHandlerStatementList` (TAB / tree
+ * paths) and `parseHandlerStatementsForCheck` (the type system's check-only view).
+ * Returns `null` when the value yields no statement view (the frame did not come
+ * back as ONE function and there were no parse errors, or the parser threw); else
+ * `{ tokens, stmts, parseErrors }` (`stmts` may be null when parse errors exist).
+ */
+function parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol) {
+  const parseErrors = [];
+  let tokens, stmts;
+  try {
+    // Parse the value as a FUNCTION BODY — §5.2.3: "the same statement grammar
+    // as a function body (§7.3)". The value's own tokens are framed as
+    // `function <synthetic>() { … }` and the body of the resulting
+    // function-decl is taken, so the statements come from the nested-body path
+    // (`parseOneStatement`) exactly as a function body's do: a `@x = …` is a
+    // WRITE (`_isReactiveAssign`, write-checked by SYM like any function-body
+    // write — round-4 #3), not a top-level declaration. The frame tokens borrow
+    // the first real token's span; the statements keep their own file spans.
+    tokens = tokenizeLogic(value.raw, baseOffset, baseLine, baseCol, []);
+    const inner = tokens.slice();
+    const last = inner[inner.length - 1];
+    const eof = last && last.kind === "EOF" ? inner.pop() : null;
+    const frameSpan = (inner[0] ?? eof)?.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol };
+    const frame = (kind, text) => ({ kind, text, span: frameSpan });
+    const framed = [
+      frame("KEYWORD", "function"), frame("IDENT", "__scrml_handler_block__"),
+      frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
+      ...inner,
+      frame("PUNCT", "}"), eof ?? frame("EOF", ""),
+    ];
+    // The tree path (`attachHandlerStatementListsInTree`, e.g. a `<match>` arm
+    // re-parsed by the native front-end at emit time) has no source block. The
+    // statement parser dereferences `parentBlock.type` whenever it builds a child
+    // block — a `!{}` guard is one — so a null parent THREW here, the catch below
+    // swallowed it, and the arm's handler fell back to the single-expression
+    // path: the guard and every later statement were silently dropped (S440 F3).
+    // A handler value always sits on a markup element, so that is its parent kind.
+    const parent = parentBlock ?? { type: "markup", raw: value.raw, span: value.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol } };
+    const top = parseLogicBody(framed, filePath, [], parent, idCounter, parseErrors, "logic");
+    // The frame not coming back as ONE function means the value broke out of it
+    // (e.g. an unbalanced `}`): no statement view; parse errors are still judged below.
+    stmts = Array.isArray(top) && top.length === 1 && top[0] && top[0].kind === "function-decl" && Array.isArray(top[0].body)
+      ? top[0].body
+      : null;
+    if (stmts === null && parseErrors.length === 0) return null;
+  } catch (_e) {
+    return null; // the statement view is optional; the existing single-expression path stands
+  }
+  return { tokens, stmts, parseErrors };
+}
+
+/** Only a FATAL diagnostic (no severity, or "error") disqualifies a handler parse. */
+function isFatalHandlerParseError(e) {
+  return !!e && typeof e === "object" &&
+    (e.severity === "error" || (e.severity === undefined && !(typeof e.code === "string" && /^[WI]-/.test(e.code))));
+}
+
+const _handlerCheckStmtIds = { next: HANDLER_STMT_ID_BASE + 750_000_000 };
+
+/**
+ * §19.4.3 (S440) — the statement view of an event-handler value FOR CHECKING
+ * ONLY, independent of which codegen path the value takes. A one-statement,
+ * single-line value keeps the single-expression codegen path (no `handlerBlock`)
+ * but its statement — `if (c) risky()`, `for (…) risky()`, `risky()` — must be
+ * checked exactly as the same statement in a multi-statement handler is, or the
+ * answer depends on the statement count again. Returns the parsed statements, or
+ * `null` when there is nothing to check this way: an unparseable value, or a
+ * callable / opaque one (a function reference, an arrow value — §19.4.3 leaves
+ * arrow-valued handlers OPEN — an escape hatch). The nodes are fresh (their own
+ * id range) and are never emitted.
+ */
+export function parseHandlerStatementsForCheck(value, filePath) {
+  if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return null;
+  const sp = value.span ?? {};
+  const res = parseHandlerStatementListCore(
+    value, filePath, _handlerCheckStmtIds, null,
+    typeof sp.start === "number" ? sp.start : 0,
+    typeof sp.line === "number" ? sp.line : 1,
+    typeof sp.col === "number" ? sp.col : 1,
+  );
+  if (!res || !Array.isArray(res.stmts) || res.stmts.length === 0) return null;
+  if (res.parseErrors.some(isFatalHandlerParseError)) return null;
+  if (res.stmts.length === 1 && isCallableOrOpaqueHandlerStmt(res.stmts[0], value)) return null;
+  return res.stmts;
+}
+
+/**
  * Parse ONE handler value as a §5.2.3 statement list and decide how it lowers.
  *
  *   - Clean parse, 2+ statements          → `value.handlerBlock = { stmts }`.
@@ -16608,39 +16696,9 @@ function isCallableOrOpaqueHandlerStmt(stmt, value) {
  */
 function attachHandlerStatementList(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol, opener, errors) {
   if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return;
-  const parseErrors = [];
-  let tokens, stmts;
-  try {
-    // Parse the value as a FUNCTION BODY — §5.2.3: "the same statement grammar
-    // as a function body (§7.3)". The value's own tokens are framed as
-    // `function <synthetic>() { … }` and the body of the resulting
-    // function-decl is taken, so the statements come from the nested-body path
-    // (`parseOneStatement`) exactly as a function body's do: a `@x = …` is a
-    // WRITE (`_isReactiveAssign`, write-checked by SYM like any function-body
-    // write — round-4 #3), not a top-level declaration. The frame tokens borrow
-    // the first real token's span; the statements keep their own file spans.
-    tokens = tokenizeLogic(value.raw, baseOffset, baseLine, baseCol, []);
-    const inner = tokens.slice();
-    const last = inner[inner.length - 1];
-    const eof = last && last.kind === "EOF" ? inner.pop() : null;
-    const frameSpan = (inner[0] ?? eof)?.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol };
-    const frame = (kind, text) => ({ kind, text, span: frameSpan });
-    const framed = [
-      frame("KEYWORD", "function"), frame("IDENT", "__scrml_handler_block__"),
-      frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
-      ...inner,
-      frame("PUNCT", "}"), eof ?? frame("EOF", ""),
-    ];
-    const top = parseLogicBody(framed, filePath, [], parentBlock, idCounter, parseErrors, "logic");
-    // The frame not coming back as ONE function means the value broke out of it
-    // (e.g. an unbalanced `}`): no statement view; parse errors are still judged below.
-    stmts = Array.isArray(top) && top.length === 1 && top[0] && top[0].kind === "function-decl" && Array.isArray(top[0].body)
-      ? top[0].body
-      : null;
-    if (stmts === null && parseErrors.length === 0) return;
-  } catch (_e) {
-    return; // the statement view is optional; the existing single-expression path stands
-  }
+  const res = parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
+  if (!res) return;
+  const { tokens, stmts, parseErrors } = res;
   const count = Array.isArray(stmts) ? stmts.length : 0;
   // Only a FATAL diagnostic (no severity, or "error") disqualifies the parse.
   // Warnings / Info (e.g. W-MAP-DUPLICATE-LITERAL-KEY on `@m = ["k": 1, "k": 2]`)
@@ -16649,8 +16707,7 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   // warning and left the build to fail E-CODEGEN-INVALID-LOGIC).
   // (api.js also routes by code prefix — a W-/I- code with no severity is a
   // warning / info, not an error.)
-  const isFatal = (e) => !!e && typeof e === "object" &&
-    (e.severity === "error" || (e.severity === undefined && !(typeof e.code === "string" && /^[WI]-/.test(e.code))));
+  const isFatal = isFatalHandlerParseError;
   const fatal = parseErrors.filter(isFatal);
   const nonFatal = parseErrors.filter((e) => e && typeof e === "object" && !isFatal(e));
   // Report diagnostics from this parse without duplicating a code an
@@ -16759,8 +16816,16 @@ function attachHandlerStatementLists(attrs, block, filePath, counter, errors) {
  * (tokenizeLogic + parseLogicBody) as the only source of handler statement lists.
  * Statement spans are anchored at the value's own span (these re-parsed trees are
  * body-local anyway). Idempotent: a value that already has `handlerBlock` is left.
+ *
+ * `options.synthesizeExprNode` (default true) also gives a value with no
+ * `exprNode` the node TAB would have built. The component-body re-parse
+ * (component-expander `reparseSynthesizedFile`) passes false: its prop
+ * substitution rewrites a value's RAW text when there is no `exprNode`, and an
+ * `exprNode` it cannot substitute through (an `if` statement's escape hatch)
+ * would leave the prop name unreplaced in the emitted handler.
  */
-export function attachHandlerStatementListsInTree(nodes, filePath) {
+export function attachHandlerStatementListsInTree(nodes, filePath, options = {}) {
+  const synthesizeExprNode = options.synthesizeExprNode !== false;
   const idCounter = { next: HANDLER_STMT_ID_BASE + 500_000_000 };
   const seen = new Set();
   const visit = (n) => {
@@ -16778,7 +16843,7 @@ export function attachHandlerStatementListsInTree(nodes, filePath) {
         // here — which mis-lowers a leading comment or a `;` inside a regex
         // (`/;/` → `/; /`). Give the value the node TAB itself would have built,
         // from the same function, so a match-arm handler lowers like any other.
-        if (attr.value.kind === "expr" && typeof attr.value.raw === "string" && !attr.value.exprNode) {
+        if (synthesizeExprNode && attr.value.kind === "expr" && typeof attr.value.raw === "string" && !attr.value.exprNode) {
           try {
             // Held-warning parse (round 5 F4): the trailing-content warning is
             // printed below only if no statement list ends up handling it.
