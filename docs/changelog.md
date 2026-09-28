@@ -2,6 +2,17 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S438 — 2026-09-27 (peter · P-Tech1)
+
+Security and bootstrap-blocker lane under the S435 TS policy, at full throttle with 17 adversarial review rounds across seven arcs. Five PRs landed, each on green with the `tracking` name set matched against main. Three fixes are parked on hold refs. About 25 gaps were filed.
+
+- **#1112** — E-MW-008 no longer counts a `kind="tool"` file as an application (this regression came from #1094).
+- **#1113** — #1045 F1: client JS relative imports are re-based in both the gate and the write phase. The browser half of the gap is re-opened.
+- **#1114** — route-inference 8b defers session config to the program. The 302 lockout for a user logged in on the root is fixed. Five integration suites now use a per-run temp dir, which fixes the Windows residue failures.
+- **#1116** — tenant floor: new **E-SCHEMA-012** rejects a qualified `<schema>` `CREATE TABLE` head, and new **E-SCHEMA-013** rejects an unreadable one. The two-qualifier form no longer leaves the floor inert.
+- **#1119** — match arms F12, F13 and F14 are fixed. New **E-MATCH-ALT-BINDING** rejects payload alternation instead of silently dropping the arm.
+- Hold refs: `hold/s438-1109-review-fixes` (bryan's M2: spread-swap HIGH + 2), `hold/s438-refusal-writes-no-dist` (bryan ruling), `hold/s438-impl1-imported-enum-match` (F11/F15/F16/F17, held on one loud→silent shape).
+
 ## S437 — 2026-09-27 (bryan · ASUS)
 
 The bootstrap's first slice landed and its central design claim held: a real parse → analyze → lower front end produces, from SPEC §66's own source, exactly the Core that was hand-built as the oracle (dpa-051 Fork A). dpa-051 was ruled (keep the S233 re-cut; `compiler/self-host/` frozen), and a long run of §66 rulings went into SPEC after two PA restatements were caught widening what bryan had answered. A handler silent-drop fix grew into five adversarial rounds and landed three silent-miscompile fixes, including an `else` that ran unconditionally in every function body.
