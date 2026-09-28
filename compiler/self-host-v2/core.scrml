@@ -173,10 +173,18 @@ ${
     // (§6.3). The invariant hook (O36) is deliberately absent until O36 rules.
     export type Check:enum = { Static, RuntimeEdge }
 
+    // Commit: an ALL-OR-NOTHING group of Writes — the spread-override field
+    // edit `@x = { ...@x, f: v, g: w }` (§66.11.3 item 1; RULED S440: "Should a
+    // spread write be all-or-nothing on a runtime refusal? Yes."). Every
+    // Write's contract is checked first; only if every check passes are the
+    // Writes applied, in order; on a refusal NONE is applied. Its Writes' values
+    // are Locals — the one snapshot, evaluated by the Lets before it (check.scrml
+    // C7), so checking and applying never re-evaluate a value.
     export type Stmt:enum = {
         Let(sym: Sym, init: Expr),
         Assign(local: Sym, value: Expr),
         Write(cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check),
+        Commit(writes: Stmt[]),
         If(cond: Expr, thenB: Block, elseB: Block | not),
         Return(e: Expr),
         Eval(e: Expr),

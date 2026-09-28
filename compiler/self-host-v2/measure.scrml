@@ -57,6 +57,7 @@ ${
             .Let(sym: x) :> "Let"
             .Assign(local: x) :> "Assign"
             .Write(cap: x) :> "Write"
+            .Commit(writes: x) :> "Commit"
             .If(cond: x) :> "If"
             .Return(e: x) :> "Return"
             .Eval(e: x) :> "Eval"
