@@ -47,3 +47,19 @@ theme body is captured only as `malformed` TEXT, truncated (`ink:string=(match @
 `})/>` is lost). So T3 is FRONT-END class for every source; the §66.17 lowering is built at the Core level
 and proven by unit tests over Core css nodes. Needed next (front end, NOT done here): parse.scrml/analyze/
 lower produce the Core css node from `<theme>` + §66 declarations + `#{}`.
+
+## 2026-09-28 — step 1: the CSS sub-seam (compiler/src, seam only)
+- pipeline-seam.ts: new registry entry `CSS` ("Stage 8 sub-seam (FileOutput.css)", entry `generateCss`,
+  output contract: a string). api.js passes `generateCss: seams.pick("CSS", generateCss)` into runCG;
+  codegen/index.ts calls it where it called `generateCss` (+ a 5th arg `{ filePath, mode }`, which
+  emit-css.ts's `generateCss` now declares as an unused optional param). Tailwind + §38 keyframes are
+  still appended by CG after the user stylesheet.
+- BYTE-IDENTITY PROOF: `slice-m3/bench/css-identity.js` snapshots every conformance case (pure impl#1,
+  fixed per-case paths — random temp dirs made 629/1048 digests differ between two identical runs at
+  first; fixed). Before (base d244a6f3b) vs after: **1048 cases compared, 664 carry css, 0 differ** in any
+  artifact digest (html/css/clientJs/serverJs/libraryJs), code list, or css text.
+- compiler/tests/integration/css-sub-seam.test.js (3): identity pick; a swapped emitter replaces only the
+  user sheet (html + clientJs byte-equal, Tailwind `.p-4` still appended, ctx carries filePath + mode);
+  a non-string return → StageSeamError naming CSS. hybrid-stage-swap + hybrid-xfail 26/0.
+- types-gate --check: exit 0; no new diagnostic in emit-css.ts / pipeline-seam.ts / api.js (the one
+  `codegen/index.ts` line it lists is the pre-existing `./emit-lift.js` TS7016).

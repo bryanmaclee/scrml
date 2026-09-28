@@ -527,6 +527,18 @@ export const STAGE_SEAMS: readonly StageSeam[] = [
     signature: "({ files, routeMap, depGraph, protectAnalysis, batchPlan, … }) -> { outputs: Map<source, FileOutput>, errors }",
     output: obj({ outputs: mapOf(cgFileOutput, str), errors: diagnostics }),
   },
+  {
+    // s440-bootstrap-css-theme-t3 (dpa-051 §8.4 step 1) — a SUB-SEAM of CG: the user stylesheet part of
+    // `FileOutput.css` (§9.1 `#{}`, §65 reset / layers / `:where()`, `<theme>` tokens). `html`,
+    // `clientJs` and `serverJs` are coupled by binding ids and swap only as the whole CG unit; `css` is
+    // independent, so it has its own seam. CG calls the picked function once per file and still appends
+    // the Tailwind utilities (§26) and the §38 transition keyframes after it. With nothing swapped, the
+    // pick is `generateCss` itself (identity), so CG's output is byte-identical. When CG itself is
+    // swapped this seam is not reached.
+    name: "CSS", tsModule: "./codegen/emit-css.ts", pipeline: "Stage 8 sub-seam (FileOutput.css)", entry: "generateCss",
+    signature: "(nodes, cssBlocks, errors, fileAST, { filePath, mode }) -> string  (the user stylesheet; \"\" = none)",
+    output: str,
+  },
 ];
 
 const SEAM_BY_NAME: ReadonlyMap<string, StageSeam> = new Map(STAGE_SEAMS.map((s) => [s.name, s]));
