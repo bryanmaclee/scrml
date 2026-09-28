@@ -17,6 +17,7 @@ import { emitValidatorRunnerSidecar } from "./emit-validators.ts";
 import { emitInlineMessageOverrides } from "./emit-messages.ts";
 import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
+import { localAsyncDeclRoot } from "./local-async-fns.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -4431,6 +4432,10 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         declaredNames: new Set<string>(opts.declaredNames ?? []),
         insideFunctionBody: true,
         inDeferredBody: false,
+        // s440 — a nested helper the pre-pass colored async is emitted `async`
+        // (below), so its body is an async host: the client auto-await gates
+        // (`clientAsyncBody`) must open for it exactly as for a colored top-level fn.
+        ...(localAsyncDeclRoot(node) != null && !node.isGenerator ? { clientAsyncBody: true } : {}),
       };
       delete (fnOpts as any).deferStack;
       // §19.16.6 — a nested function's own defer closures are sync unless its
@@ -4471,7 +4476,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const _nestedHasAwait = !node.isGenerator && fnBodyLines.some(
         (l) => /(^|[^.\w$])await\s/.test(l),
       );
-      const _asyncKw = _nestedHasAwait ? "async " : "";
+      // s440-sync-callback-async-helper — OR the pre-pass's structural verdict
+      // (`local-async-fns.ts`). Every call site of this helper was lowered from that
+      // SAME verdict (awaited / combinator-lifted / failed closed), so the keyword
+      // must agree with it even where the body's own `await` text does not show it.
+      const _asyncKw = (_nestedHasAwait || (!node.isGenerator && localAsyncDeclRoot(node) != null)) ? "async " : "";
 
       const fnLines: string[] = [];
       fnLines.push(`${_asyncKw}function${generatorStar} ${fnName}(${paramSigs.join(", ")}) {`);

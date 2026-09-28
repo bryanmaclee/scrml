@@ -1,0 +1,16 @@
+{
+  "id": "server-db-nested-helper-server-fn-some-runtime",
+  "description": "SECURITY (s440). A client fn wraps a server-fn call in a helper declared INSIDE it (`function inner(x) { return isOk(x) }`) and uses the helper in a `.some` callback. The server fn answers false for every element, so `.some` MUST be false and the verdict \"rejected\". Before s440 the nested helper was emitted `async` but called as if sync — `.some` saw one Promise per element, always truthy, and answered TRUE for every input (\"accepted\": an accept-all), with no diagnostic. A nested async helper is now awaited exactly like a file-scope one (the clean-family callback is lifted to the async combinator).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s440-nested-helper-async-sync-callback.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: the compiler SHALL insert `await` at every call site where a server-generated fetch call is made, and SHALL wrap any function containing a server call in an `async` function. `inner` contains one, so `inner` is async, and every call to it is a server call site that must be awaited. A position where the await cannot be inserted must fail closed (E-SERVER-FN-IN-SYNC-CALLBACK, §34); a `.some` callback is lifted to an awaited combinator, so here the program runs and the answer is the server's answer.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SERVER-FN-IN-SYNC-CALLBACK", "E-ASYNC-STDLIB-IN-SYNC-CALLBACK"],
+    "serverStub": { "isOk": false },
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "state": { "verdict": "rejected" },
+    "domAnchored": [{ "selector": "#out", "text": "rejected" }]
+  }
+}

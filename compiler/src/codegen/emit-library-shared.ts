@@ -22,8 +22,18 @@ import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
 // emit-expr lowering site so the fail-closed drain and the lowering agree on which
 // callbacks are transformed (and therefore must NOT fail closed).
-import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName } from "./async-combinators.ts";
+import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName, ASYNC_COMBINATOR_METHODS, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
+// s440 — nested-helper async coloring (marks set by `annotateLocalAsyncFns`).
+import {
+  localCalleeOf,
+  localFnRefOf,
+  localAsyncDeclRoot,
+  annotateLocalAsyncFns,
+  calleesThroughDirectlyCalledNestedFns,
+  anchorDiagnosticSpan,
+} from "./local-async-fns.ts";
+import type { AsyncRoot } from "./local-async-fns.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -193,6 +203,15 @@ export function computeAsyncFnNames(
     if (!name) continue;
     const callees = new Set<string>();
     collectCalleeIdents(fn.body, callees, guardNestedFnValues === true);
+    // s440 — the guarded walk stops at a nested function's body, but a body that
+    // CALLS a nested helper awaits it (`local-async-fns.ts`), so the helper's own
+    // callees are this function's too. (The unguarded walk already descends.)
+    if (guardNestedFnValues === true) {
+      for (const c of calleesThroughDirectlyCalledNestedFns(
+        fn.body,
+        (node, out) => collectCalleeIdents(node, out, true),
+      )) callees.add(c);
+    }
     calleesByName.set(name, callees);
     if (fn.isAsync === true || bodyHasForeignOrSql(fn.body) || callsStdlibPromise(callees) || callsServerFn(callees)) {
       async.add(name);
@@ -297,8 +316,12 @@ export function asyncStdlibSyncCallbackError(
   calleeName: string,
   span: unknown,
   filePath?: string | null,
+  via?: string | null,
 ): CGError {
-  const sp = (span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
+  const sp = diagnosticSpan(span, filePath);
+  const viaNote = via && via !== calleeName
+    ? ` (\`${calleeName}\` is a nested helper that the compiler emits async because it calls \`${via}(…)\`.)`
+    : "";
   return new CGError(
     "E-ASYNC-STDLIB-IN-SYNC-CALLBACK",
     `E-ASYNC-STDLIB-IN-SYNC-CALLBACK: the async call \`${calleeName}(…)\` cannot be awaited ` +
@@ -312,11 +335,131 @@ export function asyncStdlibSyncCallbackError(
       `function (a \`for\` loop over the collection, or a \`const r = ${calleeName}(…)\` binding) ` +
       `rather than inside the value-consuming callback. (Fire-and-forget scheduler callbacks — ` +
       `\`setTimeout\`/\`setInterval\`/… — DISCARD the return and are handled automatically; this ` +
-      `error is only for positions whose value is actually consumed.)`,
-    { file: filePath ?? sp.file ?? "", start: sp.start ?? 0, end: sp.end ?? 0, line: sp.line ?? 1, col: sp.col ?? 1 },
+      `error is only for positions whose value is actually consumed.)` + viaNote,
+    sp,
     "error",
   );
 }
+
+/**
+ * The SHARED E-SERVER-FN-IN-SYNC-CALLBACK builder — the peer-server-fn twin of
+ * `asyncStdlibSyncCallbackError`. emit-server's route-handler drain and the client
+ * drain (emit-functions) both use it, so the two sides report one wording.
+ * `via` names the server fn a NESTED helper is async through (s440): the helper
+ * `inner` calling server fn `isOk` inside a sync callback is reported as
+ * `inner`, with `isOk` named as the reason.
+ */
+export function serverFnSyncCallbackError(
+  peerName: string,
+  span: unknown,
+  filePath?: string | null,
+  via?: string | null,
+): CGError {
+  const sp = diagnosticSpan(span, filePath);
+  const subject = via && via !== peerName
+    ? `\`${peerName}\` (a nested helper the compiler emits async because it calls server function \`${via}\`)`
+    : `server function \`${peerName}\``;
+  return new CGError(
+    "E-SERVER-FN-IN-SYNC-CALLBACK",
+    `E-SERVER-FN-IN-SYNC-CALLBACK: ${subject} is called inside a ` +
+    `synchronous callback. A server function runs asynchronously, but \`await\` is ` +
+    `not valid in a non-async callback (and making the callback async would make ` +
+    `\`.map\`/\`.forEach\` yield Promises instead of values). Refactor to a \`for\` loop ` +
+    `so the call runs in the server function's async body, e.g. ` +
+    `\`for (const x of xs) { ... ${peerName}(x) ... }\`.`,
+    sp,
+    "error",
+  );
+}
+
+/**
+ * One recorded non-awaitable async call site. `rootKind`/`via` are present when the
+ * callee is a NESTED helper (s440, `local-async-fns.ts`): they name what the helper's
+ * asyncness bottoms out in, which decides the diagnostic code.
+ */
+export interface SyncCallSite {
+  name: string;
+  span: unknown;
+  rootKind?: "server" | "stdlib";
+  via?: string;
+}
+
+/**
+ * Pick the right fail-closed diagnostic for a recorded site: a peer SERVER function
+ * (directly, or a nested helper async through one) is E-SERVER-FN-IN-SYNC-CALLBACK;
+ * everything else — a Promise-returning stdlib call, a transitively-async local
+ * peer, a `?{}` body — is E-ASYNC-STDLIB-IN-SYNC-CALLBACK. Before s440 the client
+ * path reported every site with the stdlib code, a peer server fn included.
+ */
+export function syncCallbackErrorForSite(
+  site: SyncCallSite,
+  serverFnNames: ReadonlySet<string> | null | undefined,
+  filePath?: string | null,
+): CGError {
+  const isServer = site.rootKind != null
+    ? site.rootKind === "server"
+    : !!(serverFnNames && serverFnNames.has(site.name));
+  return isServer
+    ? serverFnSyncCallbackError(site.name, site.span, filePath, site.via ?? null)
+    : asyncStdlibSyncCallbackError(site.name, site.span, filePath, site.via ?? null);
+}
+
+/**
+ * s440 — the Promise-returning-stdlib predicate over a per-file callee map + the
+ * export registry (the classifier every drain builds inline), or null when either
+ * input is absent. Shared so callers need not import module-resolver themselves.
+ */
+export function stdlibAsyncPredicate(
+  calleeMap: CalleeImportMap | null | undefined,
+  exportRegistry: ExportRegistry | null | undefined,
+): ((name: string) => boolean) | null {
+  if (!calleeMap || !exportRegistry || exportRegistry.size === 0) return null;
+  return (name: string): boolean => {
+    const src = calleeMap.get(name);
+    return !!src && isPromiseReturningStdlibFn(name, src, exportRegistry);
+  };
+}
+
+/**
+ * s440 — run the nested-helper async pre-pass (`annotateLocalAsyncFns`) over one
+ * top-level function with an emitter's OUTER async facts. Every emitter calls this
+ * with the SAME facts it hands `isAsyncCalleeName`, so "is this nested helper async"
+ * and "is this file-scope name async" are one decision. The root classification
+ * decides the diagnostic code: a peer server fn is `server`; a stdlib export or a
+ * transitively-async local peer is `stdlib` (the code a direct call to that peer
+ * already reports).
+ */
+export function annotateNestedAsyncHelpers(
+  fnNode: unknown,
+  facts: AsyncNameFacts,
+  sqlIsAsync: boolean,
+): number {
+  const outerAsync = (name: string): AsyncRoot | null => {
+    if (facts.serverFnNames != null && facts.serverFnNames.has(name)) return { kind: "server", via: name };
+    if (facts.isStdlibAsync != null && facts.isStdlibAsync(name)) return { kind: "stdlib", via: name };
+    if (facts.asyncFnNames != null && facts.asyncFnNames.has(name)) return { kind: "stdlib", via: name };
+    return null;
+  };
+  return annotateLocalAsyncFns(fnNode, {
+    outerAsync,
+    sqlIsAsync,
+    bodyHasSql: bodyHasForeignOrSql,
+    isByRefInvokingCall: (call) => {
+      const callee = call.callee as ASTNode | undefined;
+      return !!callee && callee.kind === "member" && typeof callee.property === "string" &&
+        (ASYNC_COMBINATOR_METHODS.has(callee.property) || isSyncCallbackConsumerCall(call));
+    },
+  });
+}
+
+function diagnosticSpan(
+  span: unknown,
+  filePath?: string | null,
+): { file: string; start: number; end: number; line: number; col: number } {
+  const sp = (span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
+  return { file: filePath ?? sp.file ?? "", start: sp.start ?? 0, end: sp.end ?? 0, line: sp.line ?? 1, col: sp.col ?? 1 };
+}
+
 
 /**
  * Seam-A no-silent-leak backstop (S239 finding 6 + finding 2 multi-hop) — the
@@ -510,8 +653,8 @@ export function collectNonAwaitableAsyncCalls(
   params?: unknown,
   fnSpan?: unknown,
   serverFnNames?: ReadonlySet<string> | null,
-): Array<{ name: string; span: unknown }> {
-  const out: Array<{ name: string; span: unknown }> = [];
+): SyncCallSite[] {
+  const out: SyncCallSite[] = [];
   const seen = new Set<string>();
   const hasStdlibClassifier = !!(calleeMap && exportRegistry && exportRegistry.size > 0);
   // Limb 1 (dpa-023) — the bespoke local closure this used to carry is GONE; the
@@ -529,22 +672,68 @@ export function collectNonAwaitableAsyncCalls(
       : null,
   };
   const isAsyncName = (name: string): boolean => isAsyncCalleeName(name, facts);
-  const record = (name: string, span: unknown): void => {
+  // s440 — the NESTED async helpers declared anywhere in this body, by name, with
+  // the root of their asyncness (`local-async-fns.ts` marks them before emission).
+  // Structured calls / by-reference uses carry their own lexical resolution; this
+  // name map serves the two RAW-TEXT scans (escape-hatch / template `.raw`, and a
+  // nested function's text param default), which have no structure to resolve.
+  const localAsyncByName = new Map<string, AsyncRoot>();
+  {
+    const seenN = new WeakSet<object>();
+    const gather = (node: unknown): void => {
+      if (!node || typeof node !== "object" || seenN.has(node as object)) return;
+      seenN.add(node as object);
+      if (Array.isArray(node)) { for (const c of node) gather(c); return; }
+      const n = node as ASTNode;
+      if (n.kind === "function-decl" && typeof n.name === "string") {
+        const r = localAsyncDeclRoot(n);
+        if (r) localAsyncByName.set(n.name, r);
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "span") continue;
+        const v = n[key];
+        if (v && typeof v === "object") gather(v);
+      }
+    };
+    gather(fnBody);
+  }
+  const record = (name: string, span: unknown, root?: AsyncRoot | null): void => {
     const sp = (span ?? {}) as { start?: number };
     const key = `${name}@${sp.start ?? -1}`;
     if (seen.has(key)) return;
     seen.add(key);
-    out.push({ name, span });
+    const site: SyncCallSite = { name, span };
+    if (root) { site.rootKind = root.kind; site.via = root.via; }
+    out.push(site);
   };
-  const walk = (node: unknown, insideCallback: boolean): void => {
+  // A raw-text callee: a nested async helper (by name) or an outer async name.
+  const recordRawCallee = (c: string, span: unknown): void => {
+    const local = localAsyncByName.get(c);
+    if (local) record(c, span, local);
+    else if (isAsyncName(c)) record(c, span);
+  };
+  // The nearest enclosing node span that carries a REAL line/col (a statement span);
+  // an expression-parser call span is a `1:1` placeholder (s440 — see
+  // `anchorDiagnosticSpan`).
+  const walk = (node: unknown, insideCallback: boolean, anchor: unknown): void => {
     if (!node || typeof node !== "object") return;
-    if (Array.isArray(node)) { for (const c of node) walk(c, insideCallback); return; }
+    if (Array.isArray(node)) { for (const c of node) walk(c, insideCallback, anchor); return; }
     const n = node as ASTNode;
     const k = n.kind as string | undefined;
+    const here = anchorDiagnosticSpan(n.span, anchor);
+    const at = (span: unknown): unknown => anchorDiagnosticSpan(span, anchor);
     // Raw escape-hatch (block-body callback / raw JS) or template `.raw` — emitted
     // VERBATIM, so any async call inside is un-awaitable regardless of nesting.
     if ((k === "escape-hatch" || (k === "lit" && n.litType === "template")) && typeof n.raw === "string") {
-      for (const c of extractCalleeNames(n.raw)) if (isAsyncName(c)) record(c, n.span);
+      for (const c of extractCalleeNames(n.raw)) recordRawCallee(c, at(n.span));
+    }
+    // s440 — a NESTED function's own parameter defaults. `paramSignature` splices a
+    // default as RAW TEXT (evaluated eagerly, outside any async body — `await` is
+    // illegal there even in an async fn), so a nested `function g(y = inner(1))`
+    // was reached by neither emit-expr nor this walk. Same treatment as the
+    // enclosing fn's own defaults (Case 3 below).
+    if (k === "function-decl" && Array.isArray(n.params)) {
+      scanParamDefaults(n.params as unknown[], here);
     }
     // Phase-2 colorless-async — a CLEAN-FAMILY collection-method call with an
     // async first-arg callback is NOT a non-awaitable leak: emit-expr lowers it to
@@ -566,19 +755,19 @@ export function collectNonAwaitableAsyncCalls(
       // combinator itself is bare).
       const propName = ((n.callee as ASTNode | undefined)?.property);
       if (insideCallback && typeof propName === "string") {
-        record(`${propName}(…) async-callback combinator`, n.span);
+        record(`${propName}(…) async-callback combinator`, here);
       }
       const callee = n.callee as ASTNode | undefined;
-      if (callee) walk(callee, insideCallback);
+      if (callee) walk(callee, insideCallback, here);
       const cbArgs = Array.isArray(n.args) ? (n.args as unknown[]) : [];
       const cb = cbArgs[0] as ASTNode | undefined;
       if (cb && cb.kind === "lambda") {
-        walk(cb.body, false);
-        for (const p of (Array.isArray(cb.params) ? (cb.params as unknown[]) : [])) walk(p, true);
+        walk(cb.body, false, here);
+        for (const p of (Array.isArray(cb.params) ? (cb.params as unknown[]) : [])) walk(p, true, here);
       } else if (cb) {
-        walk(cb, insideCallback);
+        walk(cb, insideCallback, here);
       }
-      for (let ai = 1; ai < cbArgs.length; ai++) walk(cbArgs[ai], insideCallback);
+      for (let ai = 1; ai < cbArgs.length; ai++) walk(cbArgs[ai], insideCallback, here);
       return;
     }
     // KNOWN-DISCARD-HOF colorless-async (S279 over-fire fix) — a bare-ident call to a
@@ -593,53 +782,81 @@ export function collectNonAwaitableAsyncCalls(
     // does NOT match here and stays fail-closed (deferred user-HOF Case 2).
     if (k === "call" && isKnownDiscardHofCall(n, isAsyncName)) {
       const callee = n.callee as ASTNode | undefined;
-      if (callee) walk(callee, insideCallback);
+      if (callee) walk(callee, insideCallback, here);
       const hofArgs = Array.isArray(n.args) ? (n.args as unknown[]) : [];
       for (const a of hofArgs) {
         const an = a as ASTNode | undefined;
         if (an && an.kind === "lambda" && callbackReachesAsync(an, isAsyncName)) {
-          walk(an.body, false);
-          for (const p of (Array.isArray(an.params) ? (an.params as unknown[]) : [])) walk(p, true);
+          walk(an.body, false, here);
+          for (const p of (Array.isArray(an.params) ? (an.params as unknown[]) : [])) walk(p, true, here);
         } else if (an) {
-          walk(an, insideCallback);
+          walk(an, insideCallback, here);
         }
       }
       return;
     }
-    // A structured call to an async name INSIDE a callback/param-default lambda.
-    if (k === "call" && insideCallback) {
-      const name = (typeof n.name === "string" ? n.name : undefined)
-        ?? (((n.callee as ASTNode | undefined)?.kind === "ident") ? (n.callee as ASTNode).name as string : undefined);
-      if (typeof name === "string" && isAsyncName(name)) record(name, n.span);
+    if (k === "call") {
+      // s440 — a call to a NESTED helper answers from its lexical resolution.
+      const local = localCalleeOf(n);
+      if (insideCallback) {
+        if (local) {
+          if (local.async) record(local.name, here, local.root);
+        } else {
+          // A structured call to an async name INSIDE a callback/param-default lambda.
+          const name = (typeof n.name === "string" ? n.name : undefined)
+            ?? (((n.callee as ASTNode | undefined)?.kind === "ident") ? (n.callee as ASTNode).name as string : undefined);
+          if (typeof name === "string" && isAsyncName(name)) record(name, here);
+        }
+      }
+      // s440 — an async function passed BY REFERENCE to a collection method that
+      // invokes it synchronously, consumes the value, and has no async combinator
+      // (`SYNC_CALLBACK_CONSUMER_METHODS` — `xs.sort(inner)` compares Promises). The
+      // consuming call is not one the compiler can await, in ANY position. A user
+      // HOF is not flagged: it may await what it is given (see the set's doc).
+      if (isSyncCallbackConsumerCall(n)) {
+        for (const a of (Array.isArray(n.args) ? (n.args as unknown[]) : [])) checkByRefArg(a, here);
+      }
     }
     const childInside = insideCallback || k === "lambda";
     for (const key of Object.keys(n)) {
       if (key === "span") continue;
       const v = n[key];
-      if (v && typeof v === "object") walk(v, childInside);
+      if (v && typeof v === "object") walk(v, childInside, here);
     }
   };
-  walk(fnBody, false);
+  const checkByRefArg = (a: unknown, anchor: unknown): void => {
+    const an = a as ASTNode | null;
+    if (!an || an.kind !== "ident" || typeof an.name !== "string") return;
+    const local = localFnRefOf(an);
+    if (local) {
+      if (local.async) record(local.name, anchorDiagnosticSpan(an.span, anchor), local.root);
+      return;
+    }
+    if (isAsyncName(an.name)) record(an.name, anchorDiagnosticSpan(an.span, anchor));
+  };
+  const scanParamDefaults = (ps: unknown[], site: unknown): void => {
+    for (const p of ps) {
+      if (!p || typeof p !== "object") continue;
+      const pd = p as { defaultValue?: unknown; defaultExpr?: unknown; span?: unknown };
+      const at = anchorDiagnosticSpan(pd.span, site);
+      if (typeof pd.defaultValue === "string" && pd.defaultValue.length > 0) {
+        for (const c of extractCalleeNames(pd.defaultValue)) recordRawCallee(c, at);
+      } else if (pd.defaultValue && typeof pd.defaultValue === "object") {
+        walk(pd.defaultValue, true, at);
+      }
+      if (pd.defaultExpr && typeof pd.defaultExpr === "object") walk(pd.defaultExpr, true, at);
+    }
+  };
+  walk(fnBody, false, fnSpan);
   // Case 3 — the enclosing fn's OWN parameter defaults. `paramSignature` splices
   // `p.defaultValue` as RAW TEXT, so it lives in neither `fnBody` nor a structural
   // node — scan the text for async callees (mirrors the raw escape-hatch branch).
   // A structured default (a destructure-pattern's `defaultExpr` ExprNode) is walked
   // structurally as an un-awaitable region.
-  if (Array.isArray(params)) {
-    for (const p of params) {
-      if (!p || typeof p !== "object") continue;
-      const pd = p as { defaultValue?: unknown; defaultExpr?: unknown; span?: unknown };
-      const site = pd.span ?? fnSpan;
-      if (typeof pd.defaultValue === "string" && pd.defaultValue.length > 0) {
-        for (const c of extractCalleeNames(pd.defaultValue)) if (isAsyncName(c)) record(c, site);
-      } else if (pd.defaultValue && typeof pd.defaultValue === "object") {
-        walk(pd.defaultValue, true);
-      }
-      if (pd.defaultExpr && typeof pd.defaultExpr === "object") walk(pd.defaultExpr, true);
-    }
-  }
+  if (Array.isArray(params)) scanParamDefaults(params, fnSpan);
   return out;
 }
+
 
 /**
  * Shared per-fn LIBRARY member emitter — one `[export] [async] function
