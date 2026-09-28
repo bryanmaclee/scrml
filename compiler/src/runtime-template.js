@@ -4094,11 +4094,81 @@ function _scrml_input_gamepad_destroy(id, scopeId) {
 // §45 Structural equality — deep value comparison for structs and enums
 // ---------------------------------------------------------------------------
 
+// __SCRML_STRUCTURAL_EQ_START__ (server-inline slice boundary, s440-date-in-cell-and-eq)
+// This one function is ALSO the server copy: emit-server.ts inlines the text
+// between these markers into any .server.js that calls it. Keep it
+// self-contained — it must not call another runtime helper.
 function _scrml_structural_eq(a, b, seen) {
-  if (a === b) return true;
-  if (a === null || b === null || a === undefined || b === undefined) return false;
+  if (a === b) {
+    // An invalid Date (NaN instant) is unequal even to itself, the same rule a
+    // NaN number gets from \`===\` below.
+    return !(a instanceof Date && Number.isNaN(a.getTime()));
+  }
+  if (a == null || b == null) return false; // loose: null and undefined are both absence
   if (typeof a !== typeof b) return false;
   if (typeof a !== "object") return a === b;
+  // Built-in classes (S440 ruling #8: date/timestamp are VALUE types, \`==\` by
+  // instant). These keep their value in internal slots, not in own enumerable
+  // keys, so the struct branch at the bottom would see two empty key sets and
+  // call any two of them equal. Each class gets its own rule here. A built-in
+  // never equals a value of a different class.
+  if (a instanceof Date || b instanceof Date) {
+    if (!(a instanceof Date) || !(b instanceof Date)) return false;
+    // NaN !== NaN, so two invalid Dates are not equal.
+    return a.getTime() === b.getTime();
+  }
+  if (a instanceof RegExp || b instanceof RegExp) {
+    if (!(a instanceof RegExp) || !(b instanceof RegExp)) return false;
+    return a.source === b.source && a.flags === b.flags;
+  }
+  if (ArrayBuffer.isView(a) || ArrayBuffer.isView(b)) {
+    // Typed arrays compare element by element (so NaN elements are unequal,
+    // as numbers are); a DataView compares its bytes.
+    if (!ArrayBuffer.isView(a) || !ArrayBuffer.isView(b)) return false;
+    if (a.constructor !== b.constructor || a.byteLength !== b.byteLength) return false;
+    if (a instanceof DataView) {
+      for (let i = 0; i < a.byteLength; i++) {
+        if (a.getUint8(i) !== b.getUint8(i)) return false;
+      }
+      return true;
+    }
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+  if (a instanceof ArrayBuffer || b instanceof ArrayBuffer) {
+    if (!(a instanceof ArrayBuffer) || !(b instanceof ArrayBuffer)) return false;
+    if (a.byteLength !== b.byteLength) return false;
+    const aBytes = new Uint8Array(a);
+    const bBytes = new Uint8Array(b);
+    for (let i = 0; i < aBytes.length; i++) {
+      if (aBytes[i] !== bBytes[i]) return false;
+    }
+    return true;
+  }
+  if (typeof URL !== "undefined" && (a instanceof URL || b instanceof URL)) {
+    if (!(a instanceof URL) || !(b instanceof URL)) return false;
+    return a.href === b.href;
+  }
+  if (typeof URLSearchParams !== "undefined" && (a instanceof URLSearchParams || b instanceof URLSearchParams)) {
+    if (!(a instanceof URLSearchParams) || !(b instanceof URLSearchParams)) return false;
+    return a.toString() === b.toString();
+  }
+  // A Promise, WeakMap, WeakSet or Blob has no value that can be read
+  // synchronously, so two of them are equal only when they are the same
+  // object — which the \`a === b\` check above has already ruled out.
+  if (a instanceof Promise || b instanceof Promise) return false;
+  if (a instanceof WeakMap || b instanceof WeakMap) return false;
+  if (a instanceof WeakSet || b instanceof WeakSet) return false;
+  if (typeof Blob !== "undefined" && (a instanceof Blob || b instanceof Blob)) return false;
+  if (a instanceof Error || b instanceof Error) {
+    // \`message\` is an own NON-enumerable key, so check it (and the class) here;
+    // the struct branch below then compares the enumerable fields (name, type,
+    // cause on the §19 error classes).
+    if (!(a instanceof Error) || !(b instanceof Error)) return false;
+    if (a.constructor !== b.constructor || a.message !== b.message) return false;
+  }
   // Cycle guard: value-cycles are FORBIDDEN in scrml (§6.5.1 reassignment-
   // canonical), but a malformed JS-host value reaching == could still carry
   // one. Track visited (a, b) pairs so a revisit terminates instead of
@@ -4106,15 +4176,51 @@ function _scrml_structural_eq(a, b, seen) {
   // already compared against it. The standard structural-eq cycle convention
   // is assume-equal-on-revisit: the only way to reach a matching (a, b)
   // revisit is a structurally-matching cyclic shape.
-  if (seen === undefined) seen = new WeakMap();
+  if (seen == null) seen = new WeakMap();
   let seenBs = seen.get(a);
-  if (seenBs === undefined) {
+  if (seenBs == null) {
     seenBs = new WeakSet();
     seen.set(a, seenBs);
   } else if (seenBs.has(b)) {
     return true;
   }
   seenBs.add(b);
+  // JS Map / Set (host interop values — the §59 value-native map is a tagged
+  // plain object and has its own branch below). Two are equal when they have
+  // the same size and every entry of \`a\` has a match in \`b\`: a Set element or
+  // Map key matches by the collection's own key lookup first, then (for an
+  // object) by structural equality. A Map value compares structurally.
+  // Nested trial comparisons pass a FRESH cycle guard: a failed trial must
+  // not leave its pair in \`seen\`, where a later revisit would read it as equal.
+  if (a instanceof Map || b instanceof Map) {
+    if (!(a instanceof Map) || !(b instanceof Map) || a.size !== b.size) return false;
+    for (const [key, aVal] of a) {
+      if (b.has(key)) {
+        if (!_scrml_structural_eq(aVal, b.get(key), seen)) return false;
+        continue;
+      }
+      if (key === null || typeof key !== "object") return false;
+      let matched = false;
+      for (const [bKey, bVal] of b) {
+        if (_scrml_structural_eq(key, bKey) && _scrml_structural_eq(aVal, bVal)) { matched = true; break; }
+      }
+      if (!matched) return false;
+    }
+    return true;
+  }
+  if (a instanceof Set || b instanceof Set) {
+    if (!(a instanceof Set) || !(b instanceof Set) || a.size !== b.size) return false;
+    for (const item of a) {
+      if (b.has(item)) continue;
+      if (item === null || typeof item !== "object") return false;
+      let matched = false;
+      for (const bItem of b) {
+        if (_scrml_structural_eq(item, bItem)) { matched = true; break; }
+      }
+      if (!matched) return false;
+    }
+    return true;
+  }
   // Array comparison (for tuple-like fields)
   if (Array.isArray(a)) {
     if (!Array.isArray(b) || a.length !== b.length) return false;
@@ -4147,7 +4253,7 @@ function _scrml_structural_eq(a, b, seen) {
     return true;
   }
   // Enum: compare tag + payload
-  if (a._tag !== undefined && b._tag !== undefined) {
+  if (a._tag != null && b._tag != null) {
     if (a._tag !== b._tag) return false;
     // Unit variant (no payload beyond _tag)
     const aKeys = Object.keys(a);
@@ -4169,6 +4275,7 @@ function _scrml_structural_eq(a, b, seen) {
   }
   return true;
 }
+// __SCRML_STRUCTURAL_EQ_END__
 
 // ---------------------------------------------------------------------------
 // Fine-grained reactivity primitives (Reactivity Phase 1)
@@ -4270,7 +4377,7 @@ const _scrml_array_mutators = new Set([
  * - Array mutating methods (push/pop/splice/etc.) trigger via Proxy set trap
  *
  * @param {*} value — the value to wrap
- * @returns {*} — Proxy-wrapped if object/array, otherwise the value unchanged
+ * @returns {*} — Proxy-wrapped if array/plain object, otherwise the value unchanged
  */
 function _scrml_deep_reactive(value) {
   if (value === null || value === undefined) return value;
@@ -4282,6 +4389,12 @@ function _scrml_deep_reactive(value) {
 
   // Return cached proxy if we already wrapped this object
   if (_scrml_proxy_cache.has(value)) return _scrml_proxy_cache.get(value);
+
+  // Only arrays + plain objects: a Date, Map, class… throws on a Proxy receiver.
+  if (!Array.isArray(value)) {
+    const proto = Object.getPrototypeOf(value);
+    if (proto !== Object.prototype && proto !== null) return value;
+  }
 
   const proxy = new Proxy(value, {
     get(target, prop, receiver) {
@@ -6488,6 +6601,38 @@ export const SERVER_VALUE_NATIVE_MAP_HELPER = (() => {
     body.trim() +
     "\n\n"
   );
+})();
+
+/**
+ * s440-date-in-cell-and-eq — the §45 structural-equality helper, sliced VERBATIM
+ * out of SCRML_RUNTIME between the `__SCRML_STRUCTURAL_EQ_START__` /
+ * `__SCRML_STRUCTURAL_EQ_END__` markers, for inlining into a `.server.js`, a
+ * `kind="tool"` library, or a library module that calls `_scrml_structural_eq(`
+ * (emit-server.ts wraps it as SERVER_STRUCTURAL_EQ_HELPER).
+ *
+ * Before this, the server copy was a hand-written duplicate in emit-server.ts
+ * that had drifted: no §59 value-native map branch (so `==` on two maps was
+ * order-SENSITIVE on the server, against §59.9), no cycle guard, and none of
+ * the built-in class rules — a server `Date == Date` was always true. One
+ * source means the two sides cannot disagree again.
+ */
+export const SERVER_STRUCTURAL_EQ_SOURCE = (() => {
+  const startTag = "// __SCRML_STRUCTURAL_EQ_START__";
+  const endTag = "// __SCRML_STRUCTURAL_EQ_END__";
+  const s = SCRML_RUNTIME.indexOf(startTag);
+  const e = SCRML_RUNTIME.indexOf(endTag);
+  // Fail LOUD if a marker is lost: an empty helper would turn every server-side
+  // `==` on a non-primitive into a silent ReferenceError at request time.
+  if (s === -1 || e === -1) {
+    throw new Error(
+      "runtime-template.js: structural-equality slice markers " +
+        "(__SCRML_STRUCTURAL_EQ_START__/__SCRML_STRUCTURAL_EQ_END__) not found — " +
+        "the server _scrml_structural_eq inline is broken.",
+    );
+  }
+  // Skip the START marker's line and the note under it; begin at the function.
+  const fnStart = SCRML_RUNTIME.indexOf("function _scrml_structural_eq(", s);
+  return SCRML_RUNTIME.slice(fnStart, e).trim();
 })();
 
 /**

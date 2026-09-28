@@ -109,7 +109,7 @@ describe("§64 tool target — emit shape", () => {
   test("== lowers to _scrml_structural_eq AND the helper is inlined", () => {
     const { out } = compileSource(CLI_TOOL);
     expect(out.toolJs).toMatch(/_scrml_structural_eq\(/);
-    expect(out.toolJs).toMatch(/function _scrml_structural_eq\(a, b\)/);
+    expect(out.toolJs).toMatch(/function _scrml_structural_eq\(a, b, seen\)/);
   });
 
   test("§14 enum type in a tool emits its frozen backing object", () => {
