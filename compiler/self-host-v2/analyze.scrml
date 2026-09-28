@@ -33,8 +33,7 @@
 // guessed.
 //
 // impl#1 workarounds: F4 (qualified variants), F5 (typed host results), F11
-// (named payload binding), F12 (alternation only first), F14 (no
-// brace-adjacent string literal), F15 (no fn named like a
+// (named payload binding), F12 (alternation only first), F15 (no fn named like a
 // payload field of an enum declared in this file), F16 (≥ 1 binding arm over an
 // imported payload enum).
 // =============================================================================
@@ -383,9 +382,6 @@ ${
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]) }
     }
-
-    fn LB() -> string { return "{" }
-    fn RB() -> string { return "}" }
 
     // =========================================================================
     // Phase A — the program's shape: types, declarations, functions, fields,
@@ -1643,7 +1639,7 @@ ${
         let tn: string = "T"
         const td: Sym | not = r.x.iDecl
         if (td is some) tn = td.hint
-        const msg: string = "`@" + name + "` names a conditionally-mounted instance (typed `" + tn + " | not`) — a read through it must be narrowed first: `given c = @" + name + " :> " + LB() + " … c.field … " + RB() + "` (§66.7.5; reads ruled S437)"
+        const msg: string = "`@" + name + "` names a conditionally-mounted instance (typed `" + tn + " | not`) — a read through it must be narrowed first: `given c = @" + name + " :> { … c.field … }` (§66.7.5; reads ruled S437)"
         return { x: r.x, st: addDiag(r.st, env.file, e.span, "E-DECL-HANDLE-NOT-NARROWED", msg) }
     }
 
@@ -1939,7 +1935,7 @@ ${
         let j2 = 0
         for (const p of ps) {
             if (p.spread) {
-                st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` is in slice M2 only as `@x = " + LB() + " ...@x, f: v " + RB() + "` (a field edit, O58 (b))")
+                st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` is in slice M2 only as `@x = { ...@x, f: v }` (a field edit, O58 (b))")
             } else {
                 let fty: Type | not = not
                 for (const fd of fs) {
@@ -2150,7 +2146,7 @@ ${
     fn writeGuards(env: Env, p: WPlace, span: ASpan, st0: AS) -> AS {
         let st: AS = st0
         if (p.maybe) {
-            st = addDiag(st, env.file, span, "E-DECL-HANDLE-NOT-NARROWED", "this handle names a conditionally-mounted instance (`" + p.decl.sym.hint + " | not`) — narrow it first: `given c = @handle :> " + LB() + " c.field = … " + RB() + "` (§66.7.5)")
+            st = addDiag(st, env.file, span, "E-DECL-HANDLE-NOT-NARROWED", "this handle names a conditionally-mounted instance (`" + p.decl.sym.hint + " | not`) — narrow it first: `given c = @handle :> { c.field = … }` (§66.7.5)")
         }
         const f: FieldInfo = p.decl.fields[p.idx]
         if (p.decl.file != env.file && !f.exported) {

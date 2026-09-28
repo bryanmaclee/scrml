@@ -29,9 +29,9 @@
 //
 // impl#1 workarounds: F4 (qualified variants in argument / field / element
 // position), F5 (host-method results annotated), F11 (named payload binding),
-// F12 (an alternation arm only first), F14 (no string literal with a brace next
-// to another character — `LB()` / `RB()`), F16 (a match over an imported payload
-// enum binds a field in at least one arm).
+// F12 (an alternation arm only first), F16 (a match over an imported payload
+// enum binds a field in at least one arm). (F14 — a brace in a string literal —
+// is fixed in impl#1 by #1119; braces are plain string literals again, S440.)
 // =============================================================================
 ${
     import { Token, TokenKind, LexStop, LexRun, lexFrom } from "./lex.scrml"
@@ -39,9 +39,6 @@ ${
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl,
              AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
-
-    fn LB() -> string { return "{" }
-    fn RB() -> string { return "}" }
 
     // =========================================================================
     // Tokens, as the parser sees them: one TOTAL classification of TokenKind
@@ -379,7 +376,7 @@ ${
             const elems: RExprs = parseList(adv(tp), "]")
             return mkE(elems.tp, start, AExprK.ArrayLit(elems.es))
         }
-        if (isP(tp, LB())) return parseObject(tp)
+        if (isP(tp, "{")) return parseObject(tp)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
         return mkE(adv(bad), start, AExprK.Recovered)
     }
@@ -437,7 +434,7 @@ ${
         const start: int = cur(tp).start
         let t: TP = adv(tp)
         let props: AProp[] = []
-        let going = !isP(t, RB()) && !atEnd(t)
+        let going = !isP(t, "}") && !atEnd(t)
         while (going) {
             const nameTok: PTok = cur(t)
             const pstart: int = nameTok.start
@@ -459,12 +456,12 @@ ${
             t = bumpId(t)
             if (isP(t, ",")) {
                 t = adv(t)
-                if (isP(t, RB())) going = false
+                if (isP(t, "}")) going = false
             } else {
                 going = false
             }
         }
-        t = expectP(t, RB())
+        t = expectP(t, "}")
         return mkE(t, start, AExprK.ObjectLit(props))
     }
 
@@ -479,9 +476,9 @@ ${
     // `{ stmt* }`
     export fn parseBlock(tp: TP) -> RBlock {
         const start: int = cur(tp).start
-        let t: TP = expectP(tp, LB())
+        let t: TP = expectP(tp, "{")
         let stmts: AStmt[] = []
-        while (!isP(t, RB()) && !atEnd(t)) {
+        while (!isP(t, "}") && !atEnd(t)) {
             const before: int = t.i
             const r: RStmt = parseStmt(t)
             stmts = stmts.concat([r.s])
@@ -489,7 +486,7 @@ ${
             if (isP(t, ";")) t = adv(t)
             if (t.i == before) t = adv(t)
         }
-        t = expectP(t, RB())
+        t = expectP(t, "}")
         const b: ABlock = { nid: t.nid, span: spanFrom(t, start), stmts: stmts }
         return { b: b, tp: bumpId(t) }
     }
@@ -502,7 +499,7 @@ ${
         if (isWord(tp, "let") || isWord(tp, "const")) return parseLocal(tp)
         if (isWord(tp, "return")) {
             const nx: PTok = peekAt(tp, 1)
-            if (nx.cls == TC.End || nx.line != t.line || nx.text == RB() || nx.text == ";") {
+            if (nx.cls == TC.End || nx.line != t.line || nx.text == "}" || nx.text == ";") {
                 return mkS(adv(tp), start, AStmtK.Return(not))
             }
             const v: RExpr = parseAssign(adv(tp))
@@ -554,7 +551,7 @@ ${
 
     // `if (c) stmt` without braces is one statement in a block of its own.
     fn parseBlockOrStmt(tp: TP) -> RBlock {
-        if (isP(tp, LB())) return parseBlock(tp)
+        if (isP(tp, "{")) return parseBlock(tp)
         const start: int = cur(tp).start
         const s: RStmt = parseStmt(tp)
         const b: ABlock = { nid: s.tp.nid, span: spanFrom(s.tp, start), stmts: [s.s] }
@@ -671,9 +668,9 @@ ${
     }
 
     fn parseImport(tp: TP, start: int) -> RItems {
-        let t: TP = expectP(adv(tp), LB())
+        let t: TP = expectP(adv(tp), "{")
         let names: AImportName[] = []
-        while (!isP(t, RB()) && !atEnd(t)) {
+        while (!isP(t, "}") && !atEnd(t)) {
             const n: PTok = cur(t)
             if (n.cls == TC.Ident || n.cls == TC.Keyword) {
                 names = names.concat([{ nid: t.nid, span: mkSpan(n.start, n.end), name: n.v }])
@@ -683,7 +680,7 @@ ${
             }
             t = adv(t)
         }
-        t = expectP(t, RB())
+        t = expectP(t, "}")
         if (!isWord(t, "from")) t = diagAt(t, "E-PARSE-IMPORT", "expected `from` after the import list", cur(t))
         t = adv(t)
         const src: PTok = cur(t)
@@ -707,9 +704,9 @@ ${
             body = ATypeBody.EnumBody(r.vs)
             t = r.tp
         } else if (kind.v == "struct") {
-            const r2: RFields = parseTypeFields(expectP(t, LB()), RB())
+            const r2: RFields = parseTypeFields(expectP(t, "{"), "}")
             body = ATypeBody.StructBody(r2.fs)
-            t = expectP(r2.tp, RB())
+            t = expectP(r2.tp, "}")
         } else {
             t = diagAt(t, "E-PARSE-TYPE", "expected `:enum` or `:struct`, found `:" + kind.text + "`", kind)
         }
@@ -721,9 +718,9 @@ ${
     type RFields:struct = { fs: ATypeField[], tp: TP }
 
     fn parseVariants(tp: TP) -> RVariants {
-        let t: TP = expectP(tp, LB())
+        let t: TP = expectP(tp, "{")
         let vs: AVariant[] = []
-        while (!isP(t, RB()) && !atEnd(t)) {
+        while (!isP(t, "}") && !atEnd(t)) {
             const n: PTok = cur(t)
             if (n.cls == TC.Ident || n.cls == TC.Keyword) {
                 t = adv(t)
@@ -740,7 +737,7 @@ ${
                 t = adv(t)
             }
         }
-        return { vs: vs, tp: expectP(t, RB()) }
+        return { vs: vs, tp: expectP(t, "}") }
     }
 
     // `[let] name: Type` separated by commas, up to (not consuming) `close`.
@@ -825,7 +822,7 @@ ${
     fn mEof(mp: MP) -> boolean { return mp.pos >= mp.src.length }
 
     // `#` followed by an opening brace: a CSS block (§5.6).
-    fn atCss(mp: MP) -> boolean { return chAt(mp, 0) == "#" && chAt(mp, 1) == LB() }
+    fn atCss(mp: MP) -> boolean { return chAt(mp, 0) == "#" && chAt(mp, 1) == "{" }
 
     // A `#{…}` block is out of bootstrap slice M2: report it and skip it whole
     // (balanced by the lexer), never let it through as text.
@@ -842,7 +839,7 @@ ${
     }
 
     // `$` followed by an opening brace: a logic block / interpolation.
-    fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == LB() }
+    fn atInterp(mp: MP) -> boolean { return chAt(mp, 0) == "$" && chAt(mp, 1) == "{" }
 
     fn mAdv(mp: MP, n: int) -> MP {
         return { src: mp.src, pos: mp.pos + n, nid: mp.nid, diags: mp.diags, file: mp.file }
@@ -962,7 +959,7 @@ ${
             const t2: TP = expectRegionEnd(r.tp)
             return { v: AAttrValue.Paren(r.e), mp: backToMarkup(mp, t2) }
         }
-        if (c == LB()) {
+        if (c == "{") {
             const tp2: TP = regionTP(mp, LexStop.Balanced)
             const b: RBlock = parseBlock(tp2)
             const t3: TP = expectRegionEnd(b.tp)
@@ -1356,9 +1353,9 @@ ${
     fn parseInterp(mp: MP) -> RNodeOne {
         const start: int = mp.pos
         const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
-        let t: TP = expectP(tp, LB())
+        let t: TP = expectP(tp, "{")
         const r: RExpr = parseAssign(t)
-        t = expectP(r.tp, RB())
+        t = expectP(r.tp, "}")
         t = expectRegionEnd(t)
         const m: MP = backToMarkup(mp, t)
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(r.e) }
@@ -1593,8 +1590,8 @@ ${
         if (atCss(mp)) return { items: [], mp: skipCss(mp) }
         if (atInterp(mp)) {
             const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
-            const inner: RItems = parseLogicItems(expectP(tp, LB()), RB())
-            const t2: TP = expectRegionEnd(expectP(inner.tp, RB()))
+            const inner: RItems = parseLogicItems(expectP(tp, "{"), "}")
+            const t2: TP = expectRegionEnd(expectP(inner.tp, "}"))
             return { items: inner.items, mp: backToMarkup(mp, t2) }
         }
         if (chAt(mp, 0) == "<") return parseTagItem(mp, false)

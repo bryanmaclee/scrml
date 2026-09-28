@@ -63,12 +63,6 @@ ${
     export fn jthunk(e: JsExpr) -> JsExpr { return JsExpr.JArrowE([], e) }
     export fn sexpr(e: JsExpr) -> JsStmt { return JsStmt.SExpr(e) }
 
-    // Brace characters are spelled ONLY as the standalone literals below: a
-    // string literal holding a brace next to other text breaks impl#1's block
-    // splitter inside `${}` (slice-m1/progress.md F14).
-    fn LB() -> string { return "{" }
-    fn RB() -> string { return "}" }
-
     // ---- precedence ----------------------------------------------------------
     fn opPrec(op: JsOp) -> int {
         return match op {
@@ -226,20 +220,20 @@ ${
     }
 
     fn arrowBlock(ps: string[], body: JsStmt[], ind: string) -> string {
-        if (body.length == 0) return paramList(ps) + " => " + LB() + RB()
-        return paramList(ps) + " => " + LB() + "\n" + stmts(body, ind + "  ") + ind + RB()
+        if (body.length == 0) return paramList(ps) + " => {}"
+        return paramList(ps) + " => {\n" + stmts(body, ind + "  ") + ind + "}"
     }
 
     fn objectText(ps: JsProp[], ind: string) -> string {
-        if (ps.length == 0) return LB() + RB()
-        let out: string = LB() + " "
+        if (ps.length == 0) return "{}"
+        let out: string = "{ "
         let first = true
         for (const p of ps) {
             if (!first) out = out + ", "
             out = out + propKey(p.key) + ": " + wrap(p.value, 2, ind)
             first = false
         }
-        return out + " " + RB()
+        return out + " }"
     }
 
     // A property key: bare when it is a plain identifier, else quoted.
@@ -282,7 +276,7 @@ ${
             .SReturn(e: e) :> ind + "return " + expr(e, ind) + ";\n"
             .SIf(test: t, thenB: a, elseB: b) :> ifText(t, a, b, ind)
             .SFunc(name: n, params: ps, body: body) :>
-                ind + "function " + n + "(" + ps.join(", ") + ") " + LB() + "\n" + stmts(body, ind + "  ") + ind + RB() + "\n"
+                ind + "function " + n + "(" + ps.join(", ") + ") {\n" + stmts(body, ind + "  ") + ind + "}\n"
             .SComment(text: t) :> ind + "// " + t + "\n"
             .SImportAll(name: n, from: f) :> ind + "import * as " + n + " from " + quote(f) + ";\n"
             .SBlank :> "\n"
@@ -296,9 +290,9 @@ ${
     }
 
     fn ifText(t: JsExpr, a: JsStmt[], b: JsStmt[], ind: string) -> string {
-        const head: string = ind + "if (" + expr(t, ind) + ") " + LB() + "\n" + stmts(a, ind + "  ") + ind + RB()
+        const head: string = ind + "if (" + expr(t, ind) + ") {\n" + stmts(a, ind + "  ") + ind + "}"
         if (b.length == 0) return head + "\n"
-        return head + " else " + LB() + "\n" + stmts(b, ind + "  ") + ind + RB() + "\n"
+        return head + " else {\n" + stmts(b, ind + "  ") + ind + "}\n"
     }
 
     // A whole module: the statement list printed once.
