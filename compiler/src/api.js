@@ -1070,6 +1070,16 @@ function _compileScrmlImpl(options = {}) {
      * to runCG; surfaced via the `--module-format=classic|esm` CLI flag.
      */
     moduleFormat = "classic",
+    /**
+     * Pre-write commit decision (g-session-config-refusal-still-writes-dist).
+     * Called ONCE, after every compile diagnostic is known and before the first
+     * byte reaches `outputDir`, with `{ errors, outputDir, plannedServerUnits }`
+     * (`plannedServerUnits`: `{ relPath, source }` per `.server.js` this run will
+     * write, `relPath` from the same dist-space index the write phase uses).
+     * Returning `false` skips EVERY write (stdlib bundle included) and leaves
+     * `outputDir` exactly as it was. Only consulted when `write` is true.
+     */
+    beforeWrite = null,
   } = options;
 
   let { outputDir } = options;
@@ -2902,9 +2912,8 @@ function _compileScrmlImpl(options = {}) {
   if (mcpAutoActivated) {
     stdlibSpecifiers.add("mcp");
   }
-  const bundledStdlib = (write && outputDir)
-    ? bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, allErrors)
-    : new Set();
+  // (`bundledStdlib` — the first disk write — is computed below, after the
+  // `beforeWrite` commit decision, so a refused build writes nothing at all.)
 
   // ---------------------------------------------------------------------------
   // D-4 (S296) — DIST-space reversal of an emitted server import specifier.
@@ -3167,6 +3176,25 @@ function _compileScrmlImpl(options = {}) {
   emitValueOnlyServerJsForDanglingImports();
   checkServerImportInvariant();
 
+  // Pre-write commit decision — see the `beforeWrite` option. The planned
+  // `.server.js` set is read off `distServerKeyToSource` (the forward index built
+  // through the write phase's `pathFor` transform), never re-derived here.
+  let writeCommitted = write;
+  if (write && outputDir && typeof beforeWrite === "function") {
+    const outputByAbsSource = new Map();
+    for (const [fp, output] of cgResult.outputs ?? []) outputByAbsSource.set(resolve(fp), output);
+    const plannedServerUnits = [];
+    for (const [relPath, absSource] of distServerKeyToSource) {
+      const output = outputByAbsSource.get(absSource);
+      if (output && output.serverJs) plannedServerUnits.push({ relPath, source: output.serverJs });
+    }
+    writeCommitted = beforeWrite({ errors: allErrors, outputDir, plannedServerUnits }) !== false;
+  }
+
+  const bundledStdlib = (writeCommitted && outputDir)
+    ? bundleStdlibForRun(stdlibSpecifiers, outputDir, verbose ? log : null, allErrors)
+    : new Set();
+
   // ---------------------------------------------------------------------------
   // Write output files
   // ---------------------------------------------------------------------------
@@ -3177,7 +3205,7 @@ function _compileScrmlImpl(options = {}) {
   // populated in the write phase below. Empty for `write:false` / library mode.
   const hashedAssets = new Set();
 
-  if (write && outputDir) {
+  if (writeCommitted && outputDir) {
     mkdirSync(outputDir, { recursive: true });
 
     // `emitGateFailed` short-circuits ALL writes below (runtime chunk, per-file

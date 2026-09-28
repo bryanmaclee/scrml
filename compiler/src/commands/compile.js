@@ -12,6 +12,7 @@ import { resolve, dirname, join, relative, basename } from "path";
 import { fileURLToPath } from "url";
 import { compileScrml, scanDirectory } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
+import { hasApplicationScopeRefusal, noFilesWrittenLine } from "./refusal-gate.js";
 import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "./diagnostic-format.js";
 import { serializeBlockAnalysis } from "../block-analysis.ts";
 
@@ -510,11 +511,21 @@ function runOnce(opts, selfHostModules = null) {
     console.error(c.yellow(line));
   }
 
+  // g-session-config-refusal-still-writes-dist — an E-MW-008 refusal is decided
+  // before any byte reaches the output directory (see ./refusal-gate.js). E-MW-007
+  // is not raised here: it is a server-entry fact and `compile` emits none.
+  let refusedWrite = false;
+  const beforeWrite = ({ errors }) => {
+    refusedWrite = hasApplicationScopeRefusal(errors);
+    return !refusedWrite;
+  };
+
   let result;
   try {
     result = compileScrml({
       inputFiles,
       outputDir,
+      beforeWrite,
       verbose,
       convertLegacyCss,
       embedRuntime,
@@ -618,6 +629,7 @@ function runOnce(opts, selfHostModules = null) {
     const counts = [c.red(`${errCount} error${errCount !== 1 ? "s" : ""}`)];
     if (warnCount > 0) counts.push(c.yellow(`${warnCount} warning${warnCount !== 1 ? "s" : ""}`));
     console.error(c.bold(c.red("FAILED")) + ` — ${counts.join(", ")}`);
+    if (refusedWrite) console.error(noFilesWrittenLine(outRel));
     return { success: false };
   }
 
