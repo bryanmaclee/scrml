@@ -39857,9 +39857,12 @@ cannot be one instance).
 
 **An `<each>` row is a multi-instance context (S439 ruling #10).** An engine is a `single` declaration
 (§66.13.3), and the invariant's many-instances argument applies to an `<each>` row word for word: an `<engine>`
-— that is, a `single` declaration — inside an `<each>` row template SHALL be refused with
-`E-COMPONENT-ENGINE-SCOPE`. The message SHALL name the per-row form: an ordinary (non-`single`) declaration,
-which gets a keyed instance per row (§66.7.3). Same rule as §51.0.K.
+(in §66 terms, a `single` declaration carrying a transition graph) inside an `<each>` row template SHALL be
+refused with `E-COMPONENT-ENGINE-SCOPE`. The message SHALL name the per-row form: an ordinary (non-`single`)
+declaration, which gets a keyed instance per row (§66.7.3). Same rule as §51.0.K.
+> ⚑ **OPEN (not ruled):** whether a plain `single` declaration WITHOUT a transition graph is refused in an
+> `<each>` row.
+>
 > **Provenance:** ruling:user-voice-scrml.md S439 #10 "all recs" (Rec: refuse it).
 
 > ✅ **RULED S435 — O5** (bryan: *"yes, table, 1i, 2ii"*): `rule=` unchanged; `effect=` / `<onTransition>` / `history` / `internal:rule=` / `<onTimeout>` / `<onIdle>` carry over as features of a field's transition graph — per instance on a non-`single` declaration, timers disposed with the instance; `var=` / `name=` / §51.0.C auto-naming RETIRE (the declaration's name is the variable); `derived=` RETIRES (a locked declaration with a reactive initializer is derived, §66.9); `.advance(.X)` is kept as the loud write; a nested `<engine>` becomes an enum-valued child field with its own graph; cross-file `<EngineName/>` becomes `<*name/>` of an exported `single`; engine `server` becomes the declaration `server` modifier (§66.16). **(1i)** state-child BODIES stay: a state-child's body is that variant's markup, rendered wherever the field renders. **(2ii)** `accepts=` + message arms are KEPT but CONFINED: an arm may only CHOOSE a write, and every write is still checked against `rule=` — a dispatch convenience, not a second transition definition. The prior OPEN text follows for the record.
@@ -40369,7 +40372,7 @@ emitter). Every code below is Nominal on impl#1.
 |---|---|
 | **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4) — including an `<each>` row template (S439 ruling #10; the message names the per-row ordinary declaration, §66.7.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4) — including an `<engine>` (a `single` declaration carrying a transition graph) in an `<each>` row template (S439 ruling #10; the message names the per-row ordinary declaration, §66.7.3; a plain `single` without a graph in a row is OPEN). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2) — including a graph transition on a SUB-FIELD written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 
