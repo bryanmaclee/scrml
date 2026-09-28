@@ -27,3 +27,12 @@ No second SHALL contradicts these; no SPEC text grants a handler exemption.
 - Post-migration: files=2072, withErrors=714, E-ERROR-002 files=2 — per-file error-code sets IDENTICAL to before (diff empty: nothing newly accepted, nothing newly rejected).
 - sample server-failable-001 migrated to a non-failable wrapper fn (not inline `!{}`): an inline guarded handler block does NOT await a server call (pre-existing handlerBlock bug), a function body does.
 - Tests: unit+integration+conformance 25722 pass / 1 fail (defer-statement fixture with `onclick=work()` failable — migrated) ; browser 48 fail vs base 50 (base extra = TodoMVC dist env gap), no new; root/lsp/commands 6834/0.
+
+## SPEC + gap (commit e9917c46e)
+- §19.4.3 OPEN block replaced with ruled text + provenance; §34 rows (x2) do not mention the exemption — unchanged. SPEC-INDEX regenerated.
+- known-gaps g-e-error-002-handler-exemption-depends-on-statement-count → RESOLVED S440 (entry edit only).
+
+## Conformance pins
+- 4 new cases under conformance/cases/error/: handler-unhandled-failable-{multi-stmt,one-stmt,bare-and-expr}-pos + handler-failable-reference-and-guard-neg (runtime: click guarded → @r=7).
+- Bite check on a base-tree extract (git archive d244a6f3b): 3 of 4 FAIL at base (multi-stmt passes at base, as expected — it already fired); the guard-neg fails at base at RUNTIME (guard dropped).
+- conformance: base 1041/1048 (+7 xfail) → after 1045/1052 (+7 xfail, same 7).
