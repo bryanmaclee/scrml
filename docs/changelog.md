@@ -2,6 +2,15 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S439 — 2026-09-27/28 (bryan · ASUS)
+
+The bootstrap got its first measurement against the conformance corpus, and a typer. M3 items 1–3 were built and adversarially reviewed; the corpus grade was rebuilt around a bite matrix after review showed the first headline certified `if=` with zero positive evidence. bryan ruled Peter's six-note queue ("all recs") and the rulings were written into SPEC after a drift review caught three widenings in the PA's own briefs.
+
+- **#1115** — return-leg to Peter for the S439 "all recs" ruling (14 items); his six notes archived; #1111 review carve-out.
+- **#1117** — bootstrap M3 item 1: the TYPER + scope pass in `compiler/self-host-v2/analyze.scrml`. Program cells are file-scoped (§7.6.1), which closed a SILENT cross-file mis-link; §7.5.1 position 1 enforced on annotated locals; a local's type = annotation or the join of its assignments (§42.3.1). The governing-sentence gate changed 7 of 11 pinned codes (3 shapes are legal). The mutation harness now fails loudly on NOT-RUN/GREEN. Four review rounds; a pre-set stop condition ended round 3's regression with one guard.
+- **#1120** — SPEC text for the S439 rulings (§40.8, §18.0.1, §47.1.1, §50.8.5, §5.2.2, §51.0.E/K, §66.13.4, §6.7.2.1, §19.4.3); #14 left OPEN with its measured count; new HIGH gap `g-handler-loop-binder-write-creates-window-global`.
+- **Queued (`--auto`)**: #1118 — M3 item 3, the ingest shim + conformance footprint grader + bite matrix (first corpus grade: 18/18 runtime passes, 32 certified constructs, NOT-YET 573 = the ranked work queue); #1122 — M3 item 2, analyze facts split into six NodeId-indexed family tables (inert: 459 + 128 programs, 0 changed).
+
 ## S438 — 2026-09-27 (peter · P-Tech1)
 
 Security and bootstrap-blocker lane under the S435 TS policy, at full throttle with 17 adversarial review rounds across seven arcs. Five PRs landed, each on green with the `tracking` name set matched against main. Three fixes are parked on hold refs. About 25 gaps were filed.
