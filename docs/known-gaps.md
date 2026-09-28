@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 153 | 4 |
-| MED | 338 | 0 |
+| MED | 342 | 0 |
 | LOW | 138 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -19888,6 +19888,24 @@ Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + t
 ### g-per-route-chunk-dir-named-after-absolute-source-path — `--emit-per-route` on pages with no route map names each chunk dir after the mangled ABSOLUTE source path — `NEW S438; LOW; open`
 <!-- @gap id=g-per-route-chunk-dir-named-after-absolute-source-path sev=LOW status=open locus=searched:compiler/src/codegen/route-splitter.ts(chunk descriptor route-path derivation when no route map applies)—not-traced prov=empirical:S438-peter-per-route-build-of-app-page-and-app-sub-deep-identical-on-base-072741ca -->
 A `--emit-per-route` build of pages with no route map writes chunks to `dist/C__Users_<…>_app_page/_anonymous.initial.<hash>.js` (the absolute source path with separators mangled to `_`), and `chunks.json` points at those dirs. The output layout therefore depends on the machine and checkout location — not reproducible across hosts — and leaks the builder's filesystem path into shipped URLs. **PRE-EXISTING**: byte-identical on `072741ca` (measured by the S438 #1045 F1 repro; the S239 review confirmed). Direction (unverified): derive the chunk dir from the dist-relative page path (the same `pathFor` / `stripPagesPrefix` computation the page's own artifacts use) when no route map applies.
+
+## §S440 — coercion inventory + bootstrap runtime (2026-09-28; PA-reproduced unless marked)
+
+### g-eq-001-misses-typed-cell-operands — `==` between cross-type typed CELLS compiles clean; only literal operands fire E-EQ-001 — `NEW S440; MED; open`
+<!-- @gap id=g-eq-001-misses-typed-cell-operands sev=MED status=open locus=compiler/src/gauntlet-phase3-eq-checks.js(PA-located-verify — the §34 row names it as the emitter; not traced) prov=spec:§45.3-"==-between-incompatible-types-is-a-compile-error" -->
+PA-reproduced S440 on `d244a6f3b`: `<n>: int = 3` · `<s>: string = "8"` · `${ @n == @s }` compiles with no diagnostic, while `${ 0 == false }` and `${ 3 == "3" }` in the same file each fire E-EQ-001. §45.3: *"`==` between incompatible types is a compile error. `0 == false` is E-EQ-001. The type system prevents cross-type comparison before the operator is evaluated."* Conformance restoration (newly-rejecting); the S440 truthiness measurement counts the corpus sites the fix would newly reject. Under the S435 TS policy impl#1 carries unless the bootstrap needs it; the bootstrap typer implements §45.3.
+
+### g-interpolation-renders-not-as-literal-null — `${expr}` whose value is `not` renders the text `"null"` — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-interpolation-renders-not-as-literal-null sev=MED status=open locus=searched:SPEC §7.4.2(~L6228 "String() coercion … `null` and `undefined` produce the literal strings")—the SPEC itself specifies it prov=ruling:user-voice-scrml.md-S440-coercion-follow-ups-#3 -->
+The SPEC sentence at §7.4.2's interpolation rules says interpolation uses JS `String()`, so `not` (JS `null`) renders `"null"`. RULED S440 (#3): `${not}` renders NOTHING (consistent with S89 and with `class=` treating `not` as remove-the-attribute). Owed: the SPEC amendment (next S440 SPEC pass) and the bootstrap emitter; impl#1 carries (S435 policy).
+
+### g-select-enum-bind-stores-raw-string — `bind:value` on a `<select>` bound to an enum cell stores the raw string when no variant matches — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-select-enum-bind-stores-raw-string sev=MED status=open locus=searched:SPEC §5.4(~L1641 "`(EnumTypeName_toEnum[event.target.value] ?? event.target.value)`")—the SPEC itself specifies the fallback prov=ruling:user-voice-scrml.md-S440-coercion-follow-ups-#4 -->
+The SPEC's generated `onchange` coercion for an enum cell is `toEnum[value] ?? value`, so an unmatched `<option value>` writes a string into an enum-typed cell. RULED S440 (#4, PA reading flagged for veto): if the cell admits `not`, an unmatched value writes `not`; otherwise the write is refused (cell unchanged) and static `<option value=>` literals are checked against the variant set at compile time. Owed: SPEC amendment + bootstrap; impl#1 carries.
+
+### g-bootstrap-runtime-flush-not-exception-safe — slice runtime `flush()` stops on a throwing effect, leaving queued effects stale — `NEW S440; MED; open`
+<!-- @gap id=g-bootstrap-runtime-flush-not-exception-safe sev=MED status=open locus=compiler/self-host-v2/slice-m1/runtime/runtime.js(flush) prov=empirical:S440-reland-r2-review-zzr2e-A1-A2 -->
+Reviewer-executed (S440 re-review of the #1109 re-land, probe `zzr2e.test.js` A1/A2): a watcher hole that makes an illegal transition throws during the Commit's flush; the stored state is fully applied (`{note:"x", phase:"Live"}`) but the rendered text shows `G: Draft/Draft/x` — effects queued after the throwing one never ran. Not a partial apply of the Commit; a stale-view failure. Fix direction: run every queued effect (collect errors, rethrow after the loop), per the dpa-051 §8.5 new runtime core.
 
 ## §S438b — pre-existing defects surfaced by the S239 review of the F12–F14 fix (2026-09-27; reviewer-reproduced, reproducers in the S438 session scratch `rv-arms/`; NOT caused by the F12–F14 branch)
 
