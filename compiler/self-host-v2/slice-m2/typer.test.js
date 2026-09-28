@@ -606,3 +606,35 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
     expect(inApp("    <let s:string=\"\"/>\n    function f() { @s = @s + \"1\" }")).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Final repair (round 3, H1): a FIELD write `a.n = v` on a local is a field
+// edit (§66.11.4: "a field is writable along its own contract"), not a write
+// of the local. The binder records it as a local rebinding of the ROOT local
+// and computes no field type for it, so it is left unchecked (provable-or-
+// silent) and does not widen the local's joined type. Only a BARE `a = v` is
+// checked against the local's annotation / joined into its type.
+// ---------------------------------------------------------------------------
+describe("R3-H1 — a field write through a local is not a write of the whole local", () => {
+  const O = "    type O:struct = { let v: string | not, let n: int }\n    <let o:O=({ v: not, n: 0 })/>\n";
+  for (const [name, body, markup] of [
+    ["`a.n = 2` on `let a: O`", "    function f() { let a: O = { v: \"x\", n: 1 }\n a.n = 2\n @o = a }"],
+    ["`a.v = not` on `let a: O` (`v: string | not`)", "    function f() { let a: O = { v: \"x\", n: 1 }\n a.v = not\n @o = a }"],
+    ["`a.v = \"q\"` on `let a: O = @o`", "    function f() { let a: O = @o\n a.v = \"q\" }"],
+    ["the inline handler block form", "", "<button onclick={ let a: O = @o; a.n = 2; @o = a }>x</button>"],
+  ]) {
+    test(`legal — ${name}`, () => { expect(inApp(O + body, markup ?? "<p>x</p>")).toEqual([]); });
+  }
+  test("legal — `d.value = \"x\"` on `let d: dropdown = @dropdown`", () => {
+    expect(inApp("    function f() { let d: dropdown = @dropdown\n d.value = \"x\" }")).toEqual([]);
+  });
+  test("silent (this path computes no field type) — `a.n = \"s\"` on `let a: O`", () => {
+    expect(inApp(O + "    function f() { let a: O = @o\n a.n = \"s\" }")).toEqual([]);
+  });
+  test("still fires — a BARE `a = \"s\"` into `let a: O`", () => {
+    expect(inApp(O + "    function f() { let a: O = @o\n a = \"s\" }")).toEqual(["E-TYPE-031"]);
+  });
+  test("E-TYPE-031 — an unannotated `let a = @o` keeps type `O` after `a.n = 2` (the field write does not join `int` in)", () => {
+    expect(inApp(O + "    <let x:int=0/>\n    function f() { let a = @o\n a.n = 2\n @x = a }")).toEqual(["E-TYPE-031"]);
+  });
+});

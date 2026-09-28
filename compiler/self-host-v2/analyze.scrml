@@ -3993,15 +3993,19 @@ ${
             const wt: Type | not = writeValueType(env.t, ws[0].w)
             if (wt is some) placeType = known(wt)
         } else {
-            // a local rebinding (§66.11.5): it widens the local's joined type
+            // a local rebinding (§66.11.5): it widens the local's joined type.
+            // Only a BARE local target (`a = v`) is the local itself; `a.n = v`
+            // is a field edit of it (§66.11.4) whose field type this path does
+            // not compute — unchecked (provable-or-silent), and not joined.
             const ls: Sym | not = factSym(f)
+            const bareLocal: boolean = exprName(target) != ""
             if (ls is some) {
-                placeType = tLocal(env, ls)
+                if (bareLocal) placeType = tLocal(env, ls)
                 const la: Type | not = annotOf(env.t, ls)
-                if (la is some) {
+                if (la is some && bareLocal) {
                     // a write to an annotated local: checked like a cell write
                     ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))
-                } else {
+                } else if (la is not && bareLocal) {
                     ts1 = contribute(ts1, ls, r.vt)
                 }
             }
