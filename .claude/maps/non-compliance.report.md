@@ -1,6 +1,75 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-27T18:00:00Z  commit: 9941a504c
+# generated: 2026-09-28T04:40:15Z  commit: fb21983a
+# ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
+# `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
+# merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
+# `origin/main` at fetch (no fork this pass). Of the 9 commits, **3 are the PRIOR session's own maps/wrap
+# commits** (`c65f54b4` #1111 maps-refresh-to-9941a504c, `88a75073` #1110 wrap, and the inbox commit `0fc87bf9`
+# #1115 is bookkeeping only) — **6 are source-relevant**: `072741ca` #1109, `98d94e96` #1112, `b7c86323` #1113,
+# `8c55f518` #1114, `afc2308b` #1116, `fb21983a` #1119.
+# ⛑ **FIGURES RE-EXECUTED AT `fb21983a`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat — `package.json` untouched this window) · `compiler/src` **266,944 lines / 211 files**
+# per FACTS (+939 lines, files FLAT vs `9941a504c`'s 266,005/211) · test files **1,509** (+3:
+# `conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js`, `clientjs-import-disk-rebase-gate-eq-write.test.js`,
+# `match-arm-shapes-f12-f14.test.js`, all under `compiler/tests/` — `compiler/self-host-v2/slice-m2` gained 4
+# more `*.test.js` OUTSIDE this count, per FACTS' own stated scope exclusion) · `compiler/SPEC.md` **40,399**
+# lines (+51) · conformance **1047** cases (FLAT) · §34 catalog **835** rows (+3), range `20331..21237`.
+# `bun conformance/run.ts` (impl#1) -> **1040/1047 pass + 7 xfail** — FLAT vs `9941a504c`.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **943 -> 948** · W 183 FLAT · I 10 FLAT · H 2
+# FLAT · unique codes **800 -> 803**. **ADDED = {`E-MATCH-ALT-BINDING`, `E-SCHEMA-012`, `E-SCHEMA-013`}; REMOVED
+# = EMPTY.**
+# ⛑ **WINDOW HEADLINES (verify in source, not here):**
+#   · **#1119** (`g-impl1-match-miscompiles` F12/F13/F14) — a `match` alternation arm (`.A | .B :> r`) is now
+#     recognised at ANY arm position, not only first (`ast-builder.js` `armPatternChainArrowOffset` /
+#     `scanArmPatternAlternate`; `emit-control-flow.ts` Form 0w/0/2 + `armCondition` shared by `emit-logic.ts`);
+#     a NAMED-field payload arm binding 5+ fields is no longer truncated by the old 20-token paren-scan cap
+#     (`scanPastBalancedParens`, and the native-parser mirror `scanPastPayloadParen`); a brace inside a CLOSED
+#     quoted string on the same line no longer mis-scopes a block (`block-splitter.js`
+#     `braceIsQuotedStringContent`, tokenizer-backed, cached per line). A payload-BEARING alternation
+#     (a binding, a named field even when discarded, a nested/literal pattern) now FAILS CLOSED —
+#     **`E-MATCH-ALT-BINDING`** — instead of silently dropping the arm or gluing it onto its neighbor.
+#   · **#1116** (§39.2/§14.8.10 tenant floor) — a `<schema>` raw `CREATE TABLE` head naming a
+#     schema/database-qualified table is rejected (**`E-SCHEMA-012`**); a known-kind head whose name the
+#     compiler cannot read through to a follower is rejected (**`E-SCHEMA-013`**) — both were previously
+#     silent, tenant-isolation-inert gaps (`schema-differ.js` `findRejectedCreateTableHeads`,
+#     `gauntlet-phase1-checks.js` `<schema>` body checks).
+#   · **#1114** (§20.5.1) — route-inference Step 8b (protect= auto-escalation / `<page auth="required">`) no
+#     longer stamps secure session defaults that outrank a unit's OWN `<program>`'s declared session config
+#     (`g-route-inference-8b-session-defaults-outrank-program-declaration`); the session-field resolution order
+#     is unchanged, but Step 8b now leaves its fields undefined unless the unit itself declares them
+#     (`session-config-resolve.ts` `countUnitProgramNodes`, `route-inference.ts`, `emit-server.ts` now reads the
+#     ONE resolver instead of `authMiddlewareEntry.sessionExpiry` directly).
+#   · **#1112** (§20.5.1) — `E-MW-008`'s program-site count no longer counts a `kind="tool"` file as a
+#     competing web application (`g-mw008-counts-headless-tool-programs`; `codegen/index.ts`
+#     `_collectProgramSites` now asks the emit dispatch's own `isToolProgram` per FILE, not per node).
+#   · **#1113** (#1045 F1) — client JS relative-import re-basing now applied in BOTH the gate and the write
+#     phase (`compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, NEW).
+#   · **#1109** (dpa-051 bootstrap slice M2, `compiler/self-host-v2/`) — the front end (`parse.scrml` 1641L,
+#     `lower.scrml` 993L NEW) proves the lowered Core EQUALS M1's hand-built oracle (Fork-A proof); `ast.scrml`
+#     (175L NEW) is the parser's own AST; `core/check/print/lex/walk/measure.scrml` and
+#     `slice-m1/runtime/runtime.js` all took matching edits; `slice-m2/` (16 files, harness + fixtures +
+#     4 `*.test.js`) is the M2 test bed; CI `gate`'s bootstrap step now also runs `slice-m2/` and re-runs the M1
+#     suite over LOWERED programs (`SLICE_CORE=lowered`).
+# ⚑ **RE-RUN AT THIS SHA ON THIS (WINDOWS) CLONE:** `bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass;
+# `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass; `bun scripts/lint-no-default-arm.js`
+# -> 26 files, 0 violations; `bun test ./compiler/self-host-v2/slice-m2/` -> **72/74 pass, 2 FAIL** — both in
+# `parse.test.js`'s "the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)" (`counter.scrml`,
+# `lib/dropdown.scrml`+`app.scrml`), comparing a `\r\n`-checked-out fixture against a bare-`\n` SPEC extract —
+# a WINDOWS-CRLF-CHECKOUT artifact of this clone (same class as the known `scrml-regen-scripts-crlf-broken-on-windows`
+# pattern), NOT a landed defect and NOT reproduced by this session; see test.map.md. Not filed as a new gap (no
+# code moved to cause it; a checkout-line-ending property, orthogonal to #1109's content).
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S438 block were grep-derived at `fb21983a`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ S438 NON-COMPLIANCE PASS ━━━━━━━
+# scan mode: INCREMENTAL, targeted at the maps-refresh brief's changed-file list `9941a504c..fb21983a` — NOT a
+# full repo re-scan. In-scope docs the window touched: `docs/known-gaps.md`, `docs/pr-reviews.md`,
+# `docs/changelog.md`, `master-list.md`, `compiler/self-host-v2/slice-m2/progress.md` (NEW, resolves the S437b
+# ⏳ carry). `handOffs/**` out of scope (historical hand-offs). Findings: `## Summary — S438 pass` below.
+# Report only — nothing moved or edited.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437b HEADER (stamp `9941a504c`, 2026-09-27), CARRIED FOR PROVENANCE. ITS FIGURES ARE `9941a504c`-ERA. ━━━━━━━
 # ⛑ **S437b STAMP — `d02738767` -> `9941a504c`. 7 COMMITS (#1102-#1108), SAME SESSION (S437, second wrap-6c pass).**
 # MAP-STAMP RULE at write time: `git fetch origin && git merge --ff-only origin/main` -> HEAD **`9941a504c`** (== `origin/main` at fetch;
 # `origin/main` then advanced to `072741ca9` mid-pass — see ⏳);
@@ -120,6 +189,53 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S438 pass (this pass, stamp `fb21983a`)
+
+**Scope: INCREMENTAL, targeted at this window's source-relevant landing** (maps refresh brief, not a full
+re-scan). Docs touched in-window: `docs/known-gaps.md` (+295/-~), `docs/pr-reviews.md` (+10, ledger entries only
+— verdict markers for #1102-#1111), `docs/changelog.md` (+12, ledger), `master-list.md` (+1/-1, mechanical
+`@generated:recent-sessions` line churn), `handOffs/delta-log.md` + `handOffs/incoming/*` (OUT OF SCOPE per the
+scope principle — historical hand-offs), `compiler/self-host-v2/slice-m2/progress.md` (NEW).
+
+Total docs checked this pass: 5 in-window (the two ledgers, known-gaps.md, master-list.md, slice-m2/progress.md)
++ re-execution of the two carried-open findings.
+Compliant: 5 (below).
+Non-compliant: 0 new.
+Uncertain: 0 new.
+Prior S437b items re-executed: 2 — **1 RESOLVED, 1 STILL LIVE** (table below).
+⏳-carried item from S437b: **RESOLVED THIS PASS** (`slice-m2/progress.md` scanned; see below).
+
+Gates re-run at `fb21983a`: `bun scripts/facts.ts --check` PASS · `bun scripts/regen-spec-index.ts --check` OK
+(72/72 sections, 0 stale) · `bun scripts/conflict-marker-gate.ts` PASS (8,751 files, 0 markers) ·
+`bun scripts/state.ts --check` **FAIL on `@generated:recent-sessions` (master-list.md)** — expected mid-session
+state (this session's own wrap entry does not exist yet; not a maps-pass defect) — plus the standing WARN-only
+known-gaps heading/marker drift, **unchanged at 52** (re-counted, not carried).
+
+### Re-execution of the S437b findings
+| item | how re-checked at `fb21983a` | result |
+|---|---|---|
+| N-S437b-1 `known-gaps.md` — two gaps stale-open after #1106 fixed them | `grep -n 'status=' docs/known-gaps.md` for both gap ids | **RESOLVED** — `g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements` (`:19839`) and `g-multi-statement-handler-message-gives-the-retired-l19-fix` (`:19844`) both now `status=resolved resolved=14bce6376` |
+| N-S437b-2 `known-gaps.md` — `g-library-meta-import-async-not-awaited` moot by ruling | `grep -n 'status=' docs/known-gaps.md` for the gap id | **STILL LIVE** — `:12250` still `status=open`; not actioned this window (not touched by any of the 9 commits in scope) |
+
+Standing items NOT re-executed this pass (out of the brief's scope — no file in the changed-files list touches
+their locus): N-S405-1 (`E-CG-ENUM-BINDING-COLLISION`/`E-CG-SQL-FN-UNVERIFIABLE-SPAN`, re-verified via
+error.map.md's own S438 section instead — still 0 SPEC mentions), N-S422-1/2/3, N-S437b-3
+(`docs/PA-SCRML-REFERENCE.md` B18 locus drift). Treat as carried, not re-confirmed.
+
+### Docs scanned this window — verdicts
+| doc | verdict |
+|---|---|
+| `docs/known-gaps.md` | compliant for the window's edits (status flips match executed behaviour; heading/marker drift is a STANDING, already-tracked WARN, not new) |
+| `docs/pr-reviews.md` · `docs/changelog.md` | compliant (ledger; matches the commits landed) |
+| `master-list.md` | compliant — mechanical `@generated` section churn only |
+| `compiler/self-host-v2/slice-m2/progress.md` | **compliant** (append-only dispatch log, same convention already ruled on `slice-m1/progress.md`; resolves the S437b ⏳ carry) |
+| `handOffs/delta-log.md`, `handOffs/incoming/**` | out of scope (historical hand-offs) — not scanned, per the scope principle |
+
+**No new NON-COMPLIANT doc found this pass.** No doc introduced this window describes a feature the landed code
+does not implement; the three new error codes (`E-MATCH-ALT-BINDING`, `E-SCHEMA-012`, `E-SCHEMA-013`) all have a
+live emit site AND a passing regression test (verified in error.map.md's S438 section), so none is SPEC-ahead.
+
 
 ## Summary — S437b pass (this pass, stamp `9941a504c`)
 
