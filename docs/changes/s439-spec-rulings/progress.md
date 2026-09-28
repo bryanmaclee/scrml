@@ -1,2 +1,4 @@
 # progress — s439-spec-rulings
 
+- #14 MEASURED FIRST (before any SPEC edit): temporary visitAttr probe (reverted, never committed) over corpus-emit-differential capture, 2071/2071 enumerated. Unhandled explicit-`!` call as a handler's WHOLE body (today exempt): 10 files / 11 attrs, all bare `onX=fn()`/`onX=fn` shape (5 onclick + 5 formFor onsubmit); braced/`${}` one-statement blocks: 0. CPS-implicit: 34 attrs (W-CPS-NEEDS-FAILABLE path). Textual cross-check over unobserved files: 0. Non-zero under the §5.2.3 equivalence reading -> direction NOT written.
+- #2 §40.8 — before (S378 note, last sentence): "Whether any further shape is logic rather than text is an open operator question per-shape, not an inference from this list." Added S439 #2 bullet after it (program/page only; channel -> OPEN).
