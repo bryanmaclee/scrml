@@ -2614,12 +2614,10 @@ function armPatternChainArrowOffset(peek, k) {
 
 /**
  * For an arm-pattern chain beginning at peek-offset `k` (one that
- * armPatternChainArrowOffset accepted), return the first alternate token that
- * carries a payload BINDING when the chain has two or more alternates — or
- * null. A binding is an identifier inside the payload parens that is neither
- * the `_` discard nor a field name (an IDENT directly followed by `:`).
- * `.P(_) | .Q(_)` and `.P(a: _) | .Q(a: _)` bind nothing; `.P(a: x) | .Q(a: x)`
- * and `.P(x) | .Q(x)` do.
+ * armPatternChainArrowOffset accepted), return the first alternate token whose
+ * payload parens hold anything but POSITIONAL `_` discards when the chain has
+ * two or more alternates — or null. `.P(_) | .Q(_)` passes; `.P(a: x) | .Q(a: x)`,
+ * `.P(x) | .Q(x)`, `.P(a: _) | .Q(a: _)` and `.M(.X) | .N(.Y)` are returned.
  */
 function armChainBindingAlternate(peek, k) {
   let i = k;
@@ -2634,11 +2632,16 @@ function armChainBindingAlternate(peek, k) {
     if (offender === null && t && ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::"))) {
       const p = peek(start + 2);
       if (p && p.kind === "PUNCT" && p.text === "(") {
+        // Only POSITIONAL `_` discards are lowerable in an alternation (codegen
+        // compares tags only). Anything else in the parens — a binding, a
+        // NAMED field even when discarded (`a: _`), a nested/literal pattern —
+        // is rejected (S438 final review: `.P(a: _) | .Q(a: _)` was silently
+        // dropped).
         for (let j = start + 3; j < end - 1; j++) {
           const tk = peek(j);
-          if (!tk || tk.kind !== "IDENT" || tk.text === "_") continue;
-          const nx = peek(j + 1);
-          if (nx && nx.kind === "PUNCT" && nx.text === ":") continue; // field name
+          if (!tk) continue;
+          if (tk.kind === "IDENT" && tk.text === "_") continue;
+          if (tk.kind === "PUNCT" && tk.text === ",") continue;
           offender = t;
           break;
         }
@@ -4792,9 +4795,10 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (_altBind) {
         errors.push(new TABError(
           "E-MATCH-ALT-BINDING",
-          "A match arm that lists several variants with `|` cannot bind their payload fields " +
-          "(e.g. `.P(a: x) | .Q(a: x) :> x`). Give each variant its own arm with its own binding, " +
-          "or use `_` discards (`.P(_) | .Q(_) :> …`) when the body does not need the payload.",
+          "A match arm that lists several variants with `|` cannot carry payload patterns " +
+          "(bindings such as `.P(a: x) | .Q(a: x)`, named fields such as `.P(a: _)`, or nested / literal " +
+          "patterns). Give each variant its own arm, or use positional `_` discards " +
+          "(`.P(_) | .Q(_) :> …`) when the body does not need the payload.",
           spanOf(_altBind, _altBind),
         ));
       }

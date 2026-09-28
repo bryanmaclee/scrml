@@ -2946,13 +2946,15 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
     // §18 alternation arms: any alternate that names a payload-bearing variant
     // (in _variantFields) requires tagVar normalization so the OR-chain compares
     // .variant strings rather than the tagged-object value itself.
-    // An alternation arm normalizes whenever the registry cannot vouch that
-    // every alternate is a unit variant: with NO registry (library mode) the
-    // `.variant` tag is extracted unconditionally — it is correct for unit
-    // values too — because `.P(_) | .Q(_)` / `.P | .Q` over a payload enum
-    // otherwise compared the raw object against "P" and never matched,
-    // silently, with E-TYPE-020 satisfied (g-impl1-match-miscompiles F12
-    // review F1b). With a registry, unit-only alternation keeps plain equality.
+    // An alternation arm extracts the `.variant` tag UNCONDITIONALLY when no
+    // variant registry is installed (library mode, and program-mode SERVER
+    // functions, which are emitted before setVariantFieldsForFile runs) — the
+    // tag is correct for unit values too — because `.P(_) | .Q(_)` / `.P | .Q`
+    // over a payload enum otherwise compared the raw object against "P" and
+    // never matched, silently, with E-TYPE-020 satisfied
+    // (g-impl1-match-miscompiles F12 review F1b). With a registry installed it
+    // extracts only when some alternate is a registered PAYLOAD variant (the
+    // registry records payload variants only), as for a singleton arm.
     if (a.tests && a.tests.length > 1) {
       return _variantFields ? a.tests.some(t => _variantFields!.has(t)) : true;
     }

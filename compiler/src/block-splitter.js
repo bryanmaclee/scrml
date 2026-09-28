@@ -487,25 +487,11 @@ function braceIsQuotedStringContent(source, bracePos, segStart, cache) {
   if (seg.ranges === null) {
     // Closed quote-string spans [s, e) on this segment, in source order.
     const ranges = [];
-    // S438 review F3 — a segment that OPENS with `/` continues an expression
-    // from the previous line when that line ended on a value (`a\n  / b`):
-    // there the `/` is division, but a tokenizer started cold at the line
-    // reads it as a regex opener and swallows the line's strings. Start the
-    // tokenizer in expression-continuation state by prefixing one synthetic
-    // operand (offsets shifted so spans stay absolute). A line-leading regex
-    // statement (previous line ended on `;`/`{`/`}`/nothing) is left cold.
-    let prefix = "";
-    {
-      let f = segStart;
-      while (f < seg.lineEnd && (source[f] === " " || source[f] === "\t")) f++;
-      if (source[f] === "/" && source[f + 1] !== "/" && source[f + 1] !== "*") {
-        let b = segStart - 1;
-        while (b >= 0 && /\s/.test(source[b])) b--;
-        if (b >= 0 && /[A-Za-z0-9_$)\]"'`]/.test(source[b])) prefix = "_ ";
-      }
-    }
+    // Known residual (S438 final review): a segment OPENING with `/` that
+    // continues an expression from the previous line (`a\n  / b`) is read as
+    // a regex opener by this cold-started tokenizer. See the gap's F14 line.
     try {
-      const toks = tokenizeLogic(prefix + source.slice(segStart, seg.lineEnd), segStart - prefix.length, 1, 1, []);
+      const toks = tokenizeLogic(source.slice(segStart, seg.lineEnd), segStart, 1, 1, []);
       for (const t of toks) {
         if (t.kind !== "STRING" || !t.span) continue;
         const s = t.span.start;
