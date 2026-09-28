@@ -32,3 +32,12 @@ OLD guard on CRLF: blocks found = 0 ; counter found = false
 NEW guard on CRLF: 66.19.1 ok = true ; 66.19.3 ok = true
 ```
 F3 is test-only → committed alone. F1/F2 tests stay uncommitted until their fix lands (one commit each).
+
+## 2026-09-28 — F1 + F2 re-applied (GREEN)
+- F2: analyze Env gains `narrows: NarrowB[]` (+ withNarrow / lookupNarrow); resolveAt resolves a narrowed `@h`
+  to `NInst(iDecl, Narrowed(c))`, maybe=false (Peter's `Fact.FInst` → the #1122 names family `addName`).
+  resolveGiven pushes the subject's narrowing. The new typer (#1117) needed nothing: Peter's tests pass.
+- F1: SpreadWrite gains `tmp: Sym | not` (the typer's `oneWrite` — new since Peter's base — carries `not`);
+  both spread resolvers mint the local; lower emits Lets before Writes when ≥2 overrides.
+- slice suites: 396 pass / 0 fail; SLICE_CORE=lowered slice-m1 73/73; lint-no-default-arm 0 violations.
+- Next: Part 2 (atomic commit) — this F1 shape still applies override 1 before override 2's runtime edge check.

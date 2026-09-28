@@ -110,7 +110,14 @@ ${
     export type WriteFact:struct = { cap: Sym, inst: InstRef, edit: EditKind, check: Check }
     // One override of a spread write `@x = { ...@x, f: v }` (O58 (b)): a
     // FieldAt edit whose value is the object literal's prop number `prop`.
-    export type SpreadWrite:struct = { w: WriteFact, prop: int }
+    // `tmp` is the local that value is evaluated into BEFORE any override is
+    // written: the literal is one value built from one snapshot (§66.10 item 1),
+    // so `{ ...@p, x: @p.y, y: @p.x }` swaps exactly as the genuine replace
+    // `{ x: @p.y, y: @p.x }` does (§66.11.3 item 1 — legality and meaning never
+    // depend on spelling). Minted here so `lower` still decides nothing. A
+    // non-spread write viewed as one override (the typer's `oneWrite`, prop -1)
+    // has no local: `tmp` is `not`.
+    export type SpreadWrite:struct = { w: WriteFact, prop: int, tmp: Sym | not }
 
     // How an attribute of an element is used.
     export type AttrKind:enum = {
@@ -1444,6 +1451,12 @@ ${
 
     type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not }
     type RowB:struct = { bind: Sym, ty: Type | not }
+    // `@name` narrowed by an enclosing `given c = @name :> { … }` (§66.7.5, O56
+    // RULED S435: "A direct `@handle.field = …` inside the narrowed block is
+    // legal"; reads S437): inside the block `@name` IS the narrowed instance
+    // `c`, so a direct `@name.f = …` / `@name.f` there goes through `c` exactly
+    // as `c.f` does. Scoped to the block and to the handle named.
+    type NarrowB:struct = { name: string, ty: Type | not, inst: InstRef, iDecl: Sym }
 
     type Env:struct = {
         g: Globals,
@@ -1453,17 +1466,32 @@ ${
         rows: RowB[],
         handles: HandleInfo[],
         inRenders: boolean,
+        narrows: NarrowB[],
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows }
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
         const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
-                 handles: env.handles.concat(hs), inRenders: env.inRenders }
+                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows }
+    }
+
+    fn withNarrow(env: Env, n: NarrowB) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]) }
+    }
+
+    fn lookupNarrow(env: Env, name: string) -> NarrowB | not {
+        let i: int = env.narrows.length - 1
+        while (i >= 0) {
+            if (env.narrows[i].name == name) return env.narrows[i]
+            i = i - 1
+        }
+        return not
     }
 
     fn lookupLocal(env: Env, name: string) -> LocalB | not {
@@ -1651,6 +1679,12 @@ ${
     }
 
     fn resolveAt(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        // §66.7.5: inside `given c = @name :> { … }`, `@name` is the narrowed `c`.
+        const nb: NarrowB | not = lookupNarrow(env, name)
+        if (nb is some) {
+            return { x: { ty: nb.ty, inst: nb.inst, iDecl: nb.iDecl, maybe: false },
+                     st: addName(st, e.nid, NameFact.NInst(nb.iDecl, nb.inst)) }
+        }
         // O54 (a): inside x's own renders / initializers, `@x` is the current instance.
         const d: DeclSrc | not = ctxDecl(env)
         if (d is some) {
@@ -2197,7 +2231,11 @@ ${
                 const rw: RWriteFact = wholeFieldWrite(env, p, f, pr.value, st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
-                if (w is some) ws = ws.concat([{ w: w, prop: j }])
+                if (w is some) {
+                    const m: RSym = mint(st, pr.name)
+                    st = m.st
+                    ws = ws.concat([{ w: w, prop: j, tmp: m.s }])
+                }
             }
             j = j + 1
         }
@@ -2332,7 +2370,11 @@ ${
                 const rw: RWriteFact = fieldAtWrite(env, sub, f, pr.value, rv.st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
-                if (w is some) ws = ws.concat([{ w: w, prop: j }])
+                if (w is some) {
+                    const m: RSym = mint(st, pr.name)
+                    st = m.st
+                    ws = ws.concat([{ w: w, prop: j, tmp: m.s }])
+                }
             }
             j = j + 1
         }
@@ -2559,7 +2601,11 @@ ${
         st = addBind(rs.st, s.nid, BindFact.BGiven(rs.s, inst))
         const narrowed: InstRef = InstRef.Narrowed(rs.s)
         const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl }
-        return resolveBlock(withLocal(env, l), body, st)
+        let inner: Env = withLocal(env, l)
+        // the subject handle itself is narrowed inside the block too (§66.7.5)
+        const hn: string = atName(subject)
+        if (hn != "") inner = withNarrow(inner, { name: hn, ty: rs0.x.ty, inst: narrowed, iDecl: iDecl })
+        return resolveBlock(inner, body, st)
     }
 
     // =========================================================================
@@ -2791,7 +2837,7 @@ ${
 
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
-                 handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders }
+                 handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [] }
     }
 
     fn phaseB(g: Globals, st0: AS) -> AS {
@@ -2812,7 +2858,7 @@ ${
         for (const fs of g.fns) {
             let hs: HandleInfo[] = []
             if (fs.info.file == g.entry) hs = progHandles
-            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false }
+            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [] }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
                 const rs: RSym = mint(st, p.name)
@@ -3628,7 +3674,7 @@ ${
         }
     }
 
-    fn oneWrite(w: WriteFact) -> SpreadWrite { return { w: w, prop: -1 } }
+    fn oneWrite(w: WriteFact) -> SpreadWrite { return { w: w, prop: -1, tmp: not } }
 
     fn isReset(f: EffectFact | not) -> boolean {
         return match f {

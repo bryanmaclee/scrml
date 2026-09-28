@@ -220,6 +220,76 @@ describe("O58 (b) — `@x = { ...@x, f: v }` is the field edit `@x.f = v`; a gen
 });
 
 // ---------------------------------------------------------------------------
+// O58 (b) + §66.10 item 1 / §66.11.3 item 1 — the spread literal is ONE value
+// built from ONE snapshot: every override value is read before any is written,
+// so the spread means exactly what the equivalent genuine replace means
+// (review of #1109, F1: sequential per-override writes let a later value read
+// an earlier override's write — a swap yielded 2,2).
+// ---------------------------------------------------------------------------
+const PAIR = `<pair export let a:string="1" export let b:string="2">
+</>
+renders <p class="pair">\${a},\${b}</p>
+`;
+
+function snapshotProgram(fns) {
+  return {
+    path: "snap.scrml",
+    src: `${PAIR}
+<program>
+    type P:struct = { let x: int, y: int }
+    <let p:P=({ x: 1, y: 2 })/>
+${fns}
+    <main>
+        <pair as=pp/>
+        <p class="pt">\${@p.x},\${@p.y}</p>
+        <button class="go" onclick=go()>go</button>
+    </main>
+</program>
+`,
+  };
+}
+
+async function spreadOutcome(fn, tag) {
+  const r = run([snapshotProgram(fn)]);
+  expect(codes(r)).toEqual([]);
+  expect(mods.check.checkCore(r.core)).toEqual([]);
+  await loadProgram(r.core, tag);
+  click(document.querySelector("button.go"));
+  return { pt: document.querySelector("p.pt").textContent, pair: document.querySelector("p.pair").textContent, r };
+}
+
+describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine replace means (§66.10.1, §66.11.3.1)", () => {
+  test("a struct-cell swap `{ ...@p, x: @p.y, y: @p.x }` swaps (the genuine replace's 2,1 — never 2,2)", async () => {
+    const genuine = await spreadOutcome("    function go() { @p = { x: @p.y, y: @p.x } }", "snap-genuine");
+    expect(genuine.pt).toBe("2,1");
+    const spread = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x } }", "snap-swap");
+    expect(spread.pt).toBe(genuine.pt);
+  });
+
+  test("override order does not matter: `{ ...@p, y: @p.x + 10, x: @p.y }` → 2,11", async () => {
+    expect((await spreadOutcome("    function go() { @p = { ...@p, y: @p.x + 10, x: @p.y } }", "snap-order")).pt).toBe("2,11");
+  });
+
+  test("a value reading its own and a sibling field sees the pre-write snapshot: `{ ...@p, x: @p.x + @p.y, y: @p.x }` → 3,1", async () => {
+    expect((await spreadOutcome("    function go() { @p = { ...@p, x: @p.x + @p.y, y: @p.x } }", "snap-self")).pt).toBe("3,1");
+  });
+
+  test("an INSTANCE spread swap `{ ...@pp, a: @pp.b, b: @pp.a }` swaps (the instance path, not only the struct path)", async () => {
+    expect((await spreadOutcome("    function go() { @pp = { ...@pp, a: @pp.b, b: @pp.a } }", "snap-inst")).pair).toBe("2,1");
+  });
+
+  test("the classification is unchanged: still one contract-checked FieldAt Write per override, values evaluated first", async () => {
+    const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x } }", "snap-shape");
+    const st = r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
+    expect(st.map((s) => s.variant)).toEqual(["Let", "Let", "Write", "Write"]);
+    expect(st.slice(2).map((s) => [s.data.edit.variant, s.data.check])).toEqual([["FieldAt", "Static"], ["FieldAt", "Static"]]);
+    // each Write stores the local its Let evaluated — the value was read before either write
+    expect(st[2].data.value).toEqual({ variant: "Local", data: { sym: st[0].data.sym } });
+    expect(st[3].data.value).toEqual({ variant: "Local", data: { sym: st[1].data.sym } });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // O59 — construction order; O60 — a use-site value seeds a granted locked field.
 // ---------------------------------------------------------------------------
 describe("O59 — construction runs in document order after the cells it reads", () => {
@@ -363,5 +433,82 @@ describe("reads require narrowing (ruled S437) — E-DECL-HANDLE-NOT-NARROWED", 
 
   test("the §66.19.3 un-narrowed WRITE still gives exactly one diagnostic (no extra read report)", () => {
     expect(codes(run([LIB(), prog("<button onclick=(@color.value = \"\")>x</button>")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §66.7.5 (O56 RULED S435; reads S437 #1108): inside its own narrowed block
+// `given c = @h :> { … }`, `@h` IS narrowed — a direct `@h.f = …` and a direct
+// `@h.f` read there are legal and go through `c` (review of #1109, F2: both
+// were refused E-DECL-HANDLE-NOT-NARROWED).
+// ---------------------------------------------------------------------------
+describe("§66.7.5 — `@h` is narrowed inside its own `given c = @h :> { … }`", () => {
+  const cond = `<div if=@show><dropdown as=color label="C" options=(["red", "blue"])/></div>
+        <dropdown as=country label="K" options=(["US", "CA"]) value="US"/>`;
+  const prog = (fns, show = "false", extra = "<p>x</p>") =>
+    appWith(`${cond}\n        ${extra}`, `    <let show:bool=${show}/>\n    <let seen:string=""/>\n${fns}`);
+  const fnStmts = (r, name) => r.core.fns.find((f) => f.sym.hint === name).body.stmts;
+
+  test("a direct READ `@color.value` inside the block is accepted", () => {
+    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { @seen = @color.value } }")]))).toEqual([]);
+  });
+
+  test("a direct WRITE `@color.value = …` inside the block is accepted", () => {
+    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"x\" } }")]))).toEqual([]);
+  });
+
+  test("the direct write lowers exactly as the write through `c` does (the same Narrowed place)", () => {
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"x\" } }\n    function g() { given c = @color :> { c.value = \"x\" } }")]);
+    expect(codes(r)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    const inner = (name) => fnStmts(r, name)[1].data.thenB.stmts[0];
+    const f = inner("f"), g = inner("g");
+    expect(f.variant).toBe("Write");
+    expect(f.data.inst).toEqual({ variant: "Narrowed", data: { sym: fnStmts(r, "f")[0].data.sym } });
+    expect(g.data.inst).toEqual({ variant: "Narrowed", data: { sym: fnStmts(r, "g")[0].data.sym } });
+    expect([f.data.edit, f.data.check, f.data.value]).toEqual([g.data.edit, g.data.check, g.data.value]);
+  });
+
+  test("at runtime the direct write lands while mounted", async () => {
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @color.value = \"blue\" } }", "true",
+      "<button class=\"go\" onclick=f()>go</button>")]);
+    expect(codes(r)).toEqual([]);
+    await loadProgram(r.core, "narrow-direct-write");
+    const toggles = () => [...document.querySelectorAll("button.dropdown__toggle")].map((b) => b.textContent);
+    expect(toggles()).toContain("C: ");
+    click(document.querySelector("button.go"));
+    expect(toggles()).toContain("C: blue");
+  });
+
+  // bite: the narrowing is scoped to the block and to the handle it names
+  test("outside the block (after it) `@color` is still refused", () => {
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @seen = c.value }\n return @color.value }")]);
+    expect(codes(r)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+  });
+
+  test("a write after the block is still refused", () => {
+    const r = run([LIB(), prog("    function f() { given c = @color :> { @seen = c.value }\n @color.value = \"x\" }")]);
+    expect(codes(r)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+  });
+
+  test("a DIFFERENT handle's block does not narrow `@color` (read and write)", () => {
+    expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @seen = @color.value } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(codes(run([LIB(), prog("    function f() { given c = @country :> { @color.value = \"x\" } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+  });
+
+  test("nested: an outer narrowing holds inside an inner `given`; an inner one ends with its block", () => {
+    expect(codes(run([LIB(), prog("    function f() { given c = @color :> { given d = @country :> { @color.value = @country.value } } }")]))).toEqual([]);
+    expect(codes(run([LIB(), prog("    function f() { given d = @country :> { given c = @color :> { @seen = @color.value }\n @color.value = \"x\" } }")]))).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+  });
+
+  test("a `given` over an UNconditional handle: a direct write inside is accepted and lands", async () => {
+    const r = run([LIB(), prog("    function f() { given c = @country :> { @country.value = \"CA\" } }", "false",
+      "<button class=\"go\" onclick=f()>go</button>")]);
+    expect(codes(r)).toEqual([]);
+    await loadProgram(r.core, "narrow-uncond");
+    const toggles = () => [...document.querySelectorAll("button.dropdown__toggle")].map((b) => b.textContent);
+    expect(toggles()).toContain("K: US");
+    click(document.querySelector("button.go"));
+    expect(toggles()).toContain("K: CA");
   });
 });
