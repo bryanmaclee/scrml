@@ -344,14 +344,23 @@ export function noDefault(what) {
 /** A `rule=` graph edge table, shared by every instance of the declaration (§5.4). */
 export function edges(table) { return table; }
 
-/** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
-export function transition(target, table, to) {
+/**
+ * The runtime edge check alone (§6.3): throws unless `to` is reachable from the
+ * current state in one edge. A self-write passes (§51.0.F.1). Writes nothing —
+ * an all-or-nothing spread edit (RULED S440) checks every edge before any write.
+ */
+export function checkEdge(target, table, to) {
   const from = target.peek();
   if (from === to) return;
   const allowed = table[from];
   if (!allowed || !allowed.includes(to)) {
     throw new Error(`E-ENGINE-INVALID-TRANSITION: .${from} → .${to} is not an edge of this field's rule= graph`);
   }
+}
+
+/** A graph write with a runtime edge check (§6.3). A self-write is a no-op (§51.0.F.1). */
+export function transition(target, table, to) {
+  checkEdge(target, table, to);
   target.set(to);
 }
 

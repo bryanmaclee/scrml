@@ -128,6 +128,7 @@ ${
             .Assign(local: local, value: value) :> [Node.NExpr(value)]
             .Write(inst: inst, edit: edit, value: value) :>
                 [Node.NInst(inst), Node.NEdit(edit), Node.NExpr(value)]
+            .Commit(writes: ws) :> stmtNodes(ws)
             .If(cond: cond, thenB: thenB, elseB: elseB) :>
                 [Node.NExpr(cond), Node.NBlock(thenB)].concat(maybeBlock(elseB))
             .Return(e: e) :> [Node.NExpr(e)]
@@ -279,6 +280,7 @@ ${
             .Let(sym: sym, init: init) :> [sym]
             .Assign(local: local, value: value) :> []
             .Write :> []
+            .Commit :> []
             .If(cond: cond, thenB: thenB, elseB: elseB) :> []
             .Return(e: e) :> []
             .Eval(e: e) :> []
@@ -340,6 +342,7 @@ ${
             .Assign(local: local, value: value) :> local.id
             .Let(sym: sym, init: init) :> -1
             .Write :> -1
+            .Commit :> -1
             .If(cond: cond, thenB: thenB, elseB: elseB) :> -1
             .Return(e: e) :> -1
             .Eval(e: e) :> -1

@@ -22,7 +22,7 @@
 // L1/L2/L3/L6/L8/L10/L12/L16 are facts analyze computed; lower copies them.
 //
 // Every traversal is a total `match` over the AST enums with no default arm
-// (dpa-051 §3.4). impl#1 workarounds: F4, F11, F13, F16, F17 (an arm whose
+// (dpa-051 §3.4). impl#1 workarounds: F4, F11, F16, F17 (an arm whose
 // body is an object literal loses its bindings — constructors instead).
 // =============================================================================
 ${
@@ -33,7 +33,8 @@ ${
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, AParam, AFn,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
              mkSpan } from "./ast.scrml"
-    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, AttrKind,
+    import { Node, allNodes } from "./walk.scrml"
+    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, Tables, TypedProgram,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo } from "./analyze.scrml"
 
@@ -42,7 +43,13 @@ ${
     // The lowering context: the tables, the file (for diagnostics), and — while
     // lowering a field initializer for `reset` (L4) — the instance being reset,
     // which is what `.Lexical(0)` inside an initializer means there.
-    type LC:struct = { t: Tables, file: string, subst: InstRef | not }
+    // `snap` — while lowering a spread's override values (RULED S440, strict
+    // snapshot): a read of the spread target's place (`decl` / `inst` / `path`,
+    // or a place under it) reads a snapshot local instead of the live cell —
+    // the per-FIELD local of the field it reads (`fields`), or `whole` for a
+    // read of the whole target value.
+    type SnapB:struct = { decl: Sym, inst: InstRef, path: FieldRef[], whole: Sym, fields: SnapField[] }
+    type LC:struct = { t: Tables, file: string, subst: InstRef | not, snap: SnapB | not }
 
     // Lowering is total over the facts analyze produced; a node with a missing
     // or mismatched fact means analyze reported an error, and lower emits a
@@ -63,6 +70,165 @@ ${
     fn lexicalOr(d: int, s: InstRef, i: InstRef) -> InstRef {
         if (d == 0) return s
         return i
+    }
+
+    // A read of a declaration field / whole instance: the live cell — or, while
+    // lowering a spread's override values, the statement's snapshot when the
+    // place is the spread target or under it (RULED S440).
+    fn cellRead(c: LC, d: Sym, i: InstRef, path: FieldRef[]) -> Expr {
+        const s: SnapB | not = c.snap
+        if (s is some) {
+            if (s.decl.id == d.id && instKey(s.inst) == instKey(i) && hasPrefix(path, s.path)) {
+                let rest: FieldRef[] = []
+                let k: int = s.path.length
+                while (k < path.length) {
+                    rest = rest.concat([path[k]])
+                    k = k + 1
+                }
+                if (rest.length == 0) return Expr.Local(s.whole)
+                const f: SnapField | not = snapFieldOf(s.fields, rest[0])
+                if (f is not) return Expr.Read(Place.LocalPath(s.whole, rest))
+                if (rest.length == 1) return Expr.Local(f.local)
+                return Expr.Read(Place.LocalPath(f.local, dropFirst(rest)))
+            }
+        }
+        return Expr.Read(Place.Cell(d, i, path))
+    }
+
+    fn dropFirst(path: FieldRef[]) -> FieldRef[] {
+        let out: FieldRef[] = []
+        let k = 1
+        while (k < path.length) {
+            out = out.concat([path[k]])
+            k = k + 1
+        }
+        return out
+    }
+
+    fn snapFieldOf(fs: SnapField[], r: FieldRef) -> SnapField | not {
+        for (const f of fs) {
+            if (f.ref.owner.id == r.owner.id && f.ref.idx == r.idx) return f
+        }
+        return not
+    }
+
+    fn hasPrefix(path: FieldRef[], pre: FieldRef[]) -> boolean {
+        if (path.length < pre.length) return false
+        let k = 0
+        while (k < pre.length) {
+            if (path[k].owner.id != pre[k].owner.id || path[k].idx != pre[k].idx) return false
+            k = k + 1
+        }
+        return true
+    }
+
+    // Two instance references name the same instance iff they are spelled the same.
+    fn instKey(i: InstRef) -> string {
+        return match i {
+            .Shared(decl: d) :> "S" + d.id
+            .Lexical(depth: k) :> "L" + k
+            .Alias(sym: s) :> "A" + s.id
+            .Narrowed(sym: s) :> "N" + s.id
+        }
+    }
+
+    // The snapshot binding for a spread whose operand lowered to `op` (a cell read).
+    fn snapOf(op: Expr, whole: Sym, fields: SnapField[]) -> SnapB | not {
+        return match op {
+            .Read(place: pl) :> snapOfPlace(pl, whole, fields)
+            .Lit(lit: x) :> not
+            .Local(sym: x) :> not
+            .Call(callee: x) :> not
+            .Prim(op: x) :> not
+            .Match(scrut: x) :> not
+            .ArrayOf(elems: x) :> not
+            .StructOf(ty: x) :> not
+            .Handle(inst: x) :> not
+            .InitOf(decl: x) :> not
+        }
+    }
+
+    fn snapOfPlace(pl: Place, whole: Sym, fields: SnapField[]) -> SnapB | not {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> snapB(d, i, path, whole, fields)
+            .LocalPath(sym: x) :> not
+        }
+    }
+
+    // The spread operand's cell read, re-addressed through the instance local.
+    fn throughInst(op: Expr, one: InstRef) -> Expr {
+        return match op {
+            .Read(place: pl) :> Expr.Read(placeThrough(pl, one))
+            .Lit(lit: x) :> op
+            .Local(sym: x) :> op
+            .Call(callee: x) :> op
+            .Prim(op: x) :> op
+            .Match(scrut: x) :> op
+            .ArrayOf(elems: x) :> op
+            .StructOf(ty: x) :> op
+            .Handle(inst: x) :> op
+            .InitOf(decl: x) :> op
+        }
+    }
+
+    fn placeThrough(pl: Place, one: InstRef) -> Place {
+        return match pl {
+            .Cell(decl: d, inst: i, path: path) :> Place.Cell(d, one, path)
+            .LocalPath(sym: s, path: path) :> pl
+        }
+    }
+
+    fn snapB(d: Sym, i: InstRef, path: FieldRef[], whole: Sym, fields: SnapField[]) -> SnapB {
+        return { decl: d, inst: i, path: path, whole: whole, fields: fields }
+    }
+
+    // Does `e` read the local `s` (as a whole, or along a path)?
+    fn readsLocal(e: Expr, s: Sym) -> boolean {
+        for (const n of allNodes(Node.NExpr(e))) {
+            if (nodeReadsLocal(n, s)) return true
+        }
+        return false
+    }
+
+    fn nodeReadsLocal(n: Node, s: Sym) -> boolean {
+        return match n {
+            .NExpr(e: x) :> exprIsLocal(x, s)
+            .NPlace(pl: pl) :> placeIsLocal(pl, s)
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NStmt(s: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn exprIsLocal(e: Expr, s: Sym) -> boolean {
+        return match e {
+            .Local(sym: y) :> y.id == s.id
+            .Lit(lit: x) :> false
+            .Read(place: x) :> false
+            .Call(callee: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+        }
+    }
+
+    fn placeIsLocal(pl: Place, s: Sym) -> boolean {
+        return match pl {
+            .LocalPath(sym: y) :> y.id == s.id
+            .Cell(decl: x) :> false
+        }
     }
 
     // =========================================================================
@@ -102,8 +268,8 @@ ${
     fn readName(c: LC, f: NameFact | not) -> Expr {
         return match f {
             .NLocal(sym: s) :> Expr.Local(s)
-            .NField(decl: d, inst: i, idx: x) :> Expr.Read(Place.Cell(d, instOf(c, i), [{ owner: d, idx: x }]))
-            .NInst(decl: d, inst: i) :> Expr.Read(Place.Cell(d, instOf(c, i), []))
+            .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
+            .NInst(decl: d, inst: i) :> cellRead(c, d, instOf(c, i), [])
             .NStruct(owner: o) :> missing()
             .NFn(sym: s) :> missing()
             .NLength :> missing()
@@ -139,7 +305,7 @@ ${
     fn memberExpr(c: LC, f: NameFact | not, obj: AExpr) -> Expr {
         return match f {
             .NLength :> Expr.Prim(PrimOp.Length, [lowerExpr(c, obj)])
-            .NField(decl: d, inst: i, idx: x) :> Expr.Read(Place.Cell(d, instOf(c, i), [{ owner: d, idx: x }]))
+            .NField(decl: d, inst: i, idx: x) :> cellRead(c, d, instOf(c, i), [{ owner: d, idx: x }])
             .NStruct(owner: o, idx: x) :> stepInto(lowerExpr(c, obj), { owner: o, idx: x })
             .NLocal(sym: s) :> missing()
             .NInst(decl: d) :> missing()
@@ -281,7 +447,7 @@ ${
         const value: AExpr | not = assignedValue(k)
         return match f {
             .EWrite(w: w) :> writeStmt(c, w, value)
-            .ESpread(ws: ws) :> spreadStmts(c, ws, value)
+            .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value)
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
             .EAssignLocal(sym: s) :> assignLocal(c, s, value)
             not :> [Stmt.Eval(lowerExpr(c, e))]
@@ -326,16 +492,97 @@ ${
         return [Stmt.Assign(s, lowerExpr(c, value))]
     }
 
-    // O58 (b): `@x = { ...@x, f: v }` → one FieldAt Write per override.
-    fn spreadStmts(c: LC, ws: SpreadWrite[], value: AExpr | not) -> Stmt[] {
+    // O58 (b): `@x = { ...@x, f: v }` → one contract-checked Write per override.
+    // The literal is ONE value built from one snapshot (§66.10 item 1), so with
+    // two or more overrides every value is evaluated into its local (analyze
+    // minted `tmp`) before the first write — `{ ...@p, x: @p.y, y: @p.x }`
+    // swaps, as the genuine replace does (§66.11.3 item 1). The writes are ONE
+    // edit: they form a Commit — every override's contract is checked before
+    // any is applied, and a refusal applies none (RULED S440: "Should a spread
+    // write be all-or-nothing on a runtime refusal? Yes."). A lone override
+    // needs neither: its value is evaluated before its own write, and one
+    // checked write is already all-or-nothing.
+    // Every override writes the SAME instance: it is resolved once, into the
+    // local analyze minted (`Let inst = Handle(…)`), and every Write of the
+    // Commit goes through `Narrowed(inst)` — the Commit never re-resolves a
+    // handle between its writes.
+    // STRICT SNAPSHOT (RULED S440): the spread operand `...@x` — the value from
+    // BEFORE the statement — is read ONCE into the local analyze minted (`snap`),
+    // before any override value is evaluated, and every read of `@x` (or under
+    // it) inside the override values reads that local. So a call in one
+    // override that writes `@x` is invisible to the others:
+    // `{ ...@p, x: bump(), y: @p.z }` with bump writing `@p.z = 99` gives y =
+    // the pre-statement z. (bump's own write to a field NOT overridden survives:
+    // the Commit writes only the overridden fields.) The snapshot Let is emitted
+    // only when some override value reads it.
+    fn spreadStmts(c: LC, ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[], value: AExpr | not) -> Stmt[] {
         if (value is not) return []
         const ps: AProp[] = objectProps(value)
-        let out: Stmt[] = []
+        // `@x = { ...@x }`: no override — the same value; nothing to write
+        if (ws.length == 0) return []
+        const operand: Expr = lowerExpr(c, ps[0].value)
+        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: snapOf(operand, snap, fields) }
+        let values: Expr[] = []
+        for (const sw of ws) { values = values.concat([lowerExpr(sc, ps[sw.prop].value)]) }
+        if (ws.length == 1) {
+            const w0: WriteFact = ws[0].w
+            return snapLets(operand, snap, fields, values).concat([Stmt.Write(w0.cap, instOf(c, w0.inst), w0.edit, values[0], w0.check)])
+        }
+        const one: InstRef = InstRef.Narrowed(inst)
+        let lets: Stmt[] = [Stmt.Let(inst, Expr.Handle(instOf(c, ws[0].w.inst)))]
+        // the snapshot reads through the instance local too (one resolution)
+        lets = lets.concat(snapLets(throughInst(operand, one), snap, fields, values))
+        let writes: Stmt[] = []
+        let k = 0
         for (const sw of ws) {
             const w: WriteFact = sw.w
-            out = out.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, ps[sw.prop].value), w.check)])
+            const t: Sym | not = sw.tmp
+            if (t is some) {
+                lets = lets.concat([Stmt.Let(t, values[k])])
+                writes = writes.concat([Stmt.Write(w.cap, one, w.edit, Expr.Local(t), w.check)])
+            }
+            k = k + 1
+        }
+        return lets.concat([Stmt.Commit(writes)])
+    }
+
+    // The snapshot Lets (RULED S440 strict snapshot, narrowed by S440 re-review
+    // N1): ONLY the fields some override value reads lexically, each read once
+    // exactly as that lexical read would have read it (a tracked `.get()` of the
+    // field — so the reactive read set is the lexical one, never wider), and the
+    // whole value only if a value reads the whole `@x`. `operand` is the spread
+    // operand's cell read (already re-addressed through the instance local when
+    // there is a Commit).
+    fn snapLets(operand: Expr, whole: Sym, fields: SnapField[], values: Expr[]) -> Stmt[] {
+        let out: Stmt[] = []
+        if (anyReads(values, whole)) out = [Stmt.Let(whole, operand)]
+        for (const f of fields) {
+            if (anyReads(values, f.local)) out = out.concat([Stmt.Let(f.local, fieldOf(operand, f.ref))])
         }
         return out
+    }
+
+    fn anyReads(values: Expr[], s: Sym) -> boolean {
+        for (const v of values) {
+            if (readsLocal(v, s)) return true
+        }
+        return false
+    }
+
+    // A read of field `r` under the operand's place.
+    fn fieldOf(op: Expr, r: FieldRef) -> Expr {
+        return match op {
+            .Read(place: pl) :> Expr.Read(extendPlace(pl, r))
+            .Lit(lit: x) :> missing()
+            .Local(sym: x) :> missing()
+            .Call(callee: x) :> missing()
+            .Prim(op: x) :> missing()
+            .Match(scrut: x) :> missing()
+            .ArrayOf(elems: x) :> missing()
+            .StructOf(ty: x) :> missing()
+            .Handle(inst: x) :> missing()
+            .InitOf(decl: x) :> missing()
+        }
     }
 
     fn objectProps(e: AExpr) -> AProp[] {
@@ -372,7 +619,7 @@ ${
         if (di is not) return []
         const target: InstRef = instOf(c, w.inst)
         if (!isProgramKind(di.kind)) return [Stmt.Write(w.cap, target, w.edit, Expr.InitOf(d, target, idx), w.check)]
-        const ic: LC = { t: c.t, file: c.file, subst: target }
+        const ic: LC = { t: c.t, file: c.file, subst: target, snap: not }
         const init: Expr | not = lowerValue(ic, di.fields[idx].init)
         if (init is not) return []
         return [Stmt.Write(w.cap, target, w.edit, init, w.check)]
@@ -668,7 +915,7 @@ ${
     }
 
     fn lowerDecl(t: Tables, ss: DeclSyntax[], d: DeclInfo) -> Decl {
-        const c: LC = { t: t, file: d.file, subst: not }
+        const c: LC = { t: t, file: d.file, subst: not, snap: not }
         let fields: Field[] = []
         for (const f of d.fields) { fields = fields.concat([lowerField(c, f)]) }
         let renders: View[] | not = not
@@ -719,7 +966,7 @@ ${
     fn lowerFn(t: Tables, fs: FnSyntax[], info: FnInfo) -> Fn | not {
         for (const s of fs) {
             if (s.nid == info.nid) {
-                const c: LC = { t: t, file: info.file, subst: not }
+                const c: LC = { t: t, file: info.file, subst: not, snap: not }
                 let params: Param[] = []
                 for (const p of s.f.params) { params = params.concat(paramOf(bindFact(t.binds, p.nid))) }
                 return { sym: info.sym, params: params, body: lowerBlock(c, s.f.body), pure: info.pure }

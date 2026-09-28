@@ -33,8 +33,7 @@
 // guessed.
 //
 // impl#1 workarounds: F4 (qualified variants), F5 (typed host results), F11
-// (named payload binding), F12 (alternation only first), F13 (≤ 4 bound payload
-// fields), F14 (no brace-adjacent string literal), F15 (no fn named like a
+// (named payload binding), F15 (no fn named like a
 // payload field of an enum declared in this file), F16 (≥ 1 binding arm over an
 // imported payload enum).
 // =============================================================================
@@ -110,7 +109,18 @@ ${
     export type WriteFact:struct = { cap: Sym, inst: InstRef, edit: EditKind, check: Check }
     // One override of a spread write `@x = { ...@x, f: v }` (O58 (b)): a
     // FieldAt edit whose value is the object literal's prop number `prop`.
-    export type SpreadWrite:struct = { w: WriteFact, prop: int }
+    // `tmp` is the local that value is evaluated into BEFORE any override is
+    // written: the literal is one value built from one snapshot (§66.10 item 1),
+    // so `{ ...@p, x: @p.y, y: @p.x }` swaps exactly as the genuine replace
+    // `{ x: @p.y, y: @p.x }` does (§66.11.3 item 1 — legality and meaning never
+    // depend on spelling). Minted here so `lower` still decides nothing. A
+    // non-spread write viewed as one override (the typer's `oneWrite`, prop -1)
+    // has no local: `tmp` is `not`.
+    export type SpreadWrite:struct = { w: WriteFact, prop: int, tmp: Sym | not }
+    // One per-field snapshot local of a spread's target (RULED S440 strict
+    // snapshot; see spreadEffect): the field (`ref`) and the local it is read
+    // into when an override value reads it.
+    export type SnapField:struct = { ref: FieldRef, local: Sym }
 
     // How an attribute of an element is used.
     export type AttrKind:enum = {
@@ -154,7 +164,7 @@ ${
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
-        ESpread(ws: SpreadWrite[]),                       // a spread assignment: FieldAt edits (O58 (b))
+        ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[]), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
     }
@@ -376,9 +386,6 @@ ${
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
         return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]) }
     }
-
-    fn LB() -> string { return "{" }
-    fn RB() -> string { return "}" }
 
     // =========================================================================
     // Phase A — the program's shape: types, declarations, functions, fields,
@@ -1444,6 +1451,12 @@ ${
 
     type LocalB:struct = { name: string, s: Sym, ty: Type | not, mutable: boolean, narrowed: InstRef | not, nDecl: Sym | not }
     type RowB:struct = { bind: Sym, ty: Type | not }
+    // `@name` narrowed by an enclosing `given c = @name :> { … }` (§66.7.5, O56
+    // RULED S435: "A direct `@handle.field = …` inside the narrowed block is
+    // legal"; reads S437): inside the block `@name` IS the narrowed instance
+    // `c`, so a direct `@name.f = …` / `@name.f` there goes through `c` exactly
+    // as `c.f` does. Scoped to the block and to the handle named.
+    type NarrowB:struct = { name: string, ty: Type | not, inst: InstRef, iDecl: Sym }
 
     type Env:struct = {
         g: Globals,
@@ -1453,17 +1466,32 @@ ${
         rows: RowB[],
         handles: HandleInfo[],
         inRenders: boolean,
+        narrows: NarrowB[],
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows }
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
         const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
-                 handles: env.handles.concat(hs), inRenders: env.inRenders }
+                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows }
+    }
+
+    fn withNarrow(env: Env, n: NarrowB) -> Env {
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]) }
+    }
+
+    fn lookupNarrow(env: Env, name: string) -> NarrowB | not {
+        let i: int = env.narrows.length - 1
+        while (i >= 0) {
+            if (env.narrows[i].name == name) return env.narrows[i]
+            i = i - 1
+        }
+        return not
     }
 
     fn lookupLocal(env: Env, name: string) -> LocalB | not {
@@ -1615,7 +1643,7 @@ ${
         let tn: string = "T"
         const td: Sym | not = r.x.iDecl
         if (td is some) tn = td.hint
-        const msg: string = "`@" + name + "` names a conditionally-mounted instance (typed `" + tn + " | not`) — a read through it must be narrowed first: `given c = @" + name + " :> " + LB() + " … c.field … " + RB() + "` (§66.7.5; reads ruled S437)"
+        const msg: string = "`@" + name + "` names a conditionally-mounted instance (typed `" + tn + " | not`) — a read through it must be narrowed first: `given c = @" + name + " :> { … c.field … }` (§66.7.5; reads ruled S437)"
         return { x: r.x, st: addDiag(r.st, env.file, e.span, "E-DECL-HANDLE-NOT-NARROWED", msg) }
     }
 
@@ -1651,6 +1679,12 @@ ${
     }
 
     fn resolveAt(env: Env, e: AExpr, name: string, st: AS) -> RX {
+        // §66.7.5: inside `given c = @name :> { … }`, `@name` is the narrowed `c`.
+        const nb: NarrowB | not = lookupNarrow(env, name)
+        if (nb is some) {
+            return { x: { ty: nb.ty, inst: nb.inst, iDecl: nb.iDecl, maybe: false },
+                     st: addName(st, e.nid, NameFact.NInst(nb.iDecl, nb.inst)) }
+        }
         // O54 (a): inside x's own renders / initializers, `@x` is the current instance.
         const d: DeclSrc | not = ctxDecl(env)
         if (d is some) {
@@ -1905,7 +1939,7 @@ ${
         let j2 = 0
         for (const p of ps) {
             if (p.spread) {
-                st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` is in slice M2 only as `@x = " + LB() + " ...@x, f: v " + RB() + "` (a field edit, O58 (b))")
+                st = addDiag(st, env.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "a spread `...` is in slice M2 only as `@x = { ...@x, f: v }` (a field edit, O58 (b))")
             } else {
                 let fty: Type | not = not
                 for (const fd of fs) {
@@ -2116,7 +2150,7 @@ ${
     fn writeGuards(env: Env, p: WPlace, span: ASpan, st0: AS) -> AS {
         let st: AS = st0
         if (p.maybe) {
-            st = addDiag(st, env.file, span, "E-DECL-HANDLE-NOT-NARROWED", "this handle names a conditionally-mounted instance (`" + p.decl.sym.hint + " | not`) — narrow it first: `given c = @handle :> " + LB() + " c.field = … " + RB() + "` (§66.7.5)")
+            st = addDiag(st, env.file, span, "E-DECL-HANDLE-NOT-NARROWED", "this handle names a conditionally-mounted instance (`" + p.decl.sym.hint + " | not`) — narrow it first: `given c = @handle :> { c.field = … }` (§66.7.5)")
         }
         const f: FieldInfo = p.decl.fields[p.idx]
         if (p.decl.file != env.file && !f.exported) {
@@ -2182,12 +2216,18 @@ ${
         const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
         if (d is not) return st
         const ps: AProp[] = propsOf(value)
+        // the spread operand `...@h` names the instance (a subject, like a
+        // write target — no read check; writeGuards reports an un-narrowed
+        // handle). lower reads it as the statement's snapshot (S440).
+        st = resolveHandleSubject(env, ps[0].value, st).st
         let ws: SpreadWrite[] = []
         let j = 1
         while (j < ps.length) {
             const pr: AProp = ps[j]
             const i: int = fieldIndex(d.info, pr.name)
-            if (i < 0) {
+            if (overriddenBefore(ps, j)) {
+                st = dupOverride(env, st, pr)
+            } else if (i < 0) {
                 st = addDiag(st, env.file, pr.span, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + pr.name + "`")
             } else {
                 const f: FieldInfo = d.info.fields[i]
@@ -2197,11 +2237,68 @@ ${
                 const rw: RWriteFact = wholeFieldWrite(env, p, f, pr.value, st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
-                if (w is some) ws = ws.concat([{ w: w, prop: j }])
+                if (w is some) {
+                    const m: RSym = mint(st, pr.name)
+                    st = m.st
+                    ws = ws.concat([{ w: w, prop: j, tmp: m.s }])
+                }
             }
             j = j + 1
         }
-        return addEffect(st, e.nid, EffectFact.ESpread(ws))
+        let refs: FieldRef[] = []
+        let names: string[] = []
+        let fi = 0
+        for (const fd of d.info.fields) {
+            refs = refs.concat([{ owner: iDecl, idx: fi }])
+            names = names.concat([fd.sym.hint])
+            fi = fi + 1
+        }
+        return spreadEffect(st, e, ws, iDecl.hint, refs, names)
+    }
+
+    // The spread's effect. `inst` is the local the written instance is resolved
+    // into ONCE, before the Commit (lower: `Let inst = Handle(…)`, the writes go
+    // through `Narrowed(inst)`), so a flush can never make a later write of the
+    // same edit re-resolve a handle to a different instance. Minted here so
+    // `lower` still decides nothing.
+    // STRICT SNAPSHOT (RULED S440): every `@x` read inside the override values
+    // reads a value taken BEFORE any override value is evaluated — so a call in
+    // one override that writes `@x` is not seen by another. The snapshot is
+    // PER FIELD (`fields`: one local per field of the target, the field's
+    // FieldRef beside it), and lower reads only the fields the override values
+    // read lexically: taking a whole-value snapshot would `.get()` — and so
+    // subscribe to — every field when the spread runs inside an effect (S440
+    // re-review N1: a runaway re-run loop). `snap` is the whole-value local,
+    // used only when an override value reads the WHOLE `@x` (which reads every
+    // field lexically anyway).
+    fn spreadEffect(st0: AS, e: AExpr, ws: SpreadWrite[], hint: string, refs: FieldRef[], names: string[]) -> AS {
+        const m: RSym = mint(st0, hint)
+        const sn: RSym = mint(m.st, "before")
+        let st: AS = sn.st
+        let fields: SnapField[] = []
+        let k = 0
+        for (const r of refs) {
+            const fm: RSym = mint(st, "before_" + names[k])
+            st = fm.st
+            fields = fields.concat([{ ref: r, local: fm.s }])
+            k = k + 1
+        }
+        return addEffect(st, e.nid, EffectFact.ESpread(ws, m.s, sn.s, fields))
+    }
+
+    // RULED S440: a spread-override literal names each field at most once.
+    fn overriddenBefore(ps: AProp[], j: int) -> boolean {
+        let k = 1
+        while (k < j) {
+            if (ps[k].name == ps[j].name) return true
+            k = k + 1
+        }
+        return false
+    }
+
+    // Provisional bootstrap-local code (§66.20 names none; the §34 row is owed).
+    fn dupOverride(env: Env, st: AS, pr: AProp) -> AS {
+        return addDiag(st, env.file, pr.span, "E-BOOTSTRAP-DUP-OVERRIDE", "`" + pr.name + "` is overridden twice in this spread — a spread-override edits each field once; keep one `" + pr.name + ": …` (ruled S440)")
     }
 
     // A write at a struct path (`@o.s = v`): the TARGET sub-field's own contract.
@@ -2324,7 +2421,9 @@ ${
                 if (fd.sym.hint == pr.name) idx = i
                 i = i + 1
             }
-            if (idx < 0) {
+            if (overriddenBefore(ps, j)) {
+                st = dupOverride(env, st, pr)
+            } else if (idx < 0) {
                 st = addDiag(st, env.file, pr.span, "E-TYPE-STRUCT-FIELD", "`" + s.hint + "` has no field `" + pr.name + "`")
             } else {
                 const sub: WPlace = { decl: p.decl, inst: p.inst, idx: p.idx, path: [{ owner: s, idx: idx }], ty: fs[idx].ty, maybe: p.maybe }
@@ -2332,11 +2431,23 @@ ${
                 const rw: RWriteFact = fieldAtWrite(env, sub, f, pr.value, rv.st, pr.span)
                 st = rw.st
                 const w: WriteFact | not = rw.w
-                if (w is some) ws = ws.concat([{ w: w, prop: j }])
+                if (w is some) {
+                    const m: RSym = mint(st, pr.name)
+                    st = m.st
+                    ws = ws.concat([{ w: w, prop: j, tmp: m.s }])
+                }
             }
             j = j + 1
         }
-        return addEffect(st, e.nid, EffectFact.ESpread(ws))
+        let refs: FieldRef[] = []
+        let names: string[] = []
+        let fi = 0
+        for (const fd of fs) {
+            refs = refs.concat([{ owner: s, idx: fi }])
+            names = names.concat([fd.sym.hint])
+            fi = fi + 1
+        }
+        return spreadEffect(st, e, ws, p.decl.sym.hint, refs, names)
     }
 
     fn propsOf(v: AExpr) -> AProp[] {
@@ -2559,7 +2670,11 @@ ${
         st = addBind(rs.st, s.nid, BindFact.BGiven(rs.s, inst))
         const narrowed: InstRef = InstRef.Narrowed(rs.s)
         const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl }
-        return resolveBlock(withLocal(env, l), body, st)
+        let inner: Env = withLocal(env, l)
+        // the subject handle itself is narrowed inside the block too (§66.7.5)
+        const hn: string = atName(subject)
+        if (hn != "") inner = withNarrow(inner, { name: hn, ty: rs0.x.ty, inst: narrowed, iDecl: iDecl })
+        return resolveBlock(inner, body, st)
     }
 
     // =========================================================================
@@ -2791,7 +2906,7 @@ ${
 
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
-                 handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders }
+                 handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [] }
     }
 
     fn phaseB(g: Globals, st0: AS) -> AS {
@@ -2812,7 +2927,7 @@ ${
         for (const fs of g.fns) {
             let hs: HandleInfo[] = []
             if (fs.info.file == g.entry) hs = progHandles
-            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false }
+            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [] }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
                 const rs: RSym = mint(st, p.name)
@@ -3628,7 +3743,7 @@ ${
         }
     }
 
-    fn oneWrite(w: WriteFact) -> SpreadWrite { return { w: w, prop: -1 } }
+    fn oneWrite(w: WriteFact) -> SpreadWrite { return { w: w, prop: -1, tmp: not } }
 
     fn isReset(f: EffectFact | not) -> boolean {
         return match f {

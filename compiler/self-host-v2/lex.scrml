@@ -325,9 +325,9 @@ ${
     // scripts/lint-no-default-arm.js): a new token kind must decide here whether
     // it carries a keyword. Payload variants are listed one per arm (a `|`
     // alternation containing a payload pattern is dropped today — F6); the
-    // nullary kinds share one alternation arm, which must be the FIRST arm (an
-    // alternation arm in any later position is glued onto the previous arm's
-    // body — slice-m1/progress.md F12).
+    // nullary kinds share one alternation arm. (It sits first because impl#1's
+    // F12 once glued a later alternation arm onto the previous arm's body —
+    // slice-m1/progress.md; #1119 fixed that, S440.)
     fn keywordName(k: TokenKind) -> string {
         return match k {
             .LParen | .RParen | .LBrace | .RBrace | .LBracket | .RBracket |
@@ -908,13 +908,15 @@ ${
     // total with no default arm (dpa-051 §3.4; scripts/lint-no-default-arm.js).
     // dispatch is reached only for InCode (templateBodyStep owns InTemplateBody;
     // the atomic-scan modes settle back to InCode within one step); the other
-    // modes are routed to dispatchOffMode, which keeps the fold total. (An
-    // alternation arm must come FIRST — F12.)
+    // modes are routed to dispatchOffMode, which keeps the fold total. (The
+    // alternation arm is deliberately NOT first: impl#1's F12 — a non-first
+    // alternation arm glued onto the previous arm's body — is fixed by #1119,
+    // and every lexer test exercises this arm, S440.)
     fn dispatch(st: LexState, ev: LexEvent) -> LexState {
         return match st.mode {
+            .InCode :> dispatchInCode(st, ev)
             .InTemplateBody | .InSingleString | .InDoubleString |
                   .InLineComment | .InBlockComment | .InRegexBody :> dispatchOffMode(st, ev)
-            .InCode :> dispatchInCode(st, ev)
         }
     }
 
