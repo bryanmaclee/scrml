@@ -24,7 +24,7 @@
 // THROWAWAY, with ingest.scrml: delete this directory when bootstrap `analyze` produces a
 // TypedProgram for the conformance corpus.
 
-import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadBundle, SELF_HOST_V2 } from "../slice-m1/harness.js";
@@ -135,8 +135,14 @@ export async function executeClient({ html, clientJs }) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-m3-run-"));
   copyFileSync(RUNTIME, join(dir, "scrml-runtime.js"));
   writeFileSync(join(dir, "program.client.js"), clientJs);
-  const rt = await import(join(dir, "scrml-runtime.js"));
-  await import(join(dir, "program.client.js"));
+  let rt;
+  try {
+    rt = await import(join(dir, "scrml-runtime.js"));
+    await import(join(dir, "program.client.js"));
+  } finally {
+    // Both modules are loaded (and the program booted) once the imports settle.
+    rmSync(dir, { recursive: true, force: true });
+  }
   const program = () => [...rt.devtools.instances.values()].find((i) => i.id === 0 && i.decl.name === "program");
   globalThis.__scrml_conformance = {
     snapshot() {

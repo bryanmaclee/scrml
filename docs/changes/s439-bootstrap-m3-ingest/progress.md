@@ -40,3 +40,4 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
   are identical (diff exit 0); the only text differences are stack-trace line numbers inside impl1-ts.ts.
 - Suites: slice-m1 73/0 · slice-m2 74/0 · SLICE_CORE=lowered slice-m1 73/0 · slice-m3 18/0 · v2 lexer 337/0 ·
   hybrid-stage-swap + hybrid-xfail 26/0 · lint 28 files 0 violations · pre-commit (862102be3) 31981 pass / 0 fail.
+- 2026-09-27T19:56:53-06:00 executeClient removes its per-run temp dir after the imports settle (no leak); slice-m3 18/0; reactive/ filter grade unchanged (11 graded, same 2 fails).
