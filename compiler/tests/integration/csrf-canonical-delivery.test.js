@@ -30,21 +30,20 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
-const TMP_ROOT = resolve(testDir, "_tmp_csrf_canonical");
+// Per-run scratch (S438) — see helpers/per-run-tmp.js. Recurrence-proof isolation
+// (a killed / --bail'd prior run skips afterAll) now comes from the fresh per-run dir;
+// the old sweep-then-reuse threw EBUSY on Windows when a prior handle was still live.
+const _tmp = perRunTmp(resolve(testDir, "_tmp_csrf_canonical"));
+const TMP_ROOT = _tmp.root;
 let tmpCounter = 0;
 
-beforeAll(() => {
-  // Recurrence-proof isolation (a killed / --bail'd prior run skips afterAll).
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
-  mkdirSync(TMP_ROOT, { recursive: true });
-});
-afterAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
-});
+beforeAll(_tmp.setup);
+afterAll(_tmp.teardown);
 
 const ITEMS_SEED = {
   "items.db": ["CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)"],
