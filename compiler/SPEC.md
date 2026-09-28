@@ -20768,7 +20768,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-DERIVED-ENGINE-NO-WRITE | §51.0.J | Direct write to the auto-declared variable of a derived engine. Derived-engine variables are read-only. | Error |
 | E-DERIVED-ENGINE-INITIAL-ABSENT | §51.0.J | (S90 rename — M-7C-D-12 Track 4 / OQ-6) `derived=expr` returns scrml-absence (`not`) when the source is in its initial state. The derived engine has no initial variant to enter. Add a default arm or use a wildcard arm in the derivation. **Pre-S90 name:** `E-DERIVED-ENGINE-INITIAL-UNDEFINED` (renamed for §42.8 "No scrml program SHALL directly emit JavaScript `undefined`" alignment; the runtime condition is scrml-absence, not JS-`undefined`). | Error |
 | E-DERIVED-ENGINE-CIRCULAR | §51.0.J | Chained derivation (engine A → engine B → engine A) forms a cycle. Detected at compile time by the dependency-graph machinery (§31). Break the cycle. | Error |
-| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. | Error |
+| E-COMPONENT-ENGINE-SCOPE | §51.0.K | A component declaration body contains an `<engine>` element. Engines are singletons; instantiating a component multiple times would produce multiple "singletons", violating the invariant. Use plain reactive cells inside components, or define the engine outside the component. ALSO (S439 ruling #10): an `<engine>` inside an `<each>` row template (a row is a multi-instance context); the message names the per-row form — an ordinary declaration, keyed per row (§66.7.3). **Nominal for the `<each>`-row case — not yet emitted** (impl#1 compiles it at exit 0 and drops the body). | Error |
 | E-ENGINE-MOUNT-NOT-ENGINE | §51.0.D, §21.8 | A self-closing tag `<EngineName/>` mounts an imported binding whose source export is NOT an engine (e.g., a component, channel, type, function, or arbitrary const). Cross-file engine mount via `<EngineName/>` requires the imported name to be the variable of an exported `<engine>` declaration. Either import an engine binding from the source file, or use the appropriate mount form for the imported kind (e.g., component instantiation for components, expression read for const values). (Catalog addition S68 — A1b B14.) | Error |
 | E-ENGINE-STATE-CHILD-MISSING | §51.0.B, §51.0.F | A variant of the engine's `for=Type` has no matching state-child tag in the engine body. Per §51.0.F, every variant must have a corresponding state-child (`<Variant>...</>`) — exhaustiveness over the variant set is what gives `<engine>` its compile-time guarantees. Add the missing `<Variant>` state-child(ren). (Catalog addition S68 — A1b B15.) | Error |
 | E-ENGINE-STATE-CHILD-INVALID-VARIANT | §51.0.B | A state-child tag in the engine body does not match any variant of the engine's `for=Type`. State-child tags are PascalCase variant names; `<UnknownTag>` inside an `<engine for=MarioState>` is rejected because `UnknownTag` is not a `MarioState` variant. Either rename the tag to a valid variant or add the variant to the type. (Catalog addition S68 — A1b B15.) | Error |
@@ -30073,6 +30073,17 @@ declaration contains an `<engine>` element in its body. Reasoning: instantiating
 component multiple times would create multiple "singleton" engines, violating the
 singleton invariant. If you want per-instance state machines, use plain reactive cells
 (`@cell`) inside the component, not engines.
+
+**An `<engine>` inside an `<each>` row is FORBIDDEN (S439 ruling #10).** An `<each>` row
+template (§17.7) is a multi-instance context — the many-instances argument above applies to
+a row word for word — so an `<engine>` declared inside an `<each>` row template SHALL be
+refused with `E-COMPONENT-ENGINE-SCOPE` (§34). The message SHALL name the per-row form:
+per-row state is spelled as an ordinary declaration, which gets a keyed instance per row
+(§66.7.3). **Nominal for this case on impl#1** — impl#1 does not yet emit it (measured
+S439: the program compiles at exit 0 and the engine's body is silently dropped from the
+row).
+> **Provenance:** ruling:user-voice-scrml.md S439 #10 "all recs" (Rec: refuse it) ·
+> supersedes: nothing (the SPEC was silent; impl#1 silently dropped the body).
 
 **Conversely:** an engine body MAY instantiate components. That direction is fine —
 components are presentation factories that engines can use to render variant bodies.
@@ -39814,6 +39825,13 @@ carry. The load-bearing invariant survives under its existing code: **`E-COMPONE
 `single` declaration appears inside a multi-instance declaration** (one declaration site inside N instances
 cannot be one instance).
 
+**An `<each>` row is a multi-instance context (S439 ruling #10).** An engine is a `single` declaration
+(§66.13.3), and the invariant's many-instances argument applies to an `<each>` row word for word: an `<engine>`
+— that is, a `single` declaration — inside an `<each>` row template SHALL be refused with
+`E-COMPONENT-ENGINE-SCOPE`. The message SHALL name the per-row form: an ordinary (non-`single`) declaration,
+which gets a keyed instance per row (§66.7.3). Same rule as §51.0.K.
+> **Provenance:** ruling:user-voice-scrml.md S439 #10 "all recs" (Rec: refuse it).
+
 > ✅ **RULED S435 — O5** (bryan: *"yes, table, 1i, 2ii"*): `rule=` unchanged; `effect=` / `<onTransition>` / `history` / `internal:rule=` / `<onTimeout>` / `<onIdle>` carry over as features of a field's transition graph — per instance on a non-`single` declaration, timers disposed with the instance; `var=` / `name=` / §51.0.C auto-naming RETIRE (the declaration's name is the variable); `derived=` RETIRES (a locked declaration with a reactive initializer is derived, §66.9); `.advance(.X)` is kept as the loud write; a nested `<engine>` becomes an enum-valued child field with its own graph; cross-file `<EngineName/>` becomes `<*name/>` of an exported `single`; engine `server` becomes the declaration `server` modifier (§66.16). **(1i)** state-child BODIES stay: a state-child's body is that variant's markup, rendered wherever the field renders. **(2ii)** `accepts=` + message arms are KEPT but CONFINED: an arm may only CHOOSE a write, and every write is still checked against `rule=` — a dispatch convenience, not a second transition definition. The prior OPEN text follows for the record.
 >
 > *(superseded)* **O5: re-homing the §51.0 engine surface.** The ruling re-expresses `<engine>` as a
@@ -40321,7 +40339,7 @@ emitter). Every code below is Nominal on impl#1.
 |---|---|
 | **`E-DERIVED-WRITE`** | Fires on a write to a DERIVED declaration (locked + reactive initializer, §66.9). The message SHALL name the `let`-seeding trade-off (§66.9 rule 5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DERIVED-VALUE-MUTATE`** | Unchanged in meaning; applies to derived declarations as spelled in §66.9. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-COMPONENT-ENGINE-SCOPE`** | Survives as the Move-20 invariant: fires when a `single` declaration appears inside a multi-instance declaration (§66.13.4) — including an `<each>` row template (S439 ruling #10; the message names the per-row ordinary declaration, §66.7.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-ENGINE-INVALID-TRANSITION`** | Reused for a write off a transition-graph field's `rule=` edges (§66.13.2) — including a graph transition on a SUB-FIELD written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-CELL-NO-RENDER-SPEC`** | Fire condition under §66 is OPEN (O51, §66.6.8) — it continues to police the legacy Shape-1 `<x/>` form during the window. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 
