@@ -2612,6 +2612,45 @@ function armPatternChainArrowOffset(peek, k) {
   return -1;
 }
 
+/**
+ * For an arm-pattern chain beginning at peek-offset `k` (one that
+ * armPatternChainArrowOffset accepted), return the first alternate token that
+ * carries a payload BINDING when the chain has two or more alternates — or
+ * null. A binding is an identifier inside the payload parens that is neither
+ * the `_` discard nor a field name (an IDENT directly followed by `:`).
+ * `.P(_) | .Q(_)` and `.P(a: _) | .Q(a: _)` bind nothing; `.P(a: x) | .Q(a: x)`
+ * and `.P(x) | .Q(x)` do.
+ */
+function armChainBindingAlternate(peek, k) {
+  let i = k;
+  let alternates = 0;
+  let offender = null;
+  for (;;) {
+    const start = i;
+    const end = scanArmPatternAlternate(peek, i);
+    if (end < 0) return null;
+    alternates++;
+    const t = peek(start);
+    if (offender === null && t && ((t.kind === "PUNCT" && t.text === ".") || (t.kind === "OPERATOR" && t.text === "::"))) {
+      const p = peek(start + 2);
+      if (p && p.kind === "PUNCT" && p.text === "(") {
+        for (let j = start + 3; j < end - 1; j++) {
+          const tk = peek(j);
+          if (!tk || tk.kind !== "IDENT" || tk.text === "_") continue;
+          const nx = peek(j + 1);
+          if (nx && nx.kind === "PUNCT" && nx.text === ":") continue; // field name
+          offender = t;
+          break;
+        }
+      }
+    }
+    if (matchArrowGlyphAt(peek, end)) return alternates > 1 ? offender : null;
+    const bar = peek(end);
+    if (!bar || bar.kind !== "PUNCT" || bar.text !== "|") return null;
+    i = end + 1;
+  }
+}
+
 function armPatternChainReachesArrow(peek, k) {
   return armPatternChainArrowOffset(peek, k) >= 0;
 }
@@ -4744,6 +4783,22 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       !["{", "}", ")", "]", ";"].includes(_prevTok.text);
     const _headArrowOff = _prevDemandsOperand ? -1 : armPatternChainArrowOffset(peek, 0);
     const _headArrowTok = _headArrowOff >= 0 ? peek(_headArrowOff) : null;
+    // A `|` alternation whose alternates BIND payload fields
+    // (`.P(a: x) | .Q(a: x) :> x`) has no lowering: codegen compares the tags
+    // only, so every binding would be unbound in the body. Reject it LOUDLY at
+    // every arm position rather than emit an arm that silently never matches.
+    if (_headArrowTok !== null) {
+      const _altBind = armChainBindingAlternate(peek, 0);
+      if (_altBind) {
+        errors.push(new TABError(
+          "E-MATCH-ALT-BINDING",
+          "A match arm that lists several variants with `|` cannot bind their payload fields " +
+          "(e.g. `.P(a: x) | .Q(a: x) :> x`). Give each variant its own arm with its own binding, " +
+          "or use `_` discards (`.P(_) | .Q(_) :> …`) when the body does not need the payload.",
+          spanOf(_altBind, _altBind),
+        ));
+      }
+    }
     let _inArmHead = _headArrowTok !== null;
     // The first token of that arm's BODY is an operand position, exactly as it
     // is for the inline-arm forms (whose collectExpr starts AFTER the arrow with

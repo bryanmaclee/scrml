@@ -466,31 +466,66 @@ function openStringQuoteAt(source, slashPos) {
  * holding a brace next to another character (`" => {\n"`, `"{ "`, `" }"`) was
  * counted as a real brace → `E-CTX-003` / `E-CTX-001` or a mis-scoped block.
  */
-function braceIsQuotedStringContent(source, bracePos, segStart) {
-  let lineEnd = bracePos;
-  while (lineEnd < source.length && source[lineEnd] !== "\n") lineEnd++;
+function braceIsQuotedStringContent(source, bracePos, segStart, cache) {
+  // S438 review F2 — the segment is analysed ONCE and cached (keyed by its
+  // start), not re-tokenized per brace: a one-line literal with N braces was
+  // O(N × line) (a 2000-object line took ~97 s). Lookups are O(log n).
+  let seg = cache.seg;
+  if (!seg || seg.start !== segStart || bracePos >= seg.lineEnd) {
+    let lineEnd = bracePos;
+    while (lineEnd < source.length && source[lineEnd] !== "\n") lineEnd++;
+    let firstQuote = -1;
+    for (let i = segStart; i < lineEnd; i++) {
+      const q = source[i];
+      if (q === '"' || q === "'") { firstQuote = i; break; }
+    }
+    seg = { start: segStart, lineEnd, firstQuote, ranges: null };
+    cache.seg = seg;
+  }
   // Cheap pre-check: no quote before the brace on this segment → not a string.
-  let sawQuote = false;
-  for (let i = segStart; i < bracePos; i++) {
-    const q = source[i];
-    if (q === '"' || q === "'") { sawQuote = true; break; }
+  if (seg.firstQuote < 0 || seg.firstQuote >= bracePos) return false;
+  if (seg.ranges === null) {
+    // Closed quote-string spans [s, e) on this segment, in source order.
+    const ranges = [];
+    // S438 review F3 — a segment that OPENS with `/` continues an expression
+    // from the previous line when that line ended on a value (`a\n  / b`):
+    // there the `/` is division, but a tokenizer started cold at the line
+    // reads it as a regex opener and swallows the line's strings. Start the
+    // tokenizer in expression-continuation state by prefixing one synthetic
+    // operand (offsets shifted so spans stay absolute). A line-leading regex
+    // statement (previous line ended on `;`/`{`/`}`/nothing) is left cold.
+    let prefix = "";
+    {
+      let f = segStart;
+      while (f < seg.lineEnd && (source[f] === " " || source[f] === "\t")) f++;
+      if (source[f] === "/" && source[f + 1] !== "/" && source[f + 1] !== "*") {
+        let b = segStart - 1;
+        while (b >= 0 && /\s/.test(source[b])) b--;
+        if (b >= 0 && /[A-Za-z0-9_$)\]"'`]/.test(source[b])) prefix = "_ ";
+      }
+    }
+    try {
+      const toks = tokenizeLogic(prefix + source.slice(segStart, seg.lineEnd), segStart - prefix.length, 1, 1, []);
+      for (const t of toks) {
+        if (t.kind !== "STRING" || !t.span) continue;
+        const s = t.span.start;
+        const e = t.span.end;
+        const open = source[s];
+        if ((open === '"' || open === "'") && e - s >= 2 && source[e - 1] === open) ranges.push(s, e);
+      }
+    } catch {
+      // A tokenizer failure answers "not string content" — the pre-F14 rule.
+    }
+    seg.ranges = ranges;
   }
-  if (!sawQuote) return false;
-  let toks;
-  try {
-    toks = tokenizeLogic(source.slice(segStart, lineEnd), segStart, 1, 1, []);
-  } catch {
-    return false;
+  // Binary search for the last range starting before the brace.
+  const r = seg.ranges;
+  let lo = 0, hi = r.length / 2 - 1, hit = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (r[mid * 2] < bracePos) { hit = mid; lo = mid + 1; } else hi = mid - 1;
   }
-  for (const t of toks) {
-    if (t.kind !== "STRING" || !t.span) continue;
-    const s = t.span.start;
-    const e = t.span.end;
-    if (bracePos <= s || bracePos >= e - 1) continue;
-    const open = source[s];
-    if ((open === '"' || open === "'") && e - s >= 2 && source[e - 1] === open) return true;
-  }
-  return false;
+  return hit >= 0 && bracePos < r[hit * 2 + 1] - 1;
 }
 
 /**
@@ -979,6 +1014,8 @@ export function splitBlocks(filePath, source) {
   // End offset of the last comment the splitter consumed (a
   // braceIsQuotedStringContent segment never starts inside comment text).
   let _lastCommentEnd = 0;
+  // Per-segment analysis cache for braceIsQuotedStringContent (S438 F2).
+  const _braceStrCache = { seg: null };
 
   // ---------------------------------------------------------------------------
   // Accessors
@@ -2929,7 +2966,7 @@ export function splitBlocks(filePath, source) {
           let segStart = curPos;
           while (segStart > 0 && source[segStart - 1] !== "\n") segStart--;
           segStart = Math.max(segStart, (frame.startPos ?? 0) + 2, frame._codeFrom ?? 0, _lastCommentEnd);
-          if (segStart < curPos && braceIsQuotedStringContent(source, curPos, segStart)) {
+          if (segStart < curPos && braceIsQuotedStringContent(source, curPos, segStart, _braceStrCache)) {
             _inBraceStr = true;
           }
         }

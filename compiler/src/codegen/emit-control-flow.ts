@@ -1416,9 +1416,11 @@ export function parseMatchArm(rawTrimmed: string): MatchArm | null {
   // — g-match-lowering-arm-drop F6). The parens are matched then stripped: a `_`
   // discard binds nothing, so the OR-chain compares .variant tags alone. Payload
   // BINDINGS in alternation remain unsupported (SPEC §51.3.2 / §18.0.3
-  // same-binding-shape, E-ENGINE-016 at the typer) — the restricted `[_\s,]*`
-  // payload class matches ONLY discards, so a binding-bearing alternate declines
-  // here and surfaces the typer error rather than mis-lowering.
+  // same-binding-shape) — the restricted `[_\s,]*` payload class matches ONLY
+  // discards. A binding-bearing alternation never reaches here in a successful
+  // compile: the parser rejects it with E-MATCH-ALT-BINDING (ast-builder.js
+  // collectExpr). (This comment previously claimed a typer error surfaced; none
+  // did — the arm was silently dropped. S438 review F1a.)
   const altMatch = trimmed.match(
     // `::Variant` (the §18.2 alias prefix) is accepted in every alternate, as it
     // is for a singleton arm — `::B | ::C :>` otherwise matched no form and was
@@ -2944,9 +2946,12 @@ export function hasPayloadBindingOrTaggedVariant(arms: MatchArm[]): boolean {
     // §18 alternation arms: any alternate that names a payload-bearing variant
     // (in _variantFields) requires tagVar normalization so the OR-chain compares
     // .variant strings rather than the tagged-object value itself.
-    if (a.tests && a.tests.length > 1) {
-      return a.tests.some(t => _variantFields?.has(t));
-    }
+    // An alternation arm ALWAYS normalizes: the `.variant` tag is correct for
+    // unit values too, while an under-informed registry (library mode, an
+    // imported enum) made `.P(_) | .Q(_)` / `.P | .Q` over a payload enum
+    // compare the raw object against "P" and never match — silently, with
+    // E-TYPE-020 satisfied (g-impl1-match-miscompiles F12 review F1b).
+    if (a.tests && a.tests.length > 1) return true;
     return _variantFields?.has(a.test ?? "") ?? false;
   });
 }

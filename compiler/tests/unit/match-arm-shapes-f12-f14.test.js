@@ -207,6 +207,149 @@ describe("F12 — a `|` alternation arm lowers at EVERY arm position", () => {
   });
 });
 
+describe("F12 review F1 — alternation over PAYLOAD variants", () => {
+  test("library mode: discard and bare alternation over a payload enum match at every position", async () => {
+    const r = await compileAndLoad(`\${
+  type S:enum = { Z, P(a: number), Q(a: number), R }
+  export function mkP() -> S { return S.P(1) }
+  export function mkQ() -> S { return S.Q(2) }
+  export function last(s: S) -> string {
+    return match s {
+      .Z :> "z"
+      .R :> "r"
+      .P(_) | .Q(_) :> "pq"
+    }
+  }
+  export function mid(s: S) -> string {
+    return match s {
+      .Z :> "z"
+      .P | .Q :> "pq"
+      .R :> "r"
+    }
+  }
+  export function first(s: S) -> string {
+    return match s {
+      .P(_) | .Q(_) :> "pq"
+      .Z | .R :> "zr"
+    }
+  }
+  export function decl(s: S) -> string {
+    const r = match s {
+      .Z :> "z"
+      .P | .Q :> "pq"
+      .R :> "r"
+    }
+    return r
+  }
+}
+`);
+    try {
+      expect(r.errors).toEqual([]);
+      const m = r.mod;
+      for (const f of [m.last, m.mid, m.first, m.decl]) {
+        expect(f(m.mkP())).toBe("pq");
+        expect(f(m.mkQ())).toBe("pq");
+      }
+      expect([m.last("Z"), m.last("R"), m.mid("R"), m.first("Z"), m.decl("Z")]).toEqual(["z", "r", "r", "zr", "z"]);
+    } finally { r.cleanup(); }
+  });
+
+  test("program mode: discard alternation over a payload enum as the last arm", () => {
+    const { errors, js } = compileProgram(`<program>
+\${
+  type S:enum = { Z, P(a: number), Q(a: number) }
+  function f(s: S) -> string {
+    return match s {
+      .Z :> "z"
+      .P(_) | .Q(_) :> "pq"
+    }
+  }
+  @out = f(S.Q(2))
+}
+<p>\${@out}</p>
+</program>
+`);
+    expect(errors).toEqual([]);
+    expect(js).toMatch(/_scrml_tag_\d+ === "P" \|\| _scrml_tag_\d+ === "Q"/);
+  });
+
+  const bindingCases = {
+    "library, last arm": `\${
+  type S:enum = { Z, P(a: number), Q(a: number) }
+  export function f(s: S) -> number {
+    return match s {
+      .Z :> 0
+      .P(a: x) | .Q(a: x) :> x
+    }
+  }
+}
+`,
+    "library, first arm, positional": `\${
+  type S:enum = { Z, P(a: number), Q(a: number) }
+  export function f(s: S) -> number {
+    return match s {
+      .P(x) | .Q(x) :> x
+      .Z :> 0
+    }
+  }
+}
+`,
+    "library, const-decl block arm": `\${
+  type S:enum = { Z, P(a: number), Q(a: number) }
+  export function f(s: S) -> number {
+    const r = match s {
+      .Z :> 0
+      .P(a: x) | .Q(a: x) :> {
+        const y = x
+        y
+      }
+    }
+    return r
+  }
+}
+`,
+    "program, last arm": `<program>
+\${
+  type S:enum = { Z, P(a: number), Q(a: number) }
+  function f(s: S) -> number {
+    return match s {
+      .Z :> 0
+      .P(a: x) | .Q(a: x) :> x
+    }
+  }
+  @out = f(S.P(1))
+}
+<p>\${@out}</p>
+</program>
+`,
+    "program, first arm": `<program>
+\${
+  type S:enum = { Z, P(a: number), Q(a: number) }
+  function f(s: S) -> number {
+    return match s {
+      .P(a: x) | .Q(a: x) :> x
+      .Z :> 0
+    }
+  }
+  @out = f(S.P(1))
+}
+<p>\${@out}</p>
+</program>
+`,
+  };
+  for (const [name, src] of Object.entries(bindingCases)) {
+    test(`a BINDING alternation is a loud E-MATCH-ALT-BINDING (${name})`, async () => {
+      if (src.startsWith("<program>")) {
+        const { errors } = compileProgram(src);
+        expect(errors).toContain("E-MATCH-ALT-BINDING");
+      } else {
+        const r = await compileAndLoad(src);
+        try { expect(r.errors).toContain("E-MATCH-ALT-BINDING"); } finally { r.cleanup(); }
+      }
+    });
+  }
+});
+
 describe("F13 — payload patterns binding five or more fields", () => {
   test("4/5/6/8 named fields as later arms, inline and one-line", async () => {
     const r = await compileAndLoad(`\${
@@ -306,6 +449,40 @@ describe("F14 — string literals holding braces inside `${}`", () => {
       expect([x.g('a"b'), x.g("ab")]).toEqual([1, 0]);
       expect(x.h("x'y")).toBe("x{y");
       expect([x.k(), x.m(), x.n(), x.o()]).toEqual(["}", 3, "a { b } c", 2]);
+    } finally { r.cleanup(); }
+  });
+
+  test("a line OPENING with division (previous line ended on a value) is not read as a regex", async () => {
+    const r = await compileAndLoad(`\${
+  export function t(a: number, b: number, c: boolean) -> string {
+    let r = a
+      / b; let s = '/'; if (c) { r = 'x'
+      }
+    return "" + r + s
+  }
+}
+`);
+    try {
+      expect(r.errors).toEqual([]);
+      expect([r.mod.t(6, 2, false), r.mod.t(6, 2, true)]).toEqual(["3/", "x/"]);
+    } finally { r.cleanup(); }
+  });
+
+  test("perf guard (review F2): one line holding 3000 brace pairs after a quote compiles in < 2 s", async () => {
+    const line = `"q", ` + Array.from({ length: 3000 }, (_, i) => `{k${i}: ${i}}`).join(", ");
+    const t0 = Date.now();
+    const r = await compileAndLoad(`\${
+  export function t() -> number {
+    const data = [${line}]
+    return data.length
+  }
+}
+`);
+    const ms = Date.now() - t0;
+    try {
+      expect(r.errors).toEqual([]);
+      expect(r.mod.t()).toBe(3001);
+      expect(ms).toBeLessThan(2000);
     } finally { r.cleanup(); }
   });
 
