@@ -4730,16 +4730,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     // wildcard alternate (`.A | _ :> x`) tripped the leading-`| _` product-
     // wildcard boundary and tore the arm into a pattern-only bare-expr `.A`
     // (silently dropped by codegen) plus a separate `_` arm.
-    // A collection that starts right AFTER an arm arrow is that arm's RESULT,
-    // never a pattern head: `(_, .Eof) :> "eof"` followed by `| _ :> "x"` must
-    // still break at the `| _` product wildcard (the result `"eof"` merely looks
-    // like the first alternate of a `"eof" | _ :>` chain).
+    // Only a collection that starts where an ARM can start has a pattern head:
+    // after an operator / punctuator that demands an operand (an arm arrow, `<`,
+    // `=`, `(`, …) the collection is an operand, never a pattern. So
+    // `(_, .Eof) :> "eof"` + `| _ :> "x"` still breaks at the `| _` product
+    // wildcard (the result `"eof"` only LOOKS like a `"eof" | _ :>` chain), and
+    // an operand like the `0` of `given x < 0 :> …` is left exactly as before.
+    // Arms start after a closer (`{` `}` `)` `]` `;`) or a value (the previous
+    // arm's result, same-line `.A :> "a" .B | .C :> "x"`).
     const _prevTok = peek(-1);
-    const _startsAfterArrow = !!_prevTok && (
-      (_prevTok.kind === "OPERATOR" && (_prevTok.text === ":>" || _prevTok.text === "=>")) ||
-      (_prevTok.kind === "PUNCT" && _prevTok.text === ">" && peek(-2)?.kind === "PUNCT" && peek(-2)?.text === "-")
-    );
-    const _headArrowOff = _startsAfterArrow ? -1 : armPatternChainArrowOffset(peek, 0);
+    const _prevDemandsOperand = !!_prevTok &&
+      (_prevTok.kind === "PUNCT" || _prevTok.kind === "OPERATOR") &&
+      !["{", "}", ")", "]", ";"].includes(_prevTok.text);
+    const _headArrowOff = _prevDemandsOperand ? -1 : armPatternChainArrowOffset(peek, 0);
     const _headArrowTok = _headArrowOff >= 0 ? peek(_headArrowOff) : null;
     let _inArmHead = _headArrowTok !== null;
     // The first token of that arm's BODY is an operand position, exactly as it
