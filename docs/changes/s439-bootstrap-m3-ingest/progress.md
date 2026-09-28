@@ -16,3 +16,4 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
   cut this further (bind:value, meta, navigate, tool print use in-set kinds but out-of-Core semantics).
   Expected first-slice graded: roughly 15–35 runtime cases (5–12% of runtime cases). Borderline vs the
   <25 stop line; the kind-level ceiling (29–39) is above it, so CONTINUE, and report the real number.
+- 2026-09-27T19:14:31-06:00 ingest.scrml (shim: legacy cells/const/functions/markup/handlers/if= → Core) + slice-m3/{bundle.scrml,substitute.js} (CG substitute: encode → ingest → check → print; executeClient). counter-increment ingests + prints.
