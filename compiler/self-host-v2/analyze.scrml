@@ -52,13 +52,17 @@ ${
     // `span` / `annotated` (M3 typer): where the field is declared, and whether
     // its type was WRITTEN (`name:Type`) rather than inferred from a literal —
     // §7.5.1's initializer rule applies to an annotation only.
-    // `trusted`: its declaration parsed cleanly (no parser error inside its
-    // span) — the typer checks nothing against a type that failed to parse.
+    // `trusted`: its TYPE EXPRESSION parsed cleanly (no parser error inside
+    // the type's own span) — the typer checks nothing against a type that
+    // failed to parse. A diagnostic anywhere else (the initializer, a
+    // sibling, the body) does not untrust the type. `typeSpan`: the written
+    // type (`not` when the type is inferred).
     export type FieldInfo:struct = {
         nid: int,
         span: ASpan,
         annotated: boolean,
         trusted: boolean,
+        typeSpan: ASpan | not,
         sym: Sym,
         ty: Type,
         mode: FieldMode,
@@ -228,6 +232,7 @@ ${
         decls: DeclSrc[],
         fns: FnSrc[],
         handles: HandleInfo[],
+        files: FileAst[],
     }
 
     type RTypeInfos:struct = { ts: TypeInfo[], st: AS }
@@ -792,7 +797,7 @@ ${
             st = rw.st
         }
         const f: FieldInfo = {
-            nid: nid, span: span, annotated: aty is some, trusted: true, sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
+            nid: nid, span: span, annotated: aty is some, trusted: true, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
             exported: exported, wcap: wcap, init: init, reads: reads,
         }
         return { f: f, st: st }
@@ -1102,19 +1107,20 @@ ${
             for (const af of fnItems(f.items)) {
                 const r: RSym = mint(st, af.name)
                 st = r.st
-                // a signature with a parser error inside it is not trusted
-                const sigOk: boolean = !hasErrIn(f.errs, signatureSpan(af))
+                // each signature component is judged by its own type
+                // expression: the return type alone, the parameter list as a
+                // whole (an untyped or mis-typed parameter voids the arity)
                 let ret: Type | not = not
                 const at: AType | not = af.ret
-                if (sigOk && at is some) {
-                    if (!isVoidType(at)) {
+                if (at is some) {
+                    if (!isVoidType(at) && !hasErrIn(f.errs, at.span)) {
                         const rt: RType = resolveType(fte, at, st)
                         ret = rt.t
                         st = rt.st
                     }
                 }
                 let arity: int = af.params.length
-                if (!sigOk || !allParamsTyped(af.params)) arity = -1
+                if (!paramsTrusted(f.errs, af.params)) arity = -1
                 const info: FnInfo = { nid: af.nid, span: af.span, sym: r.s, name: af.name, file: f.path,
                                        exported: af.exported, pure: af.pure, arity: arity, ret: ret }
                 st = addFact(st, af.nid, Fact.FBind(r.s))
@@ -1132,15 +1138,6 @@ ${
         return false
     }
 
-    // A function's signature: from its start to its body's `{`.
-    fn signatureSpan(af: AFn) -> ASpan { return mkSpan(af.span.start, af.body.span.start) }
-
-    fn allParamsTyped(ps: AParam[]) -> boolean {
-        for (const p of ps) {
-            if (p.ty is not) return false
-        }
-        return true
-    }
 
     fn fileErrs(files: FileAst[], path: string) -> ASpan[] {
         for (const f of files) {
@@ -1149,20 +1146,36 @@ ${
         return []
     }
 
-    // The fields whose declaration contains a parser error are not trusted. A
-    // child field (and a program cell) is its own declaration; an ATTRIBUTE
-    // lives in its declaration's opener (`opener`), and a stray token there
-    // cannot be pinned to one attribute — any error in the opener untrusts them all.
-    fn trustFields(fs: FieldInfo[], errs: ASpan[], opener: ASpan) -> FieldInfo[] {
+    // A field is untrusted only when ITS OWN written type failed to parse
+    // (a parser error inside the type expression's span).
+    fn trustFields(fs: FieldInfo[], errs: ASpan[]) -> FieldInfo[] {
         let out: FieldInfo[] = []
         for (const f of fs) {
-            let where: ASpan = f.span
-            if (!isChildRole(f.role)) where = opener
-            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: !hasErrIn(errs, where),
-                                sym: f.sym, ty: f.ty, mode: f.mode, role: f.role, grants: f.grants, graph: f.graph,
-                                exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads }])
+            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: typeTrusted(errs, f.typeSpan),
+                                typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode, role: f.role, grants: f.grants,
+                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads }])
         }
         return out
+    }
+
+    fn typeSpanOf(at: AType | not) -> ASpan | not {
+        if (at is not) return not
+        return at.span
+    }
+
+    fn typeTrusted(errs: ASpan[], span: ASpan | not) -> boolean {
+        if (span is not) return true
+        return !hasErrIn(errs, span)
+    }
+
+    // Every parameter is written with a type, and none of those types failed to parse.
+    fn paramsTrusted(errs: ASpan[], ps: AParam[]) -> boolean {
+        for (const p of ps) {
+            const at: AType | not = p.ty
+            if (at is not) return false
+            if (hasErrIn(errs, at.span)) return false
+        }
+        return true
     }
 
     // `-> void` (§7.5 primitive-type) declares that the function returns no value.
@@ -1241,7 +1254,7 @@ ${
                 st = r2.st
                 single = hasFlag(d.mods, "single")
             }
-            fields = trustFields(fields, fileErrs(files, ds.file), declSpan(ds))
+            fields = trustFields(fields, fileErrs(files, ds.file))
             const rh: RHandles = handlesIn(rd.ds, rendersNodes(ds), { owner: ds.nid, conditional: false, file: ds.file }, st)
             st = rh.st
             handles = handles.concat(rh.hs)
@@ -1254,7 +1267,7 @@ ${
             const info: DeclInfo = { nid: ds.nid, span: declSpan(ds), sym: ds.sym, kind: kind, single: single, file: ds.file, fields: fields, handles: own }
             decls = decls.concat([{ info: info, file: ds.file, isProgram: ds.isProgram, d: ds.d, p: ds.p }])
         }
-        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles }
+        const g: Globals = { program: program, entry: entry, te: te0, types: rt.ts, decls: decls, fns: rf.fs, handles: handles, files: files }
         return { g: g, st: st }
     }
 
@@ -1330,10 +1343,24 @@ ${
         return InstRef.Shared(env.g.program)
     }
 
+    // The program's cells, when code in THIS file can see them: §7.6.1 — a
+    // file-level cell is reachable as `@x` "in the same file". A library's
+    // `@x` never reaches the app that links it (its meaning must not depend on
+    // which app imports it).
     fn programInfo(env: Env) -> DeclInfo | not {
         const d: DeclSrc | not = findDeclSrc(env.g, env.g.program)
         if (d is not) return not
+        if (d.file != env.file) return not
         return d.info
+    }
+
+    // A user declaration named `name` that THIS file can see: declared here, or
+    // imported here (§21.3). Only such a one is `@name`'s shared instance (§66.7.1).
+    fn visibleDecl(env: Env, name: string) -> DeclSrc | not {
+        const d: DeclSrc | not = declNamed(env.g, name)
+        if (d is not) return not
+        if (d.file == env.file || importsName(env.g.files, env.file, name)) return d
+        return not
     }
 
     // ---- expression results -------------------------------------------------
@@ -1483,7 +1510,7 @@ ${
             const i: int = fieldIndex(pi, name)
             if (i >= 0) return plain(pi.fields[i].ty, addFact(st, e.nid, Fact.FField(pi.sym, programInst(env), i)))
         }
-        const ud: DeclSrc | not = declNamed(env.g, name)
+        const ud: DeclSrc | not = visibleDecl(env, name)
         if (ud is some) {
             const si: InstRef = InstRef.Shared(ud.info.sym)
             return { x: { ty: Type.Named(ud.info.sym), inst: si, iDecl: ud.info.sym, maybe: false },
@@ -2330,7 +2357,7 @@ ${
     fn resolveLocal(env: Env, s: AStmt, name: string, mutable: boolean, aty: AType | not, init: AExpr, st0: AS) -> RB {
         let st: AS = st0
         let annot: Type | not = not
-        if (aty is some) {
+        if (aty is some && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
             const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
             const rt: RType = resolveType(te, aty, st)
             annot = rt.t
@@ -2570,9 +2597,14 @@ ${
         }
         const row: RowB = { bind: rs.s, ty: elemTy }
         const renv: Env = withRow(env, row, asName, rowHandles)
+        // `key=` is an attribute of `<each>`, not part of the row TEMPLATE: it
+        // reads the row's item, never an `as=` handle of the row it keys
+        // (§66.7.3 an instance is "keyed by the row's `key=`"; §66.7.4 a row
+        // handle is visible "within that row's template only").
+        const kenv: Env = withRow(env, row, asName, [])
         for (const a of e.attrs) {
             if (a.name == "key") {
-                st = resolveValue(renv, a.value, not, st)
+                st = resolveValue(kenv, a.value, not, st)
                 st = addFact(st, a.nid, Fact.FAttr(AttrKind.AEachKey))
             } else if (a.name != "in" && a.name != "as") {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<each " + a.name + "=>` is not in bootstrap slice M2")
@@ -2624,9 +2656,13 @@ ${
                 let pty: Type = Type.Str
                 const at: AType | not = p.ty
                 if (at is some) {
-                    const rt: RType = resolveType(fte, at, st)
-                    pty = rt.t
-                    st = rt.st
+                    // a type that failed to parse is not resolved (its parse
+                    // error is the diagnostic; the typer treats it as unproven)
+                    if (!hasErrIn(fileErrs(g.files, fs.info.file), at.span)) {
+                        const rt: RType = resolveType(fte, at, st)
+                        pty = rt.t
+                        st = rt.st
+                    }
                 } else {
                     st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "an unannotated parameter `" + p.name + "` — bootstrap slice M2 needs `" + p.name + ": Type` (Core parameters are typed)")
                 }
@@ -2839,17 +2875,28 @@ ${
 
     // `as=` handles: one name per scope (a declaration's renders, or one
     // `<each>` row — §66.7.4), and never a name `@…` already means.
-    // Only a PROGRAM-scope handle can collide with a program cell or a
-    // visible declaration's `@name`: a row-scoped (§66.7.4) or
-    // declaration-scoped handle is local to its scope and shadows them.
+    // `as=` handles. PA INTERIM RULING (S439 fix round 2, pending bryan): a
+    // handle in ANY scope — the program, a row (§66.7.4), a declaration's
+    // `renders` — whose name is a cell VISIBLE in its file is refused: the
+    // SPEC is silent on handle-vs-cell shadowing, and refusing is the limit /
+    // reversible direction (cf. E-NAME-COLLIDES-STATE, "locals cannot shadow
+    // state names"). Program cells are visible only in the program's own file
+    // (§7.6.1). A PROGRAM-scope handle also may not take a visible
+    // declaration's `@name` (its shared instance, §66.7.1).
     fn dupHandles(files: FileAst[], t: Tables) -> Diag[] {
         let out: Diag[] = []
         let prog: DeclInfo | not = declInfo(t, t.program)
         let cells: string[] = []
+        let cellSpans: ASpan[] = []
         let progNid: int = -1
+        let progFile: string = ""
         if (prog is some) {
             progNid = prog.nid
-            for (const f of prog.fields) { cells = cells.concat([f.sym.hint]) }
+            progFile = prog.file
+            for (const f of prog.fields) {
+                cells = cells.concat([f.sym.hint])
+                cellSpans = cellSpans.concat([f.span])
+            }
         }
         let j = 0
         while (j < t.handles.length) {
@@ -2863,8 +2910,9 @@ ${
             }
             if (dup is some) {
                 out = out.concat([mkDiag(h.file, h.span, "E-BOOTSTRAP-REDECLARE", "`as=" + h.name + "` — a handle `@" + h.name + "` is already bound in this scope (at " + offsetOf(dup.span) + "); a scope binds each handle name once (the SPEC names no code for this; bootstrap-local)")])
-            } else if (h.owner == progNid && cells.indexOf(h.name) >= 0) {
-                out = out.concat([mkDiag(h.file, h.span, "E-BOOTSTRAP-REDECLARE", "`as=" + h.name + "` — `@" + h.name + "` already names a cell of the program; a handle and a cell cannot share the `@` name (the SPEC names no code for this; bootstrap-local)")])
+            } else if (h.file == progFile && cells.indexOf(h.name) >= 0) {
+                const cellAt: string = offsetOf(cellSpans[cells.indexOf(h.name)])
+                out = out.concat([mkDiag(h.file, h.span, "E-BOOTSTRAP-REDECLARE", "the handle `as=" + h.name + "` would shadow the cell `@" + h.name + "` (declared at " + cellAt + ") — a handle may not share a visible cell's name, in any scope; rename one of them (the SPEC is silent on handle-vs-cell shadowing; bootstrap-local, PA interim ruling)")])
             } else if (h.owner == progNid && visibleDeclNamed(files, t, h.file, h.name)) {
                 out = out.concat([mkDiag(h.file, h.span, "E-BOOTSTRAP-REDECLARE", "`as=" + h.name + "` — `@" + h.name + "` already names the shared instance of `<" + h.name + ">` (§66.7.1); a handle cannot take that name (the SPEC names no code for this; bootstrap-local)")])
             }
@@ -3049,12 +3097,12 @@ ${
     // The typer's view of where it is: the tables, the file, the locals'
     // types (by Sym id) in scope, and `settled` — the local types the
     // previous pass joined (they win over `locals`, see typeProgram).
-    type TEnv:struct = { t: Tables, file: string, locals: LocalT[], settled: LocalT[] }
+    type TEnv:struct = { t: Tables, file: string, errs: ASpan[], locals: LocalT[], settled: LocalT[] }
     type RVT:struct = { vt: VType, ts: TypeState }
     type RTEnv:struct = { env: TEnv, ts: TypeState }
 
     fn tWithLocal(env: TEnv, s: Sym, vt: VType) -> TEnv {
-        return { t: env.t, file: env.file, locals: env.locals.concat([{ id: s.id, vt: vt }]), settled: env.settled }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals.concat([{ id: s.id, vt: vt }]), settled: env.settled }
     }
 
     fn findLocalT(ls: LocalT[], id: int) -> VType | not {
@@ -3143,11 +3191,6 @@ ${
         return true
     }
 
-    fn allUnknown(ls: LocalT[]) -> LocalT[] {
-        let out: LocalT[] = []
-        for (const l of ls) { out = out.concat([{ id: l.id, vt: VType.Unknown }]) }
-        return out
-    }
 
     fn rvt(vt: VType, ts: TypeState) -> RVT { return { vt: vt, ts: ts } }
 
@@ -3642,7 +3685,7 @@ ${
         if (tk == 2) want = 1
         if (tk == 3) want = 2
         if (want < 0 || want == lk) return ts
-        return report(ts, env, span, "E-TYPE-031", what + " is annotated `" + typeName(target) + "`, and its initializer is a " + primitiveOfLiteral(lk) + " literal (§7.5.1 position 2; a use-site value is that field's initializer, §66.9 rule 8)")
+        return report(ts, env, span, "E-TYPE-031", what + " is annotated `" + typeName(target) + "`, and its initializer is a " + primitiveOfLiteral(lk) + " literal (§7.5.1: an annotated `let` / `const` or declaration whose initializer is a literal of a different primitive; a use-site value is that field's initializer, §66.9 rule 8)")
     }
 
     fn attrLiteralKind(v: AAttrValue) -> int {
@@ -3857,7 +3900,7 @@ ${
         const k: AStmtK = s.k
         return match k {
             .Eval(e: e) :> keepTEnv(env, typeStmtExpr(env, e, ts))
-            .Local(name: n, init: i) :> typeLocal(env, s, i, ts)
+            .Local(name: n, init: i) :> typeLocal(env, s, n, i, ts)
             .Return(e: e) :> keepTEnv(env, typeMaybeExpr(env, e, ts))
             .If(cond: c, thenB: tb, elseB: el) :> keepTEnv(env, typeIf(env, c, tb, el, ts))
             .Given(name: n, subject: sub, body: b) :> keepTEnv(env, typeGiven(env, s, sub, b, ts))
@@ -3871,12 +3914,20 @@ ${
 
     // `let a[: T] = init`: an annotated local IS its annotation; an
     // unannotated one contributes its initializer to its joined type.
-    fn typeLocal(env: TEnv, s: AStmt, init: AExpr, ts: TypeState) -> RTEnv {
+    // §7.5.1 position 1: an ANNOTATED local's literal initializer is checked
+    // against its annotation (`number` / `string` / `boolean`; `not` into a
+    // non-optional type is E-TYPE-041, §42.3.1), and every struct literal in
+    // it field by field (§66.1 rule 5's rule, spelling-independent).
+    fn typeLocal(env: TEnv, s: AStmt, name: string, init: AExpr, ts: TypeState) -> RTEnv {
         const r: RVT = typeExpr(env, init, ts)
         const sym: Sym | not = factSym(factOf(env.t, s.nid))
         if (sym is not) return keepTEnv(env, r.ts)
         const annot: Type | not = annotOf(env.t, sym)
-        if (annot is some) return keepTEnv(tWithLocal(env, sym, known(annot)), r.ts)
+        if (annot is some) {
+            let ts2: TypeState = checkInit(env, annot, literalKind(init), init.span, "`" + name + "`", r.ts)
+            ts2 = checkLitFields(env, init, ts2)
+            return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)
+        }
         return keepTEnv(tWithLocal(env, sym, r.vt), contribute(r.ts, sym, r.vt))
     }
 
@@ -3946,7 +3997,13 @@ ${
             const ls: Sym | not = factSym(f)
             if (ls is some) {
                 placeType = tLocal(env, ls)
-                if (annotOf(env.t, ls) is not) ts1 = contribute(ts1, ls, r.vt)
+                const la: Type | not = annotOf(env.t, ls)
+                if (la is some) {
+                    // a write to an annotated local: checked like a cell write
+                    ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))
+                } else {
+                    ts1 = contribute(ts1, ls, r.vt)
+                }
             }
         }
         let ts2: TypeState = typePlace(env, target, placeType, ts1)
@@ -4239,27 +4296,49 @@ ${
     // The typer runs whole-program PASSES until every unannotated local's
     // joined type is stable (a local read before a later assignment is typed
     // from the join, not from its initializer alone). Only the settled pass's
-    // types and diagnostics are kept. The join lattice is shallow, so this
-    // settles in a few passes; if it does not, every rebound local is Unknown
-    // (silent — provable-or-silent).
+    // types and diagnostics are kept. A local's join only moves UP a shallow
+    // lattice (a type → `T | not` / `number` → Unknown: at most 3 moves), and a
+    // pass that does not settle moves at least one local, so N locals settle
+    // within 3N + 2 passes (the bound; a chain of N locals needs N + 1). If
+    // the bound is ever hit, only the locals STILL CHANGING become Unknown
+    // (silent — provable-or-silent); settled ones keep their type.
     fn typeProgram(files: FileAst[], t: Tables) -> RTyping {
         let settled: LocalT[] = []
+        let prev: LocalT[] = []
         let pass = 0
-        while (pass < 6) {
+        let bound = 2
+        while (pass < bound) {
             const ts: TypeState = typePass(files, t, settled)
             const next: LocalT[] = joinContribs(ts.contribs)
+            if (pass == 0) bound = 3 * next.length + 2
             if (sameLocals(next, settled)) return { typing: { exprs: ts.exprs }, diags: ts.diags }
+            prev = settled
             settled = next
             pass = pass + 1
         }
-        const last: TypeState = typePass(files, t, allUnknown(settled))
+        const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled))
         return { typing: { exprs: last.exprs }, diags: last.diags }
+    }
+
+    fn unknownWhereChanged(prev: LocalT[], cur: LocalT[]) -> LocalT[] {
+        let out: LocalT[] = []
+        for (const l of cur) {
+            const before: VType | not = findLocalT(prev, l.id)
+            let keep = false
+            if (before is some) keep = sameVT(before, l.vt)
+            if (keep) {
+                out = out.concat([l])
+            } else {
+                out = out.concat([{ id: l.id, vt: VType.Unknown }])
+            }
+        }
+        return out
     }
 
     fn typePass(files: FileAst[], t: Tables, settled: LocalT[]) -> TypeState {
         let ts: TypeState = { exprs: [], diags: [], contribs: [] }
         for (const f of files) {
-            const env: TEnv = { t: t, file: f.path, locals: [], settled: settled }
+            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled }
             for (const it of f.items) { ts = typeItem(env, it, ts) }
         }
         return ts
@@ -4326,7 +4405,10 @@ ${
         for (const p of af.params) {
             const pf: Fact = factOf(env.t, p.nid)
             const s: Sym | not = factSym(pf)
-            if (s is some) fenv = tWithLocal(fenv, s, factType(env, pf))
+            // an untyped parameter, or one whose type failed to parse, is unproven
+            let pvt: VType = VType.Unknown
+            if (paramsTrusted(env.errs, [p])) pvt = factType(env, pf)
+            if (s is some) fenv = tWithLocal(fenv, s, pvt)
         }
         return typeBlock(fenv, af.body, ts)
     }

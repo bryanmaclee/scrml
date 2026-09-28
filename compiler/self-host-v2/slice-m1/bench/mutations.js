@@ -5,7 +5,14 @@
 // the M2 front-end and fix-round mutations, re-run as a script so the proof is
 // repeatable.) A mutation whose site is not found exactly once is NOT RUN.
 //
+// THE GATE: the script exits NON-ZERO if any mutation is NOT RUN (its site
+// moved — the proof silently shrank) or GREEN (the tests do not bite), or if
+// the unmutated suite fails on the mirror. It exits 0 only when every
+// mutation ran and went RED.
+//
 // usage: bun compiler/self-host-v2/slice-m1/bench/mutations.js
+//        MUTATIONS_PROOF=absent   — run ONE synthetic mutation whose site does not exist (must exit ≠ 0)
+//        MUTATIONS_PROOF=harmless — run ONE synthetic mutation that edits only a comment (GREEN; must exit ≠ 0)
 
 import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -19,8 +26,9 @@ const RT = `${SH}/slice-m1/runtime/runtime.js`;
 
 // The M3 typer mutations all edit analyze.scrml and are judged by the two
 // typer suites: [id, from, to] triples.
-const TYPER = (rows) => rows.map(([id, from, to]) => ({
-  id, file: `${SH}/analyze.scrml`, from, to, tests: [T2("typer-gap.test.js"), T2("typer.test.js")],
+// A 4th element names another bootstrap file (default analyze.scrml).
+const TYPER = (rows) => rows.map(([id, from, to, file]) => ({
+  id, file: `${SH}/${file ?? "analyze.scrml"}`, from, to, tests: [T2("typer-gap.test.js"), T2("typer.test.js")],
 }));
 
 const MUTATIONS = [
@@ -163,6 +171,27 @@ const MUTATIONS = [
     ["FR1-F1: a duplicate type name in one file accepted",
      "                if (first.file == ti.file) {\n                    out = out.concat([mkDiag(ti.file, ti.span, \"E-BOOTSTRAP-REDECLARE\"",
      "                if (false) {\n                    out = out.concat([mkDiag(ti.file, ti.span, \"E-BOOTSTRAP-REDECLARE\""],
+    ["FR2-1: a program cell visible from every file (§7.6.1 'in the same file' dropped)",
+     "        if (d.file != env.file) return not\n", ""],
+    ["FR2-1: `@x` reaches a declaration the file neither declares nor imports",
+     "        if (d.file == env.file || importsName(env.g.files, env.file, name)) return d\n        return not", "        return d"],
+    ["FR2-2: a row / renders handle may shadow a visible cell (PA interim: refuse)",
+     "            } else if (h.file == progFile && cells.indexOf(h.name) >= 0) {", "            } else if (h.owner == progNid && cells.indexOf(h.name) >= 0) {"],
+    ["FR2-3: `key=` resolved in the row env (sees the row's own handles)",
+     "                st = resolveValue(kenv, a.value, not, st)", "                st = resolveValue(renv, a.value, not, st)"],
+    ["FR2-4: an annotated local's literal initializer not checked (§7.5.1 position 1)",
+     "            let ts2: TypeState = checkInit(env, annot, literalKind(init), init.span, \"`\" + name + \"`\", r.ts)", "            let ts2: TypeState = r.ts"],
+    ["FR2-4: a write to an annotated local not checked",
+     "                    ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))", "                    ts1 = ts1"],
+    ["FR2-5: a field's trust judged by an error ANYWHERE in its declaration (coarse Rule C)",
+     "            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: typeTrusted(errs, f.typeSpan),",
+     "            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: !hasErrIn(errs, f.span),"],
+    ["FR2-5: an opener type's span stops before its unreadable continuation (`int|not` trusted as `int`)",
+     "        if (end > m.pos) ty = { nid: ty.nid, span: mkSpan(start, end), k: ty.k }\n", "", "parse.scrml"],
+    ["FR2-7: the fixpoint bound fixed at 6 passes (a chain of 6 locals goes Unknown)",
+     "            if (pass == 0) bound = 3 * next.length + 2", "            if (pass == 0) bound = 6"],
+    ["FR2-8: compound assignment recovered as a typed `x = v`",
+     "            return mkE(rhs2.tp, start, AExprK.Recovered)", "            return mkE(rhs2.tp, start, AExprK.Assign(lhs.e, rhs2.e))", "parse.scrml"],
     ["FR1-F2: duplicate parameter names accepted",
      "                out = out.concat([mkDiag(file, ps[j].span, \"E-BOOTSTRAP-REDECLARE\"", "                if (false) out = out.concat([mkDiag(file, ps[j].span, \"E-BOOTSTRAP-REDECLARE\""],
   ]),
@@ -196,24 +225,43 @@ for (const rel of ["compiler/src", "compiler/native-parser", "compiler/SPEC.md",
   symlinkSync(join(ROOT, rel), join(MIRROR, rel));
 }
 
+// The gate's own proof: one mutation that cannot run, one that cannot bite.
+const PROOF = process.env.MUTATIONS_PROOF ?? "";
+const PROOFS = {
+  absent: [{ id: "PROOF absent site", file: `${SH}/analyze.scrml`, from: "this text is not in analyze.scrml §§§", to: "", tests: [T2("typer.test.js")] }],
+  harmless: [{ id: "PROOF harmless edit (a comment)", file: `${SH}/analyze.scrml`,
+    from: "// self-host-v2 / analyze.scrml", to: "// self-host-v2 / analyze.scrml (harmless)", tests: [T2("typer-gap.test.js")] }],
+};
+const SET = PROOF === "" ? MUTATIONS : PROOFS[PROOF];
+if (!SET) throw new Error(`unknown MUTATIONS_PROOF=${PROOF}`);
+
+const t0 = performance.now();
 const results = [];
+let bad = 0;
 try {
-  for (const m of MUTATIONS) {
+  for (const m of SET) {
     const path = join(MIRROR, m.file);
     const orig = readFileSync(path, "utf8");
     const n = orig.split(m.from).length - 1;
-    if (n !== 1) { results.push(`| ${m.id} | mutation site found ${n}× — NOT RUN |`); continue; }
+    if (n !== 1) { results.push(`| ${m.id} | mutation site found ${n}× — NOT RUN |`); bad = bad + 1; continue; }
     try {
       writeFileSync(path, orig.replace(m.from, m.to));
       const r = run(m.tests, MIRROR);
-      results.push(`| ${m.id} | ${r.code !== 0 && r.fails > 0 ? "RED" : "GREEN (does not bite!)"} (${r.fails} failing) |`);
+      const red = r.code !== 0 && r.fails > 0;
+      if (!red) bad = bad + 1;
+      results.push(`| ${m.id} | ${red ? "RED" : "GREEN (does not bite!)"} (${r.fails} failing) |`);
     } finally {
       writeFileSync(path, orig);
     }
   }
-  const clean = run([`./${SH}/slice-m1/`, `./${SH}/slice-m2/`], MIRROR);
   console.log("| mutation | result |\n|---|---|\n" + results.join("\n"));
-  console.log(`unmutated slice suite (on the mirror): exit ${clean.code}, ${clean.fails} failing`);
+  if (PROOF === "") {
+    const clean = run([`./${SH}/slice-m1/`, `./${SH}/slice-m2/`], MIRROR);
+    console.log(`unmutated slice suite (on the mirror): exit ${clean.code}, ${clean.fails} failing`);
+    if (clean.code !== 0) bad = bad + 1;
+  }
 } finally {
   rmSync(MIRROR, { recursive: true, force: true });
 }
+console.log(`${SET.length} mutation(s), ${bad} problem(s), wall ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+if (bad > 0) process.exitCode = 1;

@@ -435,8 +435,8 @@ describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () =
   test("twin silent — `in=([1, 2])`", () => {
     expect(inApp("", "<each in=([1, 2]) as c><p>${c}</p></each>")).toEqual([]);
   });
-  test("legal — a ROW-scoped `as=q` beside a program CELL `q` (§66.7.4: row-local); inside the row `@q` is the handle", () => {
-    expect(inApp("    type L:struct = { id: int }\n    <lines:L[]=([{ id: 1 }])/>\n    <let q:int=0/>",
+  test("legal — a ROW-scoped `as=q` with no cell `q`: inside the row `@q` is the row's instance (§66.7.4)", () => {
+    expect(inApp("    type L:struct = { id: int }\n    <lines:L[]=([{ id: 1 }])/>",
       "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/><p>${@q.value}</p></each>")).toEqual([]);
   });
   test("still refused — a PROGRAM-scope `as=q` beside a program cell `q`", () => {
@@ -465,5 +465,140 @@ describe("§7.3.3 ruling B1 — a nested function over a parameter", () => {
   test("twin fires — `let x` / `const x` over parameter `x`", () => {
     expect(inApp("    function f(x: int) { let x = 1 }")).toEqual(["E-SCOPE-REDECLARE"]);
     expect(inApp("    function f(x: int) { const x = 1 }")).toEqual(["E-SCOPE-REDECLARE"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 2.
+// ---------------------------------------------------------------------------
+const f2 = (path, src) => ({ path, src });
+const BOXC = f2("lib/box.scrml", "export <box export let c:int=0/>\nrenders <p>${c}</p>\n");
+const MID = (v) => f2("lib/mid.scrml", "${ import { box } from \"./box.scrml\" }\nexport <card t:string=\"\"/>\nrenders <button onclick=(@box.c = " + v + ")>x</button>\n");
+const APP_BOXCELL = (cell) => f2("app.scrml", "${ import { card } from \"./lib/mid.scrml\" }\n<program>\n" + cell + "\n    <main>\n<card/>\n    </main>\n</program>\n");
+
+describe("R2-1 — a program cell is visible only in the program's own file (§7.6.1 \"in the same file\")", () => {
+  const CELL = "    type B:struct = { let c: string }\n    <let box:B=({ c: \"\" })/>";
+  test("E-TYPE-031 — a library's `@box.c = \"s\"` is the IMPORTED `<box>` (c: int), not the app's cell `box` (c: string)", () => {
+    expect(codes([BOXC, MID("\"s\""), APP_BOXCELL(CELL)])).toEqual(["E-TYPE-031"]);
+  });
+  test("twin silent — `@box.c = 2` (right for `<box>`, wrong for the app's cell)", () => {
+    expect(codes([BOXC, MID("2"), APP_BOXCELL(CELL)])).toEqual([]);
+  });
+  test("E-SCOPE-001 — a library's renders reading `@q` does not see the app's cell `q`", () => {
+    const lib = f2("lib/b2.scrml", "export <b2 n:int=0/>\nrenders <p>${@q}</p>\n");
+    const main = f2("app.scrml", "${ import { b2 } from \"./lib/b2.scrml\" }\n<program>\n    <let q:string=\"c\"/>\n    <main><b2/></main>\n</program>\n");
+    expect(codes([lib, main])).toEqual(["E-SCOPE-001"]);
+  });
+  test("twin silent — the program's own markup reads its cell `@q`", () => {
+    expect(inApp("    <let q:string=\"c\"/>", "<p>${@q}</p>")).toEqual([]);
+  });
+  test("E-SCOPE-001 — `@card` names a declaration the file neither declares nor imports", () => {
+    const other = f2("lib/other.scrml", "export <card title:string=\"\"/>\nrenders <p>x</p>\n");
+    expect(codes([other, f2("app.scrml", "<program>\n    <let s:string=\"\"/>\n    function f() { @s = @card.title }\n    <main><p>x</p></main>\n</program>\n")]))
+      .toContain("E-SCOPE-001");
+  });
+});
+
+describe("R2-2 — PA INTERIM: an `as=` handle may not shadow a cell visible in its file, in ANY scope", () => {
+  const LINES = "    type L:struct = { id: int }\n    <lines:L[]=([{ id: 1 }])/>\n    <let q:int=0/>";
+  test("E-BOOTSTRAP-REDECLARE — a ROW-scoped `as=q` beside the program cell `q`; the message names both", () => {
+    const r = frontEnd(mods, [LIB(), app(LINES, "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/></each>")]);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+    expect(r.diags[0].message).toContain("as=q");
+    expect(r.diags[0].message).toContain("cell `@q`");
+  });
+  test("E-BOOTSTRAP-REDECLARE — a same-file declaration's `renders` handle `q` beside the program cell `q`", () => {
+    const src = "${ import { dropdown } from \"./lib/dropdown.scrml\" }\n<box n:int=0/>\nrenders <div><dropdown as=q label=\"L\" options=([\"a\"])/></div>\n<program>\n    <let q:string=\"c\"/>\n    <main><box/></main>\n</program>\n";
+    expect(codes([LIB(), f2("app.scrml", src)])).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  });
+  test("legal — a LIBRARY declaration's handle `q` while the app has a cell `q` (not visible there)", () => {
+    const lib = f2("lib/box2.scrml", "${ import { dropdown } from \"./dropdown.scrml\" }\nexport <box2 n:int=0/>\nrenders <div><dropdown as=q label=\"L\" options=([\"a\"])/><p>${@q.value}</p></div>\n");
+    const main = f2("app.scrml", "${ import { box2 } from \"./lib/box2.scrml\" }\n<program>\n    <let q:string=\"c\"/>\n    <main><box2/></main>\n</program>\n");
+    expect(codes([LIB(), lib, main])).toEqual([]);
+  });
+});
+
+describe("R2-3 — `<each key=…>` is resolved OUTSIDE the row's template (§66.7.3, §66.7.4)", () => {
+  const LINES = "    type L:struct = { id: int }\n    <lines:L[]=([{ id: 1 }])/>";
+  test("E-SCOPE-001 — `key=@q.value` cannot name the row's own `as=q` instance (a circular key)", () => {
+    expect(inApp(LINES, "<each in=@lines key=@q.value as line><dropdown as=q label=\"1\" options=([\"a\"])/></each>"))
+      .toEqual(["E-SCOPE-001", "E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("twin silent — `key=@.id` (the row's item) and `key=line.id` (its `as` name)", () => {
+    expect(inApp(LINES, "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/></each>")).toEqual([]);
+    expect(inApp(LINES, "<each in=@lines key=line.id as line><dropdown as=q label=\"1\" options=([\"a\"])/></each>")).toEqual([]);
+  });
+});
+
+describe("R2-4 — §7.5.1 position 1: an annotated `let` / `const` initializer", () => {
+  const F = (body) => "    <let s:string=\"\"/>\n    function f() { " + body + " }";
+  for (const [body, want] of [
+    ["let a: string = 5", ["E-TYPE-031"]],
+    ["let a: bool = \"s\"", ["E-TYPE-031"]],
+    ["let a: boolean = 1", ["E-TYPE-031"]],
+    ["const a: string = true", ["E-TYPE-031"]],
+    ["let a: number = \"s\"", ["E-TYPE-031"]],
+    ["let a: string = not", ["E-TYPE-041"]],
+    ["let x: string = 1\n @s = x", ["E-TYPE-031"]],
+  ]) {
+    test(`${want.join(", ")} — \`${body.replace(/\n/g, "; ")}\``, () => { expect(inApp(F(body))).toEqual(want); });
+  }
+  test("twins silent — matching literals; `string | not` given `not`", () => {
+    expect(inApp(F("let a: string = \"x\"\n let b: bool = true\n const c: number = 1\n let d: string | not = not"))).toEqual([]);
+  });
+  test("stays silent (SPEC-exact) — `int` is outside §7.5.1's literal set", () => {
+    expect(inApp(F("let a: int = \"s\""))).toEqual([]);
+  });
+  test("E-TYPE-031 — a struct literal initializer, field by field (`let v: P = { x: 1, y: \"s\" }`)", () => {
+    const P = "    type P:struct = { x: int, y: int }\n";
+    expect(inApp(P + "    function f() { let v: P = { x: 1, y: \"s\" } }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(P + "    function f() { let v: P = { x: 1, y: 2 } }")).toEqual([]);
+  });
+  test("E-TYPE-031 — a later write to an annotated local; twin silent", () => {
+    expect(inApp(F("let a: string = \"x\"\n a = 5"))).toEqual(["E-TYPE-031"]);
+    expect(inApp(F("let a: string = \"x\"\n a = \"y\""))).toEqual([]);
+  });
+});
+
+describe("R2-5 — Rule C: only a component's OWN type expression failing to parse untrusts it", () => {
+  const box = (decl, use) => codes([boxLib(decl + "\nrenders <p>x</p>\n"), boxApp(use)]);
+  test("E-TYPE-031 kept — a sibling attribute's spaced `=` (stylistic) does not untrust `a`", () => {
+    expect(box("export <box a:string=5 n:int = 0/>", "<box/>")).toEqual(["E-PARSE-OPENER-EQ-SPACED", "E-TYPE-031"]);
+  });
+  test("E-TYPE-031 kept — a sibling attribute's type failing to parse does not untrust `a`", () => {
+    expect(box("export <box a:string=\"\" n:string|not=\"\"/>", "<box a=(5)/>")).toEqual(["E-PARSE-TAG", "E-TYPE-031"]);
+  });
+  test("E-TYPE-031 kept — a cell's own spaced `=` does not untrust its type", () => {
+    expect(inApp("    <let z:int = 0/>\n    function g() { @z = \"s\" }")).toEqual(["E-PARSE-OPENER-EQ-SPACED", "E-TYPE-031"]);
+  });
+  test("E-TYPE-031 kept — `-> string` stays trusted when a PARAMETER's type fails to parse", () => {
+    expect(inApp("    <let x:int=0/>\n    function h(a: [int]) -> string { return \"a\" }\n    function g() { @x = h(1) }")).toContain("E-TYPE-031");
+  });
+  test("still untrusted — the component whose own type failed (`n:string|not` given `(not)`)", () => {
+    expect(box("export <box n:string|not=\"\"/>", "<box n=(not)/>")).toEqual(["E-PARSE-TAG"]);
+  });
+  test("an untyped parameter is unproven, never a placeholder type (`function h(a) { @x = a }`)", () => {
+    expect(inApp("    <let x:int=0/>\n    function h(a) { @x = a }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
+  const chain = (n, cell) => {
+    let s = "    <let x:" + cell + "/>\n    function f() {";
+    for (let i = 1; i <= n; i++) s += " let a" + i + " = \"s\"\n";
+    for (let i = 1; i < n; i++) s += " a" + i + " = a" + (i + 1) + "\n";
+    return s + " a" + n + " = not\n @x = a1 }";
+  };
+  test("E-TYPE-031 — a chain of 8 rebound locals settles (`string | not` reaches `a1`) into an int cell", () => {
+    expect(inApp(chain(8, "int=0"))).toEqual(["E-TYPE-031"]);
+  });
+  test("twin silent — the same chain into a string cell (a `T | not` into `T` is unproven)", () => {
+    expect(inApp(chain(8, "string=\"\""))).toEqual([]);
+  });
+  test("`@s += 1` on a string cell — only the unsupported-syntax report (recovered, not typed as `@s = 1`)", () => {
+    expect(inApp("    <let s:string=\"\"/>\n    function f() { @s += 1 }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("twin — `@s = @s + \"1\"` is silent", () => {
+    expect(inApp("    <let s:string=\"\"/>\n    function f() { @s = @s + \"1\" }")).toEqual([]);
   });
 });
