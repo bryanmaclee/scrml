@@ -1,6 +1,68 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-27T18:00:00Z  commit: 9941a504c
+# updated: 2026-09-28T04:40:15Z  commit: fb21983a
+# ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
+# `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
+# merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
+# `origin/main` at fetch (no fork this pass). Of the 9 commits, **3 are the PRIOR session's own maps/wrap
+# commits** (`c65f54b4` #1111 maps-refresh-to-9941a504c, `88a75073` #1110 wrap, and the inbox commit `0fc87bf9`
+# #1115 is bookkeeping only) — **6 are source-relevant**: `072741ca` #1109, `98d94e96` #1112, `b7c86323` #1113,
+# `8c55f518` #1114, `afc2308b` #1116, `fb21983a` #1119.
+# ⛑ **FIGURES RE-EXECUTED AT `fb21983a`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat — `package.json` untouched this window) · `compiler/src` **266,944 lines / 211 files**
+# per FACTS (+939 lines, files FLAT vs `9941a504c`'s 266,005/211) · test files **1,509** (+3:
+# `conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js`, `clientjs-import-disk-rebase-gate-eq-write.test.js`,
+# `match-arm-shapes-f12-f14.test.js`, all under `compiler/tests/` — `compiler/self-host-v2/slice-m2` gained 4
+# more `*.test.js` OUTSIDE this count, per FACTS' own stated scope exclusion) · `compiler/SPEC.md` **40,399**
+# lines (+51) · conformance **1047** cases (FLAT) · §34 catalog **835** rows (+3), range `20331..21237`.
+# `bun conformance/run.ts` (impl#1) -> **1040/1047 pass + 7 xfail** — FLAT vs `9941a504c`.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **943 -> 948** · W 183 FLAT · I 10 FLAT · H 2
+# FLAT · unique codes **800 -> 803**. **ADDED = {`E-MATCH-ALT-BINDING`, `E-SCHEMA-012`, `E-SCHEMA-013`}; REMOVED
+# = EMPTY.**
+# ⛑ **WINDOW HEADLINES (verify in source, not here):**
+#   · **#1119** (`g-impl1-match-miscompiles` F12/F13/F14) — a `match` alternation arm (`.A | .B :> r`) is now
+#     recognised at ANY arm position, not only first (`ast-builder.js` `armPatternChainArrowOffset` /
+#     `scanArmPatternAlternate`; `emit-control-flow.ts` Form 0w/0/2 + `armCondition` shared by `emit-logic.ts`);
+#     a NAMED-field payload arm binding 5+ fields is no longer truncated by the old 20-token paren-scan cap
+#     (`scanPastBalancedParens`, and the native-parser mirror `scanPastPayloadParen`); a brace inside a CLOSED
+#     quoted string on the same line no longer mis-scopes a block (`block-splitter.js`
+#     `braceIsQuotedStringContent`, tokenizer-backed, cached per line). A payload-BEARING alternation
+#     (a binding, a named field even when discarded, a nested/literal pattern) now FAILS CLOSED —
+#     **`E-MATCH-ALT-BINDING`** — instead of silently dropping the arm or gluing it onto its neighbor.
+#   · **#1116** (§39.2/§14.8.10 tenant floor) — a `<schema>` raw `CREATE TABLE` head naming a
+#     schema/database-qualified table is rejected (**`E-SCHEMA-012`**); a known-kind head whose name the
+#     compiler cannot read through to a follower is rejected (**`E-SCHEMA-013`**) — both were previously
+#     silent, tenant-isolation-inert gaps (`schema-differ.js` `findRejectedCreateTableHeads`,
+#     `gauntlet-phase1-checks.js` `<schema>` body checks).
+#   · **#1114** (§20.5.1) — route-inference Step 8b (protect= auto-escalation / `<page auth="required">`) no
+#     longer stamps secure session defaults that outrank a unit's OWN `<program>`'s declared session config
+#     (`g-route-inference-8b-session-defaults-outrank-program-declaration`); the session-field resolution order
+#     is unchanged, but Step 8b now leaves its fields undefined unless the unit itself declares them
+#     (`session-config-resolve.ts` `countUnitProgramNodes`, `route-inference.ts`, `emit-server.ts` now reads the
+#     ONE resolver instead of `authMiddlewareEntry.sessionExpiry` directly).
+#   · **#1112** (§20.5.1) — `E-MW-008`'s program-site count no longer counts a `kind="tool"` file as a
+#     competing web application (`g-mw008-counts-headless-tool-programs`; `codegen/index.ts`
+#     `_collectProgramSites` now asks the emit dispatch's own `isToolProgram` per FILE, not per node).
+#   · **#1113** (#1045 F1) — client JS relative-import re-basing now applied in BOTH the gate and the write
+#     phase (`compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, NEW).
+#   · **#1109** (dpa-051 bootstrap slice M2, `compiler/self-host-v2/`) — the front end (`parse.scrml` 1641L,
+#     `lower.scrml` 993L NEW) proves the lowered Core EQUALS M1's hand-built oracle (Fork-A proof); `ast.scrml`
+#     (175L NEW) is the parser's own AST; `core/check/print/lex/walk/measure.scrml` and
+#     `slice-m1/runtime/runtime.js` all took matching edits; `slice-m2/` (16 files, harness + fixtures +
+#     4 `*.test.js`) is the M2 test bed; CI `gate`'s bootstrap step now also runs `slice-m2/` and re-runs the M1
+#     suite over LOWERED programs (`SLICE_CORE=lowered`).
+# ⚑ **RE-RUN AT THIS SHA ON THIS (WINDOWS) CLONE:** `bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass;
+# `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass; `bun scripts/lint-no-default-arm.js`
+# -> 26 files, 0 violations; `bun test ./compiler/self-host-v2/slice-m2/` -> **72/74 pass, 2 FAIL** — both in
+# `parse.test.js`'s "the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)" (`counter.scrml`,
+# `lib/dropdown.scrml`+`app.scrml`), comparing a `\r\n`-checked-out fixture against a bare-`\n` SPEC extract —
+# a WINDOWS-CRLF-CHECKOUT artifact of this clone (same class as the known `scrml-regen-scripts-crlf-broken-on-windows`
+# pattern), NOT a landed defect and NOT reproduced by this session; see test.map.md. Not filed as a new gap (no
+# code moved to cause it; a checkout-line-ending property, orthogonal to #1109's content).
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S438 block were grep-derived at `fb21983a`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437b HEADER (stamp `9941a504c`, 2026-09-27), CARRIED FOR PROVENANCE. ITS FIGURES ARE `9941a504c`-ERA. ━━━━━━━
 # ⛑ **S437b STAMP — `d02738767` -> `9941a504c`. 7 COMMITS (#1102-#1108), SAME SESSION (S437, second wrap-6c pass).**
 # MAP-STAMP RULE at write time: `git fetch origin && git merge --ff-only origin/main` -> HEAD **`9941a504c`** (== `origin/main` at fetch;
 # `origin/main` then advanced to `072741ca9` mid-pass — see ⏳);
@@ -340,6 +402,60 @@
 # **62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (a count AND a first-match
 # check) and **all 18 are `count: 1`** — those 18 are exactly what #822 un-blinded.
 #
+
+## S438 — TEST SURFACE DELTA (`9941a504c..fb21983a`)
+
+### `compiler/tests/` — 3 NEW files, FACTS test files **1,506 → 1,509**
+- `unit/match-arm-shapes-f12-f14.test.js` — NEW (533 L): `g-impl1-match-miscompiles` F12/F13/F14 — alternation
+  at any arm position, ≥5-field NAMED payload arms, brace-in-quoted-string block scoping, `E-MATCH-ALT-BINDING`
+  fail-closed cases.
+- `conformance/conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js` — NEW (430 L): route-inference Step 8b session-field
+  precedence (#1114).
+- `integration/clientjs-import-disk-rebase-gate-eq-write.test.js` — NEW (222 L): client-JS relative-import
+  re-basing, gate phase == write phase (#1045 F1, #1113).
+- Modified (no new file): `unit/tenant-floor-raw-ddl-schema.test.js` (+650 L — the E-SCHEMA-012/013 suite),
+  `conformance/conf-SESSION-PROGRAM-ATTR-SCOPE.test.js`, `unit/session-auth.test.js`,
+  `unit/match-pipe-alternation-codegen.test.js`, `integration/import-host.test.js`, and 4 sqlite-backed
+  integration tests updated to use the new `helpers/per-run-tmp.js` (`auth-csrf-synchronizer-token`,
+  `authed-server-fn-response-http`, `csrf-canonical-delivery`, `csrf-write-path-bootstrap`,
+  `db-src-runtime-path-consistency`).
+
+### `compiler/tests/helpers/per-run-tmp.js` — NEW test helper
+A per-RUN (`run-<pid>-<time>`) scratch root for integration tests importing emitted `.server.js` modules that
+open `bun:sqlite` handles. **Windows-only motivation:** those handles stay open for the test process's life, so
+a FIXED scratch path's `afterAll` `rmSync` throws EBUSY (reported as a hook failure) and leaves the `*.db`
+behind, so the NEXT standalone run's unguarded `CREATE TABLE items` throws "table already exists" — turning
+whole files red for a reason unrelated to anything under test (measured pre-fix: `authed-server-fn-response-http`
+17/17 red on a second run; 4 other files red on every standalone run). `setup()` sweeps earlier runs'
+leftovers best-effort (a directory still held by a live process is skipped, not fatal); `teardown()` tolerates
+the held handle. Not a compiler defect — a Windows CI/local test-infra fix.
+
+Conformance — **1047 cases, 55 dirs, FLAT** (no new case this window; the 3 new codes are unit-tested).
+`bun conformance/run.ts` → **1040/1047 pass + 7 xfail** — unchanged from `9941a504c`.
+
+### Bootstrap slices — `compiler/self-host-v2/` (M1 unchanged file set, **M2 NEW**, #1109)
+Still outside the bunfig test root. Re-run this pass on this (Windows) clone:
+- `bun test ./compiler/self-host-v2/slice-m1/` → **73 pass / 0 fail** across 6 files (was 68 at `9941a504c`;
+  same 6 files — `check.test.js`, `lint.test.js`, `runtime.test.js`, `counter.browser.test.js`,
+  `dropdown.browser.test.js`, `valuesem.browser.test.js` — content grew: a new `dropdownEarlyReadCore()` fixture
+  + L12/runtime-owed-seed mutations).
+- `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` (NEW invocation, CI `gate` step) →
+  **73 pass / 0 fail** — the M1 suite re-run over programs LOWERED by M2's `parse → lower`, the Fork-A proof's
+  operational form.
+- `bun test ./compiler/self-host-v2/slice-m2/` (NEW dir, 4 `*.test.js`) → **72 pass / 2 FAIL.** ⚠ **Both
+  failures are `parse.test.js`'s "the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)"**
+  (`counter.scrml`; `lib/dropdown.scrml` + `app.scrml`) — comparing a fixture checked out with `\r\n` (this
+  Windows clone) against a bare-`\n` extract from `compiler/SPEC.md`. **Verified as a checkout-line-ending
+  artifact, not a landed defect**: the assertion is a byte-for-byte containment check with no CRLF
+  normalization on either side, and nothing in the #1109 diff touches line-ending handling. Same CLASS of issue
+  as the standing `scrml-regen-scripts-crlf-broken-on-windows` pattern (LF-only tooling on a CRLF checkout), a
+  NEW instance of it. Not filed as a gap this pass (no source defect to point at); flag for whoever runs this
+  suite next on a CRLF clone, and re-verify green on the Linux CI runner before trusting this count elsewhere.
+- `bun scripts/lint-no-default-arm.js` → **26 files, 0 violations, 0 opt-outs** (was 15 at `9941a504c` — grew
+  with the M2 front-end modules).
+
+Resolves the prior ⏳ NOT-MAPPED note.
+
 
 ## S437b — TEST SURFACE DELTA (`d02738767..9941a504c`)
 
