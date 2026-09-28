@@ -134,6 +134,16 @@ describe("the node facts — one family per node, indexed by NodeId", () => {
         expect(positions.size).toBe(tbl.facts.length);     // every recorded fact is reachable
       }
     });
+    test(`${p.name}: no NodeId appears twice in any family's key column`, () => {
+      // The index answers a node's FIRST entry; that is only the old
+      // first-match scan's answer if there is never a second one to choose.
+      const t = frontEnd(mods, p.files).typed.tables;
+      for (const fam of FAMILIES) {
+        const nids = t[fam].nids;
+        const dups = nids.filter((n, i) => nids.indexOf(n) !== i);
+        expect(`${fam}: ${dups.join(",")}`).toBe(`${fam}: `);
+      }
+    });
   }
   test("the programs above reach every fact variant of every family", () => {
     expect(Object.fromEntries(FAMILIES.map((f) => [f, [...seen[f]].sort()]))).toEqual({
@@ -163,6 +173,12 @@ describe("the node facts — one family per node, indexed by NodeId", () => {
 
 describe("the typer's table — exprType is an O(1) index over typing.exprs", () => {
   for (const p of programs()) {
+    test(`${p.name}: no NodeId appears twice in typing.exprs`, () => {
+      // Same reason as the families: first-wins in typingOf is unobservable
+      // (and so unguarded) unless no node is typed twice.
+      const nids = frontEnd(mods, p.files).typed.tables.typing.exprs.map((x) => x.nid);
+      expect(nids.filter((n, i) => nids.indexOf(n) !== i)).toEqual([]);
+    });
     test(`${p.name}: exprType(nid) = the first typing entry for nid, for every NodeId`, () => {
       const r = frontEnd(mods, p.files);
       const t = r.typed.tables;

@@ -61,3 +61,13 @@
 - FINAL: comment accuracy (two position writes: nidIndex + typingOf). origin/main moved to d1df3c64c (docs / maps /
   handOffs only — no compiler change, not merged); #1118 ingest / slice-m3 NOT on main at finish, so no footprint grade
   was run. Final lines: analyze 4491 → 4566 (+75), lower 996 → 747 (−249), check 509 → 509; net −174.
+- REVIEW (CLEAN, INERT held) → LOW-1, test-only: merged origin/main (no compiler change, no ingest). The reviewer showed that
+  "first entry wins" in nidIndex / typingOf was guarded only by comments (last-wins stayed 33/0). tables.test.js adds,
+  over the same program set: "no NodeId appears twice in any family's key column" (the family check, now explicit) and
+  "no NodeId appears twice in typing.exprs" (typing had no guard). When no node has a second entry, first-wins and last-wins
+  cannot differ. Bite, shown in the mutation mirror (a copy, analyze.scrml untouched): "every expression typed twice" →
+  RED (15 failing, the typing duplicate test for each of the 15 programs); "`@.` recorded twice in names" → RED (11 failing).
+  Both are kept as mutations: 72 mutations, 0 problems, exit 0. slice-m2 284/284, exit 0.
+- LOW-2 (note only): the scratchpad scripts m3-tables/diff.js and bench.js import compileScrml from THIS worktree's
+  absolute path (/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a70c7ac708b43c6c9/compiler/src/api.js), and
+  diff.js loads the base copy from the scratchpad. Anyone re-running them elsewhere must re-point that import.
