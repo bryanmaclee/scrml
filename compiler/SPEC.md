@@ -2662,6 +2662,8 @@ replacement from the subscriber's perspective — both result in a `_scrml_react
 
 #### 6.5.6 Nested Reactive Arrays
 
+> **Note (S439 ruling #3):** this section is NOT amended toward deep reactivity; for the §66 model the question is dissolved — under §66.10 and the R3 lean runtime values are immutable and every write is a classified write, so there is no deep-reactive proxy to specify. **Provenance:** ruling:user-voice-scrml.md S439 #3 "all recs" (Rec: don't amend §6.5.6).
+
 Nested arrays (arrays of arrays) are supported. Only the outermost reactive variable is
 reactive. Mutating an inner array does NOT trigger subscribers of the outer variable unless
 the outer array is explicitly written:
