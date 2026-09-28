@@ -10,9 +10,12 @@
 //     variant, a function, a parameter, a local, an `as=` handle or an `<each>`
 //     row binding.
 //   - ONE TABLES RECORD (§3.5): every fact `lower` needs is either a
-//     declaration/type/function record or a `Fact` keyed by the NodeId it is
-//     about. Tables are built once, never mutated (each step returns a new
-//     value), and `lower` consumes them without re-deciding anything.
+//     declaration/type/function record or a node fact keyed by the NodeId it
+//     is about — one side-table per FACT FAMILY (names, values, effects,
+//     binders, elements, attributes; M3 item 2), each reached through ONE
+//     NodeId index in O(1). Tables are built once, never mutated (each step
+//     returns a new value), and `lower` consumes them without re-deciding
+//     anything.
 //   - THE EDIT CLASSIFIER (§6.2, §66.11.2) runs here: every write becomes a
 //     `WriteFact { cap, inst, edit, check }` or a diagnostic —
 //     E-DERIVED-WRITE, E-WRITE-NOT-GRANTED, E-DECL-HANDLE-NOT-NARROWED,
@@ -116,48 +119,76 @@ ${
         AOn(event: string),       // an event handler (onclick → "click")
         AIf,                      // if= (L5)
         AConstruct(field: int),   // a use-site construction value (§66.14 rule 4)
-        AAs,                      // as= on a use (the handle is on the element's FUse)
+        AAs,                      // as= on a use (the handle is on the element's MUse)
         AEachIn,
         AEachKey,
         AEachAs,
     }
 
-    // A fact about one node (keyed by its NodeId in `Tables.facts`).
-    export type Fact:enum = {
-        FLocal(sym: Sym),                                // a local / parameter / row binding
-        FField(decl: Sym, inst: InstRef, idx: int),       // a read of a declaration field
-        FInst(decl: Sym, inst: InstRef),                  // an instance (a whole-value read, or a handle)
-        FStruct(owner: Sym, idx: int),                    // a struct-field step
-        FFn(sym: Sym),                                    // a function
-        FVariant(enumSym: Sym, idx: int),                 // a bare variant
-        FLit(lit: Literal),                               // a literal (int vs number resolved)
-        FOp(op: PrimOp),                                  // a unary / binary operator, resolved (§45)
-        FStructOf(ty: Sym, order: int[]),                 // an object literal: prop index per declared field
-        FWrite(w: WriteFact),                             // an assignment
-        FSpread(ws: SpreadWrite[]),                       // a spread assignment: FieldAt edits (O58 (b))
-        FReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
-        FAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
-        FBind(sym: Sym),                                  // a binder: a local statement, a function
-        FParam(sym: Sym, ty: Type),                       // a function parameter and its (annotated) type
-        FGiven(sym: Sym, inst: InstRef),                  // given c = @handle (L11)
-        FUse(decl: Sym, alias: Sym | not),                // an element that is a USE of a declaration
-        FEach(bind: Sym, handles: Sym[]),                 // an <each> element
-        FSlot,
-        FHtml,
-        FAttr(k: AttrKind),
-        FNone,                                            // no fact about this node (factOf's answer)
+    // ---- THE NODE FACTS, by family (M3 item 2) --------------------------------
+    // A node's fact lives in the side-table of its FAMILY — chosen by which
+    // consumer asks, so each consumer's `match` is total over a few variants
+    // (plus `not`: no fact) instead of one enum of every fact:
+    //   names   — what a name / `@x` / `@.` / member / callee DENOTES
+    //             (lower's reads, member steps and calls; the typer's value types)
+    //   values  — a constant or an operator the binder resolved
+    //             (lower's literals / variants / struct values / primitives)
+    //   effects — what a statement-position assignment or edit call DOES
+    //             (lower's writes; the typer's write checks)
+    //   binds   — the Sym a `let` / function / parameter / `given` binds
+    //   elems   — what an element IS (HTML, a use, an `<each>`, a slot)
+    //   attrs   — how an attribute is used (AttrKind)
+    export type NameFact:enum = {
+        NLocal(sym: Sym),                                // a local / parameter / row binding
+        NField(decl: Sym, inst: InstRef, idx: int),       // a read of a declaration field
+        NInst(decl: Sym, inst: InstRef),                  // an instance (a whole-value read, or a handle)
+        NStruct(owner: Sym, idx: int),                    // a struct-field step
+        NFn(sym: Sym),                                    // a function
+        NLength,                                          // `.length` of a sequence or a string (a primitive read)
     }
-    export type NodeFact:struct = { nid: int, f: Fact }
+    export type ValueFact:enum = {
+        VLit(lit: Literal),                               // a literal (int vs number resolved)
+        VVariant(enumSym: Sym, idx: int),                 // a bare variant
+        VOp(op: PrimOp),                                  // a unary / binary operator, resolved (§45)
+        VStructOf(ty: Sym, order: int[]),                 // an object literal: prop index per declared field
+    }
+    export type EffectFact:enum = {
+        EWrite(w: WriteFact),                             // an assignment / an edit call
+        ESpread(ws: SpreadWrite[]),                       // a spread assignment: FieldAt edits (O58 (b))
+        EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
+        EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
+    }
+    export type BindFact:enum = {
+        BBind(sym: Sym),                                  // a binder: a local statement, a function
+        BParam(sym: Sym, ty: Type),                       // a function parameter and its (annotated) type
+        BGiven(sym: Sym, inst: InstRef),                  // given c = @handle (L11)
+    }
+    export type ElemFact:enum = {
+        MHtml,
+        MUse(decl: Sym, alias: Sym | not),                // an element that is a USE of a declaration
+        MEach(bind: Sym, handles: Sym[]),                 // an <each> element
+        MSlot,
+    }
 
-    // THE TYPER'S TABLE (M3 item 1) — its own fact family, kept apart from
-    // `facts` (the binder's) so the M3 split of the tables by family does not
-    // have to untangle it. `exprs`: the type of every expression node the
-    // typer walked, keyed by NodeId. A value's type is what the typer can
-    // PROVE: `Known(t)`, the absence literal `not` (`Absent`, §42), or `Unknown`
-    // (inference stopped — no check ever fires on an Unknown).
+    // A family's side-table: its facts in the order the binder recorded them,
+    // and `at` — the NodeId index: `at[nid]` is the position of node `nid`'s
+    // fact in `facts`, -1 (or past the end) when the family has none. O(1).
+    export type NameTable:struct = { facts: NameFact[], at: int[] }
+    export type ValueTable:struct = { facts: ValueFact[], at: int[] }
+    export type EffectTable:struct = { facts: EffectFact[], at: int[] }
+    export type BindTable:struct = { facts: BindFact[], at: int[] }
+    export type ElemTable:struct = { facts: ElemFact[], at: int[] }
+    export type AttrTable:struct = { facts: AttrKind[], at: int[] }
+
+    // THE TYPER'S TABLE (M3 item 1). `exprs`: the type of every expression
+    // node the typer walked, keyed by NodeId (`at`, built once when the typer
+    // settles; of two entries for one node the first is the answer). A
+    // value's type is what the typer can PROVE: `Known(t)`, the absence
+    // literal `not` (`Absent`, §42), or `Unknown` (inference stopped — no
+    // check ever fires on an Unknown).
     export type VType:enum = { Known(t: Type), Absent, Unknown }
     export type ExprType:struct = { nid: int, vt: VType }
-    export type Typing:struct = { exprs: ExprType[] }
+    export type Typing:struct = { exprs: ExprType[], at: int[] }
     // A local's WRITTEN type (`let a: T = …`), by its Sym (the binder's).
     export type LocalAnnot:struct = { sym: Sym, ty: Type }
 
@@ -167,20 +198,76 @@ ${
         decls: DeclInfo[],
         fns: FnInfo[],
         handles: HandleInfo[],
-        facts: NodeFact[],
+        names: NameTable,
+        values: ValueTable,
+        effects: EffectTable,
+        binds: BindTable,
+        elems: ElemTable,
+        attrs: AttrTable,
         annots: LocalAnnot[],
         typing: Typing,
     }
 
     export type TypedProgram:struct = { files: FileAst[], tables: Tables, diags: Diag[] }
 
-    // The fact about node `nid` (FNone when analyze recorded none — a node it
-    // reported an error on, or one lower never asks about).
-    export fn factOf(t: Tables, nid: int) -> Fact {
-        for (const nf of t.facts) {
-            if (nf.nid == nid) return nf.f
-        }
-        return Fact.FNone
+    // ---- the NodeId index ------------------------------------------------------
+    // The position `at` holds for `nid` (-1: none).
+    fn slotOf(at: int[], nid: int) -> int {
+        if (nid < 0 || nid >= at.length) return -1
+        return at[nid]
+    }
+
+    // `at` with `nid` → `pos` (a new array; the old one is unchanged).
+    fn setSlot(at: int[], nid: int, pos: int) -> int[] {
+        if (nid < at.length) return at.slice(0, nid).concat([pos]).concat(at.slice(nid + 1, at.length))
+        return at.concat(minusOnes(nid - at.length)).concat([pos])
+    }
+
+    // `n` × -1 (by doubling: O(n)).
+    fn minusOnes(n: int) -> int[] {
+        if (n <= 0) return []
+        let out: int[] = [-1]
+        while (out.length + out.length <= n) { out = out.concat(out) }
+        return out.concat(minusOnes(n - out.length))
+    }
+
+    // The fact about node `nid` in each family (`not` when that family has
+    // none — analyze reported an error on the node, or its fact is another
+    // family's, or no consumer asks about it).
+    export fn nameFact(t: NameTable, nid: int) -> NameFact | not {
+        const i: int = slotOf(t.at, nid)
+        if (i < 0) return not
+        return t.facts[i]
+    }
+
+    export fn valueFact(t: ValueTable, nid: int) -> ValueFact | not {
+        const i: int = slotOf(t.at, nid)
+        if (i < 0) return not
+        return t.facts[i]
+    }
+
+    export fn effectFact(t: EffectTable, nid: int) -> EffectFact | not {
+        const i: int = slotOf(t.at, nid)
+        if (i < 0) return not
+        return t.facts[i]
+    }
+
+    export fn bindFact(t: BindTable, nid: int) -> BindFact | not {
+        const i: int = slotOf(t.at, nid)
+        if (i < 0) return not
+        return t.facts[i]
+    }
+
+    export fn elemFact(t: ElemTable, nid: int) -> ElemFact | not {
+        const i: int = slotOf(t.at, nid)
+        if (i < 0) return not
+        return t.facts[i]
+    }
+
+    export fn attrFact(t: AttrTable, nid: int) -> AttrKind | not {
+        const i: int = slotOf(t.at, nid)
+        if (i < 0) return not
+        return t.facts[i]
     }
 
     export fn declInfo(t: Tables, s: Sym) -> DeclInfo | not {
@@ -193,15 +280,73 @@ ${
     // =========================================================================
     // Analyze state: the facts and diagnostics so far, and the Sym counter.
     // =========================================================================
-    type AS:struct = { facts: NodeFact[], diags: Diag[], nextSym: int, annots: LocalAnnot[] }
+    type NodeFacts:struct = { names: NameTable, values: ValueTable, effects: EffectTable, binds: BindTable,
+                              elems: ElemTable, attrs: AttrTable }
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[] }
     type RSym:struct = { s: Sym, st: AS }
+
+    fn noFacts() -> NodeFacts {
+        return { names: { facts: [], at: [] }, values: { facts: [], at: [] }, effects: { facts: [], at: [] },
+                 binds: { facts: [], at: [] }, elems: { facts: [], at: [] }, attrs: { facts: [], at: [] } }
+    }
 
     fn mint(st: AS, hint: string) -> RSym {
         return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots } }
     }
 
-    fn addFact(st: AS, nid: int, f: Fact) -> AS {
-        return { facts: st.facts.concat([{ nid: nid, f: f }]), diags: st.diags, nextSym: st.nextSym, annots: st.annots }
+    fn withFacts(st: AS, fs: NodeFacts) -> AS {
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots }
+    }
+
+    // A node has ONE fact: the first the binder records for it CLAIMS the
+    // node, in its family's index. A later fact about a claimed node (the
+    // binder records none — tables.test.js checks) is kept in its family's
+    // list but never indexed, so a lookup answers with the first fact, as the
+    // single linear fact list this replaces did.
+    fn claimed(fs: NodeFacts, nid: int) -> boolean {
+        return slotOf(fs.names.at, nid) >= 0 || slotOf(fs.values.at, nid) >= 0 || slotOf(fs.effects.at, nid) >= 0
+            || slotOf(fs.binds.at, nid) >= 0 || slotOf(fs.elems.at, nid) >= 0 || slotOf(fs.attrs.at, nid) >= 0
+    }
+
+    fn claim(fs: NodeFacts, at: int[], nid: int, pos: int) -> int[] {
+        if (claimed(fs, nid)) return at
+        return setSlot(at, nid, pos)
+    }
+
+    fn addName(st: AS, nid: int, f: NameFact) -> AS {
+        const fs: NodeFacts = st.facts
+        const t: NameTable = { facts: fs.names.facts.concat([f]), at: claim(fs, fs.names.at, nid, fs.names.facts.length) }
+        return withFacts(st, { names: t, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
+    }
+
+    fn addValue(st: AS, nid: int, f: ValueFact) -> AS {
+        const fs: NodeFacts = st.facts
+        const t: ValueTable = { facts: fs.values.facts.concat([f]), at: claim(fs, fs.values.at, nid, fs.values.facts.length) }
+        return withFacts(st, { names: fs.names, values: t, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
+    }
+
+    fn addEffect(st: AS, nid: int, f: EffectFact) -> AS {
+        const fs: NodeFacts = st.facts
+        const t: EffectTable = { facts: fs.effects.facts.concat([f]), at: claim(fs, fs.effects.at, nid, fs.effects.facts.length) }
+        return withFacts(st, { names: fs.names, values: fs.values, effects: t, binds: fs.binds, elems: fs.elems, attrs: fs.attrs })
+    }
+
+    fn addBind(st: AS, nid: int, f: BindFact) -> AS {
+        const fs: NodeFacts = st.facts
+        const t: BindTable = { facts: fs.binds.facts.concat([f]), at: claim(fs, fs.binds.at, nid, fs.binds.facts.length) }
+        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: t, elems: fs.elems, attrs: fs.attrs })
+    }
+
+    fn addElem(st: AS, nid: int, f: ElemFact) -> AS {
+        const fs: NodeFacts = st.facts
+        const t: ElemTable = { facts: fs.elems.facts.concat([f]), at: claim(fs, fs.elems.at, nid, fs.elems.facts.length) }
+        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: t, attrs: fs.attrs })
+    }
+
+    fn addAttr(st: AS, nid: int, k: AttrKind) -> AS {
+        const fs: NodeFacts = st.facts
+        const t: AttrTable = { facts: fs.attrs.facts.concat([k]), at: claim(fs, fs.attrs.at, nid, fs.attrs.facts.length) }
+        return withFacts(st, { names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems, attrs: t })
     }
 
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
@@ -1123,7 +1268,7 @@ ${
                 if (!paramsTrusted(f.errs, af.params)) arity = -1
                 const info: FnInfo = { nid: af.nid, span: af.span, sym: r.s, name: af.name, file: f.path,
                                        exported: af.exported, pure: af.pure, arity: arity, ret: ret }
-                st = addFact(st, af.nid, Fact.FBind(r.s))
+                st = addBind(st, af.nid, BindFact.BBind(r.s))
                 out = out.concat([{ info: info, f: af }])
             }
         }
@@ -1389,9 +1534,9 @@ ${
             .At(name: n) :> resolveAtRead(env, e, n, st)
             .AtItem :> resolveAtItem(env, e, st)
             .Num(raw: r) :> resolveNum(e, r, st)
-            .Str(v: s) :> plain(Type.Str, addFact(st, e.nid, Fact.FLit(Literal.Str(s))))
-            .Bool(v: b) :> plain(Type.Bool, addFact(st, e.nid, Fact.FLit(Literal.Bool(b))))
-            .NotLit :> plain(expected, addFact(st, e.nid, Fact.FLit(Literal.Absent)))
+            .Str(v: s) :> plain(Type.Str, addValue(st, e.nid, ValueFact.VLit(Literal.Str(s))))
+            .Bool(v: b) :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VLit(Literal.Bool(b))))
+            .NotLit :> plain(expected, addValue(st, e.nid, ValueFact.VLit(Literal.Absent)))
             .Recovered :> plain(not, st)                 // the parser reported it: no fact, no type
             .Variant(name: n) :> resolveVariant(env, e, n, expected, st)
             .Member(obj: o, name: n) :> resolveMember(env, e, o, n, st)
@@ -1409,14 +1554,14 @@ ${
         const t: Type = numType(raw)
         const n: number = Number(raw)
         const isInt: boolean = t == Type.Int
-        if (isInt) return plain(t, addFact(st, e.nid, Fact.FLit(Literal.Int(n))))
-        return plain(t, addFact(st, e.nid, Fact.FLit(Literal.Num(n))))
+        if (isInt) return plain(t, addValue(st, e.nid, ValueFact.VLit(Literal.Int(n))))
+        return plain(t, addValue(st, e.nid, ValueFact.VLit(Literal.Num(n))))
     }
 
     fn resolveName(env: Env, e: AExpr, name: string, st: AS) -> RX {
         const l: LocalB | not = lookupLocal(env, name)
         if (l is some) {
-            const st2: AS = addFact(st, e.nid, Fact.FLocal(l.s))
+            const st2: AS = addName(st, e.nid, NameFact.NLocal(l.s))
             if (l.narrowed is some) return { x: { ty: l.ty, inst: l.narrowed, iDecl: l.nDecl, maybe: false }, st: st2 }
             return plain(l.ty, st2)
         }
@@ -1426,11 +1571,11 @@ ${
         if (d is some) {
             if (!d.isProgram) {
                 const i: int = fieldIndex(d.info, name)
-                if (i >= 0) return plain(d.info.fields[i].ty, addFact(st, e.nid, Fact.FField(d.info.sym, InstRef.Lexical(0), i)))
+                if (i >= 0) return plain(d.info.fields[i].ty, addName(st, e.nid, NameFact.NField(d.info.sym, InstRef.Lexical(0), i)))
             }
         }
         const f: FnInfo | not = fnNamed(env.g, name)
-        if (f is some) return plain(not, addFact(st, e.nid, Fact.FFn(f.sym)))
+        if (f is some) return plain(not, addName(st, e.nid, NameFact.NFn(f.sym)))
         const pi: DeclInfo | not = programInfo(env)
         if (pi is some) {
             if (fieldIndex(pi, name) >= 0) {
@@ -1493,7 +1638,7 @@ ${
             if (!d.isProgram && d.info.sym.hint == name) {
                 const inst: InstRef = InstRef.Lexical(0)
                 return { x: { ty: Type.Named(d.info.sym), inst: inst, iDecl: d.info.sym, maybe: false },
-                         st: addFact(st, e.nid, Fact.FInst(d.info.sym, inst)) }
+                         st: addName(st, e.nid, NameFact.NInst(d.info.sym, inst)) }
             }
         }
         // A handle in scope first: a row-scoped (§66.7.4) or declaration-scoped
@@ -1503,18 +1648,18 @@ ${
         if (h is some) {
             const hi: InstRef = InstRef.Alias(h.sym)
             return { x: { ty: Type.Named(h.target), inst: hi, iDecl: h.target, maybe: h.conditional },
-                     st: addFact(st, e.nid, Fact.FInst(h.target, hi)) }
+                     st: addName(st, e.nid, NameFact.NInst(h.target, hi)) }
         }
         const pi: DeclInfo | not = programInfo(env)
         if (pi is some) {
             const i: int = fieldIndex(pi, name)
-            if (i >= 0) return plain(pi.fields[i].ty, addFact(st, e.nid, Fact.FField(pi.sym, programInst(env), i)))
+            if (i >= 0) return plain(pi.fields[i].ty, addName(st, e.nid, NameFact.NField(pi.sym, programInst(env), i)))
         }
         const ud: DeclSrc | not = visibleDecl(env, name)
         if (ud is some) {
             const si: InstRef = InstRef.Shared(ud.info.sym)
             return { x: { ty: Type.Named(ud.info.sym), inst: si, iDecl: ud.info.sym, maybe: false },
-                     st: addFact(st, e.nid, Fact.FInst(ud.info.sym, si)) }
+                     st: addName(st, e.nid, NameFact.NInst(ud.info.sym, si)) }
         }
         return diagX(env, e, "E-SCOPE-001", "`@" + name + "` names no cell, declaration or `as=` handle in scope", st)
     }
@@ -1522,7 +1667,7 @@ ${
     fn resolveAtItem(env: Env, e: AExpr, st: AS) -> RX {
         if (env.rows.length == 0) return diagX(env, e, "E-SYNTAX-064", "`@.` outside an `<each>` body (§17.7.3)", st)
         const row: RowB = env.rows[env.rows.length - 1]
-        return plain(row.ty, addFact(st, e.nid, Fact.FLocal(row.bind)))
+        return plain(row.ty, addName(st, e.nid, NameFact.NLocal(row.bind)))
     }
 
     // A bare variant resolves against the type its position expects; with no
@@ -1532,7 +1677,7 @@ ${
             const es: Sym | not = isEnumType(env.g.types, expected)
             if (es is some) {
                 const i: int = variantIndex(env.g.types, es, name)
-                if (i >= 0) return plain(expected, addFact(st, e.nid, Fact.FVariant(es, i)))
+                if (i >= 0) return plain(expected, addValue(st, e.nid, ValueFact.VVariant(es, i)))
                 return diagX(env, e, "E-TYPE-VARIANT", "`." + name + "` is not a variant of `" + es.hint + "`", st)
             }
         }
@@ -1546,7 +1691,7 @@ ${
                 idx = i
             }
         }
-        if (found.length == 1) return plain(Type.Named(found[0]), addFact(st, e.nid, Fact.FVariant(found[0], idx)))
+        if (found.length == 1) return plain(Type.Named(found[0]), addValue(st, e.nid, ValueFact.VVariant(found[0], idx)))
         if (found.length == 0) return diagX(env, e, "E-TYPE-VARIANT", "`." + name + "` is not a variant of any enum in scope", st)
         return diagX(env, e, "E-VARIANT-AMBIGUOUS", "`." + name + "` is a variant of more than one enum — qualify it", st)
     }
@@ -1562,7 +1707,7 @@ ${
         const st: AS = ro.st
         // `.length` of a sequence or a string is a primitive (a read, never a place).
         if (name == "length" && ro.x.inst is not && isLengthOf(ro.x.ty)) {
-            return plain(Type.Int, addFact(st, e.nid, Fact.FOp(PrimOp.Length)))
+            return plain(Type.Int, addName(st, e.nid, NameFact.NLength))
         }
         const inst: InstRef | not = ro.x.inst
         const iDecl: Sym | not = ro.x.iDecl
@@ -1572,7 +1717,7 @@ ${
             const i: int = fieldIndex(d.info, name)
             if (i < 0) return diagX(env, e, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + name + "`", st)
             return { x: { ty: d.info.fields[i].ty, inst: not, iDecl: not, maybe: ro.x.maybe },
-                     st: addFact(st, e.nid, Fact.FField(iDecl, inst, i)) }
+                     st: addName(st, e.nid, NameFact.NField(iDecl, inst, i)) }
         }
         const t: Type | not = ro.x.ty
         if (t is some) {
@@ -1584,7 +1729,7 @@ ${
                     if (fs is some) {
                         let i = 0
                         for (const fd of fs) {
-                            if (fd.sym.hint == name) return plain(fd.ty, addFact(st, e.nid, Fact.FStruct(s, i)))
+                            if (fd.sym.hint == name) return plain(fd.ty, addName(st, e.nid, NameFact.NStruct(s, i)))
                             i = i + 1
                         }
                         return diagX(env, e, "E-SCOPE-001", "`" + s.hint + "` has no field `" + name + "`", st)
@@ -1608,10 +1753,10 @@ ${
         const isNot: boolean = op == UnOp.Not
         if (isNot) {
             const r: RX = resolveExpr(env, x, Type.Bool, st0)
-            return plain(Type.Bool, addFact(r.st, e.nid, Fact.FOp(PrimOp.Not)))
+            return plain(Type.Bool, addValue(r.st, e.nid, ValueFact.VOp(PrimOp.Not)))
         }
         const r2: RX = resolveExpr(env, x, not, st0)
-        return plain(r2.x.ty, addFact(r2.st, e.nid, Fact.FOp(PrimOp.Neg)))
+        return plain(r2.x.ty, addValue(r2.st, e.nid, ValueFact.VOp(PrimOp.Neg)))
     }
 
     fn isVariantExpr(e: AExpr) -> boolean {
@@ -1663,19 +1808,19 @@ ${
         const st: AS = rr.st
         const lt: Type | not = rl.x.ty
         return match op {
-            .Eq :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(eqOp(isStructural(env, lt), true))))
-            .Ne :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(eqOp(isStructural(env, lt), false))))
-            .Add :> plain(lt, addFact(st, e.nid, Fact.FOp(addOp(lt, rr.x.ty))))
-            .Sub :> plain(lt, addFact(st, e.nid, Fact.FOp(PrimOp.Sub)))
-            .Mul :> plain(lt, addFact(st, e.nid, Fact.FOp(PrimOp.Mul)))
-            .Div :> plain(Type.Num, addFact(st, e.nid, Fact.FOp(PrimOp.Div)))
-            .Mod :> plain(lt, addFact(st, e.nid, Fact.FOp(PrimOp.Mod)))
-            .Lt :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Lt)))
-            .Le :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Le)))
-            .Gt :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Gt)))
-            .Ge :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Ge)))
-            .And :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.And)))
-            .Or :> plain(Type.Bool, addFact(st, e.nid, Fact.FOp(PrimOp.Or)))
+            .Eq :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(eqOp(isStructural(env, lt), true))))
+            .Ne :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(eqOp(isStructural(env, lt), false))))
+            .Add :> plain(lt, addValue(st, e.nid, ValueFact.VOp(addOp(lt, rr.x.ty))))
+            .Sub :> plain(lt, addValue(st, e.nid, ValueFact.VOp(PrimOp.Sub)))
+            .Mul :> plain(lt, addValue(st, e.nid, ValueFact.VOp(PrimOp.Mul)))
+            .Div :> plain(Type.Num, addValue(st, e.nid, ValueFact.VOp(PrimOp.Div)))
+            .Mod :> plain(lt, addValue(st, e.nid, ValueFact.VOp(PrimOp.Mod)))
+            .Lt :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.Lt)))
+            .Le :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.Le)))
+            .Gt :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.Gt)))
+            .Ge :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.Ge)))
+            .And :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.And)))
+            .Or :> plain(Type.Bool, addValue(st, e.nid, ValueFact.VOp(PrimOp.Or)))
             .Pipe :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`|` outside a `rule=` alternation is not in bootstrap slice M2", st)
         }
     }
@@ -1752,7 +1897,7 @@ ${
             }
             j2 = j2 + 1
         }
-        return plain(Type.Named(s), addFact(st, e.nid, Fact.FStructOf(s, order)))
+        return plain(Type.Named(s), addValue(st, e.nid, ValueFact.VStructOf(s, order)))
     }
 
     fn expectedOr(t: Type | not) -> Type {
@@ -1976,7 +2121,7 @@ ${
         const l: LocalB | not = rp.local
         if (l is some) {
             if (!l.mutable) st = addDiag(st, env.file, target.span, "E-ASSIGN-CONST", "`" + l.name + "` is not a `let` local")
-            st = addFact(st, e.nid, Fact.FAssignLocal(l.s))
+            st = addEffect(st, e.nid, EffectFact.EAssignLocal(l.s))
             return resolveExpr(env, value, l.ty, st).st
         }
         const p: WPlace | not = rp.place
@@ -1988,7 +2133,7 @@ ${
         const rv: RX = resolveExpr(env, value, f.ty, st)
         const rw: RWriteFact = wholeFieldWrite(env, p, f, value, rv.st, e.span)
         const w: WriteFact | not = rw.w
-        if (w is some) return addFact(rw.st, e.nid, Fact.FWrite(w))
+        if (w is some) return addEffect(rw.st, e.nid, EffectFact.EWrite(w))
         return rw.st
     }
 
@@ -2037,7 +2182,7 @@ ${
             }
             j = j + 1
         }
-        return addFact(st, e.nid, Fact.FSpread(ws))
+        return addEffect(st, e.nid, EffectFact.ESpread(ws))
     }
 
     // A write at a struct path (`@o.s = v`): the TARGET sub-field's own contract.
@@ -2047,7 +2192,7 @@ ${
         const r: RWriteFact = fieldAtWrite(env, p, f, value, st, e.span)
         st = r.st
         const w: WriteFact | not = r.w
-        if (w is some) st = addFact(st, e.nid, Fact.FWrite(w))
+        if (w is some) st = addEffect(st, e.nid, EffectFact.EWrite(w))
         return st
     }
 
@@ -2172,7 +2317,7 @@ ${
             }
             j = j + 1
         }
-        return addFact(st, e.nid, Fact.FSpread(ws))
+        return addEffect(st, e.nid, EffectFact.ESpread(ws))
     }
 
     fn propsOf(v: AExpr) -> AProp[] {
@@ -2214,7 +2359,7 @@ ${
         if (!f.grants.replace || cap is not) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`reset(@" + f.sym.hint + ")` is a replace (§66.11.2) and `" + f.sym.hint + "` does not grant `replace` — declare it `let`")
         }
-        return addFact(st, e.nid, Fact.FReset({ cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, p.decl.sym, p.idx))
+        return addEffect(st, e.nid, EffectFact.EReset({ cap: cap, inst: p.inst, edit: EditKind.Replace, check: Check.Static }, p.decl.sym, p.idx))
     }
 
     // =========================================================================
@@ -2307,7 +2452,7 @@ ${
         const cap: Sym | not = f.wcap
         const granted: boolean = f.grants.replace || f.grants.edits.indexOf(edit) >= 0 || hasEditKind(f.grants.edits, edit)
         if (granted && cap is some) {
-            return addFact(st, e.nid, Fact.FWrite({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
+            return addEffect(st, e.nid, EffectFact.EWrite({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
         }
         const isDerived: boolean = f.mode == FieldMode.Derived
         if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-VALUE-MUTATE", "`@" + f.sym.hint + "` is derived — an in-place edit of a derived value is an error (§6.6.18, §66.9)")
@@ -2365,7 +2510,7 @@ ${
         }
         const ri: RX = resolveExpr(env, init, annot, st)
         const rs: RSym = mint(ri.st, name)
-        st = addFact(rs.st, s.nid, Fact.FBind(rs.s))
+        st = addBind(rs.st, s.nid, BindFact.BBind(rs.s))
         let lty: Type | not = ri.x.ty
         if (annot is some) {
             lty = annot
@@ -2392,7 +2537,7 @@ ${
             return addDiag(st, env.file, s.span, "E-BOOTSTRAP-UNSUPPORTED", "`given` over a value that is not an instance handle is not in bootstrap slice M2 (O56: writes through it would be errors)")
         }
         const rs: RSym = mint(st, name)
-        st = addFact(rs.st, s.nid, Fact.FGiven(rs.s, inst))
+        st = addBind(rs.st, s.nid, BindFact.BGiven(rs.s, inst))
         const narrowed: InstRef = InstRef.Narrowed(rs.s)
         const l: LocalB = { name: name, s: rs.s, ty: rs0.x.ty, mutable: false, narrowed: narrowed, nDecl: iDecl }
         return resolveBlock(withLocal(env, l), body, st)
@@ -2427,7 +2572,7 @@ ${
     fn resolveElem(env: Env, e: AElem, st: AS) -> AS {
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
-        if (e.tag == "slot") return addFact(st, e.nid, Fact.FSlot)
+        if (e.tag == "slot") return addElem(st, e.nid, ElemFact.MSlot)
         const d: DeclSrc | not = declNamed(env.g, e.tag)
         if (d is some) return resolveUse(env, e, d, st)
         return resolveHtml(env, e, st)
@@ -2484,7 +2629,7 @@ ${
     }
 
     fn resolveHtml(env: Env, e: AElem, st0: AS) -> AS {
-        let st: AS = addFact(st0, e.nid, Fact.FHtml)
+        let st: AS = addElem(st0, e.nid, ElemFact.MHtml)
         // E-DECL-FIELD-TAG-NEEDS-STAR: a bare tag naming a CHILD field of the
         // enclosing declaration (§66.6.6).
         const cd: DeclSrc | not = ctxDecl(env)
@@ -2500,17 +2645,17 @@ ${
             const ev: string = eventName(a.name)
             if (a.name == "if") {
                 st = resolveValue(env, a.value, Type.Bool, st)
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AIf))
+                st = addAttr(st, a.nid, AttrKind.AIf)
             } else if (ev != "") {
                 st = resolveHandler(env, a.value, st)
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AOn(ev)))
+                st = addAttr(st, a.nid, AttrKind.AOn(ev))
             } else if (a.name.indexOf(":") >= 0) {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not in bootstrap slice M2")
             } else if (valueExpr(a.value) is some) {
                 st = resolveValue(env, a.value, not, st)
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.ABound))
+                st = addAttr(st, a.nid, AttrKind.ABound)
             } else {
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AStatic))
+                st = addAttr(st, a.nid, AttrKind.AStatic)
             }
         }
         return resolveNodes(env, e.kids, st)
@@ -2534,10 +2679,10 @@ ${
                 const n: string = bareName(a.value)
                 const h: HandleInfo | not = lookupHandle(env, n)
                 if (h is some) alias = h.sym
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AAs))
+                st = addAttr(st, a.nid, AttrKind.AAs)
             } else if (a.name == "if") {
                 st = resolveValue(env, a.value, Type.Bool, st)
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AIf))
+                st = addAttr(st, a.nid, AttrKind.AIf)
             } else {
                 const i: int = fieldIndex(d.info, a.name)
                 if (i < 0) {
@@ -2545,11 +2690,11 @@ ${
                 } else {
                     const f: FieldInfo = d.info.fields[i]
                     st = resolveConstructValue(env, a.value, f.ty, st)
-                    st = addFact(st, a.nid, Fact.FAttr(AttrKind.AConstruct(i)))
+                    st = addAttr(st, a.nid, AttrKind.AConstruct(i))
                 }
             }
         }
-        st = addFact(st, e.nid, Fact.FUse(d.info.sym, alias))
+        st = addElem(st, e.nid, ElemFact.MUse(d.info.sym, alias))
         return resolveNodes(env, e.kids, st)
     }
 
@@ -2576,10 +2721,10 @@ ${
                     st = r.st
                     srcTy = r.x.ty
                 }
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AEachIn))
+                st = addAttr(st, a.nid, AttrKind.AEachIn)
             } else if (a.name == "as") {
                 asName = bareName(a.value)
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AEachAs))
+                st = addAttr(st, a.nid, AttrKind.AEachAs)
             }
         }
         if (asName == "") asName = "item"
@@ -2605,12 +2750,12 @@ ${
         for (const a of e.attrs) {
             if (a.name == "key") {
                 st = resolveValue(kenv, a.value, not, st)
-                st = addFact(st, a.nid, Fact.FAttr(AttrKind.AEachKey))
+                st = addAttr(st, a.nid, AttrKind.AEachKey)
             } else if (a.name != "in" && a.name != "as") {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`<each " + a.name + "=>` is not in bootstrap slice M2")
             }
         }
-        st = addFact(st, e.nid, Fact.FEach(rs.s, hsyms))
+        st = addElem(st, e.nid, ElemFact.MEach(rs.s, hsyms))
         return resolveNodes(renv, e.kids, st)
     }
 
@@ -2666,7 +2811,7 @@ ${
                 } else {
                     st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "an unannotated parameter `" + p.name + "` — bootstrap slice M2 needs `" + p.name + ": Type` (Core parameters are typed)")
                 }
-                st = addFact(st, p.nid, Fact.FParam(rs.s, pty))
+                st = addBind(st, p.nid, BindFact.BParam(rs.s, pty))
                 env = withLocal(env, { name: p.name, s: rs.s, ty: pty, mutable: false, narrowed: not, nDecl: not })
             }
             st = resolveBlock(env, fs.f.body, st)
@@ -3083,10 +3228,20 @@ ${
     // not provable either way at compile time), is never an error here.
     // =========================================================================
     export fn exprType(t: Tables, nid: int) -> VType {
-        for (const x of t.typing.exprs) {
-            if (x.nid == nid) return x.vt
+        const i: int = slotOf(t.typing.at, nid)
+        if (i < 0) return VType.Unknown
+        return t.typing.exprs[i].vt
+    }
+
+    // The settled pass's types, indexed by NodeId (the first entry per node).
+    fn typingOf(exprs: ExprType[]) -> Typing {
+        let at: int[] = []
+        let i = 0
+        for (const x of exprs) {
+            if (slotOf(at, x.nid) < 0) at = setSlot(at, x.nid, i)
+            i = i + 1
         }
-        return VType.Unknown
+        return { exprs: exprs, at: at }
     }
 
     // `contribs`: every value an UNANNOTATED `let` local is given — its
@@ -3367,158 +3522,113 @@ ${
     }
 
     // ---- the binder's facts, as the typer reads them --------------------------
-    // (Total over `Fact` — the accessor cost M3 item 2's split will shrink.)
-    fn factType(env: TEnv, f: Fact) -> VType {
+    // Each accessor is total over ONE family (plus `not`: no fact).
+    // The value type a NAME denotes (a name / `@x` / `@.` / a member step).
+    fn nameType(env: TEnv, f: NameFact | not) -> VType {
         return match f {
-            .FLocal(sym: s) :> tLocal(env, s)
-            .FField(decl: d, inst: i, idx: x) :> fieldTypeOf(env.t, d, x)
-            .FInst(decl: d) :> known(Type.Named(d))
-            .FStruct(owner: o, idx: x) :> structFieldType(env.t, o, x)
-            .FFn(sym: s) :> VType.Unknown
-            .FVariant(enumSym: s) :> known(Type.Named(s))
-            .FLit(lit: l) :> litType(l)
-            .FOp(op: o) :> unaryOpType(o)
-            .FStructOf(ty: s) :> known(Type.Named(s))
-            .FWrite(w: w) :> VType.Unknown
-            .FSpread(ws: ws) :> VType.Unknown
-            .FReset(w: w) :> VType.Unknown
-            .FAssignLocal(sym: s) :> VType.Unknown
-            .FBind(sym: s) :> VType.Unknown
-            .FParam(sym: s, ty: y) :> known(y)
-            .FGiven(sym: s) :> VType.Unknown
-            .FUse(decl: d) :> VType.Unknown
-            .FEach(bind: b) :> VType.Unknown
-            .FSlot :> VType.Unknown
-            .FHtml :> VType.Unknown
-            .FAttr(k: k) :> VType.Unknown
-            .FNone :> VType.Unknown
+            .NLocal(sym: s) :> tLocal(env, s)
+            .NField(decl: d, inst: i, idx: x) :> fieldTypeOf(env.t, d, x)
+            .NInst(decl: d) :> known(Type.Named(d))
+            .NStruct(owner: o, idx: x) :> structFieldType(env.t, o, x)
+            .NFn(sym: s) :> VType.Unknown
+            .NLength :> known(Type.Int)
+            not :> VType.Unknown
         }
     }
 
-    // The one operator the binder resolves on a Member node: `.length`.
-    fn unaryOpType(o: PrimOp) -> VType {
-        const isLength: boolean = o == PrimOp.Length
-        if (isLength) return known(Type.Int)
-        return VType.Unknown
-    }
-
-    // A Sym the fact binds or names (a local, a parameter, a function, a
-    // `given` / row binding) — for the typer's scope and the call signature.
-    fn factSym(f: Fact) -> Sym | not {
+    // The function a callee names.
+    fn calleeFn(f: NameFact | not) -> Sym | not {
         return match f {
-            .FLocal(sym: s) :> s
-            .FFn(sym: s) :> s
-            .FBind(sym: s) :> s
-            .FParam(sym: s) :> s
-            .FGiven(sym: s) :> s
-            .FEach(bind: b) :> b
-            .FAssignLocal(sym: s) :> s
-            .FField(decl: d) :> not
-            .FInst(decl: d) :> not
-            .FStruct(owner: o) :> not
-            .FVariant(enumSym: s) :> not
-            .FLit(lit: l) :> not
-            .FOp(op: o) :> not
-            .FStructOf(ty: s) :> not
-            .FWrite(w: w) :> not
-            .FSpread(ws: ws) :> not
-            .FReset(w: w) :> not
-            .FUse(decl: d) :> not
-            .FSlot :> not
-            .FHtml :> not
-            .FAttr(k: k) :> not
-            .FNone :> not
+            .NFn(sym: s) :> s
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NInst(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NLength :> not
+            not :> not
         }
     }
 
-    fn isFnFact(f: Fact) -> boolean {
+    // The type of a constant the binder resolved. (An operator's type is
+    // computed from its operands, typeBinary / typeUnary.)
+    fn valueType(f: ValueFact | not) -> VType {
         return match f {
-            .FFn(sym: s) :> true
-            .FLocal(sym: s) :> false
-            .FBind(sym: s) :> false
-            .FParam(sym: s) :> false
-            .FGiven(sym: s) :> false
-            .FEach(bind: b) :> false
-            .FAssignLocal(sym: s) :> false
-            .FField(decl: d) :> false
-            .FInst(decl: d) :> false
-            .FStruct(owner: o) :> false
-            .FVariant(enumSym: s) :> false
-            .FLit(lit: l) :> false
-            .FOp(op: o) :> false
-            .FStructOf(ty: s) :> false
-            .FWrite(w: w) :> false
-            .FSpread(ws: ws) :> false
-            .FReset(w: w) :> false
-            .FUse(decl: d) :> false
-            .FSlot :> false
-            .FHtml :> false
-            .FAttr(k: k) :> false
-            .FNone :> false
+            .VLit(lit: l) :> litType(l)
+            .VVariant(enumSym: s) :> known(Type.Named(s))
+            .VStructOf(ty: s) :> known(Type.Named(s))
+            .VOp(op: o) :> VType.Unknown
+            not :> VType.Unknown
+        }
+    }
+
+    fn opOf(f: ValueFact | not) -> PrimOp | not {
+        return match f {
+            .VOp(op: o) :> o
+            .VLit(lit: l) :> not
+            .VVariant(enumSym: s) :> not
+            .VStructOf(ty: s) :> not
+            not :> not
+        }
+    }
+
+    // The Sym a binder binds (a local, a function, a parameter, a `given`).
+    fn bindSym(f: BindFact | not) -> Sym | not {
+        return match f {
+            .BBind(sym: s) :> s
+            .BParam(sym: s) :> s
+            .BGiven(sym: s) :> s
+            not :> not
+        }
+    }
+
+    // A parameter's (annotated) type.
+    fn paramType(f: BindFact | not) -> VType {
+        return match f {
+            .BParam(sym: s, ty: y) :> known(y)
+            .BBind(sym: s) :> VType.Unknown
+            .BGiven(sym: s) :> VType.Unknown
+            not :> VType.Unknown
         }
     }
 
     // The classified writes a statement carries: a plain write is one
     // (`prop` = -1, the value is the assignment's / call's own), a spread its
     // overrides; anything else none.
-    fn factWrites(f: Fact) -> SpreadWrite[] {
+    fn effectWrites(f: EffectFact | not) -> SpreadWrite[] {
         return match f {
-            .FWrite(w: w) :> [oneWrite(w)]
-            .FSpread(ws: ws) :> ws
-            .FReset(w: w) :> []
-            .FLocal(sym: s) :> []
-            .FFn(sym: s) :> []
-            .FBind(sym: s) :> []
-            .FParam(sym: s) :> []
-            .FGiven(sym: s) :> []
-            .FEach(bind: b) :> []
-            .FAssignLocal(sym: s) :> []
-            .FField(decl: d) :> []
-            .FInst(decl: d) :> []
-            .FStruct(owner: o) :> []
-            .FVariant(enumSym: s) :> []
-            .FLit(lit: l) :> []
-            .FOp(op: o) :> []
-            .FStructOf(ty: s) :> []
-            .FUse(decl: d) :> []
-            .FSlot :> []
-            .FHtml :> []
-            .FAttr(k: k) :> []
-            .FNone :> []
+            .EWrite(w: w) :> [oneWrite(w)]
+            .ESpread(ws: ws) :> ws
+            .EReset(w: w) :> []
+            .EAssignLocal(sym: s) :> []
+            not :> []
         }
     }
 
     fn oneWrite(w: WriteFact) -> SpreadWrite { return { w: w, prop: -1 } }
 
-    // The field index a use-site attribute constructs (-1: not a construction).
-    fn factConstruct(f: Fact) -> int {
+    fn isReset(f: EffectFact | not) -> boolean {
         return match f {
-            .FAttr(k: k) :> constructIndex(k)
-            .FLocal(sym: s) :> -1
-            .FFn(sym: s) :> -1
-            .FBind(sym: s) :> -1
-            .FParam(sym: s) :> -1
-            .FGiven(sym: s) :> -1
-            .FEach(bind: b) :> -1
-            .FAssignLocal(sym: s) :> -1
-            .FField(decl: d) :> -1
-            .FInst(decl: d) :> -1
-            .FStruct(owner: o) :> -1
-            .FVariant(enumSym: s) :> -1
-            .FLit(lit: l) :> -1
-            .FOp(op: o) :> -1
-            .FStructOf(ty: s) :> -1
-            .FWrite(w: w) :> -1
-            .FSpread(ws: ws) :> -1
-            .FReset(w: w) :> -1
-            .FUse(decl: d) :> -1
-            .FSlot :> -1
-            .FHtml :> -1
-            .FNone :> -1
+            .EReset(w: w) :> true
+            .EWrite(w: w) :> false
+            .ESpread(ws: ws) :> false
+            .EAssignLocal(sym: s) :> false
+            not :> false
         }
     }
 
-    fn constructIndex(k: AttrKind) -> int {
+    // The local a rebinding `a = v` assigns (§66.11.5).
+    fn assignedLocal(f: EffectFact | not) -> Sym | not {
+        return match f {
+            .EAssignLocal(sym: s) :> s
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            not :> not
+        }
+    }
+
+    // The field index a use-site attribute constructs (-1: not a construction).
+    fn constructIndex(k: AttrKind | not) -> int {
         return match k {
             .AConstruct(field: i) :> i
             .AStatic :> -1
@@ -3529,37 +3639,31 @@ ${
             .AEachIn :> -1
             .AEachKey :> -1
             .AEachAs :> -1
+            not :> -1
         }
     }
 
     // The declaration a USE constructs.
-    fn factUse(f: Fact) -> Sym | not {
+    fn useDecl(f: ElemFact | not) -> Sym | not {
         return match f {
-            .FUse(decl: d) :> d
-            .FLocal(sym: s) :> not
-            .FFn(sym: s) :> not
-            .FBind(sym: s) :> not
-            .FParam(sym: s) :> not
-            .FGiven(sym: s) :> not
-            .FEach(bind: b) :> not
-            .FAssignLocal(sym: s) :> not
-            .FField(decl: d) :> not
-            .FInst(decl: d) :> not
-            .FStruct(owner: o) :> not
-            .FVariant(enumSym: s) :> not
-            .FLit(lit: l) :> not
-            .FOp(op: o) :> not
-            .FStructOf(ty: s) :> not
-            .FWrite(w: w) :> not
-            .FSpread(ws: ws) :> not
-            .FReset(w: w) :> not
-            .FSlot :> not
-            .FHtml :> not
-            .FAttr(k: k) :> not
-            .FNone :> not
+            .MUse(decl: d) :> d
+            .MEach(bind: b) :> not
+            .MHtml :> not
+            .MSlot :> not
+            not :> not
         }
     }
 
+    // An `<each>`'s row binding.
+    fn eachBind(f: ElemFact | not) -> Sym | not {
+        return match f {
+            .MEach(bind: b) :> b
+            .MUse(decl: d) :> not
+            .MHtml :> not
+            .MSlot :> not
+            not :> not
+        }
+    }
     fn fieldTypeOf(t: Tables, d: Sym, idx: int) -> VType {
         const di: DeclInfo | not = declInfo(t, d)
         if (di is not) return VType.Unknown
@@ -3711,32 +3815,33 @@ ${
     }
 
     fn typeExprK(env: TEnv, e: AExpr, ts: TypeState) -> RVT {
-        const f: Fact = factOf(env.t, e.nid)
+        const nf: NameFact | not = nameFact(env.t.names, e.nid)
+        const vf: ValueFact | not = valueFact(env.t.values, e.nid)
         const k: AExprK = e.k
         return match k {
-            .Name(name: n) :> rvt(factType(env, f), ts)
-            .At(name: n) :> rvt(factType(env, f), ts)
-            .AtItem :> rvt(factType(env, f), ts)
-            .Num(raw: r) :> rvt(factType(env, f), ts)
-            .Str(v: s) :> rvt(factType(env, f), ts)
-            .Bool(v: b) :> rvt(factType(env, f), ts)
+            .Name(name: n) :> rvt(nameType(env, nf), ts)
+            .At(name: n) :> rvt(nameType(env, nf), ts)
+            .AtItem :> rvt(nameType(env, nf), ts)
+            .Num(raw: r) :> rvt(valueType(vf), ts)
+            .Str(v: s) :> rvt(valueType(vf), ts)
+            .Bool(v: b) :> rvt(valueType(vf), ts)
             .NotLit :> rvt(VType.Absent, ts)
             .Recovered :> rvt(VType.Unknown, ts)                 // a parse-error placeholder is never typed
-            .Variant(name: n) :> rvt(factType(env, f), ts)
-            .Member(obj: o, name: n) :> typeMember(env, f, o, ts)
+            .Variant(name: n) :> rvt(valueType(vf), ts)
+            .Member(obj: o, name: n) :> typeMember(env, nf, o, ts)
             .Call(callee: c, args: args) :> typeCall(env, e, c, args, ts)
             .Unary(op: o, e: x) :> typeUnary(env, o, x, ts)
-            .Binary(op: o, l: l, r: r) :> typeBinary(env, f, l, r, ts)
+            .Binary(op: o, l: l, r: r) :> typeBinary(env, vf, l, r, ts)
             .Ternary(test: x, yes: y, no: n) :> typeTernary(env, x, y, n, ts)
             .Assign(target: x, value: v) :> rvt(VType.Unknown, typeExpr(env, v, ts).ts)
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
-            .ObjectLit(props: ps) :> rvt(factType(env, f), typePropValues(env, ps, ts))
+            .ObjectLit(props: ps) :> rvt(valueType(vf), typePropValues(env, ps, ts))
         }
     }
 
-    fn typeMember(env: TEnv, f: Fact, obj: AExpr, ts: TypeState) -> RVT {
+    fn typeMember(env: TEnv, f: NameFact | not, obj: AExpr, ts: TypeState) -> RVT {
         const ro: RVT = typeExpr(env, obj, ts)
-        return rvt(factType(env, f), ro.ts)
+        return rvt(nameType(env, f), ro.ts)
     }
 
     fn typePropValues(env: TEnv, ps: AProp[], ts0: TypeState) -> TypeState {
@@ -3754,41 +3859,13 @@ ${
         return rvt(VType.Unknown, r.ts)
     }
 
-    fn typeBinary(env: TEnv, f: Fact, l: AExpr, r: AExpr, ts: TypeState) -> RVT {
+    fn typeBinary(env: TEnv, f: ValueFact | not, l: AExpr, r: AExpr, ts: TypeState) -> RVT {
         const rl: RVT = typeExpr(env, l, ts)
         const rr: RVT = typeExpr(env, r, rl.ts)
-        const op: PrimOp | not = opOfFact(f)
+        const op: PrimOp | not = opOf(f)
         if (op is not) return rvt(VType.Unknown, rr.ts)
         return rvt(binaryType(op, rl.vt, rr.vt), rr.ts)
     }
-
-    fn opOfFact(f: Fact) -> PrimOp | not {
-        return match f {
-            .FOp(op: o) :> o
-            .FLocal(sym: s) :> not
-            .FFn(sym: s) :> not
-            .FBind(sym: s) :> not
-            .FParam(sym: s) :> not
-            .FGiven(sym: s) :> not
-            .FEach(bind: b) :> not
-            .FAssignLocal(sym: s) :> not
-            .FField(decl: d) :> not
-            .FInst(decl: d) :> not
-            .FStruct(owner: o) :> not
-            .FVariant(enumSym: s) :> not
-            .FLit(lit: l) :> not
-            .FStructOf(ty: s) :> not
-            .FWrite(w: w) :> not
-            .FSpread(ws: ws) :> not
-            .FReset(w: w) :> not
-            .FUse(decl: d) :> not
-            .FSlot :> not
-            .FHtml :> not
-            .FAttr(k: k) :> not
-            .FNone :> not
-        }
-    }
-
     // `&&` / `||` yield an OPERAND (JS semantics, §45.9): bool only when both are.
     fn binaryType(op: PrimOp, a: VType, b: VType) -> VType {
         return match op {
@@ -3859,10 +3936,8 @@ ${
     // required); its value is the declared return type.
     fn typeCall(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> RVT {
         let ts: TypeState = typeExprs(env, args, ts0)
-        const cf: Fact = factOf(env.t, callee.nid)
         ts = typePlace(env, callee, VType.Unknown, ts)
-        if (!isFnFact(cf)) return rvt(VType.Unknown, ts)
-        const s: Sym | not = factSym(cf)
+        const s: Sym | not = calleeFn(nameFact(env.t.names, callee.nid))
         if (s is not) return rvt(VType.Unknown, ts)
         const fi: FnInfo | not = fnInfoOf(env.t, s)
         if (fi is not) return rvt(VType.Unknown, ts)
@@ -3920,7 +3995,7 @@ ${
     // it field by field (§66.1 rule 5's rule, spelling-independent).
     fn typeLocal(env: TEnv, s: AStmt, name: string, init: AExpr, ts: TypeState) -> RTEnv {
         const r: RVT = typeExpr(env, init, ts)
-        const sym: Sym | not = factSym(factOf(env.t, s.nid))
+        const sym: Sym | not = bindSym(bindFact(env.t.binds, s.nid))
         if (sym is not) return keepTEnv(env, r.ts)
         const annot: Type | not = annotOf(env.t, sym)
         if (annot is some) {
@@ -3941,7 +4016,7 @@ ${
 
     fn typeGiven(env: TEnv, s: AStmt, subject: AExpr, body: ABlock, ts: TypeState) -> TypeState {
         const r: RVT = typeExpr(env, subject, ts)
-        const sym: Sym | not = factSym(factOf(env.t, s.nid))
+        const sym: Sym | not = bindSym(bindFact(env.t.binds, s.nid))
         if (sym is not) return typeBlock(env, body, r.ts)
         return typeBlock(tWithLocal(env, sym, r.vt), body, r.ts)
     }
@@ -3972,8 +4047,8 @@ ${
     }
 
     fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts0: TypeState) -> TypeState {
-        const f: Fact = factOf(env.t, e.nid)
-        const ws: SpreadWrite[] = factWrites(f)
+        const f: EffectFact | not = effectFact(env.t.effects, e.nid)
+        const ws: SpreadWrite[] = effectWrites(f)
         const ps: AProp[] = propsOf(value)
         if (ws.length > 0 && ws[0].prop >= 0) {
             // a spread: the operand and each override typed; each override checked
@@ -3997,7 +4072,7 @@ ${
             // Only a BARE local target (`a = v`) is the local itself; `a.n = v`
             // is a field edit of it (§66.11.4) whose field type this path does
             // not compute — unchecked (provable-or-silent), and not joined.
-            const ls: Sym | not = factSym(f)
+            const ls: Sym | not = assignedLocal(f)
             const bareLocal: boolean = exprName(target) != ""
             if (ls is some) {
                 if (bareLocal) placeType = tLocal(env, ls)
@@ -4049,9 +4124,10 @@ ${
 
     // A write whose value is the call's single argument: `@xs.push(v)`.
     fn typeCallStmt(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> TypeState {
-        const ws: SpreadWrite[] = factWrites(factOf(env.t, e.nid))
+        const f: EffectFact | not = effectFact(env.t.effects, e.nid)
+        const ws: SpreadWrite[] = effectWrites(f)
         if (ws.length == 0) {
-            if (isResetFact(factOf(env.t, e.nid))) {
+            if (isReset(f)) {
                 // `reset(@x)`: its argument is a place, not a value to check
                 return record(typePlace(env, callee, VType.Unknown, typeExprs(env, args, ts0)), e.nid, VType.Unknown)
             }
@@ -4063,34 +4139,6 @@ ${
         }
         return record(ts, e.nid, VType.Unknown)
     }
-
-    fn isResetFact(f: Fact) -> boolean {
-        return match f {
-            .FReset(w: w) :> true
-            .FWrite(w: w) :> false
-            .FSpread(ws: ws) :> false
-            .FLocal(sym: s) :> false
-            .FFn(sym: s) :> false
-            .FBind(sym: s) :> false
-            .FParam(sym: s) :> false
-            .FGiven(sym: s) :> false
-            .FEach(bind: b) :> false
-            .FAssignLocal(sym: s) :> false
-            .FField(decl: d) :> false
-            .FInst(decl: d) :> false
-            .FStruct(owner: o) :> false
-            .FVariant(enumSym: s) :> false
-            .FLit(lit: l) :> false
-            .FOp(op: o) :> false
-            .FStructOf(ty: s) :> false
-            .FUse(decl: d) :> false
-            .FSlot :> false
-            .FHtml :> false
-            .FAttr(k: k) :> false
-            .FNone :> false
-        }
-    }
-
     // The type recorded for a node this pass already typed.
     fn exprType0(ts: TypeState, nid: int) -> VType {
         let i: int = ts.exprs.length - 1
@@ -4194,7 +4242,7 @@ ${
     fn typeElem(env: TEnv, e: AElem, ts: TypeState) -> TypeState {
         if (e.star) return ts
         if (e.tag == "each") return typeEach(env, e, ts)
-        const u: Sym | not = factUse(factOf(env.t, e.nid))
+        const u: Sym | not = useDecl(elemFact(env.t.elems, e.nid))
         if (u is some) return typeUse(env, e, u, ts)
         return typeHtml(env, e, ts)
     }
@@ -4235,7 +4283,7 @@ ${
         const di: DeclInfo | not = declInfo(env.t, decl)
         for (const a of e.attrs) {
             if (a.name != "as") ts = typeAttrValue(env, a.value, ts).ts
-            const i: int = factConstruct(factOf(env.t, a.nid))
+            const i: int = constructIndex(attrFact(env.t.attrs, a.nid))
             if (di is some && i >= 0 && i < di.fields.length) {
                 const f: FieldInfo = di.fields[i]
                 if (f.annotated && f.trusted) {
@@ -4264,7 +4312,7 @@ ${
             if (et is some) elem = known(et)
         }
         let renv: TEnv = env
-        const bind: Sym | not = factSym(factOf(env.t, e.nid))
+        const bind: Sym | not = eachBind(elemFact(env.t.elems, e.nid))
         if (bind is some) renv = tWithLocal(env, bind, elem)
         const keyA: AAttr | not = attrNamed(e.attrs, "key")
         if (keyA is some) ts = typeAttrValue(renv, keyA.value, ts).ts
@@ -4315,13 +4363,13 @@ ${
             const ts: TypeState = typePass(files, t, settled)
             const next: LocalT[] = joinContribs(ts.contribs)
             if (pass == 0) bound = 3 * next.length + 2
-            if (sameLocals(next, settled)) return { typing: { exprs: ts.exprs }, diags: ts.diags }
+            if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs), diags: ts.diags }
             prev = settled
             settled = next
             pass = pass + 1
         }
         const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled))
-        return { typing: { exprs: last.exprs }, diags: last.diags }
+        return { typing: typingOf(last.exprs), diags: last.diags }
     }
 
     fn unknownWhereChanged(prev: LocalT[], cur: LocalT[]) -> LocalT[] {
@@ -4407,11 +4455,11 @@ ${
     fn typeFn(env: TEnv, af: AFn, ts: TypeState) -> TypeState {
         let fenv: TEnv = env
         for (const p of af.params) {
-            const pf: Fact = factOf(env.t, p.nid)
-            const s: Sym | not = factSym(pf)
+            const pf: BindFact | not = bindFact(env.t.binds, p.nid)
+            const s: Sym | not = bindSym(pf)
             // an untyped parameter, or one whose type failed to parse, is unproven
             let pvt: VType = VType.Unknown
-            if (paramsTrusted(env.errs, [p])) pvt = factType(env, pf)
+            if (paramsTrusted(env.errs, [p])) pvt = paramType(pf)
             if (s is some) fenv = tWithLocal(fenv, s, pvt)
         }
         return typeBlock(fenv, af.body, ts)
@@ -4422,7 +4470,7 @@ ${
     // entry (the file with `<program>`) last.
     // =========================================================================
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
-        const st0: AS = { facts: [], diags: [], nextSym: 0, annots: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [] }
         const ra: RGlobals = phaseA(files, entry, st0)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
@@ -4433,12 +4481,15 @@ ${
         // The binder's tables, then the two passes that read them: the scope
         // pass (redeclarations) and the typer (value types). Each returns new
         // values; the final Tables carries the typer's own table.
-        const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns,
-                                handles: ra.g.handles, facts: st.facts, annots: st.annots, typing: { exprs: [] } }
+        const fs: NodeFacts = st.facts
+        const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
+                                names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
+                                attrs: fs.attrs, annots: st.annots, typing: { exprs: [], at: [] } }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         const typed: RTyping = typeProgram(files, bound)
-        const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns,
-                            handles: bound.handles, facts: bound.facts, annots: bound.annots, typing: typed.typing }
+        const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
+                            names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
+                            elems: bound.elems, attrs: bound.attrs, annots: bound.annots, typing: typed.typing }
         return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(typed.diags) }
     }
 
