@@ -19,3 +19,4 @@
 - CORRECTION #8: cut the SPEC impl note to one line; moved the detail to a new known-gaps entry G-HANDLER-LOOP-BINDER-WRITE-CREATES-WINDOW-GLOBAL (HIGH; locus emit-event-wiring.ts:1140). Window global VERIFIED BY EXECUTION: happy-dom + node:vm, window.it === 4 after the click.
 - CORRECTION #9: added the bubbling-event qualifier and non-bubbling examples. MEASURED both divergence halves (happy-dom): page inner click -> 0|1 (outer did not fire); each-row inner click -> 1|1 (both fired). Order not measured.
 - CORRECTION #10: §66.13.4 + §66.20 row narrowed to 'an <engine> (a single declaration carrying a transition graph)'; OPEN on a plain single. §51.0.K and the §34 row unchanged.
+- CORRECTION #11: 'initial= also accepts'; inline (extended S439 #11) on the .Variant item; OPEN on static-ness; supersedes (extends) names the EXACTLY-ONE sentence.

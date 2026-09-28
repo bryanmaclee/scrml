@@ -29428,21 +29428,24 @@ the body lives at the declaration site. Adding a body at the use-site is a parse
 mutually-exclusive value forms:
 
 - `initial=.Variant` — a STATIC literal (the fixed start state, validated at
-  compile time against the `for=T` variant set).
+  compile time against the `for=T` variant set). *(extended S439 #11 — or a payload
+  constructor; see "Payload constructor" below)*
 - `initial=@cell` — RUNTIME-CELL HYDRATION (S198, Approach F A-leg): the engine
   is seeded from the snapshot of a reactive `@cell` at engine-construction. See
   "Runtime-cell hydration (`initial=@cell`)" below.
 
-**Payload constructor (S439 ruling #11).** The static form accepts a payload
+**Payload constructor (S439 ruling #11).** `initial=` also accepts a payload
 constructor for a payload-bearing variant — `initial=.Ready([…])` — and the engine
 starts in that variant WITH that payload: the payload is carried, not dropped. Under
 §66 `initial=` becomes the declaration's own value — the field's initializer, which
 takes any value (§66.3; `<engine for=T initial=.X>` ≡ `<t:T=.X single>`, §66.13.3).
 ⚑ **impl#1 divergence (measured S439):** `initial=.Ready(["a", "b"])` compiles at exit 0
 and the payload does not appear in the emitted client JS — impl#1 drops it.
+> ⚑ **OPEN (not ruled):** whether payload arguments must be compile-time static.
+>
 > **Provenance:** ruling:user-voice-scrml.md S439 #11 "all recs" (Rec: honour it) ·
-> supersedes: nothing normative (the two-form list above named only the bare
-> `.Variant` literal; it did not refuse a payload).
+> supersedes (extends): "It accepts EXACTLY ONE of two mutually-exclusive value
+> forms" (above) — its `.Variant` form now includes a payload constructor.
 
 **Lint behavior:**
 - On a NON-derived engine, `initial=` is REQUIRED. If omitted, the compiler emits
