@@ -67,3 +67,16 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
 - Item 10 CORRECTION to the round-0 line above: the shim DOES read a text field — a call-ref's `args`, for its LENGTH
   only (compared with `argExprNodes` to detect arguments impl#1 carried only as text). It never reads the content of
   `init` / `raw` / `expr` / `condition` / `args`. Header of ingest.scrml says the same.
+- Item 1: slice-m3/bench/bite-matrix.js — 40 named corruptions (printer, runtime, ingest shim) on a .tmp/ MIRROR, each
+  re-grading the clean run's runtime passes via `hybrid.ts --footprint --only … --json`; exits 1 on a site found ≠1×
+  or a clean mirror that does not reproduce (probed: a bogus site → exit 1, "site found 0× — NOT RUN (hollow)").
+  Reproduced the review first: round-0 grade + `Cond test const false` → no pass died (toggle-show was a FAIL then).
+  Result now: 17 runtime passes; 32 constructs CERTIFIED, 0 UNCERTIFIED. Round-1 finding: corrupting sharedJs's getter
+  FALLBACK bit nothing (unreached — a function's shared instance is its prologue local); the mutation now targets
+  instJs's `.Shared` arm (14 die). The shim's derived→Seeded MODE corruption bites nothing: the printer chooses
+  derived vs seeded by `wcap`, never by FieldMode (recorded in the matrix, not hidden).
+- CI: `bun test ./compiler/self-host-v2/slice-m3/` added to the "Bootstrap slice" gate step (wall 2.5 s). Full grade
+  (~9 s) and bite matrix (~146 s) are NOT in CI.
+- §5 re-run: slice-m1 73/0 · slice-m2 74/0 · lowered slice-m1 73/0 · slice-m3 22/0 · lexer 337/0 · hybrid 26/0 ·
+  lint 0 violations · footprint grade exit 0 · bite matrix exit 0 · impl#1 conformance exit 0 1040/1047 + 7 xfail,
+  per-case lines identical to the pre-fix run.
