@@ -3963,13 +3963,15 @@ navigation (a route region).
   the first**, and its registered `cleanup()` SHALL run on the matching **route-leave**. §6.7.1a's unity
   is preserved without exception: `on mount`, bare lifecycle expressions and `<request>` remain one
   mechanism, differing only in which owner the compiler binds them to. *(Amended S313 — ratified Pole C.)*
+  *(narrowed S439 #12 — declarations in a `${…lift…}` block inside an `if=` scope run once at file init; see the next bullet)*
 - **A `${…}` block containing `lift` inside an `if=` scope (S439 ruling #12).** Its DECLARATIONS run ONCE,
   at file init — they are file-scope declarations (§7.6), not per-mount state. Its `lift` statements run
   on every mount of the `if=` scope, including each remount. The association and remount rules above
   govern the block's `lift` statements; they do not re-run its declarations. (This is the behaviour that
   shipped as #1021.)
   > **Provenance:** ruling:user-voice-scrml.md S439 #12 "all recs" (Rec: A — "Declarations run at file
-  > init (§7.6 file scope) and lift statements run per mount").
+  > init (§7.6 file scope) and lift statements run per mount") · supersedes (narrows): the association
+  > bullet and the memoryless-remount clause above, for declarations in such a block.
 - When a scope destroys, all associated lifecycle resources are torn down in the following
   canonical order:
   1. All `when` effects registered in that scope are unregistered (no further executions
@@ -3982,7 +3984,8 @@ navigation (a route region).
   sequence before the parent scope begins its teardown sequence.
 - A scope that remounts (i.e., `if=` transitions false → true a second time) SHALL re-run
   all bare expressions and re-start all `<timer>` and `<poll>` instances declared in that
-  scope exactly as if the scope were mounting for the first time.
+  scope exactly as if the scope were mounting for the first time. *(narrowed S439 #12 —
+  does not re-run declarations in a `${…lift…}` block; see the S439 #12 bullet above)*
 
 **Definition — "outside any element scope":** A construct is outside any element scope when
 it appears at the file level without a `<program>` root element ancestor, or when it

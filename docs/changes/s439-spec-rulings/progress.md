@@ -20,3 +20,4 @@
 - CORRECTION #9: added the bubbling-event qualifier and non-bubbling examples. MEASURED both divergence halves (happy-dom): page inner click -> 0|1 (outer did not fire); each-row inner click -> 1|1 (both fired). Order not measured.
 - CORRECTION #10: §66.13.4 + §66.20 row narrowed to 'an <engine> (a single declaration carrying a transition graph)'; OPEN on a plain single. §51.0.K and the §34 row unchanged.
 - CORRECTION #11: 'initial= also accepts'; inline (extended S439 #11) on the .Variant item; OPEN on static-ness; supersedes (extends) names the EXACTLY-ONE sentence.
+- CORRECTION #12: provenance gains 'supersedes (narrows)'; the association bullet and the remount clause are marked in place.
