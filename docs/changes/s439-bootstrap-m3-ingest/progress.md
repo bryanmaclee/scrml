@@ -52,3 +52,18 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
   pre-fix run (diff exit 0) — toggle-show and reset-handler still PASS, no other case moved. (Round-1 note: the earlier
   invariance diff was taken on text passed through a `s/[0-9.]*ms//g` filter that also mangled names containing "ms";
   re-done on the raw lines: base vs round-1 identical, diff exit 0.)
+- Item 4: `unmapped(n, what, read, redundant)` — every key is READ or REDUNDANT for a stated reason (identity / text
+  twin / syntax / summary); the hoisted lists and configs on file + logic nodes are no longer "known" (non-empty →
+  not-yet); `shorthandBodyRaw` likewise. Now read and checked: cell-decl `shape`, cell-write `shape/structuralForm/
+  isConst/__enclosingFnCanFail`, element `resolvedCategory`, function `fnKind`/`isHandleEscapeHatch`. Witness
+  `${ const Foo = <span>foo</span> }` → "top-level `${}` carries unmapped key `components`" (reproduced first: was []).
+- Item 7: a `const` whose initializer contains a call → not-yet (§66.9 derived-ness not provable through a call).
+  Reproduced first with `const <d>: int = dbl()` (was Field.Locked, notYet []).
+- Items 3 / 6 / 8 / 9 (scripts/hybrid.ts): headline = RUNTIME passes; codes-only passes on their own line marked
+  "front-end codes — NOT bootstrap evidence"; FRONT-END = an error-severity front-end diagnostic (not the `E-` prefix);
+  a required code the front end does not emit → not-yet "expects code X, not emitted by impl#1's front end
+  (CG/post-CG)"; "N of M" takes M from an independent `Bun.Glob("**/case.scrml")` enumeration; a throw inside
+  footprint() → class `crashed`, a loud FAIL. `--only a,b` + `--json` for the footprint mode.
+- Item 10 CORRECTION to the round-0 line above: the shim DOES read a text field — a call-ref's `args`, for its LENGTH
+  only (compared with `argExprNodes` to detect arguments impl#1 carried only as text). It never reads the content of
+  `init` / `raw` / `expr` / `condition` / `args`. Header of ingest.scrml says the same.

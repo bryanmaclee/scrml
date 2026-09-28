@@ -28,7 +28,7 @@
  *       compile every tracked .scrml under the roots through the hybrid AND pure TS, and print a
  *       divergence report (file, artifact, first diff hunk) with N-of-M totals. TRIAGE, not a gate.
  *
- *   bun scripts/hybrid.ts --swap CG=<module> --footprint [--filter <substr>] [--report <path.md>]
+ *   bun scripts/hybrid.ts --swap CG=<module> --footprint [--filter <substr>] [--only a,b] [--report <path.md>] [--json <path>]
  *       FOOTPRINT GRADING (dpa-051 §8.2; s439-bootstrap-m3-ingest). The substitute exports
  *       `footprint(cgArgs) -> { constructs, notYet }`; each case is classified GRADED (footprint
  *       within the implemented set) / NOT-YET (never red) / FRONT-END (a rejected program — its
@@ -539,26 +539,33 @@ export function clientExecutorOf(
 
 /** What the grader knows about one case before grading it. */
 export interface FootprintInput {
-  /** The case's `expect.codes` names an E- code (a program the language rejects). */
-  expectsError: boolean;
-  /** Fatal diagnostics impl#1's front end reported for the case. */
+  /** ERROR-severity diagnostics impl#1's FRONT END reported (CG replaced by a stand-in): the program is rejected. */
   impl1Errors: string[];
+  /** Codes the case requires (`expect.codes` / `expect.severity`) that impl#1's front end did NOT emit — CG/post-CG codes. */
+  cgCodes: string[];
   /** The substitute's not-yet reasons (shapes outside the implemented footprint). */
   notYet: string[];
+  /** The substitute's `footprint()` threw: a bootstrap defect, graded as a FAIL. */
+  crash: string | null;
 }
 
-export type FootprintClass = "graded" | "not-yet" | "front-end";
+export type FootprintClass = "graded" | "not-yet" | "front-end" | "crashed";
 
 /**
- * THE CLASSIFIER. A case is GRADED iff its footprint lies within the implemented set (no not-yet
- * reason). A case the language REJECTS (an expected E- code, or impl#1's front end reports a fatal
- * error) is FRONT-END: its codes come from stages the CG substitute does not own, so grading it
- * would count impl#1's front end as the bootstrap's pass — it is reported, never graded, and it is
- * the work queue of bootstrap `analyze`. Everything else is `not-yet` — reported, never red.
+ * THE CLASSIFIER.
+ *   crashed   — the substitute's `footprint()` threw. A bootstrap defect: a loud FAIL.
+ *   front-end — impl#1's FRONT END rejects the program (an error-severity diagnostic before CG). Its
+ *               codes come from stages the substitute does not own, so it is never graded; it is
+ *               bootstrap `analyze`'s queue. (Judged by rejection, not by an `E-` prefix: an `E-`
+ *               code at warning severity rejects nothing.)
+ *   not-yet   — the footprint leaves the implemented set, OR the case requires a code impl#1's front
+ *               end does not emit (a CG/post-CG code the substitute does not produce yet). Never red.
+ *   graded    — everything else.
  */
 export function classifyFootprint(x: FootprintInput): FootprintClass {
-  if (x.expectsError || x.impl1Errors.length > 0) return "front-end";
-  if (x.notYet.length > 0) return "not-yet";
+  if (x.crash !== null) return "crashed";
+  if (x.impl1Errors.length > 0) return "front-end";
+  if (x.notYet.length > 0 || x.cgCodes.length > 0) return "not-yet";
   return "graded";
 }
 
@@ -567,21 +574,35 @@ export interface FootprintCase {
   cls: FootprintClass;
   hasRuntime: boolean;
   constructs: string[];
+  /** Not-yet reasons, including one "expects code X, not emitted by impl#1's front end" per CG code. */
   notYet: string[];
   impl1Errors: string[];
+  crash: string | null;
 }
 
 export interface FootprintReport {
-  total: number;
+  /** Case directories found by an enumeration INDEPENDENT of the grading loop (so truncation shows). */
+  enumerated: number;
   cases: FootprintCase[];
   conformance: ConformanceReport;
-  /** Union of the graded cases' footprints — the implemented construct set exercised. */
-  implemented: string[];
+  /** Union of the footprints of the PASSING RUNTIME-HALF cases — candidates for certification (bite matrix). */
+  exercised: string[];
   /** not-yet reason → number of cases carrying it, most frequent first. */
   notYetByReason: Array<[string, number]>;
 }
 
 type FootprintFn = (cgArgs: unknown) => { constructs: string[]; notYet: string[] };
+
+/**
+ * The case directories under `dir` (a directory holding `case.scrml`), by a filesystem glob that
+ * shares no code with `loadCases`. The report's "N of M" takes M from here, so a grading loop that
+ * silently skips or stops early shows as N < M.
+ */
+export function enumerateCaseDirs(dir: string): string[] {
+  const out: string[] = [];
+  for (const p of new Bun.Glob("**/case.scrml").scanSync({ cwd: dir, onlyFiles: true })) out.push(dirname(p));
+  return out.sort();
+}
 
 /**
  * Compute each case's footprint (impl#1's front end + the substitute's `footprint(cgArgs)` at the
@@ -592,15 +613,26 @@ export async function runFootprintGrade(
   stageOverrides: Record<string, unknown>,
   footprintFn: FootprintFn,
   filter: string | null = null,
-  opts: { casesDir?: string; gaps?: ReadonlyMap<string, string>; onProgress?: (done: number, total: number) => void } = {},
+  opts: {
+    casesDir?: string;
+    gaps?: ReadonlyMap<string, string>;
+    /** Grade only these case dirs (the bite matrix re-grades the clean run's passes). */
+    only?: ReadonlySet<string>;
+    onProgress?: (done: number, total: number) => void;
+  } = {},
 ): Promise<FootprintReport> {
   const { loadCases, hasRuntimeHalf } = await import("../conformance/run.ts");
-  const all = (opts.casesDir ? loadCases(opts.casesDir) : loadCases()).filter((c) => !filter || c.relDir.includes(filter));
+  const casesRoot = opts.casesDir ?? join(REPO_ROOT, "conformance", "cases");
+  const selected = (rel: string) => (!filter || rel.includes(filter)) && (!opts.only || opts.only.has(rel));
+  const enumerated = enumerateCaseDirs(casesRoot).filter(selected).length;
+  const all = loadCases(casesRoot).filter((c) => selected(c.relDir));
   const cases: FootprintCase[] = [];
   for (const c of all) {
     const dir = mkdtempSync(join(tmpdir(), "scrml-footprint-"));
     let fp: { constructs: string[]; notYet: string[] } | null = null;
     let impl1Errors: string[] = [];
+    let emitted = new Set<string>();
+    let crash: string | null = null;
     try {
       const file = join(dir, "case.scrml");
       writeFileSync(file, c.source);
@@ -612,72 +644,102 @@ export async function runFootprintGrade(
         log: () => {},
         stageOverrides: {
           CG: (cgArgs: unknown) => {
-            fp = footprintFn(cgArgs);
+            try {
+              fp = footprintFn(cgArgs);
+            } catch (e) {
+              crash = String((e as Error)?.message ?? e).split("\n")[0];
+            }
             return { outputs: new Map(), errors: [] };
           },
         },
-      }) as { errors?: Array<{ code?: string }> };
-      impl1Errors = (result.errors ?? []).map((e) => String(e?.code ?? "<no-code>"));
+      }) as { errors?: Array<{ code?: string; severity?: string }>; warnings?: Array<{ code?: string }> };
+      const errs = result.errors ?? [];
+      impl1Errors = errs.filter((e) => e?.severity !== "warning" && e?.severity !== "info").map((e) => String(e?.code ?? "<no-code>"));
+      emitted = new Set([...errs, ...(result.warnings ?? [])].map((e) => String(e?.code)));
     } catch (e) {
-      // A substitute that crashes computing a footprint is a bootstrap defect: grade the case, so
-      // the same crash surfaces RED in the conformance run.
-      fp = { constructs: [], notYet: [] };
-      impl1Errors = [];
-      void e;
+      crash = crash ?? `impl#1's front end threw: ${String((e as Error)?.message ?? e).split("\n")[0]}`;
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-    const f = fp ?? { constructs: [], notYet: ["CG was never reached"] };
-    const expectsError = (c.expected.expect.codes ?? []).some((code: string) => code.startsWith("E-"));
-    const cls = classifyFootprint({ expectsError, impl1Errors, notYet: f.notYet });
-    cases.push({ relDir: c.relDir, cls, hasRuntime: hasRuntimeHalf(c), constructs: f.constructs, notYet: f.notYet, impl1Errors });
+    const f = fp ?? { constructs: [], notYet: crash ? [] : ["CG was never reached"] };
+    const ex = c.expected.expect;
+    const required = [...new Set([...(ex.codes ?? []), ...Object.keys(ex.severity ?? {})])];
+    const cgCodes = required.filter((code) => !emitted.has(code));
+    const notYet = [...f.notYet, ...cgCodes.map((code) => `expects code ${code}, not emitted by impl#1's front end (CG/post-CG)`)];
+    const cls = classifyFootprint({ impl1Errors, cgCodes, notYet: f.notYet, crash });
+    cases.push({ relDir: c.relDir, cls, hasRuntime: hasRuntimeHalf(c), constructs: f.constructs, notYet, impl1Errors, crash });
     opts.onProgress?.(cases.length, all.length);
   }
   const graded = new Set(cases.filter((c) => c.cls === "graded").map((c) => c.relDir));
-  const conformance = graded.size > 0
+  const conformance: ConformanceReport = graded.size > 0
     ? await runHybridConformance(stageOverrides, null, { casesDir: opts.casesDir, gaps: opts.gaps, only: graded, executor: clientExecutorOf(stageOverrides) })
     : { total: 0, passed: 0, failures: [], xfailed: [], xpassed: [] };
-  const implemented = [...new Set(cases.filter((c) => c.cls === "graded").flatMap((c) => c.constructs))].sort();
+  // A crashed footprint is a FAIL of that case (loud), never a silent pass or an empty footprint.
+  for (const c of cases) if (c.cls === "crashed") conformance.failures.push({ relDir: c.relDir, reasons: [`CRASH in the substitute's footprint(): ${c.crash}`] });
+  const failed = new Set(conformance.failures.map((f) => f.relDir));
+  const exercised = [...new Set(cases.filter((c) => c.cls === "graded" && c.hasRuntime && !failed.has(c.relDir)).flatMap((c) => c.constructs))].sort();
   const byReason = new Map<string, number>();
   for (const c of cases) if (c.cls === "not-yet") for (const r of c.notYet) byReason.set(r, (byReason.get(r) ?? 0) + 1);
   const notYetByReason = [...byReason].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
-  return { total: all.length, cases, conformance, implemented, notYetByReason };
+  return { enumerated, cases, conformance, exercised, notYetByReason };
+}
+
+/** Runtime-half and codes-only passes / fails of a footprint report (a crashed case is a fail). */
+export function footprintCounts(rep: FootprintReport) {
+  const failed = new Set(rep.conformance.failures.map((f) => f.relDir));
+  const graded = rep.cases.filter((c) => c.cls === "graded" || c.cls === "crashed");
+  const rt = graded.filter((c) => c.hasRuntime);
+  const co = graded.filter((c) => !c.hasRuntime);
+  return {
+    runtimeGraded: rt.length,
+    runtimePass: rt.filter((c) => !failed.has(c.relDir)).map((c) => c.relDir),
+    runtimeFail: rt.filter((c) => failed.has(c.relDir)).map((c) => c.relDir),
+    codesGraded: co.length,
+    codesPass: co.filter((c) => !failed.has(c.relDir)).map((c) => c.relDir),
+    codesFail: co.filter((c) => failed.has(c.relDir)).map((c) => c.relDir),
+  };
 }
 
 /** The footprint table (markdown). `swapLabel` names the substitute. */
 export function footprintTable(rep: FootprintReport, swapLabel: string, top = 40): string {
   const n = (cls: FootprintClass) => rep.cases.filter((c) => c.cls === cls).length;
-  const graded = rep.cases.filter((c) => c.cls === "graded");
-  const gradedRuntime = graded.filter((c) => c.hasRuntime).length;
-  const failed = new Map(rep.conformance.failures.map((f) => [f.relDir, f.reasons]));
-  const passRuntime = graded.filter((c) => c.hasRuntime && !failed.has(c.relDir)).length;
+  const k = footprintCounts(rep);
   const L: string[] = [];
   L.push(`# Footprint grade — ${swapLabel}`, "");
-  L.push(`Cases considered: **${rep.cases.length} of ${rep.total}** (a smaller first number means the run was truncated).`, "");
+  L.push(
+    `Cases graded or classified: **${rep.cases.length} of ${rep.enumerated}** case directories found by an independent ` +
+      `enumeration${rep.cases.length === rep.enumerated ? "" : " — ⚠ MISMATCH: the grading loop did not see every case directory"}.`,
+    "",
+  );
+  L.push(`**Headline: ${k.runtimePass.length} RUNTIME passes of ${k.runtimeGraded} graded runtime-half cases** (${k.runtimeFail.length} fail).`, "");
   L.push("| bucket | cases |", "|---|---|");
-  L.push(`| GRADED | ${graded.length} (runtime half ${gradedRuntime} · codes-only ${graded.length - gradedRuntime}) |`);
-  L.push(`| — pass | ${rep.conformance.passed} (runtime-half cases ${passRuntime}) |`);
-  L.push(`| — fail | ${rep.conformance.failures.length} |`);
-  L.push(`| — xfail (impl1-ts mark, still failing as recorded) | ${rep.conformance.xfailed.length} |`);
-  L.push(`| — xpass (reported, not red) | ${rep.conformance.xpassed.length} |`);
-  L.push(`| NOT-YET (footprint outside the implemented set — never red) | ${n("not-yet")} |`);
-  L.push(`| FRONT-END (rejected program: expected E- code or impl#1 error — bootstrap analyze's queue, not graded) | ${n("front-end")} |`);
-  L.push(`| graded cases run by the conformance runner | ${rep.conformance.total} of ${graded.length} |`, "");
-  L.push("## Implemented construct set (union of the graded cases' Core footprints)", "");
-  L.push(rep.implemented.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
+  L.push(`| GRADED, runtime half — pass | ${k.runtimePass.length} |`);
+  L.push(`| GRADED, runtime half — fail | ${k.runtimeFail.length} |`);
+  L.push(`| GRADED, codes-only — pass (front-end codes — NOT bootstrap evidence) | ${k.codesPass.length} |`);
+  L.push(`| GRADED, codes-only — fail | ${k.codesFail.length} |`);
+  L.push(`| — of which xfail (impl1-ts mark, failing as recorded) | ${rep.conformance.xfailed.length} |`);
+  L.push(`| — of which xpass (reported, not red) | ${rep.conformance.xpassed.length} |`);
+  L.push(`| CRASHED in footprint() (counted in the fails above) | ${n("crashed")} |`);
+  L.push(`| NOT-YET (footprint outside the implemented set, or expects a CG-emitted code — never red) | ${n("not-yet")} |`);
+  L.push(`| FRONT-END (impl#1's front end rejects the program — bootstrap analyze's queue, not graded) | ${n("front-end")} |`);
+  L.push(`| graded cases run by the conformance runner | ${rep.conformance.total} of ${n("graded")} |`, "");
+  L.push("## Constructs exercised by passing RUNTIME cases (candidates — certified only by the bite matrix)", "");
+  L.push(rep.exercised.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
   L.push("## Fail list (first diverging reason per case)", "");
   if (rep.conformance.failures.length === 0) L.push("(none)");
   for (const f of rep.conformance.failures) L.push(`- \`${f.relDir}\` — ${String(f.reasons[0] ?? "(no reason)").replace(/\n\s*/g, " ⏎ ").slice(0, 500)}`);
-  L.push("", "## Passing graded cases", "");
-  for (const c of graded) if (!failed.has(c.relDir)) L.push(`- \`${c.relDir}\`${c.hasRuntime ? "" : " (codes-only)"}`);
+  L.push("", "## Passing RUNTIME cases", "");
+  for (const r of k.runtimePass) L.push(`- \`${r}\``);
+  L.push("", "## Passing codes-only cases (front-end codes — NOT bootstrap evidence; never count toward certification)", "");
+  for (const r of k.codesPass) L.push(`- \`${r}\``);
   L.push("", `## Top not-yet reasons by case count (the M3/M4 work queue) — ${rep.notYetByReason.length} distinct`, "");
   L.push("| cases | reason |", "|---|---|");
-  for (const [r, k] of rep.notYetByReason.slice(0, top)) L.push(`| ${k} | ${r.replace(/\|/g, "\\|")} |`);
+  for (const [r, c] of rep.notYetByReason.slice(0, top)) L.push(`| ${c} | ${r.replace(/\|/g, "\\|")} |`);
   const oneAway = new Map<string, number>();
   for (const c of rep.cases) if (c.cls === "not-yet" && c.notYet.length === 1) oneAway.set(c.notYet[0], (oneAway.get(c.notYet[0]) ?? 0) + 1);
   L.push("", "## Cases ONE reason away from graded (by that reason)", "");
   L.push("| cases | the one reason |", "|---|---|");
-  for (const [r, k] of [...oneAway].sort((a, b) => b[1] - a[1]).slice(0, top)) L.push(`| ${k} | ${r.replace(/\|/g, "\\|")} |`);
+  for (const [r, c] of [...oneAway].sort((a, b) => b[1] - a[1]).slice(0, top)) L.push(`| ${c} | ${r.replace(/\|/g, "\\|")} |`);
   return L.join("\n") + "\n";
 }
 
@@ -693,6 +755,7 @@ function parseArgs(argv: string[]) {
     differential: false,
     footprint: false,
     report: null as string | null,
+    only: null as string[] | null,
     filter: null as string | null,
     roots: DEFAULT_ROOTS,
     files: null as string[] | null,
@@ -718,6 +781,7 @@ function parseArgs(argv: string[]) {
     else if (a === "--differential") opts.differential = true;
     else if (a === "--footprint") opts.footprint = true;
     else if (a === "--report") opts.report = need(++i, a);
+    else if (a === "--only") opts.only = need(++i, a).split(",").filter(Boolean);
     else if (a === "--swap") {
       const v = need(++i, a);
       const eq = v.indexOf("=");
@@ -809,15 +873,20 @@ async function main(argv: string[]): Promise<number> {
     if (withFp.length !== 1) throw new InvalidRun("--footprint needs exactly one substitute that exports `footprint(cgArgs)`");
     const fpFn = (withFp[0][1] as { footprint: FootprintFn }).footprint;
     const rep = await runFootprintGrade(stageOverrides, fpFn, opts.filter, {
+      only: opts.only ? new Set(opts.only) : undefined,
       onProgress: (i, n) => { if (i % 100 === 0 || i === n) process.stderr.write(`  footprint: ${i}/${n} cases classified\n`); },
     });
-    if (rep.total === 0) throw new InvalidRun(`footprint: zero cases selected${opts.filter ? ` by --filter ${opts.filter}` : ""}`);
+    if (rep.enumerated === 0) throw new InvalidRun(`footprint: zero cases selected${opts.filter ? ` by --filter ${opts.filter}` : ""}`);
     const table = footprintTable(rep, swapLabel);
     console.log(table);
     console.log(`(${((performance.now() - t0) / 1000).toFixed(1)}s)`);
     if (opts.report) {
       writeFileSync(opts.report, table);
       console.log(`  report: ${opts.report}`);
+    }
+    if (opts.json) {
+      writeFileSync(opts.json, JSON.stringify({ swap: opts.swaps, counts: footprintCounts(rep), ...rep }, null, 2));
+      console.log(`  json: ${opts.json}`);
     }
     if (rep.conformance.failures.length > 0) red = true;
   }

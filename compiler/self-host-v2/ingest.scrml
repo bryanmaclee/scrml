@@ -38,10 +38,12 @@
 // the mapping itself is M3/M4 work — they report `not-yet` today.
 //
 // THE "NEVER GUESS" DISCIPLINE, MECHANIZED. impl#1 decorates its nodes with
-// many optional fields. For every node kind the shim maps, it names the keys it
-// understands (`known`); any OTHER key carrying a value (not absent / null /
-// false / empty) makes the case `not-yet` ("unmapped key"). So a node the shim
-// maps is never silently stripped of a fact impl#1 carried.
+// many optional fields. For every node kind the shim maps, every key is either
+// READ (and every value it can hold is mapped or reported) or REDUNDANT for a
+// stated reason (identity / text twin / syntax / summary — see `unmapped`); any
+// OTHER key carrying a value (not absent / null / false / empty) makes the case
+// `not-yet` ("unmapped key"). So a node the shim maps is never silently stripped
+// of a fact impl#1 carried.
 //
 // THE INPUT ENCODING. impl#1's AST is untyped JS; scrml has no `any`. The JS
 // glue (slice-m3/substitute.js) encodes it SCHEMA-FREE into `IVal` below: every
@@ -50,7 +52,10 @@
 //
 // RULE 7 (no source-text scanning post-parse). The shim reads impl#1's
 // STRUCTURED fields only: `initExpr`, `exprNode`, `condExpr`, `argExprNodes`,
-// never the parallel raw-text fields (`init`, `raw`, `args`, `expr`). A shape
+// never the CONTENT of the parallel raw-text fields (`init`, `raw`, `expr`,
+// `condition`, a call-ref's `args`). One such field is read for its LENGTH
+// only: a call-ref's `args` count is compared with `argExprNodes` to detect
+// arguments impl#1 carried only as text (never parsed). A shape
 // whose structure impl#1 carries only as text is `not-yet`. PARSE_REENTRY
 // sites in this module: NONE (see progress.md). Two reads of identifier
 // SPELLINGS are not re-parses: the `@` sigil on impl#1's `ident.name` (impl#1's
@@ -205,12 +210,29 @@ ${
         return false
     }
 
-    // The keys of `n` that carry a value but are not in `known` — the
-    // mechanized "never guess": each becomes a `not-yet` reason.
-    fn unmapped(n: INode, what: string, known: string[]) -> string[] {
+    // The keys of `n` that carry a value but are neither `read` nor
+    // `redundant` — the mechanized "never guess": each becomes a `not-yet`
+    // reason. EVERY key a mapping lists is in one of two classes, and there is
+    // no third ("known but ignored"):
+    //   read      — the mapping reads the key and acts on every value it can
+    //               hold (a value it does not map is itself a not-yet);
+    //   redundant — the key carries no fact the read keys lack, for a reason
+    //               stated at the call site, one of:
+    //                 identity  `id` (a node id; used only to mint local Syms);
+    //                 text twin impl#1's source-TEXT spelling of a structured
+    //                           key the shim reads (`init`↔`initExpr`,
+    //                           `expr`↔`exprNode`, `raw`/`refs`/`name`↔the
+    //                           attr value's `exprNode`, `condition`↔`condExpr`,
+    //                           `args`↔`argExprNodes` — counts cross-checked);
+    //                 syntax    how the source was spelled, no meaning
+    //                           (`selfClosing`, `closerForm`,
+    //                           `openerHadSpaceAfterLt`);
+    //                 summary   a file-level flag summarizing nodes the shim
+    //                           maps one by one (`hasResetExpr`, …).
+    fn unmapped(n: INode, what: string, read: string[], redundant: string[]) -> string[] {
         let out: string[] = []
         for (const e of n.entries) {
-            if (!hasStr(known, e.key)) {
+            if (!hasStr(read, e.key) && !hasStr(redundant, e.key)) {
                 if (carries(e.val)) out = out.concat([what + " carries unmapped key `" + e.key + "`"])
             }
         }
@@ -337,7 +359,7 @@ ${
     }
 
     fn identExpr(cx: Cx, n: INode) -> LE {
-        const why: string[] = unmapped(n, "ident", ["kind", "name"])
+        const why: string[] = unmapped(n, "ident", ["kind", "name"], [])
         const name: string | not = strAt(n, "name")
         if (name is not) return notYetE("expr: ident without a name")
         if (name.startsWith("@")) {
@@ -351,7 +373,7 @@ ${
     }
 
     fn litExpr(n: INode) -> LE {
-        const why: string[] = unmapped(n, "lit", ["kind", "raw", "value", "litType", "hasInterpolation"])
+        const why: string[] = unmapped(n, "lit", ["kind", "value", "litType", "hasInterpolation"], ["raw"])
         const lt: string | not = strAt(n, "litType")
         if (lt is not) return notYetE("expr: lit without litType")
         return match lt {
@@ -383,7 +405,7 @@ ${
     }
 
     fn binaryExpr(cx: Cx, n: INode) -> LE {
-        const why0: string[] = unmapped(n, "binary", ["kind", "op", "left", "right"])
+        const why0: string[] = unmapped(n, "binary", ["kind", "op", "left", "right"], [])
         const op: string | not = strAt(n, "op")
         if (op is not) return notYetE("expr: binary without op")
         const l: LE = lowerExprAt(cx, n, "left")
@@ -445,7 +467,7 @@ ${
     }
 
     fn unaryExpr(cx: Cx, n: INode) -> LE {
-        const why: string[] = unmapped(n, "unary", ["kind", "op", "argument", "prefix"])
+        const why: string[] = unmapped(n, "unary", ["kind", "op", "argument", "prefix"], [])
         const op: string | not = strAt(n, "op")
         if (op is not) return notYetE("expr: unary without op")
         if (!flagAt(n, "prefix")) return notYetE("expr: postfix " + op)
@@ -459,7 +481,7 @@ ${
 
     // L7: `c ? a : b` → a Match over a bool with `true` / `false` arms.
     fn ternaryExpr(cx: Cx, n: INode) -> LE {
-        const why: string[] = unmapped(n, "ternary", ["kind", "condition", "consequent", "alternate"])
+        const why: string[] = unmapped(n, "ternary", ["kind", "condition", "consequent", "alternate"], [])
         const c: LE = lowerExprAt(cx, n, "condition")
         const a: LE = lowerExprAt(cx, n, "consequent")
         const b: LE = lowerExprAt(cx, n, "alternate")
@@ -472,7 +494,7 @@ ${
     }
 
     fn memberExpr(cx: Cx, n: INode) -> LE {
-        const why: string[] = unmapped(n, "member", ["kind", "object", "property", "optional"])
+        const why: string[] = unmapped(n, "member", ["kind", "object", "property", "optional"], [])
         if (flagAt(n, "optional")) return notYetE("expr: optional member access `?.`")
         const prop: string | not = strAt(n, "property")
         const o: LE = lowerExprAt(cx, n, "object")
@@ -483,7 +505,7 @@ ${
     }
 
     fn callExpr(cx: Cx, n: INode) -> LE {
-        const why0: string[] = unmapped(n, "call", ["kind", "callee", "args", "optional"])
+        const why0: string[] = unmapped(n, "call", ["kind", "callee", "args", "optional"], [])
         if (flagAt(n, "optional")) return notYetE("expr: optional call `?.()`")
         const callee: INode | not = nodeAt(n, "callee")
         if (callee is not) return notYetE("expr: call without callee")
@@ -542,8 +564,12 @@ ${
     // `_isReactiveAssign`. A write through x's capability (.Replace).
     fn cellWriteStmt(cx: Cx, n: INode) -> LS {
         if (!flagAt(n, "_isReactiveAssign")) return notYetS(cx, "stmt: cell declaration inside a body")
-        const why: string[] = unmapped(n, "cell write", ["kind", "id", "name", "init", "initExpr", "shape",
-            "structuralForm", "isConst", "_isReactiveAssign", "__enclosingFnCanFail"])
+        let why: string[] = unmapped(n, "cell write", ["kind", "name", "initExpr", "shape",
+            "structuralForm", "isConst", "_isReactiveAssign", "__enclosingFnCanFail"], ["id", "init"])
+        if (strAt(n, "shape") != "plain") why = why.concat(["stmt: cell write of a non-plain shape"])
+        if (flagAt(n, "structuralForm")) why = why.concat(["stmt: `<x> = v` form in statement position"])
+        if (flagAt(n, "isConst")) why = why.concat(["stmt: `const` cell write"])
+        if (flagAt(n, "__enclosingFnCanFail")) why = why.concat(["stmt: cell write inside a failable function"])
         const name: string | not = strAt(n, "name")
         if (name is not) return notYetS(cx, "stmt: cell write without a name")
         const f: FieldInfo | not = findField(cx, name)
@@ -559,7 +585,7 @@ ${
     }
 
     fn bareExprStmt(cx: Cx, n: INode) -> LS {
-        const why: string[] = unmapped(n, "bare-expr", ["kind", "id", "expr", "exprNode"])
+        const why: string[] = unmapped(n, "bare-expr", ["kind", "exprNode"], ["id", "expr"])
         const e: INode | not = nodeAt(n, "exprNode")
         if (e is not) return notYetS(cx, "stmt: bare-expr without a structured exprNode")
         const r: LS = exprStmt(cx, e)
@@ -584,7 +610,7 @@ ${
 
     // `x = v` / `x += v` / `x -= v` on a local or a program cell.
     fn assignStmt(cx: Cx, e: INode) -> LS {
-        const why0: string[] = unmapped(e, "assign", ["kind", "op", "target", "value"])
+        const why0: string[] = unmapped(e, "assign", ["kind", "op", "target", "value"], [])
         const op: string | not = strAt(e, "op")
         const t: INode | not = nodeAt(e, "target")
         if (op is not) return notYetS(cx, "stmt: assign without op")
@@ -618,7 +644,7 @@ ${
 
     // L4 / D15: `reset(@x)` writes x's construction initializer again.
     fn resetStmt(cx: Cx, e: INode) -> LS {
-        const why: string[] = unmapped(e, "reset", ["kind", "target"])
+        const why: string[] = unmapped(e, "reset", ["kind", "target"], [])
         const t: INode | not = nodeAt(e, "target")
         if (t is not) return notYetS(cx, "stmt: reset without a target")
         const name: string | not = strAt(t, "name")
@@ -631,7 +657,7 @@ ${
     }
 
     fn localDecl(cx: Cx, n: INode, mutable: boolean) -> LS {
-        const why0: string[] = unmapped(n, "local declaration", ["kind", "id", "name", "init", "initExpr"])
+        const why0: string[] = unmapped(n, "local declaration", ["kind", "id", "name", "initExpr"], ["init"])
         const name: string | not = strAt(n, "name")
         if (name is not) return notYetS(cx, "stmt: destructuring declaration")
         const id: number | not = numAt(n, "id")
@@ -643,7 +669,7 @@ ${
     }
 
     fn ifStmt(cx: Cx, n: INode) -> LS {
-        const why0: string[] = unmapped(n, "if-stmt", ["kind", "id", "condition", "condExpr", "consequent", "alternate"])
+        const why0: string[] = unmapped(n, "if-stmt", ["kind", "condExpr", "consequent", "alternate"], ["id", "condition"])
         const c: LE = lowerExprAt(cx, n, "condExpr")
         const t: LS = lowerStmts(cx, nodesAt(n, "consequent"))
         const alt: IVal = getVal(n, "alternate")
@@ -654,7 +680,7 @@ ${
     }
 
     fn returnStmt(cx: Cx, n: INode) -> LS {
-        const why0: string[] = unmapped(n, "return-stmt", ["kind", "id", "expr", "exprNode"])
+        const why0: string[] = unmapped(n, "return-stmt", ["kind", "exprNode"], ["id", "expr"])
         const e: INode | not = nodeAt(n, "exprNode")
         if (e is not) return stmtsOf(cx, [Stmt.Return(placeholder())], why0)
         const x: LE = lowerExpr(cx, e)
@@ -700,11 +726,11 @@ ${
 
     // `${ e }` in markup: every statement must be an expression (a Dyn each).
     fn interpolation(cx: Cx, n: INode) -> LV {
-        let why: string[] = unmapped(n, "interpolation", ["kind", "id", "body", "imports", "exports", "typeDecls", "components"])
+        let why: string[] = unmapped(n, "interpolation", ["kind", "body"], ["id"])
         let out: View[] = []
         for (const s of nodesAt(n, "body")) {
             if (kindAt(s) != "bare-expr") return notYetV("markup: `${}` block containing " + kindAt(s))
-            why = why.concat(unmapped(s, "bare-expr", ["kind", "id", "expr", "exprNode"]))
+            why = why.concat(unmapped(s, "bare-expr", ["kind", "exprNode"], ["id", "expr"]))
             const x: LE = lowerExprAt(cx, s, "exprNode")
             out = out.concat([View.Dyn(x.e)])
             why = why.concat(x.why)
@@ -722,8 +748,9 @@ ${
         // declaration (components → declarations, §66.15): not-yet.
         if (rk is not) return notYetV("markup: element synthesized after name resolution (component expansion / meta emit)")
         if (rk != "html-builtin") return notYetV("markup: <" + tag + "> (" + rk + ")")
-        const why0: string[] = unmapped(n, "element", ["kind", "id", "tag", "attrs", "children", "selfClosing",
-            "closerForm", "shorthandBodyRaw", "isComponent", "openerHadSpaceAfterLt", "resolvedKind", "resolvedCategory"])
+        let why0: string[] = unmapped(n, "element", ["kind", "tag", "attrs", "children", "isComponent",
+            "resolvedKind", "resolvedCategory"], ["id", "selfClosing", "closerForm", "openerHadSpaceAfterLt"])
+        if (strAt(n, "resolvedCategory") != "html") why0 = why0.concat(["markup: html-builtin element of a non-html category"])
         const a: LA = lowerAttrs(cx, nodesAt(n, "attrs"))
         const kids: LV = lowerViews(cx, nodesAt(n, "children"))
         const el: View = View.El(tag, a.attrs, kids.views)
@@ -765,7 +792,7 @@ ${
             const v: INode | not = nodeAt(a, "value")
             if (name is not) return { attrs: [], test: not, why: ["attr: without a name"] }
             if (v is not) return { attrs: [], test: not, why: ["attr: without a value"] }
-            why = why.concat(unmapped(a, "attr", ["name", "value"]))
+            why = why.concat(unmapped(a, "attr", ["name", "value"], []))
             if (name.includes(":")) {
                 why = why.concat(["attr: `" + name.split(":")[0] + ":` directive"])
             } else if (reservedAttr(name)) {
@@ -814,7 +841,7 @@ ${
 
     // The structured expression of a `variable-ref` / `expr` attribute value.
     fn attrExpr(cx: Cx, v: INode) -> LE {
-        const why: string[] = unmapped(v, "attr value", ["kind", "name", "raw", "refs", "exprNode"])
+        const why: string[] = unmapped(v, "attr value", ["kind", "exprNode"], ["name", "raw", "refs"])
         const e: LE = lowerExprAt(cx, v, "exprNode")
         return okE(e.e, e.ty, why.concat(e.why))
     }
@@ -831,7 +858,7 @@ ${
 
     // `onclick=f(a, b)`: carried as a name + structured argument nodes.
     fn callRefHandler(cx: Cx, v: INode) -> LS {
-        const why0: string[] = unmapped(v, "call-ref handler", ["kind", "name", "args", "argExprNodes"])
+        const why0: string[] = unmapped(v, "call-ref handler", ["kind", "name", "argExprNodes"], ["args"])
         const name: string | not = strAt(v, "name")
         if (name is not) return notYetS(cx, "handler: call-ref without a name")
         const f: FnInfo | not = findFnInfo(cx, name)
@@ -850,7 +877,7 @@ ${
     }
 
     fn exprHandler(cx: Cx, v: INode) -> LS {
-        const why: string[] = unmapped(v, "expr handler", ["kind", "raw", "refs", "exprNode"])
+        const why: string[] = unmapped(v, "expr handler", ["kind", "exprNode"], ["raw", "refs"])
         const e: INode | not = nodeAt(v, "exprNode")
         if (e is not) return notYetS(cx, "handler: carried only as text")
         const r: LS = exprStmt(cx, e)
@@ -905,7 +932,11 @@ ${
 
     fn collectLogic(n: INode) -> Items {
         let out: Items = { cells: [], fnDecls: [], markup: [], why: unmapped(n, "top-level `${}`",
-            ["kind", "id", "body", "imports", "exports", "typeDecls", "components", "_synthetic"]) }
+            ["kind", "body"], ["id", "_synthetic"]) }
+        // `_synthetic` (syntax): the parser wrapped a `<program>` body's bare declarations in
+        // this block — they are the program's declarations exactly as in an authored block.
+        // The hoisted `imports` / `exports` / `typeDecls` / `components` lists are NOT listed:
+        // non-empty, each is a not-yet.
         for (const s of nodesAt(n, "body")) { out = joinItems(out, collectDecl(s)) }
         return out
     }
@@ -924,8 +955,15 @@ ${
         const name: string | not = strAt(s, "name")
         if (name is not) return itemsWhy("decl: cell without a name")
         if (!flagAt(s, "structuralForm")) return itemsWhy("decl: `@x = v` declaration form")
-        const why: string[] = unmapped(s, "cell declaration", ["kind", "id", "name", "init", "initExpr",
-            "structuralForm", "isConst", "shape", "typeAnnotation"])
+        let why: string[] = unmapped(s, "cell declaration", ["kind", "name", "initExpr",
+            "structuralForm", "isConst", "shape", "typeAnnotation"], ["id", "init"])
+        // `shape` must agree with the form: `plain` for `<x> = v`, `derived` for `const <x> = e`.
+        const shape: string | not = strAt(s, "shape")
+        if (flagAt(s, "isConst")) {
+            if (shape != "derived") why = why.concat(["decl: `const` cell of shape " + kindOrNone(shape)])
+        } else if (shape != "plain") {
+            why = why.concat(["decl: cell of shape " + kindOrNone(shape)])
+        }
         const cell: CellDecl = { n: s, name: name, isConst: flagAt(s, "isConst") }
         return { cells: [cell], fnDecls: [], markup: [], why: why }
     }
@@ -933,9 +971,12 @@ ${
     fn fnItem(s: INode) -> Items {
         const name: string | not = strAt(s, "name")
         if (name is not) return itemsWhy("decl: function without a name")
-        const why: string[] = unmapped(s, "function", ["kind", "id", "name", "params", "body", "fnKind",
-            "isServer", "isGenerator", "canFail", "isHandleEscapeHatch"])
+        const why: string[] = unmapped(s, "function", ["kind", "name", "params", "body", "fnKind",
+            "isServer", "isGenerator", "canFail", "isHandleEscapeHatch"], ["id"])
         let more: string[] = []
+        const fk: string | not = strAt(s, "fnKind")
+        if (fk != "fn" && fk != "function") more = more.concat(["decl: function of kind " + kindOrNone(fk)])
+        if (flagAt(s, "isHandleEscapeHatch")) more = more.concat(["decl: `handle()` escape hatch"])
         if (flagAt(s, "isServer")) more = more.concat(["decl: server function"])
         if (flagAt(s, "isGenerator")) more = more.concat(["decl: generator function"])
         if (flagAt(s, "canFail")) more = more.concat(["decl: failable function (`!`)"])
@@ -968,6 +1009,47 @@ ${
             if (isCellPlace(n)) return true
         }
         return false
+    }
+
+    fn hasCall(e: Expr) -> boolean {
+        for (const n of allNodes(Node.NExpr(e))) {
+            if (isCallNode(n)) return true
+        }
+        return false
+    }
+
+    fn isCallNode(n: Node) -> boolean {
+        return match n {
+            .NExpr(e: e) :> isCallExpr(e)
+            .NProgram(p: x) :> false
+            .NDecl(d: x) :> false
+            .NField(f: x) :> false
+            .NFn(f: x) :> false
+            .NServerFn(f: x) :> false
+            .NBlock(b: x) :> false
+            .NStmt(s: x) :> false
+            .NPlace(pl: x) :> false
+            .NInst(i: x) :> false
+            .NPattern(pat: x) :> false
+            .NEdit(k: x) :> false
+            .NView(v: x) :> false
+            .NAttr(a: x) :> false
+        }
+    }
+
+    fn isCallExpr(e: Expr) -> boolean {
+        return match e {
+            .Call(callee: x) :> true
+            .Lit(lit: x) :> false
+            .Local(sym: x) :> false
+            .Read(place: x) :> false
+            .Prim(op: x) :> false
+            .Match(scrut: x) :> false
+            .ArrayOf(elems: x) :> false
+            .StructOf(ty: x) :> false
+            .Handle(inst: x) :> false
+            .InitOf(decl: x) :> false
+        }
     }
 
     fn isCellPlace(n: Node) -> boolean {
@@ -1026,6 +1108,10 @@ ${
             } else {
                 const sym: Sym = mkSym(1 + i, c.name)
                 if (c.isConst) {
+                    // §66.9: derived exactly when the initializer reads a cell. The shim
+                    // cannot see through a call, so a `const` whose initializer calls a
+                    // function is declined, not classified.
+                    if (hasCall(v.e)) why = why.concat(["decl: `const` initializer calls a function (derived-ness not provable through the call, §66.9)"])
                     const mode: FieldMode = constMode(v.e)
                     infos = infos.concat([{ name: c.name, idx: i, sym: sym, wcap: not, ty: ty }])
                     fields = fields.concat([mkField(sym, ty, v.e, mode, noGrants(), not)])
@@ -1076,7 +1162,7 @@ ${
         let why: string[] = []
         let id: int = firstId
         for (const p of nodesAt(fnNode, "params")) {
-            why = why.concat(unmapped(p, "parameter", ["name", "typeAnnotation"]))
+            why = why.concat(unmapped(p, "parameter", ["name", "typeAnnotation"], []))
             const name: string | not = strAt(p, "name")
             const ann: string | not = strAt(p, "typeAnnotation")
             if (name is not) {
@@ -1107,9 +1193,13 @@ ${
         const empty: CoreProgram = { program: prog, decls: [], types: [], fns: [], server: [] }
         if (files.length != 1) return { core: empty, why: ["file: a multi-file program (imports)"] }
         const ast: INode = files[0].ast
-        const fileWhy: string[] = unmapped(ast, "file", ["filePath", "nodes", "imports", "exports", "components",
-            "typeDecls", "machineDecls", "channelDecls", "hasProgramRoot", "hasResetExpr", "hasEqualityExpr",
-            "hasChunkedMarkupTag", "hasForStmt", "authConfig", "middlewareConfig", "fileShape", "mcpConfig"])
+        // `filePath` is identity (the path arrives as IFile.path); the `has*` flags and
+        // `fileShape` summarize nodes mapped one by one. The hoisted lists (`imports`,
+        // `exports`, `components`, `typeDecls`, `machineDecls`, `channelDecls`) and the
+        // configs (`authConfig`, `middlewareConfig`, `mcpConfig`) are NOT listed: non-empty,
+        // each is a not-yet.
+        const fileWhy: string[] = unmapped(ast, "file", ["nodes"], ["filePath", "hasProgramRoot", "hasResetExpr",
+            "hasEqualityExpr", "hasChunkedMarkupTag", "hasForStmt", "fileShape"])
         const items: Items = collect(nodesAt(ast, "nodes"))
 
         // Pass 1: every declaration gets its Sym before any body is lowered.

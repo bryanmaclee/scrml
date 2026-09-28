@@ -179,6 +179,24 @@ describe("ingest — the not-yet discipline", () => {
     expect(r.why).toContain("decl: a cell annotated with a non-primitive type");
   });
 
+  test("a hoisted list on a mapped node is never a silent 'known' key (review item 4: a component definition)", () => {
+    const r = ingestSource(`\${ const Foo = <span>foo</span> }
+<p>x</p>
+`);
+    expect(r.why).toContain("top-level `${}` carries unmapped key `components`");
+  });
+
+  test("a `const` whose initializer calls a function is declined, not classified (review item 7, §66.9)", () => {
+    const r = ingestSource(`\${
+    <n> = 1
+    function dbl() { return @n * 2 }
+    const <d>: int = dbl()
+}
+<p>\${@d}</p>
+`);
+    expect(r.why).toContain("decl: `const` initializer calls a function (derived-ness not provable through the call, §66.9)");
+  });
+
   test("an unannotated parameter is not given an invented type (D14)", () => {
     const r = ingestSource(`\${
     <n> = 0
