@@ -48,6 +48,23 @@ export function setCompileOverlay(overlay: Record<string, unknown> | null): void
   compileOverlay = overlay ?? {};
 }
 
+/**
+ * Client-artifact executor (s439-bootstrap-m3-ingest). `run()` normally executes impl#1's
+ * artifact — `SCRML_RUNTIME + clientJs + CONFORMANCE_SHIM` in one IIFE. A hybrid whose CG stage
+ * is the BOOTSTRAP's printer emits a different artifact (an ES module over the bootstrap's own
+ * runtime), which that IIFE cannot run; the hybrid then installs the substitute's executor here.
+ * The executor mounts the page into the current document, runs the client, and publishes the
+ * OQ3 `globalThis.__scrml_conformance` hook over its own model (the ratified contract: each impl
+ * implements the same signature over its own model). Everything else in `run()` — the fresh DOM,
+ * server stubs, the virtual clock, input driving, settle, snapshot, DOM normalization — is shared.
+ * `null` (the default) = impl#1's own execution, unchanged.
+ */
+export type ClientExecutor = (artifact: { html: string; clientJs: string }) => Promise<void>;
+let clientExecutor: ClientExecutor | null = null;
+export function setClientExecutor(executor: ClientExecutor | null): void {
+  clientExecutor = executor;
+}
+
 export type Severity = "error" | "warning" | "info";
 
 export interface CompileResult {
@@ -497,6 +514,14 @@ export async function run(
       restoreEventSource = installNoopEventSource();
     }
 
+    if (clientExecutor !== null) {
+      // A hybrid whose CG is the bootstrap's (s439-bootstrap-m3-ingest): its artifact runs
+      // on ITS runtime, mounted and executed by the substitute's own executor, which
+      // publishes the OQ3 hook. Same clock rule as below.
+      clock.install();
+      await clientExecutor({ html, clientJs });
+    } else {
+    // (the impl#1 path — unchanged, kept at its original indentation)
     // Mirror the browser harness: extract <body> inner, strip <script>, mount.
     const bodyMatch = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
     const bodyHtml = bodyMatch ? bodyMatch[1] : html;
@@ -515,6 +540,7 @@ export async function run(
     const code = "(function () {\n" + SCRML_RUNTIME + "\n" + clientJs + "\n" + CONFORMANCE_SHIM + "\n})();";
     // eslint-disable-next-line no-eval
     (0, eval)(code);
+    }
 
     const doc = (globalThis as any).document;
     doc.dispatchEvent(new (globalThis as any).Event("DOMContentLoaded", { bubbles: true }));
