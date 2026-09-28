@@ -90,26 +90,13 @@ ${
 
     fn checkStmt(p: CoreProgram, encl: Decl[], s: Stmt) -> string[] {
         return match s {
-            .Write(cap: cap, inst: inst, edit: edit, value: v) :> checkWrite(p, encl, cap, inst, edit, v, writeCheck(s))
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> checkWrite(p, encl, cap, inst, edit, v, ck)
             .Commit(writes: ws) :> checkCommit(ws)
             .Let(sym: sym) :> []
             .Assign(local: l) :> []
             .If(cond: c) :> []
             .Return(e: e) :> []
             .Eval(e: e) :> []
-        }
-    }
-
-    // F13: Stmt.Write has 5 fields; `check` is read through this accessor.
-    fn writeCheck(s: Stmt) -> Check {
-        return match s {
-            .Write(check: c) :> c
-            .Commit(writes: x) :> Check.Static
-            .Let(sym: x) :> Check.Static
-            .Assign(local: x) :> Check.Static
-            .If(cond: x) :> Check.Static
-            .Return(e: x) :> Check.Static
-            .Eval(e: x) :> Check.Static
         }
     }
 

@@ -22,7 +22,7 @@
 // L1/L2/L3/L6/L8/L10/L12/L16 are facts analyze computed; lower copies them.
 //
 // Every traversal is a total `match` over the AST enums with no default arm
-// (dpa-051 §3.4). impl#1 workarounds: F4, F11, F13, F16, F17 (an arm whose
+// (dpa-051 §3.4). impl#1 workarounds: F4, F11, F16, F17 (an arm whose
 // body is an object literal loses its bindings — constructors instead).
 // =============================================================================
 ${

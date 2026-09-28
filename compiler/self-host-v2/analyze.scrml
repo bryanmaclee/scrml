@@ -33,8 +33,8 @@
 // guessed.
 //
 // impl#1 workarounds: F4 (qualified variants), F5 (typed host results), F11
-// (named payload binding), F12 (alternation only first), F13 (≤ 4 bound payload
-// fields), F14 (no brace-adjacent string literal), F15 (no fn named like a
+// (named payload binding), F12 (alternation only first), F14 (no
+// brace-adjacent string literal), F15 (no fn named like a
 // payload field of an enum declared in this file), F16 (≥ 1 binding arm over an
 // imported payload enum).
 // =============================================================================

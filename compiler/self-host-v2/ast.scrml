@@ -18,9 +18,10 @@
 //     instance, whether `open` in a renders is a bare projection, what `.Closed`
 //     is a variant of — all of that is analyze's (side-tables by nid).
 //
-// impl#1 workarounds: F13 (a payload pattern may bind at most 4 fields) — every
-// payload variant here has at most 3 fields, and the big node kinds carry ONE
-// struct payload. F15 — no helper fn in this file shares a name with a field.
+// Every payload variant here has at most 3 fields, and the big node kinds carry
+// ONE struct payload (first shaped around impl#1's F13 — a ≥5-field payload arm
+// — which #1119 fixed; the shape is kept on its own merits, S440). impl#1
+// workaround: F15 — no helper fn in this file shares a name with a field.
 // =============================================================================
 ${
     export type ASpan:struct = { start: int, end: int }

@@ -22,8 +22,8 @@
 // templates, rendered into their own child scopes by the runtime.
 //
 // impl#1 workarounds: F11 (named payload binding everywhere), F12 (no `|`
-// alternation arms), F13 (a payload pattern binds at most 4 fields — the 5-field
-// variants Stmt.Write / View.Each are bound in two steps).
+// alternation arms). (F13 — a ≥5-field payload arm — is fixed in impl#1 by #1119;
+// Stmt.Write / View.Each are bound in one arm again, S440.)
 // =============================================================================
 ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
@@ -428,24 +428,11 @@ ${
         return match s {
             .Let(sym: sym, init: init) :> [letJs(ctx, sym, init, assigned)]
             .Assign(local: l, value: v) :> [JsStmt.SAssign(jid(symName(ctx, l)), exprJs(ctx, v))]
-            .Write(cap: cap, inst: inst, edit: edit, value: v) :> [writeJs(ctx, cap, inst, edit, v, writeCheck(s))]
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> [writeJs(ctx, cap, inst, edit, v, ck)]
             .Commit(writes: ws) :> commitJs(ctx, ws)
             .If(cond: c, thenB: t, elseB: e) :> [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
             .Return(e: e) :> [JsStmt.SReturn(exprJs(ctx, e))]
             .Eval(e: e) :> [sexpr(exprJs(ctx, e))]
-        }
-    }
-
-    // F13: Stmt.Write has 5 fields; its `check` is bound here, separately.
-    fn writeCheck(s: Stmt) -> Check {
-        return match s {
-            .Write(check: c) :> c
-            .Commit :> Check.Static
-            .Let :> Check.Static
-            .Assign :> Check.Static
-            .If :> Check.Static
-            .Return :> Check.Static
-            .Eval :> Check.Static
         }
     }
 
@@ -478,15 +465,15 @@ ${
         let checks: JsStmt[] = []
         let writes: JsStmt[] = []
         for (const s of ws) {
-            checks = checks.concat(commitCheckJs(ctx, s, writeCheck(s)))
+            checks = checks.concat(commitCheckJs(ctx, s))
             writes = writes.concat(commitWriteJs(ctx, s))
         }
         return checks.concat(writes)
     }
 
-    fn commitCheckJs(ctx: Ctx, s: Stmt, check: Check) -> JsStmt[] {
+    fn commitCheckJs(ctx: Ctx, s: Stmt) -> JsStmt[] {
         return match s {
-            .Write(cap: cap, inst: inst, edit: edit, value: v) :> edgeCheckJs(ctx, cap, inst, edit, v, check)
+            .Write(cap: cap, inst: inst, edit: edit, value: v, check: ck) :> edgeCheckJs(ctx, cap, inst, edit, v, ck)
             .Commit :> []
             .Let :> []
             .Assign :> []
@@ -718,22 +705,9 @@ ${
             .Text :> only([])
             .Dyn(e: e) :> only([sexpr(rtCall(ctx, "text", [scopeVar(), node, jthunk(exprJs(ctx, e))]))])
             .Cond(arms: arms) :> condJs(nested(ctx), arms, node, tid + "/" + pathText(h.path))
-            .Each(src: src, bind: bind, key: key, row: row) :> eachJs(ctx, src, bind, key, eachHandles(v), row, node, tid + "/" + pathText(h.path))
+            .Each(src: src, bind: bind, key: key, handles: hs, row: row) :> eachJs(ctx, src, bind, key, hs, row, node, tid + "/" + pathText(h.path))
             .Instance(decl: d, attrs: attrs, slot: slot, alias: alias) :> instanceJs(ctx, d, attrs, slot, alias, node, h.path, tid, kid)
             .Slot :> only([sexpr(rtCall(ctx, "slot", [scopeVar(), node, ctx.slot]))])
-        }
-    }
-
-    // F13: View.Each has 5 fields; its `handles` are bound here, separately.
-    fn eachHandles(v: View) -> Sym[] {
-        return match v {
-            .Each(handles: hs) :> hs
-            .El :> []
-            .Text :> []
-            .Dyn :> []
-            .Cond :> []
-            .Instance :> []
-            .Slot :> []
         }
     }
 
