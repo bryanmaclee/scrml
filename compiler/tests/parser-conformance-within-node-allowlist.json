@@ -4399,9 +4399,9 @@
   "samples/compilation-tests/gauntlet-s20-error-test/server-failable-001.scrml": {
     "COUNT-LENGTH": 1,
     "EXTRA-FIELD": 6,
-    "FIELD-SHAPE": 4,
-    "MISSING-FIELD": 10,
-    "SPAN-COORD": 18
+    "FIELD-SHAPE": 9,
+    "MISSING-FIELD": 17,
+    "SPAN-COORD": 27
   },
   "samples/compilation-tests/gauntlet-s20-error-test/test-basic-001.scrml": {
     "COUNT-LENGTH": 1,

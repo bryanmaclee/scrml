@@ -16694,6 +16694,18 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   if (count === 0) return;
   if (count === 1) {
     if (isCallableOrOpaqueHandlerStmt(stmts[0], value)) return;
+    // A `!{}`-guarded call (`onclick={ risky() !{ | .E :> … } }`) is NOT
+    // byte-identical on the single-expression path: the expression view stops at
+    // the call, so the guard's arms were silently dropped and the failure went
+    // unhandled at runtime (§5.2.3 "No statement of the block SHALL be dropped").
+    // The statement view carries the guard, so a guarded statement always takes
+    // it — which is also what lets the §19.4.3 check see the call as handled
+    // (S440: E-ERROR-002 follows the unhandled call in every handler form).
+    if (stmts[0] && stmts[0].kind === "guarded-expr") {
+      value.handlerBlock = { stmts };
+      report(nonFatal);
+      return;
+    }
     if (!value.raw.trim().includes("\n")) return;
   }
   value.handlerBlock = { stmts };
