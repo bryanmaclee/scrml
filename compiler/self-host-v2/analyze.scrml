@@ -223,7 +223,8 @@ ${
 
     // The index over a key column: `at[nid]` = the position of the FIRST
     // entry for `nid`, -1 for none. Built in one pass into a FRESH local
-    // array — the one place the bootstrap writes an array position: nothing
+    // array — with typingOf, the only array position writes in the
+    // bootstrap: nothing
     // else holds `at` yet (a position write into a shared array would change
     // a value another holder already has — every AS the binder threads, a
     // discarded speculative one included, shares its arrays), and a write per
