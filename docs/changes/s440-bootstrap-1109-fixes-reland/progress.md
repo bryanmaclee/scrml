@@ -41,3 +41,37 @@ F3 is test-only → committed alone. F1/F2 tests stay uncommitted until their fi
   both spread resolvers mint the local; lower emits Lets before Writes when ≥2 overrides.
 - slice suites: 396 pass / 0 fail; SLICE_CORE=lowered slice-m1 73/73; lint-no-default-arm 0 violations.
 - Next: Part 2 (atomic commit) — this F1 shape still applies override 1 before override 2's runtime edge check.
+- Committed `21f91f277`.
+
+## 2026-09-28 — Part 2: spread writes ALL-OR-NOTHING (RULED S440)
+- RED first (front.test.js "RULED S440 — … ALL-OR-NOTHING", against the F1 Lets+Writes shape): 4 of 6 fail —
+  every case where a granted override precedes the refused one (`phase: .Gone, stage: .Gone` after live();
+  `note: "n1", stage: .Gone`; `stage: .Live, phase: .Draft`; the same through `given c = @g`). The two
+  "refused-first" / "all granted" cases pass either way (order-independence + non-no-op guards).
+- Finding: analyze's transitionCheck NEVER emits `Check.Static` today (always RuntimeEdge, or a compile error
+  for an unreachable variant) — so every instance-spread graph override is runtime-checked.
+- Where a runtime refusal can happen in a spread today: ONLY a RuntimeEdge Transition (instance spread over a
+  graph field). Struct-cell spreads lower to FieldAt/Static writes (no runtime check exists for them); lifecycle
+  and sequence grants are compile-time classified (no runtime refusal path in the bootstrap).
+- Design: new Core statement `Stmt.Commit(writes: Stmt[])` — an all-or-nothing group: every write's check first,
+  then every write; on a refusal none applied. Lower emits `Let tmp…` + `Commit([Write … Local(tmp)])` for ≥2
+  overrides; a lone override stays a plain Write; zero overrides lower to nothing. check.scrml C7: a Commit holds
+  ≥2 Writes and nothing else, each storing a Local. print: `rt.checkEdge(...)` per RuntimeEdge transition, then
+  each write as Static (`.set` / `rt.setIn`). runtime.js: `checkEdge` split out of `transition` (the mutation
+  anchors `if (from === to) return;` / `if (!allowed || …) {` still occur exactly once).
+  walk / measure / check / print gain the arm (no default arms — lint 0 violations).
+- SPEC atomicity sentence: searched §66.10, §66.11 (all of .1–.7 incl. the S437 amendment), §66.13, §66.20, and a
+  whole-SPEC grep for `atomic|all-or-nothing|partial|rollback` — NO governing sentence for spread-write atomicity.
+  SPEC.md NOT edited (per brief); PA to write the line.
+- Adversarial shapes (tests added where expressible):
+  - through a `given`-narrowed handle — test (atomic).
+  - row-scoped `as=` handle inside `<each>`, inline handler — test (atomic, per row).
+  - zero overrides (instance + struct cell) — test (nothing written).
+  - contract-free-of-graph `let` field alongside a graph field — test (not applied on refusal).
+  - nested spread `{ ...@p, q: { ...@p.q, a: 1 } }` and a sub-path spread `@p.q = { ...@p.q, … }` — NOT expressible:
+    E-BOOTSTRAP-UNSUPPORTED ("a spread `...` is in slice M2 only as `@x = { ...@x, f: v }`").
+  - struct-cell multi-override — covered by the snapshot tests; no runtime refusal exists on that path.
+  - DUPLICATE override of one field `{ ...@g, phase: .Gone, phase: .Live }` — compiles; the Commit checks BOTH
+    edges from the snapshot (Draft→Gone refused) although last-wins object semantics would give phase=.Live.
+    SPEC is silent on duplicate struct-literal keys → surfaced to PA, not changed.
+- slice suites: 407 pass / 0 fail; SLICE_CORE=lowered slice-m1 73/73; lint 0 violations.

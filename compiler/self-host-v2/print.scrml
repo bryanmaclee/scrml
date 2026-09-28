@@ -429,6 +429,7 @@ ${
             .Let(sym: sym, init: init) :> [letJs(ctx, sym, init, assigned)]
             .Assign(local: l, value: v) :> [JsStmt.SAssign(jid(symName(ctx, l)), exprJs(ctx, v))]
             .Write(cap: cap, inst: inst, edit: edit, value: v) :> [writeJs(ctx, cap, inst, edit, v, writeCheck(s))]
+            .Commit(writes: ws) :> commitJs(ctx, ws)
             .If(cond: c, thenB: t, elseB: e) :> [JsStmt.SIf(exprJs(ctx, c), blockJs(ctx, t), elseJs(ctx, e))]
             .Return(e: e) :> [JsStmt.SReturn(exprJs(ctx, e))]
             .Eval(e: e) :> [sexpr(exprJs(ctx, e))]
@@ -439,6 +440,7 @@ ${
     fn writeCheck(s: Stmt) -> Check {
         return match s {
             .Write(check: c) :> c
+            .Commit :> Check.Static
             .Let :> Check.Static
             .Assign :> Check.Static
             .If :> Check.Static
@@ -465,6 +467,75 @@ ${
         const target: JsExpr = fieldCell(instJs(ctx, inst), owner.decl, owner.idx)
         const v: JsExpr = exprJs(ctx, value)
         return sexpr(editJs(ctx, target, owner, edit, v, check))
+    }
+
+    // An all-or-nothing group of writes (Stmt.Commit, RULED S440): first every
+    // runtime contract check (a RuntimeEdge transition's edge), then every
+    // write. A refused check throws before anything is written. Each write's
+    // edge is already proven by then, so it is emitted as a Static write.
+    // The values are Locals (check.scrml C7): reading one twice is free.
+    fn commitJs(ctx: Ctx, ws: Stmt[]) -> JsStmt[] {
+        let checks: JsStmt[] = []
+        let writes: JsStmt[] = []
+        for (const s of ws) {
+            checks = checks.concat(commitCheckJs(ctx, s, writeCheck(s)))
+            writes = writes.concat(commitWriteJs(ctx, s))
+        }
+        return checks.concat(writes)
+    }
+
+    fn commitCheckJs(ctx: Ctx, s: Stmt, check: Check) -> JsStmt[] {
+        return match s {
+            .Write(cap: cap, inst: inst, edit: edit, value: v) :> edgeCheckJs(ctx, cap, inst, edit, v, check)
+            .Commit :> []
+            .Let :> []
+            .Assign :> []
+            .If :> []
+            .Return :> []
+            .Eval :> []
+        }
+    }
+
+    fn commitWriteJs(ctx: Ctx, s: Stmt) -> JsStmt[] {
+        return match s {
+            .Write(cap: cap, inst: inst, edit: edit, value: v) :> [writeJs(ctx, cap, inst, edit, v, Check.Static)]
+            .Commit :> []
+            .Let :> []
+            .Assign :> []
+            .If :> []
+            .Return :> []
+            .Eval :> []
+        }
+    }
+
+    // The edge check alone (no write) for a RuntimeEdge transition; nothing
+    // for a write the Core already proves.
+    fn edgeCheckJs(ctx: Ctx, cap: Sym, inst: InstRef, edit: EditKind, value: Expr, check: Check) -> JsStmt[] {
+        if (!isTransitionEdit(edit) || !isRuntimeEdge(check)) return []
+        const owner: CapOwner | not = capOwner(ctx.p, cap)
+        if (owner is not) return [sexpr(jid("danglingWriteCapability$" + cap.id))]
+        const target: JsExpr = fieldCell(instJs(ctx, inst), owner.decl, owner.idx)
+        const edges: JsExpr = jid(nameOf(ctx.names, NameKey.Edges(owner.decl.sym.id, owner.idx)))
+        return [sexpr(rtCall(ctx, "checkEdge", [target, edges, exprJs(ctx, value)]))]
+    }
+
+    fn isTransitionEdit(k: EditKind) -> boolean {
+        return match k {
+            .Transition :> true
+            .Replace :> false
+            .Append :> false
+            .Prepend :> false
+            .Anywhere :> false
+            .PositionWrite :> false
+            .FieldAt :> false
+        }
+    }
+
+    fn isRuntimeEdge(c: Check) -> boolean {
+        return match c {
+            .RuntimeEdge :> true
+            .Static :> false
+        }
     }
 
     fn editJs(ctx: Ctx, target: JsExpr, owner: CapOwner, edit: EditKind, v: JsExpr, check: Check) -> JsExpr {

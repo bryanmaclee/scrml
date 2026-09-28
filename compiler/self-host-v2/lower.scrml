@@ -330,11 +330,17 @@ ${
     // The literal is ONE value built from one snapshot (§66.10 item 1), so with
     // two or more overrides every value is evaluated into its local (analyze
     // minted `tmp`) before the first write — `{ ...@p, x: @p.y, y: @p.x }`
-    // swaps, as the genuine replace does (§66.11.3 item 1). A lone override
-    // needs no local: its value is evaluated before its own write either way.
+    // swaps, as the genuine replace does (§66.11.3 item 1). The writes are ONE
+    // edit: they form a Commit — every override's contract is checked before
+    // any is applied, and a refusal applies none (RULED S440: "Should a spread
+    // write be all-or-nothing on a runtime refusal? Yes."). A lone override
+    // needs neither: its value is evaluated before its own write, and one
+    // checked write is already all-or-nothing.
     fn spreadStmts(c: LC, ws: SpreadWrite[], value: AExpr | not) -> Stmt[] {
         if (value is not) return []
         const ps: AProp[] = objectProps(value)
+        // `@x = { ...@x }`: no override — the same value; nothing to write
+        if (ws.length == 0) return []
         if (ws.length == 1) {
             const w0: WriteFact = ws[0].w
             return [Stmt.Write(w0.cap, instOf(c, w0.inst), w0.edit, lowerExpr(c, ps[ws[0].prop].value), w0.check)]
@@ -349,7 +355,7 @@ ${
                 writes = writes.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Local(t), w.check)])
             }
         }
-        return lets.concat(writes)
+        return lets.concat([Stmt.Commit(writes)])
     }
 
     fn objectProps(e: AExpr) -> AProp[] {

@@ -281,11 +281,181 @@ describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine rep
   test("the classification is unchanged: still one contract-checked FieldAt Write per override, values evaluated first", async () => {
     const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x } }", "snap-shape");
     const st = r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
-    expect(st.map((s) => s.variant)).toEqual(["Let", "Let", "Write", "Write"]);
-    expect(st.slice(2).map((s) => [s.data.edit.variant, s.data.check])).toEqual([["FieldAt", "Static"], ["FieldAt", "Static"]]);
+    // S440: the writes are grouped in one all-or-nothing Commit (was: Let, Let, Write, Write)
+    expect(st.map((s) => s.variant)).toEqual(["Let", "Let", "Commit"]);
+    const ws = st[2].data.writes;
+    expect(ws.map((s) => s.variant)).toEqual(["Write", "Write"]);
+    expect(ws.map((s) => [s.data.edit.variant, s.data.check])).toEqual([["FieldAt", "Static"], ["FieldAt", "Static"]]);
     // each Write stores the local its Let evaluated — the value was read before either write
-    expect(st[2].data.value).toEqual({ variant: "Local", data: { sym: st[0].data.sym } });
-    expect(st[3].data.value).toEqual({ variant: "Local", data: { sym: st[1].data.sym } });
+    expect(ws[0].data.value).toEqual({ variant: "Local", data: { sym: st[0].data.sym } });
+    expect(ws[1].data.value).toEqual({ variant: "Local", data: { sym: st[1].data.sym } });
+  });
+
+  test("a LONE override stays a single Write (no local, no Commit)", async () => {
+    const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y } }", "snap-lone");
+    expect(r.core.fns.find((f) => f.sym.hint === "go").body.stmts.map((s) => s.variant)).toEqual(["Write"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RULED S440 (bryan: "Should a spread write be all-or-nothing on a runtime
+// refusal? Yes. Under R3 … the whole new value is built first and then checked,
+// so a partial apply shouldn't be possible."): a spread over several
+// contract-carrying fields is ONE edit — every override's contract is checked
+// against the one snapshot first; if any is refused, NOTHING is applied.
+// ---------------------------------------------------------------------------
+const GATES = `type Phase:enum = { Draft, Live, Gone }
+<gate title:string export let note:string="n0">
+    export <phase:Phase=.Draft>
+        <Draft rule=.Live/>
+        <Live rule=.Gone/>
+        <Gone rule=.Live/>
+    </>
+    export <stage:Phase=.Draft>
+        <Draft rule=.Live/>
+        <Live rule=.Gone/>
+        <Gone rule=.Live/>
+    </>
+</>
+renders <p class="gate">\${title}: \${phase}/\${stage}/\${note}</p>
+`;
+
+function gateProgram(fns) {
+  return {
+    path: "gate.scrml",
+    src: `${GATES}
+<program>
+    type P:struct = { let x: int, y: int }
+    <let p:P=({ x: 1, y: 2 })/>
+${fns}
+    <main>
+        <gate as=g title="G"/>
+        <p class="pt">\${@p.x},\${@p.y}</p>
+        <button class="live" onclick=live()>live</button>
+        <button class="go" onclick=go()>go</button>
+    </main>
+</program>
+`,
+  };
+}
+
+// `live()` moves phase Draft → Live (so phase → Gone is then an edge while stage → Gone is not).
+const LIVE = "    function live() { @g = { ...@g, phase: .Live } }";
+
+async function atomicRun(fn, tag) {
+  const r = run([gateProgram(`${LIVE}\n${fn}`)]);
+  expect(codes(r)).toEqual([]);
+  expect(mods.check.checkCore(r.core)).toEqual([]);
+  const { rt } = await loadProgram(r.core, tag);
+  const gate = () => instancesOf(rt, "gate")[0];
+  const text = () => document.querySelector("p.gate").textContent;
+  click(document.querySelector("button.live"));
+  expect(text()).toBe("G: Live/Draft/n0");
+  const before = JSON.stringify(rt.snapshot(gate()));
+  const beforeText = text();
+  expect(() => click(document.querySelector("button.go"))).toThrow(/E-ENGINE-INVALID-TRANSITION/);
+  takePageErrors();
+  return { r, rt, before, after: JSON.stringify(rt.snapshot(gate())), beforeText, afterText: text() };
+}
+
+describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal", () => {
+  test("two contract-carrying fields, the SECOND refused: the instance is byte-identical to before", async () => {
+    const o = await atomicRun("    function go() { @g = { ...@g, phase: .Gone, stage: .Gone } }", "atomic-second");
+    expect(o.after).toBe(o.before);
+    expect(o.afterText).toBe(o.beforeText);
+  });
+
+  test("the FIRST refused (override order does not matter): nothing applied", async () => {
+    const o = await atomicRun("    function go() { @g = { ...@g, stage: .Gone, phase: .Gone } }", "atomic-first");
+    expect(o.after).toBe(o.before);
+  });
+
+  test("a contract-free-of-graph (`let`) field alongside a refused graph field: the `let` write is not applied either", async () => {
+    const o = await atomicRun("    function go() { @g = { ...@g, note: \"n1\", stage: .Gone } }", "atomic-let");
+    expect(o.after).toBe(o.before);
+    expect(o.afterText).toBe("G: Live/Draft/n0");
+  });
+
+  test("a granted move (`stage` Draft → Live) alongside a refused one (`phase` Live → Draft, the initial state): neither applied", async () => {
+    const o = await atomicRun("    function go() { @g = { ...@g, stage: .Live, phase: .Draft } }", "atomic-move");
+    const fn = o.r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
+    expect(fn.map((s) => s.variant)).toEqual(["Let", "Let", "Commit"]);
+    expect(fn[2].data.writes.map((s) => [s.data.edit, s.data.check])).toEqual([["Transition", "RuntimeEdge"], ["Transition", "RuntimeEdge"]]);
+    expect(o.after).toBe(o.before);
+  });
+
+  test("a spread through a ROW-scoped `as=` handle inside `<each>` (an inline handler): all-or-nothing, per row", async () => {
+    const r = run([{
+      path: "rows.scrml",
+      src: `${GATES}
+<program>
+    <names:string[]=(["a", "b"])/>
+    <main>
+        <each in=@names as n>
+            <gate as=rg title=n/>
+            <button class="bad" onclick=(@rg = { ...@rg, phase: .Live, stage: .Gone })>bad</button>
+            <button class="ok" onclick=(@rg = { ...@rg, phase: .Live, stage: .Live })>ok</button>
+        </each>
+    </main>
+</program>
+`,
+    }]);
+    expect(codes(r)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    await loadProgram(r.core, "atomic-rows");
+    const texts = () => [...document.querySelectorAll("p.gate")].map((p) => p.textContent);
+    expect(texts()).toEqual(["a: Draft/Draft/n0", "b: Draft/Draft/n0"]);
+    expect(() => click(document.querySelectorAll("button.bad")[0])).toThrow(/E-ENGINE-INVALID-TRANSITION/);
+    takePageErrors();
+    expect(texts()).toEqual(["a: Draft/Draft/n0", "b: Draft/Draft/n0"]);   // `phase: .Live` NOT applied
+    click(document.querySelectorAll("button.ok")[1]);
+    expect(texts()).toEqual(["a: Draft/Draft/n0", "b: Live/Live/n0"]);     // only row b, both fields
+  });
+
+  test("a spread with ZERO overrides (`@g = { ...@g }`, `@p = { ...@p }`) is the same value: nothing is written", () => {
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g }\n @p = { ...@p } }`)]);
+    expect(codes(r)).toEqual([]);
+    expect(r.core.fns.find((f) => f.sym.hint === "go").body.stmts).toEqual([]);
+  });
+
+  test("check.scrml C7 bites: a one-write Commit, a Commit holding a non-Write, a Commit write storing a non-Local", () => {
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, stage: .Gone } }`)]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    const fn = r.core.fns.find((f) => f.sym.hint === "go");
+    const commit = fn.body.stmts[2];
+    const orig = commit.data.writes;
+    const w0 = orig[0];
+    const redo = (writes) => { commit.data.writes = writes; const out = mods.check.checkCore(r.core); commit.data.writes = orig; return out; };
+    expect(redo([w0]).some((m) => m.startsWith("C7:"))).toBe(true);
+    expect(redo([w0, fn.body.stmts[0]]).some((m) => m.startsWith("C7:"))).toBe(true);
+    const inline = { variant: "Write", data: { ...w0.data, value: { variant: "Lit", data: { lit: { variant: "Str", data: { v: "Gone" } } } } } };
+    expect(redo([w0, inline]).some((m) => m.startsWith("C7:"))).toBe(true);
+  });
+
+  test("the printed commit checks every edge BEFORE the first write (the emitted JS, read as a developer would)", async () => {
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, stage: .Live, phase: .Draft } }`)]);
+    const { out } = await loadProgram(r.core, "atomic-js");
+    const body = /function go\(\) \{([\s\S]*?)\n\}/.exec(out.js)[1];
+    const at = (re) => body.search(re);
+    const lastCheck = Math.max(...[...body.matchAll(/checkEdge\(/g)].map((m) => m.index));
+    expect([...body.matchAll(/checkEdge\(/g)].length).toBe(2);
+    expect(at(/\.set\(/)).toBeGreaterThan(lastCheck);
+    expect(body).not.toContain("transition(");
+  });
+
+  test("when every override is granted, ALL apply (the commit is not a no-op)", async () => {
+    const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, note: \"n1\" } }`)]);
+    expect(codes(r)).toEqual([]);
+    const { rt } = await loadProgram(r.core, "atomic-ok");
+    click(document.querySelector("button.live"));
+    click(document.querySelector("button.go"));
+    expect(document.querySelector("p.gate").textContent).toBe("G: Gone/Draft/n1");
+    expect(rt.snapshot(instancesOf(rt, "gate")[0])).toEqual({ title: "G", phase: "Gone", stage: "Draft", note: "n1" });
+  });
+
+  test("through a `given`-narrowed handle (`given c = @g :> { @g = { ...@g, … } }`): all-or-nothing too", async () => {
+    const o = await atomicRun("    function go() { given c = @g :> { @g = { ...@g, phase: .Gone, stage: .Gone } } }", "atomic-given");
+    expect(o.after).toBe(o.before);
   });
 });
 
