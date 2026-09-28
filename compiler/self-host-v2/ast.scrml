@@ -43,6 +43,7 @@ ${
         Str(v: string),
         Bool(v: boolean),
         NotLit,                                      // not
+        Recovered,                                   // a parse-error placeholder: the parser reported it; nothing downstream types or checks it
         Variant(name: string),                       // .Name — a bare variant
         Member(obj: AExpr, name: string),
         Call(callee: AExpr, args: AExpr[]),
@@ -62,7 +63,7 @@ ${
 
     export type AStmtK:enum = {
         Eval(e: AExpr),                                     // an expression statement (incl. an assignment)
-        Local(name: string, mutable: boolean, init: AExpr), // let / const
+        Local(name: string, mutable: boolean, ty: AType | not, init: AExpr), // let / const [: T]
         Return(e: AExpr | not),
         If(cond: AExpr, thenB: ABlock, elseB: ABlock | not),
         Given(name: string, subject: AExpr, body: ABlock),  // given c = @h :> { … }
@@ -166,7 +167,9 @@ ${
 
     // `path` is the file's path as the driver names it (an identifier of the
     // file, used to resolve import sources).
-    export type FileAst:struct = { path: string, items: AItem[] }
+    // `errs`: the spans the parser reported an error at — a declaration or
+    // signature containing one is not trusted by the typer (no check against it).
+    export type FileAst:struct = { path: string, items: AItem[], errs: ASpan[] }
 
     // A diagnostic: a code, a message, where. (§4 permits message text.)
     export type Diag:struct = { code: string, message: string, file: string, span: ASpan }

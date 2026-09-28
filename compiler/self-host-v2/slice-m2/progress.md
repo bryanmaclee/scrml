@@ -323,3 +323,15 @@ E-TYPE-001 family, and a scope pass → E-SCOPE-REDECLARE.
   Result this round: 23 mutations, all RED; the unmutated suite on the mirror is green.
 - **check.test F5 hard-coded indices**: fields / declarations / functions / types are looked up BY NAME
   (`field(core, "dropdown", "value")`, `fnNamed`, `withDecl`), never by position.
+
+## 2026-09-27 — M3 item 1: F-A CLOSED (s439-bootstrap-m3-typer)
+The typer and the scope pass landed in analyze.scrml ("THE SCOPE PASS", "THE TYPER"); the typer's facts are
+their own table (`Tables.typing`: a VType per expression NodeId). The eleven F-A pins were a hypothesis and
+were resolved against SPEC.md first (docs/changes/s439-bootstrap-m3-typer/progress.md has the quoted
+sentences): `@x = "oops"` → E-TYPE-031 (§66.1 rule 5); `label=(5)` → E-TYPE-031 (§7.5.1 position 2 via
+§66.9 rule 8); duplicate `<let x>` and duplicate functions → E-SCOPE-010 (§7.3.3 routes file scope there,
+NOT E-SCOPE-REDECLARE); arity, `<each in=>` over a non-sequence, duplicate `as=`, handle-vs-cell →
+bootstrap-local E-BOOTSTRAP-* (SPEC silent; owe rulings). THREE PINS WERE WRONG and are now "stays silent"
+tests: a wrong ARGUMENT type (§7.5.1: positions 3-5 "SHALL compile"), a non-bool `if=` and a non-bool
+ternary test (conditions are boolean-coercible, §17.1.1 / §49.2.3). Tests: typer-gap.test.js (each shape +
+a well-typed twin), typer.test.js (families, adversarial controls, Typing coverage, §66.19 zero typer codes).
