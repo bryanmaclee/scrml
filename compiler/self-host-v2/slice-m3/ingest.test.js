@@ -158,11 +158,25 @@ describe("ingest — the not-yet discipline", () => {
     expect(r.why.some((w) => w.startsWith("markup: each-block") || w.startsWith("expr: array"))).toBe(true);
   });
 
-  test("an unmapped KEY on a mapped node (a typed cell) is reported, not stripped", () => {
-    const r = ingestSource(`\${ <n>: int = 0 }
+  test("an unmapped KEY on a mapped node (a debounced cell) is reported, not stripped", () => {
+    const r = ingestSource(`\${ <q debounced=300ms> = "" }
+<p>\${@q}</p>
+`);
+    expect(r.why).toContain("cell declaration carries unmapped key `reactivity`");
+  });
+
+  test("`<x>: T = v` with a primitive T: the annotation is the field's type (§66.21 row 1)", () => {
+    const core = ok(ingestSource(`\${ <n>: number = 0 }
+<p>\${@n}</p>
+`));
+    expect(tag(program(core).fields[0].ty)).toBe("Num");
+  });
+
+  test("`<x>: T = v` with a non-primitive T is not-yet (no invented type)", () => {
+    const r = ingestSource(`\${ <n>: int | not = not }
 <p>\${@n}</p>
 `);
-    expect(r.why).toContain("cell declaration carries unmapped key `typeAnnotation`");
+    expect(r.why).toContain("decl: a cell annotated with a non-primitive type");
   });
 
   test("an unannotated parameter is not given an invented type (D14)", () => {

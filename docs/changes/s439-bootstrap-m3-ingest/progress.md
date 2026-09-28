@@ -31,3 +31,4 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
   marker — a case/normalizer defect, surfaced not fixed).
 - PARSE_REENTRY sites in the shim: 0 (params carried structured `{name,typeAnnotation}`; the shim never reads
   `init`/`raw`/`args`/`expr` text fields).
+- 2026-09-27T19:42:04-06:00 NOTE: commit a2453f5e5 carries the wrong message (it duplicates f19c4b19f's): it is the client-executor seam + footprint grader + slice-m3 tests commit. Next: primitive-typed cells `<x>: T = v` (§66.21 row 1) + post-NR-synthesized element label.

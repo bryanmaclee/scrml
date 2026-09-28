@@ -717,7 +717,11 @@ ${
         if (tag is not) return notYetV("markup: element without a tag")
         const rk: string | not = strAt(n, "resolvedKind")
         if (flagAt(n, "isComponent")) return notYetV("markup: component use (components → declarations, §66.15)")
-        if (rk != "html-builtin") return notYetV("markup: <" + tag + "> (" + kindOrNone(rk) + ")")
+        // An element with no name resolution was synthesized AFTER NR (impl#1's component
+        // expansion, or a meta emit). Mapping it would grade impl#1's expansion, not a §66
+        // declaration (components → declarations, §66.15): not-yet.
+        if (rk is not) return notYetV("markup: element synthesized after name resolution (component expansion / meta emit)")
+        if (rk != "html-builtin") return notYetV("markup: <" + tag + "> (" + rk + ")")
         const why0: string[] = unmapped(n, "element", ["kind", "id", "tag", "attrs", "children", "selfClosing",
             "closerForm", "shorthandBodyRaw", "isComponent", "openerHadSpaceAfterLt", "resolvedKind", "resolvedCategory"])
         const a: LA = lowerAttrs(cx, nodesAt(n, "attrs"))
@@ -921,7 +925,7 @@ ${
         if (name is not) return itemsWhy("decl: cell without a name")
         if (!flagAt(s, "structuralForm")) return itemsWhy("decl: `@x = v` declaration form")
         const why: string[] = unmapped(s, "cell declaration", ["kind", "id", "name", "init", "initExpr",
-            "structuralForm", "isConst", "shape"])
+            "structuralForm", "isConst", "shape", "typeAnnotation"])
         const cell: CellDecl = { n: s, name: name, isConst: flagAt(s, "isConst") }
         return { cells: [cell], fnDecls: [], markup: [], why: why }
     }
@@ -1010,9 +1014,15 @@ ${
             }
             const v: LE = lowerExprAt(cx, c.n, "initExpr")
             why = why.concat(v.why)
-            const ty: Type | not = v.ty
+            const ann: string | not = strAt(c.n, "typeAnnotation")
+            // `<x>: T = v` (§66.21 row 1): the annotation is the field's type.
+            let ty: Type | not = v.ty
+            if (ann is some) {
+                ty = primTy(ann)
+                if (ty is not) why = why.concat(["decl: a cell annotated with a non-primitive type"])
+            }
             if (ty is not) {
-                why = why.concat(["decl: a cell whose type the shim cannot infer from its initializer"])
+                if (ann is not) why = why.concat(["decl: a cell whose type the shim cannot infer from its initializer"])
             } else {
                 const sym: Sym = mkSym(1 + i, c.name)
                 if (c.isConst) {
@@ -1045,7 +1055,9 @@ ${
     // ---- functions ----
     type PInfo:struct = { params: Param[], locals: LocalInfo[], why: string[] }
 
-    fn paramTy(ann: string) -> Type | not {
+    // A primitive type annotation. impl#1 carries annotations as their spelling;
+    // only the four primitive names are mapped — an exact word match, not a parse.
+    fn primTy(ann: string) -> Type | not {
         return match ann {
             "int" :> Type.Int
             "number" :> Type.Num
@@ -1072,7 +1084,7 @@ ${
             } else if (ann is not) {
                 why = why.concat(["decl: unannotated parameter (Core parameters are typed, D14)"])
             } else {
-                const ty: Type | not = paramTy(ann)
+                const ty: Type | not = primTy(ann)
                 if (ty is not) {
                     why = why.concat(["decl: parameter of a non-primitive type"])
                 } else {
