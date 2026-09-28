@@ -59,6 +59,23 @@ function isScrmlMarkerAttr(name: string): boolean {
   return name.toLowerCase().startsWith("data-scrml-");
 }
 
+/** impl#1's conditional-mount anchor ids (`_scrml_scrml_tpl_N`, `_scrml_scrml_chain_tpl_N`). */
+const IMPL1_TEMPLATE_ANCHOR_ID = /^_scrml_scrml_(chain_)?tpl_\d+$/;
+
+/**
+ * A `<template>` with no child nodes whose id is one of impl#1's anchor ids (see the strip in
+ * buildNormalized). "No child nodes" is about the live DOM tree the serializer walks. It does NOT
+ * look at the template's `content` fragment: impl#1's anchor carries the conditional arm's markup
+ * there (`<template id="_scrml_scrml_tpl_2"><p id="panel">…</p></template>`), exactly as a parsed
+ * author template would, so content cannot tell the two apart — the exact impl#1 id is the
+ * discriminator, and the whole-tree serializer never emits a template's content anyway.
+ */
+export function isImpl1TemplateAnchor(el: DomNode): boolean {
+  const id = (el.getAttribute && el.getAttribute("id")) || "";
+  if (!IMPL1_TEMPLATE_ANCHOR_ID.test(id)) return false;
+  return !(el.childNodes && el.childNodes.length > 0);
+}
+
 function isRuntimeScriptSrc(src: string): boolean {
   // The runtime/client bundle scripts impl#1 injects into <body>. An inline
   // runtime script (no src) is also impl-private. Author <script> is out of
@@ -100,16 +117,18 @@ function buildNormalized(node: DomNode): NNode[] {
 
     const tag = (k.tagName || "").toLowerCase();
 
-    // impl#1's if-guard anchor: an EMPTY `<template id="_scrml_…">` it leaves in
-    // the live DOM where a conditional arm mounts (README OQ1: the counter-id
-    // wrapper the whole-tree `dom` kept leaking). Impl-private structure, like a
-    // `data-scrml-*` marker — never author content (an author `<template>` has
-    // no `_scrml_` id). Dropped so the whole-tree compare holds at the semantic
-    // level (s439-bootstrap-m3-ingest review item 5).
-    if (tag === "template") {
-      const id = (k.getAttribute && k.getAttribute("id")) || "";
-      if (id.startsWith("_scrml_")) continue;
-    }
+    // impl#1's if-guard / if-chain anchor: a `<template>` it leaves in the live
+    // DOM where a conditional arm mounts (README OQ1: the counter-id wrapper the
+    // whole-tree `dom` kept leaking). Dropped ONLY when it is exactly that
+    // anchor: its id is one impl#1 mints for it — `genVar("scrml_tpl")` /
+    // `genVar("scrml_chain_tpl")` (codegen/emit-html.ts; genVar spells
+    // `_scrml_<base>_<n>`, codegen/var-counter.ts) — AND it has no child nodes
+    // in the live tree (its `content` fragment is not examined — see
+    // isImpl1TemplateAnchor). A documented impl-private exclusion keyed to
+    // impl#1's naming, not a language rule: an author `<template>` with any
+    // other id, or with live child nodes, is kept, and an impl that emits no
+    // such anchor is unaffected.
+    if (tag === "template" && isImpl1TemplateAnchor(k)) continue;
 
     if (tag === "script") {
       const src = (k.getAttribute && k.getAttribute("src")) || "";

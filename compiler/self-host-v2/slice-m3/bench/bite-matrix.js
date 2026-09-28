@@ -22,6 +22,7 @@
 import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { judgeDeaths } from "./bite-lib.js";
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..");
 const SH = "compiler/self-host-v2";
@@ -120,7 +121,7 @@ function grade(sub, only, outJson) {
   const r = spawnSync("bun", args, { cwd: ROOT, encoding: "utf8", timeout: 900000, maxBuffer: 64 * 1024 * 1024 });
   try {
     const rep = JSON.parse(readFileSync(outJson, "utf8"));
-    return { ran: true, exit: r.status, counts: rep.counts, cases: rep.cases };
+    return { ran: true, exit: r.status, counts: rep.counts, cases: rep.cases, report: rep };
   } catch {
     // No report: the run itself failed (e.g. the mutated bootstrap does not compile). NOT a bite.
     const why = ((r.stderr ?? "") + (r.stdout ?? "")).split("\n").filter((l) => /hybrid:|error|Error/.test(l))[0] ?? `exit ${r.status}`;
@@ -141,6 +142,7 @@ const SUB = join(MIRROR, SH, "slice-m3", "substitute.js");
 const OUT = join(MIRROR, "grade.json");
 
 let bad = false;
+let mirrorOk = true; // its own flag: a hollow site must not read as "the mirror did not reproduce"
 const rows = [];
 const kills = new Map(); // construct → Set(killed runtime passes)
 const t0 = performance.now();
@@ -153,6 +155,7 @@ try {
   const mirrorClean = grade(SUB, passes, OUT);
   if (!mirrorClean.ran || mirrorClean.counts.runtimePass.join() !== passes.join()) {
     console.error(`the unmutated mirror does not reproduce the clean grade (${mirrorClean.ran ? mirrorClean.counts.runtimePass.length : mirrorClean.why} vs ${passes.length} runtime passes)`);
+    mirrorOk = false;
     bad = true;
   }
   for (const m of MUTATIONS) {
@@ -172,11 +175,13 @@ try {
         bad = true;
         continue;
       }
-      const survived = new Set(r.counts.runtimePass);
-      const died = passes.filter((p) => !survived.has(p));
+      // A KILL is a case still GRADED whose conformance run FAILED; a reclassified / crashed /
+      // missing case is reported, but is NOT a bite (bite-lib.js).
+      const { killed, lost } = judgeDeaths(passes, r.report);
       if (!kills.has(m.c)) kills.set(m.c, new Set());
-      for (const d of died) kills.get(m.c).add(d);
-      rows.push(`| ${m.c} | ${m.id} | ${died.length} of ${passes.length} | ${died.length ? died.map((d) => "`" + d + "`").join(", ") : "**none — does not bite**"} |`);
+      for (const d of killed) kills.get(m.c).add(d);
+      const lostNote = lost.length ? ` · NOT a bite: ${lost.map((x) => "`" + x.relDir + "` (" + x.why + ")").join(", ")}` : "";
+      rows.push(`| ${m.c} | ${m.id} | ${killed.length} of ${passes.length} | ${killed.length ? killed.map((d) => "`" + d + "`").join(", ") : "**none — does not bite**"}${lostNote} |`);
     } finally {
       writeFileSync(path, orig);
     }
@@ -186,8 +191,8 @@ try {
     kills.has(c) ? `\`${c}\` — its corruption(s) kill no runtime pass` : `\`${c}\` — no corruption defined (structural: no emission of its own to corrupt)`);
   const L = [];
   L.push("# Bite matrix — footprint-grade construct certification", "");
-  L.push(`Clean grade: **${passes.length} runtime passes** (codes-only passes excluded — front-end codes). Mirror reproduced it: ${bad ? "NO" : "yes"}.`, "");
-  L.push("| construct | corruption | runtime passes killed | which |", "|---|---|---|---|", ...rows, "");
+  L.push(`Clean grade: **${passes.length} runtime passes** (codes-only passes excluded — front-end codes). Mirror reproduced it: ${mirrorOk ? "yes" : "NO"}.`, "");
+  L.push("| construct | corruption | runtime passes killed (still graded, run FAILED) | which |", "|---|---|---|---|", ...rows, "");
   L.push(`## CERTIFIED (${certified.length}) — a corruption kills ≥1 runtime pass`, "", certified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
   L.push(`## UNCERTIFIED (${uncertified.length}) — exercised by a passing runtime case, but no evidence it is implemented`, "");
   for (const u of uncertified) L.push(`- ${u}`);

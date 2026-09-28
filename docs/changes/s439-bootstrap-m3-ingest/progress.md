@@ -80,3 +80,36 @@ walking every `kind`-bearing object in the FileASTs CG receives (`<parentKey>:<k
 - §5 re-run: slice-m1 73/0 · slice-m2 74/0 · lowered slice-m1 73/0 · slice-m3 22/0 · lexer 337/0 · hybrid 26/0 ·
   lint 0 violations · footprint grade exit 0 · bite matrix exit 0 · impl#1 conformance exit 0 1040/1047 + 7 xfail,
   per-case lines identical to the pre-fix run.
+
+## Round 2 (re-review of b1bda6170)
+- merged origin/main (833884ca7).
+- Item 1: normalize.ts strips a `<template>` only when its id matches `^_scrml_scrml_(chain_)?tpl_\d+$` (verified
+  loci: codegen/emit-html.ts:1579 `genVar("scrml_tpl")`, :1911/:1949 `genVar("scrml_chain_tpl")`; genVar spells
+  `_scrml_<base>_<n>`, codegen/var-counter.ts:17) AND it has no live child nodes. FINDING while implementing: impl#1's
+  anchor is NOT empty in the content sense — it carries the arm's markup in its `content` fragment
+  (`<template id="_scrml_scrml_tpl_2"><p id="panel">Panel open</p></template>`, toggle-show's page). A first cut that
+  also required an empty `content` turned toggle-show RED on impl#1 (caught by the invariance diff). And per the HTML
+  spec a template's children — parsed or appended — always go to `content`, so "no child nodes" is a guard that can
+  never distinguish; the exact impl#1 id is the real discriminator. Unit test
+  compiler/tests/unit/conformance-normalize-template-anchor.test.js (3): impl anchors stripped (incl. with content),
+  the review's `_scrml_x` author template kept, near-miss ids kept; bite-checked (a prefix matcher → red).
+- Item 2: toggle-show description + rationale describe the semantic tree.
+- Item 3: README OQ1 — the pipeline list gains the anchor strip + a paragraph stating it is keyed to impl#1's private
+  naming, an impl-private exclusion (not a language rule), author templates kept, impls without the anchor
+  unaffected; the leak bullet is struck and marked DISSOLVED.
+- Item 4: bench/bite-lib.js `judgeDeaths` — a KILL is a case still GRADED whose run FAILED; reclassified / crashed /
+  absent cases are listed "NOT a bite". slice-m3/bite.test.js (2). Matrix re-run: the same 32 certified, 0 NOT-a-bite rows.
+- Item 5: "Mirror reproduced it" reads its own `mirrorOk` flag.
+- Item 6: new case conformance/cases/reactive/reset-handler-nonzero-initial (`<count> = 5`, click reset → 0,
+  #display "Count: 0"): PASS on impl#1; graded (18 runtime passes); On-drop and Write-noop kill it (bite matrix).
+- Invariance (raw lines): pure impl#1 `bun conformance/run.ts` exit 0, 1041/1048 + 7 xfail; the 1047 prior per-case
+  lines are identical to round 1's, plus one new line `PASS reactive/reset-handler-nonzero-initial [runtime]`.
+
+## Surfaced, not done
+- 4 runtime cases pass impl#1 conformance while impl#1 emits error-severity diagnostics on them:
+  block-grammar/block-029-leading-equals-quote-prose-pos (E-MARKUP-001×3), defer/nested-fn-handler-in-defer (+twin)
+  (E-TYPE-080), engine/message-payload (E-ENGINE-MSG-ARM-NOT-EXHAUSTIVE×2). The runner's `codes` check is subset-only,
+  so undeclared error-severity codes are never asserted absent. The conformance runner's concern — not fixed here.
+- Constructs certified by a single case: Concat/Local/Let/Return (defer/identifier-untouched), Not (toggle-show),
+  Gt (else-if chain) — thin evidence.
+- CG-emitted codes (W-DERIVED-001 etc.) sit on the not-yet queue with no bootstrap owner.
