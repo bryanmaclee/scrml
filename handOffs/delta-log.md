@@ -4066,3 +4066,11 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3579] escalate · **to bryan**: #14 E-ERROR-002 (SPEC has NO handler exemption — restore conformance vs amend) · typer OWES-A-RULING list · PA-interim "handle shadows visible cell → refuse"
 
 [3580] friction · PA bounced merges to bryan all session — compound cmd around `gh pr merge` escapes the allow rule → classifier deny; run it BARE (memory)
+
+[3581] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/decimal-money-type-dpa-054-2026-09-28.md` · verdict: the worst money leak is the SQL NUMERIC/BIGINT decode (JS string → `row.total + 1` = "64.921", HIGH silent), not float maths; lean H (~0.55) int minor units + required-rounding integer division + `scrml:money`, core `decimal` deferred; §8 #1 rule first + alone; 6 defects routed)** · ADVISORY
+
+[3582] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/numeric-vectors-tensors-dpa-055-2026-09-28.md` · verdict: client has NO tensor path; Float32Array crosses the wire as {"0":…} at exit 0; lean Pole B staged (~0.6) dtype tapes + `scrml:tensor` fns not operators + bind transformers.js, NOT a core tensor type; R0 scope first; 7 defects routed)** · ADVISORY · ⚑ dPA-framed concurrently with #1134 — 3 PA framing points listed OPEN in the artifact
+
+[3583] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/atomics-shared-memory-dpa-056-2026-09-28.md` · verdict: shared MUTABLE memory is the wrong layer; lean A+ (~0.7) shared-nothing zero-copy (lin-send = transfer, grant-less tape shared-not-copied); ⚑ examples/13-worker broken today (bundle never written + send() clobbers when-message))** · ADVISORY · ⚑ 4 PA framing points listed OPEN in the artifact
+
+[3584] dpa · **(dpa: ran-before-supersede → `scrml-support/docs/deep-dives/value-mutability-sequences-tuples-dpa-052-2026-09-28.md` · the dPA ran dpa-052 before #1135 superseded it; it did NOT re-argue the §66 core — residuals only: silent alias writes under value semantics (5 routes), COW-on-unique as a perf contract (spread-accumulate 8,670× slower at 50k), element-level spreads bypass sub-field graphs (kanban); offered to §66.22)** · status left `superseded` — the PA's call
