@@ -98,6 +98,26 @@ const MUTATIONS = [
   { id: "S437 reads require narrowing: an un-narrowed read through a `T | not` handle accepted", file: `${SH}/analyze.scrml`,
     from: "        if (!r.x.maybe) return r\n", to: "        return r\n",
     tests: [T2("front.test.js")] },
+  // ---- S440: #1109 review fixes re-landed + spread writes all-or-nothing ----
+  { id: "S440 F1: a spread override's value read AFTER the earlier writes (no snapshot local)", file: `${SH}/lower.scrml`,
+    from: "                writes = writes.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Local(t), w.check)])",
+    to: "                writes = writes.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, ps[sw.prop].value), w.check)])",
+    tests: [T2("front.test.js")] },
+  { id: "S440 F2: `@h` not narrowed inside its own `given` (E-DECL-HANDLE-NOT-NARROWED again)", file: `${SH}/analyze.scrml`,
+    from: "        if (hn != \"\") inner = withNarrow(inner,", to: "        if (false) inner = withNarrow(inner,",
+    tests: [T2("front.test.js")] },
+  { id: "S440 all-or-nothing: the printed commit writes BEFORE it checks the edges", file: `${SH}/print.scrml`,
+    from: "        return checks.concat(writes)\n", to: "        return writes.concat(checks)\n",
+    tests: [T2("front.test.js")] },
+  { id: "S440 all-or-nothing: lower emits the spread's writes ungrouped (no Commit)", file: `${SH}/lower.scrml`,
+    from: "        return lets.concat([Stmt.Commit(writes)])\n", to: "        return lets.concat(writes)\n",
+    tests: [T2("front.test.js")] },
+  { id: "S440 all-or-nothing: the commit's edge check skipped (an off-graph override is written silently)", file: `${SH}/print.scrml`,
+    from: "        if (!isTransitionEdit(edit) || !isRuntimeEdge(check)) return []\n", to: "        return []\n",
+    tests: [T2("front.test.js")] },
+  { id: "S440 C7: a Commit write storing a non-Local accepted", file: `${SH}/check.scrml`,
+    from: "            .Lit(lit: x) :> \"a Commit write's value is not a Local (the snapshot)\"", to: "            .Lit(lit: x) :> \"\"",
+    tests: [T2("front.test.js")] },
   // ---- M3 item 1: the typer and the scope pass — one per check family, plus the
   // REVERSE mutations for the shapes the SPEC makes legal (a "stays silent" test
   // must go RED when the typer starts rejecting what the SPEC accepts) ----
@@ -219,8 +239,6 @@ const MUTATIONS = [
     from: "        return plain(row.ty, addName(st, e.nid, NameFact.NLocal(row.bind)))",
     to: "        return plain(row.ty, addName(addName(st, e.nid, NameFact.NLocal(row.bind)), e.nid, NameFact.NLocal(row.bind)))",
     tests: [T2("tables.test.js")] },
-  { id: "F8 non-first alternation arm not flagged", file: "scripts/lint-no-default-arm.js",
-    from: "if (a.alts.length > 1 && armIndex > 0) {", to: "if (false) {", tests: [T("lint.test.js")] },
   { id: "F8 wildcard inside an alternation not flagged", file: "scripts/lint-no-default-arm.js",
     from: "if (a.alts.length > 1 && a.alts.some(altIsWild)) {", to: "if (false) {", tests: [T("lint.test.js")] },
 ];

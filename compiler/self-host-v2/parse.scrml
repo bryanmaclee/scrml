@@ -29,9 +29,10 @@
 //
 // impl#1 workarounds: F4 (qualified variants in argument / field / element
 // position), F5 (host-method results annotated), F11 (named payload binding),
-// F12 (an alternation arm only first), F16 (a match over an imported payload
-// enum binds a field in at least one arm). (F14 — a brace in a string literal —
-// is fixed in impl#1 by #1119; braces are plain string literals again, S440.)
+// F16 (a match over an imported payload enum binds a field in at least one
+// arm). (F12 — an alternation arm only first — and F14 — a brace in a string
+// literal — are fixed in impl#1 by #1119; braces are plain string literals
+// again, S440.)
 // =============================================================================
 ${
     import { Token, TokenKind, LexStop, LexRun, lexFrom } from "./lex.scrml"

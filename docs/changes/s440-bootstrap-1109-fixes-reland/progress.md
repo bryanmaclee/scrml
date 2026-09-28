@@ -75,3 +75,20 @@ F3 is test-only → committed alone. F1/F2 tests stay uncommitted until their fi
     edges from the snapshot (Draft→Gone refused) although last-wins object semantics would give phase=.Live.
     SPEC is silent on duplicate struct-literal keys → surfaced to PA, not changed.
 - slice suites: 407 pass / 0 fail; SLICE_CORE=lowered slice-m1 73/73; lint 0 violations.
+- Committed `c2e8ea9f6`. After Parts 1-2: mutations 72/0 problems; bite matrix 32 CERTIFIED exit 0;
+  footprint 18/18 runtime.
+
+## 2026-09-28 — Part 3: Peter's F12/F13/F14 workarounds reverted (#1119 on main)
+- F13 (`e181164f3`): check.scrml `writeCheck`, print.scrml `writeCheck` + `eachHandles` accessors removed —
+  Stmt.Write / View.Each bound in one 5-field arm; notes in ast / analyze / lower / print updated. ast.scrml's
+  ≤3-field payload SHAPE kept (it is a design, not a workaround call site).
+- F14 (`e4923409f`): LB()/RB() removed from js.scrml, parse.scrml, analyze.scrml; every use is a plain literal.
+- F12: lint-no-default-arm's "non-first alternation arm" rule retired; lint.test.js updated (non-first
+  alternation = clean; the real-tree bite now plants `_ | .Int` in a later arm); lex.scrml `dispatch` reordered so
+  its alternation arm is NOT first (a real-tree proof: every lexer test runs through it; a glued arm would break
+  the `.InCode` arm); notes in lex / print / parse / analyze updated. mutations.js: the retired rule's mutation
+  ("F8 non-first alternation arm not flagged") removed (its anchor is gone) and 6 S440 mutations added.
+- All verified by compiling the bundle under impl#1 (validateEmit) + slice suites 407/0, lowered M1 73/0,
+  lint 0 violations.
+- Final: mutations 77 mutation(s), 0 problem(s) (all 6 S440 mutations RED); bite matrix 32 CERTIFIED /
+  0 UNCERTIFIED exit 0; footprint 18/18 runtime.

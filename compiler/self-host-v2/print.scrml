@@ -21,9 +21,9 @@
 // this module built), then wires holes. Nested arms / rows / slots are their own
 // templates, rendered into their own child scopes by the runtime.
 //
-// impl#1 workarounds: F11 (named payload binding everywhere), F12 (no `|`
-// alternation arms). (F13 — a ≥5-field payload arm — is fixed in impl#1 by #1119;
-// Stmt.Write / View.Each are bound in one arm again, S440.)
+// impl#1 workaround: F11 (named payload binding everywhere). (F12 — a non-first
+// `|` alternation arm — and F13 — a ≥5-field payload arm — are fixed in impl#1
+// by #1119; Stmt.Write / View.Each are bound in one arm again, S440.)
 // =============================================================================
 ${
     import { Sym, Type, DeclKind, TypeDef, FieldDef, VariantDef, TransitionGraph, FieldRef, InstRef, Place, Literal, PrimOp, Pattern, Expr, MatchArm,
