@@ -84,6 +84,7 @@ ${
             .Str(v: s) :> litFact(f)
             .Bool(v: b) :> litFact(f)
             .NotLit :> litFact(f)
+            .Recovered :> Expr.Lit(Literal.Absent)
             .Variant(name: n) :> variantFact(f)
             .Member(obj: o, name: n) :> memberExpr(c, f, o)
 
@@ -487,6 +488,7 @@ ${
             .Str(v: s) :> not
             .Bool(v: b) :> not
             .NotLit :> not
+            .Recovered :> not
             .Variant(name: n) :> not
             .Member(obj: o) :> not
             .Unary(op: o) :> not
@@ -535,6 +537,7 @@ ${
             .Str(v: s) :> []
             .Bool(v: b) :> []
             .NotLit :> []
+            .Recovered :> []
             .Variant(name: n) :> []
             .Member(obj: o) :> []
             .Call(callee: x) :> []

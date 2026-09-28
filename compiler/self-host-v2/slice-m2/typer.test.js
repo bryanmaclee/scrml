@@ -33,10 +33,6 @@ const boxApp = (use) => ({
   src: `\${ import { box } from "./lib/box.scrml" }\n<program>\n    <main>\n${use}\n    </main>\n</program>\n`,
 });
 
-// Every code the typer / scope pass can emit.
-const TYPER_CODES = ["E-TYPE-031", "E-TYPE-041", "E-BOOTSTRAP-CALL-ARITY", "E-BOOTSTRAP-EACH-NOT-SEQUENCE",
-  "E-SCOPE-010", "E-SCOPE-REDECLARE", "E-BOOTSTRAP-REDECLARE"];
-
 // ---------------------------------------------------------------------------
 // Writes (§66.1 rule 5) — every write shape the edit classifier produces.
 // ---------------------------------------------------------------------------
@@ -282,20 +278,192 @@ describe("the typer's table — a type per expression node (Tables.typing)", () 
 // ---------------------------------------------------------------------------
 // The worked programs and fixtures produce no typer / scope diagnostic.
 // ---------------------------------------------------------------------------
-describe("no typer / scope diagnostic on the §66.19 programs and the M2 fixtures", () => {
+// ---------------------------------------------------------------------------
+// BASE-vs-NEW: the typer adds NOTHING to the §66.19 programs or the fixtures.
+// BASE_66_19 is every §66.19 ```scrml block's FULL diagnostic list (sorted)
+// from the bootstrap at base b7c863235 (before the typer), measured by running
+// that commit's front end over the same blocks. Blocks .2 / .4 / .5 / .6 are
+// outside the slice front end, so they carry parse / unsupported codes — the
+// point is that the typer changes no list: not E-TYPE-UNKNOWN, not
+// E-BOOTSTRAP-UNSUPPORTED, nothing. (If §66.19 changes, re-measure on base.)
+// ---------------------------------------------------------------------------
+const BASE_66_19 = [
+  [],
+  ["E-PARSE-CLOSER", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED"],
+  ["E-PROGRAM-MISSING"],
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-TYPE-VARIANT"],
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPECTED", "E-PARSE-TRAILING", "E-PARSE-TRAILING", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
+  ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-EXPR", "E-PARSE-EXPR", "E-PARSE-EXPR", "E-PARSE-EXPR", "E-TYPE-STRUCT-CONTEXT", "E-WRITE-NOT-GRANTED"],
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-CLOSER", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-SCOPE-001", "E-SCOPE-001"],
+  ["E-PARSE-CLOSER", "E-PARSE-CLOSER", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED"],
+];
+
+describe("zero delta vs base b7c863235 — §66.19 programs and the M2 fixtures", () => {
   for (const name of Object.keys(PROGRAMS)) {
-    test(`${name} (compileProgram throws on ANY diagnostic)`, () => {
+    test(`${name}: no diagnostic (base: none either — compileProgram throws on ANY)`, () => {
       expect(() => compileProgram(mods, name)).not.toThrow();
     });
   }
-  test("every §66.19 code block: none of the typer's codes (blocks .2/.4/.5/.6 are outside the slice front end — their other diagnostics are front-end growth, M3 item 4)", () => {
+  test("every §66.19 code block: the full diagnostic list equals base's, code for code", () => {
     const spec = readFileSync(join(import.meta.dir, "..", "..", "SPEC.md"), "utf8");
     const sec = spec.slice(spec.indexOf("### 66.19 Worked programs"), spec.indexOf("### 66.20 Diagnostics"));
     const blocks = [...sec.matchAll(/```scrml\n([\s\S]*?)```/g)].map((m) => m[1]);
-    expect(blocks.length).toBeGreaterThanOrEqual(8);
-    for (const b of blocks) {
-      const found = codes([{ path: "p.scrml", src: b }]).filter((c) => TYPER_CODES.includes(c));
-      expect(found).toEqual([]);
-    }
+    expect(blocks.length).toBe(BASE_66_19.length);
+    const got = blocks.map((b) => codes([{ path: "p.scrml", src: b }]).sort());
+    expect(got).toEqual(BASE_66_19);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fix round 1 (adversarial review of the first cut).
+// ---------------------------------------------------------------------------
+describe("A — a local's type: its annotation, else the join of everything it is given", () => {
+  test("legal — `let a = not; a = \"x\"` then `@s = a` (§42.3.1: infer `T | not`; a `T | not` into `T` is unproven, silent)", () => {
+    expect(inApp("    <let s:string=\"\"/>\n    function f() { let a = not\n a = \"x\"\n @s = a }")).toEqual([]);
+  });
+  test("legal — the annotated form `let a: string | not = not` then `@s = a`", () => {
+    expect(inApp("    <let s:string=\"\"/>\n    function f() { let a: string | not = not\n @s = a }")).toEqual([]);
+  });
+  test("legal — the same shape in an inline handler block, and through `.push`", () => {
+    expect(inApp("    <audit:string[free, end]=([])/>\n    function f() { let a = not\n a = \"x\"\n @audit.push(a) }",
+      "<button onclick={ let b = not; b = \"y\"; @audit.push(b) }>x</button>")).toEqual([]);
+  });
+  test("silent — `let a = \"s\"; a = 1` then `@x = a` into int: the join is unprovable (was a false E-TYPE-031)", () => {
+    expect(inApp("    <let x:int=0/>\n    function f() { let a = \"s\"\n a = 1\n @x = a }")).toEqual([]);
+  });
+  test("silent — `let a = 1; a = \"s\"` then `@x = a`: same join, same answer (flow-insensitive; not provable either way)", () => {
+    expect(inApp("    <let x:int=0/>\n    function f() { let a = 1\n a = \"s\"\n @x = a }")).toEqual([]);
+  });
+  test("E-TYPE-031 — the join is still a TYPE: `let a = not; a = \"x\"` (`string | not`) into an int cell", () => {
+    expect(inApp("    <let x:int=0/>\n    function f() { let a = not\n a = \"x\"\n @x = a }")).toEqual(["E-TYPE-031"]);
+  });
+  test("E-TYPE-031 — an annotated local is its annotation (`let a: string = \"x\"` into an int cell)", () => {
+    expect(inApp("    <let x:int=0/>\n    function f() { let a: string = \"x\"\n @x = a }")).toEqual(["E-TYPE-031"]);
+  });
+  test("twin silent — `let a: int = 1` into an int cell; a rebound local read BEFORE its reassignment is typed from the join", () => {
+    expect(inApp("    <let x:int=0/>\n    function f() { let a: int = 1\n @x = a }")).toEqual([]);
+    expect(inApp("    <let x:int=0/>\n    function f() { let a = 1\n @x = a\n a = 2 }")).toEqual([]);
+  });
+});
+
+describe("B — a whole-struct replace by a literal checks every field (spelling-independent, §66.1 rule 5)", () => {
+  const P = "    type P:struct = { let x: int, let y: int }\n    <let p:P=({ x: 1, y: 2 })/>\n";
+  test("E-TYPE-031 — `@p = { x: 1, y: \"s\" }`", () => {
+    expect(inApp(P + "    function f() { @p = { x: 1, y: \"s\" } }")).toEqual(["E-TYPE-031"]);
+  });
+  test("E-TYPE-041 — `@p = { x: 1, y: not }`", () => {
+    expect(inApp(P + "    function f() { @p = { x: 1, y: not } }")).toEqual(["E-TYPE-041"]);
+  });
+  test("twin silent — `@p = { x: 1, y: 2 }`", () => {
+    expect(inApp(P + "    function f() { @p = { x: 1, y: 2 } }")).toEqual([]);
+  });
+  test("E-TYPE-031 — a struct literal inside an appended element", () => {
+    const L = "    type L:struct = { id: int, name: string }\n    <ls:L[free, end]=([])/>\n";
+    expect(inApp(L + "    function f() { @ls.push({ id: 1, name: 5 }) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(L + "    function f() { @ls.push({ id: 1, name: \"a\" }) }")).toEqual([]);
+  });
+});
+
+describe("C — no check against what failed to parse", () => {
+  test("`@s = #` — only the parse error (the recovery node is not `not`)", () => {
+    expect(inApp("    <let s:string=\"\"/>\n    function f() { @s = # }")).toEqual(["E-PARSE-EXPR"]);
+  });
+  test("a back-tick template — only the parse error", () => {
+    expect(inApp("    <let s:string=\"\"/>\n    function f() { @s = `t` }")).toEqual(["E-PARSE-EXPR"]);
+  });
+  test("`<let x:int|not=0/>` then `@x = not` — only the parse error (the cell's type did not parse)", () => {
+    expect(inApp("    <let x:int|not=0/>\n    function f() { @x = not }")).toEqual(["E-PARSE-TAG"]);
+  });
+  test("`<box n:string|not=\"\"/>` used as `<box n=(not)/>` — only the parse error", () => {
+    expect(codes([boxLib("export <box n:string|not=\"\"/>\nrenders <p>x</p>\n"), boxApp("<box n=(not)/>")])).toEqual(["E-PARSE-TAG"]);
+  });
+  test("no arity check against an untyped / malformed parameter list (default value, `b?:`)", () => {
+    const g = inApp("    function g(a: int, b: int = 1) { }\n    function f() { g(1) }");
+    expect(g).not.toContain("E-BOOTSTRAP-CALL-ARITY");
+    expect(g.every((c) => c === "E-BOOTSTRAP-UNSUPPORTED")).toBe(true);
+    const h = inApp("    function h(a: int, b?: bool) { }\n    function f() { h(1) }");
+    expect(h).not.toContain("E-BOOTSTRAP-CALL-ARITY");
+  });
+  test("a return type that failed to parse is not resolved (no E-TYPE-UNKNOWN \"unknown type ``\")", () => {
+    expect(inApp("    function g() -> [int, string] { }")).not.toContain("E-TYPE-UNKNOWN");
+  });
+});
+
+describe("D / E — names are scoped to what a file can see", () => {
+  const other = { path: "lib/other.scrml", src: "<card title:string=\"\"/>\nrenders <p>x</p>\n" };
+  test("legal — a program cell named like a declaration that is NOT visible here (not declared, not imported)", () => {
+    expect(codes([other, { path: "app.scrml", src: "<program>\n    <let card:int=0/>\n<main><p>x</p></main>\n</program>\n" }])).toEqual([]);
+  });
+  test("legal — an `as=` handle named like a declaration that is NOT visible here", () => {
+    expect(codes([other, boxLib("export <box n:int=0/>\nrenders <p>x</p>\n"), boxApp("<box as=card/>")])).toEqual([]);
+  });
+  test("E-BOOTSTRAP-UNSUPPORTED (kept, measured) — two PRIVATE `helper`s in two libraries: base b7c863235 resolved BOTH calls to the first (a silent mis-link)", () => {
+    const a = { path: "lib/a.scrml", src: "${ function helper() -> int { return 1 }\n export function useA() -> int { return helper() } }\n" };
+    const b = { path: "lib/b.scrml", src: "${ function helper() -> string { return \"b\" }\n export function useB() -> string { return helper() } }\n" };
+    const main = { path: "app.scrml", src: "${ import { useA } from \"./lib/a.scrml\" }\n${ import { useB } from \"./lib/b.scrml\" }\n<program>\n<main><p>${useA()} ${useB()}</p></main>\n</program>\n" };
+    const r = frontEnd(mods, [a, b, main]);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    expect(r.diags[0].message).toContain("the bootstrap links one namespace");
+  });
+});
+
+describe("F — SPEC-silent duplicates (bootstrap-local, owe rulings)", () => {
+  test("F1 E-BOOTSTRAP-REDECLARE — two `type T` in one file", () => {
+    expect(inApp("    type T:struct = { a: int }\n    type T:struct = { b: string }")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  });
+  test("F1 twin silent — two distinct type names", () => {
+    expect(inApp("    type T:struct = { a: int }\n    type U:struct = { b: string }")).toEqual([]);
+  });
+  test("F1 E-BOOTSTRAP-UNSUPPORTED — one type name in two files (one type namespace)", () => {
+    const lib = { path: "lib/t.scrml", src: "${ type T:struct = { a: int } }\n" };
+    expect(codes([lib, LIB(), app("    type T:struct = { b: string }", "<p>x</p>")])).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+  test("F2 E-BOOTSTRAP-REDECLARE — `function g(a: int, a: int)`", () => {
+    expect(inApp("    function g(a: int, a: int) { }")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  });
+  test("F2 twin silent — `function g(a: int, b: int)`", () => {
+    expect(inApp("    function g(a: int, b: int) { }")).toEqual([]);
+  });
+});
+
+describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () => {
+  test("E-BOOTSTRAP-EACH-NOT-SEQUENCE — `in=\"abc\"` and `in=not`, like a cell of that type", () => {
+    expect(inApp("", "<each in=\"abc\" as c><p>x</p></each>")).toEqual(["E-BOOTSTRAP-EACH-NOT-SEQUENCE"]);
+    expect(inApp("", "<each in=not as c><p>x</p></each>")).toEqual(["E-BOOTSTRAP-EACH-NOT-SEQUENCE"]);
+  });
+  test("twin silent — `in=([1, 2])`", () => {
+    expect(inApp("", "<each in=([1, 2]) as c><p>${c}</p></each>")).toEqual([]);
+  });
+  test("legal — a ROW-scoped `as=q` beside a program CELL `q` (§66.7.4: row-local); inside the row `@q` is the handle", () => {
+    expect(inApp("    type L:struct = { id: int }\n    <lines:L[]=([{ id: 1 }])/>\n    <let q:int=0/>",
+      "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/><p>${@q.value}</p></each>")).toEqual([]);
+  });
+  test("still refused — a PROGRAM-scope `as=q` beside a program cell `q`", () => {
+    expect(inApp("    <let q:int=0/>", "<dropdown as=q label=\"1\" options=([\"a\"])/>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  });
+  test("kept (owes a ruling) — one `as=x` in each of two mutually exclusive `if=` arms", () => {
+    expect(inApp("    <let b:bool=false/>", "<div if=@b><dropdown as=x label=\"1\" options=([\"a\"])/></div><div if=(!@b)><dropdown as=x label=\"2\" options=([\"a\"])/></div>"))
+      .toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  });
+  test("silent — a mixed-arm ternary (`@b ? 1 : \"s\"`) into an int cell: unprovable", () => {
+    expect(inApp("    <let b:bool=false/>\n    <let x:int=0/>\n    function f() { @x = @b ? 1 : \"s\" }")).toEqual([]);
+  });
+});
+
+// Ruling B1 (ruling:user-voice-scrml.md S439 #6 (B1)): a nested `function x`
+// in a body whose PARAMETER is `x` is EXEMPT from E-SCOPE-REDECLARE. The slice
+// front end has no nested-function statement (§7.3.1 is front-end growth, M3
+// item 4): `function x() { }` in a body parses as expression statements, so no
+// declaration reaches the scope pass and the exemption holds by construction.
+// This pins that; the exemption must be implemented in `blockRedeclares` the
+// day nested functions parse. The let / const twin still fires.
+describe("§7.3.3 ruling B1 — a nested function over a parameter", () => {
+  test("no E-SCOPE-REDECLARE — `function f(x: int) { function x() { } }`", () => {
+    expect(inApp("    function f(x: int) { function x() { } }")).not.toContain("E-SCOPE-REDECLARE");
+  });
+  test("twin fires — `let x` / `const x` over parameter `x`", () => {
+    expect(inApp("    function f(x: int) { let x = 1 }")).toEqual(["E-SCOPE-REDECLARE"]);
+    expect(inApp("    function f(x: int) { const x = 1 }")).toEqual(["E-SCOPE-REDECLARE"]);
   });
 });

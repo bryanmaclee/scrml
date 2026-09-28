@@ -380,7 +380,7 @@ ${
         }
         if (isP(tp, LB())) return parseObject(tp)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
-        return mkE(adv(bad), start, AExprK.NotLit)
+        return mkE(adv(bad), start, AExprK.Recovered)
     }
 
     fn parseKeywordPrimary(tp: TP) -> RExpr {
@@ -391,7 +391,7 @@ ${
         if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
         if (t.v == "null" || t.v == "undefined") {
             const d: TP = diagAt(tp, "E-PARSE-NO-NULL", "`" + t.v + "` does not exist in scrml — absence is `not` (§42)", t)
-            return mkE(adv(d), start, AExprK.NotLit)
+            return mkE(adv(d), start, AExprK.Recovered)
         }
         return mkE(adv(tp), start, AExprK.Name(t.v))
     }
@@ -408,7 +408,7 @@ ${
             return mkE(adv(tp), at.start, AExprK.AtItem)
         }
         const bad: TP = diagAt(tp, "E-PARSE-AT", "`@` must be followed by a name (`@count`) or `.` (`@.field`)", at)
-        return mkE(adv(bad), at.start, AExprK.NotLit)
+        return mkE(adv(bad), at.start, AExprK.Recovered)
     }
 
     fn isSpread(tp: TP) -> boolean {
@@ -520,13 +520,15 @@ ${
         const nameTok: PTok = cur(t)
         if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `let` / `const`", nameTok)
         t = adv(t)
+        let aty: AType | not = not
         if (isP(t, ":")) {
             const ty: RType = parseType(adv(t))
+            aty = ty.t
             t = ty.tp
         }
         t = expectP(t, "=")
         const init: RExpr = parseAssign(t)
-        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, init.e))
+        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e))
     }
 
     fn parseIf(tp: TP) -> RStmt {
@@ -1438,6 +1440,7 @@ ${
             .Str(v: s) :> true
             .Bool(v: b) :> true
             .NotLit :> true
+            .Recovered :> true
             .Variant(name: n) :> true
             .At(name: n) :> true
             .ArrayLit(elems: es) :> es.length == 0
@@ -1464,6 +1467,7 @@ ${
             .Str(v: s) :> false
             .Bool(v: b) :> false
             .NotLit :> false
+            .Recovered :> false
             .Variant(name: n) :> false
             .Member(obj: x) :> false
             .Call(callee: x) :> false
@@ -1636,6 +1640,8 @@ ${
     export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
         const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path }
         const r: RMItems = parseMarkupItems(m0, "")
-        return { ast: { path: path, items: r.items }, diags: r.mp.diags, nextId: r.mp.nid }
+        let errs: ASpan[] = []
+        for (const d of r.mp.diags) { errs = errs.concat([d.span]) }
+        return { ast: { path: path, items: r.items, errs: errs }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 }
