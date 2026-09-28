@@ -17703,6 +17703,15 @@ function parseArmPattern(armText: string): ParsedArmPattern {
     if (segments.length > 1) {
       const firstIsVariant = altRhsIsVariantPattern(segments[0]);
       const restAllVariants = segments.slice(1).every(altRhsIsVariantPattern);
+      if (firstIsVariant && restAllVariants &&
+          segments.some((s) => /^(?:_(?!\w)|else\b)/.test(s.trim()))) {
+        // A wildcard alternate (`.A | _`, `_ | .A`, `.A | else`) matches every
+        // value, so the whole arm IS the wildcard arm — in ANY alternate
+        // position, not only the first (patOnly below reads only the first).
+        // Codegen (emit-control-flow.ts parseMatchArm Form 0w) lowers it the
+        // same way (g-impl1-match-miscompiles F12).
+        return { kind: "wildcard", isElse: true, isNot: false, hasGuard: false, armText };
+      }
       if (firstIsVariant && restAllVariants) {
         // Pure variant-pattern alternation — harvest each alternate's name.
         const names: string[] = [];
