@@ -165,3 +165,5 @@ F3 is test-only → committed alone. F1/F2 tests stay uncommitted until their fi
 - Mutations: "STRICT SNAPSHOT off" and "duplicate key accepted" added.
 - Gates: slices 418/0; lowered M1 73/0; lint 0; mutations 81, 0 problems (strict-snapshot RED 6, dup RED 3);
   bite matrix 32 CERTIFIED / 0 UNCERTIFIED exit 0; footprint 18/18 runtime.
+- Committed `ece7bc96b`. main moved again (#1125 `7e4bc8155`, touches compiler/src/api.js + commands/) → merged
+  as `a6fe0000e`, no conflicts; re-ran on the merged tip: slices 418/0, lowered M1 73/0, lint 0, footprint 18/18.
