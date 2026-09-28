@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 148 | 4 |
-| MED | 328 | 0 |
+| MED | 329 | 0 |
 | LOW | 133 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -419,6 +419,20 @@ held to the rules only when it reads as a head — prose (`# create the table fo
 fires. SPEC §39.2 now lists the exempt literal forms and no longer claims a commented-out
 declaration "only adds floor". All new pins are red on `dccdc1cc`.
 
+**S438 ROUND 4 — the last round; NARROWING only (review of `38ec0e14`: no tag loss vs base,
+but round 3's new surface opened escapes).** F1: round 3's word-start guard counted `$` as a word
+character, so `$$CREATE TABLE a.b.assets (…)$$` escaped E-SCHEMA-012 AND dropped out of the
+harvest's structured (extra-keys) leg — round 3's code comment said the harvest was unaffected;
+that was wrong for the extra-keys leg (the pre-S438 leg, and so the ⊇-base guarantee, was
+unaffected). The boundary is now letter/digit/`_` only. F2: round 3's `//` and free-text `"""`
+masks were wider than §39.2 and masked live qualified heads in raw SQL (`DEFAULT $$http://x$$`,
+`"""a"` … `"b"""`). `//` masking is dropped (a `//`-commented qualified head is the accepted
+fail-closed false positive) and the `fn`-body exemption is now STRUCTURAL — the ranges of the
+SECURITY-DEFINER `fn` declarations the `<schema>` parser itself accepts (`schemaFnDeclRanges`,
+the same scan as `parseSchemaBlock`), no free-text pairing. F3: `PARTITION` is a follower only as
+`PARTITION OF`; the no-column-list acceptance is filed below as
+`g-schema-no-column-list-heads-declare-nothing`. All round-4 pins are red on `38ec0e14`.
+
 **(Original entry, kept for the record.) ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
 
 The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
@@ -485,6 +499,21 @@ E-SCHEMA-012/013 correctly ignore those heads; only the harvest reads them. **PA
 floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
 base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
 purpose. — `NEW S438-peter`; **HIGH**; open
+
+### g-schema-no-column-list-heads-declare-nothing — `CREATE TABLE t OF type` / `PARTITION OF parent` / `AS query` in a `<schema>` compile clean and declare no columns, so a `tenant_id` table reached that way is not tenant-scoped
+
+<!-- @gap id=g-schema-no-column-list-heads-declare-nothing sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads a column list only; readCreateTableHead's CREATE_TABLE_NAME_FOLLOWERS accepts OF / PARTITION OF / AS / WITH / ON / TABLESPACE / INHERITS heads without one) prov=review:S438-round-4-F3+empirical:reviewer-compiled-on-38ec0e14-and-base-identical -->
+
+**Pre-existing on base, unchanged by S438 (whose round 4 kept these heads ACCEPTED rather than
+rejecting them).** A raw head with no column list — a typed table `CREATE TABLE assets OF
+asset_t`, a partition child `CREATE TABLE assets_p PARTITION OF assets DEFAULT`, a CTAS
+`CREATE TABLE assets AS SELECT … tenant_id …` — declares NO columns to the §14.8.9 / §14.8.10
+floors, so a query on that table gets no tenant tag (measured tag=0, exit 0, on base and branch;
+the CTAS case happened to tag only because its source table was declared). The same holds for the
+other accepted followers (`WITH`, `ON COMMIT`, `TABLESPACE`, `INHERITS` — the latter declares its
+own list but not the parent's inherited `tenant_id`). **Direction is bryan's:** reject these in a
+`<schema>` (fail-closed, E-SCHEMA-013-shaped), or resolve their columns (parent / type / query) —
+the latter is a real schema-resolution feature. — `NEW S438-peter`; **MED**; open
 
 ### g-schema-dsl-qualified-table-head-silently-stripped — the DECLARATIVE `mydb.public.assets { … }` is accepted as `assets`, so `a.assets` + `b.assets` collapse and the second (with `tenant_id`) is silently dropped
 

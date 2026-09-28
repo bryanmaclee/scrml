@@ -29,6 +29,25 @@ import { quoteIdent } from "./codegen/sql-ident.ts";
  * @returns {{ tables: TableDecl[], fns: SecdefFnDecl[] }}
  */
 export function parseSchemaBlock(schemaBody) {
+  return scanSchemaBlock(schemaBody, null);
+}
+
+/**
+ * The source ranges `[start, end)` of every §14.8.11.2 SECURITY-DEFINER `fn`
+ * declaration `parseSchemaBlock` recognizes in a `< schema>` body — the SAME scan,
+ * so "is this text inside a fn body" is answered by the parser that defines a fn,
+ * never by free-text `"""` pairing (S438 round 4, F2).
+ *
+ * @param {string} text
+ * @returns {Array<[number, number]>}
+ */
+export function schemaFnDeclRanges(text) {
+  const ranges = [];
+  scanSchemaBlock(text, ranges);
+  return ranges;
+}
+
+function scanSchemaBlock(schemaBody, fnRanges) {
   const tables = [];
   const fns = [];
   const text = typeof schemaBody === "string" ? schemaBody : (schemaBody?.body ?? "");
@@ -48,6 +67,7 @@ export function parseSchemaBlock(schemaBody) {
       const parsed = parseFnDecl(text, i, fnHead);
       if (parsed) {
         fns.push(parsed.fn);
+        if (fnRanges) fnRanges.push([i, parsed.next]);
         i = parsed.next;
         continue;
       }
@@ -346,9 +366,11 @@ const CREATE_TABLE_MODIFIER_WORDS = new Set([
  * The token that may FOLLOW a table's name in a `CREATE TABLE` head (SQLite +
  * Postgres grammar): the column list `(`, or one of the clause keywords
  * `AS` (CREATE TABLE … AS query), `USING` (virtual-table module / access method),
- * `WITH` (storage parameters), `ON` (ON COMMIT), `TABLESPACE`, `PARTITION` (`PARTITION
- * OF parent`), `OF` (typed table `OF type`), `INHERITS`. A name followed by
- * anything else was not read as a name (E-SCHEMA-013).
+ * `WITH` (storage parameters), `ON` (ON COMMIT), `TABLESPACE`, `PARTITION` — ONLY
+ * as `PARTITION OF parent` (checked at the use site) — `OF` (typed table `OF
+ * type`), `INHERITS`. A name followed by anything else was not read as a name
+ * (E-SCHEMA-013). A readable head with no column list declares no columns — gap
+ * g-schema-no-column-list-heads-declare-nothing.
  */
 const CREATE_TABLE_NAME_FOLLOWERS = ["AS", "USING", "WITH", "ON", "TABLESPACE", "PARTITION", "OF", "INHERITS"];
 
@@ -362,9 +384,15 @@ const CREATE_TABLE_NAME_FOLLOWERS = ["AS", "USING", "WITH", "ON", "TABLESPACE", 
  */
 function readCreateTableHead(src, i) {
   // `CREATE` must START a word too (S438 round 3, F-C): `precreate table …` and
-  // `xCREATE TABLE …` are not heads for the reader. The HARVEST is unaffected —
-  // its pre-S438 leg reads `xCREATE TABLE t (…)` exactly as base did.
-  if (i > 0 && SQL_IDENT_CHAR.test(src[i - 1])) return null;
+  // `xCREATE TABLE …` are not heads for the reader. The boundary is a preceding
+  // letter / digit / `_` ONLY — NOT `$` (round 4, F1): `$$CREATE TABLE …$$` and
+  // `$f$CREATE TABLE …$f$` are dollar-quote delimiters directly before a real
+  // head, and round 3's `$`-inclusive guard hid them from BOTH E-SCHEMA-012 and
+  // the structured harvest leg. ⚑ This guard DOES apply to the harvest's
+  // structured (extra-keys) leg; the pre-S438 leg, which has no boundary, still
+  // reads everything base read — so the ⊇-base guarantee is unaffected, but an
+  // extra key before a word character is not read.
+  if (i > 0 && /[\p{L}\p{N}_]/u.test(src[i - 1])) return null;
   let j = readSqlKeyword(src, i, "CREATE");
   if (j === -1) return null;
   j = skipSqlTrivia(src, j);
@@ -407,7 +435,13 @@ function readCreateTableHead(src, i) {
   }
   const parenAt = parts.length > 0 && !danglingDot && src[k] === "(" ? k : -1;
   const readable = parts.length > 0 && !danglingDot &&
-    (parenAt !== -1 || CREATE_TABLE_NAME_FOLLOWERS.some((w) => readSqlKeyword(src, k, w) !== -1));
+    (parenAt !== -1 || CREATE_TABLE_NAME_FOLLOWERS.some((w) => {
+      const e = readSqlKeyword(src, k, w);
+      if (e === -1) return false;
+      // `PARTITION` is a follower only as `PARTITION OF` (round 4, F3) — the
+      // E-SCHEMA-013 message names `PARTITION OF`, and the code must agree.
+      return w !== "PARTITION" || readSqlKeyword(src, skipSqlTrivia(src, e), "OF") !== -1;
+    }));
   const knownKind = modifiers.every((w) => CREATE_TABLE_MODIFIER_WORDS.has(w));
   return { start: i, modifiers, parts, danglingDot, readable, knownKind, headEnd: k, parenAt };
 }
@@ -495,8 +529,13 @@ export function findRejectedCreateTableHeads(text) {
   const out = [];
   if (typeof text !== "string") return out;
   const masked = blankLiteralBodies(text, { comments: true, backtick: false });
+  // A §14.8.11.2 SECURITY-DEFINER `fn` declaration's body is runtime plpgsql, not
+  // a declaration — identified STRUCTURALLY by the `< schema>` parser's own fn
+  // scan (round 4, F2), never by pairing `"""` in free text.
+  const fnRanges = schemaFnDeclRanges(text);
+  const inFnDecl = (pos) => fnRanges.some(([s, e]) => pos >= s && pos < e);
   for (const h of scanCreateTableHeads(text)) {
-    if (!isLiveHead(masked, h)) continue;
+    if (!isLiveHead(masked, h) || inFnDecl(h.start)) continue;
     // An unknown modifier word (prose: `create the table for tenants`) counts as a
     // head only if the rest PARSES as one — a readable name chain followed by `(`
     // or a clause keyword. Then it is held to every rule; otherwise it is prose.
@@ -951,13 +990,13 @@ function parseFnArgs(argText) {
  * `< schema>` body, where DSL text and raw SQL mix) — in ONE left-to-right pass,
  * earliest opener wins, so a comment opener inside a literal is inert and a quote
  * inside a comment is inert. The forms blanked:
- *   · `"""…"""` — the DSL's multi-line literal (a SECURITY-DEFINER `fn` body),
- *     across lines;
  *   · `'…'` and `"…"` — bounded to their LINE (an unbalanced `'` in prose must
  *     not blank the rest of the body);
  *   · `/…/` — only directly after a `(` (`pattern(/…/)`, the one place the DSL
  *     grammar puts a regex; SQL `a / b` is division), bounded to its line;
- *   · `--` and `//` line comments, and CLOSED `/* … *\/` block comments.
+ *   · `--` line comments and CLOSED `/* … *\/` block comments.
+ * NOT `"""…"""` and NOT `//` (round 4 — see the note in the body). A SECURITY-
+ * DEFINER `fn` body is exempted by its caller via `schemaFnDeclRanges`.
  * `opts.backtick: false` leaves `` `…` `` LIVE: in a `< schema>` body a backtick
  * is either a quoted identifier inside a head or a `?{`…`}` wrapper around live
  * DDL, never inert text. Defaults reproduce the E-SCHEMA-011 behaviour exactly.
@@ -973,21 +1012,14 @@ function blankLiteralBodies(s, opts = {}) {
   let i = 0;
   while (i < s.length) {
     const ch = s[i];
-    // The DSL's MULTI-LINE literal: a §14.8.11.2 SECURITY-DEFINER `fn` body is
-    // `"""…"""` plpgsql, executed at runtime — never a `< schema>` declaration. It
-    // must be recognized before the line-bounded `"` rule below, which would
-    // otherwise close it at the first newline and leave its SQL live (S438 round
-    // 3, F-A). An unterminated `"""` is not blanked.
-    if (comments && s.startsWith('"""', i)) {
-      const close = s.indexOf('"""', i + 3);
-      if (close !== -1) {
-        out += '"""' + s.slice(i + 3, close).replace(/[^\n]/g, " ") + '"""';
-        i = close + 3;
-        continue;
-      }
-    }
-    // `--` (SQL) and `//` (the DSL's line comment — parseColumns strips it too).
-    if (comments && ((ch === "-" && s[i + 1] === "-") || (ch === "/" && s[i + 1] === "/"))) {
+    // ⚑ NO `"""` AND NO `//` HANDLING HERE (S438 round 4, F2). Round 3 blanked any
+    // `"""…"""` pair and any `//`-to-end-of-line; both are also ordinary RAW-SQL
+    // text (`"""a"` … `"b"""` quoted identifiers, `DEFAULT $$http://x$$`), so each
+    // masked a live qualified head and let it escape E-SCHEMA-012. A SECURITY-
+    // DEFINER `fn` body is now exempted STRUCTURALLY by the caller
+    // (`schemaFnDeclRanges`); a `//` line is live (a `//`-commented qualified head
+    // is the accepted fail-closed false positive).
+    if (comments && ch === "-" && s[i + 1] === "-") {
       let j = i;
       while (j < s.length && s[j] !== "\n") j++;
       out += " ".repeat(j - i);

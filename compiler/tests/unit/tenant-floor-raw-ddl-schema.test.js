@@ -866,6 +866,64 @@ ${sql}
   });
 });
 
+// Round 4 — NARROWING only (the review's exact shapes), each red on 38ec0e14.
+describe("round 4 — the round-3 escapes are closed (F1 `$` boundary, F2 mask scope, F3 PARTITION OF)", () => {
+  const C4 = "(id INTEGER PRIMARY KEY, tenant_id TEXT NOT NULL)";
+  const kinds = (sql) => findRejectedCreateTableHeads(sql).map((h) => `${h.kind}:${h.name}`);
+  const harvested = (sql) => { const m = new Map(); harvestRawCreateTables(sql, m); return [...m.keys()]; };
+
+  test("F1: a dollar-quote delimiter directly before CREATE is not a word boundary — rejected AND harvested", () => {
+    for (const sql of [`$$CREATE TABLE a.b.assets ${C4}$$`, `$f$CREATE TABLE a.b.assets ${C4}$f$`]) {
+      expect(kinds(sql)).toEqual(["qualified:assets"]);
+      expect(harvested(sql)).toContain("assets");
+    }
+  });
+
+  test("F1: compiled — `CREATE FUNCTION mk() … AS $$CREATE TABLE app.public.assets (…)$$` is E-SCHEMA-012, floor engaged", () => {
+    const { r, server } = compileSchemaApp(
+      `    CREATE TABLE notes (id INTEGER PRIMARY KEY);\n    CREATE FUNCTION mk() RETURNS void LANGUAGE sql AS $$CREATE TABLE app.public.assets ${COLS}$$;`,
+    );
+    expect(errCodes(r)).toContain("E-SCHEMA-012");
+    expect(tagged(server)).toBe(true);
+  });
+
+  test("F2: `//` and a `\"\"\"` pair INSIDE raw SQL no longer mask a later qualified head", () => {
+    for (const sql of [
+      `CREATE TABLE n (u TEXT DEFAULT $$http://x$$); CREATE UNLOGGED TABLE a.b.assets ${C4}`,
+      `CREATE TABLE n (u TEXT DEFAULT $$http://x$$); CREATE TABLE a.b.assets ${C4}`,
+      `CREATE TABLE n (x INT GENERATED ALWAYS AS (a // b) STORED); CREATE TABLE a.b.assets ${C4}`,
+      `CREATE TABLE "t""" (id INTEGER);\nCREATE UNLOGGED TABLE a.b.assets ${C4};\nCREATE TABLE """u" (id INTEGER)`,
+      `CREATE TABLE """a" (id INTEGER);\nCREATE TABLE a.b.assets ${C4};\nCREATE TABLE "b""" (id INTEGER)`,
+      `CREATE TABLE n (x TEXT DEFAULT "")\n"x";\nCREATE TABLE a.b.assets ${C4};\n""" "`,
+    ]) {
+      expect(kinds(sql)).toContain("qualified:assets");
+    }
+  });
+
+  test("F2: compiled — `$$http://x$$` on the line no longer lets a qualified UNLOGGED head escape", () => {
+    const { r } = compileSchemaApp(
+      `    CREATE TABLE notes (id INTEGER PRIMARY KEY, u TEXT DEFAULT $$http://x$$); CREATE UNLOGGED TABLE a.b.assets ${COLS}`,
+    );
+    expect(errCodes(r)).toContain("E-SCHEMA-012");
+  });
+
+  test("F2: the fn-body exemption is STRUCTURAL — an unparsed `fn` (no owner) or an unterminated one is not exempt", () => {
+    expect(kinds(`fn f() security definer {\n"""\nCREATE TABLE a.b.assets ${C4};\n"""\n}`)).toEqual(["qualified:assets"]);
+    expect(kinds(`fn f() {\n"""\nCREATE TABLE a.b.assets ${C4};\n`)).toEqual(["qualified:assets"]);
+    // …while a real, parsed SECDEF fn body is exempt (F-A still holds).
+    expect(kinds(`fn f(id: uuid) security definer owner(a) {\n"""\nCREATE TABLE a.b.assets ${C4};\n"""\n}`)).toEqual([]);
+  });
+
+  test("F2: a `//`-commented qualified head is the accepted fail-closed false positive", () => {
+    expect(kinds(`// CREATE TABLE a.b.assets ${C4}`)).toEqual(["qualified:assets"]);
+  });
+
+  test("F3: `PARTITION` is a name follower only as `PARTITION OF`", () => {
+    expect(kinds("CREATE TABLE assets_p PARTITION OF assets DEFAULT")).toEqual([]);
+    expect(kinds("CREATE TABLE assets_p PARTITION assets DEFAULT")).toEqual(["unreadable:assets_p"]);
+  });
+});
+
 describe("E-SCHEMA-012 — reader level: findRejectedCreateTableHeads", () => {
   const q = (sql) => findRejectedCreateTableHeads(sql)
     .filter((h) => h.kind === "qualified")
@@ -924,8 +982,7 @@ describe("E-SCHEMA-012 — reader level: findRejectedCreateTableHeads", () => {
     none("created_at.x (y)");                                  // `created` is not CREATE
     none("CREATE TABLE if (x INT)");                           // a table named `if`
     none("CREATE VIEW v AS SELECT a FROM t");                  // not a table head
-    none("// CREATE TABLE a.t (x INT)\n");                     // DSL line comment
-    none('fn f() { """\n CREATE TABLE a.b.t (x INT)\n""" }');  // multi-line fn body
+    none('fn f(id: uuid) security definer owner(a) { """\n CREATE TABLE a.b.t (x INT)\n""" }');  // a parsed SECDEF fn body
   });
 
   test("a head AFTER a column body carrying a nested `(` is still found (resume past the real end)", () => {
@@ -1022,7 +1079,7 @@ describe("THE INVARIANT — harvest ⊇ the pre-S438 harvest, for every body", (
     for (const body of NAMED) expect(assertSuperset(body)).toBeNull();
   });
 
-  test("a generated sweep: 3,000 seeded bodies mixing DSL literals, comments and every head spelling", () => {
+  test("a generated sweep: 5,000 seeded bodies mixing DSL literals, comments and every head spelling", () => {
     let seed = 0x5438;
     const rnd = (n) => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed % n; };
     const pick = (xs) => xs[rnd(xs.length)];
@@ -1035,13 +1092,14 @@ describe("THE INVARIANT — harvest ⊇ the pre-S438 harvest, for every body", (
       'q { s: text default("CREATE TABLE x.y.z (a)") }',
       "people {\n  id: integer primary key\n}",
     ];
-    const TRIVIA = ["/* c */", "-- c", "// c", "/* unterminated", "'", "\"", "*/", "/*", "$$", ""];
-    const NAMES = ["assets", "notes", "orders", "données", "a$b", "Assets"];
-    const QUAL = ["", "public.", "db.public.", '"p".', "`p`.", "[p].", "p /* x */ . ", "p . ", "my-db.", '"".'];
-    const HEAD = ["CREATE TABLE ", "create table ", "CREATE TABLE IF NOT EXISTS ", "CREATE TEMP TABLE ", "CREATE /*x*/ TABLE ", "CREATE\tTABLE\n", "xCREATE TABLE "];
-    const BODY = [COLS, "(id INTEGER, tenant_id TEXT CHECK (tenant_id <> ''))", "(id INTEGER, g TEXT DEFAULT '/*')", "(id INTEGER, u TEXT DEFAULT 'http://x', tenant_id TEXT)", "(id NUMERIC(10,2), tenant_id TEXT)", "(id INTEGER"];
+    // Round 4 (the review's inv3): `$$`-prefixed heads, `"""` and `//` inside raw SQL.
+    const TRIVIA = ["/* c */", "-- c", "// c", "/* unterminated", "'", "\"", "*/", "/*", "$$", "", '"""', '"""\n', "//", "http://", "$$http://x$$", 'fn f() {\n"""', '"""\n}', "'\"\"\"'"];
+    const NAMES = ["assets", "notes", "orders", "données", "a$b", "Assets", '"a"""', '"""b"""'];
+    const QUAL = ["", "public.", "db.public.", '"p".', "`p`.", "[p].", "p /* x */ . ", "p . ", "my-db.", '"".', '"p""".', "a.b.c."];
+    const HEAD = ["CREATE TABLE ", "create table ", "CREATE TABLE IF NOT EXISTS ", "CREATE TEMP TABLE ", "CREATE /*x*/ TABLE ", "CREATE\tTABLE\n", "xCREATE TABLE ", "$$CREATE TABLE ", "$f$CREATE TABLE ", '"""CREATE TABLE ', "//CREATE TABLE ", "CREATE UNLOGGED TABLE ", "CREATE FOO TABLE ", "éCREATE TABLE ", "1CREATE TABLE "];
+    const BODY = [COLS, "(id INTEGER, tenant_id TEXT CHECK (tenant_id <> ''))", "(id INTEGER, g TEXT DEFAULT '/*')", "(id INTEGER, u TEXT DEFAULT 'http://x', tenant_id TEXT)", "(id NUMERIC(10,2), tenant_id TEXT)", "(id INTEGER", "(id INTEGER, u TEXT DEFAULT '\"\"\"', tenant_id TEXT)", "(id INTEGER, u TEXT DEFAULT \"//x\", tenant_id TEXT)"];
     const SEP = ["\n", " ", ";", "\n\n", ""];
-    for (let n = 0; n < 3000; n++) {
+    for (let n = 0; n < 5000; n++) {
       const parts = [];
       const len = 1 + rnd(6);
       for (let p = 0; p < len; p++) {
