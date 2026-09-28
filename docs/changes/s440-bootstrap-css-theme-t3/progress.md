@@ -120,3 +120,20 @@ lower produce the Core css node from `<theme>` + §66 declarations + `#{}`.
   rules once per USE (4×), the bootstrap once — impl#1 redundancy, same effect; gauntlet-s79-calculator:
   a `//` comment inside `#{}` becomes garbage declarations `subtle: ; scanline: ; …` in impl#1 — impl#1
   bug (§27.1: `//` is a comment in every context); the bootstrap fails closed on it.
+
+## 2026-09-28 — FINAL numbers (tip b063a7e0e + reports)
+- CSS footprint grade (`bun scripts/hybrid.ts --swap CSS=compiler/self-host-v2/slice-m3/css-substitute.js
+  --footprint --report …/footprint-css-2026-09-28.md`): exit 0. 1048/1048 classified; GRADED 565
+  (conformance run 565/565: 299 runtime passes, 0 fail; codes-only passes are front-end codes); NOT-YET 36;
+  FRONT-END 447. **CSS half: 32 css passes of 32** (17 conformance · 9 css-only sources · 6 Core-level);
+  548 graded conformance cases carry a stylesheet but no oracle (unobserved — not evidence); 7 css-only
+  sources NOT graded (the OPEN / adversarial list).
+- CG footprint grade unchanged: 18/18 runtime passes, 10 codes-only, NOT-YET 573, FRONT-END 447.
+- Bite matrix (both phases, 331 s, exit 0 → bite-matrix-2026-09-28.md): CG 18 runtime passes, 32
+  certified / 0 uncertified (unchanged; Field.Derived shim-mode corruption still does not bite, as s439
+  recorded). CSS 32 css passes, 36 corruptions, **27 certified / 0 uncertified**.
+  Thin evidence (certified by ONE pass): Css.Global, Css.Import, Css.Charset, Sel.Id, Comb.Child,
+  Comb.NextSibling, Comb.LaterSibling, Token.ScriptWrites, Value.CellVar.
+- impl#1 conformance (`bun conformance/run.ts`): 1041/1048 pass + 7 xfail — unchanged.
+- Suites: slice-m1 73/0 · slice-m2 284/0 · slice-m3 53/0 (css.test 26, css-half 1, bite 3, + s439's) ·
+  lint 48 files 0 violations · pre-commit gate (b063a7e0e) 32084 pass / 85 skip / 0 fail.
