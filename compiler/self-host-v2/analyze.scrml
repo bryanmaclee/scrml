@@ -160,7 +160,7 @@ ${
     }
     export type EffectFact:enum = {
         EWrite(w: WriteFact),                             // an assignment / an edit call
-        ESpread(ws: SpreadWrite[]),                       // a spread assignment: FieldAt edits (O58 (b))
+        ESpread(ws: SpreadWrite[], inst: Sym),            // a spread assignment: FieldAt edits (O58 (b)); `inst`: the instance local
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
     }
@@ -2235,7 +2235,17 @@ ${
             }
             j = j + 1
         }
-        return addEffect(st, e.nid, EffectFact.ESpread(ws))
+        return spreadEffect(st, e, ws, iDecl.hint)
+    }
+
+    // The spread's effect. `inst` is the local the written instance is resolved
+    // into ONCE, before the Commit (lower: `Let inst = Handle(…)`, the writes go
+    // through `Narrowed(inst)`), so a flush can never make a later write of the
+    // same edit re-resolve a handle to a different instance. Minted here so
+    // `lower` still decides nothing.
+    fn spreadEffect(st0: AS, e: AExpr, ws: SpreadWrite[], hint: string) -> AS {
+        const m: RSym = mint(st0, hint)
+        return addEffect(m.st, e.nid, EffectFact.ESpread(ws, m.s))
     }
 
     // A write at a struct path (`@o.s = v`): the TARGET sub-field's own contract.
@@ -2374,7 +2384,7 @@ ${
             }
             j = j + 1
         }
-        return addEffect(st, e.nid, EffectFact.ESpread(ws))
+        return spreadEffect(st, e, ws, p.decl.sym.hint)
     }
 
     fn propsOf(v: AExpr) -> AProp[] {

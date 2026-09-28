@@ -461,6 +461,13 @@ ${
     // write. A refused check throws before anything is written. Each write's
     // edge is already proven by then, so it is emitted as a Static write.
     // The values are Locals (check.scrml C7): reading one twice is free.
+    // The writes run inside ONE `rt.batch`: a `.set` outside a batch flushes
+    // its observers synchronously (a Commit reached from a render hole or an
+    // effect runs at batch depth 0), and an observer running between two
+    // writes would see — and could act on — the half-applied value. In the
+    // batch, observers run once, after the last write. The checks stay OUTSIDE
+    // the batch: they are pure reads (`peek`), nothing can run between them and
+    // the batch, and a refusal throws before any batch bookkeeping begins.
     fn commitJs(ctx: Ctx, ws: Stmt[]) -> JsStmt[] {
         let checks: JsStmt[] = []
         let writes: JsStmt[] = []
@@ -468,7 +475,7 @@ ${
             checks = checks.concat(commitCheckJs(ctx, s))
             writes = writes.concat(commitWriteJs(ctx, s))
         }
-        return checks.concat(writes)
+        return checks.concat([sexpr(rtCall(ctx, "batch", [JsExpr.JArrow([], writes)]))])
     }
 
     fn commitCheckJs(ctx: Ctx, s: Stmt) -> JsStmt[] {

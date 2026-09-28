@@ -92,3 +92,34 @@ F3 is test-only → committed alone. F1/F2 tests stay uncommitted until their fi
   lint 0 violations.
 - Final: mutations 77 mutation(s), 0 problem(s) (all 6 S440 mutations RED); bite matrix 32 CERTIFIED /
   0 UNCERTIFIED exit 0; footprint 18/18 runtime.
+- Committed `41f8416de`.
+
+## 2026-09-28 — FIX ROUND (S239 review: DO-NOT-LAND until F-A)
+- Merged origin/main (`e84a3d74a`, `d9f183c41` — docs/inbox/master-list only) → `3f3445ba4`, no conflicts.
+- F-A reproduced with the PA's probe (zzprobe2) on the merged tip, before the fix:
+  ```
+  A observer saw: ["Draft/Draft","Live/Draft","Live/Live"] final: Live/Live
+  B thrown: E-ENGINE-INVALID-TRANSITION: .Draft → .Gone …   final: {"phase":"Live","stage":"Draft"}
+  ```
+  after the fix: A and B both `["Draft/Draft","Live/Live"]`, final Live/Live, nothing thrown.
+- Fix:
+  - print.scrml commitJs: the writes are emitted inside ONE `rt.batch(() => { … })`. The checks stay OUTSIDE,
+    before it: they are pure `peek` reads with no side effect, nothing can run between them and the batch, and
+    a refusal throws before any batch bookkeeping (a throw inside `batch` would still run its `finally` flush).
+  - Resolve the instance once: `EffectFact.ESpread` gains `inst: Sym` (minted by analyze's new `spreadEffect`);
+    lower emits `Let inst = Handle(<the write's InstRef>)` first and every Commit Write goes through
+    `Narrowed(inst)` — the existing Core idiom for "a local holding an instance identity" (check C4 already
+    resolves it via the Let's Handle initializer). Emitted JS: `const gate = shared_program().handles[0].get();`
+    then `rt.checkEdge(gate.fields[…], …)` ×n, then `rt.batch(() => { gate.fields[…].set(…); … })`.
+- Tests (front.test.js, "S440 F-A"): probe case A (observer never sees the half state), probe case B (the
+  half-state watcher never fires, final Live/Live), and a Commit REFUSED outside a batch (byte-identical, the
+  observer never re-ran). Updated shapes: `Let(inst), Let, Let, Commit`; writes via `Narrowed(inst)`; the JS test
+  asserts `rt.batch` after the checks and one `handles[` read.
+- Mutations: "S440 F-A: the Commit's writes not batched" and "S440 F-A: the Commit re-resolves the instance per
+  write" added; the S440 F1 and commit-order anchors updated to the new lines.
+- Gates after the fix: slices 410/0; lowered M1 73/0; lint 0; mutations 79, 0 problems (both F-A RED: 3 / 4
+  failing); bite matrix 32 CERTIFIED / 0 UNCERTIFIED exit 0; footprint 18/18 runtime.
+- OPEN (SPEC-silent; PA/bryan to rule — NOT acted on):
+  1. a duplicate override key `{ ...@g, phase: .Gone, phase: .Live }` — both edges checked from the snapshot.
+  2. an override value calling a function that writes the same field (`x: bump()` observed 5,99,99): the value
+     Lets run the call before the Commit, so the callee's write lands and the Commit's write then overwrites it.

@@ -281,14 +281,17 @@ describe("O58 (b) — a spread reads ONE snapshot: it means what the genuine rep
   test("the classification is unchanged: still one contract-checked FieldAt Write per override, values evaluated first", async () => {
     const { r } = await spreadOutcome("    function go() { @p = { ...@p, x: @p.y, y: @p.x } }", "snap-shape");
     const st = r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
-    // S440: the writes are grouped in one all-or-nothing Commit (was: Let, Let, Write, Write)
-    expect(st.map((s) => s.variant)).toEqual(["Let", "Let", "Commit"]);
-    const ws = st[2].data.writes;
+    // S440: the instance is resolved once (Let inst = Handle(…)); the writes are grouped in one
+    // all-or-nothing Commit through that local (was: Let, Let, Write, Write)
+    expect(st.map((s) => s.variant)).toEqual(["Let", "Let", "Let", "Commit"]);
+    expect(st[0].data.init.variant).toBe("Handle");
+    const ws = st[3].data.writes;
     expect(ws.map((s) => s.variant)).toEqual(["Write", "Write"]);
     expect(ws.map((s) => [s.data.edit.variant, s.data.check])).toEqual([["FieldAt", "Static"], ["FieldAt", "Static"]]);
+    for (const w of ws) expect(w.data.inst).toEqual({ variant: "Narrowed", data: { sym: st[0].data.sym } });
     // each Write stores the local its Let evaluated — the value was read before either write
-    expect(ws[0].data.value).toEqual({ variant: "Local", data: { sym: st[0].data.sym } });
-    expect(ws[1].data.value).toEqual({ variant: "Local", data: { sym: st[1].data.sym } });
+    expect(ws[0].data.value).toEqual({ variant: "Local", data: { sym: st[1].data.sym } });
+    expect(ws[1].data.value).toEqual({ variant: "Local", data: { sym: st[2].data.sym } });
   });
 
   test("a LONE override stays a single Write (no local, no Commit)", async () => {
@@ -379,8 +382,8 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
   test("a granted move (`stage` Draft → Live) alongside a refused one (`phase` Live → Draft, the initial state): neither applied", async () => {
     const o = await atomicRun("    function go() { @g = { ...@g, stage: .Live, phase: .Draft } }", "atomic-move");
     const fn = o.r.core.fns.find((f) => f.sym.hint === "go").body.stmts;
-    expect(fn.map((s) => s.variant)).toEqual(["Let", "Let", "Commit"]);
-    expect(fn[2].data.writes.map((s) => [s.data.edit, s.data.check])).toEqual([["Transition", "RuntimeEdge"], ["Transition", "RuntimeEdge"]]);
+    expect(fn.map((s) => s.variant)).toEqual(["Let", "Let", "Let", "Commit"]);
+    expect(fn[3].data.writes.map((s) => [s.data.edit, s.data.check])).toEqual([["Transition", "RuntimeEdge"], ["Transition", "RuntimeEdge"]]);
     expect(o.after).toBe(o.before);
   });
 
@@ -422,7 +425,7 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
     const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, stage: .Gone } }`)]);
     expect(mods.check.checkCore(r.core)).toEqual([]);
     const fn = r.core.fns.find((f) => f.sym.hint === "go");
-    const commit = fn.body.stmts[2];
+    const commit = fn.body.stmts[3];
     const orig = commit.data.writes;
     const w0 = orig[0];
     const redo = (writes) => { commit.data.writes = writes; const out = mods.check.checkCore(r.core); commit.data.writes = orig; return out; };
@@ -441,6 +444,10 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
     expect([...body.matchAll(/checkEdge\(/g)].length).toBe(2);
     expect(at(/\.set\(/)).toBeGreaterThan(lastCheck);
     expect(body).not.toContain("transition(");
+    // the writes run inside ONE rt.batch, after the checks; the handle is resolved once
+    expect(at(/rt\.batch\(\(\) => \{/)).toBeGreaterThan(lastCheck);
+    expect(at(/\.set\(/)).toBeGreaterThan(at(/rt\.batch\(/));
+    expect([...body.matchAll(/handles\[/g)].length).toBe(1);
   });
 
   test("when every override is granted, ALL apply (the commit is not a no-op)", async () => {
@@ -456,6 +463,78 @@ describe("RULED S440 — a spread write is ALL-OR-NOTHING on a runtime refusal",
   test("through a `given`-narrowed handle (`given c = @g :> { @g = { ...@g, … } }`): all-or-nothing too", async () => {
     const o = await atomicRun("    function go() { given c = @g :> { @g = { ...@g, phase: .Gone, stage: .Gone } } }", "atomic-given");
     expect(o.after).toBe(o.before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S440 review F-A (PA-reproduced on 41f8416de): a Commit reached OUTSIDE a
+// handler batch — from a render hole, i.e. inside an effect flush at batch
+// depth 0 — must still be all-or-nothing to its observers: each `.set` there
+// flushed its observers synchronously, so an observer saw (and a watcher could
+// act on) the half-applied value. The writes now run in one `rt.batch`.
+// ---------------------------------------------------------------------------
+describe("S440 F-A — a Commit outside a handler batch: no observer sees the half-applied value", () => {
+  const REACT = (spread) => `    <let n:int=0/>
+    function react() -> int {
+        if (@n > 0) { @g = { ...@g, ${spread} } }
+        return @n
+    }`;
+  const prog = (spread, fns, view) => ({
+    path: "fa.scrml",
+    src: `${GATES}
+<program>
+${REACT(spread)}
+${fns}
+    <main>
+        <gate as=g title="G"/>
+        <p class="r">\${react()}</p>
+${view}
+        <button class="b" onclick=(@n = 1)>b</button>
+    </main>
+</program>
+`,
+  });
+
+  async function runFA(tag, spread, fns = "", view = "") {
+    const r = run([prog(spread, fns, view)]);
+    expect(codes(r)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    const { rt } = await loadProgram(r.core, tag);
+    const g = instancesOf(rt, "gate")[0];
+    const pi = g.decl.fields.indexOf("phase"), si = g.decl.fields.indexOf("stage");
+    const seen = [];
+    rt.effect(rt.root, () => { seen.push(g.fields[pi].get() + "/" + g.fields[si].get()); });
+    const before = JSON.stringify(rt.snapshot(g));
+    let err = null;
+    try { click(document.querySelector("button.b")); } catch (e) { err = e; }
+    takePageErrors();
+    return { seen, before, after: JSON.stringify(rt.snapshot(g)), final: rt.snapshot(g), err };
+  }
+
+  test("case A (probe): an observer sees Draft/Draft → Live/Live, never Live/Draft", async () => {
+    const o = await runFA("fa-a", "phase: .Live, stage: .Live");
+    expect(o.err).toBe(null);
+    expect(o.seen).toEqual(["Draft/Draft", "Live/Live"]);
+    expect([o.final.phase, o.final.stage]).toEqual(["Live", "Live"]);
+  });
+
+  test("case B (probe): a watcher that refuses on the half state never fires — final Live/Live", async () => {
+    const watch = `    function watch() -> string {
+        if (@g.phase == .Live) { if (@g.stage == .Draft) { @g = { ...@g, stage: .Gone } } }
+        return "w"
+    }`;
+    const o = await runFA("fa-b", "phase: .Live, stage: .Live", watch, `        <p class="w">\${watch()}</p>`);
+    expect(o.err).toBe(null);
+    expect(o.seen).toEqual(["Draft/Draft", "Live/Live"]);
+    expect([o.final.phase, o.final.stage]).toEqual(["Live", "Live"]);
+  });
+
+  test("a Commit REFUSED outside a batch leaves the instance byte-identical, and no observer ran", async () => {
+    const o = await runFA("fa-refused", "phase: .Live, stage: .Gone");
+    expect(o.err).not.toBe(null);
+    expect(String(o.err.message)).toContain("E-ENGINE-INVALID-TRANSITION");
+    expect(o.after).toBe(o.before);
+    expect(o.seen).toEqual(["Draft/Draft"]);
   });
 });
 

@@ -281,7 +281,7 @@ ${
         const value: AExpr | not = assignedValue(k)
         return match f {
             .EWrite(w: w) :> writeStmt(c, w, value)
-            .ESpread(ws: ws) :> spreadStmts(c, ws, value)
+            .ESpread(ws: ws, inst: si) :> spreadStmts(c, ws, si, value)
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
             .EAssignLocal(sym: s) :> assignLocal(c, s, value)
             not :> [Stmt.Eval(lowerExpr(c, e))]
@@ -336,7 +336,11 @@ ${
     // write be all-or-nothing on a runtime refusal? Yes."). A lone override
     // needs neither: its value is evaluated before its own write, and one
     // checked write is already all-or-nothing.
-    fn spreadStmts(c: LC, ws: SpreadWrite[], value: AExpr | not) -> Stmt[] {
+    // Every override writes the SAME instance: it is resolved once, into the
+    // local analyze minted (`Let inst = Handle(…)`), and every Write of the
+    // Commit goes through `Narrowed(inst)` — the Commit never re-resolves a
+    // handle between its writes.
+    fn spreadStmts(c: LC, ws: SpreadWrite[], inst: Sym, value: AExpr | not) -> Stmt[] {
         if (value is not) return []
         const ps: AProp[] = objectProps(value)
         // `@x = { ...@x }`: no override — the same value; nothing to write
@@ -345,14 +349,15 @@ ${
             const w0: WriteFact = ws[0].w
             return [Stmt.Write(w0.cap, instOf(c, w0.inst), w0.edit, lowerExpr(c, ps[ws[0].prop].value), w0.check)]
         }
-        let lets: Stmt[] = []
+        const one: InstRef = InstRef.Narrowed(inst)
+        let lets: Stmt[] = [Stmt.Let(inst, Expr.Handle(instOf(c, ws[0].w.inst)))]
         let writes: Stmt[] = []
         for (const sw of ws) {
             const w: WriteFact = sw.w
             const t: Sym | not = sw.tmp
             if (t is some) {
                 lets = lets.concat([Stmt.Let(t, lowerExpr(c, ps[sw.prop].value))])
-                writes = writes.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, Expr.Local(t), w.check)])
+                writes = writes.concat([Stmt.Write(w.cap, one, w.edit, Expr.Local(t), w.check)])
             }
         }
         return lets.concat([Stmt.Commit(writes)])
