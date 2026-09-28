@@ -25,19 +25,18 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
+import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { compileScrml } from "../../src/api.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
-const TMP_ROOT = resolve(testDir, "_tmp_db_src_path");
+// Per-run scratch (S438) — see helpers/per-run-tmp.js (Windows EBUSY residue).
+const _tmp = perRunTmp(resolve(testDir, "_tmp_db_src_path"));
+const TMP_ROOT = _tmp.root;
 let counter = 0;
 
-beforeAll(() => {
-  if (!existsSync(TMP_ROOT)) mkdirSync(TMP_ROOT, { recursive: true });
-});
-afterAll(() => {
-  if (existsSync(TMP_ROOT)) rmSync(TMP_ROOT, { recursive: true, force: true });
-});
+beforeAll(_tmp.setup);
+afterAll(_tmp.teardown);
 
 const APP_SRC = `<program db="./m.db">
   <db src="./m.db" tables="items">

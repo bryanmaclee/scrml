@@ -25,6 +25,7 @@ import {
   parseHostImportEntry,
   isHostImportPermitted,
   scanHostModule,
+  validateHostImports,
 } from "../../src/host-import.js";
 
 const PARSERS = [null, "scrml-native"];
@@ -682,5 +683,43 @@ describe("re-review 2 — `import:` prose that is not a declaration gives ONE di
       expect(count(r, "E-IMPORT-009")).toBe(1);
       expect(errorCodes(r)).toContain("E-IMPORT-008");
     }
+  });
+});
+
+// #1045 review (LOW) — an `import:host` inside a function body was never
+// recorded by the manifest gate: no E-IMPORT-008 on a host-import-disabled
+// project and no `_hostImportRejected`, so nothing stopped the module resolver
+// from loading it. It now fails closed.
+describe("#1045 LOW — an in-function import:host fails closed", () => {
+  const inFnAst = () => {
+    const imp = { kind: "import-decl", hostTag: "host", source: "../../host/tok.js", span: { start: 40, line: 3, col: 5 } };
+    const ast = {
+      nodes: [{ kind: "logic", _synthetic: false, body: [{ kind: "function-decl", name: "inner", body: [imp] }] }],
+      imports: [],
+    };
+    return { ast, imp };
+  };
+
+  test("it is always marked rejected, even in a permitted file (no double E-IMPORT-003 here)", () => {
+    const root = project({ "scrml.toml": SELF_HOST_TOML, "stdlib/compiler/f.scrml": "" });
+    const fp = join(root, "stdlib/compiler/f.scrml");
+    const { ast, imp } = inFnAst();
+    const errs = validateHostImports(ast, fp, readHostImportCapability(fp));
+    expect(errs).toEqual([]);
+    expect(imp._hostImportRejected).toBe(true);
+  });
+
+  test("a disabled project gets E-IMPORT-008 for it (native front-end, end to end)", () => {
+    const root = project({
+      "scrml.toml": '[capabilities]\nhost-import = "disabled"\n',
+      "host/tok.js": HOST_JS,
+      "stdlib/compiler/f.scrml":
+        "${\n  function inner() {\n" +
+        '    import:host { tokenize } from "../../host/tok.js"\n' +
+        "    return 1\n  }\n}\n",
+    });
+    const r = compile(root, "stdlib/compiler/f.scrml", { parser: "scrml-native", mode: "library" });
+    expect(count(r, "E-IMPORT-003")).toBe(1);
+    expect(count(r, "E-IMPORT-008")).toBe(1);
   });
 });
