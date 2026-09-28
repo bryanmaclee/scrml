@@ -11,3 +11,6 @@
 - FOR THE PA (F4): §19.6.6 (owned by another agent) must be reconciled at landing — the sentence: "The compiler SHALL verify, at compile time, that every error variant reachable inside an `<errorBoundary>` either has a `renders` clause or is covered by the boundary's `fallback` attribute. Failure to satisfy this SHALL be E-ERROR-005." — it defines E-ERROR-005 only for errors INSIDE a boundary; §41.14.3 (S440 #19) now also fires E-ERROR-005 for a formFor submit error with NO enclosing boundary.
 - FOR THE PA (F9, file as a gap, not fixed): §20.5.1 "Resolution order per unit" step 2 still reads the unit's raw `<page>` attribute for `sessionExpiry=` (only the `session-secure=` limb was struck by S440 #13), but `sessionExpiry=` is not in <page>'s five-attribute per-route set either (§40.8), so that limb is dead/contradictory.
 - FOR THE PA (#5 iii): "logged as a candidate widening" — same `as=` name on mutually exclusive `if=` instances; not added to §66.22 (it is ruled, not OPEN); log it wherever candidate widenings are tracked.
+
+## Last touch
+- §5.4 enum formula fallback struck; §7.3 E-CALL-ARITY PA-reading paragraph (rest/spread/?-optional/provable-or-silent; §41.18); ${not} "evaluates to" + gap cite; §41.14.3 harmonization labelled PA reading.
