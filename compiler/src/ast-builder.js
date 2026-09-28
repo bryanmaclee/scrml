@@ -16728,7 +16728,11 @@ function parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, ba
   }
   // Several parameters: not modelled (a handler passes only the event) — left to
   // the regular path, which emits the arrow as-is and does not check its body.
-  if (multi) return undefined;
+  // Same for a NON-SIMPLE parameter — a default (`e = 1`), a rest (`...a`), or a
+  // destructuring pattern carrying a default (`({ t } = {})`, `({ t = 1 })`):
+  // the `const <param> = event` prelude cannot express it (S440 N5 — it emitted
+  // `const e = 1 = event`, E-CODEGEN-INVALID-LOGIC).
+  if (multi || /=|\.\.\./.test(paramText)) return undefined;
   const prefix = value.raw.slice(0, bodyOffset);
   const nl = (prefix.match(/\n/g) ?? []).length;
   const bodyLine = baseLine + nl;

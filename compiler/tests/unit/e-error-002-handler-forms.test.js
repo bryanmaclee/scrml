@@ -178,6 +178,34 @@ describe("§19.4.3 — handler positions", () => {
     expect(handler).not.toMatch(/\bact\(\)/);
   });
 
+  // N2 — a `!{}` guard's ARMS are prop-substituted in a component body.
+  test("component handler guard arm reading a prop is substituted (was E-SCOPE-001)", () => {
+    const { errors, clientJs } = compileBody(
+      `\${ const B = <button props={ n: number } onclick={ risky() !{ | .Empty :> @r = n } }>go</> }\n<B n=\${9}/>`,
+      { emit: true },
+    );
+    expect(errors).toEqual([]);
+    const handler = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'));
+    expect(handler).toMatch(/_reactive_set\("r", 9\)/);
+  });
+
+  // N4 — inside a handler, `event` is the DOM event in BOTH lowering paths.
+  for (const [label, handler] of [
+    ["one statement", `onclick={ @msg = event }`],
+    ["two statements", `onclick={ @msg = event; @r = 1 }`],
+  ]) {
+    test(`a prop named \`event\` is shadowed by the DOM event — ${label}`, () => {
+      const { errors, clientJs } = compileBody(
+        `<msg> = ""\n\${ const B = <button props={ event: string } ${handler}>go</> }\n<B event="hi"/>`,
+        { emit: true },
+      );
+      expect(errors).toEqual([]);
+      const h = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'), clientJs.indexOf('"_scrml_attr_onclick_') + 160);
+      expect(h).toMatch(/_reactive_set\("msg", event\)/);
+      expect(h).not.toMatch(/"hi"/);
+    });
+  }
+
   // F7 — the callee resolves through scope.
   for (const [label, body] of [
     ["bare", `<ul><each in=@items as risky><li><button onclick=risky()>x</></></each></>`],
@@ -336,6 +364,33 @@ describe("arrow-valued handlers — S440 ruling: checked like `{ … }`, guard e
     expect(handler).toMatch(/const e = event;/);
     expect(handler).toMatch(/\.variant === "Empty"/);
     expect(handler).toMatch(/_reactive_set\("r", 7\)/);
+  });
+
+  // N5 — non-simple params are not modelled: unchecked and emitted as before.
+  for (const [label, param] of [["default", "(e = 1)"], ["rest", "(...a)"]]) {
+    test(`an arrow with a ${label} parameter is emitted as before (no E-CODEGEN-INVALID-LOGIC)`, () => {
+      const { errors, clientJs } = compileBody(
+        `<button onclick=\${${param} => risky() !{ | .Empty :> @r = 1 }}>x</>`,
+        { emit: true },
+      );
+      expect(errors).toEqual([]);
+      expect(clientJs).not.toMatch(/= event =/);
+    });
+  }
+
+  test("the handler-site E-ERROR-002 message does not advise <errorBoundary> (S440 #22)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "e-error-002-msg-"));
+    try {
+      const file = join(dir, "case.scrml");
+      writeFileSync(file, HEADER + "\n<button onclick={ risky() }>x</>\n");
+      const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out"), log: () => {} });
+      const e = (r.errors ?? []).find((d) => d.code === "E-ERROR-002");
+      expect(e).toBeDefined();
+      expect(e.message).toMatch(/does not catch errors raised in event handlers/);
+      expect(e.message).not.toMatch(/or wrap in '<errorBoundary>'/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test("an arrow WITHOUT a guard keeps its as-is emission", () => {

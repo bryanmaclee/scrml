@@ -19743,18 +19743,45 @@ answer makes the rule independent of the statement count; today it is not.
 S440 "all recs": restore conformance) and arrow bodies ruled checked (S440 all recs #2 item 1); §19.4.3 states both.
 An unhandled `!` call is E-ERROR-002 in the bare, braced, `${}`, multi-statement, control-flow (`{ if (c) risky() }`)
 and arrow-valued forms, at top level / `<each>` row / engine state-child / `<match>` arm / component body, and inside an
-`<errorBoundary>` (a handler runs after render; the boundary does not catch it — verified at runtime S440). The callee
+`<errorBoundary>` (a handler runs after render; the boundary does not catch it — verified at runtime S440; §19.6.6 was
+limited to render-time calls by S440 #22). The callee
 resolves through scope. `!{}` guards are emitted in every one of those positions (one-statement braced, `<match>` arm,
 component body, arrow body — each was silently dropped or failed codegen before). The 6 measured corpus sites (5 files)
 were migrated. Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js` and
 `conformance/cases/error/handler-{unhandled-failable-*,failable-reference-and-guard-neg,guard-in-*-rt}`.
 
 **Still open (each has its own entry below):** the unbraced guard `onclick=risky() !{…}` is dropped at tokenize
-(g-unbraced-handler-guard-silently-dropped); an arrow handler with 2+ parameters and a `function (e) {…}` handler
-expression are not modelled (unchecked; the function expression fails codegen at base too); a function-valued prop
-called with the bare `onclick=act()` form is never substituted (g-component-fn-prop-bare-call-handler-unsubstituted).
-§19.6.6's "any `!` call in its … nested markup content SHALL NOT trigger E-ERROR-002" reads broader than the handler
-reading impl#1 now follows — flagged ⚑ in §19.4.3 for a ruling.
+(g-unbraced-handler-guard-silently-dropped); an arrow handler with 2+ parameters or a non-simple parameter (default
+`(e = 1)`, rest `(...a)`, destructuring with a default) and a `function (e) {…}` handler expression are not modelled
+(unchecked, emitted as before S440; the function expression and the destructuring-with-default arrow fail codegen at
+base too); a function-valued prop called with the bare `onclick=act()` form is never substituted
+(g-component-fn-prop-bare-call-handler-unsubstituted); component-body E-ERROR-002 spans/repeats
+(g-component-body-handler-diagnostic-span-and-repeat); a guard on a call inside a NESTED arrow
+(g-nested-arrow-in-handler-guard-dropped).
+
+### g-component-handler-prop-in-value-position-unsubstituted — a component handler emits a raw prop name inside an `if` body, an arrow body, or a `match` statement — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-component-handler-prop-in-value-position-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts(substituteProps — a one-statement handler value keeps its RAW text / exprNode and the leading-identifier raw rewrite does not reach into an if-statement body, an arrow body, or a match statement) prov=review:S440-final-round-N3;empirical:S440-reproduced-by-emit-both-trees -->
+
+With `const B = <button props={ n: number } onclick=…>` and `<B n=${9}/>`:
+`onclick={ if (n > 0) { @r = n } }` emits `if (n > 0) { … n … }` and `onclick=${() => { @r = n }}` emits the arrow
+with a bare `n` — both a ReferenceError on click. `onclick={ match @ph { .Idle :> @r = n  .Loading :> @r = 0 } }` is
+E-CODEGEN-INVALID-LOGIC. Same on base and after S440. (A multi-statement handler and a `!{}` guard's arms ARE
+substituted since S440.)
+
+### g-component-body-handler-diagnostic-span-and-repeat — E-ERROR-002 in a component body reports a component-relative line and repeats per instantiation — `NEW S440 (filed); LOW; open`
+<!-- @gap id=g-component-body-handler-diagnostic-span-and-repeat sev=LOW status=open locus=compiler/src/component-expander.ts(parseComponentBody re-parses the body under a synthetic `file#Component` path with body-relative spans; each expansion is type-checked separately) prov=review:S440-final-round-N7;empirical:S440-reproduced-by-compile -->
+
+`${ const B = <button onclick={ risky() }>go</> }` then `<B/>` twice → `E-ERROR-002@1`, `E-ERROR-002@1`: the line is
+relative to the component body (not the file) and the diagnostic fires once per `<B/>`. The code is right; the location
+and count are not what an author can act on. (Base reported nothing here — the check is new in S440.)
+
+### g-nested-arrow-in-handler-guard-dropped — `onclick={ const f = () => risky() !{…}; f() }` guards the arrow VALUE, not the call — `NEW S440 (filed; pre-existing); LOW; open`
+<!-- @gap id=g-nested-arrow-in-handler-guard-dropped sev=LOW status=open locus=compiler/src/ast-builder.js(the statement parser binds a trailing `!{}` to the whole initializer — the arrow — not to the call in the arrow body) prov=review:S440-final-round;empirical:S440-reproduced-by-emit-both-trees -->
+
+`<button onclick={ const f = () => risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 }; f() }>` emits
+`let _result = () => _scrml_risky_2(); if (_result && _result.__scrml_error) …` — the guard tests the function value, never
+the call's result, so no arm runs (plus W-TYPE-031-UNPROVEN). Same on base. Not covered by the S440 arrow ruling (that
+covers an arrow that IS the handler value).
 
 ### g-unbraced-handler-guard-silently-dropped — `onclick=risky() !{ | .E :> … }` loses its `!{…}` at tokenize, with no diagnostic — `NEW S440; LOW; open`
 <!-- @gap id=g-unbraced-handler-guard-silently-dropped sev=LOW status=open locus=compiler/src/tokenizer.ts(the bare attribute-value scan — ATTR_CALL ends at the call's `)` and the following `!{…}` text produces no attribute and no diagnostic) prov=review:S440-fix-round-F9;empirical:S440-reproduced-by-AST-dump -->
@@ -19809,6 +19836,9 @@ a `!` function, so `?` there has nowhere to propagate — E-ERROR-003 is the nam
 `<formFor for=Signup onsubmit=persistSignup/>` with `persistSignup(values)! SignupError` emits
 `function(event) { event.preventDefault(); …; _scrml_fetch_persistSignup_N(values); }` — the failure value is dropped.
 §41.14.3 mandates the `! ErrorType` signature but specifies no handling/display path for the error it produces.
+**Fix direction — RULED S440 (22-item queue, #19):** a `formFor` submit handler's error routes to the nearest
+`<errorBoundary>`; with no enclosing boundary, E-ERROR-005. Not implemented (needs the §41.14.3 SPEC text + the
+submit-dispatch routing + the static E-ERROR-005 check).
 
 ### g-handler-block-does-not-hoist-function-declarations — `onclick={ @r = inner(); function inner() {…} }` is E-SCOPE-001, though a function body hoists the same declaration — `NEW S437; LOW; open`
 <!-- @gap id=g-handler-block-does-not-hoist-function-declarations sev=LOW status=open locus=compiler/src/type-system.ts(visitAttr's §5.2.3 handler-statement walk visits statements in order; the function-decl pre-bind the function-body walk gets is not applied to handlerBlock.stmts) prov=review:S437-round5-review-item-b;empirical:S437-round5-reproduced-by-compile -->

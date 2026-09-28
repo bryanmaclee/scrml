@@ -14313,10 +14313,17 @@ function annotateNodes(
         }
         // else: suppressed — `!`-typed enclosing function propagates structurally.
       } else {
+        // In an event handler the remedies differ (S440 #22): an `<errorBoundary>`
+        // catches render-time failures only, and a handler is not a `!` function
+        // so `?` has nowhere to propagate to.
         errors.push(new TSError(
           "E-ERROR-002",
-          `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
-          `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
+          handlerCheckDepth > 0
+            ? `E-ERROR-002: Result of failable function '${bareCallee}' is not handled in this event handler. ` +
+              `Catch it with '!{}' (e.g. '${bareCallee}(…) !{ | .Variant :> … }'), match the result, or call it from a ` +
+              `function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
+            : `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
+              `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
           n.span as Span,
         ));
       }
@@ -14384,8 +14391,10 @@ function annotateNodes(
     //     — the same parser `handlerBlock` comes from) and walked like one;
     //   - a bare `call-ref` (`onclick=f()`) is checked as a bare call statement.
     // A function REFERENCE (`onclick=f`, `onclick=${f}`, `<formFor onsubmit=fn/>`)
-    // is not a call. An arrow VALUE (`${() => f()}`) is left unchecked — §19.4.3
-    // records arrow-valued handlers as OPEN, not ruled.
+    // is not a call. An ARROW value (`${(e) => f()}`) is checked through its BODY
+    // (S440 ruling: an arrow body runs on the event like `{ … }`) — see
+    // ast-builder `parseArrowHandlerStatements`; arrows with 2+ or non-simple
+    // parameters are not modelled and stay unchecked.
     if (
       typeof attr.name === "string"
       && isEventHandlerAttrName(attr.name)

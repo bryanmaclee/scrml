@@ -67,3 +67,14 @@ Measure (errors+warnings, per file, base extract vs worktree): only the 2 new pi
 - Whole `bun test compiler/tests/` (the post-commit set): wt 33962 pass / 55 fail vs base extract 33809 pass / 58 fail; the wt fail set is a SUBSET of base's (all browser/happy-dom whole-suite + nav/Bug-60 env fails). Browser alone: 48 fail = base set minus the 2 TodoMVC dist env-gap.
 - conformance/run.ts: 1049/1056 + 7 xfail (base 1041/1048 + same 7 xfail). All 8 new cases fail on base.
 - Corpus (errors+warnings per file) vs base: only the 3 E-ERROR-002 pin cases differ. Emitted JS vs base: only the migrated 5 files + new cases (+2 path-only import artifacts).
+
+## 2026-09-28 — FINAL FIX ROUND (re-review of 5d82298c2; rulings #22 #18 #19)
+- Merged origin/main (b30364c36) → c82f6d506, no conflicts.
+- Reproduced first: N2 (component guard arm prop → E-SCOPE-001), N4 (one-stmt emitted "hi", two-stmt emitted `event`), N5 (`(e = 1) => … !{}` → E-CODEGEN-INVALID-LOGIC; `({t} = {})` also broke — but that shape is E-CODEGEN-INVALID-LOGIC on BASE even without a guard, so it is left as base emits), N3 / N7 / nested-arrow (all reproduced, both trees where stated).
+- N1: §19.6.6 two statements limited to render-time calls (old text quoted in the provenance note), provenance S440 #22; §19.4.3 ⚑ tension block removed, #18 stated (CPS-implicit one-statement handler: neither E-ERROR-002 nor W-CPS-NEEDS-FAILABLE); known-gaps main entry updated; formFor gap fix direction = #19 (not implemented).
+- N2: component-expander guarded-expr case substitutes props into every arm's `handler` string + `handlerExpr` (arm payload binding shadows). Runtime: conformance handler-guard-arm-uses-prop-rt (r → 9).
+- N4: in an event-handler attr, a prop named `event` is excluded from substitution on every path (one-statement, call-ref, raw, statement list).
+- N5: arrow params containing `=` or `...` are not modelled (regular path, unchecked, as base).
+- N6: §19.4.3 arrow wording reworded; not-modelled list adds default/rest; stale visitAttr comment fixed; handler-site E-ERROR-002 message no longer advises <errorBoundary> (non-handler message unchanged — e2e-render-map baseline cell is a non-handler site).
+- Filed: g-component-handler-prop-in-value-position-unsubstituted (N3), g-component-body-handler-diagnostic-span-and-repeat (N7), g-nested-arrow-in-handler-guard-dropped.
+- Corpus (errors+warnings per file) vs origin/main extract: every pre-existing file identical; only the 9 new conformance cases are new files. Conformance 1050/1057 + 7 xfail.
