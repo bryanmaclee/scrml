@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 147 | 4 |
-| MED | 328 | 0 |
-| LOW | 133 | 0 |
+| HIGH | 151 | 4 |
+| MED | 334 | 0 |
+| LOW | 135 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -367,9 +367,81 @@ arc edited. One axis, two instances, one enumerated.
 
 ### g-tenant-floor-inert-for-a-two-qualifier-CREATE-TABLE — `db.schema.table` matches the harvest regex nowhere, so §14.8.10 is silently inert; a second table removes the last warning
 
-<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js:188(CREATE_TABLE_HEAD_RE — ONE optional qualifier only; locate by the regex CONST NAME, not the line)+compiler/src/codegen/tenant-egress.ts(buildTenantContext, the consumer that comes up empty) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE -->
+<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(readCreateTableHead + scanCreateTableHeads + findQualifiedCreateTableHeads — the head regex CREATE_TABLE_HEAD_RE is DELETED)+compiler/src/gauntlet-phase1-checks.js(E-SCHEMA-012 in the <schema> body checks) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE+ruling:user-voice-scrml.md-S435-"1-both"+empirical:S438-re-reproduced-on-072741ca -->
 
-**ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
+**⚑ RESOLVED S438 by branch `fix/s438-tenant-floor-qualified-create-table` — bryan RULED S435
+"1 both": REJECT a qualified `<schema>` `CREATE TABLE` head, both the ≥2-qualifier form (the
+silently inert one) AND the previously-accepted one-qualifier form, fail-closed — new
+`E-SCHEMA-012` (SPEC §39.2 + §39.12 + §34 row).** Re-reproduced on `072741ca` before the fix, by
+compilation, `<schema>`-only app, no `<db>`: 0 qualifiers → floor ACTIVE; 1 → ACTIVE (accepted by
+stripping); 2 → INERT + `W-SCHEMA-NO-TABLES-DECLARED`; 2 + a second recognized table → INERT with
+**no diagnostic at all**, exit 0. After: 0 → unchanged; 1, 2, 2+second → `E-SCHEMA-012`, and the
+floor stays ENGAGED (tenant tag emitted) because the harvest still reads + strips the qualified
+head, so there is no `W-SCHEMA-NO-TABLES-DECLARED` / `E-PA-003` cascade. **The identity-model
+question below was answered by NOT widening:** the head regex is deleted and the head is READ as a
+name chain (`readCreateTableHead`), so the qualifier COUNT is reported rather than a shape the
+pattern can fail to anticipate; the rejection and the three harvests read the same heads. Sibling
+shapes bite-tested (all rejected): `"db"."public"."assets"`, `` `mydb`.[public].assets ``,
+comments/whitespace around the dots, lowercase `if not exists`, `CREATE TEMP TABLE temp.assets`,
+a dangling `public.`, `CREATE TABLE a.b AS SELECT`, a qualified head beside a DSL table. Not
+rejected (correctly): `"a.assets"` (one identifier), a head inside `--`/`/* */`, a qualified
+`REFERENCES` target. The `?{}` walker's acceptance set is held where it was (≤1 qualifier) —
+E-SCHEMA-012 is `<schema>`-scoped. Two sibling residuals this did NOT change are filed below as
+`g-schema-create-temp-table-silently-not-a-declaration` and
+`g-schema-dsl-qualified-table-head-silently-stripped`.
+
+**S438 FIX ROUND (S239 review of `c0327349` = `finding`).** F1 HIGH: the first cut's reader SKIPPED
+top-level comments with no string/regex awareness, so a DSL `pattern(/^\/*[a-z0-9-]+$/)` (or
+`default("/api/*")`, `default("https://…")`, `default("--")`) swallowed a later real
+`CREATE TABLE assets (…, tenant_id)` from all three harvests — a floor base ENGAGED went silently
+off (reviewer-executed via the CLI). Fixed by construction: the `<schema>` harvest is now the
+pre-S438 read (verbatim, comment-agnostic) ∪ the structured reader's extra keys, base winning per
+key; comment/literal awareness (string- and `pattern(/…/)`-aware, via `blankLiteralBodies`'s new
+comment mode) is used ONLY to suppress E-SCHEMA-012 on a dead head. Pinned by an invariant test —
+harvest ⊇ the pre-S438 harvest, table by table and column by column — over the named review shapes
+and a 3,000-body seeded sweep (bite-tested: it fails on `c0327349`). F2 MED: both hand-rolled
+`<schema>` walks in `gauntlet-phase1-checks.js` now descend the markup `if-chain` node via ONE
+shared child list (`schemaWalkChildLists`) — E-SCHEMA-003 was missed there on base too. F3 MED:
+identifier parts read `[\p{L}\p{N}_$]+`; any `CREATE … TABLE` head the reader cannot read through
+to `(` / `AS` / `USING` is now E-SCHEMA-012 (fail-closed) instead of "not a head". Reviewer's 83
+probe shapes: 0 silent tenant-tag losses vs `98d94e96`; 169-file corpus differential: identical.
+A pre-existing sibling found in the round is filed below as
+`g-schema-commented-out-declaration-shadows-live-table`.
+
+**S438 ROUND 3 (review of `dccdc1cc`: security core holds; false positives + SPEC accuracy).**
+F-A: SQL inside a multi-line SECURITY-DEFINER `fn` `"""…"""` body no longer raises E-SCHEMA-012 —
+the comment-mode blanker now recognizes `"""…"""` across lines (and `//`, the DSL line comment);
+the harvest is untouched. F-B: `PARTITION OF`, `OF type`, `ON COMMIT`, `WITH`, `TABLESPACE`,
+`INHERITS` are valid name followers; the remaining unreadable heads moved to a DISTINCT code,
+**E-SCHEMA-013** (own §34 + §39.12 rows, newly-rejecting, corpus-measured zero). F-C: `CREATE` must
+start a word, and a head whose modifier words are outside the SQLite/Postgres table-kind set is
+held to the rules only when it reads as a head — prose (`# create the table for tenants`) no longer
+fires. SPEC §39.2 now lists the exempt literal forms and no longer claims a commented-out
+declaration "only adds floor". All new pins are red on `dccdc1cc`.
+
+**S438 ROUND 4 — the last round; NARROWING only (review of `38ec0e14`: no tag loss vs base,
+but round 3's new surface opened escapes).** F1: round 3's word-start guard counted `$` as a word
+character, so `$$CREATE TABLE a.b.assets (…)$$` escaped E-SCHEMA-012 AND dropped out of the
+harvest's structured (extra-keys) leg — round 3's code comment said the harvest was unaffected;
+that was wrong for the extra-keys leg (the pre-S438 leg, and so the ⊇-base guarantee, was
+unaffected). The boundary is now letter/digit/`_` only. F2: round 3's `//` and free-text `"""`
+masks were wider than §39.2 and masked live qualified heads in raw SQL (`DEFAULT $$http://x$$`,
+`"""a"` … `"b"""`). `//` masking is dropped (a `//`-commented qualified head is the accepted
+fail-closed false positive) and the `fn`-body exemption is now STRUCTURAL — the ranges of the
+SECURITY-DEFINER `fn` declarations the `<schema>` parser itself accepts (`schemaFnDeclRanges`,
+the same scan as `parseSchemaBlock`), no free-text pairing. F3: `PARTITION` is a follower only as
+`PARTITION OF`; the no-column-list acceptance is filed below as
+`g-schema-no-column-list-heads-declare-nothing`. All round-4 pins are red on `38ec0e14`.
+
+**S438 FINAL (review of `c59046d2`; fail-closed REMOVAL only).** Round 4's structural fn-body
+exemption was itself an escape: `scanSchemaBlock` sees `fn NAME(…) owner(…)` inside `--` / `/* */`
+comments, strings, and without a brace, and the exemption covered the whole fn span — so a commented
+`-- fn f() owner(r) {` … `-- }` wrapping `CREATE TABLE my-db.public.assets (…, tenant_id …)`
+compiled at exit 0 with no diagnostic and tag=0. The exemption is REMOVED; a qualified/unreadable
+head inside a real SECDEF `fn` `"""` body is now the loud, documented false positive filed as
+`g-secdef-fn-body-ddl-false-positive`. Every other round-4 narrowing is kept.
+
+**(Original entry, kept for the record.) ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
 
 The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
 (`e74f5423`); that flip is genuine and was independently reproduced-as-fixed. **But it closed the
@@ -386,7 +458,113 @@ multi-tenant isolation floor that is silently absent.
 `n` qualifiers is the tempting move, but the qualifier is normalized away downstream, so
 `a.assets` and `b.assets` would collapse to one key — the S405 arc already had two of its own fixes
 cancel each other on exactly this seam (#900 round 3). **Decide the identity model before the regex.**
-— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; open
+— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; RESOLVED S438 (branch `fix/s438-tenant-floor-qualified-create-table`, E-SCHEMA-012)
+
+### g-schema-create-temp-table-silently-not-a-declaration — `CREATE TEMP TABLE assets (…, tenant_id)` in a `<schema>` declares nothing; beside a second table the tenant floor is inert with NO diagnostic
+
+<!-- @gap id=g-schema-create-temp-table-silently-not-a-declaration sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(schemaCreateTables — the modifier filter; the head reader already READS TEMP/TEMPORARY/UNLOGGED/GLOBAL/LOCAL)+compiler/src/gauntlet-phase1-checks.js(the <schema> body checks) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**Sibling of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the S438
+bite-test of that fix; NOT changed by it, deliberately.** Same class — a `<schema>` table head the
+recognizer does not count as a declaration — one axis over (a table-kind MODIFIER instead of a
+qualifier). Measured by compilation, `<schema>`-only app, query `SELECT id, name, tenant_id FROM
+assets`, on BOTH `072741ca` and the fix branch:
+
+| `<schema>` body | diagnostics | tenant tag |
+|---|---|---|
+| `CREATE TEMP TABLE assets (id …, tenant_id TEXT)` | `W-SCHEMA-NO-TABLES-DECLARED` | **none** |
+| same + `CREATE TABLE notes (id …, body TEXT)` | **none**, exit 0 | **none** |
+
+**Why not fixed on the S438 branch:** the S435 ruling covers QUALIFIERS; whether a `TEMP`/`UNLOGGED`
+table in a `<schema>` is a DECLARATION (newly-accepting — and `UNLOGGED` would then need stripping
+before the SQLite shadow-DB replay, the #900 seam) or is REJECTED (newly-rejecting) is a language
+call. **PA recommendation: reject** (an `E-SCHEMA-012`-shaped error for a modified head) — a
+schema-as-code declaration of a session-scoped table has no coherent migration meaning, rejecting is
+the recoverable direction (the S290 E-SCHEMA-011 argument), and the reader already sees these heads
+(`findQualifiedCreateTableHeads` rejects `CREATE TEMP TABLE temp.assets` today), so the fix is a
+filter + a message. Corpus use of modified heads in `<schema>`: zero (measured S438, same grep as the
+parent gap). — `NEW S438-peter`; **HIGH**; open
+
+### g-schema-commented-out-declaration-shadows-live-table — a commented-out earlier declaration of the same table (raw or DSL) wins first-wins, so a live `tenant_id` table is silently NOT tenant-scoped
+
+<!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
+
+**Pre-existing on `98d94e96`, identical on the S438 branch (which deliberately preserves base's
+harvest per key — see the S438 fix-round note above).** The `<schema>` recognizers read declarations
+inside comments, and the harvest is first-wins per table name. So:
+
+| `<schema>` body | tenant tag (query on `assets`) |
+|---|---|
+| `-- CREATE TABLE assets (id INTEGER)` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
+| `/* assets { id: integer primary key } */` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
+
+The commented-out, `tenant_id`-less declaration shadows the live one. **Same class, noted not fixed
+(S438 round 3):** the harvest also reads a plain `CREATE TABLE x (…)` INSIDE a §14.8.11.2
+SECURITY-DEFINER `fn` `"""…"""` body as a `<schema>` declaration (pre-S438 behaviour, held for
+base parity) — runtime plpgsql becomes a declared table, and can shadow a live one the same way.
+(Since the S438 final commit, E-SCHEMA-012/013 also REPORT a qualified/unreadable head there — the
+false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** for the
+§14.8.10 declaration read, UNION the columns of every same-name declaration (over-declaring only adds
+floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
+base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
+purpose. — `NEW S438-peter`; **HIGH**; open
+
+### g-secdef-fn-body-ddl-false-positive — a qualified or unreadable `CREATE TABLE` inside a SECURITY-DEFINER `fn` `"""` body raises E-SCHEMA-012/013 although it is runtime plpgsql, not a declaration
+
+<!-- @gap id=g-secdef-fn-body-ddl-false-positive sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(findRejectedCreateTableHeads — no fn-body exemption; parseFnDecl, which would supply the body span)+compiler/src/schema-differ.js(parseSchemaBlock — treats a commented `fn … owner() {` as a real fn) prov=review:S438-final-review-of-c59046d2+empirical:reviewer-cases15-by-compilation -->
+
+**Deliberate, fail-closed, filed by the S438 final commit.** A §14.8.11.2 SECURITY-DEFINER `fn`
+body such as `"""\n CREATE TABLE IF NOT EXISTS audit.snap (…);\n …"""` is runtime plpgsql, but the
+`<schema>` head checks now REPORT its qualified (E-SCHEMA-012) or unreadable (E-SCHEMA-013) heads.
+Loud, never silent; corpus-measured zero. Two exemption attempts in S438 each opened an escape
+(round 3: free-text `"""` pairing masked raw SQL; round 4: the parser's whole-fn span, which a
+commented `-- fn f() owner(r) {` … `-- }` could forge around a live head at exit 0), so the
+exemption was removed rather than patched a third time.
+
+**Reviewer's recommended repair (verbatim):** exempt ONLY the `"""…"""` body span of a
+parser-accepted fn (have parseFnDecl return it) AND require the `fn` token to be live in `masked`
+(not in `--`/`/* */`/quotes).
+
+**Pre-existing finding recorded here:** the `<schema>` parser (`parseSchemaBlock` →
+`parseFnDecl`) treats a COMMENTED `-- fn … owner() {` as a real `fn` — measured as E-DBAUTH-SQLITE
+on a SQLite program on base. — `NEW S438-peter`; **MED**; open
+
+### g-schema-no-column-list-heads-declare-nothing — `CREATE TABLE t OF type` / `PARTITION OF parent` / `AS query` in a `<schema>` compile clean and declare no columns, so a `tenant_id` table reached that way is not tenant-scoped
+
+<!-- @gap id=g-schema-no-column-list-heads-declare-nothing sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads a column list only; readCreateTableHead's CREATE_TABLE_NAME_FOLLOWERS accepts OF / PARTITION OF / AS / WITH / ON / TABLESPACE / INHERITS heads without one) prov=review:S438-round-4-F3+empirical:reviewer-compiled-on-38ec0e14-and-base-identical -->
+
+**Pre-existing on base, unchanged by S438 (whose round 4 kept these heads ACCEPTED rather than
+rejecting them).** A raw head with no column list — a typed table `CREATE TABLE assets OF
+asset_t`, a partition child `CREATE TABLE assets_p PARTITION OF assets DEFAULT`, a CTAS
+`CREATE TABLE assets AS SELECT … tenant_id …` — declares NO columns to the §14.8.9 / §14.8.10
+floors, so a query on that table gets no tenant tag (measured tag=0, exit 0, on base and branch;
+the CTAS case happened to tag only because its source table was declared). The same holds for the
+other accepted followers (`WITH`, `ON COMMIT`, `TABLESPACE`, `INHERITS` — the latter declares its
+own list but not the parent's inherited `tenant_id`). **Direction is bryan's:** reject these in a
+`<schema>` (fail-closed, E-SCHEMA-013-shaped), or resolve their columns (parent / type / query) —
+the latter is a real schema-resolution feature. — `NEW S438-peter`; **MED**; open
+
+### g-schema-dsl-qualified-table-head-silently-stripped — the DECLARATIVE `mydb.public.assets { … }` is accepted as `assets`, so `a.assets` + `b.assets` collapse and the second (with `tenant_id`) is silently dropped
+
+<!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**The DSL twin of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the
+S438 bite-test; NOT changed by that fix (the S435 ruling names `CREATE TABLE`).** SPEC §39.2's grammar
+is `table-declaration ::= table-name '{' …` — a qualified head is not grammatical — but
+`parseSchemaBlock` recovers from an unrecognized position by advancing ONE character and retrying, so
+it slides past `mydb.public.` and matches `assets {`. The qualifier is silently STRIPPED — exactly
+the identity collapse the S435 ruling rejected for raw DDL. Measured by compilation on BOTH
+`072741ca` and the fix branch, query on `assets`:
+
+| `<schema>` body | diagnostics | tenant tag |
+|---|---|---|
+| `mydb.public.assets { id, name, tenant_id }` | none | emitted (accepted as `assets`) |
+| `a.assets { id, name }` + `b.assets { id, tenant_id }` | **none**, exit 0 | **none** — first wins, the `tenant_id` table is dropped |
+
+**PA recommendation: extend `E-SCHEMA-012` to the DSL head** (the §39.2 grammar already excludes it,
+so this is spec-conformance, not a new rule — and it is the same fail-closed argument). Fix locus:
+detect a `.`-joined identifier chain immediately before a table `{` in `parseSchemaBlock` and report
+it rather than sliding. Corpus use: zero (measured S438). — `NEW S438-peter`; **HIGH**; open
 
 ### g-7.5.2-has-no-row-for-annotated-plus-inference-defeated — the remedy the diagnostic itself recommends routes authors into an unspecified cell
 
@@ -19690,9 +19868,10 @@ Found by the S437 PRIMER currency pass (relayed; message text not PA-re-read). T
 ### g-impl1-match-miscompiles-hit-by-the-bootstrap — six impl#1 `match`/enum lowering defects found writing the native bootstrap (F11–F16); five are SILENT miscompiles
 Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + the workaround used in `compiler/self-host-v2/slice-m1/progress.md` §F11–F16 (M1's own code carries the workarounds). **P7 criterion 1 (blocks the bootstrap) — eligible for an impl#1 fix.** One entry for the family because F11 and F16 share a root (`_variantFields` holds only the CURRENT file's enums), and the adversarial review of M1 re-confirmed F12 independently (`match m { .B :> "b"\n _ | .A :> "a" }` compiles with no diagnostic and drops the arm — `f(.A)` returns undefined, defeating E-TYPE-020).
 - **F11** positional payload binding in a `match` over an IMPORTED enum is silently dropped (named binding works).
-- **F12** a `|` alternation arm lowers only as the FIRST arm; later it is silently glued onto the previous arm. (The bootstrap's no-default-arm lint now flags a non-first alternation arm, S437.)
-- **F13** a payload pattern binding five or more fields is not recognised as an arm.
-- **F14** a string literal containing `{`/`}` adjacent to other characters breaks `${}` block splitting.
+- **F12** a `|` alternation arm lowers only as the FIRST arm; later it is silently glued onto the previous arm. (The bootstrap's no-default-arm lint now flags a non-first alternation arm, S437.) — **FIXED S438 (branch `fix/s438-impl1-match-arm-shapes`)**: root = the collectExpr arm-boundary detector (`ast-builder.js`) required the arm arrow IMMEDIATELY after the first alternate; one token-kind walker (`armPatternChainArrowOffset`) now recognises every alternate shape at every chain length, and a collection's own arm head is never split. Siblings fixed with it (all execution-tested): `_ | .A` / `.A | _` lower as the wildcard arm (codegen + typer agree), `::B | ::C`, a continuation line opening with `|`, number/boolean alternation, a string alternate holding `|` (atomic enumeration), a nested `match` as an alternation arm's body, and the `const r = match …` lowering (`emit-logic.ts`), which compared only the first alternate. Native parser (`--parser=scrml-native`, opt-in) has no alternation-arm support at all and fails LOUDLY — not changed. **S239 review round (F1):** a `|` alternation over PAYLOAD variants now always extracts the `.variant` tag (library mode compared the raw object to `"P"` and never matched), and a BINDING alternation (`.P(a: x) | .Q(a: x) :> x`, any position, both modes) is rejected LOUDLY with the new **E-MATCH-ALT-BINDING** (SPEC §18.2 + §34) instead of silently dropping the arm. **Final review:** a NAMED payload alternate even when discarded (`.P(a: _) | .Q(a: _)`, silently dropped in both modes — codegen's alternation form accepts positional `_` only) and nested/literal payload alternation are rejected by the same code; ONLY positional `_` discards are accepted in an alternation. Recorded (not changed): program-mode SERVER functions are emitted before `setVariantFieldsForFile` runs (`compiler/src/codegen/index.ts`, server emit precedes the client registry install), so `_variantFields` is null there — unit-only alternation in a server fn gains tag extraction (benign; zero corpus diff; it also fixes server-side payload alternation). An IMPORTED payload enum in program mode still compares raw in a non-alternation arm (the registry side is the parallel branch `fix/s438-impl1-imported-enum-match`, F16). Residual (not fixed): the arm-boundary walker is quadratic on a very long literal `|` chain (8000 terms ≈ 2× base time) — noted, not a correctness issue.
+- **F13** a payload pattern binding five or more fields is not recognised as an arm. — **FIXED S438**: a 20-token cap in the arm-boundary payload walk (and a 40-token cap in the inline-arm walk; native `scanPastPayloadParen` mirrored); walks are now uncapped, bounded by `{`/`}`/`;`/EOF. Sibling fixed: a BLOCK arm's named binding (`.W(e: x) :> { … }`) bound `x` to the FIRST field (codegen used the local names positionally); the `const r = match …` path emitted no binding prelude for block arms at all.
+- **F14** a string literal containing `{`/`}` adjacent to other characters breaks `${}` block splitting. — **FIXED S438**: `block-splitter.js` only recognised the 3-char `"{"` shape; in `${}` / `!{}` / `~{}` contexts a brace is now string content when the logic tokenizer (regex-, comment- and escape-aware) puts it inside a CLOSED quote string on its line (`braceIsQuotedStringContent`). Residual (not changed): braces in backtick TEMPLATE text, `?{}`/`#{}`/`^{}` contexts (3-char rule only), and the separate F9 `"${"` gap. **S239 review round:** the probe analyses each line segment ONCE (cached; was re-tokenized per brace — a one-line 2000-object literal took ~97 s, now < 1 s; perf-guard test), **Known residual (division at line start, LOUD, base identical):** a segment OPENING with `/` that continues an expression from a value-ending previous line (`let r = a\n  / b; let s = '/'; if (c) { r = 'x'\n }`) is read as a regex opener by the cold-started per-line tokenizer → E-CTX-001. A synthetic-operand prefix repair was landed in round 2 and REVERTED in the final review: it misread a regex STATEMENT after a `//` comment line, a control-header `)` or `else` as division (E-CTX-003 where round 1 compiled). Suggested repair (reviewer): when scanning back for the previous significant character, skip trailing `//`/`/* */` comments; treat `)` as a value only when it does not close an `if`/`while`/`for` header; exclude keywords (`else`, `return`, `typeof`, …). **Known residual (a LOUD regression vs base, accepted at the review's stop condition):** a MULTI-LINE backtick template whose text line holds a quoted `{` that closes on a later line (`` `\n'a { b'\nc }\n` ``) now gives E-CTX-001 — the line-scoped probe cannot know it is inside template text; base compiled it because both braces were counted.
+- Tests: `compiler/tests/unit/match-arm-shapes-f12-f14.test.js` (6 of 8 red on main, all green on the branch).
 - **F15** an enum payload FIELD named like a same-file function is silently renamed in the constructor.
 - **F16** tag-only arms over an IMPORTED payload enum compare the value to a string and never match.
 — `NEW S437-bryan (relayed from the M1 build agent; F12 independently re-executed by the M1 adversarial review)`; **HIGH**; open
@@ -19707,3 +19886,37 @@ Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + t
 ### g-per-route-chunk-dir-named-after-absolute-source-path — `--emit-per-route` on pages with no route map names each chunk dir after the mangled ABSOLUTE source path — `NEW S438; LOW; open`
 <!-- @gap id=g-per-route-chunk-dir-named-after-absolute-source-path sev=LOW status=open locus=searched:compiler/src/codegen/route-splitter.ts(chunk descriptor route-path derivation when no route map applies)—not-traced prov=empirical:S438-peter-per-route-build-of-app-page-and-app-sub-deep-identical-on-base-072741ca -->
 A `--emit-per-route` build of pages with no route map writes chunks to `dist/C__Users_<…>_app_page/_anonymous.initial.<hash>.js` (the absolute source path with separators mangled to `_`), and `chunks.json` points at those dirs. The output layout therefore depends on the machine and checkout location — not reproducible across hosts — and leaks the builder's filesystem path into shipped URLs. **PRE-EXISTING**: byte-identical on `072741ca` (measured by the S438 #1045 F1 repro; the S239 review confirmed). Direction (unverified): derive the chunk dir from the dist-relative page path (the same `pathFor` / `stripPagesPrefix` computation the page's own artifacts use) when no route map applies.
+
+## §S438b — pre-existing defects surfaced by the S239 review of the F12–F14 fix (2026-09-27; reviewer-reproduced, reproducers in the S438 session scratch `rv-arms/`; NOT caused by the F12–F14 branch)
+
+### g-handler-alt-arm-body-only-last — a `!{}` handler arm `| ::B | ::C :> "bc"` gives the body only to the LAST alternate; `::B` yields null — `NEW S438; HIGH; open`
+<!-- @gap id=g-handler-alt-arm-body-only-last sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(error-handler arm lowering)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Silent wrong value: the alternation in an error-handler arm is not lowered as an OR-chain; the earlier alternates fall through with no body. Sibling of the value-`match` alternation class fixed by g-impl1-match-miscompiles F12 (that fix covers JS-style `match` arms only).
+
+### g-stmt-match-block-return-falls-through — a statement-position `match` whose arms are `{ return "a" }` blocks returns the fall-through value, not the arm's — `NEW S438; HIGH; open`
+<!-- @gap id=g-stmt-match-block-return-falls-through sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(match-stmt structuredBody IIFE — a `return` inside the arm returns from the IIFE, not the function)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Silent wrong value; direction unverified (the arm body is emitted inside the match IIFE, so its `return` exits the IIFE).
+
+### g-lib-positional-payload-binding-throws — library-mode (`${}` + `export function`) positional payload binding (`.W(a, b) :> a`) throws ReferenceError at runtime ("field order unknown") — `NEW S438; MED; open`
+<!-- @gap id=g-lib-positional-payload-binding-throws sev=MED status=open locus=compiler/src/codegen/emit-library.ts(never calls setVariantFieldsForFile — the per-file variant registry is empty in library mode) prov=empirical:S438-peter-and-S239-review -->
+Named binding works. Tag-only arms over a payload enum in library mode also compare the raw object to a string (the F16 shape, same-file). The parallel branch `fix/s438-impl1-imported-enum-match` (F11/F16 — TS-resolved subject variants) is expected to cover this; re-verify after it lands.
+
+### g-false-e-type-023-alt-arm-qualified-result — `.B | .C :> M.A` raises a false E-TYPE-023 (duplicate arm) — `NEW S438; MED; open`
+<!-- @gap id=g-false-e-type-023-alt-arm-qualified-result sev=MED status=open locus=searched:compiler/src/type-system.ts(splitMatchArms / parseArmPattern — the qualified `M.A` in the arm RESULT is read as another arm head)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud false rejection of a valid program.
+
+### g-arm-body-string-with-pipe-or-arrow-invalid-logic — a string containing `|` or `:>` in a match arm BODY yields E-CODEGEN-INVALID-LOGIC — `NEW S438; MED; open`
+<!-- @gap id=g-arm-body-string-with-pipe-or-arrow-invalid-logic sev=MED status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(splitMultiArmString / parseMatchArm text re-split of bare-expr arms)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud. The text-based arm re-splitter sees the string content.
+
+### g-block-comment-brace-in-logic-ctx-001 — `/* } */` inside `${}` gives E-CTX-001 — `NEW S438; LOW; open`
+<!-- @gap id=g-block-comment-brace-in-logic-ctx-001 sev=LOW status=open locus=searched:compiler/src/block-splitter.js(block-comment containment pre-scan — a `}` in the comment reads as the context closer)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud; pre-existing (base identical).
+
+### g-regex-with-brace-in-logic-ctx-003 — a regex literal holding a brace (`/"{/`) inside `${}` gives E-CTX-003 — `NEW S438; LOW; open`
+<!-- @gap id=g-regex-with-brace-in-logic-ctx-003 sev=LOW status=open locus=searched:compiler/src/block-splitter.js(brace counting has no regex awareness; the F14 probe consults the tokenizer for QUOTE strings only)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud; pre-existing (base identical).
+
+### g-false-e-type-023-bare-variant-arm-body — a match arm whose BODY is a bare variant (`.Z :> .P(1)` / `.Q(_) | .R :> .Z` / `_ :> .R`) raises a false E-TYPE-023 "Duplicate match arm" — `NEW S438; MED; open`
+<!-- @gap id=g-false-e-type-023-bare-variant-arm-body sev=MED status=open locus=searched:compiler/src/type-system.ts(splitMatchArms — a `.Variant` in an arm RESULT is read as a new arm pattern)—not-traced prov=empirical:S438-final-review-rv-arms2-q11 -->
+Loud false rejection, before and after the F12–F14 branch. Same family as g-false-e-type-023-alt-arm-qualified-result (the typer's text arm splitter treats a variant-valued body as a pattern).

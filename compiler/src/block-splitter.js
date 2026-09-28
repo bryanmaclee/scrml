@@ -52,6 +52,11 @@
  *   elements. E-MARKUP-001 (unknown HTML element) MUST be gated by !isComponent.
  */
 
+// The logic tokenizer is consulted ONLY as a line-scoped probe that decides
+// whether a brace inside a brace-delimited context is string-literal content
+// (braceIsQuotedStringContent). The block tree is still built by this scan.
+import { tokenizeLogic } from "./tokenizer.ts";
+
 // ---------------------------------------------------------------------------
 // Error
 // ---------------------------------------------------------------------------
@@ -440,6 +445,73 @@ function openStringQuoteAt(source, slashPos) {
   if (inSingle) return "'";
   if (inBacktick) return "`";
   return null;
+}
+
+/**
+ * g-impl1-match-miscompiles F14 — is the `{` / `}` at `bracePos` CONTENT of a
+ * closed `"…"` / `'…'` string literal on its own line? Decided by the logic
+ * TOKENIZER (the authoritative lexer of the next stage — regex literals,
+ * `/* … *\/` comments, escapes and templates are all its business, not a
+ * hand-rolled quote-parity scan's) over the code segment
+ * `[segStart, end of line)`. Only a STRING token that opens AND closes with the
+ * same quote counts: an unterminated run (a prose apostrophe, `Don't`) never
+ * makes a brace string content, and a backtick template is excluded (its
+ * `${…}` interpolation braces are real, and the splitter already pushes a
+ * nested context for them). Line-scoped like `openStringQuoteAt`: a quote
+ * string cannot span lines, and a caller passes a `segStart` that excludes
+ * text the splitter already knows is not code of this context (before the
+ * context opener, a comment, or markup that closed earlier on the line).
+ *
+ * Replaces the 3-character `"{"` / `'}'` special case, under which any string
+ * holding a brace next to another character (`" => {\n"`, `"{ "`, `" }"`) was
+ * counted as a real brace → `E-CTX-003` / `E-CTX-001` or a mis-scoped block.
+ */
+function braceIsQuotedStringContent(source, bracePos, segStart, cache) {
+  // S438 review F2 — the segment is analysed ONCE and cached (keyed by its
+  // start), not re-tokenized per brace: a one-line literal with N braces was
+  // O(N × line) (a 2000-object line took ~97 s). Lookups are O(log n).
+  let seg = cache.seg;
+  if (!seg || seg.start !== segStart || bracePos >= seg.lineEnd) {
+    let lineEnd = bracePos;
+    while (lineEnd < source.length && source[lineEnd] !== "\n") lineEnd++;
+    let firstQuote = -1;
+    for (let i = segStart; i < lineEnd; i++) {
+      const q = source[i];
+      if (q === '"' || q === "'") { firstQuote = i; break; }
+    }
+    seg = { start: segStart, lineEnd, firstQuote, ranges: null };
+    cache.seg = seg;
+  }
+  // Cheap pre-check: no quote before the brace on this segment → not a string.
+  if (seg.firstQuote < 0 || seg.firstQuote >= bracePos) return false;
+  if (seg.ranges === null) {
+    // Closed quote-string spans [s, e) on this segment, in source order.
+    const ranges = [];
+    // Known residual (S438 final review): a segment OPENING with `/` that
+    // continues an expression from the previous line (`a\n  / b`) is read as
+    // a regex opener by this cold-started tokenizer. See the gap's F14 line.
+    try {
+      const toks = tokenizeLogic(source.slice(segStart, seg.lineEnd), segStart, 1, 1, []);
+      for (const t of toks) {
+        if (t.kind !== "STRING" || !t.span) continue;
+        const s = t.span.start;
+        const e = t.span.end;
+        const open = source[s];
+        if ((open === '"' || open === "'") && e - s >= 2 && source[e - 1] === open) ranges.push(s, e);
+      }
+    } catch {
+      // A tokenizer failure answers "not string content" — the pre-F14 rule.
+    }
+    seg.ranges = ranges;
+  }
+  // Binary search for the last range starting before the brace.
+  const r = seg.ranges;
+  let lo = 0, hi = r.length / 2 - 1, hit = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (r[mid * 2] < bracePos) { hit = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return hit >= 0 && bracePos < r[hit * 2 + 1] - 1;
 }
 
 /**
@@ -924,6 +996,12 @@ export function splitBlocks(filePath, source) {
   // preceded by a context sigil ($, ?, #, !, ^, ~). This handles type declarations
   // like `type X:enum = { A, B, C }` where `{...}` is structural text, not a context.
   let orphanBraceDepth = 0;
+
+  // End offset of the last comment the splitter consumed (a
+  // braceIsQuotedStringContent segment never starts inside comment text).
+  let _lastCommentEnd = 0;
+  // Per-segment analysis cache for braceIsQuotedStringContent (S438 F2).
+  const _braceStrCache = { seg: null };
 
   // ---------------------------------------------------------------------------
   // Accessors
@@ -2275,6 +2353,9 @@ export function splitBlocks(filePath, source) {
       children: [],
       braceDepth: 1,
       tagNesting: inheritedTagNesting,
+      // tagNesting at entry — markup opened INSIDE this context raises it above
+      // this base (F14 brace-in-string probe: text there is prose, not code).
+      _baseTagNesting: inheritedTagNesting,
       // Local string tracking for tag nesting disambiguation (private state)
       _inDouble: false,
       _inSingle: false,
@@ -2499,6 +2580,7 @@ export function splitBlocks(filePath, source) {
       // Scan to end of line
       while (pos < len && source[pos] !== "\n") step();
       if (pos < len) step(); // consume the newline
+      _lastCommentEnd = pos;
       targetChildren().push({
         type: "comment",
         raw: source.slice(commentStart, pos),
@@ -2615,6 +2697,7 @@ export function splitBlocks(filePath, source) {
         }
         step();
       }
+      _lastCommentEnd = pos;
       targetChildren().push({
         type: "comment",
         raw: source.slice(commentStart, pos),
@@ -2839,13 +2922,22 @@ export function splitBlocks(filePath, source) {
       // quote characters (regex patterns, template interpolation boundaries,
       // apostrophes in comments, etc.).
       //
-      // Instead, we detect the exact 3-character patterns: '{', '}', "{", "}"
-      // — a brace character immediately surrounded by matching quotes. This
-      // handles the common case (Set/Map literals with single-brace strings)
-      // without any risk of state corruption.
+      // The exact 3-character patterns '{', '}', "{", "}" — a brace immediately
+      // surrounded by matching quotes — are string content in EVERY brace
+      // context (the original rule, kept for sql/css/meta).
       //
-      // For longer strings containing braces (e.g., "{ hello }"), users should
-      // use String.fromCharCode(123/125) as a workaround.
+      // g-impl1-match-miscompiles F14: in the JS-grammar contexts (`${}` logic,
+      // `!{}`, `~{}`) that rule was the ONLY string awareness, so a string with
+      // a brace next to any other character (`" => {\n"`, `"{ "`, `" }"`) was
+      // counted as a real brace → `E-CTX-003` / `E-CTX-001`, or a block that
+      // closed in the wrong place. There, the brace is decided by the logic
+      // tokenizer over this line's code segment (braceIsQuotedStringContent),
+      // which owns regex literals, comments and escapes — the hazards that made
+      // a hand-rolled quote tracker unsafe here. The segment starts after
+      // anything on the line already known not to be this context's code: the
+      // context opener, a comment the splitter consumed, and markup that closed
+      // earlier on the line. While markup is open (tagNesting above the
+      // frame's base) the text is prose, not code, and is not probed.
       // -----------------------------------------------------------------------
       let _inBraceStr = false;
       if (c === "{" || c === "}") {
@@ -2853,6 +2945,16 @@ export function splitBlocks(filePath, source) {
         const next1 = curPos + 1 < len ? source[curPos + 1] : "";
         if ((prev1 === '"' && next1 === '"') || (prev1 === "'" && next1 === "'")) {
           _inBraceStr = true;
+        } else if (
+          (frame.type === "logic" || frame.type === "error-effect" || frame.type === "test") &&
+          frame.tagNesting === (frame._baseTagNesting ?? 0)
+        ) {
+          let segStart = curPos;
+          while (segStart > 0 && source[segStart - 1] !== "\n") segStart--;
+          segStart = Math.max(segStart, (frame.startPos ?? 0) + 2, frame._codeFrom ?? 0, _lastCommentEnd);
+          if (segStart < curPos && braceIsQuotedStringContent(source, curPos, segStart, _braceStrCache)) {
+            _inBraceStr = true;
+          }
         }
       }
 
@@ -2981,6 +3083,7 @@ export function splitBlocks(filePath, source) {
           if (c === "<" && ch(1) === "/" && ch(2) === ">") {
             if (frame.tagNesting > 0) frame.tagNesting--;
             beginText(); step(); step(); step(); // consume </>
+            if (frame.tagNesting === (frame._baseTagNesting ?? 0)) frame._codeFrom = pos;
             continue;
           }
 
@@ -2993,6 +3096,7 @@ export function splitBlocks(filePath, source) {
             while (pos < len && /[A-Za-z0-9_\-]/.test(source[pos])) step(); // ident
             while (pos < len && source[pos] !== ">" && source[pos] !== "\n") step(); // skip to >
             if (pos < len && source[pos] === ">") step();
+            if (frame.tagNesting === (frame._baseTagNesting ?? 0)) frame._codeFrom = pos;
             continue;
           }
 
