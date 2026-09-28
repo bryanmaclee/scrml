@@ -14730,6 +14730,12 @@ A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the fol
 
 Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002** -- `Result of failable function '{name}' is not handled. Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`
 
+**Event-handler bodies — the exemption follows the call, not the statement count (S439 ruling #14).** Whether an unhandled `!` call in an event-handler body (§5.2.3) is E-ERROR-002 SHALL follow the unhandled failable call, NOT the number of statements in the handler: a handler whose whole body is `risky()` and a handler whose body is `risky(); @r = 1` SHALL receive the same answer. ⚑ impl#1 today (measured S437) splits on the count — `onclick={ risky(); @r = 1 }` is E-ERROR-002 while `onclick=risky()`, `onclick={ risky() }` and a multi-line `onclick={ risky() }` compile at exit 0 — which is the split this ruling rejects.
+
+> ⚑ **OPEN (not ruled) — the direction.** Either every handler body containing an unhandled `!` call is E-ERROR-002, or none is. The PA lean is all-error ("closed wins"); it is newly-rejecting on the whole-body form, so it was made conditional on a measured corpus count, and a non-zero count returns to bryan. **Measured S439** (compiler instrumented at the handler-attribute visit, over `examples/ samples/ conformance/ stdlib/ benchmarks/`, 2071 of 2071 sources): **10 files, 11 handler attributes** whose whole body is an unhandled explicit-`!` call — all in the bare `onX=fn()` / `onX=fn` shape; **0** in the braced `{ fn() }` or `${fn()}` one-statement shape. Non-zero, so the direction is NOT written here.
+>
+> **Provenance:** ruling:user-voice-scrml.md S439 #14 "all recs" (scope note: "#14 is ruled as 'the exemption follows the unhandled failable call, not the statement count'; the direction (all-error) is the PA LEAN and is conditional on the measured corpus count — a non-zero count comes back to bryan").
+
 #### 19.4.4 Normative Statements
 
 - The `!` modifier SHALL appear after the parameter list and before the optional error-type annotation in a function declaration.
