@@ -20,3 +20,10 @@
   New test file 25 tests (17 red on prior tip). Gate 25743/70/11/0; conformance 1041/1048 + 7 xfail. Corpus
   differential origin/main vs tip (same dir, swapped sources): NO DIFFERENCES. Filed
   g-codegen-enum-colon-rewrite-unfenced (pre-existing `/::A/` -> `/"A"/` in rewrite.ts).
+- 2026-09-28 FIX ROUND 3 (re-review F-A/F-B/P1): reproduced F-A (`o.of|o.in|x.do|of / 2 + Color::Green` ->
+  `+ Color`). regexAllowedAfter keyword limb: a keyword spelling after `.`/`?.` is a property (value); `of` is a
+  keyword only after a binding (identifier not itself a keyword, or `]`/`}`); yield/await kept as keywords
+  (documented why). F-B: `+`/`-` run parity (even -> postfix -> division; `a+++/Q/` -> regex). P1 filed as
+  g-tokenizer-regex-after-plus-minus-lexed-as-division-body-space-padded (not fixed). Tests +25 (15 red on prior
+  tip; keyword-position regex guards green on both). Gate 25768/70/11/0; conformance 1041/1048 + 7 xfail;
+  corpus differential origin/main vs tip: NO DIFFERENCES.

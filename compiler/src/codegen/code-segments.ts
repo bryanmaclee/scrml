@@ -58,9 +58,19 @@ export function regexAllowedAfter(codeBefore: string): boolean {
   if (i < 0) return true;
   const lastCh = codeBefore[i];
   // S440 f18 fix round — a trailing `++` / `--` is a POSTFIX update (`i++ / 2`):
-  // it ends a value, so a following `/` is division. The prefix reading
-  // (`++/re/`) is not valid JS — a regex literal is not an assignment target.
-  if ((lastCh === "+" || lastCh === "-") && i > 0 && codeBefore[i - 1] === lastCh) return false;
+  // it ends a value, so a following `/` is division. (A PREFIX `++` directly
+  // before a regex, `++/re/`, is an early error in JS — a regex literal is not an
+  // assignment target — so that reading never has to be preserved.)
+  // JS lexes a contiguous run of `+` (or `-`) greedily into `++` pairs from the
+  // left, so the run's PARITY decides what the last token is: even → it ends in
+  // `++` (postfix, division); odd → it ends in a single binary/unary `+`
+  // (`a+++/Q/.source` is `a++ + /Q/.source` — a regex). A run of 1 is the
+  // ordinary operator case handled below.
+  if (lastCh === "+" || lastCh === "-") {
+    let run = 0;
+    for (let r = i; r >= 0 && codeBefore[r] === lastCh; r--) run++;
+    if (run % 2 === 0) return false;
+  }
   // After punctuation / operator → regex.
   // `}` is intentionally included: in JS it ends a block-statement (regex
   // follows) far more commonly than an object-literal in expression
@@ -75,8 +85,42 @@ export function regexAllowedAfter(codeBefore: string): boolean {
     // opens a regex. They are not in `REGEX_PERMISSIVE_KEYWORDS` because that set is
     // about EXPRESSION prefixes (`return /re/`, `typeof /re/`); these are the
     // statement-position limb of the same question.
-    if (token === "else" || token === "do" || token === "finally") return true;
-    return REGEX_PERMISSIVE_KEYWORDS.has(token);
+    const isKeywordSpelling =
+      token === "else" || token === "do" || token === "finally" || REGEX_PERMISSIVE_KEYWORDS.has(token);
+    if (!isKeywordSpelling) return false;
+    // ⚑ S440 f18 fix round 3 — a keyword SPELLING is only a keyword in keyword
+    // POSITION. After `.` / `?.` it is a property name (`o.of / 2`, `x.do / 2`,
+    // `o?.in / 2`) — a VALUE, so a following `/` divides. This holds for every
+    // spelling, reserved or not (a reserved word is a legal property name).
+    let p = j;
+    while (p >= 0 && /\s/.test(codeBefore[p])) p--;
+    if (p >= 0 && codeBefore[p] === ".") return false;
+    // `of` is the one CONTEXTUAL spelling in the set that is also an ordinary
+    // identifier in every mode (`const of = 8; of / 2`). It is the for-of
+    // keyword only directly after the loop binding — an identifier, or a
+    // destructuring pattern's `]` / `}` — so it is a keyword iff the previous
+    // token is one of those (and that identifier is not itself a keyword, as in
+    // `return of / 2`, where `of` is the variable). The reserved spellings (`in`,
+    // `return`, `typeof`, `new`, `delete`, `void`, `instanceof`, `throw`, `else`,
+    // `do`, `finally`) cannot be variables, so the `.` check is their only
+    // non-keyword reading. `yield` / `await` are deliberately kept as keywords:
+    // as bare identifiers they are legal only in sloppy non-generator /
+    // non-async script code, which no preceding-token test can distinguish from
+    // the keyword reading, and misreading a real `await /re/` would be the
+    // worse (silent) failure.
+    if (token === "of") {
+      if (p < 0) return false;
+      const prev = codeBefore[p];
+      if (prev === "]" || prev === "}") return true;
+      if (/[A-Za-z0-9_$]/.test(prev)) {
+        let q = p;
+        while (q >= 0 && /[A-Za-z0-9_$]/.test(codeBefore[q])) q--;
+        const prevTok = codeBefore.slice(q + 1, p + 1);
+        return !(REGEX_PERMISSIVE_KEYWORDS.has(prevTok) || prevTok === "case" || prevTok === "else" || prevTok === "do");
+      }
+      return false;
+    }
+    return true;
   }
   // ⚑ S412 — a `)` ends a value ONLY when it closes an expression. `(a + b) / 2` and
   // `f(x) / 2` are division, but `if (c) /re/.test(c)` is a regex in statement
