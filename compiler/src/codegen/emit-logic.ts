@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -5538,10 +5538,17 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
     if (!child) continue;
     // Structured match-arm-block nodes (from `. Variant => { ... }` arms)
     if (child.kind === "match-arm-block") {
+      // Carry the payload binding (raw `field: local` text, else the positional
+      // local list) exactly as the sibling emitter in emit-control-flow.ts does —
+      // a hard-coded `null` here emitted NO `const local = …data.field` prelude,
+      // so a block arm of `const r = match …` referenced an unbound name.
+      const _pb = Array.isArray(child.payloadBindings) ? child.payloadBindings : [];
       arms.push({
         kind: child.isWildcard ? "wildcard" : child.isNotArm ? "not" : "variant",
         test: child.variant ?? null,
-        binding: null,
+        binding: typeof child.binding === "string" && child.binding.trim()
+          ? child.binding
+          : (_pb.length > 0 ? _pb.join(", ") : null),
         result: "",
         structuredBody: Array.isArray(child.body) ? child.body : null,
       });
@@ -5647,11 +5654,12 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
         conditionIndex++;
       } else {
         const prefix = conditionIndex === 0 ? "if" : "else if";
-        // arm.test for variant arms is a bare name; for string arms it already
-        // includes the surrounding quotes. Compare against the appropriate var.
-        const cmp = arm.kind === "variant"
-          ? `${tagVar} === "${arm.test}"`
-          : `${tmpVar} === ${arm.test}`;
+        // The shared arm-condition builder (emit-control-flow.ts): variant arms
+        // compare the tag, literal arms the raw value, and an ALTERNATION arm
+        // (`.B | .C`, `"a" | "b"`, `1 | 2`) ORs every alternate. This path hand-
+        // built the single `test` comparison and so lowered `.B | .C :>` as `.B`
+        // alone (g-impl1-match-miscompiles F12 sibling — `const r = match …`).
+        const cmp = armCondition(arm, tmpVar, tagVar);
         lines.push(`${prefix} (${cmp}) {`);
         conditionIndex++;
       }
@@ -5702,9 +5710,7 @@ function emitMatchExprDecl(name: string, matchExpr: any, keyword: "let" | "const
       conditionIndex++;
     } else {
       const prefix = conditionIndex === 0 ? "if" : "else if";
-      const cmp = arm.kind === "variant"
-        ? `${tagVar} === "${arm.test}"`
-        : `${tmpVar} === ${arm.test}`;
+      const cmp = armCondition(arm, tmpVar, tagVar);
       lines.push(`${prefix} (${cmp}) {`);
       if (bindingPrelude) lines.push(`  ${bindingPrelude.trimEnd()}`);
       lines.push(armResultLine(arm));

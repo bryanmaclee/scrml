@@ -124,14 +124,14 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `d1df3c64c` — wrap(s438): five landed on green, three hold refs, and every fix re-created its class one level away until a stop condition ended it (#1121) — **pushed**
+- `88a75073c` — wrap(s437): the bootstrap's first slice held its design claim, dpa-051 ruled, §66 rulings written after two PA restatements were caught widening them (#1110) — **pushed**
 - `d02738767` — wrap(s435): dpa-050 and dpa-052 ruled through and written into SPEC §66; L19 reversed; the TS compiler now serves the bootstrap and security only, with v0.8.0 as the adopter safety net (#1101) — **pushed**
 - `90130f5a3` — wrap(s436): the floor drain was the best instrument in the session, and four rounds of one fix each re-derived what the emitter already knew (#1095) — **pushed**
 - `e2e991fe6` — wrap(s433): every fix that self-reported clean came back with a finding, and five measurement failures shared one shape (#1073) — **pushed**
 - `89385ebdd` — wrap(s432): seven landed, five rulings gift-wrapped for bryan, one held on its own review (#1068) — **pushed**
 - `15e60e4b9` — wrap(s428): the decision is BOTH tracks — and the four prerequisites turn out to have been open in SPEC since S117 (#1040) — **pushed**
 - `26dca726b` — wrap(s429b): two landed, four held — two of the holds were the spec saying no; Q5–Q7 to bryan (#1039) — **pushed**
-- `45749bb14` — wrap(s425): four adopter reports triaged by execution, and the two best findings were corrections to my own work (#1028) — **pushed**
-- `92f40bd40` — wrap(s427): five merged and one held — the held fix's own review found it compiling a const reassignment into a dead page (#1023) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 147 | 4 |
-| MED | 330 | 0 |
-| LOW | 131 | 0 |
+| HIGH | 152 | 4 |
+| MED | 338 | 0 |
+| LOW | 138 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -367,9 +367,81 @@ arc edited. One axis, two instances, one enumerated.
 
 ### g-tenant-floor-inert-for-a-two-qualifier-CREATE-TABLE — `db.schema.table` matches the harvest regex nowhere, so §14.8.10 is silently inert; a second table removes the last warning
 
-<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js:188(CREATE_TABLE_HEAD_RE — ONE optional qualifier only; locate by the regex CONST NAME, not the line)+compiler/src/codegen/tenant-egress.ts(buildTenantContext, the consumer that comes up empty) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE -->
+<!-- @gap id=g-tenant-floor-inert-for-a-two-qualifier-create-table sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(readCreateTableHead + scanCreateTableHeads + findQualifiedCreateTableHeads — the head regex CREATE_TABLE_HEAD_RE is DELETED)+compiler/src/gauntlet-phase1-checks.js(E-SCHEMA-012 in the <schema> body checks) prov=review:S410-peter-S239-pass-on-901+empirical:PA-reproduced-by-compilation-on-HEAD-2e570b7e-with-bare-and-one-qualifier-CONTROLS-both-ACTIVE+ruling:user-voice-scrml.md-S435-"1-both"+empirical:S438-re-reproduced-on-072741ca -->
 
-**ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
+**⚑ RESOLVED S438 by branch `fix/s438-tenant-floor-qualified-create-table` — bryan RULED S435
+"1 both": REJECT a qualified `<schema>` `CREATE TABLE` head, both the ≥2-qualifier form (the
+silently inert one) AND the previously-accepted one-qualifier form, fail-closed — new
+`E-SCHEMA-012` (SPEC §39.2 + §39.12 + §34 row).** Re-reproduced on `072741ca` before the fix, by
+compilation, `<schema>`-only app, no `<db>`: 0 qualifiers → floor ACTIVE; 1 → ACTIVE (accepted by
+stripping); 2 → INERT + `W-SCHEMA-NO-TABLES-DECLARED`; 2 + a second recognized table → INERT with
+**no diagnostic at all**, exit 0. After: 0 → unchanged; 1, 2, 2+second → `E-SCHEMA-012`, and the
+floor stays ENGAGED (tenant tag emitted) because the harvest still reads + strips the qualified
+head, so there is no `W-SCHEMA-NO-TABLES-DECLARED` / `E-PA-003` cascade. **The identity-model
+question below was answered by NOT widening:** the head regex is deleted and the head is READ as a
+name chain (`readCreateTableHead`), so the qualifier COUNT is reported rather than a shape the
+pattern can fail to anticipate; the rejection and the three harvests read the same heads. Sibling
+shapes bite-tested (all rejected): `"db"."public"."assets"`, `` `mydb`.[public].assets ``,
+comments/whitespace around the dots, lowercase `if not exists`, `CREATE TEMP TABLE temp.assets`,
+a dangling `public.`, `CREATE TABLE a.b AS SELECT`, a qualified head beside a DSL table. Not
+rejected (correctly): `"a.assets"` (one identifier), a head inside `--`/`/* */`, a qualified
+`REFERENCES` target. The `?{}` walker's acceptance set is held where it was (≤1 qualifier) —
+E-SCHEMA-012 is `<schema>`-scoped. Two sibling residuals this did NOT change are filed below as
+`g-schema-create-temp-table-silently-not-a-declaration` and
+`g-schema-dsl-qualified-table-head-silently-stripped`.
+
+**S438 FIX ROUND (S239 review of `c0327349` = `finding`).** F1 HIGH: the first cut's reader SKIPPED
+top-level comments with no string/regex awareness, so a DSL `pattern(/^\/*[a-z0-9-]+$/)` (or
+`default("/api/*")`, `default("https://…")`, `default("--")`) swallowed a later real
+`CREATE TABLE assets (…, tenant_id)` from all three harvests — a floor base ENGAGED went silently
+off (reviewer-executed via the CLI). Fixed by construction: the `<schema>` harvest is now the
+pre-S438 read (verbatim, comment-agnostic) ∪ the structured reader's extra keys, base winning per
+key; comment/literal awareness (string- and `pattern(/…/)`-aware, via `blankLiteralBodies`'s new
+comment mode) is used ONLY to suppress E-SCHEMA-012 on a dead head. Pinned by an invariant test —
+harvest ⊇ the pre-S438 harvest, table by table and column by column — over the named review shapes
+and a 3,000-body seeded sweep (bite-tested: it fails on `c0327349`). F2 MED: both hand-rolled
+`<schema>` walks in `gauntlet-phase1-checks.js` now descend the markup `if-chain` node via ONE
+shared child list (`schemaWalkChildLists`) — E-SCHEMA-003 was missed there on base too. F3 MED:
+identifier parts read `[\p{L}\p{N}_$]+`; any `CREATE … TABLE` head the reader cannot read through
+to `(` / `AS` / `USING` is now E-SCHEMA-012 (fail-closed) instead of "not a head". Reviewer's 83
+probe shapes: 0 silent tenant-tag losses vs `98d94e96`; 169-file corpus differential: identical.
+A pre-existing sibling found in the round is filed below as
+`g-schema-commented-out-declaration-shadows-live-table`.
+
+**S438 ROUND 3 (review of `dccdc1cc`: security core holds; false positives + SPEC accuracy).**
+F-A: SQL inside a multi-line SECURITY-DEFINER `fn` `"""…"""` body no longer raises E-SCHEMA-012 —
+the comment-mode blanker now recognizes `"""…"""` across lines (and `//`, the DSL line comment);
+the harvest is untouched. F-B: `PARTITION OF`, `OF type`, `ON COMMIT`, `WITH`, `TABLESPACE`,
+`INHERITS` are valid name followers; the remaining unreadable heads moved to a DISTINCT code,
+**E-SCHEMA-013** (own §34 + §39.12 rows, newly-rejecting, corpus-measured zero). F-C: `CREATE` must
+start a word, and a head whose modifier words are outside the SQLite/Postgres table-kind set is
+held to the rules only when it reads as a head — prose (`# create the table for tenants`) no longer
+fires. SPEC §39.2 now lists the exempt literal forms and no longer claims a commented-out
+declaration "only adds floor". All new pins are red on `dccdc1cc`.
+
+**S438 ROUND 4 — the last round; NARROWING only (review of `38ec0e14`: no tag loss vs base,
+but round 3's new surface opened escapes).** F1: round 3's word-start guard counted `$` as a word
+character, so `$$CREATE TABLE a.b.assets (…)$$` escaped E-SCHEMA-012 AND dropped out of the
+harvest's structured (extra-keys) leg — round 3's code comment said the harvest was unaffected;
+that was wrong for the extra-keys leg (the pre-S438 leg, and so the ⊇-base guarantee, was
+unaffected). The boundary is now letter/digit/`_` only. F2: round 3's `//` and free-text `"""`
+masks were wider than §39.2 and masked live qualified heads in raw SQL (`DEFAULT $$http://x$$`,
+`"""a"` … `"b"""`). `//` masking is dropped (a `//`-commented qualified head is the accepted
+fail-closed false positive) and the `fn`-body exemption is now STRUCTURAL — the ranges of the
+SECURITY-DEFINER `fn` declarations the `<schema>` parser itself accepts (`schemaFnDeclRanges`,
+the same scan as `parseSchemaBlock`), no free-text pairing. F3: `PARTITION` is a follower only as
+`PARTITION OF`; the no-column-list acceptance is filed below as
+`g-schema-no-column-list-heads-declare-nothing`. All round-4 pins are red on `38ec0e14`.
+
+**S438 FINAL (review of `c59046d2`; fail-closed REMOVAL only).** Round 4's structural fn-body
+exemption was itself an escape: `scanSchemaBlock` sees `fn NAME(…) owner(…)` inside `--` / `/* */`
+comments, strings, and without a brace, and the exemption covered the whole fn span — so a commented
+`-- fn f() owner(r) {` … `-- }` wrapping `CREATE TABLE my-db.public.assets (…, tenant_id …)`
+compiled at exit 0 with no diagnostic and tag=0. The exemption is REMOVED; a qualified/unreadable
+head inside a real SECDEF `fn` `"""` body is now the loud, documented false positive filed as
+`g-secdef-fn-body-ddl-false-positive`. Every other round-4 narrowing is kept.
+
+**(Original entry, kept for the record.) ROUTED TO BRYAN — a §14.8.10 security floor + the `<schema>` recognizer surface. Filed, not fixed.**
 
 The sibling `g-tenant-floor-does-not-harvest-raw-DDL` was rated **HIGH** and RESOLVED by #900
 (`e74f5423`); that flip is genuine and was independently reproduced-as-fixed. **But it closed the
@@ -386,7 +458,113 @@ multi-tenant isolation floor that is silently absent.
 `n` qualifiers is the tempting move, but the qualifier is normalized away downstream, so
 `a.assets` and `b.assets` would collapse to one key — the S405 arc already had two of its own fixes
 cancel each other on exactly this seam (#900 round 3). **Decide the identity model before the regex.**
-— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; open
+— `NEW S410-peter (S239 pass on #901; PA-reproduced by compilation with controls)`; **HIGH**; RESOLVED S438 (branch `fix/s438-tenant-floor-qualified-create-table`, E-SCHEMA-012)
+
+### g-schema-create-temp-table-silently-not-a-declaration — `CREATE TEMP TABLE assets (…, tenant_id)` in a `<schema>` declares nothing; beside a second table the tenant floor is inert with NO diagnostic
+
+<!-- @gap id=g-schema-create-temp-table-silently-not-a-declaration sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(schemaCreateTables — the modifier filter; the head reader already READS TEMP/TEMPORARY/UNLOGGED/GLOBAL/LOCAL)+compiler/src/gauntlet-phase1-checks.js(the <schema> body checks) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**Sibling of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the S438
+bite-test of that fix; NOT changed by it, deliberately.** Same class — a `<schema>` table head the
+recognizer does not count as a declaration — one axis over (a table-kind MODIFIER instead of a
+qualifier). Measured by compilation, `<schema>`-only app, query `SELECT id, name, tenant_id FROM
+assets`, on BOTH `072741ca` and the fix branch:
+
+| `<schema>` body | diagnostics | tenant tag |
+|---|---|---|
+| `CREATE TEMP TABLE assets (id …, tenant_id TEXT)` | `W-SCHEMA-NO-TABLES-DECLARED` | **none** |
+| same + `CREATE TABLE notes (id …, body TEXT)` | **none**, exit 0 | **none** |
+
+**Why not fixed on the S438 branch:** the S435 ruling covers QUALIFIERS; whether a `TEMP`/`UNLOGGED`
+table in a `<schema>` is a DECLARATION (newly-accepting — and `UNLOGGED` would then need stripping
+before the SQLite shadow-DB replay, the #900 seam) or is REJECTED (newly-rejecting) is a language
+call. **PA recommendation: reject** (an `E-SCHEMA-012`-shaped error for a modified head) — a
+schema-as-code declaration of a session-scoped table has no coherent migration meaning, rejecting is
+the recoverable direction (the S290 E-SCHEMA-011 argument), and the reader already sees these heads
+(`findQualifiedCreateTableHeads` rejects `CREATE TEMP TABLE temp.assets` today), so the fix is a
+filter + a message. Corpus use of modified heads in `<schema>`: zero (measured S438, same grep as the
+parent gap). — `NEW S438-peter`; **HIGH**; open
+
+### g-schema-commented-out-declaration-shadows-live-table — a commented-out earlier declaration of the same table (raw or DSL) wins first-wins, so a live `tenant_id` table is silently NOT tenant-scoped
+
+<!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
+
+**Pre-existing on `98d94e96`, identical on the S438 branch (which deliberately preserves base's
+harvest per key — see the S438 fix-round note above).** The `<schema>` recognizers read declarations
+inside comments, and the harvest is first-wins per table name. So:
+
+| `<schema>` body | tenant tag (query on `assets`) |
+|---|---|
+| `-- CREATE TABLE assets (id INTEGER)` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
+| `/* assets { id: integer primary key } */` then `CREATE TABLE assets (…, tenant_id TEXT)` | **none**, exit 0 |
+
+The commented-out, `tenant_id`-less declaration shadows the live one. **Same class, noted not fixed
+(S438 round 3):** the harvest also reads a plain `CREATE TABLE x (…)` INSIDE a §14.8.11.2
+SECURITY-DEFINER `fn` `"""…"""` body as a `<schema>` declaration (pre-S438 behaviour, held for
+base parity) — runtime plpgsql becomes a declared table, and can shadow a live one the same way.
+(Since the S438 final commit, E-SCHEMA-012/013 also REPORT a qualified/unreadable head there — the
+false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** for the
+§14.8.10 declaration read, UNION the columns of every same-name declaration (over-declaring only adds
+floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
+base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
+purpose. — `NEW S438-peter`; **HIGH**; open
+
+### g-secdef-fn-body-ddl-false-positive — a qualified or unreadable `CREATE TABLE` inside a SECURITY-DEFINER `fn` `"""` body raises E-SCHEMA-012/013 although it is runtime plpgsql, not a declaration
+
+<!-- @gap id=g-secdef-fn-body-ddl-false-positive sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(findRejectedCreateTableHeads — no fn-body exemption; parseFnDecl, which would supply the body span)+compiler/src/schema-differ.js(parseSchemaBlock — treats a commented `fn … owner() {` as a real fn) prov=review:S438-final-review-of-c59046d2+empirical:reviewer-cases15-by-compilation -->
+
+**Deliberate, fail-closed, filed by the S438 final commit.** A §14.8.11.2 SECURITY-DEFINER `fn`
+body such as `"""\n CREATE TABLE IF NOT EXISTS audit.snap (…);\n …"""` is runtime plpgsql, but the
+`<schema>` head checks now REPORT its qualified (E-SCHEMA-012) or unreadable (E-SCHEMA-013) heads.
+Loud, never silent; corpus-measured zero. Two exemption attempts in S438 each opened an escape
+(round 3: free-text `"""` pairing masked raw SQL; round 4: the parser's whole-fn span, which a
+commented `-- fn f() owner(r) {` … `-- }` could forge around a live head at exit 0), so the
+exemption was removed rather than patched a third time.
+
+**Reviewer's recommended repair (verbatim):** exempt ONLY the `"""…"""` body span of a
+parser-accepted fn (have parseFnDecl return it) AND require the `fn` token to be live in `masked`
+(not in `--`/`/* */`/quotes).
+
+**Pre-existing finding recorded here:** the `<schema>` parser (`parseSchemaBlock` →
+`parseFnDecl`) treats a COMMENTED `-- fn … owner() {` as a real `fn` — measured as E-DBAUTH-SQLITE
+on a SQLite program on base. — `NEW S438-peter`; **MED**; open
+
+### g-schema-no-column-list-heads-declare-nothing — `CREATE TABLE t OF type` / `PARTITION OF parent` / `AS query` in a `<schema>` compile clean and declare no columns, so a `tenant_id` table reached that way is not tenant-scoped
+
+<!-- @gap id=g-schema-no-column-list-heads-declare-nothing sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads a column list only; readCreateTableHead's CREATE_TABLE_NAME_FOLLOWERS accepts OF / PARTITION OF / AS / WITH / ON / TABLESPACE / INHERITS heads without one) prov=review:S438-round-4-F3+empirical:reviewer-compiled-on-38ec0e14-and-base-identical -->
+
+**Pre-existing on base, unchanged by S438 (whose round 4 kept these heads ACCEPTED rather than
+rejecting them).** A raw head with no column list — a typed table `CREATE TABLE assets OF
+asset_t`, a partition child `CREATE TABLE assets_p PARTITION OF assets DEFAULT`, a CTAS
+`CREATE TABLE assets AS SELECT … tenant_id …` — declares NO columns to the §14.8.9 / §14.8.10
+floors, so a query on that table gets no tenant tag (measured tag=0, exit 0, on base and branch;
+the CTAS case happened to tag only because its source table was declared). The same holds for the
+other accepted followers (`WITH`, `ON COMMIT`, `TABLESPACE`, `INHERITS` — the latter declares its
+own list but not the parent's inherited `tenant_id`). **Direction is bryan's:** reject these in a
+`<schema>` (fail-closed, E-SCHEMA-013-shaped), or resolve their columns (parent / type / query) —
+the latter is a real schema-resolution feature. — `NEW S438-peter`; **MED**; open
+
+### g-schema-dsl-qualified-table-head-silently-stripped — the DECLARATIVE `mydb.public.assets { … }` is accepted as `assets`, so `a.assets` + `b.assets` collapse and the second (with `tenant_id`) is silently dropped
+
+<!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**The DSL twin of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the
+S438 bite-test; NOT changed by that fix (the S435 ruling names `CREATE TABLE`).** SPEC §39.2's grammar
+is `table-declaration ::= table-name '{' …` — a qualified head is not grammatical — but
+`parseSchemaBlock` recovers from an unrecognized position by advancing ONE character and retrying, so
+it slides past `mydb.public.` and matches `assets {`. The qualifier is silently STRIPPED — exactly
+the identity collapse the S435 ruling rejected for raw DDL. Measured by compilation on BOTH
+`072741ca` and the fix branch, query on `assets`:
+
+| `<schema>` body | diagnostics | tenant tag |
+|---|---|---|
+| `mydb.public.assets { id, name, tenant_id }` | none | emitted (accepted as `assets`) |
+| `a.assets { id, name }` + `b.assets { id, tenant_id }` | **none**, exit 0 | **none** — first wins, the `tenant_id` table is dropped |
+
+**PA recommendation: extend `E-SCHEMA-012` to the DSL head** (the §39.2 grammar already excludes it,
+so this is spec-conformance, not a new rule — and it is the same fail-closed argument). Fix locus:
+detect a `.`-joined identifier chain immediately before a table `{` in `parseSchemaBlock` and report
+it rather than sliding. Corpus use: zero (measured S438). — `NEW S438-peter`; **HIGH**; open
 
 ### g-7.5.2-has-no-row-for-annotated-plus-inference-defeated — the remedy the diagnostic itself recommends routes authors into an unspecified cell
 
@@ -1125,7 +1303,7 @@ Emitted verbatim: `function _scrml_bad_1(a, b) { return a * b; }` and `_scrml_lo
 ### g-recent-sessions-index-drops-named-session-wraps — `master-list.md`'s `@generated:recent-sessions` forensic index silently omits **every** wrap commit whose subject carries a contributor suffix, so a whole collaborator's sessions are invisible on a board that reads complete. **PA-CONFIRMED BY EXECUTION on `2ec2ce3a`**: `isSessionClose` (`scripts/state.ts:551-552`) tests `/\bwrap\(s\d+\)/i`, which requires the `)` to follow the digits immediately — `wrap(s390)` MATCHES, `wrap(s389-peter)` does NOT. Measured over the last 600 commits: **12 `wrap(sNNN)` seen, 5 `wrap(sNNN-name)` dropped**, and the index therefore jumps `wrap(s385)` → `wrap(s390)` with S386/S387/S388/S389 absent. ⚑ **The guard cannot see this, by construction.** `refuseDegenerateProjection` fires only on the ZERO-population path (`NO_SESSIONS_SENTINEL`), and its own doc comment records that this guard already went dead once for a different reason — so a **partial** drop is exactly the case it does not cover. A truncated enumeration reads identically to a complete one (base §8, the truncated probe). **This is NOT filed as a turnkey fix, because the fix direction is a question, not a defect:** widening the regex to `\bwrap\(s\d+[^)]*\)` makes one shared index carry both contributors' sessions, and it is not established that a shared index is what is wanted — a per-contributor index, or an explicit contributor column, may be the right shape. Whoever rules it owes a bite proof: the current matcher has never been shown to fail, which is why it has been wrong for at least five sessions with a green `--check` the whole time. — `NEW S391-bryan (found while regenerating the block during a wrap-6d gate failure; matcher behaviour proven by executing the regex against the real commit subjects, not by reading it)`; **MED**; open
 <!-- @gap id=g-recent-sessions-index-drops-named-session-wraps sev=MED status=open locus=scripts/state.ts:551-552(isSessionClose requires a close-paren immediately after the session digits, so a contributor-suffixed wrap subject never matches; recentSessions at :570 then never sees it and refuseDegenerateProjection at :430 only guards the zero-population case) prov=empirical:executed-the-matcher-against-real-commit-subjects-12-of-17-wrap-commits-matched-5-dropped-all-of-them-the-wrap-sNNN-name-form -->
 
-### g-recent-sessions-index-stale-on-main-after-every-wrap-merge — `bun scripts/state.ts --check` FAILS on `main` immediately after every wrap PR merges, by construction. The `@generated:recent-sessions` block is keyed on the wrap commits' SHAs on the trunk, and a wrap PR's own entry is its squash-merge commit — which does not exist until the merge, so the wrap's own `--write` (wrap step 6d) can never include itself. A concurrent wrap compounds it: #1101 (s435) was regenerated before #1095 (s436) merged and was then rebased under `strict:true` without a re-run, so main at `d02738767` listed s433 as newest and omitted BOTH s435 and s436. **PA-CONFIRMED BY EXECUTION at S437:** `--check` on `d02738767` → `FAIL — stale/missing @generated section(s): @generated:recent-sessions`; `--write` on the same tree produced `d02738767 wrap(s435)` and `90130f5a3 wrap(s436)` at the top, then PASS. This is the base §8 **non-deterministic input** gate shape: the gate derives from an input (the post-merge trunk SHA) that does not change WITH the commit being gated, so it goes red on main for reasons no change caused, and the fix is re-run-by-the-next-session, which is how a gate gets ignored. Fix directions (a ruling, not turnkey): key the index on something the wrap commit carries itself (e.g. the PR's head-branch commit / the `wrap(sNNN)` subject, not the trunk SHA), or exclude the newest-wrap row from `--check` and let `--write` catch it up. — `NEW S437-bryan`; **LOW**; open
+### g-recent-sessions-index-stale-on-main-after-every-wrap-merge — `bun scripts/state.ts --check` FAILS on `main` immediately after every wrap PR merges, by construction. The `@generated:recent-sessions` block is keyed on the wrap commits' SHAs on the trunk, and a wrap PR's own entry is its squash-merge commit — which does not exist until the merge, so the wrap's own `--write` (wrap step 6d) can never include itself. A concurrent wrap compounds it: #1101 (s435) was regenerated before #1095 (s436) merged and was then rebased under `strict:true` without a re-run, so main at `d02738767` listed s433 as newest and omitted BOTH s435 and s436. **PA-CONFIRMED BY EXECUTION at S437:** `--check` on `d02738767` → `FAIL — stale/missing @generated section(s): @generated:recent-sessions`; `--write` on the same tree produced `d02738767 wrap(s435)` and `90130f5a3 wrap(s436)` at the top, then PASS. This is the base §8 **non-deterministic input** gate shape: the gate derives from an input (the post-merge trunk SHA) that does not change WITH the commit being gated, so it goes red on main for reasons no change caused, and the fix is re-run-by-the-next-session, which is how a gate gets ignored. Fix directions (a ruling, not turnkey): key the index on something the wrap commit carries itself (e.g. the PR's head-branch commit / the `wrap(sNNN)` subject, not the trunk SHA), or exclude the newest-wrap row from `--check` and let `--write` catch it up. **S438-peter — a SECOND, independent cause (PA-executed on P-Tech1 at `072741ca`, clean main):** `--check` FAILS with the entries IDENTICAL and only the SHA width different — `%h` / `rev-parse --short` take git's AUTO abbreviation, which scales with each clone's object count, so this clone renders `d0273876` (8) where main carries `d02738767` (9). `--write` here rewrites all 8 rows to 8 chars and `--check` then PASSES, i.e. the section is host-dependent and every clone with a different object count is red on an untouched main (and a `--write` from it churns all rows for every other clone). Turnkey half: pin the width (`--abbrev=9` on the `git log`, `--short=9` on `rev-parse`) in `scripts/state.ts` (`:647`, `:751`, and the `rev-parse --short` stamps). Not applied S438 — left with this gap's ruling.; **LOW**; open
 <!-- @gap id=g-recent-sessions-index-stale-on-main-after-every-wrap-merge sev=LOW status=open locus=scripts/state.ts(recent-sessions section derives from trunk wrap-commit SHAs; the wrap's own squash-merge SHA is post-merge) prov=empirical:state-ts-check-FAIL-on-d02738767-then-write-listed-s435-s436-then-PASS -->
 
 ⚑⚑ **ALL FOUR MATCHING DEFECTS FIXED S410-peter — BUT THIS ENTRY STAYS `open` DELIBERATELY**, because
@@ -10605,6 +10783,30 @@ both declare. Population in the corpus: measured 0 (no tracked `.scrml` declares
 **Repro:** one file containing `<program sessionExpiry="30m">…</program>` followed by
 `<program sessionExpiry="7d">…</program>`, compiled alone; the emitted unit takes `7d`.
 
+**S438 annotation — it IS reachable as a silent wrong answer, in the DOWNGRADE direction, and
+the severity should be MED (proposed, not bumped — bryan's call with the E-PROGRAM-002 ruling).**
+The "not currently reachable" paragraph above holds only for multi-FILE sets; a single file is
+one compile set with one program-bearing file, no `E-MW-008` can fire, and step 2's last-wins
+governs. PA-executed on `origin/main` 98d94e96 (the S438 review's control): ONE file
+`<program auth="optional" csrf="off" session-secure="true" sessionExpiry="15m">` with a
+`session.set` login, followed by `<program csrf="off" auth="optional" session-secure="false"
+sessionExpiry="30d"><p>x</p></program>` → the login unit mints plain **`scrml_sid` / Max-Age
+2592000**, zero hard errors. The first program's explicit `session-secure="true"` is overridden
+by a later, content-free program: the cookie loses `__Host-` and always-Secure (the §20.5.1
+cookie-tossing defense) and lives 30 days instead of 15 minutes. So any non-protect session
+unit already reaches it today. **protect= units were one step from it (S438):** the
+`fix/s438-8b-session-defaults` change that stops route-inference Step 8b stamping `1h`/secure
+made a protect= / `<page auth="required">` unit in such a file fall through to this read, and
+the S239 review measured `scrml_sid` / 2592000 with the auto-escalated gate ACCEPTING a
+planted plain `scrml_sid` (base: `__Host-scrml_sid` / 3600). The landed fix carves 2+-`<program>`
+files out (8b keeps stamping there, byte-identical to base; counted with
+`countUnitProgramNodes`, the resolver's own step-2 walk), so this gap's reach is unchanged by
+S438 — but it is no longer LOW-shaped. A second shape of the same question, also unchanged:
+with the plain program FIRST, the file's `authConfig` is that program's `auth="optional"`, so
+a protect= `<db>` under the later secure program is not auto-escalated at all (no
+`_scrml_auth_check`; protect= still strips the column from client egress). Pinned in
+`conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js` (F1 block).
+
 <!-- @gap id=g-program-sessionexpiry-inert-on-separate-login-unit sev=MED status=open -->
 ### g-program-sessionexpiry-inert-on-separate-login-unit — `<program sessionExpiry="7d">` is silently inert on the login unit that mints the cookie; the minted session lives 1h, not 7d — but §20.5 SANCTIONS the 1h default, so this is a RULING (behaviour-change) or a WARNING, not a bug-fix
 **Re-filed S339-peter from the #282 twin (which mis-marked it *"resolved by (1)"*).** Reproduced on HEAD `1ad65742` (separate login/write page + `<program auth="required" sessionExpiry="7d">`): the login/WRITE unit bakes `Max-Age=3600` into **both** the `Set-Cookie` and the durable-store TTL (`login.server.js:_scrml_session_max_age = 3600`), while the program unit emits `604800`. So a `7d` declaration yields a silent **1-hour** session on the exact unit that issues the cookie, no warning.
@@ -18679,13 +18881,19 @@ line-start regex follows `||`), assetManagement, flogenceP. found by: S432 #1048
 
 ## §S433 — gaps filed S433 (2026-09-26, Peter / AdiPDesk; the review-floor pass over #1045/#1046/#1050, two dispatched fixes, and four PA repros — every entry verified by execution unless it says otherwise)
 
-### G-CLIENTJS-SKIPS-RELATIVE-IMPORT-REBASING-SO-A-HOST-IMPORT-DANGLES — a `import:host` binding used in client-reachable code emits a source-space specifier into `<base>.client.js`, resolved against the output dir where nothing exists; valid JS, exit 0, `node --check` passes
+### G-CLIENTJS-SKIPS-RELATIVE-IMPORT-REBASING-SO-A-HOST-IMPORT-DANGLES — a `import:host` binding used in client-reachable code emits a source-space specifier into `<base>.client.js`, resolved against the output dir where nothing exists; valid JS, exit 0, `node --check` passes — `RE-OPENED S438, re-scoped: the on-disk/gate half fixed, the BROWSER half open`
 <!-- @gap id=g-clientjs-skips-relative-import-rebasing-so-a-host-import-dangles sev=MED status=open locus=compiler/src/api.js(the two bare rewriteStdlibImports-on-clientJs limbs — one in the validateEmit gate phase and one in the write phase — versus the three rewriteRelativeImportPaths limbs for toolJs/serverJs/libraryJs; locate by symbol, the write-phase client limb carries a comment stating the hole) prov=review:S433-peter-floor-pass-on-1045-reviewer-REPRODUCED-PA-verified-the-asymmetry-by-reading-api-js route=bryan:handOffs/incoming/2026-09-26-from-S433-peter-to-bryan-1045-client-host-import-dangling.md -->
 Introduced (made REACHABLE) by #1045. Both the write phase and the `validateEmit` gate phase pass `clientJs` through `rewriteStdlibImports` only; `toolJs` / `serverJs` / `libraryJs` each get `rewriteRelativeImportPaths` first. Every `clientJs` specifier was dist-space by construction until now, so the asymmetry was inert — **`import:host` is the first source-space relative specifier that can land in client output.** The emit gate cannot catch it: the bytes are valid JavaScript and only the specifier dangles. Blast radius today is small and stated honestly — the allow-list confines host imports to `stdlib/compiler/**`, which builds library/tool-shaped, so no in-tree artifact is currently broken. Fix is one call threaded into BOTH client limbs (the gate phase too, so the gated bytes stay the written bytes). **Routed to bryan on footprint alone** (`api.js` is his declared S430 surface); it needs no ruling. Direction: inert-to-fixing.
+**S438 (peter) — HALF FIXED on `fix/s438-1045-f1-client-import-rewrite`, then RE-OPENED by that branch's S239 review.** Reproduced on `072741ca` first, and wider than filed: not only `import:host` — **any plain `.js` helper imported by a page and used client-side** emitted its source-space specifier into `<base>.client.js` (`app/sub/deep.scrml` importing `../../vendor/util.js`, built to `build/dist`, wrote a `../../vendor/util.js` that resolves nowhere on disk).
+- **FIXED — the on-disk re-base + gate==write half.** `rewriteRelativeImportPaths` now runs on `clientJs` in all three client limbs (the `validateEmit` gate phase, the content-hash pre-pass, the plain write) from the file's own dist dir, so the written specifier resolves ON DISK and the gated bytes are the written bytes; every gate limb's stdlib rewrite also moved from the output ROOT to the per-file dist dir (a nested artifact's gated bytes used to differ from its written bytes — measured on a nested library `scrml:math` import). The naive one-call fix recreated the class one level away — under `--module-format=esm` a client chunk imports the shared runtime by a `.js` specifier that is ALREADY dist-space, and re-basing it broke every esm page (bite-tested) — so the rewriter takes a `distSpaceTargets` set (the runtime's dist path). The S239 review measured 0 dangling on-disk specifiers over a 113-build matrix and gate≠write artifacts 761→321. Consumers that read the file from disk (server-side / test harnesses) benefit. Pinned by `compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, which asserts disk resolution + gate==write ONLY.
+- **OPEN — the BROWSER half (reviewer-executed, S239 of edd61059).** Client JS runs in a browser, and on-disk resolution does not make it reachable there. **Classic format (the default):** the page loads `<base>.client.js` as a classic `<script>`, where a top-level `import` is a SyntaxError whatever its specifier (acorn `sourceType:"script"` rejects it; `compiler/src/codegen/validate-emit.ts` parses emitted JS as a MODULE, so the gate cannot see it) — the page is dead on arrival. **esm format:** the re-based specifier climbs out of dist into the SOURCE tree (e.g. `../../../../../../fx1/pages/admin/local.js`), and `scrml dev` serves only the output dir (`compiler/src/commands/dev.js` ~:1595 `serveDir`), so the fetch 404s — HTTP 404 count unchanged base vs branch (fx1: 3, fx3: 2). **Options (bryan's choice):** (a) copy client-reachable relative helpers into dist the way stdlib shims land in `_scrml/`, and re-base to the copy; or (b) a compile diagnostic for a non-`.scrml` relative import reaching CLASSIC client output, and for a `.ts` `import:host` reaching ANY client output (a browser cannot load `.ts`). **P7 disposition: `carried`** (not security, not bootstrap-blocking) — but the marker stays `status=open` for now: `conformance/run.ts` fails the gate on a `carried` gap with no pinning xfail case, and the pinning case's CORRECT behaviour depends on the (a)/(b) choice (a runnable helper vs a new diagnostic), so the case — and the flip to `carried` — follows bryan's ruling.
+- **Gate≠write residue (pre-existing, string-literal-only).** Under `contentHashAssets` the write phase applies `rewriteChunkImportRefs` and the `sourceMappingURL` rename AFTER the gate: **esm + content-hash WITHOUT source maps** still mismatches for any page with a cross-file `.client.js` dep (the chunk import URL is re-pointed at the hashed dep name), and **+ source maps** mismatches on the renamed `sourceMappingURL`. (Earlier wording here — "measured equal for the shapes above" — held only for dep-less pages.)
+- **LOW design note.** `distSpaceTargets` is a MIRROR: it lists what the emitter already knows. `emit-client.ts` (~:2218, the non-`.scrml` local-import limb that pushes `import … from ${jsSource}`) is the one place that knows which client imports are USER source-space; marking them there (or emitting them dist-space, as `emit-server.ts` does via `distRelativeServerSpecifier`) would remove the list. Complete today — the runtime is the only compiler-written dist-space `.js` import in client output — but future-fragile: the next one silently re-breaks.
 
 ### G-EXPORT-FROM-AND-DYNAMIC-IMPORT-KEEP-SCRML-SPECIFIERS-IN-EMITTED-JS — a re-export from a `.scrml` module emits verbatim into the library `.js`, leaving a `.scrml` specifier in emitted JavaScript
 <!-- @gap id=g-export-from-and-dynamic-import-keep-scrml-specifiers-in-emitted-js sev=MED status=open locus=compiler/src/api.js(staticImportSources collects ImportDeclaration only, so an ExportNamedDeclaration carrying a source and an ImportExpression are never visited by rewriteRelativeImportPaths — locate both by symbol) prov=review:S433-peter-floor-pass-on-1045-reviewer-REPRODUCED-identical-at-the-parent-4b8ccdb8-caret-so-PRE-EXISTING-not-introduced -->
 PRE-EXISTING (byte-identical behaviour at `4b8ccdb8^`), surfaced by the #1045 review. #1045 replaced a line-anchored regex with an acorn walk whose doc-comment claims it rewrites "any clause shape" — but the collector visits `ImportDeclaration` only, **with the parsed tree already in hand** (Rule 7's shape: the structural route was available and a narrower node set was used instead). Measured population: **6 corpus files** — `samples/compilation-tests/gauntlet-s19-phase1-decls/phase1-export-reexport-008.scrml`, `examples/23-trucking-dispatch/models/auth.scrml`, `stdlib/auth/index.scrml`, `stdlib/data/index.scrml` (×4 lines). Shares its locus with the entry above, so whoever opens that function should close both.
+**S438 note (still OPEN):** the #1045 F1 fix left a pointer comment at the `ImportDeclaration`-only collection in `staticImportSources` and did NOT fold this in — collecting `ExportNamedDeclaration` / `ExportAllDeclaration` sources there is only half the fix: the reported symptom is a `.scrml` specifier, which `rewriteRelativeImportPaths` never touches (its re-base is `.js`/`.mjs`/`.ts`/`.mts` only), so the `.scrml` → emitted-`.js` translation for re-exports has to land too (library emitter), plus dynamic `import()`.
 
 ### G-BOOLEAN-COERCION-DOES-NOT-FIRE-OUTSIDE-A-DB-SRC-BLOCK — a declared `boolean` column read by a raw SQL block in a plain `function` under a program-level `db=` emits NO coercion; booleans reach the consumer as SQLite `0`/`1`
 <!-- @gap id=g-boolean-coercion-does-not-fire-outside-a-db-src-block sev=MED status=open locus=searched:compiler/src/codegen/bool-coerce.ts(buildBoolColumnsFromFileAST requires a state node whose stateType is schema and a column whose scrmlType is boolean),compiler/src/codegen/rewrite.ts(boolCoerceSqlResult returns inner unchanged when the module-level bool-columns context is null),compiler/src/codegen/emit-server.ts(the setBoolColumnsForRewriter call site) — the deciding condition was NOT traced; what is measured is the boundary, not the cause prov=empirical:S433-peter-PA-verified-by-execution-two-projection-shapes-bare-and-table-qualified-both-emit-no-wrapper -->
@@ -19497,6 +19705,29 @@ marker, so a `>` operator in it is indistinguishable from the tag close — the 
 Direction: a diagnostic steering to braces / `${…}` / parens (cf. `E-ATTR-UNQUOTED-OPERATOR` for conditions), not
 a guess.
 
+### G-HANDLER-LOOP-BINDER-WRITE-CREATES-WINDOW-GLOBAL — in an event-handler value, a write to a keywordless loop binder silently creates a `window` global — `NEW S439; HIGH; open`
+<!-- @gap id=g-handler-loop-binder-write-creates-window-global sev=HIGH status=open locus=compiler/src/codegen/emit-event-wiring.ts:1140 prov=ruling:user-voice-scrml.md S439 #8 -->
+
+S439 ruling #8 says a keywordless loop binder (`for (it of xs)`) is `const` (§50.8.5), and a write to it is
+E-ASSIGN-004. That diagnostic is Nominal: impl#1 does not emit it. The ruling's premise, "it already fails
+loudly", holds in only ONE of two positions:
+
+- **Function body:** impl#1 emits `for (const it of …)`, so `it = it + 1` throws a JS `TypeError` at runtime.
+- **Event-handler value:** in `onclick=${ for (it of @xs) { it = it + 1; @n = @n + it } }`, the string path
+  (Case C, `rewriteBlockBody` at the locus above) re-emits the loop VERBATIM as `for (it of …)`, with no
+  declaration keyword. The client bundle is loaded as a classic `<script src>` with no `"use strict"`, so it
+  runs in sloppy mode. The write therefore **succeeds silently and creates an implicit `window.it` global**.
+
+**Measured S439 by execution:** compiled with `bun compiler/src/cli.js compile t8b.scrml -o out8b` (exit 0,
+no diagnostics; `<xs> = [1, 2, 3]`, `<n> = 0`, the handler above). The runtime and client JS were then run
+in a happy-dom `Window` via `node:vm` `runInContext` (classic-script global code), `DOMContentLoaded` was
+dispatched, and the button was clicked. Result: before the click, `"it" in window` = false; after it,
+`"it" in window` = true with `window.it === 4`; no error; `<p>` reads `9`. Both bundle files have 0
+`"use strict"`.
+
+Fix direction: emit E-ASSIGN-004 (the ruling), and/or lower handler-value loops through the statement
+emitter so the binder gets `const`.
+
 ### g-e-error-002-handler-exemption-depends-on-statement-count — an unhandled failable call in a handler is E-ERROR-002 only when it shares the handler with another statement — `NEW S437; LOW; open (spec-consistency question for bryan)`
 <!-- @gap id=g-e-error-002-handler-exemption-depends-on-statement-count sev=LOW status=open locus=compiler/src/type-system.ts(the §19.4.3 unhandled-failable check — reaches a failable call through the §5.2.3 handler statement list; the single-expression handler forms are exempt by an earlier, separate rule) prov=review:S437-round5-review-item-a;empirical:S437-round5-reproduced-by-compile -->
 
@@ -19605,36 +19836,124 @@ enumeration walks). Not traced. Workaround: commit from a clean worktree. Measur
 main checkout vs a fresh worktree.
 
 ### g-mw008-counts-headless-tool-programs — `E-MW-008` refuses a single web app that has a `kind="tool"` `<program>` beside it (false-positive refusal, introduced by #1094)
-A compile set of ONE web app (`index.scrml` root `<program auth="optional" sessionExpiry="7d" session-secure="false">` + a `pages/` member minting a session) plus ONE headless `tools/seed.scrml` (`<program kind="tool" lang="ts">` with `main`) fails with `E-MW-008: two applications in one build contest one session cookie`. The tool program mints no cookie and owns no page, so the claim is false. **PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: with the tool file → `E-MW-008`, `FAILED — 1 error`; tool file removed, same set → clean. The S437 adversarial review (post-merge, #1094) additionally measured the artifact split this causes: the member unit falls to `__Host-scrml_sid`/3600 while the root keeps `scrml_sid`/604800 (reviewer-executed, parent-vs-merge differential; PA did not re-run the cookie read). A §43 nested worker `<program name=…>` is NOT counted — not a false positive. Fix direction: count only programs that can own cookie-session units (exclude `kind="tool"` / headless) in both the stash suppression and the E-MW-008 gate. Lane: Peter (the #1094 arc; security). — `NEW S437-bryan`; **MED**; open
-<!-- @gap id=g-mw008-counts-headless-tool-programs sev=MED status=open locus=compiler/src/codegen/index.ts(_collectProgramSites/_multiProgramCompileSet count every program node incl. kind=tool; PA-located-verify) prov=empirical:PA-compiled-3-file-set-E-MW-008-with-tool-program-clean-without -->
+A compile set of ONE web app (`index.scrml` root `<program auth="optional" sessionExpiry="7d" session-secure="false">` + a `pages/` member minting a session) plus ONE headless `tools/seed.scrml` (`<program kind="tool" lang="ts">` with `main`) fails with `E-MW-008: two applications in one build contest one session cookie`. The tool program mints no cookie and owns no page, so the claim is false. **PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: with the tool file → `E-MW-008`, `FAILED — 1 error`; tool file removed, same set → clean. The S437 adversarial review (post-merge, #1094) additionally measured the artifact split this causes: the member unit falls to `__Host-scrml_sid`/3600 while the root keeps `scrml_sid`/604800 (reviewer-executed, parent-vs-merge differential; PA did not re-run the cookie read). A §43 nested worker `<program name=…>` is NOT counted — not a false positive. Fix direction: count only programs that can own cookie-session units (exclude `kind="tool"` / headless) in both the stash suppression and the E-MW-008 gate. Lane: Peter (the #1094 arc; security). — `NEW S437-bryan`; **MED**; resolved (S438) — **FIXED S438-peter** on `fix/s438-mw008-tool-programs`: `_collectProgramSites` skips any file the emit dispatch sends down the tool path (`isToolProgram` — the SAME predicate, per FILE), so neither the count, the stash read, nor the E-MW-008 census sees it. (Round 1 skipped per `<program>` NODE; its S239 review found that re-created the class one level away — a tool file's second top-level `<program session-secure="false" sessionExpiry="7d">`, emitted nowhere, became the build's one program and turned a refused set into a silent `scrml_sid`/604800 downgrade. Fixed, pinned.) ⚑ One intentional behaviour change on a previously ACCEPTED shape: a tool declaring `session-secure="false"`/`sessionExpiry` beside a program-less minting `<page>` used to leak that declaration into the page (`scrml_sid`/604800); the page now gets the secure default — a cookie RENAME, so such an adopter is logged out once on upgrade. A/B on `072741ca` (8 shapes): the four tool-bearing false refusals (plain tool · `serve=` tool · a tool declaring `sessionExpiry`/`session-secure` · tool in the same file) flip clean with the member on `scrml_sid`/604800; two-web-app sets stay refused with or without a tool. SPEC rows (§20.5.1 table + §34) amended to count web-application programs only. 5 new conformance tests, all RED on the unfixed code.
+<!-- @gap id=g-mw008-counts-headless-tool-programs sev=MED status=resolved locus=compiler/src/codegen/index.ts(_collectProgramSites/_multiProgramCompileSet count every program node incl. kind=tool; PA-located-verify) prov=empirical:PA-compiled-3-file-set-E-MW-008-with-tool-program-clean-without -->
 
 ### g-route-inference-8b-session-defaults-outrank-program-declaration — a `protect=` unit gets route-inference's hard-coded session defaults (`sessionSecure:true`, `sessionExpiry:"1h"`), overriding its own `<program>`'s declared session config
-`route-inference.ts` Step 8b registers an `authMiddleware` entry with hard-coded `sessionSecure:true` / `sessionExpiry:"1h"` for an auto-escalated `protect=` unit (and for `<page auth="required">` + `protect=`); `session-config-resolve.ts` step 1 treats ANY middleware value as the unit's own answer, so it outranks the program's declaration and the program stash — and the unit counts as ATTRIBUTABLE, so `E-MW-008` does not refuse the contested case. Reviewer-executed (S437 post-merge review of #1094, parent-vs-merge identical — PRE-EXISTING, not a #1094 regression): a single `<program csrf="off" sessionExpiry="7d" session-secure="false">` with a `protect=` `<db>` and a minting server fn emits `__Host-scrml_sid`/3600 + expiry `"1h"`, ignoring the program's own 7d; a root declaring `session-secure="false"` + a protect member page splits one app across two cookies (the #282 split shape); two programs where one declares nothing + a protect member → NO E-MW-008 in either input order. **Direction is always the SECURE side** (not a downgrade) — impact is functional: login lockout / 1h vs 7d server-side TTL. Also contradicts #1094's own SPEC rows and resolver header, which say entries come only from `<program auth=>`. **RELAYED — PA has NOT reproduced this one**; the reproducer needs a sqlite `app.db` with `users(id,name,password_hash)`. Adjacent: `emit-server.ts` `_scrml_session_expiry` reads `authMiddlewareEntry.sessionExpiry` directly, bypassing the resolver. Related: `g-route-inference-substituted-default-outranks-program-declaration` (S433, source-derived) — likely the same defect, now executed. Fix direction: 8b leaves `sessionSecure`/`sessionExpiry` `undefined` so the resolver falls through. Lane: Peter (security-adjacent; P7 criterion 3 if the lockout counts). — `NEW S437-bryan (relayed from reviewer)`; **MED**; open
-<!-- @gap id=g-route-inference-8b-session-defaults-outrank-program-declaration sev=MED status=open locus=compiler/src/route-inference.ts(Step 8b authMiddleware stamping)+compiler/src/codegen/session-config-resolve.ts(step 1; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-4-shapes-parent-identical -->
+`route-inference.ts` Step 8b registers an `authMiddleware` entry with hard-coded `sessionSecure:true` / `sessionExpiry:"1h"` for an auto-escalated `protect=` unit (and for `<page auth="required">` + `protect=`); `session-config-resolve.ts` step 1 treats ANY middleware value as the unit's own answer, so it outranks the program's declaration and the program stash — and the unit counts as ATTRIBUTABLE, so `E-MW-008` does not refuse the contested case. Reviewer-executed (S437 post-merge review of #1094, parent-vs-merge identical — PRE-EXISTING, not a #1094 regression): a single `<program csrf="off" sessionExpiry="7d" session-secure="false">` with a `protect=` `<db>` and a minting server fn emits `__Host-scrml_sid`/3600 + expiry `"1h"`, ignoring the program's own 7d; a root declaring `session-secure="false"` + a protect member page splits one app across two cookies (the #282 split shape); two programs where one declares nothing + a protect member → NO E-MW-008 in either input order. **Direction is always the SECURE side** (not a downgrade) — impact is functional: login lockout / 1h vs 7d server-side TTL. Also contradicts #1094's own SPEC rows and resolver header, which say entries come only from `<program auth=>`. **RELAYED — PA has NOT reproduced this one**; the reproducer needs a sqlite `app.db` with `users(id,name,password_hash)`. Adjacent: `emit-server.ts` `_scrml_session_expiry` reads `authMiddlewareEntry.sessionExpiry` directly, bypassing the resolver. Related: `g-route-inference-substituted-default-outranks-program-declaration` (S433, source-derived) — likely the same defect, now executed. Fix direction: 8b leaves `sessionSecure`/`sessionExpiry` `undefined` so the resolver falls through. Lane: Peter (security-adjacent; P7 criterion 3 if the lockout counts). — `NEW S437-bryan (relayed from reviewer)`; **MED**; resolved (S438) — **REPRODUCED BY EXECUTION + FIXED S438-peter** on `fix/s438-8b-session-defaults`. All three reviewer shapes reproduced on `4e72ec6a` (cookie read from emitted server JS): (a) `__Host-scrml_sid`/3600/`"1h"` → now `scrml_sid`/604800/`"7d"`; (b) root `scrml_sid`/604800 + protect member `__Host-scrml_sid`/3600 (EXECUTED: the root's login cookie got a 302 from the member's document guard — the lockout is real) → member `scrml_sid`/604800, guard admits; (c) no `E-MW-008` either order → `E-MW-008` both orders. Nearest sibling `<page auth="required">` (inside a 7d program, and as a member page) bit identically and is fixed by the same change. Fix: Step 8b (both limbs) sets `sessionExpiry`/`sessionSecure` ONLY when the unit itself declares them, so `session-config-resolve.ts` falls through to the unit's program / the stash; `emit-server`'s `_scrml_session_expiry` now reads through the same resolver. Step 8a (`<program auth="required">`) keeps its defaults — they are that program's own answer (SPEC E-MW-008 row). Gate unchanged (auth=required, csrf=auto, W-AUTH-MIDDLEWARE-AUTO-INJECTED). Corpus: 1222 directory compile sets, 0 diagnostic changes, 0 per-unit cookie changes, 0 new `E-MW-008`. SPEC §20.5.1 "Step 1" paragraph rewritten; this also settles the S433 open question `g-route-inference-substituted-default-outranks-program-declaration` (never filed as its own entry here — it lived only in SPEC §20.5.1 + hand-off). 13 conformance tests (`conf-SESSION-8B-DEFERS-TO-PROGRAM`, incl. one runtime): 9 RED on the unfixed code, 4 controls green on both. **S239 review fix-round (F1, MED, security direction):** removing the stamp let a protect= unit in a file with 2+ `<program>` nodes reach step 2's last-wins read (`g-two-programs-one-file-session-attr-last-wins`) — a first program declaring `session-secure="true" sessionExpiry="15m"` followed (or nested) by a `session-secure="false" sessionExpiry="30d"` program gave `scrml_sid`/2592000 and the gate accepted a planted plain `scrml_sid` (reviewer-executed, PA-reproduced). Carved out: for a file with 2+ `<program>` nodes (counted by `countUnitProgramNodes`, the resolver's own step-2 walk) both 8b limbs keep the pre-S438 stamp — emitted server JS byte-identical to `origin/main` 98d94e96 in 6 multi-program shapes (sha1 compare). 6 more tests (4 RED on c9d97065, incl. 2 executed: plain `scrml_sid` → 302, `__Host-` → admitted).
+<!-- @gap id=g-route-inference-8b-session-defaults-outrank-program-declaration sev=MED status=resolved locus=compiler/src/route-inference.ts(Step 8b authMiddleware stamping)+compiler/src/codegen/session-config-resolve.ts(step 1; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-4-shapes-parent-identical -->
+
+### g-page-session-secure-three-way-disagreement — `<page session-secure=…>` is rejected by the parser, specified as valid by §20.5.1, and registered as valid by the attribute registry
+Three normative-looking artifacts disagree. (1) SPEC §20.5.1 "`session-secure=` opt-out (B4b)": *"`<program session-secure="false">` (also valid on `<page>`)"*. (2) `compiler/src/attribute-registry.js` (~:226) registers `session-secure` on the page surface, "so a page-level `session-secure=` is recognized". (3) `compiler/src/ast-builder.js` `PAGE_ALLOWED_ATTRS` (~:20607) is the closed set `{ db, auth, csrf, ratelimit, keep-alive }`, so the parser emits **`E-PAGE-INVALID-ATTR`** — and the §34 row for that code (SPEC ~:20788, §4.15) agrees with the parser, not with §20.5.1. **PA-EXECUTED S438:** `<page auth="required" session-secure="true">` over a protect= `<db>` → `E-PAGE-INVALID-ATTR: \`<page session-secure=…>\` — session-secure is not in the per-route attribute set`. Downstream readers ALSO accept it: route-inference `getExplicitAuthDeclaration` reads a page `session-secure=` into the Step 8b entry, and `session-config-resolve.ts` step 2 reads `<page>` attrs (first match wins) — so the page limb exists end-to-end and only the parser gate refuses it. Fails CLOSED (a hard error, not a silent downgrade), hence LOW. Direction is a language ruling — admit it on `<page>` (and then decide what a per-page cookie NAME means when §20.5.1 makes the cookie application-scope, and E-MW-008's "a compiled server mints ONE cookie name") OR strike the §20.5.1 parenthetical + the registry entry + the dead downstream reads. Lean: strike — a per-page cookie name contradicts the application-scope rule. Lane: bryan (language surface). — `NEW S438-peter`; **LOW**; open
+<!-- @gap id=g-page-session-secure-three-way-disagreement sev=LOW status=open locus=compiler/src/ast-builder.js(PAGE_ALLOWED_ATTRS)+compiler/src/attribute-registry.js(page session-secure)+compiler/SPEC.md(§20.5.1 B4b "also valid on <page>") prov=empirical:PA-compiled-page-session-secure-E-PAGE-INVALID-ATTR -->
 
 ### g-session-config-refusal-still-writes-dist — `E-MW-008` (and `E-MW-007`) fail the build by exit code but `scrml build` / `scrml compile --output-dir` still write a complete `dist/`, including the split-cookie server units
 So `codegen/index.ts`'s comment "the F1 split is unreachable by construction" holds only for callers that honour the exit code; a deploy script that ignores it ships the split. Reviewer-executed on the A+B two-program fixture (S437 post-merge review of #1094); `scrml dev` behaviour UNVERIFIED. Shared posture with E-MW-007, not new to #1094. Direction is a ruling: fail-closed = do not write artifacts on a hard session-config refusal. — `NEW S437-bryan (relayed from reviewer)`; **LOW**; open
 <!-- @gap id=g-session-config-refusal-still-writes-dist sev=LOW status=open locus=compiler/src/commands/build.js+compile.js(write phase does not gate on E-MW-007/008; PA-located-verify) prov=review:S437-post-merge-1094-reviewer-executed-cli-build-exit-1-dist-written -->
+**S438-peter:** a pre-built fail-closed fix sits on **`hold/s438-refusal-writes-no-dist` @ `074f1630`** (three S239 rounds: the refusal is decided before ANY write via a `beforeWrite` hook, E-MW-007 judged over the post-write unit set, success paths byte-identical, 15 tests) — awaiting bryan's ruling (note in `handOffs/incoming/`). ⚑ **Re-grade proposed LOW → MED:** measured on `072741ca`, a refused REBUILD overwrites the split units in place beside the previous `_server.js`, which boots and serves **200** on the split.
 
 ### g-ghost-lint-false-fires-on-canonical-block-handler — the canonical inline block handler `onclick={ s1; s2 }` (L19 REVERSED S435, §5.2.3) fires `W-LINT-007` ("`<Comp prop={val}>` — scrml uses `<Comp prop=val>`") and `W-LINT-013` twice ("`@click=` Vue event shorthand") on a correct program
 **PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick={ @a = @a + 1; @a = @a * 2 }>go</button>` → one `W-LINT-007` + two `W-LINT-013` on that line. The pre-Stage-2 ghost-pattern pass (PRIMER §12) predates the L19 reversal: `{…}` in attribute position reads as JSX `prop={val}`, and each `@a =` inside the braces reads as a Vue `@event=` inside a tag-opener range (the W14 Unit AA tag-opener gating does not exclude a braced attribute value). Same class as the S137 Bug 44 exemption. Every adopter writing the now-canonical form gets three false warnings, which teaches them to ignore W-LINT. Found by the S437 maps refresh (N-S437-5). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise; but the lint now contradicts a ruling made on 2026-09-26, so it is arguably part of the L19 reversal's own landing. — `NEW S437-bryan`; **LOW**; open
 <!-- @gap id=g-ghost-lint-false-fires-on-canonical-block-handler sev=LOW status=open locus=compiler/src/lint-ghost-patterns.js(W-LINT-007 JSX-prop pattern + W-LINT-013 tag-opener gating near :472/:1032; PA-located-verify) prov=empirical:PA-compiled-onclick-block-handler-1x-W-LINT-007-2x-W-LINT-013 -->
 
 ### g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements — `onclick=@count = 0; track("reset")` compiles at exit 0 with NO diagnostic: the handler keeps only `@count = 0`, and `track("reset")` is emitted as two bare HTML ATTRIBUTES (`track reset`) on the element
+**RESOLVED at #1106 (14bce6376), PA-verified by execution S437 wrap:** the assignment-led bare sequence now raises E-MULTI-STATEMENT-HANDLER, and its message gives the §5.2.3 braces fix built from the user's statements.
 **PA-REPRODUCED BY EXECUTION at S437** on `d02738767`: `<button onclick=@count = 0; track("reset")>` → emitted `<button data-scrml-bind-onclick="_scrml_attr_onclick_1" track reset>`, and `W-DEAD-FUNCTION` fires on `track` — the compiler reports the dropped call as dead code. A call-led sequence (`onclick=startGame(); track("start")`) correctly fires `E-MULTI-STATEMENT-HANDLER` (currency-pass probe, exit 1). **Governing sentence (§5.2.3):** *"A BARE event-handler value that contains a `;` outside of expression-internal contexts … is compile error `E-MULTI-STATEMENT-HANDLER`"* and *"The error is kept so the unbraced sequence can never be silently read the wrong way."* So this is a conformance defect: the SHALL fires only when the sequence is led by a call; an assignment-led sequence ends the attribute value at the `;`-adjacent whitespace and the tail re-tokenizes as attributes. Silent-wrong-output class. Fix direction is newly-REJECTING toward an existing sentence (the PA-ruled class, IF corpus impact measures zero by compiling). P7 disposition owed: not bootstrap, not security → `carried` unless ruled otherwise. Found by the S437 PRIMER currency pass. — `NEW S437-bryan`; **HIGH**; open
-<!-- @gap id=g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements sev=HIGH status=open locus=searched:compiler/src/multi-statement-scan.ts(fire-site is call-led only per B18),attribute tokenizer in ast-builder.js/block-splitter — not traced prov=spec:§5.2.3-the-unbraced-sequence-can-never-be-silently-read-the-wrong-way -->
+<!-- @gap id=g-unbraced-handler-sequence-led-by-assignment-silently-drops-statements sev=HIGH status=resolved resolved=14bce6376 locus=searched:compiler/src/multi-statement-scan.ts(fire-site is call-led only per B18),attribute tokenizer in ast-builder.js/block-splitter — not traced prov=spec:§5.2.3-the-unbraced-sequence-can-never-be-silently-read-the-wrong-way -->
 
 ### g-multi-statement-handler-message-gives-the-retired-l19-fix — `E-MULTI-STATEMENT-HANDLER`'s message still says "lift the body to a named function and wire by name"; §5.2.3 (L19 reversed S435) says the fix is to wrap the statements in braces — `onclick={ startGame(); track("start") }` — or to name a function
+**RESOLVED at #1106 (14bce6376), PA-verified by execution S437 wrap:** the assignment-led bare sequence now raises E-MULTI-STATEMENT-HANDLER, and its message gives the §5.2.3 braces fix built from the user's statements.
 Found by the S437 PRIMER currency pass (relayed; message text not PA-re-read). The diagnostic teaches the retired rule to every adopter who hits it. Part of the L19 reversal's own landing. — `NEW S437-bryan (relayed)`; **LOW**; open
-<!-- @gap id=g-multi-statement-handler-message-gives-the-retired-l19-fix sev=LOW status=open locus=searched:compiler/src/multi-statement-scan.ts — message site not traced prov=spec:§5.2.3-fix-is-to-wrap-the-statements-in-braces -->
+<!-- @gap id=g-multi-statement-handler-message-gives-the-retired-l19-fix sev=LOW status=resolved resolved=14bce6376 locus=searched:compiler/src/multi-statement-scan.ts — message site not traced prov=spec:§5.2.3-fix-is-to-wrap-the-statements-in-braces -->
 
 ### g-impl1-match-miscompiles-hit-by-the-bootstrap — six impl#1 `match`/enum lowering defects found writing the native bootstrap (F11–F16); five are SILENT miscompiles
 Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + the workaround used in `compiler/self-host-v2/slice-m1/progress.md` §F11–F16 (M1's own code carries the workarounds). **P7 criterion 1 (blocks the bootstrap) — eligible for an impl#1 fix.** One entry for the family because F11 and F16 share a root (`_variantFields` holds only the CURRENT file's enums), and the adversarial review of M1 re-confirmed F12 independently (`match m { .B :> "b"\n _ | .A :> "a" }` compiles with no diagnostic and drops the arm — `f(.A)` returns undefined, defeating E-TYPE-020).
 - **F11** positional payload binding in a `match` over an IMPORTED enum is silently dropped (named binding works).
-- **F12** a `|` alternation arm lowers only as the FIRST arm; later it is silently glued onto the previous arm. (The bootstrap's no-default-arm lint now flags a non-first alternation arm, S437.)
-- **F13** a payload pattern binding five or more fields is not recognised as an arm.
-- **F14** a string literal containing `{`/`}` adjacent to other characters breaks `${}` block splitting.
+- **F12** a `|` alternation arm lowers only as the FIRST arm; later it is silently glued onto the previous arm. (The bootstrap's no-default-arm lint now flags a non-first alternation arm, S437.) — **FIXED S438 (branch `fix/s438-impl1-match-arm-shapes`)**: root = the collectExpr arm-boundary detector (`ast-builder.js`) required the arm arrow IMMEDIATELY after the first alternate; one token-kind walker (`armPatternChainArrowOffset`) now recognises every alternate shape at every chain length, and a collection's own arm head is never split. Siblings fixed with it (all execution-tested): `_ | .A` / `.A | _` lower as the wildcard arm (codegen + typer agree), `::B | ::C`, a continuation line opening with `|`, number/boolean alternation, a string alternate holding `|` (atomic enumeration), a nested `match` as an alternation arm's body, and the `const r = match …` lowering (`emit-logic.ts`), which compared only the first alternate. Native parser (`--parser=scrml-native`, opt-in) has no alternation-arm support at all and fails LOUDLY — not changed. **S239 review round (F1):** a `|` alternation over PAYLOAD variants now always extracts the `.variant` tag (library mode compared the raw object to `"P"` and never matched), and a BINDING alternation (`.P(a: x) | .Q(a: x) :> x`, any position, both modes) is rejected LOUDLY with the new **E-MATCH-ALT-BINDING** (SPEC §18.2 + §34) instead of silently dropping the arm. **Final review:** a NAMED payload alternate even when discarded (`.P(a: _) | .Q(a: _)`, silently dropped in both modes — codegen's alternation form accepts positional `_` only) and nested/literal payload alternation are rejected by the same code; ONLY positional `_` discards are accepted in an alternation. Recorded (not changed): program-mode SERVER functions are emitted before `setVariantFieldsForFile` runs (`compiler/src/codegen/index.ts`, server emit precedes the client registry install), so `_variantFields` is null there — unit-only alternation in a server fn gains tag extraction (benign; zero corpus diff; it also fixes server-side payload alternation). An IMPORTED payload enum in program mode still compares raw in a non-alternation arm (the registry side is the parallel branch `fix/s438-impl1-imported-enum-match`, F16). Residual (not fixed): the arm-boundary walker is quadratic on a very long literal `|` chain (8000 terms ≈ 2× base time) — noted, not a correctness issue.
+- **F13** a payload pattern binding five or more fields is not recognised as an arm. — **FIXED S438**: a 20-token cap in the arm-boundary payload walk (and a 40-token cap in the inline-arm walk; native `scanPastPayloadParen` mirrored); walks are now uncapped, bounded by `{`/`}`/`;`/EOF. Sibling fixed: a BLOCK arm's named binding (`.W(e: x) :> { … }`) bound `x` to the FIRST field (codegen used the local names positionally); the `const r = match …` path emitted no binding prelude for block arms at all.
+- **F14** a string literal containing `{`/`}` adjacent to other characters breaks `${}` block splitting. — **FIXED S438**: `block-splitter.js` only recognised the 3-char `"{"` shape; in `${}` / `!{}` / `~{}` contexts a brace is now string content when the logic tokenizer (regex-, comment- and escape-aware) puts it inside a CLOSED quote string on its line (`braceIsQuotedStringContent`). Residual (not changed): braces in backtick TEMPLATE text, `?{}`/`#{}`/`^{}` contexts (3-char rule only), and the separate F9 `"${"` gap. **S239 review round:** the probe analyses each line segment ONCE (cached; was re-tokenized per brace — a one-line 2000-object literal took ~97 s, now < 1 s; perf-guard test), **Known residual (division at line start, LOUD, base identical):** a segment OPENING with `/` that continues an expression from a value-ending previous line (`let r = a\n  / b; let s = '/'; if (c) { r = 'x'\n }`) is read as a regex opener by the cold-started per-line tokenizer → E-CTX-001. A synthetic-operand prefix repair was landed in round 2 and REVERTED in the final review: it misread a regex STATEMENT after a `//` comment line, a control-header `)` or `else` as division (E-CTX-003 where round 1 compiled). Suggested repair (reviewer): when scanning back for the previous significant character, skip trailing `//`/`/* */` comments; treat `)` as a value only when it does not close an `if`/`while`/`for` header; exclude keywords (`else`, `return`, `typeof`, …). **Known residual (a LOUD regression vs base, accepted at the review's stop condition):** a MULTI-LINE backtick template whose text line holds a quoted `{` that closes on a later line (`` `\n'a { b'\nc }\n` ``) now gives E-CTX-001 — the line-scoped probe cannot know it is inside template text; base compiled it because both braces were counted.
+- Tests: `compiler/tests/unit/match-arm-shapes-f12-f14.test.js` (6 of 8 red on main, all green on the branch).
 - **F15** an enum payload FIELD named like a same-file function is silently renamed in the constructor.
 - **F16** tag-only arms over an IMPORTED payload enum compare the value to a string and never match.
 — `NEW S437-bryan (relayed from the M1 build agent; F12 independently re-executed by the M1 adversarial review)`; **HIGH**; open
 <!-- @gap id=g-impl1-match-miscompiles-hit-by-the-bootstrap sev=HIGH status=open locus=searched:compiler/src/codegen/emit-match.ts,type-system.ts(_variantFields holds only the current file's enums — F11/F16 root, per the M1 agent; PA-located-verify) prov=empirical:bootstrap-slice-m1-progress-md-F11-F16-reproducers -->
+**S438-peter:** F12/F13/F14 landed #1119. **F11/F15/F16/F17 are fixed on `hold/s438-impl1-imported-enum-match` @ `5bea376e` but HELD** (four S239 rounds): the branch as a whole turns one LOUD failure silent — a bare-dot argument to a cross-file call whose parameter enum TS cannot see (`conv(.Neg(6))`, `Expr.Neg(x)` vs `Other.Neg(y)`) picks up the outer context's enum: main throws `"Neg" is not a function`, the branch returns wrong data. Fix direction: no stamp / no by-name imported lookup for a bare-dot constructor that is an ARGUMENT of a call TS could not type (→ loud), or stop TS pushing the outer context into call arguments. Everything else on the branch is verified (66 probe cases = main, the rest fixes or loud; reviewer harness in the S438 scratch `rv-enum3/`).
+
+## §S438 — gaps filed S438 (2026-09-27, Peter; surfaced while landing #1045 F1 + the two LOW manifest-gate notes)
+
+### g-host-import-nested-bare-expr-skips-the-manifest-check — a nested `import:host` gets E-IMPORT-003 only under the live front-end but E-IMPORT-003 + E-IMPORT-008 under `--parser=scrml-native` on a host-import-disabled project — `NEW S438; LOW; open`
+<!-- @gap id=g-host-import-nested-bare-expr-skips-the-manifest-check sev=LOW status=open locus=compiler/src/host-import.js(validateHostImports — the misplacedBare limb reports E-IMPORT-003 only; the live nested-statement parser has no import branch so the declaration survives as a bare-expr with no hostTag) prov=empirical:S438-peter-compiled-if-body-and-fn-body-import-host-both-front-ends-on-072741ca -->
+**Measured on `072741ca`, both front-ends, a `[capabilities] host-import = "disabled"` project:** an `import:host` inside an `if` body gives `E-IMPORT-003` under the live front-end but `E-IMPORT-003` + `E-IMPORT-008` under `scrml-native`. The same split now holds for a function body: S438 made the native `import-decl` there fail closed and held it to the manifest (it was previously never recorded — the #1045 review's LOW note), while the live front-end still sees a `bare-expr` with no `hostTag`. The compile fails either way (`E-IMPORT-003`), so no bytes ship; the defect is front-end diagnostic parity, which §22.13 requires ("The block-splitter / native parser SHALL consult the entry"). **Not reproduced from the same review note:** "the module resolver still loads the host module" for an in-function import — a missing or wrong-name host target inside a function body produced no `E-IMPORT-006`/`E-IMPORT-004` on either front-end at `072741ca`, so that load was not observable; the S438 rejection is defensive. Fix direction (unverified): give the `misplacedBare` limb the manifest check when its text is `import:host`, or give the live nested-statement parser an import branch.
+
+### g-per-route-chunk-dir-named-after-absolute-source-path — `--emit-per-route` on pages with no route map names each chunk dir after the mangled ABSOLUTE source path — `NEW S438; LOW; open`
+<!-- @gap id=g-per-route-chunk-dir-named-after-absolute-source-path sev=LOW status=open locus=searched:compiler/src/codegen/route-splitter.ts(chunk descriptor route-path derivation when no route map applies)—not-traced prov=empirical:S438-peter-per-route-build-of-app-page-and-app-sub-deep-identical-on-base-072741ca -->
+A `--emit-per-route` build of pages with no route map writes chunks to `dist/C__Users_<…>_app_page/_anonymous.initial.<hash>.js` (the absolute source path with separators mangled to `_`), and `chunks.json` points at those dirs. The output layout therefore depends on the machine and checkout location — not reproducible across hosts — and leaks the builder's filesystem path into shipped URLs. **PRE-EXISTING**: byte-identical on `072741ca` (measured by the S438 #1045 F1 repro; the S239 review confirmed). Direction (unverified): derive the chunk dir from the dist-relative page path (the same `pathFor` / `stripPagesPrefix` computation the page's own artifacts use) when no route map applies.
+
+## §S438b — pre-existing defects surfaced by the S239 review of the F12–F14 fix (2026-09-27; reviewer-reproduced, reproducers in the S438 session scratch `rv-arms/`; NOT caused by the F12–F14 branch)
+
+### g-handler-alt-arm-body-only-last — a `!{}` handler arm `| ::B | ::C :> "bc"` gives the body only to the LAST alternate; `::B` yields null — `NEW S438; HIGH; open`
+<!-- @gap id=g-handler-alt-arm-body-only-last sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(error-handler arm lowering)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Silent wrong value: the alternation in an error-handler arm is not lowered as an OR-chain; the earlier alternates fall through with no body. Sibling of the value-`match` alternation class fixed by g-impl1-match-miscompiles F12 (that fix covers JS-style `match` arms only).
+
+### g-stmt-match-block-return-falls-through — a statement-position `match` whose arms are `{ return "a" }` blocks returns the fall-through value, not the arm's — `NEW S438; HIGH; open`
+<!-- @gap id=g-stmt-match-block-return-falls-through sev=HIGH status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(match-stmt structuredBody IIFE — a `return` inside the arm returns from the IIFE, not the function)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Silent wrong value; direction unverified (the arm body is emitted inside the match IIFE, so its `return` exits the IIFE).
+
+### g-lib-positional-payload-binding-throws — library-mode (`${}` + `export function`) positional payload binding (`.W(a, b) :> a`) throws ReferenceError at runtime ("field order unknown") — `NEW S438; MED; open`
+<!-- @gap id=g-lib-positional-payload-binding-throws sev=MED status=open locus=compiler/src/codegen/emit-library.ts(never calls setVariantFieldsForFile — the per-file variant registry is empty in library mode) prov=empirical:S438-peter-and-S239-review -->
+Named binding works. Tag-only arms over a payload enum in library mode also compare the raw object to a string (the F16 shape, same-file). The parallel branch `fix/s438-impl1-imported-enum-match` (F11/F16 — TS-resolved subject variants) is expected to cover this; re-verify after it lands.
+
+### g-false-e-type-023-alt-arm-qualified-result — `.B | .C :> M.A` raises a false E-TYPE-023 (duplicate arm) — `NEW S438; MED; open`
+<!-- @gap id=g-false-e-type-023-alt-arm-qualified-result sev=MED status=open locus=searched:compiler/src/type-system.ts(splitMatchArms / parseArmPattern — the qualified `M.A` in the arm RESULT is read as another arm head)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud false rejection of a valid program.
+
+### g-arm-body-string-with-pipe-or-arrow-invalid-logic — a string containing `|` or `:>` in a match arm BODY yields E-CODEGEN-INVALID-LOGIC — `NEW S438; MED; open`
+<!-- @gap id=g-arm-body-string-with-pipe-or-arrow-invalid-logic sev=MED status=open locus=searched:compiler/src/codegen/emit-control-flow.ts(splitMultiArmString / parseMatchArm text re-split of bare-expr arms)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud. The text-based arm re-splitter sees the string content.
+
+### g-block-comment-brace-in-logic-ctx-001 — `/* } */` inside `${}` gives E-CTX-001 — `NEW S438; LOW; open`
+<!-- @gap id=g-block-comment-brace-in-logic-ctx-001 sev=LOW status=open locus=searched:compiler/src/block-splitter.js(block-comment containment pre-scan — a `}` in the comment reads as the context closer)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud; pre-existing (base identical).
+
+### g-regex-with-brace-in-logic-ctx-003 — a regex literal holding a brace (`/"{/`) inside `${}` gives E-CTX-003 — `NEW S438; LOW; open`
+<!-- @gap id=g-regex-with-brace-in-logic-ctx-003 sev=LOW status=open locus=searched:compiler/src/block-splitter.js(brace counting has no regex awareness; the F14 probe consults the tokenizer for QUOTE strings only)—not-traced prov=empirical:S438-S239-review-rv-arms-reproducer -->
+Loud; pre-existing (base identical).
+
+### g-false-e-type-023-bare-variant-arm-body — a match arm whose BODY is a bare variant (`.Z :> .P(1)` / `.Q(_) | .R :> .Z` / `_ :> .R`) raises a false E-TYPE-023 "Duplicate match arm" — `NEW S438; MED; open`
+<!-- @gap id=g-false-e-type-023-bare-variant-arm-body sev=MED status=open locus=searched:compiler/src/type-system.ts(splitMatchArms — a `.Variant` in an arm RESULT is read as a new arm pattern)—not-traced prov=empirical:S438-final-review-rv-arms2-q11 -->
+Loud false rejection, before and after the F12–F14 branch. Same family as g-false-e-type-023-alt-arm-qualified-result (the typer's text arm splitter treats a variant-valued body as a pattern).
+
+## §S438c — gaps filed at the S438 wrap (2026-09-27, Peter; reviewer-executed unless marked)
+
+### g-bootstrap-m2-spread-overrides-write-in-sequence — slice M2 lowers `@p = { ...@p, x: @p.y, y: @p.x }` to sequential field writes with no temporaries, so later overrides read post-write state (1,2 → 2,2; genuine replace → 2,1) — `NEW S438-peter`; **HIGH**; open
+**PA-RE-EXECUTED on `072741ca`.** Also `{ ...@p, y: @p.x + 10, x: @p.y }` → 11,11 (want 2,11). No diagnostic; `checkCore` clean. §66.11.3 item 1 ("compiles exactly as the equivalent genuine replace does") and §66.10 item 1. Found by the S438 S239 review of #1109. Fix pre-built on **`hold/s438-1109-review-fixes` @ `eb3de63d`** (binds each override to a `Let` before the writes; PA re-ran slice-m2 89/0, lowered slice-m1 73/0). Open question for bryan: a spread's writes are still separate, so a runtime-refused later write leaves earlier ones applied — all-or-nothing? Lane: bryan (bootstrap).
+<!-- @gap id=g-bootstrap-m2-spread-overrides-write-in-sequence sev=HIGH status=open locus=compiler/self-host-v2/lower.scrml(spreadStmts) prov=empirical:PA-re-executed-probe3-swap-on-072741ca -->
+
+### g-bootstrap-m2-direct-handle-refused-inside-own-given — a direct `@color.value` read or write inside `given c = @color :> { … }` over a conditional handle is rejected E-DECL-HANDLE-NOT-NARROWED — `NEW S438-peter`; **MED**; open
+§66.7.5 (O56 RULED S435; reads amendment S437 #1108): "A direct `@handle.field = …` inside the narrowed block is legal". The `c.value` form works. Reviewer-executed. Fix on the same hold ref (`Env.narrows`). Lane: bryan.
+<!-- @gap id=g-bootstrap-m2-direct-handle-refused-inside-own-given sev=MED status=open locus=compiler/self-host-v2/analyze.scrml(writeGuards/resolveAtRead) prov=review:S438-S239-of-1109-reviewer-executed -->
+
+### g-bootstrap-m2-spec-drift-guard-fails-on-crlf — slice-m2 `parse.test.js`'s §66.19 drift guard matches ```` ```scrml
+ ```` on raw text, so it finds nothing on a CRLF checkout (2 fails on Windows), and it checks "some block anywhere" not the §66.19.1/.3 blocks — `NEW S438-peter`; **LOW**; open
+Fix on the same hold ref (normalise CRLF, section-scoped). Lane: bryan.
+<!-- @gap id=g-bootstrap-m2-spec-drift-guard-fails-on-crlf sev=LOW status=open locus=compiler/self-host-v2/slice-m2/parse.test.js prov=review:S438-S239-of-1109-reviewer-executed -->
+
+### g-renamed-onion-entry-refuses-every-rebuild — after renaming a source that declares the request onion, every rebuild fails E-MW-007 until dist/ is cleared by hand (the old `.server.js` unit stays in dist and counts as a second onion) — `NEW S438-peter`; **MED**; open
+Reviewer-executed on `072741ca` (build `index.scrml` with `log="minimal"`, rename to `main.scrml`, rebuild). Neither base nor any branch deletes stale dist files. Pre-existing.
+<!-- @gap id=g-renamed-onion-entry-refuses-every-rebuild sev=MED status=open locus=compiler/src/commands/build.js(E-MW-007 over dist units incl. stale) prov=review:S438-dist-refusal-review-probe3 -->
+
+### g-compile-never-checks-e-mw-007 — `scrml compile --output-dir` accepts two request onions at exit 0 with no diagnostic (E-MW-007 is checked only where a server entry is generated, which `compile` never does) — `NEW S438-peter`; **MED**; open
+Reviewer-executed on `072741ca`. `scrml build` refuses the same input.
+<!-- @gap id=g-compile-never-checks-e-mw-007 sev=MED status=open locus=compiler/src/commands/compile.js prov=review:S438-dist-refusal-agent-repro -->
+
+### g-compile-output-dir-dot-eexist — `scrml compile app.scrml --output-dir .` crashes `EEXIST: file already exists, mkdir '.'` — `NEW S438-peter`; **LOW**; open
+Reviewer-executed on `072741ca`. Pre-existing.
+<!-- @gap id=g-compile-output-dir-dot-eexist sev=LOW status=open locus=compiler/src/api.js(mkdirSync(outputDir)) prov=review:S438-dist-refusal-review-F4 -->
+
+### g-derived-circular-dep-still-writes-output — §6.6.10 "A file with a circular derived dependency SHALL NOT produce compiled output", but E-DERIVED-CIRCULAR-DEP builds exit 1 and still write html/client/css/runtime — `NEW S438-peter`; **MED**; open
+Agent-executed on `072741ca` (also E-STATE-UNDECLARED writes). Every hard error writes artifacts today except the §2.2.1 emit gate; the §34 E-CG-TILDE-UNRESOLVED row records the family-wide write gate as deliberately deferred. Conformance defect against an existing SHALL; its fix is the "fail-closed on all hard errors" option in the dist-refusal ruling note to bryan.
+<!-- @gap id=g-derived-circular-dep-still-writes-output sev=MED status=open locus=compiler/src/api.js(write phase gates only on emitGateFailed) prov=spec:§6.6.10-SHALL-NOT-produce-compiled-output -->
+
+### g-types-gate-cannot-find-tsc-on-windows — `scripts/types-gate.ts` looks for `node_modules/.bin/tsc` and fails on this Windows clone (only `tsc.exe`) — `NEW S438-peter`; **LOW**; open
+Seen by two S438 reviewers; running tsc directly with the gate's arguments works. Tooling only.
+<!-- @gap id=g-types-gate-cannot-find-tsc-on-windows sev=LOW status=open locus=scripts/types-gate.ts prov=empirical:S438-two-reviewers -->

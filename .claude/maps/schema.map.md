@@ -1,6 +1,95 @@
 # schema.map.md
 # project: scrml
-# updated: 2026-09-27T00:00:00Z  commit: d02738767
+# updated: 2026-09-28T04:40:15Z  commit: fb21983a
+# ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
+# `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
+# merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
+# `origin/main` at fetch (no fork this pass). Of the 9 commits, **3 are the PRIOR session's own maps/wrap
+# commits** (`c65f54b4` #1111 maps-refresh-to-9941a504c, `88a75073` #1110 wrap, and the inbox commit `0fc87bf9`
+# #1115 is bookkeeping only) — **6 are source-relevant**: `072741ca` #1109, `98d94e96` #1112, `b7c86323` #1113,
+# `8c55f518` #1114, `afc2308b` #1116, `fb21983a` #1119.
+# ⛑ **FIGURES RE-EXECUTED AT `fb21983a`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat — `package.json` untouched this window) · `compiler/src` **266,944 lines / 211 files**
+# per FACTS (+939 lines, files FLAT vs `9941a504c`'s 266,005/211) · test files **1,509** (+3:
+# `conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js`, `clientjs-import-disk-rebase-gate-eq-write.test.js`,
+# `match-arm-shapes-f12-f14.test.js`, all under `compiler/tests/` — `compiler/self-host-v2/slice-m2` gained 4
+# more `*.test.js` OUTSIDE this count, per FACTS' own stated scope exclusion) · `compiler/SPEC.md` **40,399**
+# lines (+51) · conformance **1047** cases (FLAT) · §34 catalog **835** rows (+3), range `20331..21237`.
+# `bun conformance/run.ts` (impl#1) -> **1040/1047 pass + 7 xfail** — FLAT vs `9941a504c`.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **943 -> 948** · W 183 FLAT · I 10 FLAT · H 2
+# FLAT · unique codes **800 -> 803**. **ADDED = {`E-MATCH-ALT-BINDING`, `E-SCHEMA-012`, `E-SCHEMA-013`}; REMOVED
+# = EMPTY.**
+# ⛑ **WINDOW HEADLINES (verify in source, not here):**
+#   · **#1119** (`g-impl1-match-miscompiles` F12/F13/F14) — a `match` alternation arm (`.A | .B :> r`) is now
+#     recognised at ANY arm position, not only first (`ast-builder.js` `armPatternChainArrowOffset` /
+#     `scanArmPatternAlternate`; `emit-control-flow.ts` Form 0w/0/2 + `armCondition` shared by `emit-logic.ts`);
+#     a NAMED-field payload arm binding 5+ fields is no longer truncated by the old 20-token paren-scan cap
+#     (`scanPastBalancedParens`, and the native-parser mirror `scanPastPayloadParen`); a brace inside a CLOSED
+#     quoted string on the same line no longer mis-scopes a block (`block-splitter.js`
+#     `braceIsQuotedStringContent`, tokenizer-backed, cached per line). A payload-BEARING alternation
+#     (a binding, a named field even when discarded, a nested/literal pattern) now FAILS CLOSED —
+#     **`E-MATCH-ALT-BINDING`** — instead of silently dropping the arm or gluing it onto its neighbor.
+#   · **#1116** (§39.2/§14.8.10 tenant floor) — a `<schema>` raw `CREATE TABLE` head naming a
+#     schema/database-qualified table is rejected (**`E-SCHEMA-012`**); a known-kind head whose name the
+#     compiler cannot read through to a follower is rejected (**`E-SCHEMA-013`**) — both were previously
+#     silent, tenant-isolation-inert gaps (`schema-differ.js` `findRejectedCreateTableHeads`,
+#     `gauntlet-phase1-checks.js` `<schema>` body checks).
+#   · **#1114** (§20.5.1) — route-inference Step 8b (protect= auto-escalation / `<page auth="required">`) no
+#     longer stamps secure session defaults that outrank a unit's OWN `<program>`'s declared session config
+#     (`g-route-inference-8b-session-defaults-outrank-program-declaration`); the session-field resolution order
+#     is unchanged, but Step 8b now leaves its fields undefined unless the unit itself declares them
+#     (`session-config-resolve.ts` `countUnitProgramNodes`, `route-inference.ts`, `emit-server.ts` now reads the
+#     ONE resolver instead of `authMiddlewareEntry.sessionExpiry` directly).
+#   · **#1112** (§20.5.1) — `E-MW-008`'s program-site count no longer counts a `kind="tool"` file as a
+#     competing web application (`g-mw008-counts-headless-tool-programs`; `codegen/index.ts`
+#     `_collectProgramSites` now asks the emit dispatch's own `isToolProgram` per FILE, not per node).
+#   · **#1113** (#1045 F1) — client JS relative-import re-basing now applied in BOTH the gate and the write
+#     phase (`compiler/tests/integration/clientjs-import-disk-rebase-gate-eq-write.test.js`, NEW).
+#   · **#1109** (dpa-051 bootstrap slice M2, `compiler/self-host-v2/`) — the front end (`parse.scrml` 1641L,
+#     `lower.scrml` 993L NEW) proves the lowered Core EQUALS M1's hand-built oracle (Fork-A proof); `ast.scrml`
+#     (175L NEW) is the parser's own AST; `core/check/print/lex/walk/measure.scrml` and
+#     `slice-m1/runtime/runtime.js` all took matching edits; `slice-m2/` (16 files, harness + fixtures +
+#     4 `*.test.js`) is the M2 test bed; CI `gate`'s bootstrap step now also runs `slice-m2/` and re-runs the M1
+#     suite over LOWERED programs (`SLICE_CORE=lowered`).
+# ⚑ **RE-RUN AT THIS SHA ON THIS (WINDOWS) CLONE:** `bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass;
+# `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` -> 73/73 pass; `bun scripts/lint-no-default-arm.js`
+# -> 26 files, 0 violations; `bun test ./compiler/self-host-v2/slice-m2/` -> **72/74 pass, 2 FAIL** — both in
+# `parse.test.js`'s "the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)" (`counter.scrml`,
+# `lib/dropdown.scrml`+`app.scrml`), comparing a `\r\n`-checked-out fixture against a bare-`\n` SPEC extract —
+# a WINDOWS-CRLF-CHECKOUT artifact of this clone (same class as the known `scrml-regen-scripts-crlf-broken-on-windows`
+# pattern), NOT a landed defect and NOT reproduced by this session; see test.map.md. Not filed as a new gap (no
+# code moved to cause it; a checkout-line-ending property, orthogonal to #1109's content).
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S438 block were grep-derived at `fb21983a`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437b HEADER (stamp `9941a504c`, 2026-09-27), CARRIED FOR PROVENANCE. ITS FIGURES ARE `9941a504c`-ERA. ━━━━━━━
+# ⛑ **S437b STAMP — `d02738767` -> `9941a504c`. 7 COMMITS (#1102-#1108), SAME SESSION (S437, second wrap-6c pass).**
+# MAP-STAMP RULE at write time: `git fetch origin && git merge --ff-only origin/main` -> HEAD **`9941a504c`** (== `origin/main` at fetch;
+# `origin/main` then advanced to `072741ca9` mid-pass — see ⏳);
+# inbound: `d02738767` is an ancestor of `9941a504c`. Pass ran in worktree `agent-a311ef56e25c9326a`; HEAD advances past
+# the stamp only by this pass's own `.claude/maps/` commits (the stamp tracks the MERGE-BASE).
+# ⛑ **FIGURES RE-EXECUTED AT `9941a504c`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **266,005 lines / 211 files** per FACTS (+790 lines, files FLAT;
+# `git ls-files compiler/src | wc -l` = 213, flat) · test files **1,506** (+1) · `compiler/SPEC.md` **40,348** lines (+216) ·
+# conformance **1,047** cases (+74) in **55** dirs (flat) · §34 catalog **832** rows FLAT, range `20294..21197` ·
+# `docs/changes/` 777. PREFIX SERIES set-diffed at both ends: E 943 · W 183 · I 10 · H 2 · unique 800 — ADDED = REMOVED = EMPTY.
+# impl#1 conformance: `bun conformance/run.ts` -> **1040/1047 pass + 7 xfail** (was 967/973 + 6 at `d02738767`).
+# ⛑ **WINDOW HEADLINES (verify in source, not here):** #1106 §5.2.3 handler fix — a multi-statement handler value is PARSED
+# with the function-body statement parser into `value.handlerBlock.stmts` and lowered from those nodes by every emitter;
+# a BARE `;`-sequence is `E-MULTI-STATEMENT-HANDLER` in every position (incl. `<each>`/engine/`<match>` sub-builds);
+# braceless `else` (`if (c) a; else b`) no longer runs `b` unconditionally; a dangling `else` after `};` is
+# `E-STMT-UNEXPECTED-TOKEN`. #1105 bootstrap slice M1 — `compiler/self-host-v2/` Core IR + walk + JS/HTML trees + printer +
+# checker; `slice-m1/` instance-record runtime + 68 tests; new CI step. #1104 — `compiler/self-host/` FROZEN (reference
+# only). #1107/#1108 — SPEC §66 rulings (L6, L12, identities, O57-O60, O21/O43; reads through an un-narrowed handle are
+# `E-DECL-HANDLE-NOT-NARROWED`); §66 stays NOMINAL — impl#1 implements none of it.
+# ⏳ **NOT MAPPED — bootstrap M2 (#1109, `072741ca9`, parse / analyze / lower) LANDED ON `origin/main` MID-PASS, AFTER
+# this stamp.** It adds `compiler/self-host-v2/{parse,lower}.scrml` + `slice-m2/`, MODIFIES `core/check/print/lex/walk/measure.scrml`,
+# `slice-m1/runtime/runtime.js` + its tests, and `ci.yml` (+7/-). This map is deliberately stamped `9941a504c` (the brief's
+# target); `state.ts` will read it 1 commit behind until the next refresh maps M2.
+# ⚑ Line 3 is parsed by `scripts/state.ts` `mapsStaleness()` (`mapText.split("\n")[2]`). Do not reformat it.
+# ⚑ `file:line` citations in this S437b block were grep-derived at `9941a504c`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ EVERYTHING BELOW THIS LINE (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S437 HEADER (stamp `d02738767`, 2026-09-27 AM), CARRIED FOR PROVENANCE. ITS FIGURES ARE `d02738767`-ERA. ━━━━━━━
 # ⛑ **S437 STAMP — `787d4cb4` -> `d02738767`. 100 COMMITS (#987-#1101), SESSIONS S422-S436. NOT A ZERO-DIFF WINDOW:
 # `compiler/src` GAINED 16 FILES — THE FIRST FILE-COUNT MOVEMENT IN FIVE WINDOWS.** MAP-STAMP RULE, executed at write time:
 # `git fetch origin && git merge-base HEAD origin/main` -> **`d02738767`** (== `origin/main`); inbound
@@ -299,6 +388,78 @@ existing node kinds, or through codegen-internal / schema-differ-internal shapes
 `ast.ts` types (the §38.6.2 constraint-drift record, the D-5 module-const candidate filter's reliance
 on `ConstDeclNode`/`LetDeclNode.initExpr`, `LogicBinding.directiveIsFormValue`, and the S302
 `ifRaw`/`ifCond` pair below), and now the #458 region shapes immediately below.
+
+## S438 — SHAPE DELTA (`9941a504c..fb21983a`)
+
+**No new `ast.ts` type.** `schema-differ.js` gains a new exported recognizer, **`findRejectedCreateTableHeads`**
+(§39.2, consumed by `gauntlet-phase1-checks.js`'s `<schema>` body checks — same call site as the existing
+`parseSchemaBlock`/`parseColumns`, a sibling scan over the same raw body text, not a replacement of it).
+
+### `findRejectedCreateTableHeads(schemaBody)` — structural head reader, new this window
+Reads every raw `CREATE [modifier...] TABLE` head in a `<schema>` body (word-initial `CREATE`, ≤3 ASCII
+modifier words, `TABLE`, then a name chain of Unicode letters/digits/`_`/`$`/quoted parts) and reports:
+- **schema/database-QUALIFIED** (any qualifier count — `public.assets`, `mydb.public.assets`) → **`E-SCHEMA-012`**.
+  A `.` inside ONE quoted identifier (`"a.assets"`) is not a qualifier.
+- **UNREADABLE** (the name chain does not reach the column-list `(` or a name follower — `AS`/`USING`/`WITH`/
+  `ON`/`TABLESPACE`/`PARTITION OF`/`OF`/`INHERITS`) → **`E-SCHEMA-013`**.
+- Exempted (same as the rest of the `<schema>` DSL reader): `--` line comments, closed `/* */`, one-line
+  `'…'`/`'"…"'`, `pattern(/…/)`. NOT exempted: `//`, `"""` spans, backticks.
+
+Both are fail-closed rejections of a shape the pre-S438 `parseSchemaBlock` silently either stripped (one
+qualifier) or matched no recognizer for (two+ qualifiers) — a schema-qualified or unreadable table name is a
+**silently inert §14.8.10 tenant floor** when the table carries `tenant_id` (every `<schema>` consumer keys a
+table by its UNQUALIFIED name). See error.map.md for the diagnostic text and known false-positive residuals
+(`g-secdef-fn-body-ddl-false-positive`, a `//`-commented qualified head) and domain.map.md for the invariant.
+Migration measured S438 at **zero** authored `.scrml` uses across the scrml repo, `flogenceP` and
+`assetManagement` (169-file corpus differential, identical).
+
+**`TableDecl`/`ColumnDecl` shapes themselves are UNCHANGED** — this is a validation-time rejection of a raw-DDL
+HEAD, not a new field on the parsed table/column shape.
+
+
+## S437b — SHAPE DELTA (`d02738767..9941a504c`)
+
+`compiler/src/types/` — NOT changed in the window. The new `compiler/src` shape is one optional field, carried untyped.
+
+### `handlerBlock` — a handler's parsed §5.2.3 statement list (#1106)
+Set by `attachHandlerStatementList` in `compiler/src/ast-builder.js` on an event-handler attribute VALUE
+(`value.handlerBlock = { stmts }`) ONLY when the value parses to 2+ statements; a 1-statement value has none and keeps
+the old `handlerExprNode` path. `stmts` are the same statement nodes a function body produces (function-body parser).
+| where | field |
+|---|---|
+| attr value (ast-builder.js, not declared in `types/ast.ts`) | `handlerBlock?: { stmts }` |
+| `EventBinding`  [compiler/src/codegen/binding-registry.ts:54] | `handlerBlock?: { stmts: any[] }` — `handlerExprNode` then covers only the first statement |
+| `EventBinding`  [compiler/src/codegen/emit-event-wiring.ts:24, file-local] | `handlerBlock?: { stmts: any[] }` (same contract) |
+Consumers: `emitHandlerStatementList` (`codegen/emit-logic.ts:5754`) via emit-event-wiring / emit-each / emit-variant-guard;
+`type-system.ts` walks `handlerBlock.stmts` for write targets and scope/state checks.
+
+### Bootstrap Core IR — `compiler/self-host-v2/core.scrml` (#1105; scrml `type` decls, NOT TypeScript)
+| type | kind | shape |
+|---|---|---|
+| `Sym` | struct | `id: int, hint: string` |
+| `Type` | enum | `Int · Num · Str · Bool · Named(sym) · Seq(elem, grants: SeqGrants) · Maybe(inner)` |
+| `TypeDef` | enum | `EnumDef(sym, variants: VariantDef[]) · StructDef(sym, fields: FieldDef[])` |
+| `InstRef` | enum | `Shared(decl) · Lexical(depth) · Alias(sym) · Narrowed(sym)` |
+| `Place` | enum | `Cell(decl, inst: InstRef, path: FieldRef[]) · LocalPath(sym, path)` |
+| `Literal` | enum | `Int · Num · Str · Bool · Variant(enumSym, idx) · Absent` |
+| `PrimOp` | enum | arithmetic, logic, comparison, `EqPrim/NeqPrim/EqStruct/NeqStruct`, `IsSome/IsNot`, `Concat`, `Length` |
+| `Pattern` | enum | `PVariant(enumSym, idx, binds) · PLit(lit) · PWild` |
+| `Expr` | enum | `Lit · Local · Read(place) · Call(callee, args) · Prim(op, args) · Match(scrut, arms) · ArrayOf · StructOf(ty, fields) · Handle(inst)` |
+| `EditKind` | enum | `Replace · Append · Prepend · Anywhere · PositionWrite · FieldAt(path) · Transition` |
+| `Stmt` | enum | `Let · Assign · Write(cap, inst, edit: EditKind, value, check: Check) · If(cond, thenB, elseB \| not) · Return · Eval` |
+| `Attr` | enum | `Static(name, value) · Bound(name, e) · On(event, body: Block)` |
+| `View` | enum | `El · Text · Dyn · Cond(arms) · Each(src, bind, key \| not, handles, row) · Instance(decl, attrs, slot, alias \| not) · Slot` |
+| `Field` | struct | `sym, ty, init: Expr \| not, mode: FieldMode(Locked/Let/Derived/Seeded), role: FieldRole(Attribute/Child), grants: GrantSet, graph: TransitionGraph \| not, exported, wcap: Sym \| not` |
+| `Decl` | struct | `sym, kind: DeclKind(Program/User/Predefined), single: boolean, fields, renders: View[] \| not, wiring: WiringAttr[], handles: Sym[]` |
+| `Fn` / `ServerFn` | struct | `sym, params: Param[], body: Block` (+ `pure` on `Fn`) |
+| `CoreProgram` | struct | `program: Sym, decls, types: TypeDef[], fns, server: ServerFn[]` |
+Also: `NodeId`, `SeqAt`, `LengthGrant`, `SeqGrants`, `FieldDef`, `VariantDef`, `FieldRef`, `MatchArm`, `Check(Static/RuntimeEdge)`,
+`Block`, `ConstructAttr`, `CondArm`, `GrantSet`, `Edge`, `TransitionGraph`, `WiringAttr`, `Param`, `CapOwner` — read `core.scrml`.
+Output trees: `JsExpr`/`JsStmt`/`JsProp`/`JsOp` (`js.scrml`), `HNode`/`HAttr`/`Page` (`html.scrml`), `NameKey`/`NameTable` (`names.scrml`).
+§66 (the declaration model this IR targets) is NOMINAL in impl#1 — these types have no counterpart in `compiler/src`.
+
+
+⏳ NOT MAPPED: bootstrap M2 (#1109, `072741ca9`) landed on main mid-pass, after this stamp; it edits files named here (self-host-v2 modules, `slice-m1/`, `ci.yml`). Next refresh maps it.
 
 ## S437 — NEW SHAPES (`787d4cb4..d02738767`) — none of them is in `compiler/src/types/`
 
@@ -962,7 +1123,7 @@ rather than closed it.** build.map.md · test.map.md.
 changed what the compiler can SAY, not what it accepts.
 
 ## Tags
-#scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main #types-zero-diff-13 #no-new-exported-type #exported-functions-not-types #synth-cell-keys-are-strings #not-type-enforced #no-named-interface-for-bsresults #structural-shape-consumption #types-zero-diff-fourteenth
+#scrml #map #schema #ast #types #asis-unknown-split #inference-result #inference-gap #unknown-reason #w-type-031-unproven #types-gate #never-fallthrough #engine-decl #reactive-decl #css65 #theme #expr-node #file-ast #outlet #reset #link-boost #theme-context #css-var-bridge #giti-038 #giti-039 #return-stmt #fn-expr-node #session-establishment #colorless-async #dbauth #table-decl #column-decl #secdef-fn-decl #schema-differ #immutable-column #auto-immutable #is-effectively-immutable #e-schema-010 #lowering-functions #sql-literal-lowering #tenant-context-union #resolved-gaps #e-schema-011 #column-constraint-drift #references-hint #same-default-text #d5 #init-expr #logic-binding #directive-is-form-value #i225 #each-reconcile-ctx #if-cond #if-raw #structural-if #§17.1.2 #absent-not-null #parity-canary #field-set-comparison #untyped-structural-nodes #each-block #match-block #attr-value-identity #object-shorthand-region #brace-group-kind #codegen-internal-shape #not-an-ast-node #segment-relative-offsets #unknown-is-a-contract #zero-exported-type-added #types-dir-flat-11-windows #unknown-has-no-reason-on-main #asis-kind-is-not-the-split #asis-split-NOT-on-main #inference-result-NOT-on-main #types-zero-diff-13 #no-new-exported-type #exported-functions-not-types #synth-cell-keys-are-strings #not-type-enforced #no-named-interface-for-bsresults #structural-shape-consumption #types-zero-diff-fourteenth #s437b #9941a504c #handler-block #core-ir #self-host-v2
 #tildecontext-shape #liftvar-vs-var #armbodystmts-readonlyset #no-uniform-binder #es6-shorthand-defeats-field-regex #binding-is-raw-paren-text #parsebindinglist #types-dir-empty-is-not-a-currency-probe
 #litexpr-hasinterpolation #carried-not-inferred #raw-value-aliasing #literal-vs-literal-type-only #section-53-4 #section-7-5-1 #fieldtypeassignable #fieldtypeequals #section-14-8-8 #width-subtyping-only #primitives-by-name #int-vs-number #position-3-has-no-code #anchors-re-derived-by-symbol-grep
 #s405 #types-ast-zero-diff #extractdesiredschema #rawddl-marker #names-only #two-consumers-opposite-needs #split-at-the-consumer #diffschema-byte-identical #db-migrate-one-line-decline #parseschemablock-dsl-only #harvestrawcreatetabledecls #parserawcreatetablecolumns-no-production-caller #tenanttableset #case-folds-on-three-methods #deferred-migrate-arc

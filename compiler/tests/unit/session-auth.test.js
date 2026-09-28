@@ -292,7 +292,14 @@ describe("S8b: RI auto-escalates auth for protect= fields", () => {
     const mw = result.routeMap.authMiddleware.get("/test/app.scrml");
     expect(mw.loginRedirect).toBe("/login");
     expect(mw.csrf).toBe("auto");
-    expect(mw.sessionExpiry).toBe("1h");
+    // S438 — the auto-escalated entry carries NO session config of its own: the unit
+    // declared none, so the shared resolver (codegen/session-config-resolve.ts) answers
+    // from the unit's <program> / the program stash, and only then the secure 1h default.
+    // Stamping "1h" / secure here outranked the program's own declaration
+    // (g-route-inference-8b-session-defaults-outrank-program-declaration;
+    // end-to-end in conformance/conf-SESSION-8B-DEFERS-TO-PROGRAM.test.js).
+    expect(mw.sessionExpiry).toBeUndefined();
+    expect(mw.sessionSecure).toBeUndefined();
   });
 
   test("explicit auth= takes precedence over auto-escalation", () => {

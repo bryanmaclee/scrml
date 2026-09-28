@@ -4028,3 +4028,41 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3560] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/block-expressions-one-off-calculations-dpa-053-2026-09-26.md` · verdict: the residual is mostly DEFECTS, not a missing construct — `${ const t = …; lift e }` already works reactively in markup; reco Pole B (complete that form into attribute / `<each>` row / derived-initializer positions) over the banked tail-valued block (Pole D); a block's value must NOT be `~` (E-TILDE-002 on `{ log(x); x*2 }`); 6 defects routed to PA incl. 2 SILENT (M3 tail-expr stale, M4/M5 arm-only reactive read untracked). ADVISORY — awaiting bryan.)**
 
 [3561] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/bootstrap-codegen-architecture-dpa-051-2026-09-26.md` · verdict: thin typed Core IR (bodies as trees, names as Syms, emitted text write-only, one tables record, total match) + an instance-record runtime (program = `single` decl → one keying scheme; scope-owned effects; immutable values; one edit classifier for grants/notify/O37); every decision mapped to a measured TS defect family. ⚑ R1 ROUTED to bryan — P5's per-stage hybrid vs the ratified S233 re-cut are unreconciled (only LEX + whole-compiler seams are shared); lean: keep S233, footprint-based module-done. Also found: dpa-053 M4/M5 root cause (regex-on-emitted-text branch guard drops arm subscriptions). ADVISORY — awaiting bryan.)**
+
+[3562] rule · **dpa-051 R1 = (a) + `compiler/self-host/` FROZEN; R2–R5 = leans** (bryan S437: "a, freeze self-host" · "leans") → #1104 · user-voice S437
+
+[3563] land · **#1106 handler fix** — bare `;`-sequence always E-MULTI-STATEMENT-HANDLER; braced blocks parsed as statement lists (each-row + leading-call drops fixed); braceless `else` no longer unconditional in function bodies; 5 S239 rounds, round-5 template scanner reverted → `g-client-template-interpolation-lowering-needs-a-structural-emitter` carried
+
+[3564] land · **#1105 bootstrap slice M1** — Core IR + printer + instance-record runtime on hand-built Core; D1 answered (one click, one dropdown); lint + slice + v2 lexer in CI gate
+
+[3565] rule · **§66 rulings** L6 (a) · L12 (b) · identities · spread = field edit · O58 (b) · O57 no · O59/O60 leans · O21/O43 closed · reads through a conditional handle require narrowing → #1107 #1108 · two PA restatement widenings corrected (user-voice S437)
+
+[3566] land · **#1109 bootstrap slice M2 MERGED (072741ca9)** — Fork-A proof: lower(analyze(parse(lex(SPEC §66.19)))) == M1 hand-built Core; M3 item 1 = the typer (11 silent shapes pinned test.failing)
+
+[3567] land · **#1112 E-MW-008 counts only non-tool files** (98d94e96) — round 1 node-skip recreated the class; per-file `isToolProgram` · SPEC rows amended
+
+[3568] land · **#1113 #1045 F1** (b7c86323) — clientJs rebased in gate+write; browser half RE-OPENED (disk ≠ browser)
+
+[3569] land · **#1114 8b defers session config to the program** (8c55f518) — 2+-program files keep base stamp; 5 Windows residue suites fixed
+
+[3570] land · **#1116 E-SCHEMA-012/013 tenant floor** (afc2308b) — 5 S239 rounds; stop condition removed the SECDEF fn exemption
+
+[3571] land · **#1119 F12/F13/F14 + E-MATCH-ALT-BINDING** (fb21983a) — stop condition reverted a division probe
+
+[3572] escalate · **to bryan**: hold/s438-1109-review-fixes (M2 spread HIGH) · hold/s438-refusal-writes-no-dist (a/b/c) · 3 new codes · §20.5.1 line — note in handOffs/incoming
+
+[3573] state · **HELD** hold/s438-impl1-imported-enum-match @5bea376e — cross-file bare-dot arg loud→silent; fix direction on the gap
+
+[3574] rule · **bryan S439 "all recs"** on the six peter→bryan notes — land S432 #1/#4/#6 holds; retire q5 + s429 holds (read S438 wrap)
+
+[3575] land · **#1117** bootstrap M3 item 1 — typer + scope pass (analyze); program cells file-scoped; mutation harness loud · review 4 rounds
+
+[3576] land · **#1120** SPEC text for S439 "all recs" (§40.8 §18.0.1 §47.1.1 §50.8.5 §5.2.2 §51.0.E/K §66.13.4 §6.7.2.1 §19.4.3) · #14 OPEN
+
+[3577] state · **#1118** (M3 item 3 ingest+footprint+bite matrix) + **#1122** (M3 item 2 tables split, inert) queued --auto, re-synced at wrap
+
+[3578] find · first bootstrap corpus grade: 18/18 runtime, 32 certified, NOT-YET 573 → docs/changes/s439-bootstrap-m3-ingest/footprint-2026-09-27.md
+
+[3579] escalate · **to bryan**: #14 E-ERROR-002 (SPEC has NO handler exemption — restore conformance vs amend) · typer OWES-A-RULING list · PA-interim "handle shadows visible cell → refuse"
+
+[3580] friction · PA bounced merges to bryan all session — compound cmd around `gh pr merge` escapes the allow rule → classifier deny; run it BARE (memory)

@@ -146,12 +146,13 @@ jobs:
       # M2 (s437-bootstrap-slice-m2): the front end (parse → analyze → lower) — its proof that the
       # lowered Core equals M1's hand-built oracle, its §66.19 negative lines, and the M1 suite run a
       # second time on the LOWERED programs (SLICE_CORE=lowered).
-      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + v2 lexer oracle
+      - name: Bootstrap slice (self-host-v2) — no-default-arm lint + M1 slice + M2 front end + M3 ingest/footprint + v2 lexer oracle
         run: |
           bun scripts/lint-no-default-arm.js
           bun test ./compiler/self-host-v2/slice-m1/
           bun test ./compiler/self-host-v2/slice-m2/
           SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/
+          bun test ./compiler/self-host-v2/slice-m3/
           bun test compiler/tests/integration/self-host-v2-lexer
       - name: Gauntlet quick check (TodoMVC compiles + emitted JS parses)
         run: |

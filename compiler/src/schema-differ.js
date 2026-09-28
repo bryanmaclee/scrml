@@ -142,20 +142,26 @@ function findSchemaBlockEnd(text, openIdx) {
  * and imports nothing but `sql-ident.ts`, so BOTH floors and the GCP1 checks can
  * read it without dragging a runtime.
  *
- * Groups: 1 = optional schema qualifier · 2 = table name · 3 = column-def body.
+ * ⚑ A QUALIFIED HEAD IN A `< schema>` IS REJECTED (E-SCHEMA-012, SPEC §39.2) —
+ * bryan RULED S435 "1 both". History, because the reversal is the point: S405
+ * taught this recognizer ONE optional qualifier (`public.assets`) and stripped
+ * it, and a `db.public.assets` head then matched NOTHING — so a `< schema>` whose
+ * table was spelled with two qualifiers declared no table and left the §14.8.10
+ * isolation floor silently inert, with no warning at all once a second table was
+ * present (g-tenant-floor-inert-for-a-two-qualifier-create-table). Widening to
+ * `n` qualifiers would have collapsed `a.assets` and `b.assets` onto one key,
+ * because the qualifier is normalized away for the SQLite shadow DB. The
+ * identity model is not decided, so the qualifier — every count, including the
+ * one that used to be accepted — is a compile error, and the table head is read
+ * STRUCTURALLY (`readCreateTableHead`), so every qualifier count is SEEN rather
+ * than a count the pattern did not anticipate falling through to "no table".
  *
- * ⚑ THE QUALIFIER IS RECOGNIZED AND THEN STRIPPED. `CREATE TABLE public.assets
- * (…)` and `CREATE TABLE "public"."assets" (…)` are the ordinary Postgres
- * spellings, and the §14.8.11 db-authoritative tier is Postgres-ONLY — so the
- * likeliest spelling for the tier's own adopters used to match NOTHING here, and
- * a `< schema>` full of them declared zero tables and left the §14.8.10 isolation
- * floor inert at exit 0. Recognizing it is not enough on its own, though:
- * `resolveDb` REPLAYS these statements into an in-memory SQLite shadow DB, and
- * SQLite has no such namespace — an unstripped `public.assets` throws and takes
- * the whole `< db>` block's type views down with `E-PA-003`. So the harvester
- * normalizes the statement to its unqualified form. The shadow DB is a
- * compile-time column-shape device that is discarded after PA; the namespace is
- * not part of what it models.
+ * The harvest below still strips the qualifier (ALL of them) from the stored
+ * statement: `resolveDb` REPLAYS these statements into an in-memory SQLite
+ * shadow DB with no such namespace, and a rejected program should report the
+ * one real error, not an `E-PA-003` / `W-SCHEMA-NO-TABLES-DECLARED` cascade. The
+ * harvest is not what makes the qualifier legal — `E-SCHEMA-012` is what makes
+ * it illegal.
  */
 /**
  * ⚑ THE REGEX MATCHES THE HEAD ONLY. IT DOES NOT MATCH THE COLUMN BODY, AND THAT
@@ -180,89 +186,434 @@ function findSchemaBlockEnd(text, openIdx) {
  * exactly the Postgres spelling the tier targets.
  *
  * So the body group is DELETED rather than repaired, and with it both sides of
- * that seam. The regex finds `CREATE TABLE [<qual>.]<name> (`; the balanced,
+ * that seam. The head reader finds `CREATE … TABLE <name-chain> (`; the balanced,
  * quote- and comment-aware scanner finds the matching `)`. There is no nesting
  * limit left to exceed, no clipped statement to recover from, and no re-find to
- * mis-align. Groups: 1 = optional schema qualifier · 2 = table name.
+ * mis-align.
+ *
+ * ⚑ THE HEAD ITSELF IS NOW READ, NOT PATTERN-MATCHED (S438). The head regex had
+ * the same shape of defect one level up: a slot for "zero or one qualifier", so
+ * a THIRD part fell through to no-match and the table silently vanished. The
+ * reader below takes the dotted name chain as a LIST of identifier parts (bare,
+ * `"…"`, `` `…` ``, `[…]`, `'…'`, with whitespace and comments allowed around
+ * each `.`), so the qualifier count is a number it reports, never a shape it can
+ * fail to anticipate.
  */
-const CREATE_TABLE_HEAD_RE =
+/**
+ * ⚑ THE HARVEST IS A SUPERSET OF THE PRE-S438 HARVEST — BY CONSTRUCTION, NOT BY
+ * ARGUMENT (S438 fix round, S239 finding F1).
+ *
+ * The first S438 cut replaced the head regex with a structured reader that also
+ * SKIPPED top-level comments. That skip had no string/regex awareness, so a DSL
+ * `pattern(/^\/*[a-z0-9-]+$/)` opened a "comment" that swallowed a later
+ * `CREATE TABLE assets (…, tenant_id)` from every harvest — a tenant floor the
+ * base compiler engaged went silently inert. A security floor may never lose a
+ * table to a recognizer change. So the harvest is now TWO READS UNIONED, and the
+ * union is the invariant:
+ *
+ *   1. `LEGACY_CREATE_TABLE_HEAD_RE` — the pre-S438 recognizer, verbatim,
+ *      comment-agnostic, ≤1 qualifier. Every table it found is found, with the
+ *      statement and body it produced. Base's result per key WINS.
+ *   2. `scanCreateTableHeads` — the structured name-chain reader, also
+ *      comment-AGNOSTIC (it reads heads wherever they are, as base did). It adds
+ *      the tables base could not read (≥2 qualifiers, comments inside the head,
+ *      Unicode / `$` names) — keys base did not have.
+ *
+ * Over-declaring only ADDS floor; under-declaring removes it. Comment awareness
+ * is used for exactly one thing: to SUPPRESS a false E-SCHEMA-012 on a head that
+ * is genuinely inside a comment or a string (`liveHeadMask`) — never to drop a
+ * table from the harvest.
+ *
+ * The `?{}` walker (`harvestCreateTables`) reads (1) alone — byte-identical to
+ * base: E-SCHEMA-012 is `< schema>`-scoped.
+ */
+const LEGACY_CREATE_TABLE_HEAD_RE =
   /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["`'[]?(\w+)["`'\]]?\s*\.\s*)?["`'[]?(\w+)["`'\]]?\s*\(/gi;
 
-/**
- * ONE pass over `text`, yielding a complete record per `CREATE TABLE` found:
- * the unqualified name, the COMPLETE statement (qualifier normalized away), and
- * the column-def body — all read from the ORIGINAL text at the match's own
- * offset, so nothing is ever re-found by string.
- *
- * @returns {Array<{key: string, name: string, statement: string, body: string}>}
- */
-function scanCreateTables(text) {
+/** The pre-S438 scan, verbatim in behaviour. */
+function legacyScanCreateTables(text) {
   const found = [];
   if (typeof text !== "string") return found;
-  CREATE_TABLE_HEAD_RE.lastIndex = 0;
+  const re = new RegExp(LEGACY_CREATE_TABLE_HEAD_RE.source, "gi");
   let m;
-  while ((m = CREATE_TABLE_HEAD_RE.exec(text)) !== null) {
-    const bodyStart = m.index + m[0].length;          // just past the `(`
+  while ((m = re.exec(text)) !== null) {
+    const bodyStart = m.index + m[0].length;
     const bodyEnd = findRawDdlBodyEnd(text, bodyStart);
-    if (bodyEnd === -1) {
-      // Genuinely unterminated source — not a clip. Skip it rather than store an
-      // unexecutable statement; a later `E-PA-002`/`W-SCHEMA-NO-TABLES-DECLARED`
-      // reports the absence honestly.
-      continue;
-    }
+    if (bodyEnd === -1) continue;
     const statementRaw = text.slice(m.index, bodyEnd + 1);
-    // Strip the schema qualifier from the STORED statement: `resolveDb` replays
-    // it into in-memory SQLite, which has no such namespace, and an unstripped
-    // `public.assets` throws. Only the `<qual> .` run goes; the table name's own
-    // quoting and the entire body are carried verbatim.
     const statement = m[1]
       ? statementRaw.replace(/(CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?)["`'[]?\w+["`'\]]?\s*\.\s*/i, "$1")
       : statementRaw;
+    found.push({ key: m[2].toLowerCase(), name: m[2], statement, body: text.slice(bodyStart, bodyEnd) });
+    re.lastIndex = bodyEnd + 1;
+  }
+  return found;
+}
+
+/** Skip whitespace and SQL `--` / `/* *\/` comments from `i` (inside a head only). */
+function skipSqlTrivia(src, i) {
+  for (;;) {
+    while (i < src.length && /\s/.test(src[i])) i++;
+    if (src.startsWith("--", i)) {
+      const nl = src.indexOf("\n", i);
+      i = nl === -1 ? src.length : nl + 1;
+      continue;
+    }
+    if (src.startsWith("/*", i)) {
+      const close = src.indexOf("*/", i + 2);
+      if (close === -1) return i;          // unterminated: not trivia — the head is unreadable
+      i = close + 2;
+      continue;
+    }
+    return i;
+  }
+}
+
+/** An identifier character: any Unicode letter or number, `_`, `$` (SQLite + Postgres). */
+const SQL_IDENT_CHAR = /[\p{L}\p{N}_$]/u;
+const SQL_IDENT_RUN = /^[\p{L}\p{N}_$]+/u;
+
+/** Case-insensitive keyword at `i`, ending on an identifier boundary. Returns the end index or -1. */
+function readSqlKeyword(src, i, word) {
+  if (src.slice(i, i + word.length).toUpperCase() !== word) return -1;
+  const after = src[i + word.length];
+  if (after !== undefined && SQL_IDENT_CHAR.test(after)) return -1;
+  return i + word.length;
+}
+
+/** A bare word at `i` (letters only) — a candidate table-kind modifier. */
+function readSqlWord(src, i) {
+  const m = /^[A-Za-z]+/.exec(src.slice(i, i + 64));
+  if (!m) return null;
+  const after = src[i + m[0].length];
+  if (after !== undefined && SQL_IDENT_CHAR.test(after)) return null;
+  return m[0];
+}
+
+/** The four quoted-identifier spellings the head accepts: opener → closer. */
+const SQL_IDENT_QUOTES = { '"': '"', "`": "`", "[": "]", "'": "'" };
+
+/**
+ * Read ONE identifier part at `i`: bare (`[\p{L}\p{N}_$]+`), or quoted with any
+ * of `SQL_IDENT_QUOTES` (a doubled closer inside is an escaped closer).
+ * @returns {{name: string, start: number, end: number} | null}
+ */
+function readSqlIdentPart(src, i) {
+  const open = src[i];
+  const close = SQL_IDENT_QUOTES[open];
+  if (close) {
+    let j = i + 1;
+    let name = "";
+    while (j < src.length) {
+      if (src[j] === close) {
+        if (close !== "]" && src[j + 1] === close) { name += close; j += 2; continue; }
+        break;
+      }
+      name += src[j];
+      j++;
+    }
+    if (j >= src.length || name.length === 0) return null;   // unterminated / empty
+    return { name, start: i, end: j + 1 };
+  }
+  const m = SQL_IDENT_RUN.exec(src.slice(i, i + 256));
+  if (!m) return null;
+  return { name: m[0], start: i, end: i + m[0].length };
+}
+
+/**
+ * Up to this many ASCII-letter words may sit between `CREATE` and `TABLE` and
+ * still be read as a table head.
+ */
+const MAX_CREATE_TABLE_MODIFIERS = 3;
+
+/**
+ * The documented SQLite + Postgres table-kind modifier words
+ * (`TEMP` / `TEMPORARY`, `GLOBAL` / `LOCAL TEMPORARY`, `UNLOGGED`, `VIRTUAL`,
+ * `FOREIGN`, `OR REPLACE`). A head whose modifier run is drawn ONLY from this set
+ * is a KNOWN-KIND head: every rule applies to it, including E-SCHEMA-013 when its
+ * name cannot be read. A head with any other word in that position (prose such as
+ * `create the table for tenants`) is still read, and still rejected with
+ * E-SCHEMA-012 if it parses as a QUALIFIED name — but it is not held to
+ * readability, because "a sentence that happens to contain create … table" is not
+ * evidence of a declaration the compiler failed to read. Neither kind is harvested
+ * (pre-S438 never harvested a modified head).
+ */
+const CREATE_TABLE_MODIFIER_WORDS = new Set([
+  "TEMP", "TEMPORARY", "GLOBAL", "LOCAL", "UNLOGGED", "VIRTUAL", "FOREIGN", "OR", "REPLACE",
+]);
+
+/**
+ * The token that may FOLLOW a table's name in a `CREATE TABLE` head (SQLite +
+ * Postgres grammar): the column list `(`, or one of the clause keywords
+ * `AS` (CREATE TABLE … AS query), `USING` (virtual-table module / access method),
+ * `WITH` (storage parameters), `ON` (ON COMMIT), `TABLESPACE`, `PARTITION` — ONLY
+ * as `PARTITION OF parent` (checked at the use site) — `OF` (typed table `OF
+ * type`), `INHERITS`. A name followed by anything else was not read as a name
+ * (E-SCHEMA-013). A readable head with no column list declares no columns — gap
+ * g-schema-no-column-list-heads-declare-nothing.
+ */
+const CREATE_TABLE_NAME_FOLLOWERS = ["AS", "USING", "WITH", "ON", "TABLESPACE", "PARTITION", "OF", "INHERITS"];
+
+/**
+ * Read a `CREATE [word…] TABLE [IF NOT EXISTS] <part>[.<part>]*` head whose
+ * `CREATE` starts at `i`. Returns null ONLY when the text is not a
+ * `CREATE … TABLE` keyword pair at all. Once `CREATE … TABLE` is read, it ALWAYS
+ * returns a head — `readable: false` when the name chain cannot be read through
+ * to `(` or a `CREATE_TABLE_NAME_FOLLOWERS` keyword; `knownKind: false` when the
+ * modifier run holds a word outside `CREATE_TABLE_MODIFIER_WORDS`.
+ */
+function readCreateTableHead(src, i) {
+  // `CREATE` must START a word too (S438 round 3, F-C): `precreate table …` and
+  // `xCREATE TABLE …` are not heads for the reader. The boundary is a preceding
+  // letter / digit / `_` ONLY — NOT `$` (round 4, F1): `$$CREATE TABLE …$$` and
+  // `$f$CREATE TABLE …$f$` are dollar-quote delimiters directly before a real
+  // head, and round 3's `$`-inclusive guard hid them from BOTH E-SCHEMA-012 and
+  // the structured harvest leg. ⚑ This guard DOES apply to the harvest's
+  // structured (extra-keys) leg; the pre-S438 leg, which has no boundary, still
+  // reads everything base read — so the ⊇-base guarantee is unaffected, but an
+  // extra key before a word character is not read.
+  if (i > 0 && /[\p{L}\p{N}_]/u.test(src[i - 1])) return null;
+  let j = readSqlKeyword(src, i, "CREATE");
+  if (j === -1) return null;
+  j = skipSqlTrivia(src, j);
+  const modifiers = [];
+  let afterTable = readSqlKeyword(src, j, "TABLE");
+  while (afterTable === -1) {
+    if (modifiers.length >= MAX_CREATE_TABLE_MODIFIERS) return null;
+    const w = readSqlWord(src, j);
+    if (!w) return null;
+    modifiers.push(w.toUpperCase());
+    j = skipSqlTrivia(src, j + w.length);
+    afterTable = readSqlKeyword(src, j, "TABLE");
+  }
+  j = skipSqlTrivia(src, afterTable);
+  // Optional IF NOT EXISTS — only consumed when all three words are present, so a
+  // table genuinely named `if` still reads as its name.
+  {
+    const a = readSqlKeyword(src, j, "IF");
+    if (a !== -1) {
+      const b = readSqlKeyword(src, skipSqlTrivia(src, a), "NOT");
+      if (b !== -1) {
+        const c = readSqlKeyword(src, skipSqlTrivia(src, b), "EXISTS");
+        if (c !== -1) j = skipSqlTrivia(src, c);
+      }
+    }
+  }
+  const parts = [];
+  let danglingDot = false;
+  let k = j;
+  const first = readSqlIdentPart(src, j);
+  if (first) {
+    parts.push(first);
+    k = skipSqlTrivia(src, first.end);
+    while (src[k] === ".") {
+      const p = readSqlIdentPart(src, skipSqlTrivia(src, k + 1));
+      if (!p) { danglingDot = true; k = skipSqlTrivia(src, k + 1); break; }
+      parts.push(p);
+      k = skipSqlTrivia(src, p.end);
+    }
+  }
+  const parenAt = parts.length > 0 && !danglingDot && src[k] === "(" ? k : -1;
+  const readable = parts.length > 0 && !danglingDot &&
+    (parenAt !== -1 || CREATE_TABLE_NAME_FOLLOWERS.some((w) => {
+      const e = readSqlKeyword(src, k, w);
+      if (e === -1) return false;
+      // `PARTITION` is a follower only as `PARTITION OF` (round 4, F3) — the
+      // E-SCHEMA-013 message names `PARTITION OF`, and the code must agree.
+      return w !== "PARTITION" || readSqlKeyword(src, skipSqlTrivia(src, e), "OF") !== -1;
+    }));
+  const knownKind = modifiers.every((w) => CREATE_TABLE_MODIFIER_WORDS.has(w));
+  return { start: i, modifiers, parts, danglingDot, readable, knownKind, headEnd: k, parenAt };
+}
+
+/**
+ * Every `CREATE … TABLE` head in `text`, in source order, with the index of its
+ * column list's closing `)` (or -1). COMMENT-AGNOSTIC, like the pre-S438 regex:
+ * a head is read wherever it is (see the superset note above). A column body is
+ * resumed PAST, so a nested `(` inside it is never read as another table; a head
+ * with no body advances ONE character, so nothing after it can be skipped.
+ */
+function scanCreateTableHeads(text) {
+  const heads = [];
+  if (typeof text !== "string") return heads;
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "C" || c === "c") {
+      const head = readCreateTableHead(text, i);
+      if (head) {
+        const bodyEnd = head.parenAt === -1 ? -1 : findRawDdlBodyEnd(text, head.parenAt + 1);
+        heads.push({ ...head, bodyEnd });
+        i = bodyEnd !== -1 ? bodyEnd + 1 : i + 1;
+        continue;
+      }
+    }
+    i++;
+  }
+  return heads;
+}
+
+/**
+ * Structured records: one per readable head with a complete column list — the
+ * table name (the LAST part of the chain), its qualifiers, the statement with
+ * every qualifier stripped (the SQLite shadow DB has no namespace), the body.
+ */
+function structuredScanCreateTables(text) {
+  const found = [];
+  for (const h of scanCreateTableHeads(text)) {
+    if (h.parenAt === -1 || h.bodyEnd === -1) continue;
+    const namePart = h.parts[h.parts.length - 1];
+    const statement = text.slice(h.start, h.parts[0].start) + text.slice(namePart.start, h.bodyEnd + 1);
     found.push({
-      key: m[2].toLowerCase(),
-      name: m[2],
+      key: namePart.name.toLowerCase(),
+      name: namePart.name,
+      qualifiers: h.parts.slice(0, -1).map((p) => p.name),
+      modifiers: h.modifiers,
       statement,
-      body: text.slice(bodyStart, bodyEnd),
+      body: text.slice(h.parenAt + 1, h.bodyEnd),
     });
-    // Resume PAST the real end, so a nested `(` inside this body can never be
-    // mistaken for the start of another table.
-    CREATE_TABLE_HEAD_RE.lastIndex = bodyEnd + 1;
   }
   return found;
 }
 
 /**
+ * Where, in a `< schema>` body, is text genuinely a comment or a string/regex
+ * literal? Reuses `blankLiteralBodies` (the E-SCHEMA-011 blanker) in its
+ * comment-aware mode, so strings, `pattern(/…/)` regexes and `--` / `/* *\/`
+ * comments are resolved in ONE left-to-right pass — a `/*` inside a regex or a
+ * string is inert, and a `'` inside a comment is inert. A head is LIVE when its
+ * `CREATE` survives the blanking.
+ *
+ * Used ONLY to suppress E-SCHEMA-012 / E-SCHEMA-013 on a dead head. It never
+ * touches the harvest.
+ */
+function isLiveHead(masked, h) {
+  return masked.slice(h.start, h.start + 6).toUpperCase() === "CREATE";
+}
+
+/**
+ * The rejected `CREATE … TABLE` heads of a `< schema>` body (SPEC §39.2) — every
+ * LIVE head that either
+ *   · names a schema/database QUALIFIER, at ANY count (`public.assets`,
+ *     `db.public.assets`, `temp.assets`, a dangling `public.`) — kind "qualified",
+ *     E-SCHEMA-012 (bryan RULED S435); or
+ *   · is a KNOWN-KIND head (`knownKind`) whose name cannot be read through to
+ *     `(` or a `CREATE_TABLE_NAME_FOLLOWERS` keyword (a stray character, an empty
+ *     `""`, a fullwidth dot, an unterminated comment) — kind "unreadable",
+ *     E-SCHEMA-013. Fail-closed: such a head is an error, never "not a head".
+ *
+ * @param {string} text a `< schema>` body
+ * @returns {Array<{kind: "qualified"|"unreadable", name: string|null, qualifiers: string[], headText: string, offset: number}>}
+ */
+export function findRejectedCreateTableHeads(text) {
+  const out = [];
+  if (typeof text !== "string") return out;
+  const masked = blankLiteralBodies(text, { comments: true, backtick: false });
+  // ⚑ NO SECURITY-DEFINER `fn`-BODY EXEMPTION (S438 final round). Round 4 exempted
+  // the whole span of every `fn` the `< schema>` parser saw — but that scan sees
+  // `fn NAME(…) owner(…)` inside `--` / `/* */` comments, strings, and without a
+  // brace, so a COMMENTED `-- fn f() owner(r) {` … `-- }` wrapped a live
+  // qualified/unreadable head and silenced E-SCHEMA-012/013 at exit 0. Removed,
+  // fail-closed: a qualified/unreadable head inside a real `fn` `"""` body is now
+  // reported — the documented false positive, gap
+  // g-secdef-fn-body-ddl-false-positive (which records the repair).
+  for (const h of scanCreateTableHeads(text)) {
+    if (!isLiveHead(masked, h)) continue;
+    // An unknown modifier word (prose: `create the table for tenants`) counts as a
+    // head only if the rest PARSES as one — a readable name chain followed by `(`
+    // or a clause keyword. Then it is held to every rule; otherwise it is prose.
+    if (!h.knownKind && !h.readable) continue;
+    const chain = h.parts.map((p) => text.slice(p.start, p.end)).join(".") + (h.danglingDot ? "." : "");
+    const headText = ["CREATE", ...h.modifiers, "TABLE"].join(" ") + (chain ? " " + chain : "");
+    if (h.parts.length >= 2 || h.danglingDot) {
+      const qualParts = h.danglingDot ? h.parts : h.parts.slice(0, -1);
+      out.push({
+        kind: "qualified",
+        name: h.danglingDot ? null : h.parts[h.parts.length - 1].name,
+        qualifiers: qualParts.map((p) => p.name),
+        headText,
+        offset: h.start,
+      });
+    } else if (!h.readable) {
+      const tail = text.slice(h.headEnd, h.headEnd + 12).split("\n")[0];
+      out.push({
+        kind: "unreadable",
+        name: h.parts.length ? h.parts[0].name : null,
+        qualifiers: [],
+        headText: headText + (tail ? ` ⟨${tail}⟩` : ""),
+        offset: h.start,
+      });
+    }
+  }
+  return out;
+}
+
+/**
  * Harvest every `CREATE TABLE … (…)` in `text` into `out`, keyed by the
- * LOWERCASED unqualified table name, storing the COMPLETE statement with any
- * schema qualifier normalized away.
+ * LOWERCASED unqualified table name — the `?{}` SQL-node walker's harvest.
+ *
+ * ⚑ BYTE-IDENTICAL TO PRE-S438: the legacy read alone. E-SCHEMA-012 is scoped to
+ * `< schema>`; a `?{}` CREATE TABLE is runtime SQL against a real database.
  *
  * @param {string} text
  * @param {Map<string,string>} out
  * @param {boolean} overwrite `true` = a later statement replaces an earlier one
- *   (the `?{}` SQL-node walker's long-standing behaviour); `false` = first wins,
- *   so a higher-precedence source already in `out` is never displaced (the
- *   raw-DDL `< schema>` behaviour).
+ *   (the `?{}` walker's long-standing behaviour); `false` = first wins.
  */
 export function harvestCreateTables(text, out, overwrite) {
-  for (const t of scanCreateTables(text)) {
+  harvestInto(legacyScanCreateTables(text), out, overwrite);
+}
+
+function harvestInto(records, out, overwrite) {
+  for (const t of records) {
     if (!overwrite && out.has(t.key)) continue;
     out.set(t.key, t.statement);
   }
 }
 
 /**
+ * The `< schema>` harvest set — legacy ∪ structured, legacy winning per key (see
+ * the superset note above). The structured side contributes only keys the legacy
+ * side does not have, and only unmodified heads (`TEMP` / `UNLOGGED` / … were
+ * never harvested — g-schema-create-temp-table-silently-not-a-declaration). A
+ * qualified head is harvested, qualifiers stripped, although E-SCHEMA-012 rejects
+ * the program: the rejected program reports that one error rather than a cascade,
+ * and the tenant floor stays ENGAGED on the table.
+ *
+ * ⚑ SCOPE OF THE ⊇-BASE GUARANTEE: it holds PER BODY. Across `< schema>` bodies,
+ * the consumers merge first-raw-wins by key (`extractDesiredSchema`,
+ * codegen/db-authoritative.ts — the raw-DDL pass; and
+ * `extractSchemaCreateTableStatements`, protect-analyzer.ts — its
+ * `harvestRawCreateTables(body, result)` call), so an EXTRA key read from an
+ * earlier body could pre-empt a base key from a later body. That cross-body case
+ * is only reachable in a program with more than one `< schema>` or a misplaced
+ * one — which E-SCHEMA-002 / E-SCHEMA-003 already reject — so the guarantee for
+ * a program that compiles rests on those two codes.
+ */
+function schemaCreateTables(text) {
+  const legacy = legacyScanCreateTables(text);
+  const seen = new Set(legacy.map((t) => t.key));
+  const extra = [];
+  for (const t of structuredScanCreateTables(text)) {
+    if (t.modifiers.length !== 0 || seen.has(t.key)) continue;
+    seen.add(t.key);
+    extra.push(t);
+  }
+  return [...legacy, ...extra];
+}
+
+/**
  * Harvest the raw-DDL `< schema>` form as TABLE DECLARATIONS — name + column
- * names — in the same single pass, reading the body from the original text.
+ * names — reading each body from the original text.
  *
  * This is what `extractDesiredSchema` consumes. It deliberately does NOT go
  * through the statement map and back: a round trip through a stored string is
- * what created the normalize-vs-re-find seam, and there is no reason for the
- * §14.8.10 declaration read to take it.
+ * what created the normalize-vs-re-find seam.
  *
  * @returns {Array<{name: string, columns: Array<{name: string, type: string, scrmlType: string}>}>}
  */
 export function harvestRawCreateTableDecls(text) {
-  return scanCreateTables(text).map((t) => ({
+  return schemaCreateTables(text).map((t) => ({
     name: t.name,
     columns: columnsFromDdlBody(t.body),
   }));
@@ -274,13 +625,11 @@ export function harvestRawCreateTableDecls(text) {
  * THE ONE RECOGNIZER, shared by both security floors. The defect this exists to
  * prevent is precisely that TWO adjacent floors disagreed about what counts as a
  * schema declaration: §14.8.9 was taught the raw-DDL form and §14.8.10 was not,
- * so a raw-DDL + no-`< db>` app got a silently INERT tenant floor at exit 0. A
- * second, better recognizer on either side would re-open that divergence in the
- * other direction.
+ * so a raw-DDL + no-`< db>` app got a silently INERT tenant floor at exit 0.
  * See `parseRawCreateTableColumns` below for the column read.
  */
 export function harvestRawCreateTables(text, out) {
-  harvestCreateTables(text, out, false);
+  harvestInto(schemaCreateTables(text), out, false);
 }
 
 /**
@@ -290,7 +639,7 @@ export function harvestRawCreateTables(text, out) {
  *
  * WHY THIS IS NOT "a second harvester" (dpa-039 arc B). Harvesting = FINDING the
  * `CREATE TABLE` statements in a body; that stays in exactly one place
- * (`harvestRawCreateTables` / `CREATE_TABLE_RE`), because two floors disagreeing
+ * (`harvestRawCreateTables` / `scanCreateTableHeads`), because two floors disagreeing
  * about what counts as a table declaration is the defect being closed here. This
  * function does the DIFFERENT job of reading columns out of a statement that
  * recognizer already found, and it deliberately inherits that recognizer's
@@ -326,7 +675,7 @@ export function harvestRawCreateTables(text, out) {
  * Postgres spelling the §14.8.11 tier targets. Two individually-correct fixes
  * cancelling.
  *
- * Statements are no longer clipped AT ALL (`CREATE_TABLE_HEAD_RE` matches only
+ * Statements are no longer clipped AT ALL (`readCreateTableHead` reads only
  * the head; a balanced scanner finds the close), so there is nothing to recover
  * from and no re-find to mis-align. One side of the seam is DELETED instead of
  * both sides being patched.
@@ -347,14 +696,22 @@ export function harvestRawCreateTables(text, out) {
  */
 export function parseRawCreateTableColumns(createTableSql) {
   if (typeof createTableSql !== "string") return null;
-  // The optional schema qualifier is accepted here too, so this stays usable on
-  // an UNNORMALIZED statement (a caller's own text, a test fixture).
-  const head = /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:["`'[]?\w+["`'\]]?\s*\.\s*)?["`'[]?(\w+)["`'\]]?\s*\(/i.exec(createTableSql);
+  // The legacy head read first — pre-S438 behaviour, verbatim — then the
+  // structured reader for the heads it could not read (the same superset rule as
+  // the harvest). A qualified head still yields its columns: this is a column
+  // READER, not the `< schema>` acceptance gate — E-SCHEMA-012 at GCP1 is.
+  const legacy = new RegExp(LEGACY_CREATE_TABLE_HEAD_RE.source, "i").exec(createTableSql);
+  if (legacy) {
+    const bodyStart = legacy.index + legacy[0].length;
+    const bodyEnd = findRawDdlBodyEnd(createTableSql, bodyStart);
+    const body = createTableSql.slice(bodyStart, bodyEnd === -1 ? createTableSql.length : bodyEnd);
+    return { name: legacy[2], columns: columnsFromDdlBody(body) };
+  }
+  const head = scanCreateTableHeads(createTableSql)
+    .find((h) => h.parenAt !== -1 && h.modifiers.length === 0);
   if (!head) return null;
-  const bodyStart = head.index + head[0].length;
-  const bodyEnd = findRawDdlBodyEnd(createTableSql, bodyStart);
-  const body = createTableSql.slice(bodyStart, bodyEnd === -1 ? createTableSql.length : bodyEnd);
-  return { name: head[1], columns: columnsFromDdlBody(body) };
+  const body = createTableSql.slice(head.parenAt + 1, head.bodyEnd === -1 ? createTableSql.length : head.bodyEnd);
+  return { name: head.parts[head.parts.length - 1].name, columns: columnsFromDdlBody(body) };
 }
 
 /**
@@ -612,29 +969,71 @@ function parseFnArgs(argText) {
  * Used by the E-SCHEMA-011 detection so `default('see references')` and
  * `pattern(/references/)` do not read as a malformed foreign key.
  *
+ * `opts.comments` (S438, E-SCHEMA-012/013 dead-head suppression over a WHOLE
+ * `< schema>` body, where DSL text and raw SQL mix) — in ONE left-to-right pass,
+ * earliest opener wins, so a comment opener inside a literal is inert and a quote
+ * inside a comment is inert. The forms blanked:
+ *   · `'…'` and `"…"` — bounded to their LINE (an unbalanced `'` in prose must
+ *     not blank the rest of the body);
+ *   · `/…/` — only directly after a `(` (`pattern(/…/)`, the one place the DSL
+ *     grammar puts a regex; SQL `a / b` is division), bounded to its line;
+ *   · `--` line comments and CLOSED `/* … *\/` block comments.
+ * NOT `"""…"""` and NOT `//` (round 4 — see the note in the body). A SECURITY-
+ * DEFINER `fn` body is NOT exempted either (final round) — gap
+ * g-secdef-fn-body-ddl-false-positive.
+ * `opts.backtick: false` leaves `` `…` `` LIVE: in a `< schema>` body a backtick
+ * is either a quoted identifier inside a head or a `?{`…`}` wrapper around live
+ * DDL, never inert text. Defaults reproduce the E-SCHEMA-011 behaviour exactly.
+ *
  * @param {string} s
+ * @param {{comments?: boolean, backtick?: boolean}} [opts]
  * @returns {string}
  */
-function blankLiteralBodies(s) {
+function blankLiteralBodies(s, opts = {}) {
+  const comments = opts.comments === true;
+  const backtick = opts.backtick !== false;
   let out = "";
   let i = 0;
   while (i < s.length) {
     const ch = s[i];
-    if (ch === "'" || ch === '"' || ch === "`") {
+    // ⚑ NO `"""` AND NO `//` HANDLING HERE (S438 round 4, F2). Round 3 blanked any
+    // `"""…"""` pair and any `//`-to-end-of-line; both are also ordinary RAW-SQL
+    // text (`"""a"` … `"b"""` quoted identifiers, `DEFAULT $$http://x$$`), so each
+    // masked a live qualified head and let it escape E-SCHEMA-012. A `//` line and a
+    // SECURITY-DEFINER `fn` `"""` body are both LIVE; a qualified/unreadable head in
+    // either is an accepted fail-closed false positive
+    // (g-secdef-fn-body-ddl-false-positive for the fn body).
+    if (comments && ch === "-" && s[i + 1] === "-") {
+      let j = i;
+      while (j < s.length && s[j] !== "\n") j++;
+      out += " ".repeat(j - i);
+      i = j;
+      continue;
+    }
+    if (comments && ch === "/" && s[i + 1] === "*") {
+      const close = s.indexOf("*/", i + 2);
+      if (close !== -1) {
+        out += s.slice(i, close + 2).replace(/[^\n]/g, " ");
+        i = close + 2;
+        continue;
+      }
+    }
+    if (ch === "'" || ch === '"' || (ch === "`" && backtick)) {
       out += ch;
       i++;
-      while (i < s.length && s[i] !== ch) {
+      while (i < s.length && s[i] !== ch && !(comments && s[i] === "\n")) {
         if (s[i] === "\\" && i + 1 < s.length) { out += "  "; i += 2; continue; }
         out += " ";
         i++;
       }
-      if (i < s.length) { out += s[i]; i++; }
+      if (i < s.length && s[i] === ch) { out += s[i]; i++; }
       continue;
     }
     // A regex literal — only `pattern(/…/)`-shaped in this grammar. Require the
     // close on the same line so a lone `/` (never legal here, but cheap to be
     // safe about) cannot swallow the rest of the constraint text.
-    if (ch === "/" && s[i + 1] !== "/" && s[i + 1] !== "*") {
+    if (ch === "/" && s[i + 1] !== "/" && s[i + 1] !== "*" &&
+        (!comments || /\(\s*$/.test(s.slice(Math.max(0, i - 16), i)))) {
       let j = i + 1;
       let closed = false;
       while (j < s.length && s[j] !== "\n") {

@@ -258,7 +258,8 @@ ${
             const op: PTok = cur(lhs.tp)
             const d: TP = diagAt(lhs.tp, "E-BOOTSTRAP-UNSUPPORTED", "compound assignment `" + op.text + "=` is not in bootstrap slice M2 — write `x = x " + op.text + " …`", op)
             const rhs2: RExpr = parseAssign(adv(adv(d)))
-            return mkE(rhs2.tp, start, AExprK.Assign(lhs.e, rhs2.e))
+            // reported above; recovered as a placeholder, never typed as `x = v`
+            return mkE(rhs2.tp, start, AExprK.Recovered)
         }
         if (isP(lhs.tp, "++") || isP(lhs.tp, "--")) {
             const inc: PTok = cur(lhs.tp)
@@ -380,7 +381,7 @@ ${
         }
         if (isP(tp, LB())) return parseObject(tp)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
-        return mkE(adv(bad), start, AExprK.NotLit)
+        return mkE(adv(bad), start, AExprK.Recovered)
     }
 
     fn parseKeywordPrimary(tp: TP) -> RExpr {
@@ -391,7 +392,7 @@ ${
         if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
         if (t.v == "null" || t.v == "undefined") {
             const d: TP = diagAt(tp, "E-PARSE-NO-NULL", "`" + t.v + "` does not exist in scrml — absence is `not` (§42)", t)
-            return mkE(adv(d), start, AExprK.NotLit)
+            return mkE(adv(d), start, AExprK.Recovered)
         }
         return mkE(adv(tp), start, AExprK.Name(t.v))
     }
@@ -408,7 +409,7 @@ ${
             return mkE(adv(tp), at.start, AExprK.AtItem)
         }
         const bad: TP = diagAt(tp, "E-PARSE-AT", "`@` must be followed by a name (`@count`) or `.` (`@.field`)", at)
-        return mkE(adv(bad), at.start, AExprK.NotLit)
+        return mkE(adv(bad), at.start, AExprK.Recovered)
     }
 
     fn isSpread(tp: TP) -> boolean {
@@ -520,13 +521,15 @@ ${
         const nameTok: PTok = cur(t)
         if (nameTok.cls != TC.Ident) t = diagAt(t, "E-PARSE-LOCAL", "expected a name after `let` / `const`", nameTok)
         t = adv(t)
+        let aty: AType | not = not
         if (isP(t, ":")) {
             const ty: RType = parseType(adv(t))
+            aty = ty.t
             t = ty.tp
         }
         t = expectP(t, "=")
         const init: RExpr = parseAssign(t)
-        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, init.e))
+        return mkS(init.tp, start, AStmtK.Local(nameTok.v, mutable, aty, init.e))
     }
 
     fn parseIf(tp: TP) -> RStmt {
@@ -1017,7 +1020,25 @@ ${
             ty = { nid: m.nid, span: mkSpan(start, m.pos), k: ATypeK.TSeq(ty, grantWords(inner)) }
             m = mBump(m)
         }
+        // The type's SPAN runs to the end of the type TEXT: a continuation the
+        // slice cannot read (`int|not`, `fn()`) stays inside it, so the tag
+        // scanner's error on it lies within this type's span and the typer
+        // does not trust the type (the value that follows is not part of it).
+        const end: int = typeTextEnd(mp.src, m.pos)
+        if (end > m.pos) ty = { nid: ty.nid, span: mkSpan(start, end), k: ty.k }
         return { t: ty, mp: m }
+    }
+
+    // The first index at or after `pos` that ends an opener type's text:
+    // whitespace, `=`, `/`, `>`, or the end of the source.
+    fn typeTextEnd(src: string, pos: int) -> int {
+        let i: int = pos
+        while (i < src.length) {
+            const c: string = src.substring(i, i + 1)
+            if (isSpaceCh(c) || c == "=" || c == "/" || c == ">") return i
+            i = i + 1
+        }
+        return i
     }
 
     fn grantWords(inner: string) -> string[] {
@@ -1438,6 +1459,7 @@ ${
             .Str(v: s) :> true
             .Bool(v: b) :> true
             .NotLit :> true
+            .Recovered :> true
             .Variant(name: n) :> true
             .At(name: n) :> true
             .ArrayLit(elems: es) :> es.length == 0
@@ -1464,6 +1486,7 @@ ${
             .Str(v: s) :> false
             .Bool(v: b) :> false
             .NotLit :> false
+            .Recovered :> false
             .Variant(name: n) :> false
             .Member(obj: x) :> false
             .Call(callee: x) :> false
@@ -1636,6 +1659,8 @@ ${
     export fn parseFile(path: string, src: string, firstId: int) -> Parsed {
         const m0: MP = { src: src, pos: 0, nid: firstId, diags: [], file: path }
         const r: RMItems = parseMarkupItems(m0, "")
-        return { ast: { path: path, items: r.items }, diags: r.mp.diags, nextId: r.mp.nid }
+        let errs: ASpan[] = []
+        for (const d of r.mp.diags) { errs = errs.concat([d.span]) }
+        return { ast: { path: path, items: r.items, errs: errs }, diags: r.mp.diags, nextId: r.mp.nid }
     }
 }

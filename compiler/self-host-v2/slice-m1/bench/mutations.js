@@ -5,7 +5,14 @@
 // the M2 front-end and fix-round mutations, re-run as a script so the proof is
 // repeatable.) A mutation whose site is not found exactly once is NOT RUN.
 //
+// THE GATE: the script exits NON-ZERO if any mutation is NOT RUN (its site
+// moved — the proof silently shrank) or GREEN (the tests do not bite), or if
+// the unmutated suite fails on the mirror. It exits 0 only when every
+// mutation ran and went RED.
+//
 // usage: bun compiler/self-host-v2/slice-m1/bench/mutations.js
+//        MUTATIONS_PROOF=absent   — run ONE synthetic mutation whose site does not exist (must exit ≠ 0)
+//        MUTATIONS_PROOF=harmless — run ONE synthetic mutation that edits only a comment (GREEN; must exit ≠ 0)
 
 import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +23,13 @@ const SH = "compiler/self-host-v2";
 const T = (f) => `./${SH}/slice-m1/${f}`;
 const T2 = (f) => `./${SH}/slice-m2/${f}`;
 const RT = `${SH}/slice-m1/runtime/runtime.js`;
+
+// The M3 typer mutations all edit analyze.scrml and are judged by the two
+// typer suites: [id, from, to] triples.
+// A 4th element names another bootstrap file (default analyze.scrml).
+const TYPER = (rows) => rows.map(([id, from, to, file]) => ({
+  id, file: `${SH}/${file ?? "analyze.scrml"}`, from, to, tests: [T2("typer-gap.test.js"), T2("typer.test.js")],
+}));
 
 const MUTATIONS = [
   { id: "F1 self-write no-op removed (throws inside a click handler)", file: RT,
@@ -84,6 +98,105 @@ const MUTATIONS = [
   { id: "S437 reads require narrowing: an un-narrowed read through a `T | not` handle accepted", file: `${SH}/analyze.scrml`,
     from: "        if (!r.x.maybe) return r\n", to: "        return r\n",
     tests: [T2("front.test.js")] },
+  // ---- M3 item 1: the typer and the scope pass — one per check family, plus the
+  // REVERSE mutations for the shapes the SPEC makes legal (a "stays silent" test
+  // must go RED when the typer starts rejecting what the SPEC accepts) ----
+  ...TYPER([
+    ["M3 typer: a write's value never checked (§66.1 rule 5 off)",
+     "        if (fitsType(x, target) != Verdict.Fails) return ts\n", "        return ts\n"],
+    ["M3 typer: `not` into a non-optional type accepted (E-TYPE-041 off)",
+     "        if (maybeInner(target) is some) return ts\n        return report(ts, env, span, \"E-TYPE-041\"",
+     "        return ts\n        return report(ts, env, span, \"E-TYPE-041\""],
+    ["M3 typer: call arity never checked",
+     "        if (n >= 0 && n != args.length) {", "        if (false) {"],
+    ["M3 typer: `<each in=…>` over a non-sequence accepted",
+     "        if (k == 5 || k == 6) return ts\n", "        return ts\n"],
+    ["M3 typer: use-site construction values never checked (§66.9 rule 8 / §7.5.1 position 2)",
+     "                if (f.annotated && f.trusted) {\n                    ts = checkInit(", "                if (false) {\n                    ts = checkInit("],
+    ["M3 typer: a declaration's own initializer never checked (§7.5.1 position 2)",
+     "            if (f.annotated && f.trusted) ts = checkInit(", "            if (false) ts = checkInit("],
+    ["M3 typer: number → int treated as provably wrong (S404 refinement ignored)",
+     "            if (vk == 1) return Verdict.Unproven", "            if (vk == 1) return Verdict.Fails"],
+    ["M3 typer: `a || b` typed bool whatever its operands (JS operand semantics lost)",
+     "            .Or :> boolPair(a, b)", "            .Or :> known(Type.Bool)"],
+    ["M3 typer: a `T | not` value into a `T` position treated as provably wrong",
+     "            if (r == Verdict.Fails) return Verdict.Fails\n            return Verdict.Unproven\n", "            return Verdict.Fails\n"],
+    ["M3 typer: the Typing table not recorded (no type per expression node)",
+     "        return rvt(r.vt, record(r.ts, e.nid, r.vt))\n", "        return rvt(r.vt, r.ts)\n"],
+    ["M3 REVERSE: a ternary test checked as `bool` (the SPEC makes it boolean-coercible)",
+     "        const rt: RVT = typeExpr(env, test, ts)\n",
+     "        const rt0: RVT = typeExpr(env, test, ts)\n        const rt: RVT = rvt(rt0.vt, checkValue(env, rt0.vt, Type.Bool, test.span, \"a condition\", rt0.ts))\n"],
+    ["M3 REVERSE: an `if=` checked as `bool` (§17.1.1 boolean-coercible)",
+     "                // `if=` is boolean-COERCIBLE (§17.1.1): typed, never checked\n                ts = typeAttrValue(env, a.value, ts).ts\n",
+     "                const cv: RVT = typeAttrValue(env, a.value, ts)\n                ts = cv.ts\n                if (a.name == \"if\") ts = checkValue(env, cv.vt, Type.Bool, a.span, \"a condition\", ts)\n"],
+    ["M3 REVERSE: a call's first argument checked against `int` (§7.5.1 position 3 \"SHALL compile\")",
+     "        const ret: Type | not = fi.ret\n",
+     "        if (args.length > 0) ts = checkValue(env, exprType0(ts, args[0].nid), Type.Int, e.span, \"an argument\", ts)\n        const ret: Type | not = fi.ret\n"],
+    ["M3 scope: duplicate program cells accepted (E-SCOPE-010 off)",
+     "                if (i >= 0) {\n                    const f: FieldInfo = d.fields[j]", "                if (false) {\n                    const f: FieldInfo = d.fields[j]"],
+    ["M3 scope: duplicate file-scope functions accepted",
+     "            if (i >= 0) {\n                const f: FnInfo = t.fns[j]", "            if (false) {\n                const f: FnInfo = t.fns[j]"],
+    ["M3 scope: the §7.3.3 function-block rule off (E-SCOPE-REDECLARE)",
+     "                out = out.concat(blockRedeclares(f.path, af.body, af.params, true))\n", ""],
+    ["M3 scope: inline handler blocks not checked",
+     "            out = out.concat(handlerRedeclares(f.path, fileMarkup(f.items)))\n", ""],
+    ["M3 REVERSE: nested blocks inherit the parameters (shadowing wrongly refused)",
+     "            for (const nb of nestedBlocks(s)) { out = out.concat(blockRedeclares(file, nb, [], inFn)) }",
+     "            for (const nb of nestedBlocks(s)) { out = out.concat(blockRedeclares(file, nb, params, inFn)) }"],
+    ["M3 scope: two `as=` of one name in one scope accepted",
+     "                if (dup is not && o.owner == h.owner && o.name == h.name) dup = o\n", "                if (false) dup = o\n"],
+    ["M3 scope: a program cell named like a declaration accepted",
+     "                } else if (d.sym.id == t.program.id && visibleDeclNamed(files, t, d.file, names[j])) {", "                } else if (false) {"],
+    ["M3 scope: a handle named like a program cell accepted",
+     "            } else if (h.file == progFile && cells.indexOf(h.name) >= 0) {", "            } else if (false) {"],
+    // ---- fix round 1 ----
+    ["FR1-A: a local's reassignments not joined into its type (typed from the initializer only)",
+     "                    ts1 = contribute(ts1, ls, r.vt)\n", ""],
+    ["FR1-A: a local's annotation ignored (typed from its initializer)",
+     "            return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)", "            return keepTEnv(tWithLocal(env, sym, r.vt), ts2)"],
+    ["FR1-B: a whole-struct literal's fields not checked",
+     "        return checkLitFields(env, value, checkValue(env, v, target, value.span, what, ts))", "        return checkValue(env, v, target, value.span, what, ts)"],
+    ["FR1-C: a parse-recovery node typed as the `not` literal",
+     ".Recovered :> rvt(VType.Unknown, ts)", ".Recovered :> rvt(VType.Absent, ts)"],
+    ["FR1-C: a write into a field whose declaration failed to parse still checked",
+     "        if (!f.trusted) return ts\n", ""],
+    ["FR1-C: arity checked against a signature that did not parse",
+     "                if (!paramsTrusted(f.errs, af.params)) arity = -1\n", ""],
+    ["FR1-D: every declaration in the link set claims `@name` (not only the visible ones)",
+     "                if (d.file == file || importsName(files, file, name)) return true", "                return true"],
+    ["FR1-G1: `<each in=not>` accepted",
+     "        if (isAbsentVT(v)) {\n            return report(", "        if (false) {\n            return report("],
+    ["FR1-F1: a duplicate type name in one file accepted",
+     "                if (first.file == ti.file) {\n                    out = out.concat([mkDiag(ti.file, ti.span, \"E-BOOTSTRAP-REDECLARE\"",
+     "                if (false) {\n                    out = out.concat([mkDiag(ti.file, ti.span, \"E-BOOTSTRAP-REDECLARE\""],
+    ["FR2-1: a program cell visible from every file (§7.6.1 'in the same file' dropped)",
+     "        if (d.file != env.file) return not\n", ""],
+    ["FR2-1: `@x` reaches a declaration the file neither declares nor imports",
+     "        if (d.file == env.file || importsName(env.g.files, env.file, name)) return d\n        return not", "        return d"],
+    ["FR2-2: a row / renders handle may shadow a visible cell (PA interim: refuse)",
+     "            } else if (h.file == progFile && cells.indexOf(h.name) >= 0) {", "            } else if (h.owner == progNid && cells.indexOf(h.name) >= 0) {"],
+    ["FR2-3: `key=` resolved in the row env (sees the row's own handles)",
+     "                st = resolveValue(kenv, a.value, not, st)", "                st = resolveValue(renv, a.value, not, st)"],
+    ["FR2-4: an annotated local's literal initializer not checked (§7.5.1 position 1)",
+     "            let ts2: TypeState = checkInit(env, annot, literalKind(init), init.span, \"`\" + name + \"`\", r.ts)", "            let ts2: TypeState = r.ts"],
+    ["FR2-4: a write to an annotated local not checked",
+     "                    ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))", "                    ts1 = ts1"],
+    ["FR2-5: a field's trust judged by an error ANYWHERE in its declaration (coarse Rule C)",
+     "            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: typeTrusted(errs, f.typeSpan),",
+     "            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: !hasErrIn(errs, f.span),"],
+    ["FR2-5: an opener type's span stops before its unreadable continuation (`int|not` trusted as `int`)",
+     "        if (end > m.pos) ty = { nid: ty.nid, span: mkSpan(start, end), k: ty.k }\n", "", "parse.scrml"],
+    ["FR2-7: the fixpoint bound fixed at 6 passes (a chain of 6 locals goes Unknown)",
+     "            if (pass == 0) bound = 3 * next.length + 2", "            if (pass == 0) bound = 6"],
+    ["FR2-8: compound assignment recovered as a typed `x = v`",
+     "            return mkE(rhs2.tp, start, AExprK.Recovered)", "            return mkE(rhs2.tp, start, AExprK.Assign(lhs.e, rhs2.e))", "parse.scrml"],
+    ["R3-H1: a field write through an annotated local checked against the WHOLE annotation",
+     "                if (la is some && bareLocal) {", "                if (la is some) {"],
+    ["R3-H1: a field write through an unannotated local joined into the local's type",
+     "                } else if (la is not && bareLocal) {", "                } else if (la is not) {"],
+    ["FR1-F2: duplicate parameter names accepted",
+     "                out = out.concat([mkDiag(file, ps[j].span, \"E-BOOTSTRAP-REDECLARE\"", "                if (false) out = out.concat([mkDiag(file, ps[j].span, \"E-BOOTSTRAP-REDECLARE\""],
+  ]),
   { id: "F8 non-first alternation arm not flagged", file: "scripts/lint-no-default-arm.js",
     from: "if (a.alts.length > 1 && armIndex > 0) {", to: "if (false) {", tests: [T("lint.test.js")] },
   { id: "F8 wildcard inside an alternation not flagged", file: "scripts/lint-no-default-arm.js",
@@ -114,24 +227,43 @@ for (const rel of ["compiler/src", "compiler/native-parser", "compiler/SPEC.md",
   symlinkSync(join(ROOT, rel), join(MIRROR, rel));
 }
 
+// The gate's own proof: one mutation that cannot run, one that cannot bite.
+const PROOF = process.env.MUTATIONS_PROOF ?? "";
+const PROOFS = {
+  absent: [{ id: "PROOF absent site", file: `${SH}/analyze.scrml`, from: "this text is not in analyze.scrml §§§", to: "", tests: [T2("typer.test.js")] }],
+  harmless: [{ id: "PROOF harmless edit (a comment)", file: `${SH}/analyze.scrml`,
+    from: "// self-host-v2 / analyze.scrml", to: "// self-host-v2 / analyze.scrml (harmless)", tests: [T2("typer-gap.test.js")] }],
+};
+const SET = PROOF === "" ? MUTATIONS : PROOFS[PROOF];
+if (!SET) throw new Error(`unknown MUTATIONS_PROOF=${PROOF}`);
+
+const t0 = performance.now();
 const results = [];
+let bad = 0;
 try {
-  for (const m of MUTATIONS) {
+  for (const m of SET) {
     const path = join(MIRROR, m.file);
     const orig = readFileSync(path, "utf8");
     const n = orig.split(m.from).length - 1;
-    if (n !== 1) { results.push(`| ${m.id} | mutation site found ${n}× — NOT RUN |`); continue; }
+    if (n !== 1) { results.push(`| ${m.id} | mutation site found ${n}× — NOT RUN |`); bad = bad + 1; continue; }
     try {
       writeFileSync(path, orig.replace(m.from, m.to));
       const r = run(m.tests, MIRROR);
-      results.push(`| ${m.id} | ${r.code !== 0 && r.fails > 0 ? "RED" : "GREEN (does not bite!)"} (${r.fails} failing) |`);
+      const red = r.code !== 0 && r.fails > 0;
+      if (!red) bad = bad + 1;
+      results.push(`| ${m.id} | ${red ? "RED" : "GREEN (does not bite!)"} (${r.fails} failing) |`);
     } finally {
       writeFileSync(path, orig);
     }
   }
-  const clean = run([`./${SH}/slice-m1/`, `./${SH}/slice-m2/`], MIRROR);
   console.log("| mutation | result |\n|---|---|\n" + results.join("\n"));
-  console.log(`unmutated slice suite (on the mirror): exit ${clean.code}, ${clean.fails} failing`);
+  if (PROOF === "") {
+    const clean = run([`./${SH}/slice-m1/`, `./${SH}/slice-m2/`], MIRROR);
+    console.log(`unmutated slice suite (on the mirror): exit ${clean.code}, ${clean.fails} failing`);
+    if (clean.code !== 0) bad = bad + 1;
+  }
 } finally {
   rmSync(MIRROR, { recursive: true, force: true });
 }
+console.log(`${SET.length} mutation(s), ${bad} problem(s), wall ${((performance.now() - t0) / 1000).toFixed(1)} s`);
+if (bad > 0) process.exitCode = 1;
