@@ -137,3 +137,4 @@ lower produce the Core css node from `<theme>` + §66 declarations + `#{}`.
 - impl#1 conformance (`bun conformance/run.ts`): 1041/1048 pass + 7 xfail — unchanged.
 - Suites: slice-m1 73/0 · slice-m2 284/0 · slice-m3 53/0 (css.test 26, css-half 1, bite 3, + s439's) ·
   lint 48 files 0 violations · pre-commit gate (b063a7e0e) 32084 pass / 85 skip / 0 fail.
+- CORRECTION to the line above: slice-m3 is 52/0 across 5 files (re-run at c274821ec), not 53.
