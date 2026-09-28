@@ -2662,7 +2662,7 @@ replacement from the subscriber's perspective — both result in a `_scrml_react
 
 #### 6.5.6 Nested Reactive Arrays
 
-> **Note (S439 ruling #3):** this section is NOT amended toward deep reactivity; for the §66 model the question is dissolved — under §66.10 and the R3 lean runtime values are immutable and every write is a classified write, so there is no deep-reactive proxy to specify. **Provenance:** ruling:user-voice-scrml.md S439 #3 "all recs" (Rec: don't amend §6.5.6).
+> **Note:** Not amended toward deep reactivity (S439 #3): for the §66 model the question is dissolved by §66.10 (value semantics) — there is no deep-reactive proxy to specify. **Provenance:** ruling:user-voice-scrml.md S439 #3 "all recs" (Rec: don't amend §6.5.6).
 
 Nested arrays (arrays of arrays) are supported. Only the outermost reactive variable is
 reactive. Mutating an inner array does NOT trigger subscribers of the outer variable unless
@@ -13104,6 +13104,8 @@ inside it (§4.18.4). A bare `<Small : Small Mario>` (prose, not a valid express
   body of a DISPATCHED arm — a block-form `<match>` arm, or an `<engine>` state-child
   (§51.0.B) — and SHALL NOT be refused there. (For the state-child case impl#1 carries a
   divergence under `W-ENGINE-MATCH-IN-STATE-CHILD`, §34; see §51.0.B.)
+  For a block `<match>` nested in a dispatched `<match>` arm, impl#1 emits no inner dispatcher
+  and renders nothing, with no diagnostic (`g-nested-block-match-in-dispatched-arm-silently-drops`).
   > **Provenance:** ruling:user-voice-scrml.md S439 #5 "all recs" (Rec: B; "Answer the open
   > nested-block-match-in-dispatched-arm fork (refuse vs support) the same way") · supersedes:
   > the OPEN fork `g-nested-block-match-in-dispatched-arm-silently-drops`.

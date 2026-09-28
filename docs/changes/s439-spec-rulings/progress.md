@@ -14,3 +14,4 @@
 - regen: SPEC-INDEX.md (line ranges) + docs/FACTS.md (SPEC line count 40,378 -> 40,469, the only facts delta). No Sections-table summary changed: every edit adds within an existing section's scope.
 - CORRECTION #14: reframed. The SPEC SHALLs are unconditional and the exemption is impl#1-only. OPEN = restore-conformance vs amend. Recount from the probe log + source: braced 0; bare calls 6 attrs / 5 files (listed); 5 formFor onsubmit references excluded (§41.14 requires them to be failable).
 - CORRECTION #2: marked the two S378 sentences narrowed in place; 'as the ruling states an on mount { block is' (dropped the §6.7.1a claim); added 'in any position among the body's direct children'.
+- CORRECTION #3: note tightened to the §66.10 sentence (dropped the R3 lean and 'classified write'). #5: added the match-in-match-arm impl#1 divergence line in §18.0.1.
