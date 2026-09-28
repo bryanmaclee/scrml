@@ -595,6 +595,10 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
   test("twin silent — the same chain into a string cell (a `T | not` into `T` is unproven)", () => {
     expect(inApp(chain(8, "string=\"\""))).toEqual([]);
   });
+  test("silent — a chain of 8 whose far end is widened to Unknown (`a8 = 1`): `a1` must SETTLE to Unknown, not stop at `string`", () => {
+    const src = chain(8, "int=0").replace(" a8 = not\n", " a8 = 1\n");
+    expect(inApp(src)).toEqual([]);
+  });
   test("`@s += 1` on a string cell — only the unsupported-syntax report (recovered, not typed as `@s = 1`)", () => {
     expect(inApp("    <let s:string=\"\"/>\n    function f() { @s += 1 }")).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
