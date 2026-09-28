@@ -12078,6 +12078,7 @@ A `for` loop with `lift` MAY include an `else` block. The `else` block executes 
 - If `collection.length === 0` (or `collection is not`), the `for` body does not execute and the `else` body executes exactly once.
 - If `collection.length > 0`, the `for` body executes for each element and the `else` body does not execute.
 - The `else` body is valid only on a `for/lift` loop. A `for` loop without `lift` SHALL NOT accept an `else` block (E-CTRL-010).
+- A keywordless loop binder — `x` in `for (x of collection)` — is `const` (§50.8.5); a write to it SHALL be E-ASSIGN-004. **Provenance:** ruling:user-voice-scrml.md S439 #8 "all recs".
 
 **Worked example:**
 
@@ -20649,7 +20650,7 @@ no program's acceptance status (direction-of-change: inert), so it is not a §62
 | E-ASSIGN-001 | §50.9 | Declaration form (`let`/`const`/`lin`) in expression position | Error |
 | E-ASSIGN-002 | §50.9 | Type mismatch in chained assignment | Error |
 | E-ASSIGN-003 | §50.9 | Undeclared identifier as assignment expression target | Error |
-| E-ASSIGN-004 | §50.9 | `const` variable as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`) | Error |
+| E-ASSIGN-004 | §50.9 | `const` variable as assignment target, statement or expression position (emitted at `compiler/src/type-system.ts`). Includes a write to a keywordless loop binder (`for (it of xs)`, §50.8.5 — S439 ruling #8) — **Nominal for that case: not yet emitted.** | Error |
 | E-AUTH-001 | §52.11 | Client-local `@var` used as bound parameter in `?{}` INSERT/UPDATE/DELETE outside server function | Error |
 | E-AUTH-002 | §52.11 | `<var server>` initial value directly derived from a client-local `@var` | Error |
 | E-AUTH-003 | §52.11 | State type declares `authority="server"` without `table=` attribute | Error |
@@ -28683,6 +28684,20 @@ ${
 ```
 
 A `let` binding stays mutable for its whole lifetime. Reassigning it any number of times is legal; the FIRST reassignment does not convert it to a `const`.
+
+**S439 ruling (#8) — a keywordless loop binder is `const`.** The binder of a keywordless loop head — `it` in `for (it of xs)` — is created without `let`, so it is `const` by the rule above (matching §66's immutable-by-default). A write to it is **E-ASSIGN-004**:
+
+```scrml
+${
+    for (it of @xs) {
+        it = it + 1        // E-ASSIGN-004 — `it` is a keywordless loop binder, so `const`
+    }
+}
+```
+
+⚑ **Nominal for this case on impl#1** — impl#1 does not yet emit E-ASSIGN-004 for a loop-binder write (measured S439, exit 0 in both positions): in a function body it emits `for (const it of …)`, so the write throws a JS `TypeError` at runtime; in an event-handler value (`onclick=${ for (it of @xs) { it = it + 1 } }`) it emits `for (it of …)` with no declaration keyword, so the write does not fail at all.
+
+> **Provenance:** ruling:user-voice-scrml.md S439 #8 "all recs" (Rec: no — it's `const` per §50.8.5; "it just needs a proper diagnostic").
 
 ### 50.9 Normative Statements
 
