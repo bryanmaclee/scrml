@@ -61,3 +61,9 @@ Measure (errors+warnings, per file, base extract vs worktree): only the 2 new pi
 - Runtime: conformance/cases/error/handler-guard-in-arrow-rt (r → 11, kind → "click"); handler-unhandled-failable-arrow-pos (E-ERROR-002 x3). Both fail on base.
 - Corpus re-measure incl. arrow shapes (23 arrow handler values in 19 files by text): errors+warnings per file identical to base except the 3 pin cases. Nothing newly failing → nothing to bring back.
 - SPEC §19.4.3: arrow OPEN block replaced by the ruled paragraph + provenance; carried-gap paragraph + direction paragraph updated; ⚑ §19.6.6 tension flagged. known-gaps: main entry stays OPEN (F9, 2+-param arrows, function expressions, fn-prop bare call listed); new entries filed: unbraced guard (F9), value-position calls, imported failables (F8), fn-prop bare call, handler guard on server call not awaited (item 3), `{ risky()? }` codegen error (item 5), formFor onsubmit error discard (item 6). F11: no description was given in the fix-round message — NOT filed.
+
+## 2026-09-28 — fix round verification (HEAD db17b80f7)
+- Pre-commit gate (unit+integration+conformance+…): 32151 pass / 0 fail.
+- Whole `bun test compiler/tests/` (the post-commit set): wt 33962 pass / 55 fail vs base extract 33809 pass / 58 fail; the wt fail set is a SUBSET of base's (all browser/happy-dom whole-suite + nav/Bug-60 env fails). Browser alone: 48 fail = base set minus the 2 TodoMVC dist env-gap.
+- conformance/run.ts: 1049/1056 + 7 xfail (base 1041/1048 + same 7 xfail). All 8 new cases fail on base.
+- Corpus (errors+warnings per file) vs base: only the 3 E-ERROR-002 pin cases differ. Emitted JS vs base: only the migrated 5 files + new cases (+2 path-only import artifacts).
