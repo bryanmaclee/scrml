@@ -16,3 +16,4 @@
 - CORRECTION #2: marked the two S378 sentences narrowed in place; 'as the ruling states an on mount { block is' (dropped the §6.7.1a claim); added 'in any position among the body's direct children'.
 - CORRECTION #3: note tightened to the §66.10 sentence (dropped the R3 lean and 'classified write'). #5: added the match-in-match-arm impl#1 divergence line in §18.0.1.
 - CORRECTION #7: 'SHALL NOT declare a binding whose name begins with _scrml_'; OPEN on references + stdlib.
+- CORRECTION #8: cut the SPEC impl note to one line; moved the detail to a new known-gaps entry G-HANDLER-LOOP-BINDER-WRITE-CREATES-WINDOW-GLOBAL (HIGH; locus emit-event-wiring.ts:1140). Window global VERIFIED BY EXECUTION: happy-dom + node:vm, window.it === 4 after the click.

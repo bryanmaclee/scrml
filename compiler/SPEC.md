@@ -28723,7 +28723,7 @@ ${
 }
 ```
 
-⚑ **Nominal for this case on impl#1** — impl#1 does not yet emit E-ASSIGN-004 for a loop-binder write (measured S439, exit 0 in both positions): in a function body it emits `for (const it of …)`, so the write throws a JS `TypeError` at runtime; in an event-handler value (`onclick=${ for (it of @xs) { it = it + 1 } }`) it emits `for (it of …)` with no declaration keyword, so the write does not fail at all.
+⚑ **Nominal for this case on impl#1** — not yet emitted (measured S439, exit 0).
 
 > **Provenance:** ruling:user-voice-scrml.md S439 #8 "all recs" (Rec: no — it's `const` per §50.8.5; "it just needs a proper diagnostic").
 
