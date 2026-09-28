@@ -4038,3 +4038,19 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3565] rule · **§66 rulings** L6 (a) · L12 (b) · identities · spread = field edit · O58 (b) · O57 no · O59/O60 leans · O21/O43 closed · reads through a conditional handle require narrowing → #1107 #1108 · two PA restatement widenings corrected (user-voice S437)
 
 [3566] land · **#1109 bootstrap slice M2 MERGED (072741ca9)** — Fork-A proof: lower(analyze(parse(lex(SPEC §66.19)))) == M1 hand-built Core; M3 item 1 = the typer (11 silent shapes pinned test.failing)
+
+[3567] land · **#1112 E-MW-008 counts only non-tool files** (98d94e96) — round 1 node-skip recreated the class; per-file `isToolProgram` · SPEC rows amended
+
+[3568] land · **#1113 #1045 F1** (b7c86323) — clientJs rebased in gate+write; browser half RE-OPENED (disk ≠ browser)
+
+[3569] land · **#1114 8b defers session config to the program** (8c55f518) — 2+-program files keep base stamp; 5 Windows residue suites fixed
+
+[3570] land · **#1116 E-SCHEMA-012/013 tenant floor** (afc2308b) — 5 S239 rounds; stop condition removed the SECDEF fn exemption
+
+[3571] land · **#1119 F12/F13/F14 + E-MATCH-ALT-BINDING** (fb21983a) — stop condition reverted a division probe
+
+[3572] escalate · **to bryan**: hold/s438-1109-review-fixes (M2 spread HIGH) · hold/s438-refusal-writes-no-dist (a/b/c) · 3 new codes · §20.5.1 line — note in handOffs/incoming
+
+[3573] state · **HELD** hold/s438-impl1-imported-enum-match @5bea376e — cross-file bare-dot arg loud→silent; fix direction on the gap
+
+[3574] rule · **bryan S439 "all recs"** on the six peter→bryan notes — land S432 #1/#4/#6 holds; retire q5 + s429 holds (read S438 wrap)

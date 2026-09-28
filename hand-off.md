@@ -1,3 +1,86 @@
+# scrml — Session 438 (peter · P-Tech1) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. **S439-bryan (ASUS) went LIVE
+> mid-session** on bootstrap M3 / SPEC rulings / his inbox queue, footprints disjoint (his board names S438's lanes
+> off-limits). Operator: *"full throttle"* (laptop fully used, ~6 agents) and *"merge on green"*.
+
+## ⏭ NEXT-SESSION PICKUP
+
+1. **bryan's S439 ruling of the six peter→bryan notes — "all recs"** (`handOffs/incoming/2026-09-27-from-S439-bryan-to-peter-six-notes-ruled.md`,
+   authority `scrml-support/user-voice-scrml.md` S439). Three are OURS TO LAND, in this order:
+   - **S432 #1 loopback-by-default** — `hold/s432-dev-server-localhost-default` @ `cb9e0ac6`: **LAND** (security, reviewed twice).
+     Merge main in (MERGE, marker-check), re-run, merge on green.
+   - **S432 #4 `${s1; s2}` handler legal, every statement runs** — `hold/s432-expr-handler-multi-stmt` @ `1b7018e2`:
+     **run the S239 adversarial pass FIRST** (still unreviewed), then land. Same silent-drop family as #1106.
+   - **S432 #6 defer SPEC calls B1/B2/B3/A2** — merge `hold/s432-defer-spec-calls` AFTER the held A fix lands (bryan is
+     implementing B1 in the bootstrap typer; the §7.3.3 text is ours via the hold).
+   - **Retire** `hold/s432-q5-deep-reactive-cells-spec` and `hold/s429-match-in-engine-state-child` (ruled: the bootstrap
+     implements them). `hold/s432-bare-when-body-top` defaults to carry.
+2. **`hold/s438-impl1-imported-enum-match` @ `5bea376e` — impl#1 F11/F15/F16/F17 (bootstrap blockers).** HELD after four
+   S239 rounds for ONE loud→silent shape: a bare-dot argument to a cross-file call whose parameter enum TS cannot see
+   (`conv(.Neg(6))`, `Expr.Neg(x)` vs `Other.Neg(y)`) takes the outer context's enum — main throws, branch returns wrong
+   data. Fix: no stamp and no by-name imported lookup for a bare-dot ctor that is an ARGUMENT of a call TS could not type
+   (→ loud), or stop TS pushing outer context into call args. Reviewer harness: S438 scratch `rv-enum3/` (q6/q7). Then ONE
+   narrow review, then land. Everything else on the branch is verified (see the gap annotation on
+   `g-impl1-match-miscompiles-hit-by-the-bootstrap`).
+3. **Outbound to bryan** (`handOffs/incoming/2026-09-27-from-S438-peter-to-bryan-holds-and-new-codes.md`): two hold refs for
+   his answer (`hold/s438-1109-review-fixes`, `hold/s438-refusal-writes-no-dist`), three new codes to review, one SPEC line
+   to confirm. Land whatever he answers.
+4. **Ledger debt still owed** (from bryan's S435 TS-policy note): fork items 2–4 should become `status=carried` with the
+   ruling as provenance — but `conformance/run.ts` fails the gate on a `carried` gap with no pinning xfail case, so each needs
+   a pinning case first. Not done S438.
+
+## WHAT LANDED — five PRs, each merged on green (gate + windows green on the latest head; `tracking` = main's five watcher names)
+
+| PR | what |
+|---|---|
+| **#1112** | E-MW-008 no longer counts a `kind="tool"` FILE (my #1094 regression); round 1 skipped per node and recreated the class — fixed by asking the emit dispatch's own `isToolProgram` |
+| **#1113** | #1045 F1 — client JS relative imports re-based in BOTH the gate and write phases; browser half RE-OPENED for bryan (disk resolution ≠ browser) |
+| **#1114** | route-inference 8b defers session config to the program (runtime lockout 302 → authenticated); 2+-program files keep base's secure stamp; five Windows `_tmp_` residue suites fixed |
+| **#1116** | fork item 1 — E-SCHEMA-012 (qualified CREATE TABLE) + E-SCHEMA-013 (unreadable head); harvest ⊇ base by construction; five review rounds + stop condition |
+| **#1119** | F12/F13/F14 match arms; E-MATCH-ALT-BINDING (payload alternation fails closed); stop condition reverted a division probe |
+
+Hold refs created: `hold/s438-1109-review-fixes` (bryan), `hold/s438-refusal-writes-no-dist` (bryan ruling),
+`hold/s438-impl1-imported-enum-match` (ours, pickup 2). ~25 gaps filed across §S438 / §S438b / §S438c.
+
+## 🔭 DURABLE
+
+**Every fix re-created its own class one level away, and every one was caught by the adversarial review, not the author.**
+Seven arcs, seventeen S239 rounds. E-MW-008 skipped per node while the emitter dispatches per file; the 8b fix un-hid a
+last-wins reader; the tenant comment-skipper was string-unaware; the enum stamp was non-enumerable and died in clones; the
+match walker opened payload alternation at every position. The memory note `fix-recreates-its-class-one-level-away` was
+right every single time. **Budget the review round as part of the fix, not as verification of it.**
+
+**A stop condition stated BEFORE the round is what ended three arcs cleanly.** Tenant round 4, match round 2, enum round 3:
+each review found a regression of the round's own making, and because the rule was already written the answer was
+"remove / revert / hold", not a fifth approximation. The two arcs where I did NOT state one up front (tenant rounds 2–3)
+are exactly where the new-surface escapes kept coming.
+
+**Newly added recognition surface is where the escapes live.** Every round that ADDED a recognizer (masking, followers,
+modifier sets, prefixes) opened a bypass; every round that only NARROWED or REMOVED held. Prefer fail-closed removal over
+a smarter heuristic when the review keeps finding the same shape.
+
+## ⚑ MISSES (mine)
+1. ★★ My own #1112 round 1 re-created its class (node vs file) — I wrote the fix myself and still needed the reviewer.
+2. ★★ Reverted `master-list.md` to my branch's PRE-merge copy during a merge resolution (would have dropped main's changes);
+   caught before commit and restored from `origin/main`.
+3. ★ Set stop conditions late on the tenant arc (round 4, not round 2).
+4. ★ Agents left six drive-root scratch dirs the harness will not let me delete (`C:\m8s`, `C:\wt-s438-out`, `C:\cdf1116`,
+   `C:\ced438`, `C:
+438w`, `C:\e2w`) — Peter deletes by hand. Brief future agents to keep scratch under the session scratchpad.
+
+## Gate at close
+- Cloud: `gate` + `windows` GREEN on every merged PR; `tracking` failure-name set byte-identical to main's newest run each time
+  (scripted: `merge-on-green.sh`, which refuses on any difference).
+- Local full `compiler/tests` at wrap: 33,717 pass / 157 skip / **204 fail** (exit 1, 709 s, main `fb21983a` + wrap docs) — mostly the browser/happy-dom tier (transition-001, bind:value, class-binding, match-002, forms, todo, component-basic, LSP L2). Consistent with the ~205–208-fail Windows-local baseline three S438 reviewers measured on BASE with full name-set diffs (0 status changes); NOT name-set-compared at wrap itself.
+- Review floor: 2 owed — #1115, #1117, both bryan's (live). Markers for #1109 (second pass), #1112–#1114, #1116, #1119 in this wrap.
+- `state.ts --check`: recent-sessions FAILS on an untouched main on this clone (host-dependent SHA width — annotated on
+  `g-recent-sessions-index-stale-on-main-after-every-wrap-merge`); `master-list.md` deliberately not regenerated here.
+- Maps: refreshed → `fb21983a` (all 13 map files; M2 slices now mapped; `primary.map.md` deep routing/fingerprint sections still carry S437 rows — flagged by the mapper). `state.ts` reports `maps: current`.
+- Worktrees: 16 of this session's 21 agent worktrees removed; **5 retained, LOCKED by their agent pids** (`agent-a4ced6bd…`, `agent-a5ba0cbd…`, `agent-a7087b4d…`, `agent-a8389a52…`, `agent-aa5a14bf…`) — all work pushed; remove with `git worktree remove -f -f` once those processes are gone. Local branches `fix/s438-impl1-imported-enum-match` + the two `hold/s438-*` kept (remote copies exist).
+
+---
+
 # scrml — Session 437 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. SOLO session (no live sibling).
