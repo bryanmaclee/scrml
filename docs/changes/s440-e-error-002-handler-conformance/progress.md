@@ -36,3 +36,8 @@ No second SHALL contradicts these; no SPEC text grants a handler exemption.
 - 4 new cases under conformance/cases/error/: handler-unhandled-failable-{multi-stmt,one-stmt,bare-and-expr}-pos + handler-failable-reference-and-guard-neg (runtime: click guarded → @r=7).
 - Bite check on a base-tree extract (git archive d244a6f3b): 3 of 4 FAIL at base (multi-stmt passes at base, as expected — it already fired); the guard-neg fails at base at RUNTIME (guard dropped).
 - conformance: base 1041/1048 (+7 xfail) → after 1045/1052 (+7 xfail, same 7).
+
+## Scope narrowing — CPS-implicit (post-adversarial)
+- Warnings-inclusive re-measure (errors+warnings, base = git-archive extract of d244a6f3b) showed the shared helper also newly emitted W-CPS-NEEDS-FAILABLE on 29 files (incl. examples/19-lin-token.scrml) — `onclick=serverFn()` where the server fn is CPS-implicit-failable (not declared `!`). The ruling covers DECLARED-`!` calls; escalating the W-CPS deprecation warning onto the most common server-call handler shape is a separate decision. Handler path now skips CPS-implicit callees.
+- Re-measure after: errors+warnings per-file sets identical to base except the 2 new pin cases. Unit test added.
+- Adversarial positions: each row / engine state-child / match arm / component-def body all fire once; component PROP callback (`<Btn act=risky/>` + `onclick=act()`) does not fire in ANY form (pre-existing — failability not tracked through fn-typed props); errorBoundary contains (E-ERROR-005 w/o fallback); `on mount {}` is a logic block (already fired at base, unchanged).

@@ -154,6 +154,33 @@ describe("§19.4.3 — handled calls and references stay legal", () => {
   });
 });
 
+describe("scope: CPS-implicit failability is NOT escalated on one-statement handlers", () => {
+  // A server-escalated fn NOT declared `!` is CPS-implicit-failable; its
+  // W-CPS-NEEDS-FAILABLE deprecation warning is a separate cycle. The S440 ruling
+  // covers functions DECLARED `!` only, so `onclick=save()` stays as it was.
+  test("onclick=save() on a CPS-implicit server fn — no E-ERROR-002, no new W-CPS-NEEDS-FAILABLE", () => {
+    const dir = mkdtempSync(join(tmpdir(), "e-error-002-cps-"));
+    try {
+      const file = join(dir, "case.scrml");
+      writeFileSync(file, `\${
+    <out> = ""
+    function save() {
+        ?{\`CREATE TABLE IF NOT EXISTS t (x text)\`}.run()
+        @out = "saved"
+    }
+}
+<button onclick=save()>go</>
+`);
+      const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out"), log: () => {} });
+      const all = [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d.code);
+      expect(all).not.toContain("E-ERROR-002");
+      expect(all).not.toContain("W-CPS-NEEDS-FAILABLE");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("a `!{}`-guarded one-statement handler emits its guard", () => {
   test("braced form — the variant arm is in the handler, not dropped", () => {
     const { errors, clientJs } = compileBody(`<button onclick={ risky() !{ | .Empty :> @r = 7 } }>x</>`, { emit: true });

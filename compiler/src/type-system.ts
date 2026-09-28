@@ -14342,7 +14342,13 @@ function annotateNodes(
       && !(value as Record<string, unknown>).handlerBlock
     ) {
       const call = handlerValueAsBareCall(value, (value.span ?? attr.span ?? parent?.span) as Span | undefined);
-      if (call) checkUnhandledFailableBareCall(call);
+      // Scope: the ruling covers calls to functions DECLARED `!`. A
+      // CPS-implicit-failable callee (a server fn not declared `!`) is still
+      // in its W-CPS-NEEDS-FAILABLE deprecation cycle, and extending that
+      // warning to the one-statement handler forms (`onclick=save()`, the
+      // common server-call shape) is a separate decision — not taken here.
+      const callee = call ? extractCalleeNameFromNode(call) : null;
+      if (call && !(callee && fnCpsImplicitFailable.has(callee))) checkUnhandledFailableBareCall(call);
     }
 
     if (value.kind === "variable-ref") {
