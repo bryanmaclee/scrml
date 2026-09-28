@@ -68,8 +68,24 @@ let _variantFieldCollisions: Set<string> | null = null;
 let _importedVariantNames: Set<string> | null = null;
 /** Local variants + ambient ParseError only — the error-envelope registry (see getErrorVariantFieldSchema). */
 let _localVariantFields: Map<string, string[]> | null = null;
-/** Enum (local name) → variant → payload field names; local decls + imported enums. */
-let _enumSchemas: Map<string, Map<string, string[] | null>> | null = null;
+/**
+ * S438 review (N1/N3) — variant names declared BOTH by a file-local enum and by
+ * an imported enum with a DIFFERENT field list. A bare-dot CONSTRUCTOR of such
+ * a name is lowered only where TS typed its position (the `__variantFields`
+ * stamp); anywhere else (a reassignment, a match-arm result, a handler string)
+ * it is E-VARIANT-AMBIGUOUS / left unlowered — never the pre-F11 silent pick
+ * of the local enum, which the matching side (bound against the subject's own
+ * enum) would then contradict. Set on BOTH the client and server passes.
+ */
+let _shadowedVariantNames: Set<string> | null = null;
+
+export function setShadowedVariantNames(names: Set<string> | null): void {
+  _shadowedVariantNames = names && names.size > 0 ? names : null;
+}
+
+export function isShadowedVariantName(variantName: string): boolean {
+  return _shadowedVariantNames?.has(variantName) ?? false;
+}
 
 /**
  * §41.13 — the fixed ParseError payload-variant schema. ParseError is imported
@@ -90,12 +106,10 @@ export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
   importedNames?: Set<string> | null,
-  enumSchemas?: Map<string, Map<string, string[] | null>> | null,
 ): void {
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
   _importedVariantNames = importedNames ?? null;
-  _enumSchemas = enumSchemas ?? null;
   // The ERROR-ENVELOPE registry: file-local variants + the compiler-ambient
   // ParseError schema, WITHOUT imported names (built before the seed below so
   // an imported same-named variant can never shadow ParseError here).
@@ -138,17 +152,7 @@ export function getErrorVariantFieldSchema(variantName: string): string[] | null
   return _localVariantFields.get(variantName) ?? null;
 }
 
-/**
- * The payload field schema of `variantName` in the enum a `fail` names
- * (`fail E::V(args)` — `E` is explicit, so no by-name guess is needed): a
- * file-local enum, or an imported one by its LOCAL name. `undefined` when the
- * enum is not known to this file (caller falls back to the error registry).
- */
-export function getEnumVariantFieldSchema(enumName: string, variantName: string): string[] | null | undefined {
-  const e = _enumSchemas?.get(enumName);
-  if (!e || !e.has(variantName)) return undefined;
-  return e.get(variantName) ?? null;
-}
+
 
 /**
  * Bug 2 (S95) — Lookup helper for the variant payload-field schema. Used by
@@ -3119,7 +3123,9 @@ export function emitVariantBindingPrelude(
   // In an error context (a failable-result match, TS did not resolve the error
   // enum) the fallback is the ERROR registry — local + ambient ParseError, never
   // an unrelated imported enum's same-named variant (S438 review F1).
-  const fromSubject = subject != null && subject.has(variantName);
+  // Error contexts never read the subject: they keep the pre-F11 by-name error
+  // lookup, the same one the `fail` producer uses (S438 review N2).
+  const fromSubject = subject != null && subject.has(variantName) && !errorContext;
   const fieldSchema = fromSubject
     ? (subject!.get(variantName) ?? null)
     : errorContext

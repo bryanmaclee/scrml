@@ -74,7 +74,7 @@ function build(name, files) {
   }
   const mods = {};
   for (const [k, v] of Object.entries(registry)) mods[k.replace(/\.client\.js$/, "").replace(/^.*\//, "")] = v;
-  return { errors, mods };
+  return { errors, mods, outDir, clientJs: listClientJs(outDir).map((f) => readFileSync(f, "utf8")).join("\n") };
 }
 
 const ENTRY = (importLine) => `<program>\n    ${importLine}\n    fn probe() -> string { return "p" }\n</program>\n`;
@@ -627,5 +627,134 @@ describe("review F3 + the unit-`Ok` enum — which `::Ok` arms mean the failable
     expect(mods.use.status("Ok")).toBe("ok");
     expect(mods.use.status("Failed")).toBe("failed");
     expect(mods.use.status("Pending")).toBe("pending");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S438 review round 2 (0298eae6 was `finding`): N1 stamp lost in each-row
+// clones, N2 cross-file error-envelope shape, N3 untyped positions picking a
+// same-named LOCAL variant. The rule pinned here: a constructor of a name that
+// a local enum and an imported enum both declare (different fields) is either
+// built with the POSITION's enum or rejected LOUDLY — never the local guess.
+// ---------------------------------------------------------------------------
+
+const NEG_CORE = `\${
+    export type Expr:enum = { Lit(n: int), Neg(x: int), Add(a: int, b: int) }
+}
+`;
+const PAGE = (decoy, body) => `<program>
+    import { Expr } from "./core.scrml"
+    \${
+${decoy ? "        type Mine:enum = { Neg(y: int, z: int), Other }" : ""}
+        @cur: Expr = Expr.Lit(0)
+        @items = [{ id: 1, k: 3 }, { id: 2, k: 4 }]
+        @n = 0
+        fn show(e: Expr) -> string {
+            return match e {
+                .Lit(n) :> "lit" + n
+                .Neg(x) :> "neg" + x
+                .Add(a, b) :> "add" + a + b
+            }
+        }
+    }
+${body}
+</program>
+`;
+const negKeys = (js) => [...js.matchAll(/variant:\s*"Neg",\s*data:\s*\{\s*([a-z_0-9]+)\s*:/g)].map((h) => h[1]);
+
+describe("review N1 — the position stamp survives each-row AST clones", () => {
+  const ROWS = {
+    "each-row interpolation": `    <ul><each in=@items key=@.id as it><li>\${ show(.Neg(it.k)) }</li></each></ul>`,
+    "each-row block const": `    <ul><each in=@items key=@.id as it>\${ for (let j of [1]) { const e: Expr = .Neg(it.k)\n lift <li>\${show(e)}</li> } }</each></ul>`,
+    "each-row handler": `    <ul><each in=@items key=@.id as it><li><button onclick=\${ @cur = .Neg(it.k); @n = 1 }>b</button></li></each></ul>`,
+  };
+  for (const [label, body] of Object.entries(ROWS)) {
+    test(`${label}: imported-only name builds the imported fields`, () => {
+      const { errors, clientJs } = build("rn1-" + label.replace(/\W+/g, "-"), { "app.scrml": PAGE(false, body), "core.scrml": NEG_CORE });
+      expect(errors).toEqual([]);
+      const keys = negKeys(clientJs);
+      expect(keys.length).toBeGreaterThan(0);
+      expect(keys.every((k) => k === "x")).toBe(true);
+      expect(clientJs).not.toContain('"Neg"(');
+    });
+    test(`${label}: beside a local Mine.Neg(y, z) — the imported fields or a loud error, never the local's`, () => {
+      const { errors, clientJs } = build("rn1d-" + label.replace(/\W+/g, "-"), { "app.scrml": PAGE(true, body), "core.scrml": NEG_CORE });
+      expect(negKeys(clientJs)).not.toContain("y");
+      if (errors.length === 0) expect(negKeys(clientJs).length).toBeGreaterThan(0);
+    });
+  }
+});
+
+describe("review N2 — a `fail` of an IMPORTED error enum and a `!{}` reader in another file agree", () => {
+  test("`!{ | ::Boom(m) }` reads the message the producer failed with", () => {
+    const { mods, errors } = build("rn2", {
+      "bundle.scrml": ENTRY(`import { f } from "./cons.scrml"`),
+      "core.scrml": `\${\n    export type E:enum = { Boom(msg: string), Zap(a: int, b: int) }\n}\n`,
+      "prod.scrml": `import { E } from "./core.scrml"
+\${
+    export function go(k)! E {
+        if (k < 0) fail E.Boom("neg")
+        return k * 2
+    }
+}
+`,
+      "cons.scrml": `import { go } from "./prod.scrml"
+\${
+    export function f(k) {
+        const r = go(k) !{
+            | ::Boom(m) -> "boom:" + m
+            | _ -> "other"
+        }
+        return r
+    }
+}
+`,
+    });
+    expect(errors).toEqual([]);
+    expect(mods.cons.f(3)).toBe(6);
+    expect(mods.cons.f(-1)).toBe("boom:neg");
+  });
+});
+
+describe("review N3 — an untyped position never silently picks the local same-named variant", () => {
+  const USE = (decoy, body) => `import { Expr } from "./core.scrml"
+\${
+${decoy ? "    type Mine:enum = { Neg(y: int, z: int), Other }" : ""}
+    fn show(e: Expr) -> string {
+        return match e {
+            .Lit(n) :> "lit" + n
+            .Neg(x) :> "neg" + x
+            .Add(a, b) :> "add" + a + b
+        }
+    }
+${body}
+}
+`;
+  const SHAPES = {
+    "reassignment of a typed let": `    export function t(k) {\n        let e: Expr = .Lit(0)\n        e = .Neg(k)\n        return show(e)\n    }`,
+    "match-arm result under a declared return type": `    fn mk(k: int) -> Expr {\n        return match k {\n            0 :> .Lit(0)\n            else :> .Neg(k)\n        }\n    }\n    export fn t(k: int) -> string { return show(mk(k)) }`,
+  };
+  for (const [label, body] of Object.entries(SHAPES)) {
+    test(`${label}: imported-only name is correct`, () => {
+      const { mods, errors } = build("rn3-" + label.replace(/\W+/g, "-"), {
+        "bundle.scrml": ENTRY(`import { t } from "./use.scrml"`), "core.scrml": NEG_CORE, "use.scrml": USE(false, body),
+      });
+      expect(errors).toEqual([]);
+      expect(mods.use.t(3)).toBe("neg3");
+    });
+    test(`${label}: beside a local Mine.Neg(y, z) it is a compile error`, () => {
+      const { errors, clientJs } = build("rn3d-" + label.replace(/\W+/g, "-"), {
+        "bundle.scrml": ENTRY(`import { t } from "./use.scrml"`), "core.scrml": NEG_CORE, "use.scrml": USE(true, body),
+      });
+      expect(errors.length).toBeGreaterThan(0);
+      expect(negKeys(clientJs)).not.toContain("y");
+    });
+  }
+  test("a handler attribute beside a local Mine.Neg(y, z) is a compile error, not a local-field ctor", () => {
+    const { errors, clientJs } = build("rn3d-handler", {
+      "app.scrml": PAGE(true, `    <button onclick=\${ @cur = .Neg(7) }>b</button>`), "core.scrml": NEG_CORE,
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(negKeys(clientJs)).not.toContain("y");
   });
 });

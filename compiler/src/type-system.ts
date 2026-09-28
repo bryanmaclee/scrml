@@ -12489,11 +12489,6 @@ function annotateNodes(
           if (errorEnumType && errorEnumType.kind === "enum") {
             const enumType = errorEnumType as EnumType;
             const allVariants = (enumType.variants ?? []).map((v: VariantDef) => v.name);
-            // §19.4.3 — stamp the callee's DECLARED error enum schema so codegen's
-            // `!{}` arm binding reads THAT enum's fields, never a by-name hit on
-            // an imported same-named variant (S438 review F1).
-            const errorVariants = matchSubjectVariantsOf(enumType);
-            if (errorVariants) (n as { __errorVariants?: MatchSubjectVariant[] }).__errorVariants = errorVariants;
 
             // Step 5: analyze the arms — detect wildcard or collect handled variants.
             // arm.pattern is a plain string: "::Declined", "_", or "else" (§19, ast-builder).
@@ -15288,8 +15283,7 @@ function inferBareVariantsInExpr(
     // lowers a bare-dot CONSTRUCTOR `.V(args)` against that enum, not a
     // by-variant-NAME lookup that a same-named variant of another enum (a local
     // `Neg(y, z)` beside the annotated imported `Neg(x)`) can shadow (S438
-    // review F2). Non-enumerable, like the skip flag: codegen-only, never
-    // serialized. First resolution wins (a later pass may have no context).
+    // review F2). First resolution wins (a later pass may have no context).
     if (contextType && !Object.prototype.hasOwnProperty.call(ident, "__variantFields")) {
       const resolvedEnum: EnumType | null =
         contextType.kind === "enum" ? contextType as EnumType
@@ -15304,10 +15298,11 @@ function inferBareVariantsInExpr(
         : null;
       const v = resolvedEnum ? (resolvedEnum.variants ?? []).find((x) => x.name === variantName) : undefined;
       if (v) {
-        Object.defineProperty(ident, "__variantFields", {
-          value: v.payload instanceof Map ? Array.from(v.payload.keys()) : null,
-          enumerable: false, configurable: true, writable: true,
-        });
+        // ENUMERABLE plain data on purpose: codegen deep-clones logic AST
+        // (emit-each row clones via JSON round-trip / structuredClone), and a
+        // non-enumerable stamp was lost there (S438 review N1).
+        (ident as unknown as Record<string, unknown>).__variantFields =
+          v.payload instanceof Map ? Array.from(v.payload.keys()) : null;
       }
     }
 

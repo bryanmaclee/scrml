@@ -58,7 +58,7 @@ import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
-import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile } from "./emit-control-flow.ts";
+import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
 import { generateClientJs, collectClientReferencedIdentsForAST, setImportedTypesForCodegen } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
@@ -1122,6 +1122,7 @@ export function resetCodegenModuleState(): void {
   setBatchLoopHoists(null);
   setBatchInListCap(null);
   setVariantFieldsForFile(null, null);
+  setShadowedVariantNames(null);
   // emit-client — per-compile cross-file imported-types map (F11/F16).
   setImportedTypesForCodegen(null);
   // rewrite.ts — per-file variant / protect / bool-column / tenant contexts.

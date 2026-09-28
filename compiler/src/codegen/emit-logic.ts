@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, getEnumVariantFieldSchema, matchArmBlockBinding, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, getMatchSubjectVariantFields, isMatchSubjectFailable, getErrorVariantFieldSchema, matchArmBlockBinding, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -629,10 +629,13 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     data = "null";
   } else {
     const argParts = _splitTopLevelCommas(rawArgs);
-    // The `fail` names its enum — key by THAT enum's declared fields (local or
-    // imported); else the error registry (never a by-name imported shadow).
-    const fromEnum = getEnumVariantFieldSchema(enumType, variant);
-    const schema = fromEnum !== undefined ? fromEnum : getErrorVariantFieldSchema(variant);
+    // The ERROR registry — exactly the pre-F11 lookup (file-local enums + the
+    // ambient ParseError schema), never an imported enum's same-named variant.
+    // Kept at the pre-F11 shape deliberately: a `fail` of an IMPORTED error enum
+    // stays `.data = <value>` so a reader in another file, which cannot type
+    // the callee's error enum, still agrees with it (S438 review N2; the
+    // field-keyed §51.3.2 shape for imported enums is residual (f)).
+    const schema = getErrorVariantFieldSchema(variant);
     // §51.3.2 / §19.3.2 — the error envelope's `.data` is a field-keyed object
     // whose keys are the variant's DECLARED payload field names, for BOTH single-
     // AND multi-field variants (matching the enum constructor `Shape.Circle(10)`
@@ -800,20 +803,15 @@ function emitGuardedArmBinding(
   binding: string,
   variantName: string,
   resultVar: string,
-  errorEnum?: Map<string, string[] | null> | null,
 ): string[] {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
-  // S438 review F1 — the callee's declared error enum (TS-stamped on the
-  // guarded-expr as `__errorVariants`) is exact; absent that, the ERROR
-  // registry (local + ambient ParseError; an ambient CPS `NetworkError` /
-  // `ServerError` has no schema → whole `.data`) — never an imported enum's
-  // same-named variant, which the by-name registry now also holds (F11).
-  const schema = !variantName
-    ? null
-    : (errorEnum && errorEnum.has(variantName))
-      ? (errorEnum.get(variantName) ?? null)
-      : getErrorVariantFieldSchema(variantName);
+  // S438 review F1 — the ERROR registry: exactly the pre-F11 lookup (local +
+  // ambient ParseError; an ambient CPS `NetworkError`/`ServerError` has no
+  // schema → whole `.data`), never an imported enum's same-named variant, which
+  // the by-name registry now also holds (F11). Same lookup as the `fail`
+  // producer, so producer and reader agree exactly as they did pre-F11.
+  const schema = variantName ? getErrorVariantFieldSchema(variantName) : null;
   if (names.length === 1) {
     // Declared single-field variant → project the field (§51.3.2). No schema
     // (wildcard / ambient variant) → bind the whole `.data` payload.
@@ -3985,7 +3983,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             const cond = `${resultVar}.variant === ${JSON.stringify(variantName)}`;
             lines.push(`  ${isFirst ? "if" : "else if"} (${cond}) {`);
             if (arm.binding && arm.binding !== "_") {
-              for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar, getMatchSubjectVariantFields({ __matchSubjectVariants: (node as { __errorVariants?: unknown }).__errorVariants }))) lines.push(l);
+              for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar)) lines.push(l);
             }
             for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
             lines.push(`  }`);

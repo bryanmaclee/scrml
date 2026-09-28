@@ -24,7 +24,7 @@ import { isEscalationServerOnlyModule } from "../route-inference.ts";
 import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
-import { setVariantFieldsForFile } from "./emit-control-flow.ts";
+import { setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
 // §65.6 (css-wave1 round-4) — the runtime theme-switch reflection. `collectThemeContext`
@@ -2006,11 +2006,15 @@ export function generateClientJs(ctx: CompileContext): string {
   // escape-hatch expressions, and other legacy emission surfaces lower to
   // the canonical `{ variant, data }` tagged-object literal (matches the
   // structured AST path in emit-expr.ts:emitCall).
-  const { fields, collisions, imported, enumSchemas } = clientStage(ctx, "build-variant-fields-registry", () =>
+  const { fields, collisions, imported, shadowed } = clientStage(ctx, "build-variant-fields-registry", () =>
     buildVariantFieldsRegistry(fileAST)
   );
-  setVariantFieldsForFile(fields, collisions, imported, enumSchemas);
-  setVariantFieldsForRewriter(fields, collisions);
+  setVariantFieldsForFile(fields, collisions, imported);
+  setShadowedVariantNames(shadowed);
+  // S438 review N3 — the string-rewrite path (handler bodies) cannot be typed:
+  // a local-shadowed name is treated as a collision there (left unlowered →
+  // a loud invalid-output error), never guessed.
+  setVariantFieldsForRewriter(fields, new Set([...collisions, ...shadowed]));
 
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — establish
   // the file's registered-`<request>` id set ONCE, here at the per-file client-
@@ -4127,6 +4131,7 @@ export function generateClientJs(ctx: CompileContext): string {
   // S22 §1a slice 2: release the per-file variant registry.
   // S95 Bug 2: also release the rewriter's mirror.
   setVariantFieldsForFile(null, null);
+  setShadowedVariantNames(null);
   setVariantFieldsForRewriter(null, null);
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE) — release the per-file
   // registered-request id set so it cannot leak into the next file's emission.
@@ -4206,15 +4211,14 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   collisions: Set<string>;
   /** Names in `fields` contributed by an IMPORTED enum (no local declaration). */
   imported: Set<string>;
-  /** Enum (local name) → variant → payload field names (null = unit), local + imported. */
-  enumSchemas: Map<string, Map<string, string[] | null>>;
+  /** Names a LOCAL enum and an IMPORTED enum both declare with different fields (see setShadowedVariantNames). */
+  shadowed: Set<string>;
 } {
   const fields = new Map<string, string[]>();
   const collisions = new Set<string>();
   const imported = new Set<string>();
-  const enumSchemas = new Map<string, Map<string, string[] | null>>();
-  const schemaOf = (info: VariantInfo[]): Map<string, string[] | null> =>
-    new Map(info.map((v) => [v.name, v.fieldNames] as [string, string[] | null]));
+  const shadowed = new Set<string>();
+  const localShape = new Map<string, string[] | null>();
   const typeDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
 
   // Every variant name a LOCAL enum declares (unit or payload) — local wins.
@@ -4222,9 +4226,9 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   for (const decl of typeDecls) {
     if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;
     const info = getAllVariantInfo(decl);
-    if (typeof decl.name === "string" && decl.name) enumSchemas.set(decl.name, schemaOf(info));
     for (const v of info) {
       localVariantNames.add(v.name);
+      if (!localShape.has(v.name)) localShape.set(v.name, v.fieldNames);
       if (v.fieldNames === null) continue; // unit variants have no bindings
       if (fields.has(v.name)) {
         // Same variant name used in a second enum → positional ambiguity.
@@ -4245,18 +4249,24 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   const seenEnums = new Set<any>();
   for (const { localName, enumType } of getImportedEnumTypes(fileAST)) {
     const info = getAllVariantInfo({ variants: enumType.variants } as unknown as TypeDecl);
-    if (!enumSchemas.has(localName)) enumSchemas.set(localName, schemaOf(info));
     if (seenEnums.has(enumType)) continue;
     seenEnums.add(enumType);
     for (const v of info) {
-      if (localVariantNames.has(v.name)) continue;
+      if (localVariantNames.has(v.name)) {
+        const mine = localShape.get(v.name) ?? null;
+        const same = mine === null || v.fieldNames === null
+          ? mine === v.fieldNames
+          : sameFieldList(mine, v.fieldNames);
+        if (!same) shadowed.add(v.name);
+        continue;
+      }
       if (v.fieldNames === null) continue; // unit variants have no bindings
       const prev = fields.get(v.name);
       if (prev === undefined) { fields.set(v.name, v.fieldNames); imported.add(v.name); }
       else if (!sameFieldList(prev, v.fieldNames)) collisions.add(v.name);
     }
   }
-  return { fields, collisions, imported, enumSchemas };
+  return { fields, collisions, imported, shadowed };
 }
 
 // ---------------------------------------------------------------------------
