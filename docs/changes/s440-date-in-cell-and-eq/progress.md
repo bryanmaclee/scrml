@@ -62,3 +62,29 @@ cell is reassigned. This is the §66.10 carried divergence; no new mechanism add
 - A regex LITERAL as a top-level declaration RHS (`<v> = /ab+c/i`) swallows the next
   declaration (`<r> = …` then E-STATE-UNDECLARED on `@r`). Parse-side; not touched.
 - `Uint8Array` / `ArrayBuffer` / `DataView` are E-SCOPE-001 in scrml source (not known globals).
+
+## 9. Runtime-size ratchet (tripped once, fixed)
+The first commit attempt tripped `runtime-size-ratchet.test.js` §3 (counter aspiration, 16,384 B gz-9):
+the counter runtime carries `_scrml_deep_reactive` (not the equality chunk), and runtime comments ship.
+Measured: base 16,232 B -> first draft 16,668 -> final 16,326 (+94 B; 58 B headroom left, was 152).
+The long deep_reactive rationale was moved out of the runtime into the test file and this doc.
+Shell ratchet shape unchanged (26,035 B, no deep_reactive/equality in it).
+
+## 10. Verification (at 2ba2dd5ce)
+- New `compiler/tests/unit/s440-date-in-cell-and-eq.test.js`: 83 pass.
+- Tests edited for the new server helper signature `(a, b, seen)`: server-eq-helper-import (4 sites),
+  standalone-tool-target (1 site). Nothing else pinned the old text (other hits are local stubs).
+- Gate `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance`:
+  25,851 pass / 0 fail / 70 skip / 11 todo (1,370 files).
+- `bun conformance/run.ts`: 1041/1048 pass + 7 xfail (no fails).
+- Browser suite `compiler/tests/browser`: 1109 pass / 48 fail / 43 skip — the SAME 48-failure set
+  with the two source files swapped back to base 2126dec1d (diffed with timings stripped).
+  Pre-existing; not caused here.
+- Corpus (examples/ samples/ conformance/, 1,079 dirs, 6,637 output files, base compiler from
+  `git archive 2126dec1d` vs this branch): same file set; per-dir compile status identical;
+  2,616 byte-identical; 3,270 differ ONLY in the runtime content-hash filename; 751 differ only
+  in the swapped helper text (663 runtime chunks: deep_reactive only; 54: equality section +
+  deep_reactive; 6: equality section only; 27 .server.js + 1 tool/lib .js: server eq helper).
+  0 unexplained. The runtime template itself is identical to base after swapping those two regions.
+- Internal-use check: `_scrml_structural_eq` is only emitted for user-written `==`/`!=`; the
+  runtime never calls it for change detection, so the invalid-Date self-inequality cannot loop.
