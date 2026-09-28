@@ -33,8 +33,9 @@
  *        E-ERROR-002 fires inside one and the render-time E-ERROR-005 does not.
  *   F7 — the handler callee resolves through scope (an `<each … as risky>` alias
  *        is not the failable `risky`).
- * Arrow-valued handlers (`${() => risky()}`) are OPEN in §19.4.3 (not ruled); the
- * test below only records the current behaviour.
+ * Arrow-valued handlers (S440 ruling, all recs #2 item 1): "check arrow bodies. An
+ * arrow body runs on the event exactly like `{ risky() }`, so check it the same way
+ * and emit its guard."
  */
 
 import { describe, test, expect } from "bun:test";
@@ -299,9 +300,47 @@ describe("a `!{}`-guarded one-statement handler emits its guard", () => {
   });
 });
 
-describe("arrow-valued handlers — OPEN in §19.4.3 (current behaviour recorded, not a rule)", () => {
-  test("`${() => risky()}` is not checked today", () => {
-    const { errors } = compileBody(`<button onclick=\${() => risky()}>x</>`);
-    expect(errors).not.toContain("E-ERROR-002");
+describe("arrow-valued handlers — S440 ruling: checked like `{ … }`, guard emitted", () => {
+  for (const [label, body] of [
+    ["expression body, one param", `<button onclick=\${(e) => risky()}>x</>`],
+    ["expression body, bare param", `<button onclick=\${e => risky()}>x</>`],
+    ["expression body, no params", `<button onclick=\${() => risky()}>x</>`],
+    ["block body", `<button onclick=\${() => { risky() }}>x</>`],
+    ["block body, call after another statement", `<button onclick=\${() => { @r = 1; risky() }}>x</>`],
+    ["block body, call under if", `<button onclick=\${(e) => { if (@r > 0) risky() }}>x</>`],
+    ["braced arrow", `<button onclick={ () => risky() }>x</>`],
+    ["in an <each> row", `<ul><each in=@items key=@.id><li><button onclick=\${() => risky()}>x</></></each></>`],
+  ]) {
+    test(`unhandled call in an arrow body is E-ERROR-002 — ${label}`, () => {
+      const { errors } = compileBody(body);
+      expect(count(errors, "E-ERROR-002")).toBe(1);
+    });
+  }
+
+  for (const [label, body] of [
+    ["guard, expression body", `<button onclick=\${(e) => risky() !{ | .Empty :> @r = 1 }}>x</>`],
+    ["guard, block body + param use", `<button onclick=\${(e) => { risky() !{ | .Empty :> @r = 1 }; @r = e.detail }}>x</>`],
+    ["non-failable call reading the param", `<button onclick=\${(e) => plain(e)}>x</>`],
+    ["arrow that is only the first statement of a sequence stays the regular path", `<button onclick={ () => plain(1); @r = 2 }>x</>`],
+  ]) {
+    test(`clean — ${label}`, () => {
+      const { errors } = compileBody(body);
+      expect(errors).not.toContain("E-ERROR-002");
+    });
+  }
+
+  test("the guard in an arrow body is EMITTED (was `(e) => _scrml_risky()`)", () => {
+    const { errors, clientJs } = compileBody(`<button onclick=\${(e) => risky() !{ | .Empty :> @r = 7 }}>x</>`, { emit: true });
+    expect(errors).toEqual([]);
+    const handler = clientJs.slice(clientJs.indexOf('"_scrml_attr_onclick_'));
+    expect(handler).toMatch(/const e = event;/);
+    expect(handler).toMatch(/\.variant === "Empty"/);
+    expect(handler).toMatch(/_reactive_set\("r", 7\)/);
+  });
+
+  test("an arrow WITHOUT a guard keeps its as-is emission", () => {
+    const { errors, clientJs } = compileBody(`<button onclick=\${(e) => plain(e)}>x</>`, { emit: true });
+    expect(errors).toEqual([]);
+    expect(clientJs).toMatch(/\(e\) => _scrml_plain_\d+\(e\)/);
   });
 });

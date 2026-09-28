@@ -16642,6 +16642,140 @@ function isFatalHandlerParseError(e) {
     (e.severity === "error" || (e.severity === undefined && !(typeof e.code === "string" && /^[WI]-/.test(e.code))));
 }
 
+/**
+ * Index of the bracket matching `raw[open]` (`(`/`{`/`[`), skipping string and
+ * template literals; -1 when unbalanced.
+ */
+function matchHandlerBracket(raw, open) {
+  const pairs = { "(": ")", "{": "}", "[": "]" };
+  const stack = [];
+  for (let i = open; i < raw.length; i++) {
+    const c = raw[i];
+    if (c === '"' || c === "'" || c === "`") {
+      for (i++; i < raw.length && raw[i] !== c; i++) if (raw[i] === "\\") i++;
+      continue;
+    }
+    if (pairs[c]) stack.push(pairs[c]);
+    else if (c === ")" || c === "}" || c === "]") {
+      if (stack.pop() !== c) return -1;
+      if (stack.length === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Split an ARROW-valued handler (`[async] (p) => BODY`, `[async] p => BODY`) into
+ * its parameter text and body text. A braced body `{ … }` that closes at the end
+ * of the value yields its interior; anything else is an expression body. Returns
+ * null when `raw` is not an arrow.
+ */
+function splitArrowHandlerValue(raw) {
+  let i = 0;
+  const n = raw.length;
+  const ws = () => { while (i < n && /\s/.test(raw[i])) i++; };
+  ws();
+  if (raw.startsWith("async", i) && /[\s(]/.test(raw[i + 5] ?? "")) { i += 5; ws(); }
+  let paramText;
+  if (raw[i] === "(") {
+    const close = matchHandlerBracket(raw, i);
+    if (close < 0) return null;
+    paramText = raw.slice(i + 1, close).trim();
+    i = close + 1;
+  } else {
+    const m = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(raw.slice(i));
+    if (!m || m[0] === "function") return null;
+    paramText = m[0];
+    i += m[0].length;
+  }
+  ws();
+  if (!raw.startsWith("=>", i)) return null;
+  i += 2;
+  ws();
+  if (raw[i] === "{") {
+    const close = matchHandlerBracket(raw, i);
+    if (close >= 0 && raw.slice(close + 1).trim() === "") {
+      return { paramText, body: raw.slice(i + 1, close), bodyOffset: i + 1, braced: true };
+    }
+    // `(e) => { … }; more` — the arrow is only the FIRST statement of a sequence.
+    return null;
+  }
+  return { paramText, body: raw.slice(i), bodyOffset: i, braced: false };
+}
+
+/**
+ * §19.4.3 (S440 ruling — "check arrow bodies. An arrow body runs on the event
+ * exactly like `{ risky() }`, so check it the same way and emit its guard") —
+ * the statement list of an ARROW-valued handler's body, parsed with the same
+ * function-body statement grammar as an inline block. The arrow's parameter
+ * receives the event, so a single parameter `p` becomes a leading
+ * `const p = event` statement (binding it for the checker and for the
+ * statement-list emitter). Returns `undefined` when the value is not an
+ * arrow-valued handler this view models (not an arrow; an arrow that is only the
+ * first statement of a sequence; more than one parameter), else
+ * `{ stmts, fatal, nonFatal }`.
+ */
+function parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol) {
+  const split = splitArrowHandlerValue(value.raw);
+  if (!split) return undefined;
+  const { paramText, body, bodyOffset } = split;
+  // Top-level comma → several parameters; a handler passes only the event.
+  let depth = 0, multi = false;
+  for (const c of paramText) {
+    if (c === "(" || c === "{" || c === "[") depth++;
+    else if (c === ")" || c === "}" || c === "]") depth--;
+    else if (c === "," && depth === 0) { multi = true; break; }
+  }
+  // Several parameters: not modelled (a handler passes only the event) — left to
+  // the regular path, which emits the arrow as-is and does not check its body.
+  if (multi) return undefined;
+  const prefix = value.raw.slice(0, bodyOffset);
+  const nl = (prefix.match(/\n/g) ?? []).length;
+  const bodyLine = baseLine + nl;
+  const bodyCol = nl === 0 ? baseCol + bodyOffset : bodyOffset - prefix.lastIndexOf("\n");
+  const bodyRes = parseHandlerStatementListCore(
+    { raw: body, span: value.span }, filePath, idCounter, parentBlock,
+    baseOffset + bodyOffset, bodyLine, bodyCol,
+  );
+  if (!bodyRes || !Array.isArray(bodyRes.stmts)) return { stmts: [], fatal: true, nonFatal: [] };
+  // An expression body is ONE expression. When the text after `=>` parses to
+  // several statements (`() => @r = 1; @r2 = 2`), the arrow is only the first
+  // statement of a sequence — not an arrow-valued handler; the regular
+  // statement-list path owns it (and reports it).
+  if (!split.braced && bodyRes.stmts.length !== 1) return undefined;
+  let prelude = [];
+  const param = paramText.replace(/\s*:\s*[A-Za-z_$][\w$.<>\[\]| ]*$/, "").trim(); // drop a type annotation
+  if (param !== "" && param !== "event") {
+    const preRes = parseHandlerStatementListCore(
+      { raw: `const ${param} = event`, span: value.span }, filePath, idCounter, parentBlock,
+      baseOffset, baseLine, baseCol,
+    );
+    if (!preRes || !Array.isArray(preRes.stmts) || preRes.parseErrors.some(isFatalHandlerParseError)) {
+      return { stmts: [], fatal: true, nonFatal: [] };
+    }
+    prelude = preRes.stmts;
+    for (const st of prelude) if (st && typeof st === "object") st._handlerParamPrelude = true;
+  }
+  const fatal = bodyRes.parseErrors.some(isFatalHandlerParseError);
+  const nonFatal = bodyRes.parseErrors.filter((e) => e && typeof e === "object" && !isFatalHandlerParseError(e));
+  return { stmts: [...prelude, ...bodyRes.stmts], fatal, nonFatal };
+}
+
+/** Does a statement list hold a `!{}` guard anywhere (not inside a nested function)? */
+function handlerStmtsContainGuard(node, seen = new Set()) {
+  if (!node || typeof node !== "object" || seen.has(node)) return false;
+  seen.add(node);
+  if (Array.isArray(node)) return node.some((x) => handlerStmtsContainGuard(x, seen));
+  if (node.kind === "guarded-expr") return true;
+  if (node.kind === "function-decl") return false;
+  for (const k of Object.keys(node)) {
+    if (k === "span") continue;
+    const v = node[k];
+    if (v && typeof v === "object" && handlerStmtsContainGuard(v, seen)) return true;
+  }
+  return false;
+}
+
 const _handlerCheckStmtIds = { next: HANDLER_STMT_ID_BASE + 750_000_000 };
 
 /**
@@ -16650,15 +16784,23 @@ const _handlerCheckStmtIds = { next: HANDLER_STMT_ID_BASE + 750_000_000 };
  * single-line value keeps the single-expression codegen path (no `handlerBlock`)
  * but its statement — `if (c) risky()`, `for (…) risky()`, `risky()` — must be
  * checked exactly as the same statement in a multi-statement handler is, or the
- * answer depends on the statement count again. Returns the parsed statements, or
- * `null` when there is nothing to check this way: an unparseable value, or a
- * callable / opaque one (a function reference, an arrow value — §19.4.3 leaves
- * arrow-valued handlers OPEN — an escape hatch). The nodes are fresh (their own
- * id range) and are never emitted.
+ * answer depends on the statement count again. An ARROW-valued handler
+ * (`${(e) => risky()}`, `${() => { … }}`) yields its BODY's statements (S440
+ * ruling: an arrow body runs on the event exactly like `{ … }`). Returns the
+ * parsed statements, or `null` when there is nothing to check this way: an
+ * unparseable value, or a callable / opaque one (a function reference, an escape
+ * hatch). The nodes are fresh (their own id range) and are never emitted.
  */
 export function parseHandlerStatementsForCheck(value, filePath) {
   if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return null;
   const sp = value.span ?? {};
+  const arrow = parseArrowHandlerStatements(
+    value, filePath, _handlerCheckStmtIds, null,
+    typeof sp.start === "number" ? sp.start : 0,
+    typeof sp.line === "number" ? sp.line : 1,
+    typeof sp.col === "number" ? sp.col : 1,
+  );
+  if (arrow !== undefined) return arrow.fatal ? null : arrow.stmts;
   const res = parseHandlerStatementListCore(
     value, filePath, _handlerCheckStmtIds, null,
     typeof sp.start === "number" ? sp.start : 0,
@@ -16696,6 +16838,19 @@ export function parseHandlerStatementsForCheck(value, filePath) {
  */
 function attachHandlerStatementList(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol, opener, errors) {
   if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return;
+  // An ARROW-valued handler keeps the as-is arrow emission — unless its body
+  // holds a `!{}` guard. The expression view of `(e) => risky() !{ … }` stops at
+  // the call, so the guard was silently dropped (emitted `(e) => _scrml_risky()`).
+  // Such an arrow lowers through its body's statement list instead (S440 ruling:
+  // "check it the same way and emit its guard").
+  const arrow = parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
+  if (arrow !== undefined) {
+    if (!arrow.fatal && arrow.stmts.length > 0 && handlerStmtsContainGuard(arrow.stmts)) {
+      value.handlerBlock = { stmts: arrow.stmts };
+      if (Array.isArray(errors)) for (const e of arrow.nonFatal) { e.fromHandlerStatementList = true; errors.push(e); }
+    }
+    return;
+  }
   const res = parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
   if (!res) return;
   const { tokens, stmts, parseErrors } = res;

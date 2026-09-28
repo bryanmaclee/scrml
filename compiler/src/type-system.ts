@@ -11138,11 +11138,15 @@ function annotateNodes(
         //   • a `_{ … }` foreign initializer — §23.2.3 opacity is deliberate,
         //     and writing `_{ }` IS the signature. §14.7's named hatch, used as
         //     designed.
+        //   • (S440) an arrow-valued handler's parameter binding (`const e = event`,
+        //     synthesized by ast-builder `parseArrowHandlerStatements`): it is the
+        //     event, typed exactly as the handler's own `event` binding is.
         if (
           !letAnnot &&
           resolvedType.kind === "asIs" &&
           !((n as Record<string, unknown>).sqlNode) &&
-          !((n as Record<string, unknown>).foreignNode)
+          !((n as Record<string, unknown>).foreignNode) &&
+          !((n as Record<string, unknown>)._handlerParamPrelude)
         ) {
           const gapInit = (n as any).initExpr as ExprNode | undefined;
           if (gapInit && typeof gapInit === "object" && typeof gapInit.kind === "string") {

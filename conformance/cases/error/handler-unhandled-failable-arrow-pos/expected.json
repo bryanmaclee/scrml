@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-unhandled-failable-arrow-pos",
+  "description": "Three ARROW-valued handlers, each with an unhandled call to a `!` function in its body: an expression body `${(e) => risky()}`, a block body `${() => { @r = 1; risky() }}`, and the braced `{ () => risky() }`. E-ERROR-002 fires once per handler — three times. A plain function REFERENCE (`onclick=risky`) is not a call and is pinned clean in handler-failable-reference-and-guard-neg.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S440 (all recs #2, item 1)",
+  "rationale": "§19.4.3 (S440 ruling) — an arrow body runs on the event exactly like `{ risky() }`, so an unhandled `!` call in it is E-ERROR-002 exactly as in the braced forms.",
+  "expect": {
+    "codes": ["E-ERROR-002"],
+    "codeCounts": { "E-ERROR-002": 3 },
+    "notCodes": [],
+    "severity": { "E-ERROR-002": "error" }
+  }
+}
