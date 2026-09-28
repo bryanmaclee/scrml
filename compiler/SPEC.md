@@ -1458,6 +1458,15 @@ All valid event handler binding forms:
 - `onclick=handler` (no parentheses) SHALL wire `handler` directly as the event listener without wrapping.
 - Use `onclick=${() => fn(item.id)}` (expression form) when inside a loop and closure capture is needed — `onclick=fn(item.id)` does not capture `item.id` per-iteration.
 
+**Dispatch contract — one contract, native bubbling (S439 ruling #9).** Every event-handler form above obeys ONE dispatch contract, the same for page markup and for `<each>` rows (§17.7):
+
+- When an event fires on an element nested inside an ancestor that also handles that event, the inner handler SHALL run first and the ancestor's handler after it; both SHALL fire.
+- A handler that calls `stopPropagation()` on the event SHALL prevent the handlers of its ancestors from running for that event.
+
+⚑ **Carried impl#1 divergence, not the language rule:** impl#1's page-markup delegation runs only the INNERMOST handler (the ancestor's does not fire), while its `<each>` rows bubble natively. The contract above is the language rule; the bootstrap implements it.
+
+> **Provenance:** ruling:user-voice-scrml.md S439 #9 "all recs" (Rec: one contract, native bubbling — "The inner handler runs first, both fire, and `stopPropagation` is honoured. The SPEC is silent").
+
 #### 5.2.3 Event handler forms — bare single-expression and inline block (Stage 0b D4 — M11; L19 REVERSED S435)
 
 **Added:** 2026-05-04 — formalised the v0.next inline event-handler shapes. **Amended:** 2026-09-26 (S435) — L19 reversed: inline multi-statement (block) handlers are legal and canonical.
