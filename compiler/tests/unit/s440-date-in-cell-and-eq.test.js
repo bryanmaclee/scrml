@@ -331,6 +331,29 @@ describe("s440 §2b — built-ins from another realm (F4: brand, not instanceof)
   }
 });
 
+describe("s440 §2b' — a spoofed Symbol.toStringTag throws, never compares (R2-1)", () => {
+  // The brand switch trusts Object.prototype.toString, which a plain object can
+  // fake. Each branch reads through the class's own brand-checking getter or
+  // method, so a spoof throws a TypeError (as Date always did) instead of
+  // returning a silent true.
+  const spoof = (tag, v) => ({ [Symbol.toStringTag]: tag, v });
+  for (const tag of ["URL", "URLSearchParams", "RegExp", "ArrayBuffer", "Date"]) {
+    test(`${tag} spoof throws on the client and the server copy`, () => {
+      expect(() => RT.eq(spoof(tag, 1), spoof(tag, 2))).toThrow(TypeError);
+      expect(() => serverEq(spoof(tag, 1), spoof(tag, 2))).toThrow(TypeError);
+    });
+  }
+
+  test("a URL-branded value where no URL class exists throws, naming the missing reader", () => {
+    // eslint-disable-next-line no-new-func
+    const noUrlEq = new Function("URL", "URLSearchParams", `${SERVER_STRUCTURAL_EQ_HELPER}\nreturn _scrml_structural_eq;`)();
+    expect(() => noUrlEq(spoof("URL", 1), spoof("URL", 2))).toThrow("no toString reader");
+    expect(() => noUrlEq(spoof("URLSearchParams", 1), spoof("URLSearchParams", 2))).toThrow("no toString reader");
+    // Everything else in that environment still works.
+    expect(noUrlEq(new Date(1), new Date(1))).toBe(true);
+  });
+});
+
 describe("s440 §2c — _scrml_deep_set fails loud on a non-plain container (F5)", () => {
   test("a field write into a URL throws, naming the class and the fix", () => {
     const u = new URL("https://a.example/x");
@@ -408,7 +431,7 @@ describe("s440 §3 — the server helper is sliced from the client runtime", () 
     expect(errors).toEqual([]);
     expect(serverJs).toContain("_scrml_structural_eq(a, b)");
     expect(serverJs).toContain("function _scrml_structural_eq(a, b, seen) {");
-    expect(serverJs).toContain("return sameNum(Date.prototype.getTime.call(a), Date.prototype.getTime.call(b));");
+    expect(serverJs).toContain("return sameNum(read(Date, \"getTime\", a), read(Date, \"getTime\", b));");
     expect(warnings.filter((w) => w.code === "W-CG-UNDEFINED-INTERPOLATION")).toEqual([]);
   });
 });

@@ -4147,17 +4147,35 @@ function _scrml_structural_eq(a, b, seen) {
     }
     return true;
   }
+  // A brand can be spoofed (Symbol.toStringTag), so every value below is read
+  // through the class's OWN brand-checking method or getter: a spoof throws a
+  // TypeError instead of being compared by whatever fields it happens to carry.
+  const read = (cls, key, x) => {
+    if (typeof cls !== "function") throw new TypeError("scrml ==: no " + key + " reader for this class here");
+    // Walk up: a polyfill (happy-dom's URL) may subclass the native class.
+    let p = cls.prototype;
+    let d;
+    while (p && !(d = Object.getOwnPropertyDescriptor(p, key))) p = Object.getPrototypeOf(p);
+    return d.get ? d.get.call(x) : d.value.call(x);
+  };
   switch (tag) {
     case "[object Date]":
-      return sameNum(Date.prototype.getTime.call(a), Date.prototype.getTime.call(b));
+      return sameNum(read(Date, "getTime", a), read(Date, "getTime", b));
     case "[object RegExp]":
-      return a.source === b.source && a.flags === b.flags;
-    case "[object ArrayBuffer]":
-      return a.byteLength === b.byteLength && bytesEq(a, 0, b, 0, a.byteLength);
+      // source is brand-checked; flags (a generic getter) is only read once
+      // source has proven both are RegExps.
+      return read(RegExp, "source", a) === read(RegExp, "source", b) &&
+        read(RegExp, "flags", a) === read(RegExp, "flags", b);
+    case "[object ArrayBuffer]": {
+      const len = read(ArrayBuffer, "byteLength", a);
+      return len === read(ArrayBuffer, "byteLength", b) && bytesEq(a, 0, b, 0, len);
+    }
     case "[object URL]":
-      return a.href === b.href;
+      // URL's toString is brand-checked and returns the href.
+      return read(typeof URL !== "undefined" && URL, "toString", a) === read(typeof URL !== "undefined" && URL, "toString", b);
     case "[object URLSearchParams]":
-      return a.toString() === b.toString();
+      return read(typeof URLSearchParams !== "undefined" && URLSearchParams, "toString", a) ===
+        read(typeof URLSearchParams !== "undefined" && URLSearchParams, "toString", b);
     // No synchronously readable value: equal only when the same object, which
     // the a === b check above has already ruled out.
     case "[object Promise]":
@@ -4169,7 +4187,8 @@ function _scrml_structural_eq(a, b, seen) {
     case "[object Error]":
       // message is an own NON-enumerable key, so check it (and the name) here;
       // the struct branch below then compares the enumerable fields (type and
-      // cause on the §19 error classes).
+      // cause on the §19 error classes). Accepted cost of realm-safe matching:
+      // an Error subclass that sets no name of its own == a base Error.
       if (a.name !== b.name || a.message !== b.message) return false;
       break;
   }

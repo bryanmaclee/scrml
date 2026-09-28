@@ -128,3 +128,16 @@ in the shell's utilities chunk).
 - Gate unit+integration+conformance: 25,880 pass / 0 fail / 70 skip / 12 todo (1,370 files).
 - `bun conformance/run.ts`: 1041/1048 + 7 xfail.
 - Browser: identical 48-failure set to base 2126dec1d (timings stripped).
+
+## 13. One-guard repair R2-1 (final round)
+Reproduced on a9080f9f2: `eq({[Symbol.toStringTag]:"URL", v:1}, {…"URL", v:2})` -> TRUE on client AND
+server; same for "URLSearchParams", "RegExp", "ArrayBuffer" (Date already threw).
+Fix: a nested `read(cls, key, x)` in `_scrml_structural_eq` reads each branch's value through the
+class's OWN brand-checking getter/method, walking up the prototype chain (happy-dom's URL subclasses
+the native one, so `href` is not an own accessor of its prototype). URL is read via its
+brand-checked `toString` (= href). RegExp `source` (brand-checked) is read before `flags` (a generic
+getter). A missing URL/URLSearchParams class throws "no toString reader". A spoof now throws
+TypeError on both copies; real instances unchanged. R2-2 accepted with a one-line comment at the
+Error branch. Typed arrays / DataView are gated by `ArrayBuffer.isView`, which a spoof cannot pass.
+Sizes unchanged: counter 16,324 gz-9 / 16,375 gz-default; shell 26,206 (structural_eq is in neither).
+Gate: 25,886 pass / 0 fail / 70 skip / 12 todo; size tests 27/0; conformance 1041/1048 + 7 xfail.
