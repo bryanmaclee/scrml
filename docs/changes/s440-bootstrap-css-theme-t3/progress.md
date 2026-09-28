@@ -94,3 +94,29 @@ lower produce the Core css node from `<theme>` + §66 declarations + `#{}`.
 - FIRST GRADE (`--swap CSS=… --footprint`): 1048/1048 classified; GRADED 565 (conformance 565/565 run,
   299 runtime passes, 0 fail); NOT-YET 36; FRONT-END 447. CSS half: 17 css passes of 17 oracle cases.
   Pure impl#1 ALSO passes all 17 oracles (bench/css-oracle-both.js).
+
+## 2026-09-28 — step 3: css-only sources, Core oracles, bite matrix CSS phase, R26
+- css-oracle/sources/ (16): 9 graded adversarial sources (scope-donut-nested, layer-order, where-flat,
+  r1-floor-order, import-hoist [+ a served theme.css], two-themes, variant-three, selectors, empty-blocks)
+  + 7 expected-NOT-graded (adv-important, adv-token-cell-same-name, open-o17a/b/c, open-o47,
+  open-t3-worked-example) — the css report lists why each is not graded.
+- css-oracle/core/ (6): t3-worked, t3-wildcard, t3-script-writes, t3-two-cells, charset (a windows-1252
+  page, so `@charset` is observable), cell-var (the §25.7 bridge's stylesheet half).
+- bench/css-oracle-both.js: pure impl#1 vs hybrid on every oracle. impl#1 FAILS r1-floor-order
+  (`#b` padding 0px; SPEC R1 says 16px) — impl#1 finding; every other graded oracle passes on both.
+- hybrid.ts css half: extras classified by the same loop but kept OUT of the suite buckets; css fails
+  red; counts cssPass/cssFail/cssUnobserved. css-half.test.js pins it with a stub grader (no browser).
+- css-ingest: a `<theme>` in a file with no `<program>` → not-yet O17(d) (plus library mode).
+- bite-matrix.js: now two phases (`--cg-only` / `--css-only`); CSS phase = 36 corruptions (31 emitter,
+  5 shim). First CSS run (before cell-var): 31 css passes; 26 CERTIFIED, 0 UNCERTIFIED; Value.CellVar
+  "does not bite" (no pass exercised it) → the cell-var Core oracle added.
+- impl#1 finding: the §25.7 bridge is DEAD for a stylesheet rule — `.box { width: @w }` emits
+  `var(--scrml-w)` but impl#1's clientJs never writes `--scrml-w` (it does for a flat inline `#{}`).
+- R26 over the 25 `#{}` examples: 10 identical (whitespace-normalized); 4 differ only by the
+  `@layer reset, global;` statement (spec-directed: §65.8 "emitted once"; impl#1 omits it when only the
+  reset exists); 11 NOT-YET — `#{}` inside a non-component element (§9.1 "inline or scoped per compiler
+  settings"). Samples (49 css/theme sources): 17 rejected by impl#1's front end; 4 identical; 16
+  NOT-YET (15 element-level `#{}`, 1 `@keyframes` block); css-scope-01: impl#1 repeats a component's
+  rules once per USE (4×), the bootstrap once — impl#1 redundancy, same effect; gauntlet-s79-calculator:
+  a `//` comment inside `#{}` becomes garbage declarations `subtle: ; scanline: ; …` in impl#1 — impl#1
+  bug (§27.1: `//` is a comment in every context); the bootstrap fails closed on it.

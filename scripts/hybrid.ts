@@ -35,6 +35,13 @@
  *       codes are not the substitute's); the graded cases then run through the conformance path
  *       above. Prints the table (N of M totals). Exit 1 iff a GRADED case fails.
  *
+ *   bun scripts/hybrid.ts --swap CSS=compiler/self-host-v2/slice-m3/css-substitute.js --footprint [--report …] [--json …]
+ *       THE CSS SUB-SEAM (s440-bootstrap-css-theme-t3): the same footprint grade for the bootstrap
+ *       STYLESHEET pass — impl#1 keeps html/clientJs/serverJs. Because conformance never observes CSS,
+ *       a substitute that exports `gradeCss` adds the CSS HALF (`CssHalf`): SPEC-derived computed-style
+ *       oracles evaluated in Chromium over the hybrid's build, for graded conformance cases, css-only
+ *       sources (`cssExtraCases`) and hand-built Cores (`gradeCssCores`). A css fail is red.
+ *
  *   Both --conformance and --differential may be given; conformance runs first.
  *
  *   A substitute may also export `executeClient({ html, clientJs })`: the runtime half then hands

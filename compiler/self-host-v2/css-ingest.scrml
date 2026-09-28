@@ -848,6 +848,11 @@ ${
         const acc0: Acc = { programs: [], cells: [], themes: [], blocks: [], seen: [], why: [] }
         const acc: Acc = visitList(acc0, listAt(ast, "nodes"), top)
         const reset: ResetR = resetOf(acc.programs)
+        // O17(d): a `<theme>` in a file with no `<program>` (a library / module file) — OPEN.
+        let placeWhy: string[] = []
+        if (acc.themes.length > 0 && acc.programs.length == 0) {
+            placeWhy = ["a `<theme>` in a file with no `<program>` (a library / module file — O17(d) — OPEN)"]
+        }
         const toks: TokensR = themeTokens(acc.themes, acc.cells, mode, 1)
         const sheet: Sheet = sheetOf(acc.blocks, toks.names)
         const unit: CssUnit = {
@@ -858,6 +863,6 @@ ${
             global: sheet.global,
             scopes: sheet.scopes,
         }
-        return { unit: unit, why: acc.why.concat(reset.why).concat(toks.why).concat(sheet.why) }
+        return { unit: unit, why: acc.why.concat(reset.why).concat(placeWhy).concat(toks.why).concat(sheet.why) }
     }
 }

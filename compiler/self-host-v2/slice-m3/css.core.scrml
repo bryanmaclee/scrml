@@ -87,6 +87,24 @@ ${
     // Nothing to emit: reset opted out, no tokens, no rules → "".
     export fn emptyUnit() -> CssUnit { return unit(false, [], [], []) }
 
+    // §25.7: a declared cell referenced in a stylesheet rule reads the reactive-cell bridge
+    // `var(--scrml-<cell>)` (whose value the runtime writes on `:root`).
+    //   <w> = "10px"    const Card = <div> #{ .box { width: @w; } } … </>
+    export fn cellVarUnit() -> CssUnit {
+        const w: Sym = mkSym(1, "w")
+        const box: StyleRule = rule([classArm("box")], [dcl("width", [CssPart.CellVar(w)])])
+        return unit(false, [], [], [{ component: "Card", rules: [box] }])
+    }
+
+    // §65.8: a program-global `@charset "UTF-8";` hoisted to byte 0, with a non-ASCII
+    // generated-content value that decodes correctly only if the sheet's charset is honoured.
+    //   #{ @charset "UTF-8"; }   const C = <div> #{ .c::before { content: "é"; } } … </>
+    export fn charsetUnit() -> CssUnit {
+        const before: ComplexSel = { head: cmpOf([SimpleSel.ClassSel("c"), SimpleSel.PseudoElement("before")]), links: [] }
+        return { charsets: ["UTF-8"], imports: [], reset: false, tokens: [], global: [],
+                 scopes: [{ component: "C", rules: [rule([before], [dcl("content", txt("\"é\""))])] }] }
+    }
+
     // Every sheet-level statement kind + every selector / combinator shape, for the printer.
     export fn everyShape() -> CssUnit {
         const brand: Sym = mkSym(1, "brand")

@@ -1,0 +1,6 @@
+{
+  "spec": "§66.17 O17(a)",
+  "open": "O17(a)",
+  "rationale": "OPEN: a hyphenated T3 token name (`space-4` is not an identifier) / a non-string CSS value.",
+  "steps": []
+}

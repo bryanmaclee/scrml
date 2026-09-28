@@ -1,0 +1,35 @@
+{
+  "core": "t3ScriptWrites",
+  "spec": "§66.17 item 7",
+  "rationale": "Item 7: a match-over-enum token NOT recognized for the variant CSS \"still lowers — each token change is a separate `:root` write\". The stylesheet carries no definition of it (nothing to override the script's write); its use site reads `var(--ink)`, so a `:root` write drives the element.",
+  "html": "<div data-scrml=\"Card\"><div class=\"card\">x</div></div>",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "html",
+          "prop": "--ink",
+          "value": ""
+        },
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(0, 0, 0)"
+        }
+      ]
+    },
+    {
+      "rootStyle": [
+        "--ink",
+        "#0f172a"
+      ],
+      "expect": [
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(15, 23, 42)"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "core": "t3Wildcard",
+  "spec": "§66.17 item 3",
+  "rationale": "A recognized match with a wildcard arm: the wildcard value holds for every variant the match does not name (and before any variant is reflected); `.Dark` re-binds it.",
+  "html": "<div data-scrml=\"Sheet\"><div class=\"sheet\">x</div></div>",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".sheet",
+          "prop": "background-color",
+          "value": "rgb(255, 255, 255)"
+        }
+      ]
+    },
+    {
+      "rootAttr": [
+        "data-scrml-theme-mode",
+        "Dark"
+      ],
+      "expect": [
+        {
+          "sel": ".sheet",
+          "prop": "background-color",
+          "value": "rgb(15, 23, 42)"
+        }
+      ]
+    },
+    {
+      "rootAttr": [
+        "data-scrml-theme-mode",
+        "Light"
+      ],
+      "expect": [
+        {
+          "sel": ".sheet",
+          "prop": "background-color",
+          "value": "rgb(255, 255, 255)"
+        }
+      ]
+    }
+  ]
+}

@@ -73,6 +73,12 @@ describe("emitter — §66.17 T3 (hand-built Cores)", () => {
   test("nothing to emit → the empty string", () => {
     expect(C.emitCss(K.emptyUnit())).toBe("");
   });
+
+  test("§65.8: a hoisted @charset is the sheet's first bytes; a pseudo-element arm stays unwrapped", () => {
+    const css = C.emitCss(K.charsetUnit());
+    expect(css.startsWith('@charset "UTF-8";\n@scope ([data-scrml="C"]) to ([data-scrml]) {')).toBe(true);
+    expect(css).toContain('  .c::before { content: "é"; }');
+  });
 });
 
 describe("emitter — sheet order, flat specificity, the floor", () => {
@@ -176,9 +182,11 @@ ${body}
     expect(why.some((w) => w.includes("O17(c)"))).toBe(true);
   });
 
-  test("O17(d): a `<theme>` in a library-mode file", () => {
+  test("O17(d): a `<theme>` in a library-mode file, or in a file with no `<program>`", () => {
     const why = whyOf(theme("      ink = #000000;"), "library");
     expect(why.some((w) => w.includes("O17(d)"))).toBe(true);
+    const moduleWhy = whyOf(`<theme>\n    ink = #000000;\n</theme>\n<p>x</p>\n`);
+    expect(moduleWhy.some((w) => w.includes("O17(d)"))).toBe(true);
   });
 
   test("O47: a theme token whose value reads a cell", () => {
