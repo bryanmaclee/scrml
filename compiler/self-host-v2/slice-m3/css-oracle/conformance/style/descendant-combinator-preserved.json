@@ -1,0 +1,20 @@
+{
+  "spec": "§65.2.5, §9.1",
+  "rationale": "`.card .title` is a DESCENDANT selector: the `.title` inside `.card` is red; `.card` itself is not matched (not a compound `.card.title`).",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".title",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(0, 0, 0)"
+        }
+      ]
+    }
+  ]
+}

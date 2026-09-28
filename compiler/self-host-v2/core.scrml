@@ -359,4 +359,70 @@ ${
         if (f.grants.replace) return true
         return f.grants.edits.length > 0
     }
+
+    // -------------------------------------------------------------------------
+    // CSS (s440-bootstrap-css-theme-t3; dpa-051 §8.4 step 1). The per-file
+    // STYLESHEET Core — a root of its own, NOT a CoreProgram field: FileOutput.css
+    // is an independent sub-seam (dpa-051 §8.4), so the stylesheet pass (css.scrml)
+    // consumes only this. Its strings are CSS-language LITERALS (a selector's
+    // names, an attribute test, a declaration's literal text) or identifiers;
+    // every `@` reference is a node (TokenVar / CellVar), never text the emitter
+    // re-reads (§3.6, §4).
+    // -------------------------------------------------------------------------
+    export type SimpleSel:enum = {
+        Universal,
+        TagSel(name: string),
+        ClassSel(name: string),
+        IdSel(name: string),
+        AttrSel(test: string),                        // the text between `[` and `]`
+        PseudoClass(name: string, arg: string | not), // `:hover`, `:not(.a)` (arg = `.a`)
+        PseudoElement(name: string),                  // `::before`
+    }
+    export type Combinator:enum = { Descendant, DirectChild, NextSibling, LaterSibling }
+    export type Compound:struct = { parts: SimpleSel[] }
+    export type SelLink:struct = { comb: Combinator, target: Compound }
+    // One arm of a selector list: `head (combinator compound)*`.
+    export type ComplexSel:struct = { head: Compound, links: SelLink[] }
+
+    // A declaration value: literal CSS text, with the `@` references resolved.
+    export type CssPart:enum = {
+        CssText(text: string),
+        TokenVar(token: Sym),   // §65.3.2 / §25.7: `@name` of a theme token → var(--name)
+        CellVar(cell: Sym),     // §25.7: `@name` of a reactive cell → var(--scrml-name)
+    }
+    export type CssDecl:struct = { prop: string, value: CssPart[] }
+    export type StyleRule:struct = { sel: ComplexSel[], decls: CssDecl[] }
+
+    // §66.17 (T3) — a theme token is a LOCKED declaration (`<theme>` is a marker).
+    // Its initializer decides its CSS:
+    //   Constant     — a literal (item 2) → static `:root { --t: v }`.
+    //   OnVariant    — a `match` over an enum-typed cell, every arm a constant
+    //                  (item 3, RECOGNIZED) → one `:root[data-scrml-theme-<cell>="<V>"]`
+    //                  block per arm; `otherwise` = a wildcard arm (→ `:root`).
+    //   ScriptWrites — a `match` over an enum cell NOT recognized (item 7) → per-token
+    //                  `:root` writes from script; NO stylesheet contribution.
+    // A reactive token of any other shape is O47 (OPEN) and has no variant here:
+    // the producer reports it not-yet.
+    export type TokenArm:struct = { variant: string, value: CssPart[] }
+    export type TokenInit:enum = {
+        Constant(value: CssPart[]),
+        OnVariant(cell: Sym, arms: TokenArm[], otherwise: CssPart[] | not),
+        ScriptWrites(cell: Sym),
+    }
+    export type ThemeToken:struct = { sym: Sym, init: TokenInit }
+
+    export type CssImport:struct = { url: string, conditions: string }
+    export type ScopeSheet:struct = { component: string, rules: StyleRule[] }
+
+    // One file's stylesheet. `reset` = the §65.3.4 built-in reset is on (opt out:
+    // `<program reset="none">`). `global` = program-level `#{}` rules (§9.1, the
+    // §65.5 `global` layer); `scopes` = component-scope `#{}` rules (§9.1 DQ-7).
+    export type CssUnit:struct = {
+        charsets: string[],
+        imports: CssImport[],
+        reset: boolean,
+        tokens: ThemeToken[],
+        global: StyleRule[],
+        scopes: ScopeSheet[],
+    }
 }

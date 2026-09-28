@@ -1,0 +1,525 @@
+// =============================================================================
+// self-host-v2 / css.scrml — the STYLESHEET emitter: CssUnit (core.scrml) → a
+// CSS output tree → text (bootstrap impl#2; dpa-051 §8.4 step 1, s440).
+//
+// It owns FileOutput.css's user-stylesheet part (the CSS sub-seam of CG,
+// compiler/src/pipeline-seam.ts `CSS`). It builds a tree and prints it once
+// (dpa-051 §3.6); it never parses and never reads its own output. Every
+// decision is a Core fact:
+//   - §65.3.4 / §65.8 — the built-in reset lives in `@layer reset`; the fixed
+//     order statement `@layer reset, global;` is emitted once, whenever either
+//     layer is; program-level `#{}` rules go in `@layer global`.
+//   - §65.8 — `@charset` is byte 0; `@import` follows the `@layer` order
+//     statement and precedes every block.
+//   - §65.5 — theme `:root` definitions and component scopes are UNLAYERED
+//     (an unlayered rule beats every layered one: component > global > reset).
+//   - §9.1 DQ-7 / §25.6 — a component's rules sit in
+//     `@scope ([data-scrml="<C>"]) to ([data-scrml])` (the donut).
+//   - §65.2.5 — inside a scope an UNCONDITIONAL arm (only type / class / id /
+//     universal selectors, any combinators) is wrapped in `:where()`, never
+//     `:is()`; an arm with an attribute test, a pseudo-class or a
+//     pseudo-element keeps its own specificity (a §65.2.2 layer; `:where(::x)`
+//     matches nothing). Program-level rules are not wrapped (§65.2 scopes the
+//     mechanism to "every author selector inside a scope").
+//   - §65.2.4 R1 / §65.5 — a universal / bare-root arm is a FLOOR that resolves
+//     below specific rules; inside a scope (all arms (0,0,0)) floor arms are
+//     emitted first, so source order ranks them below.
+//   - §66.17 — a Constant token → `:root`; an OnVariant token → one
+//     `:root[data-scrml-theme-<cell>="<V>"]` block per arm (+ `:root` for a
+//     wildcard arm); a ScriptWrites token → no CSS (item 7: script writes).
+//
+// Every `match` over an enum is total with no default arm (dpa-051 §3.4).
+// impl#1 workarounds: F11 (named payload binding), F14 (braces only via
+// LB()/RB()), F15 (no helper fn named like a payload field), F16 (a match over
+// an imported payload enum binds a field in at least one arm).
+// =============================================================================
+${
+    import { Sym, SimpleSel, Combinator, Compound, SelLink, ComplexSel, CssPart, CssDecl, StyleRule,
+             TokenArm, TokenInit, ThemeToken, CssImport, ScopeSheet, CssUnit } from "./core.scrml"
+
+    fn LB() -> string { return "{" }
+    fn RB() -> string { return "}" }
+
+    // =========================================================================
+    // The output tree.
+    // =========================================================================
+    export type OutSel:enum = {
+        Plain(sel: ComplexSel),                        // printed as authored
+        Flat(sel: ComplexSel),                         // `:where(…)` — §65.2.5
+        Root,                                          // `:root`
+        RootVariant(cell: string, tag: string),        // `:root[data-scrml-theme-<cell>="<tag>"]`
+    }
+    export type OutDecl:enum = {
+        Prop(prop: string, value: CssPart[]),
+        Custom(token: Sym, value: CssPart[]),          // `--<token>: …`
+    }
+    export type CssStmt:enum = {
+        Charset(encoding: string),
+        LayerOrder(names: string[]),
+        Import(url: string, conditions: string),
+        Layer(name: string, body: CssStmt[]),
+        Scope(component: string, body: CssStmt[]),
+        Rule(sels: OutSel[], decls: OutDecl[]),
+    }
+
+    // =========================================================================
+    // §65.3.4 — the built-in reset, as rules (frozen; the SPEC's five bullets,
+    // in order). Built from selector nodes, not CSS text.
+    // =========================================================================
+    fn cmp(parts: SimpleSel[]) -> Compound { return { parts: parts } }
+    fn one(parts: SimpleSel[]) -> ComplexSel { return { head: cmp(parts), links: [] } }
+    fn tagArm(t: string) -> ComplexSel { return one([SimpleSel.TagSel(t)]) }
+    fn tagArms(ts: string[]) -> ComplexSel[] {
+        let out: ComplexSel[] = []
+        for (const t of ts) { out = out.concat([tagArm(t)]) }
+        return out
+    }
+    fn lit(t: string) -> CssPart[] { return [CssPart.CssText(t)] }
+    fn decl(p: string, v: string) -> CssDecl { return { prop: p, value: lit(v) } }
+    fn styleRule(arms: ComplexSel[], ds: CssDecl[]) -> StyleRule { return { sel: arms, decls: ds } }
+
+    export fn resetRules() -> StyleRule[] {
+        const boxArms: ComplexSel[] = [one([SimpleSel.Universal]), one([SimpleSel.PseudoElement("before")]),
+                                       one([SimpleSel.PseudoElement("after")])]
+        return [
+            styleRule(boxArms, [decl("box-sizing", "border-box")]),
+            styleRule(tagArms(["body", "h1", "h2", "h3", "h4", "h5", "h6", "p", "ul", "ol", "figure",
+                               "blockquote", "hr", "fieldset"]), [decl("margin", "0")]),
+            styleRule(tagArms(["body"]), [decl("min-height", "100vh"), decl("line-height", "1.5")]),
+            styleRule(tagArms(["img", "picture", "video", "canvas", "svg"]),
+                      [decl("display", "block"), decl("max-width", "100%")]),
+            styleRule(tagArms(["input", "button", "textarea", "select"]), [decl("font", "inherit")]),
+        ]
+    }
+
+    // =========================================================================
+    // Lowering: CssUnit → CssStmt[].
+    // =========================================================================
+
+    // Is a simple selector unconditional (§65.2.2 / §65.2.5)?
+    fn simpleIsBase(s: SimpleSel) -> boolean {
+        return match s {
+            .Universal :> true
+            .TagSel(name: n) :> true
+            .ClassSel(name: n) :> true
+            .IdSel(name: n) :> true
+            .AttrSel(test: t) :> false
+            .PseudoClass(name: n, arg: a) :> false
+            .PseudoElement(name: n) :> false
+        }
+    }
+
+    fn compoundIsBase(c: Compound) -> boolean {
+        for (const s of c.parts) {
+            if (!simpleIsBase(s)) return false
+        }
+        return true
+    }
+
+    export fn armIsUnconditional(c: ComplexSel) -> boolean {
+        if (!compoundIsBase(c.head)) return false
+        for (const l of c.links) {
+            if (!compoundIsBase(l.target)) return false
+        }
+        return true
+    }
+
+    fn scopedSel(c: ComplexSel) -> OutSel {
+        if (armIsUnconditional(c)) return OutSel.Flat(c)
+        return OutSel.Plain(c)
+    }
+
+    fn outDecls(ds: CssDecl[]) -> OutDecl[] {
+        let out: OutDecl[] = []
+        for (const d of ds) { out = out.concat([OutDecl.Prop(d.prop, d.value)]) }
+        return out
+    }
+
+    fn plainRule(r: StyleRule) -> CssStmt {
+        let sels: OutSel[] = []
+        for (const c of r.sel) { sels = sels.concat([OutSel.Plain(c)]) }
+        return CssStmt.Rule(sels, outDecls(r.decls))
+    }
+
+    fn scopedRule(arms: ComplexSel[], ds: CssDecl[]) -> CssStmt {
+        let sels: OutSel[] = []
+        for (const c of arms) { sels = sels.concat([scopedSel(c)]) }
+        return CssStmt.Rule(sels, outDecls(ds))
+    }
+
+    fn plainRules(rs: StyleRule[]) -> CssStmt[] {
+        let out: CssStmt[] = []
+        for (const r of rs) { out = out.concat([plainRule(r)]) }
+        return out
+    }
+
+    // §65.2.4 R1 / §65.5 — a universal `*` / bare-root (`html`, `body`) rule is an author-reset
+    // FLOOR: it "resolves *below* class/id/specific author rules". Inside a scope every unconditional
+    // arm is `:where()`-flat, so all of them are (0,0,0) and specificity cannot order them; the floor
+    // arms are therefore emitted FIRST in their scope, and source order puts them below. (A rule with
+    // both kinds of arm is split; its declarations are the same for both halves.)
+    fn simpleIsFloor(s: SimpleSel) -> boolean {
+        return match s {
+            .Universal :> true
+            .TagSel(name: n) :> n == "html" || n == "body"
+            .ClassSel(name: n) :> false
+            .IdSel(name: n) :> false
+            .AttrSel(test: t) :> false
+            .PseudoClass(name: n, arg: a) :> false
+            .PseudoElement(name: n) :> false
+        }
+    }
+
+    export fn armIsFloor(c: ComplexSel) -> boolean {
+        if (c.links.length > 0) return false
+        if (c.head.parts.length != 1) return false
+        return simpleIsFloor(c.head.parts[0])
+    }
+
+    fn scopedRules(rs: StyleRule[]) -> CssStmt[] {
+        let floor: CssStmt[] = []
+        let rest: CssStmt[] = []
+        for (const r of rs) {
+            let fa: ComplexSel[] = []
+            let oa: ComplexSel[] = []
+            for (const c of r.sel) {
+                if (armIsFloor(c)) {
+                    fa = fa.concat([c])
+                } else {
+                    oa = oa.concat([c])
+                }
+            }
+            if (fa.length > 0) floor = floor.concat([scopedRule(fa, r.decls)])
+            if (oa.length > 0) rest = rest.concat([scopedRule(oa, r.decls)])
+        }
+        return floor.concat(rest)
+    }
+
+    // ---- §66.17 tokens → `:root` + variant blocks ----
+    // One `:root[…]` block per (cell, variant), in first-appearance order.
+    type VGroup:struct = { cellName: string, tag: string, ds: OutDecl[] }
+
+    fn groupAdd(gs: VGroup[], c: string, v: string, d: OutDecl) -> VGroup[] {
+        let out: VGroup[] = []
+        let found = false
+        for (const g of gs) {
+            if (g.cellName == c && g.tag == v) {
+                out = out.concat([{ cellName: g.cellName, tag: g.tag, ds: g.ds.concat([d]) }])
+                found = true
+            } else {
+                out = out.concat([g])
+            }
+        }
+        if (!found) out = out.concat([{ cellName: c, tag: v, ds: [d] }])
+        return out
+    }
+
+    // The token's `:root` definition, if it has one.
+    fn rootDecl(t: ThemeToken) -> OutDecl[] {
+        return match t.init {
+            .Constant(value: v) :> [OutDecl.Custom(t.sym, v)]
+            .OnVariant(cell: c, arms: arms, otherwise: w) :> otherwiseDecl(t.sym, w)
+            .ScriptWrites(cell: c) :> []
+        }
+    }
+
+    fn otherwiseDecl(s: Sym, w: CssPart[] | not) -> OutDecl[] {
+        if (w is some) return [OutDecl.Custom(s, w)]
+        return []
+    }
+
+    fn tokenGroups(gs: VGroup[], t: ThemeToken) -> VGroup[] {
+        return match t.init {
+            .Constant(value: v) :> gs
+            .OnVariant(cell: c, arms: arms, otherwise: w) :> armGroups(gs, c, t.sym, arms)
+            .ScriptWrites(cell: c) :> gs
+        }
+    }
+
+    fn armGroups(gs: VGroup[], c: Sym, s: Sym, arms: TokenArm[]) -> VGroup[] {
+        let out: VGroup[] = gs
+        for (const a of arms) { out = groupAdd(out, c.hint, a.variant, OutDecl.Custom(s, a.value)) }
+        return out
+    }
+
+    export fn tokenStmts(ts: ThemeToken[]) -> CssStmt[] {
+        let rootDs: OutDecl[] = []
+        let gs: VGroup[] = []
+        for (const t of ts) {
+            rootDs = rootDs.concat(rootDecl(t))
+            gs = tokenGroups(gs, t)
+        }
+        let out: CssStmt[] = []
+        if (rootDs.length > 0) out = out.concat([CssStmt.Rule([OutSel.Root], rootDs)])
+        for (const g of gs) {
+            out = out.concat([CssStmt.Rule([OutSel.RootVariant(g.cellName, g.tag)], g.ds)])
+        }
+        return out
+    }
+
+    // ---- the sheet, in §65.8 / §65.5 order ----
+    fn importStmts(u: CssUnit) -> CssStmt[] {
+        let out: CssStmt[] = []
+        for (const i of u.imports) { out = out.concat([CssStmt.Import(i.url, i.conditions)]) }
+        return out
+    }
+
+    export fn lowerCss(u: CssUnit) -> CssStmt[] {
+        let out: CssStmt[] = []
+        for (const c of u.charsets) { out = out.concat([CssStmt.Charset(c)]) }
+        const layered: boolean = u.reset || u.global.length > 0
+        if (layered) out = out.concat([CssStmt.LayerOrder(["reset", "global"])])
+        out = out.concat(importStmts(u))
+        if (u.reset) out = out.concat([CssStmt.Layer("reset", plainRules(resetRules()))])
+        out = out.concat(tokenStmts(u.tokens))
+        if (u.global.length > 0) out = out.concat([CssStmt.Layer("global", plainRules(u.global))])
+        for (const s of u.scopes) {
+            if (s.rules.length > 0) out = out.concat([CssStmt.Scope(s.component, scopedRules(s.rules))])
+        }
+        return out
+    }
+
+    // =========================================================================
+    // Printing (once, from the tree).
+    // =========================================================================
+    fn simpleText(s: SimpleSel) -> string {
+        return match s {
+            .Universal :> "*"
+            .TagSel(name: n) :> n
+            .ClassSel(name: n) :> "." + n
+            .IdSel(name: n) :> "#" + n
+            .AttrSel(test: t) :> "[" + t + "]"
+            .PseudoClass(name: n, arg: a) :> pseudoText(n, a)
+            .PseudoElement(name: n) :> "::" + n
+        }
+    }
+
+    fn pseudoText(n: string, a: string | not) -> string {
+        if (a is some) return ":" + n + "(" + a + ")"
+        return ":" + n
+    }
+
+    fn compoundText(c: Compound) -> string {
+        let s = ""
+        for (const p of c.parts) { s = s + simpleText(p) }
+        return s
+    }
+
+    fn combText(k: Combinator) -> string {
+        return match k {
+            .Descendant :> " "
+            .DirectChild :> " > "
+            .NextSibling :> " + "
+            .LaterSibling :> " ~ "
+        }
+    }
+
+    export fn complexText(c: ComplexSel) -> string {
+        let s: string = compoundText(c.head)
+        for (const l of c.links) { s = s + combText(l.comb) + compoundText(l.target) }
+        return s
+    }
+
+    fn outSelText(o: OutSel) -> string {
+        return match o {
+            .Plain(sel: c) :> complexText(c)
+            .Flat(sel: c) :> ":where(" + complexText(c) + ")"
+            .Root :> ":root"
+            .RootVariant(cell: c, tag: v) :> ":root[data-scrml-theme-" + c + "=\"" + v + "\"]"
+        }
+    }
+
+    fn partText(p: CssPart) -> string {
+        return match p {
+            .CssText(text: t) :> t
+            .TokenVar(token: s) :> "var(--" + s.hint + ")"
+            .CellVar(cell: s) :> "var(--scrml-" + s.hint + ")"
+        }
+    }
+
+    export fn partsText(ps: CssPart[]) -> string {
+        let s = ""
+        for (const p of ps) { s = s + partText(p) }
+        return s
+    }
+
+    fn declText(d: OutDecl) -> string {
+        return match d {
+            .Prop(prop: p, value: v) :> p + ": " + partsText(v) + ";"
+            .Custom(token: s, value: v) :> "--" + s.hint + ": " + partsText(v) + ";"
+        }
+    }
+
+    fn ruleText(sels: OutSel[], ds: OutDecl[]) -> string {
+        let s = ""
+        let first = true
+        for (const o of sels) {
+            if (!first) s = s + ", "
+            s = s + outSelText(o)
+            first = false
+        }
+        let body = ""
+        for (const d of ds) { body = body + " " + declText(d) }
+        return s + " " + LB() + body + " " + RB()
+    }
+
+    fn joinNames(ns: string[]) -> string {
+        let s = ""
+        let first = true
+        for (const n of ns) {
+            if (!first) s = s + ", "
+            s = s + n
+            first = false
+        }
+        return s
+    }
+
+    fn importText(u: string, c: string) -> string {
+        if (c.length > 0) return "@import url(\"" + u + "\") " + c + ";"
+        return "@import url(\"" + u + "\");"
+    }
+
+    fn bodyLines(body: CssStmt[], indent: string) -> string[] {
+        let out: string[] = []
+        for (const s of body) { out = out.concat(stmtLines(s, indent)) }
+        return out
+    }
+
+    fn blockLines(opener: string, body: CssStmt[], indent: string) -> string[] {
+        return [indent + opener + " " + LB()].concat(bodyLines(body, indent + "  ")).concat([indent + RB()])
+    }
+
+    fn stmtLines(s: CssStmt, indent: string) -> string[] {
+        return match s {
+            .Charset(encoding: e) :> [indent + "@charset \"" + e + "\";"]
+            .LayerOrder(names: ns) :> [indent + "@layer " + joinNames(ns) + ";"]
+            .Import(url: u, conditions: c) :> [indent + importText(u, c)]
+            .Layer(name: n, body: b) :> blockLines("@layer " + n, b, indent)
+            .Scope(component: c, body: b) :> blockLines("@scope ([data-scrml=\"" + c + "\"]) to ([data-scrml])", b, indent)
+            .Rule(sels: ss, decls: ds) :> [indent + ruleText(ss, ds)]
+        }
+    }
+
+    export fn printCss(stmts: CssStmt[]) -> string {
+        let lines: string[] = []
+        for (const s of stmts) { lines = lines.concat(stmtLines(s, "")) }
+        let out = ""
+        let first = true
+        for (const l of lines) {
+            if (!first) out = out + "\n"
+            out = out + l
+            first = false
+        }
+        return out
+    }
+
+    // The whole pass: CssUnit → stylesheet text ("" when nothing is emitted).
+    export fn emitCss(u: CssUnit) -> string { return printCss(lowerCss(u)) }
+
+    // =========================================================================
+    // The FOOTPRINT (dpa-051 §8.2): the stylesheet constructs a unit uses. Each
+    // name is certified only by the bite matrix (a corruption of its emission
+    // must kill a graded css pass).
+    // =========================================================================
+    fn simpleName(s: SimpleSel) -> string {
+        return match s {
+            .Universal :> "Sel.Universal"
+            .TagSel(name: n) :> "Sel.Tag"
+            .ClassSel(name: n) :> "Sel.Class"
+            .IdSel(name: n) :> "Sel.Id"
+            .AttrSel(test: t) :> "Sel.Attr"
+            .PseudoClass(name: n, arg: a) :> "Sel.PseudoClass"
+            .PseudoElement(name: n) :> "Sel.PseudoElement"
+        }
+    }
+
+    fn combName(k: Combinator) -> string {
+        return match k {
+            .Descendant :> "Comb.Descendant"
+            .DirectChild :> "Comb.Child"
+            .NextSibling :> "Comb.NextSibling"
+            .LaterSibling :> "Comb.LaterSibling"
+        }
+    }
+
+    fn partName(p: CssPart) -> string {
+        return match p {
+            .CssText(text: t) :> "Value.Text"
+            .TokenVar(token: s) :> "Value.TokenVar"
+            .CellVar(cell: s) :> "Value.CellVar"
+        }
+    }
+
+    fn addName(xs: string[], x: string) -> string[] {
+        for (const y of xs) {
+            if (y == x) return xs
+        }
+        return xs.concat([x])
+    }
+
+    fn selNames(acc: string[], c: ComplexSel) -> string[] {
+        let out: string[] = acc
+        for (const s of c.head.parts) { out = addName(out, simpleName(s)) }
+        for (const l of c.links) {
+            out = addName(out, combName(l.comb))
+            for (const s of l.target.parts) { out = addName(out, simpleName(s)) }
+        }
+        return out
+    }
+
+    fn partsNames(acc: string[], ps: CssPart[]) -> string[] {
+        let out: string[] = acc
+        for (const p of ps) { out = addName(out, partName(p)) }
+        return out
+    }
+
+    fn ruleNames(acc: string[], r: StyleRule, scoped: boolean) -> string[] {
+        let out: string[] = acc
+        for (const c of r.sel) {
+            out = selNames(out, c)
+            if (scoped) {
+                if (armIsUnconditional(c)) {
+                    out = addName(out, "Scope.Flat")
+                } else {
+                    out = addName(out, "Scope.Conditional")
+                }
+                if (armIsFloor(c)) out = addName(out, "Scope.Floor")
+            }
+        }
+        for (const d of r.decls) { out = partsNames(out, d.value) }
+        return out
+    }
+
+    fn tokenNames(acc: string[], t: ThemeToken) -> string[] {
+        return match t.init {
+            .Constant(value: v) :> partsNames(addName(acc, "Token.Constant"), v)
+            .OnVariant(cell: c, arms: arms, otherwise: w) :> variantNames(acc, arms, w)
+            .ScriptWrites(cell: c) :> addName(acc, "Token.ScriptWrites")
+        }
+    }
+
+    fn variantNames(acc: string[], arms: TokenArm[], w: CssPart[] | not) -> string[] {
+        let out: string[] = addName(acc, "Token.OnVariant")
+        for (const a of arms) { out = partsNames(out, a.value) }
+        if (w is some) {
+            out = partsNames(addName(out, "Token.OnVariant.Otherwise"), w)
+        }
+        return out
+    }
+
+    export fn cssFootprint(u: CssUnit) -> string[] {
+        let out: string[] = []
+        if (u.charsets.length > 0) out = addName(out, "Css.Charset")
+        if (u.imports.length > 0) out = addName(out, "Css.Import")
+        if (u.reset || u.global.length > 0) out = addName(out, "Css.LayerOrder")
+        if (u.reset) out = addName(out, "Css.Reset")
+        for (const t of u.tokens) { out = tokenNames(out, t) }
+        if (u.global.length > 0) out = addName(out, "Css.Global")
+        for (const r of u.global) { out = ruleNames(out, r, false) }
+        for (const s of u.scopes) {
+            if (s.rules.length > 0) out = addName(out, "Css.Scope")
+            for (const r of s.rules) { out = ruleNames(out, r, true) }
+        }
+        return out
+    }
+}

@@ -1,0 +1,115 @@
+// =============================================================================
+// self-host-v2 / slice-m3 / css.core.scrml — HAND-BUILT stylesheet Cores
+// (s440-bootstrap-css-theme-t3). The §66.17 (T3) token shapes cannot reach the
+// stylesheet pass through the ingest shim — impl#1's front end rejects T3 source
+// (progress.md, Phase 0) — so they are built here directly, as the Core the
+// bootstrap front end will produce, and graded by css.test.js (text) and
+// bench/css-core-browser.js (computed style in Chromium).
+//
+// Each fn names the source it stands for. Sym ids are dense per unit.
+// =============================================================================
+${
+    import { Sym, SimpleSel, Combinator, Compound, SelLink, ComplexSel, CssPart, CssDecl, StyleRule,
+             TokenArm, TokenInit, ThemeToken, CssImport, ScopeSheet, CssUnit, mkSym } from "../core.scrml"
+
+    fn cmpOf(parts: SimpleSel[]) -> Compound { return { parts: parts } }
+    fn classArm(c: string) -> ComplexSel { return { head: cmpOf([SimpleSel.ClassSel(c)]), links: [] } }
+    fn tagArm(t: string) -> ComplexSel { return { head: cmpOf([SimpleSel.TagSel(t)]), links: [] } }
+    fn txt(t: string) -> CssPart[] { return [CssPart.CssText(t)] }
+    fn tokRef(s: Sym) -> CssPart[] { return [CssPart.TokenVar(s)] }
+    fn dcl(p: string, v: CssPart[]) -> CssDecl { return { prop: p, value: v } }
+    fn rule(arms: ComplexSel[], ds: CssDecl[]) -> StyleRule { return { sel: arms, decls: ds } }
+    fn arm(v: string, value: CssPart[]) -> TokenArm { return { variant: v, value: value } }
+    fn unit(reset: boolean, tokens: ThemeToken[], global: StyleRule[], scopes: ScopeSheet[]) -> CssUnit {
+        return { charsets: [], imports: [], reset: reset, tokens: tokens, global: global, scopes: scopes }
+    }
+
+    // §66.17 items 2 + 3 (the ruled worked example, plus a Card that uses both tokens):
+    //   type Mode:enum = { Light, Dark }
+    //   <let mode:Mode=.Light/>
+    //   <theme>
+    //       <brand:string="#338967"/>
+    //       <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>
+    //   </theme>
+    //   const Card = <div> #{ .card { color: @ink; background-color: @brand; } } … </>
+    export fn t3Worked() -> CssUnit {
+        const mode: Sym = mkSym(1, "mode")
+        const brand: Sym = mkSym(2, "brand")
+        const ink: Sym = mkSym(3, "ink")
+        const tokens: ThemeToken[] = [
+            { sym: brand, init: TokenInit.Constant(txt("#338967")) },
+            { sym: ink, init: TokenInit.OnVariant(mode, [arm("Light", txt("#0f172a")), arm("Dark", txt("#e2e8f0"))], not) },
+        ]
+        const card: StyleRule = rule([classArm("card")], [dcl("color", tokRef(ink)), dcl("background-color", tokRef(brand))])
+        return unit(true, tokens, [], [{ component: "Card", rules: [card] }])
+    }
+
+    // A recognized match with a wildcard arm (`_ :> "#ffffff"`) → `:root` default + one variant block.
+    //   <paper:string=(match @mode { .Dark :> "#0f172a"  _ :> "#ffffff" })/>
+    export fn t3Wildcard() -> CssUnit {
+        const mode: Sym = mkSym(1, "mode")
+        const paper: Sym = mkSym(2, "paper")
+        const tokens: ThemeToken[] = [
+            { sym: paper, init: TokenInit.OnVariant(mode, [arm("Dark", txt("#0f172a"))], txt("#ffffff")) },
+        ]
+        const body: StyleRule = rule([classArm("sheet")], [dcl("background-color", tokRef(paper))])
+        return unit(false, tokens, [], [{ component: "Sheet", rules: [body] }])
+    }
+
+    // §66.17 item 7 — a match-over-enum token NOT recognized for the variant CSS
+    // (e.g. `<ink:string=(match @mode { .Light :> base  .Dark :> shade(base) })/>`,
+    // an arm that is not a constant): per-token `:root` writes from script, so the
+    // stylesheet carries NO definition for it; its use site still reads var(--ink).
+    export fn t3ScriptWrites() -> CssUnit {
+        const mode: Sym = mkSym(1, "mode")
+        const ink: Sym = mkSym(2, "ink")
+        const tokens: ThemeToken[] = [{ sym: ink, init: TokenInit.ScriptWrites(mode) }]
+        const card: StyleRule = rule([classArm("card")], [dcl("color", tokRef(ink))])
+        return unit(false, tokens, [], [{ component: "Card", rules: [card] }])
+    }
+
+    // Two tokens switched by two DIFFERENT cells (two `<theme>` markers are one
+    // namespace, §66.17 item 1/4 — the stylesheet sees one token list).
+    export fn t3TwoCells() -> CssUnit {
+        const mode: Sym = mkSym(1, "mode")
+        const contrast: Sym = mkSym(2, "contrast")
+        const ink: Sym = mkSym(3, "ink")
+        const edge: Sym = mkSym(4, "edge")
+        const tokens: ThemeToken[] = [
+            { sym: ink, init: TokenInit.OnVariant(mode, [arm("Light", txt("#111111")), arm("Dark", txt("#eeeeee"))], not) },
+            { sym: edge, init: TokenInit.OnVariant(contrast, [arm("Normal", txt("1px")), arm("High", txt("3px"))], not) },
+        ]
+        const box: StyleRule = rule([classArm("box")], [dcl("color", tokRef(ink)), dcl("border-top-width", tokRef(edge)),
+                                                       dcl("border-top-style", txt("solid"))])
+        return unit(false, tokens, [], [{ component: "Box", rules: [box] }])
+    }
+
+    // Nothing to emit: reset opted out, no tokens, no rules → "".
+    export fn emptyUnit() -> CssUnit { return unit(false, [], [], []) }
+
+    // Every sheet-level statement kind + every selector / combinator shape, for the printer.
+    export fn everyShape() -> CssUnit {
+        const brand: Sym = mkSym(1, "brand")
+        const count: Sym = mkSym(2, "count")
+        const tokens: ThemeToken[] = [{ sym: brand, init: TokenInit.Constant(txt("#2563eb")) }]
+        const g: StyleRule = rule([tagArm("a")], [dcl("color", tokRef(brand))])
+        const descend: ComplexSel = { head: cmpOf([SimpleSel.ClassSel("card")]),
+                                      links: [{ comb: Combinator.Descendant, target: cmpOf([SimpleSel.ClassSel("title")]) }] }
+        const child: ComplexSel = { head: cmpOf([SimpleSel.TagSel("ul")]),
+                                    links: [{ comb: Combinator.DirectChild, target: cmpOf([SimpleSel.TagSel("li")]) }] }
+        const sib: ComplexSel = { head: cmpOf([SimpleSel.IdSel("a")]),
+                                  links: [{ comb: Combinator.NextSibling, target: cmpOf([SimpleSel.Universal]) },
+                                          { comb: Combinator.LaterSibling, target: cmpOf([SimpleSel.TagSel("p")]) }] }
+        const hover: ComplexSel = { head: cmpOf([SimpleSel.ClassSel("btn"), SimpleSel.PseudoClass("hover", not)]), links: [] }
+        const notSel: ComplexSel = { head: cmpOf([SimpleSel.TagSel("li"), SimpleSel.PseudoClass("not", ".x")]), links: [] }
+        const attr: ComplexSel = { head: cmpOf([SimpleSel.TagSel("input"), SimpleSel.AttrSel("type=\"submit\"")]), links: [] }
+        const before: ComplexSel = { head: cmpOf([SimpleSel.ClassSel("card"), SimpleSel.PseudoElement("before")]), links: [] }
+        const scoped: StyleRule[] = [
+            rule([descend, child], [dcl("margin", txt("0"))]),
+            rule([sib], [dcl("width", [CssPart.CssText("calc("), CssPart.CellVar(count), CssPart.CssText(" * 1px)")])]),
+            rule([hover, notSel, attr, before], [dcl("color", txt("red"))]),
+        ]
+        return { charsets: ["UTF-8"], imports: [{ url: "theme.css", conditions: "" }, { url: "print.css", conditions: "print" }],
+                 reset: true, tokens: tokens, global: [g], scopes: [{ component: "Card", rules: scoped }] }
+    }
+}

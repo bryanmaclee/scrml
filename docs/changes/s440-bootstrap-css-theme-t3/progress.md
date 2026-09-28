@@ -63,3 +63,34 @@ lower produce the Core css node from `<theme>` + §66 declarations + `#{}`.
   a non-string return → StageSeamError naming CSS. hybrid-stage-swap + hybrid-xfail 26/0.
 - types-gate --check: exit 0; no new diagnostic in emit-css.ts / pipeline-seam.ts / api.js (the one
   `codegen/index.ts` line it lists is the pre-existing `./emit-lift.js` TS7016).
+
+## 2026-09-28 — step 2: stylesheet Core + emitter + shim + css half
+- core.scrml (ADDITIVE ONLY — appended; no existing type/fn touched): SimpleSel, Combinator, Compound,
+  SelLink, ComplexSel, CssPart, CssDecl, StyleRule, TokenArm, TokenInit {Constant, OnVariant, ScriptWrites},
+  ThemeToken, CssImport, ScopeSheet, CssUnit. A root of its own (not a CoreProgram field).
+- css.scrml (NEW): CssUnit → CssStmt tree → text; footprint. css-ingest.scrml (NEW, throwaway shim):
+  impl#1 FileAST → CssUnit + `why`. ingest.scrml: 17 readers gained `export` (behaviour unchanged).
+- slice-m3: css-bundle.scrml, css.core.scrml (hand-built T3 Cores), css-substitute.js (the CSS-seam
+  substitute), encode.js (the schema-free encoder, now shared with substitute.js), css-oracle.js (the
+  Chromium css half), css.test.js (25), bench/css-oracle-both.js, css-oracle/conformance/*.json (17).
+- scripts/hybrid.ts: the css half (`gradeCss` / `cssExtraCases` / `gradeCssCores`), `CssHalf` in the
+  report, `cssPass/cssFail/cssUnobserved` in counts, a CSS section in the table; css fails are red.
+- DECISIONS (each cited in the code):
+  - no `<program>` → no reset (§65.3.4 opt-out lives on `<program>`; §65.8 order "emitted once").
+    First cut failed closed on it and blocked 249 cases (implicit-program files + module files).
+  - `@layer reset, global;` emitted whenever either layer is (§65.8 "a fixed @layer order, emitted
+    once") — impl#1 emits it only when BOTH are (spec-directed difference).
+  - §65.2.4 R1 floor: inside a scope every unconditional arm is :where()-flat (0,0,0), so a `*` rule
+    AFTER `.btn` would win by source order — violating "resolves below class/id/specific author rules".
+    Floor arms (`*`, `html`, `body`) are emitted first in their scope (a mixed-arm rule is split).
+    impl#1 does not do this (finding, R26).
+  - T3 OnVariant with no wildcard arm: one `:root[data-scrml-theme-<cell>="<V>"]` block per arm, no bare
+    `:root` default — the literal item-3 emission; before the §65.6 mount-time reflection sets the
+    attribute the token is undefined (the first-paint flash §65.6 already names as a follow-on).
+  - A component used N times contributes its rules once (first expansion).
+- impl#1 F18 (NEW): inside `${}`, the one-char string literal of a tilde compiles to
+  `"__scrml_tilde__"` (the §32 `~` lowering reaches into string literals) — silent miscompile; `" ~ "`
+  (with spaces) is untouched. Worked around with charCodeAt(0) == 126.
+- FIRST GRADE (`--swap CSS=… --footprint`): 1048/1048 classified; GRADED 565 (conformance 565/565 run,
+  299 runtime passes, 0 fail); NOT-YET 36; FRONT-END 447. CSS half: 17 css passes of 17 oracle cases.
+  Pure impl#1 ALSO passes all 17 oracles (bench/css-oracle-both.js).

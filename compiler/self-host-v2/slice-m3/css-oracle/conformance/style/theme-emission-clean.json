@@ -1,0 +1,35 @@
+{
+  "spec": "§65.3.2, §65.6, §25.7",
+  "rationale": "§65.3.2: tokens lower to `:root` custom properties and `color: @ink` reads `var(--ink)`; §65.6: switching `@mode` to `.Dark` reflects `data-scrml-theme-mode=\"Dark\"` on `:root`, the `.Dark` variant re-binds `ink`/`bg`, and the card flips with zero re-render.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(15, 23, 42)"
+        },
+        {
+          "sel": ".card",
+          "prop": "background-color",
+          "value": "rgb(255, 255, 255)"
+        }
+      ]
+    },
+    {
+      "click": "button",
+      "expect": [
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(248, 250, 252)"
+        },
+        {
+          "sel": ".card",
+          "prop": "background-color",
+          "value": "rgb(15, 23, 42)"
+        }
+      ]
+    }
+  ]
+}

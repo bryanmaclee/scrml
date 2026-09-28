@@ -28,6 +28,7 @@ import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadBundle, SELF_HOST_V2 } from "../slice-m1/harness.js";
+import { makeEncoder } from "./encode.js";
 
 export const M3_MODULES = [
   "core.scrml",
@@ -51,40 +52,8 @@ export function loadM3() {
 const { mods } = loadM3();
 const I = mods.ingest;
 
-/** Encode any JS value as the shim's IVal — schema-free (see header). */
-export function encode(v, path = new Set()) {
-  if (v === null || v === undefined) return I.ivNull();
-  if (typeof v === "string") return I.ivStr(v);
-  if (typeof v === "number") return I.ivNum(v);
-  if (typeof v === "boolean") return I.ivBool(v);
-  if (Array.isArray(v)) {
-    if (path.has(v)) return I.ivStr("<cycle>");
-    path.add(v);
-    const out = I.ivList(v.map((x) => encode(x, path)));
-    path.delete(v);
-    return out;
-  }
-  if (typeof v === "object") {
-    // A Map / Set / class instance is not plain AST data: it CARRIES (a non-empty string), so a
-    // mapped node holding one is reported as an unmapped key, never silently dropped.
-    if (v instanceof Map || v instanceof Set) return I.ivStr(`<${v.constructor.name}>`);
-    if (path.has(v)) return I.ivStr("<cycle>");
-    path.add(v);
-    const entries = [];
-    for (const k of Object.keys(v)) {
-      if (k === "span") continue;
-      entries.push(I.ivEntry(k, encode(v[k], path)));
-    }
-    path.delete(v);
-    return I.ivNode(I.mkNode(entries));
-  }
-  return I.ivStr(`<${typeof v}>`);
-}
-
-function encodeNode(obj) {
-  const v = encode(obj);
-  return v && v.variant === "VNode" ? v.data.obj : I.mkNode([]);
-}
+// The schema-free encoding (see header) — shared with css-substitute.js (encode.js).
+export const { encode, encodeNode } = makeEncoder(I);
 
 /** Run the ingest shim over the files CG receives. → { core, why: string[] } */
 export function ingestFiles(files) {
