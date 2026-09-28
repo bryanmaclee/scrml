@@ -66,6 +66,10 @@ let _variantFields: Map<string, string[]> | null = null;
 let _variantFieldCollisions: Set<string> | null = null;
 /** Names in `_variantFields` that came from an IMPORTED enum (not a local decl). */
 let _importedVariantNames: Set<string> | null = null;
+/** Local variants + ambient ParseError only — the error-envelope registry (see getErrorVariantFieldSchema). */
+let _localVariantFields: Map<string, string[]> | null = null;
+/** Enum (local name) → variant → payload field names; local decls + imported enums. */
+let _enumSchemas: Map<string, Map<string, string[] | null>> | null = null;
 
 /**
  * §41.13 — the fixed ParseError payload-variant schema. ParseError is imported
@@ -86,10 +90,26 @@ export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
   importedNames?: Set<string> | null,
+  enumSchemas?: Map<string, Map<string, string[] | null>> | null,
 ): void {
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
   _importedVariantNames = importedNames ?? null;
+  _enumSchemas = enumSchemas ?? null;
+  // The ERROR-ENVELOPE registry: file-local variants + the compiler-ambient
+  // ParseError schema, WITHOUT imported names (built before the seed below so
+  // an imported same-named variant can never shadow ParseError here).
+  _localVariantFields = null;
+  if (variantFields) {
+    _localVariantFields = new Map();
+    for (const [name, fields] of variantFields) {
+      if (importedNames && importedNames.has(name)) continue;
+      _localVariantFields.set(name, fields);
+    }
+    for (const [name, fields] of PARSE_ERROR_VARIANT_FIELDS) {
+      if (!_localVariantFields.has(name)) _localVariantFields.set(name, [...fields]);
+    }
+  }
   // Seed the ParseError schema for parseVariant binding resolution. Only fill
   // in variants the file does NOT already declare — a file-local enum of the
   // same name always wins (and a genuine cross-enum collision keeps the entry,
@@ -99,6 +119,35 @@ export function setVariantFieldsForFile(
       if (!_variantFields.has(name)) _variantFields.set(name, [...fields]);
     }
   }
+}
+
+/**
+ * Error-envelope field schema for a variant NAME, for the consumers whose
+ * subject is a failable result / `!{}` handler / `fail` payload and whose error
+ * enum TS did not resolve: file-local enums + the compiler-ambient ParseError
+ * schema (§41.13), never an imported enum's same-named variant. The error type
+ * of a failable call is its DECLARED error enum (or an ambient one — ParseError,
+ * the CPS `NetworkError`/`ServerError`, which have no field schema and bind the
+ * whole `.data`), so a by-name hit on an unrelated imported enum is always
+ * wrong here (S438 review F1). This is exactly the pre-F11 lookup.
+ */
+export function getErrorVariantFieldSchema(variantName: string): string[] | null {
+  if (!_localVariantFields) return null;
+  if (_variantFieldCollisions && _variantFieldCollisions.has(variantName)
+      && !(_importedVariantNames?.has(variantName) ?? false)) return null;
+  return _localVariantFields.get(variantName) ?? null;
+}
+
+/**
+ * The payload field schema of `variantName` in the enum a `fail` names
+ * (`fail E::V(args)` — `E` is explicit, so no by-name guess is needed): a
+ * file-local enum, or an imported one by its LOCAL name. `undefined` when the
+ * enum is not known to this file (caller falls back to the error registry).
+ */
+export function getEnumVariantFieldSchema(enumName: string, variantName: string): string[] | null | undefined {
+  const e = _enumSchemas?.get(enumName);
+  if (!e || !e.has(variantName)) return undefined;
+  return e.get(variantName) ?? null;
 }
 
 /**
@@ -2571,7 +2620,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // success value is bare, so the `::Ok` arm can only be recognized via the
   // `__scrml_error`-sentinel tag).
   const subjectVariants = getMatchSubjectVariantFields(node);
-  const failableMatch = isFailableOkMatch(arms, subjectVariants);
+  const failableMatch = isFailableOkMatch(arms, subjectVariants, isMatchSubjectFailable(node));
   const needsTagNormalization = failableMatch || hasPayloadBindingOrTaggedVariant(arms, subjectVariants);
   const tagVar = needsTagNormalization ? genVar("tag") : tmpVar;
 
@@ -2595,7 +2644,7 @@ export function emitMatchExpr(node: any, opts?: any): string {
     // §19.7.3 — the failable-match `::Ok(v)` arm binds `v` to the whole bare
     // success value (not `tmpVar.data.field`).
     const bindingPrelude = arm.kind === "variant"
-      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants)
+      ? emitVariantBindingPrelude(arm, tmpVar, failableMatch && arm.test === "Ok", subjectVariants, failableMatch)
       : "";
 
     // Structured body: emit each statement via emitLogicNode (handles lift-expr, etc.)
@@ -2966,6 +3015,11 @@ export function hasPayloadBindingOrTaggedVariant(
  * (g-impl1-match-miscompiles-hit-by-the-bootstrap F11/F16).
  */
 export type SubjectVariantFields = Map<string, string[] | null>;
+
+/** §19.7.1 — TS stamped this match's subject as a failable-call result union. */
+export function isMatchSubjectFailable(node: any): boolean {
+  return node?.__matchSubjectFailable === true;
+}
 export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | null {
   const list = node?.__matchSubjectVariants;
   if (!Array.isArray(list) || list.length === 0) return null;
@@ -2990,10 +3044,20 @@ export function getMatchSubjectVariantFields(node: any): SubjectVariantFields | 
  * (it lands in `_variantFields`), so this predicate defers to the regular
  * tagged-object path in that (pathological) collision.
  */
-export function isFailableOkMatch(arms: MatchArm[], subject?: SubjectVariantFields | null): boolean {
-  // A subject TS resolved to an enum is not a failable result (a failable-call
-  // subject never resolves — type-system.ts resolveFailableCallResultType).
-  if (subject) return false;
+export function isFailableOkMatch(
+  arms: MatchArm[],
+  subject?: SubjectVariantFields | null,
+  subjectIsFailable?: boolean,
+): boolean {
+  // TS resolved the subject as a failable-call result (§19.7.1 synthetic
+  // `::Ok | <error variants>` union) — failable by construction.
+  if (subjectIsFailable) return true;
+  // A subject TS resolved to an enum that DECLARES `Ok` binds that enum's `Ok`
+  // (a payload `Res.Ok(v)`, or a unit `Status.Ok` — which the failable path
+  // matched for EVERY value, S438 review). A resolved enum WITHOUT `Ok` keeps
+  // the pre-F11 behaviour below (an ill-typed `::Ok` arm over it is not ours
+  // to reinterpret here — S438 review F3).
+  if (subject && subject.has("Ok")) return false;
   // Only a FILE-LOCAL payload `Ok` claims the name. An imported enum's `Ok`
   // (now in `_variantFields` too — F11) must not flip every unresolved
   // `::Ok` match in the importing file off the failable path.
@@ -3028,6 +3092,7 @@ export function emitVariantBindingPrelude(
   tmpVar: string,
   failableOk?: boolean,
   subject?: SubjectVariantFields | null,
+  errorContext?: boolean,
 ): string {
   if (!arm.binding) return "";
   const bindings = parseBindingList(arm.binding);
@@ -3051,11 +3116,16 @@ export function emitVariantBindingPrelude(
   // The subject's own enum is exact (F11 — covers imported enums and a variant
   // name two enums share); the by-name registry is the fallback, where a name
   // declared by two differently-shaped enums stays ambiguous.
+  // In an error context (a failable-result match, TS did not resolve the error
+  // enum) the fallback is the ERROR registry — local + ambient ParseError, never
+  // an unrelated imported enum's same-named variant (S438 review F1).
   const fromSubject = subject != null && subject.has(variantName);
   const fieldSchema = fromSubject
     ? (subject!.get(variantName) ?? null)
-    : (_variantFields?.get(variantName) ?? null);
-  const ambiguous = fromSubject ? false : (_variantFieldCollisions?.has(variantName) ?? false);
+    : errorContext
+      ? getErrorVariantFieldSchema(variantName)
+      : (_variantFields?.get(variantName) ?? null);
+  const ambiguous = fromSubject || errorContext ? false : (_variantFieldCollisions?.has(variantName) ?? false);
 
   const statements: string[] = [];
   for (let i = 0; i < bindings.length; i++) {

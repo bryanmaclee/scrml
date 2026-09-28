@@ -12489,6 +12489,11 @@ function annotateNodes(
           if (errorEnumType && errorEnumType.kind === "enum") {
             const enumType = errorEnumType as EnumType;
             const allVariants = (enumType.variants ?? []).map((v: VariantDef) => v.name);
+            // §19.4.3 — stamp the callee's DECLARED error enum schema so codegen's
+            // `!{}` arm binding reads THAT enum's fields, never a by-name hit on
+            // an imported same-named variant (S438 review F1).
+            const errorVariants = matchSubjectVariantsOf(enumType);
+            if (errorVariants) (n as { __errorVariants?: MatchSubjectVariant[] }).__errorVariants = errorVariants;
 
             // Step 5: analyze the arms — detect wildcard or collect handled variants.
             // arm.pattern is a plain string: "::Declined", "_", or "else" (§19, ast-builder).
@@ -15277,6 +15282,35 @@ function inferBareVariantsInExpr(
     // BOTH operands meet the binary-comparison shape AND the cell's
     // resolvedType is enum/union; non-matching shapes leave the flag unset
     // and the normal `contextType`-driven path runs unchanged.
+    // §14.10 — "a bare variant SHALL be resolved … from a type annotation on
+    // the LHS" (or the parameter / return / field type fixing the position).
+    // Stamp the RESOLVED enum's payload field list on the ident so codegen
+    // lowers a bare-dot CONSTRUCTOR `.V(args)` against that enum, not a
+    // by-variant-NAME lookup that a same-named variant of another enum (a local
+    // `Neg(y, z)` beside the annotated imported `Neg(x)`) can shadow (S438
+    // review F2). Non-enumerable, like the skip flag: codegen-only, never
+    // serialized. First resolution wins (a later pass may have no context).
+    if (contextType && !Object.prototype.hasOwnProperty.call(ident, "__variantFields")) {
+      const resolvedEnum: EnumType | null =
+        contextType.kind === "enum" ? contextType as EnumType
+        : (contextType.kind === "predicated" && (contextType as PredicatedType).baseType === "enum")
+          ? ((contextType as PredicatedType).enumBase as EnumType | undefined) ?? null
+        : contextType.kind === "union"
+          ? (() => {
+              const ds = ((contextType as UnionType).members.filter((m: ResolvedType) => m.kind === "enum") as EnumType[])
+                .filter((em) => (em.variants ?? []).some((v) => v.name === variantName));
+              return ds.length === 1 ? ds[0] : null;
+            })()
+        : null;
+      const v = resolvedEnum ? (resolvedEnum.variants ?? []).find((x) => x.name === variantName) : undefined;
+      if (v) {
+        Object.defineProperty(ident, "__variantFields", {
+          value: v.payload instanceof Map ? Array.from(v.payload.keys()) : null,
+          enumerable: false, configurable: true, writable: true,
+        });
+      }
+    }
+
     if ((ident as Record<string, unknown>)._bareVariantInferredAtBinaryExpr === true) return;
 
     // Determine the enum that should contain this variant from contextType.
@@ -18437,6 +18471,17 @@ function checkMatchDiagnostics(
       typeRegistry,
     );
     if (failableResult) {
+      // §19.7.1 — the failable-call subject IS resolved: to its synthetic
+      // `::Ok | <declared error variants>` union. Stamp it (and that it is a
+      // failable result) so codegen binds the error arms against the DECLARED
+      // error enum instead of a by-name lookup an imported same-named variant
+      // can shadow (S438 review F1: `::Malformed(r)` over ParseError read an
+      // imported `Wire.Malformed(code, detail)`'s `code`).
+      const failableVariants = matchSubjectVariantsOf(failableResult);
+      if (failableVariants) {
+        (node as { __matchSubjectVariants?: MatchSubjectVariant[] }).__matchSubjectVariants = failableVariants;
+        (node as { __matchSubjectFailable?: boolean }).__matchSubjectFailable = true;
+      }
       checkExhaustiveness(
         { arms: extracted.armPatterns } as unknown as ASTNodeLike,
         failableResult,

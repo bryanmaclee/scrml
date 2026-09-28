@@ -427,3 +427,205 @@ describe("F15 — a payload field named like a same-file function", () => {
     expect(mods.core.params(2)).toEqual(["p2"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// S438 review round (79fe125d was `finding`): the error-envelope, bare-dot
+// constructor, and unit-`Ok` consumers. Every case below is red on 79fe125d.
+// ---------------------------------------------------------------------------
+
+const WIRE = `\${
+    export type Wire:enum = { Malformed(code: int, detail: string), UnknownVariant(n: int), Good }
+}
+`;
+const PE_USE = `import { Wire } from "./core.scrml"
+\${
+    import { parseVariant, ParseError } from 'scrml:data'
+    type LR:enum = { Foo, Bar(n: int) }
+    function go(raw)! -> ParseError {
+        const v = parseVariant(raw, LR)
+        return v
+    }
+    export function viaMatch(raw) {
+        return match go(raw) {
+            ::Ok(v) :> "ok"
+            ::Malformed(r) :> "mal:" + r
+            ::UnknownVariant(t) :> "unk:" + t
+            _ :> "other"
+        }
+    }
+    export function viaHandler(raw) {
+        const v = go(raw) !{
+            | ::Malformed(reason) -> "mal:" + reason
+            | ::UnknownVariant(tag) -> "unk:" + tag
+            | ::InvalidPayload(field, reason) -> "inv:" + field
+            | ::MissingDiscriminator -> "miss"
+        }
+        return v
+    }
+    export function wire(x: Wire) {
+        return match x {
+            .Malformed(c, d) :> "wm:" + c + d
+            .UnknownVariant(n) :> "wu:" + n
+            .Good :> "good"
+        }
+    }
+}
+`;
+
+describe("review F1 — a failable ParseError subject beside an IMPORTED enum sharing its variant names", () => {
+  let mods, errors;
+  beforeAll(() => {
+    ({ mods, errors } = build("rf1", {
+      "bundle.scrml": ENTRY(`import { viaMatch } from "./use.scrml"`),
+      "core.scrml": WIRE,
+      "use.scrml": PE_USE,
+    }));
+  });
+  test("compiles clean", () => { expect(errors).toEqual([]); });
+  test("`match go(raw) { ::Malformed(r) … }` binds ParseError's `reason`, not Wire's `code`", () => {
+    expect(mods.use.viaMatch("{not json")).toStartWith("mal:JSON");
+    expect(mods.use.viaMatch('{"tag":"Zed"}')).toBe("unk:Zed");
+    expect(mods.use.viaMatch('{"tag":"Foo"}')).toBe("ok");
+  });
+  test("the `!{}` handler form binds the same ParseError fields", () => {
+    expect(mods.use.viaHandler("{not json")).toStartWith("mal:JSON");
+    expect(mods.use.viaHandler('{"tag":"Zed"}')).toBe("unk:Zed");
+  });
+  test("a match over the imported Wire still binds Wire's own fields", () => {
+    expect(mods.use.wire(mods.core.Wire.Malformed(1, "x"))).toBe("wm:1x");
+    expect(mods.use.wire(mods.core.Wire.UnknownVariant(4))).toBe("wu:4");
+  });
+});
+
+describe("review F1 — ambient CpsError `ServerError(detail)` in a `!{}` handler beside an imported `ServerError(code)`", () => {
+  test("`detail` is the whole error payload, so `detail.message` reads the server's message", async () => {
+    const { mods, errors } = build("rf1-cps", {
+      "bundle.scrml": ENTRY(`import { get } from "./use.scrml"`),
+      "core.scrml": `\${\n    export type Net:enum = { ServerError(code: int), NetworkError(code: int), Fine }\n}\n`,
+      "use.scrml": `import { Net } from "./core.scrml"
+\${
+    server function load(k) { return k * 2 }
+    export function get(k) {
+        const r = load(k) !{
+            | ::NetworkError(detail) -> "net:" + detail.message
+            | ::ServerError(detail) -> "srv:" + detail.message
+        }
+        return r
+    }
+}
+`,
+    });
+    expect(errors).toEqual([]);
+    const savedFetch = globalThis.fetch;
+    const hadDocument = "document" in globalThis;
+    const savedDocument = globalThis.document;
+    globalThis.fetch = async () => new Response(
+      JSON.stringify({ __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: "boom", fn: "load" } }),
+      { status: 500, headers: { "content-type": "application/json" } },
+    );
+    if (!hadDocument) globalThis.document = { cookie: "", querySelector: () => null, getElementById: () => null, addEventListener: () => {} };
+    try {
+      expect(await mods.use.get(1)).toBe("srv:boom");
+    } finally {
+      globalThis.fetch = savedFetch;
+      if (!hadDocument) delete globalThis.document; else globalThis.document = savedDocument;
+    }
+  });
+});
+
+describe("review F2 — a bare-dot constructor lowers against its POSITION's enum, not a same-named local variant", () => {
+  const USE = (body) => `import { Expr } from "./core.scrml"
+\${
+    type Mine:enum = { Neg(y: int, z: int), Other }
+${body}
+    export fn mine(k: int) {
+        const m: Mine = .Neg(k, 9)
+        return m
+    }
+}
+`;
+  const CORE_NEG = `\${\n    export type Expr:enum = { Lit(n: int), Neg(x: int) }\n}\n`;
+  const cases = {
+    "const annotation": `    export fn t(k: int) {\n        const e: Expr = .Neg(k)\n        return e\n    }`,
+    "let annotation": `    export function t(k) {\n        let e: Expr = .Neg(k)\n        return e\n    }`,
+    "declared return type": `    export fn t(k: int) -> Expr { return .Neg(k) }`,
+  };
+  for (const [label, body] of Object.entries(cases)) {
+    test(label, () => {
+      const { mods, errors } = build("rf2-" + label.replace(/\s+/g, "-"), {
+        "bundle.scrml": ENTRY(`import { t } from "./use.scrml"`),
+        "core.scrml": CORE_NEG,
+        "use.scrml": USE(body),
+      });
+      expect(errors).toEqual([]);
+      expect(mods.use.t(3)).toEqual({ variant: "Neg", data: { x: 3 } });
+      // The local enum's own construction is unchanged.
+      expect(mods.use.mine(4)).toEqual({ variant: "Neg", data: { y: 4, z: 9 } });
+    });
+  }
+  test("server function with a declared return type (emitted server ctor)", () => {
+    const { errors } = build("rf2-server", {
+      "bundle.scrml": ENTRY(`import { f } from "./use.scrml"`),
+      "core.scrml": CORE_NEG,
+      "use.scrml": `import { Expr } from "./core.scrml"
+\${
+    type Mine:enum = { Neg(y: int, z: int), Other }
+    server function mk(k) -> Expr { return .Neg(k) }
+    export function f(k) { return mk(k) }
+}
+`,
+    });
+    expect(errors).toEqual([]);
+    const findServer = (d) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) { const r = findServer(p); if (r) return r; }
+        else if (e.name === "use.server.js") return p;
+      }
+      return null;
+    };
+    const srv = readFileSync(findServer(join(TMP, "rf2-server", "out")), "utf8");
+    expect(srv).toMatch(/variant:\s*"Neg",\s*data:\s*\{\s*x:\s*k\s*\}/);
+  });
+});
+
+describe("review F3 + the unit-`Ok` enum — which `::Ok` arms mean the failable success case", () => {
+  let mods, errors;
+  beforeAll(() => {
+    ({ mods, errors } = build("rf3", {
+      "bundle.scrml": ENTRY(`import { viaParam } from "./use.scrml"`),
+      "use.scrml": `\${
+    type DivErr:enum = { DivByZero, Neg(n: int) }
+    type Status:enum = { Ok, Failed, Pending }
+    function safeDiv(a, b)! DivErr {
+        if (b == 0) fail DivErr.DivByZero
+        if (b < 0) fail DivErr.Neg(b)
+        return a / b
+    }
+    function show(r: DivErr) {
+        return match r {
+            ::Ok(v) :> "ok:" + v
+            ::DivByZero :> "zero"
+            ::Neg(n) :> "neg:" + n
+        }
+    }
+    export function viaParam(b) { return show(safeDiv(10, b)) }
+    export fn status(s: Status) -> string {
+        return match s { .Ok :> "ok"  .Failed :> "failed"  .Pending :> "pending" }
+    }
+}
+`,
+    }));
+  });
+  test("compiles clean", () => { expect(errors).toEqual([]); });
+  test("a subject typed by an error enum WITHOUT `Ok` keeps the pre-F11 failable lowering (not undefined)", () => {
+    expect(mods.use.viaParam(2)).toBe("ok:5");
+    expect(mods.use.viaParam(0)).toBe("zero");
+    expect(mods.use.viaParam(-2)).toBe("neg:-2");
+  });
+  test("a unit enum that DECLARES `Ok` is an enum match (main returned \"ok\" for every value)", () => {
+    expect(mods.use.status("Ok")).toBe("ok");
+    expect(mods.use.status("Failed")).toBe("failed");
+    expect(mods.use.status("Pending")).toBe("pending");
+  });
+});

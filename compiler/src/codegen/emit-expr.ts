@@ -3415,8 +3415,14 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       const { getVariantFieldSchemaFromRewriter } = require("./rewrite.ts") as {
         getVariantFieldSchemaFromRewriter: (variantName: string) => string[] | null;
       };
-      const fieldNames = getVariantFieldSchema(variantName)
-        ?? getVariantFieldSchemaFromRewriter(variantName);
+      // §14.10 / S438 review F2 — TS resolved this bare variant against its
+      // position's type (annotation, param, return, field) and stamped THAT
+      // enum's field list; it wins over the by-name registries, where a
+      // same-named variant of another enum can shadow it.
+      const stamped = (ident as unknown as { __variantFields?: unknown }).__variantFields;
+      const fieldNames = Array.isArray(stamped)
+        ? (stamped as string[])
+        : (getVariantFieldSchema(variantName) ?? getVariantFieldSchemaFromRewriter(variantName));
       if (fieldNames !== null) {
         // Emit `{ variant: "X", data: { field0: arg0, field1: arg1, ... } }`.
         // Truncate to min(args.length, fieldNames.length) so an over-long

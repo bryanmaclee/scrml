@@ -2006,10 +2006,10 @@ export function generateClientJs(ctx: CompileContext): string {
   // escape-hatch expressions, and other legacy emission surfaces lower to
   // the canonical `{ variant, data }` tagged-object literal (matches the
   // structured AST path in emit-expr.ts:emitCall).
-  const { fields, collisions, imported } = clientStage(ctx, "build-variant-fields-registry", () =>
+  const { fields, collisions, imported, enumSchemas } = clientStage(ctx, "build-variant-fields-registry", () =>
     buildVariantFieldsRegistry(fileAST)
   );
-  setVariantFieldsForFile(fields, collisions, imported);
+  setVariantFieldsForFile(fields, collisions, imported, enumSchemas);
   setVariantFieldsForRewriter(fields, collisions);
 
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — establish
@@ -4206,10 +4206,15 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   collisions: Set<string>;
   /** Names in `fields` contributed by an IMPORTED enum (no local declaration). */
   imported: Set<string>;
+  /** Enum (local name) → variant → payload field names (null = unit), local + imported. */
+  enumSchemas: Map<string, Map<string, string[] | null>>;
 } {
   const fields = new Map<string, string[]>();
   const collisions = new Set<string>();
   const imported = new Set<string>();
+  const enumSchemas = new Map<string, Map<string, string[] | null>>();
+  const schemaOf = (info: VariantInfo[]): Map<string, string[] | null> =>
+    new Map(info.map((v) => [v.name, v.fieldNames] as [string, string[] | null]));
   const typeDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
 
   // Every variant name a LOCAL enum declares (unit or payload) — local wins.
@@ -4217,6 +4222,7 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   for (const decl of typeDecls) {
     if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;
     const info = getAllVariantInfo(decl);
+    if (typeof decl.name === "string" && decl.name) enumSchemas.set(decl.name, schemaOf(info));
     for (const v of info) {
       localVariantNames.add(v.name);
       if (v.fieldNames === null) continue; // unit variants have no bindings
@@ -4237,10 +4243,11 @@ export function buildVariantFieldsRegistry(fileAST: any): {
   // instead (getMatchSubjectVariantFields), so a same-named local variant cannot
   // mis-bind it.
   const seenEnums = new Set<any>();
-  for (const { enumType } of getImportedEnumTypes(fileAST)) {
+  for (const { localName, enumType } of getImportedEnumTypes(fileAST)) {
+    const info = getAllVariantInfo({ variants: enumType.variants } as unknown as TypeDecl);
+    if (!enumSchemas.has(localName)) enumSchemas.set(localName, schemaOf(info));
     if (seenEnums.has(enumType)) continue;
     seenEnums.add(enumType);
-    const info = getAllVariantInfo({ variants: enumType.variants } as unknown as TypeDecl);
     for (const v of info) {
       if (localVariantNames.has(v.name)) continue;
       if (v.fieldNames === null) continue; // unit variants have no bindings
@@ -4249,7 +4256,7 @@ export function buildVariantFieldsRegistry(fileAST: any): {
       else if (!sameFieldList(prev, v.fieldNames)) collisions.add(v.name);
     }
   }
-  return { fields, collisions, imported };
+  return { fields, collisions, imported, enumSchemas };
 }
 
 // ---------------------------------------------------------------------------
