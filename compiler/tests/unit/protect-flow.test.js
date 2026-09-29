@@ -38,7 +38,7 @@ describe("analyzeProtectFlow", () => {
   });
 
   test("a row that never reaches a sink is NOT recorded as stripped", () => {
-    const r = analyzeProtectFlow(mod("const ok = Bun.password.verifySync(pw, u.passwordHash); return { ok };"));
+    const r = analyzeProtectFlow(mod("const ok = await verifyPassword(pw, u.passwordHash); return { ok };", 'import { verifyPassword } from "./_scrml/auth.js";'));
     expect(r.leaks).toEqual([]);
     expect(r.tagSites[0].stripped).toBe(false);
   });
@@ -107,7 +107,7 @@ describe("analyzeProtectFlow", () => {
 
   test("F6: call-site sensitive — a helper used on the hash does not poison a clean call", () => {
     const helper = "function norm(s) { return s.trim(); }";
-    expect(leakCols(mod("const ok = Bun.password.verifySync(pw, norm(u.passwordHash)); return norm(u.name);", helper))).toEqual([]);
+    expect(leakCols(mod("const ok = await verifyPassword(pw, norm(u.passwordHash)); return norm(u.name);", 'import { verifyPassword } from "./_scrml/auth.js";' + helper))).toEqual([]);
     expect(leakCols(mod("const a = norm(u.name); return norm(u.passwordHash);", helper))).toEqual(["passwordHash"]);
   });
 
@@ -154,7 +154,43 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod("return { toJSON() { return u.passwordHash; } };"))).toEqual(["passwordHash"]);
     // A clean receiver's method with a protected ARGUMENT is still derived
     // unless the method embeds its argument.
-    expect(leakCols(mod("return Bun.password.verifySync(pw, u.passwordHash);"))).toEqual([]);
+    expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);", 'import { verifyPassword } from "./_scrml/auth.js";'))).toEqual([]);
+    // N6: `Bun.*` is not on the allowlist (unreachable from scrml source; `Bun.hash` is not one-way).
+    expect(leakCols(mod("return Bun.hash(u.passwordHash);"))).toEqual(["passwordHash"]);
+  });
+
+  test("round 3 N1: a protected value used as an object KEY is carried into the container", () => {
+    expect(leakCols(mod("return { [u.passwordHash]: 1 };"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("const o = {}; o[u.passwordHash] = 1; return o;"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return Object.keys({ [u.passwordHash]: 1 });"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("const m = new Map(); m.set(u.passwordHash, 1); return Object.fromEntries(m);"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return [u].reduce((acc, r) => { acc[r.passwordHash] = r.id; return acc; }, {});"))).toEqual(["passwordHash"]);
+    // A non-protected key is fine.
+    expect(leakCols(mod("return [u].reduce((acc, r) => { acc[r.name] = r.id; return acc; }, {});"))).toEqual([]);
+  });
+
+  test("round 3 N2: a lookup KEYED by a protected value is protected", () => {
+    expect(leakCols(mod('const labels = { a: "x" }; return labels[u.passwordHash];'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("const h = u.passwordHash; const t = {}; const out = []; for (let i = 0; i < h.length; i++) { out.push(t[h[i]]); } return out;"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("const h = u.passwordHash; const m = new Map(); const out = []; for (let i = 0; i < h.length; i++) { out.push(m.get(h[i])); } return out;"))).toEqual(["passwordHash"]);
+  });
+
+  test("round 3: allowlisted method NAMES on an object carrying protected data are not trusted", () => {
+    expect(leakCols(mod("const o = { digest: () => u.passwordHash }; return o.digest();"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("const o = { includes: (x) => u.passwordHash }; return o.includes(1);"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("class Box { constructor(v) { this.v = v; } test() { return this.v; } } return new Box(u.passwordHash).test();"))).toEqual(["passwordHash"]);
+    // getTime is the identity on a number: removed from the derived list (N3 bug).
+    expect(leakCols(mod("return new Date(u.passwordHash).getTime();"))).toEqual(["passwordHash"]);
+  });
+
+  test("round 3 N5: Object.keys(row) is column names; scrml:data pick/omit are modelled", () => {
+    const DATA = 'import { pick, omit } from "./_scrml/data.js";';
+    expect(leakCols(mod("return Object.keys(u);"))).toEqual([]);
+    expect(leakCols(mod('return pick(u, ["id", "name"]);', DATA))).toEqual([]);
+    expect(leakCols(mod('return pick(u, ["id", "passwordHash"]);', DATA))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return omit(u, ["passwordHash"]);', DATA))).toEqual([]);
+    expect(leakCols(mod('return omit(u, ["id"]);', DATA))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return pick(u, keys);", DATA))).toEqual(["passwordHash"]); // non-literal keys: fail closed
   });
 
   test("a dynamic key reads any column; a numeric index is still a row", () => {

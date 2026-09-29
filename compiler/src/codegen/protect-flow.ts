@@ -201,6 +201,13 @@ function protKey(t: Taint): string {
 
 const CLEAN_KEY = protKey(clean());
 
+/** A value used as a KEY: only what it carries as data (its naked labels) matters. */
+function keyOnly(t: Taint): Taint {
+  const r = clean();
+  mergeMap(r.scalar, naked(t));
+  return r;
+}
+
 /** Fail-closed result: everything any argument carried comes out naked. */
 function tainted(args: Taint[], site: string): Taint {
   const r = clean();
@@ -231,7 +238,6 @@ const IDENTITY_BUILTINS = new Set([
  */
 const DERIVER_CALLS = new Set([
   "Boolean", "isNaN", "isFinite", "Number.isNaN", "Number.isFinite", "Number.isInteger", "Array.isArray",
-  "Bun.password.hash", "Bun.password.verify", "Bun.password.hashSync", "Bun.password.verifySync", "Bun.hash",
   "crypto.subtle.digest", "crypto.timingSafeEqual",
   "console.log", "console.error", "console.warn", "console.info", "console.debug", "console.trace",
 ]);
@@ -261,7 +267,7 @@ const ELEMENT_METHODS = new Set(["at", "pop", "shift", "get", "charAt"]);
 const DERIVED_METHODS = new Set([
   "includes", "indexOf", "lastIndexOf", "startsWith", "endsWith", "localeCompare",
   "search", "test", "has", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable",
-  "getTime", "delete", "forEach", "digest", "every", "some", "findIndex", "findLastIndex",
+  "delete", "forEach", "every", "some", "findIndex", "findLastIndex",
 ]);
 /**
  * Methods that execute SQL. The result is a new row read from the database — a
@@ -661,7 +667,9 @@ class FlowAnalysis {
     }
     // Monotone fixpoint over a finite lattice — it terminates; the cap is a guard.
     let converged = false;
+    let passes = 0;
     for (let pass = 0; pass < MAX_PASSES && !this.saturated; pass++) {
+      passes = pass + 1;
       this.changed = false;
       this.sinks = [];
       for (const mod of this.mods) {
@@ -673,7 +681,7 @@ class FlowAnalysis {
     }
     if (!converged) this.saturated = true;
     if (process.env.SCRML_PROTECT_FLOW_DEBUG) {
-      console.error(`[protect-flow] modules=${this.mods.length} instances=${this.instanceList.length} closures=${this.closures.size} converged=${converged} ms=${Math.round(performance.now() - this.t0)}`);
+      console.error(`[protect-flow] modules=${this.mods.length} instances=${this.instanceList.length} closures=${this.closures.size} converged=${converged} passes=${passes} ms=${Math.round(performance.now() - this.t0)}`);
     }
     const leaks: ProtectFlowLeak[] = [];
     const seen = new Set<string>();
@@ -793,7 +801,19 @@ class FlowAnalysis {
         for (const s of st.specifiers ?? []) {
           const local = s.local?.name ?? s.local?.value;
           const exported = s.exported?.name ?? s.exported?.value;
-          if (local && exported && !st.source) mod.exports.set(exported, local);
+          if (!local || !exported) continue;
+          if (!st.source) {
+            mod.exports.set(exported, local);
+          } else {
+            // `export { nm } from "./b.server.js"` — a re-export: bind a hidden
+            // module-scope name to the source module's export and export that.
+            const source = String(st.source.value);
+            const targetPath = this.resolveImport(mod.filePath, source);
+            const alias = `\u0000reexport:${exported}`;
+            mod.scope.names.add(alias);
+            mod.imports.set(alias, { target: targetPath ? byPath.get(targetPath) ?? null : null, source, imported: local });
+            mod.exports.set(exported, alias);
+          }
         }
       } else if (st.type === "ExportDefaultDeclaration" && st.declaration?.id?.name) {
         mod.exports.set("default", st.declaration.id.name);
@@ -1170,11 +1190,13 @@ class FlowAnalysis {
       case "AssignmentPattern":
         this.bindPattern(p.left, join(t, this.evalExpr(p.right, scope, fn)), scope, fn);
         return;
-      case "MemberExpression":
+      case "MemberExpression": {
         this.evalExpr(p.object, scope, fn);
-        if (p.computed) this.evalExpr(p.property, scope, fn);
-        this.mutateRoot(p.object, containerOf(t), scope);
+        // `o[h] = v` writes the KEY `h` into `o` as well as the value (N1).
+        const k = p.computed ? keyOnly(this.evalExpr(p.property, scope, fn)) : clean();
+        this.mutateRoot(p.object, containerOf(join(t, k)), scope);
         return;
+      }
     }
   }
 
@@ -1267,7 +1289,9 @@ class FlowAnalysis {
             r = join(r, containerOf(this.evalExpr(pr.argument, scope, fn)));
             continue;
           }
-          if (pr.computed) this.evalExpr(pr.key, scope, fn);
+          // A protected value used as a KEY is part of the container too —
+          // `{ [h]: 1 }` serializes as `{"SECRET":1}` (S441 round 3, N1).
+          if (pr.computed) r = join(r, containerOf(keyOnly(this.evalExpr(pr.key, scope, fn))));
           const v = this.evalExpr(pr.value, scope, fn);
           r = join(r, containerOf(v));
           // A getter, or a `toJSON` method, is INVOKED by `JSON.stringify` at the
@@ -1338,14 +1362,19 @@ class FlowAnalysis {
         const o = this.evalExpr(node.object, scope, fn);
         let key: string | null;
         let dynamic = false;
+        let keyTaint = clean();
         if (node.computed) {
-          this.evalExpr(node.property, scope, fn);
+          keyTaint = this.evalExpr(node.property, scope, fn);
           key = staticKey(node.property);
           dynamic = key === null;
         } else {
           key = node.property.type === "Identifier" || node.property.type === "PrivateIdentifier" ? node.property.name : null;
         }
-        return this.memberRead(o, key, dynamic, node, fn);
+        const read = this.memberRead(o, key, dynamic, node, fn);
+        // A lookup KEYED by a protected value (`labels[u.passwordHash]`,
+        // `table[h[i]]`) selects by the secret — the result is protected (N2).
+        mergeMap(read.scalar, naked(keyTaint));
+        return read;
       }
       case "CallExpression":
       case "NewExpression":
@@ -1411,8 +1440,42 @@ class FlowAnalysis {
    */
   private hostCall(host: { source: string; imported: string }, args: Taint[], node: any, fn: Instance | null): Taint {
     if (isStdlibDeriver(host.source, host.imported)) return clean();
+    const pm = this.pickOmit(host, args, node, fn);
+    if (pm) return pm;
     if (args.every((a) => everything(a, "").size === 0)) return clean();
     return tainted(args, `${this.site(node, fn)} — \`${host.imported}\` from \`${host.source}\`, code the compiler cannot see into`);
+  }
+
+  /**
+   * `scrml:data` `pick(obj, keys)` / `omit(obj, keys)` with a LITERAL key list:
+   * they copy fields into a fresh object (no descriptor), so exactly the
+   * protected columns that survive the selection come out naked — and none
+   * does for `pick(u, ["id", "name"])`. A non-literal key list fails closed.
+   */
+  private pickOmit(host: { source: string; imported: string }, args: Taint[], node: any, fn: Instance | null): Taint | null {
+    if (!/(?:^scrml:|(?:^|\/)_scrml\/)data(?:\.js)?$/.test(host.source)) return null;
+    if (host.imported !== "pick" && host.imported !== "omit") return null;
+    const keysNode = node?.arguments?.[1];
+    if (!keysNode || keysNode.type !== "ArrayExpression") return null;
+    const keys: string[] = [];
+    for (const e of keysNode.elements) {
+      const k = staticKey(e);
+      if (k === null) return null;
+      keys.push(k);
+    }
+    const obj = args[0] ?? clean();
+    const r = clean();
+    const site = this.site(node, fn);
+    if (obj.row) {
+      for (const c of unrevealed(obj.row)) {
+        const survives = c === ALL_COLUMNS_LABEL ? true : host.imported === "pick" ? keys.includes(c) : !keys.includes(c);
+        if (survives) r.scalar.set(c, site);
+      }
+    }
+    mergeMap(r.scalar, obj.deep);
+    for (const a of args.slice(2)) mergeMap(r.scalar, everything(a, site));
+    r.deep = new Map(r.scalar);
+    return r;
   }
 
   /** A call to a global the analysis has no model for: same fail-closed rule. */
@@ -1531,7 +1594,8 @@ class FlowAnalysis {
       if (method !== null && CALLBACK_METHODS.has(method)) return this.callbackMethod(method, recv, args, node, fn);
 
       if (method !== null && MUTATING_METHODS.has(method)) {
-        const written = method === "set" ? (args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
+        // `m.set(k, v)` stores the KEY too (N1).
+        const written = method === "set" ? join(keyOnly(args[0] ?? clean()), args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
         this.mutateRoot(m.object, containerOf(written), scope);
         return method === "push" || method === "unshift" ? clean() : join(recv, containerOf(written));
       }
@@ -1541,8 +1605,17 @@ class FlowAnalysis {
       let r = clean();
       if (this.hasCallable(viaField)) r = join(r, this.applyFns(viaField.fns, args, undefined, node, fn));
 
-      if (method !== null && DERIVED_METHODS.has(method)) return r;
-      if (method !== null && ELEMENT_METHODS.has(method)) return join(r, elemOf(recv));
+      // A predicate / position method is DERIVED only on a string-like receiver.
+      // An OBJECT receiver carrying protected data (`new Box(h).test()`, a
+      // user class whose `digest()` returns its field) is a method the compiler
+      // has no model for — fail closed (round-2 review A4/A5).
+      if (method !== null && DERIVED_METHODS.has(method) && recv.deep.size === 0 && recv.row === null) return r;
+      if (method !== null && ELEMENT_METHODS.has(method)) {
+        // `m.get(h[i])` — an element selected BY a protected key is protected (N2).
+        const el = elemOf(recv);
+        for (const a of args) mergeMap(el.scalar, naked(a));
+        return join(r, el);
+      }
       if (method === "join" || method === "toString" || method === "toLocaleString") {
         // Serializes the receiver's elements (and a `join` separator).
         const s = clean();
@@ -1606,6 +1679,14 @@ class FlowAnalysis {
       // "[object Object]" and carries nothing.
       const r = clean();
       for (const a of args) mergeMap(r.scalar, naked(a));
+      return r;
+    }
+    if (path === "Object.keys") {
+      // A row's keys are its column NAMES, not its values. Only a container that
+      // carries protected data OUTSIDE a row (possibly as a key) keeps it.
+      const r = clean();
+      for (const a of args) mergeMap(r.scalar, a.deep);
+      r.deep = new Map(r.scalar);
       return r;
     }
     if (IDENTITY_BUILTINS.has(path)) {
