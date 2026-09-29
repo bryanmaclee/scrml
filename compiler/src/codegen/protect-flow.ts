@@ -1372,8 +1372,15 @@ class FlowAnalysis {
         }
         const read = this.memberRead(o, key, dynamic, node, fn);
         // A lookup KEYED by a protected value (`labels[u.passwordHash]`,
-        // `table[h[i]]`) selects by the secret — the result is protected (N2).
-        mergeMap(read.scalar, naked(keyTaint));
+        // `table[h[i]]`) selects by the secret — the result is protected (N2),
+        // ALL THE WAY DOWN (round 4, F1): the selected value may be an object,
+        // and `L[c].v`, `L[c].test()` and `Object.keys(L[c])` read through it.
+        // So the key's labels go into BOTH parts — as the value itself and as
+        // what it contains — never the scalar part alone (a static field read
+        // off a scalar is treated as a primitive property and drops it).
+        const sel = naked(keyTaint);
+        mergeMap(read.scalar, sel);
+        mergeMap(read.deep, sel);
         return read;
       }
       case "CallExpression":
@@ -1613,7 +1620,8 @@ class FlowAnalysis {
       if (method !== null && ELEMENT_METHODS.has(method)) {
         // `m.get(h[i])` — an element selected BY a protected key is protected (N2).
         const el = elemOf(recv);
-        for (const a of args) mergeMap(el.scalar, naked(a));
+        // …and protected all the way down (round 4, F1): `M.get(c).v`.
+        for (const a of args) { mergeMap(el.scalar, naked(a)); mergeMap(el.deep, naked(a)); }
         return join(r, el);
       }
       if (method === "join" || method === "toString" || method === "toLocaleString") {

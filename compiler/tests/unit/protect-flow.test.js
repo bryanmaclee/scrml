@@ -175,6 +175,16 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod("const h = u.passwordHash; const m = new Map(); const out = []; for (let i = 0; i < h.length; i++) { out.push(m.get(h[i])); } return out;"))).toEqual(["passwordHash"]);
   });
 
+  test("round 4 F1: the value selected by a protected key is protected ALL THE WAY DOWN", () => {
+    const TBL = 'const A = "abc"; const L = {}; for (const c of A) { L[c] = { v: c, test: () => c, [c]: 1 }; }';
+    expect(leakCols(mod(TBL + ' return [...u.passwordHash].map((c) => L[c].v).join("");'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(TBL + ' return [...u.passwordHash].map((c) => L[c].test()).join("");'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(TBL + ' return [...u.passwordHash].map((c) => Object.keys(L[c])[0]).join("");'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('const M = new Map(); M.set("a", { v: "a" }); return [...u.passwordHash].map((c) => M.get(c).v).join("");'))).toEqual(["passwordHash"]);
+    // A lookup keyed by a NON-protected value stays clean.
+    expect(leakCols(mod('const L = { a: { v: 1 } }; return L[u.name].v;'))).toEqual([]);
+  });
+
   test("round 3: allowlisted method NAMES on an object carrying protected data are not trusted", () => {
     expect(leakCols(mod("const o = { digest: () => u.passwordHash }; return o.digest();"))).toEqual(["passwordHash"]);
     expect(leakCols(mod("const o = { includes: (x) => u.passwordHash }; return o.includes(1);"))).toEqual(["passwordHash"]);
