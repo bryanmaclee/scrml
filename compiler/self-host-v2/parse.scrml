@@ -1321,6 +1321,14 @@ ${
             return { typed: [da], attrs: [], mp: mBump(m) }
         }
         let name: string = nm.w
+        if (chAt(m, 0) == "(") {
+            // s442: a validator call in an opener (`length(>=5)`, `min(0)`, §6.4 /
+            // §66.4 rule 3) — skipped whole (balanced by the lexer) and reported.
+            const vt: TP = regionTP(m, LexStop.Balanced)
+            const vm: MP = backToMarkup(m, vt)
+            const d: MP = mDiag(vm, "E-BOOTSTRAP-UNSUPPORTED", validatorMessage(nm.w + "(…)"), start, vm.pos)
+            return { typed: [], attrs: [], mp: d }
+        }
         if (chAt(m, 0) == ":") {
             const sub: RWord = readName(mAdv(m, 1))
             name = nm.w + ":" + sub.w
@@ -1344,6 +1352,18 @@ ${
         if (exported || isLet) m = mDiag(m, "E-PARSE-ATTR", "`export` / `let` apply only to a typed attribute (`let " + name + ":Type=…`)", start, m.pos)
         const a: AAttr = { nid: m.nid, span: mkSpan(start, m.pos), name: name, value: v }
         return { typed: [], attrs: [a], mp: mBump(m) }
+    }
+
+    // s442: validators (§6.4, kickstarter §6.1's shared vocabulary) are outside
+    // the bootstrap — they imply the synthesized validity surface, and whether
+    // they reach a `renders` input as HTML attributes is ⚑ O25 (OPEN).
+    fn isValidatorWord(w: string) -> boolean {
+        return w == "req" || w == "length" || w == "pattern" || w == "min" || w == "max" || w == "gt" || w == "lt" ||
+               w == "gte" || w == "lte" || w == "eq" || w == "neq" || w == "oneOf" || w == "notIn"
+    }
+
+    fn validatorMessage(what: string) -> string {
+        return "the validator `" + what + "` is not in the bootstrap — validators imply the synthesized validity surface (§6.4), and whether they reach a `renders` input is ⚑ O25 (not ruled)"
     }
 
     // =========================================================================
@@ -1530,6 +1550,9 @@ ${
         }
         m = checkOpenerValue(m, o.own)
         for (const a of o.attrs) {
+            if (isValidatorWord(a.name)) {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", validatorMessage(a.name), a.span.start, a.span.end)
+            }
             if (a.name.indexOf(":") >= 0) {
                 m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "a declaration opener cannot carry `" + a.name + "` — `bind:` / `class:` / `style:` / `internal:` / `on…` are markup attributes; a declaration's markup is its `renders` (§66.2.3, §66.4)", a.span.start, a.span.end)
             }
