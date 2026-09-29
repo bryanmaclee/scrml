@@ -175,6 +175,34 @@ function isRowProducingQuery(sqlContent: string): boolean {
  * Reuses `extractSelectProjection` (the §14.8.7 alias-origin map). A `SELECT *`
  * / `table.*` star is expanded against the protected table's column set.
  */
+/**
+ * Fold a SQLite identifier for comparison: drop a schema qualifier
+ * (`main.users`), strip one layer of identifier quoting (`"x"`, `` `x` ``,
+ * `[x]`), and lower-case it. SQLite compares identifiers case-insensitively
+ * whether or not they are quoted.
+ */
+export function foldIdent(name: string): string {
+  // Last dot-separated segment outside quotes = the identifier itself.
+  let s = name.trim();
+  const m = /(?:^|\.)("(?:[^"]|"")*"|`[^`]*`|\[[^\]]*\]|[^."`\[\]]+)$/.exec(s);
+  if (m) s = m[1];
+  const q = /^"((?:[^"]|"")*)"$/.exec(s) ?? /^`([^`]*)`$/.exec(s) ?? /^\[([^\]]*)\]$/.exec(s);
+  if (q) s = q[1].replace(/""/g, '"');
+  return s.toLowerCase();
+}
+
+/** table (folded) -> Map<column (folded) -> declared column name>. */
+function protectedIndexCI(ctx: ProtectContext): Map<string, Map<string, string>> {
+  const idx = new Map<string, Map<string, string>>();
+  for (const [t, cols] of ctx.protectedByTable) {
+    const key = foldIdent(t);
+    const m = idx.get(key) ?? new Map<string, string>();
+    for (const c of cols) m.set(foldIdent(c), c);
+    idx.set(key, m);
+  }
+  return idx;
+}
+
 export function resolveProtectedOutputColumns(
   sqlContent: string,
   ctx: ProtectContext,
@@ -192,20 +220,29 @@ export function resolveProtectedOutputColumns(
   // strip every column wholesale at egress (OQ-3), never accept-unknown.
   if (!proj.resolvable) return { all: true };
 
+  // ⚑ S441 round 4 (F3) — SQLite identifiers are CASE-INSENSITIVE, quoted or
+  // not (`users`, `USERS`, `"Users"` and `main.users` name one table;
+  // `passwordHash` and `PASSWORDHASH` one column). This lookup was exact-case,
+  // so `SELECT * FROM USERS …` emitted NO tag at all — the whole-row runtime
+  // strip vanished and the route served the hash (measured, also on main).
+  // Origin matching is therefore case-folded; the OUTPUT name stays exactly as
+  // SQLite returns it (the key as written in the SELECT, or the declared name
+  // for a `*` expansion), because that is the key the row object carries.
+  const prot = protectedIndexCI(ctx);
   const out = new Set<string>();
   for (const col of proj.columns) {
     if (col.kind === "column" && col.table && col.column) {
-      const prot = ctx.protectedByTable.get(col.table);
-      if (prot && prot.has(col.column)) out.add(col.outputName);
+      const cols = prot.get(foldIdent(col.table));
+      if (cols && cols.has(foldIdent(col.column))) out.add(col.outputName);
     } else if (col.kind === "star") {
       // `SELECT *` (no table) expands against every FROM/JOIN table; `table.*`
       // expands against that one table. The output column name of a starred
       // column IS the source column name, so a protected source column appears
-      // under its own name in the result row (alias-safe by construction).
+      // under its own (declared) name in the result row.
       const tables = col.table ? [col.table] : proj.fromTables;
       for (const t of tables) {
-        const prot = ctx.protectedByTable.get(t);
-        if (prot) for (const c of prot) out.add(c);
+        const declared = prot.get(foldIdent(t));
+        if (declared) for (const c of declared.values()) out.add(c);
       }
     }
     // kind "opaque" (computed/expression column) carries no resolvable origin —

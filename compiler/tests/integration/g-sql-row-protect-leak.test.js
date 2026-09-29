@@ -127,6 +127,21 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
     expect(r && "cols" in r && r.cols).toEqual(["h"]);
   });
 
+  test("S441 round 4 F3: origin matching is CASE-INSENSITIVE, as SQLite identifiers are", () => {
+    const cols = (sql) => { const r = resolveProtectedOutputColumns(sql, usersProtect()); return r && "cols" in r ? r.cols : r; };
+    // Output names stay exactly as SQLite returns them (the key the row carries).
+    expect(cols("SELECT PASSWORDHASH FROM users")).toEqual(["PASSWORDHASH"]);
+    expect(cols("SELECT passwordhash AS x FROM users")).toEqual(["x"]);
+    expect(cols("SELECT u.PasswordHash FROM users u")).toEqual(["PasswordHash"]);
+    // A `*` over an upper-case table expands to the DECLARED name.
+    expect(cols("SELECT * FROM USERS")).toEqual(["passwordHash"]);
+    // A quoted table the projection extractor cannot resolve degrades to the
+    // fail-closed WHOLESALE strip — never to "no protected column".
+    expect(cols('SELECT * FROM "Users"')).toEqual({ all: true });
+    expect(cols("SELECT * FROM main.USERS")).toEqual({ all: true });
+    expect(cols("SELECT ID, NAME FROM USERS")).toBeNull();
+  });
+
   test("explicit safe projection (no protected column) -> null (no tag)", () => {
     const r = resolveProtectedOutputColumns("SELECT id, name FROM users", usersProtect());
     expect(r).toBeNull();
