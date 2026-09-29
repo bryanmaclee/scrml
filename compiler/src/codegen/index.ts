@@ -279,6 +279,13 @@ export interface CgInput {
    * test harnesses + the CLI verbose-buffer share a single sink.
    */
   log?: (msg: string) => void;
+  /**
+   * s440-bootstrap-css-theme-t3 — the CSS sub-seam (pipeline-seam.ts `CSS`). api.js passes
+   * `seams.pick("CSS", generateCss)`: `generateCss` itself unless a bootstrap stylesheet emitter is
+   * swapped in. Called once per file for the user stylesheet; Tailwind + §38 keyframes are appended
+   * after it as before. Absent → `generateCss`.
+   */
+  generateCss?: typeof generateCss;
 }
 
 export interface CgFileOutput {
@@ -1168,6 +1175,8 @@ export function runCG(input: CgInput): CgOutput {
     // assembled runtime into an ES module (see the `!embedRuntime` path below).
     moduleFormat = "classic",
     log = console.log,
+    // s440 — the CSS sub-seam's pick (identity when nothing is swapped).
+    generateCss: userStylesheet = generateCss,
   } = input;
 
   // §20.6 — fresh per-compile log() file:line source registry.
@@ -2324,7 +2333,7 @@ export function runCG(input: CgInput): CgOutput {
       // Generate CSS — emitted in both modes.
       // ---------------------------------------------------------------------------
       const userCss: string = codegenStage("emit-css", () =>
-        generateCss(nodes, analysis?.cssBlocks, errors, fileAST as Record<string, unknown>)
+        userStylesheet(nodes, analysis?.cssBlocks, errors, fileAST as Record<string, unknown>, { filePath, mode })
       ) || "";
 
       // ---------------------------------------------------------------------------
