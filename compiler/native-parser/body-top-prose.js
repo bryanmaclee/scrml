@@ -415,3 +415,51 @@ export function scanBodyTopTemplateClose(source, at) {
     }
     return -1;
 }
+
+// uncoveredSegments — calculation (S441 round 4, the COVERAGE invariant). In
+// `source[start, end)`, every non-whitespace, non-comment character must lie in
+// one of `ranges` (`[a, b)` absolute — parsed statements and diagnostics).
+// Returns the uncovered stretches, split per line and trimmed:
+// `{ start, end }` absolute. Comments (`//` to end of line, `/* … */`) in an
+// uncovered stretch are not content.
+export function uncoveredSegments(source, start, end, ranges) {
+    const len = Math.max(0, end - start);
+    const covered = new Uint8Array(len);
+    for (const r of ranges) {
+        const a = Math.max(start, r[0]);
+        const b = Math.min(end, r[1]);
+        for (let i = a; i < b; i++) covered[i - start] = 1;
+    }
+    const out = [];
+    let i = 0;
+    let inBlock = false;
+    let segStart = -1;
+    let segEnd = -1;
+    const flush = () => {
+        if (segStart >= 0) out.push({ start: start + segStart, end: start + segEnd });
+        segStart = -1;
+        segEnd = -1;
+    };
+    while (i < len) {
+        const c = source[start + i];
+        if (covered[i]) { flush(); i += 1; continue; }
+        if (inBlock) {
+            if (c === "*" && source[start + i + 1] === "/") { inBlock = false; i += 2; continue; }
+            if (c === "\n") flush();
+            i += 1;
+            continue;
+        }
+        if (c === "/" && source[start + i + 1] === "/") {
+            while (i < len && source[start + i] !== "\n") i += 1;
+            continue;
+        }
+        if (c === "/" && source[start + i + 1] === "*") { inBlock = true; i += 2; continue; }
+        if (c === "\n") { flush(); i += 1; continue; }
+        if (c === " " || c === "\t" || c === "\r") { i += 1; continue; }
+        if (segStart < 0) segStart = i;
+        segEnd = i + 1;
+        i += 1;
+    }
+    flush();
+    return out;
+}

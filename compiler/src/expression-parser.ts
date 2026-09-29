@@ -3190,10 +3190,16 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
   // sanctioned absence/presence keyword nor a `.Variant` pattern. When it fires
   // we stamp `_isValueRhsOnIs`; the gauntlet-phase3 §45 harvest fires E-EQ-005
   // (once per stamped node) BEFORE codegen, steering the author to `==`.
-  const _detector: { notPrefixNegation: boolean; valueRhsOnIs: boolean; lostTrailing?: boolean } = { notPrefixNegation: false, valueRhsOnIs: false };
+  const _detector: { notPrefixNegation: boolean; valueRhsOnIs: boolean; lostTrailing?: boolean; lostTrailingText?: string; lostTrailingLine?: number } = { notPrefixNegation: false, valueRhsOnIs: false };
   const _node = _parseExprToNodeInner(raw, filePath, offset, opts, _detector);
   if (_node && typeof _node === "object" && _detector.lostTrailing) {
     Object.defineProperty(_node, "_s441Trailing", { value: true, enumerable: false, configurable: true, writable: true });
+    // S441 round 4 — WHAT was lost and on which line of the expression it
+    // starts (0 = the expression's first line), so the body-top check can
+    // keep the valid prefix and re-parse / report the lost tail at its own
+    // position instead of dropping it.
+    Object.defineProperty(_node, "_s441TrailingText", { value: _detector.lostTrailingText ?? "", enumerable: false, configurable: true, writable: true });
+    Object.defineProperty(_node, "_s441TrailingLine", { value: _detector.lostTrailingLine ?? 0, enumerable: false, configurable: true, writable: true });
   }
   if (_node && typeof _node === "object") {
     if (_detector.notPrefixNegation) (_node as Record<string, unknown>)._notPrefixNegation = true;
@@ -3274,12 +3280,25 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
     let wrap = 0;
     const lead = processed.slice(0, (estree as { start?: number }).start ?? 0);
     for (const ch of lead) if (ch === "(") wrap++;
-    let rest = trailingContent;
+    // Untrimmed tail, so the line the lost content starts on is known.
+    const endAt = (estree as { end?: number }).end ?? 0;
+    let rest = processed.slice(endAt);
+    let consumed = 0;
     while (wrap > 0) {
-      rest = rest.replace(/^\s*\)/, (m) => { wrap--; return ""; });
-      if (!/^\s*\)/.test(rest)) break;
+      const m = /^\s*\)/.exec(rest);
+      if (!m) break;
+      consumed += m[0].length;
+      rest = rest.slice(m[0].length);
+      wrap--;
     }
-    if (rest.trim() !== "") (_notDetector as { lostTrailing?: boolean }).lostTrailing = true;
+    if (rest.trim() !== "") {
+      const det = _notDetector as { lostTrailing?: boolean; lostTrailingText?: string; lostTrailingLine?: number };
+      det.lostTrailing = true;
+      det.lostTrailingText = rest.trim();
+      // 0-based line (within the trimmed expression text) of the first lost char.
+      const leadWs = (/^\s*/.exec(rest) || [""])[0];
+      det.lostTrailingLine = (processed.slice(0, endAt + consumed) + leadWs).split("\n").length - 1;
+    }
   }
   if (estree && trailingContent && trailingContent.includes("\n") && /[a-zA-Z_$@]/.test(trailingContent)) {
     const preview = trailingContent.length > 60 ? trailingContent.slice(0, 60) + "..." : trailingContent;

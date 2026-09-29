@@ -1303,6 +1303,8 @@ const BODY_TOP_PROSE_HEADS = {
   "for-stmt": ["iterExpr"],
   "while-stmt": ["condExpr"],
   "return-stmt": ["exprNode"],
+  // `Are you sure?` collects as a §19.5 `expr?` propagate statement.
+  "propagate-expr": ["exprNode"],
 };
 function stmtHasInvalidOwnExpr(st) {
   if (!st || typeof st !== "object") return false;
@@ -1314,6 +1316,19 @@ function stmtHasInvalidOwnExpr(st) {
     if (!v || typeof v !== "object" || typeof v.kind !== "string") continue;
     if (hasLostTrailingContent(v)) return true;
     if (v.kind === "escape-hatch" && v.nativeKind === "ParseError") return true;
+    // S441 round 4 — a head the statement collector declined to parse
+    // (`SkippedExpr`: `...`, `.hidden file note`) is judged by parsing it.
+    if (v.kind === "escape-hatch" && v.nativeKind === "SkippedExpr" && typeof v.raw === "string") {
+      try {
+        const re = parseExprToNode(v.raw, "", 0);
+        if (hasLostTrailingContent(re) || (re && re.kind === "escape-hatch" && re.nativeKind === "ParseError")) return true;
+      } catch {
+        return true;
+      }
+    }
+    // S441 round 4 (#6) — a prefix-`not` head (`not available`) is not valid
+    // scrml (§42.6 E-TYPE-045): at a body-top it is prose, not code.
+    if (v._notPrefixNegation === true) return true;
     // S441 review #6 — a comma SEQUENCE (`Hello, world`) is not a scrml
     // expression: §4.18.2 lists what a bare run may be (identifier, keyword,
     // call, member access, literal, nested tag, `${…}`), the SPEC has no comma
@@ -1333,9 +1348,135 @@ function errStart(e) {
   return undefined;
 }
 
+// S441 round 4 — the head-expression fields whose LOST TAIL is checked on
+// every body-top statement (declarations included). A lost tail that starts on
+// a LATER line is text the collector swallowed across an un-inserted ASI
+// boundary (`<count> = 3⏎5 items`, `g()⏎"abc".toUpperCase()`): the statement
+// keeps its valid prefix and the tail is re-parsed as its own statements. A
+// lost tail on the statement's own line is reported where it is.
+const BODY_TOP_TRAIL_FIELDS = ["exprNode", "condExpr", "iterExpr", "initExpr", "valueExpr"];
+const BODY_TOP_TRAIL_STRING_FIELD = { exprNode: "expr", condExpr: "condition", iterExpr: "iterable", initExpr: "init", valueExpr: "value" };
+function stmtLostTail(st) {
+  if (!st || typeof st !== "object") return null;
+  for (const key of BODY_TOP_TRAIL_FIELDS) {
+    const v = st[key];
+    if (v && typeof v === "object" && hasLostTrailingContent(v)) {
+      return { key, text: String(v._s441TrailingText ?? ""), line: Number(v._s441TrailingLine ?? 0) };
+    }
+  }
+  return null;
+}
+
+// S441 round 4 — a SPLIT statement keeps only its valid prefix: cut its
+// expression text at the line the lost tail starts on and re-parse the head,
+// so nothing downstream (a text-based check reading `init`, an `is`-detector
+// stamp from the swallowed line) still sees the swallowed text.
+function truncateStmtAtTail(st, tail, filePath) {
+  const strKey = BODY_TOP_TRAIL_STRING_FIELD[tail.key];
+  const str = strKey && typeof st[strKey] === "string" ? st[strKey] : null;
+  if (str === null) return;
+  const lines = str.split("\n");
+  if (tail.line <= 0 || tail.line >= lines.length + 1) return;
+  const kept = lines.slice(0, tail.line).join("\n").replace(/\s+$/, "");
+  st[strKey] = kept;
+  const old = st[tail.key];
+  try {
+    st[tail.key] = parseExprToNode(kept, filePath, (old && old.span && typeof old.span.start === "number") ? old.span.start : 0);
+  } catch {
+    // keep the old node — the text cut above already removed the swallowed tail
+  }
+}
+
+function unquotedError(filePath, shown, start, end, line, col) {
+  return new TABError(
+    "E-UNQUOTED-DISPLAY-TEXT",
+    `E-UNQUOTED-DISPLAY-TEXT: \`${shown}\` is not valid code. A \`<program>\` / ` +
+    `\`<page>\` / \`<channel>\` body is code (SPEC §40.8, S441) — loose prose is ` +
+    `not allowed there. If this is displayed text, declare it: wrap it in a ` +
+    `markup element (\`<p>${shown}</p>\`) or write it as a display-text literal ` +
+    `(\`"${shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"\`, §4.18.3).`,
+    { file: filePath, start, end, line, col },
+  );
+}
+
 function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePath, reparseTail, srcLine = 1) {
   if (!Array.isArray(body) || body.length === 0) return 0;
-  const fi = body.findIndex((st) => !!(st && st.span && typeof st.span.start === "number") && stmtHasInvalidOwnExpr(st));
+  const lineNoAt = (rel) => srcLine + (srcText.slice(0, rel).match(/\n/g) || []).length;
+  // First problem statement, in source order.
+  let fi = -1;
+  let splitRel = -1;
+  for (let si = 0; si < body.length; si++) {
+    const st = body[si];
+    if (!(st && st.span && typeof st.span.start === "number")) continue;
+    const tail = stmtLostTail(st);
+    // Two statements juxtaposed on ONE line with no `;` / `}` between them
+    // (`let me explain`, `Are you sure?`, `(optional) fill this in`) is not a
+    // statement sequence (§4 E-STMT-MISSING-SEMICOLON): the line is prose.
+    if (si > 0) {
+      const prev = body[si - 1];
+      // (An `export` carries its declaration as a second node on the same
+      // line — `export fn greet() { … }` — which is one statement, not two.)
+      if (prev && prev.span && typeof prev.span.line === "number" && prev.span.line === st.span.line
+          && prev.kind !== "export-decl" && prev.kind !== "import-decl" && prev.span.start !== st.span.start) {
+        const relSt = st.span.start - srcOffset;
+        const between = srcText.slice(Math.max(0, prev.span.start - srcOffset), Math.max(0, relSt));
+        const lastSig = between.replace(/\s+$/, "").slice(-1);
+        // (A statement the parser already REPORTED and recovered from —
+        // `const <x>: int` → E-DECL-NEEDS-INITIALIZER, re-collected as two
+        // nodes — keeps that diagnostic; it is not prose.)
+        const reported = errors.some((e, k) => k >= errsBefore && e && e.code !== "E-UNQUOTED-DISPLAY-TEXT" && errStart(e) === prev.span.start);
+        if (!reported && lastSig !== ";" && lastSig !== "}") { fi = si; break; }
+      }
+    }
+    if (tail && tail.line > 0) {
+      // SPLIT — keep this statement; re-parse from the line the tail is on.
+      let rel = Math.max(0, st.span.start - srcOffset);
+      for (let k = 0; k < tail.line; k++) {
+        const nl = srcText.indexOf("\n", rel);
+        if (nl === -1) { rel = -1; break; }
+        rel = nl + 1;
+      }
+      if (rel > 0 && rel < srcText.length) { fi = si; splitRel = rel; break; }
+    }
+    if (tail && tail.line === 0 && BODY_TOP_PROSE_HEADS[st.kind] === undefined && st.kind !== "html-fragment") {
+      // SAMELINE on a statement that is code by its head (a declaration …):
+      // keep it, report the lost text on its own line.
+      const rel0 = Math.max(0, st.span.start - srcOffset);
+      const lineEnd = srcText.indexOf("\n", rel0);
+      const shownT = tail.text.length > 80 ? tail.text.slice(0, 77) + "..." : tail.text;
+      const at = srcText.slice(rel0, lineEnd === -1 ? srcText.length : lineEnd).lastIndexOf(tail.text.split(/\s+/)[0]);
+      const tRel = at > 0 ? rel0 + at : rel0;
+      const tCol = tRel - (srcText.lastIndexOf("\n", tRel - 1) + 1) + 1;
+      errors.push(unquotedError(filePath, shownT, srcOffset + tRel, srcOffset + (lineEnd === -1 ? srcText.length : lineEnd), lineNoAt(tRel), tCol));
+      continue;
+    }
+    if (stmtHasInvalidOwnExpr(st)) { fi = si; break; }
+    // `let me explain` collects as a let-decl `me` whose initializer is
+    // `explain` — with no `=` in its source. A binding without `=` that
+    // still carries an initializer is not valid code.
+    if ((st.kind === "let-decl" || st.kind === "const-decl") && typeof st.init === "string" && st.init.trim() !== "") {
+      const relSt = st.span.start - srcOffset;
+      const nextSt = body[si + 1] && body[si + 1].span ? body[si + 1].span.start - srcOffset : srcText.length;
+      const lineEnd = srcText.indexOf("\n", relSt);
+      const stText = srcText.slice(relSt, Math.min(nextSt, lineEnd === -1 ? srcText.length : lineEnd));
+      if (!stText.includes("=")) { fi = si; break; }
+    }
+  }
+  if (fi >= 0 && splitRel > 0) {
+    const splitAbs = srcOffset + splitRel;
+    for (let k = errors.length - 1; k >= errsBefore; k--) {
+      const s0 = errStart(errors[k]);
+      if (typeof s0 === "number" && s0 >= splitAbs && errors[k].code !== "E-UNQUOTED-DISPLAY-TEXT") errors.splice(k, 1);
+    }
+    truncateStmtAtTail(body[fi], stmtLostTail(body[fi]), filePath);
+    body.splice(fi + 1);
+    for (const st of body) {
+      if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
+    }
+    const tail = srcText.slice(splitRel).trim() !== "" ? (reparseTail(splitRel) || []) : [];
+    for (const st of tail) body.push(st);
+    return 1;
+  }
   if (fi < 0) {
     // A lone identifier IS valid code (`Counter`) and is checked as code; mark
     // it so E-SCOPE-001 can name the declared-prose forms (§4.18.7 SHOULD).
@@ -1394,6 +1535,43 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
   ));
   for (const st of tail) body.push(st);
   return 1;
+}
+
+// S441 round 4 — see the call site in buildBlock's `logic` case. Returns a new
+// token array with an IDENT token inserted for every maximal run of
+// non-whitespace characters no token (and no comment) covers.
+function coverUnknownBodyTopChars(tokens, text, baseOffset, baseLine, baseCol) {
+  if (!Array.isArray(tokens) || typeof text !== "string" || text.length === 0) return tokens;
+  const covered = new Uint8Array(text.length);
+  for (const t of tokens) {
+    if (!t || !t.span || t.kind === "EOF") continue;
+    let a = t.span.start - baseOffset;
+    const b = t.span.end - baseOffset;
+    // A COMMENT token's span starts after its `//` / `/*` opener.
+    if (t.kind === "COMMENT") a -= 2;
+    for (let i = Math.max(0, a); i < Math.min(text.length, b); i++) covered[i] = 1;
+  }
+  const extra = [];
+  let i = 0;
+  while (i < text.length) {
+    if (covered[i] || /\s/.test(text[i])) { i++; continue; }
+    let j = i;
+    while (j < text.length && !covered[j] && !/\s/.test(text[j])) j++;
+    const before = text.slice(0, i);
+    const nl = before.lastIndexOf("\n");
+    const line = baseLine + (before.match(/\n/g) || []).length;
+    const col = nl === -1 ? baseCol + i : i - nl;
+    extra.push({ kind: "IDENT", text: text.slice(i, j), span: { start: baseOffset + i, end: baseOffset + j, line, col }, _s441Uncovered: true });
+    i = j;
+  }
+  if (extra.length === 0) return tokens;
+  const merged = tokens.concat(extra);
+  merged.sort((x, y) => {
+    if (x.kind === "EOF") return 1;
+    if (y.kind === "EOF") return -1;
+    return x.span.start - y.span.start;
+  });
+  return merged;
 }
 
 function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }, isDefaultLogicBody = false) {
@@ -20207,7 +20385,17 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         }
       }
 
-      const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, _liveChildren);
+      let tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, _liveChildren);
+      // S441 round 4 — the COVERAGE invariant, at the token level: the logic
+      // tokenizer silently DROPS characters it has no token for (`★ ✓ →`,
+      // `©`, `🎉`), so body-top text made of them vanished at exit 0. Every
+      // non-whitespace, non-comment character of a body-top run must reach the
+      // parser: each uncovered stretch becomes an IDENT-kind token carrying its
+      // own text and position, which the parser then judges like any other
+      // token (a line of them is not valid code → E-UNQUOTED-DISPLAY-TEXT at
+      // its own line/col; an identifier-shaped one on a new line after a
+      // value also ends the previous statement).
+      if (block._bodyTop === true) tokens = coverUnknownBodyTopChars(tokens, bodyRaw, bodyOffset, bodyLine, bodyCol);
       let body;
       if (block._bodyTop === true) {
         // S441 — body-top code: parse, then reject what is not valid code.

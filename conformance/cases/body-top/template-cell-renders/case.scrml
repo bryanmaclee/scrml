@@ -1,0 +1,5 @@
+<program>
+<total> = 3
+const msg = `total is ${@total} units`
+<p id="z">${msg}</p>
+</program>

@@ -105,7 +105,7 @@ import { lex } from "./lex.js";
 import { makeParseExprContext, parseExpression } from "./parse-expr.js";
 import { parseProgram } from "./parse-stmt.js";
 // S441 — the body-top display-text segmenter shared with the live front end.
-import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose } from "./body-top-prose.js";
+import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose, uncoveredSegments } from "./body-top-prose.js";
 import { atEnd } from "./token-cursor.js";
 // MK4 — the markup<->JS seam (R1 spike §3). The seam helpers centralize the
 // markup->JS delegate-down direction (the .InLogicEscape body's JS parse) +
@@ -2803,6 +2803,24 @@ function rejectBodyTopProseNative(block, source, ctx) {
         return idx;
     };
     const flagged = body.map((st) => isSeqStmt(st));
+    // A diagnostic past the END of every statement that could own it, on a
+    // later line (`<count> = 0⏎...` — the error-recovery statement for `...`
+    // carries the previous statement's span): its own line is the prose.
+    let orphanFs = -1;
+    for (const d of diags) {
+        const k0 = stmtIndexAt(d.span.start);
+        const owner = k0 >= 0 ? body[k0] : null;
+        const ownerEnd = owner && owner.span && typeof owner.span.end === "number" ? owner.span.end : -1;
+        if (owner !== null && d.span.start >= ownerEnd
+                && source.slice(starts[k0], d.span.start).includes("\n")) {
+            let f0 = d.span.start;
+            while (f0 < blockEnd && /\s/.test(source[f0])) f0 = f0 + 1;
+            const ls = source.lastIndexOf("\n", f0 - 1) + 1;
+            const le = source.indexOf("\n", f0);
+            const lt = source.slice(ls, le === -1 ? blockEnd : Math.min(le, blockEnd));
+            if (BODY_TOP_CODE_HEAD_RE.test(lt) === false && (orphanFs < 0 || f0 < orphanFs)) orphanFs = f0;
+        }
+    }
     for (const d of diags) {
         let k = stmtIndexAt(d.span.start);
         // `Welcome.⏎<count> = 0` — "expected a property name after '.'" is
@@ -2831,18 +2849,31 @@ function rejectBodyTopProseNative(block, source, ctx) {
         if (BODY_TOP_CODE_HEAD_RE.test(text) === false && (block._bodyTopCatchAll === true || allExprStmts)) fi = si;
         si = sj;
     }
-    if (fi < 0) return;
-    const start = starts[fi];
-    const nlAt = source.indexOf("\n", start);
+    if (fi < 0 && orphanFs < 0) return;
+    // Prose is LINE-granular (mirrors ast-builder.js rejectBodyTopProse): the
+    // whole line holding the first flagged statement is rejected, including
+    // statements the parser cut from that line before it (`(optional) fill
+    // this in` → a valid `(optional)` plus an invalid `fill this in`).
+    let fs = fi >= 0 ? starts[fi] : orphanFs;
+    while (fs < blockEnd && /\s/.test(source[fs])) fs = fs + 1;
+    if (orphanFs >= 0 && orphanFs < fs) fs = orphanFs;
+    const start = Math.max(blockStart, source.lastIndexOf("\n", fs - 1) + 1);
+    let cut = fi >= 0 && fs !== orphanFs ? fi : body.length;
+    while (cut > 0 && (starts[cut - 1] === null || starts[cut - 1] >= start)) cut = cut - 1;
+    const nlAt = source.indexOf("\n", fs);
     const lineEnd = (nlAt === -1 || nlAt >= blockEnd) ? blockEnd : nlAt;
     let end = lineEnd;
     // Withdraw this parse's diagnostics from the rejected line on; the tail
     // re-parse below reports for itself.
     ctx.diagnostics = ctx.diagnostics.filter((d) => !(inBlock(d) && d.span.start >= start));
-    const kept = body.slice(0, fi);
-    const lineText = source.slice(start, lineEnd).trim();
+    const kept = body.slice(0, cut);
+    // S441 round 4 (#7) — never quote an empty run: when the first flagged
+    // statement starts at a line end, quote the first non-empty line of the
+    // rejected range instead.
+    let lineText = source.slice(start, lineEnd).trim();
+    if (lineText === "") lineText = (source.slice(start, blockEnd).split("\n").find((l) => l.trim() !== "") || "").trim();
     const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
-    const stLine = body[fi] && body[fi].span && typeof body[fi].span.line === "number" ? body[fi].span.line : 1;
+    const stLine = (source.slice(0, fs).match(/\n/g) || []).length + 1;
     let tailBody = [];
     if (lineEnd < blockEnd && source.slice(lineEnd + 1, blockEnd).trim() !== "") {
         const tailStart = lineEnd + 1;
@@ -2872,9 +2903,106 @@ function rejectBodyTopProseNative(block, source, ctx) {
         "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
         "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
         + "\"`, §4.18.3).",
-        { start, end, line: stLine, col: body[fi].span.col ?? 1 },
+        (() => {
+            // Report at the first non-whitespace character of the rejected run.
+            let rs = start;
+            while (rs < end && /\s/.test(source[rs])) rs = rs + 1;
+            const pre = source.slice(0, rs);
+            return { start: rs, end, line: (pre.match(/\n/g) || []).length + 1, col: rs - (pre.lastIndexOf("\n") + 1) + 1 };
+        })(),
     ));
     block.body = kept.concat(tailBody);
+}
+
+// S441 round 4 — `coverBodyTopNative`: the COVERAGE invariant (mirrors the
+// live front end's unknown-character tokens). Every non-whitespace, non-comment
+// byte of a body-top run must end up inside a parsed statement's span or inside
+// a diagnostic's span; the native lexer drops characters it has no token for
+// (`★ ✓ →`, `©`, `🎉`), so without this they vanished at exit 0. Each uncovered
+// stretch is ONE E-UNQUOTED-DISPLAY-TEXT at its own line/col quoting its own
+// text; consecutive uncovered lines merge.
+function coverBodyTopNative(block, source, ctx) {
+    const span = block.span;
+    if (span === undefined || span === null || typeof span.start !== "number" || typeof span.end !== "number") return;
+    // Coverage is measured against the LEXER's tokens over the run (the
+    // exact analogue of the live front end's check): a character no token
+    // covers was dropped before any statement could see it.
+    const ranges = [];
+    const runText = source.slice(span.start, span.end);
+    let toks = [];
+    try { toks = lex(runText); } catch { toks = []; }
+    for (const t of toks) {
+        if (!t || !t.span || t.kind === "EOF" || typeof t.span.start !== "number") continue;
+        let a = t.span.start;
+        // A template's first chunk span starts after its opening backtick.
+        if (t.kind === "TemplateChunk" && a > 0 && runText[a - 1] === "`") a = a - 1;
+        ranges.push([span.start + a, span.start + t.span.end]);
+    }
+    if (ctx !== null && ctx !== undefined && Array.isArray(ctx.diagnostics)) {
+        for (const d of ctx.diagnostics) {
+            if (d && d.span && typeof d.span.start === "number" && typeof d.span.end === "number"
+                    && d.span.start >= span.start && d.span.start <= span.end) {
+                // A diagnostic covers its span, and a parse diagnostic its line.
+                const le = source.indexOf("\n", d.span.start);
+                ranges.push([d.span.start, Math.max(d.span.end, le === -1 ? span.end : le)]);
+            }
+        }
+    }
+    const segs = uncoveredSegments(source, span.start, span.end, ranges);
+    const lineOf = (off) => (source.slice(0, off).match(/\n/g) || []).length + 1;
+    const unquotedMessage = (shown) => "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
+        "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
+        "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
+        "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+        + "\"`, §4.18.3).";
+    // An uncovered stretch on a line that ALREADY carries an
+    // E-UNQUOTED-DISPLAY-TEXT (`© 2026 Acme Inc`: the lexer dropped `©`, the
+    // statement check rejected `2026 Acme Inc`) widens that one diagnostic to
+    // the whole line instead of adding a second.
+    const pending = [];
+    for (const sg of segs) {
+        const ln = lineOf(sg.start);
+        const existing = Array.isArray(ctx.diagnostics) ? ctx.diagnostics.find((d) => d && d.code === "E-UNQUOTED-DISPLAY-TEXT"
+            && d.span && typeof d.span.start === "number" && lineOf(d.span.start) === ln) : undefined;
+        if (existing) {
+            const a = Math.min(existing.span.start, sg.start);
+            const b = Math.max(existing.span.end, sg.end);
+            const ls = source.lastIndexOf("\n", a - 1) + 1;
+            const le0 = source.indexOf("\n", a);
+            const lineText = source.slice(a, le0 === -1 ? b : Math.min(le0, Math.max(b, a))).trim() || source.slice(a, b).trim();
+            const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+            existing.span = { ...existing.span, start: a, end: b, line: ln, col: a - ls + 1 };
+            existing.message = unquotedMessage(shown);
+        } else {
+            pending.push(sg);
+        }
+    }
+    segs.length = 0;
+    for (const sg of pending) segs.push(sg);
+    let k = 0;
+    while (k < segs.length) {
+        let j = k;
+        // merge segments on consecutive lines
+        while (j + 1 < segs.length && source.slice(segs[j].end, segs[j + 1].start).split("\n").length === 2
+                && source.slice(segs[j].end, segs[j + 1].start).trim() === "") j = j + 1;
+        const a = segs[k].start;
+        const b = segs[j].end;
+        const lineText = source.slice(a, segs[k].end).trim();
+        const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+        const before = source.slice(0, a);
+        const line = (before.match(/\n/g) || []).length + 1;
+        const col = a - (before.lastIndexOf("\n") + 1) + 1;
+        pushDiagnostic(ctx, makeDiagnostic(
+            "E-UNQUOTED-DISPLAY-TEXT",
+            "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
+            "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
+            "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
+            "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+            + "\"`, §4.18.3).",
+            { start: a, end: b, line, col },
+        ));
+        k = j + 1;
+    }
 }
 
 // liftBareBlocks — calculation (pure; returns a new array, no mutation). The
@@ -3089,6 +3217,7 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter, de
                     && b._bodyTop !== true) {
                 b._bodyTop = true;
                 rejectBodyTopProseNative(b, source, ctx);
+                coverBodyTopNative(b, source, ctx);
             }
         }
     }
