@@ -1,0 +1,1 @@
+- 2026-09-29T17:02:21-06:00 start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-a33767a8215d9e61d
