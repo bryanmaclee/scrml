@@ -7242,13 +7242,14 @@ Three CSS context forms are supported. All three support scrml's CSS variable sy
 css-inline-context ::= '#{' css-content '}'
 ```
 
-Valid inside markup and state contexts, and at program scope (top-level in the program body, not nested inside any element). Applies styles to the document globally when used at program scope, or inline at the element level when used inside a markup or state context.
+Valid inside markup and state contexts, and at program scope (top-level in the program body, not nested inside any element). Applies styles to the document globally when used at program scope or inside a plain markup element, and scoped to the component when used inside a component (state type constructor) — see DQ-7 (the element-level reading is ruling:user-voice-scrml.md S440, all recs #2, item 4).
 
 **Normative statements (DQ-6):**
 
 - A `#{}` block MAY appear at the top level of a file (outside any markup element). Top-level `#{}` is valid and SHALL compile.
 - Top-level `#{}` compiles to a stylesheet that is included in the page's global styles, applied to the entire document.
-- `#{}` inside a markup element applies styles at the element level (inline or scoped per compiler settings).
+- `#{}` inside a markup element that is not inside a component (state type constructor) is **program-global**: its rules compile exactly as a program-level `#{}` — global CSS with no `@scope` wrapper, in the `global` cascade layer (§65.5, §65.8). A plain element creates no scope; component scoping is DQ-7 below. (A flat-declaration block — bare `property: value;` pairs with no selector — inlines only on a constructor root, DQ-7; this rule places selector rules.)
+  > **Provenance:** ruling:user-voice-scrml.md S440 (all recs #2, item 4). Replaces "applies styles at the element level (inline or scoped per compiler settings)" — no such compiler setting existed.
 - Using `#{}` at top level SHALL NOT be a compile error or warning.
 
 **Normative statements (DQ-7 — CSS Scoping):**
@@ -40215,6 +40216,8 @@ the #15 lean: such a copy does not fetch on its own mount and is not server-auth
 4. **One namespace.** A token IS a declaration, so a token and a same-named cell cannot coexist silently (the
    token/cell collision the DD measured, D7, is gone by construction), and a token is readable from logic as
    `@brand` like any cell. A CSS-position reference `@brand` resolves as §65.3.2 specifies (→ `var(--brand)`).
+   A token and a same-named cell is `E-THEME-TOKEN-CELL-COLLISION` (§66.20; ruling:user-voice-scrml.md S440,
+   all recs #2, item 5).
 5. **The mode cell is an ordinary `let` declaration** — `<let mode:Mode=.Light/>` (the ruling records the PA's
    worked-example erratum: `<mode:Mode=.Light let/>` is wrong; `let` is a prefix).
 6. The `name = value;` body grammar and `.Variant { }` blocks go through the §63 lifecycle (§66.21).
@@ -40548,6 +40551,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell (or another token) are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
 
 **Cross-reference (not a §66 code):** a field overridden twice in one spread-override shape
 (`{ ...@g, phase: .Gone, phase: .Live }`, §66.11.3 item 1) is `E-STRUCT-DUPLICATE-KEY` — a language-wide

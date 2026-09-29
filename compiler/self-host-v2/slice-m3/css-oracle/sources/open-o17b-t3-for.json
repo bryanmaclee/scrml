@@ -1,0 +1,6 @@
+{
+  "spec": "§66.17 O17(b)",
+  "open": "O17(b)",
+  "rationale": "OPEN: whether `for=` is still permitted on a T3 `<theme>`.",
+  "steps": []
+}

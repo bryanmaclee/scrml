@@ -1,0 +1,884 @@
+// =============================================================================
+// self-host-v2 / css-ingest.scrml — THE STYLESHEET SHIM: impl#1's FileAST →
+// the stylesheet Core (`CssUnit`, core.scrml). s440-bootstrap-css-theme-t3;
+// the css sibling of ingest.scrml, under the same terms (dpa-051 §8.3, R5):
+//   - confined to this module; NEVER graded by parity with impl#1's output —
+//     only by what the css oracle asserts (computed style, per the SPEC);
+//   - DELETION CONDITION: delete it when the bootstrap front end produces the
+//     stylesheet Core from source (`#{}`, `<theme>` + §66 declarations);
+//   - a shape with no Core mapping is a `not-yet` reason (`why`), never a guess.
+//
+// WHAT IT MAPS (every mapping is the SPEC meaning, cited):
+//   - `#{}` directly under `<program>` (or a `${}` there, or the file top level)
+//     → `global` rules (§9.1 DQ-6/DQ-7 program-level; §65.5 `@layer global`);
+//     a top-level `@charset` / `@import` in it → the hoisted statements (§65.8).
+//   - `#{}` inside a markup element that is NOT inside a component → PROGRAM-GLOBAL,
+//     exactly as a program-level block (§9.1 as amended by ruling S440 all recs #2
+//     item 4 — R4): a plain element creates no scope.
+//   - `#{}` anywhere inside a component instance → that component's scope rules
+//     (§9.1 DQ-7). The component is the nearest `_expandedFrom` (impl#1 marks
+//     each expansion root); the FIRST expansion of a component contributes and
+//     later expansions of the same component are skipped (the rules are the
+//     component's, not the use site's). A block that is ONLY bare declarations
+//     is the inline `style=""` form (§9.1) — that is html's, not the sheet's.
+//   - `<program reset="none">` → no reset (§65.3.4).
+//   - the LEGACY `<theme>` body (Stage-1 deprecated, §66.21 — still works):
+//     `name = value;` → a Constant token (§66.17 item 2); a base token re-bound by
+//     `.Variant { name = v; }` under `<theme for=@cell>` → OnVariant over `cell`
+//     with the base value as the wildcard arm — exactly the legacy meaning
+//     (§65.6: the base is the default, a variant re-binds a subset).
+//   - a declaration value's `@name` → TokenVar (a theme token) / CellVar (a
+//     declared cell) (§65.3.2 / §25.7: membership disambiguates).
+//
+// FAIL-CLOSED (reported `not-yet`, never emitted):
+//   OPEN items — O17(c) a `<theme>` `@media (…)` auto-bind; O17(d) a `<theme>` in
+//   a library-mode file; O47 a token whose value reads a cell. (O17(a)/(b) — a
+//   hyphenated / non-string T3 token, `for=` on a T3 `<theme>` — cannot arrive
+//   here: impl#1's front end rejects every T3 declaration; progress.md.)
+//   UNRULED here — a `<theme>` body impl#1 did not parse (`malformed`: T3
+//   declarations); a token declared twice / a token and a cell of one name
+//   (§66.17 item 4: one namespace — the duplicate is analyze's to diagnose); a
+//   variant with no `for=`; a variant re-binding a name with no base value; a
+//   `@name` resolving to nothing (E-THEME-TOKEN-UNKNOWN is analyze's);
+//   `!important` (§65.7: internal vs interop is not classified yet); a computed
+//   `@` expression; `@apply` (§26.8); an at-rule block (`@media`, …); a
+//   selector this shim cannot parse (§65.2.5: fail loud, never forgive); a flat
+//   (selector-less) declaration at program or plain-element level (no selector to
+//   apply to — §9.1 inlines flat blocks only on a component root); a file with
+//   no `<program>` (where its reset goes is not specified); a `<style>` block.
+//
+// RULE 7 (text). The css payload IS text in impl#1's AST — a rule's `selector`
+// and a declaration's `value` have no structured twin — so this module parses
+// them (the selector grammar; `@` references in a value, skipping quoted
+// strings and `url(…)`). That is the one sanctioned read of CSS text; the
+// parallel text twin `reactiveRefs` is REDUNDANT (re-derived from `value`).
+//
+// Every `match` over an enum is total with no default arm (dpa-051 §3.4).
+// Matches over impl#1's `kind` STRINGS keep an `else`.
+// impl#1 workarounds: F11 (named payload binding), F14 (braces only via
+// LB()/RB()), F15 (no helper fn named like a payload field), F17 (no object
+// literal as a match arm body).
+// =============================================================================
+${
+    import { Sym, SimpleSel, Combinator, Compound, SelLink, ComplexSel, CssPart, CssDecl, StyleRule,
+             TokenArm, TokenInit, ThemeToken, CssImport, ScopeSheet, CssUnit, mkSym } from "./core.scrml"
+    import { IVal, INode, IField, strAt, numAt, flagAt, nodeAt, listAt, nodesAt, kindAt, hasStr,
+             unmapped } from "./ingest.scrml"
+
+    fn LB() -> string { return "{" }
+    fn RB() -> string { return "}" }
+
+    export type CssIngest:struct = { unit: CssUnit, why: string[] }
+
+    // =========================================================================
+    // Characters.
+    // =========================================================================
+    fn charAt(s: string, i: int) -> string { return s.substring(i, i + 1) }
+    fn letters() -> string { return "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ" }
+    fn digits() -> string { return "0123456789" }
+    fn isLetter(c: string) -> boolean { return c.length == 1 && letters().indexOf(c) >= 0 }
+    fn isDigit(c: string) -> boolean { return c.length == 1 && digits().indexOf(c) >= 0 }
+    fn isSpace(c: string) -> boolean { return c.length == 1 && " \t\n\r".indexOf(c) >= 0 }
+    fn isQuote(c: string) -> boolean { return c == "\"" || c == "'" }
+    // A CSS identifier (ASCII subset): letters, digits, `-`, `_`; not starting with a digit.
+    fn isNameStart(c: string) -> boolean { return isLetter(c) || c == "_" || c == "-" }
+    fn isNameChar(c: string) -> boolean { return isNameStart(c) || isDigit(c) }
+    // An `@` reference name (§65.3.2): a JS-ish identifier; a legacy token may be hyphenated.
+    fn isRefStart(c: string) -> boolean { return isLetter(c) || c == "_" || c == "$" }
+    fn isRefChar(c: string) -> boolean { return isRefStart(c) || isDigit(c) || c == "-" }
+
+    fn readName(s: string, i: int) -> string {
+        let j = i
+        if (j < s.length && isNameStart(charAt(s, j))) {
+            j = j + 1
+            while (j < s.length && isNameChar(charAt(s, j))) { j = j + 1 }
+        }
+        return s.substring(i, j)
+    }
+
+    fn readRef(s: string, i: int) -> string {
+        let j = i
+        if (j < s.length && isRefStart(charAt(s, j))) {
+            j = j + 1
+            while (j < s.length && isRefChar(charAt(s, j))) { j = j + 1 }
+        }
+        return s.substring(i, j)
+    }
+
+    // Index just past the quoted string starting at `i` (a backslash escapes the next char), or -1.
+    fn skipQuoted(s: string, i: int) -> int {
+        const q: string = charAt(s, i)
+        let j = i + 1
+        while (j < s.length) {
+            const c: string = charAt(s, j)
+            if (c == "\\") {
+                j = j + 2
+            } else if (c == q) {
+                return j + 1
+            } else {
+                j = j + 1
+            }
+        }
+        return 0 - 1
+    }
+
+    // Index of the bracket closing the one opened at `i` (`(`/`[`), quote-aware, or -1.
+    fn closeOf(s: string, i: int, open: string, close: string) -> int {
+        let depth = 0
+        let j = i
+        while (j < s.length) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipQuoted(s, j)
+                if (k < 0) return 0 - 1
+                j = k
+            } else {
+                if (c == open) depth = depth + 1
+                if (c == close) {
+                    depth = depth - 1
+                    if (depth == 0) return j
+                }
+                j = j + 1
+            }
+        }
+        return 0 - 1
+    }
+
+    fn trimmed(s: string) -> string { return s.trim() }
+
+    // =========================================================================
+    // Selectors (§65.2.5: parse, fail loud). A selector list → its arms.
+    // =========================================================================
+    type ArmsR:struct = { arms: string[], err: string }
+
+    fn splitArms(s: string) -> ArmsR {
+        let arms: string[] = []
+        let depth = 0
+        let start = 0
+        let j = 0
+        while (j < s.length) {
+            const c: string = charAt(s, j)
+            if (isQuote(c)) {
+                const k: int = skipQuoted(s, j)
+                if (k < 0) return { arms: [], err: "an unterminated string in the selector" }
+                j = k
+            } else {
+                if (c == "(" || c == "[") depth = depth + 1
+                if (c == ")" || c == "]") depth = depth - 1
+                if (c == "," && depth == 0) {
+                    arms = arms.concat([s.substring(start, j)])
+                    start = j + 1
+                }
+                j = j + 1
+            }
+        }
+        return { arms: arms.concat([s.substring(start, s.length)]), err: "" }
+    }
+
+    type CompR:struct = { parts: SimpleSel[], next: int, err: string }
+
+    fn compErr(msg: string) -> CompR { return { parts: [], next: 0, err: msg } }
+
+    fn parseCompound(s: string, i: int) -> CompR {
+        let parts: SimpleSel[] = []
+        let j = i
+        let going = true
+        while (going && j < s.length) {
+            const c: string = charAt(s, j)
+            if (c == "*") {
+                parts = parts.concat([SimpleSel.Universal])
+                j = j + 1
+            } else if (c == ".") {
+                const n: string = readName(s, j + 1)
+                if (n.length == 0) return compErr("`.` with no class name")
+                parts = parts.concat([SimpleSel.ClassSel(n)])
+                j = j + 1 + n.length
+            } else if (c == "#") {
+                const n: string = readName(s, j + 1)
+                if (n.length == 0) return compErr("`#` with no id")
+                parts = parts.concat([SimpleSel.IdSel(n)])
+                j = j + 1 + n.length
+            } else if (c == "[") {
+                const k: int = closeOf(s, j, "[", "]")
+                if (k < 0) return compErr("an unclosed `[`")
+                parts = parts.concat([SimpleSel.AttrSel(s.substring(j + 1, k))])
+                j = k + 1
+            } else if (c == ":") {
+                if (charAt(s, j + 1) == ":") {
+                    const n: string = readName(s, j + 2)
+                    if (n.length == 0) return compErr("`::` with no pseudo-element name")
+                    parts = parts.concat([SimpleSel.PseudoElement(n)])
+                    j = j + 2 + n.length
+                } else {
+                    const n: string = readName(s, j + 1)
+                    if (n.length == 0) return compErr("`:` with no pseudo-class name")
+                    const after: int = j + 1 + n.length
+                    if (charAt(s, after) == "(") {
+                        const k: int = closeOf(s, after, "(", ")")
+                        if (k < 0) return compErr("an unclosed `(` in `:" + n + "`")
+                        parts = parts.concat([SimpleSel.PseudoClass(n, s.substring(after + 1, k))])
+                        j = k + 1
+                    } else {
+                        parts = parts.concat([SimpleSel.PseudoClass(n, not)])
+                        j = after
+                    }
+                }
+            } else if (isNameStart(c)) {
+                if (parts.length > 0) return compErr("a type selector after another simple selector")
+                const n: string = readName(s, j)
+                parts = parts.concat([SimpleSel.TagSel(n)])
+                j = j + n.length
+            } else {
+                going = false
+            }
+        }
+        return { parts: parts, next: j, err: "" }
+    }
+
+    type ComplexR:struct = { sel: ComplexSel, err: string }
+
+    fn emptyComplex() -> ComplexSel { return { head: { parts: [] }, links: [] } }
+    fn complexErr(msg: string) -> ComplexR { return { sel: emptyComplex(), err: msg } }
+
+    // impl#1 F18 (progress.md): the one-char string literal of a tilde is rewritten to
+    // "__scrml_tilde__" inside `${}` (the §32 `~` lowering reaches into string literals), so the
+    // later-sibling combinator is recognized by its char code (126).
+    fn combOf(c: string) -> Combinator | not {
+        if (c == ">") return Combinator.DirectChild
+        if (c == "+") return Combinator.NextSibling
+        if (c.length == 1 && c.charCodeAt(0) == 126) return Combinator.LaterSibling
+        return not
+    }
+
+    fn parseComplex(arm: string) -> ComplexR {
+        const t: string = trimmed(arm)
+        if (t.length == 0) return complexErr("an empty selector arm")
+        const head: CompR = parseCompound(t, 0)
+        if (head.err.length > 0) return complexErr(head.err)
+        if (head.parts.length == 0) return complexErr("unexpected `" + charAt(t, 0) + "`")
+        let links: SelLink[] = []
+        let j: int = head.next
+        while (j < t.length) {
+            let sawSpace = false
+            while (j < t.length && isSpace(charAt(t, j))) {
+                j = j + 1
+                sawSpace = true
+            }
+            if (j < t.length) {
+                const explicit: Combinator | not = combOf(charAt(t, j))
+                let comb: Combinator = Combinator.Descendant
+                if (explicit is some) {
+                    comb = explicit
+                    j = j + 1
+                    while (j < t.length && isSpace(charAt(t, j))) { j = j + 1 }
+                } else if (!sawSpace) {
+                    return complexErr("unexpected `" + charAt(t, j) + "`")
+                }
+                const next: CompR = parseCompound(t, j)
+                if (next.err.length > 0) return complexErr(next.err)
+                if (next.parts.length == 0) return complexErr("unexpected `" + charAt(t, j) + "`")
+                links = links.concat([{ comb: comb, target: { parts: next.parts } }])
+                j = next.next
+            }
+        }
+        return { sel: { head: { parts: head.parts }, links: links }, err: "" }
+    }
+
+    type SelR:struct = { arms: ComplexSel[], err: string }
+
+    export fn parseSelector(s: string) -> SelR {
+        const split: ArmsR = splitArms(s)
+        if (split.err.length > 0) return { arms: [], err: split.err }
+        let arms: ComplexSel[] = []
+        for (const a of split.arms) {
+            const r: ComplexR = parseComplex(a)
+            if (r.err.length > 0) return { arms: [], err: r.err }
+            arms = arms.concat([r.sel])
+        }
+        return { arms: arms, err: "" }
+    }
+
+    // =========================================================================
+    // Declaration values: literal text + resolved `@` references.
+    // =========================================================================
+    type Named:struct = { name: string, sym: Sym }
+    type Names:struct = { tokens: Named[], cells: Named[] }
+
+    fn lookup(xs: Named[], n: string) -> Sym | not {
+        for (const x of xs) {
+            if (x.name == n) return x.sym
+        }
+        return not
+    }
+
+    type PartsR:struct = { parts: CssPart[], why: string[] }
+
+    fn flushText(ps: CssPart[], buf: string) -> CssPart[] {
+        if (buf.length == 0) return ps
+        return ps.concat([CssPart.CssText(buf)])
+    }
+
+    // `inToken` = this value initializes a theme token (a cell read there is O47).
+    export fn parseValue(v: string, names: Names, inToken: boolean) -> PartsR {
+        const t: string = trimmed(v)
+        if (t.length == 0) return { parts: [], why: ["a declaration with an empty value (impl#1's css parser lost its text)"] }
+        let parts: CssPart[] = []
+        let why: string[] = []
+        let buf = ""
+        let j = 0
+        while (j < t.length) {
+            const c: string = charAt(t, j)
+            if (isQuote(c)) {
+                const k: int = skipQuoted(t, j)
+                if (k < 0) return { parts: [], why: ["an unterminated string in a css value"] }
+                buf = buf + t.substring(j, k)
+                j = k
+            } else if (t.substring(j, j + 4).toLowerCase() == "url(") {
+                const k: int = closeOf(t, j + 3, "(", ")")
+                if (k < 0) return { parts: [], why: ["an unclosed `url(` in a css value"] }
+                buf = buf + t.substring(j, k + 1)
+                j = k + 1
+            } else if (c == "!") {
+                return { parts: [], why: ["`!important` (§65.7: internal-vs-interop is not classified yet)"] }
+            } else if (c == "@") {
+                const n: string = readRef(t, j + 1)
+                if (n.length == 0) return { parts: [], why: ["a stray `@` in a css value"] }
+                parts = flushText(parts, buf)
+                buf = ""
+                const tok: Sym | not = lookup(names.tokens, n)
+                const cell: Sym | not = lookup(names.cells, n)
+                if (tok is some) {
+                    parts = parts.concat([CssPart.TokenVar(tok)])
+                } else if (cell is some) {
+                    if (inToken) {
+                        why = why.concat(["a theme token whose value reads the cell `@" + n + "` (O47 — OPEN)"])
+                    } else {
+                        parts = parts.concat([CssPart.CellVar(cell)])
+                    }
+                } else {
+                    why = why.concat(["`@" + n + "` names no theme token and no cell the shim sees (E-THEME-TOKEN-UNKNOWN is analyze's)"])
+                }
+                j = j + 1 + n.length
+            } else {
+                buf = buf + c
+                j = j + 1
+            }
+        }
+        return { parts: flushText(parts, buf), why: why }
+    }
+
+    // =========================================================================
+    // Collection: one walk over the file (`nodes`), recording the program node,
+    // the declared cells, the `<theme>`s and every `#{}` with its position.
+    // =========================================================================
+    // level: "program" (under `<program>` / `${}` / the file top), "element"
+    // (inside a non-component element), "component" (inside an instance).
+    type Place:struct = { level: string, scope: string, dup: boolean }
+    type Found:struct = { node: INode, at: Place }
+    type Acc:struct = {
+        programs: INode[],
+        cells: string[],
+        themes: INode[],
+        blocks: Found[],
+        seen: string[],
+        why: string[],
+    }
+
+    fn accWithWhy(a: Acc, w: string) -> Acc {
+        return { programs: a.programs, cells: a.cells, themes: a.themes, blocks: a.blocks, seen: a.seen, why: a.why.concat([w]) }
+    }
+
+    fn visitVal(a: Acc, v: IVal, at: Place) -> Acc {
+        return match v {
+            .VNode(obj: o) :> visitNode(a, o, at)
+            .VList(elems: xs) :> visitList(a, xs, at)
+            .VStr(s: x) :> a
+            .VNum(n: x) :> a
+            .VBool(b: x) :> a
+            .VNull :> a
+        }
+    }
+
+    fn visitList(a: Acc, xs: IVal[], at: Place) -> Acc {
+        let out: Acc = a
+        for (const x of xs) { out = visitVal(out, x, at) }
+        return out
+    }
+
+    fn visitKids(a: Acc, n: INode, at: Place) -> Acc {
+        let out: Acc = a
+        for (const e of n.entries) { out = visitVal(out, e.val, at) }
+        return out
+    }
+
+    // The position a node's CHILDREN are at.
+    fn childPlace(n: INode, at: Place, seen: string[]) -> Place {
+        const origin: string | not = strAt(n, "_expandedFrom")
+        if (origin is some) return { level: "component", scope: origin, dup: at.dup || hasStr(seen, origin) }
+        if (at.level == "component") return at
+        const k: string = kindAt(n)
+        if (k == "logic") return at
+        if (k == "markup") {
+            const tag: string | not = strAt(n, "tag")
+            if (tag is some) {
+                if (tag == "program") return at
+            }
+            return { level: "element", scope: "", dup: at.dup }
+        }
+        // Any other node kind (an each-block, an if-chain, a text node …) — not program level.
+        return { level: "element", scope: "", dup: at.dup }
+    }
+
+    fn sameIdSeen(bs: Found[], n: INode) -> boolean {
+        const id: number | not = numAt(n, "id")
+        if (id is not) return false
+        for (const b of bs) {
+            const other: number | not = numAt(b.node, "id")
+            if (other is some) {
+                if (other == id) return true
+            }
+        }
+        return false
+    }
+
+    fn visitNode(a: Acc, n: INode, at: Place) -> Acc {
+        const k: string = kindAt(n)
+        if (k == "css-inline") {
+            // impl#1 can hold ONE node in two places (an each-block's `bodyChildren` and
+            // `templateChildren`): the same node id is the same `#{}`, collected once.
+            if (sameIdSeen(a.blocks, n)) return a
+            return { programs: a.programs, cells: a.cells, themes: a.themes, blocks: a.blocks.concat([{ node: n, at: at }]),
+                     seen: a.seen, why: a.why }
+        }
+        if (k == "theme-decl") {
+            return { programs: a.programs, cells: a.cells, themes: a.themes.concat([n]), blocks: a.blocks, seen: a.seen, why: a.why }
+        }
+        if (k == "style") return accWithWhy(a, "a `<style>` block (E-STYLE-001 territory — CSS lives in `#{}`)")
+        // A component DEFINITION is not an instance: its expansions carry its stylesheet.
+        if (k == "component-def") return a
+        let acc: Acc = a
+        if (k == "state-decl") {
+            const name: string | not = strAt(n, "name")
+            if (name is some) {
+                if (!hasStr(acc.cells, name)) {
+                    acc = { programs: acc.programs, cells: acc.cells.concat([name]), themes: acc.themes, blocks: acc.blocks,
+                            seen: acc.seen, why: acc.why }
+                }
+            }
+        }
+        if (k == "markup") {
+            const tag: string | not = strAt(n, "tag")
+            if (tag is some) {
+                if (tag == "program") {
+                    acc = { programs: acc.programs.concat([n]), cells: acc.cells, themes: acc.themes, blocks: acc.blocks,
+                            seen: acc.seen, why: acc.why }
+                }
+            }
+        }
+        const inner: Place = childPlace(n, at, acc.seen)
+        const origin: string | not = strAt(n, "_expandedFrom")
+        if (origin is some) {
+            if (!hasStr(acc.seen, origin)) {
+                acc = { programs: acc.programs, cells: acc.cells, themes: acc.themes, blocks: acc.blocks,
+                        seen: acc.seen.concat([origin]), why: acc.why }
+            }
+        }
+        return visitKids(acc, n, inner)
+    }
+
+    // =========================================================================
+    // `<theme>` (the legacy body) → tokens.
+    // =========================================================================
+    type ArmRec:struct = { variant: string, text: string }
+    type TokRec:struct = { name: string, sym: Sym, base: string, cell: string, arms: ArmRec[] }
+    type Toks:struct = { recs: TokRec[], next: int, why: string[] }
+
+    fn findRec(rs: TokRec[], n: string) -> TokRec | not {
+        for (const r of rs) {
+            if (r.name == n) return r
+        }
+        return not
+    }
+
+    fn baseTokens(t: Toks, theme: INode, cells: string[]) -> Toks {
+        let recs: TokRec[] = t.recs
+        let next: int = t.next
+        let why: string[] = t.why
+        for (const tok of nodesAt(theme, "baseTokens")) {
+            why = why.concat(unmapped(tok, "a `<theme>` token", ["name", "value"], []))
+            const name: string | not = strAt(tok, "name")
+            const text: string | not = strAt(tok, "value")
+            if (name is not) {
+                why = why.concat(["a `<theme>` token with no name"])
+            } else if (text is not) {
+                why = why.concat(["the `<theme>` token `" + name + "` has no value"])
+            } else if (findRec(recs, name) is some) {
+                why = why.concat(["the theme token `" + name + "` is declared twice (§66.17 item 4: one namespace)"])
+            } else if (hasStr(cells, name)) {
+                why = why.concat(["the theme token `" + name + "` and a cell share the name (§66.17 item 4: one namespace — E-THEME-TOKEN-CELL-COLLISION, analyze's to fire)"])
+            } else {
+                recs = recs.concat([{ name: name, sym: mkSym(next, name), base: text, cell: "", arms: [] }])
+                next = next + 1
+            }
+        }
+        return { recs: recs, next: next, why: why }
+    }
+
+    fn hasArm(r: TokRec, v: string) -> boolean {
+        for (const a of r.arms) {
+            if (a.variant == v) return true
+        }
+        return false
+    }
+
+    fn withArm(rs: TokRec[], name: string, cell: string, v: string, text: string) -> TokRec[] {
+        let out: TokRec[] = []
+        for (const r of rs) {
+            if (r.name == name) {
+                out = out.concat([{ name: r.name, sym: r.sym, base: r.base, cell: cell, arms: r.arms.concat([{ variant: v, text: text }]) }])
+            } else {
+                out = out.concat([r])
+            }
+        }
+        return out
+    }
+
+    fn variantTokens(t: Toks, theme: INode) -> Toks {
+        let recs: TokRec[] = t.recs
+        let why: string[] = t.why
+        const forCell: string | not = strAt(theme, "forCell")
+        for (const vb of nodesAt(theme, "variants")) {
+            why = why.concat(unmapped(vb, "a `<theme>` variant block", ["variant", "tokens"], []))
+            const v: string | not = strAt(vb, "variant")
+            if (v is not) {
+                why = why.concat(["a `<theme>` variant block with no name"])
+            } else if (forCell is not) {
+                why = why.concat(["the `." + v + "` variant of a `<theme>` with no `for=` (no cell reflects it)"])
+            } else {
+                for (const tok of nodesAt(vb, "tokens")) {
+                    why = why.concat(unmapped(tok, "a `<theme>` token", ["name", "value"], []))
+                    const name: string | not = strAt(tok, "name")
+                    const text: string | not = strAt(tok, "value")
+                    if (name is not) {
+                        why = why.concat(["a `<theme>` variant token with no name"])
+                    } else if (text is not) {
+                        why = why.concat(["the `." + v + "` re-bind of `" + name + "` has no value"])
+                    } else {
+                        const r: TokRec | not = findRec(recs, name)
+                        if (r is not) {
+                            why = why.concat(["the `." + v + "` variant re-binds `" + name + "`, which has no base value (E-THEME-TOKEN-UNKNOWN is analyze's)"])
+                        } else if (r.cell.length > 0 && r.cell != forCell) {
+                            why = why.concat(["the token `" + name + "` is re-bound by variants of two cells (`@" + r.cell + "`, `@" + forCell + "`)"])
+                        } else if (hasArm(r, v)) {
+                            why = why.concat(["the `." + v + "` variant re-binds `" + name + "` twice"])
+                        } else {
+                            recs = withArm(recs, name, forCell, v, text)
+                        }
+                    }
+                }
+            }
+        }
+        return { recs: recs, next: t.next, why: why }
+    }
+
+    fn themeWhy(theme: INode, mode: string) -> string[] {
+        let why: string[] = unmapped(theme, "`<theme>`", ["kind", "forCell", "baseTokens", "variants", "mediaBinds", "malformed"],
+                                     ["id", "openerHadSpaceAfterLt"])
+        if (listAt(theme, "malformed").length > 0) {
+            why = why.concat(["a `<theme>` body impl#1 did not parse (T3 `<name:type=…/>` declarations need the bootstrap front end)"])
+        }
+        if (listAt(theme, "mediaBinds").length > 0) {
+            why = why.concat(["a `<theme>` `@media (…)` auto-bind (O17(c) — OPEN)"])
+        }
+        if (mode == "library") {
+            why = why.concat(["a `<theme>` in a library-mode file (O17(d) — OPEN)"])
+        }
+        return why
+    }
+
+    type TokensR:struct = { tokens: ThemeToken[], names: Names, next: int, why: string[] }
+    type PartsInit:struct = { init: TokenInit, why: string[] }
+
+    fn tokenInit(r: TokRec, cellSym: Sym, names: Names) -> PartsInit {
+        const base: PartsR = parseValue(r.base, names, true)
+        if (r.arms.length == 0) return { init: TokenInit.Constant(base.parts), why: base.why }
+        let arms: TokenArm[] = []
+        let why: string[] = base.why
+        for (const a of r.arms) {
+            const p: PartsR = parseValue(a.text, names, true)
+            why = why.concat(p.why)
+            arms = arms.concat([{ variant: a.variant, value: p.parts }])
+        }
+        return { init: TokenInit.OnVariant(cellSym, arms, base.parts), why: why }
+    }
+
+    fn themeTokens(themes: INode[], cells: string[], mode: string, first: int) -> TokensR {
+        let t: Toks = { recs: [], next: first, why: [] }
+        for (const th of themes) {
+            t = { recs: t.recs, next: t.next, why: t.why.concat(themeWhy(th, mode)) }
+            t = baseTokens(t, th, cells)
+        }
+        for (const th of themes) { t = variantTokens(t, th) }
+        let next: int = t.next
+        let tokNames: Named[] = []
+        for (const r of t.recs) { tokNames = tokNames.concat([{ name: r.name, sym: r.sym }]) }
+        let cellNames: Named[] = []
+        for (const c of cells) {
+            cellNames = cellNames.concat([{ name: c, sym: mkSym(next, c) }])
+            next = next + 1
+        }
+        const names: Names = { tokens: tokNames, cells: cellNames }
+        let tokens: ThemeToken[] = []
+        let why: string[] = t.why
+        for (const r of t.recs) {
+            let cellSym: Sym = mkSym(0, r.cell)
+            if (r.cell.length > 0) {
+                const c: Sym | not = lookup(cellNames, r.cell)
+                if (c is some) {
+                    cellSym = c
+                } else {
+                    why = why.concat(["`<theme for=@" + r.cell + ">` names no cell the shim sees"])
+                }
+            }
+            const pi: PartsInit = tokenInit(r, cellSym, names)
+            why = why.concat(pi.why)
+            tokens = tokens.concat([{ sym: r.sym, init: pi.init }])
+        }
+        return { tokens: tokens, names: names, next: next, why: why }
+    }
+
+    // =========================================================================
+    // `#{}` blocks → rules / hoisted statements.
+    // =========================================================================
+    type Sheet:struct = {
+        charsets: string[],
+        imports: CssImport[],
+        global: StyleRule[],
+        scopes: ScopeSheet[],
+        why: string[],
+    }
+
+    type DeclR:struct = { decl: CssDecl, why: string[] }
+    fn emptyDecl() -> CssDecl { return { prop: "", value: [] } }
+
+    fn isFlatRule(r: INode) -> boolean {
+        return strAt(r, "prop") is some && strAt(r, "selector") is not
+    }
+
+    fn declOf(d: INode, names: Names) -> DeclR {
+        let why: string[] = unmapped(d, "a css declaration", ["prop", "value", "isExpression", "apply"], ["reactiveRefs"])
+        if (listAt(d, "apply").length > 0) {
+            return { decl: emptyDecl(), why: why.concat(["`@apply` (§26.8 — the utility table is not in the bootstrap)"]) }
+        }
+        if (flagAt(d, "isExpression")) why = why.concat(["a computed `@` expression in a css value (§25 bridge)"])
+        const p: string | not = strAt(d, "prop")
+        const v: string | not = strAt(d, "value")
+        if (p is not) return { decl: emptyDecl(), why: why.concat(["a css declaration with no property"]) }
+        if (v is not) return { decl: emptyDecl(), why: why.concat(["the css declaration `" + p + "` has no value"]) }
+        const name: string = trimmed(p)
+        if (readName(name, 0) != name) return { decl: emptyDecl(), why: why.concat(["the css property `" + name + "` is not a plain property name"]) }
+        const parts: PartsR = parseValue(v, names, false)
+        return { decl: { prop: name, value: parts.parts }, why: why.concat(parts.why) }
+    }
+
+
+    type RuleR:struct = { rule: StyleRule, why: string[] }
+
+    fn ruleOf(r: INode, names: Names) -> RuleR {
+        let why: string[] = []
+        const sel: string | not = strAt(r, "selector")
+        let arms: ComplexSel[] = []
+        if (sel is not) {
+            why = why.concat(["a css rule with no selector"])
+        } else {
+            const parsed: SelR = parseSelector(sel)
+            if (parsed.err.length > 0) {
+                why = why.concat(["the selector `" + sel + "`: " + parsed.err + " (§65.2.5: fail loud)"])
+            }
+            arms = parsed.arms
+        }
+        let ds: CssDecl[] = []
+        for (const d of nodesAt(r, "declarations")) {
+            const dr: DeclR = declOf(d, names)
+            why = why.concat(dr.why)
+            ds = ds.concat([dr.decl])
+        }
+        return { rule: { sel: arms, decls: ds }, why: why }
+    }
+
+    type HoistR:struct = { charset: string, imp: CssImport | not, why: string }
+
+    // `@charset "X";` / `@import url("u") conds;` / `@import "u" conds;` (§65.8).
+    fn hoistOf(text: string) -> HoistR {
+        const t: string = trimmed(text)
+        const low: string = t.toLowerCase()
+        if (t.substring(t.length - 1, t.length) != ";") {
+            return { charset: "", imp: not, why: "the at-rule `" + t + "` (a block at-rule, or not `;`-terminated)" }
+        }
+        const body: string = trimmed(t.substring(0, t.length - 1))
+        if (low.substring(0, 9) == "@charset ") {
+            const rest: string = trimmed(body.substring(9, body.length))
+            if (rest.length >= 2 && charAt(rest, 0) == "\"" && skipQuoted(rest, 0) == rest.length) {
+                return { charset: rest.substring(1, rest.length - 1), imp: not, why: "" }
+            }
+            return { charset: "", imp: not, why: "the `@charset` statement `" + t + "`" }
+        }
+        if (low.substring(0, 8) == "@import ") {
+            const rest: string = trimmed(body.substring(8, body.length))
+            let url = ""
+            let after = 0
+            if (rest.substring(0, 4).toLowerCase() == "url(") {
+                const k: int = closeOf(rest, 3, "(", ")")
+                if (k < 0) return { charset: "", imp: not, why: "the `@import` statement `" + t + "`" }
+                const inner: string = trimmed(rest.substring(4, k))
+                url = inner
+                if (inner.length >= 2 && isQuote(charAt(inner, 0))) {
+                    if (skipQuoted(inner, 0) != inner.length) return { charset: "", imp: not, why: "the `@import` statement `" + t + "`" }
+                    url = inner.substring(1, inner.length - 1)
+                }
+                after = k + 1
+            } else if (isQuote(charAt(rest, 0))) {
+                const k: int = skipQuoted(rest, 0)
+                if (k < 0) return { charset: "", imp: not, why: "the `@import` statement `" + t + "`" }
+                url = rest.substring(1, k - 1)
+                after = k
+            } else {
+                return { charset: "", imp: not, why: "the `@import` statement `" + t + "`" }
+            }
+            if (url.indexOf("\"") >= 0 || url.indexOf("\\") >= 0) {
+                return { charset: "", imp: not, why: "the `@import` url in `" + t + "` (quotes / escapes)" }
+            }
+            return { charset: "", imp: { url: url, conditions: trimmed(rest.substring(after, rest.length)) }, why: "" }
+        }
+        return { charset: "", imp: not, why: "the at-rule `" + t + "` (only a top-level `@charset` / `@import` is mapped)" }
+    }
+
+    fn addScopeRules(ss: ScopeSheet[], c: string, rs: StyleRule[]) -> ScopeSheet[] {
+        let out: ScopeSheet[] = []
+        let found = false
+        for (const s of ss) {
+            if (s.component == c) {
+                out = out.concat([{ component: s.component, rules: s.rules.concat(rs) }])
+                found = true
+            } else {
+                out = out.concat([s])
+            }
+        }
+        if (!found) out = out.concat([{ component: c, rules: rs }])
+        return out
+    }
+
+    fn sheetOf(blocks: Found[], names: Names) -> Sheet {
+        let sh: Sheet = { charsets: [], imports: [], global: [], scopes: [], why: [] }
+        for (const b of blocks) {
+            if (!b.at.dup) sh = blockInto(sh, b, names)
+        }
+        return sh
+    }
+
+    fn blockInto(sh: Sheet, b: Found, names: Names) -> Sheet {
+        // `_dbVar`: a CG-internal stamp (the SQL handle's name) CG writes onto nodes during emission,
+        // before the stylesheet runs — no styling fact.
+        let why: string[] = sh.why.concat(unmapped(b.node, "`#{}`", ["kind", "rules"], ["id", "_dbVar"]))
+        const rules: INode[] = nodesAt(b.node, "rules")
+        if (rules.length == 0) return { charsets: sh.charsets, imports: sh.imports, global: sh.global, scopes: sh.scopes, why: why }
+        let flat = 0
+        for (const r of rules) {
+            why = why.concat(unmapped(r, "a css rule", ["selector", "declarations", "prop", "value", "isExpression", "atRule", "apply"],
+                                      ["reactiveRefs"]))
+            if (isFlatRule(r)) flat = flat + 1
+        }
+        // R4 (S440): a `#{}` in a plain (non-component) element is program-global.
+        const global: boolean = b.at.level == "program" || b.at.level == "element"
+        if (flat == rules.length && b.at.level == "component") {
+            // The inline `style=""` form (§9.1) — html's, not the stylesheet's.
+            return { charsets: sh.charsets, imports: sh.imports, global: sh.global, scopes: sh.scopes, why: why }
+        }
+        if (flat > 0) {
+            return { charsets: sh.charsets, imports: sh.imports, global: sh.global, scopes: sh.scopes,
+                     why: why.concat(["bare css declarations in a `#{}` at " + b.at.level + " level, with no selector to apply to"]) }
+        }
+        let charsets: string[] = sh.charsets
+        let imports: CssImport[] = sh.imports
+        let rs: StyleRule[] = []
+        for (const r of rules) {
+            const at: string | not = strAt(r, "atRule")
+            if (at is some) {
+                if (!global) {
+                    why = why.concat(["the at-rule `" + trimmed(at) + "` in a component `#{}`"])
+                } else {
+                    const h: HoistR = hoistOf(at)
+                    if (h.why.length > 0) {
+                        why = why.concat([h.why])
+                    } else if (h.imp is some) {
+                        imports = imports.concat([h.imp])
+                    } else {
+                        charsets = charsets.concat([h.charset])
+                    }
+                }
+            } else if (listAt(r, "apply").length > 0) {
+                why = why.concat(["a top-level `@apply` in `#{}` (§26.8)"])
+            } else {
+                const rr: RuleR = ruleOf(r, names)
+                why = why.concat(rr.why)
+                rs = rs.concat([rr.rule])
+            }
+        }
+        if (global) {
+            return { charsets: charsets, imports: imports, global: sh.global.concat(rs), scopes: sh.scopes, why: why }
+        }
+        return { charsets: charsets, imports: imports, global: sh.global, scopes: addScopeRules(sh.scopes, b.at.scope, rs), why: why }
+    }
+
+    // =========================================================================
+    // The entry.
+    // =========================================================================
+    type ResetR:struct = { on: boolean, why: string[] }
+
+    fn resetOf(programs: INode[]) -> ResetR {
+        // No `<program>` → no reset: the reset is the APP's, attached to its `<program>` (§65.3.4 — the
+        // opt-out is `<program reset="none">`), and the §65.8 order is "emitted once" — not once per
+        // module / fragment file. (impl#1 agrees; the SPEC says it in no single sentence — progress.md.)
+        if (programs.length == 0) return { on: false, why: [] }
+        for (const a of nodesAt(programs[0], "attrs")) {
+            const n: string | not = strAt(a, "name")
+            if (n is some) {
+                if (n == "reset") {
+                    const v: INode | not = nodeAt(a, "value")
+                    if (v is some) {
+                        const k: string = kindAt(v)
+                        const s: string | not = strAt(v, "value")
+                        if (k == "string-literal" && s is some) {
+                            if (s == "none") return { on: false, why: [] }
+                        }
+                    }
+                    return { on: true, why: ["`<program reset=…>` with a value other than \"none\" (§65.3.4)"] }
+                }
+            }
+        }
+        return { on: true, why: [] }
+    }
+
+    export fn ingestCss(ast: INode, mode: string) -> CssIngest {
+        const top: Place = { level: "program", scope: "", dup: false }
+        const acc0: Acc = { programs: [], cells: [], themes: [], blocks: [], seen: [], why: [] }
+        const acc: Acc = visitList(acc0, listAt(ast, "nodes"), top)
+        const reset: ResetR = resetOf(acc.programs)
+        // O17(d): a `<theme>` in a file with no `<program>` (a library / module file) — OPEN.
+        let placeWhy: string[] = []
+        if (acc.themes.length > 0 && acc.programs.length == 0) {
+            placeWhy = ["a `<theme>` in a file with no `<program>` (a library / module file — O17(d) — OPEN)"]
+        }
+        const toks: TokensR = themeTokens(acc.themes, acc.cells, mode, 1)
+        const sheet: Sheet = sheetOf(acc.blocks, toks.names)
+        const unit: CssUnit = {
+            charsets: sheet.charsets,
+            imports: sheet.imports,
+            reset: reset.on,
+            tokens: toks.tokens,
+            global: sheet.global,
+            scopes: sheet.scopes,
+        }
+        return { unit: unit, why: acc.why.concat(reset.why).concat(placeWhy).concat(toks.why).concat(sheet.why) }
+    }
+}

@@ -1,0 +1,19 @@
+{
+  "core": "charsetUnit",
+  "spec": "§65.8",
+  "rationale": "§65.8: `@charset` is \"the very first thing in the sheet (byte 0)\" — only then does it decide the sheet's encoding. Against a windows-1252 page, the UTF-8 `é` in the sheet decodes correctly only if the `@charset` is honoured.",
+  "charset": "windows-1252",
+  "html": "<div data-scrml=\"C\"><span class=\"c\">x</span></div>",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".c",
+          "pseudo": "::before",
+          "prop": "content",
+          "value": "\"é\""
+        }
+      ]
+    }
+  ]
+}
