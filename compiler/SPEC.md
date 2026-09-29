@@ -23842,7 +23842,7 @@ The following attributes on `<program>` enable automatic middleware generation:
 |---|---|---|
 | `cors=` | `"*"` or `"https://example.com"` | CORS preflight handler (OPTIONS route) + `Access-Control-*` headers on all responses |
 | `log=` | `"structured"` \| `"minimal"` \| `"off"` | Request/response logging with timestamp, method, path, status, duration |
-| `csrf=` | `"auto"` \| `"off"` | CSRF token generation, cookie injection, and validation on state-mutating requests. With `<program auth=>` present, emits session-bound synchronizer-token validation; without auth, baseline double-submit cookie helpers are auto-emitted on routes that mutate state. See §52.13 for the canonical value set. |
+| `csrf=` | `"auto"` \| `"off"` (`"auto"` is the default whenever `auth=` is present) | CSRF token generation, cookie injection, and validation on state-mutating requests. With `<program auth=>` present, emits session-bound synchronizer-token validation; without auth, baseline double-submit cookie helpers are auto-emitted on routes that mutate state. See §52.13 for the canonical value set. |
 | `ratelimit=` | `"100/min"` \| `"N/unit"` | In-memory sliding window rate limiter per IP; 429 response when exceeded |
 | `headers=` | `"strict"` | Injects `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Content-Security-Policy: default-src 'self'` on all responses |
 | `idempotency-store=` | `"auto"` (default) \| `"sqlite"` \| `"postgres"` \| `"mysql"` \| `"redis"` \| `"none"` | Per-app idempotency-key store backend used by §19.9.6 replay-safety machinery. See §39.2.6. |
@@ -23852,7 +23852,10 @@ The following attributes on `<program>` enable automatic middleware generation:
 - All `<program>` middleware attributes SHALL be processed before any route handler is invoked.
 - Multiple `<program>` middleware attributes MAY be combined on a single `<program>` element. The compiler SHALL generate them in the order: CORS → rate limit → CSRF → route handler → security headers → logging.
 - The compiler SHALL generate these middleware handlers as server-side code only. None of these constructs produce client-side JavaScript.
-- A `<program>` element with none of these attributes generates no middleware infrastructure. The absence of a middleware attribute SHALL NOT be a compile error or warning.
+- A `<program>` element with none of these attributes generates no middleware infrastructure beyond the CSRF protection §39.2.3 requires by default (baseline double-submit on state-mutating routes of an app without `auth=`; `csrf="auto"` under `auth=`, next statement). The absence of a middleware attribute SHALL NOT be a compile error or warning — an absent attribute means its default applies.
+- **CSRF under `auth=` is on by default.** When a `<program>` or `<page>` declares `auth=` and carries no `csrf=` attribute, the compiler SHALL treat it exactly as if it declared `csrf="auto"`: the emitted server, client and HTML SHALL be those of the explicit `csrf="auto"` form. Only the literal `csrf="off"` opts out. The default fails closed: a `csrf=` literal outside the §52.13 set (which emits `W-ATTR-002`) SHALL also resolve to `"auto"`, never to "no check". Routes that are CSRF-exempt by construction keep that exemption — the `<endpoint>` foreign-facing surface (§61.7), the SSE `route=` generator (§37.3, a `GET`), and every non-state-mutating (`GET`/`HEAD`) route, including `/__serverLoad` and the WebSocket upgrade (§38, authenticated by the session check alone).
+
+> **Provenance:** ruling:user-voice-scrml.md S441 "yes on csrf auto" — *"when `auth=` is present, `csrf="auto"` is the default, written into §40.2. It fails closed, and apps that need to opt out can say `csrf="off"`."* Before S441 an absent `csrf=` under `auth="required"` emitted no CSRF check while the same app without `auth=` got the baseline double-submit gate, so adding authentication removed the CSRF gate (gap `g-auth-program-without-csrf-attr-emits-no-csrf-check`, resolved by change-id `s441-csrf-default-under-auth`).
 
 #### 39.2.1 `cors=`
 
@@ -23899,6 +23902,7 @@ The compiler generates:
 - CSRF protection SHALL apply only to requests that mutate state (POST, PUT, PATCH, DELETE). GET requests SHALL NOT be subject to CSRF validation.
 - `csrf=` accepts the literal values `"auto"` and `"off"` (canonical value set defined at §52.13). Any other literal value SHALL emit `W-ATTR-002` per §52.13.2.
 - `csrf="auto"` SHALL be paired with `<program auth=>` to enable session-bound synchronizer-token validation; without `auth=`, baseline double-submit cookie helpers are auto-emitted on routes that mutate state.
+- Under `auth=`, an absent `csrf=` SHALL behave as `csrf="auto"`; only `csrf="off"` opts out (§40.2, S441).
 
 #### 39.2.4 `ratelimit=`
 
@@ -34014,8 +34018,8 @@ exactly three literal values:
 
 The `csrf=` attribute accepts:
 
-- `csrf="auto"` — automatic CSRF token injection + verification.
-- `csrf="off"` — no CSRF check.
+- `csrf="auto"` — automatic CSRF token injection + verification. The default whenever `auth=` is present (§40.2, S441).
+- `csrf="off"` — no CSRF check. Under `auth=` this is the only opt-out spelling; any other literal emits `W-ATTR-002` and resolves to `"auto"`.
 
 **Login-page requirement.** When `auth="required"` is declared (whether on
 `<program>`, `<page>`, or `<auth>`) the redirect target (default `/login`)
