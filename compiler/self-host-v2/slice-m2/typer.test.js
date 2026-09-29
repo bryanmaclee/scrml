@@ -201,7 +201,8 @@ describe("adversarial controls — adjacent shapes stay silent", () => {
     ["a ternary of ints into an int cell, with a bool test", "    <let b:bool=false/>\n    <let x:int=0/>\n    function f() { @x = @b ? 1 : 2 }"],
     ["an int into a `number` cell", "    <let r:number=0.5/>\n    function f() { @r = 2 }"],
     ["`not` and a value into a `T | not` struct field", "    type O:struct = { let v: string | not }\n    <let o:O=({ v: not })/>\n    function f() { @o.v = not\n @o.v = \"a\" }"],
-    ["a `T | not` parameter into a `T` cell (may be `not`: unproven, not wrong)", "    <let t:string=\"\"/>\n    function f(s: string | not) { @t = s }"],
+    // (s442 r6: the S439 control "a `T | not` parameter into a `T` cell — unproven, not wrong" moved OUT — RULED an
+    // error for all types (user-voice S442 "`T | not` into `T` is an error for all types"); now a positive test in typer-s440.test.js)
     ["an enum variant into an enum cell", "    <let o:Openness=.Closed/>\n    function f() { @o = .Opened }"],
     ["a seeded `let` (reactive initializer) and a use-site live value", "    <let src:string=\"a\"/>\n    <let draft:string=@src/>", "<dropdown label=(@src) options=([\"a\"]) value=(@draft)/>"],
     ["a sequence's `.length` into an int cell", "    <audit:string[free, end]=([])/>\n    <let n:int=0/>\n    function f() { @audit.push(\"x\")\n @n = @audit.length }"],
@@ -325,8 +326,9 @@ describe("A — a local's type: its annotation, else the join of everything it i
   test("legal — `let a = not; a = \"x\"` then `@s = a` (§42.3.1: infer `T | not`; a `T | not` into `T` is unproven, silent)", () => {
     expect(inApp("    <let s:string=\"\"/>\n    function f() { let a = not\n a = \"x\"\n @s = a }")).toEqual([]);
   });
-  test("legal — the annotated form `let a: string | not = not` then `@s = a`", () => {
-    expect(inApp("    <let s:string=\"\"/>\n    function f() { let a: string | not = not\n @s = a }")).toEqual([]);
+  // FLIPPED (s442 r6) — provenance: ruling:user-voice-scrml.md S442 "`T | not` into `T` is an error for all types" ("A `T | not` isn't a `T`"; bryan: "if the lifecycle says T | not then it can only end as not"). Was: legal (S439 "unproven").
+  test("E-TYPE-031 (ruled S442) — the annotated form `let a: string | not = not` then `@s = a`", () => {
+    expect(inApp("    <let s:string=\"\"/>\n    function f() { let a: string | not = not\n @s = a }")).toEqual(["E-TYPE-031"]);
   });
   test("legal — the same shape in an inline handler block, and through `.push`", () => {
     expect(inApp("    <audit:string[free, end]=([])/>\n    function f() { let a = not\n a = \"x\"\n @audit.push(a) }",
@@ -595,8 +597,9 @@ describe("R2-7 / R2-8 — the fixpoint bound; compound assignment", () => {
   test("E-TYPE-031 — a chain of 8 rebound locals settles (`string | not` reaches `a1`) into an int cell", () => {
     expect(inApp(chain(8, "int=0"))).toEqual(["E-TYPE-031"]);
   });
-  test("twin silent — the same chain into a string cell (a `T | not` into `T` is unproven)", () => {
-    expect(inApp(chain(8, "string=\"\""))).toEqual([]);
+  // FLIPPED (s442 r6) — provenance: ruling:user-voice-scrml.md S442 "`T | not` into `T` is an error for all types". Was: silent (S439 "unproven").
+  test("E-TYPE-031 (ruled S442) — the same chain into a string cell (`string | not` reaches `a1`, un-narrowed)", () => {
+    expect(inApp(chain(8, "string=\"\""))).toEqual(["E-TYPE-031"]);
   });
   test("silent — a chain of 8 whose far end is widened to Unknown (`a8 = 1`): `a1` must SETTLE to Unknown, not stop at `string`", () => {
     const src = chain(8, "int=0").replace(" a8 = not\n", " a8 = 1\n");
