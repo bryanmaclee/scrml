@@ -41,9 +41,13 @@
  *   module defines (analysed interprocedurally — parameters and returns), an
  *   array-callback (`map`, `filter`, `find`, `reduce`, …), `join` /
  *   `toString`, the string methods that return a slice or transform of the
- *   receiver, and the ECMAScript built-ins that copy or serialize their
- *   argument (`String`, `JSON.stringify`, `Object.values`, `structuredClone`, …
- *   — see `SERIALIZING_BUILTINS` / `IDENTITY_BUILTINS`).
+ *   receiver or embed an argument (`concat`, `replace`, …), the ECMAScript
+ *   built-ins that copy, serialize or decode their argument (`String`,
+ *   `JSON.stringify`, `JSON.parse`, `Object.values`, `structuredClone`, … — see
+ *   `SERIALIZING_BUILTINS` / `STRINGIFY_BUILTINS` / `IDENTITY_BUILTINS`), a
+ *   getter or `toJSON` in an object literal (the sink's `JSON.stringify`
+ *   invokes it), `new Promise` resolution, and `throw` → `catch` / reject →
+ *   `.catch`.
  *
  *   A value that is COMPUTED from the column — a comparison, arithmetic, a
  *   boolean predicate method (`includes`, `startsWith`, …), `.length`, or the
@@ -186,11 +190,16 @@ function taintKey(t: Taint): string {
  * verbatim but a row not at all.
  */
 const SERIALIZING_BUILTINS = new Set([
-  "JSON.stringify", "Object.values", "Object.entries", "Object.fromEntries", "structuredClone",
+  "JSON.stringify", "JSON.parse", "Object.values", "Object.entries", "Object.fromEntries", "structuredClone",
 ]);
-/** Built-ins that embed a SCALAR argument verbatim in a string result. */
+/**
+ * Built-ins that embed (or decode) a SCALAR argument verbatim in a string
+ * result. (`JSON.parse` is in `SERIALIZING_BUILTINS`: it rebuilds DATA, so
+ * `JSON.parse(JSON.stringify(row)).passwordHash` must stay protected.)
+ */
 const STRINGIFY_BUILTINS = new Set([
   "String", "encodeURIComponent", "encodeURI", "escape", "btoa", "String.raw",
+  "decodeURIComponent", "decodeURI", "unescape", "atob",
 ]);
 /** Built-ins that return their argument (or a container of it) unchanged. */
 const IDENTITY_BUILTINS = new Set([
@@ -210,6 +219,13 @@ const MUTATING_METHODS = new Set(["push", "unshift", "splice", "set", "add", "fi
 const ELEMENT_METHODS = new Set(["at", "pop", "shift", "get", "charAt"]);
 /** Methods that serialize the receiver's elements into a string. */
 const JOINING_METHODS = new Set(["join", "toString", "toLocaleString"]);
+/**
+ * Methods whose ARGUMENTS end up verbatim in the result, whatever the receiver
+ * is: `"".concat(x)`, `"X".replace("X", x)`, `s.padStart(n, x)`, `a.join(x)`.
+ * (A method on a clean receiver is otherwise treated as derived from its
+ * arguments — `Bun.password.verify(pw, hash)` — so these must be named.)
+ */
+const EMBEDDING_METHODS = new Set(["concat", "replace", "replaceAll", "padStart", "padEnd", "join", "with", "toSpliced"]);
 /**
  * Methods whose result is a predicate / position / comparison over the
  * receiver — a DERIVED value of independent identity (§14.8.9 bound).
@@ -733,7 +749,11 @@ class FlowAnalysis {
       }
       case "TryStatement":
         this.walkStmt(node.block, scope, fn);
-        if (node.handler) this.walkStmt(node.handler.body, scope, fn);
+        if (node.handler) {
+          // A `catch` may receive anything the module ever throws or rejects.
+          if (node.handler.param) this.bindPattern(node.handler.param, this.thrown, scope, fn);
+          this.walkStmt(node.handler.body, scope, fn);
+        }
         this.walkStmt(node.finalizer, scope, fn);
         return;
       case "SwitchStatement":
@@ -747,7 +767,7 @@ class FlowAnalysis {
         this.walkStmt(node.body, scope, fn);
         return;
       case "ThrowStatement":
-        this.evalExpr(node.argument, scope, fn);
+        this.addThrown(this.evalExpr(node.argument, scope, fn));
         return;
       case "ExportNamedDeclaration":
         if (node.declaration) this.walkStmt(node.declaration, scope, fn);
@@ -923,7 +943,14 @@ class FlowAnalysis {
             continue;
           }
           if (pr.computed) this.evalExpr(pr.key, scope, fn);
-          r = join(r, containerOf(this.evalExpr(pr.value, scope, fn)));
+          const v = this.evalExpr(pr.value, scope, fn);
+          r = join(r, containerOf(v));
+          // A getter, or a `toJSON` method, is INVOKED by `JSON.stringify` at the
+          // sink — what it returns is what ships.
+          const keyName = pr.key?.type === "Identifier" ? pr.key.name : staticKey(pr.key);
+          if (v.fns.size > 0 && (pr.kind === "get" || keyName === "toJSON")) {
+            r = join(r, containerOf(this.applyFns(v.fns, [])));
+          }
         }
         return r;
       }
@@ -1016,9 +1043,29 @@ class FlowAnalysis {
     return null;
   }
 
+  // `new Promise` executors: the resolver pseudo-function per promise site, the
+  // value it was called with, and the shared rejecter (feeds `thrown`).
+  private resolvers = new Map<number, any>();
+  private resolved = new Map<number, Taint>();
+  private rejecter: any = { __rejecter: true };
+  /** Everything ever thrown / rejected — what any `catch` may receive. */
+  private thrown: Taint = clean();
+
+  private addThrown(t: Taint): void {
+    const next = join(this.thrown, t);
+    if (taintKey(next) !== taintKey(this.thrown)) { this.thrown = next; this.changed = true; }
+  }
+
   private applyFns(fns: Set<any>, args: Taint[], everyParam?: Taint): Taint {
     let r = clean();
     for (const f of fns) {
+      if (f && f.__resolver !== undefined) {
+        const prev = this.resolved.get(f.__resolver) ?? clean();
+        const next = join(prev, everyParam ?? args[0] ?? clean());
+        if (taintKey(next) !== taintKey(prev)) { this.resolved.set(f.__resolver, next); this.changed = true; }
+        continue;
+      }
+      if (f && f.__rejecter) { this.addThrown(everyParam ?? args[0] ?? clean()); continue; }
       const info = this.fnInfos.get(f);
       if (!info || info.skip) continue;
       f.params.forEach((p: any, i: number) => {
@@ -1081,6 +1128,14 @@ class FlowAnalysis {
         this.sinks.push({ t: args[0] ?? clean(), fnName: this.displayName(fn?.node ?? null), kind: "serializer-json" });
         return clean();
       }
+      if (path === "Array.from" && args[1] && args[1].fns.size > 0) {
+        // `Array.from(rows, r => r.passwordHash)` — the mapper is a `.map`.
+        return this.callbackMethod("map", args[0] ?? clean(), [args[1]], node, fn);
+      }
+      if (path === "Promise.reject") {
+        this.addThrown(args[0] ?? clean());
+        return clean();
+      }
       if (path !== null) {
         const b = this.builtin(path, args);
         if (b) return b;
@@ -1132,9 +1187,12 @@ class FlowAnalysis {
 
       if (method !== null && DERIVED_METHODS.has(method)) return r;
       if (method !== null && ELEMENT_METHODS.has(method)) return join(r, elemOf(recv));
-      if (method !== null && JOINING_METHODS.has(method)) {
-        const s = clean();
+      if (method !== null && (JOINING_METHODS.has(method) || EMBEDDING_METHODS.has(method))) {
+        const s: Taint = JOINING_METHODS.has(method)
+          ? clean()
+          : { row: recv.row ? joinRow(null, recv.row) : null, scalar: new Map(recv.scalar), deep: new Map(recv.deep), fns: new Set() };
         mergeMap(s.scalar, naked(recv));
+        if (EMBEDDING_METHODS.has(method)) for (const a of args) mergeMap(s.scalar, naked(a));
         return join(r, s);
       }
       // Any other method: the result may be the receiver, a slice or transform
@@ -1149,6 +1207,16 @@ class FlowAnalysis {
     const ct = this.evalExpr(callee, scope, fn);
     if (ct.fns.size > 0) return this.applyFns(ct.fns, args);
     const path = this.globalPath(callee, scope);
+    if (path === "Promise" && node.type === "NewExpression" && args[0] && args[0].fns.size > 0) {
+      // `new Promise((resolve, reject) => resolve(u.passwordHash))` — the promise
+      // settles to whatever the executor passes to `resolve`. The executor's
+      // first parameter is bound to a resolver that records its argument here.
+      const key = node.start;
+      let resolver = this.resolvers.get(key);
+      if (!resolver) { resolver = { __resolver: key, params: [] }; this.resolvers.set(key, resolver); }
+      this.applyFns(args[0].fns, [{ ...clean(), fns: new Set([resolver]) }, { ...clean(), fns: new Set([this.rejecter]) }]);
+      return this.resolved.get(key) ?? clean();
+    }
     if (path === "Response" && node.type === "NewExpression") {
       // A response body the server sends. (An AUTHOR-built one is also
       // E-PROTECT-005 and refused at runtime; a compiler-built one must only
@@ -1218,7 +1286,8 @@ class FlowAnalysis {
       let params: Taint[];
       if (method === "reduce" || method === "reduceRight") params = [join(args[1] ?? clean()), el, clean(), recv];
       else if (method === "then") params = [recv];
-      else if (method === "catch" || method === "finally") params = [clean()];
+      else if (method === "catch") params = [this.thrown];
+      else if (method === "finally") params = [clean()];
       else params = [el, clean(), recv];
       cbRet = this.applyFns(cb.fns, params);
       if (method === "reduce" || method === "reduceRight") {

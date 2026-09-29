@@ -107,6 +107,24 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod("return [u].reduce((a, r) => a + r.passwordHash, '');"))).toEqual(["passwordHash"]);
   });
 
+  test("adversarial round 2 — laundering shapes that initially slipped through", () => {
+    // Each of these compiled clean and SHIPPED the hash on the first cut (measured).
+    expect(leakCols(mod("return JSON.parse(JSON.stringify(u));"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return JSON.parse(JSON.stringify(u)).passwordHash;"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return "".concat(u.passwordHash);'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return "X".replace("X", u.passwordHash);'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return Array.from([u], (r) => r.passwordHash);"))).toEqual(["passwordHash"]);
+    // …and the ones found while closing them.
+    expect(leakCols(mod("return await new Promise((res) => res(u.passwordHash));"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("try { throw u.passwordHash; } catch (e) { return e; }"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return await Promise.reject(u.passwordHash).catch((e) => e);"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return { get h() { return u.passwordHash; } };"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return { toJSON() { return u.passwordHash; } };"))).toEqual(["passwordHash"]);
+    // A clean receiver's method with a protected ARGUMENT is still derived
+    // unless the method embeds its argument.
+    expect(leakCols(mod("return Bun.password.verifySync(pw, u.passwordHash);"))).toEqual([]);
+  });
+
   test("a dynamic key reads any column; a numeric index is still a row", () => {
     expect(leakCols(mod("return u[k];"))).toEqual(["passwordHash"]);
     expect(leakCols(mod("return [u][0];"))).toEqual([]);
