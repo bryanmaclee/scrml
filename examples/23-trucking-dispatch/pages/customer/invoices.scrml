@@ -109,15 +109,20 @@
             // Per F-LIN-001: SQL ?{} interpolation doesn't satisfy lin
             // consume; copy into template literal first.
             const consumeMarker = `consume:${token}`
-            const tokRes = ?{`
+            // Atomic single-use guard: RETURNING yields a row only when this
+            // UPDATE flipped consumed_at from NULL. `.run()` returns void
+            // (§8.5.1), so the outcome is read from RETURNING via `.get()`;
+            // `not` = already consumed (replay / race) or never issued.
+            const consumed = ?{`
                 UPDATE lin_tokens
                 SET consumed_at = CURRENT_TIMESTAMP, consumed_by = ${user.id}
                 WHERE token = ${consumeMarker.substring(8)}
                   AND kind = 'payment'
                   AND load_id = ${inv.load_id}
                   AND consumed_at IS NULL
-            `}.run()
-            if (tokRes.changes == 0) {
+                RETURNING token
+            `}.get()
+            if (consumed is not) {
                 return { error: "Payment token already used or invalid." }
             }
 
