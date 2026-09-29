@@ -12,4 +12,7 @@
       listed samples/ hits in the gap entry (not fixed). docs/ + stdlib/: zero hits.
 - [x] Gaps filed §S441: g-run-result-field-read-compiles-silently (MED),
       g-server-error-envelope-returns-http-200 (MED), g-enum-variant-httpstatus-attribute-drops-variant (MED, surfaced)
-- [ ] suites + conformance + push
+- [x] ex23 compiled (exit 0, 36 files); node --check 69/69 emitted .js OK
+- [x] core suite (pre-commit gate): 32350 pass / 0 fail; conformance 1047/1054 pass + 7 named XFAIL, 0 FAIL
+      (two commit attempts hit 5s test timeouts under load avg ~39 from sibling suites; both tests pass in isolation; retried clean)
+- [x] push
