@@ -446,12 +446,40 @@ ${
         return false
     }
 
+    // A repeat sighting of an already-collected `#{}` (same id) that is directly on the
+    // root of the SAME component instance marks the collected block as on the root.
+    fn withRootSighting(bs: Found[], n: INode, at: Place) -> Found[] {
+        if (!at.root) return bs
+        const id: number | not = numAt(n, "id")
+        if (id is not) return bs
+        let out: Found[] = []
+        for (const b of bs) {
+            const other: number | not = numAt(b.node, "id")
+            let same = false
+            if (other is some) {
+                if (other == id && b.at.level == at.level && b.at.scope == at.scope) same = true
+            }
+            if (same) {
+                out = out.concat([{ node: b.node, at: { level: b.at.level, scope: b.at.scope, dup: b.at.dup, root: true } }])
+            } else {
+                out = out.concat([b])
+            }
+        }
+        return out
+    }
+
     fn visitNode(a: Acc, n: INode, at: Place) -> Acc {
         const k: string = kindAt(n)
         if (k == "css-inline") {
             // impl#1 can hold ONE node in two places (an each-block's `bodyChildren` and
-            // `templateChildren`): the same node id is the same `#{}`, collected once.
-            if (sameIdSeen(a.blocks, n)) return a
+            // `templateChildren`; a component use-site child, which impl#1 hangs BOTH directly
+            // on the expansion root and inside a root descendant): the same node id is the
+            // same `#{}`, collected once. If any sighting is directly on the constructor root,
+            // the block IS on the root — impl#1's html inlines it there (§9.1 DQ-7).
+            if (sameIdSeen(a.blocks, n)) {
+                return { programs: a.programs, cells: a.cells, themes: a.themes, blocks: withRootSighting(a.blocks, n, at),
+                         seen: a.seen, why: a.why }
+            }
             return { programs: a.programs, cells: a.cells, themes: a.themes, blocks: a.blocks.concat([{ node: n, at: at }]),
                      seen: a.seen, why: a.why }
         }

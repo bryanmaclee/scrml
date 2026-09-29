@@ -270,6 +270,24 @@ ${body}
     }
   });
 
+  test("a flat block written as a component USE-SITE child is on the constructor root (impl#1 also hangs it inside a root descendant)", () => {
+    // The ctrl-020 shape: impl#1 holds this one node both directly on the expansion root and under <h3>;
+    // its html inlines it on the root, so the shim must not refuse it by the <h3> sighting.
+    const r = ingest(`<program>
+  <div>
+    <Card title="Secret">
+      #{ color: #111; }
+    </>
+  </div>
+  const Card = <div props={ title: string }>
+    <h3>\${title}</>
+  </>
+</program>
+`).results[0];
+    expect(r.why).toEqual([]);
+    expect(r.unit.scopes).toEqual([]);
+  });
+
   test("a variant re-binding a name with no base value (E-THEME-TOKEN-UNKNOWN is analyze's)", () => {
     const why = whyOf(caseSource("style/theme-variant-rebind-unknown"));
     expect(why.some((w) => w.includes("no base value"))).toBe(true);
