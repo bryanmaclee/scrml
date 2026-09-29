@@ -1,0 +1,19 @@
+type LoadError:enum = { Empty, Bad }
+type Phase:enum = { Idle, Loading }
+
+${
+    function risky()! -> LoadError { fail LoadError.Empty }
+}
+
+<ph>: Phase = .Idle
+<r> = 0
+<msg> = ""
+
+<match on=@ph>
+    <Idle>
+        <button id="one" onclick={ risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 } }>one</button>
+        <button id="seq" onclick={ risky() !{ | .Empty :> @r = @r + 10 | .Bad :> @r = 2 }; @msg = "y" }>seq</button>
+    </>
+    <Loading><p>Loading</p></>
+</>
+<p id="out">${@r} ${@msg}</p>

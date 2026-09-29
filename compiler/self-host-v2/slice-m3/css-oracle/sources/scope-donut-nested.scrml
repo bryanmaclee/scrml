@@ -1,0 +1,18 @@
+<program>
+  const Inner = <div props={}>
+      #{ .label { color: blue; } }
+      <button class="btn" id="inner">in</button>
+      <span class="label" id="inner-label">l</span>
+  </>
+  const Outer = <div props={}>
+      #{
+          .btn   { color: red; }
+          .label { color: green; }
+      }
+      <button class="btn" id="outer">out</button>
+      <span class="label" id="outer-label">l</span>
+      <Inner/>
+  </>
+  <Outer/>
+  <button class="btn" id="page">page</button>
+</program>

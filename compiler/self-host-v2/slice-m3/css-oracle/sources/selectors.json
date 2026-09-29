@@ -1,0 +1,56 @@
+{
+  "spec": "§9.1, §65.2.5",
+  "rationale": "Each author selector keeps its CSS meaning inside the scope (class names unmangled, §9.1): `::before` generates content; `>` matches a direct child only; `+` the next sibling only; `~` any later sibling; `#id`; `:not()`.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".q",
+          "pseudo": "::before",
+          "prop": "content",
+          "value": "\">\""
+        },
+        {
+          "sel": "#direct",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": "#deep",
+          "prop": "color",
+          "value": "rgb(0, 0, 0)"
+        },
+        {
+          "sel": "#next",
+          "prop": "color",
+          "value": "rgb(0, 0, 255)"
+        },
+        {
+          "sel": "#notnext",
+          "prop": "color",
+          "value": "rgb(0, 0, 0)"
+        },
+        {
+          "sel": "#later",
+          "prop": "color",
+          "value": "rgb(0, 128, 0)"
+        },
+        {
+          "sel": "#special",
+          "prop": "color",
+          "value": "rgb(1, 2, 3)"
+        },
+        {
+          "sel": "#li1",
+          "prop": "background-color",
+          "value": "rgb(255, 255, 0)"
+        },
+        {
+          "sel": "#li2",
+          "prop": "background-color",
+          "value": "rgba(0, 0, 0, 0)"
+        }
+      ]
+    }
+  ]
+}

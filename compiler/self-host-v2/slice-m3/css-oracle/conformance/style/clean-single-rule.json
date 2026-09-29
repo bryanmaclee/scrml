@@ -1,0 +1,30 @@
+{
+  "spec": "§9.1 DQ-7, §65.2.5, §65.3.4",
+  "rationale": "The component-scope rule `.btn { color: red }` applies to the component's `<button class=\"btn\">` (§9.1: `#{}` in a component compiles to its `@scope` block). §65.3.4: the built-in reset ships default-on — `margin` zeroed on `body`, `box-sizing: border-box` on every element. Form controls inherit `font` (the body's 16px).",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "body",
+          "prop": "margin-top",
+          "value": "0px"
+        },
+        {
+          "sel": "body > *",
+          "prop": "box-sizing",
+          "value": "border-box"
+        },
+        {
+          "sel": ".btn",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": ".btn",
+          "prop": "font-size",
+          "value": "16px"
+        }
+      ]
+    }
+  ]
+}

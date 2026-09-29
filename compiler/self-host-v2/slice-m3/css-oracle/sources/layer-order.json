@@ -1,0 +1,25 @@
+{
+  "spec": "§65.5, §65.8, §65.3.4",
+  "rationale": "§65.5: reset < program-global `#{}` (`@layer global`) < component scope (unlayered). The global `p { margin-top: 8px }` beats the reset's `p { margin: 0 }`; the component's `.lead { margin-top: 4px }` beats the global `p` rule regardless of specificity.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "#plain",
+          "prop": "margin-top",
+          "value": "8px"
+        },
+        {
+          "sel": ".lead",
+          "prop": "margin-top",
+          "value": "4px"
+        },
+        {
+          "sel": ".note",
+          "prop": "color",
+          "value": "rgb(1, 2, 3)"
+        }
+      ]
+    }
+  ]
+}
