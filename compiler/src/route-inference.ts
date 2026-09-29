@@ -86,6 +86,7 @@ import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn } from "./tool-program.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
+import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
 import { getNodes } from "./codegen/collect.ts";
 // §12.4 client-pin shadow (S263 review) — reuse the tested destructuring
 // name-extractor rather than re-hand-rolling it. Cycle-safe: type-system's
@@ -6252,7 +6253,8 @@ export function runRI(input: RIInput): RIOutput {
       filePath: fileAST.filePath,
       auth: authConfig.auth,
       loginRedirect: authConfig.loginRedirect ?? "/login",
-      csrf: authConfig.csrf ?? "off",
+      // §40.2 (S441) — `csrf="auto"` is the default under `auth=`; only "off" opts out.
+      csrf: effectiveCsrfUnderAuth(authConfig.csrf),
       sessionExpiry: authConfig.sessionExpiry ?? "1h",
       // §20.5.1 (i29e B4b) — "false" opts out of Secure; any other value
       // (incl. the "true" default) → secure mode.
@@ -6340,7 +6342,7 @@ export function runRI(input: RIInput): RIOutput {
           filePath,
           auth: "required",
           loginRedirect: explicit.loginRedirect ?? "/login",
-          csrf: explicit.csrf ?? "auto",
+          csrf: effectiveCsrfUnderAuth(explicit.csrf),
         };
         if (multiProgramFile.has(filePath)) {
           // Pre-S438 stamp, byte-identical (see multiProgramFile above).

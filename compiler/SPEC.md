@@ -22793,6 +22793,8 @@ There is no backward compatibility shim; v0.3 is scrml as of 2026-05-12; v0.next
 
 The `auth=` attribute on `<channel>` accepts `"required" | "optional" | "none"` (per §52.13). When `auth="required"` is set, the compiler injects an `_scrml_auth_check(req)` call before `server.upgrade()` is invoked; unauthenticated upgrade requests are rejected. (Prior to S80, this attribute was named `protect=` on `<channel>`. The rename aligns channel session-gating with the canonical routing-surface vocabulary defined in §52.13; the field-level access control surface `protect=` remains on `<db>` and `<Type>` declarations per §6.12.1 and §52.)
 
+Independently of `auth=`, every channel upgrade in a web-application program refuses a cross-origin handshake (§40.2, S441 — the session cookie rides a WebSocket handshake, so the auth check alone cannot tell the viewer's own page from another site's).
+
 ### 38.6 broadcast() and disconnect() Built-ins
 
 `broadcast(data)` and `disconnect()` are available inside **any function whose declaration appears within the lexical scope of a `<channel>` body**. (Prior to 2026-06-10 this was scoped to "any server-annotated function or handler"; the `server` keyword requirement was relaxed by change-id `server-keyword-eliminate-2026-06-10` D2 — a `broadcast()`/`disconnect()` call is now itself a §12.2 Trigger-7 server-escalation signal, so the keyword that previously distinguished these functions is no longer required. The escalation circularity — "available only in server functions, but the keyword is being eliminated" — is broken by making the call the escalation signal.) This includes:
@@ -23982,7 +23984,7 @@ The following attributes on `<program>` enable automatic middleware generation:
 |---|---|---|
 | `cors=` | `"*"` or `"https://example.com"` | CORS preflight handler (OPTIONS route) + `Access-Control-*` headers on all responses |
 | `log=` | `"structured"` \| `"minimal"` \| `"off"` | Request/response logging with timestamp, method, path, status, duration |
-| `csrf=` | `"auto"` \| `"off"` | CSRF token generation, cookie injection, and validation on state-mutating requests. With `<program auth=>` present, emits session-bound synchronizer-token validation; without auth, baseline double-submit cookie helpers are auto-emitted on routes that mutate state. See §52.13 for the canonical value set. |
+| `csrf=` | `"auto"` \| `"off"` (`"auto"` is the default whenever `auth=` is present) | CSRF token generation, cookie injection, and validation on state-mutating requests. With `<program auth=>` present, emits session-bound synchronizer-token validation; without auth, baseline double-submit cookie helpers are auto-emitted on routes that mutate state. See §52.13 for the canonical value set. |
 | `ratelimit=` | `"100/min"` \| `"N/unit"` | In-memory sliding window rate limiter per IP; 429 response when exceeded |
 | `headers=` | `"strict"` | Injects `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, and `Content-Security-Policy: default-src 'self'` on all responses |
 | `idempotency-store=` | `"auto"` (default) \| `"sqlite"` \| `"postgres"` \| `"mysql"` \| `"redis"` \| `"none"` | Per-app idempotency-key store backend used by §19.9.6 replay-safety machinery. See §39.2.6. |
@@ -23992,7 +23994,17 @@ The following attributes on `<program>` enable automatic middleware generation:
 - All `<program>` middleware attributes SHALL be processed before any route handler is invoked.
 - Multiple `<program>` middleware attributes MAY be combined on a single `<program>` element. The compiler SHALL generate them in the order: CORS → rate limit → CSRF → route handler → security headers → logging.
 - The compiler SHALL generate these middleware handlers as server-side code only. None of these constructs produce client-side JavaScript.
-- A `<program>` element with none of these attributes generates no middleware infrastructure. The absence of a middleware attribute SHALL NOT be a compile error or warning.
+- A `<program>` element with none of these attributes generates no middleware infrastructure beyond the CSRF protection §39.2.3 requires by default (baseline double-submit on state-mutating routes of an app without `auth=`; `csrf="auto"` under `auth=`, next statement). The absence of a middleware attribute SHALL NOT be a compile error or warning — an absent attribute means its default applies.
+- **CSRF under `auth=` is on by default.** When a `<program>` declares `auth=` and carries no `csrf=` attribute, the compiler SHALL treat it exactly as if it declared `csrf="auto"`: the emitted server, client and HTML SHALL be those of the explicit `csrf="auto"` form. Only the literal `csrf="off"` opts out. The default fails closed: a `csrf=` literal outside the §52.13 set (which emits `W-ATTR-002`) SHALL also resolve to `"auto"`, never to "no check". Routes that are CSRF-exempt by construction keep that exemption — the `<endpoint>` foreign-facing surface (§61.7), the SSE `route=` generator (§37.3, a `GET`), and every non-state-mutating (`GET`/`HEAD`) route, including `/__serverLoad`. The WebSocket upgrade (§38) is a `GET` and is outside the CSRF token mechanism; it is protected by the Origin check in the next statement instead.
+  *Current `<page auth=>` behaviour (not normative — recorded so this bullet is not read as covering it):* a `<page auth="required">` without `protect=` fields is not registered as an auth scope at all — its state-mutating routes get only the baseline double-submit check that every no-`auth=` app gets, not `csrf="auto"`, and the page itself is not auth-gated (`g-page-auth-required-protects-nothing`, open). A `<page auth="required">` whose file carries `protect=` fields IS registered, and the default above applies to it.
+- **The WebSocket upgrade SHALL refuse a cross-origin handshake.** Every compiler-emitted WebSocket upgrade route of a web-application program (the §38 channel route `/_scrml_ws/<name>`) SHALL accept the upgrade only when the request's `Origin` names the server's own origin: the same host — taken from `X-Forwarded-Host` when a proxy sets it, else the request's own host — and the same scheme — `X-Forwarded-Proto`, else the request's — except that an `https` origin SHALL be accepted on a request that arrived as plain `http` (TLS terminated by a proxy that sets no `X-Forwarded-Proto`). Default ports compare equal to their omitted form. A mismatched origin, and the opaque `Origin: null`, SHALL be refused with `403` before the upgrade and before any channel handler runs. A handshake with NO `Origin` header is a non-browser client (a browser always sends one), which cannot carry a victim's ambient cookie; it SHALL be accepted, and the channel's own `auth=` session check (§38.5) SHALL still apply to it. The development server SHALL apply the same rule to the upgrade it proxies, before accepting the browser's socket. Because the check trusts `X-Forwarded-Host` / `X-Forwarded-Proto`, a deployment behind a reverse proxy MUST have that proxy strip or overwrite both headers on every inbound request; a proxy that passes a client-supplied value through lets a non-browser client choose the host the check compares against (a browser cannot set these headers on a WebSocket handshake, so the cross-site case stays closed either way). There is no allow-list for other origins in this version. A headless program (no cookie session) emits no Origin check.
+- **The HTML-composition route is a document request.** The request-time compose route that serves a page's first-paint HTML (§52.8 SSR pre-render; the §39.2.3 `<meta name="csrf-token">` fill, which every `csrf="auto"` scope emits) serves the SAME document as the static file. Under `auth="required"` it SHALL run the same §52.13 gate before composing anything: an unauthenticated request is redirected to `loginRedirect` and no seed query runs. It SHALL NOT be a path around the protected-document guard.
+
+> **Provenance:** ruling:user-voice-scrml.md S441 "yes on csrf auto" — *"when `auth=` is present, `csrf="auto"` is the default, written into §40.2. It fails closed, and apps that need to opt out can say `csrf="off"`."* Before S441 an absent `csrf=` under `auth="required"` emitted no CSRF check while the same app without `auth=` got the baseline double-submit gate, so adding authentication removed the CSRF gate (gap `g-auth-program-without-csrf-attr-emits-no-csrf-check`, resolved by change-id `s441-csrf-default-under-auth`).
+>
+> **Provenance (compose-route bullet):** S441 security review F1 of `s441-csrf-default-under-auth` — making `csrf="auto"` the default also made its compose route the default, and that route (dispatched before the static-file branch that carries the §52.13 guard) served an `auth="required"` page to anonymous requests at 200. Governing: §52.13 *"every request to this scope SHALL be authenticated; unauthenticated requests are redirected to `loginRedirect=`"*. The WebSocket sentence was reworded in the same review (F2) so the section does not bless the cross-site WebSocket hole.
+>
+> **Provenance (WebSocket Origin bullet):** ruling:user-voice-scrml.md S441 "yes on origin check" — closes `g-ws-upgrade-no-origin-check-cross-site-websocket-hijacking` (measured before: a cross-origin handshake carrying the session cookie opened, drove the author's `onserver:message` handler, and relayed a `__sync` write to every subscriber).
 
 #### 39.2.1 `cors=`
 
@@ -24039,6 +24051,7 @@ The compiler generates:
 - CSRF protection SHALL apply only to requests that mutate state (POST, PUT, PATCH, DELETE). GET requests SHALL NOT be subject to CSRF validation.
 - `csrf=` accepts the literal values `"auto"` and `"off"` (canonical value set defined at §52.13). Any other literal value SHALL emit `W-ATTR-002` per §52.13.2.
 - `csrf="auto"` SHALL be paired with `<program auth=>` to enable session-bound synchronizer-token validation; without `auth=`, baseline double-submit cookie helpers are auto-emitted on routes that mutate state.
+- Under `auth=`, an absent `csrf=` SHALL behave as `csrf="auto"`; only `csrf="off"` opts out (§40.2, S441).
 
 #### 39.2.4 `ratelimit=`
 
@@ -27122,6 +27135,34 @@ exactly one server.js.
 The routes registry array SHALL also de-duplicate by name — registering the
 same route binding multiple times is correctness-equivalent (same path /
 method / handler) but wasteful.
+
+### 47.13 Static-File Serving — Client-Artifact Allowlist
+
+**Added:** 2026-09-29 (S441). Resolves `g-static-server-serves-db-and-server-source`: both static-serving paths — the production `_server.js` (§47.12) and `scrml dev` — served ANY file that existed under the output directory, so an anonymous request received the SQLite database (`protect=` columns and password hashes included), the session store, every `*.server.js`, and `_server.js` itself.
+
+The output directory holds server-side artifacts beside the client ones (§47.9, §47.11, and the §20.5 session store, which lives at the dist root). A compiled server SHALL NOT serve server modules, databases, dotfiles, or sources as static files. Static serving is therefore an **allowlist**: a file is served if and only if
+
+1. it is NOT in a **denied class**, AND
+2. it is either a **client artifact** of the build or a **passive media asset**.
+
+Every other request that reaches the static fallback SHALL receive `404 Not Found` with a body that does not disclose the file's contents.
+
+**Denied classes.** These SHALL NOT be served, whatever the manifest says. The match SHALL be case-insensitive, because a case-insensitive filesystem serves `APP.SERVER.JS` from `app.server.js`.
+
+- server modules and anything named `*.server.*`, including `_server.js` and server source maps;
+- databases: `*.db`, `*.db-wal`, `*.db-shm`, `*.db-journal`, and `*.sqlite*`;
+- dotfiles and dot-directories (`.env`, `.git/…`, `.scrml-sessions.db`), meaning any path segment that begins with `.`;
+- `.scrml` sources;
+- source maps (`*.map`). A client map embeds the whole `.scrml` source as `sourcesContent`, server functions and SQL included, so a map is source disclosure;
+- any path that resolves outside the output directory.
+
+**Request-path handling.** The request path SHALL be percent-decoded before it is judged, so an encoded traversal (`%2e%2e`, `%2f`, `%5c`) is evaluated in the form the filesystem sees. The request SHALL be refused if the decoded path contains NUL, `\`, or `:`, if any segment begins with `.`, or if any segment ends in `.` or a space (on Windows, `app.db.` resolves to `app.db`). The allowlist SHALL be checked against the resolved candidate file, so every resolution rule passes through it: exact file, clean URL `<p>.html`, directory index, and dev's root fallback.
+
+**Client artifacts: the manifest.** The compiler SHALL record every artifact it writes for the browser: the HTML documents, the CSS, the client bundles (hashed or not, §47.9.8), the shared runtime, and the per-route chunks. It SHALL close that set over the relative module imports of its JavaScript members, which admits, for example, a `_scrml/<name>.js` shim that a client bundle imports and excludes a shim that only a server module imports. A closure target that falls in a denied class is not admitted. `compileScrml` returns the set as `clientAssets` (output-relative POSIX paths) and writes it to `<outputDir>/.scrml-client-assets.json`. That file is a dotfile, so it is itself unservable. `scrml build` SHALL bake the set into `_server.js`, so that nothing written into the deploy directory after the build can widen what the server serves. `scrml dev` SHALL read the manifest file, which it rewrites on every recompile. A missing manifest is an empty set, so the server fails closed. A stale artifact that the latest compile did not write is not in the set and is not served.
+
+**Passive media.** A file with one of the following extensions is served without a manifest entry, provided it is not in a denied class: `png`, `jpg`, `jpeg`, `gif`, `webp`, `avif`, `svg`, `ico`, `bmp`, `woff`, `woff2`, `ttf`, `otf`, `eot`, `mp3`, `mp4`, `webm`, `ogg`, `wav`. These are the images, icons, fonts, and audio/video an author places beside the build output. The SPEC defines no `public/` or assets directory. Any other file the build did not write for the browser is refused, including `.json`, `.txt`, and author `.js`.
+
+**One policy, both servers.** `scrml dev` and the production `_server.js` SHALL apply the identical decision. Implementation: `compiler/src/static-serve-policy-emitted.js` holds the policy functions. Dev imports them, and `generateServerEntry` copies their source text verbatim into `_server.js`. `collectClientAssets` in `compiler/src/static-serve-policy.js` computes the manifest.
 
 ---
 
@@ -34154,8 +34195,8 @@ exactly three literal values:
 
 The `csrf=` attribute accepts:
 
-- `csrf="auto"` — automatic CSRF token injection + verification.
-- `csrf="off"` — no CSRF check.
+- `csrf="auto"` — automatic CSRF token injection + verification. The default whenever `auth=` is present (§40.2, S441).
+- `csrf="off"` — no CSRF check. Under `auth=` this is the only opt-out spelling; any other literal emits `W-ATTR-002` and resolves to `"auto"`.
 
 **Login-page requirement.** When `auth="required"` is declared (whether on
 `<program>`, `<page>`, or `<auth>`) the redirect target (default `/login`)
@@ -34324,7 +34365,7 @@ A server-authority cell scopes its rows to the request by promoting to a Tier-2 
 Route-admission (§52.15.2 — whole route → 401) ⟂ row-selection (§52.15.3 — per row → `WHERE`) ⟂ column-redaction (§14.8.9 protect-floor — per column → strip protected-origin). They STACK; none substitutes: a column-redacted payload can still leak every user's rows; a row-scoped payload can still leak a protected column. The compiler applies all three at the egress; §14.8.9 is reused unchanged. §14.8.10 tenant-row isolation (Nominal) adds a **fourth, coarser row-selection axis** (whole-tenant): route-admission ⟂ tenant-scope ⟂ per-user row-selection ⟂ column-redaction — a per-user-scoped payload can still leak a wrong tenant's rows, so it too stacks and substitutes for none.
 
 #### 52.15.5 SSR sequencing — auto-make-safe (`I-SSR-AUTH-SCOPED-CLIENT-HYDRATED`)
-Per §52.8, the SSR compose route is an **anonymous-reachable GET** (it serves the first-paint HTML to every viewer, gated or not — the `<page>`/`<program auth="required">` redirect covers navigation, not the compose route's own output). Seeding an **auth-scoped, UNSCOPED** cell (a Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` filter) into that first paint would bake one query result into every viewer's first-paint HTML **and** the `window.__scrml_ssr_state` seed — a cross-user leak, strictly worse than the gated `/__serverLoad` client fetch (401 for anon) the pre-render accelerates.
+Per §52.8, the SSR compose route serves the first-paint HTML to every viewer the page admits. Under `<program auth="required">` it runs the §52.13 document gate first (§40.2 — anonymous → redirect, S441); a page that does not require auth serves it anonymously. Either way ONE composed document goes to every admitted viewer, so the omission below stays load-bearing under the gate: it is what keeps viewer A's rows out of viewer B's first paint. Seeding an **auth-scoped, UNSCOPED** cell (a Tier-1 `SELECT *`, or a Pattern-C query with no `${@currentUser.…}` filter) into that first paint would bake one query result into every viewer's first-paint HTML **and** the `window.__scrml_ssr_state` seed — a cross-user leak, strictly worse than the gated `/__serverLoad` client fetch (401 for anon) the pre-render accelerates.
 
 The compiler **auto-makes-safe** at this egress sink (mirroring the §14.8.9 protect-floor's auto-redaction, not a hard error that breaks idiomatic code): an auth-scoped unscoped cell is **OMITTED** from the SSR seed entirely — no first-paint markup fill (its `<div data-scrml-each-mount>` is left empty), no `window.__scrml_ssr_state` entry. The cell then hydrates client-side behind its already-gated `/__serverLoad` fetch **post-mount** (the standard graceful-degradation path a static-hosted deployment already uses) — safe by construction, and idiomatic code still compiles and renders correctly for authorized viewers. An `I-SSR-AUTH-SCOPED-CLIENT-HYDRATED` **Info** lint (per-var) records the omission so it is never silent, and steers the developer to §52.15.3 row-scoping to restore the first-paint acceleration.
 

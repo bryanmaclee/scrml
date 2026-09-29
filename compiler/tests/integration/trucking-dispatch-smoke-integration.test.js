@@ -467,7 +467,14 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // auto-lift without the wrapper (SPEC §40.8), so all 18 wrappers were dropped;
     // W-PROGRAM-REDUNDANT-LOGIC no longer fires and is REMOVED from the baseline
     // (a 0-count entry would also trip the "no UNEXPECTED codes" inverse). 77 -> 59.
-    "W-SQL-ROW-UNTYPED": 6,
+    // S441 s441-ex23-run-changes: 6 -> 9 (aggregate 397 -> 400). The three
+    // lin-token single-use guards (customer/load-detail acceptance, driver/
+    // load-detail BOL, customer/invoices payment) read `.changes` off the
+    // VOID result of `?{UPDATE}.run()` (§8.5.1) — always undefined, so replayed
+    // and never-issued tokens were accepted. They now use the §8.5.1-sanctioned
+    // `UPDATE … RETURNING token` + `.get()` + `is not`; an UPDATE…RETURNING row
+    // is not a SELECT projection, so each fires the INFO-level untyped-row lint.
+    "W-SQL-ROW-UNTYPED": 9,
     // S208 Fix B (W-SERVER-IMPORT-UNEMITTED, g-pure-module-server-emit) fired 6
     // distinct missing-EXPORT shapes here — a server-CALLED exported helper
     // route-inferred into a handler, so its `.server.js` emitted the ROUTE but

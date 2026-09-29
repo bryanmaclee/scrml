@@ -1,6 +1,31 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-28T04:40:15Z  commit: fb21983a
+# updated: 2026-09-29T13:38:25Z  commit: cf62b415
+# ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
+# refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
+# --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
+# == `origin/main` (`git fetch --dry-run`: main not advanced; no fork). Source-relevant: #1117 (bootstrap M3 typer + scope pass), #1118 (ingest shim + footprint
+# grader + bite matrix), #1122 (analyze facts -> six NodeId-indexed family tables), #1129 (re-land #1109 review fixes +
+# spread all-or-nothing `Stmt.Commit` + strict snapshot + E-BOOTSTRAP-DUP-OVERRIDE), #1125 (E-MW-007/008 refused build
+# writes no dist), #1131 ("~" + 3 sibling rewrites fenced out of literals), #1137 (Date/built-ins in cells; `==` on
+# built-ins), #1139 (nested async helpers vs sync-callback guards, SECURITY). SPEC-only: #1120 (S439 rulings), #1133
+# (S440 rulings). The rest are wrap / inbox / dpa-queue / gaps / review / @generated bookkeeping.
+# ⛑ **FIGURES RE-EXECUTED AT `cf62b415`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **268,394 lines / 213 files** per FACTS (+1,450 lines, +2 files:
+# `codegen/local-async-fns.ts`, `commands/refusal-gate.js`) · test files **1,515** (+6) · `compiler/SPEC.md` **40,663**
+# lines (+264) · conformance **1054** cases (+7) · §34 catalog **839** rows (+4), range `20443..21365`.
+# `bun conformance/run.ts` (impl#1) -> **1047/1054 pass + 7 xfail**.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **948 -> 952** · W 183 · I 10 · H 2 FLAT · unique codes
+# **803 -> 807**. **ADDED = {`E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-SELECT-OPTION-NOT-VARIANT`,
+# `E-STRUCT-DUPLICATE-KEY`} — all four rows say "Nominal / not yet emitted" (impl pending); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `cf62b415` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# 28 files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **325/325** (6 files) ·
+# `slice-m3/` **24/24** (3 files) · footprint grade (`bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js
+# --footprint`) -> runtime **18 pass / 0 fail**, codes-only 10/0, crashed 0, not-yet 579, front-end 447. The S438 CRLF
+# drift-guard failures are gone (the guard is CRLF-safe since #1129, and this clone is LF).
+# ⚑ `file:line` citations in S440 sections were grep-derived at `cf62b415`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S438 HEADER (stamp `fb21983a`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
 # `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
 # merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
@@ -459,6 +484,64 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S440 — DIAGNOSTIC DELTA (`fb21983a..cf62b415`)
+
+### §34 catalog — 4 rows ADDED (835 -> 839), ALL "Named; impl pending — Nominal / not yet emitted" (impl#1 exit 0 today)
+| code | § | trigger (short) |
+|---|---|---|
+| `E-CALL-ARITY` | §7.3 | a call passes more / fewer arguments than declared (omitted params with defaults excepted, §7.3.2) |
+| `E-EACH-NOT-SEQUENCE` | §17.7.2 | `<each in=expr>` over a value PROVABLY not a sequence (`S \| not` admitted; unresolved type silent) |
+| `E-SELECT-OPTION-NOT-VARIANT` | §5.4 | `<select bind:value>` on an enum cell (no `not`): a static `<option value>` names no variant |
+| `E-STRUCT-DUPLICATE-KEY` | §14.3, §66.11.3 | a struct literal names a key twice — plain, nested, or spread-override (`{ ...@g, k: a, k: b }`) |
+Rows EXTENDED with a Nominal (not-yet-emitted) case: `E-SCOPE-010` (§7.6: two top-level `function`s of one name),
+`E-ERROR-005` (§41.14.3: `<formFor>` whose `onsubmit=` error has no enclosing `<errorBoundary>`), `E-TYPE-031`
+(position 6, §7.5.1: a cell write / typed-field write), `E-ASSIGN-004` (write to a keywordless loop binder, §50.8.5),
+`E-COMPONENT-ENGINE-SCOPE` (`<engine>` in an `<each>` row). `W-ENGINE-MATCH-IN-STATE-CHILD` reworded as a carried
+impl#1 divergence (the language supports block `<match>` in a state-child, S439 #5). Census at `cf62b415`: PINNED 362 ·
+IMPL-SITES 312 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+
+### Bootstrap (`compiler/self-host-v2/`) diagnostics — data, never thrown; `Diag { code, file, span, message }`
+- `parse.scrml`: `E-DECL-OPENER-EXPR-UNPARENTHESIZED` (§66.2.4), `E-DECL-ILLEGAL-FIELD-NAME` (§66.2.3), `E-PARSE-*`
+  (no §34 rows — bootstrap-local: TYPE, TAG, UNCLOSED, IMPORT, CLOSER, ATTR, ITEM, GIVEN, OPENER-EQ-SPACED, …),
+  `E-BOOTSTRAP-UNSUPPORTED`.
+- `analyze.scrml` binder / edit classifier: `E-DERIVED-WRITE`, `E-WRITE-NOT-GRANTED`, `E-DECL-HANDLE-NOT-NARROWED`,
+  `E-FIELD-PRIVATE-WRITE`, `E-DECL-RENDERS-BARE-WRITE`, `E-ENGINE-INVALID-TRANSITION`, `E-ASSIGN-TARGET`,
+  `E-IMPORT-NOT-EXPORTED`, `E-GRANT-*`, `E-DECL-*`, `E-TYPE-STRUCT-*`, `E-RESET-*`, …; **`E-BOOTSTRAP-DUP-OVERRIDE`**
+  (NEW #1129: a spread-override literal names a field twice).
+- `analyze.scrml` scope pass (`checkScopes`): `E-SCOPE-010` (file-scope duplicate `let` / `function`),
+  `E-SCOPE-REDECLARE`, `E-BOOTSTRAP-REDECLARE` (dup `as=`, handle named like a cell).
+- `analyze.scrml` typer (`typeProgram`): `E-TYPE-031` (write / initializer value provably does not fit), `E-TYPE-041`,
+  `E-BOOTSTRAP-CALL-ARITY`, `E-BOOTSTRAP-EACH-NOT-SEQUENCE`.
+- `check.scrml` `checkCore`: C1-C7 messages as plain strings (not coded).
+- ⚑ **Drift at `cf62b415`:** SPEC now names `E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE` and `E-STRUCT-DUPLICATE-KEY` for the
+  shapes the bootstrap still reports as `E-BOOTSTRAP-CALL-ARITY`, `E-BOOTSTRAP-EACH-NOT-SEQUENCE`,
+  `E-BOOTSTRAP-DUP-OVERRIDE`. Tests pin the bootstrap-local names (`slice-m2/typer*.test.js`, `front.test.js`).
+
+### Runtime errors (impl#1 runtime, `compiler/src/runtime-template.js`, #1137)
+- `_scrml_deep_set` -> `_scrml_deep_set_copy` THROWS `TypeError("scrml: cannot write .<key> of a <Class> in place; it is a
+  value. Assign the whole cell.")` when a path write would spread a non-plain container (Date, URL, Map, class instance).
+- `_scrml_structural_eq` reads each built-in through the class's own brand-checking getter; a spoofed
+  `Symbol.toStringTag` THROWS `TypeError`; a missing URL / URLSearchParams class throws `"scrml ==: no <key> reader …"`.
+- `SERVER_STRUCTURAL_EQ_SOURCE` (module init) THROWS if the `__SCRML_STRUCTURAL_EQ_START__` / `__SCRML_STRUCTURAL_EQ_END__`
+  markers are missing — fail loud rather than inline an empty server helper.
+- `_scrml_deep_reactive` now proxies ONLY arrays and plain objects; built-ins stay unproxied (in-place mutation of a
+  Date etc. is untracked, by design).
+
+### Fail-closed async sites (#1139, SECURITY)
+`E-SERVER-FN-IN-SYNC-CALLBACK` / `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` now also fire when the async callee is a NESTED
+helper (a `function` declared inside a function) in a sync position (`.some`/`.find`/`.filter`/`.map` callback, `.sort`
+/ `.toSorted` / `.findLast` / `.findLastIndex` / `.reduceRight` by reference, sync lambda, param default), and the
+code follows the ROOT (server fn -> SERVER-FN code; stdlib -> ASYNC-STDLIB code). Builders:
+`emit-library-shared.ts` `syncCallbackErrorForSite`, `serverFnSyncCallbackError`; spans anchored via
+`local-async-fns.ts` `anchorDiagnosticSpan` to the enclosing statement. Known false positives filed:
+`g-sync-callback-rawtext-scan-false-positives`, `g-sync-local-with-async-name-treated-async`. Still open (RULED,
+not built): an async helper escaping as a value (F4) and inline-handler / `on mount` server calls (F5).
+
+### E-MW-007 / E-MW-008 (#1125)
+Still exit 1; now ALSO write nothing (see build.map.md, `commands/refusal-gate.js`). CLI prints
+`noFilesWrittenLine(outputDir)`.
+
 
 ## S438 — NEW DIAGNOSTIC CODES (`9941a504c..fb21983a`)
 
@@ -1435,7 +1518,7 @@ compiling stdlib source emitting a browser-DOA bundle, invisible to every prior 
 once (wrong goggle AND `stdlib/` outside the corpus roots). See build.map.md for how to run it.
 
 ## Tags
-#scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule #no-diagnostic-class #accepted-then-discarded #fail-open #structural-show #structural-if-row-template #census-re-executed #files-scanned-not-a-repo-fact #e-state-block-statement-form #813-codes #impl-sites-303 #bs-lint-stage #pre-ast-error-gate #fresh-code-not-reserved-code #do-not-cite-a-code-token-in-a-message #glob-disarms-a-fatal-gate #census-table-needs-a-sha #s380-incremental #w-each-peritem-if-multiroot-deferred #w-lift-tier0-line-fix #silent-wrong-no-new-code #§52.13 #s437b #9941a504c #e-multi-statement-handler #dangling-else #braceless-else
+#scrml #map #error #diagnostics #w-dead-function #reachability #route-inference #not-usage-analyzer #dead-function-locus #routing #e-stdlib-client-chunk-missing #w-type-031-unproven #asis-unknown-split #stdlib-client-registry #e-control-flow-in-markup #default-logic-lift #semdiff #css65 #diagnostic-partition #result-warnings #lint-diagnostics #tab-span-lift #outlet #tenant-floor #ssr-auth-scoped #sql-lex #sql-table-refs #catalog-count-audit #catalog-vs-impl #w-lint-uncatalogued #dbauth #e-dbauth-sqlite #e-dbauth-no-tenant-column #w-dbauth-marker-nearmiss #w-schema-destructive-drop #db-migrate #rls #secdef #e-cg-018 #w-each-bind-item-field-deferred #e-schema-010 #e-schema-011 #w-schema-constraint-tightened #w-schema-constraint-drift-unapplied #w-nav-chunk-load-failed #navigate-wave1c #e-match-invalid-arm #e-if-in-dispatched-arm #structural-if #§17.1.2 #three-call-sites #revert-by-symbol #e-channel-inside-page #cataloged-but-unwired #listen-quoting #changelog-dereferenced #ghost-pattern #w-dead-function #e-pa-002 #protect-analyzer #tailwind #w-tailwind-unrecognized-class #e-tailwind-001 #outline-family #w-server-import-unemitted #dist-space #d4 #on-mount #gh237 #gh234 #messages-chunk #w-auth-001-split #w-auth-middleware-auto-injected #code-split #trigger-3 #escalation-server-only #route-inference #prefix-coverage-audit #error-generated-index #not-a-diagnostic #w-lift-tier0 #ifrow-apply #§34.0 #row-provenance #s34-census #census-buckets #false-claim #declared-ahead #runtime-surfaced #struck-tombstone #line-citation-strip #e-deprecated-001 #machine-retired #w-deprecated-001-retired #e-lifecycle-001 #e-lifecycle-002 #e-lifecycle-004 #cleanup-diagnostics #e-for-unparenthesized-head #e-server-fn-in-sync-callback #e-mw-006-dead #e-error-011 #w-route-request-duplicates-server-load #named-codes-land-with-impl #w-lint-uncatalogued-eight #generated-index-unmaintained #e-fn-equals-body #fn-decl-parse-sites #subparse-span-rebase #within-node-gate-windows-fix #s34-census-broken #fileURLToPath-vs-pathname #pr-405-landed #w-if-in-each #s34-census-works-on-linux #windows-only-enoent #async-name-provider #drain-widening #position-blind-textscan #self-retiring-guard #arm-granular-vs-site-granular #cross-file-server-fn-collision #e-session-context-trimmed #session-read-disclosure #e-cg-001-writes-anyway #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #import-meta-classic-script #each-nested-if-not-reactive #cps-choke-point-landed #zero-new-codes #806-unchanged #silent-drop-testable #no-diagnostic-by-design #register-fn-name #e-codegen-invalid-logic #validate-emit-contract #e-scope-001 #response-contract-has-no-code #spec-silent-shall #807-codes #e-derived-server-only-reach #§6.6.19 #step-3b #refuse-not-escalate #per-function-scope-only #one-position-not-a-class #shortest-edit-restores-the-leak #kind-tool-carve-out #e-sql-006-compile-time #sink-not-detector #prepared-stmt-errors #narrow-sink-drain #dedup-at-drain #handle-escape-hatch-body #census-oracle-re-executed #pinned-341 #impl-sites-320 #false-claim-95-unchanged #prefix-grep-is-not-the-catalog-figure #silent-wrong-output-no-code #§18.5-no-diagnostic #undefined-does-not-exist-§42.1.1 #809-codes #catalog-moved-two-windows-running #e-each-body-decl-unsupported #i-ssr-each-client-rendered #§17.7.3 #§52.8 #pinned-in-the-emitting-pr #pinned-341-to-343 #silent-broken-bundle-to-compile-error #surfaces-not-changes #fallback-descriptor-not-null #four-fixes-no-code #false-fire-is-a-defect-with-no-count #e-markup-001-false-fire #silent-vs-loud-same-class #awk-cross-check-810-ewih #prefix-grep-series-diverges #filesscanned-is-not-a-repo-fact #810-codes #e-mw-007 #e-program-002 #e-import-005 #declared-ahead #census-reclassification #false-claim-disposition #build-arc #home-no-shall #orphan-index #nominal-home #impl-sites-minus-20 #w-lint-nine-no-row #fire-site-not-comment #files-scanned-not-a-fact #select-request-onion #one-onion-rule #no-diagnostic-class #accepted-then-discarded #fail-open #structural-show #structural-if-row-template #census-re-executed #files-scanned-not-a-repo-fact #e-state-block-statement-form #813-codes #impl-sites-303 #bs-lint-stage #pre-ast-error-gate #fresh-code-not-reserved-code #do-not-cite-a-code-token-in-a-message #glob-disarms-a-fatal-gate #census-table-needs-a-sha #s380-incremental #w-each-peritem-if-multiroot-deferred #w-lift-tier0-line-fix #silent-wrong-no-new-code #§52.13 #s437b #9941a504c #e-multi-statement-handler #dangling-else #braceless-else #s440 #cf62b415 #e-call-arity #e-each-not-sequence #e-struct-duplicate-key #e-select-option-not-variant #e-bootstrap-codes
 #e-cg-tilde-unresolved #tilde-accumulator #section-32 #fail-closed-floor #narrow-sink #two-drains #reset-once-per-run #process-level-not-filesystem-level #partial-span-position #resolvespanlinecol #spanfromestree-hardcodes-1-1 #cardinality-per-emission #e-tilde-001-zero-fire-sites #zero-producers #cause-traced #815-codes #pinned-344
 #e-type-031-three-positions #section-7-5-1-position-2 #e-contract-001 #e-contract-001-rt #classifypredicatezone #checkpredicateliteral #buckets-sum-to-total #dispositions-redistributed #catalog-flat-815 #range-moved-not-total
 #s405 #818-codes #catalog-19750-20639 #921-e-rows #182-w-rows #786-unique-codes #row-count-is-not-a-code-count #e-protect-004-is-a-lint #e-protect-005 #file-scoped-not-query-scoped #dedup-key-span-plus-name #endpoint-arm-shares-a-span #w-protect-005 #compile-runtime-seam #zero-byte-readablestream #w-schema-no-tables-declared #four-way-conjunction #cry-wolf-gate-gets-deleted #schema-anchor-fixture-declared-nothing #e-cg-enum-binding-collision #e-cg-sql-fn-unverifiable-span #code-with-no-spec-home #catalog-count-measures-the-catalog #emitter-derived-vs-catalog-derived #error-generated-regenerated
