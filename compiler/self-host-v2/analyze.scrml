@@ -126,6 +126,10 @@ ${
     // snapshot; see spreadEffect): the field (`ref`) and the local it is read
     // into when an override value reads it.
     export type SnapField:struct = { ref: FieldRef, local: Sym }
+    // r2 (RULED S442 "sequence spreads use one snapshot"): the one snapshot of a
+    // sequence shape's target — field `idx` of `decl` — read into `local` before
+    // any element is evaluated; every `@x` read inside the elements reads it.
+    export type SeqSnap:struct = { local: Sym, decl: Sym, idx: int }
 
     // How an attribute of an element is used.
     export type AttrKind:enum = {
@@ -172,7 +176,7 @@ ${
         ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[]), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
-        EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[]), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first
+        EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
     }
     export type BindFact:enum = {
         BBind(sym: Sym),                                  // a binder: a local statement, a function
@@ -598,8 +602,15 @@ ${
         let length: LengthGrant = LengthGrant.Fixed
         let where: SeqAt[] = []
         let writable = false
+        let seen: string[] = []
         for (const g of gs) {
             const ax: GrantAxis = grantAxis(g)
+            // r2 N3: a grant named twice is refused (E-GRANT-UNKNOWN: the list
+            // is a SET of axis values; a repeat is not a value of any axis)
+            if (seen.indexOf(g) >= 0) {
+                st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", "`" + g + "` is granted twice — a grant list names each permission once (§66.12.2)")
+            }
+            seen = seen.concat([g])
             if (ax == GrantAxis.GFree) {
                 length = LengthGrant.Free
             } else if (ax == GrantAxis.GWritable) {
@@ -1589,13 +1600,23 @@ ${
                 const n: string = ownTypeName(d)
                 if (n != "" && declNames.indexOf(n) >= 0) {
                     st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
-                } else if (hasOwnValue(d.own) && d.attrs.length > 0) {
-                    // r1 G2: an own value AND typed attributes on one declaration —
-                    // what `@x` then is, is ⚑ O19 (OPEN). Refused, not decided.
-                    st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ">` has an own value AND attributes — what `@" + d.name + "` then names is ⚑ O19 (not ruled); the bootstrap does not decide it")
+                } else {
+                    st = o19Diags(s.file, d, st)
                 }
             }
         }
+        return st
+    }
+
+    // r1 G2 / r2 item 1: an own value AND typed attributes on one declaration —
+    // what `@x` then is, is ⚑ O19 (OPEN). Refused, not decided — on the
+    // declaration itself and on every child field, at any depth.
+    fn o19Diags(file: string, d: ADecl, st0: AS) -> AS {
+        let st: AS = st0
+        if (hasOwnValue(d.own) && d.attrs.length > 0) {
+            st = addDiag(st, file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ">` has an own value AND attributes — what `@" + d.name + "` then names is ⚑ O19 (not ruled); the bootstrap does not decide it")
+        }
+        for (const c of childFields(d.body)) { st = o19Diags(file, c, st) }
         return st
     }
 
@@ -3113,6 +3134,8 @@ ${
             if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-WRITE", derivedMessage(p, f))
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + " = …` is " + shapeWhat(shape) + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
         }
+        // r2 N2: `filter` shrinks — impossible on a fixed-length sequence
+        if (shape == 3 && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedShrinkMessage(f.sym.hint, shapeWhat(shape)))
         if (shape > 2) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + " = @" + f.sym.hint + "." + callMethodName(value) + "(…)` is granted, but Core has no function value to lower it with (core.scrml has no lambda / host call)")
         }
@@ -3138,7 +3161,10 @@ ${
                 tmps = tmps.concat([m.s])
             }
         }
-        return addEffect(st, e.nid, EffectFact.EEdits({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }, elems, tmps))
+        const sn: RSym = mint(st, "before_" + f.sym.hint)
+        st = sn.st
+        const snap: SeqSnap = { local: sn.s, decl: p.decl.sym, idx: p.idx }
+        return addEffect(st, e.nid, EffectFact.EEdits({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }, elems, tmps, snap))
     }
 
     // r1 F1: is the place `e` names rooted in a local (a `let` / `const`, a
@@ -3206,6 +3232,10 @@ ${
         }
     }
 
+    fn fixedShrinkMessage(name: string, what: string) -> string {
+        return "`@" + name + "`: " + what + " shrinks the sequence, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)"
+    }
+
     fn fixedLengthMessage(name: string, what: string) -> string {
         return "`@" + name + "`: " + what + " grows the sequence, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)"
     }
@@ -3243,6 +3273,8 @@ ${
         if (!isGranted) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "." + m.method + "()` is " + what + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
         }
+        // r2 N2 (F7's mirror): a removal SHRINKS — impossible on a fixed-length sequence
+        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedShrinkMessage(f.sym.hint, what))
         return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + "." + m.method + "()` is granted, but Core has no removal edit to lower it with (core.scrml EditKind)")
     }
 
