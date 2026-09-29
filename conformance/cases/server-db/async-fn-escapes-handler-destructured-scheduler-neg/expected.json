@@ -1,0 +1,16 @@
+{
+  "id": "server-db-async-fn-escapes-handler-destructured-scheduler-neg",
+  "description": "SECURITY (s441 fix round 3, review N1). A scheduler name bound by a destructuring pattern inside an inline event handler is an ordinary function, not the global scheduler, so passing an async-colored function to it is not fire-and-forget: it calls it and returns the unawaited Promise \u2014 always truthy (reviewer-executed with real scrml:auth hashing: a wrong password accepted). Round 2 recognised only simple declarations; the exemption now holds only when every occurrence of the name in the source is a plain call or a member read.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "\u00a713.2",
+  "rationale": "\u00a713.2: the fire-and-forget exemption applies only to the global scheduler; a program-bound name of any binding form is an ordinary function, and passing an async-colored function to it SHALL be E-ASYNC-FN-ESCAPES-AS-VALUE (\u00a734).",
+  "expect": {
+    "codes": [
+      "E-ASYNC-FN-ESCAPES-AS-VALUE"
+    ],
+    "severity": {
+      "E-ASYNC-FN-ESCAPES-AS-VALUE": "error"
+    }
+  }
+}

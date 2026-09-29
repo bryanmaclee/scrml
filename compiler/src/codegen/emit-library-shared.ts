@@ -16,13 +16,13 @@
 import { emitFnShortcutBody } from "./emit-logic.js";
 import { paramSignature, indentBodyLines } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
-import { extractCalleeNames } from "./scheduling.ts";
+import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
 // emit-expr lowering site so the fail-closed drain and the lowering agree on which
 // callbacks are transformed (and therefore must NOT fail closed).
-import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName, ASYNC_COMBINATOR_METHODS, isSyncCallbackConsumerCall } from "./async-combinators.ts";
+import { isAsyncCombinatorCall, isKnownDiscardHofCall, callbackReachesAsync, isAsyncCalleeName, ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 // s440 — nested-helper async coloring (marks set by `annotateLocalAsyncFns`).
 import {
@@ -32,8 +32,15 @@ import {
   annotateLocalAsyncFns,
   calleesThroughDirectlyCalledNestedFns,
   anchorDiagnosticSpan,
+  localSyncShadowOf,
+  rawAsyncUsesOf,
+  BOUND_CALLEE_MARK,
 } from "./local-async-fns.ts";
-import type { AsyncRoot } from "./local-async-fns.ts";
+import type { AsyncRoot, AsyncEscapeSite, RawAsyncUses } from "./local-async-fns.ts";
+// s441 — scope-aware analysis of raw JS fragments (FP1) and of emitted handler /
+// mount bodies (F5); the async-escape check (S440 F4).
+import { analyzeRawJsFragment, schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
+import type { FreeAsyncResolver, JsAsyncUses } from "./js-async-analysis.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -433,13 +440,10 @@ export function annotateNestedAsyncHelpers(
   fnNode: unknown,
   facts: AsyncNameFacts,
   sqlIsAsync: boolean,
+  escapes?: AsyncEscapeSite[],
+  escapeFacts?: AsyncNameFacts,
 ): number {
-  const outerAsync = (name: string): AsyncRoot | null => {
-    if (facts.serverFnNames != null && facts.serverFnNames.has(name)) return { kind: "server", via: name };
-    if (facts.isStdlibAsync != null && facts.isStdlibAsync(name)) return { kind: "stdlib", via: name };
-    if (facts.asyncFnNames != null && facts.asyncFnNames.has(name)) return { kind: "stdlib", via: name };
-    return null;
-  };
+  const outerAsync = (name: string): AsyncRoot | null => outerAsyncRootFromFacts(name, facts);
   return annotateLocalAsyncFns(fnNode, {
     outerAsync,
     sqlIsAsync,
@@ -449,7 +453,227 @@ export function annotateNestedAsyncHelpers(
       return !!callee && callee.kind === "member" && typeof callee.property === "string" &&
         (ASYNC_COMBINATOR_METHODS.has(callee.property) || isSyncCallbackConsumerCall(call));
     },
+    fnArgRole: asyncFnArgRole,
+    analyzeRaw: (raw, resolveFree) => analyzeRawJsFragment(raw, resolveFree) as RawAsyncUses | null,
+    ...(escapes ? { escapes } : {}),
+    ...(escapeFacts ? { escapeOuterAsync: (name: string) => outerAsyncRootFromFacts(name, escapeFacts) } : {}),
+    isFileBound: (name: string) => !!facts.boundNames && facts.boundNames.has(name),
   });
+}
+
+/**
+ * s441 — the emitter's OUTER async facts as a root: a server-boundary fn is
+ * `server`; a Promise-returning stdlib export or a transitively-async local peer is
+ * `stdlib` (the code a direct call to it already reports). Shared by the nested-
+ * helper pre-pass and the text analysis of handler / mount bodies.
+ */
+export function outerAsyncRootFromFacts(name: string, facts: AsyncNameFacts): AsyncRoot | null {
+  if (facts.serverFnNames != null && facts.serverFnNames.has(name)) return { kind: "server", via: name };
+  if (facts.isStdlibAsync != null && facts.isStdlibAsync(name)) return { kind: "stdlib", via: name };
+  if (facts.asyncFnNames != null && facts.asyncFnNames.has(name)) return { kind: "stdlib", via: name };
+  return null;
+}
+
+/** s441 — `outerAsyncRootFromFacts` as a free-name resolver for js-async-analysis. */
+export function freeAsyncResolverFromFacts(facts: AsyncNameFacts): FreeAsyncResolver {
+  return Object.assign(
+    (name: string) => {
+      const root = outerAsyncRootFromFacts(name, facts);
+      return root ? { root, local: false } : null;
+    },
+    { isBound: (name: string): boolean => !!facts.boundNames && facts.boundNames.has(name) },
+  );
+}
+
+/**
+ * s441 fix round — every name the FILE binds at file scope: function
+ * declarations (top-level, and the bodies of top-level logic blocks), top-level
+ * `let`/`const`/`tilde`/`lin` declarations, and imported local names. Walks
+ * statements without descending into function bodies. Over-collection only makes
+ * a scheduler exemption fail CLOSED (the name is treated as a user binding).
+ */
+export function fileBoundNamesOf(fileAST: unknown, sourceText?: string | null): Set<string> {
+  const out = new Set<string>();
+  if (!fileAST || typeof fileAST !== "object") return out;
+  // s441 round 4 (review round 3, findings 1-2) — the scheduler exemption is
+  // decided on the TREE (`schedulerNamesNotProvablyGlobal`): any binding, key or
+  // write of a scheduler name anywhere in the file withdraws it (fail closed). The
+  // round-2/3 text scans are gone — a string holding `//` or `/*` hid a binding.
+  void sourceText;
+  for (const nm of schedulerNamesNotProvablyGlobal(fileAST)) out.add(nm);
+  for (const k of buildCalleeImportMap(fileAST as ASTNode).keys()) out.add(k);
+  const seen = new WeakSet<object>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object" || seen.has(node as object)) return;
+    seen.add(node as object);
+    if (Array.isArray(node)) { for (const c of node) visit(c); return; }
+    const n = node as ASTNode;
+    const kind = n.kind as string | undefined;
+    if (kind === "function-decl") {
+      if (typeof n.name === "string" && n.name) out.add(n.name);
+      return; // not its body
+    }
+    if (kind === "lambda") return;
+    if ((kind === "let-decl" || kind === "const-decl" || kind === "tilde-decl" || kind === "lin-decl") &&
+        typeof n.name === "string") {
+      const m = n.name.match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+      if (m) out.add(m[0]);
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      const v = n[key];
+      if (v && typeof v === "object") visit(v);
+    }
+  };
+  const f = fileAST as { nodes?: unknown; ast?: { nodes?: unknown } };
+  visit(f.nodes ?? f.ast?.nodes ?? []);
+  return out;
+}
+
+/**
+ * s441 (S440 F4) — what a call may do with an async-colored function passed as
+ * argument `index`. The ruling: only the AWAITED collection methods may take it —
+ * the first argument of a clean-family method (`.some`/`.every`/`.find`/
+ * `.findIndex`/`.filter`/`.map`/`.forEach`/`.reduce`/`.flatMap`), which emit-expr
+ * lifts to the sequential `_scrml_<m>Async` combinator that awaits every call.
+ * Two further positions are not escapes: a sync consumer with no combinator
+ * (`.sort(inner)`) already fails closed with its own code, and a fire-and-forget
+ * scheduler (`setTimeout(refresh, 1000)`) DISCARDS the return — no Promise reaches
+ * a consumer, which is the hazard the ruling closes. Everything else — a user HOF,
+ * `Array.from(xs, fn)`, `new Promise(fn)`, `el.addEventListener(…, fn)` — is an
+ * escape.
+ */
+export function asyncFnArgRole(call: ASTNode, index: number): "allowed" | "own-code" | "escape" {
+  const callee = call.callee as ASTNode | undefined;
+  if (callee && callee.kind === "member" && typeof callee.property === "string" && !callee.optional && !call.optional) {
+    if (index === 0 && ASYNC_COMBINATOR_METHODS.has(callee.property)) return "allowed";
+    if (isSyncCallbackConsumerCall(call)) return "own-code";
+  }
+  // Only the GLOBAL scheduler discards the return: a program-bound
+  // `function setTimeout(f) { return f(x) }` (local, file-scope, import, param)
+  // hands the Promise back — s441 fix round, the reviewer's accept-all.
+  if (callee && callee.kind === "ident" && typeof callee.name === "string" && KNOWN_DISCARD_HOF.has(callee.name) &&
+      call[BOUND_CALLEE_MARK] !== true) {
+    return "allowed";
+  }
+  return "escape";
+}
+
+/**
+ * s441 (S440 F4) — the E-ASYNC-FN-ESCAPES-AS-VALUE builder. An async-colored
+ * function (the compiler emits it `async`: a server function, a Promise-returning
+ * stdlib function, or a helper that calls one) used as a VALUE. Whoever calls it
+ * through that value gets an unawaited Promise — always truthy, so a check written
+ * against it passes for every input. §13.2 awaits the calls the compiler can SEE;
+ * a function value's calls it cannot, so the value may not escape.
+ */
+export function asyncFnEscapesAsValueError(
+  site: { name: string; root: AsyncRoot; local: boolean; position: string },
+  span: unknown,
+  filePath?: string | null,
+): CGError {
+  const sp = diagnosticSpan(span, filePath);
+  const nm = site.name;
+  const why = site.root.via && site.root.via !== nm
+    ? `the compiler emits it \`async\` because it calls ${site.root.kind === "server" ? "server function " : ""}\`${site.root.via}(…)\``
+    : site.root.kind === "server"
+      ? `it runs on the server, and the compiler emits it \`async\` and awaits every call to it`
+      : `it returns a Promise, and the compiler emits it \`async\` and awaits every call to it`;
+  return new CGError(
+    "E-ASYNC-FN-ESCAPES-AS-VALUE",
+    `E-ASYNC-FN-ESCAPES-AS-VALUE: \`${nm}\` is an async function — ${why} — and here it is ` +
+      `${site.position}. Whoever calls it through that value gets an unawaited Promise, which is ` +
+      `always truthy: a check written against it passes for every input. scrml inserts \`await\` ` +
+      `only at call sites it can see (§13.2), so an async function may not escape as a value. ` +
+      `Call it directly — \`${nm}(…)\` — so the compiler awaits the call, or hand it to an ` +
+      `awaited collection method (\`.some\`, \`.every\`, \`.find\`, \`.findIndex\`, \`.filter\`, ` +
+      `\`.map\`, \`.forEach\`, \`.reduce\`, \`.flatMap\`), which awaits every call it makes.`,
+    sp,
+    "error",
+  );
+}
+
+/** s441 — report the escape sites the nested-helper pre-pass collected. */
+export function asyncEscapeErrors(sites: AsyncEscapeSite[], filePath?: string | null): CGError[] {
+  const out: CGError[] = [];
+  const seen = new Set<string>();
+  for (const s of sites) {
+    const sp = (s.span ?? {}) as { start?: number };
+    const key = `${s.name}@${sp.start ?? -1}|${s.position}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(asyncFnEscapesAsValueError(s, s.span, filePath));
+  }
+  return out;
+}
+
+/**
+ * s441 — report a text analysis (js-async-analysis) as diagnostics: each async
+ * call the compiler cannot await → the sync-callback code its root names; each
+ * async function used as a value → E-ASYNC-FN-ESCAPES-AS-VALUE. `span` anchors
+ * every site (text positions inside emitted JS map to no source line).
+ */
+export function jsAsyncUsesErrors(uses: JsAsyncUses, span: unknown, filePath?: string | null): CGError[] {
+  const out: CGError[] = [];
+  for (const c of uses.calls) {
+    const via = c.local ? c.root.via : null;
+    out.push(c.root.kind === "server"
+      ? serverFnSyncCallbackError(c.name, span, filePath, via)
+      : asyncStdlibSyncCallbackError(c.name, span, filePath, via));
+  }
+  for (const e of uses.escapes) out.push(asyncFnEscapesAsValueError(e, span, filePath));
+  const sp = diagnosticSpan(span, filePath);
+  for (const p of uses.promiseMethods ?? []) {
+    out.push(new CGError(
+      "E-ASYNC-CALL-PROMISE-METHOD",
+      `E-ASYNC-CALL-PROMISE-METHOD: \`.${p.method}(…)\` is called on \`${p.name}(…)\`, which the compiler ` +
+        `awaits for you (§13.2) — so \`.${p.method}\` would be read off the RESOLVED value, not a ` +
+        `Promise, and throw a TypeError at run time. Remove \`.${p.method}(…)\` and use the value ` +
+        `directly: \`const r = ${p.name}(…)\` then work with \`r\`` +
+        (p.method === "then" ? "." : ` (a failure is handled with \`!{}\`, §19).`),
+      sp,
+      "error",
+    ));
+  }
+  const seenEvt = new Set<string>();
+  for (const c of uses.eventControlAfterAwait ?? []) {
+    if (seenEvt.has(c.method)) continue;
+    seenEvt.add(c.method);
+    const isControl = /^(preventDefault|stopPropagation|stopImmediatePropagation|returnValue|cancelBubble)$/.test(c.method);
+    const what = isControl
+      ? (c.method === "returnValue" || c.method === "cancelBubble" ? `\`event.${c.method}\`` : `\`event.${c.method}()\``)
+      : `\`${c.method.replace(/ \(derived from the event\)$/, "")}\` (the event, or a value derived from it)`;
+    const effect = c.method === "preventDefault" || c.method === "returnValue"
+      ? "performed the default action (the form submitted / the link navigated)"
+      : isControl ? "propagated the event" : "performed the default action and propagated the event";
+    out.push(new CGError(
+      "E-EVENT-CONTROL-AFTER-AWAIT",
+      `E-EVENT-CONTROL-AFTER-AWAIT: ${what} is used after this handler's first server / async call. ` +
+        `The compiler awaits that call (§13.2), and by the time the handler resumes the browser has ` +
+        `already ${effect} — cancelling or stopping the event then has no effect. After the first ` +
+        `await a handler may only READ plain event properties (\`event.target\`, \`event.key\`, …); ` +
+        `it may not call or read the event's control members, pass the event (or an alias, a container ` +
+        `holding it, or a closure that uses it) anywhere, or alias it. Call \`event.preventDefault()\` / ` +
+        `\`stopPropagation()\` before the first server call. If it must depend on the server's answer, call ` +
+        `it unconditionally first and perform the action yourself when the answer allows it. (The ` +
+        `compiler does not move it for you: that would change which events a conditional call applies to.)`,
+      sp,
+      "error",
+    ));
+  }
+  for (const u of uses.unanalyzable ?? []) {
+    out.push(new CGError(
+      "E-ASYNC-HANDLER-UNANALYZABLE",
+      `E-ASYNC-HANDLER-UNANALYZABLE: this event handler references the async function \`${u.name}\`, but ` +
+        `the compiler could not analyse the handler's code, so it cannot insert the \`await\` §13.2 ` +
+        `requires. Rather than ship an unawaited call (a Promise is always truthy), the build fails. ` +
+        `Move the handler body into a named function and reference it (\`onclick=handle()\`). ` +
+        `This is also a compiler defect worth reporting.`,
+      sp,
+      "error",
+    ));
+  }
+  return out;
 }
 
 function diagnosticSpan(
@@ -725,7 +949,12 @@ export function collectNonAwaitableAsyncCalls(
     // Raw escape-hatch (block-body callback / raw JS) or template `.raw` — emitted
     // VERBATIM, so any async call inside is un-awaitable regardless of nesting.
     if ((k === "escape-hatch" || (k === "lit" && n.litType === "template")) && typeof n.raw === "string") {
-      for (const c of extractCalleeNames(n.raw)) recordRawCallee(c, at(n.span));
+      // s441 (FP1) — the scope-aware analysis the pre-pass attached (strings,
+      // member calls and a same-named binding in scope no longer count); the name
+      // scan remains only for a fragment that was not analysed (fail closed).
+      const uses = rawAsyncUsesOf(n);
+      if (uses) { for (const c of uses.calls) record(c.name, at(n.span), c.local ? c.root : null); }
+      else for (const c of extractCalleeNames(n.raw)) recordRawCallee(c, at(n.span));
     }
     // s440 — a NESTED function's own parameter defaults. `paramSignature` splices a
     // default as RAW TEXT (evaluated eagerly, outside any async body — `await` is
@@ -801,6 +1030,8 @@ export function collectNonAwaitableAsyncCalls(
       if (insideCallback) {
         if (local) {
           if (local.async) record(local.name, here, local.root);
+        } else if (localSyncShadowOf(n)) {
+          // s441 (FP2) — the binding in scope is a SYNC nested fn sharing an async name.
         } else {
           // A structured call to an async name INSIDE a callback/param-default lambda.
           const name = (typeof n.name === "string" ? n.name : undefined)
@@ -832,6 +1063,7 @@ export function collectNonAwaitableAsyncCalls(
       if (local.async) record(local.name, anchorDiagnosticSpan(an.span, anchor), local.root);
       return;
     }
+    if (localSyncShadowOf(an)) return; // s441 (FP2) — a SYNC nested fn is in scope
     if (isAsyncName(an.name)) record(an.name, anchorDiagnosticSpan(an.span, anchor));
   };
   const scanParamDefaults = (ps: unknown[], site: unknown): void => {
@@ -840,7 +1072,9 @@ export function collectNonAwaitableAsyncCalls(
       const pd = p as { defaultValue?: unknown; defaultExpr?: unknown; span?: unknown };
       const at = anchorDiagnosticSpan(pd.span, site);
       if (typeof pd.defaultValue === "string" && pd.defaultValue.length > 0) {
-        for (const c of extractCalleeNames(pd.defaultValue)) recordRawCallee(c, at);
+        const uses = rawAsyncUsesOf(p);
+        if (uses) { for (const c of uses.calls) record(c.name, at, c.local ? c.root : null); }
+        else for (const c of extractCalleeNames(pd.defaultValue)) recordRawCallee(c, at);
       } else if (pd.defaultValue && typeof pd.defaultValue === "object") {
         walk(pd.defaultValue, true, at);
       }

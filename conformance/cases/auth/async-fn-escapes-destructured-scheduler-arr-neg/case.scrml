@@ -1,0 +1,15 @@
+<program>
+${
+  import { verifyPassword } from 'scrml:auth'
+}
+<verdict> = "unset"
+server function check(pw, hash) {
+  const [setTimeout] = [(f, a, b) => f(a, b)]
+  return setTimeout(verifyPassword, pw, hash) ? "accepted" : "rejected"
+}
+function go() {
+  @verdict = check("wrong", "not-a-real-hash")
+}
+<p id="out">${@verdict}</p>
+<button id="go" onclick=go()>go</button>
+</program>

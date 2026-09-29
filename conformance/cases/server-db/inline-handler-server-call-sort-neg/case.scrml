@@ -1,0 +1,7 @@
+<program>
+<verdict> = "unset"
+<xs> = [3, 1, 2]
+server function isOk(n) { return n > 100 }
+<p id="out">${@verdict}</p>
+<button id="go" onclick={ const s = [...@xs].sort((a, b) => isOk(a) ? 1 : -1); @verdict = "sorted " + s.length }>go</button>
+</program>

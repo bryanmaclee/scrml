@@ -62,7 +62,7 @@ import { emitMarkupValueExpr } from "./emit-lift.js";
 import { ASYNC_COMBINATOR_METHODS, KNOWN_DISCARD_HOF, callbackReachesAsync, isAsyncCalleeName, isServerBoundaryCallee, isSyncCallbackConsumerCall } from "./async-combinators.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 // s440 — nested-helper async coloring (lexical resolutions marked by the pre-pass).
-import { localCalleeOf, localFnRefOf, anchorDiagnosticSpan } from "./local-async-fns.ts";
+import { localCalleeOf, localFnRefOf, localSyncShadowOf, anchorDiagnosticSpan } from "./local-async-fns.ts";
 import type { AsyncRoot } from "./local-async-fns.ts";
 
 // ---------------------------------------------------------------------------
@@ -3649,6 +3649,9 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
         if (local.async) recordAsyncSyncCallSite(local.name, local.root, a.span, ctx);
         continue;
       }
+      // s441 (FP2) — the binding in scope is a SYNC nested fn that merely shares
+      // an async name (`function verifyPassword(a, b) { return a - b }`).
+      if (localSyncShadowOf(a)) continue;
       const nm = (a as IdentExpr).name;
       if (combinatorIsAsyncName(nm, ctx)) recordAsyncSyncCallSite(nm, outerAsyncRootOf(nm, ctx), a.span, ctx);
     }
@@ -3677,6 +3680,15 @@ function emitCall(node: CallExpr, ctx: EmitExprContext): string {
       return `${callee}(${args})`;
     }
     return `await ${callee}(${args})`;
+  }
+  // s441 (g-sync-local-with-async-name-treated-async) — the callee CERTAINLY
+  // resolves to a SYNC nested function that shares an async outer name. Where
+  // `await` is illegal (a sync callback, a `.sort` comparator) the call is a plain
+  // sync call — nothing to fail closed on. In an awaitable position it keeps the
+  // name-based treatment below (an `await` of a sync value is the same value), so
+  // this mark can never remove an await.
+  if (ctx.peerAwaitable === false && localSyncShadowOf(node)) {
+    return `${callee}(${args})`;
   }
 
   // §20.5 (S265, i29e) — `session` server-builtin method calls. Inside a

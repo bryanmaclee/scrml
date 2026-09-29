@@ -362,53 +362,18 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
 </program>
 `;
 
-  test("(#284) SQL ?{} param: ${aliasedPeer()} lowers to ${await peer()}", () => {
-    const { errors, serverJsPath } = compileToFiles(ALIAS_SQL_SRC, "alias-sql", SEED);
-    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
-    const js = readFileSync(serverJsPath, "utf-8");
-
-    // GREEN: the aliased peer in the SQL param is awaited; plain `name` is not.
-    expect(js).toContain(
-      "await _scrml_sql`INSERT INTO items (ord, name) VALUES (${await p()}, ${name})`;",
-    );
-    // RED guard: the pre-fix bare (unawaited) aliased peer — a Promise bind.
-    expect(js).not.toContain("VALUES (${p()}, ${name})");
-
-    assertValidJs(js);
-  });
-
-  test("(#284) runtime: an aliased peer in a SQL param binds the AWAITED value, not a Promise", async () => {
-    if (typeof globalThis.document !== "undefined") return; // happy-dom pollution guard
-
-    const { errors, serverJsPath, tmpDir } = compileToFiles(ALIAS_SQL_SRC, "alias-sql-rt", SEED);
-    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
-
-    const absDbPath = resolve(tmpDir, "items.db");
-    const mod = await patchAndImport(serverJsPath, absDbPath);
-    const route = Object.values(mod).find(
-      (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("insertAlias"),
-    );
-    expect(route).toBeDefined();
-
-    const TOKEN = "ss22-csrf-token";
-    const mkReq = (path, body) =>
-      new Request(`http://localhost${path}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-CSRF-Token": TOKEN,
-          "Cookie": `scrml_csrf=${TOKEN}`,
-        },
-        body: JSON.stringify(body ?? {}),
-      });
-
-    const r = await route.handler(mkReq(route.path, { name: "widget" }));
-    expect(r.status).toBe(200);
-    const ord = await r.json();
-    // The awaited alias value (next order #, 1 on an empty table) is what got
-    // bound + stored — a bound Promise would NOT round-trip to the integer 1.
-    expect(ord).toBe(1);
-    expect(String(ord)).not.toContain("[object Promise]");
+  // s441 (S440 F4, ruling:user-voice-scrml.md "async helpers may not escape as
+  // values") — `nextOrder` is an async-colored function (a `server function` with a
+  // `?{}` body). Aliasing it is now a compile error: the #284 alias-await covered the
+  // aliases route inference could resolve, but the ruling rejects implicit await on
+  // calls of a function-typed value in favour of refusing the value use itself.
+  test("(#284 → S440 F4) aliasing an async server fn is E-ASYNC-FN-ESCAPES-AS-VALUE", () => {
+    const { errors } = compileToFiles(ALIAS_SQL_SRC, "alias-sql", SEED);
+    const codes = errors.map((e) => e.code);
+    expect(codes).toContain("E-ASYNC-FN-ESCAPES-AS-VALUE");
+    const err = errors.find((e) => e.code === "E-ASYNC-FN-ESCAPES-AS-VALUE");
+    expect(err.message).toContain("`nextOrder`");
+    expect(err.message).toContain("aliased");
   });
 
   // ── #284 DISPATCH-TABLE residual (S304): a peer reached through a direct
@@ -452,52 +417,17 @@ describe("ss22 #4 — peer call / @cell inside a ${} interpolation", () => {
 </program>
 `;
 
-  test("(#284 dispatch) SQL ?{} param: ${t[\"a\"]()} lowers to ${await t[\"a\"]()}", () => {
-    const { errors, serverJsPath } = compileToFiles(DISPATCH_SRC, "disp-sql", SEED);
-    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
-    const js = readFileSync(serverJsPath, "utf-8");
-    expect(js).toContain('VALUES (${await t["a"]()}, ${name})');
-    expect(js).not.toContain('VALUES (${t["a"]()}, ${name})'); // RED: bare dispatch
-    // The peer callable MUST be emitted for the awaited reference to resolve, even
-    // though `nextOrder` is reached ONLY through the dispatch table (sole ref).
-    expect(js).toMatch(/async function nextOrder\(\) \{/);
-    assertValidJs(js);
-  });
-
-  test("(#284 dispatch) template literal: ${t[which]()} lowers to ${await t[which]()}", () => {
-    const { errors, serverJsPath } = compileToFiles(DISPATCH_SRC, "disp-tmpl", SEED);
-    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
-    const js = readFileSync(serverJsPath, "utf-8");
-    expect(js).toContain("`ord ${await t[which]()}`");
-    expect(js).not.toContain("`ord ${t[which]()}`"); // RED: bare dispatch → [object Promise]
-    assertValidJs(js);
-  });
-
-  test("(#284 dispatch) runtime: a dispatch peer in a SQL param binds the AWAITED value, not a Promise", async () => {
-    if (typeof globalThis.document !== "undefined") return; // happy-dom pollution guard
-    const { errors, serverJsPath, tmpDir } = compileToFiles(DISPATCH_SRC, "disp-rt", SEED);
-    expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
-    const absDbPath = resolve(tmpDir, "items.db");
-    const mod = await patchAndImport(serverJsPath, absDbPath);
-    const route = Object.values(mod).find(
-      (v) => v && typeof v === "object" && typeof v.path === "string" && v.path.includes("dispatchSql"),
-    );
-    expect(route).toBeDefined();
-    const TOKEN = "ss22-csrf-token";
-    const mkReq = (path, body) =>
-      new Request(`http://localhost${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-CSRF-Token": TOKEN, "Cookie": `scrml_csrf=${TOKEN}` },
-        body: JSON.stringify(body ?? {}),
-      });
-    const r = await route.handler(mkReq(route.path, { name: "widget" }));
-    expect(r.status).toBe(200);
-    const ord = await r.json();
-    // Awaited dispatch value (1 on an empty table) round-trips; a bound Promise
-    // would have broken the INSERT (a NOT NULL / type error) or stored a garbage
-    // ord — and the peer callable would be undefined (ReferenceError) if unemitted.
-    expect(ord).toBe(1);
-    expect(String(ord)).not.toContain("[object Promise]");
+  // s441 (S440 F4) — storing the async `nextOrder` in a dispatch object is a value
+  // use of an async-colored function: a compile error in every dispatch body.
+  test("(#284 dispatch → S440 F4) an async server fn in a dispatch object is E-ASYNC-FN-ESCAPES-AS-VALUE", () => {
+    const { errors } = compileToFiles(DISPATCH_SRC, "disp-sql", SEED);
+    const escapes = errors.filter((e) => e.code === "E-ASYNC-FN-ESCAPES-AS-VALUE");
+    // dispatchSql + dispatchTemplate each store it.
+    expect(escapes.length).toBe(2);
+    for (const e of escapes) {
+      expect(e.message).toContain("`nextOrder`");
+      expect(e.message).toContain("stored in an object");
+    }
   });
 
   // ── #284 dispatch-table PLACEMENT (S305): a PLAIN helper (not a `server

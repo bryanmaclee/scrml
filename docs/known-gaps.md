@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 205 | 4 |
-| MED | 399 | 0 |
-| LOW | 173 | 0 |
+| HIGH | 211 | 4 |
+| MED | 409 | 0 |
+| LOW | 186 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -2806,6 +2806,7 @@ and should be decided WITH it, not separately. **Reproduce before fixing.**
 
 ### g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources — the auto-await arc's motivating bug class is still live at ~150 call sites across cleanly-compiling corpus sources — `NEW S322-bryan (measured by the wide-corpus harness + an independent reviewer sweep); HIGH; open`
 <!-- @gap id=g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources sev=HIGH status=open locus=searched:compiler/src/codegen/emit-expr.ts,emit-client.ts,scheduling.ts,emit-functions.ts prov=dd:autoawait-choke-point-vs-heterogeneous-2026-08-04 -->
+> **S441 (review:S441-f4f5-review):** seven residual positions of this family are filed separately in §S441c (Promise.all batch operands, markup gates, top-level async closures, cross-file helpers, top-level derived constants, a handler-local shadow renamed to a fetch, handler parallelization), and a `.then` on an awaited call in a function body is noted there.
 
 **⚑ THE ID BAKES A STALE FIGURE — 150 vs 142. Do NOT rename it; `scripts/threads.ts` and the review records key on the id.** The `150` is the harness's wider **pre-rebase** count (looser counting rule, wider corpus). The **landed** re-measure, on the rebased tree under the fixed dual-goggle gate, is **142 bare of 464 across 103 sources, delta 0 base→head** — that is the figure in the changelog, delta-log [1171], and #429/#442. An independent reviewer's third count, different rule again, was 49 of 148 across 70 sources. **All three agree on the only number that gates anything: the delta is ZERO.** Cite 142 when quoting the current surface.
 
@@ -19814,6 +19815,24 @@ base too); a function-valued prop called with the bare `onclick=act()` form is n
 (g-propagate-in-handler-silently-drops-error); a failable call in a `when … changes` body
 (g-when-changes-body-failable-call-unchecked).
 
+### g-static-server-serves-db-and-server-source — the production `_server.js` and `scrml dev` served ANY file in the output dir to anyone: the SQLite database, the session store, every `*.server.js`, `_server.js` itself — `NEW S441; HIGH (security, CRITICAL); RESOLVED S441`
+<!-- @gap id=g-static-server-serves-db-and-server-source sev=HIGH status=resolved locus=compiler/src/static-serve-policy-emitted.js(the one allowlist policy — dev imports it, build copies its text into _server.js);compiler/src/commands/build.js(generateServerEntry static dispatch);compiler/src/commands/dev.js(devDispatch static loop);compiler/src/api.js(clientAssets manifest) prov=repro:PA-S441-curl-app.db-200 -->
+
+With `<program db="app.db">` built by `scrml build` and run from its dist dir, `curl /app.db` returned 200 and the
+whole database (`protect=` columns and password hashes included), `/app.server.js` returned the server source (SQL,
+auth logic), and `/_server.js` returned itself. Both static loops (the emitted `_server.js` and `devDispatch`) served
+whatever file a candidate path resolved to. The same hole exposed `.scrml-sessions.db` (the §20.5 session store sits at
+the dist root), `serverfns.json` and the other MCP sidecars, and `*.map` files, which embed the whole `.scrml` source as
+`sourcesContent`. **RESOLVED S441** by SPEC §47.13: static serving is an ALLOWLIST. A file is served iff it is not in a
+denied class (`*.server.*`/`_server.js`, `*.db*`/`*.sqlite*`, any dot-segment, `.scrml`, `*.map`, outside the root;
+case-insensitive) AND it is either in the build's client-asset manifest or passive media (images, fonts, audio/video).
+The manifest is what `compileScrml` wrote for the browser, closed over those files' relative imports. It is written to
+`.scrml-client-assets.json` (a dotfile, so it is unservable), baked into `_server.js`, and re-read by dev. Request paths
+are percent-decoded, then refused on traversal, dot-segments, `\`, `:`, NUL, or a trailing dot or space. Dev and prod
+run one policy source. Pinned by `compiler/tests/integration/static-serve-allowlist.test.js`, which runs the real
+`_server.js` and the real dev app child in child processes and probes them over raw sockets, and by
+`compiler/tests/commands/static-serve-allowlist-dev-http.test.js`, which runs a whole `scrml dev`.
+
 ### g-failable-handler-reference-unchecked — `onclick=risky` (a `!` function wired by reference) compiled clean and discarded its error on every click — `NEW S441; HIGH; RESOLVED S441`
 <!-- @gap id=g-failable-handler-reference-unchecked sev=HIGH status=resolved locus=compiler/src/type-system.ts(visitAttr — the §19.4.3 handler-value check now also fires on a REFERENCE value via handlerValueAsReference; formFor exempt, scope-resolved, declared-`!` only) prov=review:S441-e-error-002-review;ruling:user-voice-scrml.md-S441-yes-on-references -->
 
@@ -20744,3 +20763,124 @@ Executed: `repro/comment2.scrml` (`.panel { color: red; // subtle scanline overl
 ### g-impl1-universal-selector-not-a-floor — a component `#{ .btn { padding: 16px; } * { padding: 0; } }` gives `.btn` 0px: `*` is emitted as a same-level `:where(*)` rule after `:where(.btn)`, so source order wins, not the §65.2.4 R1 floor — `NEW S441`; **MED** (silent wrong cascade vs SPEC); open
 Executed: `repro` source = `compiler/self-host-v2/slice-m3/css-oracle/sources/r1-floor-order.scrml` → `@scope ([data-scrml="Card"]) to ([data-scrml]) {\n:where(.btn) { padding: 16px; } :where(*) { padding: 0; }\n}`; `bun compiler/self-host-v2/slice-m3/bench/css-oracle-both.js --filter r1-floor` → `impl#1: step 1: #b[0] padding-top = "0px", SPEC says "16px"` (the CSS-swapped hybrid passes). SPEC §65.2.4 R1: a user-authored `*` / `html` / `body` rule is an author-reset floor "resolved **below** class/id/specific author rules in the §65.5 precedence order". impl#1 uses R1 only to silence `E-STYLE-CONFLICT`; the emitter never places the rule below.
 <!-- @gap id=g-impl1-universal-selector-not-a-floor sev=MED status=open locus=compiler/src/codegen/emit-css.ts(component @scope emission — `*` / html / body rules not layered below) prov=review:S441-css-t3-review -->
+
+
+## §S441c — async-escape (F4/F5) review residuals (2026-09-29; review:S441-f4f5-review, reviewer-executed at `3807f2df7`; every reproducer re-compiled on the fix-round tree — reproducers in `docs/changes/s441-async-escape-f4-f5/review-repro/`, run with `bun docs/changes/s441-async-escape-f4-f5/review-repro/run.ts <compilerRoot>`)
+
+The s441-async-escape-f4-f5 branch closed F4/F5 and the #1139 false positives; its review found the holes below. They are the remaining positions where a server / async call's Promise reaches a synchronous consumer. SPEC §13.2 lists them as carried impl#1 gaps.
+
+### g-promise-all-batch-puts-unawaited-call-under-sync-operator — in a client function, the §13.2 parallel batch (`const [a, b] = await Promise.all([...])`) puts an un-awaited server call under `?` / `!` / `&&` / an object or array literal, so the operator tests the Promise — `NEW S441`; **HIGH** (SECURITY: accept-all); open
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/c-batch-ternary`, `c-batch-not`, `c-batch-and`, `c-batch-obj`, `c-batch-arr`: `const b = isOk(2) ? "accepted" : "rejected"` beside an independent `const a = isOk(1)` emits `const [a, b] = await Promise.all([_scrml_fetch_isOk(1), _scrml_fetch_isOk(2) ? "accepted" : "rejected"])` — the element is the ternary over a PROMISE, always "accepted". Compiles clean on base and on the fix round. The batch elements must be the bare calls (await the call, then apply the operator), or a statement whose server call sits under an operator must not be batched. Governing: §13.2 SHALL await every server call site. Scheduler: `compiler/src/codegen/scheduling.ts` (the Promise.all batch builder).
+<!-- @gap id=g-promise-all-batch-puts-unawaited-call-under-sync-operator sev=HIGH status=open locus=compiler/src/codegen/scheduling.ts(Promise.all batch — elements are whole initializers, not the server calls) prov=review:S441-f4f5-review -->
+
+### g-markup-gate-tests-server-call-promise — a markup gate or attribute over a server call (`if=(isOk(1))`, `show=(isOk(1))`, `disabled=(isOk(1))`, `${isOk(1) ? … : …}`) tests / renders a Promise: the gate is always open — `NEW S441`; **HIGH** (SECURITY: a gated element always shows); open — **next to be fixed**
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/mk-if`, `mk-show`, `mk-disabled`, `mk-interp`: `<p if=(isOk(1))>SECRET</p>` emits `if ((_scrml_fetch_isOk(1))) _scrml_if_mount…` — mounted for every answer. `${isOk(1) ? "a" : "b"}` wraps the whole ternary in `await (…)`, so the ternary still tests the Promise. Compiles clean. The display/attribute predicate lowering (`emit-event-wiring.ts` `computeDisplayToggleCondition` and the attribute effect writers) never went through §13.2. Fix direction: a gate that reads a server call awaits it (async effect with a stale-guard) or is refused with a diagnostic pointing at a cell (`<ok> = isOk(1)` then `if=@ok`).
+<!-- @gap id=g-markup-gate-tests-server-call-promise sev=HIGH status=open locus=compiler/src/codegen/emit-event-wiring.ts(display / attribute predicate lowering)+compiler/src/codegen/emit-html.ts prov=review:S441-f4f5-review -->
+
+### g-top-level-async-closure-called-later-accept-all — a TOP-LEVEL `const check = (n) => isOk(n)` (or a function expression, or an object method wrapping a server call) is emitted sync, and a later `check(1) ? … : …` tests its Promise — accept-all, no diagnostic — `NEW S441`; **HIGH** (SECURITY); open
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/tl-arrow-const`, `tl-arrow-handler`, `tl-fnexpr-const`, `tl-obj-method`. The async coloring (`computeAsyncFnNames`) and the escape check (E-ASYNC-FN-ESCAPES-AS-VALUE) see `function` declarations only; a top-level arrow / function expression / method bound to a name is neither colored async nor treated as async-colored at its call sites. Fix direction: color a top-level `const f = <lambda>` like a function declaration (it is one in every respect that matters here), or refuse a server call inside a top-level lambda.
+<!-- @gap id=g-top-level-async-closure-called-later-accept-all sev=HIGH status=open locus=compiler/src/codegen/emit-library-shared.ts(computeAsyncFnNames — function-decl only)+compiler/src/codegen/emit-reactive-wiring.ts(top-level lambda emission) prov=review:S441-f4f5-review -->
+
+### g-cross-file-async-helper-called-unawaited — an imported helper that calls a server function (`export function check(n) { return isOk(n) }` in `lib.scrml`) is emitted `async` in its module but the importer calls it un-awaited; aliasing it raises no E-ASYNC-FN-ESCAPES-AS-VALUE — `NEW S441`; **HIGH** (SECURITY: accept-all across a module boundary); open
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/xf-call-fn`, `xf-call-handler`, `xf-alias-fn`, `xf-alias-handler`, `xf-obj-fn`, `xf-toplevel-obj` (each with its `lib.scrml`). The importer's async facts come from `_asyncImportedLocals` / `asyncExportNamesOf`, which do not carry "calls a server function in its own module" for this shape; both the await and the escape rule key on those facts. Related: g-crossmodule-async-in-markup-position-not-awaited (S317, the markup position).
+<!-- @gap id=g-cross-file-async-helper-called-unawaited sev=HIGH status=open locus=searched:compiler/src/codegen/emit-functions.ts(_asyncImportedLocals seed)+module-resolver(asyncExportNamesOf)—not-traced prov=review:S441-f4f5-review -->
+
+### g-top-level-derived-from-async-helper-holds-promise — a top-level `const ok = isOk(1)` / `<ok> = m(1)` (with `m` a client async helper) stores the Promise; a handler's `ok ? … : …` / `@ok ? … : …` is always "accepted" — `NEW S441`; **MED**; open
+Reproducers `docs/changes/s441-async-escape-f4-f5/review-repro/t2-const-derived`, `t2-derived-helper`. `<ok> = isOk(1)` (a direct server call) is lifted and awaited; the CLIENT-helper form and the plain top-level `const` are not. Module-init positions are outside the function-body await machinery (§13.2). MED: a derived constant, not a check written against a call; still a wrong value.
+<!-- @gap id=g-top-level-derived-from-async-helper-holds-promise sev=MED status=open locus=searched:compiler/src/codegen/emit-client.ts(post-server-fn-iife-wrap keys on fetch stubs, not async client helpers)+emit-reactive-wiring.ts(top-level const) prov=review:S441-f4f5-review -->
+
+### g-handler-local-shadowing-server-fn-renamed-to-fetch — a handler-local binding named like a server function (`onclick=${ const isOk = (n) => false; @v = isOk(1) ? … }`) is rewritten by the scope-blind post-emit renamer to the fetch stub: the analysis sees the local, the renamer does not — `NEW S441`; **MED**; open
+Reproducer `docs/changes/s441-async-escape-f4-f5/review-repro/h-shadow-local` (also `srv-s-shadow-name.scrml`). The js-async-analysis resolves `isOk` to the local (no await), then the fnNameMap mangle (`emit-client.ts` post-fn-name-mangle, a text pass) renames `isOk(1)` to `_scrml_fetch_isOk_N(1)` — an un-awaited fetch in a condition. Same class as g-mangler-scope-blind-shorthand-key-rename (S325): the renamer needs scope, or the analysis must run after it.
+<!-- @gap id=g-handler-local-shadowing-server-fn-renamed-to-fetch sev=MED status=open locus=compiler/src/codegen/emit-client.ts(post-fn-name-mangle — scope-blind) prov=review:S441-f4f5-review -->
+
+### g-handler-independent-server-calls-serialized — in an inline handler / `on mount` body, independent server calls are awaited one after another; §13.2 requires parallelization — `NEW S441`; **LOW** (correct values, extra latency); open
+Reproducer `docs/changes/s441-async-escape-f4-f5/review-repro/par-par.scrml`: `onclick=${ a(3); b(4) }` emits `await a(3); await b(4);`. Function bodies get the `Promise.all` scheduler; handler / mount bodies (analysed as emitted text since s441) do not.
+<!-- @gap id=g-handler-independent-server-calls-serialized sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(transform adds awaits in order; no batching) prov=review:S441-f4f5-review -->
+
+### g-promise-method-on-awaited-call-through-a-binding-not-caught — `const p = isOk(1); p.then(…)` in a handler / `on mount` body is not E-ASYNC-CALL-PROMISE-METHOD: `p` holds the awaited value and `.then` throws a TypeError at run time — `NEW S441`; **LOW** (loud runtime TypeError, not silent); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `pm/alias-then.scrml`. The check reads `.then`/`.catch`/`.finally` only directly off the awaited call (`isOk(1).then`, `isOk(1)["then"]` since round 3). A binding that holds the awaited value is not followed. Fix direction: follow simple `const` bindings of an awaited call as the event-control check follows event aliases.
+<!-- @gap id=g-promise-method-on-awaited-call-through-a-binding-not-caught sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(checkPromiseMethod — direct parent only) prov=review:S441-f4f5-review-r2 -->
+
+### g-promise-method-check-fires-on-a-then-field-read — `String(getRec().then)` (a server fn returning a record with a `then` FIELD) is rejected by E-ASYNC-CALL-PROMISE-METHOD — `NEW S441`; **LOW** (false positive, loud); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `pm/field-named-then.scrml`. The check fires on any member read named `then`/`catch`/`finally` off an awaited call, not only a CALL of it. Narrowing to a call (`parent` is the callee of a CallExpression) would clear it; a record field named `then` is also a thenable hazard under `await`, so the right rule is a design question (flag the field at the type).
+<!-- @gap id=g-promise-method-check-fires-on-a-then-field-read sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(checkPromiseMethod) prov=review:S441-f4f5-review-r2 -->
+
+### g-event-control-after-await-in-a-named-handler-function — `onsubmit=handle(event)` where `function handle(e) { … server call … ; e.preventDefault() }` compiles clean: the preventDefault runs after the function's first await — `NEW S441`; **MED** (the form submits); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `ev/named-fn.scrml`. E-EVENT-CONTROL-AFTER-AWAIT covers handler TEXT (inline / block / row / lift handlers); a named function reached through a call-ref handler is an ordinary async function body and was async on main too (not a regression of this branch). Fix direction: in a function passed the event by a call-ref handler, apply the same rule to the parameter the event is bound to.
+<!-- @gap id=g-event-control-after-await-in-a-named-handler-function sev=MED status=open locus=compiler/src/codegen/emit-functions.ts+compiler/src/codegen/emit-event-wiring.ts(call-ref handlers) prov=review:S441-f4f5-review-r2 -->
+> **S441 round 4 (review:S441-f4f5-review-r3, cases `h01`, `h02`, `h04`, `h09`, `c02` in the round-3 review scratch `f4f5-rr3/cases/`):** still open after the handler-body rule became binding poisoning. The handler text passes `event` to a named function (`onsubmit=h(event)`, `onclick=h(event)`, or `${ h(event) }` where the call itself is awaited, so the argument is evaluated before the handler yields); the named function awaits and then calls `e.preventDefault()` / `e.stopPropagation()` on its parameter. Not a regression of the branch (the function body was async on main). Fix direction: apply the same poisoning to the parameter of a function that a handler calls with its event, or refuse passing the event to an async function.
+
+> **Round-3 residuals of E-EVENT-CONTROL-AFTER-AWAIT (review N2/N3), conservative by design, SPEC §13.2 names them:** "after" is source order, so `if (c) { … await … } else { event.preventDefault() }` (`ev/else-branch.scrml`) and a call after an `await` in a branch that was not taken (`ev/first-await-in-untaken-if.scrml`) are rejected though they would run in time. A closure passed elsewhere (not invoked by name after the await) is not traced.
+
+> **Not filed, pre-existing, noted for the fix of E-ASYNC-CALL-PROMISE-METHOD's reach:** `docs/changes/s441-async-escape-f4-f5/review-repro/then-fn` — `isOk(1).then(…)` inside an ordinary FUNCTION body emits `(await f(1)).then(…)` (a TypeError) on base `cf62b4154` too; the new code covers handler and `on mount` bodies only. Carried under g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources.
+
+## §S441c — security-review findings at the S441 wrap (2026-09-29; PA-reproduced where marked, otherwise reviewer-executed; reproducers in the S441 session scratch `protect-rr3/`, `protect-rr4/`, `static-rr/`, `csrf-rr3/`, `f4f5-rr4/`)
+
+### g-protect-origin-match-case-sensitive — `protect=` origin matching is case-sensitive; SQLite identifiers are not: `SELECT * FROM USERS …` emits no `_scrml_protect_tag`, so even the whole-row strip is gone — `NEW S441`; **HIGH** (security, fail-open); open
+PA-reproduced on main `3c4e6cf47`: `getUser` returning `?{\`SELECT * FROM USERS WHERE id = ${id}\`}.get()…` served `{"id":1,"name":"bob","passwordHash":"SECRET-HASH-123"}`. Also `SELECT PASSWORDHASH`, `passwordhash AS x`, `u.PasswordHash`. A fix is on the held branch `worktree-agent-a8aefdb4c19a10c1a` but the round-4 review found it half-done: tags record the SURFACE spelling (`["PASSWORDHASH"]`) and the runtime redactor compares keys exact-case, so `SELECT PASSWORDHASH … return u` still ships. Fix: normalise case at tag, redactor and flow.
+<!-- @gap id=g-protect-origin-match-case-sensitive sev=HIGH status=open locus=compiler/src(resolveProtectedOutputColumns + runtime _scrml_protect redactor key compare) prov=empirical:S441-PA-f3main -->
+
+### g-protect-sql-expression-column-no-descriptor — an output column that is a SQL EXPRESSION over a protected column (or quoted/bracketed/subquery) gets no protect descriptor, so the value ships — `NEW S441`; **HIGH** (security, fail-open); open
+Reviewer-executed (round-4 review, served over HTTP): `passwordHash || '' AS x`, `CAST(passwordHash AS TEXT)`, `substr(…)`, `coalesce(…)`, `lower(…)`, `hex(…)`, `json_object('h', passwordHash)`, `group_concat(…)`, `"passwordhash" AS x`, `[passwordHash] AS x`, `(SELECT passwordHash FROM users LIMIT 1) AS q`, `pin + 0 AS x` — all return the value from a plain `return u`. Pre-existing on main. SPEC §14.8.9 requires an unresolvable origin to degrade to the wholesale strip. Fix: any output column whose expression references a protected column (case-insensitively) or cannot be resolved gets `cols:"*"`.
+<!-- @gap id=g-protect-sql-expression-column-no-descriptor sev=HIGH status=open locus=compiler/src(resolveProtectedOutputColumns — expression output columns) prov=review:S441-protect-r4-review -->
+
+### g-sql-get-trailing-member-dropped — `return ?{…}.get().passwordHash` emits code returning the WHOLE ROW; the trailing member read is dropped — `NEW S441`; **MED** (silent wrong output; masked for protected columns by the row strip); open
+PA-observed on main `3c4e6cf47` (the f3main probe returned the whole row, not the field). Needs a non-protected-column reproducer to confirm scope.
+<!-- @gap id=g-sql-get-trailing-member-dropped sev=MED status=open locus=searched:compiler/src/codegen(SQL chain .get() member continuation) prov=empirical:S441-PA-f3main -->
+
+### g-reexport-only-module-emits-no-server-js — a `.scrml` that only re-exports (`export { nm } from './b.scrml'`) emits no `.server.js`, so an importer's `./c.server.js` import dangles — `NEW S441`; **MED** (broken output; fails closed under protect); open
+Reported by the protect round-3 agent (case X1c). Needs PA reproduction.
+<!-- @gap id=g-reexport-only-module-emits-no-server-js sev=MED status=open locus=searched:compiler/src/codegen(server module emission for re-export-only files) prov=review:S441-protect-r3 -->
+
+### g-static-manifest-closure-steerable-by-string-literal — the client-asset manifest's import closure regex-scans raw bundle text, so a client string literal can admit an arbitrary dist file (e.g. a non-`.db`-named database) — `NEW S441`; **MED** (security; needs author-written string); open
+Reviewer-reproduced on #1162's merged tip `7cff98bb9`: 03-contact-book with `<db src="contacts.data">` plus a client fn returning `"see import './contacts.data'"`, rebuilt in place → manifest lists `contacts.data`, `GET /contacts.data` = 200 with the database. Fix: follow closure targets ending `.js`/`.mjs` only (parse imports with acorn) and add every declared `<db src>` path to the denied set.
+<!-- @gap id=g-static-manifest-closure-steerable-by-string-literal sev=MED status=open locus=compiler/src/static-serve-policy.js(collectClientAssets) prov=review:S441-static-review -->
+
+### g-static-no-public-dir-convention — author-placed static files (`robots.txt`, `site.webmanifest`, PDFs, `.well-known/acme-challenge/*`, JSON, vendored JS) now 404 with no way to admit them — `NEW S441`; **LOW** (design gap, fail-closed by §47.13); ruling-gated
+Intended by §47.13 (#1162), which admits only build outputs plus passive media. A declared `public/` directory (copied into dist and added to the manifest) is a LANGUAGE decision for bryan. Operator cost: ACME/TLS and security.txt break.
+<!-- @gap id=g-static-no-public-dir-convention sev=LOW status=ruling-gated locus=compiler/SPEC.md(§47.13) prov=review:S441-static-review -->
+
+### g-static-svg-served-without-csp — passive-media SVG is served with no CSP; an SVG opened as a document runs its own script, contradicting §47.13's "none of these types runs as script" — `NEW S441`; **LOW**; open
+Fix: send `Content-Security-Policy: script-src 'none'` (or `sandbox`) on `.svg`, or drop the claim.
+<!-- @gap id=g-static-svg-served-without-csp sev=LOW status=open locus=compiler/src/static-serve-policy-emitted.js prov=review:S441-static-review -->
+
+### g-static-manifest-worker-bundles-not-seeded — the manifest seeds only `.html`/`.css`/`.client*.js`; when worker bundles are written (they are not yet — dpa-056 D1) they will 404 — `NEW S441`; **LOW**; open
+<!-- @gap id=g-static-manifest-worker-bundles-not-seeded sev=LOW status=open locus=compiler/src/static-serve-policy.js(collectClientAssets seeds) prov=review:S441-static-review -->
+
+### g-static-manifest-written-on-failed-build — a failed build (E-PA-002) still writes `.scrml-client-assets.json` — `NEW S441`; **LOW** (fails closed); open
+<!-- @gap id=g-static-manifest-written-on-failed-build sev=LOW status=open locus=compiler/src/api.js(compileScrml manifest write) prov=review:S441-static-review -->
+
+### g-precommit-runtime-tests-silently-skip-under-happy-dom — in-process runtime tests guarded by `typeof globalThis.document !== "undefined"` return early when the pre-commit hook runs unit+integration+conformance in ONE bun process (happy-dom globals leak in from sibling browser tests), so a red test passes; and `compiler/tests/commands/` is not in the hook set at all — `NEW S441`; **MED** (test-gate hole; a green hook overstates coverage); open
+Found by the CSRF agent: `csrf-canonical-delivery.test.js` failed alone (8 pass/1 fail) but passed after `stdlib-client-registry.test.js` (46/0), which is how a red commit got through. `auth-protected-document-served` (commands/) never runs in the hook. Fix: run such runtime tests in a child process (as the new CSRF/WS/static tests do) or reset globals; add `compiler/tests/commands` to the hook.
+<!-- @gap id=g-precommit-runtime-tests-silently-skip-under-happy-dom sev=MED status=open locus=.git-hooks pre-commit + compiler/tests/integration(runtime-guarded tests) prov=empirical:S441-csrf-r3 -->
+
+### g-csrf-compose-meta-dev-prod-parity — prod fills the CSRF meta only on the compose route's exact path (`/`); authenticated `GET /index` and `/index.html` get `meta=""` and no SSR seed, so the first mutation costs a 403 + retry; dev fills every path that resolves to the document — `NEW S441`; **LOW**; open
+<!-- @gap id=g-csrf-compose-meta-dev-prod-parity sev=LOW status=open locus=compiler/src/commands/build.js(generateServerEntry compose routing) prov=review:S441-csrf-r3-review -->
+
+### g-dev-hotreload-stale-server-module-keeps-guard — dev never cleans its output dir; after a recompile removes auth AND the server fns, the stale `index.server.js` keeps its guard and the now-public page stays 302 — `NEW S441`; **LOW** (fails closed; prod `scrml build` has the same stale-output exposure); open
+<!-- @gap id=g-dev-hotreload-stale-server-module-keeps-guard sev=LOW status=open locus=compiler/src/commands/dev.js(output-dir staleness) prov=review:S441-csrf-r3-review -->
+
+### g-example23-login-redirect-404 — 23-trucking-dispatch's auth gate redirects to `/login` but the page lives at `/auth/login`, so the prod server 404s — `NEW S441`; **LOW** (flagship example); open
+<!-- @gap id=g-example23-login-redirect-404 sev=LOW status=open locus=examples/23-trucking-dispatch(auth loginPath) prov=review:S441-static-review -->
+
+### g-event-control-after-await-loop-back-edge — E-EVENT-CONTROL-AFTER-AWAIT orders by SOURCE position, so a control call that sits BEFORE the await in a loop body but runs on the next pass is missed — `NEW S441` (#1163); **MED** (regression vs the pre-#1163 sync handler: the form submits natively); open
+Reviewer-executed (`f4f5-rr4/c/b07-loop`, `b08-while`): `onsubmit=${ for (let i = 0; i < 2; i++) { if (i > 0) { event.preventDefault() } @verdict = isOk(i) ? "a" : "r" } }` builds. Fix: inside any loop whose body has an own-level await, every use in the loop counts as after it.
+<!-- @gap id=g-event-control-after-await-loop-back-edge sev=MED status=open locus=compiler/src/js-async-analysis.ts(event poisoning — await ordering) prov=review:S441-f4f5-r4-review -->
+
+### g-event-taint-container-mutation — mutating an EXISTING container with the event is not a taint source: `box.push(event)`, `o.e = event`, `arr[0] = event`, `m.set("e", event)`, `Object.defineProperty(o,"e",{value:event})`, `o.f = () => event.preventDefault()`, `window.pd = …` all ship control after an await — `NEW S441` (#1163); **MED** (regression vs the sync handler); open
+Reviewer-executed (`f4f5-rr4/c/b01,b02,b03,b04,b14,b15,b21,b24`). Fix: a tainted value on the right of a member write, or as an argument to any call before the await, taints the root object and the receiver.
+<!-- @gap id=g-event-taint-container-mutation sev=MED status=open locus=compiler/src/js-async-analysis.ts(event taint fixpoint) prov=review:S441-f4f5-r4-review -->
+
+### g-event-taint-arguments — `const a = arguments; …await…; a[0].preventDefault()` builds: `arguments` in the root handler is not tainted — `NEW S441` (#1163); **LOW**; open
+<!-- @gap id=g-event-taint-arguments sev=LOW status=open locus=compiler/src/js-async-analysis.ts prov=review:S441-f4f5-r4-review -->
+
+### g-scheduler-exemption-per-file-not-per-build — the global-scheduler exemption is decided per FILE; a helper module that writes `globalThis.setTimeout = (f)=>f(1)` (in an exported fn or at top level) leaves the app's `setTimeout(isOk) ? "a" : "r"` exempt → accept-all — `NEW S441` (#1163); **MED** (security; a polyfill/fake-timer shim is a plausible source); open
+Reviewer-executed (`f4f5-rr4/c/a17-xmod`, `a19-xmod-sideeffect`). Fix: withdraw the exemption for any name ANY module in the build withdraws.
+<!-- @gap id=g-scheduler-exemption-per-file-not-per-build sev=MED status=open locus=compiler/src/js-async-analysis.ts(schedulerNamesNotProvablyGlobal) prov=review:S441-f4f5-r4-review -->
+
+### g-scheduler-computed-reflective-global-write — non-literal computed or reflective writes onto `globalThis`/`window` (`globalThis["set"+"Timeout"]=`, `` globalThis[`setTimeout`]= ``, `globalThis[k]=`, `Object.defineProperty(globalThis,"set"+"Timeout",…)`) do not withdraw the exemption — `NEW S441` (#1163); **LOW**; open
+Fix: a non-literal-key write or reflective write onto a global object withdraws every scheduler name.
+<!-- @gap id=g-scheduler-computed-reflective-global-write sev=LOW status=open locus=compiler/src/js-async-analysis.ts(schedulerNamesNotProvablyGlobal) prov=review:S441-f4f5-r4-review -->
+
+### g-async-escape-rules-false-positives — fail-closed false positives from #1163: an object key named `setTimeout` (`{setTimeout:5}`) withdraws the exemption file-wide; a nested plain-value destructure `const {target:{value}} = event` before an await is rejected; `typeof event` after an await is rejected — `NEW S441` (#1163); **LOW**; open
+<!-- @gap id=g-async-escape-rules-false-positives sev=LOW status=open locus=compiler/src/js-async-analysis.ts prov=review:S441-f4f5-r4-review -->

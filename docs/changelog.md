@@ -2,6 +2,25 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S441 — 2026-09-29 (bryan · ASUS)
+
+Spotlight prep: every public surface was audited for old or wrong information, and the audit surfaced a run of real security holes. Most of the session went into closing them, with S239 adversarial review on every code landing.
+
+- **#1141 / #1142 / #1145** — NERDME, kickstarter, external-js, lin, examples docs, package.json and the tutorial made accurate at v0.8.0; every program in them is gated; a snippet drift gate means a doc copy can no longer diverge from its gated source.
+- **#1146** — 59 audit-surfaced defects filed with version-stamped reproducers.
+- **#1147** — bare `fail .Variant` resolves against the declared `!` type (ruling); examples/09 compiles.
+- **#1149** — bootstrap CSS + `<theme>` T3 (dpa-051 §8.4 step 1).
+- **#1150** — E-ERROR-002 handler conformance restored: no handler exemption; failable handler references checked (ruling).
+- **#1152** — stdlib http/cron doc comments closed early and leaked exports as page text; a regression gate compiles every stdlib module.
+- **#1153** — no false W-LINT-007/013 on inline block handlers.
+- **#1155** — SECURITY: example 23's one-time-token guards were bypassable (replay, forged and concurrent tokens all accepted).
+- **#1158** — `@cell = serverFn()` is awaited in place (S440 #12): no stale reads or racing writes; the flagship tasks-app boots correctly.
+- **#1161** — SECURITY: `csrf="auto"` is the default under `auth=` (before: zero CSRF checks); the compose route is gated; the WebSocket upgrade checks `Origin` (cross-site WebSocket hijack closed).
+- **#1162** — SECURITY: static serving is an allowlist. Before, both servers handed out any dist file — the SQLite database, `.scrml-sessions.db`, server source and source maps.
+- **#1163** — SECURITY (S440 F4/F5): an async function cannot escape as a value into a sync slot (accept-all password checks); event control after an await is an error. Four review rounds, ending in a structural rule (scope-resolved scheduler exemption, poisoned event binding).
+- Site: scrml.dev published with the audit fixes.
+- HELD for S442: protected-column egress §14.8.9 (ratified; round 5 owed), declared prose §40.8 (ruled; round-4 WIP salvaged), `| err :>` error binding (ruled).
+
 ## S440 — 2026-09-28/29 (bryan · ASUS)
 
 A ruling-heavy session driven by a JS "stupid behaviour" gauntlet (352 probes, 273 silent leaks) and four dPA deep-dives — ~100 bryan rulings, all in `scrml-support/user-voice-scrml.md` S440. Every code landing went through S239 adversarial review; four needed fix rounds for findings of their own making.

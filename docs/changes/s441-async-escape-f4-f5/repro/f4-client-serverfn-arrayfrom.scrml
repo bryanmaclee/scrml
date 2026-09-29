@@ -1,0 +1,13 @@
+<program>
+<verdict> = "unset"
+server function m(n) { return n > 100 }
+function decide() {
+  const rs = Array.from([1], m)
+  return rs[0] ? "accepted" : "rejected"
+}
+function go() {
+  @verdict = decide()
+}
+<p id="out">${@verdict}</p>
+<button id="go" onclick=go()>go</button>
+</program>

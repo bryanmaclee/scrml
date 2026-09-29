@@ -1,0 +1,16 @@
+<program>
+${
+  import { verifyPassword } from 'scrml:auth'
+}
+<verdict> = "unset"
+server function check(pw, hash) {
+  function matches(h) { return verifyPassword(pw, h) }
+  function drive(f) { return f(hash) }
+  return drive(matches) ? "accepted" : "rejected"
+}
+function go() {
+  @verdict = check("wrong", "not-a-hash")
+}
+<p id="out">${@verdict}</p>
+<button id="go" onclick=go()>go</button>
+</program>

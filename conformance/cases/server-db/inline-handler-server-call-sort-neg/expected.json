@@ -1,0 +1,12 @@
+{
+  "id": "server-db-inline-handler-server-call-sort-neg",
+  "description": "SECURITY (s441, F5). A block event handler calls a server function inside a `.sort` comparator. `.sort` has no awaited combinator (async merge-sort is not offered), so the call cannot be awaited: the comparator would compare Promises. In a function body this fails closed; before s441 a handler body skipped the check and shipped the bare call. It now fails closed with the peer-server-fn code.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2 + §34 E-SERVER-FN-IN-SYNC-CALLBACK: a server call in a position where the compiler cannot insert `await` is a hard, fail-closed error — in an inline handler as in a function body (ruling S440 JS-WAT #11).",
+  "expect": {
+    "codes": ["E-SERVER-FN-IN-SYNC-CALLBACK"],
+    "severity": { "E-SERVER-FN-IN-SYNC-CALLBACK": "error" }
+  }
+}

@@ -1,0 +1,19 @@
+<program>
+${
+  import { verifyPassword } from 'scrml:auth'
+}
+<out> = ""
+server function check(pw, hash) {
+  const ok = verifyPassword(pw, hash)
+  return ok ? "yes" : "no"
+}
+server function ranked(xs) {
+  function verifyPassword(a, b) { return a - b }
+  return xs.sort(verifyPassword).join(",")
+}
+function go() {
+  @out = check("x", "y") + ranked([3, 1, 2])
+}
+<p id="out">${@out}</p>
+<button id="go" onclick=go()>go</button>
+</program>
