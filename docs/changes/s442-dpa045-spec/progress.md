@@ -41,3 +41,12 @@ Method: `splitBlocks` (the shipping block splitter) over every `.scrml` in the s
 Cross-check: raw grep finds 347 `\` chars on 161 lines in 38 files; every one is in logic — ~99 lines JS string escapes (`\n` in `emit(...)` strings, `"\""`, `"\\"`), ~41 lines regex literals (`/\d/`, `/\+/g`, the `pattern(/…\s…/)` state-decl attribute in examples/30), ~22 lines comments. None is in a markup free-text body, including markup nested in logic.
 
 Code-default escape catalog (§4.18.3) use: display-text literals seen = 40 (37 `:`-shorthand, 3 block-form). `\"` = 0, `\\` = 0, `\${` = 0. Zero uses of the catalog anywhere in the corpus. (Side finding: the block splitter itself splits `"lit \${5}"` into text `"lit \` + a live logic block `${5}` — a third locus where `\${` is not honoured.)
+
+## Extra measurement — the closed exit set vs. blocks the BS opens in free-text bodies today
+
+Blocks (other than text / markup / `${}` logic) whose parent is a plain-markup free-text body, same corpus, same splitter:
+`//` comment 459 (36 files) · `#{}` css 87 (67 files) · `<!-- -->` 107 (35 files; inside the `<!` exit class) · `^{}` meta 29 (26 files) · `!{}` error-effect 5 (5 files).
+Whitespace-after-`<` openers (§4.3 deprecated form) inside a free-text body: 1 (conformance/cases/control-flow/ctrl-004-else-on-state-opener-pos); 101 elsewhere.
+`<p>5 < 7 is true</p>` today: E-CTX-001 (`'</program>' tries to close '<7>'`) + E-CTX-003 cascade. `x <3`, `a <= b`, stray `\` in `<p>`: compile, emitted verbatim.
+
+- 2026-09-29 STEP 2 (D) SPEC amendment written: §4.18 banner, §4.18.1 / .1a / .1b, §4.18.3 (`\"` deleted; B(2) OPEN), §4.18.4 note, §4.18.5 (revised), §4.18.7 lint wording, §4.18.9, §4.17 orthogonality note. SPEC-INDEX regenerated + §4 summary; facts --write (SPEC lines 40,761 → 40,932); conformance 1104/1111 + 7 xfail (unchanged by a SPEC-only edit).
