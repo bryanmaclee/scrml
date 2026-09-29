@@ -1,0 +1,8 @@
+<program>
+  #{
+      @import url("theme.css");
+      p { margin-top: 8px; }
+  }
+  <span class="imp">i</span>
+  <p id="p">p</p>
+</program>

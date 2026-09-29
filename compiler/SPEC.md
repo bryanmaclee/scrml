@@ -7242,13 +7242,20 @@ Three CSS context forms are supported. All three support scrml's CSS variable sy
 css-inline-context ::= '#{' css-content '}'
 ```
 
-Valid inside markup and state contexts, and at program scope (top-level in the program body, not nested inside any element). Applies styles to the document globally when used at program scope, or inline at the element level when used inside a markup or state context.
+Valid inside markup and state contexts, and at program scope (top-level in the program body, not nested inside any element). Applies styles to the document globally when used at program scope or inside a plain markup element, and scoped to the component when used inside a component (state type constructor) — see DQ-7 (the element-level reading is ruling:user-voice-scrml.md S440, all recs #2, item 4).
 
 **Normative statements (DQ-6):**
 
 - A `#{}` block MAY appear at the top level of a file (outside any markup element). Top-level `#{}` is valid and SHALL compile.
 - Top-level `#{}` compiles to a stylesheet that is included in the page's global styles, applied to the entire document.
-- `#{}` inside a markup element applies styles at the element level (inline or scoped per compiler settings).
+- `#{}` inside a markup element that is not inside a component (state type constructor) is **program-global**: its rules compile exactly as a program-level `#{}` — global CSS with no `@scope` wrapper, in the `global` cascade layer (§65.5, §65.8). A plain element creates no scope; component scoping is DQ-7 below. This rule places **selector rules**.
+  > **Provenance:** ruling:user-voice-scrml.md S440 (all recs #2, item 4). Replaces "applies styles at the element level (inline or scoped per compiler settings)" — no such compiler setting existed.
+  >
+  > ⚑ **OPEN — flat-declaration blocks outside the DQ-7 case are UNRULED.** A flat-declaration `#{}` (bare `property: value;` pairs, no selector) is ruled only by DQ-7 below (inside a constructor scope → inline `style=` on the containing element). Ruling #4 (S440) placed selector rules only; it did not rule these two cases, and neither has a normative reading yet:
+  > 1. **A flat block in a plain markup element** (not inside a component) — impl#1 today emits the bare declarations inside `@layer global { … }` with no selector: invalid CSS the browser discards, so the block has no effect, and no diagnostic.
+  > 2. **A flat block in an element nested inside a component** (not the constructor root) — impl#1 today drops it silently: no `style=`, no CSS, no diagnostic.
+  >
+  > The bootstrap's stylesheet shim refuses both (not-yet) rather than guess. Tracked as `g-impl1-flat-css-block-on-plain-element-emits-dead-css` and `g-impl1-flat-css-block-nested-in-component-dropped` (docs/known-gaps.md).
 - Using `#{}` at top level SHALL NOT be a compile error or warning.
 
 **Normative statements (DQ-7 — CSS Scoping):**
@@ -9787,7 +9794,7 @@ applyMushroom(.Small)                   // bare variant — parameter type fixes
 **Normative statements:**
 
 - A bare variant reference is the form `.VariantName` with no preceding type qualifier.
-- A bare variant reference SHALL be resolved by the compiler when the type at the position can be inferred from one of: a type annotation on the LHS (`<x>: T = .V`), a previously-declared cell or local with a known type (`@cell = .V` where `@cell: T`), a function parameter type (`fn(.V)` where the parameter is typed `T`), a function return type (`return .V` where the return is typed `T`), a match on-expression type (`<match for=T> | .V => ...`), an engine `for=T` qualifier (`<engine for=T initial=.V>`), or any other position where the type is fixed by the surrounding declaration.
+- A bare variant reference SHALL be resolved by the compiler when the type at the position can be inferred from one of: a type annotation on the LHS (`<x>: T = .V`), a previously-declared cell or local with a known type (`@cell = .V` where `@cell: T`), a function parameter type (`fn(.V)` where the parameter is typed `T`), a function return type (`return .V` where the return is typed `T`), a `fail` target (`fail .V` where the enclosing function is declared `! T`, §19.3.3), a match on-expression type (`<match for=T> | .V => ...`), an engine `for=T` qualifier (`<engine for=T initial=.V>`), or any other position where the type is fixed by the surrounding declaration.
 - An enum-payload-variant CONSTRUCTOR argument is such a position. In `<x>: Mode = .OnePlayer(.Easy)` (where `Mode:enum = { OnePlayer(difficulty: Difficulty), ... }`), the argument `.Easy` resolves against the `OnePlayer` payload-field type (`Difficulty`) — NOT the outer enum `Mode`. The constructor callee may be bare (`.OnePlayer(...)`, resolved against the surrounding-declaration enum) or qualified (`Mode.OnePlayer(...)` / `Mode::OnePlayer(...)`, resolved directly). A wrong argument variant fails with `E-TYPE-063` naming the PAYLOAD enum (`Difficulty`), not the constructor's enum. (Added ss16 C5 — §14.10 position-3 for variant constructors.)
 - A bare variant reference SHALL fail with `E-VARIANT-AMBIGUOUS` when the position's type is a union or otherwise ambiguous (e.g., `let x = .Small` with no annotation; the compiler cannot pick which enum has a `.Small` variant).
 - A bare variant reference IS NOT supported in expression positions where no type context exists (top-level expressions, `let`/`const` without annotation in untyped contexts).
@@ -14733,8 +14740,10 @@ type PaymentError:enum = {
 #### 19.3.1 Syntax
 
 ```
-fail-stmt ::= 'fail' enum-type ('.' | '::') variant-name ('(' arg-list ')')?
+fail-stmt ::= 'fail' enum-type? ('.' | '::') variant-name ('(' arg-list ')')?
 ```
+
+The `enum-type` MAY be omitted (the bare form, §19.3.3); the variant then resolves against the function's declared error type.
 
 **Syntax:**
 
@@ -14742,6 +14751,7 @@ fail-stmt ::= 'fail' enum-type ('.' | '::') variant-name ('(' arg-list ')')?
 fail PaymentError::InvalidAmount("Amount must be positive")
 fail PaymentError::CustomerNotFound(customerId)
 fail PaymentError::ExpiredCard
+fail .ExpiredCard                    // bare form — resolves against the declared `! PaymentError`
 ```
 
 #### 19.3.2 Semantics
@@ -14754,6 +14764,12 @@ fail PaymentError::ExpiredCard
 
 - `fail` SHALL be valid only inside a function body declared with the `!` modifier. Using `fail` in a function without `!` SHALL be a compile error: **E-ERROR-001** -- `'fail' used in function '{name}' which is not declared as failable. Add '!' to the function signature: 'function {name}(...)! -> {ErrorType}'.`
 - `fail` SHALL produce a value of the error enum type declared in the function's `!` signature. The variant specified in the `fail` statement SHALL be a valid variant of that error enum type. A variant that does not belong to the declared error type SHALL be a compile error: **E-ERROR-009** -- `'fail' names variant '{Variant}' which is not a valid variant of the declared error type '{ErrorType}' for function '{name}'. Valid variants: {list}.` This covers a variant undeclared by the declared enum, a `fail` naming a foreign enum entirely, and a `fail` target that is not an enum variant. For a bare-`!` function the declared error type is the built-in `Error` enum (§19.4.2), whose sole valid variant is `Generic`.
+- **Bare form.** A `fail` whose target omits the enum type — `fail .Variant` or `fail .Variant(args)` (also spelled `fail ::Variant`) — SHALL resolve the bare variant against the error type declared in the enclosing function's `!` signature: this is §14.10 bare-variant inference applied to the `fail` target, the declared error type being the position type. The resolved `fail .V` SHALL be equivalent in every respect to the qualified `fail ErrorType.V` — the same validity checks (E-ERROR-009 for a name that is not a variant of the declared type, E-TYPE-082 for a valid variant with the wrong payload arity) and the same produced error value. For a bare-`!` function the resolution target is the built-in `Error` enum, so `fail .Generic(msg)` is `fail Error.Generic(msg)`. An error enum imported from another scrml file resolves exactly as a local one.
+  - *Declared type not an enum.* A declared error type that is not an enum — undeclared, a non-enum type, or a type alias — is governed by §19.4.4.1 (**E-ERROR-011**, reserved). Until E-ERROR-011 has an emitter, impl#1 reports a bare `fail .V` against such a type as **E-ERROR-009**, because the bare variant has no variant set to resolve against. This is a carried interim, and E-ERROR-011 subsumes it when that code ships. The qualified `fail T.V` against the same type is not yet diagnosed (gap `g-qualified-fail-against-non-enum-error-type-undiagnosed`).
+  - *Type alias.* A bare variant does not resolve through a type alias. `type A = E` is not a `:enum` declaration (§19.4.4.1), so in a function declared `! A`, `fail .V` falls under the preceding sub-bullet. Write the enum name in the signature (`! E`). Whether an alias of an enum is a legal `!` error type at all is **OPEN**: the SPEC has no normative alias construct beyond the `type A = Type` annotation position (§14.1.2).
+  - *Unverifiable import.* An error type imported from a module whose declaration the compiler cannot see is unverifiable, not invalid. Two cases qualify: a non-scrml (host) module, or single-file mode where the import is not loaded. A bare variant against such a type is accepted exactly as the qualified form is: it resolves to the declared name and is not checked. An imported type whose declaration *is* visible and is not an enum is not exempt.
+
+  > **Provenance:** ruling:user-voice-scrml.md S441 "fail shorthand yes" · supersedes: unrecoverable:the prior implicit rejection (no ruling found — the §19.3.1 grammar required `enum-type` and the E-ERROR-009 check read a bare target as "not a variant"; recorded as gap `g-fail-variant-shorthand-rejected-by-ts-context`, where the reject also fired only when the declared enum resolved).
 - When the `fail` names a VALID variant of the declared error type but supplies the wrong number of payload arguments (too few, too many, or any payload on a unit variant), that is a distinct error class from E-ERROR-009: it SHALL be a compile error **E-TYPE-082** (enum-variant construction payload arity mismatch, §14.4 / §18.7). Because `fail MyError.Timeout("oops")` is a variant CONSTRUCTION, the arity check is the same one applied to non-`fail` construction (`let e = MyError.Timeout("oops")`, `return MyError.Timeout("oops")`) — it lives at the variant-constructor site, not the `fail` handler alone. E-ERROR-009 (invalid variant NAME) and E-TYPE-082 (valid variant, wrong arity) never double-fire on the same `fail`.
 - `fail` SHALL cause the enclosing function to return immediately with the error variant value. Statements after `fail` in the same block are unreachable. The compiler MAY emit a warning for unreachable code after `fail`.
 - `fail` SHALL be valid inside any control flow construct (if/else, for, match) within a `!` function body. The `fail` returns from the function, not from the control flow construct.
@@ -15755,7 +15771,7 @@ The following error codes are introduced by this section. They SHALL be added to
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`; ALSO (S440 #19) a `<formFor>` whose `onsubmit=` error has no enclosing `<errorBoundary>` (§41.14.3; Nominal for that case) | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
-| E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
+| E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
 | E-RENDER-NO-OF | §19.15.3 | `<render>` missing the required `of=` attribute | Error |
 | E-RENDER-NO-CLAUSE | §19.15.3 | `<render of=X>` — a reachable variant of X's enum has no `renders` clause (reuses the §19.6.6 E-ERROR-005 exhaustiveness fence at the render-expression fire site) | Error |
@@ -20694,7 +20710,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-ERROR-005 | §19.6.3, §41.14.3 | Error variant in markup without `renders` clause or boundary `fallback`. ALSO (S440 ruling #19, §41.14.3): a `<formFor>` whose `onsubmit=` handler's error has no enclosing `<errorBoundary>` to route to. **Provenance:** ruling:user-voice-scrml.md S440 (the S440 22-item queue, item 19). **Named; impl pending — Nominal / not yet emitted for the `formFor` case** (measured S440: compiles clean); impl#1 carries it (§34.0). | Error |
 | E-ERROR-006 | §19.2.3 | `renders` clause references undefined variable | Error |
 | E-ERROR-007 | §19.10.4 | Nested `transaction` blocks | Error |
-| E-ERROR-009 | §19.3.3 | `fail` variant not a valid variant of the declared error enum | Error |
+| E-ERROR-009 | §19.3.3 | `fail` variant (qualified, or bare `fail .V` resolved against the declared `!` type) not a valid variant of the declared error enum (emitted at `compiler/src/type-system.ts:10629`, `:10637`, `:10644` for a qualified/bare target that is not a variant, and `:10686` for a bare `fail .V` whose declared type is not an enum.) | Error |
 | E-ERROR-010 | §19.5.4 | `?`-propagation: a called function's error variants are incompatible with the enclosing function's declared error type (dedicated code; formerly overloaded on E-TYPE-001) | Error |
 | E-DEFER-CONTROL-FLOW | §19.16.3 | A deferred body (`defer <stmt>`) contains `return`, `fail`, a `?` propagation, or a `break`/`continue` whose target lies outside the deferred body. A deferred body runs while its block is already exiting, so it cannot redirect control. A loop inside the deferred body, and a function nested in it, are their own targets/scopes. **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
 | E-DEFER-NESTED | §19.16.3 | A deferred body contains a `defer` statement (outside a nested function). **Provenance:** `ruling:user-voice-S430-P3`. (S430; emitted at `compiler/src/validators/lint-defer.ts`.) | Error |
@@ -40215,6 +40231,8 @@ the #15 lean: such a copy does not fetch on its own mount and is not server-auth
 4. **One namespace.** A token IS a declaration, so a token and a same-named cell cannot coexist silently (the
    token/cell collision the DD measured, D7, is gone by construction), and a token is readable from logic as
    `@brand` like any cell. A CSS-position reference `@brand` resolves as §65.3.2 specifies (→ `var(--brand)`).
+   A token and a same-named cell is `E-THEME-TOKEN-CELL-COLLISION` (§66.20; ruling:user-voice-scrml.md S440,
+   all recs #2, item 5).
 5. **The mode cell is an ordinary `let` declaration** — `<let mode:Mode=.Light/>` (the ruling records the PA's
    worked-example erratum: `<mode:Mode=.Light let/>` is wrong; `let` is a prefix).
 6. The `name = value;` body grammar and `.Variant { }` blocks go through the §63 lifecycle (§66.21).
@@ -40548,6 +40566,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
 
 **Cross-reference (not a §66 code):** a field overridden twice in one spread-override shape
 (`{ ...@g, phase: .Gone, phase: .Live }`, §66.11.3 item 1) is `E-STRUCT-DUPLICATE-KEY` — a language-wide

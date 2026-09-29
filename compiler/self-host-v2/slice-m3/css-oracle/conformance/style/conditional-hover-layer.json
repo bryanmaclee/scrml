@@ -1,0 +1,25 @@
+{
+  "spec": "§65.2.2, §65.2.5",
+  "rationale": "§65.2.2: `.btn:hover` is a deterministic layer over the base `.btn` — the base (`red`) holds until hover, the `:hover` rule (`blue`) wins while hovered.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".btn",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        }
+      ]
+    },
+    {
+      "hover": ".btn",
+      "expect": [
+        {
+          "sel": ".btn",
+          "prop": "color",
+          "value": "rgb(0, 0, 255)"
+        }
+      ]
+    }
+  ]
+}
