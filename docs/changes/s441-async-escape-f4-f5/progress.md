@@ -4,3 +4,4 @@
 - 2026-09-29T07:52:15-06:00 F5 (handlers+mount via js-async-analysis), F4 (E-ASYNC-FN-ESCAPES-AS-VALUE + SPEC), FP1, FP2 implemented; core suite 0 fail; new unit file 62 pass (37 red on base)
 - 2026-09-29T09:10:14-06:00 blast radius: each-row + lift handlers colored (same root), top-level F4 escapes, facts computed once; suite 32406 pass / 1 flaky (standalone-tool-target Bun.serve, env — identical emitted output vs base)
 - 2026-09-29T09:50:35-06:00 snippet-gate regression (match IIFE token await scan) fixed via own-level await parse; CI gates run: facts, spec-index, s34-census, delta-lint, snippet-gate, corpus-compile-floor, browser-baseline, types-gate, e2e/lsp/commands — all PASS
+- 2026-09-29T10:21:34-06:00 RESUMED after rate-limit kill: Phase 3 grep 0/0, corpus 5 newly failing (4 new neg cases + flogence dispatch-tool.scrml), conformance 1053/1060 (+6 new cases, 7 xfail)
