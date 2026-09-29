@@ -1,0 +1,20 @@
+${
+    type LoadError:enum = {
+        Boom(msg: string)
+    }
+    <result> : string = "init"
+    <after> : string = "not-run"
+    server function risky(n: number)! LoadError {
+        if (n < 0) { fail LoadError.Boom("neg") }
+        return "ok"
+    }
+    function go() {
+        @result = risky(-1) !{
+            | .Boom(m) :> "recovered: " + m
+        }
+        @after = "saw " + @result
+    }
+}
+<button id="go" onclick=go()>Go</>
+<p id="out">${@result}</p>
+<p id="after">${@after}</p>

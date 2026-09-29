@@ -1,0 +1,20 @@
+<program db="postgres://u:p@localhost:5432/app">
+${
+    <a> : number = 0
+    <b> : number = 0
+    server function rd1() {
+        const r = ?{`WITH x AS (INSERT INTO t (v) VALUES (1) RETURNING v) SELECT v FROM x`}.get()
+        return r
+    }
+    server function rd2() {
+        const r = ?{`SELECT count(*) AS v FROM t`}.get()
+        return r.v
+    }
+    function go() {
+        @a = rd1()
+        @b = rd2()
+    }
+}
+<button id="b" onclick=go()>b</>
+<p id="s">${@a} ${@b}</>
+</program>

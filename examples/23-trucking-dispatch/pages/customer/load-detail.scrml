@@ -125,8 +125,9 @@
 
         // M6: lin token #1 consumption — customer signs the rate confirmation.
         // The lin_tokens row's consumed_at IS NULL → succeeds + advances load
-        // to dispatched. Concurrent / replayed clicks UPDATE rows with
-        // consumed_at NULL → 0 affected → returns "alreadyConsumed".
+        // to dispatched. Concurrent / replayed clicks find no row with
+        // consumed_at NULL → RETURNING yields no row → returns the
+        // "already used or invalid" error.
         // Per §35.2.1, the `lin token` parameter is consumed exactly once
         // in the body — passed to the SQL UPDATE through ${} interpolation
         // (counts as a consume per §35.3 rule 1). The DB-side single-use
@@ -146,8 +147,11 @@
             if (load.status != "Booked") return { error: "Load is not awaiting acceptance." }
 
             // The lin_tokens UPDATE-with-WHERE-NULL is the durable single-use
-            // guard. If consumed_at is already non-null, no rows update and
-            // changes = 0 — the token was already consumed (replay or race).
+            // guard. If consumed_at is already non-null (or the token was never
+            // issued), no row updates and RETURNING yields nothing, so `.get()`
+            // is `not` — the token was already consumed (replay or race) or is
+            // invalid. `.run()` returns void (§8.5.1): the write outcome comes
+            // from RETURNING, never from a field read off `.run()`.
             //
             // Per F-LIN-001 (M6): SQL ?{} interpolation does NOT count as
             // a `lin` consumption event the way template-literal ${ticket}
@@ -155,15 +159,16 @@
             // template literal first to satisfy §35.3 rule 1, then use
             // the copy in the SQL.
             const consumeMarker = `consume:${token}`
-            const result = ?{`
+            const consumed = ?{`
                 UPDATE lin_tokens
                 SET consumed_at = CURRENT_TIMESTAMP, consumed_by = ${user.id}
                 WHERE token = ${consumeMarker.substring(8)}
                   AND kind = 'acceptance'
                   AND load_id = ${loadId}
                   AND consumed_at IS NULL
-            `}.run()
-            if (result.changes == 0) {
+                RETURNING token
+            `}.get()
+            if (consumed is not) {
                 return { error: "Acceptance token already used or invalid." }
             }
 
