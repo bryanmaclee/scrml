@@ -1,0 +1,18 @@
+// NERDME.md "State and reactivity" — gated by scripts/snippet-gate.js.
+// If this stops compiling, the NERDME section citing it is making a false claim.
+<program>
+<count> = 0
+<userName req length(>=2)> = <input/>
+const <doubled> = @count * 2
+<formRes>
+    <name> = ""
+    <email> = ""
+</>
+<agree> = false
+<result> = not
+<button onclick={ @count = @count + 1; @formRes.email = "alice" }>+</button>
+<userName/>
+<input type="checkbox" bind:checked=@agree/>
+<p>${@count} ${@doubled} ${@formRes.name} ${@userName}</p>
+<p if=(@result is not)>none yet</p>
+</>

@@ -1,0 +1,17 @@
+// NERDME.md "Type-derived apps" — gated by scripts/snippet-gate.js.
+<program db="contacts.db">
+import { formFor, schemaFor, tableFor } from "scrml:data"
+
+type Contact:struct = {
+    name:  string(.length > 0)
+    email: string(email)
+    phone: string(phone)?
+}
+
+<contacts>: Contact[] = []
+function save(c) { @contacts = [...@contacts, c] }
+
+<formFor for=Contact onsubmit=save/>
+<schema>${ schemaFor(Contact) }</schema>
+<tableFor for=Contact rows=@contacts/>
+</>

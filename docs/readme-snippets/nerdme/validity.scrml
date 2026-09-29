@@ -1,0 +1,21 @@
+// NERDME.md "Validity surface" — gated by scripts/snippet-gate.js.
+<program>
+<signup>
+    <name req length(>=2)>             = <input type="text"/>
+    <password req length(>=8)>         = <input type="password"/>
+    <confirm req eq(@signup.password)> = <input type="password"/>
+</>
+
+function submit() { }
+
+<form onsubmit=submit()>
+    <signup><name/></>
+    <errors of=@signup.name/>
+    <signup><password/></>
+    <errors of=@signup.password/>
+    <signup><confirm/></>
+    <errors of=@signup.confirm/>
+    <button type="submit" disabled=!@signup.isValid>Create account</button>
+</form>
+<p if=@signup.submitted>Account created.</p>
+</program>
