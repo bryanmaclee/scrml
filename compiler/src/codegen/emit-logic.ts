@@ -846,8 +846,13 @@ function emitGuardedArmBinding(binding: string, variantName: string, resultVar: 
 function emitCatchAllErrorValueBinding(binding: string, resultVar: string): string[] | null {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
   if (names.length !== 1 || names[0] === "_") return null;
+  // A unit variant carries no payload. Most producers emit `data: null`; some
+  // emit an empty object (parseVariant's `ParseError.MissingDiscriminator` —
+  // `data: {}`). Both are "no payload" and normalize to the unit value; a
+  // payload variant always has at least one field, so this never hides one.
+  const d = `${resultVar}.data`;
   return [
-    `    const ${names[0]} = ${resultVar}.data == null ? ${resultVar}.variant : { variant: ${resultVar}.variant, data: ${resultVar}.data };`,
+    `    const ${names[0]} = (${d} == null || (typeof ${d} === "object" && Object.keys(${d}).length === 0)) ? ${resultVar}.variant : { variant: ${resultVar}.variant, data: ${d} };`,
   ];
 }
 

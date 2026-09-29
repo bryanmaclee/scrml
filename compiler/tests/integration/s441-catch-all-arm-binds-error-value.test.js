@@ -169,7 +169,7 @@ describe("s441 D1 — `| err :>` binds the error value (client)", () => {
   test("emits the normalized value, not the bare payload", () => {
     const c = compileSource("d1", CLIENT_SRC);
     expect(c.errors).toEqual([]);
-    expect(c.clientJs).toMatch(/const err = (_scrml__scrml_result_\d+)\.data == null \? \1\.variant : \{ variant: \1\.variant, data: \1\.data \};/);
+    expect(c.clientJs).toMatch(/const err = \((_scrml__scrml_result_\d+)\.data == null \|\| \(typeof \1\.data === "object" && Object\.keys\(\1\.data\)\.length === 0\)\) \? \1\.variant : \{ variant: \1\.variant, data: \1\.data \};/);
     expect(c.clientJs).not.toMatch(/const err = _scrml__scrml_result_\d+\.data;/);
   });
 
@@ -275,7 +275,7 @@ describe("s441 D1 — `| err :>` binds the error value (server-side `!{}`)", () 
   test("the server bundle emits the same normalized binding", () => {
     const c = compileSource("d1s", SERVER_SRC);
     expect(c.errors).toEqual([]);
-    expect(c.serverJs).toMatch(/const err = (\S+)\.data == null \? \1\.variant : \{ variant: \1\.variant, data: \1\.data \};/);
+    expect(c.serverJs).toMatch(/const err = \(([\w$]+)\.data == null \|\| \(typeof \1\.data === "object" && Object\.keys\(\1\.data\)\.length === 0\)\) \? \1\.variant : \{ variant: \1\.variant, data: \1\.data \};/);
   });
 
   test("EXECUTES: server-side catch-all sees unit and payload error values", async () => {

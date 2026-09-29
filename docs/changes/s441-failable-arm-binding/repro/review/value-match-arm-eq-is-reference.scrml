@@ -1,0 +1,24 @@
+// repro s441 review — `==` inside a VALUE-RETURN `match` arm body lowers to `===`
+// (reference), so a payload comparison there is false even when the values are
+// structurally equal. The same `==` in a plain `fn` body lowers to the §45
+// structural comparison.
+<program>
+${
+  type E:enum = { Unit, One(msg: string) }
+  <inArm> = ""
+  <inFn> = ""
+  fn viaMatch(e: E) -> string {
+    return match e {
+      .Unit :> "unit"
+      .One(msg) :> "" + (e == E.One("m"))
+    }
+  }
+  fn viaFn(e: E) -> string { return "" + (e == E.One("m")) }
+  function go() {
+    @inArm = viaMatch(E.One("m"))
+    @inFn = viaFn(E.One("m"))
+  }
+}
+<button id="go" onclick=go()>g</button>
+<p>${@inArm} ${@inFn}</p>
+</program>

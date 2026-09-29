@@ -1,0 +1,23 @@
+// repro s441 review (p9b) — a `!{}` arm written `| One :>` (the leading `.` forgotten)
+// is NOT an error: the parser reads `One` as an identifier-binding catch-all
+// (§19.4.3.1), binds a LOCAL named `One` to the error value, and the arm fires for
+// EVERY remaining variant. Here `check()` fails `.Two`, and the "one" arm runs.
+// (Written before another arm instead of last, the same typo is the catch-all-not-last
+// crash — see catchall-not-last.scrml.)
+<program>
+${
+  type E:enum = { Unit, One(msg: string), Two(n: number) }
+  <r> = ""
+  function check() ! E {
+    fail E.Two(2)
+  }
+  function go() {
+    check() !{
+      | .Unit :> { @r = "unit-arm"; return }
+      | One :> { @r = "one-arm"; return }
+    }
+  }
+}
+<button id="go" onclick=go()>g</button>
+<p>${@r}</p>
+</program>

@@ -14838,12 +14838,28 @@ Failing to handle the result of a `!` function call in any of these ways SHALL b
 ```
 handler         ::= expression '!{' handler-arm+ '}'
 handler-arm     ::= '|'? handler-pattern (':>' | '=>' | '->') arm-body
-handler-pattern ::= variant-pattern            // §18.2 — `.V`, `::V`, `.V(a, b)`
-                  | '_'                        // the wildcard; binds nothing
-                  | Identifier                 // the identifier-binding arm (catch-all)
+handler-pattern ::= variant-pattern                      // §18.2 — `.V`, `::V`, `.V(a, b)`
+                  | ('.' | '::') VariantName Identifier  // `| ::Network msg :>` — space-form payload binding
+                  | '_' Identifier?                      // the wildcard; with a name, binds the PAYLOAD
+                  | Identifier                           // the identifier-binding arm; binds the ERROR VALUE
 ```
 
 `variant-pattern`, `arm-body` and the separators are the §18.2 productions.
+
+What each form binds:
+
+| arm | matches | the name is bound to |
+|---|---|---|
+| `\| .V(a, b) :>` / `\| ::V(a, b) :>` | variant `V` | each name to the declared payload field at its position |
+| `\| ::V msg :>` / `\| .V msg :>` | variant `V` | the variant's FIRST declared payload field (for a single-field variant, the field value) |
+| `\| _ :>` | every remaining variant | nothing |
+| `\| _ e :>` | every remaining variant | the variant's **payload** — the field-keyed payload object, or no value for a unit variant. NOT the error value |
+| `\| e :>` | every remaining variant | the **error value** (the bullets below) |
+
+`| _ e :>` and `| e :>` are both catch-alls and differ ONLY in what the name holds: the explicit
+wildcard binds the payload, the bare identifier binds the whole error value. Code that reads a
+payload field directly off a catch-all (`| _ e :> log(e.message)`, the transport-error shape of
+§19.9.5) uses the wildcard form.
 
 - An **identifier-binding arm** `| err :> body` SHALL match every error variant the handled call can
   produce, exactly as `_` does. It satisfies handler exhaustiveness for the variants not named by an
@@ -14870,6 +14886,18 @@ function handleSubmit() {
 ```
 
 > **Provenance:** ruling:user-voice-scrml.md S441 "your recs on the rest" (| err :> binds the error value)
+
+> ⚑ **Carried impl#1 gap — `==` written inside an arm body.** impl#1 lowers an `!{}` arm body from
+> source text rather than from a parsed tree (gap
+> `g-bang-brace-arm-bodies-have-no-tree-form`), so an
+> `==` written directly in the arm body is emitted as the host's reference `===`, not the §45
+> structural comparison. Consequence for this section: `| err :> { @ok = err == E.V(x) }` compares a
+> payload variant by reference and is always false. The same comparison through a function —
+> `fn isV(e: E) -> bool { return e == E.V(x) }` called from the arm — is structural and correct, and
+> a unit-variant comparison is correct either way. The bullets above are the normative behaviour;
+> this is an implementation gap, not a SPEC exception. Pinned by
+> `compiler/tests/integration/s441-errarm-review-round.test.js` (a known-failing case plus a sibling
+> asserting today's behaviour).
 
 **Event-handler bodies — impl#1's handler exemption follows the call, not the statement count (S439 ruling #14).** The SPEC has NO handler exemption: the E-ERROR-002 sentence above and §19.4.4 ("An unhandled `!` function call SHALL be a compile error") are unconditional. impl#1 alone exempts some handler bodies. The ruling: whatever answer applies to an unhandled `!` call in an event-handler body (§5.2.3) SHALL follow the unhandled failable call, NOT the number of statements in the handler — a handler whose whole body is `risky()` and a handler whose body is `risky(); @r = 1` get the same answer. ⚑ impl#1 today (measured S437) splits on the count: `onclick={ risky(); @r = 1 }` is E-ERROR-002, while `onclick=risky()`, `onclick={ risky() }` and a multi-line `onclick={ risky() }` compile at exit 0. That is the split the ruling rejects.
 

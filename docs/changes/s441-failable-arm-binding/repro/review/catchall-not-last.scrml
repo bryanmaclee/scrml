@@ -1,0 +1,16 @@
+<program>
+${
+  type E:enum = { Unit, One(msg: string) }
+  <r> = ""
+  function check() ! E {
+    fail E.One("m")
+  }
+  function go() {
+    check() !{
+      | _ :> { @r = "wild"; return }
+      | .One(m) :> { @r = "one-arm:" + m; return }
+    }
+  }
+}
+<button id="go" onclick=go()>g</button>
+</program>

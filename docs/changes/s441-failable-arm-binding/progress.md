@@ -9,3 +9,7 @@
 - D1 RULED (user-voice-scrml.md S441, verified): `| err :>` binds the error value. Implemented: ast-builder parseErrorTokens flags `identifierArm`; emit-logic binds `R.data == null ? R.variant : { variant, data }`; native parse-error-body.js (+ .scrml mirror) recognizes the arm. `| _ e :>` (explicit wildcard + name) left binding the payload (flogence reads `e.message` through it) — surfaced.
 - SPEC: §18.2 note + new §19.4.3.1 (grammar + normative bullets + provenance).
 - corpus diff (base2 = post-merge pre-D1): examples/09, 16, 29 + samples/login.scrml (pre-existing compile failure).
+- REVIEW ROUND (PA review of af62bce5a): merged origin/main (6ea34b5c6; fail-shorthand SPEC/type-system/test conflicts → main's version).
+  F1/F3/F5 fixed at one root (imported enum decls in buildVariantFieldsRegistry, both passes). F4 fixed (data:{} unit normalize).
+  F2 → carried-gap note in SPEC §19.4.3.1 + witness on g-bang-brace-arm-bodies-have-no-tree-form + test.failing/sibling.
+  F7 SPEC table of arm forms. F6 filed. F8 09 comment + ledger line refreshed. 8 gaps filed under §S441.

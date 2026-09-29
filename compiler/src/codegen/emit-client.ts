@@ -4147,13 +4147,38 @@ export function generateClientJs(ctx: CompileContext): string {
 // (the type system may not attach .variants back onto the AST node).
 // ---------------------------------------------------------------------------
 
+// s441 F1/F3 — per-compile map: importing file (posix path) → the enum
+// type-decls it imports from other `.scrml` files. Set once per compile by
+// codegen/index.ts:runCG (collectImportedEnumDeclsByFile) and read by
+// buildVariantFieldsRegistry on BOTH the client and the server pass, so an
+// imported enum's payload field names are known where it is used — the `fail`
+// emitter keys its payload, and the `!{}` / `match` readers project it, the
+// same way as in the declaring file. `null` = no cross-file info (harnesses).
+let _importedEnumDeclsByFile: Map<string, TypeDecl[]> | null = null;
+
+export function setImportedEnumDeclsByFile(m: Map<string, TypeDecl[]> | null): void {
+  _importedEnumDeclsByFile = m;
+}
+
+function _importedEnumDeclsFor(fileAST: any): TypeDecl[] {
+  if (!_importedEnumDeclsByFile) return [];
+  const fp: string | undefined = fileAST?.filePath ?? fileAST?.ast?.filePath;
+  if (!fp) return [];
+  return _importedEnumDeclsByFile.get(toPosix(fp)) ?? [];
+}
+
 export function buildVariantFieldsRegistry(fileAST: any): {
   fields: Map<string, string[]>;
   collisions: Set<string>;
 } {
   const fields = new Map<string, string[]>();
   const collisions = new Set<string>();
-  const typeDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
+  const ownDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
+  // Own decls first, then imported enums. A variant name declared by two enums
+  // (own + imported, or two imports) is a collision exactly as two local enums
+  // are: the readers fall back to their conservative no-schema path.
+  const importedDecls = _importedEnumDeclsFor(fileAST).filter((d) => !ownDecls.includes(d));
+  const typeDecls: TypeDecl[] = [...ownDecls, ...importedDecls];
 
   for (const decl of typeDecls) {
     if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;

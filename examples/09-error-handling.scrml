@@ -18,8 +18,8 @@
 // outbox table via a `?{}` INSERT (the canonical "write to outbox, a worker
 // delivers the email" pattern). Because the body touches a `?{}` SQL block,
 // §12 body-content inference places submit on the SERVER — no `server`
-// keyword required (Insight 26). A zero-row insert surfaces SubmitFailed,
-// so the error path is real, not hypothetical.
+// keyword required (Insight 26). An INSERT that writes no row surfaces
+// SubmitFailed (see submit() for exactly when that happens).
 //
 // NOTE — this is NOT the `<errorBoundary>` idiom. The variant-`renders`
 // clause + `<errorBoundary fallback=...>` pair (§19.6) is a SEPARATE,
@@ -76,12 +76,15 @@
     // submit() queues the message server-side and is failable. The `?{}`
     // INSERT escalates the function to the server (§12 Trigger 1) — the
     // database write never runs on the client. A real app's outbox worker
-    // would pick up the queued row and deliver the email; here a zero-row
-    // insert (the DB rejected the write) surfaces SubmitFailed.
+    // would pick up the queued row and deliver the email.
     //
     // `.run()` returns nothing (§8.5.1), so the write outcome is read back with
-    // a `RETURNING` clause: the INSERT hands back the row it wrote, or no row
-    // at all when the database dropped the write.
+    // a `RETURNING` clause: the INSERT hands back the row it wrote. It hands
+    // back NO row only when the database silently drops the write — with this
+    // schema, that means a `BEFORE INSERT` trigger doing `RAISE(IGNORE)` (an
+    // outbox with a quota or a kill switch). That case surfaces SubmitFailed.
+    // A write the database REJECTS outright (a constraint violation) never
+    // reaches this check: the INSERT itself fails.
     function submit(name: string, email: string, body: string) ! ContactError {
         ?{`
           CREATE TABLE IF NOT EXISTS contact_messages (

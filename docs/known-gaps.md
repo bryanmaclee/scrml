@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 202 | 4 |
-| MED | 385 | 0 |
-| LOW | 164 | 0 |
+| HIGH | 204 | 4 |
+| MED | 388 | 0 |
+| LOW | 167 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -1518,9 +1518,13 @@ error enum resolves (an import the registry lacks is exempt: unverifiable, not i
 `enum-type` optional, §19.3.3 gains the normative bare-form bullet, §14.10 lists the `fail` target as a position, §34
 E-ERROR-009 row reworded. Corpus: newly-accepting only — `examples/09-error-handling.scrml` and two
 `samples/compilation-tests/gauntlet-s19-phase1-decls/` files flip FAIL→OK; zero files flip OK→FAIL.
-⚑ **Surfaced, not fixed (pre-existing, identical under the qualified spelling):** 09's `<Failed err>` arm renders an
-EMPTY message at runtime — a catch-all `!{}` arm `| err :> …` lowers to `const err = result.data` (the payload), not the
-error variant, so `errorMessage(err)` gets `null` for `.EmptyName`. Filed separately; see the S441 report.
+⚑ **Surfaced here, now FIXED (`s441-failable-arm-binding`):** 09's `<Failed err>` arm rendered an EMPTY message at
+runtime because the catch-all `!{}` arm `| err :> …` lowered to `const err = result.data` (the payload), not the error
+value. bryan RULED S441 that `| err :>` binds the ERROR VALUE (user-voice-scrml.md S441, "your recs on the rest"); SPEC
+§19.4.3.1 states it, and codegen binds the value in the enum-value representation on client and server. 09's four error
+paths and its success path are driven end to end in happy-dom by
+`compiler/tests/integration/s441-server-fail-payload-wire.test.js`. The same branch also fixed the server-side single-field
+`fail` wire shape (§19.9.1) and 09's own `result.changes` read off a void `.run()` (§8.5.1).
 
 ### g-qualified-fail-against-non-enum-error-type-undiagnosed — the qualified `fail T.V` in a function declared `! T`, where `T` is undeclared / a non-enum type / a type alias, compiles with NO diagnostic — `NEW S441`; **MED** (silent acceptance of an invalid error type; the bare form is already fail-closed); open
 Executed on the s441-fail-bare-variant tip: `function check(n: string) ! Undeclared { if (n == "") fail Undeclared.X }` compiles at exit 0. So do `! S` with `type S:struct = {…}` + `fail S.X`, and `! A` with `type A = E` + `fail A.V`. The emitted envelope is `{ __scrml_error: true, type: "Undeclared", variant: "X", … }` — a variant of a type that does not exist. §19.4.4.1 already requires the `!` error type to be an enum and names **E-ERROR-011** (reserved, no emitter) for the non-enum case, so this is the qualified-form half of that unbuilt emitter. The impl half is tracked under [[g-failable-error-type-non-enum-spec-vs-corpus-conflict]] ("REMAINING — the impl half is NOT built"). The bare form `fail .V` against the same types reports **E-ERROR-009** as a carried interim (§19.3.3, S441), which E-ERROR-011 subsumes when it ships. A second strand: an UNDECLARED name in the `!` position is not reached by §14.1.2 `E-TYPE-UNKNOWN-NAME`, because the `!` error-type position is absent from that rule's Loci list. Decide whether that code or E-ERROR-011 owns the undeclared case. **Direction: newly-rejecting** — measure the corpus before landing (§34.0 / pa-base §8). The s441 corpus sweep (2,033 files) found no qualified `fail` against an unresolved `!` type among files that compile, but that sweep was not targeted at this shape. Re-measure.
@@ -4205,6 +4209,78 @@ Adopter-A's native-iOS client (reused, re-pointed at the scrml backend for the l
 > above, which moves as gaps are filed/closed (S174 filed 4 → MED 11 · LOW 20).
 
 ---
+
+## §S441 — gaps filed S441 (2026-09-29, bryan; surfaced by the PA review of `s441-failable-arm-binding`)
+
+Repro files: `docs/changes/s441-failable-arm-binding/repro/review/`. Each was compiled and driven in happy-dom on the
+branch tip; the verifier prints the compile codes, whether `client.js` parses, and the cell values after the click.
+
+### g-errarm-catchall-not-last-emits-else-if-syntaxerror — a catch-all `!{}` arm (`| _ :>` or `| e :>`) written BEFORE another arm emits `{ … } else if (…)`, a JS SyntaxError that kills the WHOLE client bundle, with ZERO diagnostics — `NEW S441; **HIGH**; open`
+<!-- @gap id=g-errarm-catchall-not-last-emits-else-if-syntaxerror sev=HIGH status=open locus=compiler/src/codegen/emit-logic.ts(guarded-expr-arm-loop-pattern-_-branch) prov=review:S441-errarm-p9-executed -->
+`repro/review/catchall-not-last.scrml`: `check() !{ | _ :> {…} | .One(m) :> {…} }` compiles at exit 0 (only
+W-/I-/E-DG-002 lints), `client.js` fails to parse ("Unexpected token"), and evaluating the bundle throws "Unexpected keyword
+'else'", so no cell exists and nothing on the page works. The arm loop in `emit-logic.ts` emits the wildcard as a bare
+`{ … }` block and the next arm as `else if (…)`. **Direction (a ruling):** reject a catch-all that is not the last arm (an
+arm after it is unreachable — the §18 dead-arm family), or order-normalize the catch-all to the end. Either way the emit
+must never produce `{…} else if`. The emitted-JS gate did not catch it because this compile had no fatal error to trip the
+gate's ordering — measure why `validateEmit` let it through.
+
+### g-errarm-missing-dot-variant-becomes-catchall-binding — a `!{}` arm written `| One :>` (the leading `.` forgotten) silently becomes an identifier-binding catch-all that binds a local named `One` and fires for EVERY remaining variant — `NEW S441; **MED**; open`
+<!-- @gap id=g-errarm-missing-dot-variant-becomes-catchall-binding sev=MED status=open locus=compiler/src/ast-builder.js(parseErrorTokens-identifierArm)+compiler/native-parser/parse-error-body.js(scanErrorPattern) prov=review:S441-errarm-p9b-executed -->
+`repro/review/missing-dot-variant-arm.scrml`: `check()` fails `.Two`; the arms are `| .Unit :>` and `| One :>`; the
+"one" arm runs (`r = "one-arm"`), no diagnostic. §19.4.3.1 makes a bare identifier the error-value catch-all, so the
+parse is grammatical — but an identifier that is exactly a variant NAME of the handled error enum is almost always the
+typo, and it shadows the variant name inside the arm. Written before another arm, the same typo is
+[[g-errarm-catchall-not-last-emits-else-if-syntaxerror]]. **Suggested (not built):** a lint when the identifier of an
+identifier-binding arm equals a variant name of the handled error type ("did you mean `.One`?").
+
+### g-errarm-wildcard-named-vs-identifier-arm-lint-suggested — `| _ e :>` binds the PAYLOAD while `| e :>` binds the ERROR VALUE; one character apart, different values, no nudge — `NEW S441; **LOW**; open (lint suggestion, not built)`
+<!-- @gap id=g-errarm-wildcard-named-vs-identifier-arm-lint-suggested sev=LOW status=open locus=compiler/src/ast-builder.js(parseErrorTokens) prov=review:S441-errarm-F7 -->
+SPEC §19.4.3.1 (S441) now states both: the explicit-wildcard name binds the payload (flogence `viewapp/view.scrml`
+reads `e.message` off a transport error through it), the bare identifier binds the whole error value. **Suggested
+(not built):** an info-level lint on `| _ e :>` whose body uses `e` as an error VALUE (compared with `==` to a variant,
+passed where the error enum is expected, stored into an enum-typed cell), pointing at `| e :>`. Needs a ruling before
+it is built: it nudges a form flogence uses on purpose.
+
+### g-value-match-arm-eq-lowers-to-reference — `==` inside a VALUE-RETURN `match` arm lowers to `===`, so a payload-variant comparison there is false — `NEW S441; **MED**; open`
+<!-- @gap id=g-value-match-arm-eq-lowers-to-reference sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(emitMatchExpr-arm-result-string-path) prov=review:S441-errarm-executed -->
+`repro/review/value-match-arm-eq-is-reference.scrml`: in `fn viaMatch(e: E) -> string { return match e { … .One(msg) :> "" + (e == E.One("m")) } }`
+the arm's `==` is emitted as `===` and yields `"false"`; the identical `==` in a plain `fn` body yields `"true"` (§45
+structural). Same class as the `!{}` arm-body case (S441 witness on [[g-bang-brace-arm-bodies-have-no-tree-form]]): an arm
+result lowered from a string skips the structural `==` lowering.
+
+### g-builtin-error-enum-not-nameable — the built-in `Error` enum (§19.4.2, the error type of a bare-`!` function) cannot be named in a type position, so `err == Error.Generic(msg)` / `fn f(e: Error)` are inexpressible — `NEW S441; **LOW**; open`
+<!-- @gap id=g-builtin-error-enum-not-nameable sev=LOW status=open locus=compiler/src/type-system.ts(typeRegistry-seed,no-builtin-Error) prov=review:S441-errarm-p11-executed -->
+`repro/review/error-generic-not-nameable.scrml`: `fn isBoom(e: Error) -> bool { return e == Error.Generic("boom") }`
+is E-TYPE-UNKNOWN-NAME + E-TYPE-025, and at runtime `Error.Generic` is the host `Error` constructor's missing property
+(`TypeError: Error.Generic is not a function`). §19.3.3 already reads `fail .Generic(msg)` as `fail Error.Generic(msg)`,
+so the SPEC treats `Error` as a real enum; impl#1 does not register it, so a bare-`!` failure bound by `| err :>`
+cannot be compared or matched by name.
+
+### g-native-errarm-arrow-split-fabricates-arms — the native parser's `!{}` guarded-expr path joins handler tokens with spaces, so `:>` arrives as `: >` and NO `:>` arm is recognized; 09's `| err :> { @phase = .Failed(err) }` becomes a fabricated `.Failed` arm binding `err` (emitted `result.data.err`) — `NEW S441; **LOW** (opt-in `--parser=scrml-native`); open`
+<!-- @gap id=g-native-errarm-arrow-split-fabricates-arms sev=LOW status=open locus=compiler/native-parser/parse-expr.js(parseGuardedExprTail-bodyText-join)+compiler/native-parser/parse-error-body.js(scanErrorArrow) prov=review:S441-errarm-F6+executed-nativeParseFile-on-examples/09 -->
+Executed: `nativeParseFile` on `examples/09-error-handling.scrml` yields, for each of the two handlers, one arm
+`{ pattern: ".Failed", binding: "err", handler: "; return }" }` — the real arm is skipped because `scanErrorArrow` needs
+`:` and `>` adjacent. The live parser is correct. The within-node canary allowlist for 09 (MISSING-FIELD) absorbs the
+divergence. Fix: join guarded-expr body tokens by source span (or re-slice the source) instead of `parts.join(" ")`,
+or let `scanErrorArrow` skip whitespace inside the arrow. Separately, native rejects the bare `fail .V` form
+(E-EXPR-FAIL-VARIANT) that §19.3.3 ratified S441.
+
+### g-server-bundle-does-not-export-imported-enum — a server function that uses an enum imported from another `.scrml` file imports it from the exporter's `.server.js`, which does not export it: the importing server module fails to LINK at runtime — `NEW S441; **HIGH**; open`
+<!-- @gap id=g-server-bundle-does-not-export-imported-enum sev=HIGH status=open locus=compiler/src/codegen/emit-server.ts(ss1-module-value-exports-footer,no-enum-export) prov=review:S441-errarm-p5-executed-main-and-branch -->
+`errs.scrml` exports `type IE:enum = { P(a: string), Q(b: string), R }` plus a server fn; `app.scrml` has a `server
+function` that builds and matches an `IE` value. The compile is clean; `app.server.js` emits
+`import { IE } from "./errs.server.js"`, and `errs.server.js` exports only its routes, `fetch` and its server fn — not
+`IE`. Importing `app.server.js` throws `SyntaxError: Export named 'IE' not found`. Reproduced identically on `main`
+(pre-existing, not introduced by S441). The S209 ss1 value-export footer covers constants and pure fns but not enum
+objects. Probe: `scratchpad/rv-errarm-out/p5.js` (the PA review harness).
+
+### g-fn-referencing-stdlib-enum-is-server-escalated — a pure `fn` that mentions `ParseError.MissingDiscriminator` (imported from `scrml:data`) is route-inferred to the SERVER and called over a fetch — `NEW S441; **MED**; open`
+<!-- @gap id=g-fn-referencing-stdlib-enum-is-server-escalated sev=MED status=open locus=compiler/src/route-inference.ts prov=empirical:S441-errarm-executed-on-main -->
+`fn isMissing(e: ParseError) -> bool { return e == ParseError.MissingDiscriminator }` compiles to
+`_scrml_fetch_isMissing_N` on the client (a server route), and `function go() { @r = isMissing(…) }` then trips
+E-CPS-NONIDEM-NO-STORAGE. A comparison against a stdlib enum's unit variant has no server trigger; the `scrml:data`
+import is apparently read as a server capability. Reproduced on `main`.
 
 ## §S326 — gaps filed S326 (2026-08-06, bryan; surfaced while landing the inherited S325 arcs)
 
@@ -10444,6 +10520,14 @@ The converged parent-side fix (`BODY_RAW_WHEN_HANDLER_KINDS`) DELIBERATELY exclu
 ⚑ **The blast radius is not this gate.** Any pass that walks bodies structurally — protect/egress, tenant isolation, route inference, reachability, the auto-await injectors — is blind inside an `!{}` arm and silently reads "nothing here" where the truth is "unanalyzable". This is the [[g-...dpa-024...]] class (in-place decoration over a non-load-bearing canonical AST) surfacing as a *security* blindness rather than a typing one.
 
 **Round 5 mitigated §14.8.9 specifically** by testing the escape-hatch node's own `raw` string for what it could hold (0 corpus false positives, vs 22 for a blanket fail-closed and 1 for treating every arm as an egress). **That mitigation is per-gate and does not generalise** — and it tests a string, which is the form dpa-029 Q1 declined; the judgement is recorded there for the operator. **Root fix: give arm bodies a real parsed form.** Until then, every new structural pass inherits the blindness by default.
+
+> **S441 witness — `==` inside an arm body (review:S441-errarm F2; executed).** The string lowering also skips the §45
+> structural `==`: an arm body's `==` is emitted as the host's `===` on the client AND on the server. So
+> `| err :> { @ok = err == E.One("m") }` is **false** for a structurally equal payload variant, while the same `==`
+> through a `fn` called from the arm is true. SPEC §19.4.3.1 (S441) promises that comparison, so it now carries this as a
+> named impl#1 gap. Pinned: `compiler/tests/integration/s441-errarm-review-round.test.js` — `test.failing` for the in-arm
+> comparison plus a sibling asserting today's `===` and the working `fn` route. Flip the `.failing` when the arm body gains
+> a tree form.
 
 ### g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client — `analyzeAll` caches `FileAnalysis` fields BEFORE the nested-`<program>` extraction splice; `fnNodes` and `cssBlocks` are stale and LEAK worker-only code into the client bundle — `NEW S354-bryan (adversarial pass; 2 of 7 fields confirmed leaking by execution, 3 UNVERIFIED); HIGH; open`
 <!-- @gap id=g-stale-fileanalysis-snapshot-leaks-worker-internals-into-the-client sev=HIGH status=open locus=compiler/src/codegen/index.ts prov=empirical:S354-adversarial-executed-both-trees -->

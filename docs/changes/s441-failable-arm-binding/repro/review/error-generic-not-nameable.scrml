@@ -1,0 +1,20 @@
+<program>
+${
+  <r> = ""
+  function check() ! {
+    fail Error.Generic("boom")
+  }
+  fn isBoom(e: Error) -> bool { return e == Error.Generic("boom") }
+  fn msgOf(e: Error) -> string {
+    return match e {
+      .Generic(m) :> "g:" + m
+    }
+  }
+  function go() {
+    check() !{
+      | err :> { @r = "raw=" + JSON.stringify(err) + " eq=" + isBoom(err) + " m=" + msgOf(err); return }
+    }
+  }
+}
+<button id="go" onclick=go()>g</button>
+</program>

@@ -60,7 +60,7 @@ import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-c
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
 import { setBatchLoopHoists, setBatchInListCap, setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { drainMachineCodegenErrors, clearMachineCodegenErrors } from "./emit-machines.ts";
-import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-client.js";
+import { generateClientJs, collectClientReferencedIdentsForAST, setImportedEnumDeclsByFile } from "./emit-client.js";
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
@@ -1110,6 +1110,58 @@ function findMatchingCloseIdx(html: string, tag: string, fromIdx: number): numbe
  * module-level `let` / container in codegen that holds per-file or per-compile
  * state belongs here too.
  */
+/**
+ * s441 F1/F3 — for every file in the compile, the ENUM type-decls it imports
+ * from other `.scrml` files in the same compile, keyed by the importer's posix
+ * path. Follows `export { X } from "./other.scrml"` re-export chains through the
+ * importGraph `exports[].reExportSource` edges (cycle-safe). A non-enum or an
+ * unresolvable name contributes nothing. Local aliases are irrelevant here: the
+ * consumer keys by VARIANT name, which aliasing does not change.
+ */
+function collectImportedEnumDeclsByFile(
+  files: any[],
+  importGraph: Map<string, any> | null,
+): Map<string, any[]> | null {
+  if (!importGraph || importGraph.size === 0) return null;
+  const declsByPath = new Map<string, any[]>();
+  for (const f of files) {
+    const fp = f?.filePath;
+    if (!fp) continue;
+    declsByPath.set(toPosix(fp), f?.typeDecls ?? f?.ast?.typeDecls ?? []);
+  }
+  const findEnum = (absSource: string, name: string, seen: Set<string>): any | null => {
+    const key = toPosix(absSource) + "::" + name;
+    if (seen.has(key)) return null;
+    seen.add(key);
+    const own = (declsByPath.get(toPosix(absSource)) ?? []).find(
+      (d: any) => d?.kind === "type-decl" && d?.typeKind === "enum" && d?.name === name);
+    if (own) return own;
+    const entry = importGraph.get(absSource) ?? importGraph.get(toPosix(absSource));
+    for (const exp of (entry?.exports ?? []) as any[]) {
+      if (exp?.name !== name || !exp?.reExportSource) continue;
+      const found = findEnum(exp.reExportSource, name, seen);
+      if (found) return found;
+    }
+    return null;
+  };
+  const out = new Map<string, any[]>();
+  for (const [fp, entry] of importGraph) {
+    const found: any[] = [];
+    for (const imp of (entry?.imports ?? []) as any[]) {
+      if (!imp?.absSource) continue;
+      const names: string[] = Array.isArray(imp.specifiers) && imp.specifiers.length > 0
+        ? imp.specifiers.map((sp: any) => sp.imported)
+        : (imp.names ?? []);
+      for (const n of names) {
+        const decl = findEnum(imp.absSource, n, new Set());
+        if (decl && !found.includes(decl)) found.push(decl);
+      }
+    }
+    if (found.length > 0) out.set(toPosix(fp), found);
+  }
+  return out.size > 0 ? out : null;
+}
+
 export function resetCodegenModuleState(): void {
   // emit-logic — §6.8 structural-decl set + implicit-init emission tracker.
   endEmitLogicFile();
@@ -1120,6 +1172,8 @@ export function resetCodegenModuleState(): void {
   setBatchLoopHoists(null);
   setBatchInListCap(null);
   setVariantFieldsForFile(null, null);
+  // emit-client — per-compile imported-enum decls (s441 F1/F3).
+  setImportedEnumDeclsByFile(null);
   // rewrite.ts — per-file variant / protect / bool-column / tenant contexts.
   setVariantFieldsForRewriter(null, null);
   setProtectContextForRewriter(null);
@@ -1258,6 +1312,10 @@ export function runCG(input: CgInput): CgOutput {
   // function of the input regardless of what this process compiled before (an
   // exception mid-emit in a PREVIOUS compile can otherwise strand a value).
   resetCodegenModuleState();
+  // s441 F1/F3 — publish each importing file's imported enum decls so the
+  // variant→payload-field registry (client AND server pass) covers enums
+  // declared in another `.scrml` file. Cleared by resetCodegenModuleState.
+  setImportedEnumDeclsByFile(collectImportedEnumDeclsByFile(files as any[], importGraphInput));
 
   const outputs = new Map<string, CgFileOutput>();
   const errors: CGError[] = [];
