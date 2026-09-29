@@ -1,0 +1,19 @@
+{
+  "id": "protect-scalar-helper-e006",
+  "description": "§14.8.9 — laundering shape: a HELPER extracts the column from a row passed to it (`pick(u)` → `r.passwordHash`). The provenance flow is interprocedural, so the extraction is traced through the call and the caller's return is E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-scalar-egress.test.js",
+  "rationale": "§14.8.9: every compiler-emitted client-egress serializer \"SHALL strip, by construction, every column whose provenance origin is a `protect=` field … keys on the column's resolved source `(table, column)` origin\". The runtime strip reads a descriptor the ROW carries; a value extracted from the row carries none, so before S441 (g-protected-column-escapes-redaction-as-scalar) this shape compiled at exit 0 and shipped the column — MEASURED, HTTP 200 body \"SECRET-HASH-123\" for the plain scalar — while I-PROTECT-STRIP-001 claimed it had been stripped. The §14.8.9 provenance flow (compiler/src/codegen/protect-flow.ts) now rejects it at compile time as E-PROTECT-006, and the info no longer fires because nothing was stripped. Goes RED against the pre-S441 emitter (no E-PROTECT-006 existed).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

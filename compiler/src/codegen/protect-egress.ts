@@ -27,13 +27,16 @@
  *      `reveal`-stamped. Redaction is sound BY CONSTRUCTION — the compiler reads
  *      a tag at egress; it never proves a return clean (no value-flow obligation).
  *
- * Soundness bound (§14.8.9 normative — DO NOT over-claim): complete for
- * explicit-column flows of statically-resolvable SQL, by ORIGIN. NOT covered:
- * derived/implicit flows (`{ hasPw: row.pw != "" }` — a value of independent
- * identity carries no descriptor), covert channels, and member-extraction into
- * a re-keyed fresh literal (`{ secret: row.pw }` — same derived-flow boundary).
- * Unresolvable dynamic SQL is stripped WHOLESALE (fail-closed), never
- * accept-unknown.
+ * Soundness bound (§14.8.9 normative — DO NOT over-claim): the RUNTIME strip
+ * here is complete only for values that still ARE (or contain) a tagged row. A
+ * value EXTRACTED from the row — `return row.pw`, `{ secret: row.pw }`,
+ * `"x" + row.pw`, `JSON.stringify(row)` — carries no descriptor and passes this
+ * floor untouched. That is NOT the derived-flow boundary (the value IS the
+ * column); it is closed at COMPILE time by the provenance flow in
+ * `protect-flow.ts` (`E-PROTECT-006`, S441 — until then it shipped, measured).
+ * Genuinely derived flows (`{ hasPw: row.pw != "" }` — a value of independent
+ * identity) and covert channels remain out of scope. Unresolvable dynamic SQL is
+ * stripped WHOLESALE (fail-closed), never accept-unknown.
  *
  * RAW / FOREIGN EGRESS — the closed-world precondition, enforced in THREE places
  * with three different strengths. Read the strengths; they are not interchangeable:

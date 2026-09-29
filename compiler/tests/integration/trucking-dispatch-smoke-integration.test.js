@@ -362,7 +362,14 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // doing its job; the dev is informed the protected column is removed (use
     // `reveal("password_hash")` to send it deliberately, or project it out).
     // Aggregate 40 -> 42.
-    "I-PROTECT-STRIP-001": 2,
+    //
+    // ⚑ S441 (`g-protected-column-escapes-redaction-as-scalar`): REMOVED, 2 -> 0,
+    // and the paragraph above was the false claim the fix corrects. The login
+    // row is NEVER returned: `loginServer` passes `row.password_hash` to
+    // `verifyPassword` and returns `{ token, user: { id, email, role }, … }`, so
+    // no protected column reaches any egress and the floor strips NOTHING. The
+    // info used to fire for every protected SELECT; it now fires only for a query
+    // whose row the sink actually stripped (`protect-flow.ts`). Aggregate -2.
     "W-ATTR-001": 20,
     // ss19 #6/#7 (auth-precedence-2026-06-25): W-AUTH-001 20 -> 0, REMOVED.
     // Every protect= page in this corpus declares an EXPLICIT `<page auth=...>`

@@ -4,10 +4,16 @@
   "language-version": "1.0",
   "spec": "§14.8.9",
   "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
-  "rationale": "§14.8.9 closed-world precondition: soundness rests on every construction being compiler-emitted and descriptor-preserving. An author-constructed `Response` breaks that precondition at the sink itself, so the compiler refuses to emit an envelope it cannot mediate. This is DELIBERATELY a hard error with NO escape hatch — `reveal(\"col\")` does not discharge it, because reveal declassifies a column at a value the floor can still walk and a hand-serialized Response is not walkable. The removed capability is the argument for a future typed, mediatable return. I-PROTECT-STRIP-001 co-fires (the SELECT * is tagged).",
+  "rationale": "§14.8.9 closed-world precondition: soundness rests on every construction being compiler-emitted and descriptor-preserving. An author-constructed `Response` breaks that precondition at the sink itself, so the compiler refuses to emit an envelope it cannot mediate. This is DELIBERATELY a hard error with NO escape hatch — `reveal(\"col\")` does not discharge it, because reveal declassifies a column at a value the floor can still walk and a hand-serialized Response is not walkable. The removed capability is the argument for a future typed, mediatable return. ⚑ S441 (`g-protected-column-escapes-redaction-as-scalar`): `I-PROTECT-STRIP-001` no longer co-fires here, because nothing is stripped — the info now fires only for a query whose row the egress sink ACTUALLY stripped (the §14.8.9 provenance flow, `compiler/src/codegen/protect-flow.ts`). Before S441 it fired for every protected SELECT, and this case pinned that false claim. (The row goes into the author's own `JSON.stringify` body, which the runtime floor refuses; `E-PROTECT-006` also names the serialized protected column.)",
   "expect": {
-    "codes": ["E-PROTECT-005", "I-PROTECT-STRIP-001"],
-    "notCodes": ["E-PROTECT-004"],
-    "severity": { "E-PROTECT-005": "error", "I-PROTECT-STRIP-001": "info" }
+    "codes": [
+      "E-PROTECT-005"
+    ],
+    "notCodes": [
+      "E-PROTECT-004"
+    ],
+    "severity": {
+      "E-PROTECT-005": "error"
+    }
   }
 }

@@ -433,12 +433,14 @@ describe("§14.8.9 A4 — derived/implicit flows are out of scope (honest bound)
     expect(_scrml_protect_redact(derived)).toEqual({ hasPw: true });
   });
 
-  test("member-extraction into a re-keyed literal `{ secret: row.pw }` is the same boundary", () => {
+  test("member-extraction into a re-keyed literal `{ secret: row.pw }` passes the RUNTIME floor", () => {
     const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const row = _scrml_protect_tag({ id: 1, passwordHash: "secret" }, ["passwordHash"]);
-    // A fresh literal that re-keys the column value loses the descriptor — the
-    // derived-flow boundary. The floor catches WHOLE-ROW-IDENTITY flows, not
-    // per-value member extraction (documented; the deferred A-layer / IFC).
+    // A fresh literal that re-keys the column value loses the descriptor, so the
+    // RUNTIME redactor cannot strip it — this pins that the helper alone does
+    // not. ⚑ S441: this is NOT the derived-flow boundary (the value IS the
+    // column) and it no longer ships: the compile-time provenance flow rejects
+    // it as E-PROTECT-006 (protect-flow.ts; protect-scalar-egress.test.js).
     const rekeyed = { secret: row.passwordHash };
     expect(_scrml_protect_redact(rekeyed)).toEqual({ secret: "secret" });
   });
