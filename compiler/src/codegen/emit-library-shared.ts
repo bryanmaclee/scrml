@@ -16,7 +16,7 @@
 import { emitFnShortcutBody } from "./emit-logic.js";
 import { paramSignature, indentBodyLines } from "./utils.ts";
 import { bodyContains } from "./collect.ts";
-import { extractCalleeNames } from "./scheduling.ts";
+import { extractCalleeNames, buildCalleeImportMap } from "./scheduling.ts";
 import { isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { CGError } from "./errors.ts";
 // Phase-2 colorless-async — the clean-family combinator detector, shared with the
@@ -34,6 +34,7 @@ import {
   anchorDiagnosticSpan,
   localSyncShadowOf,
   rawAsyncUsesOf,
+  BOUND_CALLEE_MARK,
 } from "./local-async-fns.ts";
 import type { AsyncRoot, AsyncEscapeSite, RawAsyncUses } from "./local-async-fns.ts";
 // s441 — scope-aware analysis of raw JS fragments (FP1) and of emitted handler /
@@ -456,6 +457,7 @@ export function annotateNestedAsyncHelpers(
     analyzeRaw: (raw, resolveFree) => analyzeRawJsFragment(raw, resolveFree) as RawAsyncUses | null,
     ...(escapes ? { escapes } : {}),
     ...(escapeFacts ? { escapeOuterAsync: (name: string) => outerAsyncRootFromFacts(name, escapeFacts) } : {}),
+    isFileBound: (name: string) => !!facts.boundNames && facts.boundNames.has(name),
   });
 }
 
@@ -474,10 +476,52 @@ export function outerAsyncRootFromFacts(name: string, facts: AsyncNameFacts): As
 
 /** s441 — `outerAsyncRootFromFacts` as a free-name resolver for js-async-analysis. */
 export function freeAsyncResolverFromFacts(facts: AsyncNameFacts): FreeAsyncResolver {
-  return (name: string) => {
-    const root = outerAsyncRootFromFacts(name, facts);
-    return root ? { root, local: false } : null;
+  return Object.assign(
+    (name: string) => {
+      const root = outerAsyncRootFromFacts(name, facts);
+      return root ? { root, local: false } : null;
+    },
+    { isBound: (name: string): boolean => !!facts.boundNames && facts.boundNames.has(name) },
+  );
+}
+
+/**
+ * s441 fix round — every name the FILE binds at file scope: function
+ * declarations (top-level, and the bodies of top-level logic blocks), top-level
+ * `let`/`const`/`tilde`/`lin` declarations, and imported local names. Walks
+ * statements without descending into function bodies. Over-collection only makes
+ * a scheduler exemption fail CLOSED (the name is treated as a user binding).
+ */
+export function fileBoundNamesOf(fileAST: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!fileAST || typeof fileAST !== "object") return out;
+  for (const k of buildCalleeImportMap(fileAST as ASTNode).keys()) out.add(k);
+  const seen = new WeakSet<object>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object" || seen.has(node as object)) return;
+    seen.add(node as object);
+    if (Array.isArray(node)) { for (const c of node) visit(c); return; }
+    const n = node as ASTNode;
+    const kind = n.kind as string | undefined;
+    if (kind === "function-decl") {
+      if (typeof n.name === "string" && n.name) out.add(n.name);
+      return; // not its body
+    }
+    if (kind === "lambda") return;
+    if ((kind === "let-decl" || kind === "const-decl" || kind === "tilde-decl" || kind === "lin-decl") &&
+        typeof n.name === "string") {
+      const m = n.name.match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+      if (m) out.add(m[0]);
+    }
+    for (const key of Object.keys(n)) {
+      if (key === "span") continue;
+      const v = n[key];
+      if (v && typeof v === "object") visit(v);
+    }
   };
+  const f = fileAST as { nodes?: unknown; ast?: { nodes?: unknown } };
+  visit(f.nodes ?? f.ast?.nodes ?? []);
+  return out;
 }
 
 /**
@@ -499,7 +543,11 @@ export function asyncFnArgRole(call: ASTNode, index: number): "allowed" | "own-c
     if (index === 0 && ASYNC_COMBINATOR_METHODS.has(callee.property)) return "allowed";
     if (isSyncCallbackConsumerCall(call)) return "own-code";
   }
-  if (callee && callee.kind === "ident" && typeof callee.name === "string" && KNOWN_DISCARD_HOF.has(callee.name)) {
+  // Only the GLOBAL scheduler discards the return: a program-bound
+  // `function setTimeout(f) { return f(x) }` (local, file-scope, import, param)
+  // hands the Promise back — s441 fix round, the reviewer's accept-all.
+  if (callee && callee.kind === "ident" && typeof callee.name === "string" && KNOWN_DISCARD_HOF.has(callee.name) &&
+      call[BOUND_CALLEE_MARK] !== true) {
     return "allowed";
   }
   return "escape";
@@ -568,6 +616,45 @@ export function jsAsyncUsesErrors(uses: JsAsyncUses, span: unknown, filePath?: s
       : asyncStdlibSyncCallbackError(c.name, span, filePath, via));
   }
   for (const e of uses.escapes) out.push(asyncFnEscapesAsValueError(e, span, filePath));
+  const sp = diagnosticSpan(span, filePath);
+  for (const p of uses.promiseMethods ?? []) {
+    out.push(new CGError(
+      "E-ASYNC-CALL-PROMISE-METHOD",
+      `E-ASYNC-CALL-PROMISE-METHOD: \`.${p.method}(…)\` is called on \`${p.name}(…)\`, which the compiler ` +
+        `awaits for you (§13.2) — so \`.${p.method}\` would be read off the RESOLVED value, not a ` +
+        `Promise, and throw a TypeError at run time. Remove \`.${p.method}(…)\` and use the value ` +
+        `directly: \`const r = ${p.name}(…)\` then work with \`r\`` +
+        (p.method === "then" ? "." : ` (a failure is handled with \`!{}\`, §19).`),
+      sp,
+      "error",
+    ));
+  }
+  for (const c of uses.eventControlAfterAwait ?? []) {
+    out.push(new CGError(
+      "E-EVENT-CONTROL-AFTER-AWAIT",
+      `E-EVENT-CONTROL-AFTER-AWAIT: \`event.${c.method}()\` runs after this handler's first server / ` +
+        `async call. The compiler awaits that call (§13.2), and by the time the handler resumes the ` +
+        `browser has already ${c.method === "preventDefault" ? "performed the default action (the form submitted / the link navigated)" : "propagated the event"} — ` +
+        `the call has no effect. Move \`event.${c.method}()\` before the first server call. If it must ` +
+        `stay conditional on the server's answer, call it unconditionally first and perform the ` +
+        `action yourself when the answer allows it. (The compiler does not move it for you: that ` +
+        `would change which events a conditional call applies to.)`,
+      sp,
+      "error",
+    ));
+  }
+  for (const u of uses.unanalyzable ?? []) {
+    out.push(new CGError(
+      "E-ASYNC-HANDLER-UNANALYZABLE",
+      `E-ASYNC-HANDLER-UNANALYZABLE: this event handler references the async function \`${u.name}\`, but ` +
+        `the compiler could not analyse the handler's code, so it cannot insert the \`await\` §13.2 ` +
+        `requires. Rather than ship an unawaited call (a Promise is always truthy), the build fails. ` +
+        `Move the handler body into a named function and reference it (\`onclick=handle()\`). ` +
+        `This is also a compiler defect worth reporting.`,
+      sp,
+      "error",
+    ));
+  }
   return out;
 }
 

@@ -7,7 +7,7 @@ import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
-import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
@@ -646,6 +646,7 @@ export function clientAsyncFactsOf(ctx: CompileContext): AsyncNameFacts {
   const fnNodes: ASTNode[] = (ctx.analysis?.fnNodes ?? collectFunctions(ctx.fileAST)) as ASTNode[];
   const { serverFnNames, clientAsyncFnNames } = computeClientAsyncSets(ctx, fnNodes, calleeMap, exportRegistry);
   const facts: AsyncNameFacts = {
+    boundNames: fileBoundNamesOf(ctx.fileAST),
     asyncFnNames: clientAsyncFnNames,
     serverFnNames,
     isStdlibAsync: (calleeMap && exportRegistry && exportRegistry.size > 0)
@@ -1473,6 +1474,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // detector, the nested-decl emitter and the drain below all read the marks.
   {
     const _nestedFacts: AsyncNameFacts = {
+      boundNames: fileBoundNamesOf(ctx.fileAST),
       asyncFnNames: _clientAsyncFnNames,
       serverFnNames: _serverFnNames,
       isStdlibAsync: (_calleeMap && _exportRegistry && _exportRegistry.size > 0)

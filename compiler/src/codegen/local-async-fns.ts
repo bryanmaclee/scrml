@@ -109,8 +109,15 @@ export const LOCAL_SYNC_SHADOW_MARK = "_scrmlLocalSyncShadow";
  * run, or the text did not parse) — consumers fall back to their name scan.
  */
 export const RAW_ASYNC_MARK = "_scrmlRawAsync";
+/**
+ * s441 fix round — a `call` whose bare-ident callee is BOUND by the program (a
+ * local / param / nested fn in scope, or a file-scope binding per
+ * `LocalAsyncAnnotateOpts.isFileBound`). Read by the fire-and-forget scheduler
+ * exemptions: only the GLOBAL `setTimeout` & co. discard the callback's return.
+ */
+export const BOUND_CALLEE_MARK = "_scrmlBoundCallee";
 
-const MARK_KEYS = new Set<string>([LOCAL_CALLEE_MARK, LOCAL_REF_MARK, LOCAL_ASYNC_DECL_MARK, LOCAL_SYNC_SHADOW_MARK, RAW_ASYNC_MARK]);
+const MARK_KEYS = new Set<string>([LOCAL_CALLEE_MARK, LOCAL_REF_MARK, LOCAL_ASYNC_DECL_MARK, LOCAL_SYNC_SHADOW_MARK, RAW_ASYNC_MARK, BOUND_CALLEE_MARK]);
 
 /** Does this call / ident certainly resolve to a SYNC nested function (see LOCAL_SYNC_SHADOW_MARK)? */
 export function localSyncShadowOf(node: unknown): boolean {
@@ -376,7 +383,7 @@ export interface LocalAsyncAnnotateOpts {
    * s441 (FP1) — the scope-aware raw-fragment analyser (js-async-analysis
    * `analyzeRawJsFragment`), injected to keep this module dependency-neutral.
    */
-  analyzeRaw?: (raw: string, resolveFree: (name: string) => ResolvedAsyncName | null) => RawAsyncUses | null;
+  analyzeRaw?: (raw: string, resolveFree: ((name: string) => ResolvedAsyncName | null) & { isBound?: (name: string) => boolean }) => RawAsyncUses | null;
   /** s441 (S440 F4) — sink for every async-colored function used as a value. */
   escapes?: AsyncEscapeSite[];
   /**
@@ -389,6 +396,12 @@ export interface LocalAsyncAnnotateOpts {
    * `outerAsync`.
    */
   escapeOuterAsync?: (name: string) => AsyncRoot | null;
+  /**
+   * s441 fix round — does the FILE bind `name` (file-scope fn / top-level decl /
+   * import)? A bare callee bound here or in an enclosing scope is marked
+   * BOUND_CALLEE_MARK — it is not the global scheduler of the same name.
+   */
+  isFileBound?: (name: string) => boolean;
 }
 
 /**
@@ -527,7 +540,10 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
   // sit in (s441, FP1). The analysis result rides on the node for the drains.
   const markRaw = (holder: ASTNode, raw: string, scope: Scope, span: unknown): void => {
     if (!opts.analyzeRaw) { delete holder[RAW_ASYNC_MARK]; return; }
-    const uses = opts.analyzeRaw(raw, (nm) => resolveAsyncAt(nm, scope));
+    const resolveFree = Object.assign((nm: string) => resolveAsyncAt(nm, scope), {
+      isBound: (nm: string): boolean => !!resolve(nm, scope) || !!(opts.isFileBound && opts.isFileBound(nm)),
+    });
+    const uses = opts.analyzeRaw(raw, resolveFree);
     if (!uses) { delete holder[RAW_ASYNC_MARK]; return; }
     holder[RAW_ASYNC_MARK] = uses;
     for (const e of uses.escapes) reportEscape(e.name, e, e.position, span);
@@ -546,6 +562,9 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
       else delete call[LOCAL_CALLEE_MARK];
       if (!res && nm && isSyncShadow(nm, scope)) call[LOCAL_SYNC_SHADOW_MARK] = true;
       else delete call[LOCAL_SYNC_SHADOW_MARK];
+      const _bare = (call.callee as ASTNode | undefined)?.kind === "ident" ? calleeName(call) : null;
+      if (_bare && (resolve(_bare, scope) || (opts.isFileBound && opts.isFileBound(_bare)))) call[BOUND_CALLEE_MARK] = true;
+      else delete call[BOUND_CALLEE_MARK];
     },
     (ident, scope, link) => {
       const nm = typeof ident.name === "string" ? ident.name : null;

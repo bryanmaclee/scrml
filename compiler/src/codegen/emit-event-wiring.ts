@@ -20,7 +20,7 @@ import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
-import { colorAsyncFunctionExpr } from "./js-async-analysis.ts";
+import { colorAsyncFunctionExpr, unanalyzableHandlerUses } from "./js-async-analysis.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
 
@@ -478,8 +478,14 @@ function exprUsesServerFn(expr: string, serverFnNames: Set<string>): boolean {
 function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileContext): string {
   if (!handlerExpr) return handlerExpr;
   const facts = clientAsyncFactsOf(ctx);
-  const colored = colorAsyncFunctionExpr(handlerExpr, freeAsyncResolverFromFacts(facts));
-  if (!colored) return handlerExpr;
+  const resolveFree = freeAsyncResolverFromFacts(facts);
+  const colored = colorAsyncFunctionExpr(handlerExpr, resolveFree);
+  if (!colored) {
+    // s441 fix round — fail CLOSED on handler text the analysis cannot read.
+    const u = unanalyzableHandlerUses(handlerExpr, resolveFree);
+    if (u) for (const err of jsAsyncUsesErrors(u, span, ctx.filePath)) ctx.errors.push(err);
+    return handlerExpr;
+  }
   for (const err of jsAsyncUsesErrors(colored, span, ctx.filePath)) ctx.errors.push(err);
   return colored.code;
 }

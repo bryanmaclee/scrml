@@ -71,7 +71,14 @@ export interface ResolvedAsync {
   local: boolean;
 }
 
-export type FreeAsyncResolver = (name: string) => ResolvedAsync | null;
+export type FreeAsyncResolver = ((name: string) => ResolvedAsync | null) & {
+  /**
+   * s441 fix round — is a name that is free in the fragment nevertheless BOUND by
+   * the program (a file-scope fn / decl / import, or a binding of the scrml scope
+   * the fragment sits in)? Only an unbound scheduler name is the global one.
+   */
+  isBound?: (name: string) => boolean;
+};
 
 /** An async call the compiler cannot await where it sits. */
 export interface JsAsyncCall extends ResolvedAsync {
@@ -89,6 +96,25 @@ export interface JsAsyncEscape extends ResolvedAsync {
 export interface JsAsyncUses {
   calls: JsAsyncCall[];
   escapes: JsAsyncEscape[];
+  /**
+   * s441 fix round — `.then` / `.catch` / `.finally` read off a call the compiler
+   * awaits: `(await f()).then(…)` calls `.then` on the RESOLVED value (a TypeError
+   * for any non-thenable). Reported as E-ASYNC-CALL-PROMISE-METHOD.
+   */
+  promiseMethods?: Array<{ name: string; method: string }>;
+  /**
+   * s441 fix round — `event.preventDefault()` / `stopPropagation()` /
+   * `stopImmediatePropagation()` placed after the handler's first `await`: by then
+   * the browser has already run the default action / propagated the event.
+   * Reported as E-EVENT-CONTROL-AFTER-AWAIT.
+   */
+  eventControlAfterAwait?: Array<{ method: string }>;
+  /**
+   * s441 fix round — the handler text could not be analysed (it does not parse)
+   * and mentions these async-colored names: fail CLOSED
+   * (E-ASYNC-HANDLER-UNANALYZABLE) rather than ship it unawaited.
+   */
+  unanalyzable?: Array<{ name: string }>;
 }
 
 export interface ColoredBody extends JsAsyncUses {
@@ -398,6 +424,8 @@ interface AnalyzeOpts {
   transform: boolean;
   /** The function whose asyncness the caller controls (handler / mount block), or null. */
   root: N | null;
+  /** The handler's event parameter name — enables the event-control check (handlers only). */
+  eventParam?: string | null;
   /** Leave a SERVER fn call that is the direct value of `_scrml_(cs_)reactive_set` alone (emit-client's IIFE lift owns it). */
   reactiveArg1Skip: boolean;
 }
@@ -507,11 +535,27 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
   // its synchronous shape byte-for-byte.
   let rootAsync = false;
   let curFn: N = null;
-  const noteAwait = (): void => { if (curFn !== null && curFn === opts.root) rootAsync = true; };
+  // The source position of the root's first own-level await (inserted or already
+  // present) — for the event-control check.
+  let firstOwnAwait = Infinity;
+  const noteAwait = (pos?: number): void => {
+    if (curFn !== null && curFn === opts.root) {
+      rootAsync = true;
+      if (typeof pos === "number" && pos < firstOwnAwait) firstOwnAwait = pos;
+    }
+  };
+  const promiseMethods: Array<{ name: string; method: string }> = [];
+  const PROMISE_METHODS = new Set(["then", "catch", "finally"]);
+  const checkPromiseMethod = (node: N, parent: N, name: string): void => {
+    if (parent && parent.type === "MemberExpression" && parent.object === node && !parent.computed &&
+        parent.property && parent.property.type === "Identifier" && PROMISE_METHODS.has(parent.property.name)) {
+      promiseMethods.push({ name, method: parent.property.name });
+    }
+  };
 
   const at = (pos: number): number => pos - P;
   const addAwait = (node: N, parent: N, depth: number): void => {
-    noteAwait();
+    noteAwait(node.start);
     if (needsWrap(node, parent)) {
       edits.push({ pos: at(node.start), end: at(node.start), text: "(await ", kind: "open", depth });
       edits.push({ pos: at(node.end), end: at(node.end), text: ")", kind: "close", depth });
@@ -541,6 +585,7 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
       curFn = prevFn;
       return;
     }
+    if (node.type === "AwaitExpression" || (node.type === "ForOfStatement" && node.await === true)) noteAwait(node.start);
     // Class field initializers and static blocks are sync contexts.
     if (node.type === "PropertyDefinition") {
       if (node.computed) visit(node.key, node, awaitLegal, depth + 1);
@@ -566,7 +611,8 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
             const recv = node.callee.object;
             const prefix = `_scrml_${method}Async(`;
             if (awaitLegal) {
-              noteAwait();
+              noteAwait(node.start);
+              checkPromiseMethod(node, parent, `${method}(…)`);
               const wrap = needsWrap(node, parent);
               edits.push({ pos: at(node.start), end: at(node.start), text: (wrap ? "(await " : "await ") + prefix, kind: "open", depth });
               if (wrap) edits.push({ pos: at(node.end), end: at(node.end), text: ")", kind: "close", depth });
@@ -590,7 +636,8 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
 
       // (b) a global fire-and-forget scheduler DISCARDS its callback's return.
       if (node.callee && node.callee.type === "Identifier" && KNOWN_DISCARD_HOF.has(node.callee.name) &&
-          refs.has(node.callee) && refs.get(node.callee) === undefined) {
+          refs.has(node.callee) && refs.get(node.callee) === undefined &&
+          !(resolveFree.isBound && resolveFree.isBound(node.callee.name))) {
         for (const a of args) {
           if (a && a.type === "Identifier" && asyncOf(a)) consumed.add(a);
           else if (opts.transform && a && (a.type === "ArrowFunctionExpression" || a.type === "FunctionExpression") &&
@@ -621,7 +668,10 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
             REACTIVE_ARG1_WRAPPERS.has(parent.callee.name) && parent.arguments[1] === node;
           const alreadyAwaited = !!parent && parent.type === "AwaitExpression";
           if (!arg1Skip && !alreadyAwaited) {
-            if (opts.transform && awaitLegal) addAwait(node, parent, depth);
+            if (opts.transform && awaitLegal) {
+              addAwait(node, parent, depth);
+              checkPromiseMethod(node, parent, node.callee.name);
+            }
             else calls.push({ name: node.callee.name, ...r });
           }
         }
@@ -706,7 +756,33 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
 
   visit(program, null, false, 0);
 
-  return { code: applyEdits(src.slice(P, bodyEnd), edits), rootAsync, calls: dedupeCalls(calls), escapes: dedupeEscapes(escapes) };
+  // Event control after the first own-level await (handlers only).
+  const eventControlAfterAwait: Array<{ method: string }> = [];
+  if (opts.root && opts.eventParam && firstOwnAwait !== Infinity) {
+    const CONTROL = new Set(["preventDefault", "stopPropagation", "stopImmediatePropagation"]);
+    const walk = (n: N): void => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+      if (n !== opts.root && isFn(n)) return;
+      if (n.type === "CallExpression" && n.callee && n.callee.type === "MemberExpression" && !n.callee.computed &&
+          n.callee.object && n.callee.object.type === "Identifier" && n.callee.object.name === opts.eventParam &&
+          refs.get(n.callee.object) !== undefined &&
+          n.callee.property && CONTROL.has(n.callee.property.name) && n.start > firstOwnAwait) {
+        eventControlAfterAwait.push({ method: n.callee.property.name });
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "type" || key === "start" || key === "end") continue;
+        const v = n[key];
+        if (v && typeof v === "object") walk(v);
+      }
+    };
+    walk(opts.root.body);
+  }
+  return {
+    code: applyEdits(src.slice(P, bodyEnd), edits), rootAsync, calls: dedupeCalls(calls), escapes: dedupeEscapes(escapes),
+    ...(promiseMethods.length ? { promiseMethods } : {}),
+    ...(eventControlAfterAwait.length ? { eventControlAfterAwait } : {}),
+  };
 }
 
 function dedupeCalls(list: JsAsyncCall[]): JsAsyncCall[] {
@@ -855,9 +931,31 @@ export function colorActiveHandler(fnText: string, span?: unknown): string {
   const active = _activeClientAsync;
   if (!active || !fnText) return fnText;
   const colored = colorAsyncFunctionExpr(fnText, active.resolveFree);
-  if (!colored) return fnText;
+  if (!colored) {
+    const u = unanalyzableHandlerUses(fnText, active.resolveFree);
+    if (u) active.report(u, span);
+    return fnText;
+  }
   active.report(colored, span);
   return colored.code;
+}
+
+/**
+ * s441 fix round — a handler whose text does not parse cannot be analysed, so its
+ * server calls cannot be awaited. If it mentions any async-colored name, report it
+ * (fail CLOSED); otherwise nothing async is at stake and the text stands. The scan
+ * is deliberately coarse (every identifier-shaped token, strings included): a
+ * false positive is a loud error on text that is already malformed.
+ */
+export function unanalyzableHandlerUses(fnText: string, resolveFree: FreeAsyncResolver): JsAsyncUses | null {
+  // Text that parses (a bare reference, a non-function expression) is not this
+  // case — only text the analysis could not read at all.
+  if (tryParse("(" + fnText + "\n)") || tryParse(fnText)) return null;
+  const names = new Set<string>();
+  for (const m of fnText.matchAll(/[A-Za-z_$][A-Za-z0-9_$]*/g)) names.add(m[0]);
+  const hits: Array<{ name: string }> = [];
+  for (const nm of names) if (resolveFree(nm)) hits.push({ name: nm });
+  return hits.length ? { calls: [], escapes: [], unanalyzable: hits } : null;
 }
 
 export interface ColorOpts {
@@ -896,7 +994,8 @@ export function colorAsyncFunctionExpr(code: string, resolveFree: FreeAsyncResol
   const root = program.body[0]?.expression;
   if (!root || (root.type !== "FunctionExpression" && root.type !== "ArrowFunctionExpression")) return null;
   if (root.start !== PREFIX.length) return null;
-  let r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, reactiveArg1Skip: opts.reactiveArg1Skip !== false });
+  const eventParam = root.params && root.params[0] && root.params[0].type === "Identifier" ? root.params[0].name : null;
+  let r = analyze(src, program, PREFIX.length, src.length - SUFFIX.length, resolveFree, { transform: true, root, eventParam, reactiveArg1Skip: opts.reactiveArg1Skip !== false });
   if (r.rootAsync && !root.async) r = { ...r, code: "async " + r.code };
   return r;
 }

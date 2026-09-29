@@ -3,7 +3,7 @@ import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
-import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError, serverFnSyncCallbackError, annotateNestedAsyncHelpers, syncCallbackErrorForSite, asyncEscapeErrors } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError, serverFnSyncCallbackError, annotateNestedAsyncHelpers, syncCallbackErrorForSite, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { SyncCallSite } from "./emit-library-shared.ts";
 import { localAsyncDeclRoot, rawAsyncUsesOf } from "./local-async-fns.ts";
 import type { AsyncRoot, AsyncEscapeSite } from "./local-async-fns.ts";
@@ -1053,6 +1053,7 @@ function emitModuleValueExportLines(
   {
     const _veReg = exportRegistry ?? null;
     const _veNestedFacts = {
+      boundNames: fileBoundNamesOf(fileAST),
       asyncFnNames,
       isStdlibAsync: (_veReg && _veReg.size > 0)
         ? (n: string): boolean => {
@@ -3915,6 +3916,7 @@ export function generateServerJs(
   // every call site in the handler and peer-callable bodies emitted below.
   {
     const _nestedFacts = {
+      boundNames: fileBoundNamesOf(fileAST),
       serverFnNames: _serverFnPeerNames,
       isStdlibAsync: _isAsyncStdlibName,
     };

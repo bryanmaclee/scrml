@@ -10,7 +10,7 @@ import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
 // transitive coloring fixpoint (shared with emit-server ss1 / emit-tool), the
 // per-file callee resolver, and the SERVER-mode stdlib auto-await classifier.
-import { computeAsyncFnNames, computeNestedAsyncFnHolders, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, stdlibAsyncPredicate, asyncEscapeErrors } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, computeNestedAsyncFnHolders, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, stdlibAsyncPredicate, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { setServerAsyncClassifier } from "./emit-expr.ts";
@@ -1004,6 +1004,7 @@ function emitAsyncLibraryFns(
   // nested async helper as async at every call / by-reference site.
   {
     const _libNestedFacts = {
+      boundNames: new Set<string>([...fileBoundNamesOf({ nodes: logicBody }), ...calleeMap.keys()]),
       asyncFnNames,
       isStdlibAsync: stdlibAsyncPredicate(calleeMap, exportRegistry),
     };

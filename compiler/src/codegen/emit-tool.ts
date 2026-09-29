@@ -28,7 +28,7 @@
 
 import type { CompileContext } from "./context.ts";
 import { getNodes, containsSql, containsSqlOrTransaction } from "./collect.ts";
-import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors } from "./emit-library-shared.ts";
+import { bodyHasForeignOrSql, computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
 import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { emitLogicNode } from "./emit-logic.js";
@@ -451,9 +451,10 @@ export interface ToolServeEmitDeps {
  * s440 — resolve nested helpers against the tool's async set (see local-async-fns.ts);
  * s441 (S440 F4) — and report every async fn a tool body uses as a VALUE.
  */
-function annotateToolFns(fns: ASTNode[], asyncFnNames: Set<string>, filePath: string, errors?: unknown[]): void {
+function annotateToolFns(fns: ASTNode[], asyncFnNames: Set<string>, filePath: string, errors: unknown[] | undefined, fileAST: unknown): void {
   const escapes: AsyncEscapeSite[] = [];
-  for (const _f of fns) annotateNestedAsyncHelpers(_f, { asyncFnNames }, /*sqlIsAsync*/ true, escapes);
+  const boundNames = fileBoundNamesOf(fileAST);
+  for (const _f of fns) annotateNestedAsyncHelpers(_f, { asyncFnNames, boundNames }, /*sqlIsAsync*/ true, escapes);
   if (!errors) return;
   for (const err of asyncEscapeErrors(escapes, filePath)) {
     const es = err.span as { start?: number };
@@ -504,7 +505,7 @@ export function generateToolJs(
   const fns = stmts.filter(isFunctionDecl);
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   // s440 — nested helpers resolved against the tool's async set (see local-async-fns.ts).
-  annotateToolFns(fns, asyncFnNames, filePath, errors);
+  annotateToolFns(fns, asyncFnNames, filePath, errors, fileAST);
   // Foreign crossing-shadow errors (E-FOREIGN-006) surface via this sink.
   const foreignCrossingErrors: unknown[] = [];
   // E-SQL-006 (§44.3) — `.prepare()` on a `?{}` result in a tool fn body surfaces
@@ -728,7 +729,7 @@ function generateServeHarnessToolJs(
   const fns = stmts.filter(isFunctionDecl);
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   // s440 — nested helpers resolved against the tool's async set (see local-async-fns.ts).
-  annotateToolFns(fns, asyncFnNames, filePath, errors);
+  annotateToolFns(fns, asyncFnNames, filePath, errors, fileAST);
   const foreignCrossingErrors: unknown[] = [];
   // E-SQL-006 (§44.3) — dedicated narrow .prepare() sink (mirror of foreignCrossingErrors).
   const preparedStmtErrors: unknown[] = [];
@@ -1008,7 +1009,7 @@ export function generateToolLibraryJs(
   // lib must await it too (mirrors generateToolJs's Flag-C seed).
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, asyncImportedNames);
   // s440 — nested helpers resolved against the tool's async set (see local-async-fns.ts).
-  annotateToolFns(fns, asyncFnNames, filePath, errors);
+  annotateToolFns(fns, asyncFnNames, filePath, errors, fileAST);
   const foreignCrossingErrors: unknown[] = [];
   // E-SQL-006 (§44.3) — dedicated narrow .prepare() sink (mirror of foreignCrossingErrors).
   const preparedStmtErrors: unknown[] = [];

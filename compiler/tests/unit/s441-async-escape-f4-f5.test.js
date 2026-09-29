@@ -36,7 +36,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { analyzeRawJsFragment, colorAsyncFunctionExpr, colorAsyncStatements, fnTextHasOwnAwait, bodyTextHasOwnAwait } from "../../src/codegen/js-async-analysis.ts";
+import { analyzeRawJsFragment, colorAsyncFunctionExpr, colorAsyncStatements, fnTextHasOwnAwait, bodyTextHasOwnAwait, unanalyzableHandlerUses, colorActiveHandler, setActiveClientAsync } from "../../src/codegen/js-async-analysis.ts";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/s441-async-escape-f4-f5");
 
@@ -593,6 +593,163 @@ function go() { @out = check("x", "y") + ranked([3, 1, 2]) }
   test("F1 guard: a sync verifyPassword in a NON-enclosing block does not demote the import", () => {
     const o = src(`if (false) { function verifyPassword(a, b) { return a - b } }\n  return xs.sort(verifyPassword).join(",")`);
     expect(o.codes).toContain(STDLIB_CODE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FIX ROUND (review:S441-f4f5-review)
+// ---------------------------------------------------------------------------
+describe("fix round 1 — a program-bound scheduler name is not the global scheduler", () => {
+  const serverNested = (decl, use) => compileFile(`<program>
+${AUTH_IMPORT}<v> = "unset"
+server function check(pw, hash) {
+  function m(h) { return verifyPassword(pw, h) }
+  ${decl}
+  return ${use} ? "accepted" : "rejected"
+}
+function go() { @v = check("wrong", "h") }
+<button onclick=go()>go</button>
+</program>
+`);
+  for (const nm of ["setTimeout", "queueMicrotask", "requestAnimationFrame"]) {
+    test(`a LOCAL \`function ${nm}(f)\` handed an async fn → ${ESCAPE}`, () => {
+      const o = serverNested(`function ${nm}(f) { return f(hash) }`, `${nm}(m)`);
+      expect(o.codes).toContain(ESCAPE);
+    });
+  }
+  test("a local scheduler given the async stdlib fn directly (`setTimeout(verifyPassword, pw, hash)`) → escape", () => {
+    const o = serverNested(`function setTimeout(f, a, b) { return f(a, b) }`, `setTimeout(verifyPassword, pw, hash)`);
+    expect(o.codes).toContain(ESCAPE);
+  });
+  test("a FILE-SCOPE `function setTimeout` (client) → escape", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+function m(n) { return isOk(n) }
+function setTimeout(f) { return f(1) }
+function decide() { return setTimeout(m) ? "accepted" : "rejected" }
+function go() { @v = decide() }
+<button onclick=go()>go</button>
+</program>
+`);
+    expect(o.codes).toContain(ESCAPE);
+  });
+  test("a handler-local scheduler → escape", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+<button onclick=\${ function setTimeout(f) { return f(1) } @v = setTimeout(isOk) ? "a" : "r" }>go</button>
+</program>
+`);
+    expect(o.codes).toContain(ESCAPE);
+  });
+  test("a local scheduler given an async LAMBDA → the call in the lambda fails closed (no async lift)", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+function decide() {
+  function setTimeout(f) { return f() }
+  return setTimeout(() => isOk(1)) ? "accepted" : "rejected"
+}
+function go() { @v = decide() }
+<button onclick=go()>go</button>
+</program>
+`);
+    expect(o.codes).toContain(SERVER_CODE);
+  });
+  test("control: the GLOBAL setTimeout still takes an async fn / callback", () => {
+    const o = serverNested(`setTimeout(m, 10)`, `true`);
+    expect(o.codes).toEqual([]);
+  });
+});
+
+describe("fix round 2 — event control after the first await", () => {
+  const app = (attr) => compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+${attr}
+</program>
+`);
+  test("`preventDefault()` after an awaited call → E-EVENT-CONTROL-AFTER-AWAIT", () => {
+    const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; event.preventDefault() }><button>s</button></form>`);
+    expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+    expect(o.errors.find((e) => e.code === "E-EVENT-CONTROL-AFTER-AWAIT").message).toContain("preventDefault");
+  });
+  test("`stopPropagation()` after an awaited call → error", () => {
+    const o = app(`<div><button onclick=\${ @v = isOk(1) ? "a" : "r"; event.stopPropagation() }>b</button></div>`);
+    expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+  });
+  test("a CONDITIONAL preventDefault in the branch of an awaited test → error (not auto-hoisted)", () => {
+    const o = app(`<a href="/x" onclick=\${ if (isOk(1)) { @v = "a" } else { event.preventDefault(); @v = "r" } }>l</a>`);
+    expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+  });
+  test("control: preventDefault BEFORE the first await compiles and runs synchronously", () => {
+    const o = app(`<form onsubmit=\${ event.preventDefault(); @v = isOk(1) ? "a" : "r" }><button>s</button></form>`);
+    expect(o.codes).toEqual([]);
+    expect(handlers(o.clientJs)[0]).toMatch(/^async function\(event\) \{ event\.preventDefault\(\);/);
+  });
+  test("control: a handler with no await may call preventDefault anywhere", () => {
+    const o = app(`<form onsubmit=\${ @v = "x"; event.preventDefault() }><button>s</button></form>`);
+    expect(o.codes).toEqual([]);
+  });
+});
+
+describe("fix round 3 — `.then` / `.catch` / `.finally` on an awaited call", () => {
+  for (const m of ["then", "catch", "finally"]) {
+    test(`handler: \`isOk(1).${m}(…)\` → E-ASYNC-CALL-PROMISE-METHOD`, () => {
+      const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+<button onclick=\${ isOk(1).${m}((r) => { @v = "x" }) }>go</button>
+</program>
+`);
+      expect(o.codes).toContain("E-ASYNC-CALL-PROMISE-METHOD");
+      expect(o.errors.find((e) => e.code === "E-ASYNC-CALL-PROMISE-METHOD").message).toContain(`.${m}`);
+    });
+  }
+  test("on mount: `isOk(2).then(…)` → error", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+on mount {
+  isOk(2).then((r) => { @v = "m" })
+}
+</program>
+`);
+    expect(o.codes).toContain("E-ASYNC-CALL-PROMISE-METHOD");
+  });
+  test("control: a member read that is not a Promise method (`isOk(1).ok`) is awaited, no error", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return { ok: n > 100 } }
+<button onclick=\${ @v = isOk(1).ok ? "a" : "r" }>go</button>
+</program>
+`);
+    expect(o.codes).toEqual([]);
+  });
+});
+
+describe("fix round 4 — an unanalysable handler fails closed", () => {
+  const facts = (n) => (n === "isOk" ? { root: { kind: "server", via: "isOk" }, local: false } : null);
+  test("unparseable text that names an async fn → reported", () => {
+    const u = unanalyzableHandlerUses(`function(event) { if (isOk(1) { go() } }`, facts);
+    expect(u.unanalyzable.map((x) => x.name)).toEqual(["isOk"]);
+  });
+  test("unparseable text with no async name → nothing", () => {
+    expect(unanalyzableHandlerUses(`function(event) { if (x { go() } }`, facts)).toBeNull();
+  });
+  test("parseable text (a bare reference / non-function expression) is not this case", () => {
+    expect(unanalyzableHandlerUses(`isOk`, facts)).toBeNull();
+  });
+  test("colorActiveHandler reports it under the active client emission", () => {
+    const reported = [];
+    const prev = setActiveClientAsync({ resolveFree: facts, report: (u) => reported.push(u) });
+    try {
+      const out = colorActiveHandler(`function(event) { if (isOk(1) { go() } }`);
+      expect(out).toBe(`function(event) { if (isOk(1) { go() } }`);
+    } finally { setActiveClientAsync(prev); }
+    expect(reported.length).toBe(1);
+    expect(reported[0].unanalyzable[0].name).toBe("isOk");
   });
 });
 
