@@ -2904,6 +2904,8 @@ ${
         }
         const cap: Sym | not = f.wcap
         const granted: boolean = f.grants.replace || f.grants.edits.indexOf(edit) >= 0 || hasEditKind(f.grants.edits, edit)
+        // r1 F7: a granted edit that GROWS a fixed-length sequence breaks its length invariant
+        if (granted && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, what))
         if (granted && cap is some) {
             return addEffect(st, e.nid, EffectFact.EWrite({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
         }
@@ -3114,6 +3116,8 @@ ${
         if (shape > 2) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + " = @" + f.sym.hint + "." + callMethodName(value) + "(…)` is granted, but Core has no function value to lower it with (core.scrml has no lambda / host call)")
         }
+        // r1 F7: growing a FIXED-length sequence breaks its length invariant
+        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, shapeWhat(shape)))
         let elemTy: Type | not = not
         const pt: Type | not = p.ty
         if (pt is some) elemTy = seqElem(pt)
@@ -3172,6 +3176,38 @@ ${
     fn localEditRefused(env: Env, e: AExpr, method: string, args: AExpr[], st0: AS) -> AS {
         const st: AS = resolveExprs(env, args, not, st0)
         return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)")
+    }
+
+    // r1 F7: a sequence type whose length axis is FIXED (no `free` / bound,
+    // §66.12.1: omission is fully constrained) cannot grow — provably, so a
+    // growing edit is a compile error (§66.11.2 invariants; dpa-052 Q5).
+    fn growsFixed(t: Type | not) -> boolean {
+        if (t is not) return false
+        return seqFixed(t)
+    }
+
+    fn seqFixed(t: Type) -> boolean {
+        return match t {
+            .Seq(elem: el, grants: g) :> isFixedLength(g.length)
+            .Int :> false
+            .Num :> false
+            .Str :> false
+            .Bool :> false
+            .Named(sym: x) :> false
+            .Maybe(inner: i) :> false
+        }
+    }
+
+    fn isFixedLength(l: LengthGrant) -> boolean {
+        return match l {
+            .Fixed :> true
+            .Free :> false
+            .Bounded(min: a, max: b) :> false
+        }
+    }
+
+    fn fixedLengthMessage(name: string, what: string) -> string {
+        return "`@" + name + "`: " + what + " grows the sequence, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)"
     }
 
     fn callMethodName(v: AExpr) -> string {
