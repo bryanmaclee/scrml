@@ -8,7 +8,7 @@
 //     no-op from .Done (§51.0.F.1), E-ENGINE-INVALID-TRANSITION otherwise;
 //   - each `<card>` has its own `status` (a per-instance transition graph);
 //   - its negative lines: `single` on `status` → E-COMPONENT-ENGINE-SCOPE;
-//     `<phase/>` → E-DECL-SINGLE-INSTANTIATED is conditional on ⚑ O55 (OPEN).
+//     `<phase/>` → E-DECL-SINGLE-INSTANTIATED (O55 RULED S442).
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd, programFiles, compileClean, codesOf, replaceLine, negativeLines, readM4 } from "./harness.js";
@@ -107,7 +107,7 @@ describe("§66.19.6 — behaviour", () => {
 const NEGATIVE = [
   { code: "E-COMPONENT-ENGINE-SCOPE", marker: "writing `single` on `status` here",
     edit: (src) => src.replace("<status:Phase=.Idle>", "<status:Phase=.Idle single>") },
-  { code: "E-DECL-SINGLE-INSTANTIATED", marker: "<phase/> → E-DECL-SINGLE-INSTANTIATED", open: "O55",
+  { code: "E-DECL-SINGLE-INSTANTIATED", marker: "<phase/> → E-DECL-SINGLE-INSTANTIATED",
     edit: (src) => replaceLine(src, "<phase/> → E-DECL-SINGLE-INSTANTIATED", "<phase/>") },
 ];
 
@@ -130,12 +130,21 @@ describe("§66.19.6 — negative lines", () => {
     expect(d[0].message).toContain("its own `status`");
   });
 
-  test.todo("`<phase/>` → E-DECL-SINGLE-INSTANTIATED — conditional on ⚑ O55 (OPEN: an error, or a render of the one instance); not decided by the bootstrap");
-
-  test("until O55 rules, a plain `<phase/>` is REFUSED (bootstrap-unsupported, naming O55) — never rendered as an HTML element", () => {
+  test("`<phase/>` → E-DECL-SINGLE-INSTANTIATED (O55 RULED S442: a plain use of a `single` declaration is an error)", () => {
     const d = compileDiags(NEGATIVE[1].edit(SRC()));
-    expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(d[0].message).toContain("O55");
+    expect(d.map((x) => x.code)).toEqual(["E-DECL-SINGLE-INSTANTIATED"]);
+    expect(d[0].message).toContain("<*phase/>");
+  });
+
+  test("O55 on a USER declaration: `<card … single>` used twice → E-DECL-SINGLE-INSTANTIATED at each use; `<*card/>` renders the one instance", async () => {
+    const decl = `<program>\n    <card title:string="x" single>\n        <n:int=0/>\n    </>\n    renders <article>\${title}</article>\n    <main>\n@@\n    </main>\n</program>\n`;
+    expect(compileDiags(decl.replace("@@", `        <card title="One"/>\n        <card title="Two"/>`)).map((x) => x.code))
+      .toEqual(["E-DECL-SINGLE-INSTANTIATED", "E-DECL-SINGLE-INSTANTIATED"]);
+    const ok = frontEnd(mods, [{ path: "c.scrml", src: decl.replace("@@", "        <*card/>\n        <*card/>") }]);
+    expect(ok.diags).toEqual([]);
+    const { rt } = await loadProgram(ok.core, "single-user");
+    expect([...document.querySelectorAll("main > article")].map((a) => a.textContent)).toEqual(["x", "x"]);
+    expect(instancesOf(rt, "card").length).toBe(1);
   });
 });
 

@@ -124,3 +124,19 @@ slice-m4 71 pass + 2 todo · lint-no-default-arm 34 files / 0 violations · conf
 (unchanged) · footprint 18/18 runtime, 10 codes-only, 579 not-yet, 447 front-end (unchanged — printer / runtime /
 ingest untouched) · bite matrix: 32 footprint constructs CERTIFIED (unchanged) + 12 front constructs CERTIFIED
 (21 behaviour tests, 15 mutations) · mutations.js 94/94 RED.
+
+## FIX ROUND r1 (adversarial review of 5ceef638: DO-NOT-LAND)
+Reproduction (reviewer tests copied read-only to scratchpad/repro/, paths retargeted to this worktree; run at 5ceef638):
+- F1 REPRODUCED — `bun test repro/r2.test.js`: localAppend / localAppendConst / localFilter / localAppendWrongType all compile
+  with NO diagnostic and `lp()` returns 1 (the statement is deleted); paramAppend emits `null;` and throws at runtime.
+- F2 REPRODUCED — `repro/r6.test.js` singleUserDeclTwice: no diagnostic, cards=2.
+- F3 REPRODUCED — `repro/r5.test.js`: `<p : @n >= 3>` renders `<p>5</p>= 3&gt;`; `<p : @n > 3>` renders `<p>5</p> 3&gt;`.
+- F4 REPRODUCED — `repro/r7.test.js` bareWord `Ready now` renders as text, no diagnostic; `repro/r6.test.js`
+  stateChildBareBody `"Ready"` renders WITH quotes; cardChildBodies free text.
+- F5 REPRODUCED — `repro/r9.test.js`: two appended elements read `@audit.length` as 2 then 3.
+- F6 REPRODUCED — `repro/r8.test.js`: after `[mk("a"), mk("b"), ...@audit]` the actor is `a` (right-to-left evaluation).
+- F7 REPRODUCED — `repro/r1.test.js`: `Entry[end]` (fixed length) compiles, and push + spread-append grow it.
+- Nits reproduced: `<p : @n></>` and `<p : <span>x</span>>` cascade (r5); `@phase = [...@phase, .Done]` is
+  E-WRITE-NOT-GRANTED, not a type error (r3); `<*status/>` at top → E-DECL-STAR-PREDEFINED "predefined (HTML)" (r10);
+  duplicate `<Idle>` state-children accepted silently (r6 stateChildDup).
+- NEW RULING (bryan S442): O55 = a plain use of a `single` declaration is E-DECL-SINGLE-INSTANTIATED.

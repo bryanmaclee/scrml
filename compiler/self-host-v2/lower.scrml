@@ -453,7 +453,7 @@ ${
             .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value)
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
             .EAssignLocal(sym: s) :> assignLocal(c, s, value)
-            .EEdits(w: w, elems: es) :> editStmts(c, w, es)
+            .EEdits(w: w, elems: es, tmps: ts) :> editStmts(c, w, es, ts)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
@@ -494,28 +494,40 @@ ${
         return [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, value), w.check)]
     }
 
-    // s442 — a recognized sequence shape (§66.11.2): `@x = [...@x, a, b]` is the
-    // end-appends of `a` then `b` (the same edits as `@x.push(a); @x.push(b)`);
-    // `@x = [a, b, ...@x]` the front-prepends of `b` then `a`, so the result
-    // reads `[a, b, …]`. Every element is evaluated before the first write —
-    // the array literal is one value built from one snapshot (§66.10).
-    fn editStmts(c: LC, w: WriteFact, elems: AExpr[]) -> Stmt[] {
+    // s442 / r1 F5 F6 — a recognized sequence shape (§66.11.2): `@x = [...@x, a, b]`
+    // is the end-appends of `a` then `b` (the same edits as `@x.push(a);
+    // @x.push(b)`); `@x = [a, b, ...@x]` the front-prepends that leave the
+    // result reading `[a, b, …]`. The array literal is ONE value: every new
+    // element is evaluated, LEFT TO RIGHT, into its local (analyze minted
+    // `tmps`) before any write, so no element sees another's edit (`at:
+    // @x.length` twice reads the same length). Two or more writes form one
+    // Commit (all-or-nothing, batched); one element needs no local — its value
+    // is evaluated before its own single write.
+    fn editStmts(c: LC, w: WriteFact, elems: AExpr[], tmps: Sym[]) -> Stmt[] {
         let values: Expr[] = []
         for (const x of elems) { values = values.concat([lowerExpr(c, x)]) }
-        const prepend: boolean = w.edit == EditKind.Prepend
-        let out: Stmt[] = []
-        if (prepend) {
-            let k: int = values.length - 1
-            while (k >= 0) {
-                out = out.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, values[k], w.check)])
-                k = k - 1
-            }
-            return out
-        }
+        const target: InstRef = instOf(c, w.inst)
+        if (values.length == 1) return [Stmt.Write(w.cap, target, w.edit, values[0], w.check)]
+        let lets: Stmt[] = []
+        let k = 0
         for (const v of values) {
-            out = out.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, v, w.check)])
+            lets = lets.concat([Stmt.Let(tmps[k], v)])
+            k = k + 1
         }
-        return out
+        const prepend: boolean = w.edit == EditKind.Prepend
+        let writes: Stmt[] = []
+        if (prepend) {
+            let j: int = tmps.length - 1
+            while (j >= 0) {
+                writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(tmps[j]), w.check)])
+                j = j - 1
+            }
+        } else {
+            for (const t of tmps) {
+                writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(t), w.check)])
+            }
+        }
+        return lets.concat([Stmt.Commit(writes)])
     }
 
     fn assignLocal(c: LC, s: Sym, value: AExpr | not) -> Stmt[] {
