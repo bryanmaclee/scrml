@@ -4484,6 +4484,20 @@ ${
     }
 
     fn checkKnown(env: TEnv, x: Type, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
+        // r5 R6: an UN-NARROWED `T | not` into a non-optional `int`-bearing
+        // position may put `not` into an `int` (§34 E-TYPE-031: "a value is
+        // assigned to a position whose declared type it does not satisfy").
+        // (A narrowed value reads as `T` and never reaches here as `T | not`.)
+        // Scoped to `int` targets — the S442 int ruling; for other types the
+        // S439 "unproven" reading of a `T | not` into `T` stands (flagged).
+        if (maybeInner(x) is some && maybeInner(target) is not && hasInt(target)) {
+            const xi: Type | not = maybeInner(x)
+            if (xi is some) {
+                if (fitsType(xi, target) != Verdict.Fails) {
+                    return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` — it may be `not`; narrow it first (`if (x != not) { … }`) (§34 E-TYPE-031; `int` enforced, ruled S442)")
+                }
+            }
+        }
         if (fitsType(x, target) != Verdict.Fails) return ts
         return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
     }

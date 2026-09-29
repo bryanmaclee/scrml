@@ -654,6 +654,19 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp("    function f() { let ks: int[] = [1, 2.5] }")).toEqual(["E-TYPE-031"]);
     expect(codes([boxLibS("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxAppS("<box n=(0.5 * 2)/>")])).toEqual(["E-TYPE-031"]);
   });
+  test("r5 R6 — an UN-NARROWED `int | not` into an `int` position is E-TYPE-031 (return, argument, local, cell write)", () => {
+    const d = run([LIB(), app(O + "    function f() { @m = @o.n }", "<p>x</p>")]).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-TYPE-031"]);
+    expect(d[0].message).toContain("narrow it first");
+    expect(inApp(O + "    function h() -> int { return @o.n }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    function g(k: int) { }\n    function f() { g(@o.n) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    function f() { let k: int = @o.n }")).toEqual(["E-TYPE-031"]);
+  });
+  test("r5 R6 twins — narrowed, into `int | not`, or a non-int target (the S439 `T | not` into `T` reading stands there)", () => {
+    expect(inApp(O + "    function f() { if (@o.n != not) { @m = @o.n\n let k: int = @o.n } }")).toEqual([]);
+    expect(inApp(O + "    function f() { let k: int | not = @o.n }")).toEqual([]);
+    expect(inApp(O + "    <let t:string=\"\"/>\n    function f() { @t = @o.v }")).toEqual([]);
+  });
   test("r4 (c) twins — int-typed initializers stay silent; `1e3` / `2.0` into int stay errors", () => {
     expect(inApp(CELLS + "    <let q:int=(@n * 2)/>\n    <ks:int[]=([1, 2])/>\n    function f() { let k: int = @n }")).toEqual([]);
     expect(inApp("    <let q:int=2.0/>")).toEqual(["E-TYPE-031"]);
