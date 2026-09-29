@@ -1,0 +1,10 @@
+{
+  "core": "t3ScriptWrites",
+  "spec": "§66.17 item 7",
+  "rationale": "Item 7: a match-over-enum token NOT recognized for the variant CSS \"still lowers — each token change is a separate `:root` write\". The stylesheet's part is that the use site reads `var(--ink)`, so the script's `:root` write drives the element (a second write re-drives it). What the token resolves to BEFORE the first write is not ruled and is not asserted (review F1): a script write is an inline `:root` style, which beats any stylesheet `:root` rule, so the stylesheet's own contribution for this token is unobservable once the script runs. Token.ScriptWrites therefore has no stylesheet emission to certify; its behaviour is the clientJs half (dpa-051 §8.4 step 3).",
+  "html": "<div data-scrml=\"Card\"><div class=\"card\">x</div></div>",
+  "steps": [
+    { "rootStyle": ["--ink", "#0f172a"], "expect": [{ "sel": ".card", "prop": "color", "value": "rgb(15, 23, 42)" }] },
+    { "rootStyle": ["--ink", "#e2e8f0"], "expect": [{ "sel": ".card", "prop": "color", "value": "rgb(226, 232, 240)" }] }
+  ]
+}

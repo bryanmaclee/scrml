@@ -1,0 +1,16 @@
+<program>
+  <mode> = .Light
+  <theme for=@mode>
+      ink = #111111;
+      .Dark  { ink = #eeeeee; }
+      .Sepia { ink = #704214; }
+  </theme>
+  const Card = <div props={}>
+      #{ .t { color: @ink; } }
+      <p class="t">t</p>
+  </>
+  <Card/>
+  <button id="dark" onclick=(@mode = .Dark)>d</button>
+  <button id="sepia" onclick=(@mode = .Sepia)>s</button>
+  <button id="light" onclick=(@mode = .Light)>l</button>
+</program>

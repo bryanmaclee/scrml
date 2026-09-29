@@ -8901,6 +8901,24 @@ function annotateNodes(
   // engine `for=` pattern), instead of firing E-VARIANT-AMBIGUOUS.
   const themeCellVariants = collectThemeCellVariants(fileAST);
 
+  // §19.3.3 bare `fail .V` (S441) — the file's import specifier names, built
+  // lazily on the first bare `fail` whose declared error type is NOT in the
+  // registry. An imported error type that the registry does not hold (single-
+  // file mode: no dep was compiled into it) is UNVERIFIABLE, not invalid, so a
+  // bare `fail` against it is resolved to the declared name and accepted —
+  // exactly as the qualified `fail T.V` is. Any other unresolved declared type
+  // (undeclared / non-enum) leaves the bare variant nothing to resolve against.
+  let _failImportNames: Set<string> | null = null;
+  const failImportNames = (): Set<string> => {
+    if (_failImportNames === null) {
+      const top = (fileAST.nodes as ASTNodeLike[] | undefined)
+        ?? ((fileAST.ast as FileAST | undefined)?.nodes as ASTNodeLike[] | undefined)
+        ?? [];
+      _failImportNames = collectImportSpecifierNames(top);
+    }
+    return _failImportNames;
+  };
+
   function functionBoundary(fnNode: ASTNodeLike): "server" | "client" {
     if (!routeMap || !routeMap.functions) return "client";
     const id = `${filePath}::${(fnNode.span as Span | undefined)?.start}`;
@@ -10597,8 +10615,9 @@ function annotateNodes(
             // E-ERROR-009: fail names a variant that is not a valid variant of
             // the declared error enum type (§19.3.3). Runs ONLY inside a `!`
             // function (the E-ERROR-001 gate above owns the non-`!` case). The
-            // fail-stmt grammar (§19.3.1) always names an enum-type + variant;
-            // three shapes are invalid here:
+            // fail-stmt grammar (§19.3.1) names an enum-type + variant, or a
+            // bare `.variant` that is first resolved against the declared error
+            // type (§19.3.3 bare form, S441); three shapes are invalid here:
             //   (1) undeclared variant of the DECLARED enum   (enumType == declared, variant absent)
             //   (2) a FOREIGN enum entirely                   (enumType != declared)
             //   (4) a non-enum target / missing variant       (enumType == "" || variant == "")
@@ -10606,11 +10625,23 @@ function annotateNodes(
             // distinct error class — the variant IS valid — and is NOT covered
             // by E-ERROR-009 (see the fail-arity note; unchecked, surfaced).
             if (k === "fail-expr" && canFail) {
-              const failEnum = ((stmt as Record<string, unknown>).enumType as string) ?? "";
+              let failEnum = ((stmt as Record<string, unknown>).enumType as string) ?? "";
               const failVariant = ((stmt as Record<string, unknown>).variant as string) ?? "";
               // The declared error type: explicit `! -> T` / `! T`, else the
               // built-in default `Error` enum (§19.4.2 — sole variant Generic).
               const declaredType = ((n as Record<string, unknown>).errorType as string) || "Error";
+              // §19.3.3 bare form (S441 ruling) — `fail .V` / `fail .V(args)`
+              // resolves `.V` against the DECLARED error type (§14.10 bare-
+              // variant inference applied to the `fail` target). The resolved
+              // enum name is written back onto the node so codegen emits the
+              // SAME `{ __scrml_error, type: "<T>", variant, data }` envelope as
+              // the qualified `fail T.V`; the validity checks below then run on
+              // the resolved variant exactly as for the qualified form.
+              const failIsBare = failEnum === "" && failVariant !== "";
+              if (failIsBare) {
+                failEnum = declaredType;
+                (stmt as Record<string, unknown>).enumType = declaredType;
+              }
               // Resolve the declared enum's valid variant names. The built-in
               // `Error` default is not in the type registry, so its sole variant
               // (`Generic`, §19.4.2) is supplied directly.
@@ -10671,6 +10702,29 @@ function annotateNodes(
                     }
                   }
                 }
+              } else if (
+                failIsBare &&
+                !(failImportNames().has(declaredType) &&
+                  (!typeRegistry.has(declaredType) || typeRegistry.get(declaredType)?.kind === "unknown"))
+              ) {
+                // Bare `fail .V` whose declared error type does not resolve to
+                // an enum (undeclared, a non-enum type, or a non-`type X:enum`
+                // shape that never registered). The qualified form names its
+                // enum itself; the bare form has ONLY the declared type to
+                // resolve against, so there is no variant set in which `.V`
+                // could be valid — accepting it would be vacuous (the S382
+                // gate asymmetry). An imported name whose declaration this
+                // compile cannot see (absent / `unknown` in the registry) is
+                // exempted: unverifiable here, not invalid. An imported name
+                // that DOES resolve, to a non-enum, is not exempt. Interim for
+                // the non-enum case: §19.4.4.1 E-ERROR-011 governs it once
+                // that code has an emitter (§19.3.3).
+                errors.push(new TSError(
+                  "E-ERROR-009",
+                  `E-ERROR-009: 'fail .${failVariant}' in function '${fnName}' cannot be resolved: the declared error type '${declaredType}' is not a declared enum type, so it has no variant '${failVariant}'. ` +
+                  `A failable function's error type must be an enum declared as 'type ${declaredType}:enum = { ... }' (§19.4.4.1).`,
+                  (stmt.span ?? n.span) as Span,
+                ));
               }
             }
             // Also detect `fail` that survives as a bare-expr string (e.g.

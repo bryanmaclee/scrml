@@ -1,0 +1,15 @@
+<program>
+  #{
+      p.c { padding: 4px; padding-left: 9px; }
+  }
+  const Card = <div props={}>
+      #{
+          .a { margin: 0; margin-top: 12px; }
+          .b { color: red; color: blue; }
+      }
+      <div class="a">a</div>
+      <span class="b">b</span>
+  </>
+  <Card/>
+  <p class="c">c</p>
+</program>
