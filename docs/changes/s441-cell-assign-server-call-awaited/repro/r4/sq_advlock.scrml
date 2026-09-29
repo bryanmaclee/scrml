@@ -1,0 +1,20 @@
+<program db="postgres://u:p@localhost:5432/app">
+${
+    <a> : number = 0
+    <b> : number = 0
+    server function rd1() {
+        const r = ?{`SELECT pg_advisory_lock(1) AS v`}.get()
+        return r
+    }
+    server function rd2() {
+        const r = ?{`SELECT count(*) AS v FROM t`}.get()
+        return r.v
+    }
+    function go() {
+        @a = rd1()
+        @b = rd2()
+    }
+}
+<button id="b" onclick=go()>b</>
+<p id="s">${@a} ${@b}</>
+</program>

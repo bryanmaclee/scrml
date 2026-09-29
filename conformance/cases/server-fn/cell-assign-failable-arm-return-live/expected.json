@@ -1,0 +1,18 @@
+{
+  "id": "server-fn-cell-assign-failable-arm-return-live",
+  "description": "§19.4.3 + §13.2 — a CELL-assigned failable SERVER call, `@out = risky(2) !{ | .Boom(m) :> { …; return } }`. The stub answers the Boom error envelope, so the arm runs and its `return` returns from the AUTHOR's function `load`: the statement after the handler (`@after = \"ran\"`) never runs and @out keeps its prior value (the error envelope never lands in the cell). The pre-fix emit wrapped the call + handler in a detached async IIFE, so the arm's `return` only left the IIFE and `@after = \"ran\"` executed anyway (g-failable-cell-load-fire-and-forget-stale-read-dead-return; S435 ruling: lift).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "rationale": "§19.4.3: the `!{}` handler's arm runs in the enclosing function's control flow, so a terminal `return` in an arm is the early-return-on-error idiom and exits that function. §13.2 SHALL insert `await` at the server call site and sequence dependent operations, so the handler decision is made on the RESOLVED envelope before the next statement runs.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "serverStub": { "risky": { "__serverError": { "type": "LoadError", "variant": "Boom", "data": { "msg": "neg" } } } },
+    "state": { "out": 0, "seen": "boom:neg", "after": "not-run" },
+    "domAnchored": [
+      { "selector": "#seen", "text": "boom:neg" },
+      { "selector": "#after", "text": "not-run" }
+    ]
+  }
+}

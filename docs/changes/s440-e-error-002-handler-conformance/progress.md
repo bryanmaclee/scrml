@@ -1,0 +1,80 @@
+# s440-e-error-002-handler-conformance — progress (append-only)
+
+## 2026-09-28 — start
+- Worktree `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ae3f795fdfd7f8631`, base `d244a6f3b` (== origin/main).
+- Maps: primary.map.md read; no map mentions E-ERROR-002 or a handler exemption. schema.map.md's `handlerBlock` entry (S437b) was load-bearing — it names the 2+-statement-only attach that IS the exemption's mechanism.
+
+## Governing sentences (Rule 4 gate)
+- §19.4.3: "Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002**"
+- §19.4.4: "The caller of a `!` function SHALL handle the result via match, `?`, `!{}`, or `<errorBoundary>`. An unhandled `!` function call SHALL be a compile error (E-ERROR-002)."
+- §5.2.3: "An inline block holding a single statement (`onclick={@filter = .All}`) is legal and equivalent to the bare shape of the same statement." and "No statement of the block SHALL be dropped, whatever its kind or position".
+- §41.14.3: "The submit handler signature SHALL match `fn(values: StructType) ! ErrorType`" — formFor's onsubmit is a reference that MUST be failable.
+No second SHALL contradicts these; no SPEC text grants a handler exemption.
+
+## Where the exemption lived (hypothesis check)
+- PA hypothesis: type-system.ts (+ lint-defer.ts mention). HELD for type-system.ts; lint-defer.ts is only a doc-comment mention of the E-ERROR-002 site (no decision there).
+- The exemption was by OMISSION in `visitAttr` (type-system.ts): a multi-statement handler (`value.handlerBlock`, attached by ast-builder `attachHandlerStatementList` only for 2+ statements or a multi-line single statement) is walked via `visitLogicNode` -> `bare-expr` case -> E-ERROR-002. One-statement forms (`call-ref` for bare `onclick=f()`, `expr` for `{ f() }` / `${f()}`) only got `checkLogicExprIdents` (scope check), never the failable-call check.
+
+## Before measure
+- `bun scratchpad/measure.ts <root> before.json` — compileScrml per file over examples/ samples/ conformance/ stdlib/ benchmarks/: files=2072, withErrors=714, E-ERROR-002 files=2 (both intentional neg fixtures).
+
+## Findings during impl
+- A `!{}`-guarded ONE-statement braced/`${}` handler (`onclick={ risky() !{ | .E :> ... } }`) SILENTLY DROPPED the guard at HEAD: the expression view stops at the call; emitted `function(event){ _scrml_risky(); }`. Fixed in ast-builder: a single guarded-expr statement takes the statement view (`handlerBlock`), so the guard is emitted and the call counts as handled.
+- formFor lowers `onsubmit=fn` to a synthesized call-ref tagged `formForSubmitCell` — exempted (the source is a reference).
+
+## After measure (same command)
+- Impl only (pre-migration): files=2072, withErrors=721 → newly-failing = 5 of the listed files (6 sites) + 4 formFor cases (synthesized call-ref) → formFor exempted → exactly the 5 listed files / 6 sites; zero other diffs.
+- Post-migration: files=2072, withErrors=714, E-ERROR-002 files=2 — per-file error-code sets IDENTICAL to before (diff empty: nothing newly accepted, nothing newly rejected).
+- sample server-failable-001 migrated to a non-failable wrapper fn (not inline `!{}`): an inline guarded handler block does NOT await a server call (pre-existing handlerBlock bug), a function body does.
+- Tests: unit+integration+conformance 25722 pass / 1 fail (defer-statement fixture with `onclick=work()` failable — migrated) ; browser 48 fail vs base 50 (base extra = TodoMVC dist env gap), no new; root/lsp/commands 6834/0.
+
+## SPEC + gap (commit e9917c46e)
+- §19.4.3 OPEN block replaced with ruled text + provenance; §34 rows (x2) do not mention the exemption — unchanged. SPEC-INDEX regenerated.
+- known-gaps g-e-error-002-handler-exemption-depends-on-statement-count → RESOLVED S440 (entry edit only).
+
+## Conformance pins
+- 4 new cases under conformance/cases/error/: handler-unhandled-failable-{multi-stmt,one-stmt,bare-and-expr}-pos + handler-failable-reference-and-guard-neg (runtime: click guarded → @r=7).
+- Bite check on a base-tree extract (git archive d244a6f3b): 3 of 4 FAIL at base (multi-stmt passes at base, as expected — it already fired); the guard-neg fails at base at RUNTIME (guard dropped).
+- conformance: base 1041/1048 (+7 xfail) → after 1045/1052 (+7 xfail, same 7).
+
+## Scope narrowing — CPS-implicit (post-adversarial)
+- Warnings-inclusive re-measure (errors+warnings, base = git-archive extract of d244a6f3b) showed the shared helper also newly emitted W-CPS-NEEDS-FAILABLE on 29 files (incl. examples/19-lin-token.scrml) — `onclick=serverFn()` where the server fn is CPS-implicit-failable (not declared `!`). The ruling covers DECLARED-`!` calls; escalating the W-CPS deprecation warning onto the most common server-call handler shape is a separate decision. Handler path now skips CPS-implicit callees.
+- Re-measure after: errors+warnings per-file sets identical to base except the 2 new pin cases. Unit test added.
+- Adversarial positions: each row / engine state-child / match arm / component-def body all fire once; component PROP callback (`<Btn act=risky/>` + `onclick=act()`) does not fire in ANY form (pre-existing — failability not tracked through fn-typed props); errorBoundary contains (E-ERROR-005 w/o fallback); `on mount {}` is a logic block (already fired at base, unchanged).
+
+## 2026-09-28 — FIX ROUND (S239 review DO-NOT-LAND on cd6089168)
+Reproduced before fixing (all on cd6089168, vs base extract d244a6f3b):
+- F1 REPRODUCED: `{ if (@r > 0) risky() }`, `{ if (c) { risky() } }`, `{ for (…) risky() }` exit 0; `{ if(…) risky(); @msg="y" }` errors. Multi-line one-statement form already fired (it takes handlerBlock).
+- F2 REPRODUCED: component `onclick=risky()` errors, `{ risky(); @r = 1 }` and `{ risky() }` clean (base: all three clean).
+- F3 REPRODUCED + ROOT-CAUSED: emit-match re-parses arm bodies natively and calls attachHandlerStatementListsInTree with parentBlock=null; the statement parser dereferences `parentBlock.type` when building the `!{}` child block → TypeError swallowed by the catch → no handlerBlock → single-expression path (guard + later statements dropped). Fixed in the shared parse core (synthetic markup parent).
+- F4 REPRODUCED (emit only): component `{ risky() !{…} }` → E-CODEGEN-INVALID-LOGIC. Different cause from F3: component bodies (native reparse in component-expander) never got statement lists. Fixed by attaching them in reparseSynthesizedFile (without exprNode synthesis — see below).
+- F5 REPRODUCED: fallback boundary suppressed E-ERROR-002; fallback-less boundary raised E-ERROR-005 x2 on one-statement handlers (base: only for multi-stmt). Runtime VERIFIED on base extract with a click probe: handler failure inside `<errorBoundary fallback=…>` does NOT render the fallback (#fb count 0), while a render-time `${risky()}` in the same boundary does (#fb count 1).
+- F7 REPRODUCED: `<each in=@fns as risky>` + `onclick=risky()` fired (new); base multi-stmt form also fired (base false positive).
+- F9 REPRODUCED: the `!{…}` after an unbraced call vanishes at tokenize (no attr, no diagnostic). LEFT (not cheap: the text is gone before TS; tokenizer-level). Filed.
+Found during the round: attaching statement lists to component bodies made the multi-statement form false-fire E-SCOPE-001 on prop refs (props were substituted into exprNode only) → CE now substitutes props into handlerBlock.stmts (also fixes a BASE silent drop: `{ @msg = label; @r = 1 }` in a component emitted only statement 1). Synthesizing exprNode for component bodies broke `{ if (@c) act() }` prop substitution (escape-hatch exprNode not substitutable) → component path attaches statement lists WITHOUT exprNode synthesis.
+F10: allowlist rise for server-failable-001 is the migration's new source, NOT the F3 handler divergence: v0(base src)→v1(+wrapper fn +<status> +interp, no guard) = FIELD-SHAPE 4→7, MISSING 8→13, SPAN 18→24; v1→v3(+ the `!{}` arms inside the wrapper FUNCTION body) = 7→9, 13→17, 24→27. The guard is in a function body (live vs native guarded-expr shape), not a handler.
+Measure (errors+warnings, per file, base extract vs worktree): only the 2 new pin cases differ. Emitted-output diff over examples/samples/conformance/benchmarks: only the migrated files + new cases (+2 path-only import-rewrite artifacts).
+
+## 2026-09-28 — F6 RULED mid-round (bryan S440 all recs #2 item 1: "check arrow bodies … emit its guard")
+- Reproduced first: `${(e) => risky()}` / `${() => { risky() }}` / `{ () => risky() }` all clean on base; guard `${(e) => risky() !{…}}` emitted `(e) => _scrml_risky()`; block-bodied guard arrow → E-CODEGEN-INVALID-LOGIC on base.
+- Impl: ast-builder `splitArrowHandlerValue` + `parseArrowHandlerStatements` parse the arrow BODY with the statement grammar; a single param `p` becomes a synthesized `const p = event` prelude (tagged `_handlerParamPrelude`; W-TYPE-031-UNPROVEN carve-out). Check: parseHandlerStatementsForCheck returns the body statements. Codegen: ONLY an arrow whose body holds a `!{}` guard lowers through handlerBlock; every other arrow keeps its as-is emission (corpus emit diff: zero changes). Not modelled: 2+ params, `function(e){}` expressions, an arrow that is only the first statement of a sequence (regular path — the s437-r4 arrow-seq neg cases pin this; they failed on my first cut and pass now).
+- Runtime: conformance/cases/error/handler-guard-in-arrow-rt (r → 11, kind → "click"); handler-unhandled-failable-arrow-pos (E-ERROR-002 x3). Both fail on base.
+- Corpus re-measure incl. arrow shapes (23 arrow handler values in 19 files by text): errors+warnings per file identical to base except the 3 pin cases. Nothing newly failing → nothing to bring back.
+- SPEC §19.4.3: arrow OPEN block replaced by the ruled paragraph + provenance; carried-gap paragraph + direction paragraph updated; ⚑ §19.6.6 tension flagged. known-gaps: main entry stays OPEN (F9, 2+-param arrows, function expressions, fn-prop bare call listed); new entries filed: unbraced guard (F9), value-position calls, imported failables (F8), fn-prop bare call, handler guard on server call not awaited (item 3), `{ risky()? }` codegen error (item 5), formFor onsubmit error discard (item 6). F11: no description was given in the fix-round message — NOT filed.
+
+## 2026-09-28 — fix round verification (HEAD db17b80f7)
+- Pre-commit gate (unit+integration+conformance+…): 32151 pass / 0 fail.
+- Whole `bun test compiler/tests/` (the post-commit set): wt 33962 pass / 55 fail vs base extract 33809 pass / 58 fail; the wt fail set is a SUBSET of base's (all browser/happy-dom whole-suite + nav/Bug-60 env fails). Browser alone: 48 fail = base set minus the 2 TodoMVC dist env-gap.
+- conformance/run.ts: 1049/1056 + 7 xfail (base 1041/1048 + same 7 xfail). All 8 new cases fail on base.
+- Corpus (errors+warnings per file) vs base: only the 3 E-ERROR-002 pin cases differ. Emitted JS vs base: only the migrated 5 files + new cases (+2 path-only import artifacts).
+
+## 2026-09-28 — FINAL FIX ROUND (re-review of 5d82298c2; rulings #22 #18 #19)
+- Merged origin/main (b30364c36) → c82f6d506, no conflicts.
+- Reproduced first: N2 (component guard arm prop → E-SCOPE-001), N4 (one-stmt emitted "hi", two-stmt emitted `event`), N5 (`(e = 1) => … !{}` → E-CODEGEN-INVALID-LOGIC; `({t} = {})` also broke — but that shape is E-CODEGEN-INVALID-LOGIC on BASE even without a guard, so it is left as base emits), N3 / N7 / nested-arrow (all reproduced, both trees where stated).
+- N1: §19.6.6 two statements limited to render-time calls (old text quoted in the provenance note), provenance S440 #22; §19.4.3 ⚑ tension block removed, #18 stated (CPS-implicit one-statement handler: neither E-ERROR-002 nor W-CPS-NEEDS-FAILABLE); known-gaps main entry updated; formFor gap fix direction = #19 (not implemented).
+- N2: component-expander guarded-expr case substitutes props into every arm's `handler` string + `handlerExpr` (arm payload binding shadows). Runtime: conformance handler-guard-arm-uses-prop-rt (r → 9).
+- N4: in an event-handler attr, a prop named `event` is excluded from substitution on every path (one-statement, call-ref, raw, statement list).
+- N5: arrow params containing `=` or `...` are not modelled (regular path, unchecked, as base).
+- N6: §19.4.3 arrow wording reworded; not-modelled list adds default/rest; stale visitAttr comment fixed; handler-site E-ERROR-002 message no longer advises <errorBoundary> (non-handler message unchanged — e2e-render-map baseline cell is a non-handler site).
+- Filed: g-component-handler-prop-in-value-position-unsubstituted (N3), g-component-body-handler-diagnostic-span-and-repeat (N7), g-nested-arrow-in-handler-guard-dropped.
+- Corpus (errors+warnings per file) vs origin/main extract: every pre-existing file identical; only the 9 new conformance cases are new files. Conformance 1050/1057 + 7 xfail.

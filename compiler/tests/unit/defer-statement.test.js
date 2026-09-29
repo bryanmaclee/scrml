@@ -353,7 +353,10 @@ describe("§4 failable calls in a deferred body must be handled in place", () =>
       function work()! -> CloseError {
         defer closeAll()
         log("w")
-      }`, `<button onclick=work()>go</button>`));
+      }`, `<button onclick={ work() !{ | ::Busy :> log("busy") } }>go</button>`));
+    // The handler's own call to the failable `work()` is handled with `!{}` —
+    // an unhandled one is E-ERROR-002 in every handler form (§19.4.3, S440) —
+    // so the only E-ERROR-002 this could see is the deferred `closeAll()`.
     expect(count(r, "E-DEFER-UNHANDLED-FAILABLE")).toBe(1);
     expect(count(r, "E-ERROR-002")).toBe(0);
   });

@@ -1,0 +1,15 @@
+{
+  "id": "error-handler-guard-arm-uses-prop-rt",
+  "description": "A component-body handler whose `!{}` guard ARM reads a prop (RT). Clicking runs the .Empty arm with the prop substituted: @r = 9. Before the S440 final round, the component expander substituted props into the guarded call only, never into the arms, so the arm's `n` stayed unbound and the compile failed with E-SCOPE-001.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S439 #14 + S440 \"all recs\" (restore conformance); review:S440-final-round-N2",
+  "rationale": "§19.4.3 — a handler handles a failable call with `!{}`, and a component body's handler is no exception. A prop read inside an arm is a prop reference like any other (§15 component props), so it is substituted.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-", "E-CODEGEN-", "E-SCOPE-"],
+    "input": [{ "click": "#b" }],
+    "state": { "r": 9 }
+  }
+}

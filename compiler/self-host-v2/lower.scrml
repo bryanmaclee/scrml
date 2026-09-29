@@ -245,9 +245,38 @@ ${
     // emits an absence check, never JS truthiness") lowers to `IsSome(x)`.
     // (s442 — additive; the decision is the typer's `Typing.presence`.)
     export fn lowerExpr(c: LC, e: AExpr) -> Expr {
-        const x: Expr = lowerExprK(c, e)
-        if (presenceTest(c.t, e.nid)) return Expr.Prim(PrimOp.IsSome, [x])
-        return x
+        if (presenceTest(c.t, e.nid)) return Expr.Prim(PrimOp.IsSome, [presenceOperand(c, e)])
+        return lowerExprK(c, e)
+    }
+
+    // (s442 r4 (b)) A presence test of a HANDLE tests the handle, not a
+    // snapshot of its (possibly unmounted) instance — as `given` does (L11).
+    fn presenceOperand(c: LC, e: AExpr) -> Expr {
+        const f: NameFact | not = nameFact(c.t.names, e.nid)
+        const i: InstRef | not = aliasInst(f)
+        if (i is some) return Expr.Handle(instOf(c, i))
+        return lowerExprK(c, e)
+    }
+
+    fn aliasInst(f: NameFact | not) -> InstRef | not {
+        return match f {
+            .NInst(decl: d, inst: i) :> aliasOnly(i)
+            .NLocal(sym: s) :> not
+            .NField(decl: d) :> not
+            .NStruct(owner: o) :> not
+            .NFn(sym: s) :> not
+            .NLength :> not
+            not :> not
+        }
+    }
+
+    fn aliasOnly(i: InstRef) -> InstRef | not {
+        return match i {
+            .Alias(sym: s) :> i
+            .Shared(decl: d) :> not
+            .Lexical(depth: n) :> not
+            .Narrowed(sym: s) :> not
+        }
     }
 
     fn lowerExprK(c: LC, e: AExpr) -> Expr {

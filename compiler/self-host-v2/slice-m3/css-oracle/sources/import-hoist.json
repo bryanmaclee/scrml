@@ -1,0 +1,23 @@
+{
+  "spec": "§65.8",
+  "rationale": "§65.8: a program-global `@import` is hoisted out of `@layer global {}` to its legal position (after the `@layer` order statement, before any block), so the imported sheet applies; the rest of the block stays in the global layer.",
+  "files": {
+    "theme.css": ".imp { color: rgb(1, 2, 3); }\n"
+  },
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".imp",
+          "prop": "color",
+          "value": "rgb(1, 2, 3)"
+        },
+        {
+          "sel": "#p",
+          "prop": "margin-top",
+          "value": "8px"
+        }
+      ]
+    }
+  ]
+}

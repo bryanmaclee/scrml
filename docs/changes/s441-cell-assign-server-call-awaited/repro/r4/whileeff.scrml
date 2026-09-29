@@ -1,0 +1,36 @@
+${
+    type Phase:enum = { Loading, Editing }
+    <out> : number = 0
+    <log> : string = ""
+    <elog> : string = ""
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    function go() {
+        for (const n of [1, 2, 3]) {
+            @out = double(n)
+            @log = @log + "," + @out
+        }
+    }
+}
+<engine for=Phase initial=.Loading effect=${
+    let i = 0
+    while (i < 3) {
+        i = i + 1
+        @out = double(i)
+        @elog = @elog + "," + @out
+    }
+    for (let j = 0; j < 2; j = j + 1) {
+        @out = double(j)
+        @elog = @elog + ";" + @out
+    }
+    @phase = .Editing
+}>
+    <Loading rule=.Editing>Loading…</>
+    <Editing rule=.Loading>ok</>
+</>
+<program>
+<button id="b" onclick=go()>b</>
+<p id="s">${@log}</>
+<p id="e">${@elog}</>
+</program>

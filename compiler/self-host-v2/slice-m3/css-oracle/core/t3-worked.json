@@ -1,0 +1,44 @@
+{
+  "core": "t3Worked",
+  "spec": "§66.17 items 2-3, §65.6",
+  "rationale": "Item 2: the constant `brand` lowers to a static `:root` custom property. Item 3: the `ink` token (a match over the enum cell `mode`) lowers to `:root[data-scrml-theme-mode=\"<V>\"]` blocks, so the one attribute write §65.6's reflection performs switches it. (The page stands in for the reflection by writing the attribute.)",
+  "html": "<div data-scrml=\"Card\"><div class=\"card\">x</div></div>",
+  "steps": [
+    {
+      "rootAttr": [
+        "data-scrml-theme-mode",
+        "Light"
+      ],
+      "expect": [
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(15, 23, 42)"
+        },
+        {
+          "sel": ".card",
+          "prop": "background-color",
+          "value": "rgb(51, 137, 103)"
+        }
+      ]
+    },
+    {
+      "rootAttr": [
+        "data-scrml-theme-mode",
+        "Dark"
+      ],
+      "expect": [
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(226, 232, 240)"
+        },
+        {
+          "sel": ".card",
+          "prop": "background-color",
+          "value": "rgb(51, 137, 103)"
+        }
+      ]
+    }
+  ]
+}

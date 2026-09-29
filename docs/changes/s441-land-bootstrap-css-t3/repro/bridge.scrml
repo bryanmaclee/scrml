@@ -1,0 +1,6 @@
+<program>
+  <w> = 10
+  #{ .box { width: @w; } }
+  <div class="box">x</div>
+  <button onclick=${@w = @w + 5}>grow</button>
+</program>

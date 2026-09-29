@@ -379,7 +379,15 @@ function renderCssBlock(block: CSSBlock, errors?: CGError[], ctx?: LowerCtx, fla
  *   (`const d = @a*2`) referenced in a `#{}` keeps the §25 bridge instead of a
  *   false E-THEME-TOKEN-UNKNOWN (FIX2, S265 review).
  */
-export function generateCss(nodes: object[], cssBlocks?: { inlineBlocks: object[]; styleBlocks: object[] }, errors?: CGError[], fileAST?: Record<string, unknown>): string {
+export function generateCss(
+  nodes: object[],
+  cssBlocks?: { inlineBlocks: object[]; styleBlocks: object[] },
+  errors?: CGError[],
+  fileAST?: Record<string, unknown>,
+  // The CSS sub-seam's per-file context (pipeline-seam.ts `CSS`). Unused here — a substituted
+  // stylesheet emitter needs the compile mode (`<theme>` in a library file) and the file path.
+  _seamCtx?: { filePath?: string; mode?: string },
+): string {
   const { inlineBlocks, styleBlocks } = cssBlocks ?? collectCssBlocks(nodes);
 
   // Separate program-level blocks from component-scoped blocks.

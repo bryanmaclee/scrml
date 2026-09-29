@@ -1,0 +1,30 @@
+{
+  "spec": "§65.8, §65.5",
+  "rationale": "§65.8: a program-global `@charset` becomes \"the very first thing in the sheet (byte 0)\" — only there does it decide the sheet's encoding — and `@import` \"follows the `@layer name;` order declaration but precedes any style rule or `@layer {}` block\", so the imported sheet applies. The page is re-declared windows-1252 (`pageCharset`), so the UTF-8 `é` decodes correctly ONLY if the sheet's `@charset` is honoured. §65.5: the global `p { margin-top: 8px }` beats the reset's `p { margin: 0 }`.",
+  "pageCharset": "windows-1252",
+  "files": {
+    "theme.css": ".imp { color: rgb(1, 2, 3); }\n"
+  },
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "#n",
+          "pseudo": "::before",
+          "prop": "content",
+          "value": "\"é\""
+        },
+        {
+          "sel": ".imp",
+          "prop": "color",
+          "value": "rgb(1, 2, 3)"
+        },
+        {
+          "sel": "#n",
+          "prop": "margin-top",
+          "value": "8px"
+        }
+      ]
+    }
+  ]
+}
