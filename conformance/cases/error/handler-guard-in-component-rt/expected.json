@@ -1,0 +1,15 @@
+{
+  "id": "error-handler-guard-in-component-rt",
+  "description": "A `!{}`-guarded multi-statement handler inside a component body (RT). Clicking runs the .Empty arm (@r = 1) and then the second statement (@msg = \"y\"). Before S440 a component body's handler got no statement list from the native re-parse, so the string lowering emitted a raw `!{` (E-CODEGEN-INVALID-LOGIC).",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "provenance": "ruling:user-voice-scrml.md S439 #14 + S440 \"all recs\" (restore conformance); review:S440-fix-round-F4",
+  "rationale": "§5.2.3 — an inline block's statements run in order and none is dropped, wherever the handler sits. §19.4.3 — `!{}` handles the failable call.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-", "E-CODEGEN-"],
+    "input": [{ "click": "#c" }],
+    "state": { "r": 1, "msg": "y" }
+  }
+}
