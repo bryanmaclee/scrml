@@ -689,10 +689,38 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + "    function g(k: int) { }\n    function f() { g(@o.n) }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + "    function f() { let k: int = @o.n }")).toEqual(["E-TYPE-031"]);
   });
-  test("r5 R6 twins — narrowed, into `int | not`, or a non-int target (the S439 `T | not` into `T` reading stands there)", () => {
+  test("r5 R6 twins — narrowed, or into `int | not`", () => {
     expect(inApp(O + "    function f() { if (@o.n != not) { @m = @o.n\n let k: int = @o.n } }")).toEqual([]);
     expect(inApp(O + "    function f() { let k: int | not = @o.n }")).toEqual([]);
-    expect(inApp(O + "    <let t:string=\"\"/>\n    function f() { @t = @o.v }")).toEqual([]);
+  });
+  // r6 — RULED S442 (user-voice "`T | not` into `T` is an error for all types": "A `T | not` isn't a `T`"; bryan:
+  // "if the lifecycle says T | not then it can only end as not"). FLIPPED from the r5 twin `@t = @o.v` (was silent).
+  test("r6 — an UN-NARROWED `T | not` into `T` is E-TYPE-031 for EVERY type (string, bool, struct, enum; write, param, return, arg, local)", () => {
+    const S = "    <let t:string=\"\"/>\n    <let bb:bool=false/>\n    type P:struct = { x: int }\n    type Q:struct = { let p: P | not, let e: Openness | not }\n    <let q:Q=({ p: not, e: not })/>\n    <let pp:P=({ x: 1 })/>\n    <let oo:Openness=.Closed/>\n";
+    expect(inApp(O + S + "    function f() { @t = @o.v }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f() { @bb = @o.f }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f() { @pp = @q.p }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f() { @oo = @q.e }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f(s: string | not) { @t = s }")).toEqual(["E-TYPE-031"]);
+    // every position that takes a `T` — the return / argument / non-literal-initializer positions too
+    expect(inApp(O + S + "    function h() -> string { return @o.v }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function g(z: string) { }\n    function f() { g(@o.v) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + S + "    function f() { let z: string = @o.v }")).toEqual(["E-TYPE-031"]);
+    // twin: those positions are NOT widened for other mismatches (§7.5.1 positions 3-5 stay unchecked for non-int types)
+    expect(inApp(O + S + "    function h() -> string { return 5 }\n    function g(z: string) { }\n    function f() { g(5) }")).toEqual([]);
+    const d = run([LIB(), app(O + S + "    function f() { @t = @o.v }", "<p>x</p>")]).diags;
+    expect(d[0].message).toContain("narrow it first");
+  });
+  test("r6 — a sequence ELEMENT that may be `not` into a non-optional element type (`[@o.n]` into `int[]`)", () => {
+    expect(inApp(O + "    function f() { let ks: int[] = [@o.n] }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    <ks:int[free, append]=([])/>\n    function f() { @ks.push(@o.n) }")).toEqual(["E-TYPE-031"]);
+  });
+  test("r6 twins — narrowed; `T | not` into `T | not`; `not` into `T | not`; an element into `(T | not)[]`", () => {
+    const S = "    <let t:string=\"\"/>\n    type Q:struct = { let v: string | not }\n    <let q:Q=({ v: not })/>\n";
+    expect(inApp(O + S + "    function f() { if (@o.v != not) { @t = @o.v } }")).toEqual([]);
+    expect(inApp(O + S + "    function f() { @q.v = @o.v\n @q.v = not }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n != not) { let ks: int[] = [@o.n] } }")).toEqual([]);
+    expect(inApp(O + "    function f() { let ks: (int | not)[] = [@o.n] }")).not.toContain("E-TYPE-031");
   });
   test("r4 (c) twins — int-typed initializers stay silent; `1e3` / `2.0` into int stay errors", () => {
     expect(inApp(CELLS + "    <let q:int=(@n * 2)/>\n    <ks:int[]=([1, 2])/>\n    function f() { let k: int = @n }")).toEqual([]);
