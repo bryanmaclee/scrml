@@ -331,6 +331,10 @@ ${
             } else if (t.cls == TC.Punct && t.text == "(" && t.line == prev.line) {
                 const args: RExprs = parseList(adv(r.tp), ")")
                 r = mkE(args.tp, start, AExprK.Call(r.e, args.es))
+            } else if (t.cls == TC.Punct && t.text == "[" && touching(prev, t)) {
+                // `a[i]` — the `[` touches what it indexes (a spaced `[` starts a new expression)
+                const ix: RExpr = parseAssign(adv(r.tp))
+                r = mkE(expectP(ix.tp, "]"), start, AExprK.Index(r.e, ix.e))
             } else {
                 going = false
             }
@@ -367,19 +371,98 @@ ${
         if (t.cls == TC.Keyword) return parseKeywordPrimary(tp)
         if (t.cls == TC.Ident) {
             if (t.v == "not") return mkE(adv(tp), start, AExprK.NotLit)
+            if (peekAt(tp, 1).text == "=>") return parseLambda(adv(tp), start, [t.v])
             return mkE(adv(tp), start, AExprK.Name(t.v))
         }
         if (isP(tp, "(")) {
+            const ps: string[] | not = lambdaParams(tp)
+            if (ps is some) return parseLambda(skipParams(tp), start, ps)
             const inner: RExpr = parseAssign(adv(tp))
             return { e: inner.e, tp: expectP(inner.tp, ")") }
         }
         if (isP(tp, "[")) {
-            const elems: RExprs = parseList(adv(tp), "]")
+            const elems: RExprs = parseArrayElems(adv(tp))
             return mkE(elems.tp, start, AExprK.ArrayLit(elems.es))
         }
         if (isP(tp, "{")) return parseObject(tp)
         const bad: TP = diagAt(tp, "E-PARSE-EXPR", "expected an expression, found `" + t.text + "`", t)
         return mkE(adv(bad), start, AExprK.Recovered)
+    }
+
+    // s442: array elements up to (and consuming) `]`; `...e` is a Spread element.
+    fn parseArrayElems(tp: TP) -> RExprs {
+        let t: TP = tp
+        let out: AExpr[] = []
+        let going = !isP(t, "]") && !atEnd(t)
+        while (going) {
+            if (isSpread(t)) {
+                const sstart: int = cur(t).start
+                const sv: RExpr = parseSpreadValue(t)
+                const sp: RExpr = mkE(sv.tp, sstart, AExprK.Spread(sv.e))
+                out = out.concat([sp.e])
+                t = sp.tp
+            } else {
+                const r: RExpr = parseAssign(t)
+                out = out.concat([r.e])
+                t = r.tp
+            }
+            if (isP(t, ",")) {
+                t = adv(t)
+                if (isP(t, "]")) going = false
+            } else {
+                going = false
+            }
+        }
+        return { es: out, tp: expectP(t, "]") }
+    }
+
+    // s442: `(a, b) =>` — the parameter names when the parenthesis at `tp` is a
+    // lambda's parameter list (only names and commas, then `=>`), else `not`.
+    fn lambdaParams(tp: TP) -> string[] | not {
+        let k: int = 1
+        let names: string[] = []
+        let going = true
+        while (going) {
+            const x: PTok = peekAt(tp, k)
+            if (x.cls == TC.Ident) {
+                names = names.concat([x.v])
+                k = k + 1
+                const sep: PTok = peekAt(tp, k)
+                if (sep.text == ",") {
+                    k = k + 1
+                } else if (sep.text == ")") {
+                    going = false
+                } else {
+                    return not
+                }
+            } else if (x.text == ")" && names.length == 0) {
+                going = false
+            } else {
+                return not
+            }
+        }
+        if (peekAt(tp, k + 1).text != "=>") return not
+        return names
+    }
+
+    // Past a lambda's `( … )` (lambdaParams said it is one), at its `=>`.
+    fn skipParams(tp: TP) -> TP {
+        let t: TP = adv(tp)
+        while (!isP(t, ")") && !atEnd(t)) { t = adv(t) }
+        return adv(t)
+    }
+
+    // At `=>`: the lambda's expression body (§7.2 arrow functions; a braced
+    // body is not in the bootstrap — reported).
+    fn parseLambda(tp: TP, start: int, params: string[]) -> RExpr {
+        const t: TP = adv(tp)
+        if (isP(t, "{")) {
+            const d: TP = diagAt(t, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function with a braced body is not in the bootstrap — write an expression body", cur(t))
+            const b: RBlock = parseBlock(d)
+            return mkE(b.tp, start, AExprK.Recovered)
+        }
+        const body: RExpr = parseAssign(t)
+        return mkE(body.tp, start, AExprK.Lambda(params, body.e))
     }
 
     fn parseKeywordPrimary(tp: TP) -> RExpr {
@@ -1065,6 +1148,7 @@ ${
         typed: ADeclAttr[],
         attrs: AAttr[],
         selfClosing: boolean,
+        short: ANode | not,
     }
     type ROpener:struct = { o: Opener, mp: MP }
 
@@ -1123,11 +1207,19 @@ ${
         let typed: ADeclAttr[] = []
         let attrs: AAttr[] = []
         let selfClosing = false
+        let short: ANode | not = not
         let going = true
         while (going) {
             m = skipSpace(m)
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-TAG", "unterminated tag `<" + nm.w + "`", start, m.pos)
+                going = false
+            } else if (chAt(m, 0) == ":" && isSpaceCh(chAt(m, -1))) {
+                // §4.14: a whitespace-preceded `:` opens the `:`-shorthand body —
+                // one expression, running to the `>` that ends the opener.
+                const rs: RNodeOne = parseShorthand(m, nm.w)
+                short = rs.n
+                m = rs.mp
                 going = false
             } else if (mLooking(m, "/>")) {
                 selfClosing = true
@@ -1149,8 +1241,138 @@ ${
             }
         }
         const o: Opener = { start: start, star: star, isLet: isLet, name: nm.w, ty: ty, own: own,
-                            typed: typed, attrs: attrs, selfClosing: selfClosing }
+                            typed: typed, attrs: attrs, selfClosing: selfClosing, short: short }
         return { o: o, mp: m }
+    }
+
+    // At the `:` of a `:`-shorthand body (§4.14): the single expression, as an
+    // Interp node — or a nested element (markup-as-value, §1.4) — then the
+    // opener's `>` (consumed). There is no closer: a `/>` here, or a closer
+    // written right after the `>` (`<p : x></>`), is E-CLOSER-001 (§4.14).
+    // The expression ends at the first depth-0 `>` that is not `>=`.
+    // r1 F3 (PA ruling, fail-closed): a bare `>` COMPARISON cannot be told from
+    // the opener's end — when the rest of the line after that `>` holds
+    // another `>`, the body was a comparison: E-PARSE-SHORTHAND-GT (parenthesize
+    // it, `(@n > 3)`), and the tail is consumed, never rendered as text.
+    fn parseShorthand(mp: MP, tag: string) -> RNodeOne {
+        const start: int = mp.pos
+        const at: MP = skipSpace(mAdv(mp, 1))
+        if (chAt(at, 0) == "<" && isNameStart(chAt(at, 1))) {
+            const inner: RNodeOne = parseMarkupNode(at)
+            let m0: MP = skipSpace(inner.mp)
+            if (chAt(m0, 0) == ">") {
+                m0 = mAdv(m0, 1)
+            } else {
+                m0 = mDiag(m0, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m0.pos, m0.pos + 1)
+            }
+            return { n: inner.n, mp: closerAfterShorthand(m0, tag) }
+        }
+        if (chAt(at, 0) == ">") {
+            // an empty `:`-shorthand body: one diagnostic, the opener still ends
+            const em: MP = mDiag(mAdv(at, 1), "E-PARSE-SHORTHAND", "a `:`-shorthand body needs one expression before the `>` (§4.14)", start, at.pos + 1)
+            const en: ANode = { nid: em.nid, span: mkSpan(start, em.pos), k: ANodeK.Text("") }
+            return { n: en, mp: mBump(em) }
+        }
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)
+        let t: TP = tp
+        let e: AExpr = { nid: t.nid, span: mkSpan(start, start + 1), k: AExprK.Recovered }
+        if (atEnd(t)) {
+            t = diagAt(t, "E-PARSE-SHORTHAND", "a `:`-shorthand body needs one expression before the `>` (§4.14)", cur(t))
+            t = bumpId(t)
+        } else {
+            const r: RExpr = parseTernary(t)
+            e = r.e
+            t = expectRegionEnd(r.tp)
+        }
+        let m: MP = skipSpace(backToMarkup(mp, t))
+        if (mLooking(m, "/>")) {
+            m = mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `/` (`<tag … : expr>`, §4.14)", m.pos, m.pos + 2), 2)
+        } else if (chAt(m, 0) == ">") {
+            m = mAdv(m, 1)
+            m = comparisonTail(m, start)
+            m = closerAfterShorthand(m, tag)
+        } else {
+            m = mDiag(m, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m.pos, m.pos + 1)
+        }
+        const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }
+        return { n: n, mp: mBump(m) }
+    }
+
+    // r1 F3: after the shorthand's `>`: another `>` later on the same line
+    // (before any `<`) means the first one was a comparison operator.
+    fn comparisonTail(mp: MP, start: int) -> MP {
+        let i: int = mp.pos
+        let content = false
+        while (i < mp.src.length) {
+            const c: string = mp.src.substring(i, i + 1)
+            if (c == "\n" || c == "<") return mp
+            // a `>` right after this one (only spaces between) ends an OUTER
+            // opener (`<div : <p : "x">>`) — not a comparison
+            if (c == ">" && !content) return mp
+            if (c != " " && c != "\t") content = true
+            if (c == ">") {
+                const d: MP = mDiag(mp, "E-PARSE-SHORTHAND-GT", "a `>` inside a `:`-shorthand body ends the opener — this body reads as a comparison; parenthesize it: `: (a > b)` (§4.14; §66.2.4's rule for opener values)", start, i + 1)
+                return mAt(d, i + 1)
+            }
+            i = i + 1
+        }
+        return mp
+    }
+
+    // nit: `<p : x></>` / `<p : x></p>` written right after the opener.
+    fn closerAfterShorthand(mp: MP, tag: string) -> MP {
+        let m: MP = mp
+        while (chAt(m, 0) == " " || chAt(m, 0) == "\t") { m = mAdv(m, 1) }
+        let n: int = 0
+        if (mLooking(m, "</>")) n = 3
+        if (tag != "" && mLooking(m, "</" + tag + ">")) n = tag.length + 3
+        if (n == 0) return mp
+        return mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `" + m.src.substring(m.pos, m.pos + n) + "` (§4.14)", m.pos, m.pos + n), n)
+    }
+
+    // ---- r1 F4: a CODE-DEFAULT body (§4.18.1) — an engine state-child body ----
+    // A bare run is CODE (an expression, §4.18.2); display text is a "…"
+    // literal; a nested tag is markup (a free-text body of its own); `${…}` is
+    // an interpolation. A run that is not ONE valid expression is
+    // E-UNQUOTED-DISPLAY-TEXT (§4.18.7), suggesting the quoted literal.
+    fn parseCodeBody(mp: MP, tag: string) -> RNodes {
+        let m: MP = mp
+        let out: ANode[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                going = false
+            } else if (atInterp(m)) {
+                const ri: RNodeOne = parseInterp(m)
+                out = out.concat([ri.n])
+                m = ri.mp
+            } else if (chAt(m, 0) == "<") {
+                const tagNode: RNodeOne = parseMarkupNode(m)
+                out = out.concat([tagNode.n])
+                m = tagNode.mp
+            } else {
+                const before: int = m.pos
+                const tp: TP = regionTP(m, LexStop.CodeBody)
+                const runEnd: int = lastEnd(tp)
+                const r: RExpr = parseAssign(tp)
+                if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
+                    const back: MP = backToMarkup(m, r.tp)
+                    const n: ANode = { nid: back.nid, span: mkSpan(before, runEnd), k: ANodeK.Interp(r.e) }
+                    out = out.concat([n])
+                    m = mBump(back)
+                } else {
+                    const text: string = m.src.substring(before, runEnd).trim()
+                    m = mDiag(mAt(m, runEnd), "E-UNQUOTED-DISPLAY-TEXT", "display text in a `<" + tag + ">` state-child body must be a quoted display-text literal — did you mean `\"" + text + "\"`? (a code-default body, §4.18.1 / §4.18.7)", before, runEnd)
+                }
+                if (m.pos == before) m = mAdv(m, 1)
+            }
+        }
+        if (mLooking(m, "</")) m = parseCloser(m, tag)
+        return { nodes: out, mp: m }
     }
 
     type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], mp: MP }
@@ -1199,6 +1421,14 @@ ${
             return { typed: [da], attrs: [], mp: mBump(m) }
         }
         let name: string = nm.w
+        if (chAt(m, 0) == "(") {
+            // s442: a validator call in an opener (`length(>=5)`, `min(0)`, §6.4 /
+            // §66.4 rule 3) — skipped whole (balanced by the lexer) and reported.
+            const vt: TP = regionTP(m, LexStop.Balanced)
+            const vm: MP = backToMarkup(m, vt)
+            const d: MP = mDiag(vm, "E-BOOTSTRAP-UNSUPPORTED", validatorMessage(nm.w + "(…)"), start, vm.pos)
+            return { typed: [], attrs: [], mp: d }
+        }
         if (chAt(m, 0) == ":") {
             const sub: RWord = readName(mAdv(m, 1))
             name = nm.w + ":" + sub.w
@@ -1222,6 +1452,18 @@ ${
         if (exported || isLet) m = mDiag(m, "E-PARSE-ATTR", "`export` / `let` apply only to a typed attribute (`let " + name + ":Type=…`)", start, m.pos)
         const a: AAttr = { nid: m.nid, span: mkSpan(start, m.pos), name: name, value: v }
         return { typed: [], attrs: [a], mp: mBump(m) }
+    }
+
+    // s442: validators (§6.4, kickstarter §6.1's shared vocabulary) are outside
+    // the bootstrap — they imply the synthesized validity surface, and whether
+    // they reach a `renders` input as HTML attributes is ⚑ O25 (OPEN).
+    fn isValidatorWord(w: string) -> boolean {
+        return w == "req" || w == "length" || w == "pattern" || w == "min" || w == "max" || w == "gt" || w == "lt" ||
+               w == "gte" || w == "lte" || w == "eq" || w == "neq" || w == "oneOf" || w == "notIn"
+    }
+
+    fn validatorMessage(what: string) -> string {
+        return "the validator `" + what + "` is not in the bootstrap — validators imply the synthesized validity surface (§6.4), and whether they reach a `renders` input is ⚑ O25 (not ruled)"
     }
 
     // =========================================================================
@@ -1279,6 +1521,14 @@ ${
         if (o.typed.length > 0 && o.star) {
             // a typed attribute on `<*x …>` is meaningless — a reference declares nothing
             return elemFrom(o, [], mDiag(mp, "E-PARSE-TAG", "a `<*" + o.name + ">` reference cannot declare typed attributes", o.start, mp.pos))
+        }
+        const sh: ANode | not = o.short
+        if (sh is some) {
+            // §4.14 / §24: a non-void element's `:`-shorthand body IS its one child
+            if (isVoidTag(o.name)) {
+                return elemFrom(o, [], mDiag(mp, "E-COLON-SHORTHAND-ON-VOID", "`<" + o.name + ">` is a void element — it has no body for a `:`-shorthand (bind a value through an attribute, §4.14)", o.start, mp.pos))
+            }
+            return elemFrom(o, [sh], mp)
         }
         if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
         const kids: RNodes = parseKids(mp, o.name)
@@ -1366,12 +1616,34 @@ ${
     // A tag in markup position: an element, a `<*x>` reference, or a declaration.
     fn parseMarkupNode(mp: MP) -> RNodeOne {
         const ro: ROpener = parseOpener(mp)
+        if (isThemeOpener(ro.o)) {
+            const m: MP = refuseTheme(ro.o, ro.mp)
+            const t: ANode = { nid: m.nid, span: mkSpan(ro.o.start, m.pos), k: ANodeK.Text("") }
+            return { n: t, mp: mBump(m) }
+        }
         const k: TagKind = tagKind(ro.o)
         return match k {
             .IsDecl :> declNode(finishDecl(ro.o, ro.mp, false))
             .IsElem :> elemNode(finishElem(ro.o, ro.mp))
             .IsProgram :> elemNode(finishElem(ro.o, mDiag(ro.mp, "E-PARSE-PROGRAM", "`<program>` inside markup", ro.o.start, ro.mp.pos)))
         }
+    }
+
+    // s442: `<theme>` (§66.17) — its declarations are tokens that lower to CSS
+    // custom properties (`:root { --brand: … }`, a `data-scrml-theme-mode`
+    // attribute per mode). The bootstrap has no CSS emission in this slice (the
+    // slice-m3 CSS files are held by another session), so the element is
+    // consumed whole and REPORTED — never parsed as markup (its token
+    // declarations would otherwise vanish silently).
+    fn isThemeOpener(o: Opener) -> boolean { return !o.star && o.name == "theme" }
+
+    fn refuseTheme(o: Opener, mp: MP) -> MP {
+        let m: MP = mp
+        if (!o.selfClosing) {
+            const kids: RNodes = parseKids(mp, o.name)
+            m = kids.mp
+        }
+        return mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<theme>` (§66.17 — tokens lower to CSS custom properties) is not in the bootstrap: it has no CSS emission in this slice", o.start, m.pos)
     }
 
     fn declNode(r: RDecl) -> RNodeOne {
@@ -1400,12 +1672,17 @@ ${
         }
         m = checkOpenerValue(m, o.own)
         for (const a of o.attrs) {
+            if (isValidatorWord(a.name)) {
+                m = mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", validatorMessage(a.name), a.span.start, a.span.end)
+            }
             if (a.name.indexOf(":") >= 0) {
                 m = mDiag(m, "E-DECL-ILLEGAL-FIELD-NAME", "a declaration opener cannot carry `" + a.name + "` — `bind:` / `class:` / `style:` / `internal:` / `on…` are markup attributes; a declaration's markup is its `renders` (§66.2.3, §66.4)", a.span.start, a.span.end)
             }
         }
         let body: ADeclChild[] = []
-        if (!o.selfClosing) {
+        if (o.short is some) {
+            m = mDiag(m, "E-PARSE-SHORTHAND", "a declaration has no `:`-shorthand body — its markup is its `renders` (§66.5); a `:`-shorthand body belongs to an element or a state-child (§4.14)", o.start, m.pos)
+        } else if (!o.selfClosing) {
             const rb: RChildren = parseDeclBody(m, o.name)
             body = rb.cs
             m = rb.mp
@@ -1470,6 +1747,9 @@ ${
             .Ternary(test: t) :> false
             .Assign(target: t) :> false
             .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
         }
     }
 
@@ -1494,6 +1774,9 @@ ${
             .Assign(target: x) :> false
             .ArrayLit(elems: x) :> false
             .ObjectLit(props: x) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
         }
     }
 
@@ -1542,12 +1825,19 @@ ${
             return { c: ADeclChild.ChildField(rd.d), mp: rd.mp }
         }
         let m: MP = ro.mp
-        if (!o.selfClosing) {
-            m = mDiag(m, "E-PARSE-STATE-CHILD", "a state-child body is not in bootstrap slice M2 — write `<" + o.name + " rule=…/>`", o.start, m.pos)
-            const skip: RChildren = parseDeclBody(m, o.name)
-            m = skip.mp
+        // O5 RULED (1i): a state-child's body is that variant's markup — a
+        // `:`-shorthand expression (§4.14) or a bare body up to its closer.
+        let body: ANode[] = []
+        const sh: ANode | not = o.short
+        if (sh is some) {
+            body = [sh]
+        } else if (!o.selfClosing) {
+            // r1 F4: a state-child body is CODE-DEFAULT (§4.18.1)
+            const kids: RNodes = parseCodeBody(m, o.name)
+            body = kids.nodes
+            m = kids.mp
         }
-        const sc: AStateChild = { nid: m.nid, span: mkSpan(o.start, m.pos), name: o.name, attrs: o.attrs }
+        const sc: AStateChild = { nid: m.nid, span: mkSpan(o.start, m.pos), name: o.name, attrs: o.attrs, body: body }
         return { c: ADeclChild.StateChild(sc), mp: mBump(m) }
     }
 
@@ -1617,6 +1907,7 @@ ${
     fn parseTagItem(mp: MP, exported: boolean) -> RMItems {
         const ro: ROpener = parseOpener(mp)
         const o: Opener = ro.o
+        if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }
         const k: TagKind = tagKind(o)
         return match k {
             .IsProgram :> programItem(o, ro.mp)
