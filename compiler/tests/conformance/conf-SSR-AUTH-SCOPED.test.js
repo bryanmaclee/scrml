@@ -119,7 +119,7 @@ describe("CONF-SSR-AUTH-SCOPED (runtime-half): the compiled bundle omits the see
     expect(serverJs.slice(gi, gi + 300)).toContain("_scrml_serverload_auth");
   });
 
-  test("R26 — the shipped compose handler, invoked ANONYMOUSLY, leaks NO auth-scoped row/key; serves the public rows", async () => {
+  test("R26 — the shipped compose handler redirects an ANONYMOUS request (§52.13) and, for an authenticated viewer, leaks NO auth-scoped row/key while serving the public rows", async () => {
     const { serverJs, outDir } = compile(LEAK_APP, true);
     // Seed data — an anon request must see NEITHER Alice NOR Bob NOR an accounts key.
     const SEED = {
@@ -146,10 +146,37 @@ describe("CONF-SSR-AUTH-SCOPED (runtime-half): the compiled bundle omits the see
     const compose = factory(stubSql, Bun);
     expect(typeof compose).toBe("function");
 
-    // anonymous request — no cookies, no session. A real request shape (url +
-    // headers), as the host passes: an auth app's compose reads the session for the
-    // §39.2.3 csrf-token meta fill (§40.2 S441 — csrf="auto" is the default under auth=).
-    const resp = await compose({ url: "http://localhost/", method: "GET", headers: { get: () => null } });
+    // A real request shape (url + headers), as the host passes.
+    const docReq = (cookie) => ({
+      url: "http://localhost/",
+      method: "GET",
+      headers: { get: (k) => (String(k).toLowerCase() === "cookie" ? cookie : null) },
+    });
+
+    // S441 (§52.13, §40.2 compose-route bullet) — the app is auth="required": the
+    // compose route serves the page DOCUMENT, so an anonymous request is redirected
+    // and composes nothing. Before S441 review F1 it answered 200 with the markup.
+    const anon = await compose(docReq(null));
+    expect(anon.status).toBe(302);
+    expect(anon.headers.get("Location")).toBe("/login");
+    const anonBody = await anon.text();
+    expect(anonBody).not.toContain("Alice");
+    expect(anonBody).not.toContain("PublicWidget");
+
+    // An AUTHENTICATED viewer gets the first paint. The omission still has to hold:
+    // one composed document goes to every admitted viewer, so the unscoped auth-scoped
+    // cell (every user's rows) must stay out of it.
+    const store = (globalThis.__scrml_session_store ??= new Map());
+    const sid = "conf-ssr-auth-" + Math.random().toString(36).slice(2);
+    store.set(sid, { userId: 1, role: null });
+    const cookieName = serverJs.includes("__Host-scrml_sid") ? "__Host-scrml_sid" : "scrml_sid";
+    let resp;
+    try {
+      resp = await compose(docReq(`${cookieName}=${sid}`));
+    } finally {
+      store.delete(sid);
+    }
+    expect(resp.status).toBe(200);
     const html = await resp.text();
     const seedMatch = /<script type="application\/json" id="__scrml_ssr_state">([\s\S]*?)<\/script>/.exec(html);
     const seed = seedMatch ? JSON.parse(seedMatch[1]) : {};

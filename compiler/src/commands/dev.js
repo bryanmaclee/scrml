@@ -1487,6 +1487,35 @@ function stripHopByHop(headers) {
  * @param {number} childPort
  * @returns {Response|undefined}
  */
+/**
+ * §40.2 (S441) — the WebSocket upgrade Origin rule, for the dev parent. The SAME rule
+ * the compiler emits as `_scrml_ws_origin_ok` in every web-app server module
+ * (codegen/emit-server.ts); kept byte-for-byte equivalent in behaviour — change both.
+ * No Origin → non-browser client → allowed (the child's channel auth still applies);
+ * `Origin: null` → refused; otherwise host must match and scheme must match, except
+ * an https page on a request that arrived as plain http.
+ *
+ * @param {Request} req
+ * @param {URL} url
+ * @returns {boolean}
+ */
+export function wsOriginAllowed(req, url) {
+  const origin = req.headers.get("origin");
+  if (origin === null) return true;
+  try {
+    const o = new URL(origin);
+    const host = (req.headers.get("x-forwarded-host") || "").split(",")[0].trim() || url.host;
+    const proto = ((req.headers.get("x-forwarded-proto") || "").split(",")[0].trim() || url.protocol.replace(":", ""))
+      .toLowerCase()
+      .replace(/^ws(s?)$/, "http$1");
+    const self = new URL(proto + "://" + host);
+    if (o.host !== self.host) return false;
+    return o.protocol === self.protocol || (o.protocol === "https:" && self.protocol === "http:");
+  } catch {
+    return false;
+  }
+}
+
 function proxyWebSocketToChild(req, srv, url, childPort) {
   // Forward the auth-bearing request headers so a `<channel auth>` upgrade
   // handler's `_scrml_auth_check(req)` sees the browser's session cookie (Bun's
@@ -1497,15 +1526,21 @@ function proxyWebSocketToChild(req, srv, url, childPort) {
   if (cookie) fwd.Cookie = cookie;
   const auth = req.headers.get("authorization");
   if (auth) fwd.Authorization = auth;
+  // §40.2 (S441) — the child's channel upgrade route checks Origin against its OWN
+  // host. Through this proxy the child sees `127.0.0.1:<childPort>`, not the host the
+  // browser used, so forward the browser's Origin plus the host/scheme it connected to
+  // (the same X-Forwarded-* a production proxy sets). A browser cannot set
+  // X-Forwarded-Host on a WebSocket handshake, so an attacker page cannot spoof it.
+  const origin = req.headers.get("origin");
+  if (origin !== null) fwd.Origin = origin;
+  fwd["X-Forwarded-Host"] = req.headers.get("x-forwarded-host") || url.host;
+  fwd["X-Forwarded-Proto"] = req.headers.get("x-forwarded-proto") || url.protocol.replace(":", "");
   // NB: `Sec-WebSocket-Protocol` is deliberately NOT forwarded — scrml channels do
   // not negotiate a subprotocol, and the parent's `srv.upgrade` cannot echo the
   // child's chosen subprotocol back to the browser, so forwarding it would make a
   // subprotocol-requiring browser close on the unconfirmed handshake.
 
-  const upstream = new WebSocket(
-    `ws://127.0.0.1:${childPort}${url.pathname}${url.search}`,
-    Object.keys(fwd).length ? { headers: fwd } : undefined,
-  );
+  const upstream = new WebSocket(`ws://127.0.0.1:${childPort}${url.pathname}${url.search}`, { headers: fwd });
   // Deliver binary channel frames as ArrayBuffer (ServerWebSocket.send accepts
   // ArrayBuffer/TypedArray/string but throws on a Blob — the browser default).
   upstream.binaryType = "arraybuffer";
@@ -1655,6 +1690,13 @@ export async function runDev(args) {
       // HTML body and thrashing its retry loop.
       if ((req.headers.get("upgrade") || "").toLowerCase() === "websocket") {
         if (!childPort) return new Response("[dev] app server is starting…", { status: 503 });
+        // §40.2 (S441) — refuse a cross-origin upgrade HERE, before the browser
+        // socket is accepted. The child's route runs the same check on the forwarded
+        // Origin, but this proxy upgrades the browser side before the child answers,
+        // so without this the cross-origin socket would open and then close.
+        if (!wsOriginAllowed(req, url)) {
+          return new Response("Cross-origin WebSocket upgrade refused", { status: 403 });
+        }
         return proxyWebSocketToChild(req, srv, url, childPort);
       }
       // While the last compile is failing, serve the real error at every app
