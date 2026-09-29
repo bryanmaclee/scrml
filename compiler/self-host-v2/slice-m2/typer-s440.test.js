@@ -534,6 +534,15 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O + XS, row("@o.n = not"))).toEqual([]);
     expect(inApp(O + XS, "<each in=@xs as x><p if=(x.n != not)>${x.n + 1}</p></each>")).toEqual([]);
   });
+  test("r5 R1 — N3 at depth: writing the OUTER source of a nested `<each>` drops the inner row's narrowing", () => {
+    const G = "    type G:struct = { let name: string, let kids: O[] }\n    <gs:G[replace]=([{ name: \"a\", kids: [{ v: \"\", n: 0, f: false }] }])/>\n    function clearGs() { @gs = [{ name: \"b\", kids: [{ v: not, n: not, f: not }] }] }\n    function other() { @m = 2 }\n";
+    const nested = (body) => `<each in=@gs as g><each in=g.kids as y><p if=(y.n != not)><button onclick={ ${body}\n @m = y.n + 1 }>b</button></p></each></each>`;
+    expect(inApp(O + G, nested("clearGs()"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + G, nested("@gs = []"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    // twins: a write elsewhere; the narrowed inner read with no write
+    expect(inApp(O + G, nested("other()"))).toEqual([]);
+    expect(inApp(O + G, "<each in=@gs as g><each in=g.kids as y><p if=(y.n != not)>${y.n + 1}</p></each></each>")).toEqual([]);
+  });
   test("r2 F1a twin — a call whose callee writes OTHER places keeps the narrowing", () => {
     expect(inApp(O + "    function h() { @m = 2\n @o.v = \"x\" }\n    function f() { if (@o.n != not) { h()\n @m = @o.n + 1 } }")).toEqual([]);
   });
