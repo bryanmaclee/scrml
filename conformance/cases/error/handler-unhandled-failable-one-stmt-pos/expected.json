@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-unhandled-failable-one-stmt-pos",
+  "description": "A braced ONE-statement event handler `onclick={ risky() }` whose whole body is an unhandled call to a `!` function. E-ERROR-002 fires once. Before S440 impl#1 compiled this at exit 0 while the multi-statement form errored — the split S439 ruling #14 rejected.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S439 #14 + S440 \"all recs\" (restore conformance)",
+  "rationale": "§19.4.3 / §19.4.4 — an unhandled `!` call SHALL be E-ERROR-002, and nothing exempts an event-handler value. §5.2.3: a one-statement inline block is equivalent to the bare shape of the same statement, and neither is exempt.",
+  "expect": {
+    "codes": ["E-ERROR-002"],
+    "codeCounts": { "E-ERROR-002": 1 },
+    "notCodes": [],
+    "severity": { "E-ERROR-002": "error" }
+  }
+}
