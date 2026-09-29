@@ -36,7 +36,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { compileScrml } from "../../src/api.js";
 import { mkdirSync, writeFileSync, rmSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { analyzeRawJsFragment, colorAsyncFunctionExpr, colorAsyncStatements } from "../../src/codegen/js-async-analysis.ts";
+import { analyzeRawJsFragment, colorAsyncFunctionExpr, colorAsyncStatements, fnTextHasOwnAwait, bodyTextHasOwnAwait } from "../../src/codegen/js-async-analysis.ts";
 
 const FIXTURE_DIR = join(import.meta.dir, "__fixtures__/s441-async-escape-f4-f5");
 
@@ -197,6 +197,32 @@ server function isOk(n) { return n > 100 }
     expect(o.clientJs).toMatch(/addEventListener\("click", async function\(event\)/);
     expect(o.clientJs).toMatch(/if \(await _scrml_fetch_isOk_\d+\(x\)\)/);
     expect(o.clientJs).not.toMatch(/if \(_scrml_fetch_isOk_\d+\(x\)\)/);
+  });
+
+  test("an awaiting lift handler inside a match arm does NOT make the arm IIFE async (it belongs to the handler)", () => {
+    // Regression found by the snippet gate (docs/tutorial-snippets/05-signup-form):
+    // the match IIFE decided async-ness from a token scan, counted the handler's
+    // own `await`, and stranded `await (async function() {…})()` in a sync effect.
+    const o = compileFile(`<program>
+type Phase:enum = { Editing, Done }
+<engine for=Phase initial=.Editing>
+  <Editing rule=.Done></>
+  <Done rule=.Editing></>
+</>
+server function save(n) { return n > 1 }
+function submit() {
+  save(2)
+  @phase = Phase.Done
+}
+\${ match @phase {
+  .Editing :> { lift <form onsubmit=submit()><button>go</button></form> }
+  .Done :> { lift <p>done</p> }
+} }
+</program>
+`);
+    expect(o.codes).toEqual([]);
+    expect(o.clientJs).not.toMatch(/await \(async function\(\) \{/);
+    expect(o.clientJs).toMatch(/addEventListener\("submit", async function\(event\)/);
   });
 
   test("an async fn used as a value in a row handler is E-ASYNC-FN-ESCAPES-AS-VALUE", () => {
@@ -616,6 +642,14 @@ describe("js-async-analysis", () => {
   test("statements: an async call in a sync callback that is not liftable is reported", () => {
     const r = colorAsyncStatements(`const s = xs.sort((a, b) => isOk(a) ? 1 : -1)`, facts);
     expect(r.calls.map((c) => c.name)).toEqual(["isOk"]);
+  });
+
+  test("own-level await: an await inside a nested function does not count", () => {
+    expect(fnTextHasOwnAwait(`function() { el.addEventListener("x", async function(e) { await go() }) }`)).toBe(false);
+    expect(fnTextHasOwnAwait(`(async function() { const r = await go(); })()`)).toBe(true);
+    expect(bodyTextHasOwnAwait(`for await (const x of xs) { f(x) }`)).toBe(true);
+    expect(bodyTextHasOwnAwait(`const f = async () => { await g() }`)).toBe(false);
+    expect(fnTextHasOwnAwait(`function( { `)).toBeNull();
   });
 
   test("statements: a scheduler callback that reaches async is made async, not reported", () => {

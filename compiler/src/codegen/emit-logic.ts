@@ -18,6 +18,7 @@ import { emitInlineMessageOverrides } from "./emit-messages.ts";
 import { emitCompoundSynthSurface } from "./emit-synth-surface.ts";
 import { CGError } from "./errors.ts";
 import { localAsyncDeclRoot } from "./local-async-fns.ts";
+import { bodyTextHasOwnAwait } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
 // Deep reactive wrapping helper (Reactivity Phase 1)
@@ -4090,7 +4091,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         // AST path above) is awaited here too.
         body = sched.injectFnBodyServerCallAwaits(body, (n) => whenSrvNames.has(n), "none");
       }
-      const isAsync = !isServer && /\bawait\b/.test(body);
+      // s441 — own-level `await` only (a colored handler inside is its own scope).
+      const _whenOwnAwait = bodyTextHasOwnAwait(body);
+      const isAsync = !isServer && (_whenOwnAwait !== null ? _whenOwnAwait : /\bawait\b/.test(body));
       const ctx = opts.encodingCtx;
       const seen = new Set<string>();
       const subs: string[] = [];
@@ -4473,9 +4476,14 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // body stubs its SQL to `return null` (no await), so the function stays
       // synchronous and this is a no-op. A generator (`function*`) is never
       // marked async (async generators are a distinct, unused form here).
-      const _nestedHasAwait = !node.isGenerator && fnBodyLines.some(
+      // s441 — only an `await` at THIS function's own level counts: an
+      // `async function(event) { await … }` handler lifted inside the body is its
+      // own async scope (a token scan made the helper async, and its callers got a
+      // Promise). Unparseable text keeps the token scan (fail-safe).
+      const _nestedOwnAwait = node.isGenerator ? false : bodyTextHasOwnAwait(fnBodyLines.join("\n"));
+      const _nestedHasAwait = !node.isGenerator && (_nestedOwnAwait !== null ? _nestedOwnAwait : fnBodyLines.some(
         (l) => /(^|[^.\w$])await\s/.test(l),
-      );
+      ));
       // s440-sync-callback-async-helper — OR the pre-pass's structural verdict
       // (`local-async-fns.ts`). Every call site of this helper was lowered from that
       // SAME verdict (awaited / combinator-lifted / failed closed), so the keyword

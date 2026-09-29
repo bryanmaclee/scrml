@@ -775,6 +775,51 @@ export function analyzeRawJsFragment(raw: string, resolveFree: FreeAsyncResolver
 }
 
 // ---------------------------------------------------------------------------
+// Own-level `await` — does a body await at ITS OWN function level?
+// ---------------------------------------------------------------------------
+
+/**
+ * s441 — does `fnText` (one function expression) contain an `await` that belongs
+ * to that function itself, not to a function nested inside it? `null` when the
+ * text does not parse (callers keep their text scan — fail-safe).
+ *
+ * Several emitters decide "must this wrapper be `async`?" by scanning the emitted
+ * text for the token `await`. Since s441 an event handler inside such a body —
+ * a `lift` handler in a `match` arm IIFE, a handler in a nested helper — may itself
+ * be `async function(event) { await … }`. That `await` belongs to the HANDLER; a
+ * token scan counted it for the enclosing wrapper and stranded an outer `await`
+ * in a synchronous effect (invalid JS).
+ */
+export function fnTextHasOwnAwait(fnText: string): boolean | null {
+  // A function expression, or an IIFE `(function() { … })()` given whole.
+  const program = tryParse("(" + fnText + "\n)") ?? tryParse(fnText);
+  if (!program || program.body.length !== 1) return null;
+  const root = program.body[0]?.expression;
+  const fn = root && (root.type === "CallExpression" ? root.callee : root);
+  if (!fn || !isFn(fn)) return null;
+  let found = false;
+  const walk = (n: N): void => {
+    if (found || !n || typeof n !== "object") return;
+    if (Array.isArray(n)) { for (const c of n) walk(c); return; }
+    if (n !== fn && isFn(n)) return;
+    if (n.type === "AwaitExpression" || (n.type === "ForOfStatement" && n.await === true)) { found = true; return; }
+    for (const key of Object.keys(n)) {
+      if (key === "type" || key === "start" || key === "end") continue;
+      const v = n[key];
+      if (v && typeof v === "object") walk(v);
+    }
+  };
+  walk(fn.params);
+  walk(fn.body);
+  return found;
+}
+
+/** `fnTextHasOwnAwait` for a function BODY given as statement text. */
+export function bodyTextHasOwnAwait(bodyText: string): boolean | null {
+  return fnTextHasOwnAwait("async function() {\n" + bodyText + "\n}");
+}
+
+// ---------------------------------------------------------------------------
 // The active client emission (handler emitters with no ctx in reach)
 // ---------------------------------------------------------------------------
 
