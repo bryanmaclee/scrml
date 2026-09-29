@@ -119,3 +119,6 @@ base = origin/main 650c47c29 vs tip
 - Corpus (2225 files vs origin/main f0377fbf5): newly failing = only the 20
   intentional `*-e006` cases. Arithmetic ruling: 0 non-intentional failures.
 - Push of this round was DENIED by the permission classifier; local branch only.
+
+## Round 5 (fresh agent; round-4 review DO-NOT-LAND)
+- start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ab2240605e359d289, base = 049390932 + merge origin/main 6dccbd6cf (10120709a).
