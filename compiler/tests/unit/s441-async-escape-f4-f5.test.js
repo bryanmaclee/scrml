@@ -692,6 +692,21 @@ server function isOk(n) { return n > 100 }
 `);
     expect(o.codes).toContain(ESCAPE);
   });
+  test("round 3 (N1 corpus regression): a COMMENT mentioning setTimeout does not withdraw the exemption", () => {
+    // flogence/src/app.scrml: `// the poll setInterval handle` + `setTimeout(() => hydrate(), 0)`.
+    const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+<t> = 0   // the setTimeout handle /* and setInterval */
+function hydrate() { @v = isOk(1) ? "a" : "r" }
+function go() {
+  setTimeout(() => hydrate(), 0)
+}
+<button onclick=go()>go</button>
+</program>
+`);
+    expect(o.codes).toEqual([]);
+  });
   test("control: the GLOBAL setTimeout still takes an async fn / callback", () => {
     const o = serverNested(`setTimeout(m, 10)`, `true`);
     expect(o.codes).toEqual([]);

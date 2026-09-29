@@ -8,3 +8,4 @@
 - 2026-09-29T11:02:49-06:00 review fix round 1-5 + ledger §S441c; conformance 1056/1063 (+3 cases); snippet 122/122; s34 PASS; types identical to base
 - 2026-09-29T12:19:10-06:00 round 3 N1: scheduler exemption narrowed to source-provable calls/member reads; +4 conformance, +7 unit
 - 2026-09-29T12:51:12-06:00 round 3 N2/N3 (+N4 bracket then): event matched by binding; +5 unit, +3 conformance; conformance 1079/1086
+- 2026-09-29T13:13:58-06:00 round 3 N1 follow-up: comments no longer withdraw the scheduler exemption (flogence app.scrml false positive caught by corpus diff); corpus = new cases + dispatch-tool only

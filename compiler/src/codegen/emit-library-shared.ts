@@ -505,9 +505,20 @@ export function fileBoundNamesOf(fileAST: unknown, sourceText?: string | null): 
   // withdraws the exemption for the whole file (fail CLOSED: the async fn value
   // is then reported as an escape). `const { setTimeout } = globalThis` is
   // withdrawn too (sound, conservative).
-  const src = typeof sourceText === "string" ? sourceText
+  const rawSrc = typeof sourceText === "string" ? sourceText
     : typeof (fileAST as { _sourceText?: unknown })._sourceText === "string" ? (fileAST as { _sourceText: string })._sourceText
     : null;
+  // Comments are not bindings: a `// … setTimeout …` note must not withdraw the
+  // exemption (it failed flogence's `setTimeout(() => hydrate(), 0)` calls).
+  // Stripped: `/* … */`, `<!-- … -->`, and a `//` comment that starts a line or
+  // follows whitespace (a `http://` URL does not match). Strings are NOT stripped —
+  // markup prose apostrophes make a text-level string scanner unreliable, and a
+  // mis-opened "string" could hide a real binding (fail open); a mention inside a
+  // string stays a withdrawal (fail closed).
+  const src = rawSrc === null ? null : rawSrc
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
   if (src !== null) {
     for (const nm of KNOWN_DISCARD_HOF) {
       if (!src.includes(nm)) continue;
