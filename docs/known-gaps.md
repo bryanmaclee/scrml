@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 153 | 4 |
-| MED | 342 | 0 |
-| LOW | 138 | 0 |
+| HIGH | 174 | 4 |
+| MED | 357 | 0 |
+| LOW | 156 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19905,6 +19905,206 @@ Found by the S437 bootstrap slice M1 (dpa-051), each with shape + reproducer + t
 ### g-per-route-chunk-dir-named-after-absolute-source-path — `--emit-per-route` on pages with no route map names each chunk dir after the mangled ABSOLUTE source path — `NEW S438; LOW; open`
 <!-- @gap id=g-per-route-chunk-dir-named-after-absolute-source-path sev=LOW status=open locus=searched:compiler/src/codegen/route-splitter.ts(chunk descriptor route-path derivation when no route map applies)—not-traced prov=empirical:S438-peter-per-route-build-of-app-page-and-app-sub-deep-identical-on-base-072741ca -->
 A `--emit-per-route` build of pages with no route map writes chunks to `dist/C__Users_<…>_app_page/_anonymous.initial.<hash>.js` (the absolute source path with separators mangled to `_`), and `chunks.json` points at those dirs. The output layout therefore depends on the machine and checkout location — not reproducible across hosts — and leaks the builder's filesystem path into shipped URLs. **PRE-EXISTING**: byte-identical on `072741ca` (measured by the S438 #1045 F1 repro; the S239 review confirmed). Direction (unverified): derive the chunk dir from the dist-relative page path (the same `pathFor` / `stripPagesPrefix` computation the page's own artifacts use) when no route map applies.
+
+## §S440b — JS-WAT gauntlet + dPA DD defects (2026-09-28/29)
+
+Sources: the JS-WAT gauntlet (`scrml-support/docs/deep-dives/js-wat-gauntlet-2026-09-28/` — `REPORT.md` "Compiler bugs (impl#1)" + the `A/B/C/D-*-results.md` rows, finder-executed at `7e4bc8155` under happy-dom / in-process server fetch), the dpa-052/054/055/056 DD defect lists (DD-executed at `048df04db`), and PA finds. "PA-reproduced" and "re-executed on `5e5c952cd`" are execution, not relay; everything else is finder- or DD-executed and says so. Skipped as already fixed by #1137: Date `==` always true, Date-in-cell breaks boot, typed arrays through the deep-reactive Proxy (dpa-055 D4). Skipped as already filed: E-EQ-001 on typed cells.
+
+### g-cell-increment-on-string-concatenates — `@s++` on a string cell concatenates (`"5"` → `"51"`) — `NEW S440; HIGH; open`
+<!-- @gap id=g-cell-increment-on-string-concatenates sev=HIGH status=open locus=searched:compiler/src/codegen(the `@x++`/`@x--` desugar to `set(x, get(x) + 1)`)—not-traced prov=empirical:S440-JS-WAT-A92-PA-reproduced -->
+PA-reproduced: `<s> = "5"`, `@s++` in a function → `@s` = `"51"`; the local control `let loc = "5"; loc++` gives `6`. Silent wrong value, and a wat JS itself does not have — `++` means two things by sigil. Fix direction: lower to a numeric increment (or reject on a non-number cell once `int`/operator typing lands).
+
+### g-bigint-literal-truncates-the-rest-of-the-expression — a BigInt literal drops its `n` AND everything after it: `10n / 3n + 100` → `10` — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-bigint-literal-truncates-the-rest-of-the-expression sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts(numeric literal ends at the `n` suffix)—not-traced prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#4 -->
+PA-reproduced (and re-seen by dpa-054 M6 at `048df04db`): `let big = 10n / 3n + 100` emits `let big = 10;`; `<v> = 1n + 1` → `set("v", 1)`. Exit 0, zero diagnostics. RULED S440 JS-WAT #4: BigInt literals are rejected (an `E-*-NOT-IN-SCRML` code) until designed — the fix is the rejection, not a lowering.
+
+### g-prefix-increment-statement-deleted-in-function-body — a line-leading `++x` / `--x` statement in a `function` body is deleted from the emit — `NEW S440; HIGH; open`
+<!-- @gap id=g-prefix-increment-statement-deleted-in-function-body sev=HIGH status=open locus=searched:compiler/src/ast-builder.js(function-body statement splitter — newline before a prefix update)—not-traced prov=empirical:S440-JS-WAT-C21-C21b-PA-reproduced -->
+PA-reproduced: `let b = 1` / `++b` / `let c = 1` / `c++` / `--d` on separate lines → `"1|2|1"`; emitted body has `c++;` but no `++b;`/`--d;`. Works with an explicit `;`, in `on mount`, in inline handlers, and in expression position (`let y = ++x`). JS keeps the statement (ASI restricted production), so this is scrml-own. Near relatives, not duplicates: g-bare-block-statement-is-silently-dropped, g-double-unary-minus-emit-decrement.
+
+### g-regex-literal-initializer-without-semicolon-swallows-the-next-statement — a regex-literal initializer with no trailing `;` deletes the following statement — `NEW S440; HIGH; open`
+<!-- @gap id=g-regex-literal-initializer-without-semicolon-swallows-the-next-statement sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts,compiler/src/ast-builder.js(statement boundary after a regex-literal RHS)—not-traced prov=empirical:S440-JS-WAT-D-BUG-1+re-executed-on-5e5c952cd -->
+Re-executed on `5e5c952cd` (after the F18 fence landed): in a function, `const re = /a/g` / `console.log("one")` / `@out = "done"` emits `const re = /a/g;` then the `@out` write — `console.log("one")` is gone, exit 0. At the TOP LEVEL (the PA's S440 find): `<v> = /ab+c/i` / `<r> = @v.test("x")` swallows the second declaration → a false `E-STATE-UNDECLARED` on `@r`. One defect, two positions (silent in a body, misleading at top level). With `;` both work.
+
+### g-regex-with-colon-in-array-literal-lowers-as-a-map-literal — `[/a:b/]` compiles to a §59 map — `NEW S440; HIGH; open`
+<!-- @gap id=g-regex-with-colon-in-array-literal-lowers-as-a-map-literal sev=HIGH status=open locus=compiler/src/expression-parser.ts(preprocessMapLiterals — the S411 regex fence does not cover a regex that is a bracket-literal ELEMENT) prov=empirical:S440-f18-final-check+re-executed-on-5e5c952cd -->
+Re-executed on `5e5c952cd`: `const xs = [/a:b/]` emits `const xs = _scrml_map_from_entries([[/a, b/]], false);` at exit 0 (only a `W-TYPE-031-UNPROVEN` "inference stopped at map literal"). `[/a:b/, /c/]` fails loud instead (`E-MAP-LITERAL-MALFORMED` on `/c/`). A residual of the RESOLVED g-regex-char-class-colon-mislowered-as-map-literal (S411 fenced regex interiors, but not a regex whose `:` sits at array-element level).
+
+### g-nested-helper-in-sync-callback-accept-all — a server call wrapped in a helper declared INSIDE the handler and used in `.some`/`.filter` is un-awaited → `.some` true for every input — `NEW S440; HIGH (SECURITY); open`
+<!-- @gap id=g-nested-helper-in-sync-callback-accept-all sev=HIGH status=open locus=searched:compiler/src/codegen(sync-callback async rewrite — a nested async helper call site stays `.some((x) => inner(x))`)—fix-on-unmerged-branch prov=empirical:S440-JS-WAT-D65-PA-reproduced -->
+PA-reproduced (#65): server `function inner(x) { return isOk(x) } return [1,2,3].some(x => inner(x))` and the client twin both return **true** (expected false). `inner` is emitted `async … return await isOk(x)` but the call site is not rewritten. A file-scope helper is handled. This is the accept-all E-SERVER-FN-IN-SYNC-CALLBACK exists to fail closed on (`hashes.some(h => verifyPassword(pw, h))`). Fix built, NOT on main at `5e5c952cd`: `eb964a2c6` + fix round `7db49187c` (`worktree-agent-ab13d4ede5a9719a8`), in PR #1139. Residuals are filed as F4/F5 below; two fail-closed false positives the fix introduces are filed as g-sync-callback-rawtext-scan-false-positives and g-sync-local-with-async-name-treated-async.
+
+### g-async-helper-escaping-as-a-value-accept-all — an async-colored helper passed or stored as a VALUE (`drive(inner)`, an alias, inside an array/object, `Array.from(xs, inner)`) reaches a sync consumer un-awaited → accept-all — `NEW S440; HIGH (SECURITY); open; RULED`
+<!-- @gap id=g-async-helper-escaping-as-a-value-accept-all sev=HIGH status=open locus=searched:compiler/src/codegen(async coloring — no escape analysis on function VALUES) prov=ruling:user-voice-scrml.md-S440-F4 -->
+F4, surfaced by the S440 nested-helper review; pre-existing (not introduced by #1139). With `m` wrapping `verifyPassword`: `const g = m; g("wrong")`, `{f: m}.f(…)`, `[m][0](…)` and a user HOF `drive(m)` are all ACCEPTED with real hashing (reviewer-executed). RULED S440 (F4): an async-colored function may not escape as a value, except into the awaited combinators (`.some`, `.filter`, …); everything else is a compile error (fail closed). Queued.
+
+### g-sync-callback-rawtext-scan-false-positives — the server raw-text nested-async scan (#1139) keys a per-FILE name map with no scope, string or member awareness, so valid code fails `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` — `NEW S440; MED; open`
+<!-- @gap id=g-sync-callback-rawtext-scan-false-positives sev=MED status=open locus=compiler/src/codegen/emit-server.ts(nested-async raw-text check)+compiler/src/codegen/local-async-fns.ts prov=review:S440-PR-1139-review-coordinator-relayed -->
+BRANCH-conditional: exists only once PR #1139 (g-nested-helper-in-sync-callback-accept-all) lands. Reviewer-found, RELAYED-UNVERIFIED by this filer: `[1].map(x => { return "m(" + x })` (string text), `o.m(x)` (a member), template text `` `call m(${pw})` ``, and a DIFFERENT server fn's own sync `m` all fire the error on valid code. Fail-closed, so no security cost; the cost is false rejections. Fix direction: key the map per enclosing server fn, skip matches preceded by `.`, skip string/template text.
+
+### g-sync-local-with-async-name-treated-async — a SYNC local function that shares a name with an async one (`function verifyPassword(a, b) { return a - b }` then `.sort(verifyPassword)`) now fails to compile — `NEW S440; LOW; open`
+<!-- @gap id=g-sync-local-with-async-name-treated-async sev=LOW status=open locus=compiler/src/codegen/local-async-fns.ts prov=review:S440-PR-1139-review-coordinator-relayed -->
+BRANCH-conditional on PR #1139 (compiled before it). Reviewer-found, RELAYED-UNVERIFIED by this filer. Fail-closed false rejection: the local-async name set is keyed by name, not by the binding that is actually in scope.
+
+### g-server-call-in-inline-handler-condition-unawaited — `onclick=${ if (isOk(1)) {…} }` tests a Promise, and `on mount` `.some`/nested helpers leave server calls un-awaited → accept-all — `NEW S440; HIGH (SECURITY); open`
+<!-- @gap id=g-server-call-in-inline-handler-condition-unawaited sev=HIGH status=open locus=searched:compiler/src/codegen/emit-event-wiring.ts,compiler/src/codegen/emit-reactive-wiring.ts(inline-handler + on-mount bodies skip the auto-await rewrite)—not-traced prov=empirical:S440-F5-PA-reproduced -->
+F5, PA-reproduced: `onclick=${ if (isOk(1)) {…} }` emits `if (_scrml_fetch_isOk_4(1))` — a Promise is always truthy, so the branch is taken for every input. The same class in `on mount` bodies with `.some` and nested helpers. Member of g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources, filed separately because the condition position makes it an authorization bypass rather than a stale value.
+
+### g-cell-assign-server-call-fired-detached — `@cell = serverFn()` is emitted as a fire-and-forget IIFE: the next statement reads the old value and successive writes race — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-cell-assign-server-call-fired-detached sev=HIGH status=open locus=searched:compiler/src/codegen/emit-client.ts(the whole-result `_scrml_reactive_set(name, await stub())` → async-IIFE rewrite)—not-traced prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#12 -->
+PA-reproduced (D#59): `@out = double(21); console.log(@out)` logs `0`; `@out = double(1); @out = double(2); @out = @out + 100` logs `100` and ends `4` (arrival order decides). Emitted `(async () => _scrml_cs_reactive_set("out", await _scrml_fetch_double_5(1)))().catch(…)` inside an already-async function; `const a = double(1)` IS awaited. Violates §13.2's SHALLs. RULED S440 JS-WAT #12: fix in impl#1 as a §13.2 conformance restoration (explicit S435-policy exception). Siblings: g-failable-cell-load-fire-and-forget-stale-read-dead-return (the `!{}` form), g-reactive-write-member-server-call-no-autoawait.
+
+### g-refinement-contract-unchecked-on-cell-write — a §53 refinement is checked at the declaration initializer only; writes to the cell are unchecked, even a static-zone literal — `NEW S440; HIGH; open`
+<!-- @gap id=g-refinement-contract-unchecked-on-cell-write sev=HIGH status=open locus=searched:compiler/src/codegen(reactive-cell write emit — no E-CONTRACT-001-RT guard),compiler/src/type-system.ts(static-zone fold at write sites)—not-traced prov=empirical:S440-JS-WAT-B45-finder-executed -->
+Finder-executed: `<c>: number(>0) = 5` then `@c = -5` (a literal) → accepted, emitted `_scrml_cs_reactive_set("c", -5)`; `@c = @zero / @zero` → NaN accepted; `<pct>: number(>=0 && <=100)` accepts `0/0`. Control: `<c>: number(>0) = -5` fires E-CONTRACT-001, and a refinement LOCAL (`let r: number(>0) = …`) does get a runtime guard. Undercuts §53.4/§53.6's three-zone contract.
+
+### g-int-annotation-unenforced — `int` accepts any number: `<q>: int = 7 / 2` holds `3.5`, even the literal `1.5` is accepted — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-int-annotation-unenforced sev=HIGH status=open locus=searched:compiler/src/type-system.ts(int ≡ integer ≡ number assignability; §7.5.1 excludes `int` from the checked set)—not-traced prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#7a -->
+Finder-executed (B#4/#44) and DD-reconfirmed (dpa-054 M4: `const <taxC>: int = @cents*@rateBp/10000` holds `164.9175`): cells, locals, fn params/returns and cell writes all accept non-integers with zero diagnostics. RULED S440 JS-WAT #7(a): enforce `int` (bootstrap typer); `7 / 2` into `int` is an error; integer division is explicit (dpa-054 #3: `div(a, b, mode)`). Lane: bootstrap; impl#1 carries per S435 unless ruled otherwise.
+
+### g-derived-value-mutate-bypassed-by-non-syntactic-routes — `Object.assign(@d, …)`, `mutate(@d)`, `[@d][0].push()`, `{arr: @d}.arr.push()` mutate a derived cell in place with no E-DERIVED-VALUE-MUTATE — `NEW S440; HIGH; open`
+<!-- @gap id=g-derived-value-mutate-bypassed-by-non-syntactic-routes sev=HIGH status=open locus=searched:compiler/src/type-system.ts(§6.6.18 checker — method-on-`@d` + direct alias chain only) prov=empirical:S440-JS-WAT-D14-finder-executed -->
+Finder-executed (p07_2..5): all four compile clean; `@d` then reads `[3,1,2,42]` while the DOM still shows `3,1,2`, and the next upstream write silently discards the mutation — the exact hazard §6.6.18 exists to prevent. The direct forms (`@d.push`, `const a = @d; a.push`, 2-hop alias) ARE rejected. The error's own fix-it ("`[...@d]` breaks the alias chain") is true only one level deep (D#17).
+
+### g-derived-rhs-mutator-mutates-the-upstream-cell — `const <s> = @src.sort()` sorts `@src` in place every time the derived cell evaluates — `NEW S440; HIGH; open`
+<!-- @gap id=g-derived-rhs-mutator-mutates-the-upstream-cell sev=HIGH status=open locus=searched:compiler/src/type-system.ts(§6.6 derived-RHS purity — no rule that a derived RHS must not mutate) prov=empirical:S440-JS-WAT-D15-finder-executed -->
+Finder-executed: after `@src = [9,8,7]`, `@src` reads `[7,8,9]`; `const <s> = @src.reverse().length` likewise. No diagnostic. Fix direction: reject an in-place mutator on a cell read inside a derived RHS (the §6.5.1 mutator set).
+
+### g-fn-purity-misses-mutator-methods — `fn f() { @xs.sort() }` / `@xs.push(4)` write the cell though `@xs = …` in a `fn` is E-FN-003; I-FN-PROMOTABLE recommends the violation — `NEW S440; HIGH; open`
+<!-- @gap id=g-fn-purity-misses-mutator-methods sev=HIGH status=open locus=searched:compiler/src/type-system.ts(checkOuterScopeMutation — assignment only, not the §6.5.1 mutators the compiler itself lowers to a reactive set) prov=empirical:S440-JS-WAT-D75-D12-finder-executed -->
+Finder-executed (D#75): both compile clean and write the cell (DOM updates); `@xs = [1]` in the same `fn` is rejected. `I-FN-PROMOTABLE` actively recommends promoting `function go() { @xs.sort() }` to `fn`. Also (D#12): a `fn` mutating its PARAMETER (`arr.push(7)` on a passed cell) is accepted and writes the caller's cell.
+
+### g-cell-mutators-skip-clone-then-write-back — `@xs.sort()`/`push`/`reverse` mutate the live array in place, not the §6.5.1 clone → mutate → write-back — `NEW S440; HIGH; open`
+<!-- @gap id=g-cell-mutators-skip-clone-then-write-back sev=HIGH status=open locus=searched:compiler/src/codegen/rewrite.ts,compiler/src/codegen/emit-logic.ts(the §6.5.1 mutating-method lowering) prov=spec:§6.5.1-SHALL-clone-apply-write-back+empirical:S440-JS-WAT-D16 -->
+Finder-executed (D#16): emitted `_scrml_cs_reactive_get("xs").sort(); _scrml_cs_reactive_set("xs", <same ref>)`. An alias taken earlier (`const before = @xs`) is sorted too; `const r = @ys.reverse(); r.push(100)` writes the cell (`[2,1,3,100]`) while the DOM stays `2,1,3`. §6.5.1: "SHALL rewrite … 1. Clone the current array value 2. apply to the clone 3. write back". Distinct from the carried §66.10 alias divergence: this one violates a SHALL impl#1 claims to implement.
+
+### g-onmount-and-inline-handler-bodies-skip-the-language-checks — `on mount` (and partly inline `{ }` handlers) accept `switch`, `var`, `try`/`finally`, `null`, `undefined`, `async`, `throw`, method shorthand and `for…in` — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-onmount-and-inline-handler-bodies-skip-the-language-checks sev=HIGH status=open locus=searched:compiler/src/ast-builder.js,compiler/src/codegen(on-mount body emitted as raw escape-hatch text — root shared with g-onmount-multistatement-bypasses-statement-codegen) prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#11 -->
+Finder-executed (C65) and PA-reproduced (`on mount` accepting `null` + `switch`): each construct compiles and RUNS in `on mount`; the same statement in a `function` body or top-level `${ }` is rejected with its proper code. Inline `onclick={ … }` lets through `null`, `try/finally`, keywordless `for (k in …)`. Only `class` and `===` are caught. RULED S440 JS-WAT #11: a §6.7.1a conformance bug; every rule (incl. S440 #4 truthiness and JS-WAT #4–#6) must be enforced in these bodies or it leaks there.
+
+### g-worker-send-overwrites-the-when-message-handler — the emitted `.send()` sets `worker.onmessage = resolve` on every call, killing every `when message from <#w>` handler — `NEW S440; HIGH; open`
+<!-- @gap id=g-worker-send-overwrites-the-when-message-handler sev=HIGH status=open locus=compiler/src/codegen/emit-client.ts:2411-2417(at-048df04db — the send wrapper assigns onmessage) prov=empirical:S440-dpa-056-D2-DD-executed -->
+DD-executed in headless Chromium (dpa-056 M2): with the worker bundle hand-supplied, `examples/13-worker.scrml`'s worker replies correctly (`count = 168`) but the button stays on "Computing…"; `onmessage` is the `when` handler before the click and the promise resolver after it. Silent at exit 0; violates §46.6's first SHALL. With g-nested-program-emits-artifacts-it-never-produces, the shipped worker example is broken twice.
+
+### g-pg-numeric-and-bigint-arrive-as-strings-so-arithmetic-concatenates — Postgres `NUMERIC`/`DECIMAL`/`BIGINT` values reach scrml as JS strings; `row.total + 1` → `"64.921"` — `NEW S440; HIGH; open; RULED`
+<!-- @gap id=g-pg-numeric-and-bigint-arrive-as-strings-so-arithmetic-concatenates sev=HIGH status=open locus=searched:compiler/src/codegen/emit-server.ts(SQL row decode — Bun.SQL returns numeric/int8 as strings, no coercion or typing) prov=ruling:user-voice-scrml.md-S440-dpa-054-§8-#1 -->
+DD-executed live against Postgres (dpa-054 M9/M11): `orders(total NUMERIC(12,2), big BIGINT)` → wire `{"total":"64.92","big":"9007199254740993"}`; `addTip(1)` → `"64.921"`, `addTip(0.1)` → `"64.920.1"`; `row.total == 64.92` is false at runtime; zero diagnostics (row type UNPROVEN). NUMERIC-typed expressions (`int4 + 0.5`) arrive as strings too. RULED S440 dpa-054 #1 = (B), an impl#1 exception: `int8`/`bigint` → `int` decoded to a number with a LOUD runtime error past 2^53 naming the column; `numeric`/`decimal` → `string` plus a schema-time diagnostic. Queued.
+
+### g-map-field-write-through-bracket-bypasses-e-map-bracket-write — `@m["a"].x = 5` (map cell inferred from its literal) and nested `@s.m["a"] = 5` compile clean and write a stray own key instead of the entry — `NEW S440; HIGH; open`
+<!-- @gap id=g-map-field-write-through-bracket-bypasses-e-map-bracket-write sev=HIGH status=open locus=searched:compiler/src/type-system.ts(E-MAP-BRACKET-WRITE fires only when the cell's map type is ANNOTATED and the map is the root receiver),compiler/src/codegen(emits `_scrml_deep_set(get("m"), ["a","x"], 5)` on a HAMT map) prov=empirical:S440-PA-find+compile-re-executed-on-5e5c952cd -->
+Compile re-executed on `5e5c952cd`: `<m> = ["a": {x: 1}]` + `@m["a"].x = 5` → exit 0, `_scrml_deep_set(_scrml_cs_reactive_get("m"), ["a", "x"], 5)`; `<s> = { m: ["a": 1] }` + `@s.m["a"] = 5` → exit 0, `_scrml_deep_set(…, ["m", "a"], 5)`. With the map ANNOTATED (`<m>: [string: {x: number}] = …`) the first form IS rejected E-MAP-BRACKET-WRITE. Runtime effect (PA-observed, not re-run here): a silent no-op on the entry plus a stray own key on the map object, and the nested form renders the stray key.
+
+### g-no-dependency-derived-cell-never-displays — `const <k> = 5 + 1` is emitted as a JS local but every `@k` read goes through `_scrml_derived_get` → `""` on screen, `@k + 1` is NaN — `NEW S440; MED; open`
+<!-- @gap id=g-no-dependency-derived-cell-never-displays sev=MED status=open locus=searched:compiler/src/codegen(§6.6.11 const-lowering of a no-dep derived cell — the read side was not updated) prov=empirical:S440-JS-WAT-B-BUG-1+A-bug-5-finder-executed -->
+Finder-executed twice (A `p/der.scrml`, B `p/bug1b.scrml`) and hit again by dpa-054 (`const <fixed> = (1.005).toFixed(2)`): `${@k}` renders `""`; `<m> = @k + 1` is NaN. §6.6.11 says it "SHALL still compile as a const" — the declare side does, the reads do not. `W-DERIVED-001` says "will never re-evaluate after initial computation … use `const k` instead" — wrong (it never displays at all) and confused (the author did write `const`).
+
+### g-local-shadow-of-file-scope-fn-misresolved-as-call-argument — a local `const helper = 41` is used correctly in `helper + 1` but rewritten to the file-scope FUNCTION when passed as a call argument — `NEW S440; MED; open`
+<!-- @gap id=g-local-shadow-of-file-scope-fn-misresolved-as-call-argument sev=MED status=open locus=searched:compiler/src/codegen(user-fn mangling of call-argument identifiers ignores local shadowing)—not-traced prov=empirical:S440-JS-WAT-D-BUG-2-finder-executed -->
+Finder-executed (`bug01.scrml`): with a file-scope `function helper()`, `String(helper)` inside a function holding `const helper = 41` emits `String(_scrml_helper_2)`. Found via `Object.create(proto)` beside a `function proto()`. Silent wrong value. Same family as g-user-fn-rename-rewrites-emitted-helper-locals.
+
+### g-point-free-server-fn-reference-throws-referenceerror — `.some(isOk)` / `.map(double)` with a server fn passed by name compile clean and throw `ReferenceError: isOk is not defined` — `NEW S440; MED; open`
+<!-- @gap id=g-point-free-server-fn-reference-throws-referenceerror sev=MED status=open locus=searched:compiler/src/codegen(async-combinator rewrite applied — `_scrml_someAsync([1,2,3], isOk)` — but the bare name is never mangled to the route stub) prov=empirical:S440-JS-WAT-D66-finder-executed -->
+Finder-executed client AND server (`bug05-pointfree-serverfn-ref.scrml`). `const f = isOk; f(1)` works. Loud at runtime, clean at compile. Interacts with the F4 ruling (a server fn escaping as a value into an awaited combinator stays legal, so this must lower, not reject).
+
+### g-discarded-map-set-method-result-is-a-silent-noop — `@m.insert(k, v)` / `@s.add(k)` / `@xs.concat([4])` as bare statements do nothing, with no diagnostic — `NEW S440; MED; open`
+<!-- @gap id=g-discarded-map-set-method-result-is-a-silent-noop sev=MED status=open locus=searched:compiler/src/type-system.ts(no unused-result check for §59 reassignment-canonical methods) prov=empirical:S440-JS-WAT-D68-finder-executed -->
+Finder-executed (p23): size stays 0, 0, `[1,2,3]`. §59.7 makes map/set writes reassignment-canonical (`@m = @m.insert(k, v)`), so a discarded result from a method that exists ONLY to return a new value is always a bug; a must-use diagnostic would close it.
+
+### g-promise-not-rejected-despite-13-1 — `new Promise(…)`, `Promise.all([…])` compile and run though §13.1 says the developer SHALL NOT write them — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-promise-not-rejected-despite-13-1 sev=MED status=open locus=searched:compiler/src/type-system.ts(scope allowlist admits Promise; `async`/`await` are enforced, `Promise` is not) prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#4 -->
+Finder-executed (D#60): `typeof p` = "object"; SPEC.md:7896 "The developer SHALL NOT write `async`, `await`, `Promise`, `Promise.all` …". RULED S440 JS-WAT #4: reject `Promise` / `new Promise` / `Promise.all` with an `E-*-NOT-IN-SCRML` code (newly rejecting; measure the corpus before landing). Note dpa-056 D5: §43.5.1 still types cross-program calls `Promise<T>` — see g-spec-2-4-and-43-5-1-restatements-owed.
+
+### g-js-constructs-not-rejected-with-named-codes — `var`, `this`, `void`, `delete`, `with`, `globalThis.eval`/`new Function`, `arguments`, getters/setters/method shorthand compile, or fail under a misleading code — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-js-constructs-not-rejected-with-named-codes sev=MED status=open locus=searched:compiler/src/type-system.ts,compiler/src/ast-builder.js(§7.2.1 not-scrml table + its enforcement) prov=ruling:user-voice-scrml.md-S440-JS-WAT-decisions-4-12-#4 -->
+Finder-executed (C1/C2/C7/C12/C29/C30/C32/C33/C39/C40): `for (var i…)` accepted, a bare `var x` reported as `E-STMT-MISSING-SEMICOLON` (emit contains `var;`); `this` works with sloppy-mode semantics (the chunk has no `"use strict"`); `void 0` mints `undefined`; `with` and `delete local` are refused as "compiler defect" (the validator parses strict while the chunk runs sloppy); `globalThis.eval("1+2")` runs; `{ get v() {} }` / `{ m() {} }` emit `{v: , m: }` → `E-CODEGEN-INVALID-LOGIC`. RULED S440 JS-WAT #4: each gets an `E-*-NOT-IN-SCRML` code (labels kept), measured against the corpus before landing.
+
+### g-arithmetic-and-relational-operators-accept-non-numbers — `"5" + 2`, `true + true`, `@a * @b` on `number[]`, `"10" < "9"`, `not + 1` all compile — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-arithmetic-and-relational-operators-accept-non-numbers sev=MED status=open locus=searched:compiler/src/type-system.ts(no operand typing for binary operators) prov=ruling:user-voice-scrml.md-S440-JS-WAT-1-3-Gotcha-Q1-Q3 -->
+Status note for a ruled rule, with its evidence: 273 of 352 gauntlet probes leak silently, most through operators; dpa-055 M8 (Chromium): `@a + @b` on `number[]` cells renders `"1,2,34,5,6"`, `@a * @b` and `@a * 2` render `NaN`. RULED S440 (Gotcha Q1–Q3): arithmetic and relational operators take numbers only, `+` takes two numbers or two strings; `!`/`&&`/`||` take booleans (defaults via `??`); a `T | not` operand is narrowed first. dpa-055 R6: no operators on tapes. Bootstrap enforces (provable-or-silent); impl#1 keeps today's behaviour.
+
+### g-appendix-d-disagrees-with-the-scope-allowlist — 17 of Appendix D's 45 promised globals are E-SCOPE-001 in source (`Uint8Array`, `ArrayBuffer`, `DataView`, all typed arrays, …) while `Math` is admitted though §41.18 says there is no ambient `Math` — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-appendix-d-disagrees-with-the-scope-allowlist sev=MED status=open locus=compiler/src/type-system.ts(LOGIC_SCOPE_GLOBAL_ALLOWLIST)+compiler/SPEC.md(Appendix-D-~L16070 vs §41.18-~L25540) prov=ruling:user-voice-scrml.md-S440-dpa-055-R1 -->
+DD-executed (dpa-055 M1/M2, dpa-056 P1) and PA-found: `new Float32Array(4)` / `new Int32Array(4)` → `E-SCOPE-001` in a function, a cell and a `fn`; missing: all 8 typed arrays, `ArrayBuffer`, `DataView`, `WeakRef`, `BigInt`, `Intl`, `Reflect`, `Proxy`, `structuredClone`, `queueMicrotask` (while Node's `Buffer` IS allowlisted). SPEC self-contradiction (dpa-055 D7): §41.18 "There is no ambient `Math` global" vs Appendix D + the allowlist. RULED S440 dpa-055 R1: rewrite Appendix D to what the language admits (IN: typed arrays incl. `Float16Array`, `ArrayBuffer`, `DataView`, …) and make the compiler match; (i) no ambient `Math`.
+
+### g-stdlib-crypto-source-does-not-compile-standalone — `stdlib/crypto/index.scrml` fails 6 errors under the language it ships with — `NEW S440; MED; open`
+<!-- @gap id=g-stdlib-crypto-source-does-not-compile-standalone sev=MED status=open locus=stdlib/crypto/index.scrml prov=empirical:S440-dpa-055-M3-DD-executed -->
+DD-executed (dpa-055 M3, `048df04db`): `Uint8Array` ×2, `TextEncoder`, `Bun` ×2, `throw`. Unknown which one adopters actually get (the runtime shim or this source); either way the source is not valid scrml. Partly downstream of g-appendix-d-disagrees-with-the-scope-allowlist.
+
+### g-typed-array-server-return-arrives-as-an-index-keyed-object — a server fn declared `-> number[]` returning a `Float32Array` delivers `{"0":0.1…,"1":…}` to the client — `NEW S440; MED; open; RULED`
+<!-- @gap id=g-typed-array-server-return-arrives-as-an-index-keyed-object sev=MED status=open locus=searched:compiler/src/codegen/emit-server.ts(`JSON.stringify(_scrml_result ?? null)` — no binary encoding, declared return type unchecked at the boundary) prov=ruling:user-voice-scrml.md-S440-dpa-055-R4 -->
+DD-executed in Chromium (dpa-055 M5), exit 0. The declared return type is not enforced at the `_={}` value boundary and there is no wire encoding for binary data. Same wire family as JS-WAT D#73 (NaN/Infinity arrive as `not`, a JS `Map` as `{}`). RULED S440 dpa-055 R4: base64-in-envelope + a size warning; binary frames later.
+
+### g-tofixed-and-formatcurrency-round-the-same-value-differently — `1.005.toFixed(2)` → `"1.00"`, `formatCurrency(1.005, "USD")` → `"$1.01"`, `round(x*100)/100` → `1` — `NEW S440; MED; open`
+<!-- @gap id=g-tofixed-and-formatcurrency-round-the-same-value-differently sev=MED status=open locus=stdlib/format(formatCurrency via Intl)+docs(PRIMER §6.4 teaches `@price.toFixed(2)`) prov=empirical:S440-dpa-054-M2-D3-DD-executed -->
+DD-executed (dpa-054 M2): also `0.615` → `"0.61"` / `"$0.62"` / `0.62`. The language's own three display paths disagree on one value (Intl rounds the shortest decimal repr, `toFixed` the binary value), and the PRIMER teaches the worst one. Superseded in part by dpa-054 #2 (core `decimal`, bootstrap), but the PRIMER text and `scrml:format` disagree today.
+
+### g-client-server-call-in-sync-callback-reports-the-stdlib-code-at-1-1 — on the client, a peer server fn in `forEach` / a `sort` comparator / a stored lambda / an `Array.from` mapFn fires `E-ASYNC-STDLIB-IN-SYNC-CALLBACK` at span `1:1` with a wrong example list — `NEW S440; LOW; open`
+<!-- @gap id=g-client-server-call-in-sync-callback-reports-the-stdlib-code-at-1-1 sev=LOW status=open locus=searched:compiler/src/codegen(client-side sync-callback guard — server side correctly uses E-SERVER-FN-IN-SYNC-CALLBACK) prov=empirical:S440-JS-WAT-D57-D58-finder-executed -->
+Finder-executed (p17_1/4/6/13): fails closed (good) but under the stdlib-named code, pointing at `<program>` line 1, and its examples (`.map`/`.filter`/`.some`) are exactly the ones the client DOES rewrite; for `forEach` the hazard is ordering, not a consumed return value. The server side uses the correct code for the same shape.
+
+### g-template-literal-not-interpolation-emitted-unlowered — `` `${not}` `` inside a logic template literal compiles clean and throws `ReferenceError: not is not defined` — `NEW S440; MED; open`
+<!-- @gap id=g-template-literal-not-interpolation-emitted-unlowered sev=MED status=open locus=searched:compiler/src/expression-parser.ts(esTreeToExprNode TemplateLiteral multi-quasi `raw` — the §42 `not` lowering never reaches interpolations) prov=empirical:S440-JS-WAT-A71-finder-executed -->
+Finder-executed: `` <i3> = `${not}` `` is emitted verbatim. The REPORT listed it LOW; filed MED because it compiles at exit 0 and crashes at runtime — the same shape as g-tilde-keyword-inside-template-interpolation-leaks-placeholder (HIGH), and likely the same `raw` path. Once fixed it must render per the S440 `${not}` ruling (nothing), see g-interpolation-renders-not-as-literal-null.
+
+### g-double-bang-object-literal-read-as-error-handler — `!!{}` crashes codegen: `!{` is lexed as the §19 error-handler sigil and the `{}` is eaten — `NEW S440; LOW; open`
+<!-- @gap id=g-double-bang-object-literal-read-as-error-handler sev=LOW status=open locus=searched:compiler/src/tokenizer.ts,compiler/src/ast-builder.js(`!{` handler-sigil recognition after a unary `!`)—not-traced prov=empirical:S440-JS-WAT-A38-finder-executed -->
+Finder-executed: `<t3> = !!{}` → `E-CODEGEN-INVALID-LOGIC` (`_scrml_reactive_set("t3", !);`). `!!({})` compiles. Loud; at minimum the error should name the `!{` collision. Moot for `!` on a non-boolean once Gotcha Q2 (booleans only) is enforced, but the sigil collision remains for any `!{…}` object operand.
+
+### g-number-literal-member-access-codegen-defects — `(255).toString(16)`, `1..toString()` and octal `010` reach the output validator as generic "compiler defects" — `NEW S440; LOW; open`
+<!-- @gap id=g-number-literal-member-access-codegen-defects sev=LOW status=open locus=searched:compiler/src/codegen/emit-expr.ts(parens dropped around an integer-literal receiver),compiler/src/tokenizer.ts(`1.`+`.` split; leading-zero literal passed through) prov=empirical:S440-JS-WAT-B78-B83-B84-finder-executed -->
+Finder-executed: `(255).toString(16)` emits `255.toString(16)` ("Identifier directly after number"; `(1e21)` / `(1.005)` survive because the literal has `.`/`e`); `1..toString()` emits `1 .. toString ( )`; `<v> = 010` passes to strict-mode JS. All fail closed as `E-CODEGEN-INVALID-LOGIC` with no source line. The first is ordinary code; the octal form wants a parse-time error naming the literal.
+
+### g-prefix-increment-on-cell-lowers-to-rvalue — `++@n` emits `++_scrml_reactive_get("n")` → `E-CODEGEN-INVALID-LOGIC "Assigning to rvalue"` — `NEW S440; LOW; open`
+<!-- @gap id=g-prefix-increment-on-cell-lowers-to-rvalue sev=LOW status=open locus=searched:compiler/src/codegen(prefix update on a `@` cell lowered as a read, postfix `@n++` lowered as a set) prov=empirical:S440-JS-WAT-C22-finder-executed -->
+Finder-executed. Fails closed, blamed on the compiler. Postfix `@n++` lowers (but see g-cell-increment-on-string-concatenates).
+
+### g-tilde-diagnostic-explains-accumulator-for-bitwise-not — `~x` / `~~x` get `E-CG-TILDE-UNRESOLVED`, which explains the §32 accumulator and never says bitwise NOT is not scrml — `NEW S440; LOW; open`
+<!-- @gap id=g-tilde-diagnostic-explains-accumulator-for-bitwise-not sev=LOW status=open locus=searched:compiler/src/codegen(E-CG-TILDE-UNRESOLVED message)+compiler/SPEC.md(no bitwise-operator text at all) prov=empirical:S440-JS-WAT-B26-finder-executed -->
+Finder-executed: `<bw2> = ~~3000000000.7`, `@bw2 = ~@n`. Net effect is prevention (bitwise NOT is inexpressible, since §32 owns the glyph), but the SPEC is silent on bitwise operators entirely, so neither the prevention nor the rest of the bitwise set (`|`, `>>`, `<<` pass through; `>>>` see g-multi-ops-first-match-shadows-the-longer-operator) is written down.
+
+### g-w-dead-function-false-fires-on-default-param-and-value-references — `W-DEAD-FUNCTION` fires for a function called only from a default-parameter expression or referenced only as a value — `NEW S440; LOW; open`
+<!-- @gap id=g-w-dead-function-false-fires-on-default-param-and-value-references sev=LOW status=open locus=compiler/src/route-inference.ts(the W-DEAD-FUNCTION caller scan — misses default-param expressions and value references) prov=empirical:S440-JS-WAT-C14-C19-finder-executed -->
+Finder-executed: `function f(a = tick())` → "`tick` has no callers … will be tree-shaken"; a tagged-template tag referenced as a value likewise. Neither is removed. A new fire-condition miss beside the resolved `<each>` one (g-usage-analyzer-blind-to-each-in-collection-fn-ref); the false "tree-shaken" sentence is g-wdead-function-tree-shaken-claim-is-false.
+
+### g-call-char-return-spurious-e-scope-001 — `r{ dot(...) }` in a `return` expression fires a spurious E-SCOPE-001 on `r` beside E-WASM-NOMINAL — `NEW S440; LOW; open`
+<!-- @gap id=g-call-char-return-spurious-e-scope-001 sev=LOW status=open locus=searched:compiler/src/type-system.ts(scope check on the call-char `r`) prov=empirical:S440-dpa-055-M7-D6-DD-executed -->
+DD-executed (dpa-055 M7, `extern r dot(...)` + `r{ dot(...) }`): E-WASM-NOMINAL fires as documented, plus E-SCOPE-001 on `r` — contradicting §23.3's note that the misleading E-SCOPE-001 was retired at S231.
+
+### g-worker-send-passes-no-transfer-list — `postMessage(data)` never passes a transfer list, so every send is a structured-clone copy — `NEW S440; LOW; open; RULED`
+<!-- @gap id=g-worker-send-passes-no-transfer-list sev=LOW status=open locus=compiler/src/codegen/emit-client.ts(the worker send wrapper) prov=ruling:user-voice-scrml.md-S440-dpa-056-R3 -->
+DD-measured (dpa-056 M5, Bun, 128 MB): copy 75–79 ms vs transfer 11 ms. RULED S440 dpa-056 R3: `send(lin x)` is a TRANSFER. Perf only.
+
+### g-spec-2-4-and-43-5-1-restatements-owed — §2.4's "SHALL use SharedArrayBuffer and Atomics" is unimplemented, and §43.5.1 types cross-program calls `Promise<T>` while S440 rejects `Promise` in source — `NEW S440; LOW; open; RULED`
+<!-- @gap id=g-spec-2-4-and-43-5-1-restatements-owed sev=LOW status=open locus=compiler/SPEC.md(§2.4,§43.5.1) prov=ruling:user-voice-scrml.md-S440-dpa-056-R7 -->
+dpa-056 D4/D5 (grep reach: no `SharedArrayBuffer`/`Atomics` anywhere in `compiler/` or `stdlib/`). RULED S440 dpa-056 R7: restate §2.4 as non-normative implementation guidance; restate §43.5.1's cross-program call as returning `T` (compiler-awaited). SPEC edit only.
+
+### g-spec-secdef-example-uses-illegal-schema-types — SPEC's §S4 SECDEF worked example declares `amount: decimal` / `id: uuid`, which fail `E-SCHEMA-004` — `NEW S440; LOW; open`
+<!-- @gap id=g-spec-secdef-example-uses-illegal-schema-types sev=LOW status=open locus=compiler/SPEC.md(§S4-SECDEF-example-~L9617 at 048df04db) prov=empirical:S440-dpa-054-M8-D4-DD-executed -->
+DD-executed on Postgres and SQLite `db=`. The ~L9375 note covers the db-authoritative example but not this one. Doc fix now; revisit when dpa-054 #2's core `decimal` lands.
+
+### g-sqlite-numeric-affinity-silently-lossy — a `NUMERIC(10,2)`/`DECIMAL(10,2)` column on SQLite stores `"1.005"` as REAL and `"12345678901234567.89"` as integer `12345678901234568`, with no warning — `NEW S440; LOW; open`
+<!-- @gap id=g-sqlite-numeric-affinity-silently-lossy sev=LOW status=open locus=searched:compiler/src(schema-time — no W- for NUMERIC/DECIMAL CREATE TABLE targeting SQLite) prov=empirical:S440-dpa-054-M12-D5-DD-executed -->
+DD-executed via Bun.SQL. §14.8.3 rule 5 types it `number`, honest about the runtime and silently lossy. Proposed: a schema-time `W-` when a NUMERIC/DECIMAL table targets SQLite.
+
+### g-postgres-unix-socket-db-url-ignored — `db="postgres:///db?host=/var/run/postgresql"` is emitted verbatim to `new SQL(url)`, which ignores `host=` and connects over TCP — `NEW S440; LOW; open`
+<!-- @gap id=g-postgres-unix-socket-db-url-ignored sev=LOW status=open locus=compiler/src/codegen/emit-server.ts(`new SQL(connStr)` emit) prov=empirical:S440-dpa-054-D6-DD-executed -->
+DD-observed while running dpa-054 M9 (the harness replaced only that constructor line with the socket-path option form). Environment-dependent: a unix-socket `db=` URL does not work.
+
+### g-spec-20-5-1-page-limb-names-sessionexpiry — §20.5.1 resolution step 2 still reads the unit's raw `<page>` attribute for `sessionExpiry=`, which is outside §40.8's `<page>` attribute set — `NEW S440; LOW; open`
+<!-- @gap id=g-spec-20-5-1-page-limb-names-sessionexpiry sev=LOW status=open locus=compiler/SPEC.md:16728(§20.5.1 resolution order step 2) prov=spec:§40.8-page-attribute-set-PA-found-S440 -->
+PA-found. S440 #13 struck the `<page>` limb for `session-secure=` only; for `sessionExpiry=` the limb is dead (a `<page>` cannot carry the attribute). SPEC text: strike it for `sessionExpiry=` too, or add the attribute to §40.8 — the former matches S440 #13's reasoning.
+
+### g-tuple-shapes-report-map-literal-diagnostics — a tuple-shaped literal or type reports `E-MAP-LITERAL-MALFORMED` / `E-MAP-KEY-NOT-COMPARABLE` — `NEW S440; LOW; open`
+<!-- @gap id=g-tuple-shapes-report-map-literal-diagnostics sev=LOW status=open locus=searched:compiler/src/expression-parser.ts,compiler/src/type-system.ts(tuple syntax falls into the §59 map path) prov=empirical:S440-dpa-052-D4-DD-executed -->
+DD-executed (dpa-052 p11/p12). Until §66.12.5 lands, "tuples are not yet implemented (§66.12.5)" would be accurate.
+
+### g-value-semantics-divergence-conformance-under-covers — the §66.10 impl#1 alias divergence has five routes (both directions, structs and sequences) but its conformance note covers one; lifecycle writes are unchecked with no case — `NEW S440; LOW; open`
+<!-- @gap id=g-value-semantics-divergence-conformance-under-covers sev=LOW status=open locus=conformance(§66.10 impl#1-divergence case; §66.11.6 lifecycle-write case) prov=empirical:S440-dpa-052-D2-D3-D5-DD-executed -->
+dpa-052 D2/D3/D5: the mechanism is `_scrml_deep_reactive` proxies handed out on read (JS-WAT D#9–#12/#17/#72 are the same class). Carried by design (§66.10, §66.11.6); owed: conformance cases covering all five routes and the unchecked lifecycle write. `samples/gauntlet-s19-phase4/nested-comments.scrml` depends on the reference leak and a `@comments = [...@comments]` re-render nudge — a §66 migration test case as it stands. RULED S440 dpa-052 Q1: a dead-snapshot write becomes a compile error + `scrml fix`.
+
+### g-spec-66-tape-rulings-not-yet-written — S440's `tape` name and the dpa-052 rulings are not in §66.12 (SPEC has zero `tape` hits at `5e5c952cd`) — `NEW S440; LOW; open; RULED`
+<!-- @gap id=g-spec-66-tape-rulings-not-yet-written sev=LOW status=open locus=compiler/SPEC.md(§66.12,§66.19.5,§66.21) prov=ruling:user-voice-scrml.md-S440-sequence-kind-is-named-tape+dpa-052-Q1-Q10 -->
+dpa-052 D6: (a) `tape` is absent from §66.12; (b) §66.19.5's comment gives two reasons for one error; (c) §66.21's codemod rule must collapse `replace`-containing grant sets (Q7). SPEC pass owed.
 
 ## §S440 — coercion inventory + bootstrap runtime (2026-09-28; PA-reproduced unless marked)
 
