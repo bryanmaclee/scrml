@@ -826,13 +826,47 @@ function collectReassignedNames(body: ASTNode[] | undefined, sink: Set<string>):
 const _READONLY_STMT_KINDS = new Set(["const-decl", "let-decl", "return-stmt", "lift-expr", "if-stmt", "sql", "fail-expr"]);
 const _READONLY_EXPR_KINDS = new Set(["lit", "ident", "array", "object", "spread", "unary", "binary", "ternary", "member", "index", "cast"]);
 const _READONLY_SQL_METHODS = new Set(["get", "all"]);
-const _SQL_WRITE_WORD = /\b(insert|update|delete|replace|upsert|create|drop|alter|truncate|pragma|attach|detach|vacuum|reindex|grant|revoke|merge|call|copy|lock|into|returning)\b/i;
+// Words that make a SELECT not provably read-only. Matched with `_` counted as
+// a word separator too (`create_order`, `pg_advisory_lock` split on `_`), so a
+// column like `update_count` is rejected as well -- fail closed. `share` / `nowait`
+// / `skip` cover the row-locking `FOR SHARE` / `FOR UPDATE NOWAIT` forms.
+const _SQL_WRITE_WORD = /(?:^|[^a-z0-9])(insert|update|delete|replace|upsert|create|drop|alter|truncate|pragma|attach|detach|vacuum|reindex|grant|revoke|merge|call|copy|lock|into|returning|share|nowait|execute|exec|notify|listen|setval|nextval)(?=[^a-z0-9]|$)/i;
+// round 4 (review F1) -- a SQL FUNCTION call can write (`SELECT place_order(5)`,
+// `nextval('s')`, `pg_advisory_lock(1)`, `set_config(...)`), and nothing in the
+// query tells a pure function from a writing one. So EVERY `name(` in the query
+// must be either a SQL keyword that takes a parenthesised operand (a subquery,
+// an `IN (...)` list, a CTE body, ...) or one of this small explicit allowlist
+// of pure, side-effect-free functions common to SQLite and Postgres. Anything
+// else -- including every user-defined or extension function -- makes the query
+// NOT provably read-only (fail closed).
+const _SQL_PURE_FUNCTIONS = new Set([
+  "count", "sum", "avg", "min", "max", "total",
+  "coalesce", "ifnull", "nullif",
+  "lower", "upper", "length", "abs", "round", "trim", "ltrim", "rtrim", "substr", "substring",
+  "cast", "date", "time", "datetime", "julianday", "strftime",
+]);
+const _SQL_PAREN_KEYWORDS = new Set([
+  "select", "from", "where", "and", "or", "not", "in", "exists", "as", "on", "join", "by",
+  "when", "then", "else", "case", "over", "values", "all", "any", "some", "with", "using", "having", "like", "is",
+]);
 function sqlNodeIsReadOnly(sql: any): boolean {
   if (!sql || sql.kind !== "sql" || typeof sql.query !== "string") return false;
-  const q = sql.query.replace(/\$\{[^}]*\}/g, "?").trim();
+  // `${...}` holes are bound parameters, never SQL text; quoted literals are data.
+  const q = sql.query
+    .replace(/\$\{[^}]*\}/g, "?")
+    .replace(/'(?:[^']|'')*'/g, "''")
+    .trim();
   if (!/^select\b/i.test(q)) return false;
   if (q.replace(/;\s*$/, "").includes(";")) return false;
+  if (q.includes('"')) return false; // a quoted identifier could name anything
   if (_SQL_WRITE_WORD.test(q)) return false;
+  const callRe = /([A-Za-z_][A-Za-z0-9_$.]*)\s*\(/g;
+  let m: RegExpExecArray | null;
+  while ((m = callRe.exec(q)) !== null) {
+    const name = m[1].toLowerCase();
+    if (_SQL_PURE_FUNCTIONS.has(name) || _SQL_PAREN_KEYWORDS.has(name)) continue;
+    return false;
+  }
   const calls = Array.isArray(sql.chainedCalls) ? sql.chainedCalls : [];
   return calls.every((c: any) => c && _READONLY_SQL_METHODS.has(c.method));
 }

@@ -15,3 +15,8 @@
 - F6: `returnExitsWrapper` threaded through the if/for/while/do-while hops (emit-logic + emit-control-flow); efffail nested arm return exits the effect.
 - F7: reset thunk is `async () =>` exactly when its emitted init contains `await` (async host); boot-effect byte-identical to main.
 - r3 probes copied (insel/inselc rewritten to compile clean: `server function` + <program db> + <schema>) under repro/r3/ — reviewer's originals at the S441 scratch rv-cell12-r2-out/p/b/, compiler base = origin/main at merge.
+- (fix round 4, re-review DO-NOT-LAND on ef8a5a8ac) merged origin/main.
+- F1: `sqlNodeIsReadOnly` now rejects ANY `name(` in the query unless it is a paren-taking SQL keyword or on an explicit pure-function allowlist (count/sum/avg/min/max/total, coalesce/ifnull/nullif, lower/upper/length/abs/round/trim/ltrim/rtrim/substr/substring, cast, date/time/datetime/julianday/strftime). Quoted literals are masked first; a quoted identifier rejects. The write-word check now treats `_` as a separator (`create_order`, `pg_advisory_lock`) and adds share/nowait/execute/notify/listen/setval/nextval. Probes pgproc + sq_{proc,nextval,advlock,setcfg,subq,cte,forupd,run} pinned sequential; sq_plain still batches.
+- F2: for…of / while / do-while bodies forward `clientAsyncBody` even without `asyncRouteMap` (engine effect= opts carry none) — the same hop-forwarding root as round-2 F4. whileeff / efffor pinned.
+- N1 filed: g-reset-server-init-not-awaited-before-next-read (LOW).
+- N2 NOT done: the thunk async decision stays on the emitted text. The AST alternative needs the one async-name provider's facts (`asyncNameFactsOf`, emit-expr.ts — the sibling's file, not exported); hand-building a second async predicate is what map invariant 39 forbids.

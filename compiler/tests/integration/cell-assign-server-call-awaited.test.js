@@ -595,3 +595,59 @@ describe("s441 round 3 — engine opener effect=", () => {
     expect(r.state.cells.m).toEqual([0, 1, 2]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// s441 fix round 4 — a SQL FUNCTION call is not provably read-only (review F1),
+// and while / for…of bodies inside an engine effect= await in place (F2).
+// Probes: docs/changes/…/repro/r4/.
+// ---------------------------------------------------------------------------
+
+const R4 = join(REPO, "docs/changes/s441-cell-assign-server-call-awaited/repro/r4");
+
+describe("s441 round 4 — a SELECT that calls a non-allowlisted SQL function never batches with a cell write", () => {
+  const SEQ_RD = ["start rd1", "end rd1", "start rd2", "end rd2"];
+  // proc: SELECT place_order(5) · nextval: SELECT nextval('s') · advlock: pg_advisory_lock(1)
+  // setcfg: set_config(...) · subq: SELECT (SELECT place_order(1)) · cte: WITH x AS (INSERT …)
+  // forupd: SELECT … FOR UPDATE · run: a SELECT executed with .run()
+  for (const probe of ["sq_proc", "sq_nextval", "sq_advlock", "sq_setcfg", "sq_subq", "sq_cte", "sq_forupd", "sq_run"]) {
+    test(`${probe}: sequential`, async () => {
+      const src = readFileSync(join(R4, probe + ".scrml"), "utf8");
+      expect(fnBody(clientJs(src), "go")).not.toContain("Promise.all");
+      const { log } = await runLoggingCallOrder(src, [{ click: "#b" }, { wait: "settle" }], { rd1: 1, rd2: 2 });
+      expect(log).toEqual(SEQ_RD);
+    });
+  }
+
+  test("sq_plain (`SELECT max(v)` + `SELECT count(*)`, allowlisted pure functions) still batches", async () => {
+    const src = readFileSync(join(R4, "sq_plain.scrml"), "utf8");
+    expect(fnBody(clientJs(src), "go")).toContain("await Promise.all([");
+    const { log } = await runLoggingCallOrder(src, [{ click: "#b" }, { wait: "settle" }], { rd1: 1, rd2: 2 });
+    expect(log.slice(0, 2)).toEqual(["start rd1", "start rd2"]);
+  });
+
+  test("pgproc: `@orderId = placeOrder(5)` (SELECT place_order(…)) then `@count = orderCount()` stays in source order", async () => {
+    const src = readFileSync(join(R4, "pgproc.scrml"), "utf8");
+    const { r, log } = await runLoggingCallOrder(src, [{ click: "#b" }, { wait: "settle" }], { placeOrder: 7, orderCount: 1 });
+    expect(log).toEqual(["start placeOrder", "end placeOrder", "start orderCount", "end orderCount"]);
+    expect(r.state.cells.orderId).toBe(7);
+    expect(r.state.cells.count).toBe(1);
+  });
+});
+
+describe("s441 round 4 — while / for…of inside an engine effect= await in place", () => {
+  test("whileeff: every loop write lands before the loop's next read", async () => {
+    const src = readFileSync(join(R4, "whileeff.scrml"), "utf8");
+    expect(clientJs(src)).not.toMatch(DETACHED);
+    const r = await run(src, [{ wait: "settle" }], {}, { double: 7 });
+    expect(r.state.cells.elog).toBe(",7,7,7;7;7"); // pre-fix: ",0,0,0;7;7"
+  });
+
+  test("efffor: a `!{}` arm `return` inside for…of exits the effect", async () => {
+    const src = readFileSync(join(R4, "efffor.scrml"), "utf8");
+    const r = await run(src, [{ wait: "settle" }], {}, {
+      risky: { __serverError: { type: "LoadError", variant: "Boom", data: { msg: "neg" } } },
+    });
+    expect(r.state.cells.seen).toBe("loop:neg");
+    expect(r.state.cells.after).toBe("not-run");
+  });
+});
