@@ -1,6 +1,31 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-09-28T04:40:15Z  commit: fb21983a
+# updated: 2026-09-29T13:38:25Z  commit: cf62b415
+# ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
+# refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
+# --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
+# == `origin/main` (`git fetch --dry-run`: main not advanced; no fork). Source-relevant: #1117 (bootstrap M3 typer + scope pass), #1118 (ingest shim + footprint
+# grader + bite matrix), #1122 (analyze facts -> six NodeId-indexed family tables), #1129 (re-land #1109 review fixes +
+# spread all-or-nothing `Stmt.Commit` + strict snapshot + E-BOOTSTRAP-DUP-OVERRIDE), #1125 (E-MW-007/008 refused build
+# writes no dist), #1131 ("~" + 3 sibling rewrites fenced out of literals), #1137 (Date/built-ins in cells; `==` on
+# built-ins), #1139 (nested async helpers vs sync-callback guards, SECURITY). SPEC-only: #1120 (S439 rulings), #1133
+# (S440 rulings). The rest are wrap / inbox / dpa-queue / gaps / review / @generated bookkeeping.
+# ⛑ **FIGURES RE-EXECUTED AT `cf62b415`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **268,394 lines / 213 files** per FACTS (+1,450 lines, +2 files:
+# `codegen/local-async-fns.ts`, `commands/refusal-gate.js`) · test files **1,515** (+6) · `compiler/SPEC.md` **40,663**
+# lines (+264) · conformance **1054** cases (+7) · §34 catalog **839** rows (+4), range `20443..21365`.
+# `bun conformance/run.ts` (impl#1) -> **1047/1054 pass + 7 xfail**.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **948 -> 952** · W 183 · I 10 · H 2 FLAT · unique codes
+# **803 -> 807**. **ADDED = {`E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-SELECT-OPTION-NOT-VARIANT`,
+# `E-STRUCT-DUPLICATE-KEY`} — all four rows say "Nominal / not yet emitted" (impl pending); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `cf62b415` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# 28 files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **325/325** (6 files) ·
+# `slice-m3/` **24/24** (3 files) · footprint grade (`bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js
+# --footprint`) -> runtime **18 pass / 0 fail**, codes-only 10/0, crashed 0, not-yet 579, front-end 447. The S438 CRLF
+# drift-guard failures are gone (the guard is CRLF-safe since #1129, and this clone is LF).
+# ⚑ `file:line` citations in S440 sections were grep-derived at `cf62b415`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S438 HEADER (stamp `fb21983a`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
 # `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
 # merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
@@ -385,6 +410,21 @@
 #
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
+
+## S440 — AUTH-RELEVANT DELTA (`fb21983a..cf62b415`)
+
+**#1139 (SECURITY) — accept-all via a nested async helper is closed.** Before: a `function` declared inside another
+function whose body awaited `verifyPassword` / a server fn was emitted `async` but called as sync, so
+`hashes.some(h => inner(h))`, `if (inner(pw))`, `.sort(inner)` and similar evaluated a Promise (always truthy) —
+every password accepted, with no diagnostic. After: `codegen/local-async-fns.ts` marks nested async helpers per
+top-level fn (block-scoped; only ASYNC resolutions are marked, so a mark can only add an await or a rejection); every
+emitter (client, server route/peer + value exports, library, tool) consumes the marks. Pinned by
+`compiler/tests/unit/s440-nested-helper-async-sync-callback.test.js` and conformance `auth/nested-helper-*-neg`,
+`server-db/nested-helper-*`. Still OPEN (ruled, not built): an async helper escaping as a VALUE (`const g = m`,
+object/array, user HOF, `Array.from(xs, m)`) and inline-handler / `on mount` server calls — both accept-all shapes.
+
+No change to session, CSRF, `protect=`, or token handling this window.
+
 
 ## S438 — SESSION-CONFIG RESOLUTION DELTA (`9941a504c..fb21983a`)
 
@@ -885,7 +925,7 @@ Expiry: `sessionExpiry` on `<program>` for the session cookie `Max-Age` + durabl
 Magic-link/verify/reset tokens: TTL-bound (caller-supplied, embedded in the stored record as an authoritative `expiresAt`), single-use, namespace-scoped.
 
 ## Tags
-#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental #s738-dev-rewrite #dev-child-process #dev-parent-proxy #run-dev-child-server #serve-dev-infra #child-ready-prefix #issue-724 #s437b #9941a504c #zero-diff
+#scrml #map #auth #baas #jwt #jwks #oauth #csrf #magic-link #password-reset #e-cg-001 #protect-floor #stdlib-auth #server-shape #tool-serve #jwt-auth-bypass #session-establishment #session-secure #host-cookie #e-scope-012 #e-session-context #e-session-value #e-session-reserved-key #gh357 #session-proxy-bind #scrml-session-bind #reflect-get-target-receiver #sql-interpolation-session #csrf-token-disclosure #session-read-side #dangling-ref-class #ast-reads-current-user-ambient #sse-currentuser-splice #channel-auth-only #scrml-auth-check #permissive-by-design #store-invariant-probed #§52.15.1 #§20.5 #object-hasown #own-property-read #prototype-chain-read-closed #hasownproperty-shadow #read-side-policy-open #wire-live #response-contract #security-theater-vs-defense #ledger-locus-stale #§6.6.19 #e-derived-server-only-reach #escalation-server-only-modules #two-limb-criterion #credential-handling-limb #oauth-client-secret #criterion-not-the-list #per-function-scope-only #two-positions-still-open #mutable-cell-initialiser-open #markup-interpolation-open #reference-not-call #four-evasions #over-fire-not-leak #kind-tool-carve-out #no-diagnostic-when-it-fires #any-position #structural-walk-not-field-listed #collect-derived-cell-decls #skip-derived-walk-key #six-leaking-positions #for-lift-body #while-lift-body #each-row-body #engine-state-child #expr-wrapper #deny-list-not-load-bearing #depth-cap-512 #identity-seen-set #exported-for-tests #collect-file-level-binding-roots-has-no-seen-set #descend-one-field-too-many #do-not-add-the-field-name #carve-out-applied-by-the-caller #request-onion #select-request-onion #e-mw-007 #one-onion-rule #handle-top-level-dispatch #scrml-onion-dispatch #mw-pipeline-export #mw-declared-in #cors-preflight-stage-1 #preflight-carries-no-credentials #ratelimit-route-scoped #filename-sorted-precedence-hazard #csp-default-src-self #ssr-seed-application-json #transition-css-stylesheet #dev-prod-onion-parity #onion-dispatch-is-in-build-js #wrong-file-not-drifted-line #zero-diff-is-not-correctness #§52.13 #protected-document #scrml-protected-document #auth-required-document-guard #g-auth-required-does-not-protect-the-served-html-document #protecteddocs #scrml-pd-alias #case-insensitive-doc-guard #dev-prod-guard-parity #s380-incremental #s738-dev-rewrite #dev-child-process #dev-parent-proxy #run-dev-child-server #serve-dev-infra #child-ready-prefix #issue-724 #s437b #9941a504c #zero-diff #s440 #cf62b415 #nested-async-helper #accept-all-closed
 #fourth-consecutive-zero-diff #anchors-carry-by-measurement
 #s405 #auth-surface-non-empty #protect-analyzer-deleted-its-regex #import-direction-invariant #e-pa-003-shadow-db #§14.8.9-three-limbs #e-protect-004-is-a-lint #e-protect-005 #runtime-refusal-is-the-guarantee #the-unit-is-the-body #status-and-headers-not-the-body #mediation-mark #provenance-vs-shape #w-protect-005 #zero-byte-readablestream #mounthydrate-was-unguarded #serverload-safe-for-a-reason #enumerate-over-the-serializer #tagged-refusal #soundness-bound-by-origin #§14.8.10-tenant-floor #four-app-matrix #cross-tenant-escape-executed #tenanttableset #w-schema-no-tables-declared #foreign-opener-two-of-five-are-security-floors
 #s437 #d02738767 #session-store-dist-root #session-config-resolve #e-mw-008 #e-auth-005-application-scope #secret-redactor #db-target #cookie-name-per-application
