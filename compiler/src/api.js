@@ -47,6 +47,7 @@ import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
 import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
+import { collectClientAssets, relFromRoot, CLIENT_ASSET_MANIFEST } from "./static-serve-policy.js";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
 import { PathKeyedMap, PathKeyedSet } from "./path-canonical.js";
@@ -3204,6 +3205,13 @@ function _compileScrmlImpl(options = {}) {
   // dist-relative POSIX paths. Function-scoped so it reaches the return value;
   // populated in the write phase below. Empty for `write:false` / library mode.
   const hashedAssets = new Set();
+  // SPEC §47.13 — the client-asset manifest (g-static-server-serves-db-and-server-
+  // source). `clientSeeds` records every artifact written FOR THE BROWSER
+  // (documents, CSS, client bundles, the shared runtime, per-route chunks);
+  // `collectClientAssets` closes it over their relative imports after the write
+  // phase. Both static servers serve ONLY this set (plus passive media).
+  const clientSeeds = new Set();
+  let clientAssets = [];
 
   if (writeCommitted && outputDir) {
     mkdirSync(outputDir, { recursive: true });
@@ -3378,6 +3386,7 @@ function _compileScrmlImpl(options = {}) {
     // In browser mode, write the shared runtime file (not needed in library mode)
     if (!emitGateFailed && mode !== 'library' && cgResult.runtimeJs && cgResult.runtimeFilename) {
       writeFileSync(join(outputDir, cgResult.runtimeFilename), cgResult.runtimeJs);
+      clientSeeds.add(cgResult.runtimeFilename);
       if (verbose) log(`  [CG] Wrote shared runtime: ${cgResult.runtimeFilename}`);
     }
 
@@ -3455,6 +3464,13 @@ function _compileScrmlImpl(options = {}) {
         mkdirSync(targetDir, { recursive: true });
         writeFileSync(fullPath, contents);
         writtenPaths.set(fullPath, filePath);
+        // §47.13 — a browser artifact (document, stylesheet, client bundle; hashed
+        // or not) seeds the client-asset manifest. `.server.js`, library/tool
+        // `.js`, source maps and test files do not: a library `.js` a client
+        // bundle imports is admitted by the import closure, never by its suffix.
+        if (suffix === ".html" || suffix.endsWith(".css") || /^\.client(\.[a-z0-9]+)?\.js$/.test(suffix)) {
+          clientSeeds.add(relFromRoot(outputDir, fullPath));
+        }
         return true;
       }
 
@@ -3766,6 +3782,7 @@ function _compileScrmlImpl(options = {}) {
         const chunkPath = join(outputDir, chunk.filename);
         mkdirSync(dirname(chunkPath), { recursive: true });
         writeFileSync(chunkPath, chunk.payloadJs);
+        clientSeeds.add(relFromRoot(outputDir, chunkPath));
         fileCount++;
         const byteLen = Buffer.byteLength(chunk.payloadJs, "utf8");
         if (chunk.tier === "tier1") {
@@ -3844,6 +3861,18 @@ function _compileScrmlImpl(options = {}) {
         // fetches OTHER routes' INITIAL chunks — not files counted here.
         log(`  [CG] Tier-2 intra-route prefetch chunks: ${tier2Count} file(s), ${tier2Bytes} B total`);
       }
+    }
+
+    // SPEC §47.13 — close the browser artifacts over their relative imports and
+    // record the result beside the build output. The manifest is a DOTFILE, so the
+    // policy that reads it can never serve it. Not counted in `fileCount`: it is
+    // compiler bookkeeping, not a compiled artifact.
+    if (!emitGateFailed) {
+      clientAssets = collectClientAssets(outputDir, clientSeeds);
+      writeFileSync(
+        join(outputDir, CLIENT_ASSET_MANIFEST),
+        JSON.stringify({ clientAssets }, null, 2) + "\n",
+      );
     }
   } else if (!write && cgResult.outputs) {
     // Still count outputs even when not writing
@@ -3930,6 +3959,10 @@ function _compileScrmlImpl(options = {}) {
     // on the build path, page bundles + CSS). The generated `_server.js` serves
     // `immutable` by membership in this set — never by a filename shape guess.
     hashedAssets: [...hashedAssets],
+    // SPEC §47.13 — dist-relative POSIX paths the static servers may serve (the
+    // browser artifacts + their import closure). `generateServerEntry` bakes it
+    // into `_server.js`; `scrml dev` reads the `.scrml-client-assets.json` copy.
+    clientAssets,
     // W2 §21.7: the full gathered .scrml file set (after auto-gather pre-pass).
     // Equal to options.inputFiles when gather is disabled. Includes all
     // transitively-reachable .scrml files when gather is enabled.

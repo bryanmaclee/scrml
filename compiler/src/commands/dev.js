@@ -30,6 +30,13 @@ import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
+import {
+  _scrml_static_request_path,
+  _scrml_static_servable,
+  readClientAssetManifest,
+  relFromRoot,
+  CLIENT_ASSET_MANIFEST,
+} from "../static-serve-policy.js";
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -1054,6 +1061,30 @@ function* staticCandidates(pathname, staticPathname, serveDir, opts) {
 }
 
 /**
+ * SPEC §47.13 — the client-asset manifest of the serve dir, as `compileScrml` last
+ * wrote it (`.scrml-client-assets.json`). Re-read whenever the file's mtime changes,
+ * because `scrml dev` rewrites it on every recompile; a missing manifest is an EMPTY
+ * set (fail closed — only passive media is served).
+ *
+ * The manifest also retires stale output: `scrml dev` never cleans its output dir
+ * (see `rootFallbackCandidates`), and a leftover `.html` from a prior compile is no
+ * longer in the set, so it is no longer served.
+ */
+const devClientAssetCache = new Map(); // serveDir → { stamp, assets }
+function devClientAssets(serveDir) {
+  let stamp = "";
+  try {
+    const st = statSync(join(serveDir, CLIENT_ASSET_MANIFEST));
+    stamp = `${st.mtimeMs}:${st.size}`;
+  } catch { /* no manifest yet */ }
+  const cached = devClientAssetCache.get(serveDir);
+  if (cached && cached.stamp === stamp) return cached.assets;
+  const assets = stamp === "" ? new Set() : readClientAssetManifest(serveDir);
+  devClientAssetCache.set(serveDir, { stamp, assets });
+  return assets;
+}
+
+/**
  * §40.3 — the remainder of the `scrml dev` request pipeline: registered-route
  * match → static file → 404. This is exactly what `resolve(request)` runs
  * inside an author's `handle()`.
@@ -1116,13 +1147,15 @@ export async function devDispatch(req, server, serveDir, opts) {
   // `dist/foo/index.html`) need directory-index resolution for
   // `/foo` to land on the right file.
   // ------------------------------------------------------------------
-  // Normalize trailing slash to fold `/foo/` into `/foo` for the
-  // first probe (the trailing-slash form still resolves via the
-  // directory-index candidate below).
-  const trimmedPathname = (pathname !== "/" && pathname.endsWith("/"))
-    ? pathname.slice(0, -1)
-    : pathname;
-  let staticPathname = trimmedPathname === "/" ? "/index.html" : trimmedPathname;
+  // SPEC §47.13 — decode + normalize the request path through the SAME policy the
+  // production `_server.js` emits. A traversal, dot-path, backslash or undecodable
+  // request is refused here, before any candidate is built. Normalizing also folds
+  // `/foo/` into `/foo` for the first probe (the trailing-slash form still resolves
+  // via the directory-index candidate below).
+  const safePathname = _scrml_static_request_path(pathname);
+  if (safePathname === false) return new Response("Not found", { status: 404 });
+  const staticPathname = safePathname === "/" ? "/index.html" : safePathname;
+  const clientAssets = devClientAssets(serveDir);
 
   // Try, in order: exact file, with .html, as dir/index.html — plus, for `/`, the
   // compiled entry and the first .html in the serve dir.
@@ -1133,7 +1166,13 @@ export async function devDispatch(req, server, serveDir, opts) {
   // `auth="required"` document that was not named `index.html` was served in full to
   // an unauthenticated `GET /`. The fix is not a second gate — it is deleting the
   // second serving path, so `/`'s candidates go through the ONE gated loop.
-  for (const candidate of staticCandidates(pathname, staticPathname, serveDir, opts)) {
+  for (const candidate of staticCandidates(safePathname, staticPathname, serveDir, opts)) {
+    // SPEC §47.13 — the allowlist, decided on the RESOLVED candidate before the
+    // filesystem is touched, exactly as `_server.js` does. Every candidate kind —
+    // exact, clean-URL, directory index, root fallback — passes through here, so no
+    // resolution order can reach a server module, a database or a dotfile.
+    if (!_scrml_static_servable(relFromRoot(serveDir, candidate), clientAssets)) continue;
+
     // Existence probe. A candidate that is not there is the normal case — that is what
     // enumerating candidates means — so this failure is swallowed and we move on.
     let st;
