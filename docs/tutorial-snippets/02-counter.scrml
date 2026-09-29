@@ -2,17 +2,15 @@
 
 <program>
 
-${
   <count> = 0
 
   function inc() { @count = @count + 1 }
   function dec() { @count = @count - 1 }
-}
 
-<div>
-  <h1>Counter: ${@count}</h1>
-  <button onclick=dec()>−</button>
-  <button onclick=inc()>+</button>
-</div>
+  <div>
+    <h1>Counter: ${@count}</h1>
+    <button onclick=dec()>−</button>
+    <button onclick=inc()>+</button>
+  </div>
 
 </program>

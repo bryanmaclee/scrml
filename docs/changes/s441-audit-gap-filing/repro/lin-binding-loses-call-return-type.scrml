@@ -1,0 +1,22 @@
+// S441 reproducer — addendum item 27: `lin t = f()` types `t` as `asIs` (the declared `-> Ticket` return is not
+// propagated), so `match t` fails E-TYPE-025; `let t = f()` types it and compiles.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/lin-binding-loses-call-return-type.scrml --output-dir <scratch>
+// Expected: compiles. §18.12: "Matching a `lin` variable is a consumption event. The expression
+//           `match token { ... }` consumes `token`." — matching a lin binding is the specified use.
+// Actual:   exit 1, `error [E-TYPE-025]: Cannot match on `asIs`-typed subject. … Narrow the type first via a type
+//           annotation (`let x: SomeType = ...`)`. Changing `lin` to `let` on the same line compiles clean.
+<program>
+${
+type Ticket:enum = { Small, Large }
+function nextTicket() -> Ticket { return .Small }
+function handle() -> string {
+    lin ticket = nextTicket()
+    return match ticket {
+        .Small :> "small"
+        .Large :> "large"
+    }
+}
+}
+<p>${handle()}</p>
+</program>
