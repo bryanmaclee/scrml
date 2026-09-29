@@ -160,8 +160,9 @@ const MUTATIONS = [
      "            if (vk == 0) return Verdict.Fits\n            if (vk == 1) return Verdict.Unproven\n            return Verdict.Fails\n"],
     ["S442 #8 Q2: `a || b` typed from its operands again (JS operand semantics, S439)",
      "            .Or :> known(Type.Bool)", "            .Or :> VType.Unknown"],
-    ["M3 typer: a `T | not` value into a `T` position treated as provably wrong",
-     "            if (r == Verdict.Fails) return Verdict.Fails\n            return Verdict.Unproven\n", "            return Verdict.Fails\n"],
+    // (s442 r6: the S439 REVERSE row "a `T | not` value into a `T` position treated as provably wrong" is RETIRED —
+    // S442 ruled exactly that ("`T | not` into `T` is an error for all types"); the rule now lives in mayBeNot, pinned
+    // by the r6 rows below.)
     ["M3 typer: the Typing table not recorded (no type per expression node)",
      "        return rvt(r.vt, record(r.ts, e.nid, r.vt))\n", "        return rvt(r.vt, r.ts)\n"],
     // (S442: the two S439 REVERSE rows "a ternary test / an `if=` checked as `bool`" are retired —
