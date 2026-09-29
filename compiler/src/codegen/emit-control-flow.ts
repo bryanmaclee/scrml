@@ -151,7 +151,7 @@ interface IfOpts {
    * don't emit a `_scrml_init_set` sidecar (which would clobber the cell's
    * canonical declaration-time init thunk).
    */
-  insideFunctionBody?: boolean;
+  insideFunctionBody?: boolean; returnExitsWrapper?: boolean;
   /**
    * S144 (GITI-020) — emission boundary, threaded so a channel-cell write
    * `@cell = expr` nested inside an if/else body on the SERVER boundary reaches
@@ -451,6 +451,7 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
     synthCellKeys: opts.synthCellKeys,
     declaredNames: opts.declaredNames,
     insideFunctionBody: opts.insideFunctionBody,
+    returnExitsWrapper: opts.returnExitsWrapper,
     // S144 (GITI-020): thread boundary + channelOwnedCells so a nested
     // `@cell = expr` on the server boundary reaches the broadcast-wire arm.
     boundary: opts.boundary,
@@ -549,7 +550,7 @@ function _emitIfStmtInner(node: any, opts: IfOpts = {}): string {
  */
 export function emitForStmt(
   node: any,
-  opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null;
+  opts?: { dbVar?: string; declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; fnBodyRegistry?: FunctionBodyRegistry | null; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null;
     // Bug 65 (S157) — engine codegen extras for lifted engine-transition
     // handlers (`@engine.advance(.X)` / `@engine = .X` inside `${for…lift}`).
     // The if-stmt dispatch already threads these (emit-logic.ts:2358); the
@@ -630,7 +631,7 @@ function _emitForStmtInner(
       lines.push(`for (${init}; ${cond}; ${update}) {`);
 
       const body: any[] = node.body ?? [];
-      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, /* U1 F4 — host-async flag travels with serverFnNames */ ...(opts?.clientAsyncBody ? { clientAsyncBody: true } : {}), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
       lines.push(`}`);
@@ -834,7 +835,7 @@ function _emitForStmtInner(
         lines.push(`  ${liftCode}`);
       }
     } else {
-      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(_plainNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+      for (const code of emitLogicBody(body, { /* S415 */ declaredNames: blockScopedDeclaredNames(_plainNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
         lines.push(`  ${code}`);
       }
     }
@@ -1041,7 +1042,7 @@ function emitHoistedForStmt(node: any, hoist: any, dbVar: string, opts?: {
 /**
  * Emit a while statement, optionally with a label prefix.
  */
-export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
+export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to the body emission so
   // SQL-bearing statements (`yield ?{...}`, `return ?{...}`, etc.) inside a
   // `while` body parse-time-attached sqlNode are emitted via the server
@@ -1056,7 +1057,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _whileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}while (${condition}) {`);
-  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`}`);
@@ -1070,7 +1071,7 @@ export function emitWhileStmt(node: any, opts?: { declaredNames?: Set<string>; i
 /**
  * Emit a do-while statement.
  */
-export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
+export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>; insideFunctionBody?: boolean; returnExitsWrapper?: boolean; clientAsyncBody?: boolean; boundary?: "client" | "server"; channelOwnedCells?: Set<string> | null; serverFnNames?: Set<string> | null; serverFnPeerAliasNames?: Set<string> | null; serverFnPeerDispatchObjs?: Set<string> | null; syncPeerCalls?: Array<{ name: string; span: unknown }> | null; localMapVarNames?: Set<string> | null; localSetVarNames?: Set<string> | null; localOrderedMapVarNames?: Set<string> | null }): string {
   // R25-Bug-42 (S138): thread `boundary` through to body emission. See
   // emitWhileStmt comment above.
   const lines: string[] = [];
@@ -1078,7 +1079,7 @@ export function emitDoWhileStmt(node: any, opts?: { declaredNames?: Set<string>;
   const condition = emitExprField(node.condExpr, node.condition ?? "true", _doWhileCtx);
   const label = node.label ? `${node.label}: ` : "";
   lines.push(`${label}do {`);
-  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
+  for (const code of emitLogicBody(node.body ?? [], { /* S415 */ declaredNames: blockScopedDeclaredNames(opts?.declaredNames), insideFunctionBody: opts?.insideFunctionBody, returnExitsWrapper: opts?.returnExitsWrapper, boundary: opts?.boundary, channelOwnedCells: opts?.channelOwnedCells, serverFnNames: opts?.serverFnNames, serverFnPeerAliasNames: opts?.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts?.serverFnPeerDispatchObjs, syncPeerCalls: opts?.syncPeerCalls, ..._asyncAwaitBodyOpts(opts), ...(opts?.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts?.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts?.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}), ...(opts?.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts?.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts?.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}) } as any)) {
     lines.push(`  ${code}`);
   }
   lines.push(`} while (${condition});`);

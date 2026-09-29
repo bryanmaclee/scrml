@@ -813,6 +813,57 @@ function collectReassignedNames(body: ASTNode[] | undefined, sink: Set<string>):
 }
 
 /**
+ * s441 F1 (round 3) -- is this SERVER function provably read-only? Fail closed:
+ * `true` only for a body built from plain declarations / returns / lifts / `if`
+ * over pure expressions (the same structural whitelist the batch argument test
+ * uses, plus locals) and `?{}` blocks whose query is a single SELECT read with a
+ * read-only chained method. ANY call (a helper, another server fn, a stdlib or
+ * host call, a channel broadcast) or any statement kind outside the list --
+ * `fail` excepted, which only returns a value -- makes it unprovable, so its
+ * call sites never join a cell-write batch. bryan S441: "parallelize only calls
+ * proven read-only".
+ */
+const _READONLY_STMT_KINDS = new Set(["const-decl", "let-decl", "return-stmt", "lift-expr", "if-stmt", "sql", "fail-expr"]);
+const _READONLY_EXPR_KINDS = new Set(["lit", "ident", "array", "object", "spread", "unary", "binary", "ternary", "member", "index", "cast"]);
+const _READONLY_SQL_METHODS = new Set(["get", "all"]);
+const _SQL_WRITE_WORD = /\b(insert|update|delete|replace|upsert|create|drop|alter|truncate|pragma|attach|detach|vacuum|reindex|grant|revoke|merge|call|copy|lock|into|returning)\b/i;
+function sqlNodeIsReadOnly(sql: any): boolean {
+  if (!sql || sql.kind !== "sql" || typeof sql.query !== "string") return false;
+  const q = sql.query.replace(/\$\{[^}]*\}/g, "?").trim();
+  if (!/^select\b/i.test(q)) return false;
+  if (q.replace(/;\s*$/, "").includes(";")) return false;
+  if (_SQL_WRITE_WORD.test(q)) return false;
+  const calls = Array.isArray(sql.chainedCalls) ? sql.chainedCalls : [];
+  return calls.every((c: any) => c && _READONLY_SQL_METHODS.has(c.method));
+}
+function nodeIsReadOnly(node: any): boolean {
+  if (node === null || node === undefined) return true;
+  if (Array.isArray(node)) return node.every(nodeIsReadOnly);
+  if (typeof node !== "object") return true;
+  const kind = node.kind;
+  if (typeof kind === "string") {
+    // a lift target wraps its SQL node: `{ kind: "sql", node: <sql> }`
+    if (kind === "sql") return sqlNodeIsReadOnly(typeof node.query === "string" ? node : node.node);
+    if (!_READONLY_STMT_KINDS.has(kind) && !_READONLY_EXPR_KINDS.has(kind)) return false;
+    // a statement carrying raw expression text with no parsed node is unprovable
+    for (const [strK, nodeK] of [["expr", "exprNode"], ["init", "initExpr"], ["condition", "conditionExpr"]]) {
+      const raw = node[strK];
+      if (typeof raw === "string" && raw.trim() !== "" && !node[nodeK] && !node.sqlNode) return false;
+    }
+  }
+  for (const [k, v] of Object.entries(node)) {
+    if (k === "span" || k === "kind") continue;
+    if (v && typeof v === "object" && !nodeIsReadOnly(v)) return false;
+  }
+  return true;
+}
+export function isProvablyReadOnlyServerFn(fnNode: any): boolean {
+  if (!fnNode || !Array.isArray(fnNode.body)) return false;
+  if (fnNode.isGenerator || fnNode.isHandleEscapeHatch) return false;
+  return nodeIsReadOnly(fnNode.body);
+}
+
+/**
  * Schedule statements in a function body using dependency graph information.
  *
  * Identifies groups of independent operations and wraps them in Promise.all.
@@ -829,7 +880,7 @@ function collectReassignedNames(body: ASTNode[] | undefined, sink: Set<string>):
  * @param {CGError[]} [errors]
  * @returns {string[]}
  */
-export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null, clientAsyncBody?: boolean, synthCellKeys?: Set<string> | null): string[] {
+export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: RouteMap, depGraph: DepGraph, filePath: string, errors: CGError[] = [], machineBindings?: Map<string, { engineName: string; tableName: string; rules: any[]; auditTarget?: string | null }> | null, engineBindings?: Map<string, { varName: string; forType: string; tableName: string }> | null, engineVarNames?: Set<string> | null, enginesWithHooks?: Set<string> | null, returnTypeAnnotation?: string | null, enclosingFnName?: string | null, enginesWithOnTimeout?: Set<string> | null, enginesWithIdleWatchdog?: Set<string> | null, enginesWithInternalRules?: Set<string> | null, enginesWithHistory?: Set<string> | null, enginesWithMessageArms?: Set<string> | null, engineMessageVariants?: Map<string, Set<string>> | null, calleeMap?: CalleeImportMap | null, exportRegistry?: Map<string, Map<string, { kind: string; category: string; isComponent: boolean; isAsync?: boolean }>> | null, mapVarNames?: Set<string> | null, orderedMapVarNames?: Set<string> | null, setVarNames?: Set<string> | null, localMapVarNames?: Set<string> | null, localSetVarNames?: Set<string> | null, localOrderedMapVarNames?: Set<string> | null, clientAsyncFnNames?: Set<string> | null, syncPeerCalls?: Array<{ name: string; span: unknown }> | null, clientAsyncBody?: boolean, synthCellKeys?: Set<string> | null, readOnlyServerFnNames?: Set<string> | null): string[] {
   const lines: string[] = [];
   // Track declared names so tilde-decl can detect reassignment vs first declaration
   const declaredNames = new Set<string>();
@@ -1204,9 +1255,22 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   //     reassignment whose init is a direct, non-optional call to one of this
   //     file's server fns -- not an engine variable, not derived, not
   //     debounced/throttled, no `default=`), in an async host;
-  //   - its call's arguments read no cell written by an earlier batch member
-  //     (a data dependency), and no decl member reads a cell a cell-write
-  //     member writes (it would read before the write lands);
+  //   - EVERY member of a batch that contains a cell write is PROVABLY free of
+  //     cell effects, decided on the AST (ExprNode), never on emitted text: its
+  //     call arguments (a decl member: its initializer) are built only from
+  //     literals, the function's parameters, and earlier locals whose own
+  //     initializers pass the same test -- operators, member/index access,
+  //     array/object literals and spreads over those. ANY call to a non-server
+  //     function (a helper may read OR write a cell), ANY `@` read (a derived
+  //     cell may depend on a member's write; a plain one may be a member's
+  //     target), ANY lambda / `new` / assignment / match / escape hatch ends
+  //     the batch. Fail closed: what the check cannot prove, it rejects;
+  //   - EVERY server fn called by a member is PROVABLY READ-ONLY
+  //     (`readOnlyServerFnNames`, emit-functions.ts `isProvablyReadOnlyServerFn`:
+  //     a body of plain expressions and SELECT-only `?{}` blocks, no calls at
+  //     all). Two writes that go to the server (an INSERT then a count) keep
+  //     their source order -- bryan S441: "parallelize only calls proven
+  //     read-only";
   //   - NO statement between the members: once a cell write is in the batch
   //     (or is the candidate), a statement that cannot join ENDS the batch
   //     rather than being skipped over. A skipped statement would be emitted
@@ -1265,16 +1329,68 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     _cellWriteInfo.set(idx, info);
     return info;
   }
-  // Does this statement read one of `cells`? Conservative: a reactive read of
-  // the quoted cell name anywhere in the call / init text counts.
-  function readsAnyCell(idx: number, cells: Set<string>): boolean {
-    if (cells.size === 0) return false;
-    const info = cellWriteBatchInfo(idx);
-    const text = info ? info.callExpr : extractInitExpr(body[idx] as ASTNode);
-    for (const c of cells) {
-      if (text.includes(`@${c}`) || text.includes(`_scrml_reactive_get(${JSON.stringify(c)}`)) return true;
+  // s441 F1 (round 3) -- the AST cell-effect-freedom test. Allowed: literals,
+  // parameters, cell-free earlier locals, and pure structural operators over
+  // them. Everything else -- a call, an `@` read, a lambda, `new`, an assign,
+  // a match, an escape hatch, any kind this list does not name -- is rejected.
+  const _paramNames = new Set<string>();
+  for (const prm of (((fnNode as any).params ?? []) as any[])) {
+    if (typeof prm === "string") {
+      const n = prm.split(/[:=]/)[0].trim();
+      if (n) _paramNames.add(n);
+    } else if (prm && typeof prm.name === "string") {
+      _paramNames.add(prm.name);
     }
-    return false;
+  }
+  const _CELL_FREE_KINDS = new Set(["lit", "ident", "array", "object", "spread", "unary", "binary", "ternary", "member", "index", "cast"]);
+  function exprCellFree(node: any, allowed: Set<string>): boolean {
+    if (node === null || node === undefined) return true;
+    if (Array.isArray(node)) return node.every((n) => exprCellFree(n, allowed));
+    if (typeof node !== "object") return true;
+    if (typeof node.kind === "string") {
+      if (!_CELL_FREE_KINDS.has(node.kind)) return false;
+      if (node.kind === "ident") {
+        const nm = node.name;
+        return typeof nm === "string" && !nm.startsWith("@") && allowed.has(nm);
+      }
+    }
+    for (const [k, v] of Object.entries(node)) {
+      if (k === "span" || k === "kind") continue;
+      // a member's `property` / an object prop's `key` is a name, not a read
+      if ((k === "property" || k === "key") && typeof v === "string") continue;
+      if (v && typeof v === "object" && !exprCellFree(v, allowed)) return false;
+    }
+    return true;
+  }
+  // Parameters plus the locals declared before `idx` whose initializers are
+  // themselves cell-free (and never reassigned).
+  function cellFreeNamesBefore(idx: number): Set<string> {
+    const allowed = new Set<string>(_paramNames);
+    for (let k = 0; k < idx; k++) {
+      const st = body[k] as any;
+      if (!st || (st.kind !== "const-decl" && st.kind !== "let-decl")) continue;
+      if (typeof st.name !== "string" || !st.name || st.sqlNode || !st.initExpr) continue;
+      if (declIsReassignedLater(st)) continue;
+      if (exprCellFree(st.initExpr, allowed)) allowed.add(st.name);
+    }
+    return allowed;
+  }
+  const _readOnlyServerFns: Set<string> = readOnlyServerFnNames ?? new Set<string>();
+  // May statement `idx` sit in a batch alongside a cell write?
+  function memberBatchSafe(idx: number, seedIdx: number): boolean {
+    const st = body[idx] as any;
+    if (!st || st.sqlNode || !st.initExpr) return false;
+    const allowed = cellFreeNamesBefore(seedIdx);
+    const init = st.initExpr;
+    if (init.kind === "call") {
+      if (init.optional || !init.callee || init.callee.kind !== "ident") return false;
+      const callee = init.callee.name;
+      if (!_batchServerFnNames.has(callee) || !_readOnlyServerFns.has(callee)) return false;
+      return exprCellFree(init.args ?? [], allowed);
+    }
+    // a non-call decl member (`const k = 3`) -- a pure value.
+    if (st.kind !== "const-decl" && st.kind !== "let-decl") return false;
+    return exprCellFree(init, allowed);
   }
 
   // Group independent statements (those with no inter-dependencies among the group)
@@ -1301,6 +1417,8 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     // statement has been skipped (not joined) since the seed.
     const groupWrittenCells = new Set<string>(seedIsCellWrite ? [cellWriteBatchInfo(i)!.cell] : []);
     let skippedSinceSeed = false;
+    // round 3: a cell-write seed that is not itself batch-safe batches with nothing.
+    const seedBlocksCellBatch = seedIsCellWrite && !memberBatchSafe(i, i);
 
     for (let j = i + 1; j < body.length; j++) {
       // #165 g-batch-hoist-across-control-flow — a control-transfer statement
@@ -1333,6 +1451,11 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       const candIsCellWrite = cellWriteBatchInfo(j) !== null;
       if (seedIsNonDecl || (!candIsCellWrite && !isDeclShapeStmt(body[j] as ASTNode))) break;
       if (candIsCellWrite && skippedSinceSeed) break;
+      if (seedBlocksCellBatch) break;
+      // round 3: joining a batch that has (or would get) a cell write requires
+      // EVERY member -- existing ones and the candidate -- to be batch-safe.
+      if (candIsCellWrite && groupWrittenCells.size === 0 && !group.every((g) => memberBatchSafe(g, i))) break;
+      if ((candIsCellWrite || groupWrittenCells.size > 0) && !memberBatchSafe(j, i)) break;
       // S212 — a reassigned-later decl (`let acc = []`) can't be const-
       // destructured into the batch, but it is a pure binding (no observable
       // side effect), so it is SKIPPED, not a boundary — a later independent
@@ -1360,9 +1483,6 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
           break;
         }
       }
-      // s441 F1 -- a data dependency on a cell a member writes (the member's
-      // write lands only after the batch) forbids joining.
-      if (independent && readsAnyCell(j, groupWrittenCells)) independent = false;
       if (independent) {
         group.push(j);
         visited.add(j);

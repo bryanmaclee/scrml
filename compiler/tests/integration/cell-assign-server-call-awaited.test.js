@@ -372,6 +372,7 @@ describe("s441 §6 — README flagship: engine opener `effect=` boots to the loa
  */
 async function runLoggingCallOrder(src, steps, stub) {
   const log = [];
+  const bodies = [];
   const RE = /__ri_route_(.+?)_\d+/;
   const origRegister = GlobalRegistrator.register.bind(GlobalRegistrator);
   GlobalRegistrator.register = (...a) => {
@@ -384,6 +385,7 @@ async function runLoggingCallOrder(src, steps, stub) {
         inner = v && v.__s441 ? v : Object.assign(async (u, init) => {
           const n = String(typeof u === "string" ? u : u?.url).match(RE)?.[1] ?? "?";
           log.push("start " + n);
+          bodies.push(n + " " + String(init?.body ?? ""));
           for (let i = 0; i < 5; i++) await Promise.resolve();
           const res = await v(u, init);
           log.push("end " + n);
@@ -395,7 +397,7 @@ async function runLoggingCallOrder(src, steps, stub) {
   };
   try {
     const r = await run(src, steps, {}, stub);
-    return { r, log };
+    return { r, log, bodies };
   } finally {
     GlobalRegistrator.register = origRegister;
   }
@@ -492,5 +494,104 @@ describe("s441 F4 — `while` / `do…while` bodies in an async function await i
     expect(r1.state.cells.seen).toBe("w:5"); // pre-fix: "w:0"
     const r2 = await run(src, [{ click: "#d" }, { wait: "settle" }], {}, { double: 5 });
     expect(r2.state.cells.seen).toBe("d:5");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s441 fix round 3 — batch membership is decided on the AST and fails CLOSED
+// (review findings 1-5), and only proven read-only server fns share a batch
+// with a cell write (finding 8). Probes: docs/changes/…/repro/r3/.
+// ---------------------------------------------------------------------------
+
+const R3 = join(REPO, "docs/changes/s441-cell-assign-server-call-awaited/repro/r3");
+const SEQ = ["start one", "end one", "start two", "end two"];
+
+describe("s441 round 3 — a statement whose call args are not provably cell-free never joins a cell-write batch", () => {
+  const cases = [
+    // [probe, expected @seen, the body the SECOND server call must receive]
+    ["helper", "a=2 b=20", 'two {"n":2}'],       // two(readA()) — a helper reads @a
+    ["derived", "a=2 b=20", 'two {"n":4}'],      // two(@dbl) — derived cell over @a
+    ["direct", "a=2 b=20", 'two {"n":2}'],       // two(@a) — direct read of the member's cell
+    ["declhelper", "a=2 x=20", 'two {"n":2}'],   // const x = two(readA())
+    ["sidew", "a=50 r=20", 'two {"n":1}'],       // const r = two(bump()) — the helper WRITES @a
+  ];
+  for (const [probe, seen, secondBody] of cases) {
+    test(`${probe}: sequential, and every read sees the resolved value`, async () => {
+      const src = readFileSync(join(R3, probe + ".scrml"), "utf8");
+      const { r, log, bodies } = await runLoggingCallOrder(src, [{ click: "#b" }, { wait: "settle" }], { one: 2, two: 20 });
+      expect(log).toEqual(SEQ);
+      expect(bodies[1]).toBe(secondBody);
+      expect(r.state.cells.seen).toBe(seen);
+    });
+  }
+
+  test("declplain: `const y = @dbl` after the write reads the derived value of the resolved cell", async () => {
+    const src = readFileSync(join(R3, "declplain.scrml"), "utf8");
+    const { r } = await runLoggingCallOrder(src, [{ click: "#b" }, { wait: "settle" }], { one: 2 });
+    expect(r.state.cells.seen).toBe("a=2 y=4");
+  });
+});
+
+describe("s441 round 3 — only PROVABLY read-only server fns batch with a cell write (bryan S441)", () => {
+  test("`@a = addRow(5)` (INSERT) then `@b = countRows()` (SELECT) stays in source order", async () => {
+    const src = readFileSync(join(R3, "insel.scrml"), "utf8");
+    const { r, log } = await runLoggingCallOrder(src, [{ click: "#b" }, { wait: "settle" }], { addRow: 5, countRows: 1 });
+    expect(log).toEqual(["start addRow", "end addRow", "start countRows", "end countRows"]);
+    expect(r.state.cells.seen).toBe("b=1");
+  });
+
+  test("two provably read-only loads (no calls in their bodies) still batch", () => {
+    const js = clientJs(BATCH);
+    expect(fnBody(js, "indep")).toContain("await Promise.all([");
+  });
+
+  test("KNOWN (gap g-const-batch-parallelizes-side-effecting-server-calls, not fixed here): the pre-existing CONST-form batch still parallelizes INSERT + SELECT", () => {
+    const src = readFileSync(join(R3, "inselc.scrml"), "utf8");
+    const js = clientJs(src);
+    expect(fnBody(js, "go")).toContain("await Promise.all([");
+  });
+});
+
+describe("s441 round 3 — engine opener effect=", () => {
+  test("F6: a `!{}` arm `return` nested in an `if` exits the effect (no null write; the statements after it do not run)", async () => {
+    const src = readFileSync(join(R3, "efffail.scrml"), "utf8");
+    const r = await run(src, [{ wait: "settle" }], {}, {
+      risky: { __serverError: { type: "LoadError", variant: "Boom", data: { msg: "neg" } } },
+    });
+    expect(r.state.cells.seen).toBe("nested:neg");
+    expect(r.state.cells.after).toBe("not-run");
+    expect(r.state.cells.out).toBe(0);
+  });
+
+  test("F7: the reset thunk of an effect write with a server call inside a larger expression is async and resolves", async () => {
+    const src = `\${
+    type Phase:enum = { Loading, Empty, Editing }
+    server fn loadTasks() : number[] {
+        return [1, 2]
+    }
+    function grow() {
+        @m.push(9)
+    }
+    function doReset() {
+        reset(@m)
+    }
+}
+<engine for=Phase initial=.Loading effect=\${
+    @m = [0, ...loadTasks()]
+    @phase = @m.length == 0 ? .Empty : .Editing
+}>
+    <Loading rule=(.Empty | .Editing)>Loading…</>
+    <Empty rule=.Loading>None.</>
+    <Editing rule=.Loading>ok</>
+</>
+<program>
+<button id="grow" onclick=grow()>g</>
+<button id="rst" onclick=doReset()>r</>
+</program>
+`;
+    const js = clientJs(src);
+    expect(js).toMatch(/_scrml_cs_init_set\("m", async \(\) => /);
+    const r = await run(src, [{ wait: "settle" }, { click: "#grow" }, { wait: "settle" }, { click: "#rst" }, { wait: "settle" }], {}, { loadTasks: [1, 2] });
+    expect(r.state.cells.m).toEqual([0, 1, 2]);
   });
 });
