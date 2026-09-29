@@ -1,0 +1,19 @@
+// S441 reproducer — item 6: <formFor> renders every string field as `type="text"`, ignoring §53 named shapes.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/formfor-ignores-named-shape-input-type.scrml --output-dir <scratch>
+// Expected: §53.6.1 built-in shape table — `email` → HTML attribute `type="email"`, `phone` → `type="tel"`;
+//           §41.14 — formFor expands to what "the developer could have hand-authored under Shape 2".
+// Actual:   exit 0. HTML: `<input type="text" ... data-scrml-formfor-input="email" />` and the same for
+//           `phone`. Control: `<email>: string(email) = …` + `<input bind:value=@email>` → `type="email"`
+//           (the §53 derivation works on a hand-bound input; formFor bypasses it).
+<program>
+import { formFor } from "scrml:data"
+type Contact:struct = {
+    name:  string(.length > 0)
+    email: string(email)
+    phone: string(phone)?
+}
+<contacts>: Contact[] = []
+function save(c) { @contacts = [...@contacts, c] }
+<formFor for=Contact onsubmit=save/>
+</>

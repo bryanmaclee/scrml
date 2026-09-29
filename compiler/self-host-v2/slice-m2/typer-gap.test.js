@@ -4,13 +4,13 @@
 //
 // The M2 pins named a code per shape as a HYPOTHESIS. Each was resolved
 // against compiler/SPEC.md before it was implemented (the governing-sentence
-// gate, docs/changes/s439-bootstrap-m3-typer/progress.md). The outcome per
-// shape is one of:
-//   - the SPEC names the rule and the code — the test asserts that code;
-//   - the SPEC names no rule — the bootstrap rejects with a bootstrap-local
-//     `E-BOOTSTRAP-*` code (the reversible direction; the shape owes a ruling);
-//   - the SPEC ACCEPTS the shape — the test asserts it stays silent, quoting
-//     the sentence. The bootstrap never rejects what the SPEC accepts.
+// gate, docs/changes/s439-bootstrap-m3-typer/progress.md), and S440 then RULED
+// the shapes that SPEC left open (docs/changes/s442-bootstrap-typer-rules/):
+// every shape below now asserts a code the ruling / SPEC names — E-CALL-ARITY
+// (§7.3), E-EACH-NOT-SEQUENCE (§17.7.2), E-HANDLE-REDECLARE (§66.7.2),
+// E-SCOPE-010 for `function` (§7.6), E-COND-NOT-BOOLEAN for a non-bool
+// condition (S440 #4 = (c)). The earlier "the SPEC names no rule" /
+// "STAYS SILENT" outcomes are superseded by those rulings.
 // Every shape carries a well-typed TWIN that must stay silent: a checker that
 // fires on everything would pass the negative tests, the twins would not.
 
@@ -38,12 +38,14 @@ const SHAPES = [
     files: () => [LIB(), app("    <let x:int=0/>\n    function f() { @x = \"oops\" }", "<p>x</p>")],
     twin: () => [LIB(), app("    <let x:int=0/>\n    function f() { @x = 5 }", "<p>x</p>")] },
   { name: "a call with the wrong arity (too few)",
-    // SPEC-silent (searched §7.3, §7.3.2, §7.5.1, §48, §34): bootstrap-local, owes a ruling.
-    want: ["E-BOOTSTRAP-CALL-ARITY"],
+    // RULED S440 #2; §7.3: "A call that passes FEWER is a compile error too, unless each omitted parameter
+    // has a default (§7.3.2)." (§34 row E-CALL-ARITY.)
+    want: ["E-CALL-ARITY"],
     files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g() }", "<p>x</p>")],
     twin: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1) }", "<p>x</p>")] },
   { name: "a call with the wrong arity (too many)",
-    want: ["E-BOOTSTRAP-CALL-ARITY"],
+    // §7.3: "A call that passes MORE arguments than the function declares parameters is a compile error".
+    want: ["E-CALL-ARITY"],
     files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1, 2) }", "<p>x</p>")],
     twin: () => [LIB(), app("    function g(a: int, b: int) { }\n    function f() { g(1, 2) }", "<p>x</p>")] },
   { name: "a call with a wrong argument type — STAYS SILENT",
@@ -53,21 +55,21 @@ const SHAPES = [
     files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(\"s\") }", "<p>x</p>")],
     twin: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1) }", "<p>x</p>")] },
   { name: "`<each in=@x>` over an int",
-    // SPEC-silent (searched §17.7, §17.4, §59, §66.7.3/.4, the E-EACH-* rows): bootstrap-local, owes a ruling.
-    want: ["E-BOOTSTRAP-EACH-NOT-SEQUENCE"],
+    // RULED S440 #3; §17.7.2: "`<each in=expr>` over a value that is not a sequence is a compile error,
+    // `E-EACH-NOT-SEQUENCE` (§34)."
+    want: ["E-EACH-NOT-SEQUENCE"],
     files: () => [LIB(), app("    <x=3/>", "<each in=@x as i><p>${i}</p></each>")],
     twin: () => [LIB(), app("    <xs:int[]=([1, 2, 3])/>", "<each in=@xs as i><p>${i}</p></each>")] },
-  { name: "a non-bool `if=` — STAYS SILENT",
-    // §17.1.1: "The TS pass performs type-checking over `IfChainExpr` directly, treating each condition
-    // expression as `boolean`-coercible."; §17.1's own example `if=@errorMessage`; §49.2.3: "The compiler
-    // applies the same boolean coercion rules as `if`. No special restriction applies to the type of the condition."
-    want: [],
+  { name: "a non-bool `if=`",
+    // RULED S440 #4 = (c): "All conditions require a boolean, or a `T | not` presence test, and the truthiness
+    // of numbers and strings goes." Q2: "an immediate error wherever the violation is PROVABLE". Supersedes the
+    // S439 "boolean-coercible" reading of §17.1.1 / §49.2.3. Code PROPOSED (no SPEC text yet): E-COND-NOT-BOOLEAN.
+    want: ["E-COND-NOT-BOOLEAN"],
     files: () => [LIB(), app("    <x=3/>", "<p if=@x>x</p>")],
     twin: () => [LIB(), app("    <x=true/>", "<p if=@x>x</p>")] },
-  { name: "a non-bool ternary condition — STAYS SILENT",
-    // No sentence restricts a ternary test (§17.6.7, §45, §42 searched); the SPEC's condition rule is the
-    // `if` boolean coercion above, so rejecting here would reject what `if` accepts. Owes an explicit ruling.
-    want: [],
+  { name: "a non-bool ternary condition",
+    // RULED S440 #4 = (c) — "it touches every `if=`, `if`, `while` and ternary".
+    want: ["E-COND-NOT-BOOLEAN"],
     files: () => [LIB(), app("    <x=3/>", "<p>${@x ? \"a\" : \"b\"}</p>")],
     twin: () => [LIB(), app("    <x=3/>", "<p>${@x > 0 ? \"a\" : \"b\"}</p>")] },
   { name: "`label=(5)` for a `string` attribute",
@@ -86,22 +88,19 @@ const SHAPES = [
     files: () => [LIB(), app("    <let x:int=0/>\n    <let x:int=1/>", "<p>x</p>")],
     twin: () => [LIB(), app("    <let x:int=0/>\n    <let y:int=1/>", "<p>x</p>")] },
   { name: "duplicate `as=` names",
-    // SPEC-silent (searched §66.7.2, §66.7.4, §66.20, §7.3.3, §7.6): bootstrap-local, owes a ruling.
-    want: ["E-BOOTSTRAP-REDECLARE"],
+    // RULED S440 #5 (i); §66.7.2: "two `as=` handles of the same name in one scope" is `E-HANDLE-REDECLARE`.
+    want: ["E-HANDLE-REDECLARE"],
     files: () => [LIB(), app("", "<dropdown as=a label=\"1\" options=([\"a\"])/>\n<dropdown as=a label=\"2\" options=([\"a\"])/>")],
     twin: () => [LIB(), app("", "<dropdown as=a label=\"1\" options=([\"a\"])/>\n<dropdown as=b label=\"2\" options=([\"a\"])/>")] },
   { name: "duplicate function names",
-    // §7.3.3 (a function-BODY block rule): "Two `function` declarations of one name in one block are outside this
-    // rule." / "File-scope duplicates are E-SCOPE-010 (§7.6), not this code." §7.6 itself names only `let`, and
-    // §19.16.6 says "§7.3.3 deliberately does not reject duplicate `function` declarations in general" — the
-    // code follows §7.3.3's routing bullet; the shape owes a ruling.
+    // RULED S440 #6; §7.6: "Two top-level `function` declarations of one name SHALL be a compile error
+    // (E-SCOPE-010: duplicate binding in file scope)".
     want: ["E-SCOPE-010"],
     files: () => [LIB(), app("    function f() { }\n    function f() { }", "<p>x</p>")],
     twin: () => [LIB(), app("    function f() { }\n    function g() { }", "<p>x</p>")] },
   { name: "a handle named like a cell",
-    // SPEC-silent (searched §66.7.2 — a handle lives in the `@` namespace; §6.1 / §7.6.1 E-NAME-COLLIDES-STATE is
-    // local-vs-cell only; §66.20): bootstrap-local, owes a ruling.
-    want: ["E-BOOTSTRAP-REDECLARE"],
+    // RULED S440 #5 (ii); §66.7.2: "an `as=` handle named like a cell" is `E-HANDLE-REDECLARE`.
+    want: ["E-HANDLE-REDECLARE"],
     files: () => [LIB(), app("    <let country:string=\"\"/>", "<dropdown as=country label=\"1\" options=([\"a\"])/>")],
     twin: () => [LIB(), app("    <let countryName:string=\"\"/>", "<dropdown as=country label=\"1\" options=([\"a\"])/>")] },
 ];

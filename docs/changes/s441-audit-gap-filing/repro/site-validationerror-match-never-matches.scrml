@@ -1,0 +1,31 @@
+// S441 reproducer — addendum-2 S2: a `match` over §55.9 `ValidationError` values never selects a variant arm.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-validationerror-match-never-matches.scrml --output-dir <scratch>
+// Expected: §55.9 "`@signup.errors` arrays contain these enum values. Render via `messageFor` (§55.10) or via
+//           `match` over `ValidationError` (the JS-style match form, §18.1+, or block-form, §18.0.1)."
+//           An empty email must hit the `.Required` arm.
+// Actual:   exit 0. The runtime validators build `{ tag: "Required" }` / `{ tag: "PatternMismatch", re }`
+//           (scrml-runtime `_scrml_validator_fire`), but the match lowers to
+//           `if (_scrml_match_5 === "Required") …` (tag-only arms: compares the OBJECT to a string) or, with a
+//           payload arm, `const _scrml_tag_5 = (…typeof === "object") ? _scrml_match_4.variant : …` (reads
+//           `.variant`, the runtime wrote `.tag`). Payload arms also emit
+//           `/* §1a: cannot positionally bind 'p' — variant 'PatternMismatch' field order unknown */ … String ( p )`.
+//           EXECUTED (emitted report() bodies verbatim over the three runtime error objects):
+//           tag-only form → ["email-other","email-other","email-other"]; payload form → the same.
+//           Every error falls to `else`; had there been no `else`, nothing would run.
+<program>
+<signup>
+  <email req pattern(/@/) length(>=5)>: string = ""
+</>
+function logEvent(name: string) { console.log(name) }
+function report(e: ValidationError) {
+  match e {
+    .Required        :> logEvent("email-blank")
+    .PatternMismatch :> logEvent("email-malformed")
+    .LengthFailed    :> logEvent("email-too-short")
+    else             :> logEvent("email-other")
+  }
+}
+<input bind:value=@signup.email>
+<button onclick=${ for (let e of @signup.email.errors) { report(e) } }>Log errors</button>
+</program>

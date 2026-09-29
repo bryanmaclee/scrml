@@ -1,0 +1,111 @@
+// 10-all-together.scrml — the spine of a typical scrml program, in one file.
+
+<program db="notes.db">
+
+  // Types — structs and enums, as direct <program> children
+  type Note:struct = { id: number, body: string }
+  type Phase:enum = { Idle, Loading, Loaded, Failed(msg: string) }
+  type SaveError:enum = { TooShort, Duplicate(body: string) }
+
+  // Schema — the database shape, declared next to the code that uses it
+  <schema>
+    notes {
+      id:   integer primary key
+      body: text not null
+    }
+  </>
+
+  // Engine — auto-declares @phase; rule= lists the legal moves out of each state
+  <engine for=Phase initial=.Idle>
+    <Idle    rule=(.Loading | .Failed)></>
+    <Loading rule=(.Loaded | .Failed)></>
+    <Loaded  rule=(.Loading | .Failed)></>
+    <Failed  rule=.Loading></>
+  </>
+
+  // Channel — state shared live with every connected client
+  <channel name="activity">
+    <lastSaved> = ""
+  </>
+
+  <db src="notes.db" tables="notes">
+
+    ${
+      <notes>: Note[] = []                    // plain reactive
+      const <count> = @notes.length           // derived reactive
+
+      // Compound state with a validator
+      <draft>
+        <note req length(>=3)> = <input type="text"/>
+      </>
+
+      // Server functions — they touch ?{}, so they run on the server.
+      // They return data; they do not write @state.
+      function loadNotes() {
+        return ?{`SELECT id, body FROM notes ORDER BY id`}.all()
+      }
+
+      function saveNote(body)! -> SaveError {
+        if (body.length < 3) fail SaveError.TooShort
+        const existing = ?{`SELECT id FROM notes WHERE body = ${body}`}.get()
+        if (existing is some) fail SaveError.Duplicate(body)
+        ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
+      }
+
+      // Client functions — call the server and own the @state writes
+      function load() {
+        @phase = Phase.Loading
+        @notes = loadNotes()
+        @phase = Phase.Loaded
+      }
+
+      function submit() {
+        saveNote(@draft.note) !{
+          | .TooShort     :> { @phase = Phase.Failed("Too short.") ; return }
+          | .Duplicate(b) :> { @phase = Phase.Failed(b + " is already saved.") ; return }
+        }
+        @lastSaved = @draft.note
+        reset(@draft)
+        load()
+      }
+
+      // Component — reusable markup with typed props
+      const NoteRow = <li class="row" props={ note: Note }>${note.body}</li>
+    }
+
+    // Style block, placed just before the markup it styles
+    #{
+      .row { padding: 0.5rem; border-bottom: 1px solid #eee; }
+    }
+    <div>
+      <form onsubmit=submit()>
+        <note/> <errors of=@draft.note/>
+        <button type="submit" disabled=!@draft.isValid>Save</button>
+      </form>
+      <p if=(@lastSaved != "")>Last saved: ${@lastSaved}</p>
+
+      <match for=Phase on=@phase>
+        <Idle>
+          <button onclick=load()>Load notes</button>
+        </Idle>
+        <Loading>
+          <p>Loading…</p>
+        </Loading>
+        <Loaded>
+          <p>${@count} notes</p>
+          <ul>
+            <each in=@notes as n key=n.id>
+              <NoteRow note=n/>
+            </each>
+          </ul>
+        </Loaded>
+        <Failed(msg)>
+          <p class="err">${msg}</p>
+          <button onclick=load()>Reload</button>
+        </Failed>
+      </match>
+    </div>
+
+  </>
+
+</program>

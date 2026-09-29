@@ -1,0 +1,19 @@
+// S441 reproducer — item 20: SPEC §39.8 describes a `scrml migrate` schema-apply CLI and compile-time
+// `<db-path>.migration.sql/.json` artifacts; neither exists.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Commands + actual:
+//   bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/spec-39-8-migrate-cli-drift.scrml --output-dir <scratch>
+//     → exit 0; no `m.db.migration.sql` / `.migration.json` anywhere (no `migration.sql` string in compiler/src).
+//   bun compiler/bin/scrml.js migrate --help
+//     → "Apply automated source rewrites for deprecated scrml syntax patterns." — the §56/W-* codemod, not a
+//       schema applier. `scrml migrate --dry` (the §39.8.2 flag) would run the source codemod.
+//   bun compiler/bin/scrml.js db-migrate --help
+//     → the real schema applier: `--dry-run` (not `--dry`), `--allow-destructive` (not `--force`), no `--check`.
+// Expected: §39.8 "The compiler SHALL always regenerate `<db-path>.migration.sql` and `<db-path>.migration.json`
+//           when a `<schema>` block is present" + the §39.8.2 flag table (numbered 38.8.x in the SPEC).
+<program db="./m.db">
+<schema>
+    notes { id: integer primary key
+            body: text }
+</>
+</program>

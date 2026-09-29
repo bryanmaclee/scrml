@@ -1,0 +1,25 @@
+// S441 reproducer — addendum-2 S9c: a `.length` member predicate on a server-function parameter
+// (`string(.length > 2)`) gets NO server-side boundary check; value predicates and named shapes do.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-server-param-length-predicate-unenforced.scrml --output-dir <scratch>
+// Expected: §53.9.4 "Inline predicate constraints on server function parameters SHALL be enforced at the server
+//           boundary. The compiler SHALL generate server-side validation code that runs before any database
+//           write … A server function's parameter constraint cannot be bypassed by raw HTTP requests."
+// Actual:   exit 0, no diagnostic. server.js carries exactly one guard,
+//           `// §53.9.4 E-CONTRACT-001-RT server-side boundary check: 'qty'`, and none for `name`; the INSERT
+//           runs with any string a raw POST supplies. Same with `email: string(email)` + `name: string(.length > 2)`:
+//           the email guard is emitted, the length guard is not. (The audit's broader claim "parameter
+//           predicates on server functions are not enforced" is too wide — `number(>0 && <100)` is enforced.)
+<program db="./fresh-s9c.db">
+<schema>
+  items {
+    id: integer primary key
+    name: text
+    qty: integer
+  }
+</schema>
+function save(name: string(.length > 2), qty: number(>0)) {
+    ?{`INSERT INTO items (name, qty) VALUES (${name}, ${qty})`}.run()
+}
+<button onclick=save("bob", 3)>x</button>
+</program>

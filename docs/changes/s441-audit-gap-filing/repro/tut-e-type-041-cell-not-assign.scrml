@@ -1,0 +1,15 @@
+// S441 reproducer — addendum-3 T8: E-TYPE-041 fires for `let x: string = not` but not for a reactive cell.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/tut-e-type-041-cell-not-assign.scrml --output-dir <scratch>
+// Expected: two E-TYPE-041s. §42.3.1: `${ let x: string = not }  // compile error E-TYPE-041`; §34 row:
+//           "`not` (the absence sentinel) assigned to a variable of non-optional type `T`. `not` is only
+//           assignable to `T | not` optional types."
+// Actual:   exit 0, zero diagnostics; client.js `_scrml_cs_reactive_set("name", null);`. Control:
+//           `${ let x: string = not }` → `error [E-TYPE-041]: Cannot assign `not` to variable `x` of type `string`.`
+//           Root (traced): compiler/src/type-system.ts ~L11000 checks only a `let`/`const` initializer's raw text.
+<program>
+<name>: string = not
+function clear() { @name = not }
+<button onclick=clear()>x</button>
+<p>${@name}</p>
+</program>
