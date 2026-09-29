@@ -2232,6 +2232,61 @@ const IMPORT_HOST_LIFT_RE =
 const TOPLEVEL_STATE_DECL_RE =
     /^\s*(?:export\s+)?(?:const\s+)?<\s*[A-Za-z_][A-Za-z0-9_]*[^>]*>\s*(?:[=:]|<[A-Za-z_])/;
 
+// forbiddenConstructHead — calculation. A VERBATIM port of ast-builder.js's
+// `forbiddenConstructHead` (S441): the keyword of a SPEC §7.2.1 not-scrml
+// construct whose brace-delimited grammar head leads `raw` — `class`,
+// `async function|fn`, `try`, `switch`, `for await` — or null. Only
+// brace-delimited heads, so prose (`class of 2026`, `try harder`) never
+// matches. If the live function changes, this copy must change in lockstep;
+// `default-logic-forbidden-construct-lift-s441.test.js` compares the two.
+export function forbiddenConstructHead(raw) {
+    if (typeof raw !== "string") return null;
+    if (/^\s*(?:export\s+(?:default\s+)?)?class\b(?:\s+[A-Za-z_$][\w$]*)?\s*(?:extends\s+[^{};\n]+)?\{/.test(raw)) return "class";
+    if (/^\s*try\s*\{/.test(raw)) return "try";
+    const sw = raw.match(/^\s*switch\s*(?=\()/);
+    if (sw !== null) {
+        const after = skipBalancedParensNative(raw, sw[0].length);
+        if (after !== -1 && /^\s*\{/.test(raw.slice(after))) return "switch";
+    }
+    const fa = raw.match(/^\s*for\s+await\s*(?=\()/);
+    if (fa !== null && skipBalancedParensNative(raw, fa[0].length) !== -1) return "for await";
+    const as = raw.match(/^\s*(?:export\s+(?:default\s+)?)?(?:server\s+)?async\s+(?:function|fn)\b\s*\*?\s*[A-Za-z_$][\w$]*\s*/);
+    if (as !== null) {
+        let i = as[0].length;
+        if (raw[i] === "(") {
+            i = skipBalancedParensNative(raw, i);
+            if (i === -1) return null;
+        }
+        if (/^\s*(?:(?:->|:)[^{\n]*)?\{/.test(raw.slice(i))) return "async";
+    }
+    return null;
+}
+
+// skipBalancedParensNative — calculation. From `i` (at a `(`), the index just
+// past its matching `)`, skipping quoted strings; -1 when unbalanced.
+function skipBalancedParensNative(s, start) {
+    let depth = 0;
+    let quote = null;
+    let i = start;
+    while (i < s.length) {
+        const c = s[i];
+        if (quote !== null) {
+            if (c === "\\") { i = i + 2; continue; }
+            if (c === quote) quote = null;
+            i = i + 1;
+            continue;
+        }
+        if (c === "\"" || c === "'" || c === "`") { quote = c; i = i + 1; continue; }
+        if (c === "(") depth = depth + 1;
+        else if (c === ")") {
+            depth = depth - 1;
+            if (depth === 0) return i + 1;
+        }
+        i = i + 1;
+    }
+    return -1;
+}
+
 // BARE_EXPORT_AT_END_RE — VERBATIM copy of ast-builder.js L396. A `Text` block
 // whose TRAILING portion is a bare `export` keyword awaiting a `<markup>` RHS
 // — the P5-2 `export <channel ...>` / `export <Component ...>` pairing form.
@@ -2792,6 +2847,16 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             // `<page>` / `<channel>` direct-child body) — NOT plain file
             // top-level — to avoid lifting prose markup that contains `~`.
             if (parentType === "state" && TILDE_TOKEN_RE.test(raw)) {
+                result.push(synthLiftedLogicBlock(block, source, ctx));
+                i = i + 1;
+                continue;
+            }
+            // S441 — a §7.2.1 not-scrml construct head (`class`, `async
+            // function`, `try`, `switch`, `for await`). Mirrors the live
+            // oracle's `forbiddenConstructHead` lift so the native tree sees
+            // the construct and its productions fire the E-*-NOT-IN-SCRML code
+            // (this tree decides E-CLASS-NOT-IN-SCRML for BOTH pipelines).
+            if (forbiddenConstructHead(raw) !== null) {
                 result.push(synthLiftedLogicBlock(block, source, ctx));
                 i = i + 1;
                 continue;

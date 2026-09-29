@@ -1,0 +1,8 @@
+<program>
+<p>hi</p>
+try {
+    go()
+} catch (e) {
+    go()
+}
+</program>

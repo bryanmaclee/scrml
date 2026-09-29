@@ -1,0 +1,7 @@
+<program>
+<k> = 1
+<p>hi</p>
+switch (@k) {
+    case 1: break
+}
+</program>

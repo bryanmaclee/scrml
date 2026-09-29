@@ -1,0 +1,6 @@
+<page>
+<p>hi</p>
+async function load() {
+    return 1
+}
+</page>

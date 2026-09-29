@@ -766,6 +766,96 @@ const TOPLEVEL_ON_LIFECYCLE_RE =
   /^\s*on\s+(?:mount|dismount)\s*\{/;
 
 /**
+ * S441 (s441-demo-blockers, DEFECT 2) — a SPEC §7.2.1 "JavaScript construct that
+ * is not scrml" leading a text run at a declaration site (the §40.8
+ * `<program>` / `<page>` / `<channel>` default-logic body-top, or file top level).
+ *
+ * §7.2.1: the constructs are "rejected at the parse layer, each under a code of
+ * the `E-*-NOT-IN-SCRML` family". Inside `${ }` they are. At the body-top none of
+ * the declaration lift gates matched them, so the run fell to
+ * `result.push(block)` and SHIPPED AS PAGE TEXT at exit 0 — `class Counter { … }`
+ * rendered in the page, and `W-PROGRAM-REDUNDANT-LOGIC` tells authors to write
+ * exactly that shape. Lifting the run by its GRAMMAR HEAD (the S439 #2 precedent:
+ * a bare `when` "SHALL be lifted into the logic context by that grammar head, as
+ * … an `on mount {` block is") routes it through the SAME parser that rejects it
+ * inside `${ }`, so it gets the same diagnostic from the same code path — no
+ * second, per-keyword error site.
+ *
+ * Only the BRACE-DELIMITED heads are recognised, because only they separate code
+ * from prose (the criterion the §40.8 S378 note / ruling 3 hold states: prose at
+ * this body-top renders and is a working shape). Each head is the construct's
+ * COMPLETE grammar head, so no instance of the construct escapes it:
+ *   - `class`        — `class Name {`, `class Name extends X {`, `class {`
+ *                      (optionally `export` / `export default`)
+ *   - `async`        — `async function name(…) {` / `async fn name(…) {` /
+ *                      `async fn name {` (optionally `export` / `server`)
+ *   - `try`          — `try {`
+ *   - `switch`       — `switch (…) {`
+ *   - `for await`    — `for await (…)`
+ * NOT recognised (they are braceless EXPRESSION statements, the §40.8 bare-call
+ * limb, whose treatment is an open operator question): `throw expr`,
+ * `await expr`, a dynamic `import(…)`, an `async (…) =>` arrow statement.
+ * Prose such as `class of 2026`, `try harder`, `switch it off`, or
+ * `async function calls are slow` has no brace-delimited head and never matches.
+ *
+ * MIRRORED in `compiler/native-parser/parse-markup.js` (`forbiddenConstructHead`)
+ * so the native tree — which decides `E-CLASS-NOT-IN-SCRML` for BOTH pipelines
+ * (§7.2.1) — sees the same logic block. Keep the two in sync; a drift-guard test
+ * compares them (`default-logic-forbidden-construct-lift-s441.test.js`).
+ *
+ * @param {string} raw — the text run
+ * @returns {string|null} the construct's keyword, or null
+ */
+export function forbiddenConstructHead(raw) {
+  if (typeof raw !== "string") return null;
+  if (/^\s*(?:export\s+(?:default\s+)?)?class\b(?:\s+[A-Za-z_$][\w$]*)?\s*(?:extends\s+[^{};\n]+)?\{/.test(raw)) return "class";
+  if (/^\s*try\s*\{/.test(raw)) return "try";
+  const sw = raw.match(/^\s*switch\s*(?=\()/);
+  if (sw) {
+    const after = _skipBalancedParens(raw, sw[0].length);
+    if (after !== -1 && /^\s*\{/.test(raw.slice(after))) return "switch";
+  }
+  const fa = raw.match(/^\s*for\s+await\s*(?=\()/);
+  if (fa && _skipBalancedParens(raw, fa[0].length) !== -1) return "for await";
+  const as = raw.match(/^\s*(?:export\s+(?:default\s+)?)?(?:server\s+)?async\s+(?:function|fn)\b\s*\*?\s*[A-Za-z_$][\w$]*\s*/);
+  if (as) {
+    let i = as[0].length;
+    if (raw[i] === "(") {
+      i = _skipBalancedParens(raw, i);
+      if (i === -1) return null;
+    }
+    // Optional return annotation (`-> T` / `: T`) up to the body brace, same line.
+    const rest = raw.slice(i).match(/^\s*(?:(?:->|:)[^{\n]*)?\{/);
+    if (rest) return "async";
+  }
+  return null;
+}
+
+/**
+ * From `i` (at a `(`), return the index just past its matching `)`, skipping
+ * quoted strings; -1 when unbalanced. Helper for `forbiddenConstructHead`.
+ */
+function _skipBalancedParens(s, i) {
+  let depth = 0;
+  let quote = null;
+  for (; i < s.length; i++) {
+    const c = s[i];
+    if (quote !== null) {
+      if (c === "\\") { i++; continue; }
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "\"" || c === "'" || c === "`") { quote = c; continue; }
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return -1;
+}
+
+/**
  * change-id bare-control-flow-in-markup-diagnostic-2026-06-17 (S203).
  *
  * A text run inside a MARKUP body whose leading non-whitespace token is a bare
@@ -1910,6 +2000,32 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         // S180 D3.1 — synthetic block PREPENDS a fictional `${` to raw while
         // keeping span at body[0]; the `case "logic"` handler keys on this flag
         // to NOT advance bodyOffset past the (non-existent) `${`.
+        _bareDeclLift: true,
+      });
+      continue;
+    }
+
+    // S441 — a §7.2.1 not-scrml construct (`class`, `async function`, `try`,
+    // `switch`, `for await`) leading a text run at a declaration site. Lift it
+    // by its grammar head so the logic parser rejects it with the same
+    // E-*-NOT-IN-SCRML code it gets inside `${ }`, instead of the run shipping
+    // as page text. Same locus as BARE_DECL_RE (`parentType !== "markup"`): a
+    // class is a declaration, and wherever a declaration lifts, a forbidden one
+    // must not silently become text. See `forbiddenConstructHead`.
+    if (block.type === "text" && parentType !== "markup" && forbiddenConstructHead(block.raw) !== null) {
+      result.push({
+        type: "logic",
+        raw: "${" + block.raw + "}",
+        span: block.span,
+        depth: block.depth,
+        children: [],
+        name: null,
+        closerForm: null,
+        // (no component flag: a logic block is never a component, and readers
+        // test it `!== true`)
+        _synthetic: true,
+        _forbiddenConstructLift: true,  // diagnostic marker — S441 lift origin
+        // S180 D3.1 — synthetic block PREPENDS a fictional `${` (see above).
         _bareDeclLift: true,
       });
       continue;

@@ -1,0 +1,7 @@
+<program>
+<xs> = []
+<p>hi</p>
+for await (const x of @xs) {
+    log(x)
+}
+</program>
