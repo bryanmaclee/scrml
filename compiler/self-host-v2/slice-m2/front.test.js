@@ -570,7 +570,7 @@ renders <p class="box">\${a},\${b},\${c}</p>
     path: "n1.scrml",
     src: `${BOX}<program>
     <let n:int=0/>
-    <log:int[append]=([])/>
+    <log:int[free, append]=([])/>
     function stamp() -> int {
         @log.push(1)
         return 1
