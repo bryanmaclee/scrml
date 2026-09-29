@@ -352,3 +352,28 @@ export function scanBodyTopLiteralClose(source, at) {
     }
     return -1;
 }
+
+// scanBodyTopTemplateClose — calculation (S441 review #8). The offset of the
+// closing backtick of a CODE template literal opened at `at` at a body-top
+// (`const msg = \`total is ${@total} units\``), skipping `\`-escapes and
+// `${…}` interpolations; -1 at EOF or when a LINE opens with `<` (a missing
+// closing backtick cannot swallow the next element). Both block scanners keep
+// the whole template — `${…}` included — as ONE text run, so the lift hands it
+// to the logic parser intact instead of cutting it at `${` (which left the
+// tail ` units\`` to be lifted as code: a runtime ReferenceError).
+export function scanBodyTopTemplateClose(source, at) {
+    let j = at + 1;
+    while (j < source.length) {
+        const c = source[j];
+        if (c === "\\") { j += 2; continue; }
+        if (c === "$" && source[j + 1] === "{") { j = skipInterpolation(source, j); continue; }
+        if (c === "`") return j;
+        if (c === "\n") {
+            let k = j + 1;
+            while (k < source.length && (source[k] === " " || source[k] === "\t" || source[k] === "\r")) k += 1;
+            if (source[k] === "<") return -1;
+        }
+        j += 1;
+    }
+    return -1;
+}

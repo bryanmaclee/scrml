@@ -104,3 +104,27 @@ for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native
     }
   });
 }
+
+describe("#8 — a body-top CODE template literal stays whole (not cut at `${`)", () => {
+  test("default: `const msg = \`total is ${n + 1} units\`` compiles to the whole template", () => {
+    const r = compile("<program>\nconst n = 3\nconst msg = `total is ${n + 1} units`\n<p>${msg}</p>\n</program>\n");
+    expect(r.errors).toHaveLength(0);
+    expect(r.client).toContain("`total is ${n + 1} units`");
+    expect(r.client).not.toMatch(/^units/m);
+  });
+  test("default: a body-top template behaves exactly as the same template in an explicit `${}`", () => {
+    const bare = compile("<program>\n<total> = 3\nconst msg = `total is ${@total} units`\n<p>${msg}</p>\n</program>\n");
+    const explicit = compile("<program>\n<total> = 3\n${ const msg = `total is ${@total} units` }\n<p>${msg}</p>\n</program>\n");
+    expect(bare.codes).toEqual(explicit.codes);
+    // Never the pre-fix shape: the template's tail lifted as code.
+    expect(bare.client).not.toContain("units `");
+  });
+  test("scrml-native: the tail is not lifted as code (no runtime ReferenceError shape)", () => {
+    const r = compile("<program>\nconst n = 3\nconst msg = `total is ${n + 1} units`\n<p>${msg}</p>\n</program>\n", "scrml-native");
+    expect(r.client).not.toContain("units `");
+  });
+  test("a stray backtick in prose cannot swallow the next element", () => {
+    const r = compile("<program>\nuse `this` wisely\n<p id=\"z\">z</p>\n</program>\n");
+    expect(r.body).toContain("<p id=\"z\">z</p>");
+  });
+});

@@ -105,7 +105,7 @@ import { lex } from "./lex.js";
 import { makeParseExprContext, parseExpression } from "./parse-expr.js";
 import { parseProgram } from "./parse-stmt.js";
 // S441 — the body-top display-text segmenter shared with the live front end.
-import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose } from "./body-top-prose.js";
+import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose } from "./body-top-prose.js";
 import { atEnd } from "./token-cursor.js";
 // MK4 — the markup<->JS seam (R1 spike §3). The seam helpers centralize the
 // markup->JS delegate-down direction (the .InLogicEscape body's JS parse) +
@@ -888,6 +888,27 @@ export function dispatchTopLevel(run, cursor, ctx) {
     // resumes here, still inside the literal.
     if (orphanActive && inOrphan === false) {
         const litEnd = typeof ctx.bodyTopLiteralEnd === "number" ? ctx.bodyTopLiteralEnd : 0;
+        // S441 review #8 — a CODE template literal at a body-top is one text
+        // run, `${…}` included (mirrors the live block-splitter).
+        const tplEnd = typeof ctx.bodyTopTemplateEnd === "number" ? ctx.bodyTopTemplateEnd : 0;
+        if (tplEnd > cursor.pos) {
+            beginTextRun(run, cursor);
+            advance(cursor, 1);
+            return;
+        }
+        if (litEnd <= cursor.pos && peekChar(cursor, 0) === "`") {
+            const tf0 = topTagFrame(ctx);
+            if (tf0 !== null && tf0 !== undefined
+                    && isProgramFamilyRoot(typeof tf0.name === "string" ? tf0.name : "")) {
+                const tclose = scanBodyTopTemplateClose(cursor.source, cursor.pos);
+                if (tclose > cursor.pos) {
+                    ctx.bodyTopTemplateEnd = tclose + 1;
+                    beginTextRun(run, cursor);
+                    advance(cursor, 1);
+                    return;
+                }
+            }
+        }
         if (litEnd > cursor.pos) {
             if (!(peekChar(cursor, 0) === "$" && peekChar(cursor, 1) === openBrace())) {
                 beginTextRun(run, cursor);

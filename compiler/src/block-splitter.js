@@ -58,7 +58,7 @@
 import { tokenizeLogic } from "./tokenizer.ts";
 // S441 — the body-top display-text literal scanner predicates, shared with the
 // native markup trampoline (see the `bodyTopLiteralEnd` state below).
-import { bodyTopQuoteStartsStatement, scanBodyTopLiteralClose } from "../native-parser/body-top-prose.js";
+import { bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose } from "../native-parser/body-top-prose.js";
 
 // ---------------------------------------------------------------------------
 // Error
@@ -1011,6 +1011,10 @@ export function splitBlocks(filePath, source) {
   // splitBodyTopDisplayLiterals); this only stops the scanner from cutting
   // the literal apart first.
   let bodyTopLiteralEnd = 0;
+  // S441 review #8 — a CODE template literal at a body-top: the whole
+  // template, `${…}` included, is one text run (offset just past its closing
+  // backtick; 0 = none). See scanBodyTopTemplateClose.
+  let bodyTopTemplateEnd = 0;
 
   // End offset of the last comment the splitter consumed (a
   // braceIsQuotedStringContent segment never starts inside comment text).
@@ -2527,6 +2531,22 @@ export function splitBlocks(filePath, source) {
 
     // S441 — inside a body-top display-text literal every character is text
     // except a `${` interpolation (handled by the normal logic-context path).
+    if (bodyTopTemplateEnd > pos && !topIsBraceContext()) {
+      beginText();
+      step();
+      continue;
+    } else if (
+      c === "`" && bodyTopLiteralEnd <= pos && orphanBraceDepth === 0 &&
+      !topIsBraceContext() && topIsProgramFamilyBody()
+    ) {
+      const tclose = scanBodyTopTemplateClose(source, curPos);
+      if (tclose > curPos) {
+        bodyTopTemplateEnd = tclose + 1;
+        beginText();
+        step();
+        continue;
+      }
+    }
     if (bodyTopLiteralEnd > pos && !topIsBraceContext()) {
       if (!(c === "$" && source[pos + 1] === "{")) {
         beginText();
