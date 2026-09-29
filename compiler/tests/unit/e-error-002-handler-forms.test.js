@@ -17,8 +17,12 @@
  * (`handlerBlock`), so its guard is EMITTED (it was silently dropped before — the
  * expression view stops at the call) and the call counts as handled.
  *
- * References are not calls: `onclick=risky`, `onclick=${risky}` and the compiler's
- * own `<formFor onsubmit=fn/>` lowering never fire.
+ * References (S441 ruling "yes on references"): a failable function passed as a
+ * handler reference (`onclick=risky`, `onclick=${risky}`) IS E-ERROR-002 — the
+ * event dispatcher calls it and discards its error, like `onclick=risky()`. A
+ * non-failable reference, a local binding that shadows the name, and the
+ * `<formFor onsubmit=fn/>` reference (the §19.6.6 / §41.14.3 submit route) do not
+ * fire.
  *
  * S440 fix round (review of cd6089168):
  *   F1 — the count split survived for control flow: a one-statement
@@ -221,8 +225,8 @@ describe("§19.4.3 — handler positions", () => {
 
 describe("§19.4.3 — handled calls and references stay legal", () => {
   const CLEAN = [
-    ["reference, bare", `<button onclick=risky>x</>`],
-    ["reference, ${}", `<button onclick=\${risky}>x</>`],
+    ["non-failable reference, bare", `<button onclick=plain>x</>`],
+    ["non-failable reference, ${}", `<button onclick=\${plain}>x</>`],
     ["braced !{} one statement", `<button onclick={ risky() !{ | .Empty :> @r = 1 } }>x</>`],
     ["component body, braced !{}", `\${ const Btn = <button onclick={ risky() !{ | .Empty :> @r = 1 } }>go</> }\n<Btn/>`],
     ["${} !{} one statement", `<button onclick=\${risky() !{ | .Empty :> @r = 2 }}>x</>`],
@@ -284,6 +288,77 @@ describe("§19.4.3 — handled calls and references stay legal", () => {
   });
 });
 
+describe("§19.4.3 (S441 \"yes on references\") — a failable function passed as a handler REFERENCE is E-ERROR-002", () => {
+  const FIRES = [
+    ["bare", `<button onclick=risky>x</>`],
+    ["${}", `<button onclick=\${risky}>x</>`],
+    ["braced", `<button onclick={ risky }>x</>`],
+    ["<each> row", `<ul><each in=@items key=@.id><li><button class="row" onclick=risky>x</></></each></>`],
+    ["engine state-child", `<engine for=Phase initial=.Idle>\n<Idle>\n<button id="go" onclick=risky>Begin</>\n</>\n<Loading : "Loading">\n</>`],
+    ["<match> arm", `<match on=@ph>\n<Idle>\n<button id="mc" onclick=risky>x</button>\n</>\n<Loading><p>L</p></>\n</>`],
+    ["component body", `\${ const Btn = <button onclick=risky>go</> }\n<Btn/>`],
+    ["inside an <errorBoundary> (a handler is not render-time)", `<errorBoundary fallback="oops"><button onclick=risky>x</></errorBoundary>`],
+  ];
+  for (const [label, body] of FIRES) {
+    test(label, () => {
+      const { errors } = compileBody(body);
+      expect(count(errors, "E-ERROR-002")).toBeGreaterThanOrEqual(1);
+      expect(errors.filter((c) => c !== "E-ERROR-002")).toEqual([]);
+    });
+  }
+
+  test("the message names the reference and the fix", () => {
+    const dir = mkdtempSync(join(tmpdir(), "e-error-002-ref-msg-"));
+    try {
+      const file = join(dir, "case.scrml");
+      writeFileSync(file, HEADER + "\n<button onclick=risky>x</>\n");
+      const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out"), log: () => {} });
+      const e = (r.errors ?? []).find((d) => d.code === "E-ERROR-002");
+      expect(e).toBeDefined();
+      const msg = String(e.message ?? "");
+      expect(msg).toContain("'risky' is passed as an event-handler reference");
+      expect(msg).toContain("onclick={ risky() !{");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  const CLEAN = [
+    ["a non-failable reference", `<button onclick=plain>x</>`],
+    ["an <each> row alias that shadows the failable name", `<ul><each in=@items as risky><li><button class="row" onclick=risky>x</></></each></>`],
+    ["a component prop that shadows the failable name", `\${ const Btn = <button props={ risky: function } onclick=risky>go</> }\n<Btn risky=plain/>`],
+    ["a reactive read is not a function reference", `<button onclick=@r>x</>`],
+  ];
+  for (const [label, body] of CLEAN) {
+    test(`clean: ${label}`, () => {
+      expect(count(compileBody(body).errors, "E-ERROR-002")).toBe(0);
+    });
+  }
+
+  test("clean: <formFor onsubmit=failable/> is exempt (the §19.6.6 / §41.14.3 submit route)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "e-error-002-ref-ff-"));
+    try {
+      const file = join(dir, "case.scrml");
+      writeFileSync(file, `\${
+  import { formFor } from 'scrml:data'
+  type SignupError:enum = { Rejected(reason: string) }
+  type Signup:struct = { name: string req length(>=2) }
+  server function persistSignup(values: Signup) ! SignupError { return "ok" }
+}
+<program>
+  <errorBoundary fallback={<div>Submit failed</div>}>
+    <formFor for=Signup onsubmit=persistSignup/>
+  </>
+</program>
+`);
+      const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out"), log: () => {} });
+      expect((r.errors ?? []).map((d) => d.code)).toEqual([]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("scope: CPS-implicit failability is NOT escalated on one-statement handlers", () => {
   // A server-escalated fn NOT declared `!` is CPS-implicit-failable; its
   // W-CPS-NEEDS-FAILABLE deprecation warning is a separate cycle. The S440 ruling
@@ -305,6 +380,27 @@ describe("scope: CPS-implicit failability is NOT escalated on one-statement hand
       const all = [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d.code);
       expect(all).not.toContain("E-ERROR-002");
       expect(all).not.toContain("W-CPS-NEEDS-FAILABLE");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("onclick=save (a REFERENCE) on a CPS-implicit server fn — no E-ERROR-002 (same scope as the call form)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "e-error-002-cps-ref-"));
+    try {
+      const file = join(dir, "case.scrml");
+      writeFileSync(file, `\${
+    <out> = ""
+    function save() {
+        ?{\`CREATE TABLE IF NOT EXISTS t (x text)\`}.run()
+        @out = "saved"
+    }
+}
+<button onclick=save>go</>
+`);
+      const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out"), log: () => {} });
+      const all = [...(r.errors ?? []), ...(r.warnings ?? [])].map((d) => d.code);
+      expect(all).not.toContain("E-ERROR-002");
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

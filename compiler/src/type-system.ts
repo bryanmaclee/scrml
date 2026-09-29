@@ -14390,8 +14390,9 @@ function annotateNodes(
     //     is parsed as a statement list FOR CHECKING (`parseHandlerStatementsForCheck`
     //     — the same parser `handlerBlock` comes from) and walked like one;
     //   - a bare `call-ref` (`onclick=f()`) is checked as a bare call statement.
-    // A function REFERENCE (`onclick=f`, `onclick=${f}`, `<formFor onsubmit=fn/>`)
-    // is not a call. An ARROW value (`${(e) => f()}`) is checked through its BODY
+    // A function REFERENCE (`onclick=f`, `onclick=${f}`) to a `!` function is
+    // E-ERROR-002 too (S441 "yes on references" — the dispatcher calls it and
+    // discards its error); `<formFor onsubmit=fn/>` is exempt. An ARROW value (`${(e) => f()}`) is checked through its BODY
     // (S440 ruling: an arrow body runs on the event like `{ … }`) — see
     // ast-builder `parseArrowHandlerStatements`; arrows with 2+ or non-simple
     // parameters are not modelled and stay unchecked.
@@ -14428,6 +14429,37 @@ function annotateNodes(
         const callee = call ? extractCalleeNameFromNode(call) : null;
         if (call && !(callee && fnCpsImplicitFailable.has(callee))) {
           withHandlerCheckContext(() => checkUnhandledFailableBareCall(call));
+        } else if (!call) {
+          // §19.4.3 (S441 ruling "yes on references") — a failable function
+          // passed as a handler REFERENCE (`onclick=risky`, `onclick=${risky}`)
+          // is called by the event dispatcher, which discards its result: the
+          // same unhandled call as `onclick=risky()`. `<formFor onsubmit=fn/>`
+          // stays exempt — its compiler-generated submit dispatch is the §19.6.6
+          // / §41.14.3 route to a boundary (and its lowering is a tagged call-ref,
+          // already skipped by `handlerValueAsBareCall`). Same scope as the call
+          // form: declared-`!` callees only, resolved through scope.
+          const refName = handlerValueAsReference(value);
+          const parentTag = parent && typeof parent === "object"
+            ? (parent as Record<string, unknown>).tag
+            : undefined;
+          if (
+            refName
+            && parentTag !== "formFor"
+            && fnCanFail.has(refName)
+            && !fnCpsImplicitFailable.has(refName)
+          ) {
+            withHandlerCheckContext(() => {
+              if (isShadowedByLocalBinding(refName)) return;
+              errors.push(new TSError(
+                "E-ERROR-002",
+                `E-ERROR-002: Failable function '${refName}' is passed as an event-handler reference, so the ` +
+                `event would call it and discard its error. Call it in a handler that handles the result ` +
+                `(e.g. '${attr.name as string}={ ${refName}() !{ | .Variant :> … } }'), or wire a function that ` +
+                `handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`,
+                valueSpan as Span,
+              ));
+            });
+          }
         }
       }
     }
@@ -19316,6 +19348,30 @@ function handlerValueAsBareCall(value: ASTNodeLike, span: Span | undefined): AST
       && typeof exprNode.callee.name === "string"
     ) {
       return { kind: "bare-expr", exprNode, span } as unknown as ASTNodeLike;
+    }
+  }
+  return null;
+}
+
+/**
+ * §19.4.3 (S441 "yes on references") — the function name an event-handler value
+ * passes BY REFERENCE, or null. A reference is a bare identifier value: the
+ * unbraced `onclick=f` (`variable-ref`) or a braced / `${…}` value whose whole
+ * expression is an identifier (`onclick=${f}`, `onclick={ f }`). A reactive read
+ * (`@x`), a member path, a call and an arrow are not references.
+ */
+function handlerValueAsReference(value: ASTNodeLike): string | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const IDENT = /^[A-Za-z_$][A-Za-z0-9_$]*$/;
+  if (v.kind === "variable-ref") {
+    const name = v.name;
+    return typeof name === "string" && IDENT.test(name) ? name : null;
+  }
+  if (v.kind === "expr") {
+    const exprNode = v.exprNode as { kind?: string; name?: string } | undefined;
+    if (exprNode && exprNode.kind === "ident" && typeof exprNode.name === "string" && IDENT.test(exprNode.name)) {
+      return exprNode.name;
     }
   }
   return null;

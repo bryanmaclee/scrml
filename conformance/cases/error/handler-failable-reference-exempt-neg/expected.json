@@ -1,0 +1,12 @@
+{
+  "id": "error-handler-failable-reference-exempt-neg",
+  "description": "Two function references that do NOT fire E-ERROR-002 under the S441 reference rule. `<formFor onsubmit=persistSignup/>` passes a failable function by reference, but its compiler-generated submit dispatch is the §19.6.6 / §41.14.3 route to the nearest `<errorBoundary>`, not an author-written handler. An `<each in=@fns as risky>` row's `onclick=risky` names the row alias, a local binding that shadows the file's failable `risky`.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S441 \"yes on references\" (formFor exempt, per the ruled question); S440 22-item queue #19",
+  "rationale": "§19.4.3 — the reference rule covers a reference to a `!` function resolved through scope; the `<formFor>` `onsubmit=` reference is governed by §41.14.3 and §19.6.6 instead.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ERROR-002"]
+  }
+}

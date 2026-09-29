@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 176 | 4 |
+| HIGH | 175 | 4 |
 | MED | 363 | 0 |
 | LOW | 162 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -19766,8 +19766,9 @@ and an arrow body (each was silently dropped or failed codegen before) — but N
 ONE-LINE single-statement `if`/`for` handler (`onclick={ if (c) { risky() !{…} } }`) still fails the build with
 E-CODEGEN-INVALID-LOGIC at top level, `${}`, `<each>` row and component body (corrected S441 review;
 g-guard-in-one-line-if-for-emits-raw-bang-brace). The 6 measured corpus sites (5 files)
-were migrated. Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js` and
-`conformance/cases/error/handler-{unhandled-failable-*,failable-reference-and-guard-neg,guard-in-*-rt}`.
+were migrated. S441: a failable function passed as a handler REFERENCE (`onclick=risky`) is E-ERROR-002 too
+(ruled "yes on references"; g-failable-handler-reference-unchecked, resolved; no corpus site). Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js` and
+`conformance/cases/error/handler-{unhandled-failable-*,failable-guard-and-plain-reference-neg,failable-reference-*,guard-in-*-rt}`.
 
 **Still open (each has its own entry below):** the unbraced guard `onclick=risky() !{…}` is dropped at tokenize
 (g-unbraced-handler-guard-silently-dropped); an arrow handler with 2+ parameters or a non-simple parameter (default
@@ -19776,21 +19777,23 @@ were migrated. Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js`
 base too); a function-valued prop called with the bare `onclick=act()` form is never substituted
 (g-component-fn-prop-bare-call-handler-unsubstituted); component-body E-ERROR-002 spans/repeats
 (g-component-body-handler-diagnostic-span-and-repeat); a guard on a call inside a NESTED arrow
-(g-nested-arrow-in-handler-guard-dropped); a failable function wired by REFERENCE (g-failable-handler-reference-unchecked);
-a guard in a one-line `if`/`for` handler (g-guard-in-one-line-if-for-emits-raw-bang-brace); `?` in a handler
+(g-nested-arrow-in-handler-guard-dropped); a guard in a one-line `if`/`for` handler (g-guard-in-one-line-if-for-emits-raw-bang-brace); `?` in a handler
 (g-propagate-in-handler-silently-drops-error); a failable call in a `when … changes` body
 (g-when-changes-body-failable-call-unchecked).
 
-### g-failable-handler-reference-unchecked — `onclick=risky` (a `!` function wired by reference) compiles clean and discards its error on every click — `NEW S441 (filed; pre-existing); HIGH; open`
-<!-- @gap id=g-failable-handler-reference-unchecked sev=HIGH status=open locus=searched:compiler/src/type-system.ts(visitAttr — the §19.4.3 handler-value check walks call statements / arrow bodies only; a bare or `${}` function REFERENCE value is skipped and no reference-to-failable check exists) prov=review:S441-e-error-002-review -->
+### g-failable-handler-reference-unchecked — `onclick=risky` (a `!` function wired by reference) compiled clean and discarded its error on every click — `NEW S441; HIGH; RESOLVED S441`
+<!-- @gap id=g-failable-handler-reference-unchecked sev=HIGH status=resolved locus=compiler/src/type-system.ts(visitAttr — the §19.4.3 handler-value check now also fires on a REFERENCE value via handlerValueAsReference; formFor exempt, scope-resolved, declared-`!` only) prov=review:S441-e-error-002-review;ruling:user-voice-scrml.md-S441-yes-on-references -->
 
 With `function risky()! -> LoadError { fail LoadError.Empty }`, `<button onclick=risky>` (and `onclick=${risky}`)
-compiles at exit 0 with no diagnostic and wires `"_scrml_attr_onclick_N": _scrml_risky_M` — the event dispatcher calls
-the failable function and throws its error value away on every click. Silent error discard, same on main and after the
-S440 E-ERROR-002 landing (reproducer: the S441 review probe `ref2.scrml`). The LANGUAGE rule is not yet written:
-§19.4.3 is silent on a reference to a `!` function as a handler value pending bryan's ruling (the only reference with a
-SPEC basis is `<formFor onsubmit=fn/>`, §41.14.3 — required failable, routed per §19.6.6). Candidate directions for the
-ruling: E-ERROR-002 on the reference (treat the dispatcher as the unhandling caller), or a dispatcher-level route.
+compiled at exit 0 with no diagnostic and wired `"_scrml_attr_onclick_N": _scrml_risky_M` — the event dispatcher called
+the failable function and threw its error value away on every click (reproducer: the S441 review probe `ref2.scrml`).
+**RESOLVED S441** — bryan ruled "yes on references": a failable function passed as a handler reference is E-ERROR-002,
+the same as the call form (§19.4.3 "Handler references"); `<formFor onsubmit=fn/>` stays exempt (§19.6.6 / §41.14.3
+route). Implemented in the §19.4.3 handler-value check, in every position the call form is checked (top level, `<each>`
+row, engine state-child, `<match>` arm, component body, inside an `<errorBoundary>`); a local binding that shadows the
+name (row alias, component prop) and a CPS-implicit-only callee stay clean. Corpus measure (2041 files under `examples/
+samples/ conformance/cases/ docs/readme-snippets/ docs/tutorial-snippets/`): no newly failing file. Pinned by
+`compiler/tests/unit/e-error-002-handler-forms.test.js` and `conformance/cases/error/handler-failable-reference-{pos,exempt-neg}`.
 
 ### g-guard-in-one-line-if-for-emits-raw-bang-brace — a `!{}` guard inside a one-line single-statement `if`/`for` handler fails codegen — `NEW S441 (filed; pre-existing); MED; open`
 <!-- @gap id=g-guard-in-one-line-if-for-emits-raw-bang-brace sev=MED status=open locus=compiler/src/codegen(the one-statement handler value keeps the single-expression codegen path; an `if`/`for` statement body is re-emitted from its raw text, so the nested `!{` reaches the output unlowered) prov=review:S441-e-error-002-review;empirical:S441-reproduced-on-branch-and-main -->
