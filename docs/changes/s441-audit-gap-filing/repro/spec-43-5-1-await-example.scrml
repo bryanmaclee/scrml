@@ -1,0 +1,14 @@
+// S441 re-verification — item 19 (existing gaps g-spec-43-5-1-cross-program-rpc-example-is-invalid-scrml and
+// g-spec-2-4-and-43-5-1-restatements-owed). SPEC §43.5.1's worked example, verbatim.
+// Compiler SHA: cf62b4154 (origin/main at dispatch); SPEC.md §43.5.1 at ~L26050
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/spec-43-5-1-await-example.scrml --output-dir <scratch>
+// Expected: the SPEC example compiles (dpa-056 R7 ruled §43.5.1 restated to return T, compiler-awaited).
+// Actual:   §43.5.1 still reads `${ const result = await <#compute>.add(1, 2) }` and "Cross-program calls
+//           return `Promise<T>`. Unawaited cross-program calls SHALL be compile error E-PROG-004." — the R7
+//           restatement has not been written. Compiling it fires E-AWAIT-NOT-IN-SCRML (§19.9.8).
+<program>
+<program name="compute">
+    ${ export function add(a: number, b: number) -> number { return a + b } }
+</>
+${ const result = await <#compute>.add(1, 2) }
+</program>

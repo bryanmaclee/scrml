@@ -1,0 +1,20 @@
+// S441 reproducer — item 18: three stale user-facing CLI / lint strings.
+// Compiler SHA: cf62b4154 (origin/main at dispatch), package.json version 0.8.0
+// Commands + actual:
+//   bun compiler/bin/scrml.js compile --help
+//     → `--emit-per-route … (SPEC §40.9.7; opt-in during A-4 wave; default-on at v0.3.0 cut)` — but
+//       compiler/src/commands/compile.js:120 `let emitPerRoute = false;` (still opt-in at 0.8.0).
+//   bun compiler/bin/scrml.js --help
+//     → `scrml promote --match|--engine <file|dir> … (CLI surface; impl pending)` and
+//       `Status: CLI surface locked; AST→AST rewrite implementation pending.` (compiler/src/cli.js:48) — but
+//       --match (S66), --engine (S228) and --each (S134) all ship (`promote --help` says SHIPPED); --each is
+//       missing from the top-level line.
+//   bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/cli-stale-help-strings.scrml --output-dir <scratch>
+//     → `lint [W-TAILWIND-UNRECOGNIZED-CLASS]: Class name 'notaclass' is not a recognized Tailwind utility. Either
+//       the class is misspelled, is a Tailwind arbitrary-value class (e.g., 'grid-cols-[auto_1fr_auto]') which
+//       scrml's built-in Tailwind engine does not yet support, …` — while the SAME compile resolves
+//       `.grid-cols-\[auto_1fr_auto\] { grid-template-columns: auto 1fr auto }` and `.p-\[13px\] { padding: 13px }`.
+// Expected: strings that match shipped behaviour (§26.4 arbitrary values; §56.5/§56.6 promote verbs).
+<program>
+<div class="grid-cols-[auto_1fr_auto] p-[13px] notaclass">x</div>
+</program>

@@ -1,0 +1,14 @@
+// S441 reproducer — addendum-2 S8: `scrml build` cuts every warning message at 120 characters.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: copy this file alone into an empty dir <d> as app.scrml, then
+//          bun compiler/bin/scrml.js build <d>
+// Expected: the full message, as `scrml compile` prints it (no SPEC sentence on CLI formatting — cosmetic).
+// Actual:   `[warn] …/app.scrml:1:1 W-PROGRAM-SPA-INFERRED: The compiler has inferred SPA (single-page
+//           application) shape from the filesystem: the entry file declares a top-level `` — the sentence
+//           stops mid-token and the fix-it (create a `pages/` directory …) is never shown.
+//           Root (traced): compiler/src/commands/build.js:1002
+//           `console.warn(`  [warn] ${rel}${loc} ${w.code}: ${stripRedundantCode(w.code, w.message)?.slice(0, 120)}`)`.
+<program>
+<count> = 0
+<p>${@count}</p>
+</program>

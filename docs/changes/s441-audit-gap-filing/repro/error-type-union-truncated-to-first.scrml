@@ -1,0 +1,19 @@
+// S441 reproducer — addendum-5 P5: `! A | B` keeps only `A`.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/error-type-union-truncated-to-first.scrml --output-dir <scratch>
+// Expected: either the union is honoured (`fail .Z` from B is valid) or `! A | B` is rejected as unsupported syntax.
+// Actual:   exit 1, `E-ERROR-009: 'fail' in function 'f' does not name a valid variant of the declared error type 'A'
+//           … Valid variants: X, Y.` — `| B` was silently dropped from the declaration.
+<program>
+${
+    type A:enum = { X, Y(msg: string) }
+    type B:enum = { Z, X }
+    <out> = ""
+    function f(n: string) ! A | B { if (n == "") fail .Z }
+    function run() {
+        f("") !{ | .X :> { @out = "x" } | _ :> { @out = "o" } }
+    }
+}
+<button onclick=run()>go</button>
+<p>${@out}</p>
+</program>

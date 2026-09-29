@@ -5,7 +5,7 @@
 // per-field surfaces (@signup.name.isValid, @signup.name.errors, ...).
 // All synth properties are read-only — the compiler computes them.
 //
-// The engine lives inside <program>; markup uses `match` to switch on the phase.
+// The engine lives inside <program>; a <match> renders the markup for each phase.
 //
 // `db=` is required because persistSignup() runs a `?{}` write (E-SQL-004,
 // §44.7): a `?{}` with no db= in any ancestor <program> has no connection.
@@ -35,36 +35,33 @@
     @signupPhase = SignupPhase.Done
   }
 
-  // Server-escalated via the ?{} block — `server` keyword no longer needed
-  // (deprecated per Insight 26, 2026-05-08).
+  // Runs on the server: the body touches a `?{}` SQL block.
   function persistSignup(name, email, password) {
     ?{`INSERT INTO users (name, email, password_hash) VALUES (${name}, ${email}, ${password})`}.run()
   }
 
-  <div>
-  ${
-    match @signupPhase {
-      .Editing :> {
-        lift <form onsubmit=submit()>
-          <h1>Sign up</h1>
-          <label>Name      <name/>     <errors of=@signup.name/></label>
-          <label>Email     <email/>    <errors of=@signup.email/></label>
-          <label>Password  <password/> <errors of=@signup.password/></label>
-          <label>Confirm   <confirm/>  <errors of=@signup.confirm/></label>
-          <label class="row">
-            <agree/> I agree to the terms
-            <errors of=@signup.agree/>
-          </label>
-          <button type="submit" disabled=!@signup.isValid>Create account</button>
-        </form>
-      }
-      .Submitting :> { lift <p>Creating your account…</p> }
-      .Done :> {
-        lift <p>Welcome, ${@signup.name}!</p>
-        lift <button onclick=${@signupPhase = SignupPhase.Editing}>Sign up another</button>
-      }
-    }
-  }
-  </div>
+  <match for=SignupPhase on=@signupPhase>
+    <Editing>
+      <form onsubmit=submit()>
+        <h1>Sign up</h1>
+        <label>Name      <name/>     <errors of=@signup.name/></label>
+        <label>Email     <email/>    <errors of=@signup.email/></label>
+        <label>Password  <password/> <errors of=@signup.password/></label>
+        <label>Confirm   <confirm/>  <errors of=@signup.confirm/></label>
+        <label class="row">
+          <agree/> I agree to the terms
+          <errors of=@signup.agree/>
+        </label>
+        <button type="submit" disabled=!@signup.isValid>Create account</button>
+      </form>
+    </Editing>
+    <Submitting>
+      <p>Creating your account…</p>
+    </Submitting>
+    <Done>
+      <p>Welcome, ${@signup.name}!</p>
+      <button onclick={ @signupPhase = SignupPhase.Editing }>Sign up another</button>
+    </Done>
+  </match>
 
 </program>

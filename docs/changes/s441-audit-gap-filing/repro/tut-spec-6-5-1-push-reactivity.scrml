@@ -1,0 +1,17 @@
+// S441 reproducer — addendum-3 T7: SPEC §6.5.1 contradicts itself on whether `@arr.push(x)` updates.
+// Compiler SHA: cf62b4154 (origin/main at dispatch); SPEC.md §6.5.1 ~L2527-2540
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/tut-spec-6-5-1-push-reactivity.scrml --output-dir <scratch>
+// SPEC text: DQ-2 paragraph — "Array mutation methods (`.push()`, `.splice()`, `.pop()`, etc.) do NOT trigger
+//           reactivity on their own." … "this rewrite is NOT guaranteed in production builds". Normative rule,
+//           same subsection — "it SHALL rewrite the call to: 1. Clone … 3. Write the clone back to `@name` via
+//           `_scrml_reactive_set`, which triggers all subscribers." (§66.11's header note says it supersedes the
+//           DQ-2 paragraph; the paragraph is still inline and unstruck.)
+// Actual:   client.js `{ _scrml_cs_reactive_get("items").push(2); _scrml_cs_reactive_set("items", _scrml_cs_reactive_get("items")); }`
+//           (in place, no clone — see g-cell-mutators-skip-clone-then-write-back). EXECUTED (happy-dom): the
+//           paragraph shows 1, after clicking the button 2 — push DOES update.
+<program>
+<items> = [1]
+function add() { @items.push(2) }
+<button onclick=add()>add</button>
+<p>${@items.length}</p>
+</program>

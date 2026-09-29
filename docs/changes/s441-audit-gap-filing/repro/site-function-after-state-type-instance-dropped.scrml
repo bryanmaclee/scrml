@@ -1,0 +1,37 @@
+// S441 reproducer — addendum-2 S9a: a `function` declared after a state-type instance line (`<T> @x`) inside
+// `${ }` is silently dropped from the output.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-function-after-state-type-instance-dropped.scrml --output-dir <scratch>
+// Expected: §52.3.5 "Worked Example — Valid (Type-Level Authority)" declares `<Card> @cards` / `<EditState> @ui`
+//           and THEN `function createCard(…)` in the same `${ }` — the function exists after compile.
+// Actual:   exit 0, zero errors. The function is in neither bundle: server.js has only
+//           `path: "/__serverLoad/cards"` (no route for the UPDATE, 0 hits for `UPDATE cards`) and client.js
+//           has no stub — yet the button wiring still calls the bare source name, a ReferenceError on click.
+//           Minimal control: the same function moved ABOVE the instance line compiles and is emitted; used
+//           from an inline `${ … }` handler instead of a call attribute, the drop surfaces as a misleading
+//           `E-SCOPE-001: Undeclared identifier`.
+<program db="./app.db">
+<schema>
+    cards {
+        id: integer primary key
+        title: text
+    }
+</schema>
+${
+    <Card authority="server" table="cards">
+        id: number
+        title: string
+    </>
+    <EditState>
+        draftTitle: string
+    </>
+    <Card> @cards
+    <EditState> @ui
+    function renameCard(id: number, title: string) {
+        ?{`UPDATE cards SET title = ${title} WHERE id = ${id}`}.run()
+    }
+}
+<ul>
+    ${ for (let c of @cards) { lift <li>${c.title} <button onclick=renameCard(c.id, "x")>rename</button></li> } }
+</ul>
+</program>
