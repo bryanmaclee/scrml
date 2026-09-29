@@ -31,8 +31,8 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 207 | 4 |
-| MED | 396 | 0 |
-| LOW | 171 | 0 |
+| MED | 397 | 0 |
+| LOW | 173 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -20726,5 +20726,19 @@ Reproducer `docs/changes/s441-async-escape-f4-f5/review-repro/h-shadow-local` (a
 ### g-handler-independent-server-calls-serialized — in an inline handler / `on mount` body, independent server calls are awaited one after another; §13.2 requires parallelization — `NEW S441`; **LOW** (correct values, extra latency); open
 Reproducer `docs/changes/s441-async-escape-f4-f5/review-repro/par-par.scrml`: `onclick=${ a(3); b(4) }` emits `await a(3); await b(4);`. Function bodies get the `Promise.all` scheduler; handler / mount bodies (analysed as emitted text since s441) do not.
 <!-- @gap id=g-handler-independent-server-calls-serialized sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(transform adds awaits in order; no batching) prov=review:S441-f4f5-review -->
+
+### g-promise-method-on-awaited-call-through-a-binding-not-caught — `const p = isOk(1); p.then(…)` in a handler / `on mount` body is not E-ASYNC-CALL-PROMISE-METHOD: `p` holds the awaited value and `.then` throws a TypeError at run time — `NEW S441`; **LOW** (loud runtime TypeError, not silent); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `pm/alias-then.scrml`. The check reads `.then`/`.catch`/`.finally` only directly off the awaited call (`isOk(1).then`, `isOk(1)["then"]` since round 3). A binding that holds the awaited value is not followed. Fix direction: follow simple `const` bindings of an awaited call as the event-control check follows event aliases.
+<!-- @gap id=g-promise-method-on-awaited-call-through-a-binding-not-caught sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(checkPromiseMethod — direct parent only) prov=review:S441-f4f5-review-r2 -->
+
+### g-promise-method-check-fires-on-a-then-field-read — `String(getRec().then)` (a server fn returning a record with a `then` FIELD) is rejected by E-ASYNC-CALL-PROMISE-METHOD — `NEW S441`; **LOW** (false positive, loud); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `pm/field-named-then.scrml`. The check fires on any member read named `then`/`catch`/`finally` off an awaited call, not only a CALL of it. Narrowing to a call (`parent` is the callee of a CallExpression) would clear it; a record field named `then` is also a thenable hazard under `await`, so the right rule is a design question (flag the field at the type).
+<!-- @gap id=g-promise-method-check-fires-on-a-then-field-read sev=LOW status=open locus=compiler/src/codegen/js-async-analysis.ts(checkPromiseMethod) prov=review:S441-f4f5-review-r2 -->
+
+### g-event-control-after-await-in-a-named-handler-function — `onsubmit=handle(event)` where `function handle(e) { … server call … ; e.preventDefault() }` compiles clean: the preventDefault runs after the function's first await — `NEW S441`; **MED** (the form submits); open
+From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `ev/named-fn.scrml`. E-EVENT-CONTROL-AFTER-AWAIT covers handler TEXT (inline / block / row / lift handlers); a named function reached through a call-ref handler is an ordinary async function body and was async on main too (not a regression of this branch). Fix direction: in a function passed the event by a call-ref handler, apply the same rule to the parameter the event is bound to.
+<!-- @gap id=g-event-control-after-await-in-a-named-handler-function sev=MED status=open locus=compiler/src/codegen/emit-functions.ts+compiler/src/codegen/emit-event-wiring.ts(call-ref handlers) prov=review:S441-f4f5-review-r2 -->
+
+> **Round-3 residuals of E-EVENT-CONTROL-AFTER-AWAIT (review N2/N3), conservative by design, SPEC §13.2 names them:** "after" is source order, so `if (c) { … await … } else { event.preventDefault() }` (`ev/else-branch.scrml`) and a call after an `await` in a branch that was not taken (`ev/first-await-in-untaken-if.scrml`) are rejected though they would run in time. A closure passed elsewhere (not invoked by name after the await) is not traced.
 
 > **Not filed, pre-existing, noted for the fix of E-ASYNC-CALL-PROMISE-METHOD's reach:** `docs/changes/s441-async-escape-f4-f5/review-repro/then-fn` — `isOk(1).then(…)` inside an ordinary FUNCTION body emits `(await f(1)).then(…)` (a TypeError) on base `cf62b4154` too; the new code covers handler and `on mount` bodies only. Carried under g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources.
