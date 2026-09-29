@@ -1,0 +1,23 @@
+change-id: s441-fail-bare-variant
+
+Implement a RULED widening: `fail .Variant` (bare-variant shorthand) resolves against the error type declared in the function's `!` signature. Base: origin/main.
+
+CRITICAL — STARTUP + PATH DISCIPLINE (incident counter: 0): pwd must start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-` and equal `git rev-parse --show-toplevel`; tree clean; `git merge-base HEAD origin/main` == `git rev-parse origin/main`. `bun install`; `bun run pretest` plainly from the worktree CWD. Edit/Write only absolute paths under your worktree; never cd into /home/bryan-maclee/scrmlMaster/scrml; NEVER `git stash`; NEVER `pkill -f`. Scratch under your worktree or /tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/3d8eae9f-f153-45e9-9c40-317c40f0c614/scratchpad/s441-fail/. First commit: this prompt verbatim → `docs/changes/s441-fail-bare-variant/BRIEF.md` + progress.md, `WIP(s441-fail-bare-variant): start at $(pwd)`. Code + test in ONE commit. Foreground commits, long timeout, never --no-verify, never touch core.hooksPath.
+
+MAPS — REQUIRED FIRST READ: `.claude/maps/primary.map.md` (stamp fb21983a; verify vs source). Report load-bearing or not.
+
+Siblings live in emit-event-wiring.ts, emit-reactive-wiring.ts, local-async-fns.ts, emit-expr.ts, emit-server.ts, emit-client.ts, lint-ghost-patterns.js and the default-logic top-level recognizer (ast-builder/block-splitter). This change should live at the E-ERROR-009 / bare-variant inference site (type-system.ts); if the root is elsewhere and in a sibling's file, STOP and report.
+
+RULING (bryan S441, verbatim-authority /home/bryan-maclee/scrmlMaster/scrml-support/user-voice-scrml.md "RULED — site yes; `fail .Variant` shorthand yes"): "`fail .EmptyName` resolves the bare variant against the error type declared in the function's `!` signature (§14.10 bare-variant inference applied to the `fail` target; §19.3.3's validity rule still applies to the resolved variant). Newly-accepting widening, ruled by bryan."
+GAP: `g-fail-variant-shorthand-rejected-by-ts-context` in docs/known-gaps.md (read in full): `fail .Variant` is rejected by E-ERROR-009 while `fail E.Variant` compiles; the reject fires ONLY when the declared error enum resolves (canonical `type X:enum = {…}`), not for a non-canonical `enum X {…}` — the diagnostic is gated on an orthogonal condition. `examples/09-error-handling.scrml` fails 4× E-ERROR-009.
+READ IN FULL before coding: SPEC §19.3 (esp. §19.3.3, ~line 14756), §19.4.2 (bare `!` → built-in `Error` enum, sole variant `Generic`), §14.10 (bare-variant inference), §18.0.3.
+
+WORK:
+1. Reproduce (repro files into docs/changes/s441-fail-bare-variant/repro/, version-stamped).
+2. Implement: in a failable function, `fail .V` and `fail .V(args)` resolve `.V` against the declared error enum; then the §19.3.3 checks run on the resolved variant exactly as for the qualified form — invalid name → E-ERROR-009 (with the Valid-variants list), wrong payload arity → E-TYPE-082. Bare `!` functions: `fail .Generic` resolves to `Error.Generic`. Codegen must be identical to the qualified form (verify by diffing emitted JS of `fail .X` vs `fail E.X`). Also make the diagnostic gate consistent: the non-canonical-enum path must not silently accept an INVALID bare variant.
+3. SPEC: amend §19.3.3 with a normative sentence for the bare form + cross-ref §14.10, with `> **Provenance:** ruling:user-voice-scrml.md S441 "fail shorthand yes" · supersedes: unrecoverable:the prior implicit rejection (no ruling found — cite the gap)`. Update §34 E-ERROR-009 row wording if needed. Mark the gap resolved with the landing note (status=resolved, locus=, prov=ruling:...).
+4. Tests: unit/integration for valid bare, invalid bare (E-ERROR-009), wrong-arity bare (E-TYPE-082), bare `!` Generic, the non-canonical enum path, `!{}` handler matching still works; a conformance case (codes + runtime halves) for the bare form.
+5. `examples/09-error-handling.scrml` compiles and its error paths behave (run it if there is a harness; at minimum compile + node --check). Direction-of-change is newly-ACCEPTING: report the corpus artifact diff (compile examples/, samples/, conformance/cases/, docs/readme-snippets/, docs/tutorial-snippets/ before/after — only previously-failing files should change status).
+6. `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (0 fail) + `bun conformance/run.ts` (pass/total vs base). `git push -u origin HEAD`.
+
+REPORT: worktree, branch, FINAL SHA (== pushed tip), files touched, locus verdict, SPEC text added (quoted), codegen-identity diff result, corpus before/after, suite numbers. git status clean before DONE.

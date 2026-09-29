@@ -1,0 +1,20 @@
+{
+  "spec": "§65.3.2, §65.4.1, §25.7",
+  "rationale": "§65.3.2: `brand = #2563eb` lowers to `:root { --brand: #2563eb }`; the flat `#{ color: @brand }` (the element's inline style, §65.4.1) reads `var(--brand)`, so the Card's color is #2563eb.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "[data-scrml=Card]",
+          "prop": "color",
+          "value": "rgb(37, 99, 235)"
+        },
+        {
+          "sel": "[data-scrml=Card]",
+          "prop": "padding-top",
+          "value": "16px"
+        }
+      ]
+    }
+  ]
+}

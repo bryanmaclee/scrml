@@ -1,0 +1,20 @@
+{
+  "spec": "§65.2.4",
+  "rationale": "`button { color: red }` and `a { color: blue }` are disjoint by tag; each element gets its own rule's value.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "button",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": "a",
+          "prop": "color",
+          "value": "rgb(0, 0, 255)"
+        }
+      ]
+    }
+  ]
+}

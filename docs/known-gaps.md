@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 201 | 4 |
-| MED | 381 | 0 |
-| LOW | 164 | 0 |
+| HIGH | 203 | 4 |
+| MED | 395 | 0 |
+| LOW | 171 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -1504,7 +1504,28 @@ its parser + VP-2 hunks are already on main via this branch and must be dropped 
 <!-- @gap id=g-checked-expr-attr-always-checked-for-falsy sev=HIGH status=ruling-gated locus=searched:compiler/src/codegen/emit-html.ts,compiler/src/codegen/emit-each.ts(lifted-for-setAttribute-path) prov=adopter:S381-peter-dogfood-checked-expr-emits-raw-source-as-a-literal-string-attr-with-no-reactive-wiring-and-setAttribute-unconditional-while-class-colon-done-on-the-same-element-treats-0-as-falsy -->
 
 ### g-fail-variant-shorthand-rejected-by-ts-context — `fail .Variant` (the bare-variant shorthand) is **rejected by `E-ERROR-009` at the TS stage** while the qualified `fail E.Variant` compiles. **S382-peter VERIFIED + ROOT-CAUSED + SPEC-checked: a SPEC-INTERNAL grammar-reconciliation RULING, not a bug fix.** ⚠ **The reject fires ONLY when the declared error enum RESOLVES** — a canonical `type ContactError:enum = { … }` declaration produces `E-ERROR-009`; a non-canonical `enum ContactError { … }` does not. The diagnostic is gated on a condition orthogonal to the shape it names. Adopter-visible and blocking: **flagship `09-error-handling` fails to compile — 4× `E-ERROR-009`** (`validate` ×3, `submit` ×1), and `login.scrml` likewise. Bare-variant inference is §14.10-sanctioned elsewhere (`<x>: Phase = .Idle`), which is why the shorthand reads as legal to an author and why the reconciliation is bryan's. — `NEW S381-peter (dog-food sweep), VERIFIED S382-peter; FILED S385-bryan; **HIGH**; needs bryan (SPEC-internal grammar reconciliation)`
-<!-- @gap id=g-fail-variant-shorthand-rejected-by-ts-context sev=HIGH status=ruling-gated locus=searched:compiler/src/type-system.ts(E-ERROR-009-fire-site),compiler/SPEC.md-§19,§14.10 prov=adopter:S381-peter-dogfood-VERIFIED-S382-peter-flagship-09-fails-4x-E-ERROR-009-and-the-reject-fires-only-when-the-error-enum-RESOLVES-canonical-type-enum-decl-vs-non-canonical -->
+<!-- @gap id=g-fail-variant-shorthand-rejected-by-ts-context sev=HIGH status=resolved locus=compiler/src/type-system.ts(annotateNodes-§19-fail-expr-E-ERROR-009-site-bare-resolution),compiler/SPEC.md-§19.3.1,§19.3.3,§14.10,§34-E-ERROR-009 prov=ruling:user-voice-scrml.md-S441-"fail-shorthand-yes"+adopter:S381-peter-dogfood-VERIFIED-S382-peter -->
+
+**RESOLVED S441** (`s441-fail-bare-variant`; ruling: user-voice-scrml.md S441 "site yes, fail shorthand yes"). `fail .V` /
+`fail .V(args)` / `fail ::V` now resolve the bare variant against the enclosing function's declared `!` error type
+(bare `!` → built-in `Error`, so `fail .Generic(m)` ≡ `fail Error.Generic(m)`). The E-ERROR-009 site in `type-system.ts`
+resolves first and writes the enum name onto the `fail-expr` node, then runs the unchanged §19.3.3 checks on the
+resolved variant — invalid name → E-ERROR-009 (Valid-variants list), valid name + wrong arity → E-TYPE-082. Codegen is
+byte-identical to the qualified form (asserted in `compiler/tests/unit/fail-bare-variant-shorthand-s441.test.js`).
+The gate asymmetry is closed: a bare `fail .V` whose declared type does NOT resolve to an enum (undeclared, non-enum,
+the non-canonical `enum E {…}` that never registers) is now E-ERROR-009 instead of passing vacuously; an imported
+error enum resolves (an import the registry lacks is exempt: unverifiable, not invalid). SPEC: §19.3.1 grammar makes
+`enum-type` optional, §19.3.3 gains the normative bare-form bullet, §14.10 lists the `fail` target as a position, §34
+E-ERROR-009 row reworded. Corpus: newly-accepting only — `examples/09-error-handling.scrml` and two
+`samples/compilation-tests/gauntlet-s19-phase1-decls/` files flip FAIL→OK; zero files flip OK→FAIL.
+⚑ **Surfaced, not fixed (pre-existing, identical under the qualified spelling):** 09's `<Failed err>` arm renders an
+EMPTY message at runtime — a catch-all `!{}` arm `| err :> …` lowers to `const err = result.data` (the payload), not the
+error variant, so `errorMessage(err)` gets `null` for `.EmptyName`. Filed separately; see the S441 report.
+
+### g-qualified-fail-against-non-enum-error-type-undiagnosed — the qualified `fail T.V` in a function declared `! T`, where `T` is undeclared / a non-enum type / a type alias, compiles with NO diagnostic — `NEW S441`; **MED** (silent acceptance of an invalid error type; the bare form is already fail-closed); open
+Executed on the s441-fail-bare-variant tip: `function check(n: string) ! Undeclared { if (n == "") fail Undeclared.X }` compiles at exit 0. So do `! S` with `type S:struct = {…}` + `fail S.X`, and `! A` with `type A = E` + `fail A.V`. The emitted envelope is `{ __scrml_error: true, type: "Undeclared", variant: "X", … }` — a variant of a type that does not exist. §19.4.4.1 already requires the `!` error type to be an enum and names **E-ERROR-011** (reserved, no emitter) for the non-enum case, so this is the qualified-form half of that unbuilt emitter. The impl half is tracked under [[g-failable-error-type-non-enum-spec-vs-corpus-conflict]] ("REMAINING — the impl half is NOT built"). The bare form `fail .V` against the same types reports **E-ERROR-009** as a carried interim (§19.3.3, S441), which E-ERROR-011 subsumes when it ships. A second strand: an UNDECLARED name in the `!` position is not reached by §14.1.2 `E-TYPE-UNKNOWN-NAME`, because the `!` error-type position is absent from that rule's Loci list. Decide whether that code or E-ERROR-011 owns the undeclared case. **Direction: newly-rejecting** — measure the corpus before landing (§34.0 / pa-base §8). The s441 corpus sweep (2,033 files) found no qualified `fail` against an unresolved `!` type among files that compile, but that sweep was not targeted at this shape. Re-measure.
+<!-- @gap id=g-qualified-fail-against-non-enum-error-type-undiagnosed sev=MED status=open locus=compiler/src/type-system.ts(annotateNodes-§19-fail-expr-E-ERROR-009-site,validVariants===null-branch)+compiler/src/ast-builder.js(consumeErrorTypeAnnotation-E-ERROR-011-natural-site) prov=review:S441-fail-bare-variant-PA-review-N1-reproduced-by-execution -->
+
 
 <!-- ⚑ S385-bryan filing batch 5 — the "separable defects, file not design" set from dpa-028 (offline/PWA, 2026-08-15). The DD named FOUR; the PA reproduced each by execution before filing rather than relaying, and ONE DID NOT REPRODUCE (recorded below, not filed). bryan: "file those four". -->
 
@@ -6293,6 +6314,7 @@ directory, not only "genuinely nested multi-segment flat routes".**
 ## §S265 — gaps filed S265 (2026-07-18, discovered during the CSS Wave-1 S239 review)
 
 ### g-css-selector-nested-reactive-ref-no-bridge — a component `#{ .box { color: @cell } }` (SELECTOR form, reactive cell) collects **no §25 CSS-var bridge**: `collectCssVariableBridges` (collect.ts) only gathers a block's top-level flat-declaration `reactiveRefs`, NOT selector-NESTED ones → the emitted CSS carries `var(--scrml-cell)` but nothing ever sets `--scrml-cell` → `E-DG-002` "never consumed" fires and the custom property is dead. Sibling of the flat-inline bug fixed in #98 (which handled the FLAT-declaration form). The natural warm-adjacent next pickup. — `NEW S265 (scoping agent, §25 fix); MED; open`
+> **S441 reconfirmed, and wider than a component (review:S441-css-t3-review; executed at `aedcc6d61`+):** a PROGRAM-level selector rule is dead the same way. `docs/changes/s441-land-bootstrap-css-t3/repro/bridge.scrml` (`<w> = 10`, `#{ .box { width: @w; } }`, a button writing `@w`) → the css reads `.box { width: var(--scrml-w); }` and `--scrml-w` appears in NO other output field (`repro/bridge-show.js`), no error. `collectCssVariableBridges` gathers only a block's top-level (flat) `reactiveRefs`, so every selector-nested `@cell` in any `#{}` is a static read of an unset property. Filed as the S440 bootstrap branch's "§25.7 bridge dead for stylesheet rules" finding — the same defect, not a new entry.
 ### g-css-inline-string-at-ident-miscompile — a flat-inline `#{ content: "@twitter" }` or `#{ background: url("@retina/x.png") }` — the `@ident` inside a CSS **string / url() literal** is mis-detected as a §25 reactive ref by `lowerCssValueRefs`/`AT_REF_RE` (which don't skip string/url literals) → malformed client JS (`_scrml_reactive_get("twitter")`, nested-quote breakage) → `E-CODEGEN-INVALID-LOGIC`. Pre-existing (reproduces on main). — `NEW S265 (S239 review R3); MED; open`
 ### g-css-value-string-brace-mangle — `#{ .a::before { content: "}"; color: red } }` — the `}` inside a CSS **string value** is mis-parsed as a rule terminator by the downstream CSS-value tokenizer / `renderCssBlock` → mangled output. Reproduces identically at PROGRAM level (never touches the component-expander masking) → a pre-existing downstream CSS-value-tokenizer bug, not the round-4 scanner. — `NEW S265 (S239 review R1); LOW; open`
 
@@ -19755,8 +19777,8 @@ dispatched, and the button was clicked. Result: before the click, `"it" in windo
 Fix direction: emit E-ASSIGN-004 (the ruling), and/or lower handler-value loops through the statement
 emitter so the binder gets `const`.
 
-### g-e-error-002-handler-exemption-depends-on-statement-count — an unhandled failable call in a handler is E-ERROR-002 only when it shares the handler with another statement — `NEW S437; LOW; open (spec-consistency question for bryan)`
-<!-- @gap id=g-e-error-002-handler-exemption-depends-on-statement-count sev=LOW status=open locus=compiler/src/type-system.ts(the §19.4.3 unhandled-failable check — reaches a failable call through the §5.2.3 handler statement list; the single-expression handler forms are exempt by an earlier, separate rule) prov=review:S437-round5-review-item-a;empirical:S437-round5-reproduced-by-compile -->
+### g-e-error-002-handler-exemption-depends-on-statement-count — an unhandled failable call in a handler is E-ERROR-002 only when it shares the handler with another statement — `NEW S437; LOW; open (split CLOSED S440; residual holes listed below)`
+<!-- @gap id=g-e-error-002-handler-exemption-depends-on-statement-count sev=LOW status=open locus=compiler/src/type-system.ts(visitAttr — the §19.4.3 handler check: handlerBlock walk, parseHandlerStatementsForCheck check-walk, call-ref path; withHandlerCheckContext)+compiler/src/ast-builder.js(parseHandlerStatementListCore, parseArrowHandlerStatements, attachHandlerStatementList)+compiler/src/component-expander.ts(reparseSynthesizedFile + handlerBlock prop substitution) prov=review:S437-round5-review-item-a;empirical:S437-round5-reproduced-by-compile;review:S440-fix-round-F1-F10 -->
 
 With `function risky()! E`, measured on the S437 round-5 build: `onclick={ risky(); @r = 1 }` → **E-ERROR-002**
 (§19.4.3 — an unhandled failable call), but `onclick=risky()`, `onclick={ risky() }` and `onclick={⏎ risky()⏎ }`
@@ -19765,6 +19787,178 @@ lists visible to the check, which is what exposed the split. **Spec-consistency 
 call as a handler's WHOLE body exempt from §19.4.3 (the event dispatcher is the boundary), and if so, should that
 exemption extend to a failable statement inside a multi-statement handler — or should neither be exempt? Either
 answer makes the rule independent of the statement count; today it is not.
+
+**S440 — the split is CLOSED; the gap stays open for the residual holes below.** Ruled "neither is exempt" (S439 #14 +
+S440 "all recs": restore conformance) and arrow bodies ruled checked (S440 all recs #2 item 1); §19.4.3 states both.
+An unhandled `!` call is E-ERROR-002 in the bare, braced, `${}`, multi-statement, control-flow (`{ if (c) risky() }`)
+and arrow-valued forms, at top level / `<each>` row / engine state-child / `<match>` arm / component body, and inside an
+`<errorBoundary>` (a handler runs after render; the boundary does not catch it — verified at runtime S440; §19.6.6 was
+limited to render-time calls by S440 #22). The callee
+resolves through scope. `!{}` guards are emitted in the one-statement braced form, a `<match>` arm, a component body
+and an arrow body (each was silently dropped or failed codegen before) — but NOT in every position: a guard inside a
+ONE-LINE single-statement `if`/`for` handler (`onclick={ if (c) { risky() !{…} } }`) still fails the build with
+E-CODEGEN-INVALID-LOGIC at top level, `${}`, `<each>` row and component body (corrected S441 review;
+g-guard-in-one-line-if-for-emits-raw-bang-brace). The 6 measured corpus sites (5 files)
+were migrated. S441: a failable function passed as a handler REFERENCE (`onclick=risky`) is E-ERROR-002 too
+(ruled "yes on references"; g-failable-handler-reference-unchecked, resolved; no corpus site). Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js` and
+`conformance/cases/error/handler-{unhandled-failable-*,failable-guard-and-plain-reference-neg,failable-reference-*,guard-in-*-rt}`.
+
+**Still open (each has its own entry below):** the unbraced guard `onclick=risky() !{…}` is dropped at tokenize
+(g-unbraced-handler-guard-silently-dropped); an arrow handler with 2+ parameters or a non-simple parameter (default
+`(e = 1)`, rest `(...a)`, destructuring with a default) and a `function (e) {…}` handler expression are not modelled
+(unchecked, emitted as before S440; the function expression and the destructuring-with-default arrow fail codegen at
+base too); a function-valued prop called with the bare `onclick=act()` form is never substituted
+(g-component-fn-prop-bare-call-handler-unsubstituted); component-body E-ERROR-002 spans/repeats
+(g-component-body-handler-diagnostic-span-and-repeat); a guard on a call inside a NESTED arrow
+(g-nested-arrow-in-handler-guard-dropped); a guard in a one-line `if`/`for` handler (g-guard-in-one-line-if-for-emits-raw-bang-brace); `?` in a handler
+(g-propagate-in-handler-silently-drops-error); a failable call in a `when … changes` body
+(g-when-changes-body-failable-call-unchecked).
+
+### g-failable-handler-reference-unchecked — `onclick=risky` (a `!` function wired by reference) compiled clean and discarded its error on every click — `NEW S441; HIGH; RESOLVED S441`
+<!-- @gap id=g-failable-handler-reference-unchecked sev=HIGH status=resolved locus=compiler/src/type-system.ts(visitAttr — the §19.4.3 handler-value check now also fires on a REFERENCE value via handlerValueAsReference; formFor exempt, scope-resolved, declared-`!` only) prov=review:S441-e-error-002-review;ruling:user-voice-scrml.md-S441-yes-on-references -->
+
+With `function risky()! -> LoadError { fail LoadError.Empty }`, `<button onclick=risky>` (and `onclick=${risky}`)
+compiled at exit 0 with no diagnostic and wired `"_scrml_attr_onclick_N": _scrml_risky_M` — the event dispatcher called
+the failable function and threw its error value away on every click (reproducer: the S441 review probe `ref2.scrml`).
+**RESOLVED S441** — bryan ruled "yes on references": a failable function passed as a handler reference is E-ERROR-002,
+the same as the call form (§19.4.3 "Handler references"); `<formFor onsubmit=fn/>` stays exempt (§19.6.6 / §41.14.3
+route). Implemented in the §19.4.3 handler-value check, in every position the call form is checked (top level, `<each>`
+row, engine state-child, `<match>` arm, component body, inside an `<errorBoundary>`); a local binding that shadows the
+name (row alias, component prop) and a CPS-implicit-only callee stay clean. Corpus measure (2041 files under `examples/
+samples/ conformance/cases/ docs/readme-snippets/ docs/tutorial-snippets/`): no newly failing file. Pinned by
+`compiler/tests/unit/e-error-002-handler-forms.test.js` and `conformance/cases/error/handler-failable-reference-{pos,exempt-neg}`.
+
+### g-guard-in-one-line-if-for-emits-raw-bang-brace — a `!{}` guard inside a one-line single-statement `if`/`for` handler fails codegen — `NEW S441 (filed; pre-existing); MED; open`
+<!-- @gap id=g-guard-in-one-line-if-for-emits-raw-bang-brace sev=MED status=open locus=compiler/src/codegen(the one-statement handler value keeps the single-expression codegen path; an `if`/`for` statement body is re-emitted from its raw text, so the nested `!{` reaches the output unlowered) prov=review:S441-e-error-002-review;empirical:S441-reproduced-on-branch-and-main -->
+
+`<button onclick={ if (@n == 0) { risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 } } }>` → **E-CODEGEN-INVALID-LOGIC**
+(a raw `!{` is emitted). Same for `onclick={ for (const i of xs) { risky() !{…} } }`, and in `${…}` form, an `<each>` row
+and a component body. FAILS CLOSED (the build fails; no bad JS ships). The multi-line form of the same handler and the
+two-statement form (`{ if (c) { risky() !{…} }; @m = 1 }`) and an arrow body compile and run. Pre-existing on main. The
+check passes it (the call is handled), which is why the S440 unit test using `write:false` looked clean; that test now
+runs the full pipeline and is `test.failing`-pinned to this gap in
+`compiler/tests/unit/e-error-002-handler-forms.test.js`.
+
+### g-propagate-in-handler-silently-drops-error — `onclick={ risky()?; @msg = "after" }` compiles clean and drops the error — `NEW S441 (filed; pre-existing); HIGH; open`
+<!-- @gap id=g-propagate-in-handler-silently-drops-error sev=HIGH status=open locus=compiler/src/type-system.ts(the §19.5.4 E-ERROR-003 check runs in the function-body statement walk, keyed on the enclosing function's `canFail`; an event-handler value is not a function body, so `?` in a multi-statement handler is never checked) prov=review:S441-e-error-002-review;empirical:S441-reproduced-by-emit -->
+
+A handler is not a `!` function, so `?` inside it has nowhere to propagate: §19.5.4 ("`?` SHALL be valid only inside a
+`!` function body … E-ERROR-003") should fire. Instead `<button onclick={ risky()?; @msg = "after" }>` compiles at exit 0
+and emits `const t = _scrml_risky_N(); if (t.__scrml_error) return t; …` — on click the handler returns early and the
+error value is discarded by the dispatcher (runtime probe: S441 review `rt/prop-in-handler`). Silent error discard.
+(The one-statement `onclick={ risky()? }` form fails codegen instead — g-handler-propagate-in-handler-is-codegen-error.)
+
+### g-when-changes-body-failable-call-unchecked — `when @r changes { risky() }` gets no E-ERROR-002; `on mount { risky() }` does — `NEW S441 (filed; pre-existing); LOW; open`
+<!-- @gap id=g-when-changes-body-failable-call-unchecked sev=LOW status=open locus=not-traced(the E-ERROR-002 statement walk evidently does not reach a `when … changes` body; the skip site was not located) prov=review:S441-e-error-002-review;empirical:S441-reproduced-by-compile -->
+
+With the same `risky()!`, `${ when @r changes { risky() } }` compiles at exit 0 while `${ on mount { risky() } }` is
+E-ERROR-002. §19.4.3 exempts neither. Split from the HIGH `?` entry above because it is a missing diagnostic on a
+reactive body, not a handler; the runtime effect was not probed.
+
+### g-failable-handler-indirect-reference-unchecked — an INDIRECT reference to a `!` function as a handler is not caught — `NEW S441 (filed; follow-up); MED; open`
+<!-- @gap id=g-failable-handler-indirect-reference-unchecked sev=MED status=open locus=compiler/src/type-system.ts(handlerValueAsReference — recognises only a bare identifier naming a declared-`!` function; no value-flow tracking of function values) prov=review:S441-e-error-002-review-r2-N2;empirical:S441-reproduced-by-compile -->
+
+The S441 reference rule (§19.4.3 "Handler references") catches a DIRECT reference (`onclick=risky`, `${risky}`,
+`{ risky }`). Measured S441, each of these compiles at exit 0 although the dispatcher calls `risky` and discards its
+error: `<fnc> = risky` + `onclick=@fnc`; `const o = { m: risky }` + `onclick=o.m`; `onclick=${ @c ? risky : plain }`;
+`const h = risky` + `onclick=h`. An imported `!` function is not recognised as failable at all (the carried §19.4.3
+gap), so its reference is unchecked too (relayed from the review; not re-executed). These are outside the ruling's
+direct-reference scope as implemented; catching them needs function-value flow (or a type-level failable marker on
+function values). Follow-up.
+
+### g-component-on-prop-leaks-as-dom-listener — a declared `on*` component prop is ALSO wired as a DOM event listener on the component root — `NEW S441 (filed; pre-existing); MED; open`
+<!-- @gap id=g-component-on-prop-leaks-as-dom-listener sev=MED status=open locus=compiler/src/component-expander.ts(the call-site attrs — declared props included — are merged onto the expanded root's `attrs`)+compiler/src/codegen/emit-event-wiring.ts(any `on*` attr on an element is wired as an event handler; `_componentPropNames` is not consulted) prov=review:S441-e-error-002-review-r2;empirical:S441-reproduced-on-branch-and-main -->
+
+`${ const Show = <p props={ onSave: function }>hi</> }` + `<Show onSave=risky/>` emits
+`data-scrml-bind-onSave="…"` on the `<p>` and `el.addEventListener("Save", _scrml_risky_N)` in client JS — the
+callback prop becomes a listener for a DOM event named `Save`. Same on origin/main. Silent wrong wiring: nothing fires
+today because no `Save` event is dispatched, but a custom event of that name would call the function (and discard a
+failable's error); the prop is also exposed in the DOM. emit-html already consults `_componentPropNames` for reactive
+value attrs (S239 finding 7); event wiring does not. The §19.4.3 check skips declared props (S441 review B1), so this
+is a codegen-only bug.
+
+### g-component-handler-prop-in-value-position-unsubstituted — a component handler emits a raw prop name inside an `if` body, an arrow body, or a `match` statement — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-component-handler-prop-in-value-position-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts(substituteProps — a one-statement handler value keeps its RAW text / exprNode and the leading-identifier raw rewrite does not reach into an if-statement body, an arrow body, or a match statement) prov=review:S440-final-round-N3;empirical:S440-reproduced-by-emit-both-trees -->
+
+With `const B = <button props={ n: number } onclick=…>` and `<B n=${9}/>`:
+`onclick={ if (n > 0) { @r = n } }` emits `if (n > 0) { … n … }` and `onclick=${() => { @r = n }}` emits the arrow
+with a bare `n` — both a ReferenceError on click. `onclick={ match @ph { .Idle :> @r = n  .Loading :> @r = 0 } }` is
+E-CODEGEN-INVALID-LOGIC. Same on base and after S440. (A multi-statement handler and a `!{}` guard's arms ARE
+substituted since S440.)
+
+### g-component-body-handler-diagnostic-span-and-repeat — E-ERROR-002 in a component body reports a component-relative line and repeats per instantiation — `NEW S440 (filed); LOW; open`
+<!-- @gap id=g-component-body-handler-diagnostic-span-and-repeat sev=LOW status=open locus=compiler/src/component-expander.ts(parseComponentBody re-parses the body under a synthetic `file#Component` path with body-relative spans; each expansion is type-checked separately) prov=review:S440-final-round-N7;empirical:S440-reproduced-by-compile -->
+
+`${ const B = <button onclick={ risky() }>go</> }` then `<B/>` twice → `E-ERROR-002@1`, `E-ERROR-002@1`: the line is
+relative to the component body (not the file) and the diagnostic fires once per `<B/>`. The code is right; the location
+and count are not what an author can act on. (Base reported nothing here — the check is new in S440.)
+
+### g-nested-arrow-in-handler-guard-dropped — `onclick={ const f = () => risky() !{…}; f() }` guards the arrow VALUE, not the call — `NEW S440 (filed; pre-existing); LOW; open`
+<!-- @gap id=g-nested-arrow-in-handler-guard-dropped sev=LOW status=open locus=compiler/src/ast-builder.js(the statement parser binds a trailing `!{}` to the whole initializer — the arrow — not to the call in the arrow body) prov=review:S440-final-round;empirical:S440-reproduced-by-emit-both-trees -->
+
+`<button onclick={ const f = () => risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 }; f() }>` emits
+`let _result = () => _scrml_risky_2(); if (_result && _result.__scrml_error) …` — the guard tests the function value, never
+the call's result, so no arm runs (plus W-TYPE-031-UNPROVEN). Same on base. Not covered by the S440 arrow ruling (that
+covers an arrow that IS the handler value).
+
+### g-unbraced-handler-guard-silently-dropped — `onclick=risky() !{ | .E :> … }` loses its `!{…}` at tokenize, with no diagnostic — `NEW S440; LOW; open`
+<!-- @gap id=g-unbraced-handler-guard-silently-dropped sev=LOW status=open locus=compiler/src/tokenizer.ts(the bare attribute-value scan — ATTR_CALL ends at the call's `)` and the following `!{…}` text produces no attribute and no diagnostic) prov=review:S440-fix-round-F9;empirical:S440-reproduced-by-AST-dump -->
+
+`<button onclick=risky() !{ | .Empty :> @r = 3 }>` → the button's attrs are `id` and `onclick = call-ref risky` only;
+the `!{ … }` text is gone. Since S440 the handler reports the generic E-ERROR-002 (the guard is not visible to the
+checker); before S440 it compiled at exit 0 and ran unguarded. Fix direction: a diagnostic naming the unbraced guard
+("wrap the handler in braces: `onclick={ risky() !{ … } }`") at the tokenizer, or accept it as one bare expression.
+
+### g-failable-call-in-value-position-unchecked — `@r = risky()`, `let v = risky()`, `f(risky())`, `c ? risky() : 0` are never E-ERROR-002 — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-failable-call-in-value-position-unchecked sev=MED status=open locus=compiler/src/type-system.ts(checkUnhandledFailableBareCall + the function-body §19 visitStmt walker — both resolve the callee from the statement ROOT only via extractCalleeNameFromNode) prov=review:S440-fix-round-out-of-scope;empirical:S440-reproduced-by-compile -->
+
+`function h() { @r = risky() }`, `function h3() { let x = risky(); return x }`, `function h4() { id(risky()) }`,
+`function h5() { @c ? risky() : 0 }` all compile clean (same in handlers). §19.4.3: "A call to a `!` function SHALL
+NOT be ignored" — a value-position call that is not matched / `?` / `!{}` is unhandled. Related: a statement-level
+`risky()` in a function body fires E-ERROR-002 TWICE (the function-body walker and the bare-expr case both fire), and
+a bare IDENT statement `risky` fires (the ident limb of extractCalleeNameFromNode treats a reference as a call).
+
+### g-imported-failable-function-never-checked — a `!` function imported from another file is never treated as failable — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-imported-failable-function-never-checked sev=MED status=open locus=compiler/src/type-system.ts(fnCanFail / fnErrorTypes are built from this file's function-decls only — ~:9120) prov=review:S440-fix-round-F8;empirical:S440-reproduced-by-compile -->
+
+`lib.scrml`: `export function risky()! -> LoadError { fail LoadError.Empty }`. `main.scrml`: `import { risky } from
+'./lib.scrml'`, then `function go() { risky() }`, `<button onclick=risky()>`, `<button onclick={ risky(); @r = 1 }>`
+→ zero diagnostics. E-ERROR-002 (and `?`/E-ERROR-004 reasoning) never sees an imported failable.
+
+### g-component-fn-prop-bare-call-handler-unsubstituted — `<button props={ act: fn } onclick=act()>` emits a literal `act()` — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-component-fn-prop-bare-call-handler-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts(substituteProps — the call-ref attribute value's NAME is not substituted by a function-valued prop) prov=empirical:S440-reproduced-by-compile-and-emit -->
+
+`${ const B = <button props={ act: fn } onclick=act()>go</> }` + `<B act=plain/>` emits
+`"_scrml_attr_onclick_1": function(event) { act(); }` — a ReferenceError on click (base and S440 alike). The braced
+forms (`{ act() }`, `{ act(); @r = 1 }`, `{ if (c) act() }`) ARE substituted, and since S440 are §19.4.3-checked
+after substitution. Per the S440 ruling, arrows passed as props (vs. arrows that ARE the handler value) are also out of
+§19.4.3's handler rule — filed here.
+
+### g-handler-block-guard-on-server-call-not-awaited — `onclick={ getUser(2) !{ … } }` tests the guard against a Promise — `NEW S440 (filed; pre-existing); MED; open`
+<!-- @gap id=g-handler-block-guard-on-server-call-not-awaited sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(emitHandlerStatementList — the guarded-expr lowering does not await a CPS/server fetch; a function body's lowering does) prov=empirical:S440-reproduced-by-emit -->
+
+With `server function getUser(id)! -> UserError`, `<button onclick={ getUser(2) !{ | .NotFound :> … | .Forbidden :> … } }>`
+emits `let _r = _scrml_fetch_getUser_5(2); if (_r && _r.__scrml_error) …` — `_r` is a Promise, so no arm ever runs.
+The same guard inside `function load() { … }` emits `await _scrml_fetch_getUser_5(1)` and works. (This is why the
+S440 migration of server-failable-001 uses a wrapper function.)
+
+### g-handler-propagate-in-handler-is-codegen-error — `onclick={ risky()? }` is E-CODEGEN-INVALID-LOGIC, not a named diagnostic — `NEW S440 (filed; pre-existing); LOW; open`
+<!-- @gap id=g-handler-propagate-in-handler-is-codegen-error sev=LOW status=open locus=compiler/src/type-system.ts(the handler walk never reaches a `?` in a one-statement handler — its exprNode is an escape-hatch ParseError) prov=empirical:S440-reproduced-by-emit -->
+
+`<button onclick={ risky()? }>` → E-CODEGEN-INVALID-LOGIC (a codegen failure) at base and after S440. A handler is not
+a `!` function, so `?` there has nowhere to propagate — E-ERROR-003 is the named diagnostic a function body gets.
+
+### g-formfor-onsubmit-error-discarded — §41.14.3 requires a failable `onsubmit=` handler but says nothing of where its error goes — `NEW S440 (filed; SPEC gap); LOW; open`
+<!-- @gap id=g-formfor-onsubmit-error-discarded sev=LOW status=open locus=compiler/src/codegen/emit-event-wiring.ts(the formForSubmitCell branch — `${resolvedHandler}(values)` result is discarded)+compiler/SPEC.md(§41.14.3) prov=empirical:S440-read-of-emitter -->
+
+`<formFor for=Signup onsubmit=persistSignup/>` with `persistSignup(values)! SignupError` emits
+`function(event) { event.preventDefault(); …; _scrml_fetch_persistSignup_N(values); }` — the failure value is dropped.
+§41.14.3 mandates the `! ErrorType` signature but specifies no handling/display path for the error it produces.
+**Fix direction — RULED S440 (22-item queue, #19):** a `formFor` submit handler's error routes to the nearest
+`<errorBoundary>`; with no enclosing boundary, E-ERROR-005. Not implemented. The SPEC text has landed (§41.14.3,
+#1133; §19.6.6 names it as the one handler-time route to a boundary, S441); still needed: the submit-dispatch
+routing + the static E-ERROR-005 check. Re-measured S441: with an enclosing `<errorBoundary>` the dispatch still
+discards the result (not routed); with none, the `<formFor>` compiles with no E-ERROR-005.
 
 ### g-handler-block-does-not-hoist-function-declarations — `onclick={ @r = inner(); function inner() {…} }` is E-SCOPE-001, though a function body hoists the same declaration — `NEW S437; LOW; open`
 <!-- @gap id=g-handler-block-does-not-hoist-function-declarations sev=LOW status=open locus=compiler/src/type-system.ts(visitAttr's §5.2.3 handler-statement walk visits statements in order; the function-decl pre-bind the function-body walk gets is not applied to handlerBlock.stmts) prov=review:S437-round5-review-item-b;empirical:S437-round5-reproduced-by-compile -->
@@ -20160,6 +20354,18 @@ Reproducer `repro/import-shadowed-by-local-struct.scrml` (+ `repro/n3-errs.scrml
 <!-- @gap id=g-handler-level-rejection-bypasses-scrml-logging sev=LOW status=ruling-gated locus=compiler/src/codegen/emit-event-wiring.ts(handler registry wraps `fn()` with no rejection routing) prov=empirical:S441-cell12-review-s3-reject -->
 Reproducer `repro/handler-rejection-bypasses-logging.scrml`: `async function _scrml_go2_5() { const a = await _scrml_fetch_double_4(1); … }` is wired as `function(event) { _scrml_go2_5(); }`. The detached `@out = double(21)` form does route to `_scrml_error_boundary_log`. Governing: searched §19.6.8, §20.6 — the B5 "no silent swallow; route to scrml's logging surface" rule is scoped to an `<errorBoundary>` backstop; nothing specifies a handler-level backstop. Ruling: extend B5 to event handlers (recommended — one `.catch(log)` per handler).
 
+### g-const-batch-parallelizes-side-effecting-server-calls — `const x = addRow(5); const y = countRows()` runs the INSERT and the SELECT concurrently, so the count may not see the row — `NEW S441; MED; open`
+<!-- @gap id=g-const-batch-parallelizes-side-effecting-server-calls sev=MED status=open locus=compiler/src/codegen/scheduling.ts(scheduleStatements const/let-decl Promise.all grouping — no read-only / side-effect test on the callees) prov=review:S441-cell12-rereview-finding-8-reproduced -->
+Reproduced on the s441-cell-assign-server-call-awaited branch and on main (the const-form batch is main behaviour, untouched there): `docs/changes/s441-cell-assign-server-call-awaited/repro/r3/inselc.scrml` emits `const [x, y] = await Promise.all([addRow(5), countRows()])` — both requests are in flight together, so whether `countRows` observes the INSERT depends on server arrival order. §13.2 parallelizes calls with no DATA dependency; a write-then-read through the database is a dependency the client-side DG cannot see. The whole-result cell-write batch added in s441 already applies bryan's S441 rule ("parallelize only calls proven read-only": `isProvablyReadOnlyServerFn` in scheduling.ts, fail-closed); the fix direction is to apply the same test to the const/let-decl members, keeping any batch that contains a non-provably-read-only callee sequential. Pinned as KNOWN by `compiler/tests/integration/cell-assign-server-call-awaited.test.js` ("the pre-existing CONST-form batch still parallelizes INSERT + SELECT") — flip that assertion when this is fixed.
+
+### g-reset-server-init-not-awaited-before-next-read — `reset(@x)` whose init is a server call settles in the background, so the next statement reads the pre-reset value — `NEW S441; LOW; open`
+<!-- @gap id=g-reset-server-init-not-awaited-before-next-read sev=LOW status=open locus=compiler/src/runtime-template.js(_scrml_reset_apply fire-and-forget thenable settle)+codegen(reset emitted as a sync statement) prov=review:S441-cell12-rereview-r3-N1 -->
+Reviewer-reported on the s441-cell-assign-server-call-awaited branch (probes `rstread.scrml` / `rstread2.scrml` in the S441 scratch `rv-cell12-r3-out/b/`), not fixed there. `_scrml_reset` stays synchronous and `_scrml_reset_apply` settles a promise-returning init/default thunk with `.then(...)`, so `reset(@x); @y = @x` inside an async function reads the value from before the reset; the cell becomes the re-fetched value only later. §6.8.1: "If `default=` is absent, `reset(@cell)` SHALL re-evaluate the init expression at reset time and write the result to the cell", and §13.2 sequences dependent operations with `await`. Fix direction: in an async host, emit `await` on a reset whose thunk can return a promise (the reset of a server-call init), mirroring the s441 cell-write fix; keep the sync form elsewhere.
+
+### g-block-comment-early-close-leaks-logic-as-page-text — a `*/` inside a `/** … */` comment in a `${}` block closes it early; the rest of the block becomes page text, and no diagnostic names the comment — `NEW S441; MED; open`
+<!-- @gap id=g-block-comment-early-close-leaks-logic-as-page-text sev=MED status=open locus=compiler/src/block-splitter.js(~L2597 §27.1 `/* */` skip inside brace contexts — ends at the first `*/`, correct JS semantics; nothing records that a comment which closed mid-line left doc-comment prose behind)+compiler/src/api.js(STDLIB-EXPORT-SEED `_parseStdlibExports` swallows every parse error by design) prov=empirical:S441-stdlib-http-comment-leak -->
+Reproducer `docs/changes/s441-stdlib-http-comment-leak/repro/block-comment-early-close-leaks-logic-as-page-text.scrml`: a doc comment containing `{ headers: { /* none */ } }`. The inner `*/` ends the comment (block comments do not nest — §27.2 gives logic `/* */` JS semantics), the leftover ` } })` closes the `${` block, and `function bump()` onward is emitted INTO `app.html` as text. The compile does fail — two `E-CTX-001` "Unexpected '}' … Check for a missing context opener above this line" — so a user file is not silent, but the message points at a brace and never mentions the comment; the same class via a string (`"*/15 * * * *"` in the stdlib/cron doc comment) fails as `E-CODEGEN-INVALID-LOGIC` "compiler defect" instead. **On the stdlib import path it IS silent:** STDLIB-EXPORT-SEED parses a stdlib module TAB-only and swallows errors, so the leaked exports just vanish from the export table. Two stdlib modules shipped this way and are FIXED in this change (stdlib/http lost `multipart` + `uploadFile` — a client `const r = uploadFile(url, f)` was not auto-awaited, `r` was a Promise; stdlib/cron lost all three exports); `compiler/tests/unit/stdlib-source-no-logic-leak.test.js` now gates every stdlib module. What stays open is the DIAGNOSTIC: when a block comment ends on a line that continues with non-comment text and the following lines look like doc-comment continuation (`^\s*\*`), the unbalanced-brace / invalid-logic error should name the early-closed comment (e.g. "the `*/` on line 5 closed the `/**` opened on line 4 — block comments do not nest"). Governing: §27.2 (per-context native comments; nesting is not specified — searched, no sentence); §2.2.1 no-silent-stub principle for the seed path. ⚑ SPEC drift noticed alongside: §4.7 says the block splitter "SHALL NOT handle `/* */`", but block-splitter.js has skipped `/* */` inside brace contexts since jwt-auth-bypass (2026-07-11) — the SPEC sentence is stale and should be amended to the shipped rule.
+
 ## §S440b — JS-WAT gauntlet + dPA DD defects (2026-09-28/29)
 
 Sources: the JS-WAT gauntlet (`scrml-support/docs/deep-dives/js-wat-gauntlet-2026-09-28/` — `REPORT.md` "Compiler bugs (impl#1)" + the `A/B/C/D-*-results.md` rows, finder-executed at `7e4bc8155` under happy-dom / in-process server fetch), the dpa-052/054/055/056 DD defect lists (DD-executed at `048df04db`), and PA finds. "PA-reproduced" and "re-executed on `5e5c952cd`" are execution, not relay; everything else is finder- or DD-executed and says so. Skipped as already fixed by #1137: Date `==` always true, Date-in-cell breaks boot, typed arrays through the deep-reactive Proxy (dpa-055 D4). Skipped as already filed: E-EQ-001 on typed cells.
@@ -20473,3 +20679,25 @@ Executed on `d9f183c41` (pre-f18, pre-existing) and on the s440-f18 tip: `functi
 ### g-tokenizer-regex-after-plus-minus-lexed-as-division-body-space-padded — a regex literal directly after a binary or unary `+` / `-` is lexed as PUNCT + code tokens and re-joined SPACE-PADDED: a different regex, exit 0, no diagnostic — `NEW S440`; **MED** (silent wrong output); open
 Executed on the s440-f18 fix-round-3 tip (pre-existing — the tokenizer is untouched by f18): `function p1() { return "a" + /x or y/.source }` → `return "a" + / x or y /.source;` (the source string gains two spaces); `function p2() { return 1 + +/a or b/.test("a or b") }` → `return 1 + +/ a or b /.test("a or b");` (evaluates to 1, not 2 — the padded pattern no longer matches). Control: `return /x or y/.source` is emitted verbatim. Cause: `isRegexContext` in the tokenizer deliberately omits `+ - * %` from `REGEX_PUNCT` ("to avoid false positives like x * /foo/.test()"), so a `/` after a binary/unary `+`/`-` lexes as division, the regex body lexes as ordinary tokens, and statement re-joining space-pads them (whitespace and `\` are significant inside a regex — the same mechanism the S412 `)`-limb comment in that function documents). Fix direction: after an operator token that cannot end a value (`+`, `-`, `*`, `%`, and the rest of the binary set) a `/` opens a regex in JS; the stated `x * /foo/` "false positive" is in fact a regex in JS too. Must stay consistent with `regexAllowedAfter` in `codegen/code-segments.ts` (which already treats a trailing `+`/`-` as regex context).
 <!-- @gap id=g-tokenizer-regex-after-plus-minus-lexed-as-division-body-space-padded sev=MED status=open locus=compiler/src/tokenizer.ts(isRegexContext REGEX_PUNCT omits + - * %) prov=review:S440-f18-rereview-P1-reproduced -->
+
+## §S441 — impl#1 stylesheet defects surfaced by the bootstrap CSS + `<theme>` T3 branch and its S441 review (2026-09-29; every entry re-executed at `aedcc6d61`+ in the s441-land-bootstrap-css-t3 worktree; reproducers in `docs/changes/s441-land-bootstrap-css-t3/repro/`)
+
+### g-impl1-each-row-css-block-dropped — a `#{}` inside an `<each>` row (`<li class="row">#{ .row { padding-left: 7px; } }…</li>`) is silently dropped: no CSS, no diagnostic — `NEW S441`; **HIGH** (silent wrong output — author CSS vanishes); open
+Executed: `repro/each.scrml` → the stylesheet holds only the reset layer; `padding-left` appears in no output field. The css oracle (`slice-m3/bench/css-oracle-both.js`) measures it in Chromium on `css-oracle/element-level-global`: `.row` 0px, SPEC 7px. Mechanism (read, not traced): `collectCssBlocks` (collect.ts) walks `children` and `logic.body` only, and an each-block holds its row under `bodyChildren`/`templateChildren`, so the block is never collected. Under ruling S440 all recs #2 item 4 (§9.1 DQ-6) the block is program-global.
+<!-- @gap id=g-impl1-each-row-css-block-dropped sev=HIGH status=open locus=compiler/src/codegen/collect.ts(collectCssBlocks — no descent into each-block bodyChildren/templateChildren) prov=review:S441-css-t3-review -->
+
+### g-impl1-flat-css-block-on-plain-element-emits-dead-css — a flat-declaration `#{ color: blue; padding: 4px; }` in a plain (non-component) element is emitted as bare declarations inside `@layer global { … }` with no selector — invalid CSS the browser discards; no diagnostic — `NEW S441`; **MED** (silent no-op); open
+Executed: `repro/el.scrml` → `@layer global {\n.box p { color: red; }\ncolor: blue; padding: 4px;\n}`, no `style=` on the `<section>`. The flat-block case is UNRULED (§9.1 DQ-6 ⚑ OPEN note, S441): whatever the ruling, emitting dead CSS silently is wrong — a diagnostic until it is ruled. Emit site: the program/global path of `emit-css.ts` renders a flat block's declarations verbatim (only the component path skips `isFlatDeclarationBlock`); `emit-html.ts` inlines a flat block only when the element carries `_expandedFrom`.
+<!-- @gap id=g-impl1-flat-css-block-on-plain-element-emits-dead-css sev=MED status=open locus=compiler/src/codegen/emit-css.ts(global inline-block path; no isFlatDeclarationBlock check) prov=review:S441-css-t3-review -->
+
+### g-impl1-flat-css-block-nested-in-component-dropped — a flat-declaration `#{ padding: 3px; }` on an element NESTED inside a component (not the constructor root) is silently dropped: no `style=`, no CSS, no diagnostic — `NEW S441`; **MED** (silent wrong output); open
+Executed: `repro/flat.scrml` → the root's `#{ color: red; }` becomes `style="color: red;"` as DQ-7 says; the nested `3px` appears in no output field. SPEC DQ-7 says a flat block in a constructor scope inlines "on the containing element", but whether that covers a nested element is UNRULED (§9.1 DQ-6 ⚑ OPEN note, S441). Mechanism: `emit-html.ts` pre-scans for flat blocks only when `node._expandedFrom` is set (the root), and `emit-css.ts` skips every flat component block — so a nested one falls through both. The bootstrap shim refuses it (not-yet) since S441.
+<!-- @gap id=g-impl1-flat-css-block-nested-in-component-dropped sev=MED status=open locus=compiler/src/codegen/emit-html.ts(DQ-7 flat pre-scan gated on node._expandedFrom)+compiler/src/codegen/emit-css.ts(component path skips isFlatDeclarationBlock) prov=review:S441-css-t3-review -->
+
+### g-impl1-line-comment-in-css-block-becomes-css — a `//` comment inside `#{}` is not a comment: between declarations its words become garbage declarations; before a rule it is glued onto the selector — `NEW S441`; **HIGH** (silent wrong output; §27.1 "`//` is valid in all scrml contexts", §27.2 lists `//` for CSS); open
+Executed: `repro/comment2.scrml` (`.panel { color: red; // subtle scanline overlay\n padding: 4px; }`) → `.panel { color: red; subtle: ; scanline: ; overlay: ; padding: 4px; }`; `repro/comment.scrml` (a component, `// a comment` above `.card { … }`) → `:where(a comment\n .card) { color: red; }` — a selector that matches nothing, so the rule is silently dead. First seen S440 on `gauntlet-s79-calculator` (s440-bootstrap-css-theme-t3 progress.md); the bootstrap shim fails closed on it. Locus not traced: the `#{}` CSS tokenizer/rule parser drops the `//` marker but keeps the comment text.
+<!-- @gap id=g-impl1-line-comment-in-css-block-becomes-css sev=HIGH status=open locus=searched:compiler/src/tokenizer.ts(the css-inline rule/declaration tokenizer — not traced) prov=review:S441-css-t3-review -->
+
+### g-impl1-universal-selector-not-a-floor — a component `#{ .btn { padding: 16px; } * { padding: 0; } }` gives `.btn` 0px: `*` is emitted as a same-level `:where(*)` rule after `:where(.btn)`, so source order wins, not the §65.2.4 R1 floor — `NEW S441`; **MED** (silent wrong cascade vs SPEC); open
+Executed: `repro` source = `compiler/self-host-v2/slice-m3/css-oracle/sources/r1-floor-order.scrml` → `@scope ([data-scrml="Card"]) to ([data-scrml]) {\n:where(.btn) { padding: 16px; } :where(*) { padding: 0; }\n}`; `bun compiler/self-host-v2/slice-m3/bench/css-oracle-both.js --filter r1-floor` → `impl#1: step 1: #b[0] padding-top = "0px", SPEC says "16px"` (the CSS-swapped hybrid passes). SPEC §65.2.4 R1: a user-authored `*` / `html` / `body` rule is an author-reset floor "resolved **below** class/id/specific author rules in the §65.5 precedence order". impl#1 uses R1 only to silence `E-STYLE-CONFLICT`; the emitter never places the rule below.
+<!-- @gap id=g-impl1-universal-selector-not-a-floor sev=MED status=open locus=compiler/src/codegen/emit-css.ts(component @scope emission — `*` / html / body rules not layered below) prov=review:S441-css-t3-review -->

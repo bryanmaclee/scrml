@@ -1,0 +1,15 @@
+{
+  "id": "error-handler-guard-in-match-arm-rt",
+  "description": "`!{}`-guarded handlers inside a `<match>` arm (RT). #one: `{ risky() !{…} }` — the .Empty arm sets @r = 1. #seq: the guard followed by `; @msg = \"y\"` — the arm adds 10 and the second statement runs. Before S440 the arm's handler statement parse threw (null parent block) and was swallowed, so both handlers emitted a bare `_scrml_risky();`: the guard AND the trailing statement were dropped at exit 0.",
+  "language-version": "1.0",
+  "spec": "§5.2.3",
+  "provenance": "ruling:user-voice-scrml.md S439 #14 + S440 \"all recs\" (restore conformance); review:S440-fix-round-F3",
+  "rationale": "§5.2.3 — on each dispatch the statements of an inline block SHALL run in source order, and no statement SHALL be dropped whatever its position, including inside a `<match>`/engine arm. §19.4.3 — a `!{}` guard is how a handler handles a failable call; a guard the checker counts as handling the call must also be emitted.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-", "E-CODEGEN-"],
+    "input": [{ "click": "#one" }, { "click": "#seq" }],
+    "state": { "r": 11, "msg": "y" }
+  }
+}
