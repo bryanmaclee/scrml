@@ -1,0 +1,15 @@
+// today-component.scrml — the "today" half of a README "Where the language is going"
+// pair: a component in the shipping `const Name = <root props={…}>` form.
+// SPEC §66.19.4 declares the same swatch as a declaration with a `renders`.
+<program>
+
+const Swatch = <span class="chip" props={ label: string, hex: string }>
+    <i style="background:${hex}"></i> ${label}
+</span>
+
+<main>
+    <Swatch label="Brand" hex="#338967"/>
+    <Swatch label="Warn" hex="#FF6600"/>
+</main>
+
+</program>
