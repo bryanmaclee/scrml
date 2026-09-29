@@ -1,0 +1,20 @@
+{
+  "spec": "§65.2.4 R1, §65.5",
+  "rationale": "R1: a universal `*` rule is an author-reset FLOOR that \"resolves below class/id/specific author rules\" — so `.btn` keeps 16px even though `*` comes later in the source; the floor still applies where no specific rule does.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "#b",
+          "prop": "padding-top",
+          "value": "16px"
+        },
+        {
+          "sel": "#plain",
+          "prop": "padding-top",
+          "value": "0px"
+        }
+      ]
+    }
+  ]
+}

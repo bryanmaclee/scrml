@@ -1,0 +1,15 @@
+{
+  "id": "server-fn-cell-assign-failable-success-then-read",
+  "description": "§13.2 + §19.4.3 — the SUCCESS path of a cell-assigned failable server call: `@out = risky(3) !{ … }` then `@seen = \"loaded:\" + @out`. The stub answers 9, so after the #load click and a settle @out is 9 and the statement after the handler reads the RESOLVED cell (`loaded:9`). The pre-fix emit fired the call + handler as a detached IIFE, so `@seen` read the stale initial 0 (`loaded:0`) — the flogenceP `needsAttention` header bug (g-failable-cell-load-fire-and-forget-stale-read-dead-return).",
+  "language-version": "1.0",
+  "spec": "§13.2",
+  "rationale": "§13.2 SHALL insert `await` at every server call site and sequence dependent operations. The read of @out after the guarded write depends on it, so it must observe the resolved success value.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "serverStub": { "risky": 9 },
+    "state": { "out": 9, "seen": "loaded:9" },
+    "domAnchored": [{ "selector": "#seen", "text": "loaded:9" }]
+  }
+}

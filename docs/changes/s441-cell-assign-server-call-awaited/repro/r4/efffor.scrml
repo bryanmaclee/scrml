@@ -1,0 +1,37 @@
+${
+    type Phase:enum = { Loading, Editing }
+    type LoadError:enum = {
+        Boom(msg: string)
+    }
+    <out> : number = 0
+    <seen> : string = "none"
+    <after> : string = "not-run"
+    <msg> : string = "x"
+    server function risky(n: number)! LoadError {
+        if (n < 0) { fail LoadError.Boom("neg") }
+        return n * 3
+    }
+    function doReset() {
+        @msg = "changed"
+        reset(@msg)
+        @seen = "msg=" + @msg
+    }
+}
+<engine for=Phase initial=.Loading effect=${
+    @msg = "please await me"
+    for (const n of [1, -1, 2]) {
+        @out = risky(n) !{
+            | .Boom(m) :> { @seen = "loop:" + m; return }
+        }
+    }
+    @after = "ran"
+    @phase = .Editing
+}>
+    <Loading rule=.Editing>Loading…</>
+    <Editing rule=.Loading>ok</>
+</>
+<program>
+<button id="rst" onclick=doReset()>r</>
+<p id="seen">${@seen}</>
+<p id="after">${@after}</>
+</program>

@@ -1,0 +1,40 @@
+{
+  "spec": "§9.1 (as amended — ruling S440 all recs #2 item 4), §65.5",
+  "rationale": "R4: a `#{}` in a plain (non-component) element is PROGRAM-GLOBAL — no scope: its `.x` rule styles an `.x` OUTSIDE the element that holds it, its descendant rule reaches a `section` elsewhere on the page; blocks inside an `if=` element and inside an `<each>` row are global too. §65.5: a component's own scoped `.x` (unlayered) beats the global `.x` (`@layer global`).",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "#inside",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": "#outside",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": "#deep",
+          "prop": "color",
+          "value": "rgb(0, 128, 0)"
+        },
+        {
+          "sel": "#ify",
+          "prop": "color",
+          "value": "rgb(0, 0, 255)"
+        },
+        {
+          "sel": ".row",
+          "prop": "padding-left",
+          "value": "7px"
+        },
+        {
+          "sel": "#carded",
+          "prop": "color",
+          "value": "rgb(1, 2, 3)"
+        }
+      ]
+    }
+  ]
+}

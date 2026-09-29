@@ -1,0 +1,8 @@
+<program>
+  #{ }
+  const Card = <div props={}>
+      #{ }
+      <p id="p">p</p>
+  </>
+  <Card/>
+</program>

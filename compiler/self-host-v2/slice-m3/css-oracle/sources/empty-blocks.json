@@ -1,0 +1,15 @@
+{
+  "spec": "§9.1, §65.3.4",
+  "rationale": "An empty `#{}` contributes nothing; the page still gets the reset (p margin 0).",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "#p",
+          "prop": "margin-top",
+          "value": "0px"
+        }
+      ]
+    }
+  ]
+}

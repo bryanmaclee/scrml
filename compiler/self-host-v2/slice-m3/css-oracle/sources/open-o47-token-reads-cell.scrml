@@ -1,0 +1,11 @@
+<program>
+  <userColor> = "#ff0000"
+  <theme>
+      ink = @userColor;
+  </theme>
+  const Card = <div props={}>
+      #{ .t { color: @ink; } }
+      <p class="t">t</p>
+  </>
+  <Card/>
+</program>

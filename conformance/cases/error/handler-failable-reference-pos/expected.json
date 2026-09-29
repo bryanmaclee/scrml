@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-failable-reference-pos",
+  "description": "A `!` function passed as an event-handler REFERENCE: the bare `onclick=risky`, the `${}` `onclick=${risky}`, and a bare reference inside an `<errorBoundary>`. The event dispatcher would call `risky` and discard its error, exactly like `onclick=risky()`. E-ERROR-002 fires once per handler — three times; the boundary does not contain a handler (§19.6.6).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S441 \"yes on references\"",
+  "rationale": "§19.4.3 (S441) — a failable function passed as a handler reference SHALL be E-ERROR-002, the same as the call form; §19.6.6 — an `<errorBoundary>` catches render-time calls only.",
+  "expect": {
+    "codes": ["E-ERROR-002"],
+    "codeCounts": { "E-ERROR-002": 3 },
+    "notCodes": [],
+    "severity": { "E-ERROR-002": "error" }
+  }
+}
