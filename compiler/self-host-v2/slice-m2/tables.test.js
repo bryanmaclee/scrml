@@ -71,7 +71,7 @@ function programs() {
 }
 
 const EXPR = new Set(["Name", "At", "AtItem", "Num", "Str", "Bool", "NotLit", "Recovered", "Variant", "Member", "Call",
-  "Unary", "Binary", "Ternary", "Assign", "ArrayLit", "ObjectLit"]);
+  "Unary", "Binary", "Ternary", "Assign", "ArrayLit", "ObjectLit", "Spread", "Index", "Lambda"]);
 const STMT = new Set(["Eval", "Local", "Return", "If", "Given"]);
 const ATTR_VALUE = new Set(["Quoted", "Bare", "Paren", "Braced"]);
 const tag = (x) => (typeof x === "string" ? x : x && x.variant);
@@ -149,9 +149,9 @@ describe("the node facts — one family per node, indexed by NodeId", () => {
     expect(Object.fromEntries(FAMILIES.map((f) => [f, [...seen[f]].sort()]))).toEqual({
       names: ["NField", "NFn", "NInst", "NLength", "NLocal", "NStruct"],
       values: ["VLit", "VOp", "VStructOf", "VVariant"],
-      effects: ["EAssignLocal", "EReset", "ESpread", "EWrite"],
+      effects: ["EAssignLocal", "EEdits", "EReset", "ESpread", "EWrite"],
       binds: ["BBind", "BGiven", "BParam"],
-      elems: ["MEach", "MHtml", "MSlot", "MUse"],
+      elems: ["MEach", "MHtml", "MInline", "MSlot", "MStateView", "MUse"],
       attrs: ["AAs", "ABound", "AConstruct", "AEachAs", "AEachIn", "AEachKey", "AIf", "AOn", "AStatic"],
     });
   });
