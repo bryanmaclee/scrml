@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 174 | 4 |
-| MED | 362 | 0 |
-| LOW | 161 | 0 |
+| HIGH | 176 | 4 |
+| MED | 363 | 0 |
+| LOW | 162 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -19761,8 +19761,11 @@ An unhandled `!` call is E-ERROR-002 in the bare, braced, `${}`, multi-statement
 and arrow-valued forms, at top level / `<each>` row / engine state-child / `<match>` arm / component body, and inside an
 `<errorBoundary>` (a handler runs after render; the boundary does not catch it — verified at runtime S440; §19.6.6 was
 limited to render-time calls by S440 #22). The callee
-resolves through scope. `!{}` guards are emitted in every one of those positions (one-statement braced, `<match>` arm,
-component body, arrow body — each was silently dropped or failed codegen before). The 6 measured corpus sites (5 files)
+resolves through scope. `!{}` guards are emitted in the one-statement braced form, a `<match>` arm, a component body
+and an arrow body (each was silently dropped or failed codegen before) — but NOT in every position: a guard inside a
+ONE-LINE single-statement `if`/`for` handler (`onclick={ if (c) { risky() !{…} } }`) still fails the build with
+E-CODEGEN-INVALID-LOGIC at top level, `${}`, `<each>` row and component body (corrected S441 review;
+g-guard-in-one-line-if-for-emits-raw-bang-brace). The 6 measured corpus sites (5 files)
 were migrated. Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js` and
 `conformance/cases/error/handler-{unhandled-failable-*,failable-reference-and-guard-neg,guard-in-*-rt}`.
 
@@ -19773,7 +19776,48 @@ were migrated. Pinned by `compiler/tests/unit/e-error-002-handler-forms.test.js`
 base too); a function-valued prop called with the bare `onclick=act()` form is never substituted
 (g-component-fn-prop-bare-call-handler-unsubstituted); component-body E-ERROR-002 spans/repeats
 (g-component-body-handler-diagnostic-span-and-repeat); a guard on a call inside a NESTED arrow
-(g-nested-arrow-in-handler-guard-dropped).
+(g-nested-arrow-in-handler-guard-dropped); a failable function wired by REFERENCE (g-failable-handler-reference-unchecked);
+a guard in a one-line `if`/`for` handler (g-guard-in-one-line-if-for-emits-raw-bang-brace); `?` in a handler
+(g-propagate-in-handler-silently-drops-error); a failable call in a `when … changes` body
+(g-when-changes-body-failable-call-unchecked).
+
+### g-failable-handler-reference-unchecked — `onclick=risky` (a `!` function wired by reference) compiles clean and discards its error on every click — `NEW S441 (filed; pre-existing); HIGH; open`
+<!-- @gap id=g-failable-handler-reference-unchecked sev=HIGH status=open locus=searched:compiler/src/type-system.ts(visitAttr — the §19.4.3 handler-value check walks call statements / arrow bodies only; a bare or `${}` function REFERENCE value is skipped and no reference-to-failable check exists) prov=review:S441-e-error-002-review -->
+
+With `function risky()! -> LoadError { fail LoadError.Empty }`, `<button onclick=risky>` (and `onclick=${risky}`)
+compiles at exit 0 with no diagnostic and wires `"_scrml_attr_onclick_N": _scrml_risky_M` — the event dispatcher calls
+the failable function and throws its error value away on every click. Silent error discard, same on main and after the
+S440 E-ERROR-002 landing (reproducer: the S441 review probe `ref2.scrml`). The LANGUAGE rule is not yet written:
+§19.4.3 is silent on a reference to a `!` function as a handler value pending bryan's ruling (the only reference with a
+SPEC basis is `<formFor onsubmit=fn/>`, §41.14.3 — required failable, routed per §19.6.6). Candidate directions for the
+ruling: E-ERROR-002 on the reference (treat the dispatcher as the unhandling caller), or a dispatcher-level route.
+
+### g-guard-in-one-line-if-for-emits-raw-bang-brace — a `!{}` guard inside a one-line single-statement `if`/`for` handler fails codegen — `NEW S441 (filed; pre-existing); MED; open`
+<!-- @gap id=g-guard-in-one-line-if-for-emits-raw-bang-brace sev=MED status=open locus=compiler/src/codegen(the one-statement handler value keeps the single-expression codegen path; an `if`/`for` statement body is re-emitted from its raw text, so the nested `!{` reaches the output unlowered) prov=review:S441-e-error-002-review;empirical:S441-reproduced-on-branch-and-main -->
+
+`<button onclick={ if (@n == 0) { risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 } } }>` → **E-CODEGEN-INVALID-LOGIC**
+(a raw `!{` is emitted). Same for `onclick={ for (const i of xs) { risky() !{…} } }`, and in `${…}` form, an `<each>` row
+and a component body. FAILS CLOSED (the build fails; no bad JS ships). The multi-line form of the same handler and the
+two-statement form (`{ if (c) { risky() !{…} }; @m = 1 }`) and an arrow body compile and run. Pre-existing on main. The
+check passes it (the call is handled), which is why the S440 unit test using `write:false` looked clean; that test now
+runs the full pipeline and is `test.failing`-pinned to this gap in
+`compiler/tests/unit/e-error-002-handler-forms.test.js`.
+
+### g-propagate-in-handler-silently-drops-error — `onclick={ risky()?; @msg = "after" }` compiles clean and drops the error — `NEW S441 (filed; pre-existing); HIGH; open`
+<!-- @gap id=g-propagate-in-handler-silently-drops-error sev=HIGH status=open locus=compiler/src/type-system.ts(the §19.5.4 E-ERROR-003 check runs in the function-body statement walk, keyed on the enclosing function's `canFail`; an event-handler value is not a function body, so `?` in a multi-statement handler is never checked) prov=review:S441-e-error-002-review;empirical:S441-reproduced-by-emit -->
+
+A handler is not a `!` function, so `?` inside it has nowhere to propagate: §19.5.4 ("`?` SHALL be valid only inside a
+`!` function body … E-ERROR-003") should fire. Instead `<button onclick={ risky()?; @msg = "after" }>` compiles at exit 0
+and emits `const t = _scrml_risky_N(); if (t.__scrml_error) return t; …` — on click the handler returns early and the
+error value is discarded by the dispatcher (runtime probe: S441 review `rt/prop-in-handler`). Silent error discard.
+(The one-statement `onclick={ risky()? }` form fails codegen instead — g-handler-propagate-in-handler-is-codegen-error.)
+
+### g-when-changes-body-failable-call-unchecked — `when @r changes { risky() }` gets no E-ERROR-002; `on mount { risky() }` does — `NEW S441 (filed; pre-existing); LOW; open`
+<!-- @gap id=g-when-changes-body-failable-call-unchecked sev=LOW status=open locus=not-traced(the E-ERROR-002 statement walk evidently does not reach a `when … changes` body; the skip site was not located) prov=review:S441-e-error-002-review;empirical:S441-reproduced-by-compile -->
+
+With the same `risky()!`, `${ when @r changes { risky() } }` compiles at exit 0 while `${ on mount { risky() } }` is
+E-ERROR-002. §19.4.3 exempts neither. Split from the HIGH `?` entry above because it is a missing diagnostic on a
+reactive body, not a handler; the runtime effect was not probed.
 
 ### g-component-handler-prop-in-value-position-unsubstituted — a component handler emits a raw prop name inside an `if` body, an arrow body, or a `match` statement — `NEW S440 (filed; pre-existing); MED; open`
 <!-- @gap id=g-component-handler-prop-in-value-position-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts(substituteProps — a one-statement handler value keeps its RAW text / exprNode and the leading-identifier raw rewrite does not reach into an if-statement body, an arrow body, or a match statement) prov=review:S440-final-round-N3;empirical:S440-reproduced-by-emit-both-trees -->

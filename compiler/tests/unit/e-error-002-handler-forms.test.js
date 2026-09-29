@@ -224,7 +224,6 @@ describe("§19.4.3 — handled calls and references stay legal", () => {
     ["reference, bare", `<button onclick=risky>x</>`],
     ["reference, ${}", `<button onclick=\${risky}>x</>`],
     ["braced !{} one statement", `<button onclick={ risky() !{ | .Empty :> @r = 1 } }>x</>`],
-    ["braced !{} inside a one-statement if", `<button onclick={ if (@r > 0) { risky() !{ | .Empty :> @r = 1 } } }>x</>`],
     ["component body, braced !{}", `\${ const Btn = <button onclick={ risky() !{ | .Empty :> @r = 1 } }>go</> }\n<Btn/>`],
     ["${} !{} one statement", `<button onclick=\${risky() !{ | .Empty :> @r = 2 }}>x</>`],
     ["braced !{} multi-line", `<button onclick={\n    risky() !{ | .Empty :> @r = 1 }\n}>x</>`],
@@ -238,6 +237,28 @@ describe("§19.4.3 — handled calls and references stay legal", () => {
       expect(errors).toEqual([]);
     });
   }
+
+  // A `!{}` guard inside a ONE-LINE single-statement `if`/`for` handler. The CHECK
+  // accepts it (the call is handled — no E-ERROR-002), but codegen emits a raw `!{`
+  // and the full pipeline fails E-CODEGEN-INVALID-LOGIC (pre-existing on main;
+  // fails closed). This used to sit in CLEAN above and passed only because
+  // compileBody defaults to write:false, which skips codegen validation (S441
+  // review). It now runs the FULL pipeline.
+  //   - the `test.failing` states the target (a clean full compile); when
+  //     g-guard-in-one-line-if-for-emits-raw-bang-brace is fixed it starts
+  //     passing, `test.failing` reports that as a failure, and the fixer flips it
+  //     to a plain `test`.
+  //   - the positive pin below asserts the CURRENT failure exactly, so the
+  //     `test.failing` cannot be kept green by an unrelated break.
+  const GUARD_IN_ONE_LINE_IF = `<button onclick={ if (@r > 0) { risky() !{ | .Empty :> @r = 1 } } }>x</>`;
+  test.failing("braced !{} inside a one-statement if — full compile is clean [xfail: g-guard-in-one-line-if-for-emits-raw-bang-brace]", () => {
+    const { errors } = compileBody(GUARD_IN_ONE_LINE_IF, { emit: true });
+    expect(errors).toEqual([]);
+  });
+  test("braced !{} inside a one-statement if — pin: no E-ERROR-002, codegen fails closed (g-guard-in-one-line-if-for-emits-raw-bang-brace)", () => {
+    expect(compileBody(GUARD_IN_ONE_LINE_IF).errors).toEqual([]);
+    expect(compileBody(GUARD_IN_ONE_LINE_IF, { emit: true }).errors).toEqual(["E-CODEGEN-INVALID-LOGIC"]);
+  });
 
   test("a call handled inside a non-failable wrapper function", () => {
     const { errors } = compileBody(
