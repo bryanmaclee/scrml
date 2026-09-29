@@ -1,0 +1,26 @@
+// S441 reproducer — addendum-5 P3: `fail` inside an arrow body or a match-arm expression is neither validated nor lowered.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/fail-in-arrow-or-match-arm-not-lowered.scrml --output-dir <scratch>
+// Expected: `fail` lowered to the error envelope (or rejected in positions where it cannot propagate), and `.Nope`
+//           rejected E-ERROR-009 (not a variant of A).
+// Actual:   exit 0. client.js: `[1].forEach(( v ) => { fail.X });` and `if (_scrml_match_5 === "a") return fail.X;
+//           else return fail.Nope;` — `fail` is emitted as an identifier (ReferenceError when reached), `.Nope` is never
+//           checked. The qualified `fail A.X` in an arrow fails E-CODEGEN-INVALID-LOGIC ("compiler defect"). The canonical `return match n { … :> fail … }` form IS validated (E-ERROR-009 fires) — the statement-position `=>` match is the gap.
+<program>
+${
+    type A:enum = { X, Y(msg: string) }
+    <out> = ""
+    function f(n: string) ! A {
+        [1].forEach((v) => { fail .X })
+    }
+    function g(n: string) ! A {
+        match n { "a" => fail .X  _ => fail .Nope }
+    }
+    function run() {
+        f("") !{ | .X :> { @out = "x" } | _ :> { @out = "o" } }
+        g("a") !{ | .X :> { @out = "gx" } | _ :> { @out = "go" } }
+    }
+}
+<button onclick=run()>go</button>
+<p>${@out}</p>
+</program>

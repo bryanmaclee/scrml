@@ -1,0 +1,25 @@
+{
+  "spec": "§65.3.4, §65.1",
+  "rationale": "`<program reset=\"none\">` drops the whole reset layer, so `body` keeps the browser's initial margin (8px) and elements keep `box-sizing: content-box` (§65.1 step 6: the browser initial value); the component rule still applies.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "body",
+          "prop": "margin-top",
+          "value": "8px"
+        },
+        {
+          "sel": ".card",
+          "prop": "box-sizing",
+          "value": "content-box"
+        },
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        }
+      ]
+    }
+  ]
+}

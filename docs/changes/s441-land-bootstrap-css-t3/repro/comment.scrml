@@ -1,0 +1,10 @@
+<program>
+  const Card = <div props={}>
+      #{
+          // a comment
+          .card { color: red; }
+      }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+</program>

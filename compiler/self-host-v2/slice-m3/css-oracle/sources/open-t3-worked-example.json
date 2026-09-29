@@ -1,0 +1,5 @@
+{
+  "spec": "§66.17 items 2-3",
+  "rationale": "The ruled T3 worked example. impl#1's front end rejects it, so it cannot reach the stylesheet pass through the shim; its lowering is graded at the Core level (css-oracle/core/t3-worked).",
+  "steps": []
+}

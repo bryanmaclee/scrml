@@ -1,0 +1,24 @@
+// S441 reproducer — addendum item 23: the retired `@debounced(N) <x> = …` form compiles clean and the
+// declaration is never emitted.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/retired-debounced-decorator-silently-dropped.scrml --output-dir <scratch>
+// Expected: a diagnostic. §6.13 (SPEC.md:~5958): the `debounced=` attribute "Supersedes the pre-v0.next
+//           `@debounced(N) name = expr` keyword-form modifier surface (deleted at S79 …)". The canonical form is
+//           `<slow debounced=300ms> = @query`.
+// Actual:   the declaration is dropped with no diagnostic of its own. When the only read sits inside an arrow
+//           body (the onboarding probe k0/k43 shape, reproduced here) the compile is exit 0 with zero
+//           diagnostics and client.js reads a cell nobody declares or sets
+//           (`… .filter((w) => w.includes(_scrml_cs_reactive_get("slow")))`) — here that silently searches for
+//           the string "undefined"; k43's `.toLowerCase()` on it throws. With a direct read
+//           (`const <shown> = @slow.toLowerCase()`) it instead fails E-STATE-UNDECLARED — loud, but naming the
+//           wrong cause (the declaration was written and silently discarded).
+<program>
+${
+  <query> = ""
+  @debounced(300) <slow> = @query
+  const words = ["apple", "banana"]
+  const <shown> = words.filter(w => w.includes(@slow))
+}
+<input bind:value=@query/>
+<p>${@shown.length}</p>
+</program>

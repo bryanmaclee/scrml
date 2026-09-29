@@ -1,0 +1,35 @@
+{
+  "spec": "§9.1 DQ-7, §25.6",
+  "rationale": "A component's `#{}` rules match inside its own `@scope` and stop at a nested component (the donut, `to ([data-scrml])`): Outer's `.btn`/`.label` style Outer's own elements only — not Inner's, not the page's; Inner's `.label` styles Inner's.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "#outer",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": "#outer-label",
+          "prop": "color",
+          "value": "rgb(0, 128, 0)"
+        },
+        {
+          "sel": "#inner",
+          "prop": "color",
+          "value": "rgb(0, 0, 0)"
+        },
+        {
+          "sel": "#inner-label",
+          "prop": "color",
+          "value": "rgb(0, 0, 255)"
+        },
+        {
+          "sel": "#page",
+          "prop": "color",
+          "value": "rgb(0, 0, 0)"
+        }
+      ]
+    }
+  ]
+}

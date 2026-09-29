@@ -1,0 +1,19 @@
+// S441 reproducer — item 5: `scrml db-migrate` does not see `schemaFor`-generated tables.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js db-migrate docs/changes/s441-audit-gap-filing/repro/db-migrate-ignores-schemafor.scrml --db <scratch>/m.db --dry-run
+//          (examples/26-type-derived-schema.scrml reproduces identically)
+// Expected: §41.15.2 — schemaFor's output "is internally equivalent to the hand-authored shared-core form";
+//           §41.15.9 — it "rides the existing `<schema>` parser + §39.5.8 SQL DDL lowering pipeline".
+//           The dry-run plan should list `+ CREATE TABLE "users" ...` as it does for a literal <schema>.
+// Actual:   exit 0, stdout `No <schema> tables found — nothing to apply.` Control: examples/17
+//           (literal <schema>) → `plan (desired vs actual) — 2 statement(s): + CREATE TABLE "users" ...`.
+<program db="./m.db">
+import { schemaFor } from 'scrml:data'
+type User:struct = {
+    email: string req length(<=120)
+    name:  string req
+}
+<schema>
+    ${ schemaFor(User) }
+</>
+</program>

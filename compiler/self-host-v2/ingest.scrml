@@ -106,14 +106,16 @@ ${
     export fn mkFile(p: string, a: INode) -> IFile { return { path: p, ast: a } }
 
     // ---- reading an encoded node ----
-    fn getVal(n: INode, k: string) -> IVal {
+    // (Exported for the stylesheet shim, css-ingest.scrml (s440) — one reader
+    // set over the one encoding; behaviour unchanged.)
+    export fn getVal(n: INode, k: string) -> IVal {
         for (const e of n.entries) {
             if (e.key == k) return e.val
         }
         return IVal.VNull
     }
 
-    fn valStr(v: IVal) -> string | not {
+    export fn valStr(v: IVal) -> string | not {
         return match v {
             .VStr(s: s) :> s
             .VNum(n: x) :> not
@@ -124,7 +126,7 @@ ${
         }
     }
 
-    fn valNum(v: IVal) -> number | not {
+    export fn valNum(v: IVal) -> number | not {
         return match v {
             .VNum(n: n) :> n
             .VStr(s: x) :> not
@@ -135,7 +137,7 @@ ${
         }
     }
 
-    fn valBool(v: IVal) -> boolean {
+    export fn valBool(v: IVal) -> boolean {
         return match v {
             .VBool(b: b) :> b
             .VStr(s: x) :> false
@@ -146,7 +148,7 @@ ${
         }
     }
 
-    fn valNode(v: IVal) -> INode | not {
+    export fn valNode(v: IVal) -> INode | not {
         return match v {
             .VNode(obj: o) :> o
             .VStr(s: x) :> not
@@ -157,7 +159,7 @@ ${
         }
     }
 
-    fn valList(v: IVal) -> IVal[] {
+    export fn valList(v: IVal) -> IVal[] {
         return match v {
             .VList(elems: xs) :> xs
             .VStr(s: x) :> []
@@ -169,7 +171,7 @@ ${
     }
 
     // Does a value carry anything (for the unmapped-key check)?
-    fn carries(v: IVal) -> boolean {
+    export fn carries(v: IVal) -> boolean {
         return match v {
             .VStr(s: s) :> s.length > 0
             .VNum(n: x) :> true
@@ -180,13 +182,13 @@ ${
         }
     }
 
-    fn strAt(n: INode, k: string) -> string | not { return valStr(getVal(n, k)) }
-    fn numAt(n: INode, k: string) -> number | not { return valNum(getVal(n, k)) }
-    fn flagAt(n: INode, k: string) -> boolean { return valBool(getVal(n, k)) }
-    fn nodeAt(n: INode, k: string) -> INode | not { return valNode(getVal(n, k)) }
-    fn listAt(n: INode, k: string) -> IVal[] { return valList(getVal(n, k)) }
+    export fn strAt(n: INode, k: string) -> string | not { return valStr(getVal(n, k)) }
+    export fn numAt(n: INode, k: string) -> number | not { return valNum(getVal(n, k)) }
+    export fn flagAt(n: INode, k: string) -> boolean { return valBool(getVal(n, k)) }
+    export fn nodeAt(n: INode, k: string) -> INode | not { return valNode(getVal(n, k)) }
+    export fn listAt(n: INode, k: string) -> IVal[] { return valList(getVal(n, k)) }
 
-    fn nodesIn(vs: IVal[]) -> INode[] {
+    export fn nodesIn(vs: IVal[]) -> INode[] {
         let out: INode[] = []
         for (const v of vs) {
             const o: INode | not = valNode(v)
@@ -195,15 +197,15 @@ ${
         return out
     }
 
-    fn nodesAt(n: INode, k: string) -> INode[] { return nodesIn(listAt(n, k)) }
+    export fn nodesAt(n: INode, k: string) -> INode[] { return nodesIn(listAt(n, k)) }
 
-    fn kindAt(n: INode) -> string {
+    export fn kindAt(n: INode) -> string {
         const k: string | not = strAt(n, "kind")
         if (k is not) return "<no kind>"
         return k
     }
 
-    fn hasStr(xs: string[], x: string) -> boolean {
+    export fn hasStr(xs: string[], x: string) -> boolean {
         for (const y of xs) {
             if (y == x) return true
         }
@@ -229,7 +231,7 @@ ${
     //                           `openerHadSpaceAfterLt`);
     //                 summary   a file-level flag summarizing nodes the shim
     //                           maps one by one (`hasResetExpr`, …).
-    fn unmapped(n: INode, what: string, read: string[], redundant: string[]) -> string[] {
+    export fn unmapped(n: INode, what: string, read: string[], redundant: string[]) -> string[] {
         let out: string[] = []
         for (const e of n.entries) {
             if (!hasStr(read, e.key) && !hasStr(redundant, e.key)) {
