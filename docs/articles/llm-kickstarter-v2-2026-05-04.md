@@ -2,7 +2,9 @@
 
 **One-paste context for any LLM about to write scrml.** Read this in full before generating any scrml code. If you've been pasted this document, do not skim.
 
-> v2 supersedes v1 (2026-04-25). v1 described **pre-v0.next** scrml; v2 describes the language **after the S52-S56 deliberation arc** (locks L1-L20, captured in `scrml-support/docs/deep-dives/v0next-s56-deliberation-outcomes-2026-05-04.md`). The two languages share much of their vocabulary (file extension, Bun runtime, `<db>` + `?{}`, `<program>`, `lift`, `bind:value`, `onclick=fn()`, `${expr}`, `#{}`, `lin`, components, stdlib) but the **state model has changed materially**, **engines are now the centerpiece**, and **markup is a first-class value type that can sit anywhere expressions sit** (the load-bearing pillar held since the scrml8 era). If a v1 recipe contradicts a v2 recipe, v2 is correct. Do not back-fill from v1.
+> **Accurate as of scrml v0.8.0 (2026-09-29).** First written 2026-05-04; revised for the v0.8.0 compiler. **Code blocks:** a block that starts with `<program>` is a complete program that compiles with the v0.8.0 compiler. Every other block is a **fragment** — an excerpt that assumes surrounding declarations — unless it is marked *specified — not shipped*, which means the SPEC describes it but the shipping compiler does not implement it.
+
+> v2 supersedes v1 (2026-04-25). v1 described **pre-v0.next** scrml; v2 describes the language after the v0.next redesign of the state model. The two languages share much of their vocabulary (file extension, Bun runtime, `<db>` + `?{}`, `<program>`, `lift`, `bind:value`, `onclick=fn()`, `${expr}`, `#{}`, `lin`, components, stdlib) but the **state model has changed materially**, **engines are now the centerpiece**, and **markup is a first-class value type that can sit anywhere expressions sit** (the load-bearing pillar held since the scrml8 era). If a v1 recipe contradicts a v2 recipe, v2 is correct. Do not back-fill from v1.
 
 ---
 
@@ -23,6 +25,46 @@ In particular: **scrml is NOT Svelte**, even though `.scrml` looks like `.svelte
 
 ---
 
+## 0.1 Recent changes (through v0.8.0) — these override older habits
+
+Each item below was checked against the v0.8.0 compiler.
+
+- **Inline block handlers are legal and canonical.** `onclick={ a(); @x = .Y }` runs a multi-statement handler inline. Earlier revisions of this document told you to move every multi-statement handler into a named function; that rule is gone. Named functions are still the right call when the handler is reused or long.
+- **`defer` ships** (SPEC §19.16). `defer stmt` inside a function runs `stmt` when the function exits, on every path, last-registered first.
+- **`class` is not scrml.** A `class` declaration in logic is rejected with `E-CLASS-NOT-IN-SCRML`. Use `type X:struct = { ... }` for data and functions for behavior.
+- **Dynamic `import(...)` is rejected** (`E-DYNAMIC-IMPORT-NOT-IN-SCRML`). Imports are static: `import { x } from 'scrml:data'` or a relative path.
+- **Debounce/throttle are cell attributes**, not a modifier: `<query debounced=300ms> = ""` (SPEC §6.13). The old `@debounced(N)` prefix form is gone.
+
+```scrml
+<program>
+
+type Phase:enum = { Editing, Done }
+
+<count> = 0
+<phase>: Phase = .Editing
+<log>: string[] = []
+
+function note(msg: string) {
+    @log = [...@log, msg]
+}
+
+function save() {
+    note("start")
+    defer note("finished")          // runs when save() exits, on every path
+    if (@count == 0) return
+    @count = 0
+}
+
+<button onclick={ @count = @count + 1; note("clicked") }>+</button>
+<button onclick={ reset(@count); @phase = .Done }>Start over</button>
+<button onclick=save()>Save</button>
+<p>${@count} — ${@log.length} events</p>
+
+</program>
+```
+
+---
+
 ## 1. The north star — the design key for v0.next
 
 **The UI of a scrml application SHOULD be a fully-handled state machine.** In scrml's vocabulary that machine is called an **engine**. Not aspiration — design intent. **The structural shape of the UI tree IS the structural shape of the application's state.**
@@ -38,60 +80,75 @@ When you are stuck on a design call ("should this engine attribute behave X way 
 Start from the canonical shape below and modify what you need. Don't write from scratch — every scrml app is a variation of this skeleton.
 
 ```scrml
-<program auth="required">
+<program db="contacts.db">
 
-<db src="contacts.db" protect="password_hash" tables="contacts">
+<db src="contacts.db" tables="contacts"/>
 
-  ${
-    <name>  = ""
-    <email> = ""
-    <phone> = ""
-
-    function persistContact(name, email, phone) {
-      ?{`INSERT INTO contacts (name, email, phone) VALUES (${name}, ${email}, ${phone})`}.run()
+<schema>
+    contacts {
+        id:    integer primary key
+        name:  text not null
+        email: text not null
+        phone: text
     }
+</>
 
-    function addContact() {
-      persistContact(@name, @email, @phone)
-      @name  = ""
-      @email = ""
-      @phone = ""
-    }
+type Contact:struct = { id: number, name: string, email: string, phone: string }
 
-    function deleteContact(id) {
-      ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
-    }
+<name>  = ""
+<email> = ""
+<phone> = ""
+<contacts>: Contact[] = loadContacts()
 
-    function loadContacts() {
-      lift ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all()
-    }
-  }
+function loadContacts() {
+    return ?{`SELECT id, name, email, phone FROM contacts ORDER BY name`}.all()
+}
 
-  <div class="max-w-2xl mx-auto my-8 font-sans">
+function insertContact(name, email, phone) {
+    ?{`INSERT INTO contacts (name, email, phone) VALUES (${name}, ${email}, ${phone})`}.run()
+}
+
+function removeContact(id) {
+    ?{`DELETE FROM contacts WHERE id = ${id}`}.run()
+}
+
+function addContact() {
+    insertContact(@name, @email, @phone)
+    @name  = ""
+    @email = ""
+    @phone = ""
+    @contacts = loadContacts()
+}
+
+function deleteContact(id) {
+    removeContact(id)
+    @contacts = loadContacts()
+}
+
+<div class="max-w-2xl mx-auto my-8 font-sans">
     <h1 class="text-2xl font-semibold mb-4">Contact Book</h1>
 
     <form onsubmit=addContact() class="flex gap-2 mb-6">
-      <input type="text"  bind:value=@name  placeholder="Name"  required class="flex-1 p-2 border border-slate-300 rounded"/>
-      <input type="email" bind:value=@email placeholder="Email" required class="flex-1 p-2 border border-slate-300 rounded"/>
-      <input type="tel"   bind:value=@phone placeholder="Phone"        class="flex-1 p-2 border border-slate-300 rounded"/>
-      <button type="submit" class="px-4 py-2 bg-slate-900 text-white rounded">Add</button>
+        <input type="text"  bind:value=@name  placeholder="Name"  required class="flex-1 p-2 border border-slate-300 rounded"/>
+        <input type="email" bind:value=@email placeholder="Email" required class="flex-1 p-2 border border-slate-300 rounded"/>
+        <input type="tel"   bind:value=@phone placeholder="Phone"          class="flex-1 p-2 border border-slate-300 rounded"/>
+        <button type="submit" class="px-4 py-2 bg-slate-900 text-white rounded">Add</button>
     </form>
 
     <ul class="list-none p-0">
-      ${
-        for (let contact of loadContacts()) {
-          lift <li class="flex gap-4 py-3 border-b border-slate-200">
-            <span>${contact.name}</span>
-            <span class="text-slate-600">${contact.email}</span>
-            <span class="text-slate-500">${contact.phone}</span>
-            <button onclick=deleteContact(contact.id) class="ml-auto text-rose-700 hover:text-rose-900">Remove</button>
-          </li>
-        }
-      }
+        <each in=@contacts key=@.id>
+            <li class="flex gap-4 py-3 border-b border-slate-200">
+                <span>${@.name}</span>
+                <span class="text-slate-600">${@.email}</span>
+                <span class="text-slate-500">${@.phone}</span>
+                <button onclick=deleteContact(@.id) class="ml-auto text-rose-700 hover:text-rose-900">Remove</button>
+            </li>
+            <empty>
+                <li class="text-slate-500">No contacts yet.</li>
+            </empty>
+        </each>
     </ul>
-  </div>
-
-</>
+</div>
 
 </program>
 ```
@@ -100,22 +157,22 @@ Note the parts:
 
 | Element | Purpose |
 |---|---|
-| `<program ...>` | Root element. **Required.** Without it, the compiler emits W-PROGRAM-001. |
-| `<db src="..." tables="...">` | DB block. Compile-time schema introspection runs here. `protect="a, b"` (**comma-separated**) marks fields server-only. |
-| `${ ... }` | **Logic block.** All declarations and functions live here, not in a separate `<script>` tag. |
+| `<program ...>` | Root element. **Required.** Without it, the compiler emits W-PROGRAM-001. `db="..."` names the database the app's `?{}` queries and `<schema>` use. |
+| `<db src="..." tables="..."/>` | DB block. The compiler checks `?{}` queries against the schema. `protect="a, b"` (**comma-separated**) marks fields server-only. |
+| `<schema>` | The tables the app expects. `scrml db-migrate <dir> --db contacts.db` creates or migrates the real database to match (`--dry-run` prints the plan). |
+| Top-level declarations | Declarations and functions sit directly in the `<program>` body. No `<script>` tag, and no `${ ... }` wrapper is needed (wrapping them fires `W-PROGRAM-REDUNDANT-LOGIC`). |
 | `<varname> = expr` | **Reactive state DECLARATION** (V5-strict structural form). Bare `let var` is non-reactive. |
 | `@varname` | **Reactive state EXPRESSION ACCESS** (V5-strict canonical form). Reads, writes, and compound assignments use the `@` sigil. Bare names in expressions are LOCALS only. |
 | `const <name> = expr` | **Derived reactive** (structural-decl form, V5-strict). Re-evaluates when inputs change. Read at `@name`. |
-| `server function name() { ... }` | A function that runs on the server. Boundary security is compiler-enforced. |
-| `function name() { ... }` | Client function. Owns reactive-state writes. |
+| `function name() { ... }` | A function. Placement is **inferred**: one that touches a server-only resource (`?{}` SQL, env, file I/O) runs on the server and the client call becomes a fetch; the rest run on the client. Don't write `server function`. |
 | `?{` ... `}` | **SQL block.** Backticks inside hold the SQL string. `${param}` interpolations become bound parameters. |
 | `.run()`, `.all()`, `.get()` | SQL execution methods. **`.prepare()` does not exist — emits E-SQL-006.** |
-| `lift` | Marks a server-fn return value (data) or client-side reactive markup expansion. |
+| `<each in=@list key=@.id>` | List rendering. `@.` is the current item; `<empty>` renders when the list is empty (§11.10). |
 | `bind:value=@x` | Two-way binding. The `@` is REQUIRED on the bound variable. |
-| `onclick=fn()` | **Bare-call event handler.** NOT `on:click={fn}`, NOT `@click=fn`, NOT `onClick={fn}`. |
+| `onclick=fn()` | **Bare-call event handler.** NOT `on:click={fn}`, NOT `@click=fn`, NOT `onClick={fn}`. A multi-statement handler can be written inline as a block: `onclick={ a(); @x = 1 }`. |
 | `${expr}` in markup | Interpolation. NOT `{expr}`. The `$` is REQUIRED. |
-| `#{ ... }` | **Scoped CSS block.** Auto-scoped via native `@scope`. |
-| `</>` | **The only generic closer.** Closes the most-recent opener. (`<///>` was dropped from v0.next; that convenience is now an editor concern.) |
+| `#{ ... }` | **CSS block.** Inside a component, scoped to that component with native `@scope`; at `<program>` level, global. Tailwind utility classes (as above) work without setup (§13). |
+| `</>` | **The only generic closer.** Closes the most-recent opener. |
 
 This is the canonical shape. Copy it, rename `contact` to your domain, and you have a working app.
 
@@ -325,15 +382,15 @@ scrml has TWO canonical function-declaration shapes. Client-vs-server placement 
 | `function` | DOM, state, event handlers — OR `?{}`/file-IO/env (then INFERRED server) | nothing extra; client-vs-server placement is INFERRED per §12 | `function handleClick() { @count = @count + 1 }` |
 | `fn` | nowhere — body is pure | no SQL, no DOM, no outer-scope mutation, no non-determinism (`Date.now()`, `Math.random()`), no async; must return a value at every path | `fn double(n: int) -> int { return n * 2 }` |
 
-**Server placement is inferred — don't write `server function`.** A `function` that touches a server-only resource (`?{}` SQL, `Bun.*`, file I/O, env) auto-escalates to the server (§12); the client call is compiled to a fetch. The explicit `server` modifier on a `function` is deprecated and fires `W-DEPRECATED-SERVER-MODIFIER` — write `function` and let inference place it. (Recipes below still show the explicit `server function` form pending the corpus migration — `g-server-keyword-drift`.) **The one exception is `server fn`** — a pure helper pinned to the server: a pure `fn` has no trigger to infer from, so `server` is load-bearing there and is NOT deprecated. **`pure function` / `pure fn` are deprecated** (`W-PURE-DEPRECATED`, S176 — supersedes the old `W-PURE-REDUNDANT`); use `fn`. Run `bun scrml migrate --fix`.
+**Server placement is inferred — don't write `server function`.** A `function` that touches a server-only resource (`?{}` SQL, `Bun.*`, file I/O, env) auto-escalates to the server (§12); the client call is compiled to a fetch. The explicit `server` modifier on a `function` is deprecated and fires `W-DEPRECATED-SERVER-MODIFIER` — write `function` and let inference place it. **The one exception is `server fn`** — a pure helper pinned to the server: a pure `fn` has no trigger to infer from, so `server` is load-bearing there and is NOT deprecated. **`pure function` / `pure fn` are deprecated** (`W-PURE-DEPRECATED`, S176 — supersedes the old `W-PURE-REDUNDANT`); use `fn`. `scrml migrate <file|dir>` rewrites both mechanically.
 
-**Reach discipline (Pillar 5b):** when computing a value with no side effects, use `fn`. The discipline is signal: the call site reads as "this is a calculation, not a state machine." `function` is the escape hatch for impure work — event handlers, complex DOM-coupled logic, transitions.
+**Reach discipline:** when computing a value with no side effects, use `fn`. The discipline is signal: the call site reads as "this is a calculation, not a state machine." `function` is the escape hatch for impure work — event handlers, complex DOM-coupled logic, transitions.
 
-**Mutual recursion + hoisting (§48.6.4, S98):** `fn` declarations at file scope hoist exactly like `function`. Mutual recursion is supported without forward-ref ceremony: `fn isEven(n) -> bool { return n == 0 ? true : isOdd(n - 1) }` next to `fn isOdd(n) -> bool { ... isEven(n - 1) ... }` compiles clean. The `pinned fn` modifier opts a `fn` OUT of hoisting (forward-ref becomes `E-STATE-PINNED-FORWARD-REF`).
+**Mutual recursion + hoisting (§48.6.4):** `fn` declarations at file scope hoist exactly like `function`. Mutual recursion is supported without forward-ref ceremony: `fn isEven(n) -> bool { return n == 0 ? true : isOdd(n - 1) }` next to `fn isOdd(n) -> bool { ... isEven(n - 1) ... }` compiles clean. The `pinned fn` modifier opts a `fn` OUT of hoisting (forward-ref becomes `E-STATE-PINNED-FORWARD-REF`).
 
-**`lift` inside `fn` — `E-SYNTAX-002`.** A `fn` cannot `lift` markup; it must `return` it (markup is a value per Pillar 1). Reach for `function` (or `${ ... lift ... }` in a logic block) when you need to lift.
+**`lift` inside `fn` — `E-SYNTAX-002`.** A `fn` cannot `lift` markup; it must `return` it (markup is a value). Reach for `function` (or `${ ... lift ... }` in a logic block) when you need to lift.
 
-See SPEC §48 for the full `fn` discipline; §33 for `pure` keyword semantics; §6.1 of the PA primer for the fn-vs-function decision matrix.
+See SPEC §48 for the full `fn` discipline; §33 for `pure` keyword semantics.
 
 ---
 
@@ -346,16 +403,16 @@ An **engine** is scrml's name for a state machine that owns part of (or all of) 
 ```scrml
 <program>
 
-${
-  type MarioState:enum = { Small, Big, Fire, Cape }
-}
+type MarioState:enum = { Small, Big, Fire, Cape }
 
 <engine for=MarioState initial=.Small>
-  <Small  rule=.Big>                                    : "🧍"
-  <Big    rule=(.Fire | .Cape | .Small)>                : "🧍 🧍"
-  <Fire   rule=.Small>                                  : "🔥"
-  <Cape   rule=.Small>                                  : "🦸"
+  <Small  rule=.Big                     : "🧍">
+  <Big    rule=(.Fire | .Cape | .Small) : "🧍 🧍">
+  <Fire   rule=.Small                   : "🔥">
+  <Cape   rule=.Small                   : "🦸">
 </>
+
+<button onclick=${@marioState = .Big}>Grow</button>
 
 </program>
 ```
@@ -368,7 +425,7 @@ Things to notice:
 - **`initial=.Small`** sets the starting state. Required on non-derived engines (lint-warns if omitted; compiler defaults to first state-child).
 - **`<Small>`, `<Big>`, etc.** are **state-children**. Their tag names must match the variants of the engine type. Their bodies (after `:` or in `</>` form) describe the markup rendered when the engine is in that state.
 - **`rule=`** declares the legal transitions OUT of this state. `rule=.Big` means "from `.Small` you may transition to `.Big`." Multi-target uses `(.A | .B | .C)`.
-- **`:`-shorthand** — a single-expression body. `<Small rule=.Big> : "🧍"` is sugar for `<Small rule=.Big>"🧍"</>`. Mandatory whitespace around `:`.
+- **`:`-shorthand** — a single-expression body, written INSIDE the opener: `<Small rule=.Big : "🧍">` is sugar for `<Small rule=.Big>"🧍"</>`. Mandatory whitespace around `:`. (The older placement after the `>` — `<Small rule=.Big> : "🧍"` — still compiles but fires `W-COLON-SHORTHAND-LEGACY-PLACEMENT`; `scrml migrate --fix` rewrites it.)
 
 ### 4.2 Engine declaration position = mount position
 
@@ -377,14 +434,14 @@ Where you declare the engine in the source IS where it renders. There is no sepa
 ```scrml
 <program>
 
-${ type MarioState:enum = { Small, Big } }
+type MarioState:enum = { Small, Big }
 
 <div class="game">
   <h1>Mario</h1>
 
   <engine for=MarioState initial=.Small>     <!-- renders here -->
-    <Small rule=.Big> : "🧍"
-    <Big rule=.Small> : "🧍 🧍"
+    <Small rule=.Big : "🧍">
+    <Big rule=.Small : "🧍 🧍">
   </>
 
   <p>Press the button to grow.</p>
@@ -425,7 +482,7 @@ When you need to run code on transition (sound, log, animation), you have two fo
 <engine for=MarioState initial=.Small>
 
   <!-- Simple, single-target effect on the FROM-side: -->
-  <Small rule=.Big effect=${ playSound("grow") }> : "🧍"
+  <Small rule=.Big effect=${ playSound("grow") } : "🧍">
 
   <!-- Multi-target or attribute-bearing — use <onTransition>.
        Note: when </> closer is present, :-shorthand is unavailable.
@@ -456,7 +513,7 @@ State-children come in two shapes:
 
 ```scrml
 <engine for=Phase initial=.Loading>
-  <Loading rule=.Loaded> : <Spinner/>          <!-- body: renders this when in .Loading -->
+  <Loading rule=.Loaded : <Spinner/>>         <!-- body: renders this when in .Loading -->
   <Loaded rule=.Error|.Loading>                <!-- body: full markup conditional render -->
     <h1>Done</h1>
     <button onclick=reload()>Reload</button>
@@ -485,9 +542,9 @@ ${
 }
 
 <engine for=MarioState initial=.Small>
-  <Small rule=.Big>  : character("🧍",     "SMALL")
-  <Big   rule=.Fire> : character("🧍 🧍",  "BIG")
-  <Fire  rule=.Small>: character("🔥",     "FIRE")
+  <Small rule=.Big   : character("🧍",    "SMALL")>
+  <Big   rule=.Fire  : character("🧍 🧍", "BIG")>
+  <Fire  rule=.Small : character("🔥",    "FIRE")>
 </>
 ```
 
@@ -611,7 +668,7 @@ type Playback:enum = { Paused, Running, Buffering }
 
 **Parent-rule cascade dispatch:** writes to the outer engine's variable from inside a composite are validated against the COMPOSITE outer state-child's `rule=`. Writes to the inner-engine variable from inside inner state-children validated against inner state-child's `rule=`. Standard §51.0.F mechanic applied per-variable.
 
-**Where engines can NOT live.** Component bodies (`E-COMPONENT-ENGINE-SCOPE`); function/snippet bodies. Engines live at file scope OR inside another engine's state-child body — nowhere else. The Pillar 5 reason: no per-kind mini-DSLs (avoiding `<region>`/`<sub-engine>` keyword surface preserves tooling-uniformity — CLI promotion + migration stay context-blind).
+**Where engines can NOT live.** Component bodies (`E-COMPONENT-ENGINE-SCOPE`); function/snippet bodies. Engines live at file scope OR inside another engine's state-child body — nowhere else. The reason: no per-kind mini-DSLs (avoiding `<region>`/`<sub-engine>` keyword surface preserves tooling-uniformity — CLI promotion + migration stay context-blind).
 
 See SPEC §51.0.Q for hierarchy / nested engines; §54 for nested substate grammar + state-local transitions + field narrowing + terminal states.
 
@@ -661,7 +718,7 @@ DURATION accepts `Nms` / `Ns` / `Nm` / `Nh`. Reset-on-reentry per §51.12.4 — 
 
 Static literals retain their constant-fold path (zero runtime overhead). Computed-form rules opt out of JSON-encoded chained auto-rearm (multi-step computed→computed chains require user-driven writes — single-step works fine).
 
-**Named timers + `cancelTimer("name")` (S79; §51.0.M.1)** — optional `name=IDENT` attribute on `<onTimeout>` makes the timer addressable. The `cancelTimer("name")` builtin cancels a specific named timer; useful for "user took action, cancel the auto-redirect" patterns.
+**Named timers + `cancelTimer("name")` (§51.0.M.1)** — optional `name=IDENT` attribute on `<onTimeout>` makes the timer addressable. The `cancelTimer("name")` builtin cancels a specific named timer; useful for "user took action, cancel the auto-redirect" patterns.
 
 ```scrml
 <Saving rule=(.Saved | .Error)>
@@ -680,71 +737,73 @@ See SPEC §51.0.M for `<onTimeout>`; §51.0.R for `<onIdle>`; §51.12 for the ti
 
 Three composable type-system surfaces that account for scrml's distinguishing capability story. Adopters who don't know they exist write JS-style or reach for npm packages that have scrml-native equivalents.
 
-#### `^{}` — the meta context (§22 + S114 Approach C)
+#### `^{}` — the meta context (§22)
 
-A `^{}` block is **compile-time-and-runtime metaprogramming territory**. Inside, you can introspect the scrml type graph, emit code, or read structured metadata about types. The meta surface is **closed at 12 primitives** (S114 Approach C ratification) — no JS-host escape; everything you write is scrml-native, traceable, and verifiable.
+A `^{}` block is **metaprogramming territory**. A compile-time `^{}` block can introspect the scrml type graph with `reflect(Type)` and splice markup in place with `emit(...)` (`emit.raw(...)` skips escape normalization). A `^{}` block that reads runtime values is a runtime meta block and uses the `meta.*` APIs instead (`meta.emit(html)`, `meta.interval`, `meta.timeout`, …). One block cannot mix the two (`E-META-005`). The meta surface is a **closed, enumerated set of primitives** — no JS-host escape, no DOM, no SQL, no I/O. Misuse fires `E-META-001` with a per-identifier hint.
 
 ```scrml
-${
+<program>
+
+type User:struct = { name: string, email: string, age: int }
+
+<table>
   ^{
-    // reflect(TypeName) returns the structural metadata for any scrml type at compile time:
-    const user_shape = reflect(User)
-    meta.emit("User has " + user_shape.fields.length + " fields")
+    // Compile time: reflect(User) reads the type; emit() splices markup in place.
+    const info = reflect(User)
+    for (const field of info.fields) {
+      emit(`<tr><td>${field.name}</td><td>${field.type}</td></tr>`)
+    }
   }
-}
+</table>
+
+</program>
 ```
 
-The 12 primitives include `reflect(TypeName)` (type introspection), `meta.emit(str)` (compile-time stdout — adopter-debuggable), `meta.emit.raw(str)` (codegen splice), `meta.interval` / `meta.timeout` (compile-time timers per S114), and a small set of structured-type accessors. `^{}` blocks are sandboxed — no DOM, no SQL, no I/O. Misuse fires `E-META-001` with a per-identifier hint.
+**Manifest gate** (§22.13). If you need to call into a JS host module — rare; the closed set covers most needs — declare it under `[capabilities] host-import` in `scrml.toml`. The gate is opt-in per project and disabled by default.
 
-**Manifest gate** (§22.13). If you need to call into a JS host module from a `^{}` block — rare; the closed set covers most needs — declare it under `[capabilities] host-import` in `scrml.toml`. The gate is opt-in per-project; no implicit host access.
+#### The type-as-argument family (§41.13-§41.16)
 
-74+ scrml sample + example files use `^{}`. It's the substrate for the type-as-argument family (next).
+**The big idea:** you write the type once, and the compiler derives a form, a SQL schema, a table view, a structured parser — all from that one type definition. No code duplication; no two-source-of-truth drift.
 
-#### The type-as-argument family — L22 (§41.13-§41.16)
-
-**The big idea:** you write the type once, and the compiler derives a form, a SQL schema, a table view, a structured parser — all from that one type definition. No code duplication; no two-source-of-truth drift. **L22 (S65 ratification)** locks "type-as-argument" as a first-class language primitive.
-
-Four shipped (or shipping) family members:
+Four members, all imported from `scrml:data`:
 
 ```scrml
-type SignupForm:struct = {
+<program db="app.db">
+
+import { formFor, tableFor, schemaFor } from 'scrml:data'
+
+type Signup:struct = {
     email:    string,
     password: string,
     age:      int(>=18)
 }
 
-// 1. parseVariant — boundary-parse an unknown string into a typed variant
-${
-  const result = parseVariant(MyEnum, request.body.kind)   // → MyEnum | ParseError
-}
-
-// 2. formFor — type-driven form generation; FLAGSHIP (scrml.dev demo)
-//    Canonical attribute form: for=TypeName (NOT bare positional)
-<formFor for=SignupForm onsubmit=handleSignup/>
-  <!-- The compiler synthesizes: <email req>, <password req length(>=8)>, <age req>,
-       a submit button, the validity surface, the error-rendering elements,
-       and the bind:value plumbing. ONE LINE. -->
+// 1. schemaFor — the table DDL is generated from the struct, inside <schema>.
+<schema>
+    ${ schemaFor(Signup) }
 </>
 
-// 3. schemaFor — type-driven SQL schema (DDL) generation
-//    Function-call form (NOT markup-element) — different shape from formFor/tableFor
-//    because the output is a DDL string, not markup. Use inside <schema> blocks
-//    via ${...} interpolation per SPEC §41.15.
-${
-  ^{
-    const ddl = schemaFor(SignupForm)
-    meta.emit.raw(ddl)   // emits: CREATE TABLE signup_form (email text, password text, age integer check (age >= 18))
-  }
+<users>: Signup[] = []
+
+function handleSignup(s: Signup) {
+    @users = [...@users, s]
 }
 
-// 4. tableFor — type-driven admin-UI table for a record collection
-//    Canonical attribute form: for=TypeName (NOT bare positional)
-<tableFor for=SignupForm rows=@users/>
+// 2. formFor — the form (inputs, validators, submit) is generated from the struct.
+<formFor for=Signup onsubmit=handleSignup/>
+
+// 3. tableFor — an admin table generated from the struct + rows.
+<tableFor for=Signup rows=@users/>
+
+</program>
 ```
 
-**`pick=` / `omit=` / `partial=true` field-set transforms (§41.14.5 / §41.15.4 / §41.16.5).** Every L22 family member supports the same field-set vocabulary for selecting which struct fields participate in the synthesized output. The canonical form is **a string-literal array** (`pick=["email", "password"]`) — NOT bare identifiers. Bare identifiers fall through to scope resolution and fire `E-SCOPE-001` because the field names aren't declared identifiers in the surrounding scope:
+The fourth member, **`parseVariant(raw, EnumType)`**, boundary-parses an untrusted string or object into a typed enum variant. It is failable — handle its `ParseError` variants with `!{}` (SPEC §41.13).
+
+**`pick=` / `omit=` / `partial=true` field-set transforms (§41.14.5 / §41.15.4 / §41.16.5).** Every family member supports the same field-set vocabulary for selecting which struct fields participate in the synthesized output. The canonical form is **a string-literal array** (`pick=["email", "password"]`) — NOT bare identifiers. Bare identifiers fall through to scope resolution and fire `E-SCOPE-001` because the field names aren't declared identifiers in the surrounding scope:
 
 ```scrml
+// fragment — assumes the imports and a `submitFn` / `@users` from the block above
 type Signup:struct = { email: string, password: string, age: int(>=18), referredBy: string | not }
 
 // formFor — pick a subset of fields, omit the rest
@@ -760,14 +819,14 @@ type Signup:struct = { email: string, password: string, age: int(>=18), referred
 <tableFor for=Signup rows=@users pick=["email", "age"]/>
 
 // schemaFor — function-call form uses an object literal (different shape from markup-element form)
-${ const ddl = schemaFor(Signup, { pick: ["email", "password"] }) }
+${ schemaFor(Signup, { pick: ["email", "password"] }) }
 ```
 
-**Anti-pattern** — bare-identifier pick lists like `pick=[email, password]` are NOT canonical and fire `E-SCOPE-001` per field. Quote each field name. `pick=` and `omit=` are mutually exclusive on the same call (`E-FORMFOR-PICK-OMIT-CONFLICT` / `E-TABLEFOR-PICK-OMIT-CONFLICT` / `E-SCHEMAFOR-PICK-OMIT-CONFLICT`). Field names not present on the struct fire `E-FORMFOR-PICK-INVALID-FIELD` (or the equivalent for the other family members).
+**Anti-pattern** — bare-identifier pick lists like `pick=[email, password]` are NOT canonical and fire `E-SCOPE-001` per field. Quote each field name. `pick=` and `omit=` are mutually exclusive on the same call (`E-FORMFOR-PICK-OMIT-CONFLICT` / `E-TABLEFOR-PICK-OMIT-CONFLICT` / `E-SCHEMAFOR-PICK-OMIT-CONFLICT`). Field names not present on the struct fire `E-FORMFOR-PICK-INVALID-FIELD` (or the equivalent for the other family members). Using a family member without importing it fires `E-FORMFOR-NOT-IMPORTED` (and the equivalents).
 
-`parseVariant` shipped S65; `formFor` shipped S102; `schemaFor` shipped S104; `tableFor` shipped S105. All four are imported from `scrml:data`. Per-field customization (slot-based for `formFor`/`tableFor`, attribute-based for `schemaFor`) is documented in SPEC §41.13-§41.16.
+Per-field customization (slot-based for `formFor`/`tableFor`, attribute-based for `schemaFor`) is documented in SPEC §41.13-§41.16.
 
-**Synonym-detection discipline.** Per L22 + the §53.14.4 canon, the family REPLACES rather than wraps existing tools (`zod`/`yup`/`prisma`/`drizzle` schema-bridges) — type-as-argument is the scrml-native shape. Adjacent npm-style wrappers are anti-pattern.
+**Synonym-detection discipline.** The family REPLACES rather than wraps existing tools (`zod`/`yup`/`prisma`/`drizzle` schema-bridges) — type-as-argument is the scrml-native shape. Adjacent npm-style wrappers are anti-pattern.
 
 #### Refinement-type predicates — value constraints in the type position (§53)
 
@@ -779,7 +838,7 @@ let email:   string(pattern(EMAIL_RE)) = "" // pattern-constrained string
 <age req>: int(>=18) = 0                    // refinement-typed reactive cell
 ```
 
-**Three loci** of "exists/required/constrained" — schema column (SQL DDL: `not null` / `check`), state validator (`req` / `length(>=2)`), refinement type (predicate form). Each fires in its layer's enforcement context — **NOT redundancy** — the same `length(>=2)` predicate in a `<schema>` column generates a `CHECK (length(name) >= 2)` SQL constraint; in a state cell, validates the user input reactively; in a refinement type, gates assignment statically. ONE vocabulary, three loci, three enforcement layers (L4 ratification).
+**Three loci** of "exists/required/constrained" — schema column (SQL DDL: `not null` / `check`), state validator (`req` / `length(>=2)`), refinement type (predicate form). Each fires in its layer's enforcement context — **NOT redundancy** — the same `length(>=2)` predicate in a `<schema>` column generates a `CHECK (length(name) >= 2)` SQL constraint; in a state cell, validates the user input reactively; in a refinement type, gates assignment statically. ONE vocabulary, three loci, three enforcement layers.
 
 **SPARK three-zone semantics** (§53.6.1 / §53.6.2 — boundary + trusted + static zones). Briefly: predicates ONLY runtime-check at the **boundary zone** (where untrusted input enters: form submit, server-fn arg, JSON.parse result). Inside the **trusted zone** (after a predicate passed at the boundary), the type is statically narrowed; no re-check. The **static zone** is compile-time literal evaluation (`let x: number(>0) = 5` constant-folds the predicate check away). Adopters get runtime safety without the runtime cost of pervasive re-validation.
 
@@ -791,7 +850,7 @@ function createUser(email: string(pattern(EMAIL_RE))) {
 }
 ```
 
-See SPEC §22 for `^{}` meta context; §41.13-§41.16 for the L22 family; §53 for refinement-type predicates + SPARK zones.
+See SPEC §22 for `^{}` meta context; §41.13-§41.16 for the type-as-argument family; §53 for refinement-type predicates + SPARK zones.
 
 ---
 
@@ -922,11 +981,11 @@ Default rendering is single-first-error wrapped as `<p class="scrml-error">${mes
 
 3. **`scrml:data` shipped English defaults** (zero-config; works for prototype-phase apps).
 
-4. **`match` escape hatch** (full developer control via L6 match machinery):
+4. **`match` escape hatch** (full developer control):
    ```scrml
    <match for=ValidationError on=@signup.name.errors[0]>
-     <Required>     : "Name is required"
-     <TooShort(n)>  : "Name must be at least ${n} characters"
+     <Required    : "Name is required">
+     <TooShort(n) : "Name must be at least ${n} characters">
    </>
    ```
 
@@ -952,29 +1011,21 @@ Per-cell semantics: if the declaration carries an explicit `default=` attribute,
 
 Per-field reset: `reset(@signup.name)` resets just that field by the same rule.
 
-### 6.7 Multi-statement event handlers — name the function
+### 6.7 Event handlers — bare call, bare assignment, or an inline block
 
-Inline event handlers accept ONE form: a bare call, a bare assignment, or a bare single-expression. Anything more requires a named function:
+An event-handler attribute takes a bare call, a bare assignment, a single expression, or an **inline block** `{ ... }` holding several statements:
 
 ```scrml
-// ✅ Legal inline:
+// fragment — assumes submit(), @signup, @signupPhase, @count
 <button onclick=submit()>Save</button>
 <button onclick=@signupPhase = .Editing>Try again</button>
 <button onclick=@count++>+</button>
 
-// ❌ Illegal inline (multi-statement):
-<button onclick=reset(@signup); @signupPhase = .Editing>Sign up another</button>
-<button onclick=() => { fn(); @x = .Y }>...</button>
-
-// ✅ Multi-statement → named function:
-${
-  function startOver() {
-    reset(@signup)
-    @signupPhase = .Editing
-  }
-}
-<button onclick=startOver()>Sign up another</button>
+// Multi-statement handler, inline — legal and canonical:
+<button onclick={ reset(@signup); @signupPhase = .Editing }>Sign up another</button>
 ```
+
+Reach for a named function when the handler is reused, long, or worth a name — not because it has two statements. A bare semicolon list without braces (`onclick=reset(@signup); @signupPhase = .Editing`) is still an error (`E-MULTI-STATEMENT-HANDLER`); wrap it in `{ }`.
 
 ### 6.8 Error handling beyond validators — `<errorBoundary>` + per-handler transactions (§19)
 
@@ -1022,9 +1073,9 @@ A caught error variant displays via its OWN `renders` clause (§19.2) when it ha
 
 **Implicit per-handler transactions (§19.10.5).** Inside an `!{}` handler arm, any SQL writes the arm performs are wrapped in an implicit transaction. If the arm fails (re-throws OR a downstream `!{}` doesn't catch), the writes ROLL BACK automatically. Atomic-rollback semantics without `BEGIN`/`COMMIT` ceremony — the canonical safety property. To opt-OUT (commit-on-error), annotate the handler arm with `@nosql-tx`.
 
-**Body-split / CPS — compiler-managed (§19.9; one-line cross-ref).** Server-function calls inside non-top-level positions (inside `if`, `match`, loop bodies) compile-to-CPS — the compiler splits the function body at server-call boundaries. Multi-batch CPS (§19.9.9, S114 Ext 1) extends this. Adopters never write the CPS form; it's invisible at source. Failures route through `!{}` naturally.
+**Body-split / CPS — compiler-managed (§19.9; one-line cross-ref).** Server-function calls inside non-top-level positions (inside `if`, `match`, loop bodies) compile-to-CPS — the compiler splits the function body at server-call boundaries. Multi-batch CPS (§19.9.9) extends this. Adopters never write the CPS form; it's invisible at source. Failures route through `!{}` naturally.
 
-**`test-bind` for failure-injection in tests (§19.12, S74).** The `test-bind <serverFnName> = <handler>` declaration replaces a server-fn call with a test-supplied handler at compile time. Zero runtime cost (production binary unchanged). Use for testing error-path branches without touching the database.
+**`test-bind` for failure-injection in tests (§19.12).** The `test-bind <serverFnName> = <handler>` declaration replaces a server-fn call with a test-supplied handler at compile time. Zero runtime cost (production binary unchanged). Use for testing error-path branches without touching the database.
 
 ---
 
@@ -1060,14 +1111,16 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `v-model="x"` | Vue | `bind:value=@x` |
 | `on:click={fn}`, `@click="fn"`, `onClick={fn}` | Svelte/Vue/React | `onclick=fn()` (bare call, parens included) |
 | `import Database from 'better-sqlite3'` | Node | Don't. Use `<db src="...">` + `?{}` blocks. |
+| `class Foo { constructor() {…} }` | JS/TS | Not scrml — `E-CLASS-NOT-IN-SCRML`. Data is `type Foo:struct = {…}`; behavior is functions. |
+| `await import("./mod.js")` | JS | Not scrml — `E-DYNAMIC-IMPORT-NOT-IN-SCRML`. Imports are static. |
 | `db.prepare(sql).all(params)` | better-sqlite3 | `?{`SELECT …`}.all()` — `.prepare()` does not exist (E-SQL-006) |
 | `await prisma.product.findMany({where: {…}})` | Prisma | `?{`SELECT * FROM products WHERE …`}.all()` |
-| `socket.io`, Phoenix Channels | Node, LiveView | `<channel>` (file-level — see §11.3 real-time recipe) |
+| `socket.io`, Phoenix Channels | Node, LiveView | `<channel>` inside `<program>` — see §11.3 real-time recipe |
 | `useEffect(() => fetch(url).then(...))` | React | `<request id="profile">${ @user = fetchUser(@id) }</>` — declarative fetch |
 | Custom `room { state {} on join() {} broadcast event() }` DSL | Phoenix LiveView | `<channel>` markup tag — see §11.3 real-time recipe |
 | `<slot />` inside SFC | Vue, Svelte | Multi-slot: `slot="name"` on call-site children + `${render slotName()}` in component body. Single unnamed children: `${children}`. |
 | `import { x } from 'scrml'` | (invented) | No bare scrml import. Stdlib uses `import { x } from 'scrml:auth'`, `'scrml:data'`, etc. Capability form: `use scrml:auth`. |
-| Hand-rolled debounce in `effect()` | (invented) | `@debounced(300) <debouncedQuery> = @query` — declaration modifier, NOT `.debounced()` postfix. |
+| Hand-rolled debounce in `effect()` | (invented) | `<query debounced=300ms> = ""` — a cell attribute (§6.13); `throttled=` is the sibling. NOT a `.debounced()` postfix and NOT the removed `@debounced(N)` prefix. |
 | zod / yup / joi schema for runtime validation | (npm) | Compile-time: `let x: number(>0 && <100)`. Runtime: `import { validate } from 'scrml:data'` |
 | `bcrypt`, `jsonwebtoken`, custom session table | npm | `import { hashPassword, signJwt } from 'scrml:auth'` — built in |
 | `pg`, `mysql2`, `better-sqlite3` packages | npm | Bun.SQL via `?{}` — driver picked from `<db src="...">` URL scheme |
@@ -1075,7 +1128,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 | `function validate() { if (@x.field == "") ... }` | React/Vue imperative | Declarative: `<x.field req>` on the cell decl. `@x.isValid` and `@x.errors` are auto-synthesized (see §6). |
 | Per-field `if (@signup.errors.name.length > 0) <p>...</p>` | (verbose) | `<errors of=@signup.name/>` — first-class markup element (§6.3). |
 | `<input bind:value=@signup.name>` written separately | v1 / generic frameworks | Decl-coupled: `<name req> = <input/>` declares cell + render-spec + validator together. Then `<name/>` in markup expands to the bound input (§3.1, §6). |
-| `onclick=fn(); @x = .Y` (multi-statement inline) | JS/Vue/Svelte | Name the function: `function startOver() { fn(); @x = .Y }` then `onclick=startOver()` (§6.7). |
+| `onclick=fn(); @x = .Y` (bare multi-statement inline) | JS/Vue/Svelte | Wrap it in a block: `onclick={ fn(); @x = .Y }` (§6.7), or name a function if it is reused. |
 | `function reset() { ... }` defined locally | (training-data muscle memory) | `reset` is a reserved language keyword. Pick another name. Use `reset(@cell)` to reset state to its declared default (§6.6). |
 | `<MyEngine/>` for a same-file engine | (over-eager-mount) | Same-file engines render at declaration position. `<EngineName/>` use-site is for cross-file mounts only (§4.2). |
 | `derived=@source` expecting auto variant-name matching | (anticipated shorthand) | `derived=expr` accepts any reactive expression of the engine's type. Use a `match` block: `derived=match @source { .A | .B :> .X, _ :> .Y }` (§4.10). |
@@ -1089,7 +1142,7 @@ If your instinct from another framework fires, stop and use the scrml form. Thes
 
 **If you don't see your case in the table, default to the canonical shape from §2.** Do not invent syntax.
 
-### 7.1 Word-form ↔ symbol-form parallels — both work (S136 R24 ratification)
+### 7.1 Word-form ↔ symbol-form parallels — both work
 
 A small set of operator-position forms accept BOTH the JS-style symbol form AND a word-form alias. Neither is "more canonical" — adopters use whichever reads better in context:
 
@@ -1110,7 +1163,7 @@ The compiler lowers word-form to symbol-form at the JS-host boundary; both paths
 
 **NOT in this category** — these are word-form keywords that DO NOT have symbol-form aliases:
 
-- `not` — the ABSENCE value, NOT a logical-NOT operator. `not` ≠ `!`. Use `is not` / `is some` for absence predicates; use `!` for logical negation (still JS-host); see §42 (PRIMER §9.5).
+- `not` — the ABSENCE value, NOT a logical-NOT operator. `not` ≠ `!`. Use `is not` / `is some` for absence predicates; use `!` for logical negation (still JS-host); see SPEC §42.
 - `is` / `is not` / `is some` — presence + variant predicates with no JS-host equivalent.
 - `given X :> {}` — narrow-AND-use form with no JS-host equivalent.
 
@@ -1123,7 +1176,7 @@ These are the questions every LLM silently guesses wrong on. The right answers:
 1. **File extension:** `.scrml`
 2. **Runtime:** **Bun**, not Node. Bun.SQL handles SQLite + Postgres natively. MySQL deferred.
 3. **DB layer:** Built into the language via `?{}` blocks. **DO NOT npm install any DB driver.** `<db src="./app.db">` for SQLite, `<db src="postgres://...">` for Postgres.
-4. **Form mutations:** `server function name(args)` inside `${ ... }`. Bare-call event handlers in markup: `<form onsubmit=addItem()>`. No separate `.server.js` files.
+4. **Form mutations:** a plain `function name(args)` that runs SQL — the compiler places it on the server and turns the client call into a fetch. Bare-call event handlers in markup: `<form onsubmit=addItem()>`. No separate `.server.js` files.
 5. **Template syntax:** `${expr}` for interpolation. Control flow uses `if=` attribute on elements, or `${ if (cond) {...} }` and `${ for (let x of xs) {...} }` inside logic blocks. NOT JSX, NOT Svelte braces. **No `<if>` or `<for>` markup tags exist.**
 6. **State model:** `<var> = init` to declare; `@var` to read; `@var = X` to write. **V5-strict — read §3 in full.** State machines are first-class via `<engine>` — read §4 in full.
 7. **Component model:** `const Card = <article props={ title: string, body: string }>...</>`. Markup-defined. Multi-instance. **Components stay distinct from engines** — read §4.9.
