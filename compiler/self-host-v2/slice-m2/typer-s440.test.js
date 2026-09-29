@@ -782,6 +782,11 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     const d2 = run([LIB(), app(O + "    function f() { let ks: int[] = [\"s\"] }", "<p>x</p>")]).diags;
     expect(d2[0].message).toContain("`int[]`");
   });
+  test("r7 C — a NON-literal value that is provably `not` (`@b ? not : not`) into a non-optional initializer is E-TYPE-041", () => {
+    expect(inApp(O + "    <let b:bool=false/>\n    function f() { let z: string = @b ? not : not }")).toEqual(["E-TYPE-041"]);
+    // twin: into `string | not`
+    expect(inApp(O + "    <let b:bool=false/>\n    function f() { let z: string | not = @b ? not : not }")).toEqual([]);
+  });
   test("r7 C twins — `not` into `T | not` (return, argument, element of `T[] | not`… as the whole value); a mixed `[1, not]` reported ONCE (E-TYPE-031)", () => {
     expect(inApp(O + "    function g(z: string | not) -> string | not { return not }\n    function f() { g(not) }")).toEqual([]);
     expect(inApp(O + "    function f() { let ks: int[] | not = not }")).toEqual([]);

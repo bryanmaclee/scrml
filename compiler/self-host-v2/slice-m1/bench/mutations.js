@@ -322,7 +322,7 @@ const MUTATIONS = [
      "            if (ti is some) return mayBeNot(xi, ti)\n", ""],
     ["S442 r7 N2: a `T | not` element type printed unparenthesized (`int | not[]`)",
      "        if (maybeInner(e) is some) return \"(\" + typeName(e) + \")\"\n", ""],
-    ["S442 r7 C: the `not` literal into a non-int return / argument accepted",
+    ["S442 r7 C: a provably-`not` NON-literal initializer of a non-int type accepted (returns / arguments are checkValue's since A)",
      "        if (isAbsentVT(v)) return checkAbsent(env, target, span, what, ts)\n", ""],
     ["S442 r7 C: `not` elements of an untyped array literal accepted",
      "                out = checkAbsent(env, te, x.span, \"an element of `\" + typeName(target) + \"`\", out)", "                out = out"],
