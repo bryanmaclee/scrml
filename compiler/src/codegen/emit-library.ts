@@ -1004,7 +1004,7 @@ function emitAsyncLibraryFns(
   // nested async helper as async at every call / by-reference site.
   {
     const _libNestedFacts = {
-      boundNames: new Set<string>([...fileBoundNamesOf({ nodes: logicBody }), ...calleeMap.keys()]),
+      boundNames: new Set<string>([...fileBoundNamesOf({ nodes: logicBody }, sourceText), ...calleeMap.keys()]),
       asyncFnNames,
       isStdlibAsync: stdlibAsyncPredicate(calleeMap, exportRegistry),
     };

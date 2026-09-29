@@ -657,6 +657,41 @@ function go() { @v = decide() }
 `);
     expect(o.codes).toContain(SERVER_CODE);
   });
+  for (const [label, decl, use] of [
+    ["object destructuring", "const { setTimeout } = { setTimeout: (f) => f(hash) }", "setTimeout(m)"],
+    ["array destructuring", "const [setTimeout] = [(f) => f(hash)]", "setTimeout(m)"],
+    ["nested/default destructuring", "const { a: { setTimeout = (f) => f(hash) } = {} } = {}", "setTimeout(m)"],
+    ["an arrow parameter", "const run = (setTimeout) => setTimeout(m)", "run((f) => f(hash))"],
+    ["`= globalThis` (conservative: withdrawn)", "const { setTimeout } = globalThis", "setTimeout(m)"],
+  ]) {
+    test(`round 3 (N1): a scheduler name bound by ${label} → escape`, () => {
+      const o = serverNested(decl, use);
+      expect(o.codes).toContain(ESCAPE);
+    });
+  }
+  test("round 3 (N1): a `for…of` binding named setTimeout → escape", () => {
+    const o = compileFile(`<program>
+${AUTH_IMPORT}<v> = "unset"
+server function check(pw, hash) {
+  function m(h) { return verifyPassword(pw, h) }
+  for (const setTimeout of [(f) => f(hash)]) { return setTimeout(m) ? "a" : "r" }
+  return "r"
+}
+function go() { @v = check("wrong", "h") }
+<button onclick=go()>go</button>
+</program>
+`);
+    expect(o.codes).toContain(ESCAPE);
+  });
+  test("round 3 (N1): a destructured scheduler inside a handler → escape", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+<button onclick=\${ const { setTimeout } = { setTimeout: (f) => f(1) }; @v = setTimeout(isOk) ? "a" : "r" }>go</button>
+</program>
+`);
+    expect(o.codes).toContain(ESCAPE);
+  });
   test("control: the GLOBAL setTimeout still takes an async fn / callback", () => {
     const o = serverNested(`setTimeout(m, 10)`, `true`);
     expect(o.codes).toEqual([]);

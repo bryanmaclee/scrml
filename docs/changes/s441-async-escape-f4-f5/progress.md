@@ -6,3 +6,4 @@
 - 2026-09-29T09:50:35-06:00 snippet-gate regression (match IIFE token await scan) fixed via own-level await parse; CI gates run: facts, spec-index, s34-census, delta-lint, snippet-gate, corpus-compile-floor, browser-baseline, types-gate, e2e/lsp/commands — all PASS
 - 2026-09-29T10:21:34-06:00 RESUMED after rate-limit kill: Phase 3 grep 0/0, corpus 5 newly failing (4 new neg cases + flogence dispatch-tool.scrml), conformance 1053/1060 (+6 new cases, 7 xfail)
 - 2026-09-29T11:02:49-06:00 review fix round 1-5 + ledger §S441c; conformance 1056/1063 (+3 cases); snippet 122/122; s34 PASS; types identical to base
+- 2026-09-29T12:19:10-06:00 round 3 N1: scheduler exemption narrowed to source-provable calls/member reads; +4 conformance, +7 unit
