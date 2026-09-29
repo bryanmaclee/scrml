@@ -325,6 +325,59 @@ describe("§6 imported error enum", () => {
     expect(codes(rBad)).toEqual(["E-ERROR-009"]);
     expect(e9Messages(rBad)[0]).toContain("Valid variants: Missing, Bad.");
   });
+
+  test("an imported type that RESOLVES to a non-enum (struct) is not exempt: E-ERROR-009", () => {
+    fix("errs-struct.scrml", `\${
+    export type AppS:struct = { a: string }
+}
+`);
+    const p = fix("imp-struct.scrml", program(`    import { AppS } from "./errs-struct.scrml"
+    function check(n: string) ! AppS {
+        if (n == "") fail .X
+    }`, `        check("") !{
+            | err :> { return }
+        }`));
+    expect(codes(compile(p))).toEqual(["E-ERROR-009"]);
+  });
+
+  test("an error type imported from a module whose declaration is not visible (host .js) is unverifiable: accepted like the qualified form", () => {
+    fix("host-errs.js", `export const HostErr = { X: "X" };\n`);
+    const caller = `        check("") !{
+            | err :> { return }
+        }`;
+    const bare = fix("imp-host.scrml", program(`    import { HostErr } from "./host-errs.js"
+    function check(n: string) ! HostErr {
+        if (n == "") fail .X
+    }`, caller));
+    const rBare = compile(bare);
+    expect(codes(rBare)).toEqual([]);
+    const bareJs = rBare.outputs.get(bare)?.clientJs ?? "";
+    expect(bareJs).toContain(`type: "HostErr", variant: "X"`);
+    const qual = fix("imp-host.scrml", program(`    import { HostErr } from "./host-errs.js"
+    function check(n: string) ! HostErr {
+        if (n == "") fail HostErr.X
+    }`, caller));
+    expect(compile(qual).outputs.get(qual)?.clientJs ?? "").toBe(bareJs);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8 — a bare variant does not resolve through a type alias
+// ---------------------------------------------------------------------------
+
+describe("§8 declared error type is a type ALIAS of an enum", () => {
+  test("`type A = E` is not a `:enum` declaration (§19.4.4.1): bare `fail .V` is E-ERROR-009", () => {
+    const p = fix("alias.scrml", program(`    type E:enum = { EmptyName, Bad }
+    type A = E
+    function check(n: string) ! A {
+        if (n == "") fail .EmptyName
+    }`, `        check("") !{
+            | err :> { return }
+        }`));
+    const r = compile(p);
+    expect(codes(r)).toEqual(["E-ERROR-009"]);
+    expect(e9Messages(r)[0]).toContain("'A' is not a declared enum type");
+  });
 });
 
 // ---------------------------------------------------------------------------

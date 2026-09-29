@@ -10665,15 +10665,23 @@ function annotateNodes(
                     }
                   }
                 }
-              } else if (failIsBare && !failImportNames().has(declaredType)) {
+              } else if (
+                failIsBare &&
+                !(failImportNames().has(declaredType) &&
+                  (!typeRegistry.has(declaredType) || typeRegistry.get(declaredType)?.kind === "unknown"))
+              ) {
                 // Bare `fail .V` whose declared error type does not resolve to
                 // an enum (undeclared, a non-enum type, or a non-`type X:enum`
                 // shape that never registered). The qualified form names its
                 // enum itself; the bare form has ONLY the declared type to
                 // resolve against, so there is no variant set in which `.V`
                 // could be valid — accepting it would be vacuous (the S382
-                // gate asymmetry). An imported name the registry lacks is
-                // exempted above: unverifiable here, not invalid.
+                // gate asymmetry). An imported name whose declaration this
+                // compile cannot see (absent / `unknown` in the registry) is
+                // exempted: unverifiable here, not invalid. An imported name
+                // that DOES resolve, to a non-enum, is not exempt. Interim for
+                // the non-enum case: §19.4.4.1 E-ERROR-011 governs it once
+                // that code has an emitter (§19.3.3).
                 errors.push(new TSError(
                   "E-ERROR-009",
                   `E-ERROR-009: 'fail .${failVariant}' in function '${fnName}' cannot be resolved: the declared error type '${declaredType}' is not a declared enum type, so it has no variant '${failVariant}'. ` +
