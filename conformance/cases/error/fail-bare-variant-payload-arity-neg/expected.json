@@ -1,0 +1,13 @@
+{
+  "id": "error-fail-bare-variant-payload-arity-neg",
+  "description": "§19.3.3 bare form (S441) + §14.4 E-TYPE-082 — `fail .Timeout(\"oops\")` resolves `.Timeout` against the declared error enum `MyError`, where it is a VALID nullary variant; the payload arity is wrong, so E-TYPE-082 fires and E-ERROR-009 does not (the two never double-fire), exactly as for the qualified `fail MyError.Timeout(\"oops\")`. Incidental W-DEAD-FUNCTION/W-PROGRAM-001 ignored by superset matching.",
+  "language-version": "1.0",
+  "source-test": "compiler/SPEC.md §19.3.3, §14.4",
+  "spec": "§19.3.3",
+  "rationale": "§19.3.3: the bare form's resolved variant is subject to the same construction checks as the qualified form; a valid variant with the wrong payload arity SHALL be E-TYPE-082.",
+  "expect": {
+    "codes": ["E-TYPE-082"],
+    "notCodes": ["E-ERROR-009", "E-ERROR-001"],
+    "severity": { "E-TYPE-082": "error" }
+  }
+}
