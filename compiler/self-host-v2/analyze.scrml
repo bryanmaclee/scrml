@@ -178,7 +178,16 @@ ${
         MUse(decl: Sym, alias: Sym | not),                // an element that is a USE of a declaration
         MEach(bind: Sym, handles: Sym[]),                 // an <each> element
         MSlot,
+        MStateView(v: StateView),                         // `<*f/>` of a graph field: its state-child bodies (O5 (1i))
     }
+    // s442 — `<*f/>` of a field whose value carries a `rule=` graph with
+    // state-child BODIES: O5 RULED (1i) "a state-child's body is that
+    // variant's markup, rendered wherever the field renders". One arm per
+    // state-child that has a body: shown while the field (`decl`/`inst`/`idx`)
+    // holds variant `variant` of `enumSym`. The bodies are syntax (resolved in
+    // the declaring declaration's context, like its renders); lower lowers them.
+    export type StateArm:struct = { variant: int, body: ANode[] }
+    export type StateView:struct = { decl: Sym, inst: InstRef, idx: int, enumSym: Sym, arms: StateArm[] }
 
     // A family's side-table: its facts in the order the binder recorded them,
     // `nids[i]` the node `facts[i]` is about, and `at` — the NodeId index:
@@ -789,7 +798,7 @@ ${
     fn declStubOf(k: AItemK, file: string, entry: string, st: AS) -> RDeclStubs {
         return match k {
             .DeclItem(d: d) :> userDeclStub(d, file, st)
-            .ProgramItem(p: p) :> programStub(p, file, entry, st)
+            .ProgramItem(p: p) :> withNestedStubs(programStub(p, file, entry, st), p, file)
             .ImportItem(i: i) :> noStubs(st)
             .TypeItem(t: t) :> noStubs(st)
             .FnItem(f: f) :> noStubs(st)
@@ -811,6 +820,33 @@ ${
     fn userDeclStub(d: ADecl, file: string, st: AS) -> RDeclStubs {
         const r: RSym = mint(st, d.name)
         return { ds: [{ sym: r.s, file: file, isProgram: false, d: d, p: not, nid: d.nid }], st: r.st }
+    }
+
+    // s442: a declaration with typed attributes or a `renders` written inside
+    // `<program>` is a USER declaration (a multi-instance type, §66.1) — the
+    // §66.19.6 `<card title:string>` — not a program field. Its instances come
+    // from its uses; the declaration itself renders nothing where it is
+    // written (the §66.19 programs render instances only through uses and
+    // `<*x/>`; ⚑ O38 — whether a program-level declaration is in "a markup
+    // position" — is not decided here). A declaration with neither stays a
+    // program field (R4), `single` or not.
+    fn isNestedUserDecl(d: ADecl) -> boolean {
+        return d.attrs.length > 0 || d.renders is some
+    }
+
+    fn withNestedStubs(r: RDeclStubs, p: AProgram, file: string) -> RDeclStubs {
+        let st: AS = r.st
+        let out: DeclStub[] = r.ds
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (isNestedUserDecl(d)) {
+                    const n: RDeclStubs = userDeclStub(d, file, st)
+                    out = out.concat(n.ds)
+                    st = n.st
+                }
+            }
+        }
+        return { ds: out, st: st }
     }
 
     fn programStub(p: AProgram, file: string, entry: string, st: AS) -> RDeclStubs {
@@ -1097,6 +1133,11 @@ ${
             st = r.st
         }
         for (const c of childFields(d.body)) {
+            if (hasFlag(c.mods, "single")) {
+                // s442, §66.13.4: the Move-20 invariant — one declaration site
+                // inside N instances cannot be one instance.
+                st = addDiag(st, te.file, c.span, "E-COMPONENT-ENGINE-SCOPE", "`<" + c.name + " … single>` is a `single` declaration inside the multi-instance declaration `<" + d.name + ">` — every `<" + d.name + ">` instance would share one `" + c.name + "`. Drop `single`: an ordinary child field gives each `<" + d.name + ">` its own `" + c.name + "` (§66.13.4)")
+            }
             const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, st)
             out = out.concat([r2.f])
             st = r2.st
@@ -1110,8 +1151,8 @@ ${
         let out: FieldInfo[] = []
         for (const it of p.items) {
             for (const d of declsOfItem(it)) {
-                if (d.attrs.length > 0 || d.renders is some) {
-                    st = addDiag(st, te.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration with attributes or a `renders` inside `<program>` (a nested user declaration) is not in bootstrap slice M2 — declare it at file level")
+                if (isNestedUserDecl(d)) {
+                    // a user declaration (stubbed by withNestedStubs), not a field
                 } else {
                     const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, st)
                     out = out.concat([r.f])
@@ -2709,12 +2750,24 @@ ${
         if (e.tag == "slot") return addElem(st, e.nid, ElemFact.MSlot)
         const d: DeclSrc | not = declNamed(env.g, e.tag)
         if (d is some) return resolveUse(env, e, d, st)
+        // s442: a plain `<x/>` of a `single` declaration is ⚑ O55 (OPEN: an
+        // error, E-DECL-SINGLE-INSTANTIATED, or a render of the one instance).
+        // Not decided — refused as outside the bootstrap, never rendered as an
+        // HTML element of that name.
+        const sd: ADecl | not = singleProgramField(env, e.tag)
+        if (sd is some) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + "/>` is a plain use of the `single` declaration `" + e.tag + "` — whether that is an error (E-DECL-SINGLE-INSTANTIATED) or renders the one instance is ⚑ O55 (not ruled); render it with `<*" + e.tag + "/>`")
+        }
         return resolveHtml(env, e, st)
     }
 
     // `<*x …/>` (§66.6.2): the existing instance.
     fn resolveStar(env: Env, e: AElem, st0: AS) -> AS {
         let st: AS = st0
+        // s442: `<*f/>` naming a FIELD of the enclosing declaration (the
+        // program's cells included, R4) — THIS instance's own field (§66.6.2).
+        const sf: StarField | not = starField(env, e.tag)
+        if (sf is some) return resolveStarField(env, e, sf, st)
         const d: DeclSrc | not = declNamed(env.g, e.tag)
         if (d is not) {
             return addDiag(st, env.file, e.span, "E-DECL-STAR-PREDEFINED", "`<*" + e.tag + "/>` — a predefined (HTML) declaration has no shared instance (§66.6.5)")
@@ -2728,6 +2781,109 @@ ${
             st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "rendering an existing instance `<*" + e.tag + "/>` is not in bootstrap slice M2 Core (no View.Star yet)")
         }
         return st
+    }
+
+    // ---- s442: `<*f/>` of a field, and state-child bodies ----------------------
+    // The field `<*name/>` names from here: a field of the enclosing user
+    // declaration (its renders), else a cell of the program visible here.
+    type StarField:struct = { decl: DeclInfo, inst: InstRef, idx: int, src: DeclSrc }
+
+    fn starField(env: Env, name: string) -> StarField | not {
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is some) {
+            if (!d.isProgram) {
+                const i: int = fieldIndex(d.info, name)
+                if (i >= 0) return { decl: d.info, inst: InstRef.Lexical(0), idx: i, src: d }
+            }
+        }
+        const pi: DeclInfo | not = programInfo(env)
+        const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
+        if (pi is some && ps is some) {
+            const j: int = fieldIndex(pi, name)
+            if (j >= 0) return { decl: pi, inst: programInst(env), idx: j, src: ps }
+        }
+        return not
+    }
+
+    // A field with a `rule=` graph whose state-children carry bodies renders
+    // the body of the variant it holds (O5 (1i)). Anything else a `<*f/>` could
+    // mean — a child declaration's own `renders`, a field with no markup
+    // (⚑ O51) — is outside this construct and reported.
+    fn resolveStarField(env: Env, e: AElem, sf: StarField, st0: AS) -> AS {
+        let st: AS = st0
+        const f: FieldInfo = sf.decl.fields[sf.idx]
+        if (e.attrs.length > 0) {
+            return addDiag(st, env.file, e.span, "E-DECL-STAR-REF-ATTR-WRITE", "`<*" + e.tag + ">` names the field `" + e.tag + "` of this instance — a `<*x>` reference takes no attributes here (§66.6.7)")
+        }
+        const g: TransitionGraph | not = f.graph
+        const children: AStateChild[] = fieldStateChildren(sf.src, f.nid)
+        let arms: StateArm[] = []
+        if (g is some) {
+            for (const c of children) {
+                const v: int = variantIndex(env.g.types, g.enumSym, c.name)
+                if (v >= 0 && c.body.length > 0) arms = arms.concat([{ variant: v, body: c.body }])
+            }
+            if (arms.length > 0) {
+                const sv: StateView = { decl: sf.decl.sym, inst: sf.inst, idx: sf.idx, enumSym: g.enumSym, arms: arms }
+                return addElem(st, e.nid, ElemFact.MStateView(sv))
+            }
+        }
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — rendering a field is in the bootstrap only for a `rule=` graph field whose state-children have bodies (O5 (1i)); `" + e.tag + "` has none (a field with no markup of its own is ⚑ O51)")
+    }
+
+    // The state-children of the field declared by the ADecl `fieldNid` inside
+    // the declaration `ds` (a program cell, or a user declaration's child).
+    fn fieldStateChildren(ds: DeclSrc, fieldNid: int) -> AStateChild[] {
+        for (const fd of fieldDecls(ds)) {
+            if (fd.nid == fieldNid) {
+                let out: AStateChild[] = []
+                for (const c of fd.body) { out = out.concat(stateChildOf(c)) }
+                return out
+            }
+        }
+        return []
+    }
+
+    // The ADecls that are fields of `ds`: the program's cells (its body's
+    // declarations that are not nested user declarations), or a user
+    // declaration's child fields.
+    fn fieldDecls(ds: DeclSrc) -> ADecl[] {
+        const p: AProgram | not = ds.p
+        if (p is some) {
+            let out: ADecl[] = []
+            for (const it of p.items) {
+                for (const d of declsOfItem(it)) {
+                    if (!isNestedUserDecl(d)) out = out.concat([d])
+                }
+            }
+            return out
+        }
+        const ud: ADecl | not = ds.d
+        if (ud is some) return childFields(ud.body)
+        return []
+    }
+
+    // Every state-child body of `ds`'s fields, resolved in `ds`'s context (O5
+    // (1i): the body is that variant's markup, like the declaration's renders).
+    fn stateBodies(ds: DeclSrc) -> ANode[] {
+        let out: ANode[] = []
+        for (const fd of fieldDecls(ds)) {
+            for (const c of fd.body) {
+                for (const sc of stateChildOf(c)) { out = out.concat(sc.body) }
+            }
+        }
+        return out
+    }
+
+    // s442: the program's cell `name` when it was declared `single` (§66.13.3).
+    fn singleProgramField(env: Env, name: string) -> ADecl | not {
+        if (programInfo(env) is not) return not
+        const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
+        if (ps is not) return not
+        for (const d of fieldDecls(ps)) {
+            if (d.name == name && hasFlag(d.mods, "single")) return d
+        }
+        return not
     }
 
     fn eventName(attr: string) -> string {
@@ -2920,6 +3076,8 @@ ${
             // renders
             const renv: Env = declEnv(g, ds, true)
             st = resolveNodes(renv, rendersNodes(ds), st)
+            // s442: state-child bodies (O5 (1i)), in the same context
+            st = resolveNodes(renv, stateBodies(ds), st)
         }
         const prog: DeclSrc | not = findDeclSrc(g, g.program)
         let progHandles: HandleInfo[] = []
@@ -3789,6 +3947,7 @@ ${
             .MEach(bind: b) :> not
             .MHtml :> not
             .MSlot :> not
+            .MStateView(v: v) :> not
             not :> not
         }
     }
@@ -3800,6 +3959,7 @@ ${
             .MUse(decl: d) :> not
             .MHtml :> not
             .MSlot :> not
+            .MStateView(v: v) :> not
             not :> not
         }
     }
@@ -4565,7 +4725,7 @@ ${
         return match k {
             .FnItem(f: f) :> typeFn(env, f, ts)
             .MarkupItem(n: n) :> typeNode(env, n, ts)
-            .DeclItem(d: d) :> ts
+            .DeclItem(d: d) :> typeUserDecl(env, d, ts)
             .ProgramItem(p: p) :> ts
             .ImportItem(i: i) :> ts
             .TypeItem(t: x) :> ts
