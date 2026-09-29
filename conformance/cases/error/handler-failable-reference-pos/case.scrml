@@ -1,0 +1,13 @@
+${
+    type LoadError:enum = { Empty }
+    function risky()! -> LoadError { fail LoadError.Empty }
+}
+
+<r> = 0
+
+<button id="bare" onclick=risky>bare</>
+<button id="dollar" onclick=${risky}>dollar</>
+<errorBoundary fallback="oops">
+  <button id="boxed" onclick=risky>inside a boundary</>
+</>
+<p id="out">${@r}</p>

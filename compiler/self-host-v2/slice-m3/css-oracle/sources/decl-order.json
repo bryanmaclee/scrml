@@ -1,0 +1,35 @@
+{
+  "spec": "§9.1 (CSS declaration semantics), §65.1",
+  "rationale": "Within one rule a later declaration overrides an earlier one of the same property (CSS's own declaration order, which §65 keeps — it deletes only the cross-rule specificity step): `margin: 0; margin-top: 12px` leaves margin-top 12px and margin-bottom 0; `color: red; color: blue` is blue; the global `padding: 4px; padding-left: 9px` leaves padding-left 9px, padding-top 4px.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".a",
+          "prop": "margin-top",
+          "value": "12px"
+        },
+        {
+          "sel": ".a",
+          "prop": "margin-bottom",
+          "value": "0px"
+        },
+        {
+          "sel": ".b",
+          "prop": "color",
+          "value": "rgb(0, 0, 255)"
+        },
+        {
+          "sel": ".c",
+          "prop": "padding-left",
+          "value": "9px"
+        },
+        {
+          "sel": ".c",
+          "prop": "padding-top",
+          "value": "4px"
+        }
+      ]
+    }
+  ]
+}

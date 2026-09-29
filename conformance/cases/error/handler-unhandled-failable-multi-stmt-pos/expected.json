@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-unhandled-failable-multi-stmt-pos",
+  "description": "A braced multi-statement event handler whose first statement is an unhandled call to a `!` function. E-ERROR-002 fires once — the same answer the one-statement forms get (see handler-unhandled-failable-one-stmt-pos / -bare-and-expr-pos).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S439 #14 + S440 \"all recs\" (restore conformance)",
+  "rationale": "§19.4.3 / §19.4.4 — an unhandled `!` call SHALL be E-ERROR-002, and nothing exempts an event-handler value. The answer follows the unhandled call, not the handler's statement count or form.",
+  "expect": {
+    "codes": ["E-ERROR-002"],
+    "codeCounts": { "E-ERROR-002": 1 },
+    "notCodes": [],
+    "severity": { "E-ERROR-002": "error" }
+  }
+}

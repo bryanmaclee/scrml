@@ -1,0 +1,41 @@
+{
+  "from": "examples/08-chat.scrml",
+  "spec": "§9.1 (as amended — R4), §65.5",
+  "rationale": "A real example with element-level `#{}` blocks: under R4 they are program-global — `.chat-app` is a 700px-max flex column, `.message-list` a flex column, `.composer` a flex row; the composer's `textarea { font-size: 0.95rem }` (global layer) beats the reset's `font: inherit` (reset layer, §65.5).",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".chat-app",
+          "prop": "display",
+          "value": "flex"
+        },
+        {
+          "sel": ".chat-app",
+          "prop": "max-width",
+          "value": "700px"
+        },
+        {
+          "sel": ".message-list",
+          "prop": "flex-direction",
+          "value": "column"
+        },
+        {
+          "sel": ".composer",
+          "prop": "display",
+          "value": "flex"
+        },
+        {
+          "sel": "textarea",
+          "prop": "font-size",
+          "value": "15.2px"
+        },
+        {
+          "sel": "textarea",
+          "prop": "border-top-left-radius",
+          "value": "8px"
+        }
+      ]
+    }
+  ]
+}

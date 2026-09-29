@@ -84,6 +84,7 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-054 | **FULLY RULED S440** — §8 #1 = (B) + impl#1 exception (queued); #2 = Pole A core `decimal` in the BOOTSTRAP; #3 `div(a,b,.Mode)`; #4 `Rounding` enum, no default; #5 provable-or-runtime div-by-zero; #6 currency a value field; #7 scale carried, numeric `==`; #8 one money display path. ⚑ STILL OWED: the `decimal` runtime rep. (Row rewritten S441.) | user-voice S440 dpa-054 #1-#8 |
 | dpa-055 | **FULLY RULED S440** R0-R8 (manipulation+retrieval scope; Appendix D rewrite + no ambient `Math`; dtypes are tape element types; `bf16`/`i64` rules; base64 wire + warning; BLOB + pgvector; no tape operators; `scrml:tensor` v1; `scrml:ml`). BUILD owed. (Row rewritten S441.) | user-voice S440 dpa-055 R0-R8 |
 | dpa-056 | **FULLY RULED S440** R1-R7 (no shared mutable memory in the core; share grant-less tapes; `send(lin x)` = transfer; `<program isolation=>`; `pool=N`; R6 diagnostic now + client foreign placement BANKED; SPEC hygiene). D1/D2 worker fixes queued. (Row rewritten S441.) | user-voice S440 dpa-056 R1-R7 |
+| dpa-058 | **BANKED — UNRUN (S442 2026-09-29).** O25 (SPEC §66.5.5 / §66.22): a declaration's `renders` — implicit vs explicit `bind:`, and whether the declaration's validators (`req`, `length(…)`) reach the input in its `renders` as HTML attributes + the validity surface (§6.4.2 steps 3–4), incl. a `renders` that is not a single input. Blocks bootstrap §66.19.2 (validated form). | **bryan** — "2 deliberate" (S442) |
 | dpa-057 | **BANKED S441 — UNRUN.** Server/client placement leaks a server helper's return value (incl. `process.env` secrets) to the browser when a client-placed function calls it. R2 minimum, security, bryan rules. | user-voice S441 "yes, queue the DD" |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
@@ -3730,3 +3731,24 @@ E-CG-006 / egress-field-scan + §14.8.9 redaction machinery and what it covers; 
 the `server-only` package + React taint APIs; Remix loaders; tRPC; Blazor; SvelteKit `$env/static/private` import
 restriction; Qwik `server$`).
 **Interacts with:** dpa-017 (egress redaction floor), dpa-023 (async boundary), §23.5 capabilities, §52 authority.
+
+## [dpa-058] deep-dive — O25: a declaration's `renders`, its bind, and where its validators land
+`status:    banked`
+banked:     S442 2026-09-29 (bryan: "2 deliberate")
+
+The question (SPEC §66.5.5, O25 in §66.22): under §66 a Shape-2 cell (`<email req length(>=5)> = <input type="email"/>`)
+becomes a declaration with a `renders` clause. Today (impl#1, §6.4.2) a Shape-2 cell's `<input/>` is bound implicitly
+(step 3) and its validators are wired onto the input as HTML attributes and into the validity surface (step 4). Two
+unruled halves: **(a)** does a `renders` holding a single bindable element keep an IMPLICIT bind, or is the bind always
+written (`renders <input type="email" bind:value=@email/>`)? **(b)** do validators on the declaration
+(`<let email:string="" req length(>=5)/>`) reach the `<input>` in its `renders` as HTML attributes, and how does that meet a
+`renders` that is not a single input (several inputs, a component, no input at all)? §66's worked examples write the
+bind explicitly and do not rely on (b). Context the PA verified: the S435 DD §7 #5 lean proposed explicit `bind:` inside
+`renders`, but the PA message bryan answered "yes" to presented only lexical `*`, the bare-own-field-tag error and the
+`<x/>` → `<*x/>` migration — not the bind half. Consumer: the bootstrap's §66.19.2 validated-form program is BLOCKED on this
+(S442 six-programs dispatch, `docs/changes/s442-bootstrap-six-programs/progress.md`). Interacts with: §55 validity surface
+(compound + per-field), §66.4 (attributes = data, children = validated fields), O54 (`@f` inside a child field's own
+`renders`), `formFor` (§41.14), the co-location axiom (S206). Poles to argue: implicit bind + validators flow to the
+single input (today's behaviour, carried) · explicit bind always + validators flow only to an explicitly marked input ·
+explicit bind + validators live ONLY in the validity surface (no HTML attributes). Deliver worked programs for each pole.
+

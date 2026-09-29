@@ -1,0 +1,13 @@
+${
+    type LoadError:enum = { Empty }
+    function risky()! -> LoadError { fail LoadError.Empty }
+}
+
+<r> = 0
+
+${ const Btn = <button id="handled" props={ onSave: function } onclick={ onSave() !{ | .Empty :> @r = 1 } }>go</> }
+${ const Show = <p props={ onSave: function }>hi</> }
+
+<Btn onSave=risky/>
+<Show onSave=risky/>
+<p id="out">${@r}</p>
