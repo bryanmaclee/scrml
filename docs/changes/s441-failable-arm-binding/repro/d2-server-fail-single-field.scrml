@@ -1,0 +1,24 @@
+// repro s441-failable-arm-binding D2 — base fa2e698c4 + merge of 635f99c6d (bare `fail .V`)
+// A SERVER-side `fail` of a single-field variant: at base the server emits the raw value
+// (`data: "queue full"`) while the client `!{}` arm reads the field-keyed `data.reason`
+// (the client-side schema), so `reason` binds `undefined`.
+<program db="d2.db">
+<db src="d2.db" tables="t">
+${
+  type E:enum = { Down(reason: string), Other }
+  <msg> = "none"
+  function send() ! E {
+    ?{`CREATE TABLE IF NOT EXISTS t (id integer primary key)`}.run()
+    fail .Down("queue full")
+  }
+  function go() {
+    send() !{
+      | ::Down(reason) :> { @msg = "down: " + reason; return }
+      | ::Other        :> { @msg = "other"; return }
+    }
+  }
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@msg}</p>
+</>
+</program>

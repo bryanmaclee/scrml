@@ -1,0 +1,26 @@
+// repro s441-failable-arm-binding D1 — base fa2e698c4 + merge of 635f99c6d (bare `fail .V`)
+// A bare-identifier catch-all `!{}` arm `| err :>` — what does `err` bind?
+// Observed at base: `const err = <result>.data` — the PAYLOAD (null for a unit variant),
+// not the error value. SPEC §19 / §18.2 grammar has no bare-identifier arm-pattern.
+<program>
+${
+  type E:enum = { Unit, Pay(msg: string) }
+  type Phase:enum = { Idle, Failed(err: E) }
+  <phase>: Phase = .Idle
+  <kind> = "unit"
+  function check() ! E {
+    if (@kind == "unit") fail .Unit
+    fail .Pay("boom")
+  }
+  function run() {
+    check() !{
+      | err :> { @phase = .Failed(err); return }
+    }
+  }
+}
+<button id="go" onclick=run()>go</button>
+<match for=Phase on=@phase>
+  <Idle><p id="out">idle</p></>
+  <Failed err><p id="out">${err}</p></>
+</>
+</program>
