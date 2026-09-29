@@ -272,10 +272,15 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
     expect(t.typing.presence.length).toBe(1);
     expect(mods.analyze.presenceTest(t, t.typing.presence[0])).toBe(true);
   });
-  test("Q1 — a CONDITIONALLY-mounted handle is `T | not` (§66.7.5): `if=@color` is not E-COND-NOT-BOOLEAN (only S437's read rule fires — see progress.md)", () => {
+  test("Q1 — a CONDITIONALLY-mounted handle is `T | not` (§66.7.5): `if=@color` is a presence test (r4 (b): legal); an always-mounted one is not", () => {
     expect(inApp("    <let show:bool=false/>", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div><p if=@color>x</p>"))
-      .toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+      .toEqual([]);
     expect(inApp("", "<dropdown as=country label=\"1\" options=([\"a\"])/><p if=@country>x</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
+  test("r4 (f) — `${@o.n}` in markup WITHOUT narrowing stays silent (ruled S442: `${not}` renders nothing; Q3's \"template\" is string templates only)", () => {
+    expect(inApp(O, "<p>${@o.n}</p><p>${@o.v}</p><p>${@o.f}</p>")).toEqual([]);
+    // twin: the same value under an operator in markup is still Q3
+    expect(inApp(O, "<p>${@o.n + 1}</p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
   test("r4 (a) — a bare `bool | not` condition is E-COND-NOT-BOOLEAN naming both fixes (ruled S442)", () => {
     const d = run([LIB(), app(O, "<p if=@o.f>x</p>")]).diags;
@@ -287,6 +292,18 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
   test("r4 (a) twins — `@o.f == true`, `@o.f != not`, and a NARROWED `bool | not` (a value test) are legal", () => {
     expect(inApp(O, "<p if=(@o.f == true)>x</p><p if=(@o.f != not)>y</p>")).toEqual([]);
     expect(inApp(O + "    function f() { if (@o.f != not) { if (@o.f) { @m = 1 } } }")).toEqual([]);
+  });
+  test("r4 (b) — a presence test of a CONDITIONAL handle is legal and narrows reads inside (ruled S442)", () => {
+    const S = "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n";
+    const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
+    expect(inApp(S, DDC + "<p if=@color>${@color.value}</p>")).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { @seen = @color.value } }\n    function g() { @seen = @color ? @color.value : \"\" }", DDC)).toEqual([]);
+  });
+  test("r4 (b) twins — the S437 rule still binds OUTSIDE the test: a sibling read, an else branch", () => {
+    const S = "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n";
+    const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
+    expect(inApp(S, DDC + "<p if=@color>x</p><p>${@color.value}</p>")).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(inApp(S + "    function f() { if (@color) { @seen = \"\" } else { @seen = @color.value } }", DDC)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
   test("Q1 — a `bool` condition is NOT recorded as a presence test", () => {
     const r = run([LIB(), app(CELLS, "<p if=@b>x</p>")]);
@@ -338,6 +355,38 @@ describe("#7 Q1 at runtime — a presence test lowers to an absence check, never
     expect(document.querySelector("p.t").textContent).toBe("no");
     click(document.querySelector("button.probe"));
     expect(document.querySelector("p.out").textContent).toBe("absent");
+  });
+});
+
+// r4 (b) at RUNTIME: `if=@color` over a conditionally-mounted handle renders only while it is mounted.
+const HANDLE_PRESENCE = `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+<program>
+    <let show:bool=false/>
+    function toggle() { @show = !@show }
+    <main>
+        <div if=@show><dropdown as=color label="C" options=(["a"])/></div>
+        <p class="c" if=@color>V=\${@color.value}</p>
+        <p class="d">\${@color ? "D" : "-"}</p>
+        <button class="t" onclick=toggle()>t</button>
+    </main>
+</program>
+`;
+
+describe("r4 (b) at runtime — a handle presence test is an absence check", () => {
+  test("`if=@color` / `if=(@color != not)` render only while the instance is mounted", async () => {
+    const files = [LIB(), { path: "app.scrml", src: HANDLE_PRESENCE }];
+    const r = run(files);
+    expect(r.diags.map((d) => d.code)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    await loadProgram(r.core, "s442-handle-presence");
+    expect(document.querySelector("p.c")).toBeNull();
+    expect(document.querySelector("p.d").textContent).toBe("-");
+    click(document.querySelector("button.t"));
+    expect(document.querySelector("p.c").textContent).toBe("V=");
+    expect(document.querySelector("p.d").textContent).toBe("D");
+    click(document.querySelector("button.t"));
+    expect(document.querySelector("p.c")).toBeNull();
+    expect(document.querySelector("p.d").textContent).toBe("-");
   });
 });
 

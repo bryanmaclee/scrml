@@ -1477,6 +1477,10 @@ ${
     // as `c.f` does. Scoped to the block and to the handle named.
     type NarrowB:struct = { name: string, ty: Type | not, inst: InstRef, iDecl: Sym }
 
+    // `present`: the conditional handles a PRESENCE TEST has proven mounted here
+    // (RULED S442: "the S437 conditional-handle rule vs Q1: the presence test
+    // COUNTS AS the narrowing (`if=@color` is legal; reads inside are
+    // narrowed)"). Inside, `@h` is not `maybe`.
     type Env:struct = {
         g: Globals,
         file: string,
@@ -1486,22 +1490,54 @@ ${
         handles: HandleInfo[],
         inRenders: boolean,
         narrows: NarrowB[],
+        present: string[],
     }
 
     fn withLocal(env: Env, l: LocalB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present }
     }
 
     fn withRow(env: Env, row: RowB, name: string, hs: HandleInfo[]) -> Env {
         const l: LocalB = { name: name, s: row.bind, ty: row.ty, mutable: false, narrowed: not, nDecl: not }
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals.concat([l]), rows: env.rows.concat([row]),
-                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows }
+                 handles: env.handles.concat(hs), inRenders: env.inRenders, narrows: env.narrows, present: env.present }
     }
 
     fn withNarrow(env: Env, n: NarrowB) -> Env {
         return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
-                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]) }
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows.concat([n]), present: env.present }
+    }
+
+    fn withPresent(env: Env, name: string) -> Env {
+        if (name == "") return env
+        return { g: env.g, file: env.file, ctx: env.ctx, locals: env.locals, rows: env.rows,
+                 handles: env.handles, inRenders: env.inRenders, narrows: env.narrows, present: env.present.concat([name]) }
+    }
+
+    // The conditional handle a condition tests for presence ("" — none): a
+    // BARE `@h` (the ruled spelling, `if=@color`), where `@h` is a conditional
+    // handle in scope not narrowed by a `given`. (`@h != not` is not taken:
+    // its `@h` lowers as a snapshot read — still S437's read rule.)
+    fn presenceHandle(env: Env, c: AExpr) -> string {
+        return condHandleNamed(env, atName(c))
+    }
+
+    fn condHandleNamed(env: Env, n: string) -> string {
+        if (n == "") return ""
+        if (lookupNarrow(env, n) is some) return ""
+        const h: HandleInfo | not = lookupHandle(env, n)
+        if (h is not) return ""
+        if (!h.conditional) return ""
+        return n
+    }
+
+    // A condition: a presence test of a conditional handle resolves its `@h`
+    // as a SUBJECT (not a read — the test is the narrowing, ruled S442).
+    fn resolveCond(env: Env, c: AExpr, st: AS) -> AS {
+        const h: string = presenceHandle(env, c)
+        if (h == "") return resolveExpr(env, c, Type.Bool, st).st
+        return resolveExpr(withPresent(env, h), c, Type.Bool, st).st
     }
 
     fn lookupNarrow(env: Env, name: string) -> NarrowB | not {
@@ -1719,7 +1755,9 @@ ${
         const h: HandleInfo | not = lookupHandle(env, name)
         if (h is some) {
             const hi: InstRef = InstRef.Alias(h.sym)
-            return { x: { ty: Type.Named(h.target), inst: hi, iDecl: h.target, maybe: h.conditional },
+            // a presence test in scope proves it mounted (ruled S442)
+            const maybe: boolean = h.conditional && env.present.indexOf(name) < 0
+            return { x: { ty: Type.Named(h.target), inst: hi, iDecl: h.target, maybe: maybe },
                      st: addName(st, e.nid, NameFact.NInst(h.target, hi)) }
         }
         const pi: DeclInfo | not = programInfo(env)
@@ -1915,8 +1953,8 @@ ${
     }
 
     fn resolveTernary(env: Env, e: AExpr, test: AExpr, yes: AExpr, no: AExpr, expected: Type | not, st0: AS) -> RX {
-        const rt: RX = resolveExpr(env, test, Type.Bool, st0)
-        const ry: RX = resolveExpr(env, yes, expected, rt.st)
+        const rt: RX = plain(Type.Bool, resolveCond(env, test, st0))
+        const ry: RX = resolveExpr(withPresent(env, presenceHandle(env, test)), yes, expected, rt.st)
         let want: Type | not = expected
         if (want is not) want = ry.x.ty
         const rn: RX = resolveExpr(env, no, want, ry.st)
@@ -2700,8 +2738,8 @@ ${
     }
 
     fn resolveIf(env: Env, c: AExpr, t: ABlock, el: ABlock | not, st0: AS) -> AS {
-        let st: AS = resolveExpr(env, c, Type.Bool, st0).st
-        st = resolveBlock(env, t, st)
+        let st: AS = resolveCond(env, c, st0)
+        st = resolveBlock(withPresent(env, presenceHandle(env, c)), t, st)
         if (el is some) st = resolveBlock(env, el, st)
         return st
     }
@@ -2811,7 +2849,25 @@ ${
         return resolveExpr(env, e, expected, st).st
     }
 
+    // An element's `if=` value: a condition (resolveCond). `elemPresentEnv`:
+    // the env its other attributes and its children see — the conditional
+    // handle its `if=` tests for presence is mounted there (ruled S442).
+    fn resolveIfValue(env: Env, v: AAttrValue, st: AS) -> AS {
+        const x: AExpr | not = valueExpr(v)
+        if (x is not) return st
+        return resolveCond(env, x, st)
+    }
+
+    fn elemPresentEnv(env: Env, e: AElem) -> Env {
+        const a: AAttr | not = attrNamed(e.attrs, "if")
+        if (a is not) return env
+        const x: AExpr | not = valueExpr(a.value)
+        if (x is not) return env
+        return withPresent(env, presenceHandle(env, x))
+    }
+
     fn resolveHtml(env: Env, e: AElem, st0: AS) -> AS {
+        const penv: Env = elemPresentEnv(env, e)
         let st: AS = addElem(st0, e.nid, ElemFact.MHtml)
         // E-DECL-FIELD-TAG-NEEDS-STAR: a bare tag naming a CHILD field of the
         // enclosing declaration (§66.6.6).
@@ -2827,21 +2883,21 @@ ${
         for (const a of e.attrs) {
             const ev: string = eventName(a.name)
             if (a.name == "if") {
-                st = resolveValue(env, a.value, Type.Bool, st)
+                st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
             } else if (ev != "") {
-                st = resolveHandler(env, a.value, st)
+                st = resolveHandler(penv, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AOn(ev))
             } else if (a.name.indexOf(":") >= 0) {
                 st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + a.name + "` is not in bootstrap slice M2")
             } else if (valueExpr(a.value) is some) {
-                st = resolveValue(env, a.value, not, st)
+                st = resolveValue(penv, a.value, not, st)
                 st = addAttr(st, a.nid, AttrKind.ABound)
             } else {
                 st = addAttr(st, a.nid, AttrKind.AStatic)
             }
         }
-        return resolveNodes(env, e.kids, st)
+        return resolveNodes(penv, e.kids, st)
     }
 
     fn handleByOwnerName(env: Env, owner: int, name: string) -> HandleInfo | not {
@@ -2855,6 +2911,7 @@ ${
     // construction (§66.14 rule 4, L6 / O60 — the printer seeds a field with a
     // capability and derives one without).
     fn resolveUse(env: Env, e: AElem, d: DeclSrc, st0: AS) -> AS {
+        const penv: Env = elemPresentEnv(env, e)
         let st: AS = st0
         let alias: Sym | not = not
         for (const a of e.attrs) {
@@ -2864,7 +2921,7 @@ ${
                 if (h is some) alias = h.sym
                 st = addAttr(st, a.nid, AttrKind.AAs)
             } else if (a.name == "if") {
-                st = resolveValue(env, a.value, Type.Bool, st)
+                st = resolveIfValue(env, a.value, st)
                 st = addAttr(st, a.nid, AttrKind.AIf)
             } else {
                 const i: int = fieldIndex(d.info, a.name)
@@ -2872,13 +2929,13 @@ ${
                     st = addDiag(st, env.file, a.span, "E-DECL-USE-ATTR", "`<" + e.tag + ">` has no attribute `" + a.name + "`")
                 } else {
                     const f: FieldInfo = d.info.fields[i]
-                    st = resolveConstructValue(env, a.value, f.ty, st)
+                    st = resolveConstructValue(penv, a.value, f.ty, st)
                     st = addAttr(st, a.nid, AttrKind.AConstruct(i))
                 }
             }
         }
         st = addElem(st, e.nid, ElemFact.MUse(d.info.sym, alias))
-        return resolveNodes(env, e.kids, st)
+        return resolveNodes(penv, e.kids, st)
     }
 
     fn resolveConstructValue(env: Env, v: AAttrValue, t: Type, st: AS) -> AS {
@@ -2955,7 +3012,7 @@ ${
 
     fn declEnv(g: Globals, ds: DeclSrc, inRenders: boolean) -> Env {
         return { g: g, file: ds.file, ctx: CtxK.InDecl(ds.info.sym, ds.isProgram), locals: [], rows: [],
-                 handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [] }
+                 handles: handlesOwnedBy(g, ds.info.nid), inRenders: inRenders, narrows: [], present: [] }
     }
 
     fn phaseB(g: Globals, st0: AS) -> AS {
@@ -2976,7 +3033,7 @@ ${
         for (const fs of g.fns) {
             let hs: HandleInfo[] = []
             if (fs.info.file == g.entry) hs = progHandles
-            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [] }
+            let env: Env = { g: g, file: fs.info.file, ctx: CtxK.InFn, locals: [], rows: [], handles: hs, inRenders: false, narrows: [], present: [] }
             const fte: TypeEnv = { stubs: g.te.stubs, declNames: g.te.declNames, declSyms: g.te.declSyms, file: fs.info.file }
             for (const p of fs.f.params) {
                 const rs: RSym = mint(st, p.name)
