@@ -44,7 +44,8 @@
 
 import { nativeParseFile } from "../native-parser/parse-file.js";
 import { splitBlocks } from "./block-splitter.js";
-import { buildAST } from "./ast-builder.js";
+import { buildAST, attachHandlerStatementListsInTree } from "./ast-builder.js";
+import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
 import { desugarImpliedLiftMarkupArms } from "./implied-lift-desugar.ts";
 import { exprNodeMatchesIdent, exprNodeContainsCall, emitStringFromTree, parseExprToNode } from "./expression-parser.ts";
 import type {
@@ -1202,6 +1203,14 @@ function reparseSynthesizedFile(
   const errors = result.errors ?? [];
   upgradeNativePropsDeclsInFileAST(result.ast, errors);
   upgradeNativeCallRefArgExprNodesInFileAST(result.ast, filePath);
+  // §5.2.3 handler statement lists — the native parser gives a handler value
+  // neither `exprNode` nor `handlerBlock`, so a component body's handler fell
+  // to the string lowering: `onclick={ f() !{…} }` emitted a raw `!{`
+  // (E-CODEGEN-INVALID-LOGIC), and the §19.4.3 check never saw its statements
+  // (S440 F2/F4). Attach them with the SAME statement parser the TAB path and
+  // the `<match>` arm re-parse (emit-match.ts) use. The live-fallback branch
+  // above already has them — buildAST attaches while building each block.
+  attachHandlerStatementListsInTree(result.ast.nodes, filePath, { synthesizeExprNode: false });
   return { ast: result.ast, errors };
 }
 
@@ -2283,9 +2292,29 @@ function substitutePropsInLogicStmt(
     }
     case "guarded-expr": {
       const n = stmt as GuardedExprNode;
+      // The `!{}` ARMS are substituted too (S440 N2): each arm body carries a raw
+      // `handler` string (what the arm emitter lowers) and a parsed `handlerExpr`
+      // (what the type system checks). An arm's payload binding shadows a
+      // same-named prop inside that arm only.
+      const arms = Array.isArray(n.arms)
+        ? n.arms.map((arm) => {
+            if (!arm || typeof arm !== "object") return arm;
+            const a = arm as unknown as { binding?: string; handler?: string; handlerExpr?: ExprNode };
+            const armShadowed = new Set(shadowed);
+            if (typeof a.binding === "string" && a.binding) {
+              for (const b of a.binding.split(",")) if (b.trim()) armShadowed.add(b.trim());
+            }
+            return {
+              ...(arm as object),
+              ...(typeof a.handler === "string" ? { handler: rewriteIdentsInRawExpr(a.handler, propExprMap, armShadowed) } : {}),
+              ...(a.handlerExpr ? { handlerExpr: substitutePropsInExprNode(a.handlerExpr, propExprMap, armShadowed) } : {}),
+            } as typeof arm;
+          })
+        : n.arms;
       return {
         ...n,
         guardedNode: substitutePropsInLogicStmt(n.guardedNode, propExprMap, shadowed),
+        arms,
       } satisfies GuardedExprNode;
     }
     // "when-effect" and the "when-worker-*" kinds emit from `bodyRaw` and are
@@ -2384,8 +2413,21 @@ function substituteProps(
   // Markup nodes: substitute in attrs and recurse into children
   if (cloned.kind === "markup") {
     if (Array.isArray(cloned.attrs)) {
+      const outerProps = props;
+      const outerPropExprMap = propExprMap;
       cloned.attrs = (cloned.attrs as AttrNode[]).map((attr: AttrNode) => {
         if (!attr || !attr.value) return attr;
+        // Inside an event-handler value `event` is the DOM event (§5.2.2), so a
+        // prop named `event` is shadowed there — in EVERY lowering path (the
+        // statement list already shadowed it; the one-statement / call-ref / raw
+        // paths substituted it — S440 N4).
+        const isHandlerAttr = typeof attr.name === "string" && isEventHandlerAttrName(attr.name);
+        const props = isHandlerAttr && outerProps.has("event")
+          ? new Map([...outerProps].filter(([k]) => k !== "event"))
+          : outerProps;
+        const propExprMap = isHandlerAttr && outerPropExprMap && outerPropExprMap.has("event")
+          ? new Map([...outerPropExprMap].filter(([k]) => k !== "event"))
+          : outerPropExprMap;
         if (attr.value.kind === "string-literal") {
           // First the whole-prop-name `${name}` substitution (string values).
           let newVal = applyPropSubstitutions(attr.value.value, props);
@@ -2505,7 +2547,17 @@ function substituteProps(
           }
         }
         if (propExprMap && attr.value.kind === "expr") {
-          const exprVal = attr.value as { raw: string; refs: string[]; exprNode?: ExprNode; span: ExprSpan };
+          const exprVal = attr.value as { raw: string; refs: string[]; exprNode?: ExprNode; span: ExprSpan; handlerBlock?: { stmts: LogicStatement[] } };
+          // §5.2.3 statement list (`handlerBlock`, attached at the body re-parse):
+          // it is what codegen emits and what the type system checks, so the
+          // props are substituted INTO it — every statement, not just the first
+          // (the `exprNode` below only ever held statement 1). The handler's
+          // `event` binding shadows a same-named prop.
+          if (exprVal.handlerBlock && Array.isArray(exprVal.handlerBlock.stmts)) {
+            const stmts = substitutePropsInLogicStmts(exprVal.handlerBlock.stmts, propExprMap, new Set(["event"]));
+            const first = exprVal.exprNode ? substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set()) : exprVal.exprNode;
+            return { ...attr, value: { ...exprVal, exprNode: first, handlerBlock: { stmts } } };
+          }
           if (exprVal.exprNode) {
             const replaced = substitutePropsInExprNode(exprVal.exprNode, propExprMap, new Set());
             if (replaced !== exprVal.exprNode) {

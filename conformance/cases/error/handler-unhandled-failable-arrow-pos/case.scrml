@@ -1,0 +1,11 @@
+${
+    type LoadError:enum = { Empty }
+    function risky()! -> LoadError { fail LoadError.Empty }
+}
+
+<r> = 0
+
+<button id="expr" onclick=${(e) => risky()}>expr</>
+<button id="block" onclick=${() => { @r = 1; risky() }}>block</>
+<button id="braced" onclick={ () => risky() }>braced</>
+<p id="out">${@r}</p>

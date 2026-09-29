@@ -75,6 +75,7 @@
 import { getElementShape, getAllElementNames } from "./html-elements.js";
 import { forEachIdentInExprNode, forEachCallInExprNode, classifyLiteralFromExprNode, exprNodeContainsCall, emitStringFromTree, parseExprToNode, extractValueIdentifiersFromAST } from "./expression-parser.ts";
 import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
+import { parseHandlerStatementsForCheck } from "./ast-builder.js";
 // §7.5 (S365, dpa-036 call 1) — `inferExprType` switches exhaustively over this
 // union. Imported as a TYPE so the `never` fallthrough has a closed set to close
 // over: adding a member to `ExprNode` without teaching inference about it is a
@@ -9802,6 +9803,42 @@ function annotateNodes(
   // only when the boundary also lacks a `fallback`.
   const errorBoundaryFallbackStack: boolean[] = [];
 
+  // §19.4.3 (S440) — depth of an event-handler value's check walk. A handler
+  // runs on an event, AFTER render: an enclosing `<errorBoundary>` does not
+  // catch its failure (the boundary contains render-time calls — §19.6), so a
+  // handler walk runs with the boundary context CLEARED — E-ERROR-002 fires for
+  // an unhandled call and E-ERROR-005 (a render-time renderability check) does
+  // not. The depth also turns on scope resolution of the callee.
+  let handlerCheckDepth = 0;
+  function withHandlerCheckContext(fn: () => void): void {
+    const savedDepth = errorBoundaryDepth;
+    const savedFallbacks = errorBoundaryFallbackStack.splice(0);
+    errorBoundaryDepth = 0;
+    handlerCheckDepth++;
+    try {
+      fn();
+    } finally {
+      handlerCheckDepth--;
+      errorBoundaryDepth = savedDepth;
+      errorBoundaryFallbackStack.splice(0, errorBoundaryFallbackStack.length, ...savedFallbacks);
+    }
+  }
+  // True when `name`'s nearest binding is a LOCAL non-function one (an `<each>`
+  // alias, a handler-local `let`, a parameter) — i.e. it shadows any file-level
+  // function of that name. A global-scope binding (incl. the export pre-bind,
+  // which binds exported functions as variables) or no binding is not a shadow.
+  function isShadowedByLocalBinding(name: string): boolean {
+    let scope: Scope | null = scopeChain.current;
+    while (scope !== null) {
+      if (scope.hasOwn(name)) {
+        const entry = scope.bindings.get(name);
+        return scope !== scopeChain.global && !!entry && entry.kind !== "function";
+      }
+      scope = scope.parent;
+    }
+    return false;
+  }
+
   function visitNode(node: unknown): ResolvedType {
     if (!node || typeof node !== "object") return tUnknown({ source: "not-a-node" });
 
@@ -11101,11 +11138,15 @@ function annotateNodes(
         //   • a `_{ … }` foreign initializer — §23.2.3 opacity is deliberate,
         //     and writing `_{ }` IS the signature. §14.7's named hatch, used as
         //     designed.
+        //   • (S440) an arrow-valued handler's parameter binding (`const e = event`,
+        //     synthesized by ast-builder `parseArrowHandlerStatements`): it is the
+        //     event, typed exactly as the handler's own `event` binding is.
         if (
           !letAnnot &&
           resolvedType.kind === "asIs" &&
           !((n as Record<string, unknown>).sqlNode) &&
-          !((n as Record<string, unknown>).foreignNode)
+          !((n as Record<string, unknown>).foreignNode) &&
+          !((n as Record<string, unknown>)._handlerParamPrelude)
         ) {
           const gapInit = (n as any).initExpr as ExprNode | undefined;
           if (gapInit && typeof gapInit === "object" && typeof gapInit.kind === "string") {
@@ -12164,93 +12205,10 @@ function annotateNodes(
             }
           }
         }
-        // E-ERROR-002 (§19.4.3): a bare call to a failable function at top-level
-        // (outside any function body) is also unhandled. The in-function check
-        // runs in the function-decl branch; this catches the outer case.
-        // Skip when this node is the guardedNode of a parent guarded-expr — the
-        // !{} arms already handle the error.
-        // A9-Ext-4 D3 (2026-05-08): for CPS-implicit-failable callees, fire
-        // W-CPS-NEEDS-FAILABLE (warning, cycle 1) instead. Mirrors the
-        // function-body site above (line ~3990).
-        // A9-Ext-4 D3 suppression: when this bare-expr is inside a `!`-typed
-        // function body (`__enclosingFnCanFail === true`, marked by the
-        // function-decl visitor above), the structural propagation satisfies
-        // the handling requirement — suppress W-CPS-NEEDS-FAILABLE per
-        // body-split soundness design dive §3.4 verdict.
-        const bareCallee = extractCalleeNameFromNode(n) ?? extractCalleeNameFromString(
-          n.exprNode ? emitStringFromTree(n.exprNode as import("./types/ast.ts").ExprNode) : (n.expr as string | undefined)
-        );
-        // §19.16.3 rule 3 — a bare call inside a deferred body is checked by the
-        // function-body §19 walker (E-DEFER-UNHANDLED-FAILABLE), which REPLACES
-        // E-ERROR-002 / W-CPS-NEEDS-FAILABLE there.
-        const inGuarded = (n as Record<string, unknown>).__inGuardedContext === true ||
-          (n as Record<string, unknown>).__inDeferBody === true;
-        const enclosingFnCanFail = (n as Record<string, unknown>).__enclosingFnCanFail === true;
-        // errorBoundary (§19.6 / §19.4.3 item 4) — a `!`-call reached inside an
-        // `<errorBoundary>` subtree is contained by the boundary; the markup
-        // catch satisfies the handling requirement. Suppress E-ERROR-002 /
-        // W-CPS-NEEDS-FAILABLE; E-ERROR-005 (§19.6.6) instead governs whether
-        // the boundary can render the variant.
-        const inErrorBoundary = errorBoundaryDepth > 0;
-        if (bareCallee && fnCanFail.has(bareCallee) && !inGuarded && !inErrorBoundary) {
-          if (fnCpsImplicitFailable.has(bareCallee)) {
-            if (!enclosingFnCanFail) {
-              errors.push(new TSError(
-                "W-CPS-NEEDS-FAILABLE",
-                `W-CPS-NEEDS-FAILABLE: function \`${bareCallee}\` is split across the client/server ` +
-                `boundary (CPS) and may fail due to network or SQL errors. The current call ` +
-                `site does not handle the failure case.\n` +
-                `  Resolution options:\n` +
-                `    1. Wrap the call site in \`<errorBoundary>\` (markup context).\n` +
-                `    2. Mark the calling function \`!\` to propagate the error.\n` +
-                `    3. Match on the result: \`match ${bareCallee}(...) { ::Ok(v) -> ... ::NetworkError(e) -> ... }\`.\n` +
-                `  This warning will become an error (E-CPS-NEEDS-FAILABLE) in v0.next+1.`,
-                n.span as Span,
-                "warning",
-              ));
-            }
-            // else: suppressed — `!`-typed enclosing function propagates structurally.
-          } else {
-            errors.push(new TSError(
-              "E-ERROR-002",
-              `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
-              `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
-              n.span as Span,
-            ));
-          }
-        }
-
-        // E-ERROR-005 (§19.6.6) — static exhaustiveness for markup-context
-        // `!`-calls inside an `<errorBoundary>`. Every error variant the call
-        // can produce MUST be displayable: either the variant carries a
-        // `renders` clause (§19.2) or the innermost boundary declares a
-        // `fallback=`. A variant with neither is a compile error — at runtime
-        // it would re-propagate (§19.6.8 B3) with nothing to render.
-        if (bareCallee && inErrorBoundary && fnCanFail.has(bareCallee) && !inGuarded) {
-          const hasFallback = errorBoundaryFallbackStack.length > 0
-            && errorBoundaryFallbackStack[errorBoundaryFallbackStack.length - 1] === true;
-          if (!hasFallback) {
-            const errTypeName = fnErrorTypes.get(bareCallee);
-            const errType = errTypeName ? typeRegistry.get(errTypeName) : undefined;
-            if (errType && errType.kind === "enum" && Array.isArray(errType.variants)) {
-              for (const v of errType.variants) {
-                // A variant with no `renders` clause and no boundary `fallback`
-                // is unrenderable inside this boundary.
-                if (!v.renders) {
-                  const loc = `${(n.span as Span | undefined)?.line ?? "?"}:${(n.span as Span | undefined)?.col ?? "?"}`;
-                  errors.push(new TSError(
-                    "E-ERROR-005",
-                    `E-ERROR-005: Error variant '${errTypeName}::${v.name}' may occur inside ` +
-                    `'<errorBoundary>' at ${loc} but has no 'renders' clause and the boundary has no ` +
-                    `'fallback' attribute. Either add a 'renders' clause to the variant or add a ` +
-                    `'fallback' attribute to the boundary.`,
-                    n.span as Span,
-                  ));
-                }
-              }
-            }
-          }
-        }
+        // E-ERROR-002 / W-CPS-NEEDS-FAILABLE / E-ERROR-005 for a bare failable
+        // call — shared with event-handler attribute values (see
+        // `checkUnhandledFailableBareCall`).
+        checkUnhandledFailableBareCall(n);
         break;
       }
 
@@ -14290,6 +14248,120 @@ function annotateNodes(
     );
   }
 
+  /**
+   * §19.4.3 / §19.4.4 — the unhandled-failable-call check for ONE bare
+   * expression statement `n` (`{ kind: "bare-expr", exprNode | expr, span }`).
+   * Fires E-ERROR-002 (or W-CPS-NEEDS-FAILABLE for a CPS-implicit callee), and
+   * E-ERROR-005 when the call is contained by an `<errorBoundary>`.
+   *
+   * Called from the `bare-expr` case of `visitNode` AND from `visitAttr` for an
+   * event-handler value that is a single call (`onclick=f()`, `onclick={ f() }`,
+   * `onclick=${f()}`) — S439 ruling #14 + S440 "restore conformance": the answer
+   * follows the unhandled call, not the handler's statement count or form, so the
+   * one-statement forms take the SAME check a multi-statement handler's
+   * statements already take (via `visitLogicNode`).
+   */
+  function checkUnhandledFailableBareCall(n: ASTNodeLike): void {
+    // E-ERROR-002 (§19.4.3): a bare call to a failable function at top-level
+    // (outside any function body) is also unhandled. The in-function check
+    // runs in the function-decl branch; this catches the outer case.
+    // Skip when this node is the guardedNode of a parent guarded-expr — the
+    // !{} arms already handle the error.
+    // A9-Ext-4 D3 (2026-05-08): for CPS-implicit-failable callees, fire
+    // W-CPS-NEEDS-FAILABLE (warning, cycle 1) instead. Mirrors the
+    // function-body site above (line ~3990).
+    // A9-Ext-4 D3 suppression: when this bare-expr is inside a `!`-typed
+    // function body (`__enclosingFnCanFail === true`, marked by the
+    // function-decl visitor above), the structural propagation satisfies
+    // the handling requirement — suppress W-CPS-NEEDS-FAILABLE per
+    // body-split soundness design dive §3.4 verdict.
+    const bareCallee = extractCalleeNameFromNode(n) ?? extractCalleeNameFromString(
+      n.exprNode ? emitStringFromTree(n.exprNode as import("./types/ast.ts").ExprNode) : (n.expr as string | undefined)
+    );
+    // §19.16.3 rule 3 — a bare call inside a deferred body is checked by the
+    // function-body §19 walker (E-DEFER-UNHANDLED-FAILABLE), which REPLACES
+    // E-ERROR-002 / W-CPS-NEEDS-FAILABLE there.
+    const inGuarded = (n as Record<string, unknown>).__inGuardedContext === true ||
+      (n as Record<string, unknown>).__inDeferBody === true;
+    const enclosingFnCanFail = (n as Record<string, unknown>).__enclosingFnCanFail === true;
+    // errorBoundary (§19.6 / §19.4.3 item 4) — a `!`-call reached inside an
+    // `<errorBoundary>` subtree is contained by the boundary; the markup
+    // catch satisfies the handling requirement. Suppress E-ERROR-002 /
+    // W-CPS-NEEDS-FAILABLE; E-ERROR-005 (§19.6.6) instead governs whether
+    // the boundary can render the variant.
+    const inErrorBoundary = errorBoundaryDepth > 0;
+    // In an event-handler value, resolve the callee through scope: `fnCanFail`
+    // is keyed by NAME, so an `<each in=@fns as risky>` row's `onclick=risky()`
+    // would otherwise be taken for the file's failable `risky` (S440 F7).
+    if (bareCallee && handlerCheckDepth > 0 && isShadowedByLocalBinding(bareCallee)) return;
+    if (bareCallee && fnCanFail.has(bareCallee) && !inGuarded && !inErrorBoundary) {
+      if (fnCpsImplicitFailable.has(bareCallee)) {
+        if (!enclosingFnCanFail) {
+          errors.push(new TSError(
+            "W-CPS-NEEDS-FAILABLE",
+            `W-CPS-NEEDS-FAILABLE: function \`${bareCallee}\` is split across the client/server ` +
+            `boundary (CPS) and may fail due to network or SQL errors. The current call ` +
+            `site does not handle the failure case.\n` +
+            `  Resolution options:\n` +
+            `    1. Wrap the call site in \`<errorBoundary>\` (markup context).\n` +
+            `    2. Mark the calling function \`!\` to propagate the error.\n` +
+            `    3. Match on the result: \`match ${bareCallee}(...) { ::Ok(v) -> ... ::NetworkError(e) -> ... }\`.\n` +
+            `  This warning will become an error (E-CPS-NEEDS-FAILABLE) in v0.next+1.`,
+            n.span as Span,
+            "warning",
+          ));
+        }
+        // else: suppressed — `!`-typed enclosing function propagates structurally.
+      } else {
+        // In an event handler the remedies differ (S440 #22): an `<errorBoundary>`
+        // catches render-time failures only, and a handler is not a `!` function
+        // so `?` has nowhere to propagate to.
+        errors.push(new TSError(
+          "E-ERROR-002",
+          handlerCheckDepth > 0
+            ? `E-ERROR-002: Result of failable function '${bareCallee}' is not handled in this event handler. ` +
+              `Catch it with '!{}' (e.g. '${bareCallee}(…) !{ | .Variant :> … }'), match the result, or call it from a ` +
+              `function that handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`
+            : `E-ERROR-002: Result of failable function '${bareCallee}' is not handled. ` +
+              `Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`,
+          n.span as Span,
+        ));
+      }
+    }
+
+    // E-ERROR-005 (§19.6.6) — static exhaustiveness for markup-context
+    // `!`-calls inside an `<errorBoundary>`. Every error variant the call
+    // can produce MUST be displayable: either the variant carries a
+    // `renders` clause (§19.2) or the innermost boundary declares a
+    // `fallback=`. A variant with neither is a compile error — at runtime
+    // it would re-propagate (§19.6.8 B3) with nothing to render.
+    if (bareCallee && inErrorBoundary && fnCanFail.has(bareCallee) && !inGuarded) {
+      const hasFallback = errorBoundaryFallbackStack.length > 0
+        && errorBoundaryFallbackStack[errorBoundaryFallbackStack.length - 1] === true;
+      if (!hasFallback) {
+        const errTypeName = fnErrorTypes.get(bareCallee);
+        const errType = errTypeName ? typeRegistry.get(errTypeName) : undefined;
+        if (errType && errType.kind === "enum" && Array.isArray(errType.variants)) {
+          for (const v of errType.variants) {
+            // A variant with no `renders` clause and no boundary `fallback`
+            // is unrenderable inside this boundary.
+            if (!v.renders) {
+              const loc = `${(n.span as Span | undefined)?.line ?? "?"}:${(n.span as Span | undefined)?.col ?? "?"}`;
+              errors.push(new TSError(
+                "E-ERROR-005",
+                `E-ERROR-005: Error variant '${errTypeName}::${v.name}' may occur inside ` +
+                `'<errorBoundary>' at ${loc} but has no 'renders' clause and the boundary has no ` +
+                `'fallback' attribute. Either add a 'renders' clause to the variant or add a ` +
+                `'fallback' attribute to the boundary.`,
+                n.span as Span,
+              ));
+            }
+          }
+        }
+      }
+    }
+  }
+
   function visitAttr(attr: ASTNodeLike, parent: ASTNodeLike): void {
     if (!attr || !attr.value) return;
 
@@ -14305,6 +14377,60 @@ function annotateNodes(
     // attr (`<input value=42>`) still errors (`value` is not allowlisted).
 
     const value = attr.value as ASTNodeLike;
+
+    // §19.4.3 / §19.4.4 — an unhandled `!` call in an event-handler value is
+    // E-ERROR-002 in EVERY form (S439 ruling #14 + S440 "restore conformance").
+    // A multi-statement value (`handlerBlock`) is walked statement-by-statement
+    // in the `expr` branch below through `visitLogicNode`, whose `bare-expr` case
+    // runs the check. A one-statement value keeps the single-expression codegen
+    // path (no `handlerBlock`), so before S440 its statement never reached that
+    // case — impl#1's handler exemption, which made the answer depend on the
+    // statement count. Every one-statement form is now checked the same way:
+    //   - an `expr` value (`{ f() }`, `${f()}`, `{ if (c) f() }`, `{ for … f() }`)
+    //     is parsed as a statement list FOR CHECKING (`parseHandlerStatementsForCheck`
+    //     — the same parser `handlerBlock` comes from) and walked like one;
+    //   - a bare `call-ref` (`onclick=f()`) is checked as a bare call statement.
+    // A function REFERENCE (`onclick=f`, `onclick=${f}`, `<formFor onsubmit=fn/>`)
+    // is not a call. An ARROW value (`${(e) => f()}`) is checked through its BODY
+    // (S440 ruling: an arrow body runs on the event like `{ … }`) — see
+    // ast-builder `parseArrowHandlerStatements`; arrows with 2+ or non-simple
+    // parameters are not modelled and stay unchecked.
+    if (
+      typeof attr.name === "string"
+      && isEventHandlerAttrName(attr.name)
+      && !(value as Record<string, unknown>).handlerBlock
+    ) {
+      const valueSpan = (value.span ?? attr.span ?? parent?.span) as Span | undefined;
+      const checkStmts = value.kind === "expr" ? parseHandlerStatementsForCheck(value, filePath) : null;
+      if (Array.isArray(checkStmts)) {
+        // Check-only walk: keep ONLY the §19.4.3 diagnostic. Every other check
+        // on this value already ran on the expression path (`checkLogicExprIdents`
+        // below) — re-running them here would double-report — and the
+        // CPS-implicit W-CPS-NEEDS-FAILABLE is out of this ruling's scope.
+        const before = errors.length;
+        scopeChain.push(`handler-check:${attr.name as string}`);
+        scopeChain.bind("event", { kind: "variable", resolvedType: tAsIs() });
+        withHandlerCheckContext(() => {
+          for (const stmt of checkStmts) {
+            if (stmt && typeof stmt === "object") visitLogicNode(stmt as ASTNodeLike, "client");
+          }
+        });
+        scopeChain.pop();
+        const produced = errors.splice(before);
+        for (const e of produced) if (e && e.code === "E-ERROR-002") errors.push(e);
+      } else {
+        const call = handlerValueAsBareCall(value, valueSpan);
+        // Scope: the ruling covers calls to functions DECLARED `!`. A
+        // CPS-implicit-failable callee (a server fn not declared `!`) is still
+        // in its W-CPS-NEEDS-FAILABLE deprecation cycle, and extending that
+        // warning to the one-statement handler forms (`onclick=save()`, the
+        // common server-call shape) is a separate decision — not taken here.
+        const callee = call ? extractCalleeNameFromNode(call) : null;
+        if (call && !(callee && fnCpsImplicitFailable.has(callee))) {
+          withHandlerCheckContext(() => checkUnhandledFailableBareCall(call));
+        }
+      }
+    }
 
     if (value.kind === "variable-ref") {
       const name = value.name as string;
@@ -14471,9 +14597,11 @@ function annotateNodes(
           }
         };
         collectWrites(handlerBlock.stmts);
-        for (const stmt of handlerBlock.stmts) {
-          if (stmt && typeof stmt === "object") visitLogicNode(stmt as ASTNodeLike, "client");
-        }
+        withHandlerCheckContext(() => {
+          for (const stmt of handlerBlock.stmts!) {
+            if (stmt && typeof stmt === "object") visitLogicNode(stmt as ASTNodeLike, "client");
+          }
+        });
         scopeChain.pop();
         return;
       }
@@ -19140,6 +19268,55 @@ function extractCalleeNameFromNode(node: ASTNodeLike): string | null {
   // propagate-expr where the inner expression is just an identifier (rare but possible)
   if (exprNode.kind === "ident" && exprNode.name) {
     return exprNode.name;
+  }
+  return null;
+}
+
+/**
+ * §19.4.3 — view a ONE-statement event-handler attribute value as the
+ * `bare-expr` statement it is, when (and only when) its root is a CALL to a
+ * plain identifier. Returns null for every non-call value — a function
+ * reference (`onclick=f`, `onclick=${f}`), an arrow (`${() => f()}`, a
+ * function VALUE whose body runs later), an assignment, a `!{}`-guarded or
+ * `?`-propagated call, a method call on a reactive (`@phase.advance()`).
+ *
+ *   - `call-ref` — the bare `onclick=f(a, b)` form: `{ name, args, span }`.
+ *   - `expr`     — the braced `onclick={ f() }` / `onclick=${f()}` form, whose
+ *                  `exprNode` is the parsed expression.
+ *
+ * The same structural root rule the `bare-expr` statement check applies
+ * (`extractCalleeNameFromNode`'s call limb), so a handler statement and a
+ * function-body statement get the same answer. The ident limb of that helper
+ * is deliberately NOT mirrored: in a handler value an ident is a reference.
+ */
+function handlerValueAsBareCall(value: ASTNodeLike, span: Span | undefined): ASTNodeLike | null {
+  if (!value || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  if (v.kind === "call-ref") {
+    // `<formFor onsubmit=persist/>` is lowered (emit-form-for.ts `callRefAttr`)
+    // to a synthesized `<form onsubmit=persist()>` call-ref tagged
+    // `formForSubmitCell`. The SOURCE is a function reference — §41.14.3
+    // REQUIRES that function to be failable — so the compiler's own lowering
+    // is not an author-written unhandled call.
+    if (typeof v.formForSubmitCell === "string") return null;
+    const name = v.name;
+    if (typeof name !== "string" || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) return null;
+    return {
+      kind: "bare-expr",
+      exprNode: { kind: "call", callee: { kind: "ident", name }, args: [] },
+      span,
+    } as unknown as ASTNodeLike;
+  }
+  if (v.kind === "expr") {
+    const exprNode = v.exprNode as { kind?: string; callee?: { kind?: string; name?: string } } | undefined;
+    if (
+      exprNode && typeof exprNode === "object"
+      && exprNode.kind === "call"
+      && exprNode.callee?.kind === "ident"
+      && typeof exprNode.callee.name === "string"
+    ) {
+      return { kind: "bare-expr", exprNode, span } as unknown as ASTNodeLike;
+    }
   }
   return null;
 }

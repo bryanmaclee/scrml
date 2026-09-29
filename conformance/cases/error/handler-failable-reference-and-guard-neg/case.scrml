@@ -1,0 +1,10 @@
+${
+    type LoadError:enum = { Empty }
+    function risky()! -> LoadError { fail LoadError.Empty }
+}
+
+<r> = 0
+
+<button id="ref" onclick=risky>reference</>
+<button id="guarded" onclick={ risky() !{ | .Empty :> @r = 7 } }>guarded</>
+<p id="out">${@r}</p>
