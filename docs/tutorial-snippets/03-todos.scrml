@@ -24,9 +24,9 @@
   }
 
   const TodoRow = <li class="row" props={ item: Todo }>
-    <input type="checkbox" checked=@item.done onchange=toggle(@item.id)/>
-    <span class:done=@item.done>${@item.body}</span>
-    <button onclick=remove(@item.id)>x</button>
+    <input type="checkbox" checked=item.done onchange=toggle(item.id)/>
+    <span class:done=item.done>${item.body}</span>
+    <button onclick=remove(item.id)>x</button>
   </li>
 
   #{

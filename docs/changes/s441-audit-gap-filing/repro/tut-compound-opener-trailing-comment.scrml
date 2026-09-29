@@ -1,0 +1,14 @@
+// S441 reproducer — addendum-3 T5: a trailing `//` comment on a compound-state opener line breaks the compound.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/tut-compound-opener-trailing-comment.scrml --output-dir <scratch>
+// Expected: compiles — §27.1 "`//` is a single-line comment. It is valid in all scrml contexts."
+// Actual:   exit 1: `error [E-MARKUP-001]: `<form1>` is not a known HTML element and not a defined component…`
+//           (stage NR) + `error [E-STATE-UNDECLARED]: bare `@form1` read with no reactive cell in scope…`.
+//           Control: the identical file with the comment on its own line above the opener → exit 0.
+<program>
+<form1>   // the form's fields
+    <title req> = <input type="text"/>
+</>
+<p>${@form1.isValid}</p>
+<form1><title/></>
+</program>

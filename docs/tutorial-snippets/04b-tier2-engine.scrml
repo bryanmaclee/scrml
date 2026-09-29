@@ -1,9 +1,8 @@
-// 04b-tier2-engine.scrml — Tier 2: <engine> with rule= contracts.
+// 04b-tier2-engine.scrml — Tier 2: an <engine> with rule= contracts.
 //
-// The engine is declared inside <program> as a direct child, alongside the
-// types and functions. State-children carry rule= attributes that declare the
-// legal transitions out. Bodies are empty (</>) here — markup is driven by a
-// `match` block that reads the engine's auto-declared variable.
+// The engine is a direct child of <program>, alongside the type and the
+// function. Each state-child's rule= lists the legal transitions out of it.
+// The bodies are empty here; the <match> below renders each phase.
 
 <program>
 
@@ -26,17 +25,21 @@
     <Failed  rule=.Idle></>
   </>
 
-  <div>
-    ${
-      match @loadPhase {
-        .Idle        :> { lift <button onclick=load()>Load</button> }
-        .Loading     :> { lift <p>Loading…</p> }
-        .Loaded(n)   :> { lift <p>Got ${n} rows.</p>
-                          lift <button onclick=${@loadPhase = .Idle}>Reset</button> }
-        .Failed(msg) :> { lift <p class="err">Failed: ${msg}</p>
-                          lift <button onclick=${@loadPhase = .Idle}>Try again</button> }
-      }
-    }
-  </div>
+  <match for=LoadPhase on=@loadPhase>
+    <Idle>
+      <button onclick=load()>Load</button>
+    </Idle>
+    <Loading>
+      <p>Loading…</p>
+    </Loading>
+    <Loaded(n)>
+      <p>Got ${n} rows.</p>
+      <button onclick={ @loadPhase = .Idle }>Reset</button>
+    </Loaded>
+    <Failed(msg)>
+      <p class="err">Failed: ${msg}</p>
+      <button onclick={ @loadPhase = .Idle }>Try again</button>
+    </Failed>
+  </match>
 
 </program>

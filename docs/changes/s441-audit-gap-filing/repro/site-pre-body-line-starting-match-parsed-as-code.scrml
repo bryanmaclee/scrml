@@ -1,0 +1,15 @@
+// S441 reproducer — addendum-2 S6a: a line beginning `match` inside a `<pre>` raw-content body is parsed as code.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-pre-body-line-starting-match-parsed-as-code.scrml --output-dir <scratch>
+// Expected: §4.17 "The element names `pre` and `code` … are raw-content elements … the block splitter SHALL
+//           scan the body as a single text run terminated only by the matching close tag" — the text renders.
+// Actual:   exit 1 `error [E-TYPE-026]: `match` is not valid directly in markup (§18.9). Wrap the match in a
+//           logic interpolation — e.g. `${ match subject { .A => <p>a</> else => <p>b</> } }` …` (stage TS).
+//           The raw body reached the typer's markup-match check. (The message also still teaches `=>` arms.)
+<program>
+<pre>
+match @phase {
+  .Idle :> "idle"
+}
+</pre>
+</program>
