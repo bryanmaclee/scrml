@@ -56,6 +56,9 @@
 // whether a brace inside a brace-delimited context is string-literal content
 // (braceIsQuotedStringContent). The block tree is still built by this scan.
 import { tokenizeLogic } from "./tokenizer.ts";
+// S441 — the body-top display-text literal scanner predicates, shared with the
+// native markup trampoline (see the `bodyTopLiteralEnd` state below).
+import { bodyTopQuoteStartsStatement, scanBodyTopLiteralClose } from "../native-parser/body-top-prose.js";
 
 // ---------------------------------------------------------------------------
 // Error
@@ -997,6 +1000,18 @@ export function splitBlocks(filePath, source) {
   // like `type X:enum = { A, B, C }` where `{...}` is structural text, not a context.
   let orphanBraceDepth = 0;
 
+  // S441 (SPEC §40.8 S441 bullet, §4.18.3) — a `<program>` / `<page>` /
+  // `<channel>` body is code-default, so a `"` that STARTS A STATEMENT there
+  // opens a display-text literal whose content is TEXT: a `<`, `//` or `<!--`
+  // inside it is literal content, not a tag or a comment (§4.18.6 escapes
+  // `<`/`>`/`&` on emit). `bodyTopLiteralEnd` is the offset just past the
+  // closing `"` of the literal being scanned (0 = none); `${…}` inside it
+  // still opens a logic context (§4.18.4 interpolation). The literal/code
+  // split itself is the TAB-stage pass (ast-builder.js
+  // splitBodyTopDisplayLiterals); this only stops the scanner from cutting
+  // the literal apart first.
+  let bodyTopLiteralEnd = 0;
+
   // End offset of the last comment the splitter consumed (a
   // braceIsQuotedStringContent segment never starts inside comment text).
   let _lastCommentEnd = 0;
@@ -1125,6 +1140,13 @@ export function splitBlocks(filePath, source) {
   // ---------------------------------------------------------------------------
 
   /** Begin accumulating a text run at the current position (if not already started). */
+  // S441 — is the innermost open frame a `<program>` / `<page>` / `<channel>`
+  // markup body?
+  function topIsProgramFamilyBody() {
+    const tf = topFrame();
+    return !!tf && tf.type === "markup" && (tf.name === "program" || tf.name === "page" || tf.name === "channel");
+  }
+
   function beginText() {
     if (textStart === -1) {
       textStart = pos;
@@ -2502,6 +2524,28 @@ export function splitBlocks(filePath, source) {
     const curLine = line;
     const curCol = col;
     const c = source[pos];
+
+    // S441 — inside a body-top display-text literal every character is text
+    // except a `${` interpolation (handled by the normal logic-context path).
+    if (bodyTopLiteralEnd > pos && !topIsBraceContext()) {
+      if (!(c === "$" && source[pos + 1] === "{")) {
+        beginText();
+        step();
+        continue;
+      }
+    } else if (
+      c === "\"" && orphanBraceDepth === 0 && !topIsBraceContext() &&
+      topIsProgramFamilyBody() &&
+      bodyTopQuoteStartsStatement(source, curPos, textStart !== -1 ? textStart : curPos)
+    ) {
+      const close = scanBodyTopLiteralClose(source, curPos);
+      if (close > curPos) {
+        bodyTopLiteralEnd = close + 1;
+        beginText();
+        step();
+        continue;
+      }
+    }
 
     // -----------------------------------------------------------------------
     // Section 4.7: '//' comment suppression (applies at most context levels)

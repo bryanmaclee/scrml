@@ -3162,6 +3162,20 @@ export function captureTrailingContentWarnings<T>(fn: () => T): { result: T; war
   }
 }
 
+/**
+ * S441 — the body-top strictness oracle (SPEC §40.8 S441 bullet, §4.18.7).
+ * A `<program>` / `<page>` / `<channel>` body-top run is a statement sequence;
+ * an expression the lenient statement collector handed over that acorn can only
+ * parse by DROPPING trailing content (`parseExpressionAt` stops early —
+ * `Welcome to the dashboard.` keeps `Welcome`) is not valid code. The returned
+ * ExprNode then carries a NON-enumerable `_s441Trailing` flag (invisible to
+ * serialization and structural equality); ast-builder's body-top check reads it
+ * through `hasLostTrailingContent`.
+ */
+export function hasLostTrailingContent(node: unknown): boolean {
+  return !!node && typeof node === "object" && (node as Record<string, unknown>)._s441Trailing === true;
+}
+
 export function parseExprToNode(raw: string, filePath: string, offset: number, opts?: { tildeActive?: boolean }): ExprNode {
   // §42.10 ENFORCEMENT (S188 g-not-negation-enforce): a detector object captures
   // whether preprocessForAcorn lowered a prefix-`not`-as-negation (bare `not @x`
@@ -3176,8 +3190,11 @@ export function parseExprToNode(raw: string, filePath: string, offset: number, o
   // sanctioned absence/presence keyword nor a `.Variant` pattern. When it fires
   // we stamp `_isValueRhsOnIs`; the gauntlet-phase3 §45 harvest fires E-EQ-005
   // (once per stamped node) BEFORE codegen, steering the author to `==`.
-  const _detector = { notPrefixNegation: false, valueRhsOnIs: false };
+  const _detector: { notPrefixNegation: boolean; valueRhsOnIs: boolean; lostTrailing?: boolean } = { notPrefixNegation: false, valueRhsOnIs: false };
   const _node = _parseExprToNodeInner(raw, filePath, offset, opts, _detector);
+  if (_node && typeof _node === "object" && _detector.lostTrailing) {
+    Object.defineProperty(_node, "_s441Trailing", { value: true, enumerable: false, configurable: true, writable: true });
+  }
   if (_node && typeof _node === "object") {
     if (_detector.notPrefixNegation) (_node as Record<string, unknown>)._notPrefixNegation = true;
     if (_detector.valueRhsOnIs) (_node as Record<string, unknown>)._isValueRhsOnIs = true;
@@ -3250,6 +3267,20 @@ function _parseExprToNodeInner(raw: string, filePath: string, offset: number, op
   // followed by code — this is the signature of the ASI merge bug.
   // Single-line trailing content (e.g., tokenizer-spaced "header ( )") is typically
   // from the space-separated token stream, not from merged statements.
+  if (estree && trailingContent && _notDetector) {
+    // acorn reports a parenthesized expression's node WITHOUT its wrapping
+    // parens, so `(1)` "trails" `)`. Discount one `)` per `(` that precedes
+    // the node's start; anything left over was genuinely dropped.
+    let wrap = 0;
+    const lead = processed.slice(0, (estree as { start?: number }).start ?? 0);
+    for (const ch of lead) if (ch === "(") wrap++;
+    let rest = trailingContent;
+    while (wrap > 0) {
+      rest = rest.replace(/^\s*\)/, (m) => { wrap--; return ""; });
+      if (!/^\s*\)/.test(rest)) break;
+    }
+    if (rest.trim() !== "") (_notDetector as { lostTrailing?: boolean }).lostTrailing = true;
+  }
   if (estree && trailingContent && trailingContent.includes("\n") && /[a-zA-Z_$@]/.test(trailingContent)) {
     const preview = trailingContent.length > 60 ? trailingContent.slice(0, 60) + "..." : trailingContent;
     const msg = `[scrml] warning: statement boundary not detected — trailing content would be silently dropped: "${preview}" (in ${filePath} near offset ${offset})`;

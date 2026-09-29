@@ -53,7 +53,8 @@ import {
 // `compiler/tests/unit/state-block-bare-write-comment-state.test.js` asserts
 // this file does not import it.
 
-import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings } from "./expression-parser.ts";
+import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
+import { segmentBodyTopItems } from "../native-parser/body-top-prose.js";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -717,6 +718,9 @@ const TILDE_TOKEN_RE = /(?<![A-Za-z0-9_$])~(?![A-Za-z0-9_$])/;
  * codegen with no diagnostic. (Bug-q-1 reproducer: `<program>` body opening
  * with `@cell = X` produced a silent runtime miss.)
  *
+ * ⛑ S441: RETIRED as an error — the body is code now (§40.8 S441 bullet), so
+ * the write is plain body-top logic; the paragraph below is the S123 history.
+ *
  * Per the S122 user-voice Option-2 ratification, this shape is a SEMANTIC
  * error (writes are logic; logic goes in `${...}`). The lift wraps the text
  * in a synthetic `${...}` so the parser's V5-strict `@name = expr` site sees
@@ -1192,10 +1196,188 @@ function shiftBlockSpans(blocks, delta, lineDelta = 0) {
 // must be scanned for the bare-write-decl lint. (`engine`/`machine` are EXCLUDED
 // — they route to engine-decl, a different grammar with no bare-`@x=` decl site.)
 const _STATE_BLOCK_BARE_WRITE_NAMES = new Set(["db", "state", "schema"]);
+
+// S441 (SPEC §40.8 S441 bullet, §4.18.1 S441 amendment) — `subBlockSpan`:
+// the span of `raw.slice(start, end)` inside a block whose span starts at
+// `span`. Line/col advance over the newlines before `start`.
+function subBlockSpan(span, raw, start, end) {
+  if (!span) return span;
+  const before = raw.slice(0, start);
+  const nl = before.lastIndexOf("\n");
+  const newlines = (before.match(/\n/g) || []).length;
+  return {
+    ...span,
+    start: span.start + start,
+    end: span.start + end,
+    line: (span.line ?? 1) + newlines,
+    col: nl === -1 ? (span.col ?? 1) + start : start - nl,
+  };
+}
+
+// S441 — the body-top display-text split. In a `<program>` / `<page>` /
+// `<channel>` body (a code-default body), a `"..."` standing as its own
+// statement is a DECLARED display-text literal (§4.18.3) and renders as a text
+// node; everything else in a bare run is code. `segmentBodyTopItems`
+// (native-parser/body-top-prose.js — shared with the native front end so the
+// two pipelines agree on what is a literal) finds the literals; this maps its
+// answer back onto BS blocks:
+//   - a code piece      -> a text block marked `_bodyTopSegmented` (the lift
+//                          chain below turns it into logic);
+//   - a literal piece   -> a text block marked `_displayLiteral`, raw = the
+//                          decoded, HTML-escaped content (§4.18.3 / §4.18.6);
+//   - a `${...}` inside a literal -> the logic block marked `_displayInterp`
+//                          (it renders — §4.18.4 — where a body-top `${}` is
+//                          otherwise evaluated, not rendered).
+// An unterminated literal is E-CTX-001 (§4.18.3), recovered as literal text.
+function splitBodyTopDisplayLiterals(blocks, errors, filePath) {
+  const items = blocks.map((b) => {
+    if (!b) return { type: "break" };
+    if (b.type === "text") return { type: "text", raw: b.raw };
+    if (b.type === "logic") return { type: "interp" };
+    if (b.type === "comment") return { type: "neutral", raw: b.raw };
+    return { type: "break" };
+  });
+  const { segments, interpInLiteral, unterminated } = segmentBodyTopItems(items);
+  for (const u of unterminated) {
+    const b = blocks[u.itemIndex];
+    const span = subBlockSpan(b.span, b.raw, u.offset, b.raw.length);
+    errors.push(new TABError(
+      "E-CTX-001",
+      "E-CTX-001: unterminated display-text literal — the `\"` that opens it " +
+      "has no closing `\"` before the next element or the end of the body " +
+      "(SPEC §4.18.3). Close the literal with `\"`.",
+      { file: filePath, start: span.start, end: span.end, line: span.line, col: span.col },
+    ));
+  }
+  const out = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    const segs = segments[i];
+    if (b && b.type === "logic" && interpInLiteral[i]) {
+      out.push({ ...b, _displayInterp: true });
+      continue;
+    }
+    if (!segs || !b || (b.type !== "text" && b.type !== "comment")) {
+      out.push(b);
+      continue;
+    }
+    for (const s of segs) {
+      const span = subBlockSpan(b.span, b.raw, s.start, s.end);
+      if (s.kind === "literal") {
+        out.push({ ...b, type: "text", raw: s.value, span, _displayLiteral: true });
+      } else {
+        out.push({ ...b, type: "text", raw: b.raw.slice(s.start, s.end), span, _bodyTopSegmented: true });
+      }
+    }
+  }
+  return out;
+}
+
+// S441 — `rejectBodyTopProse`: the strict half of the body-top code rule
+// (SPEC §40.8 S441 bullet, §4.18.7). `body` is the statement list the logic
+// parser built for one body-top run. The statement collector is lenient: it
+// hands acorn whatever tokens it gathered, and acorn's `parseExpressionAt`
+// keeps the longest valid prefix — so the prose `Welcome to the dashboard.`
+// becomes a bare expression `Welcome` with the rest silently dropped. A
+// top-level statement one of whose OWN expressions (not a nested statement's —
+// a function body with a bug is code with a bug, not prose) lost content that
+// way (`hasLostTrailingContent`) or could not be parsed at all (a `ParseError`
+// escape hatch) is not valid code. Each maximal run of such statements is ONE
+// `E-UNQUOTED-DISPLAY-TEXT` naming the declared-prose forms; the statements
+// are dropped and the diagnostics their own parse raised (an `E-EQ-005` for a
+// prose `is`, …) are withdrawn, so the author sees the root cause rather than
+// an `E-SCOPE-001` on the first word. Returns the number rejected.
+function stmtHasInvalidOwnExpr(st) {
+  if (!st || typeof st !== "object") return false;
+  // A DECLARATION is code by its head (`<x> = …`, `const x = …`, `function`,
+  // `type`, `import`, a component def): a broken initializer is a code bug with
+  // its own diagnostics (E-CODEGEN-INVALID-LOGIC for `-@a ** 2`, …), not prose.
+  if (typeof st.kind === "string" && (st.kind.endsWith("-decl") || st.kind === "component-def")) return false;
+  for (const key of Object.keys(st)) {
+    if (key === "span") continue;
+    const v = st[key];
+    if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+    if (typeof v.kind !== "string") continue;
+    if (hasLostTrailingContent(v)) return true;
+    if (v.kind === "escape-hatch" && v.nativeKind === "ParseError") return true;
+  }
+  return false;
+}
+
+function rejectBodyTopProse(body, bodyRaw, bodyOffset, errors, errsBefore, filePath) {
+  if (!Array.isArray(body) || body.length === 0) return 0;
+  const stmtEnd = (si) => {
+    const sp = body[si].span;
+    const next = body[si + 1];
+    const nextStart = next && next.span && typeof next.span.start === "number" ? next.span.start : Infinity;
+    const end = typeof sp.end === "number" ? sp.end : sp.start + 1;
+    return Math.max(sp.start + 1, Math.min(end, nextStart));
+  };
+  const flagged = body.map((st) => !!(st && st.span && typeof st.span.start === "number") && stmtHasInvalidOwnExpr(st));
+  let rejected = 0;
+  const ranges = [];
+  for (let si = 0; si < body.length; si++) {
+    if (!flagged[si]) continue;
+    let sj = si;
+    while (sj + 1 < body.length && flagged[sj + 1]) sj++;
+    const start = body[si].span.start;
+    const end = stmtEnd(sj);
+    ranges.push([start, end]);
+    const slice = bodyRaw.slice(Math.max(0, start - bodyOffset), Math.max(0, end - bodyOffset));
+    const firstLine = (slice.split("\n").find((l) => l.trim() !== "") || slice).trim();
+    const shown = firstLine.length > 80 ? firstLine.slice(0, 77) + "..." : firstLine;
+    const sp = body[si].span;
+    errors.push(new TABError(
+      "E-UNQUOTED-DISPLAY-TEXT",
+      `E-UNQUOTED-DISPLAY-TEXT: \`${shown}\` is not valid code. A \`<program>\` / ` +
+      `\`<page>\` / \`<channel>\` body is code (SPEC §40.8, S441) — loose prose is ` +
+      `not allowed there. If this is displayed text, declare it: wrap it in a ` +
+      `markup element (\`<p>${shown}</p>\`) or write it as a display-text literal ` +
+      `(\`"${shown}"\`, §4.18.3).`,
+      { file: filePath, start, end, line: sp.line ?? 1, col: sp.col ?? 1 },
+    ));
+    rejected += sj - si + 1;
+    si = sj;
+  }
+  if (ranges.length > 0) {
+    // Withdraw the diagnostics the rejected statements' own parse raised.
+    const startOf = (e) => {
+      if (!e) return undefined;
+      if (e.tabSpan && typeof e.tabSpan.start === "number") return e.tabSpan.start;
+      if (e.span && typeof e.span.start === "number") return e.span.start;
+      return undefined;
+    };
+    for (let k = errors.length - 1; k >= errsBefore; k--) {
+      const s0 = startOf(errors[k]);
+      if (errors[k] && errors[k].code !== "E-UNQUOTED-DISPLAY-TEXT" && typeof s0 === "number"
+          && ranges.some(([a, b]) => s0 >= a && s0 < b)) errors.splice(k, 1);
+    }
+    for (let si = body.length - 1; si >= 0; si--) if (flagged[si]) body.splice(si, 1);
+  }
+  // A lone identifier IS valid code (`Counter`) and is checked as code; mark
+  // it so E-SCOPE-001 can name the declared-prose forms (§4.18.7 SHOULD).
+  for (const st of body) {
+    if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
+  }
+  return rejected;
+}
+
 function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }, isDefaultLogicBody = false) {
+  // S441 — at a default-logic body (`<program>` / `<page>` / `<channel>`
+  // direct children) split the declared `"..."` literals out of the bare runs
+  // first. Skipped on the recursive re-lift of an already-split code piece.
+  if (isDefaultLogicBody && blocks.some((b) => b && b.type === "text" && b._bodyTopSegmented !== true && b._displayLiteral !== true)) {
+    blocks = splitBodyTopDisplayLiterals(blocks, errors, filePath);
+  }
   const result = [];
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
+
+    // S441 — a declared display-text literal is display text, never lifted.
+    if (block && block.type === "text" && block._displayLiteral === true) {
+      result.push(block);
+      continue;
+    }
 
     // Recurse into state children — server fns inside <db>/state contexts
     // are real declarations and need the same lift treatment. Pass
@@ -1848,9 +2030,10 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
 
     // Unit CC (S123) — bare `@name = expr` write at <program>/<page>/
     // <channel> direct-child text position. Wrap in synthetic `${...}` so
-    // the parser observes the write and the SYM PASS 3 fire site reaches
-    // E-WRITE-NOT-IN-LOGIC-CONTEXT. See TOPLEVEL_AT_WRITE_RE comment for
-    // rationale (pre-Unit-CC silent drop closed at the lift gate).
+    // the parser observes the write. ⛑ S441: the write is now ordinary
+    // body-top logic (E-WRITE-NOT-IN-LOGIC-CONTEXT is RETIRED — see the
+    // parseOneStatement `@name =` site); this lift is kept because it is the
+    // same lift the S441 catch-all below would perform, with its own marker.
     //
     // Gated on `isDefaultLogicBody === true` — the PRECISE §40.8 default-
     // logic-body surface. Suppressed inside `<db>` / `<state>` STATE-block
@@ -1989,7 +2172,39 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
       continue;
     }
 
+    // S441 (SPEC §40.8 S441 bullet) — a `<program>` / `<page>` / `<channel>`
+    // body carries NO loose prose. Every bare run the specific lifts above did
+    // not claim is CODE: lift it so the logic parser checks it exactly as the
+    // same text inside `${ … }` (every §7.2.1 `E-*-NOT-IN-SCRML` fires; a bare
+    // expression statement is evaluated, never rendered). A run that is not
+    // valid code is `E-UNQUOTED-DISPLAY-TEXT` — found by the `_bodyTop` check in
+    // buildBlock's `logic` case. Whitespace between children is formatting and
+    // stays a text block (§4.18.5).
+    if (block.type === "text" && isDefaultLogicBody && typeof block.raw === "string" && block.raw.trim() !== "") {
+      result.push({
+        type: "logic",
+        raw: "${" + block.raw + "}",
+        span: block.span,
+        depth: block.depth,
+        children: [],
+        name: null,
+        closerForm: null,
+        _synthetic: true,
+        _bodyTopCodeLift: true, // diagnostic marker — S441 catch-all lift
+        // S180 D3.1 — the fictional `${` is not in the source; see above.
+        _bareDeclLift: true,
+      });
+      continue;
+    }
+
     result.push(block);
+  }
+  // S441 — every synthetic lift at a default-logic body is body-top code: the
+  // `logic` case in buildBlock runs the strict statement check on it.
+  if (isDefaultLogicBody) {
+    for (const b of result) {
+      if (b && b.type === "logic" && b._synthetic === true) b._bodyTop = true;
+    }
   }
   return result;
 }
@@ -5352,9 +5567,15 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // A word-form INFIX operator (`or`/`and`, §45.9) is IDENT-shaped but continues
           // the expression across a newline (`(a)\n  or (b)`) — it never starts a
           // statement, so exclude it by operator class (mirrors the same-line detector).
+          // S441 — a bare `@cell` read on a later line after a value is a new
+          // statement too (JS ASI: `a⏎b` is two statements). Pre-S441 it was
+          // excluded, so `<count> = 3⏎@count` collected `3 @count` and acorn
+          // dropped `@count` — a silent statement loss the body-top strictness
+          // check (rejectBodyTopProse) would otherwise read as prose.
           const tokStartsStmt = (
             (tok.kind === "IDENT" && !WORD_INFIX_OPERATORS.has(tok.text)) ||
-            (tok.kind === "KEYWORD" && !STMT_KEYWORDS.has(tok.text))
+            (tok.kind === "KEYWORD" && !STMT_KEYWORDS.has(tok.text)) ||
+            tok.kind === "AT_IDENT"
           );
           if (lastEndsValue && tokStartsStmt) break;
           // Phase A1a Step 11.0b — newline-as-statement-separator for state-decls.
@@ -9049,14 +9270,21 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         //     it ONLY at the IMMEDIATE body-top surface.
         //   - isMetaContext → no tag (BUG-META-6 dependency)
         //   - else (fn / function / user-written ${}) → _isReactiveAssign (V-kill fire)
+        //
+        // ⛑ S441 — Unit CC is RETIRED (ruling: user-voice-scrml.md S441
+        // "declared-prose implementation … yes to all four", item 4). A
+        // `<program>` / `<page>` / `<channel>` body is CODE now (§40.8 S441
+        // bullet), so a bare write at its body-top is a write in a logic context
+        // and is treated EXACTLY as the same write inside an explicit `${ … }`
+        // there: the V-kill discrimination (`_isReactiveAssign` — a write to a
+        // declared cell, E-STATE-UNDECLARED otherwise). The `_isUnitCCWrite` tag
+        // and E-WRITE-NOT-IN-LOGIC-CONTEXT no longer exist. Nested writes under
+        // the synthetic wrapper (`function f() { @x = 5 }`) keep the V-kill
+        // carve-out unchanged.
         const isDefaultLogicLift = parentBlock && parentBlock._synthetic === true;
         const isMetaContext = blockContext === "meta";
         const isAtBodyTopOfSyntheticLift = isDefaultLogicLift && _nestedBlockDepth === 0;
-        const isUnitCCWrite = isAtBodyTopOfSyntheticLift;
-        // V-kill fire region: preserve original V-kill discrimination
-        // (synthetic-wrapper carve-out) to avoid expanding V-kill's surface
-        // beyond Unit CC's narrow body-top fire.
-        const isReactiveAssign = !isDefaultLogicLift && !isMetaContext;
+        const isReactiveAssign = !isMetaContext && (!isDefaultLogicLift || isAtBodyTopOfSyntheticLift);
         return {
           id: ++counter.next,
           kind: "state-decl",
@@ -9067,7 +9295,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           structuralForm: false,
           isConst: false,
           ...(isReactiveAssign ? { _isReactiveAssign: true } : {}),
-          ...(isUnitCCWrite ? { _isUnitCCWrite: true } : {}),
           span: spanOf(startTok, peek()),
         };
       }
@@ -12984,9 +13211,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           continue;
         }
         const { expr, span } = collectExpr();
-        const isDefaultLogicLift_ml = parentBlock && parentBlock._synthetic === true;
-        const isAtBodyTopOfSyntheticLift_ml = isDefaultLogicLift_ml && _nestedBlockDepth === 0;
-        const isUnitCCWrite_ml = isAtBodyTopOfSyntheticLift_ml;
+        // ⛑ S441 — Unit CC RETIRED (see the parseOneStatement site): a bare
+        // write at a `<program>` / `<page>` / `<channel>` body-top is treated
+        // exactly as the same write in an explicit top-level `${ … }`.
         nodes.push({
           id: ++counter.next,
           kind: "state-decl",
@@ -12996,7 +13223,6 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           shape: "plain",
           structuralForm: false,
           isConst: false,
-          ...(isUnitCCWrite_ml ? { _isUnitCCWrite: true } : {}),
           span: spanOf(startTok, peek()),
         });
         continue;
@@ -16816,6 +17042,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         kind: "text",
         value: block.raw,
         span,
+        // S441 — a declared `"..."` display-text literal at a default-logic
+        // body (§4.18.3); `value` is already decoded + HTML-escaped.
+        ...(block._displayLiteral === true ? { _displayLiteral: true } : {}),
       };
 
     // --------------------------------------------------------------- comment
@@ -19681,7 +19910,18 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       }
 
       const tokens = tokenizeLogic(bodyRaw, bodyOffset, bodyLine, bodyCol, _liveChildren);
-      const body = parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic");
+      let body;
+      if (block._bodyTop === true) {
+        // S441 — body-top code: parse, then reject what is not valid code.
+        const _errsBefore = errors.length;
+        const _tw = captureTrailingContentWarnings(() =>
+          parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic"));
+        body = _tw.result;
+        const _rejected = rejectBodyTopProse(body, bodyRaw, bodyOffset, errors, _errsBefore, filePath);
+        if (_rejected === 0) for (const w of _tw.warnings) console.warn(w);
+      } else {
+        body = parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic");
+      }
 
       // Hoist imports and exports from the body
       const imports = body.filter(n => n.kind === "import-decl");
@@ -19780,6 +20020,9 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         // so the W-PROGRAM-REDUNDANT-LOGIC walker can distinguish author-written
         // `${...}` blocks from compiler-synthesised lift wrappers. SPEC §40.8.
         ...(block._synthetic ? { _synthetic: true } : {}),
+        // S441 — a `${...}` inside a body-top `"..."` display-text literal
+        // (§4.18.4): it renders, where a body-top `${}` is otherwise evaluated.
+        ...(block._displayInterp === true ? { _displayInterp: true } : {}),
       };
     }
 

@@ -18729,6 +18729,7 @@ depend on its position. Repros: `C:\wt432s\pa\n4c.scrml`, `n4d.scrml`. **Exposur
 in assetManagement, flogenceP or `compiler/self-host/` (the one repo-corpus hit, `docs/website/pages/learn/validators.scrml:314`,
 is HTML-escaped sample text inside a `<pre>`). Pinned by `conformance/cases/reactive/nested-path-method-call-not-first-stmt`
 (impl#1: `o` stays `{list:[], m:[9]}`). PA-reproduced.
+⚑ **S441 — the DROP is fixed; the case still fails, for a narrower reason.** The S441 declared-prose work made a bare `@cell` on a later line after a value a statement boundary (`ast-builder.js` collectExpr ASI-NEWLINE `tokStartsStmt` now admits `AT_IDENT`), so both statements now EMIT (`#add` runs `@o.list.push(t)` → `#n` shows 1). `#refill` still reads 1, not 2: after `@o.m = [9]` (a `_scrml_deep_set` that replaces `o`) the following `@o.m.push(1)` mutates the new array without the display updating. Signature re-recorded on the case (`sha256:6744fc50e4841499`); the gap stays `carried` until the notify miss is traced — NOT traced in the S441 dispatch.
 
 ### g-expr-handler-drops-every-statement-after-a-leading-call — an inline `${…}` handler whose FIRST statement is a call drops every statement after it — `NEW S432-peter; HIGH; resolved (S437)`
 <!-- @gap id=g-expr-handler-drops-every-statement-after-a-leading-call sev=HIGH status=resolved locus=searched:compiler/src/codegen/emit-event-wiring.ts,compiler/src/ast-builder.js(the `${}` event-attribute value collection)—not-traced prov=empirical:S432-PA-reproduced-semi2-re-verified-by-compile-on-280ecbdd -->
