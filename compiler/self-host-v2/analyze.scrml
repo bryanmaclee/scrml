@@ -3104,7 +3104,9 @@ ${
         let isGranted: boolean = f.grants.replace || hasEditKind(f.grants.edits, edit)
         // RULED S442: `filter` SHRINKS anywhere — the `remove` grant, not `insert`
         if (shape == 3) isGranted = f.grants.replace || shrinkGranted(f.shrink, SeqAt.Anywhere)
-        if (!isGranted || cap is not) {
+        // a shrink-only field has no write capability (Core has no removal edit to
+        // name one for): the grant alone decides a shape that is never lowered
+        if (!isGranted || (cap is not && shape <= 2)) {
             const isDerived: boolean = f.mode == FieldMode.Derived
             if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-WRITE", derivedMessage(p, f))
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + " = …` is " + shapeWhat(shape) + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
@@ -3202,7 +3204,7 @@ ${
         }
         // RULED S442: a removal needs a SHRINK grant there (or `remove`), never the grow grant
         const isGranted: boolean = f.grants.replace || shrinkGranted(f.shrink, place)
-        if (!isGranted || f.wcap is not) {
+        if (!isGranted) {
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "." + m.method + "()` is " + what + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
         }
         return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + "." + m.method + "()` is granted, but Core has no removal edit to lower it with (core.scrml EditKind)")
