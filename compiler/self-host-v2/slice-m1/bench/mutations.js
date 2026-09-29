@@ -310,7 +310,7 @@ const MUTATIONS = [
     ["S442 r4 (a): a bare `bool | not` condition taken as a presence test again",
      "            if (kindOf(inner) == 3) {\n                return report(", "            if (false) {\n                return report("],
     ["S442 r3 N3: a write of an `<each>` source keeps the row binding's narrowing",
-     "            if (r.key != \"\" && placesOverlap(r.key, key)) drop = drop.concat([r.name])\n", ""],
+     "            if (r.key != \"\" && placesOverlap(r.key, key)) {", "            if (false) {"],
     ["S442 r5 R6: an un-narrowed `int | not` into an `int` position accepted",
      "        if (maybeInner(x) is some && maybeInner(target) is not && hasInt(target)) {", "        if (false) {"],
     ["S442 r5 R6 REVERSE: every un-narrowed `T | not` into `T` refused (not only `int`)",

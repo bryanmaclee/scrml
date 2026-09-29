@@ -312,6 +312,23 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
     expect(inApp(S, DDC + "<p if=@color>${@color.value}</p>")).toEqual([]);
     expect(inApp(S + "    function f() { if (@color) { @seen = @color.value } }\n    function g() { @seen = @color ? @color.value : \"\" }", DDC)).toEqual([]);
   });
+  test("the typer's table records a conditional handle read as `T | not` (§66.7.5), an always-mounted one as `T`", () => {
+    const r = run([LIB(), app("    <let show:bool=false/>", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div><dropdown as=country label=\"2\" options=([\"a\"])/><p if=@color>x</p><p>${@country.value}</p>")]);
+    const t = r.typed.tables;
+    const atNodes = [];
+    (function walk(n) {
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (n === null || typeof n !== "object") return;
+      if (n.k && n.k.variant === "At") atNodes.push({ nid: n.nid, name: n.k.data.name });
+      Object.values(n).forEach(walk);
+    })(r.asts);
+    const color = atNodes.find((a) => a.name === "color");
+    const country = atNodes.find((a) => a.name === "country");
+    const cv = mods.analyze.exprType(t, color.nid);
+    expect(cv.variant).toBe("Known");
+    expect(cv.data.t.variant).toBe("Maybe");
+    expect(mods.analyze.exprType(t, country.nid).data.t.variant).toBe("Named");
+  });
   test("r5 R3 — a REPEATED presence test inside a region that already narrowed the handle stays legal", () => {
     const S = "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n";
     const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
