@@ -1,0 +1,6 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+<p id="out">${@verdict}</p>
+<button id="go" onclick=${ if (isOk(1)) { @verdict = "accepted" } else { @verdict = "rejected" } }>go</button>
+</program>

@@ -1,0 +1,13 @@
+{
+  "id": "auth-async-fn-escapes-as-value-user-hof-neg",
+  "description": "SECURITY (s441, S440 F4). A helper declared inside a server function wraps scrml:auth `verifyPassword`, so the compiler emits it `async`. It is handed to a user-written higher-order function (`drive(matches)`), which calls it and tests the result. That result is an unawaited Promise — always truthy — so before s441 `check` answered \"accepted\" for EVERY password (reproduced with real hashing) and compiled clean. Ruled S440 (F4): an async-colored function may not escape as a value; only the awaited collection methods may take it. The pass now fails closed with E-ASYNC-FN-ESCAPES-AS-VALUE and not with a sync-callback code (nothing here is a collection callback).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: an async-colored function (one the compiler emits `async`: a server function, a Promise-returning stdlib function, or a helper that calls one) SHALL NOT be used as a value; passing it to a function that is not an awaited collection method SHALL be a compile error (E-ASYNC-FN-ESCAPES-AS-VALUE, §34).",
+  "expect": {
+    "codes": ["E-ASYNC-FN-ESCAPES-AS-VALUE"],
+    "notCodes": ["E-ASYNC-STDLIB-IN-SYNC-CALLBACK", "E-SERVER-FN-IN-SYNC-CALLBACK"],
+    "severity": { "E-ASYNC-FN-ESCAPES-AS-VALUE": "error" }
+  }
+}

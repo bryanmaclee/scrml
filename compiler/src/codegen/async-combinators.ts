@@ -28,7 +28,7 @@
  * `callbackReachesAsync` detector without an import cycle.
  */
 
-import { localCalleeOf, localFnRefOf } from "./local-async-fns.ts";
+import { localCalleeOf, localFnRefOf, BOUND_CALLEE_MARK } from "./local-async-fns.ts";
 
 /** A loosely-typed AST node. */
 type ASTNode = Record<string, unknown>;
@@ -74,6 +74,15 @@ export interface AsyncNameFacts {
    * already is. Absent → no stdlib classifier in scope (test harness / no imports).
    */
   isStdlibAsync?: ((name: string) => boolean) | null;
+  /**
+   * s441 fix round — every name the FILE itself binds (a file-scope function, a
+   * top-level `let`/`const`, an import). A fire-and-forget scheduler exemption
+   * (`setTimeout(fn)` discards fn's return) is only sound for the GLOBAL
+   * scheduler: a user `function setTimeout(f) { return f(x) }` hands the Promise
+   * straight back. Absent → no file bindings known (no exemption is then taken on
+   * a name the lexical pass can see bound; the file scope is unknown).
+   */
+  boundNames?: ReadonlySet<string> | null;
 }
 
 /**
@@ -230,6 +239,10 @@ export function isKnownDiscardHofCall(
   const callee = n.callee as ASTNode | undefined;
   if (!callee || callee.kind !== "ident" || typeof callee.name !== "string") return false;
   if (!KNOWN_DISCARD_HOF.has(callee.name)) return false;
+  // s441 fix round — a scheduler NAME bound by the program (a local or file-scope
+  // `function setTimeout(f) { return f() }`, an import, a param) is not the global
+  // scheduler and does not discard the return (marked by the lexical pre-pass).
+  if (n[BOUND_CALLEE_MARK] === true) return false;
   const args = n.args as unknown[] | undefined;
   if (!Array.isArray(args) || args.length < 1) return false;
   return args.some(

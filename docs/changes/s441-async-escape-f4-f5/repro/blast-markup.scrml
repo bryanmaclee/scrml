@@ -1,0 +1,8 @@
+<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+<p id="if1" if=(isOk(1))>if-shown</p>
+<p id="show1" show=(isOk(1))>show-shown</p>
+<p id="interp">${isOk(1) ? "interp-yes" : "interp-no"}</p>
+<p id="title" title=${isOk(1) ? "t-yes" : "t-no"}>title</p>
+</program>

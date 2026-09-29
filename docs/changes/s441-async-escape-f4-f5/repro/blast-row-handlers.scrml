@@ -1,0 +1,11 @@
+<program>
+<v> = "unset"
+<xs> = [1, 2, 3]
+server function isOk(n) { return n > 100 }
+<p id="out">${@v}</p>
+<ul>
+  <each in=@xs as x>
+    <li><button class="row" onclick=${ if (isOk(x)) { @v = "row-yes" } else { @v = "row-no" } }>${x}</button></li>
+  </each>
+</ul>
+</program>

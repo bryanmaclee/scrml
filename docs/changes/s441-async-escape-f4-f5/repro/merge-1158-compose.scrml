@@ -1,0 +1,12 @@
+<program>
+<v> = "unset"
+<n> = 0
+server function isOk(n) { return n > 100 }
+server function count() { return 7 }
+function refresh() { @n = count() }
+<p id="out">${@v}</p>
+<form id="a" onsubmit=${ @v = isOk(1); event.preventDefault() }><button>a</button></form>
+<form id="b" onsubmit=${ event.preventDefault(); @v = isOk(1) }><button>b</button></form>
+<button id="c" onclick=${ @n = count(); setTimeout(refresh, 10) }>c</button>
+<button id="d" onclick=${ @v = isOk(1) ? "yes" : "no" }>d</button>
+</program>

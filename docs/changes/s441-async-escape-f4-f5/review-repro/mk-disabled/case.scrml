@@ -1,0 +1,6 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+<button id="secret" disabled=${!isOk(1)}>b</button>
+<p id="out">${@verdict}</p>
+</program>

@@ -1,0 +1,26 @@
+${
+    type Phase:enum = { Loading, Ready }
+    type Mode:enum = { Off, On }
+    <phase>: Phase = .Loading
+    <v> = "unset"
+    server function isOk(n) { return n > 100 }
+}
+<match for=Phase on=@phase>
+    <Loading>
+        <button id="m" onclick=${ if (isOk(1)) { @v = "match-yes" } else { @v = "match-no" } }>m</button>
+    </>
+    <Ready>
+        <p>ready</p>
+    </>
+</match>
+<engine for=Mode initial=.Off>
+    <Off rule=.On>
+        <button id="e" onclick=${ if (isOk(2)) { @v = "engine-yes" } else { @v = "engine-no" } }>e</button>
+    </>
+    <On rule=.Off>
+        <p>r</p>
+    </>
+</>
+<program>
+<p id="out">${@v}</p>
+</program>

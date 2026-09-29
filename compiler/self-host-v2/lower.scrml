@@ -35,7 +35,7 @@ ${
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, Tables, TypedProgram,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
     export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
@@ -300,6 +300,9 @@ ${
             .Assign(target: t) :> missing()
             .ArrayLit(elems: es) :> Expr.ArrayOf(lowerExprs(c, es))
             .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps)
+            .Spread(e: sx) :> missing()
+            .Index(obj: ix) :> missing()
+            .Lambda(params: lp) :> missing()
         }
     }
 
@@ -489,6 +492,7 @@ ${
             .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value)
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
             .EAssignLocal(sym: s) :> assignLocal(c, s, value)
+            .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
@@ -513,6 +517,9 @@ ${
             .Ternary(test: t) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -524,6 +531,54 @@ ${
     fn writeStmt(c: LC, w: WriteFact, value: AExpr | not) -> Stmt[] {
         if (value is not) return []
         return [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, value), w.check)]
+    }
+
+    // s442 / r1 F5 F6 — a recognized sequence shape (§66.11.2): `@x = [...@x, a, b]`
+    // is the end-appends of `a` then `b` (the same edits as `@x.push(a);
+    // @x.push(b)`); `@x = [a, b, ...@x]` the front-prepends that leave the
+    // result reading `[a, b, …]`. The array literal is ONE value: every new
+    // element is evaluated, LEFT TO RIGHT, into its local (analyze minted
+    // `tmps`) before any write, so no element sees another's edit (`at:
+    // @x.length` twice reads the same length). Two or more writes form one
+    // Commit (all-or-nothing, batched); one element needs no local — its value
+    // is evaluated before its own single write.
+    // r2 (RULED S442, "sequence spreads use one snapshot"): every `@x` read
+    // inside the elements reads the value from BEFORE the statement — the one
+    // snapshot, a Let emitted only when some element reads it (as the struct
+    // spread's, S440). The edit itself is still the classified append /
+    // prepend onto the target (a write a called function made to `@x` while
+    // the elements were evaluated survives, as a struct spread keeps a write
+    // to a field it does not override).
+    fn editStmts(c: LC, w: WriteFact, elems: AExpr[], tmps: Sym[], sn: SeqSnap) -> Stmt[] {
+        const target: InstRef = instOf(c, w.inst)
+        const place: FieldRef[] = [{ owner: sn.decl, idx: sn.idx }]
+        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: { decl: sn.decl, inst: target, path: place, whole: sn.local, fields: [] } }
+        let values: Expr[] = []
+        for (const x of elems) { values = values.concat([lowerExpr(sc, x)]) }
+        let pre: Stmt[] = []
+        if (anyReads(values, sn.local)) pre = [Stmt.Let(sn.local, Expr.Read(Place.Cell(sn.decl, target, place)))]
+        if (values.length == 1) return pre.concat([Stmt.Write(w.cap, target, w.edit, values[0], w.check)])
+        let lets: Stmt[] = pre
+        let k = 0
+        for (const v of values) {
+            lets = lets.concat([Stmt.Let(tmps[k], v)])
+            k = k + 1
+        }
+        const prepend: boolean = w.edit == EditKind.Prepend
+        let writes: Stmt[] = []
+        if (prepend) {
+            let j: int = tmps.length - 1
+            while (j >= 0) {
+                writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(tmps[j]), w.check)])
+                j = j - 1
+            }
+        } else {
+            for (const t of tmps) {
+                writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(t), w.check)])
+            }
+        }
+        const edit: Stmt = Stmt.Commit(writes)
+        return lets.concat([edit])
     }
 
     fn assignLocal(c: LC, s: Sym, value: AExpr | not) -> Stmt[] {
@@ -628,6 +683,9 @@ ${
         const k: AExprK = e.k
         return match k {
             .ObjectLit(props: ps) :> ps
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -710,8 +768,34 @@ ${
             .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
+            .MStateView(v: v) :> [stateView(c, v)]
+            .MInline(v: v) :> inlineViews(c, v)
             not :> []
         }
+    }
+
+    // s442 — `<*x/>` by inlining (analyze's InlineView): the markup, lowered in
+    // place; when it is a declaration's renders for its SHARED instance, its
+    // `.Lexical(0)` means that instance (`subst`, as L4's reset does).
+    fn inlineViews(c: LC, v: InlineView) -> View[] {
+        const s: InstRef | not = v.subst
+        if (s is not) return lowerNodes(c, v.nodes)
+        const ic: LC = { t: c.t, file: c.file, subst: s, snap: not }
+        return lowerNodes(ic, v.nodes)
+    }
+
+    // s442 — `<*f/>` of a graph field (O5 (1i)): a View.Cond with one arm per
+    // state-child body, each shown while the field holds that variant. The
+    // test reads the field (a nullary-variant compare, EqPrim — §45) through
+    // the instance analyze resolved; the bodies are lowered in place.
+    fn stateView(c: LC, v: StateView) -> View {
+        const read: Expr = cellRead(c, v.decl, instOf(c, v.inst), [{ owner: v.decl, idx: v.idx }])
+        let arms: CondArm[] = []
+        for (const a of v.arms) {
+            const test: Expr = Expr.Prim(PrimOp.EqPrim, [read, Expr.Lit(Literal.Variant(v.enumSym, a.variant))])
+            arms = arms.concat([{ test: test, body: lowerNodes(c, a.body) }])
+        }
+        return View.Cond(arms)
     }
 
     fn attrKind(c: LC, a: AAttr) -> AttrKind | not {
@@ -904,7 +988,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .DeclItem(d: d) :> [userSyntax(file, d)]
-            .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true }]
+            .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true }].concat(nestedSyntaxes(file, p.items))
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
             .FnItem(f: f) :> []
@@ -917,6 +1001,29 @@ ${
         if (r is not) return { nid: d.nid, file: file, renders: [], hasRenders: false }
         const node: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) }
         return { nid: d.nid, file: file, renders: [node], hasRenders: true }
+    }
+
+    // s442: the declarations written inside `<program>` (a nested user
+    // declaration's renders is its own; a program cell's is none — syntaxOf
+    // is keyed by the declaration's nid, so a cell's entry is never asked for).
+    fn nestedSyntaxes(file: string, items: AItem[]) -> DeclSyntax[] {
+        let out: DeclSyntax[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            out = out.concat(nestedDeclSyntax(file, k))
+        }
+        return out
+    }
+
+    fn nestedDeclSyntax(file: string, k: AItemK) -> DeclSyntax[] {
+        return match k {
+            .DeclItem(d: d) :> [userSyntax(file, d)]
+            .MarkupItem(n: n) :> []
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .FnItem(f: f) :> []
+            .ProgramItem(p: p) :> []
+        }
     }
 
     fn programMarkup(items: AItem[]) -> ANode[] {

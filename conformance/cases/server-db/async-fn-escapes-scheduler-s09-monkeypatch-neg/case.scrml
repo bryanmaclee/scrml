@@ -1,0 +1,7 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+${ globalThis.setTimeout = (f) => f(1) }
+<button id="go" onclick=${ @verdict = setTimeout(isOk) ? "a" : "r" }>go</button>
+<p id="out">${@verdict}</p>
+</program>

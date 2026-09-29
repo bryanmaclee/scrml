@@ -1,0 +1,11 @@
+<program>
+<v> = "unset"
+<xs> = [1, 2, 3]
+server function isOk(n) { return n > 100 }
+<p id="out">${@v}</p>
+<ul>
+${ for (x of @xs) {
+  lift <li><button onclick=${ if (isOk(x)) { @v = "lift-yes" } else { @v = "lift-no" } }>b</button></li>
+} }
+</ul>
+</program>
