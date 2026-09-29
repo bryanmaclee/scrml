@@ -1,0 +1,13 @@
+${
+    <out> : number = 0
+    <seen> : number = -1
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    function go() {
+        @out = double(21)
+        @seen = @out
+    }
+}
+<button id="go" onclick=go()>Go</>
+<p id="seen">${@seen}</>

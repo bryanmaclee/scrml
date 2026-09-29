@@ -1,0 +1,23 @@
+<program db="sqlite:./app.db" idempotency-store="none">
+<schema>
+  t { id: integer primary key, v: integer }
+</>
+${
+    <seen> : string = ""
+    server function addRow(n: number) {
+        ?{`INSERT INTO t (v) VALUES (${n})`}.run()
+        return n
+    }
+    server function countRows() {
+        const r = ?{`SELECT count(*) AS c FROM t`}.get()
+        return r.c
+    }
+    function go() {
+        const x = addRow(5)
+        const y = countRows()
+        @seen = "y=" + y
+    }
+}
+<button id="b" onclick=go()>b</>
+<p id="s">${@seen}</>
+</program>

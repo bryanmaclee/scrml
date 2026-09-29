@@ -454,6 +454,62 @@ function installNoopEventSource(): () => void {
   };
 }
 
+/**
+ * Install a minimal, NEVER-CONNECTING `globalThis.WebSocket` for the duration of
+ * one `run()` (s441). happy-dom's WebSocket is a REAL `ws` client: a `<channel>`
+ * (§38) opens a socket at module-init, the connection to the absent host fails,
+ * and `ws` emits an `error` event with no listener — an unhandled error that
+ * kills a `bun:test` run, and a real network attempt the hermetic harness must
+ * never make. Same shape as `installNoopEventSource`: it models the
+ * PRE-CONNECT window (`readyState` CONNECTING, never OPEN, never fires), which a
+ * channel client is already built to tolerate (it sends only at readyState OPEN).
+ * Installed ONLY when the emitted client constructs a WebSocket, so the global
+ * env is byte-identical for every other case. NOT a channel-sync model: no case
+ * asserts cross-client sync, and one that wants to would need a driver verb.
+ */
+function installNoopWebSocket(): () => void {
+  const g = globalThis as any;
+  const real = g.WebSocket;
+  class NoopWebSocket {
+    static CONNECTING = 0;
+    static OPEN = 1;
+    static CLOSING = 2;
+    static CLOSED = 3;
+    url: string;
+    readyState = 0;
+    binaryType = "blob";
+    bufferedAmount = 0;
+    protocol = "";
+    onopen: ((ev: any) => void) | null = null;
+    onmessage: ((ev: any) => void) | null = null;
+    onerror: ((ev: any) => void) | null = null;
+    onclose: ((ev: any) => void) | null = null;
+    _listeners: Record<string, Array<(ev: any) => void>> = {};
+    constructor(url: string) {
+      this.url = String(url);
+    }
+    addEventListener(type: string, cb: (ev: any) => void): void {
+      (this._listeners[type] = this._listeners[type] || []).push(cb);
+    }
+    removeEventListener(type: string, cb: (ev: any) => void): void {
+      const a = this._listeners[type];
+      if (a) this._listeners[type] = a.filter((f) => f !== cb);
+    }
+    send(_data: unknown): void {
+      // Never OPEN, so the channel client (which sends only at readyState OPEN)
+      // never calls this; a no-op rather than a throw keeps the stub inert.
+    }
+    close(): void {
+      this.readyState = 3; // CLOSED
+    }
+  }
+  g.WebSocket = NoopWebSocket;
+  return () => {
+    if (real === undefined) delete g.WebSocket;
+    else g.WebSocket = real;
+  };
+}
+
 function ensureFreshDom(): void {
   // A fresh window per run isolates DOMContentLoaded listeners + state from the
   // prior run (verified: re-register drops old listeners). unregister() is async.
@@ -486,6 +542,7 @@ export async function run(
   // §37.5 SSE binding — a never-firing EventSource stub, installed below only
   // when the emitted client actually opens a stream (assigned inside the try).
   let restoreEventSource: (() => void) | null = null;
+  let restoreWebSocket: (() => void) | null = null;
 
   // Virtual clock — installed just before the eval (so timer arming at module-
   // init + on DOMContentLoaded funnels through it) and restored in finally.
@@ -512,6 +569,10 @@ export async function run(
     // pre-first-event window (the cell shows its seed). See installNoopEventSource.
     if (clientJs.includes("new EventSource")) {
       restoreEventSource = installNoopEventSource();
+    }
+    // §38 `<channel>`: never let a run open a real socket (see installNoopWebSocket).
+    if (clientJs.includes("new WebSocket")) {
+      restoreWebSocket = installNoopWebSocket();
     }
 
     if (clientExecutor !== null) {
@@ -560,6 +621,7 @@ export async function run(
     delete (globalThis as any).__scrml_conformance;
     if (restoreFetch) restoreFetch();
     if (restoreEventSource) restoreEventSource();
+    if (restoreWebSocket) restoreWebSocket();
     clock.restore();
   }
 }

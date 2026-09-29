@@ -24,6 +24,7 @@ import { isEscalationServerOnlyModule } from "../route-inference.ts";
 import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
+import { _clientServerFnNames } from "./scheduling.ts";
 import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
@@ -2701,7 +2702,10 @@ export function generateClientJs(ctx: CompileContext): string {
   // watchdog per §51.0.R rule 2 (falls out of the standard write rewrite \u2014
   // no watchdog reset is special-cased for the boot edge). Tree-shake: empty
   // when no engine declares an opener effect=.
-  const engineOpenerEffectLines = clientStage(ctx, "emit-engine-opener-effects", () => emitEngineOpenerEffectsForFile(fileAST));
+  // s441 — the file's server-fn names (the SAME file-filtered set the §6.7.4
+  // `when` body uses) so a server call in the effect body is awaited in place.
+  const engineOpenerEffectLines = clientStage(ctx, "emit-engine-opener-effects", () =>
+    emitEngineOpenerEffectsForFile(fileAST, ctx.routeMap ? _clientServerFnNames(ctx.routeMap, ctx.filePath ?? "") : null));
   if (engineOpenerEffectLines.length > 0) {
     lines.push("");
     lines.push("// --- engine opener effect= boot-init effects (compiler-generated, §51.0.H Form 3) ---");
@@ -3392,8 +3396,20 @@ export function generateClientJs(ctx: CompileContext): string {
         // definition of done requires of the no-tail case. U1's gain is in the
         // positions this pass never reached (receiver-tail, nested-argument, and
         // the `emitFnShortcutBody` path).
+        //
+        // s441 (g-cell-assign-server-call-fired-detached) — the ABSORB above was
+        // the bug. The emitter's `await` is its PROOF that the host is async and
+        // the position await-legal (`isClientServerFnCall` gates on
+        // `clientAsyncBody` + `peerAwaitable`), and re-emitting the site as a
+        // DETACHED IIFE threw that sequencing away: the next statement read the
+        // pre-fetch value and two successive writes raced. `emitterAwaited`
+        // records the proof; every branch below honors it by awaiting IN PLACE.
+        // The IIFE survives only where the emitter could NOT await (a module-init
+        // statement of a classic script, a sync host) — the case it was built for.
+        let emitterAwaited = false;
         if (clientCode.slice(valStart, valStart + 5) === "await" &&
             /\s/.test(clientCode[valStart + 5] ?? "")) {
+          emitterAwaited = true;
           valStart += 5;
           while (valStart < clientCode.length && /\s/.test(clientCode[valStart])) valStart++;
         }
@@ -3456,7 +3472,7 @@ export function generateClientJs(ctx: CompileContext): string {
         // DEAD CODE (the user's `!{}` handler never fires). Relocate the guard +
         // arm INSIDE the IIFE, after the await, reading the resolved value, with a
         // happy-path `else` that performs the reactive set. The `<resultVar>`
-        // genVar name is REUSED as the in-IIFE `const`, so the existing arm body
+        // genVar name is REUSED as the in-IIFE `let` (s441: an arm assigns it), so the existing arm body
         // (which reads `<resultVar>.variant` / `.data`) is relocated verbatim — no
         // rewrite of the arm interior is needed. ss32's `.catch` is retained as
         // the safety net for a genuine non-envelope rejection.
@@ -3485,14 +3501,44 @@ export function generateClientJs(ctx: CompileContext): string {
                 // `_scrml_init_set(...)` lazy-initializer) stay OUTSIDE the IIFE.
                 const interveningText = clientCode.slice(stmtEnd, ifStart);
                 const ifBlock = clientCode.slice(ifStart, closeIdx + 1);
+                parts.push(clientCode.slice(i, letStart));
+                // s441 (S435 ruling "lift" on g-failable-cell-load-fire-and-
+                // forget-stale-read-dead-return) — in an async host, await IN
+                // PLACE: the statements after the handler see the resolved cell,
+                // and an arm's `return` (or the no-wildcard `else { return R; }`
+                // escalation) returns from the AUTHOR's function, not from an
+                // IIFE nobody awaits. The success path still writes the cell only
+                // in the `else`, so a handled failure never lands the error
+                // envelope in the cell. `let`, not `const`: a value-form arm
+                // assigns its recovery value to `<resultVar>`.
+                if (emitterAwaited || /\bawait\s+$/.test(letMatch[1])) {
+                  // Re-indent the relocated block to the `let` line's own indent
+                  // (the multi-line guarded-expr arrives with only its first line
+                  // indented by the enclosing function emitter).
+                  const lineStart = clientCode.lastIndexOf("\n", letStart - 1) + 1;
+                  const indent = /^[ \t]*/.exec(clientCode.slice(lineStart, letStart))![0];
+                  const inPlace =
+                    `let ${resultVar} = await ${mangledName}(${args});` +
+                    interveningText +
+                    `${ifBlock} else {\n` +
+                    `  _scrml_reactive_set(${nameArg}, ${resultVar});\n` +
+                    `}`;
+                  parts.push(
+                    inPlace
+                      .split("\n")
+                      .map((l, idx) => (idx === 0 || l.length === 0 ? l : indent + l))
+                      .join("\n"),
+                  );
+                  i = closeIdx + 1;
+                  continue;
+                }
                 const indentedIf = ifBlock
                   .split("\n")
                   .map((l) => (l.length ? "  " + l : l))
                   .join("\n");
-                parts.push(clientCode.slice(i, letStart));
                 parts.push(
                   `(async () => {\n` +
-                    `  const ${resultVar} = await ${mangledName}(${args});\n` +
+                    `  let ${resultVar} = await ${mangledName}(${args});\n` +
                     `${indentedIf} else {\n` +
                     `    _scrml_reactive_set(${nameArg}, ${resultVar});\n` +
                     `  }\n` +
@@ -3513,7 +3559,15 @@ export function generateClientJs(ctx: CompileContext): string {
         // machine's own try/catch routes a thrown fetch (a non-2xx surfaced by the
         // stub) to `.error` and leaves the success cell untouched (§6.7.7 failure
         // contract); success sets both `.data` and the cell.
-        if (hadTrailingSemi && requestBodyCells.size > 0) {
+        //
+        // s441 — never for an emitter-awaited site: that proof means the site is
+        // inside an async FUNCTION body (a later reassignment, e.g. a refresh
+        // handler), not the body's module-init mount fetch. Function bodies are
+        // emitted BEFORE module-init statements, so without this gate such a
+        // reassignment was the "first occurrence" and the whole settle machine
+        // (`var` decls, a nested fetch fn, a cleanup registration) was spliced
+        // into the author's function while the real mount fetch stayed plain.
+        if (hadTrailingSemi && !emitterAwaited && requestBodyCells.size > 0) {
           let cellKey: string | null = null;
           try {
             const parsed = JSON.parse(nameArg.trim());
@@ -3529,6 +3583,21 @@ export function generateClientJs(ctx: CompileContext): string {
             i = stmtEnd;
             continue;
           }
+        }
+
+        // s441 (g-cell-assign-server-call-fired-detached, §13.2 "The compiler SHALL
+        // insert `await` at every call site where a server-generated fetch call is
+        // made") — the emitter already awaited this call in an async host, so the
+        // site is ALREADY correct: `_scrml_reactive_set(name, await stub(args))`.
+        // Leave it byte-for-byte as emitted. A rejection now propagates out of the
+        // author's function at the call site — exactly as `const a = serverFn()`
+        // in the same body always has — and the statements after it do not run
+        // on a stale value. (The detached IIFE below logged the rejection and let
+        // the function carry on as if the write had happened.)
+        if (emitterAwaited) {
+          parts.push(clientCode.slice(i, stmtEnd));
+          i = stmtEnd;
+          continue;
         }
 
         parts.push(clientCode.slice(i, setIdx));

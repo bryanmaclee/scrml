@@ -1,0 +1,30 @@
+${
+    type LoadError:enum = { Boom(msg: string) }
+    <out> : number = 0
+    <top> : number = 0
+    <seen> : string = ""
+    <init> : number = double(3)
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    server function risky(n: number)! LoadError {
+        if (n < 0) { fail LoadError.Boom("neg") }
+        return n * 3
+    }
+    @top = double(50)
+    function failable() {
+        @out = risky(2) !{
+            | .Boom(m) :> { @seen = "boom"; return }
+        }
+        @seen = "failable:" + @out
+    }
+    function resetThen() {
+        reset(@init)
+        @seen = "reset:" + @init
+    }
+}
+<button id="failable" onclick=failable()>f</>
+<button id="inline" onclick=${@out = double(8)}>i</>
+<button id="reset" onclick=resetThen()>r</>
+<p id="seen">${@seen}</>
+<p id="top">${@top}</>

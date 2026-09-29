@@ -205,15 +205,20 @@
             if (driver is not) return { error: "No driver record." }
 
             const consumeMarker = `consume:${token}`
-            const result = ?{`
+            // Atomic single-use guard: RETURNING yields a row only when this
+            // UPDATE flipped consumed_at from NULL. `.run()` returns void
+            // (§8.5.1), so the outcome is read from RETURNING via `.get()`;
+            // `not` = already consumed (replay / race) or never issued.
+            const consumed = ?{`
                 UPDATE lin_tokens
                 SET consumed_at = CURRENT_TIMESTAMP, consumed_by = ${user.id}
                 WHERE token = ${consumeMarker.substring(8)}
                   AND kind = 'bol'
                   AND load_id = ${loadId}
                   AND consumed_at IS NULL
-            `}.run()
-            if (result.changes == 0) {
+                RETURNING token
+            `}.get()
+            if (consumed is not) {
                 return { error: "BOL already submitted for this load." }
             }
 

@@ -1,0 +1,10 @@
+<!-- s441-demo-blockers DEFECT 2 repro — base cf62b4154: exit 0, the class ships as page text.
+     Fixed: E-CLASS-NOT-IN-SCRML at 7:1 (same code + position class as inside ${ }). -->
+<program title="d2-class">
+<count> = 0
+<p>${@count}</p>
+
+class Counter {
+    constructor() { this.n = 0 }
+}
+</program>

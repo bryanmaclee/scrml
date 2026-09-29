@@ -4,7 +4,7 @@ import { emitLogicNode, emitLogicBody, emitFnShortcutBody } from "./emit-logic.j
 import { deferStackRunnerLines, type DeferStackCtx } from "./emit-control-flow.ts";
 import { CGError } from "./errors.ts";
 import { isServerOnlyNode, collectFunctions } from "./collect.ts";
-import { scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
+import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
 import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers } from "./emit-library-shared.ts";
@@ -1317,6 +1317,16 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // cross-import async locals, THEN computeAsyncFnNames adds the Gap-1 stdlib-
   // Promise seed + propagates over local peer calls. The result drives BOTH the
   // `async` prefix AND the client peer-await (threaded as `clientAsyncFnNames`).
+  // s441 F1 (round 3) -- this file's server fns that are PROVABLY read-only;
+  // only their call sites may share a batch with a server cell write.
+  const _readOnlyServerFnNames = new Set<string>();
+  for (const fn of fnNodes) {
+    const id = `${filePath}::${(fn.span as ASTNode)?.start}`;
+    const r = routeMap.functions.get(id);
+    if (r && r.boundary === "server" && typeof fn.name === "string" && isProvablyReadOnlyServerFn(fn)) {
+      _readOnlyServerFnNames.add(fn.name as string);
+    }
+  }
   const _endpointClientSkipIds = (routeMap as { endpointClientSkipIds?: Set<string> }).endpointClientSkipIds;
   const _clientFns = fnNodes.filter((fn) => {
     const id = `${filePath}::${(fn.span as ASTNode)?.start}`;
@@ -1618,7 +1628,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       // S89 §13.2 Sub-Phase B Step 3 — thread calleeMap + exportRegistry so
       // the auto-await classifier inside scheduleStatements covers stdlib
       // Promise<T> callees alongside server functions.
-      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _clientPeerAwaitNames, _clientSyncPeerCalls, _fnIsAsync, ctx.synthCellKeys);
+      const scheduled = scheduleStatements(body, fnNode, routeMap, depGraph, filePath, errors, machineBindings, engineBindings, engineVarNames, enginesWithHooks, _returnTypeAnnotation, name, enginesWithOnTimeout, enginesWithIdleWatchdog, enginesWithInternalRules, enginesWithHistory, enginesWithMessageArms, engineMessageVariants, _calleeMap, _exportRegistry, mapVarNames, orderedMapVarNames, setVarNames, _localMap, _localSet, _localOrdered, _clientPeerAwaitNames, _clientSyncPeerCalls, _fnIsAsync, ctx.synthCellKeys, _readOnlyServerFnNames);
       for (const line of scheduled) {
         lines.push(`  ${line}`);
       }
