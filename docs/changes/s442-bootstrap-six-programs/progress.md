@@ -100,3 +100,27 @@ if reached). Core-blocked constructs are implemented up to the Core boundary and
   - Bite: 15 front mutations, 12 constructs, all CERTIFIED (41 s).
   - slice-m2 shared tests updated (dedicated commit): typer.test BASE_66_19 re-measured (the §66.19 programs
     now carry only their Core-blocked / O25 codes; no typer code), tables.test knows the new variants.
+- 2026-09-29 — §66.19.4 (theme library) — BLOCKED at `<theme>` (CSS, brief §4): the parser now REFUSES `<theme>`
+  (E-BOOTSTRAP-UNSUPPORTED naming its CSS lowering) instead of parsing it as markup where its token declarations
+  vanished silently; analyze refuses the named shared instances `<accent:swatch …/>` (§66.8.2) where written.
+  Not built: `match` in an opener value, `@mode = …` on a library top-level `let` (⚑ O39). slice-m4/theme.test.js
+  pins the refusals; the run is a `test.todo`.
+- 2026-09-29 — code certification: slice-m1/bench/mutations.js gained 14 s442 rows (every new diagnostic /
+  refusal and the typer walks) — 94 mutations, 0 problems (all RED; clean mirror suite incl. slice-m4 green).
+
+## FINAL STATE (HEAD at report time)
+
+| § | program | status | stopped at |
+|---|---|---|---|
+| 66.19.1 | counter | DONE (M2) | — |
+| 66.19.3 | dropdown ×3 | DONE (M2) | — |
+| 66.19.6 | engine as `single` (After) | DONE — verbatim source compiles clean and RUNS (8 behaviour tests); negative line E-COMPONENT-ENGINE-SCOPE exact | E-DECL-SINGLE-INSTANTIATED line: ⚑ O55 (test.todo; the bootstrap refuses `<phase/>` naming O55) |
+| 66.19.5 | audit log | PARTIAL — everything but 2 constructs RUNS on a derived fixture; 5/5 negative lines exact | `Date.now()` (Core: no host-call Expr), `bind:value` (Core: no bind Attr) |
+| 66.19.2 | validated form | PARTIAL — everything but validators + binds RUNS on a derived fixture; negative line exact | validators `req`/`length(…)` (⚑ O25 + validity surface), 3 × `bind:` (Core) |
+| 66.19.4 | theme library | BLOCKED | `<theme>` (CSS emission — slice-m3 CSS held); also named shared instances, `match` in an opener, ⚑ O39 |
+
+AFTER (HEAD): slice-m1 73/73 · lowered slice-m1 73/73 · slice-m2 325/325 · slice-m3 29/29 (+5 bite-front judgement) ·
+slice-m4 71 pass + 2 todo · lint-no-default-arm 34 files / 0 violations · conformance (impl#1) 1047/1054 + 7 xfail
+(unchanged) · footprint 18/18 runtime, 10 codes-only, 579 not-yet, 447 front-end (unchanged — printer / runtime /
+ingest untouched) · bite matrix: 32 footprint constructs CERTIFIED (unchanged) + 12 front constructs CERTIFIED
+(21 behaviour tests, 15 mutations) · mutations.js 94/94 RED.
