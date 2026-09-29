@@ -3318,7 +3318,7 @@ ${
             } else if (h.file == progFile && cells.indexOf(h.name) >= 0) {
                 const cellAt: string = offsetOf(cellSpans[cells.indexOf(h.name)])
                 out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "the handle `as=" + h.name + "` is named like the cell `@" + h.name + "` (declared at " + cellAt + ") — a handle may not share a cell's name, in any scope (a row handle may shadow a program-level HANDLE, never a cell); rename one of them (§66.7.2, §66.7.4)")])
-            } else if (h.owner == progNid && visibleDeclNamed(files, t, h.file, h.name)) {
+            } else if (visibleDeclNamed(files, t, h.file, h.name)) {   // any scope — program, row, renders (r5 R5, ruled S442)
                 out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "`as=" + h.name + "` — `@" + h.name + "` already names the shared instance of `<" + h.name + ">` (§66.7.1); a handle cannot take that name (a handle named like a visible declaration is E-HANDLE-REDECLARE, ruled S442)")])
             }
             j = j + 1
@@ -5442,12 +5442,23 @@ ${
         return ts
     }
 
+    // A markup `${x}`: typed; a `T | not` there is NOT an un-narrowed operand —
+    // RULED S442: "`${@o.n}` in markup without narrowing stays SILENT (`${not}`
+    // renders nothing); Q3's "use in a template" binds string templates only".
+    fn typeInterp(env: TEnv, x: AExpr, ts0: TypeState) -> TypeState {
+        const r: RVT = typeExpr(env, x, ts0)
+        const t: Type | not = knownOf(r.vt)
+        if (t is not) return r.ts
+        if (maybeInner(t) is not) return r.ts
+        return r.ts                                         // (f): a `T | not` renders nothing — silent
+    }
+
     fn typeNode(env: TEnv, n: ANode, ts: TypeState) -> TypeState {
         const k: ANodeK = n.k
         return match k {
             .Elem(e: e) :> typeElem(env, e, ts)
             .Text(text: x) :> ts
-            .Interp(e: x) :> typeExpr(env, x, ts).ts
+            .Interp(e: x) :> typeInterp(env, x, ts)
             .DeclNode(d: d) :> ts
         }
     }

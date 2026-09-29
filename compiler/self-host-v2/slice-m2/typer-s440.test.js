@@ -166,6 +166,16 @@ describe("#5 / #7 — handle names (E-HANDLE-REDECLARE)", () => {
     expect(inApp("", DD("dropdown"))).toEqual(["E-HANDLE-REDECLARE"]);
     expect(inApp("    <let dropdown:int=0/>")).toEqual(["E-SCOPE-010"]);
   });
+  test("r5 R5 — a handle named like a visible declaration in a ROW or a declaration's RENDERS → E-HANDLE-REDECLARE", () => {
+    expect(inApp("    <xs:int[]=([1])/>", "<each in=@xs as x>" + DD("dropdown") + "</each>")).toEqual(["E-HANDLE-REDECLARE"]);
+    const wrap = { path: "app.scrml", src: "${ import { dropdown, Openness } from \"./lib/dropdown.scrml\" }\n<wrap n:int=0/>\nrenders <div><dropdown as=dropdown label=\"1\" options=([\"a\"])/></div>\n<program>\n    <main><wrap/></main>\n</program>\n" };
+    expect(codes([LIB(), wrap])).toEqual(["E-HANDLE-REDECLARE"]);
+  });
+  test("r5 R5 twins — a row binding, a local and a parameter named like the declaration stay silent; a row handle with another name too", () => {
+    expect(inApp("    <xs:int[]=([1])/>", "<each in=@xs as dropdown><p>${dropdown}</p></each>")).toEqual([]);
+    expect(inApp("    function f(dropdown: int) { let k = dropdown }\n    function g() { let dropdown = 1 }")).toEqual([]);
+    expect(inApp("    <xs:int[]=([1])/>", "<each in=@xs as x>" + DD("pick") + "</each>")).toEqual([]);
+  });
   test("r4 (d) twins — a name no visible declaration holds; a declaration visible only in ANOTHER file", () => {
     expect(inApp("    <let dropdownOpen:bool=false/>", DD("picker"))).toEqual([]);
     const other = { path: "lib/other.scrml", src: "<card title:string=\"\"/>\nrenders <p>x</p>\n" };
