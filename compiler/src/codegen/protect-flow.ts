@@ -272,6 +272,13 @@ function isStdlibDeriver(source: string, imported: string): boolean {
   return !!m && !!STDLIB_DERIVERS[m[1]]?.has(imported);
 }
 
+/**
+ * Binary operators whose result is a boolean of independent identity (DERIVED).
+ * Every OTHER binary operator — `+ - * / % **`, bitwise and shifts — preserves
+ * provenance (ruling, S441: arithmetic stays protected).
+ */
+const DERIVED_OPERATORS = new Set(["==", "!=", "===", "!==", "<", "<=", ">", ">=", "in", "instanceof"]);
+
 /** Array callbacks: element-param methods (and what their result is). */
 const CALLBACK_METHODS = new Set([
   "map", "flatMap", "filter", "find", "findLast", "forEach", "some", "every",
@@ -1378,15 +1385,30 @@ class FlowAnalysis {
       case "ClassExpression":
         return this.evalGeneric(node, scope, fn);
       case "UnaryExpression":
-      case "UpdateExpression":
-        this.evalExpr(node.argument, scope, fn);
-        return clean();
+      case "UpdateExpression": {
+        const v = this.evalExpr(node.argument, scope, fn);
+        // RULING (bryan, S441): arithmetic stays protected. Unary `+` / `-` /
+        // `~` and `++` / `--` yield a number computed from the operand — `+u.pin`
+        // IS the pin. Only `!`, `typeof`, `void` and `delete` are derived.
+        if (node.type === "UnaryExpression" && (node.operator === "!" || node.operator === "typeof" || node.operator === "void" || node.operator === "delete")) {
+          return clean();
+        }
+        const r = clean();
+        mergeMap(r.scalar, naked(v));
+        return r;
+      }
       case "BinaryExpression": {
         const l = this.evalExpr(node.left, scope, fn);
         const rr = this.evalExpr(node.right, scope, fn);
-        if (node.operator !== "+") return clean();
-        // String concatenation embeds a protected scalar VERBATIM. A row
-        // concatenates as "[object Object]" and carries nothing.
+        // Comparisons / relational / membership operators yield a boolean of
+        // independent identity — DERIVED.
+        if (DERIVED_OPERATORS.has(node.operator)) return clean();
+        // String concatenation embeds a protected scalar VERBATIM; and — RULING
+        // (bryan, S441): "arithmetic stays protected" — every arithmetic or
+        // bitwise result computed from a protected value is protected
+        // (`u.pin * 1`, `u.pin - 0`, `cost_price * qty`). To compute with a
+        // protected column and ship the result, declassify it with `reveal`.
+        // A row in the expression is "[object Object]" / NaN and carries nothing.
         const r = clean();
         mergeMap(r.scalar, naked(l));
         mergeMap(r.scalar, naked(rr));
@@ -1400,14 +1422,11 @@ class FlowAnalysis {
       case "AssignmentExpression": {
         const rv = this.evalExpr(node.right, scope, fn);
         let v = rv;
-        if (node.operator === "+=") {
+        if (node.operator !== "=" && node.operator !== "||=" && node.operator !== "&&=" && node.operator !== "??=") {
           const lv = this.evalExpr(node.left, scope, fn);
           v = clean();
           mergeMap(v.scalar, naked(lv));
           mergeMap(v.scalar, naked(rv));
-        } else if (node.operator !== "=" && node.operator !== "||=" && node.operator !== "&&=" && node.operator !== "??=") {
-          this.evalExpr(node.left, scope, fn);
-          return clean();
         }
         this.bindPattern(node.left, v, scope, fn);
         return v;

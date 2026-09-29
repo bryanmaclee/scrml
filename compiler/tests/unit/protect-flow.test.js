@@ -201,6 +201,21 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod(H + 'const A = "AB"; let s = ""; for (const c of A) { if (_scrml_structural_eq(h, c)) { } s = s + c; } return s;'))).toEqual([]);
   });
 
+  test("ruling (bryan, S441): arithmetic stays protected; reveal is the path to compute", () => {
+    const P = (body) => mod(body).replace('["passwordHash"]', '["passwordHash", "pin"]');
+    for (const e of ["u.pin * 1", "+u.pin", "u.pin - 0", "u.pin * qty", "-u.pin", "~u.pin", "u.pin | 0", "u.pin ** 1", "u.pin / 1", "u.pin % 1e12"]) {
+      expect(leakCols(P(`const qty = 3; return ${e};`))).toEqual(["pin"]);
+    }
+    expect(leakCols(P("let t = 0; t += u.pin; return t;"))).toEqual(["pin"]);
+    expect(leakCols(P("let t = u.pin; t++; return t;"))).toEqual(["pin"]);
+    // Comparisons, `!` and `typeof` remain derived.
+    expect(leakCols(P("return { a: u.pin == 1, b: u.pin > 10, c: !u.pin, d: typeof u.pin };"))).toEqual([]);
+    // reveal, then arithmetic: declassified, clean.
+    expect(leakCols(P('const r = _scrml_protect_reveal(u, "pin"); return r.pin * 3;'))).toEqual([]);
+    // Arithmetic on a NON-protected column is clean.
+    expect(leakCols(P("return u.id * 1000;"))).toEqual([]);
+  });
+
   test("round 3: allowlisted method NAMES on an object carrying protected data are not trusted", () => {
     expect(leakCols(mod("const o = { digest: () => u.passwordHash }; return o.digest();"))).toEqual(["passwordHash"]);
     expect(leakCols(mod("const o = { includes: (x) => u.passwordHash }; return o.includes(1);"))).toEqual(["passwordHash"]);
