@@ -140,6 +140,26 @@ const FRONT_MUTATIONS = [
     from: "                if (isNestedUserDecl(d)) {\n                    const n: RDeclStubs", to: "                if (false) {\n                    const n: RDeclStubs", tests: ["engine.test.js"] },
   { c: "Lower.NestedDeclSyntax", id: "a nested declaration's renders is never lowered", file: LOWER,
     from: ".concat(nestedSyntaxes(file, p.items))", to: "", tests: ["engine.test.js"] },
+  // §66.19.5 — an append-only audit log (the fixture minus its Core-blocked constructs)
+  { c: "Analyze.SeqShape", id: "a recognized append shape records no element to write", file: ANALYZE,
+    from: "                elems = elems.concat([x])\n", to: "                elems = elems\n", tests: ["audit.test.js"] },
+  { c: "Analyze.SeqShape", id: "`[...@x, e]` classified as the front shape (a prepend)", file: ANALYZE,
+    from: "                    if (samePlaceSyntax(target, first)) return 1", to: "                    if (samePlaceSyntax(target, first)) return 2", tests: ["audit.test.js"] },
+  { c: "Lower.SeqEdits", id: "an append shape's writes are dropped", file: LOWER,
+    from: "        for (const v of values) {\n            out = out.concat([Stmt.Write(", to: "        for (const v of []) {\n            out = out.concat([Stmt.Write(", tests: ["audit.test.js"] },
+  { c: "Lower.SeqEdits", id: "a prepend shape writes its elements in source order (the log would read b, a)", file: LOWER,
+    from: "        const prepend: boolean = w.edit == EditKind.Prepend", to: "        const prepend: boolean = false", tests: ["audit.test.js"] },
+  { c: "Parse.ArraySpread", id: "a spread element keeps only its operand's position (`[...@x, e]` read as `[e, ...@x]`)", file: PARSE,
+    from: "                out = out.concat([sp.e])", to: "                out = [sp.e].concat(out)", tests: ["audit.test.js"] },
+  // §66.19.2 — a validated form (the fixture minus its validators and binds)
+  { c: "Analyze.StarShared", id: "`<*x/>` of a shared instance inlines with no instance substitution", file: ANALYZE,
+    from: "MInline({ nodes: nodes, subst: InstRef.Shared(d.info.sym) })", to: "MInline({ nodes: nodes, subst: not })", tests: ["form.test.js"] },
+  { c: "Lower.Inline", id: "an inlined renders keeps the caller's instance context", file: LOWER,
+    from: "        const ic: LC = { t: c.t, file: c.file, subst: s, snap: not }", to: "        const ic: LC = { t: c.t, file: c.file, subst: c.subst, snap: not }", tests: ["form.test.js"] },
+  { c: "Analyze.ChildRenders", id: "`<*f/>` of a child field with renders inlines nothing", file: ANALYZE,
+    from: "MInline({ nodes: own, subst: not })", to: "MInline({ nodes: [], subst: not })", tests: ["form.test.js"] },
+  { c: "Analyze.ChildRenders", id: "a child field's renders is never resolved", file: ANALYZE,
+    from: "st = resolveNodes(renv, childRenders(ds), st)", to: "st = resolveNodes(renv, [], st)", tests: ["form.test.js"] },
 ];
 
 function runFront(tests) {

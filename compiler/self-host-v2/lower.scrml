@@ -35,7 +35,7 @@ ${
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, Tables, TypedProgram,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, Tables, TypedProgram,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo } from "./analyze.scrml"
 
     export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
@@ -706,8 +706,19 @@ ${
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
             .MStateView(v: v) :> [stateView(c, v)]
+            .MInline(v: v) :> inlineViews(c, v)
             not :> []
         }
+    }
+
+    // s442 — `<*x/>` by inlining (analyze's InlineView): the markup, lowered in
+    // place; when it is a declaration's renders for its SHARED instance, its
+    // `.Lexical(0)` means that instance (`subst`, as L4's reset does).
+    fn inlineViews(c: LC, v: InlineView) -> View[] {
+        const s: InstRef | not = v.subst
+        if (s is not) return lowerNodes(c, v.nodes)
+        const ic: LC = { t: c.t, file: c.file, subst: s, snap: not }
+        return lowerNodes(ic, v.nodes)
     }
 
     // s442 — `<*f/>` of a graph field (O5 (1i)): a View.Cond with one arm per

@@ -64,3 +64,39 @@ if reached). Core-blocked constructs are implemented up to the Core boundary and
   - Environment: two pre-commit runs failed on timing-sensitive impl#1 tests (a live-Postgres hook timeout,
     an arrow-SQL test at 7.3 s > 5 s) while a bite run loaded the machine; the retry with no concurrent load
     passed. Not a Bun-version artifact; heavy runs and commits are now serialized.
+- 2026-09-29 — §66.19.5 (audit log) — PARTIAL, everything but the Core-blocked constructs RUNS:
+  - ast: three new AExprK variants `Spread(e)` (an array element `...e`), `Index(obj, idx)`, `Lambda(params, body)`
+    (expression body); every total match over AExprK took the new arms (analyze: 19 sites, neutral answers).
+  - parse: array elements with `...e`; `a[i]` postfix (the `[` must touch); `x => e` / `(a, b) => e` (a braced
+    body is E-BOOTSTRAP-UNSUPPORTED).
+  - analyze (ADDITIVE, d5a6e9dc): §66.11.2 recognized reassignment shapes — `@x = [...@x, e…]` end-append,
+    `@x = [e…, ...@x]` front-prepend, `@x = @x.filter(λ)` shrink-anywhere, `@x = @x.map(λ)` position-write —
+    classified BEFORE the replace path (`seqEditShape` / `resolveSeqShape`), each refused with
+    E-WRITE-NOT-GRANTED naming the edit when the type does not grant it; `.shift()` / `.pop()` (front / end
+    removals, §66.12.2); `@xs[i].f = v` an edit of field `f` judged by f's own contract (dpa-052 Q3, RULED
+    S440) — a fixed field → E-WRITE-NOT-GRANTED. A GRANTED filter / map / shift / pop / element-field write is
+    E-BOOTSTRAP-UNSUPPORTED (Core has no lambda, removal edit or index place — core.scrml untouched).
+    New EffectFact `EEdits(w, elems)` + the typer checks each element against the element type.
+  - lower: `EEdits` → one Append Write per element in order / Prepend in reverse (so `[a, b, ...@x]` reads a, b).
+  - Core-blocked (reported, pinned by a test on the VERBATIM source): `Date.now()` (no host-call Expr) and
+    `<input bind:value=@actor/>` (no bind / event-value Attr).
+  - Tests: slice-m4/audit.test.js — verbatim diagnostics pinned; fixture (`fixtures.js`, derived by named edits)
+    run: log in, spread-append order, the §66.10 snapshot line as a probe, interleaving; shapes fixture (front
+    granted): multi-element append / prepend order; 5 negative lines → exactly E-WRITE-NOT-GRANTED each, their
+    messages name the edit, and the same shapes GRANTED on a wider type are not grant errors.
+- 2026-09-29 — §66.19.2 (validated form) — PARTIAL, everything but the validators (O25) and binds (Core) RUNS:
+  - parse: validators in an opener (`req`, `length(…)`, … — the kickstarter §6.1 vocabulary) → E-BOOTSTRAP-
+    UNSUPPORTED naming ⚑ O25 (and the validity surface, §6.4); a `name(args)` call is skipped whole.
+  - analyze (ADDITIVE): `ElemFact.MInline(InlineView{nodes, subst})` — `<*f/>` of a CHILD field with its own
+    `renders` (§66.4 rule 2) inlines that renders for THIS instance; `<*x/>` of a user declaration at program
+    top level inlines x's renders for its SHARED instance (`subst` = Shared(x)); restricted to markup that
+    constructs nothing (no use / `as=` / `<slot/>`) because Core has no View.Star (M1 D4); child-field renders
+    are resolved in the declaration's context; the typer walks state-child bodies and child renders.
+  - lower: `MInline` → the nodes lowered in place (with `subst` for a shared instance, as L4's reset does).
+  - Tests: slice-m4/form.test.js — verbatim diagnostics pinned (7: 4 validator, 3 bind); fixture run: the form
+    via `<*signup/>`, `<*email/>`/`<*password/>`, `<*saveState/>` bodies, `save()`'s guard, `.Idle → .Saving →
+    .Saved`, the bare `agree` projection, `<*signup/>` twice = one instance; negative line
+    E-DECL-FIELD-TAG-NEEDS-STAR exact. slice-m4/typing.test.js: Typing covers every expression node.
+  - Bite: 15 front mutations, 12 constructs, all CERTIFIED (41 s).
+  - slice-m2 shared tests updated (dedicated commit): typer.test BASE_66_19 re-measured (the §66.19 programs
+    now carry only their Core-blocked / O25 codes; no typer code), tables.test knows the new variants.
