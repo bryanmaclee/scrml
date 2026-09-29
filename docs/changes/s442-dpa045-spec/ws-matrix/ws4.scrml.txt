@@ -1,0 +1,21 @@
+<program>
+  <n> = 2
+  <items> = ["a", "b"]
+  const Box = <div class="box">
+      <p>   WSA  p-in-comp   ${@n}   tail   </p>
+      <span>WSB-no-edge  runs   here</span>
+  </>
+  <Box/>
+  const Plain = <section>WSC-single-line  two  spaces</section>
+  <Plain/>
+  ${
+    const frag = <p>   WSD  markup-as-value   ${@n}   end   </p>
+  }
+  <div>${frag}</div>
+  <ul>
+    ${ for (let it of @items) { lift <li><span>   WSE  nested-in-lift   </span></li> } }
+  </ul>
+  <ul>
+    ${ for (let it of @items) { lift <li>WSF-a${it}b-no-spaces</li> } }
+  </ul>
+</program>
