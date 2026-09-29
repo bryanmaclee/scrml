@@ -183,3 +183,31 @@ Reproduction (reviewer tests copied read-only to scratchpad/repro/, paths retarg
   base (review-six-b/dumpcore.js at HEAD vs review-six-b/out-base: `diff -rq` clean).
 - Mutations: 112 (94 + 18 r1 rows), 0 problems. Bite (front): 12 constructs certified (one Lower.SeqEdits row
   re-sited after the editStmts rewrite).
+
+## MERGE + GROW/SHRINK TOKENS (after r1)
+- Pre-merge r1 tip: 898b3a1a. Merge commit 4ba2ef14 (origin/main 55a9f3d5, #1151 S440 typer). Conflict: lower.scrml
+  import list only (kept both sides). analyze.scrml auto-merged; #1151 added 7 total matches over AExprK that lacked
+  s442's Spread/Index/Lambda arms (nKey, isNotLit, condNarrowing, exprKids — children, ownEffect, assignValue,
+  writtenKey) — added in the merge commit. No §66.19 program or fixture tripped the new typer rules.
+  Post-merge suites all green; mutations 138/138 RED; bite 32 + 12 front certified.
+- RULED S442 grow/shrink split (ruling:user-voice-scrml.md S442 — "1 yes, 2 yes" and "spellings are fine"):
+  `append`/`pop` (end), `prepend`/`shift` (front), `insert`/`remove` (anywhere); insert/remove COVER end and front.
+  analyze: `grantAxis` is the one place grant spellings are read (the rest of O10 — the bracket form, `free` /
+  `writable` / `replace`, bounded length — is still OPEN); Core's SeqGrants.at = the GROW places (insert expands to
+  Append+Prepend+Anywhere edits in seqEdits, so check.scrml's C3 is untouched); SHRINK places are an analyze fact
+  (`FieldInfo.shrink`); pop / shift / filter are judged by the shrink grant (a shrink-only field has no write
+  capability — the removals are never lowered, so the grant alone decides). Retired `end` / `front` / `anywhere`
+  → E-GRANT-UNKNOWN naming both halves. Tests: slice-m4/grants.test.js (append-only log refuses pop / shift /
+  filter / prepend; stack `[free, append, pop]`; `[free, insert, remove, writable]` all four; runtime: `insert`
+  appends and prepends). 6 mutations rows. Shared slice-m1/m2 files moved to the ruled tokens (valuesem fixture:
+  its lowered Core is unchanged — oracle equality holds).
+- PENDING the SPEC PR: slice-m4/src/audit/audit.scrml now writes `Entry[free, append]`; the §66.19.5 drift guard
+  compares modulo that one token (+ a `test.todo` for verbatim); slice-m2 BASE_66_19's §66.19.5 block list gains
+  E-GRANT-UNKNOWN (+ 2 × E-WRITE-NOT-GRANTED) until SPEC is amended.
+- F7 STILL HELD (unchanged by the ruling): see "F7 NOT LANDED" above — what tripped it is slice-m2/front.test.js's
+  S440 N1 "side-effecting override … converges" (guarded + unguarded), whose fixture `<log:int[append]=([])/>`
+  (was `int[end]`) declares a FIXED-length log and pushes into it; refusing growth of a fixed-length sequence makes
+  that fixture a compile error. Landing F7 = F7-held.diff + that fixture → `int[free, append]` (PA call).
+- FINAL (HEAD): slice-m1 73/73 · lowered 73/73 · slice-m2 409/409 · slice-m3 29/29 · slice-m4 111 + 2 todo · lint 34/0 ·
+  conformance 1047/1054 + 7 xfail · footprint 18/18, 579 not-yet, 447 front-end · mutations 144/144 RED ·
+  bite 32 footprint + 12 front constructs certified.
