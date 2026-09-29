@@ -758,6 +758,36 @@ ${attr}
     const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; if (true) { const event = { preventDefault: () => 0 }; event.preventDefault() } }><button>s</button></form>`);
     expect(o.codes).toEqual([]);
   });
+  // round 4 — the event binding is POISONED after the first await (review round 3, finding 3)
+  for (const [label, body] of [
+    ["destructured control method", `const { preventDefault } = event; @v = isOk(1) ? "a" : "r"; preventDefault.call(event)`],
+    ["non-literal computed key", `const k = "prevent" + "Default"; @v = isOk(1) ? "a" : "r"; event[k]()`],
+    ["alias + .call", `const ev = event; @v = isOk(1) ? "a" : "r"; ev.preventDefault.call(ev)`],
+    ["let reassignment alias", `let ev; ev = event; @v = isOk(1) ? "a" : "r"; ev.preventDefault()`],
+    ["object container", `const o = { e: event }; @v = isOk(1) ? "a" : "r"; o.e.preventDefault()`],
+    ["array alias", `const [ev] = [event]; @v = isOk(1) ? "a" : "r"; ev.preventDefault()`],
+    ["bound method", `const pd = event.preventDefault.bind(event); @v = isOk(1) ? "a" : "r"; pd()`],
+    ["closure passed", `const stop = () => event.preventDefault(); @v = isOk(1) ? "a" : "r"; [1].forEach(stop)`],
+    ["closure of a closure", `const inner = () => event.preventDefault(); const outer = () => inner(); @v = isOk(1) ? "a" : "r"; outer()`],
+    ["event passed as an argument", `const stop = (e) => e.preventDefault(); @v = isOk(1) ? "a" : "r"; stop(event)`],
+    ["Reflect.apply", `@v = isOk(1) ? "a" : "r"; Reflect.apply(event.preventDefault, event, [])`],
+    ["comma expression", `@v = isOk(1) ? "a" : "r"; (0, event.preventDefault).call(event)`],
+    ["returnValue write", `@v = isOk(1) ? "a" : "r"; event.returnValue = false`],
+    ["cancelBubble write", `@v = isOk(1) ? "a" : "r"; event.cancelBubble = true`],
+  ]) {
+    test(`round 4: ${label} after the await → error`, () => {
+      const o = app(`<form onsubmit=\${ ${body} }><button>s</button></form>`);
+      expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+    });
+  }
+  test("round 4: plain non-control reads after the await are allowed (`event.target`, alias `.key`)", () => {
+    const o = app(`<form onsubmit=\${ event.preventDefault(); const ev = event; @v = isOk(1) ? "a" : "r"; @v = ev.type + event.target.id }><button>s</button></form>`);
+    expect(o.codes).toEqual([]);
+  });
+  test("round 4: a destructure of non-control fields is clean", () => {
+    const o = app(`<form onsubmit=\${ event.preventDefault(); const { target, type } = event; @v = isOk(1) ? "a" : "r"; @v = type + target.id }><button>s</button></form>`);
+    expect(o.codes).toEqual([]);
+  });
   test("control: a handler with no await may call preventDefault anywhere", () => {
     const o = app(`<form onsubmit=\${ @v = "x"; event.preventDefault() }><button>s</button></form>`);
     expect(o.codes).toEqual([]);

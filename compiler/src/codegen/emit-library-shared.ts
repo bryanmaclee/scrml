@@ -668,16 +668,28 @@ export function jsAsyncUsesErrors(uses: JsAsyncUses, span: unknown, filePath?: s
       "error",
     ));
   }
+  const seenEvt = new Set<string>();
   for (const c of uses.eventControlAfterAwait ?? []) {
+    if (seenEvt.has(c.method)) continue;
+    seenEvt.add(c.method);
+    const isControl = /^(preventDefault|stopPropagation|stopImmediatePropagation|returnValue|cancelBubble)$/.test(c.method);
+    const what = isControl
+      ? (c.method === "returnValue" || c.method === "cancelBubble" ? `\`event.${c.method}\`` : `\`event.${c.method}()\``)
+      : `\`${c.method.replace(/ \(derived from the event\)$/, "")}\` (the event, or a value derived from it)`;
+    const effect = c.method === "preventDefault" || c.method === "returnValue"
+      ? "performed the default action (the form submitted / the link navigated)"
+      : isControl ? "propagated the event" : "performed the default action and propagated the event";
     out.push(new CGError(
       "E-EVENT-CONTROL-AFTER-AWAIT",
-      `E-EVENT-CONTROL-AFTER-AWAIT: \`event.${c.method}()\` runs after this handler's first server / ` +
-        `async call. The compiler awaits that call (§13.2), and by the time the handler resumes the ` +
-        `browser has already ${c.method === "preventDefault" ? "performed the default action (the form submitted / the link navigated)" : "propagated the event"} — ` +
-        `the call has no effect. Move \`event.${c.method}()\` before the first server call. If it must ` +
-        `stay conditional on the server's answer, call it unconditionally first and perform the ` +
-        `action yourself when the answer allows it. (The compiler does not move it for you: that ` +
-        `would change which events a conditional call applies to.)`,
+      `E-EVENT-CONTROL-AFTER-AWAIT: ${what} is used after this handler's first server / async call. ` +
+        `The compiler awaits that call (§13.2), and by the time the handler resumes the browser has ` +
+        `already ${effect} — cancelling or stopping the event then has no effect. After the first ` +
+        `await a handler may only READ plain event properties (\`event.target\`, \`event.key\`, …); ` +
+        `it may not call or read the event's control members, pass the event (or an alias, a container ` +
+        `holding it, or a closure that uses it) anywhere, or alias it. Call \`event.preventDefault()\` / ` +
+        `\`stopPropagation()\` before the first server call. If it must depend on the server's answer, call ` +
+        `it unconditionally first and perform the action yourself when the answer allows it. (The ` +
+        `compiler does not move it for you: that would change which events a conditional call applies to.)`,
       sp,
       "error",
     ));

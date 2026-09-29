@@ -9,3 +9,4 @@
 - 2026-09-29T12:19:10-06:00 round 3 N1: scheduler exemption narrowed to source-provable calls/member reads; +4 conformance, +7 unit
 - 2026-09-29T12:51:12-06:00 round 3 N2/N3 (+N4 bracket then): event matched by binding; +5 unit, +3 conformance; conformance 1079/1086
 - 2026-09-29T13:13:58-06:00 round 3 N1 follow-up: comments no longer withdraw the scheduler exemption (flogence app.scrml false positive caught by corpus diff); corpus = new cases + dispatch-tool only
+- 2026-09-29T14:09:48-06:00 round 4 step 2: event binding poisoning after the first await; e01-e24+h03 fire, e25/h08 clean; +16 unit, +14 conformance; conformance 1100/1107

@@ -152,33 +152,40 @@ function lookup(name: string, scope: Scope | null): Binding | undefined {
 const isFn = (n: N): boolean =>
   !!n && (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression");
 
-/** Every name a binding pattern introduces. */
-function patternNames(p: N, out: string[]): void {
+/** Every Identifier node a binding pattern declares (s441 round 4 — binding identity). */
+function patternIdents(p: N, out: N[]): void {
   if (!p) return;
   switch (p.type) {
-    case "Identifier": out.push(p.name); return;
+    case "Identifier": out.push(p); return;
     case "ObjectPattern":
-      for (const prop of p.properties) patternNames(prop.type === "RestElement" ? prop.argument : prop.value, out);
+      for (const prop of p.properties) patternIdents(prop.type === "RestElement" ? prop.argument : prop.value, out);
       return;
-    case "ArrayPattern": for (const e of p.elements) patternNames(e, out); return;
-    case "RestElement": patternNames(p.argument, out); return;
-    case "AssignmentPattern": patternNames(p.left, out); return;
+    case "ArrayPattern": for (const e of p.elements) patternIdents(e, out); return;
+    case "RestElement": patternIdents(p.argument, out); return;
+    case "AssignmentPattern": patternIdents(p.left, out); return;
     default: return;
   }
 }
 
-/** `var` names hoisted to a function scope (not crossing nested functions). */
-function hoistedVars(node: N, out: string[]): void {
+/** Bind every name a pattern declares to its own Identifier node. */
+function declarePattern(p: N, scope: Scope): void {
+  const ids: N[] = [];
+  patternIdents(p, ids);
+  for (const id of ids) scope.decls.set(id.name, id);
+}
+
+/** `var` declarator patterns hoisted to a function scope (not crossing nested functions). */
+function hoistedVarPatterns(node: N, out: N[]): void {
   if (!node || typeof node !== "object") return;
-  if (Array.isArray(node)) { for (const c of node) hoistedVars(c, out); return; }
+  if (Array.isArray(node)) { for (const c of node) hoistedVarPatterns(c, out); return; }
   if (isFn(node) || node.type === "ClassDeclaration" || node.type === "ClassExpression") return;
   if (node.type === "VariableDeclaration" && node.kind === "var") {
-    for (const d of node.declarations) patternNames(d.id, out);
+    for (const d of node.declarations) out.push(d.id);
   }
   for (const key of Object.keys(node)) {
     if (key === "type" || key === "start" || key === "end") continue;
     const v = node[key];
-    if (v && typeof v === "object") hoistedVars(v, out);
+    if (v && typeof v === "object") hoistedVarPatterns(v, out);
   }
 }
 
@@ -189,15 +196,10 @@ function declareBlock(stmts: N[], scope: Scope): void {
     if (st.type === "FunctionDeclaration" && st.id) scope.decls.set(st.id.name, st);
     else if (st.type === "ClassDeclaration" && st.id) scope.decls.set(st.id.name, OTHER);
     else if (st.type === "VariableDeclaration" && st.kind !== "var") {
-      // s441 round 3 — a simple `const x = …` binds to its own id node (a distinct
-      // binding identity, so aliases of the event parameter can be followed);
-      // pattern-bound names stay the anonymous OTHER.
-      for (const d of st.declarations) {
-        if (d.id && d.id.type === "Identifier") { scope.decls.set(d.id.name, d.id); continue; }
-        const names: string[] = [];
-        patternNames(d.id, names);
-        for (const nm of names) scope.decls.set(nm, OTHER);
-      }
+      // s441 rounds 3-4 — every declared name binds to its own Identifier node (a
+      // distinct binding identity: the event taint and the scheduler scope check
+      // follow bindings, never names).
+      for (const d of st.declarations) declarePattern(d.id, scope);
     }
   }
 }
@@ -205,6 +207,8 @@ function declareBlock(stmts: N[], scope: Scope): void {
 interface Resolution {
   /** Identifier REFERENCE node → its binding (`undefined` → free in the fragment). */
   refs: Map<N, Binding | undefined>;
+  /** An Identifier ASSIGNMENT target (`x = …`, `x += …`, `[x] = …`) → the binding it writes. */
+  assignTargets: Map<N, Binding | undefined>;
   /** Every FunctionDeclaration in the fragment. */
   fnDecls: N[];
 }
@@ -215,22 +219,25 @@ interface Resolution {
  */
 function resolveScopes(root: N, rootScope: Scope): Resolution {
   const refs = new Map<N, Binding | undefined>();
+  const assignTargets = new Map<N, Binding | undefined>();
   const fnDecls: N[] = [];
 
-  const visitPattern = (p: N, scope: Scope): void => {
+  const visitPattern = (p: N, scope: Scope, isAssign = false): void => {
     if (!p) return;
     switch (p.type) {
-      case "Identifier": return;
+      case "Identifier":
+        if (isAssign) assignTargets.set(p, lookup(p.name, scope));
+        return;
       case "ObjectPattern":
         for (const prop of p.properties) {
-          if (prop.type === "RestElement") { visitPattern(prop.argument, scope); continue; }
+          if (prop.type === "RestElement") { visitPattern(prop.argument, scope, isAssign); continue; }
           if (prop.computed) visit(prop.key, scope);
-          visitPattern(prop.value, scope);
+          visitPattern(prop.value, scope, isAssign);
         }
         return;
-      case "ArrayPattern": for (const e of p.elements) visitPattern(e, scope); return;
-      case "RestElement": visitPattern(p.argument, scope); return;
-      case "AssignmentPattern": visitPattern(p.left, scope); visit(p.right, scope); return;
+      case "ArrayPattern": for (const e of p.elements) visitPattern(e, scope, isAssign); return;
+      case "RestElement": visitPattern(p.argument, scope, isAssign); return;
+      case "AssignmentPattern": visitPattern(p.left, scope, isAssign); visit(p.right, scope); return;
       default: visit(p, scope); // a member-expression assignment target
     }
   };
@@ -238,13 +245,12 @@ function resolveScopes(root: N, rootScope: Scope): Resolution {
   const visitFunction = (fn: N, scope: Scope): void => {
     const fs = newScope(scope);
     if (fn.type === "FunctionExpression" && fn.id) fs.decls.set(fn.id.name, OTHER);
-    const names: string[] = [];
-    for (const p of fn.params) patternNames(p, names);
-    if (fn.body && fn.body.type === "BlockStatement") hoistedVars(fn.body.body, names);
-    for (const nm of names) fs.decls.set(nm, OTHER);
-    // s441 round 3 — a simple identifier parameter binds to its own node (the
-    // handler's event parameter is matched by BINDING, not by name).
-    for (const p of fn.params) if (p && p.type === "Identifier") fs.decls.set(p.name, p);
+    // s441 rounds 3-4 — parameters and hoisted `var`s bind to their own Identifier
+    // nodes (the handler's event parameter is matched by BINDING, not by name).
+    const vars: N[] = [];
+    if (fn.body && fn.body.type === "BlockStatement") hoistedVarPatterns(fn.body.body, vars);
+    for (const v of vars) declarePattern(v, fs);
+    for (const p of fn.params) declarePattern(p, fs);
     // `arguments` is implicitly bound in a non-arrow function.
     if (fn.type !== "ArrowFunctionExpression") fs.decls.set("arguments", OTHER);
     for (const p of fn.params) visitPattern(p, fs);
@@ -265,9 +271,9 @@ function resolveScopes(root: N, rootScope: Scope): Resolution {
         refs.set(node, lookup(node.name, scope));
         return;
       case "Program": {
-        const names: string[] = [];
-        hoistedVars(node.body, names);
-        for (const nm of names) scope.decls.set(nm, OTHER);
+        const vars: N[] = [];
+        hoistedVarPatterns(node.body, vars);
+        for (const v of vars) declarePattern(v, scope);
         declareBlock(node.body, scope);
         for (const st of node.body) visit(st, scope);
         return;
@@ -310,9 +316,7 @@ function resolveScopes(root: N, rootScope: Scope): Resolution {
       }
       case "CatchClause": {
         const cs = newScope(scope);
-        const names: string[] = [];
-        patternNames(node.param, names);
-        for (const nm of names) cs.decls.set(nm, OTHER);
+        declarePattern(node.param, cs);
         visitPattern(node.param, cs);
         visit(node.body, cs);
         return;
@@ -331,7 +335,7 @@ function resolveScopes(root: N, rootScope: Scope): Resolution {
         visit(node.init, scope);
         return;
       case "AssignmentExpression":
-        visitPattern(node.left, scope);
+        visitPattern(node.left, scope, true);
         visit(node.right, scope);
         return;
       case "MemberExpression":
@@ -361,7 +365,7 @@ function resolveScopes(root: N, rootScope: Scope): Resolution {
   };
 
   visit(root, rootScope);
-  return { refs, fnDecls };
+  return { refs, assignTargets, fnDecls };
 }
 
 // ---------------------------------------------------------------------------
@@ -448,7 +452,7 @@ interface AnalyzeOpts {
 
 function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFree: FreeAsyncResolver, opts: AnalyzeOpts): ColoredBody {
   const rootScope = newScope(null);
-  const { refs, fnDecls } = resolveScopes(program, rootScope);
+  const { refs, assignTargets, fnDecls } = resolveScopes(program, rootScope);
 
   // What does an identifier REFERENCE resolve to, async-wise? `asyncDecl` is filled
   // by the fixpoint (transform mode only — a verbatim fragment's declarations stay
@@ -553,11 +557,18 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
   let curFn: N = null;
   // The source position of the root's first own-level await (inserted or already
   // present) — for the event-control check.
+  // `firstOwnAwait` / `firstOwnAwaitEnd`: the earliest own-level await and the
+  // end of what it awaits — code at or after `firstOwnAwaitEnd` runs after the
+  // handler has yielded to the event loop.
   let firstOwnAwait = Infinity;
-  const noteAwait = (pos?: number): void => {
+  let firstOwnAwaitEnd = Infinity;
+  const noteAwait = (pos?: number, end?: number): void => {
     if (curFn !== null && curFn === opts.root) {
       rootAsync = true;
-      if (typeof pos === "number" && pos < firstOwnAwait) firstOwnAwait = pos;
+      if (typeof pos === "number" && pos < firstOwnAwait) {
+        firstOwnAwait = pos;
+        firstOwnAwaitEnd = typeof end === "number" ? end : pos;
+      }
     }
   };
   const promiseMethods: Array<{ name: string; method: string }> = [];
@@ -571,7 +582,7 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
 
   const at = (pos: number): number => pos - P;
   const addAwait = (node: N, parent: N, depth: number): void => {
-    noteAwait(node.start);
+    noteAwait(node.start, node.end);
     if (needsWrap(node, parent)) {
       edits.push({ pos: at(node.start), end: at(node.start), text: "(await ", kind: "open", depth });
       edits.push({ pos: at(node.end), end: at(node.end), text: ")", kind: "close", depth });
@@ -601,7 +612,8 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
       curFn = prevFn;
       return;
     }
-    if (node.type === "AwaitExpression" || (node.type === "ForOfStatement" && node.await === true)) noteAwait(node.start);
+    if (node.type === "AwaitExpression") noteAwait(node.start, node.end);
+    else if (node.type === "ForOfStatement" && node.await === true) noteAwait(node.start, node.right ? node.right.end : node.start);
     // Class field initializers and static blocks are sync contexts.
     if (node.type === "PropertyDefinition") {
       if (node.computed) visit(node.key, node, awaitLegal, depth + 1);
@@ -627,7 +639,7 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
             const recv = node.callee.object;
             const prefix = `_scrml_${method}Async(`;
             if (awaitLegal) {
-              noteAwait(node.start);
+              noteAwait(node.start, node.end);
               checkPromiseMethod(node, parent, `${method}(…)`);
               const wrap = needsWrap(node, parent);
               edits.push({ pos: at(node.start), end: at(node.start), text: (wrap ? "(await " : "await ") + prefix, kind: "open", depth });
@@ -772,78 +784,155 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
 
   visit(program, null, false, 0);
 
-  // Event control after the first own-level await (handlers only). The event is
-  // matched by BINDING (the handler's parameter, and `const ev = event` aliases of
-  // it), so an inner `(event) => …` parameter or a block-local `const event` is
-  // not it. A nested function that calls event control on it and is INVOKED after
-  // the first await is flagged too (fail closed; not traced further).
+  // Event control after the first own-level await (handlers only) — s441 round 4:
+  // the event binding is POISONED after the handler yields, rather than a list of
+  // call shapes being matched. After the first own-level await, any use of the
+  // event parameter — or of anything derived from it (an alias in any binding
+  // form, a container holding it, a destructured control method, a closure that
+  // misuses it) — other than a plain read of a NON-control property
+  // (`ev.target`, `ev.key`) is an error. Bindings are followed by identity (the
+  // scope resolver), so an inner `(event) => …` parameter or a block-local
+  // `const event` is a different binding and never fires.
   const eventControlAfterAwait: Array<{ method: string }> = [];
   const eventParamNode = opts.root && opts.root.params && opts.root.params[0] &&
     opts.root.params[0].type === "Identifier" ? opts.root.params[0] : null;
-  if (opts.root && eventParamNode && firstOwnAwait !== Infinity) {
-    const CONTROL = new Set(["preventDefault", "stopPropagation", "stopImmediatePropagation"]);
-    const eventBindings = new Set<N>([eventParamNode]);
-    const isEventRef = (id: N): boolean => !!id && id.type === "Identifier" && eventBindings.has(refs.get(id));
-    const eachNode = (n: N, fnVisit: (x: N) => void): void => {
+  if (opts.root && eventParamNode && firstOwnAwaitEnd !== Infinity) {
+    const CONTROL = new Set(["preventDefault", "stopPropagation", "stopImmediatePropagation", "returnValue", "cancelBubble"]);
+    type Taint = "event" | "alias" | "container" | "closure";
+    const taint = new Map<N, Taint>([[eventParamNode, "event"]]);
+    // Parent links over the whole handler (nested functions included).
+    const parentOf = new Map<N, N>();
+    const idents: N[] = [];
+    const link = (n: N, parent: N): void => {
       if (!n || typeof n !== "object") return;
-      if (Array.isArray(n)) { for (const c of n) eachNode(c, fnVisit); return; }
-      fnVisit(n);
+      if (Array.isArray(n)) { for (const c of n) link(c, parent); return; }
+      if (typeof n.type !== "string") return;
+      if (parent) parentOf.set(n, parent);
+      if (n.type === "Identifier") idents.push(n);
       for (const key of Object.keys(n)) {
         if (key === "type" || key === "start" || key === "end") continue;
         const v = n[key];
-        if (v && typeof v === "object") eachNode(v, fnVisit);
+        if (v && typeof v === "object") link(v, n);
       }
     };
-    // Aliases: `const ev = event` (and aliases of aliases).
+    link(opts.root.body, opts.root);
+    const bindingOf = (id: N): N | undefined => {
+      const b = refs.has(id) ? refs.get(id) : assignTargets.get(id);
+      return b === OTHER ? undefined : (b as N | undefined);
+    };
+    const taintOf = (id: N): Taint | undefined => {
+      if (!refs.has(id)) return undefined;
+      const b = bindingOf(id);
+      return b ? taint.get(b) : undefined;
+    };
+    // A reference to the event / an alias of it that is a plain read of a
+    // non-control property: `ev.target` (also as the object of a further chain),
+    // not written, not deleted.
+    const isPlainNonControlRead = (id: N): boolean => {
+      const m = parentOf.get(id);
+      if (!m || m.type !== "MemberExpression" || m.object !== id) return false;
+      const name = memberName(m);
+      if (name === null || CONTROL.has(name)) return false;
+      const mp = parentOf.get(m);
+      if (mp && mp.type === "AssignmentExpression" && mp.left === m) return false;
+      if (mp && mp.type === "UpdateExpression") return false;
+      if (mp && mp.type === "UnaryExpression" && mp.operator === "delete") return false;
+      return true;
+    };
+    // Is this reference a MISUSE (anything but a plain non-control read of the
+    // event / an alias)? Position is not considered here.
+    const isMisuse = (id: N): boolean => {
+      const t = taintOf(id);
+      if (!t) return false;
+      if (t === "container" || t === "closure") return true;
+      return !isPlainNonControlRead(id);
+    };
+    const containsMisuse = (n: N): boolean => {
+      let found = false;
+      const walk = (x: N): void => {
+        if (found || !x || typeof x !== "object") return;
+        if (Array.isArray(x)) { for (const c of x) walk(c); return; }
+        if (x.type === "Identifier" && isMisuse(x)) { found = true; return; }
+        for (const key of Object.keys(x)) {
+          if (key === "type" || key === "start" || key === "end") continue;
+          const v = x[key];
+          if (v && typeof v === "object") walk(v);
+        }
+      };
+      walk(n);
+      return found;
+    };
+    const unparen = (e: N): N => (e && e.type === "ParenthesizedExpression" ? unparen(e.expression) : e);
+    const isAliasSource = (e: N): boolean => {
+      const x = unparen(e);
+      if (!x || x.type !== "Identifier") return false;
+      const t = taintOf(x);
+      return t === "event" || t === "alias";
+    };
+    const mark = (b: N | undefined, t: Taint): boolean => {
+      if (!b || taint.has(b)) return false;
+      taint.set(b, t);
+      return true;
+    };
+    // Bind the names of a pattern that RECEIVES `src` (a declaration or an
+    // assignment): an alias when `src` is the event itself and the pattern is a
+    // plain name; a destructure of the event binds each non-control field's value
+    // clean and taints everything else; any other misusing source taints all.
+    const receive = (pattern: N, src: N, isAssign: boolean): boolean => {
+      let changed = false;
+      const bind = (id: N): N | undefined => (isAssign ? assignTargets.get(id) as N | undefined : id);
+      if (!pattern) return false;
+      if (pattern.type === "Identifier") {
+        if (src && isAliasSource(src)) return mark(bind(pattern), "alias");
+        if (src && (isFn(unparen(src)) ? containsMisuse(unparen(src).body) : containsMisuse(src))) {
+          return mark(bind(pattern), isFn(unparen(src)) ? "closure" : "container");
+        }
+        return false;
+      }
+      if (pattern.type === "ObjectPattern" && src && isAliasSource(src)) {
+        for (const prop of pattern.properties) {
+          const safe = prop.type === "Property" && !prop.computed && prop.key &&
+            ((prop.key.type === "Identifier" && !CONTROL.has(prop.key.name)) ||
+             (prop.key.type === "Literal" && typeof prop.key.value === "string" && !CONTROL.has(prop.key.value))) &&
+            prop.value && (prop.value.type === "Identifier" || prop.value.type === "AssignmentPattern");
+          if (safe) continue;
+          const ids: N[] = [];
+          patternIdents(prop.type === "RestElement" ? prop.argument : prop.value, ids);
+          for (const id of ids) changed = mark(bind(id), "container") || changed;
+        }
+        return changed;
+      }
+      if (src && (isAliasSource(src) || containsMisuse(src))) {
+        const ids: N[] = [];
+        patternIdents(pattern, ids);
+        for (const id of ids) changed = mark(bind(id), "container") || changed;
+      }
+      return changed;
+    };
     let grew = true;
     while (grew) {
       grew = false;
-      eachNode(opts.root.body, (n) => {
-        if (n.type === "VariableDeclarator" && n.id && n.id.type === "Identifier" && isEventRef(n.init) &&
-            !eventBindings.has(n.id)) { eventBindings.add(n.id); grew = true; }
-      });
-    }
-    const controlMethodOf = (n: N): string | null => {
-      if (n.type !== "CallExpression" || !n.callee || n.callee.type !== "MemberExpression") return null;
-      if (!isEventRef(n.callee.object)) return null;
-      const m = memberName(n.callee);
-      return m !== null && CONTROL.has(m) ? m : null;
-    };
-    // Nested functions that perform event control, by their binding.
-    const controlFns = new Map<N, string>();
-    eachNode(opts.root.body, (n) => {
-      if (!isFn(n)) return;
-      let method: string | null = null;
-      eachNode(n.body, (x) => { if (method === null) method = controlMethodOf(x); });
-      if (method === null) return;
-      if (n.type === "FunctionDeclaration") controlFns.set(n, method);
-    });
-    eachNode(opts.root.body, (n) => {
-      if (n.type === "VariableDeclarator" && n.id && n.id.type === "Identifier" && n.init && isFn(n.init)) {
-        let method: string | null = null;
-        eachNode(n.init.body, (x) => { if (method === null) method = controlMethodOf(x); });
-        if (method !== null) controlFns.set(n.id, method);
-      }
-    });
-    const walk = (n: N): void => {
-      if (!n || typeof n !== "object") return;
-      if (Array.isArray(n)) { for (const c of n) walk(c); return; }
-      if (n !== opts.root && isFn(n)) return;
-      if (n.start > firstOwnAwait) {
-        const m = controlMethodOf(n);
-        if (m !== null) eventControlAfterAwait.push({ method: m });
-        else if (n.type === "CallExpression" && n.callee && n.callee.type === "Identifier") {
-          const via = controlFns.get(refs.get(n.callee));
-          if (via) eventControlAfterAwait.push({ method: via });
+      const scan = (n: N): void => {
+        if (!n || typeof n !== "object") return;
+        if (Array.isArray(n)) { for (const c of n) scan(c); return; }
+        if (n.type === "VariableDeclarator" && n.init) grew = receive(n.id, n.init, false) || grew;
+        else if (n.type === "AssignmentExpression" && n.operator === "=") grew = receive(n.left, n.right, true) || grew;
+        else if (n.type === "FunctionDeclaration" && containsMisuse(n.body)) grew = mark(n, "closure") || grew;
+        for (const key of Object.keys(n)) {
+          if (key === "type" || key === "start" || key === "end") continue;
+          const v = n[key];
+          if (v && typeof v === "object") scan(v);
         }
-      }
-      for (const key of Object.keys(n)) {
-        if (key === "type" || key === "start" || key === "end") continue;
-        const v = n[key];
-        if (v && typeof v === "object") walk(v);
-      }
-    };
-    walk(opts.root.body);
+      };
+      scan(opts.root.body);
+    }
+    // After the first own-level await: every misusing reference is an error.
+    for (const id of idents) {
+      if (id.start < firstOwnAwaitEnd || !isMisuse(id)) continue;
+      const m = parentOf.get(id);
+      const name = m && m.type === "MemberExpression" && m.object === id ? memberName(m) : null;
+      eventControlAfterAwait.push({ method: name !== null && CONTROL.has(name) ? name : `${id.name} (derived from the event)` });
+    }
   }
   return {
     code: applyEdits(src.slice(P, bodyEnd), edits), rootAsync, calls: dedupeCalls(calls), escapes: dedupeEscapes(escapes),
