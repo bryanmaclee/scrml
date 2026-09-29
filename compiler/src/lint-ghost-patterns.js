@@ -11,6 +11,10 @@
  * Integration: called by api.js:compileScrml() before Stage 2 (BS).
  */
 
+// The parser's own event-handler-name predicate — the inline-block handler
+// recognition below must make the same decision the tokenizer/ast-builder make.
+import { isEventHandlerAttrName } from "./multi-statement-scan.ts";
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -464,6 +468,41 @@ function buildFunctionBodyRanges(source, skipMerged) {
 }
 
 /**
+ * Is the `{` at `braceOffset` (inside a markup opener) the opening brace of a
+ * §5.2.3 inline-block event-handler value — `on<event>={ … }`? Reads back from
+ * the brace: optional whitespace, `=`, optional whitespace, then an attribute
+ * name that starts at an attribute boundary (whitespace or a closing value quote/brace/paren) and satisfies the
+ * parser's own `isEventHandlerAttrName`. A `${` value is not this form (the
+ * char before `{` is `$`, not `=`), and is already a logic range.
+ *
+ * @param {string} source
+ * @param {number} braceOffset
+ * @returns {boolean}
+ */
+function isInlineBlockHandlerBrace(source, braceOffset) {
+  let k = braceOffset - 1;
+  while (k >= 0 && /\s/.test(source[k])) k--;
+  if (k < 0 || source[k] !== "=") return false;
+  k--;
+  while (k >= 0 && /\s/.test(source[k])) k--;
+  const nameEnd = k + 1;
+  while (k >= 0 && /[A-Za-z0-9_:-]/.test(source[k])) k--;
+  // Attribute boundary: whitespace, or the close of the previous attribute's
+  // value (`class="a"onclick={…}`, `x={v}onclick={…}`, `f(a)onclick={…}`) —
+  // the boundaries the attribute scanner itself accepts. Anything else (a
+  // name char was already consumed; `@`, `:`-prefixed junk, `=`) is not an
+  // attribute start.
+  if (k < 0 || !/[\s"'})\]]/.test(source[k])) return false;
+  const name = source.slice(k + 1, nameEnd);
+  // A camelCase `onClick={…}` is the React shape itself (W-LINT-004's target);
+  // the whole attribute is the ghost, so its braces are left to W-LINT-007 as
+  // before (R25 Bug 44 pins `<button onClick={(e) => fn()}>` firing). Only the
+  // canonical lowercase / namespaced event names are the §5.2.3 block form.
+  if (/^on[A-Z]/.test(name)) return false;
+  return isEventHandlerAttrName(name);
+}
+
+/**
  * Build ranges that correspond to markup-element OPENING TAGS — the region
  * spanning from `<TagName` through the closing `>` (or `/>`). These ranges
  * are the ONLY place where `@click=`, `:class=`, `v-if=`, and friends are
@@ -488,11 +527,29 @@ function buildFunctionBodyRanges(source, skipMerged) {
  * opener prematurely. A nested `<` (malformed markup) closes the current
  * opener at that point.
  *
+ * S441 (s441-demo-blockers, DEFECT 1) — §5.2.3 inline-block event handlers.
+ * `<button onclick={ @count = 0; @msg = "hi" }>` is legal and canonical
+ * (L19 reversed S435): the braces are the handler attribute's OWN grammar and
+ * the statement list between them is logic context (§5.2.3 "The statement
+ * list is logic context — the same statement grammar as a function body").
+ * Pre-fix, this raw-text pass saw `onclick={` as a JSX `<Comp prop={val}>`
+ * (W-LINT-007) and every `@x = …` write inside the block as a Vue `@event=`
+ * shorthand (W-LINT-013), and a `>` inside the block (`if (n > 2)`) closed
+ * the opener early. The recognition here is the SAME decision the parser
+ * makes — an attribute whose name satisfies `isEventHandlerAttrName` (the
+ * predicate the tokenizer and ast-builder use) with a value that opens with a
+ * bare `{` — located at attribute position inside a markup opener, never by
+ * matching the block's contents. Each such block's `{…}` span is appended to
+ * `handlerBlockRanges` (callers add it to the logic ranges) and the opener
+ * walk steps OVER it, so its contents can neither close the opener nor be
+ * read as attributes.
+ *
  * @param {string} source
  * @param {Array<[number, number]>} skipMerged
+ * @param {Array<[number, number]>} [handlerBlockRanges] — out: inline-block handler `{…}` spans
  * @returns {Array<[number, number]>}
  */
-function buildTagOpenerRanges(source, skipMerged) {
+function buildTagOpenerRanges(source, skipMerged, handlerBlockRanges) {
   const ranges = [];
   let i = 0;
   // One cursor for both loops: the inner `j` walk starts at `i + 1` and the
@@ -518,6 +575,13 @@ function buildTagOpenerRanges(source, skipMerged) {
           if (ch === "/" && source[j + 1] === ">") { j += 2; break; }
           // Nested `<` (malformed) — close opener here, restart at this `<`.
           if (ch === "<") break;
+          // §5.2.3 inline-block handler value — step over the whole block.
+          if (ch === "{" && isInlineBlockHandlerBrace(source, j)) {
+            const end = findMatchingClose(source, j + 1, skipMerged);
+            if (handlerBlockRanges) handlerBlockRanges.push([j, end]);
+            j = end;
+            continue;
+          }
           j++;
         }
         ranges.push([start, j]);
@@ -899,8 +963,16 @@ const PATTERNS = [
     // lambda), not `<`. `bracedBodyOpensParenArrowLambda` peeks for a
     // `( ... ) =>` body (the snippet fill). A genuine JSX scalar `prop={value}`
     // / `{fn()}` / `{a + b}` has no `( ... ) =>` body so STILL fires.
+    //
+    // S441 — exempt the §5.2.3 inline-block event handler `onclick={ … }`.
+    // The match's own `{` (at `matchEnd - 1`) is then the start of a logic
+    // range (a handler block recorded by `buildTagOpenerRanges`): the braces
+    // are that attribute's grammar, not a JSX scalar. A braced value on any
+    // NON-event attribute (`<Comp prop={val}>`) is never a handler block, so
+    // it still fires. (A camelCase `onClick={…}` still gets W-LINT-004.)
     skipIf: (offset, logicRanges, _cssRanges, commentRanges, _tildeRanges, functionBodyRanges, stringRanges, _tagOpenerRanges, source, matchEnd) =>
       inRange(offset, logicRanges) ||
+      (matchEnd !== undefined && inRange(matchEnd - 1, logicRanges)) ||
       inRange(offset, commentRanges) ||
       inRange(offset, stringRanges) ||
       inRange(offset, functionBodyRanges || []) ||
@@ -1417,11 +1489,18 @@ export function lintGhostPatterns(source, filePath) {
   const { stringRanges, commentRanges } = buildSkipRanges(source);
   const skipMerged = mergeSkipRanges({ stringRanges, commentRanges });
 
-  const logicRanges = buildLogicRanges(source, skipMerged);
   const cssRanges = buildCssRanges(source, skipMerged);
   const tildeRanges = buildTildeRanges(source, skipMerged);
   const functionBodyRanges = buildFunctionBodyRanges(source, skipMerged);
-  const tagOpenerRanges = buildTagOpenerRanges(source, skipMerged);
+  // §5.2.3 inline-block handler bodies are logic context (S441) — they join
+  // the `${…}` logic ranges, so every pattern that already stays silent inside
+  // logic stays silent inside `onclick={ … }` too. Sorted by start so the
+  // ranges remain in source order for readers of the list.
+  const handlerBlockRanges = [];
+  const tagOpenerRanges = buildTagOpenerRanges(source, skipMerged, handlerBlockRanges);
+  const logicRanges = handlerBlockRanges.length === 0
+    ? buildLogicRanges(source, skipMerged)
+    : buildLogicRanges(source, skipMerged).concat(handlerBlockRanges).sort((a, b) => a[0] - b[0]);
   const diagnostics = [];
 
   for (const pattern of PATTERNS) {

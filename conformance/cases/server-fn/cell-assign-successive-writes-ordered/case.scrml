@@ -1,0 +1,16 @@
+${
+    <out> : number = 0
+    <final> : number = -1
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    function seq() {
+        @out = double(1)
+        @out = double(2)
+        @out = @out + 100
+        @final = @out
+    }
+}
+<button id="seq" onclick=seq()>Seq</>
+<p id="out">${@out}</>
+<p id="final">${@final}</>

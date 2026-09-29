@@ -1,0 +1,10 @@
+<!-- s441-demo-blockers DEFECT 2 repro — base cf62b4154: exit 0, the function ships as page text.
+     Fixed: E-ASYNC-NOT-IN-SCRML (same code as inside ${ }). -->
+<program title="d2-async">
+<count> = 0
+<p>${@count}</p>
+
+async function load() {
+    return 1
+}
+</program>

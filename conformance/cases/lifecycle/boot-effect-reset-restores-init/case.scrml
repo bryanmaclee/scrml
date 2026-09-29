@@ -1,0 +1,23 @@
+${
+    type Phase:enum = { Loading, Empty, Editing }
+    function grow() {
+        @tasks.push(3)
+    }
+    function doReset() {
+        reset(@tasks)
+    }
+}
+const loadTasks = () => [1, 2]
+<engine for=Phase initial=.Loading effect=${
+    @tasks = loadTasks()
+    @phase = @tasks.length == 0 ? .Empty : .Editing
+}>
+    <Loading rule=(.Empty | .Editing)>Loading…</>
+    <Empty rule=.Loading>None.</>
+    <Editing rule=.Loading>${@tasks.length} tasks</>
+</>
+<program>
+<button id="grow" onclick=grow()>g</>
+<button id="rst" onclick=doReset()>r</>
+<p id="count">Tasks: ${@tasks.length}</>
+</program>
