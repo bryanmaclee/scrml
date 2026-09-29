@@ -1,0 +1,13 @@
+{
+  "id": "auth-nested-helper-verify-password-sort-neg",
+  "description": "SECURITY (s440). The original accept-every-password shape (`hashes.some(h => verifyPassword(pw, h))`, §34 E-ASYNC-STDLIB-IN-SYNC-CALLBACK) wrapped one level deeper: a helper declared INSIDE the server function calls `verifyPassword`, and the helper is used in a `.sort` comparator (no async combinator — DD FORK 2). Before s440 the nested helper escaped every async-colored set, so the comparator received an always-truthy Promise and the build was silent. It now fails closed with the async-stdlib code (the helper's asyncness is rooted in a stdlib call, not a peer server fn).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s440-nested-helper-async-sync-callback.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2 compiler-managed asynchrony: a Promise-returning stdlib call is auto-awaited where `await` is legal. `matches` wraps one, so `matches` is async; its call in a synchronous `.sort` comparator is an async call the compiler cannot await. §34 E-ASYNC-STDLIB-IN-SYNC-CALLBACK is fail-closed for exactly this position — the nested helper does not launder the Promise.",
+  "expect": {
+    "codes": ["E-ASYNC-STDLIB-IN-SYNC-CALLBACK"],
+    "notCodes": ["E-SERVER-FN-IN-SYNC-CALLBACK"],
+    "severity": { "E-ASYNC-STDLIB-IN-SYNC-CALLBACK": "error" }
+  }
+}

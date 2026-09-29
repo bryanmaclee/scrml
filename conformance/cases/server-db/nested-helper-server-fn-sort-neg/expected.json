@@ -1,0 +1,13 @@
+{
+  "id": "server-db-nested-helper-server-fn-sort-neg",
+  "description": "SECURITY (s440). Inside a SERVER function, a helper declared in the body wraps a PEER server-fn call and is used in a `.sort` comparator. `.sort` has no async combinator (DD colorless-async-boundaries FORK 2), so the comparator cannot await the helper: a bare emission hands `.sort` an always-truthy Promise per comparison. Before s440 the nested helper was invisible to the file-scope async sets, so this compiled silently. It now fails closed with the peer-server-fn code.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s440-nested-helper-async-sync-callback.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2 requires `await` at every server call site. `inner` calls a peer server fn, so it is async, and its call in a synchronous comparator is a server call the compiler cannot await. §34 E-SERVER-FN-IN-SYNC-CALLBACK: a peer server-fn call in a position where the compiler cannot insert `await` is a hard, fail-closed compile error — reached through a nested helper exactly as through a direct call.",
+  "expect": {
+    "codes": ["E-SERVER-FN-IN-SYNC-CALLBACK"],
+    "notCodes": ["E-ASYNC-STDLIB-IN-SYNC-CALLBACK"],
+    "severity": { "E-SERVER-FN-IN-SYNC-CALLBACK": "error" }
+  }
+}

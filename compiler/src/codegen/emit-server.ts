@@ -3,7 +3,10 @@ import { genVar, getVarCounter, setVarCounter } from "./var-counter.ts";
 import { routePath, paramSignature, paramName, stripPagesPrefix, indentBodyLines } from "./utils.ts";
 import { collectFunctions, collectServerVarDecls, callableServerVarDecls, collectServerAuthorityTypes, serverVarDeclLoadKind, queryInterpolationsAreServerAmbientOnly, isServerOnlyNode, containsSqlOrTransaction, containsSql } from "./collect.ts";
 import { emitLogicNode, emitFnShortcutBody } from "./emit-logic.ts";
-import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError, serverFnSyncCallbackError, annotateNestedAsyncHelpers, syncCallbackErrorForSite } from "./emit-library-shared.ts";
+import type { SyncCallSite } from "./emit-library-shared.ts";
+import { localAsyncDeclRoot } from "./local-async-fns.ts";
+import type { AsyncRoot } from "./local-async-fns.ts";
 import { getNodes } from "./collect.ts";
 import { collectReactiveVarNames, collectLocalMapSetNames, buildFnReturnMapKinds } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitChannelWatchesServerBoot, collectChannelFunctionMap, collectChannelCellMap, filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -1044,6 +1047,20 @@ function emitModuleValueExportLines(
     _veCalleeMap,
     exportRegistry ?? null,
   );
+  // s440 — nested helpers inside a value-exported fn (same facts as the lowering).
+  {
+    const _veReg = exportRegistry ?? null;
+    const _veNestedFacts = {
+      asyncFnNames,
+      isStdlibAsync: (_veReg && _veReg.size > 0)
+        ? (n: string): boolean => {
+            const src = _veCalleeMap.get(n);
+            return !!src && isPromiseReturningStdlibFn(n, src, _veReg);
+          }
+        : null,
+    };
+    for (const _vfn of fnDeclByName.values()) annotateNestedAsyncHelpers(_vfn, _veNestedFacts, /*sqlIsAsync*/ true);
+  }
   // W5b (S239) — E-FOREIGN-006 crossing-shadow diagnostics from lowering an
   // async ss1 fn body surface via this sink (parity with the tool path — the
   // pre-consolidation server path dropped them silently). Drained into `errors`
@@ -1200,7 +1217,7 @@ function emitModuleValueExportLines(
       const nm = fnNode?.name as string | undefined;
       if (!nm) continue;
       for (const site of collectNonAwaitableAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames, fnNode.params, fnNode.span)) {
-        _pushVeDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+        _pushVeDeduped(syncCallbackErrorForSite(site, null, filePath));
       }
       for (const a of collectAliasedAsyncCalls(fnNode.body, _veCalleeMap, exportRegistry ?? null, asyncFnNames)) {
         _pushVeDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
@@ -3854,19 +3871,11 @@ export function generateServerJs(
   // those here.
   // Shared E-SERVER-FN-IN-SYNC-CALLBACK emitter — used by the escape-hatch walk
   // below AND by the post-emission `_syncPeerCalls` drain (structured lambdas).
-  const _diagSyncCb = (peerName: string, span: any): void => {
-    const _sp = (span ?? {}) as { file?: string; start?: number; end?: number; line?: number; col?: number };
-    errors.push(new CGError(
-      "E-SERVER-FN-IN-SYNC-CALLBACK",
-      `E-SERVER-FN-IN-SYNC-CALLBACK: server function \`${peerName}\` is called inside a ` +
-      `synchronous callback. A server function runs asynchronously, but \`await\` is ` +
-      `not valid in a non-async callback (and making the callback async would make ` +
-      `\`.map\`/\`.forEach\` yield Promises instead of values). Refactor to a \`for\` loop ` +
-      `so the call runs in the server function's async body, e.g. ` +
-      `\`for (const x of xs) { ... ${peerName}(x) ... }\`.`,
-      { file: filePath ?? _sp.file ?? "", start: _sp.start ?? 0, end: _sp.end ?? 0, line: _sp.line ?? 1, col: _sp.col ?? 1 },
-      "error",
-    ));
+  // s440 — delegates to the SHARED builder (emit-library-shared
+  // `serverFnSyncCallbackError`), so the client drain reports the same wording;
+  // `via` names the peer a NESTED helper is async through.
+  const _diagSyncCb = (peerName: string, span: any, via?: string | null): void => {
+    errors.push(serverFnSyncCallbackError(peerName, span, filePath, via ?? null));
   };
   // Issue #26 Finding-2 (S239 adversarial review) — the async-stdlib sibling of
   // `_diagSyncCb`. Shared E-ASYNC-STDLIB-IN-SYNC-CALLBACK emitter, used by BOTH
@@ -3880,8 +3889,8 @@ export function generateServerJs(
   // Cleanup 7 (S239) — delegate to the SHARED single-wording builder
   // (emit-library-shared.asyncStdlibSyncCallbackError) so the route-handler,
   // ss1, library, and client paths all emit one identical message.
-  const _diagAsyncStdlibSyncCb = (calleeName: string, span: any): void => {
-    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath));
+  const _diagAsyncStdlibSyncCb = (calleeName: string, span: any, via?: string | null): void => {
+    errors.push(asyncStdlibSyncCallbackError(calleeName, span, filePath, via ?? null));
   };
   // Issue #26 Finding-2 — does a bare callee `name` resolve to a Promise-returning
   // stdlib export? Mirrors emit-expr's `isStdlibAsyncCallee` using the file's
@@ -3894,6 +3903,20 @@ export function generateServerJs(
     if (!_src) return false;
     return isPromiseReturningStdlibFn(name, _src, _asyncExportRegistry);
   };
+  // s440-sync-callback-async-helper — resolve every helper function declared INSIDE
+  // a server fn against the SAME facts emit-expr uses here (peer server fns + the
+  // stdlib classifier; a `?{}` body lowers to an `await` on this side). The peer set
+  // is file-scope, so a nested helper wrapping a peer / async-stdlib call was emitted
+  // `async` and then called as if sync — `[…].some(x => inner(x))` true for every
+  // input. The marks drive the await / combinator lift / fail-closed decision at
+  // every call site in the handler and peer-callable bodies emitted below.
+  {
+    const _nestedFacts = {
+      serverFnNames: _serverFnPeerNames,
+      isStdlibAsync: _isAsyncStdlibName,
+    };
+    for (const { fnNode: _nfn } of serverFns) annotateNestedAsyncHelpers(_nfn, _nestedFacts, /*sqlIsAsync*/ true);
+  }
   const _calledPeerNames = new Set<string>();
   {
     const _seen = new WeakSet<object>();
@@ -3960,6 +3983,19 @@ export function generateServerJs(
         // accept-all auth bypass), so FAIL CLOSED here too.
         const _asyncHit = _callees.find((c) => _isAsyncStdlibName(c));
         if (_asyncHit) _diagAsyncStdlibSyncCb(_asyncHit, n.span);
+        // s440 fix round (F2) — a NESTED async helper called from a block-body
+        // callback (`hashes.some(h => { return m(h) })`): the raw text is emitted
+        // verbatim, so the call is bare exactly like the peer / stdlib hits above.
+        // Raw text cannot be resolved lexically, so match by name (fail closed).
+        _diagNestedAsyncRaw(_callees, n.span);
+      }
+      // s440 fix round (F2) — a template literal's `${…}` interpolation is re-parsed
+      // from raw text at emit time (emitServerTemplateLit), which awaits PEER calls
+      // but has no nested-helper resolution: `${inner(1)}` rendered
+      // `[object Promise]`. Fail closed.
+      if (n.kind === "lit" && n.litType === "template" && typeof n.raw === "string"
+          && n.raw.includes("${")) {
+        _diagNestedAsyncRaw(extractCalleeNames(n.raw), n.span);
       }
 
       // ss19 #12 (g-sql-in-arrow-body-invalid-js) — DIAGNOSTIC. A `?{}` SQL
@@ -3993,12 +4029,64 @@ export function generateServerJs(
         ));
       }
 
+      // s440 — DIAGNOSTIC. A NESTED function's parameter default is spliced as RAW
+      // TEXT by `paramSignature` and evaluated eagerly, outside any async body
+      // (`await` is illegal in a default even in an async fn), so an async call
+      // there — a peer, an async-stdlib export, or a nested async helper — can never
+      // be awaited, and emit-expr never sees it. Fail closed.
+      if (n.kind === "function-decl" && Array.isArray(n.params)) {
+        for (const _p of n.params) {
+          const _dv = _p && typeof _p === "object" ? (_p as { defaultValue?: unknown }).defaultValue : undefined;
+          if (typeof _dv !== "string" || _dv.length === 0) continue;
+          for (const c of extractCalleeNames(_dv)) {
+            const _local = _nestedAsyncByName.get(c);
+            if (_local) {
+              if (_local.kind === "stdlib") _diagAsyncStdlibSyncCb(c, n.span, _local.via);
+              else _diagSyncCb(c, n.span, _local.via);
+            } else if (_serverFnPeerNames.has(c)) {
+              _diagSyncCb(c, n.span);
+            } else if (_isAsyncStdlibName(c)) {
+              _diagAsyncStdlibSyncCb(c, n.span);
+            }
+          }
+        }
+      }
+
       for (const k in n) {
         const v = n[k];
         if (Array.isArray(v)) { for (const ch of v) _walk(ch); }
         else if (v && typeof v === "object") _walk(v);
       }
     };
+    // s440 — the nested async helpers of every server fn, by name (for the raw-text
+    // scans above — block-body callbacks, template interpolations, param defaults —
+    // which have no structure to resolve lexically).
+    const _nestedAsyncByName = new Map<string, AsyncRoot>();
+    function _diagNestedAsyncRaw(callees: Iterable<string>, span: any): void {
+      for (const c of callees) {
+        const _local = _nestedAsyncByName.get(c);
+        if (!_local) continue;
+        if (_local.kind === "stdlib") _diagAsyncStdlibSyncCb(c, span, _local.via);
+        else _diagSyncCb(c, span, _local.via);
+      }
+    }
+    {
+      const _seenN = new WeakSet<object>();
+      const _gather = (n: any): void => {
+        if (!n || typeof n !== "object" || _seenN.has(n)) return;
+        _seenN.add(n);
+        if (n.kind === "function-decl" && typeof n.name === "string") {
+          const _r = localAsyncDeclRoot(n);
+          if (_r) _nestedAsyncByName.set(n.name, _r);
+        }
+        for (const k in n) {
+          if (k === "span") continue;
+          const v = n[k];
+          if (v && typeof v === "object") _gather(v);
+        }
+      };
+      for (const { fnNode: _sfn } of serverFns) _gather(_sfn?.body);
+    }
     for (const { fnNode: _sfn } of serverFns) {
       for (const _stmt of (_sfn?.body ?? [])) _walk(_stmt);
     }
@@ -5600,7 +5688,16 @@ export function generateServerJs(
       const _key = `${_spc.name}@${_sp.start ?? -1}`;
       if (_seenSync.has(_key)) continue;
       _seenSync.add(_key);
-      _diagSyncCb(_spc.name, _spc.span);
+      // s440 — a site recorded for a NESTED helper carries the root of its
+      // asyncness: one async through a stdlib call / `?{}` is the stdlib code;
+      // one through a peer server fn (and every legacy peer / alias / dispatch
+      // record, which carries no root) is E-SERVER-FN-IN-SYNC-CALLBACK.
+      const _site = _spc as SyncCallSite;
+      if (_site.rootKind === "stdlib") {
+        _diagAsyncStdlibSyncCb(_site.name, _site.span, _site.via);
+      } else {
+        _diagSyncCb(_site.name, _site.span, _site.via);
+      }
     }
   }
 

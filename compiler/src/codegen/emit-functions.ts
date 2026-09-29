@@ -7,7 +7,8 @@ import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
-import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers } from "./emit-library-shared.ts";
+import type { AsyncNameFacts } from "./async-combinators.ts";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // The ONE stdlib-async predicate (Q5 `<repo>/stdlib/` carve-out + `isAsync`). Used
 // to subtract the vendor-async imports the stdlib auto-await classifier already
@@ -1414,6 +1415,27 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // non-awaitable position (sync callback / param default). Drained after the loop.
   const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];
 
+  // s440-sync-callback-async-helper — the async sets above are FILE-SCOPE: a
+  // function declared INSIDE a client fn was in none of them, so it was emitted
+  // `async` (its body awaits) and then called as if sync — `xs.some(x => inner(x))`
+  // true for every input. Resolve every nested helper lexically against the SAME
+  // facts (server fns · the transitive client async set · the stdlib classifier)
+  // and mark the AST before any body is emitted; emit-expr, the combinator
+  // detector, the nested-decl emitter and the drain below all read the marks.
+  {
+    const _nestedFacts: AsyncNameFacts = {
+      asyncFnNames: _clientAsyncFnNames,
+      serverFnNames: _serverFnNames,
+      isStdlibAsync: (_calleeMap && _exportRegistry && _exportRegistry.size > 0)
+        ? (n: string): boolean => {
+            const src = _calleeMap.get(n);
+            return !!src && isPromiseReturningStdlibFn(n, src, _exportRegistry);
+          }
+        : null,
+    };
+    for (const fn of _clientFns) annotateNestedAsyncHelpers(fn, _nestedFacts, /*sqlIsAsync*/ false);
+  }
+
   for (const fnNode of fnNodes) {
     const fnNodeId = `${filePath}::${(fnNode.span as ASTNode)?.start}`;
     const route = routeMap.functions.get(fnNodeId);
@@ -1638,8 +1660,12 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
     // and a fn-SIGNATURE parameter default (spliced as raw text by
     // `paramSignature`, so it is in neither `fn.body` nor any structural node).
     // Overlapping sites dedup below on `${code}@${span.start}`.
+    // s440 — the code follows the callee: a peer SERVER fn (or a nested helper
+    // async through one) is E-SERVER-FN-IN-SYNC-CALLBACK; stdlib / a transitively-
+    // async local peer is E-ASYNC-STDLIB-IN-SYNC-CALLBACK. (Every client site used to
+    // report the stdlib code, a direct server-fn call included.)
     for (const site of collectNonAwaitableAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames, fn.params, fn.span, _serverFnNames)) {
-      _pushClientLeak(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+      _pushClientLeak(syncCallbackErrorForSite(site, _serverFnNames, filePath));
     }
     for (const a of collectAliasedAsyncCalls(fn.body, _calleeMap, _exportRegistry, _clientAsyncFnNames)) {
       _pushClientLeak(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
@@ -1653,7 +1679,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // default is covered by the `fn.params` scan in the detector loop ABOVE, not here.
   // This sink remains for any peer call emit-expr records BARE inside a fn body.
   for (const _sp of _clientSyncPeerCalls) {
-    _pushClientLeak(asyncStdlibSyncCallbackError(_sp.name, _sp.span, filePath));
+    _pushClientLeak(syncCallbackErrorForSite(_sp, _serverFnNames, filePath));
   }
 
   return { lines, fnNameMap };

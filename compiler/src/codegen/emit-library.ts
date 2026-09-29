@@ -10,7 +10,7 @@ import type { CompileContext } from "./context.ts";
 // Seam-A colorless-async (GITI-037) — the structured async-fn emitter + its
 // transitive coloring fixpoint (shared with emit-server ss1 / emit-tool), the
 // per-file callee resolver, and the SERVER-mode stdlib auto-await classifier.
-import { computeAsyncFnNames, computeNestedAsyncFnHolders, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, asyncStdlibSyncCallbackError, aliasedAsyncCallError } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, computeNestedAsyncFnHolders, emitLibraryFnMember, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, stdlibAsyncPredicate } from "./emit-library-shared.ts";
 import { buildCalleeImportMap } from "./scheduling.ts";
 import { setServerAsyncClassifier } from "./emit-expr.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
@@ -995,6 +995,17 @@ function emitAsyncLibraryFns(
   // `await` (verbatim would ship a bare Promise into the `!{}` check).
   const asyncFnNames = computeAsyncFnNames(fns, sourceText, crossImportSeed, calleeMap, exportRegistry, undefined, /*guardNestedFnValues*/ true);
   const nestedAsyncHolders = computeNestedAsyncFnHolders(fns, asyncFnNames, calleeMap, exportRegistry);
+  // s440 — resolve every helper declared INSIDE a library fn against the same async
+  // facts (the library async set + the stdlib classifier; a `?{}` body awaits on the
+  // lowered path) and mark the AST, so the lowering and the drain below see a
+  // nested async helper as async at every call / by-reference site.
+  {
+    const _libNestedFacts = {
+      asyncFnNames,
+      isStdlibAsync: stdlibAsyncPredicate(calleeMap, exportRegistry),
+    };
+    for (const fn of fns) annotateNestedAsyncHelpers(fn, _libNestedFacts, /*sqlIsAsync*/ true);
+  }
 
   // No-silent-leak backstop (bucket c) — run the structural detectors over ALL fns
   // (NOT just the colored ones): after [4] a raw-verbatim-body async call no longer
@@ -1011,7 +1022,7 @@ function emitAsyncLibraryFns(
   };
   for (const fn of fns) {
     for (const site of collectNonAwaitableAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames, fn.params, fn.span)) {
-      pushDeduped(asyncStdlibSyncCallbackError(site.name, site.span, filePath));
+      pushDeduped(syncCallbackErrorForSite(site, null, filePath));
     }
     for (const a of collectAliasedAsyncCalls(fn.body, calleeMap, exportRegistry, asyncFnNames)) {
       pushDeduped(aliasedAsyncCallError(a.alias, a.resolved, a.span, filePath));
