@@ -3535,13 +3535,13 @@ ${
     // `fnw`: each function's WRITE SET (place keys it may write, transitively
     // through its calls) — a call drops the narrowing of what its callee writes.
     type TEnv:struct = { t: Tables, file: string, errs: ASpan[], locals: LocalT[], settled: LocalT[], narrowed: string[],
-                         fnw: FnW[], rows: Alias[] }
+                         fnw: FnW[], rows: Alias[], fret: Type | not }
     type RVT:struct = { vt: VType, ts: TypeState }
     type RTEnv:struct = { env: TEnv, ts: TypeState }
 
     fn tWithLocal(env: TEnv, s: Sym, vt: VType) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals.concat([{ id: s.id, vt: vt }]), settled: env.settled,
-                 narrowed: env.narrowed, fnw: env.fnw, rows: env.rows }
+                 narrowed: env.narrowed, fnw: env.fnw, rows: env.rows, fret: env.fret }
     }
 
     // ---- NARROWING (for the S440 `T | not` operand rule) ------------------------
@@ -3569,7 +3569,7 @@ ${
         for (const k of keys) {
             if (k != "") out = out.concat([k])
         }
-        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows, fret: env.fret }
     }
 
     // Drop the narrowing of `key` and of every place under it.
@@ -3586,7 +3586,7 @@ ${
         for (const k of env.narrowed) {
             if (!underAny(k, drop)) out = out.concat([k])
         }
-        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows, fret: env.fret }
     }
 
     fn placesOverlap(a: string, b: string) -> boolean {
@@ -3603,7 +3603,7 @@ ${
 
     fn tWithRow(env: TEnv, bind: Sym, src: string) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: env.narrowed,
-                 fnw: env.fnw, rows: env.rows.concat([{ name: "#" + bind.id, key: src }]) }
+                 fnw: env.fnw, rows: env.rows.concat([{ name: "#" + bind.id, key: src }]), fret: env.fret }
     }
 
     // A place's key ("" — not a place the typer narrows).
@@ -3772,7 +3772,7 @@ ${
     // write. A `given c = @h` body's `c.f` is `@h.f`. Syntactic and whole
     // program (the bootstrap links one namespace): over-approximate, so it only
     // ever un-narrows MORE (never silences a report).
-    type FnW:struct = { name: string, keys: string[] }
+    type FnW:struct = { name: string, keys: string[], params: int[] }   // `params`: the parameter nids (r4 (c): argument checks)
     type Alias:struct = { name: string, key: string }
 
     fn exprKids(e: AExpr) -> AExpr[] {
@@ -3901,7 +3901,7 @@ ${
     fn fnWrites(files: FileAst[]) -> FnW[] {
         let ws: FnW[] = []
         for (const f of files) {
-            for (const af of fnItems(f.items)) { ws = ws.concat([{ name: af.name, keys: blockEffects(af.body, []) }]) }
+            for (const af of fnItems(f.items)) { ws = ws.concat([{ name: af.name, keys: blockEffects(af.body, []), params: paramNids(af.params) }]) }
         }
         let changed = true
         let pass = 0
@@ -3920,7 +3920,7 @@ ${
                         }
                     }
                 }
-                next = next.concat([{ name: w.name, keys: keys }])
+                next = next.concat([{ name: w.name, keys: keys, params: w.params }])
             }
             ws = next
             pass = pass + 1
@@ -4906,9 +4906,77 @@ ${
         if (n >= 0 && n != args.length) {
             ts = report(ts, env, e.span, "E-CALL-ARITY", arityMessage(fi.name, n, args.length))
         }
+        if (n >= 0 && n == args.length) ts = checkIntArgs(env, fi.name, args, ts)
         const ret: Type | not = fi.ret
         if (ret is some) return rvt(known(ret), ts)
         return rvt(VType.Unknown, ts)
+    }
+
+    // ---- `int` ENFORCEMENT AT EVERY §7.5.1 POSITION (r4 (c)) -------------------
+    // RULED S442: "`int` enforcement reaches every §7.5.1 position (returns,
+    // arguments, all initializers); `1e3` / `2.0` into `int` stay errors (float
+    // literals)". Only an `int`-BEARING target (`int`, `int | not`, a sequence
+    // of them) is checked at a return / an argument / a non-literal
+    // initializer — the ruling widens `int`, not those positions in general
+    // (§7.5.1 positions 3-5 stay unchecked for every other type).
+    fn hasInt(t: Type) -> boolean {
+        if (kindOf(t) == 0) return true
+        const i: Type | not = maybeInner(t)
+        if (i is some) return hasInt(i)
+        const el: Type | not = seqElem(t)
+        if (el is some) return hasInt(el)
+        return false
+    }
+
+    fn paramNids(ps: AParam[]) -> int[] {
+        let out: int[] = []
+        for (const p of ps) { out = out.concat([p.nid]) }
+        return out
+    }
+
+    // Each argument into an `int`-bearing parameter.
+    fn checkIntArgs(env: TEnv, name: string, args: AExpr[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        let pnids: int[] = []
+        for (const w of env.fnw) {
+            if (w.name == name) pnids = w.params
+        }
+        if (pnids.length != args.length) return ts
+        let i = 0
+        while (i < args.length) {
+            const pt: Type | not = knownOf(paramType(bindFact(env.t.binds, pnids[i])))
+            if (pt is some) {
+                if (hasInt(pt)) ts = checkValue(env, exprType0(ts, args[i].nid), pt, args[i].span, "argument " + (i + 1) + " of `" + name + "`", ts)
+            }
+            i = i + 1
+        }
+        return ts
+    }
+
+    // `return v` in a function declared `-> T` with an `int`-bearing `T`.
+    fn typeReturn(env: TEnv, e: AExpr | not, ts0: TypeState) -> TypeState {
+        const ts: TypeState = typeMaybeExpr(env, e, ts0)
+        if (e is not) return ts
+        const rt: Type | not = env.fret
+        if (rt is not) return ts
+        if (!hasInt(rt)) return ts
+        return checkValue(env, exprType0(ts, e.nid), rt, e.span, "the return value", ts)
+    }
+
+    // A non-literal initializer into an `int`-bearing annotation (a literal is
+    // checkInit's; checking it here too would report it twice).
+    // The struct literals inside an attribute-valued initializer, field by
+    // field (as a write's and an annotated local's are — spelling-independent).
+    fn checkAttrLitFields(env: TEnv, v: AAttrValue, ts: TypeState) -> TypeState {
+        const x: AExpr | not = valueExpr(v)
+        if (x is not) return ts
+        return checkLitFields(env, x, ts)
+    }
+
+    fn checkIntInit(env: TEnv, target: Type, lk: int, v: VType, span: ASpan, what: string, ts: TypeState) -> TypeState {
+        if (lk >= 0) return ts
+        if (!hasInt(target)) return ts
+        return checkValue(env, v, target, span, what, ts)
     }
 
     fn arityMessage(name: string, n: int, got: int) -> string {
@@ -4951,7 +5019,7 @@ ${
         return match k {
             .Eval(e: e) :> typeEvalStmt(env, e, ts)
             .Local(name: n, init: i) :> typeLocal(tCallUnnarrow(env, i), s, n, i, ts)
-            .Return(e: e) :> keepTEnv(env, typeMaybeExpr(env, e, ts))
+            .Return(e: e) :> keepTEnv(env, typeReturn(env, e, ts))
             .If(cond: c, thenB: tb, elseB: el) :> typeIf(env, c, tb, el, ts)
             .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
         }
@@ -5055,7 +5123,7 @@ ${
 
     fn withNarrowed(env: TEnv, keys: string[]) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keys,
-                 fnw: env.fnw, rows: env.rows }
+                 fnw: env.fnw, rows: env.rows, fret: env.fret }
     }
 
     fn typeMaybeExpr(env: TEnv, e: AExpr | not, ts: TypeState) -> TypeState {
@@ -5076,6 +5144,7 @@ ${
         const annot: Type | not = annotOf(env.t, sym)
         if (annot is some) {
             let ts2: TypeState = checkInit(env, annot, literalKind(init), init.span, "`" + name + "`", r.ts)
+            ts2 = checkIntInit(env, annot, literalKind(init), r.vt, init.span, "`" + name + "`", ts2)
             ts2 = checkLitFields(env, init, ts2)
             return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)
         }
@@ -5385,12 +5454,21 @@ ${
         let ts: TypeState = ri.ts
         const di: DeclInfo | not = declInfo(env.t, decl)
         for (const a of e.attrs) {
-            if (a.name != "as" && a.name != "if") ts = typeAttrValue(renv, a.value, ts).ts
+            let av: VType = VType.Unknown
+            if (a.name != "as" && a.name != "if") {
+                const ra: RVT = typeAttrValue(renv, a.value, ts)
+                ts = ra.ts
+                av = ra.vt
+            }
             const i: int = constructIndex(attrFact(env.t.attrs, a.nid))
             if (di is some && i >= 0 && i < di.fields.length) {
                 const f: FieldInfo = di.fields[i]
                 if (f.annotated && f.trusted) {
-                    ts = checkInit(env, f.ty, attrLiteralKind(a.value), a.span, "`" + a.name + "` of `<" + e.tag + ">`", ts)
+                    const what: string = "`" + a.name + "` of `<" + e.tag + ">`"
+                    const lk: int = attrLiteralKind(a.value)
+                    ts = checkInit(env, f.ty, lk, a.span, what, ts)
+                    ts = checkIntInit(env, f.ty, lk, av, a.span, what, ts)
+                    ts = checkAttrLitFields(env, a.value, ts)
                 }
             }
         }
@@ -5512,7 +5590,7 @@ ${
         let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [] }
         const fnw: FnW[] = fnWrites(files)
         for (const f of files) {
-            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnw, rows: [] }
+            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnw, rows: [], fret: not }
             for (const it of f.items) { ts = typeItem(env, it, ts) }
         }
         return ts
@@ -5568,8 +5646,14 @@ ${
         if (di is not) return ts0
         let ts: TypeState = ts0
         for (const f of di.fields) {
-            ts = typeAttrValue(env, f.init, ts).ts
-            if (f.annotated && f.trusted) ts = checkInit(env, f.ty, attrLiteralKind(f.init), f.span, "`" + f.sym.hint + "`", ts)
+            const rv: RVT = typeAttrValue(env, f.init, ts)
+            ts = rv.ts
+            if (f.annotated && f.trusted) {
+                const lk: int = attrLiteralKind(f.init)
+                ts = checkInit(env, f.ty, lk, f.span, "`" + f.sym.hint + "`", ts)
+                ts = checkIntInit(env, f.ty, lk, rv.vt, f.span, "`" + f.sym.hint + "`", ts)
+                ts = checkAttrLitFields(env, f.init, ts)
+            }
         }
         return ts
     }
@@ -5584,7 +5668,21 @@ ${
             if (paramsTrusted(env.errs, [p])) pvt = paramType(pf)
             if (s is some) fenv = tWithLocal(fenv, s, pvt)
         }
-        return typeBlock(fenv, af.body, ts)
+        return typeBlock(withRet(fenv, fnRet(env.t, af)), af.body, ts)
+    }
+
+    // The declared return type of a function (`not`: none, or untrusted).
+    fn fnRet(t: Tables, af: AFn) -> Type | not {
+        const s: Sym | not = bindSym(bindFact(t.binds, af.nid))
+        if (s is not) return not
+        const fi: FnInfo | not = fnInfoOf(t, s)
+        if (fi is not) return not
+        return fi.ret
+    }
+
+    fn withRet(env: TEnv, r: Type | not) -> TEnv {
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: env.narrowed,
+                 fnw: env.fnw, rows: env.rows, fret: r }
     }
 
     // =========================================================================

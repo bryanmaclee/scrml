@@ -234,6 +234,9 @@ describe("duplicate struct-literal keys (E-STRUCT-DUPLICATE-KEY)", () => {
 // `T | not` value reaches a condition through a field, a parameter or an annotated local).
 const O = "    type O:struct = { let v: string | not, let n: int | not, let f: bool | not }\n    <let o:O=({ v: \"\", n: 0, f: false })/>\n    <let m:int=0/>\n";
 const CELLS = "    <let n:int=0/>\n    <let r:number=0.5/>\n    <let s:string=\"\"/>\n    <let b:bool=false/>\n    <xs:int[]=([1])/>\n";
+// a one-declaration library and an app that uses it
+const boxLibS = (decl) => ({ path: "lib/box.scrml", src: decl });
+const boxAppS = (use) => ({ path: "app.scrml", src: `\${ import { box } from "./lib/box.scrml" }\n<program>\n    <main>\n${use}\n    </main>\n</program>\n` });
 
 // ---------------------------------------------------------------------------
 // #7 — truthiness (c) + Q1 / Q2: a condition needs a `bool` or a `T | not` presence test.
@@ -611,6 +614,31 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(CELLS + "    function f() { @r = 0xFE / 2 }")).toEqual(["E-INT-DIVISION"]);
     // twin: a real exponent stays a non-integer literal (`1e3` into `int` is bryan's open question — unchanged)
     expect(inApp("    <let q:int=1e3/>")).toEqual(["E-TYPE-031"]);
+  });
+  test("r4 (c) — `int` enforced at RETURNS (ruled S442)", () => {
+    expect(inApp(CELLS + "    function h() -> int { return 2.5 }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function h() -> int { return @r }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function h() -> int | not { return @r }")).toEqual(["E-TYPE-031"]);
+    // twins: an int; `not` into `int | not`; a non-int return type is not widened
+    expect(inApp(CELLS + "    function h() -> int { return @n + 1 }\n    function k() -> int | not { return not }\n    function s() -> string { return 5 }")).toEqual([]);
+  });
+  test("r4 (c) — `int` enforced at ARGUMENTS into an `int` parameter", () => {
+    expect(inApp(CELLS + "    function g(k: int) { }\n    function f() { g(@r) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function g(k: int) { }\n    function f() { g(1.5) }")).toEqual(["E-TYPE-031"]);
+    // twins: an int argument; a number into a `number` parameter; a string parameter is not widened
+    expect(inApp(CELLS + "    function g(k: int, x: number, s: string) { }\n    function f() { g(@n, @r, 5) }")).toEqual([]);
+  });
+  test("r4 (c) — `int` enforced at ALL initializers (non-literal local / cell / use-site, struct-literal fields, `int[]` elements)", () => {
+    expect(inApp(CELLS + "    function f() { let k: int = @r }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    <let q:int=(@r)/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    type P:struct = { x: int }\n    <p:P=({ x: 2.5 })/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    <ks:int[]=([1.5])/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    function f() { let ks: int[] = [1, 2.5] }")).toEqual(["E-TYPE-031"]);
+    expect(codes([boxLibS("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxAppS("<box n=(0.5 * 2)/>")])).toEqual(["E-TYPE-031"]);
+  });
+  test("r4 (c) twins — int-typed initializers stay silent; `1e3` / `2.0` into int stay errors", () => {
+    expect(inApp(CELLS + "    <let q:int=(@n * 2)/>\n    <ks:int[]=([1, 2])/>\n    function f() { let k: int = @n }")).toEqual([]);
+    expect(inApp("    <let q:int=2.0/>")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — a non-integer element pushed onto an `int[]`", () => {
     expect(inApp("    <ks:int[free, end]=([])/>\n    function f() { @ks.push(1.5) }")).toEqual(["E-TYPE-031"]);
