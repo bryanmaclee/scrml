@@ -989,7 +989,8 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
   const fnHasServerCellWrite = !!_fileServerFnNames && _fileServerFnNames.size > 0 && body.some((st: any) =>
     st && st.kind === "state-decl" && st.initExpr && st.initExpr.kind === "call" &&
     st.initExpr.callee && st.initExpr.callee.kind === "ident" && _fileServerFnNames.has(st.initExpr.callee.name));
-  const fnHasServerCalls = hasServerCallees(fnNode, routeMap, filePath, null, null) || fnHasServerCellWrite;
+  const fnHasClassifiedServerCalls = hasServerCallees(fnNode, routeMap, filePath, null, null);
+  const fnHasServerCalls = fnHasClassifiedServerCalls || fnHasServerCellWrite;
   if (!fnHasServerCalls || !depGraph || !depGraph.nodes || depGraph.nodes.size === 0) {
     // No server calls or no dependency graph info — emit sequentially
     for (const stmt of body) {
@@ -1370,6 +1371,15 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
         if (groupWrittenCells.size > 0 || candIsCellWrite) break;
         skippedSinceSeed = true;
       }
+    }
+
+    // s441 F1 — a function that reached this grouping path ONLY through a server
+    // cell write keeps every other group sequential: without a cell-write member
+    // there is no server call in the group, and a Promise.all over plain values
+    // (`const [p, q] = await Promise.all([@a, @b])`) is noise, not parallelism.
+    if (group.length > 1 && !fnHasClassifiedServerCalls && !group.some((g) => cellWriteBatchInfo(g) !== null)) {
+      for (const g of group.slice(1)) visited.delete(g);
+      group.length = 1;
     }
 
     if (group.length > 1) {

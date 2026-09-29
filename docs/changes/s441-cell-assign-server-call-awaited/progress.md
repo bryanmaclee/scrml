@@ -8,3 +8,4 @@
 - F2: effect body no longer lowered as a function body; a new opt `returnExitsWrapper` keeps the `!{}` arm `return` real. boot-effect conformance output byte-identical to main; reset(@tasks) restored.
 - F4: while/do-while hops now forward clientAsyncBody (emit-logic.ts + emit-control-flow.ts). Hook bodies (state-child effect=, <onTransition>), module-init `${}` blocks, on-mount and <poll> bodies: NOT the same root (see report).
 - F5 NOTE: a `!{}` arm's `return` now returns from the author's function — intended per the S435 "lift" ruling; a caller of that function now receives the arm's return value (or undefined) where it previously received whatever the function returned after running on.
+- F1 follow-up: a function that reaches the grouping path ONLY via a server cell write no longer Promise.all's plain-value decl groups (htmx submitOrder's `[product, qty]` noise batch); output for such groups matches main.
