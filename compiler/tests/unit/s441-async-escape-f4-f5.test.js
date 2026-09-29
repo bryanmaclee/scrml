@@ -161,6 +161,62 @@ function m(n) { return isOk(n) }
 });
 
 // ---------------------------------------------------------------------------
+// F5 — per-element handlers: `<each>` rows and `lift` (built as text, deep in
+// call chains with no compile context — colored under the active client emission)
+// ---------------------------------------------------------------------------
+describe("F5 — `<each>` row and `lift` handlers", () => {
+  test("an `<each>` row handler awaits its server-call condition", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+<xs> = [1, 2, 3]
+server function isOk(n) { return n > 100 }
+<ul>
+  <each in=@xs as x>
+    <li><button onclick=\${ if (isOk(x)) { @v = "yes" } else { @v = "no" } }>\${x}</button></li>
+  </each>
+</ul>
+</program>
+`);
+    expect(o.codes).toEqual([]);
+    expect(o.clientJs).toMatch(/addEventListener\("click", async function\(event\) \{[^\n]*if \(await _scrml_fetch_isOk_\d+\(x\)\)/);
+  });
+
+  test("a `lift` handler awaits its server-call condition", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+<xs> = [1, 2, 3]
+server function isOk(n) { return n > 100 }
+<ul>
+\${ for (x of @xs) {
+  lift <li><button onclick=\${ if (isOk(x)) { @v = "yes" } else { @v = "no" } }>b</button></li>
+} }
+</ul>
+</program>
+`);
+    expect(o.codes).toEqual([]);
+    expect(o.clientJs).toMatch(/addEventListener\("click", async function\(event\)/);
+    expect(o.clientJs).toMatch(/if \(await _scrml_fetch_isOk_\d+\(x\)\)/);
+    expect(o.clientJs).not.toMatch(/if \(_scrml_fetch_isOk_\d+\(x\)\)/);
+  });
+
+  test("an async fn used as a value in a row handler is E-ASYNC-FN-ESCAPES-AS-VALUE", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+<xs> = [1, 2, 3]
+server function isOk(n) { return n > 100 }
+function decide(f, x) { return f(x) ? "a" : "r" }
+<ul>
+  <each in=@xs as x>
+    <li><button onclick=\${ @v = decide(isOk, x) }>\${x}</button></li>
+  </each>
+</ul>
+</program>
+`);
+    expect(o.codes).toContain(ESCAPE);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // F5 — `on mount`
 // ---------------------------------------------------------------------------
 describe("F5 — `on mount` bodies", () => {
@@ -291,6 +347,21 @@ function drive(f) { return f(1) }
 </program>
 `);
     expect(o.codes).toContain(ESCAPE);
+  });
+
+  test("a top-level logic declaration storing a server fn is an escape", () => {
+    const o = compileFile(`<program>
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+\${
+  const checks = [isOk]
+}
+function go() { @v = checks[0](1) ? "accepted" : "rejected" }
+<button onclick=go()>go</button>
+</program>
+`);
+    expect(o.codes).toContain(ESCAPE);
+    expect(o.errors.find((e) => e.code === ESCAPE).message).toContain("stored in an array");
   });
 
   test("an escape inside a server BLOCK-BODY callback (raw text) is caught too", () => {

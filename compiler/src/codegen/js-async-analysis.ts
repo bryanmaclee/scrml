@@ -774,6 +774,47 @@ export function analyzeRawJsFragment(raw: string, resolveFree: FreeAsyncResolver
   return null;
 }
 
+// ---------------------------------------------------------------------------
+// The active client emission (handler emitters with no ctx in reach)
+// ---------------------------------------------------------------------------
+
+/**
+ * s441 — the client emission in progress: how to resolve a free name, and where
+ * to report. Set by emit-client for the duration of one file's client emission
+ * (codegen is synchronous — the same module-level pattern the each / lift
+ * emitters already use for their per-file state), so the row / lift handler
+ * emitters, which build `function(event) { … }` text deep in call chains that
+ * carry no compile context, color their handlers against the SAME facts the
+ * top-level event wiring uses.
+ */
+export interface ActiveClientAsync {
+  resolveFree: FreeAsyncResolver;
+  report: (uses: JsAsyncUses, span: unknown) => void;
+}
+
+let _activeClientAsync: ActiveClientAsync | null = null;
+
+/** Install (or clear, with null) the active client emission; returns the previous one. */
+export function setActiveClientAsync(next: ActiveClientAsync | null): ActiveClientAsync | null {
+  const prev = _activeClientAsync;
+  _activeClientAsync = next;
+  return prev;
+}
+
+/**
+ * Apply §13.2 to one emitted event-handler function expression under the active
+ * client emission (see `colorAsyncFunctionExpr`); unchanged when no emission is
+ * active or the text is not a single function expression that parses.
+ */
+export function colorActiveHandler(fnText: string, span?: unknown): string {
+  const active = _activeClientAsync;
+  if (!active || !fnText) return fnText;
+  const colored = colorAsyncFunctionExpr(fnText, active.resolveFree);
+  if (!colored) return fnText;
+  active.report(colored, span);
+  return colored.code;
+}
+
 export interface ColorOpts {
   /** See AnalyzeOpts.reactiveArg1Skip. Default true. */
   reactiveArg1Skip?: boolean;

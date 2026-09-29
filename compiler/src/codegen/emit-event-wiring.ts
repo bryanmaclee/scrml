@@ -22,6 +22,7 @@ import type { CompileContext } from "./context.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 import { colorAsyncFunctionExpr } from "./js-async-analysis.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
+import { clientAsyncFactsOf } from "./emit-functions.ts";
 
 /** An event binding recorded by HTML gen and consumed by client JS gen. */
 interface EventBinding {
@@ -475,8 +476,8 @@ function exprUsesServerFn(expr: string, serverFnNames: Set<string>): boolean {
  * async function used as a value, is reported. Unparseable text is left unchanged.
  */
 function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileContext): string {
-  const facts = (ctx as unknown as { _clientAsyncFacts?: AsyncNameFacts })._clientAsyncFacts;
-  if (!facts || !handlerExpr) return handlerExpr;
+  if (!handlerExpr) return handlerExpr;
+  const facts = clientAsyncFactsOf(ctx);
   const colored = colorAsyncFunctionExpr(handlerExpr, freeAsyncResolverFromFacts(facts));
   if (!colored) return handlerExpr;
   for (const err of jsAsyncUsesErrors(colored, span, ctx.filePath)) ctx.errors.push(err);

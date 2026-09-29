@@ -37,6 +37,7 @@
  */
 
 import type { CompileContext } from "./context.ts";
+import { colorActiveHandler } from "./js-async-analysis.ts";
 import type { EncodingContext } from "./context.ts";
 import type { EngineRewriteCtx } from "./emit-control-flow.ts";
 import { emitStringFromTree } from "../expression-parser.ts";
@@ -2520,7 +2521,18 @@ function renderTemplateAttrToJs(
     // on a stale (reconciled-away) item.
     const preventLine = ev === "submit" ? "event.preventDefault(); " : "";
     const wrappedHandlerBody = maybeWrapEachPerItemHandler(handlerBody, iterVarName);
-    lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, function(event) { ${preventLine}${wrappedHandlerBody} });`);
+    // s441 (g-server-call-in-inline-handler-condition-unawaited) — a row handler
+    // is built as TEXT and never reaches the function-body auto-await, so
+    // `onclick=${ if (isOk(x)) {…} }` in an `<each>` tested a Promise. Apply §13.2
+    // under the active client emission (js-async-analysis `colorActiveHandler`):
+    // await its async calls (the handler becomes `async`), lift clean-family
+    // callbacks, fail closed on what cannot be awaited and on an async fn used as
+    // a value (S440 F4).
+    const handlerFn = colorActiveHandler(
+      `function(event) { ${preventLine}${wrappedHandlerBody} }`,
+      (attr as { span?: unknown }).span ?? (elNode as { span?: unknown } | null)?.span,
+    );
+    lines.push(`${indent}${elVar}.addEventListener(${JSON.stringify(ev)}, ${handlerFn});`);
     return;
   }
 
