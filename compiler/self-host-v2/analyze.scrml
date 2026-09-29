@@ -4546,8 +4546,8 @@ ${
         let renv: TEnv = env
         const isAnd: boolean = bop == BinOp.And
         const isOr: boolean = bop == BinOp.Or
-        if (isAnd) renv = tNarrow(env, condNarrowing(env, l).yes)
-        if (isOr) renv = tNarrow(env, condNarrowing(env, l).no)
+        if (isAnd) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).yes), l)   // r3 N1: what the left operand's calls write is not narrowed
+        if (isOr) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).no), l)
         const rr: RVT = typeExpr(renv, r, rl.ts)
         const op: PrimOp | not = opOf(f)
         if (op is not) return rvt(VType.Unknown, rr.ts)

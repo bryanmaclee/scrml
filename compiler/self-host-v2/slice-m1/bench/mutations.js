@@ -282,6 +282,10 @@ const MUTATIONS = [
      "        if (tk == 0) {\n            if (lk == 4) return 1\n            return 0\n        }\n", "        if (tk == 0) {\n            return -1\n        }\n"],
     ["S442 r2 F4: a hex literal classified by its digits (`0xE` typed `number`)",
      "        if (isRadixLiteral(raw)) return Type.Int\n", ""],
+    ["S442 r3 N1: `&&`'s right operand narrowed across the left operand's writing call",
+     "        if (isAnd) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).yes), l)", "        if (isAnd) renv = tNarrow(env, condNarrowing(env, l).yes)"],
+    ["S442 r3 N1: `||`'s right operand narrowed across the left operand's writing call",
+     "        if (isOr) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).no), l)", "        if (isOr) renv = tNarrow(env, condNarrowing(env, l).no)"],
     // ---- s442 fix round r1 (review F1 / F2 / F3) ----
     ["S442 r1 F1: `a && b` typed from its operands again (the `&&` arm of Q2)",
      "            .And :> known(Type.Bool)", "            .And :> VType.Unknown"],

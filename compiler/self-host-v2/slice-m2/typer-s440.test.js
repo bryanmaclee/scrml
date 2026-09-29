@@ -443,6 +443,17 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O + CLEAR, "<button if=(@o.n != not) onclick={ clear(); @m = @o.n + 1 }>x</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     expect(inApp(O + CLEAR + "    function outer() { clear() }\n    function f() { if (@o.n != not) { outer()\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
+  test("r3 N1 — the right operand of `&&` / `||` is not narrowed across a call in the LEFT operand that writes the place", () => {
+    const CB = "    <let bb:bool=false/>\n    function clearB() -> bool { @o = { v: not, n: not, f: not }\n return true }\n";
+    expect(inApp(O + CB + "    function f() { if (@o.n != not && clearB() && @o.n + 1 > 0) { @m = 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CB + "    function f() { @bb = @o.n != not && clearB() && @o.n + 1 > 0 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CB + "    function f() { @bb = @o.n == not || !clearB() || @o.n + 1 > 0 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("r3 N1 twin — a left-operand call that writes OTHER places keeps the narrowing", () => {
+    const KB = "    <let bb:bool=false/>\n    function keepB() -> bool { @m = 3\n return true }\n";
+    expect(inApp(O + KB + "    function f() { @bb = @o.n != not && keepB() && @o.n + 1 > 0 }")).toEqual([]);
+    expect(inApp(O + KB + "    function f() { @bb = @o.n == not || !keepB() || @o.n + 1 > 0 }")).toEqual([]);
+  });
   test("r2 F1a twin — a call whose callee writes OTHER places keeps the narrowing", () => {
     expect(inApp(O + "    function h() { @m = 2\n @o.v = \"x\" }\n    function f() { if (@o.n != not) { h()\n @m = @o.n + 1 } }")).toEqual([]);
   });
