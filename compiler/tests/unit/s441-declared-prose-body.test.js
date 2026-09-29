@@ -152,3 +152,16 @@ for (const [label, parser] of PIPELINES) {
     });
   });
 }
+
+describe("S441 — only a statement HEAD is judged (default pipeline)", () => {
+  test("a multi-statement `when … changes { … }` body at body-top is not read as prose", () => {
+    const r = compile("<program>\n<a> = 0\n<x> = 0\nwhen @a changes { @x = @a\n  @x = @x + 1 }\n<p>x</p>\n</program>\n");
+    expect(r.codes).not.toContain("E-UNQUOTED-DISPLAY-TEXT");
+    expect(r.errors).toHaveLength(0);
+  });
+  test("a declaration with a broken initializer keeps its own diagnostic (not E-UNQUOTED)", () => {
+    const r = compile("<program>\n<a> = 2\n<r> = -@a ** 2\n<p>${@r}</p>\n</program>\n");
+    expect(r.codes).toContain("E-CODEGEN-INVALID-LOGIC");
+    expect(r.codes).not.toContain("E-UNQUOTED-DISPLAY-TEXT");
+  });
+});

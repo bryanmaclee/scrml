@@ -157,7 +157,7 @@ function fixOf(primary: string): Run["fix"] {
 }
 
 interface FileResult {
-  runs: Run[]; wsRuns: number; surfaces: Record<Surface, number>; liftedBareExpr: { line: number; expr: string }[]; crash?: string;
+  runs: Run[]; wsRuns: number; declaredLiterals: number; surfaces: Record<Surface, number>; liftedBareExpr: { line: number; expr: string }[]; crash?: string;
 }
 
 function isInlineLogic(n: any): boolean {
@@ -165,7 +165,7 @@ function isInlineLogic(n: any): boolean {
 }
 
 function analyze(src: string, rel: string, nodes: any[]): FileResult {
-  const res: FileResult = { runs: [], wsRuns: 0, surfaces: { program: 0, page: 0, channel: 0, "file-root": 0 }, liftedBareExpr: [] };
+  const res: FileResult = { runs: [], wsRuns: 0, declaredLiterals: 0, surfaces: { program: 0, page: 0, channel: 0, "file-root": 0 }, liftedBareExpr: [] };
   const scanBody = (children: any[], surface: Surface) => {
     res.surfaces[surface]++;
     for (let i = 0; i < children.length; i++) {
@@ -180,6 +180,8 @@ function analyze(src: string, rel: string, nodes: any[]): FileResult {
         }
       }
       if (c.kind !== "text") continue;
+      // S441 — a declared `"..."` display-text literal is not a loose run.
+      if (c._displayLiteral === true) { res.declaredLiterals++; continue; }
       const v: string = c.value ?? "";
       if (v.trim() === "") { res.wsRuns++; continue; }
       const baseLine = c.span?.line ?? 0;
@@ -241,7 +243,7 @@ for (const { abs, rel } of files) {
       const ast = pipelines[p](abs, src);
       results[p].set(rel, analyze(src, rel, ast?.nodes ?? []));
     } catch (e) {
-      results[p].set(rel, { runs: [], wsRuns: 0, surfaces: { program: 0, page: 0, channel: 0, "file-root": 0 }, liftedBareExpr: [], crash: String((e as Error)?.message ?? e).slice(0, 120) });
+      results[p].set(rel, { runs: [], wsRuns: 0, declaredLiterals: 0, surfaces: { program: 0, page: 0, channel: 0, "file-root": 0 }, liftedBareExpr: [], crash: String((e as Error)?.message ?? e).slice(0, 120) });
     }
   }
 }
@@ -297,6 +299,7 @@ for (const p of Object.keys(pipelines) as P[]) {
   const liftedFiles = [...m.entries()].filter(([, r]) => r.liftedBareExpr.length).map(([f, r]) => ({ f, r }));
   pd.whitespaceOnlyRuns = wsTotal;
   console.log(`\nwhitespace-only text nodes (excluded, formatting): ${wsTotal}`);
+  console.log(`declared "..." display-text literals (S441; excluded, declared prose): ${all.reduce((a, r) => a + r.declaredLiterals, 0)}`);
   if (p === "live") {
     // Live only: the native builder's bare-expr spans / node-kind use differ (its
     // best-effort logic-body parse emits bare-expr for statements live types

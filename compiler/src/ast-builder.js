@@ -1287,17 +1287,27 @@ function splitBodyTopDisplayLiterals(blocks, errors, filePath) {
 // are dropped and the diagnostics their own parse raised (an `E-EQ-005` for a
 // prose `is`, …) are withdrawn, so the author sees the root cause rather than
 // an `E-SCOPE-001` on the first word. Returns the number rejected.
+// The statement shapes prose actually lands in, and the HEAD-expression field
+// of each. Only a head is judged: other expression-valued fields (a `when`
+// statement's `bodyExpr`, a handler body, ...) hold a statement LIST that is not
+// a single expression by design, so a lost tail there says nothing.
+// Declarations are never judged - they are code by their head keyword, and a
+// broken initializer has its own diagnostics (E-CODEGEN-INVALID-LOGIC for
+// `-@a ** 2`, ...).
+const BODY_TOP_PROSE_HEADS = {
+  "bare-expr": ["exprNode"],
+  "if-stmt": ["condExpr"],
+  "for-stmt": ["iterExpr"],
+  "while-stmt": ["condExpr"],
+  "return-stmt": ["exprNode"],
+};
 function stmtHasInvalidOwnExpr(st) {
   if (!st || typeof st !== "object") return false;
-  // A DECLARATION is code by its head (`<x> = …`, `const x = …`, `function`,
-  // `type`, `import`, a component def): a broken initializer is a code bug with
-  // its own diagnostics (E-CODEGEN-INVALID-LOGIC for `-@a ** 2`, …), not prose.
-  if (typeof st.kind === "string" && (st.kind.endsWith("-decl") || st.kind === "component-def")) return false;
-  for (const key of Object.keys(st)) {
-    if (key === "span") continue;
+  const heads = BODY_TOP_PROSE_HEADS[st.kind];
+  if (!heads) return false;
+  for (const key of heads) {
     const v = st[key];
-    if (!v || typeof v !== "object" || Array.isArray(v)) continue;
-    if (typeof v.kind !== "string") continue;
+    if (!v || typeof v !== "object" || typeof v.kind !== "string") continue;
     if (hasLostTrailingContent(v)) return true;
     if (v.kind === "escape-hatch" && v.nativeKind === "ParseError") return true;
   }
