@@ -1351,9 +1351,9 @@ ${
                 out = out.concat([ri.n])
                 m = ri.mp
             } else if (chAt(m, 0) == "<") {
-                const rn: RNodeOne = parseMarkupNode(m)
-                out = out.concat([rn.n])
-                m = rn.mp
+                const tagNode: RNodeOne = parseMarkupNode(m)
+                out = out.concat([tagNode.n])
+                m = tagNode.mp
             } else {
                 const before: int = m.pos
                 const tp: TP = regionTP(m, LexStop.CodeBody)

@@ -527,7 +527,8 @@ ${
                 writes = writes.concat([Stmt.Write(w.cap, target, w.edit, Expr.Local(t), w.check)])
             }
         }
-        return lets.concat([Stmt.Commit(writes)])
+        const edit: Stmt = Stmt.Commit(writes)
+        return lets.concat([edit])
     }
 
     fn assignLocal(c: LC, s: Sym, value: AExpr | not) -> Stmt[] {
