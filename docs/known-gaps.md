@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 203 | 4 |
-| MED | 384 | 0 |
+| HIGH | 202 | 4 |
+| MED | 385 | 0 |
 | LOW | 164 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -1504,7 +1504,28 @@ its parser + VP-2 hunks are already on main via this branch and must be dropped 
 <!-- @gap id=g-checked-expr-attr-always-checked-for-falsy sev=HIGH status=ruling-gated locus=searched:compiler/src/codegen/emit-html.ts,compiler/src/codegen/emit-each.ts(lifted-for-setAttribute-path) prov=adopter:S381-peter-dogfood-checked-expr-emits-raw-source-as-a-literal-string-attr-with-no-reactive-wiring-and-setAttribute-unconditional-while-class-colon-done-on-the-same-element-treats-0-as-falsy -->
 
 ### g-fail-variant-shorthand-rejected-by-ts-context — `fail .Variant` (the bare-variant shorthand) is **rejected by `E-ERROR-009` at the TS stage** while the qualified `fail E.Variant` compiles. **S382-peter VERIFIED + ROOT-CAUSED + SPEC-checked: a SPEC-INTERNAL grammar-reconciliation RULING, not a bug fix.** ⚠ **The reject fires ONLY when the declared error enum RESOLVES** — a canonical `type ContactError:enum = { … }` declaration produces `E-ERROR-009`; a non-canonical `enum ContactError { … }` does not. The diagnostic is gated on a condition orthogonal to the shape it names. Adopter-visible and blocking: **flagship `09-error-handling` fails to compile — 4× `E-ERROR-009`** (`validate` ×3, `submit` ×1), and `login.scrml` likewise. Bare-variant inference is §14.10-sanctioned elsewhere (`<x>: Phase = .Idle`), which is why the shorthand reads as legal to an author and why the reconciliation is bryan's. — `NEW S381-peter (dog-food sweep), VERIFIED S382-peter; FILED S385-bryan; **HIGH**; needs bryan (SPEC-internal grammar reconciliation)`
-<!-- @gap id=g-fail-variant-shorthand-rejected-by-ts-context sev=HIGH status=ruling-gated locus=searched:compiler/src/type-system.ts(E-ERROR-009-fire-site),compiler/SPEC.md-§19,§14.10 prov=adopter:S381-peter-dogfood-VERIFIED-S382-peter-flagship-09-fails-4x-E-ERROR-009-and-the-reject-fires-only-when-the-error-enum-RESOLVES-canonical-type-enum-decl-vs-non-canonical -->
+<!-- @gap id=g-fail-variant-shorthand-rejected-by-ts-context sev=HIGH status=resolved locus=compiler/src/type-system.ts(annotateNodes-§19-fail-expr-E-ERROR-009-site-bare-resolution),compiler/SPEC.md-§19.3.1,§19.3.3,§14.10,§34-E-ERROR-009 prov=ruling:user-voice-scrml.md-S441-"fail-shorthand-yes"+adopter:S381-peter-dogfood-VERIFIED-S382-peter -->
+
+**RESOLVED S441** (`s441-fail-bare-variant`; ruling: user-voice-scrml.md S441 "site yes, fail shorthand yes"). `fail .V` /
+`fail .V(args)` / `fail ::V` now resolve the bare variant against the enclosing function's declared `!` error type
+(bare `!` → built-in `Error`, so `fail .Generic(m)` ≡ `fail Error.Generic(m)`). The E-ERROR-009 site in `type-system.ts`
+resolves first and writes the enum name onto the `fail-expr` node, then runs the unchanged §19.3.3 checks on the
+resolved variant — invalid name → E-ERROR-009 (Valid-variants list), valid name + wrong arity → E-TYPE-082. Codegen is
+byte-identical to the qualified form (asserted in `compiler/tests/unit/fail-bare-variant-shorthand-s441.test.js`).
+The gate asymmetry is closed: a bare `fail .V` whose declared type does NOT resolve to an enum (undeclared, non-enum,
+the non-canonical `enum E {…}` that never registers) is now E-ERROR-009 instead of passing vacuously; an imported
+error enum resolves (an import the registry lacks is exempt: unverifiable, not invalid). SPEC: §19.3.1 grammar makes
+`enum-type` optional, §19.3.3 gains the normative bare-form bullet, §14.10 lists the `fail` target as a position, §34
+E-ERROR-009 row reworded. Corpus: newly-accepting only — `examples/09-error-handling.scrml` and two
+`samples/compilation-tests/gauntlet-s19-phase1-decls/` files flip FAIL→OK; zero files flip OK→FAIL.
+⚑ **Surfaced, not fixed (pre-existing, identical under the qualified spelling):** 09's `<Failed err>` arm renders an
+EMPTY message at runtime — a catch-all `!{}` arm `| err :> …` lowers to `const err = result.data` (the payload), not the
+error variant, so `errorMessage(err)` gets `null` for `.EmptyName`. Filed separately; see the S441 report.
+
+### g-qualified-fail-against-non-enum-error-type-undiagnosed — the qualified `fail T.V` in a function declared `! T`, where `T` is undeclared / a non-enum type / a type alias, compiles with NO diagnostic — `NEW S441`; **MED** (silent acceptance of an invalid error type; the bare form is already fail-closed); open
+Executed on the s441-fail-bare-variant tip: `function check(n: string) ! Undeclared { if (n == "") fail Undeclared.X }` compiles at exit 0. So do `! S` with `type S:struct = {…}` + `fail S.X`, and `! A` with `type A = E` + `fail A.V`. The emitted envelope is `{ __scrml_error: true, type: "Undeclared", variant: "X", … }` — a variant of a type that does not exist. §19.4.4.1 already requires the `!` error type to be an enum and names **E-ERROR-011** (reserved, no emitter) for the non-enum case, so this is the qualified-form half of that unbuilt emitter. The impl half is tracked under [[g-failable-error-type-non-enum-spec-vs-corpus-conflict]] ("REMAINING — the impl half is NOT built"). The bare form `fail .V` against the same types reports **E-ERROR-009** as a carried interim (§19.3.3, S441), which E-ERROR-011 subsumes when it ships. A second strand: an UNDECLARED name in the `!` position is not reached by §14.1.2 `E-TYPE-UNKNOWN-NAME`, because the `!` error-type position is absent from that rule's Loci list. Decide whether that code or E-ERROR-011 owns the undeclared case. **Direction: newly-rejecting** — measure the corpus before landing (§34.0 / pa-base §8). The s441 corpus sweep (2,033 files) found no qualified `fail` against an unresolved `!` type among files that compile, but that sweep was not targeted at this shape. Re-measure.
+<!-- @gap id=g-qualified-fail-against-non-enum-error-type-undiagnosed sev=MED status=open locus=compiler/src/type-system.ts(annotateNodes-§19-fail-expr-E-ERROR-009-site,validVariants===null-branch)+compiler/src/ast-builder.js(consumeErrorTypeAnnotation-E-ERROR-011-natural-site) prov=review:S441-fail-bare-variant-PA-review-N1-reproduced-by-execution -->
+
 
 <!-- ⚑ S385-bryan filing batch 5 — the "separable defects, file not design" set from dpa-028 (offline/PWA, 2026-08-15). The DD named FOUR; the PA reproduced each by execution before filing rather than relaying, and ONE DID NOT REPRODUCE (recorded below, not filed). bryan: "file those four". -->
 
