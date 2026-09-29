@@ -124,6 +124,7 @@ const NEGATIVE = [
   { marker: "@audit.shift()", body: "@audit.shift()" },
   { marker: "@audit = @audit.filter(", body: "@audit = @audit.filter(e => e.actor != \"x\")" },
   { marker: "@audit[0].action = \"edited\"", body: "@audit[0].action = \"edited\"" },
+  { marker: "@audit.pop()", body: "@audit.pop()" }, // S442: `[free, append]` grants no shrink
 ];
 
 describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
@@ -150,6 +151,7 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
     expect(msg(2)).toContain("removal at the front");
     expect(msg(3)).toContain("shrink-anywhere");
     expect(msg(4)).toContain("fixed");
+    expect(msg(5)).toContain("removal at the end");
   });
 
   test("a wrong-typed element in the spread shape is E-TYPE-031 (§66.1 rule 5 — the element is the written value)", () => {
