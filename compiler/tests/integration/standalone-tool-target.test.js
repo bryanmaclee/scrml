@@ -292,19 +292,30 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
       let out = "";
       let port = null;
       const deadline = Date.now() + 10000;
+      let pending = null;
       try {
+        // ONE outstanding read at a time. Racing a FRESH `reader.read()` against
+        // the tick on every iteration abandoned the previous read when the tick
+        // won; the chunk then resolved the abandoned promise and was lost, so
+        // whether the port line was ever seen depended on whether the child
+        // printed within the first 200ms (order/load-dependent flake, S443).
+        pending = reader.read();
         while (Date.now() < deadline && proc.exitCode === null) {
           const chunk = await Promise.race([
-            reader.read(),
+            pending,
             Bun.sleep(200).then(() => "TICK"),
           ]);
           if (chunk === "TICK") continue;
+          pending = null;
           if (chunk.done) break;
           out += dec.decode(chunk.value, { stream: true });
           const m = out.match(/SCRML_TOOL_PORT=(\d+)/);
           if (m) { port = Number(m[1]); break; }
+          pending = reader.read();
         }
       } finally {
+        // A read still outstanding at the deadline rejects on release; swallow it.
+        if (pending) pending.catch(() => {});
         reader.releaseLock();
       }
       if (port === null) {
