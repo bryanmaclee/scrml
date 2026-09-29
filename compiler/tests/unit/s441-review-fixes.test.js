@@ -92,3 +92,15 @@ for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native
     });
   });
 }
+
+for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native"]]) {
+  describe(`#6 — a comma sequence of bare words is not a scrml expression (${label})`, () => {
+    for (const line of ["Hi, there", "Hello, world", "Yes, please", "First, second, third", "Thanks, Bob", "Hello, world, again"]) {
+      test(`\`${line}\` → E-UNQUOTED-DISPLAY-TEXT, and nothing ships to the client`, () => {
+        const r = compile(`<program>\n${line}\n<p id="z">z</p>\n</program>\n`, parser);
+        expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+        expect(r.client).not.toContain(" , ");
+      });
+    }
+  });
+}

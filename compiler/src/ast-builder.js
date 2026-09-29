@@ -1314,6 +1314,14 @@ function stmtHasInvalidOwnExpr(st) {
     if (!v || typeof v !== "object" || typeof v.kind !== "string") continue;
     if (hasLostTrailingContent(v)) return true;
     if (v.kind === "escape-hatch" && v.nativeKind === "ParseError") return true;
+    // S441 review #6 — a comma SEQUENCE (`Hello, world`) is not a scrml
+    // expression: §4.18.2 lists what a bare run may be (identifier, keyword,
+    // call, member access, literal, nested tag, `${…}`), the SPEC has no comma
+    // operator, and the expression layer does not model one (it survives only
+    // as a `SequenceExpression` escape hatch, emitted verbatim — `Hello, world`
+    // shipped as `Hello , world;` and threw a ReferenceError at boot). So a
+    // body-top statement whose head is a sequence is not valid code.
+    if (key === "exprNode" && v.kind === "escape-hatch" && v.nativeKind === "SequenceExpression") return true;
   }
   return false;
 }

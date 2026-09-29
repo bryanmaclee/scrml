@@ -2760,21 +2760,28 @@ const BODY_TOP_CODE_HEAD_RE = /^\s*(?:(?:export|server|async)\s+)*(?:type|fn|fun
 function rejectBodyTopProseNative(block, source, ctx) {
     const body = Array.isArray(block.body) ? block.body : [];
     if (body.length === 0) return;
-    if (ctx === null || ctx === undefined || Array.isArray(ctx.diagnostics) === false) return;
+    if (ctx === null || ctx === undefined) return;
+    // `ctx.diagnostics` is created lazily — absent on a clean parse, which is
+    // exactly when a comma-sequence run (no parse diagnostic) must still be
+    // judged.
+    if (Array.isArray(ctx.diagnostics) === false) ctx.diagnostics = [];
     const span = block.span;
     const blockStart = span !== undefined && span !== null && typeof span.start === "number" ? span.start : 0;
     const blockEnd = span !== undefined && span !== null && typeof span.end === "number" ? span.end : blockStart;
     const inBlock = (d) => d !== null && d !== undefined && d.span !== undefined && d.span !== null
         && typeof d.span.start === "number" && d.span.start >= blockStart && d.span.start <= blockEnd;
     const diags = ctx.diagnostics.filter((d) => inBlock(d) && BODY_TOP_PARSE_DIAG_RE.test(d.code));
-    if (diags.length === 0) return;
+    // S441 review #6 — a comma sequence statement (`Hello, world`) is not a
+    // scrml expression (mirrors ast-builder.js stmtHasInvalidOwnExpr).
+    const isSeqStmt = (st) => st && st.kind === "ExprStmt" && st.expression && st.expression.kind === "Sequence";
+    if (diags.length === 0 && body.some(isSeqStmt) === false) return;
     const starts = body.map((st) => (st && st.span && typeof st.span.start === "number") ? st.span.start : null);
     const stmtIndexAt = (off) => {
         let idx = -1;
         for (let k = 0; k < starts.length; k++) if (starts[k] !== null && starts[k] <= off) idx = k;
         return idx;
     };
-    const flagged = body.map(() => false);
+    const flagged = body.map((st) => isSeqStmt(st));
     for (const d of diags) {
         let k = stmtIndexAt(d.span.start);
         // `Welcome.⏎<count> = 0` — "expected a property name after '.'" is
