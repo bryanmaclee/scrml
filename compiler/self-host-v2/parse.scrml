@@ -1217,7 +1217,7 @@ ${
             } else if (chAt(m, 0) == ":" && isSpaceCh(chAt(m, -1))) {
                 // §4.14: a whitespace-preceded `:` opens the `:`-shorthand body —
                 // one expression, running to the `>` that ends the opener.
-                const rs: RNodeOne = parseShorthand(m)
+                const rs: RNodeOne = parseShorthand(m, nm.w)
                 short = rs.n
                 m = rs.mp
                 going = false
@@ -1246,12 +1246,33 @@ ${
     }
 
     // At the `:` of a `:`-shorthand body (§4.14): the single expression, as an
-    // Interp node, then the opener's `>` (consumed). There is no closer: a
-    // `/>` here is E-CLOSER-001 (§4.14 "closer present on `:`-shorthand body").
-    // The expression ends at the first depth-0 `>` (a comparison inside it
-    // must be parenthesized, as in any opener value, §66.2.4).
-    fn parseShorthand(mp: MP) -> RNodeOne {
+    // Interp node — or a nested element (markup-as-value, §1.4) — then the
+    // opener's `>` (consumed). There is no closer: a `/>` here, or a closer
+    // written right after the `>` (`<p : x></>`), is E-CLOSER-001 (§4.14).
+    // The expression ends at the first depth-0 `>` that is not `>=`.
+    // r1 F3 (PA ruling, fail-closed): a bare `>` COMPARISON cannot be told from
+    // the opener's end — when the rest of the line after that `>` holds
+    // another `>`, the body was a comparison: E-PARSE-SHORTHAND-GT (parenthesize
+    // it, `(@n > 3)`), and the tail is consumed, never rendered as text.
+    fn parseShorthand(mp: MP, tag: string) -> RNodeOne {
         const start: int = mp.pos
+        const at: MP = skipSpace(mAdv(mp, 1))
+        if (chAt(at, 0) == "<" && isNameStart(chAt(at, 1))) {
+            const inner: RNodeOne = parseMarkupNode(at)
+            let m0: MP = skipSpace(inner.mp)
+            if (chAt(m0, 0) == ">") {
+                m0 = mAdv(m0, 1)
+            } else {
+                m0 = mDiag(m0, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m0.pos, m0.pos + 1)
+            }
+            return { n: inner.n, mp: closerAfterShorthand(m0, tag) }
+        }
+        if (chAt(at, 0) == ">") {
+            // an empty `:`-shorthand body: one diagnostic, the opener still ends
+            const em: MP = mDiag(mAdv(at, 1), "E-PARSE-SHORTHAND", "a `:`-shorthand body needs one expression before the `>` (§4.14)", start, at.pos + 1)
+            const en: ANode = { nid: em.nid, span: mkSpan(start, em.pos), k: ANodeK.Text("") }
+            return { n: en, mp: mBump(em) }
+        }
         const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)
         let t: TP = tp
         let e: AExpr = { nid: t.nid, span: mkSpan(start, start + 1), k: AExprK.Recovered }
@@ -1268,11 +1289,90 @@ ${
             m = mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `/` (`<tag … : expr>`, §4.14)", m.pos, m.pos + 2), 2)
         } else if (chAt(m, 0) == ">") {
             m = mAdv(m, 1)
+            m = comparisonTail(m, start)
+            m = closerAfterShorthand(m, tag)
         } else {
             m = mDiag(m, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m.pos, m.pos + 1)
         }
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }
         return { n: n, mp: mBump(m) }
+    }
+
+    // r1 F3: after the shorthand's `>`: another `>` later on the same line
+    // (before any `<`) means the first one was a comparison operator.
+    fn comparisonTail(mp: MP, start: int) -> MP {
+        let i: int = mp.pos
+        let content = false
+        while (i < mp.src.length) {
+            const c: string = mp.src.substring(i, i + 1)
+            if (c == "\n" || c == "<") return mp
+            // a `>` right after this one (only spaces between) ends an OUTER
+            // opener (`<div : <p : "x">>`) — not a comparison
+            if (c == ">" && !content) return mp
+            if (c != " " && c != "\t") content = true
+            if (c == ">") {
+                const d: MP = mDiag(mp, "E-PARSE-SHORTHAND-GT", "a `>` inside a `:`-shorthand body ends the opener — this body reads as a comparison; parenthesize it: `: (a > b)` (§4.14; §66.2.4's rule for opener values)", start, i + 1)
+                return mAt(d, i + 1)
+            }
+            i = i + 1
+        }
+        return mp
+    }
+
+    // nit: `<p : x></>` / `<p : x></p>` written right after the opener.
+    fn closerAfterShorthand(mp: MP, tag: string) -> MP {
+        let m: MP = mp
+        while (chAt(m, 0) == " " || chAt(m, 0) == "\t") { m = mAdv(m, 1) }
+        let n: int = 0
+        if (mLooking(m, "</>")) n = 3
+        if (tag != "" && mLooking(m, "</" + tag + ">")) n = tag.length + 3
+        if (n == 0) return mp
+        return mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `" + m.src.substring(m.pos, m.pos + n) + "` (§4.14)", m.pos, m.pos + n), n)
+    }
+
+    // ---- r1 F4: a CODE-DEFAULT body (§4.18.1) — an engine state-child body ----
+    // A bare run is CODE (an expression, §4.18.2); display text is a "…"
+    // literal; a nested tag is markup (a free-text body of its own); `${…}` is
+    // an interpolation. A run that is not ONE valid expression is
+    // E-UNQUOTED-DISPLAY-TEXT (§4.18.7), suggesting the quoted literal.
+    fn parseCodeBody(mp: MP, tag: string) -> RNodes {
+        let m: MP = mp
+        let out: ANode[] = []
+        let going = true
+        while (going) {
+            m = skipTrivia(m)
+            if (mEof(m)) {
+                m = mDiag(m, "E-PARSE-UNCLOSED", "`<" + tag + ">` is never closed", mp.pos, m.pos)
+                going = false
+            } else if (mLooking(m, "</")) {
+                going = false
+            } else if (atInterp(m)) {
+                const ri: RNodeOne = parseInterp(m)
+                out = out.concat([ri.n])
+                m = ri.mp
+            } else if (chAt(m, 0) == "<") {
+                const rn: RNodeOne = parseMarkupNode(m)
+                out = out.concat([rn.n])
+                m = rn.mp
+            } else {
+                const before: int = m.pos
+                const tp: TP = regionTP(m, LexStop.CodeBody)
+                const runEnd: int = lastEnd(tp)
+                const r: RExpr = parseAssign(tp)
+                if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
+                    const back: MP = backToMarkup(m, r.tp)
+                    const n: ANode = { nid: back.nid, span: mkSpan(before, runEnd), k: ANodeK.Interp(r.e) }
+                    out = out.concat([n])
+                    m = mBump(back)
+                } else {
+                    const text: string = m.src.substring(before, runEnd).trim()
+                    m = mDiag(mAt(m, runEnd), "E-UNQUOTED-DISPLAY-TEXT", "display text in a `<" + tag + ">` state-child body must be a quoted display-text literal — did you mean `\"" + text + "\"`? (a code-default body, §4.18.1 / §4.18.7)", before, runEnd)
+                }
+                if (m.pos == before) m = mAdv(m, 1)
+            }
+        }
+        if (mLooking(m, "</")) m = parseCloser(m, tag)
+        return { nodes: out, mp: m }
     }
 
     type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], mp: MP }
@@ -1732,7 +1832,8 @@ ${
         if (sh is some) {
             body = [sh]
         } else if (!o.selfClosing) {
-            const kids: RNodes = parseKids(m, o.name)
+            // r1 F4: a state-child body is CODE-DEFAULT (§4.18.1)
+            const kids: RNodes = parseCodeBody(m, o.name)
             body = kids.nodes
             m = kids.mp
         }

@@ -1084,6 +1084,7 @@ ${
         Statement,   // a `function` / `type` declaration: stop after a `}` that returns to depth 0
         Line,        // a braceless declaration (`import … from "…"`): stop at depth 0 before a newline
         Shorthand,   // a `:`-shorthand body (§4.14): stop at depth 0 before the `>` (or `/>`) that ends the opener
+        CodeBody,    // a run of a code-default body (§4.18.1): stop at depth 0 before a tag (`<x`, `</`, `<!`) or `${`
     }
     export type LexRun:struct = { tokens: Token[], end: int }
 
@@ -1121,6 +1122,7 @@ ${
             .BareValue :> isTrivia(c0) || c0 == 62 || (c0 == 47 && peekCode(st.cur, 1) == 62)
             .Line      :> lineEndsAt(skipBlanks(st.cur))
             .Shorthand :> endsOpener(skipTriviaAhead(st.cur))
+            .CodeBody  :> startsMarkup(skipTriviaAhead(st.cur))
             .Balanced  :> false
             .Statement :> false
         }
@@ -1135,6 +1137,7 @@ ${
             .BareValue :> false
             .Line      :> false
             .Shorthand :> false
+            .CodeBody  :> false
         }
     }
 
@@ -1160,7 +1163,20 @@ ${
     // `:`-shorthand body).
     fn endsOpener(c: Cursor) -> boolean {
         const c0: int = peekCode(c, 0)
-        return c0 == 62 || (c0 == 47 && peekCode(c, 1) == 62)
+        // r1 F3: `>=` is an operator, never the opener's end
+        if (c0 == 62) return peekCode(c, 1) != 61
+        return c0 == 47 && peekCode(c, 1) == 62
+    }
+
+    // A tag (`<name`, `</`, `<!--`) or an interpolation (`${`) — where a
+    // code-default body's expression run ends (a `<` before a space / digit is
+    // a comparison and does not stop it).
+    fn startsMarkup(c: Cursor) -> boolean {
+        const c0: int = peekCode(c, 0)
+        const c1: int = peekCode(c, 1)
+        if (c0 == 36) return c1 == 123
+        if (c0 != 60) return false
+        return c1 == 47 || c1 == 33 || (c1 >= 65 && c1 <= 90) || (c1 >= 97 && c1 <= 122)
     }
 
     fn skipTriviaAhead(cur: Cursor) -> Cursor {
