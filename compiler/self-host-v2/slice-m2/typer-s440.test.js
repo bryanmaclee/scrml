@@ -162,8 +162,24 @@ describe("#5 / #7 — handle names (E-HANDLE-REDECLARE)", () => {
     expect(inApp("", DD("a") + DD("b", "2"))).toEqual([]);
     expect(inApp(LINES, row(DD("a")) + row(DD("a", "2")))).toEqual([]);
   });
-  test("un-ruled, kept bootstrap-local — a program handle named like a visible DECLARATION (its shared instance, §66.7.1)", () => {
-    expect(inApp("", DD("dropdown"))).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  test("r4 (d) — a handle named like a visible DECLARATION → E-HANDLE-REDECLARE; a cell → E-SCOPE-010 (ruled S442)", () => {
+    expect(inApp("", DD("dropdown"))).toEqual(["E-HANDLE-REDECLARE"]);
+    expect(inApp("    <let dropdown:int=0/>")).toEqual(["E-SCOPE-010"]);
+  });
+  test("r5 R5 — a handle named like a visible declaration in a ROW or a declaration's RENDERS → E-HANDLE-REDECLARE", () => {
+    expect(inApp("    <xs:int[]=([1])/>", "<each in=@xs as x>" + DD("dropdown") + "</each>")).toEqual(["E-HANDLE-REDECLARE"]);
+    const wrap = { path: "app.scrml", src: "${ import { dropdown, Openness } from \"./lib/dropdown.scrml\" }\n<wrap n:int=0/>\nrenders <div><dropdown as=dropdown label=\"1\" options=([\"a\"])/></div>\n<program>\n    <main><wrap/></main>\n</program>\n" };
+    expect(codes([LIB(), wrap])).toEqual(["E-HANDLE-REDECLARE"]);
+  });
+  test("r5 R5 twins — a row binding, a local and a parameter named like the declaration stay silent; a row handle with another name too", () => {
+    expect(inApp("    <xs:int[]=([1])/>", "<each in=@xs as dropdown><p>${dropdown}</p></each>")).toEqual([]);
+    expect(inApp("    function f(dropdown: int) { let k = dropdown }\n    function g() { let dropdown = 1 }")).toEqual([]);
+    expect(inApp("    <xs:int[]=([1])/>", "<each in=@xs as x>" + DD("pick") + "</each>")).toEqual([]);
+  });
+  test("r4 (d) twins — a name no visible declaration holds; a declaration visible only in ANOTHER file", () => {
+    expect(inApp("    <let dropdownOpen:bool=false/>", DD("picker"))).toEqual([]);
+    const other = { path: "lib/other.scrml", src: "<card title:string=\"\"/>\nrenders <p>x</p>\n" };
+    expect(codes([other, { path: "app.scrml", src: "<program>\n    <let card:int=0/>\n<main><p>x</p></main>\n</program>\n" }])).toEqual([]);
   });
 });
 
@@ -228,6 +244,9 @@ describe("duplicate struct-literal keys (E-STRUCT-DUPLICATE-KEY)", () => {
 // `T | not` value reaches a condition through a field, a parameter or an annotated local).
 const O = "    type O:struct = { let v: string | not, let n: int | not, let f: bool | not }\n    <let o:O=({ v: \"\", n: 0, f: false })/>\n    <let m:int=0/>\n";
 const CELLS = "    <let n:int=0/>\n    <let r:number=0.5/>\n    <let s:string=\"\"/>\n    <let b:bool=false/>\n    <xs:int[]=([1])/>\n";
+// a one-declaration library and an app that uses it
+const boxLibS = (decl) => ({ path: "lib/box.scrml", src: decl });
+const boxAppS = (use) => ({ path: "app.scrml", src: `\${ import { box } from "./lib/box.scrml" }\n<program>\n    <main>\n${use}\n    </main>\n</program>\n` });
 
 // ---------------------------------------------------------------------------
 // #7 — truthiness (c) + Q1 / Q2: a condition needs a `bool` or a `T | not` presence test.
@@ -266,10 +285,64 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
     expect(t.typing.presence.length).toBe(1);
     expect(mods.analyze.presenceTest(t, t.typing.presence[0])).toBe(true);
   });
-  test("Q1 — a CONDITIONALLY-mounted handle is `T | not` (§66.7.5): `if=@color` is not E-COND-NOT-BOOLEAN (only S437's read rule fires — see progress.md)", () => {
+  test("Q1 — a CONDITIONALLY-mounted handle is `T | not` (§66.7.5): `if=@color` is a presence test (r4 (b): legal); an always-mounted one is not", () => {
     expect(inApp("    <let show:bool=false/>", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div><p if=@color>x</p>"))
-      .toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+      .toEqual([]);
     expect(inApp("", "<dropdown as=country label=\"1\" options=([\"a\"])/><p if=@country>x</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
+  test("r4 (f) — `${@o.n}` in markup WITHOUT narrowing stays silent (ruled S442: `${not}` renders nothing; Q3's \"template\" is string templates only)", () => {
+    expect(inApp(O, "<p>${@o.n}</p><p>${@o.v}</p><p>${@o.f}</p>")).toEqual([]);
+    // twin: the same value under an operator in markup is still Q3
+    expect(inApp(O, "<p>${@o.n + 1}</p>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("r4 (a) — a bare `bool | not` condition is E-COND-NOT-BOOLEAN naming both fixes (ruled S442)", () => {
+    const d = run([LIB(), app(O, "<p if=@o.f>x</p>")]).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(d[0].message).toContain("x != not");
+    expect(d[0].message).toContain("x == true");
+    expect(inApp(O + "    function f() { if (@o.f) { @m = 1 } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
+  test("r4 (a) twins — `@o.f == true`, `@o.f != not`, and a NARROWED `bool | not` (a value test) are legal", () => {
+    expect(inApp(O, "<p if=(@o.f == true)>x</p><p if=(@o.f != not)>y</p>")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.f != not) { if (@o.f) { @m = 1 } } }")).toEqual([]);
+  });
+  test("r4 (b) — a presence test of a CONDITIONAL handle is legal and narrows reads inside (ruled S442)", () => {
+    const S = "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n";
+    const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
+    expect(inApp(S, DDC + "<p if=@color>${@color.value}</p>")).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { @seen = @color.value } }\n    function g() { @seen = @color ? @color.value : \"\" }", DDC)).toEqual([]);
+  });
+  test("the typer's table records a conditional handle read as `T | not` (§66.7.5), an always-mounted one as `T`", () => {
+    const r = run([LIB(), app("    <let show:bool=false/>", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div><dropdown as=country label=\"2\" options=([\"a\"])/><p if=@color>x</p><p>${@country.value}</p>")]);
+    const t = r.typed.tables;
+    const atNodes = [];
+    (function walk(n) {
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (n === null || typeof n !== "object") return;
+      if (n.k && n.k.variant === "At") atNodes.push({ nid: n.nid, name: n.k.data.name });
+      Object.values(n).forEach(walk);
+    })(r.asts);
+    const color = atNodes.find((a) => a.name === "color");
+    const country = atNodes.find((a) => a.name === "country");
+    const cv = mods.analyze.exprType(t, color.nid);
+    expect(cv.variant).toBe("Known");
+    expect(cv.data.t.variant).toBe("Maybe");
+    expect(mods.analyze.exprType(t, country.nid).data.t.variant).toBe("Named");
+  });
+  test("r5 R3 — a REPEATED presence test inside a region that already narrowed the handle stays legal", () => {
+    const S = "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n";
+    const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
+    expect(inApp(S, DDC + "<div if=@color><p if=@color>${@color.value}</p></div>")).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { if (@color) { @seen = @color.value } } }", DDC)).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { @seen = @color ? @color.value : \"\" } }", DDC)).toEqual([]);
+    // twin: an ALWAYS-mounted handle is still not a condition
+    expect(inApp(S, "<dropdown as=country label=\"1\" options=([\"a\"])/><div if=@show><p if=@country>x</p></div>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
+  test("r4 (b) twins — the S437 rule still binds OUTSIDE the test: a sibling read, an else branch", () => {
+    const S = "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n";
+    const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
+    expect(inApp(S, DDC + "<p if=@color>x</p><p>${@color.value}</p>")).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
+    expect(inApp(S + "    function f() { if (@color) { @seen = \"\" } else { @seen = @color.value } }", DDC)).toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
   });
   test("Q1 — a `bool` condition is NOT recorded as a presence test", () => {
     const r = run([LIB(), app(CELLS, "<p if=@b>x</p>")]);
@@ -321,6 +394,38 @@ describe("#7 Q1 at runtime — a presence test lowers to an absence check, never
     expect(document.querySelector("p.t").textContent).toBe("no");
     click(document.querySelector("button.probe"));
     expect(document.querySelector("p.out").textContent).toBe("absent");
+  });
+});
+
+// r4 (b) at RUNTIME: `if=@color` over a conditionally-mounted handle renders only while it is mounted.
+const HANDLE_PRESENCE = `\${ import { dropdown, Openness } from "./lib/dropdown.scrml" }
+<program>
+    <let show:bool=false/>
+    function toggle() { @show = !@show }
+    <main>
+        <div if=@show><dropdown as=color label="C" options=(["a"])/></div>
+        <p class="c" if=@color>V=\${@color.value}</p>
+        <p class="d">\${@color ? "D" : "-"}</p>
+        <button class="t" onclick=toggle()>t</button>
+    </main>
+</program>
+`;
+
+describe("r4 (b) at runtime — a handle presence test is an absence check", () => {
+  test("`if=@color` / `if=(@color != not)` render only while the instance is mounted", async () => {
+    const files = [LIB(), { path: "app.scrml", src: HANDLE_PRESENCE }];
+    const r = run(files);
+    expect(r.diags.map((d) => d.code)).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
+    await loadProgram(r.core, "s442-handle-presence");
+    expect(document.querySelector("p.c")).toBeNull();
+    expect(document.querySelector("p.d").textContent).toBe("-");
+    click(document.querySelector("button.t"));
+    expect(document.querySelector("p.c").textContent).toBe("V=");
+    expect(document.querySelector("p.d").textContent).toBe("D");
+    click(document.querySelector("button.t"));
+    expect(document.querySelector("p.c")).toBeNull();
+    expect(document.querySelector("p.d").textContent).toBe("-");
   });
 });
 
@@ -443,6 +548,37 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O + CLEAR, "<button if=(@o.n != not) onclick={ clear(); @m = @o.n + 1 }>x</button>")).toEqual(["E-OPERAND-NOT-NARROWED"]);
     expect(inApp(O + CLEAR + "    function outer() { clear() }\n    function f() { if (@o.n != not) { outer()\n @m = @o.n + 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
   });
+  test("r3 N1 — the right operand of `&&` / `||` is not narrowed across a call in the LEFT operand that writes the place", () => {
+    const CB = "    <let bb:bool=false/>\n    function clearB() -> bool { @o = { v: not, n: not, f: not }\n return true }\n";
+    expect(inApp(O + CB + "    function f() { if (@o.n != not && clearB() && @o.n + 1 > 0) { @m = 1 } }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CB + "    function f() { @bb = @o.n != not && clearB() && @o.n + 1 > 0 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + CB + "    function f() { @bb = @o.n == not || !clearB() || @o.n + 1 > 0 }")).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("r3 N1 twin — a left-operand call that writes OTHER places keeps the narrowing", () => {
+    const KB = "    <let bb:bool=false/>\n    function keepB() -> bool { @m = 3\n return true }\n";
+    expect(inApp(O + KB + "    function f() { @bb = @o.n != not && keepB() && @o.n + 1 > 0 }")).toEqual([]);
+    expect(inApp(O + KB + "    function f() { @bb = @o.n == not || !keepB() || @o.n + 1 > 0 }")).toEqual([]);
+  });
+  const XS = "    <xs:O[replace]=([{ v: \"\", n: 0, f: false }])/>\n    function clearXs() { @xs = [{ v: not, n: not, f: not }] }\n    function other() { @m = 2 }\n";
+  const row = (body) => `<each in=@xs as x><p if=(x.n != not)><button onclick={ ${body}\n @m = x.n + 1 }>b</button></p></each>`;
+  test("r3 N3 — a write of an `<each>` source (direct, or by a callee) drops the row binding's narrowing", () => {
+    expect(inApp(O + XS, row("clearXs()"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + XS, row("@xs = [{ v: not, n: not, f: not }]"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("r3 N3 twin — a write elsewhere keeps the row narrowing; the narrowed row read itself is silent", () => {
+    expect(inApp(O + XS, row("other()"))).toEqual([]);
+    expect(inApp(O + XS, row("@o.n = not"))).toEqual([]);
+    expect(inApp(O + XS, "<each in=@xs as x><p if=(x.n != not)>${x.n + 1}</p></each>")).toEqual([]);
+  });
+  test("r5 R1 — N3 at depth: writing the OUTER source of a nested `<each>` drops the inner row's narrowing", () => {
+    const G = "    type G:struct = { let name: string, let kids: O[] }\n    <gs:G[replace]=([{ name: \"a\", kids: [{ v: \"\", n: 0, f: false }] }])/>\n    function clearGs() { @gs = [{ name: \"b\", kids: [{ v: not, n: not, f: not }] }] }\n    function other() { @m = 2 }\n";
+    const nested = (body) => `<each in=@gs as g><each in=g.kids as y><p if=(y.n != not)><button onclick={ ${body}\n @m = y.n + 1 }>b</button></p></each></each>`;
+    expect(inApp(O + G, nested("clearGs()"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + G, nested("@gs = []"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    // twins: a write elsewhere; the narrowed inner read with no write
+    expect(inApp(O + G, nested("other()"))).toEqual([]);
+    expect(inApp(O + G, "<each in=@gs as g><each in=g.kids as y><p if=(y.n != not)>${y.n + 1}</p></each></each>")).toEqual([]);
+  });
   test("r2 F1a twin — a call whose callee writes OTHER places keeps the narrowing", () => {
     expect(inApp(O + "    function h() { @m = 2\n @o.v = \"x\" }\n    function f() { if (@o.n != not) { h()\n @m = @o.n + 1 } }")).toEqual([]);
   });
@@ -523,6 +659,44 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(CELLS + "    function f() { @r = 0xFE / 2 }")).toEqual(["E-INT-DIVISION"]);
     // twin: a real exponent stays a non-integer literal (`1e3` into `int` is bryan's open question — unchanged)
     expect(inApp("    <let q:int=1e3/>")).toEqual(["E-TYPE-031"]);
+  });
+  test("r4 (c) — `int` enforced at RETURNS (ruled S442)", () => {
+    expect(inApp(CELLS + "    function h() -> int { return 2.5 }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function h() -> int { return @r }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function h() -> int | not { return @r }")).toEqual(["E-TYPE-031"]);
+    // twins: an int; `not` into `int | not`; a non-int return type is not widened
+    expect(inApp(CELLS + "    function h() -> int { return @n + 1 }\n    function k() -> int | not { return not }\n    function s() -> string { return 5 }")).toEqual([]);
+  });
+  test("r4 (c) — `int` enforced at ARGUMENTS into an `int` parameter", () => {
+    expect(inApp(CELLS + "    function g(k: int) { }\n    function f() { g(@r) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    function g(k: int) { }\n    function f() { g(1.5) }")).toEqual(["E-TYPE-031"]);
+    // twins: an int argument; a number into a `number` parameter; a string parameter is not widened
+    expect(inApp(CELLS + "    function g(k: int, x: number, s: string) { }\n    function f() { g(@n, @r, 5) }")).toEqual([]);
+  });
+  test("r4 (c) — `int` enforced at ALL initializers (non-literal local / cell / use-site, struct-literal fields, `int[]` elements)", () => {
+    expect(inApp(CELLS + "    function f() { let k: int = @r }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(CELLS + "    <let q:int=(@r)/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    type P:struct = { x: int }\n    <p:P=({ x: 2.5 })/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    <ks:int[]=([1.5])/>")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    function f() { let ks: int[] = [1, 2.5] }")).toEqual(["E-TYPE-031"]);
+    expect(codes([boxLibS("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxAppS("<box n=(0.5 * 2)/>")])).toEqual(["E-TYPE-031"]);
+  });
+  test("r5 R6 — an UN-NARROWED `int | not` into an `int` position is E-TYPE-031 (return, argument, local, cell write)", () => {
+    const d = run([LIB(), app(O + "    function f() { @m = @o.n }", "<p>x</p>")]).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-TYPE-031"]);
+    expect(d[0].message).toContain("narrow it first");
+    expect(inApp(O + "    function h() -> int { return @o.n }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    function g(k: int) { }\n    function f() { g(@o.n) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    function f() { let k: int = @o.n }")).toEqual(["E-TYPE-031"]);
+  });
+  test("r5 R6 twins — narrowed, into `int | not`, or a non-int target (the S439 `T | not` into `T` reading stands there)", () => {
+    expect(inApp(O + "    function f() { if (@o.n != not) { @m = @o.n\n let k: int = @o.n } }")).toEqual([]);
+    expect(inApp(O + "    function f() { let k: int | not = @o.n }")).toEqual([]);
+    expect(inApp(O + "    <let t:string=\"\"/>\n    function f() { @t = @o.v }")).toEqual([]);
+  });
+  test("r4 (c) twins — int-typed initializers stay silent; `1e3` / `2.0` into int stay errors", () => {
+    expect(inApp(CELLS + "    <let q:int=(@n * 2)/>\n    <ks:int[]=([1, 2])/>\n    function f() { let k: int = @n }")).toEqual([]);
+    expect(inApp("    <let q:int=2.0/>")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — a non-integer element pushed onto an `int[]`", () => {
     expect(inApp("    <ks:int[free, append]=([])/>\n    function f() { @ks.push(1.5) }")).toEqual(["E-TYPE-031"]);

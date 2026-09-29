@@ -1,0 +1,12 @@
+{
+  "id": "error-handler-failable-reference-component-prop-neg",
+  "description": "A failable function passed to a component as a declared `on*` PROP is a callback value, not a DOM handler reference. `<Btn onSave=risky/>` where `Btn` calls `onSave()` inside a guarded handler (`onclick={ onSave() !{ | .Empty :> @r = 1 } }`) — the component handles the error. `<Show onSave=risky/>` where `Show` never uses the prop as a handler. Neither fires E-ERROR-002.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S441 \"yes on references\" (the rule covers event-handler references; a component prop is not one — S441 review B1)",
+  "rationale": "§19.4.3 (S441) — the reference rule applies to an event-handler attribute whose value is a `!` function. A declared component prop named `on…` is handed to the component, which decides how the function is called; where the component wires it as a raw handler reference, the rule fires at the call site (handler-failable-reference-pos covers the direct forms).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ERROR-002"]
+  }
+}

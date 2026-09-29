@@ -1,0 +1,6 @@
+{
+  "spec": "§66.17 O17(c)",
+  "open": "O17(c)",
+  "rationale": "OPEN: how the `@media (prefers-color-scheme)` auto-bind variant is expressed under T3. Fail closed.",
+  "steps": []
+}

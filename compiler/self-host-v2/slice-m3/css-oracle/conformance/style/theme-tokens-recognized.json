@@ -1,0 +1,25 @@
+{
+  "spec": "§65.3.2, §25.7",
+  "rationale": "§65.3.2: each `<theme>` token lowers to a `:root` custom property.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "html",
+          "prop": "--brand",
+          "value": "#2563eb"
+        },
+        {
+          "sel": "html",
+          "prop": "--danger",
+          "value": "#dc2626"
+        },
+        {
+          "sel": "html",
+          "prop": "--line",
+          "value": "#e2e8f0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+<program>
+  <theme>
+      brand = #2563eb;
+  </theme>
+  <theme>
+      accent = #dc2626;
+      ring   = @brand;
+  </theme>
+  const Card = <div props={}>
+      #{
+          .a { color: @brand; }
+          .b { color: @accent; }
+          .c { color: @ring; }
+      }
+      <span class="a">a</span>
+      <span class="b">b</span>
+      <span class="c">c</span>
+  </>
+  <Card/>
+</program>

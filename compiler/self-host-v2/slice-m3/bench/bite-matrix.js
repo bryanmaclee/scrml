@@ -17,17 +17,23 @@
 //                 gate must not pass silently);
 //             2 = a grade run itself failed to run.
 //
-// FRONT-END SECTION (s442, bite-front.js): the §66 constructs the front end (lex / parse / analyze /
+// TWO PHASES (s440-bootstrap-css-theme-t3): `cg` — the CG substitute, killing RUNTIME passes (above);
+// `css` — the CSS-seam substitute (css-substitute.js), killing CSS passes: graded cases whose css oracle
+// (computed style in Chromium, SPEC-derived; css-oracle.js) held. A css construct is certified only if
+// one of its corruptions (the stylesheet emitter css.scrml, or the stylesheet shim css-ingest.scrml)
+// makes a css pass fail its oracle while the case stays graded (bite-lib.js `judgeCssDeaths`).
+//
+// FRONT-END PHASE (s442, bite-front.js): the §66 constructs the front end (lex / parse / analyze /
 // lower) gained for the §66.19 worked programs, certified against the slice-M4 BEHAVIOUR tests (each
 // program compiled from its verbatim SPEC source and run). A kill there is a behaviour test that fails
-// while the mutated program still compiles clean. `--front` runs this section alone.
+// while the mutated program still compiles clean.
 //
-// usage: bun compiler/self-host-v2/slice-m3/bench/bite-matrix.js [--front] [--report <path.md>]
+// usage: bun compiler/self-host-v2/slice-m3/bench/bite-matrix.js [--report <path.md>] [--cg-only | --css-only | --front]
 
 import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { judgeDeaths } from "./bite-lib.js";
+import { judgeCssDeaths, judgeDeaths } from "./bite-lib.js";
 import { judgeFrontRun, isFrontKill } from "./bite-front.js";
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..");
@@ -205,8 +211,102 @@ function frontSection(L) {
   L.push(`## FRONT UNCERTIFIED (${uncertified.length})`, "", uncertified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
 }
 
-function grade(sub, only, outJson) {
-  const args = ["scripts/hybrid.ts", "--swap", `CG=${sub}`, "--footprint", "--json", outJson];
+// ---- s440: the STYLESHEET pass (CSS sub-seam). A css pass is a graded case whose css ORACLE (computed
+// style in Chromium, SPEC-derived) held; a corruption certifies its construct only if a css pass dies. ----
+const CSSF = `${SH}/css.scrml`;
+const CSSI = `${SH}/css-ingest.scrml`;
+const CSS_MUTATIONS = [
+  { c: "Css.Scope", id: "the `@scope` wrapper dropped (component rules land unscoped)", file: CSSF,
+    from: '.Scope(component: c, body: b) :> blockLines("@scope ([data-scrml=\\"" + c + "\\"]) to ([data-scrml])", b, indent)',
+    to: ".Scope(component: c, body: b) :> bodyLines(b, indent)" },
+  { c: "Css.Scope", id: "the donut limit `to ([data-scrml])` dropped", file: CSSF,
+    from: '+ "\\"]) to ([data-scrml])", b, indent)', to: '+ "\\"])", b, indent)' },
+  { c: "Scope.Flat", id: "`:where()` dropped (natural specificity)", file: CSSF,
+    from: '.Flat(sel: c) :> ":where(" + complexText(c) + ")"', to: ".Flat(sel: c) :> complexText(c)" },
+  { c: "Scope.Flat", id: "`:is()` instead of `:where()` (§65.2.5 never-:is)", file: CSSF,
+    from: '.Flat(sel: c) :> ":where("', to: '.Flat(sel: c) :> ":is("' },
+  { c: "Scope.Conditional", id: "conditional arms flattened too", file: CSSF,
+    from: "if (armIsUnconditional(c)) return OutSel.Flat(c)", to: "return OutSel.Flat(c)" },
+  { c: "Scope.Floor", id: "floor arms emitted AFTER the specific rules", file: CSSF,
+    from: "return floor.concat(rest)", to: "return rest.concat(floor)" },
+  { c: "Css.Reset", id: "the reset layer emptied", file: CSSF,
+    from: 'if (u.reset) out = out.concat([CssStmt.Layer("reset", plainRules(resetRules()))])', to: 'if (u.reset) out = out.concat([CssStmt.Layer("reset", [])])' },
+  { c: "Css.LayerOrder", id: "the layer order reversed (`global, reset`)", file: CSSF,
+    from: 'CssStmt.LayerOrder(["reset", "global"])', to: 'CssStmt.LayerOrder(["global", "reset"])' },
+  { c: "Css.Global", id: "program-global rules emitted unlayered", file: CSSF,
+    from: 'out = out.concat([CssStmt.Layer("global", plainRules(u.global))])', to: "out = out.concat(plainRules(u.global))" },
+  { c: "Css.Import", id: "`@import` emitted after the reset block (not hoisted)", file: CSSF,
+    from: '        out = out.concat(importStmts(u))\n        if (u.reset) out = out.concat([CssStmt.Layer("reset", plainRules(resetRules()))])\n',
+    to: '        if (u.reset) out = out.concat([CssStmt.Layer("reset", plainRules(resetRules()))])\n        out = out.concat(importStmts(u))\n' },
+  { c: "Css.Charset", id: "`@charset` dropped", file: CSSF,
+    from: "for (const c of u.charsets) { out = out.concat([CssStmt.Charset(c)]) }", to: "" },
+  { c: "Css.Charset", id: "`@charset` emitted after the `@layer` statement (not byte 0)", file: CSSF,
+    from: '        for (const c of u.charsets) { out = out.concat([CssStmt.Charset(c)]) }\n        const layered: boolean = u.reset || u.global.length > 0\n        if (layered) out = out.concat([CssStmt.LayerOrder(["reset", "global"])])\n',
+    to: '        const layered: boolean = u.reset || u.global.length > 0\n        if (layered) out = out.concat([CssStmt.LayerOrder(["reset", "global"])])\n        for (const c of u.charsets) { out = out.concat([CssStmt.Charset(c)]) }\n' },
+  // ---- review F4: each §65.3.4 reset bullet, on its own ----
+  { c: "Reset.BoxSizing", id: "reset bullet 1: box-sizing rule emptied", file: CSSF,
+    from: 'styleRule(boxArms, [decl("box-sizing", "border-box")])', to: "styleRule(boxArms, [])" },
+  { c: "Reset.FlowMargin", id: "reset bullet 2: the flow-set margin rule matches nothing", file: CSSF,
+    from: 'styleRule(tagArms(["body", "h1", "h2",', to: 'styleRule(tagArms(["x-none", "x-h1", "x-h2",' },
+  { c: "Reset.Body", id: "reset bullet 5: body `min-height` dropped", file: CSSF,
+    from: '[decl("min-height", "100vh"), decl("line-height", "1.5")]', to: '[decl("line-height", "1.5")]' },
+  { c: "Reset.Body", id: "reset bullet 5: body `line-height` dropped", file: CSSF,
+    from: '[decl("min-height", "100vh"), decl("line-height", "1.5")]', to: '[decl("min-height", "100vh")]' },
+  { c: "Reset.Media", id: "reset bullet 3: the replaced-media rule matches nothing", file: CSSF,
+    from: 'styleRule(tagArms(["img", "picture", "video", "canvas", "svg"]),', to: 'styleRule(tagArms(["x-none"]),' },
+  { c: "Reset.FormFont", id: "reset bullet 4: form controls no longer inherit font", file: CSSF,
+    from: '[decl("font", "inherit")]', to: "[]" },
+  // ---- review F3: declaration order within a rule ----
+  { c: "Decl.Order", id: "a rule's declarations printed in reverse order", file: CSSF,
+    from: 'for (const d of ds) { body = body + " " + declText(d) }', to: 'for (const d of ds) { body = " " + declText(d) + body }' },
+  { c: "Token.Constant", id: "a constant token's `:root` definition dropped", file: CSSF,
+    from: ".Constant(value: v) :> [OutDecl.Custom(t.sym, v)]", to: ".Constant(value: v) :> []" },
+  { c: "Token.OnVariant", id: "variant blocks key the wrong attribute", file: CSSF,
+    from: '":root[data-scrml-theme-" + c', to: '":root[data-scrml-" + c' },
+  { c: "Token.OnVariant", id: "variant arms dropped", file: CSSF,
+    from: ".OnVariant(cell: c, arms: arms, otherwise: w) :> armGroups(gs, c, t.sym, arms)", to: ".OnVariant(cell: c, arms: arms, otherwise: w) :> gs" },
+  { c: "Token.OnVariant.Otherwise", id: "the wildcard / base value dropped", file: CSSF,
+    from: "if (w is some) return [OutDecl.Custom(s, w)]", to: "if (false) return [OutDecl.Custom(s, w)]" },
+  // Review F1: kept to SHOW it is unobservable — a static value is overridden by the script's inline
+  // `:root` write, so it can only differ before the first write (unruled). Token.ScriptWrites is not a
+  // stylesheet construct (css.scrml footprint); this row is expected to bite nothing.
+  { c: "Token.ScriptWrites", id: "an unrecognized token pinned by a static `:root` value (expected: no bite, F1)", file: CSSF,
+    from: ".ScriptWrites(cell: c) :> []", to: '.ScriptWrites(cell: c) :> [OutDecl.Custom(t.sym, [CssPart.CssText("red")])]' },
+  { c: "Value.TokenVar", id: "`@token` prints a wrong custom-property name", file: CSSF,
+    from: '.TokenVar(token: s) :> "var(--"', to: '.TokenVar(token: s) :> "var(--x-"' },
+  { c: "Value.CellVar", id: "`@cell` prints the token form", file: CSSF,
+    from: '.CellVar(cell: s) :> "var(--scrml-"', to: '.CellVar(cell: s) :> "var(--"' },
+  { c: "Value.Text", id: "literal value text emptied", file: CSSF,
+    from: ".CssText(text: t) :> t", to: '.CssText(text: t) :> ""' },
+  { c: "Sel.Universal", id: "`*` misprinted", file: CSSF, from: '.Universal :> "*"', to: '.Universal :> "*x"' },
+  { c: "Sel.Tag", id: "a type selector misprinted", file: CSSF, from: ".TagSel(name: n) :> n\n", to: '.TagSel(name: n) :> n + "x"\n' },
+  { c: "Sel.Class", id: "a class selector misprinted", file: CSSF, from: '.ClassSel(name: n) :> "." + n', to: '.ClassSel(name: n) :> "." + n + "x"' },
+  { c: "Sel.Id", id: "an id selector printed as a class", file: CSSF, from: '.IdSel(name: n) :> "#" + n', to: '.IdSel(name: n) :> "." + n' },
+  { c: "Sel.Attr", id: "an attribute test misprinted", file: CSSF, from: '.AttrSel(test: t) :> "[" + t + "]"', to: '.AttrSel(test: t) :> "[data-x-" + t + "]"' },
+  { c: "Sel.PseudoClass", id: "a pseudo-class misprinted", file: CSSF, from: ".PseudoClass(name: n, arg: a) :> pseudoText(n, a)", to: '.PseudoClass(name: n, arg: a) :> ":x-" + n' },
+  { c: "Sel.PseudoElement", id: "a pseudo-element misprinted", file: CSSF, from: '.PseudoElement(name: n) :> "::" + n', to: '.PseudoElement(name: n) :> "::x-" + n' },
+  { c: "Comb.Descendant", id: "descendant prints as next-sibling", file: CSSF, from: '.Descendant :> " "', to: '.Descendant :> " + "' },
+  { c: "Comb.Child", id: "child prints as descendant", file: CSSF, from: '.DirectChild :> " > "', to: '.DirectChild :> " "' },
+  { c: "Comb.NextSibling", id: "next-sibling prints as later-sibling", file: CSSF, from: '.NextSibling :> " + "', to: '.NextSibling :> " ~ "' },
+  { c: "Comb.LaterSibling", id: "later-sibling prints as next-sibling", file: CSSF, from: '.LaterSibling :> " ~ "', to: '.LaterSibling :> " + "' },
+  // ---- the stylesheet shim (its mapping of each legacy form) ----
+  { c: "Css.Scope", id: "shim: component rules attributed to the program", file: CSSI,
+    from: "return { charsets: charsets, imports: imports, global: sh.global, scopes: addScopeRules(sh.scopes, b.at.scope, rs), why: why }",
+    to: "return { charsets: charsets, imports: imports, global: sh.global.concat(rs), scopes: sh.scopes, why: why }" },
+  { c: "Css.Reset", id: 'shim: `reset="none"` ignored', file: CSSI,
+    from: 'if (s == "none") return { on: false, why: [] }', to: 'if (s == "none") return { on: true, why: [] }' },
+  { c: "Token.OnVariant", id: "shim: legacy `.Variant` re-binds dropped", file: CSSI,
+    from: "if (r.arms.length == 0) return { init: TokenInit.Constant(base.parts), why: base.why }", to: "if (true) return { init: TokenInit.Constant(base.parts), why: base.why }" },
+  { c: "Value.TokenVar", id: "shim: `@token` resolved as a cell", file: CSSI,
+    from: "parts = parts.concat([CssPart.TokenVar(tok)])", to: "parts = parts.concat([CssPart.CellVar(tok)])" },
+  { c: "Css.Global", id: "shim: element-level `#{}` dropped (R4 undone)", file: CSSI,
+    from: 'const global: boolean = b.at.level == "program" || b.at.level == "element"', to: 'const global: boolean = b.at.level == "program"' },
+  { c: "Css.Import", id: "shim: a program-level `@import` dropped", file: CSSI,
+    from: "imports = imports.concat([h.imp])", to: "imports = imports" },
+];
+
+function grade(stage, sub, only, outJson) {
+  const args = ["scripts/hybrid.ts", "--swap", `${stage}=${sub}`, "--footprint", "--json", outJson];
   if (only) args.push("--only", only.join(","));
   rmSync(outJson, { force: true }); // never read a previous run's report
   const r = spawnSync("bun", args, { cwd: ROOT, encoding: "utf8", timeout: 900000, maxBuffer: 64 * 1024 * 1024 });
@@ -220,90 +320,114 @@ function grade(sub, only, outJson) {
   }
 }
 
-const reportPath = (() => { const i = process.argv.indexOf("--report"); return i === -1 ? null : process.argv[i + 1]; })();
-const FRONT_ONLY = process.argv.includes("--front");
+const argv = process.argv.slice(2);
+const reportPath = (() => { const i = argv.indexOf("--report"); return i === -1 ? null : argv[i + 1]; })();
+const FRONT_ONLY = argv.includes("--front");
+const phaseSel = FRONT_ONLY ? [] : argv.includes("--css-only") ? ["css"] : argv.includes("--cg-only") ? ["cg"] : ["cg", "css"];
+const withFront = FRONT_ONLY || !(argv.includes("--css-only") || argv.includes("--cg-only"));
+
+const PHASES = {
+  cg: {
+    title: "CG — the bootstrap printer / runtime / ingest shim (runtime passes)",
+    stage: "CG", subFile: "substitute.js", mutations: MUTATIONS, unit: "runtime passes",
+    note: "codes-only passes excluded — front-end codes",
+    passesOf: (g) => g.counts.runtimePass,
+    exercisedOf: (g, passes) => [...new Set(g.cases.filter((c) => passes.includes(c.relDir)).flatMap((c) => c.constructs))].sort(),
+    judge: judgeDeaths,
+    killWord: "still graded, run FAILED",
+  },
+  css: {
+    title: "CSS — the bootstrap stylesheet pass (css passes: computed style in Chromium against SPEC-derived oracles)",
+    stage: "CSS", subFile: "css-substitute.js", mutations: CSS_MUTATIONS, unit: "css passes",
+    note: "conformance css halves + css-only sources + Core-level T3 oracles",
+    passesOf: (g) => g.counts.cssPass,
+    exercisedOf: (g) => g.report.css?.exercised ?? [],
+    judge: judgeCssDeaths,
+    killWord: "still graded, css oracle FAILED",
+  },
+};
 
 const MIRROR = join(ROOT, ".tmp", `bite-matrix-${process.pid}`);
 rmSync(MIRROR, { recursive: true, force: true });
 mkdirSync(join(MIRROR, "compiler"), { recursive: true });
 cpSync(join(ROOT, SH), join(MIRROR, SH), { recursive: true });
-for (const rel of ["compiler/src", "compiler/native-parser", "compiler/SPEC.md", "bunfig.toml", "package.json"]) {
+// `examples` — css-oracle sources compile real examples in place (`"from"`), resolved from the tree root.
+for (const rel of ["compiler/src", "compiler/native-parser", "compiler/SPEC.md", "bunfig.toml", "package.json", "examples"]) {
   symlinkSync(join(ROOT, rel), join(MIRROR, rel));
 }
-const SUB = join(MIRROR, SH, "slice-m3", "substitute.js");
 const OUT = join(MIRROR, "grade.json");
 
 let bad = false;
-let mirrorOk = true; // its own flag: a hollow site must not read as "the mirror did not reproduce"
-const rows = [];
-const kills = new Map(); // construct → Set(killed runtime passes)
 const t0 = performance.now();
+const sections = [];
+let totalUncertified = 0;
 try {
-  if (FRONT_ONLY) {
-    const L = [];
-    frontSection(L);
-    L.push("", `(${((performance.now() - t0) / 1000).toFixed(1)}s)`);
-    const text = L.join("\n") + "\n";
-    console.log(text);
-    if (reportPath) writeFileSync(reportPath, text);
-    process.exitCode = bad ? 1 : 0;
-  } else {
-  // The clean grade on the SOURCE, then the unmutated mirror must reproduce it exactly.
-  const clean = grade(join(ROOT, SH, "slice-m3", "substitute.js"), null, OUT);
-  if (!clean.ran) { console.error(`the clean grade did not run: ${clean.why}`); process.exit(2); }
-  const passes = clean.counts.runtimePass;
-  const exercised = [...new Set(clean.cases.filter((c) => passes.includes(c.relDir)).flatMap((c) => c.constructs))].sort();
-  const mirrorClean = grade(SUB, passes, OUT);
-  if (!mirrorClean.ran || mirrorClean.counts.runtimePass.join() !== passes.join()) {
-    console.error(`the unmutated mirror does not reproduce the clean grade (${mirrorClean.ran ? mirrorClean.counts.runtimePass.length : mirrorClean.why} vs ${passes.length} runtime passes)`);
-    mirrorOk = false;
-    bad = true;
-  }
-  for (const m of MUTATIONS) {
-    const path = join(MIRROR, m.file);
-    const orig = readFileSync(path, "utf8");
-    const n = orig.split(m.from).length - 1;
-    if (n !== 1) {
-      rows.push(`| ${m.c} | ${m.id} | site found ${n}× — NOT RUN (hollow) | — |`);
+  for (const name of phaseSel) {
+    const P = PHASES[name];
+    const SUB = join(MIRROR, SH, "slice-m3", P.subFile);
+    let mirrorOk = true; // its own flag: a hollow site must not read as "the mirror did not reproduce"
+    const rows = [];
+    const kills = new Map(); // construct → Set(killed passes)
+    // The clean grade on the SOURCE, then the unmutated mirror must reproduce it exactly.
+    const clean = grade(P.stage, join(ROOT, SH, "slice-m3", P.subFile), null, OUT);
+    if (!clean.ran) { console.error(`[${name}] the clean grade did not run: ${clean.why}`); process.exit(2); }
+    const passes = P.passesOf(clean);
+    const exercised = P.exercisedOf(clean, passes);
+    const mirrorClean = grade(P.stage, SUB, passes, OUT);
+    if (!mirrorClean.ran || P.passesOf(mirrorClean).join() !== passes.join()) {
+      console.error(`[${name}] the unmutated mirror does not reproduce the clean grade (${mirrorClean.ran ? P.passesOf(mirrorClean).length : mirrorClean.why} vs ${passes.length} ${P.unit})`);
+      mirrorOk = false;
       bad = true;
-      continue;
     }
-    try {
-      writeFileSync(path, orig.replace(m.from, m.to));
-      const r = grade(SUB, passes, OUT);
-      if (!r.ran) {
-        rows.push(`| ${m.c} | ${m.id} | GRADE DID NOT RUN — not a bite | ${r.why.replace(/\|/g, "\\|")} |`);
+    for (const m of P.mutations) {
+      const path = join(MIRROR, m.file);
+      const orig = readFileSync(path, "utf8");
+      const n = orig.split(m.from).length - 1;
+      if (n !== 1) {
+        rows.push(`| ${m.c} | ${m.id} | site found ${n}× — NOT RUN (hollow) | — |`);
         bad = true;
         continue;
       }
-      // A KILL is a case still GRADED whose conformance run FAILED; a reclassified / crashed /
-      // missing case is reported, but is NOT a bite (bite-lib.js).
-      const { killed, lost } = judgeDeaths(passes, r.report);
-      if (!kills.has(m.c)) kills.set(m.c, new Set());
-      for (const d of killed) kills.get(m.c).add(d);
-      const lostNote = lost.length ? ` · NOT a bite: ${lost.map((x) => "`" + x.relDir + "` (" + x.why + ")").join(", ")}` : "";
-      rows.push(`| ${m.c} | ${m.id} | ${killed.length} of ${passes.length} | ${killed.length ? killed.map((d) => "`" + d + "`").join(", ") : "**none — does not bite**"}${lostNote} |`);
-    } finally {
-      writeFileSync(path, orig);
+      try {
+        writeFileSync(path, orig.replace(m.from, m.to));
+        const r = grade(P.stage, SUB, passes, OUT);
+        if (!r.ran) {
+          rows.push(`| ${m.c} | ${m.id} | GRADE DID NOT RUN — not a bite | ${r.why.replace(/\|/g, "\\|")} |`);
+          bad = true;
+          continue;
+        }
+        // A KILL is a case still GRADED whose run FAILED; a reclassified / crashed / missing case is
+        // reported, but is NOT a bite (bite-lib.js).
+        const { killed, lost } = P.judge(passes, r.report);
+        if (!kills.has(m.c)) kills.set(m.c, new Set());
+        for (const d of killed) kills.get(m.c).add(d);
+        const lostNote = lost.length ? ` · NOT a bite: ${lost.map((x) => "`" + x.relDir + "` (" + x.why + ")").join(", ")}` : "";
+        rows.push(`| ${m.c} | ${m.id} | ${killed.length} of ${passes.length} | ${killed.length ? killed.map((d) => "`" + d + "`").join(", ") : "**none — does not bite**"}${lostNote} |`);
+      } finally {
+        writeFileSync(path, orig);
+      }
     }
+    const certified = exercised.filter((c) => (kills.get(c)?.size ?? 0) > 0);
+    const uncertified = exercised.filter((c) => !certified.includes(c)).map((c) =>
+      kills.has(c) ? `\`${c}\` — its corruption(s) kill no ${P.unit.replace(/s$/, "")}` : `\`${c}\` — no corruption defined (structural: no emission of its own to corrupt)`);
+    totalUncertified += uncertified.length;
+    const L = [];
+    L.push(`## ${P.title}`, "");
+    L.push(`Clean grade: **${passes.length} ${P.unit}** (${P.note}). Mirror reproduced it: ${mirrorOk ? "yes" : "NO"}.`, "");
+    L.push(`| construct | corruption | ${P.unit} killed (${P.killWord}) | which |`, "|---|---|---|---|", ...rows, "");
+    L.push(`### CERTIFIED (${certified.length}) — a corruption kills ≥1 of the ${P.unit}`, "", certified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
+    L.push(`### UNCERTIFIED (${uncertified.length}) — exercised by a pass, but no evidence it is implemented`, "");
+    for (const u of uncertified) L.push(`- ${u}`);
+    sections.push(L.join("\n"));
   }
-  const certified = exercised.filter((c) => (kills.get(c)?.size ?? 0) > 0);
-  const uncertified = exercised.filter((c) => !certified.includes(c)).map((c) =>
-    kills.has(c) ? `\`${c}\` — its corruption(s) kill no runtime pass` : `\`${c}\` — no corruption defined (structural: no emission of its own to corrupt)`);
-  const L = [];
-  L.push("# Bite matrix — footprint-grade construct certification", "");
-  L.push(`Clean grade: **${passes.length} runtime passes** (codes-only passes excluded — front-end codes). Mirror reproduced it: ${mirrorOk ? "yes" : "NO"}.`, "");
-  L.push("| construct | corruption | runtime passes killed (still graded, run FAILED) | which |", "|---|---|---|---|", ...rows, "");
-  L.push(`## CERTIFIED (${certified.length}) — a corruption kills ≥1 runtime pass`, "", certified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
-  L.push(`## UNCERTIFIED (${uncertified.length}) — exercised by a passing runtime case, but no evidence it is implemented`, "");
-  for (const u of uncertified) L.push(`- ${u}`);
-  L.push("");
-  frontSection(L);
-  L.push("", `(${((performance.now() - t0) / 1000).toFixed(1)}s)`);
-  const text = L.join("\n") + "\n";
+  if (withFront) {
+    const F = [];
+    frontSection(F);
+    sections.push(F.join("\n"));
+  }
+  const text = ["# Bite matrix — footprint-grade construct certification", "", ...sections, "", `(${((performance.now() - t0) / 1000).toFixed(1)}s)`].join("\n") + "\n";
   console.log(text);
   if (reportPath) writeFileSync(reportPath, text);
-  }
 } finally {
   rmSync(MIRROR, { recursive: true, force: true });
 }
