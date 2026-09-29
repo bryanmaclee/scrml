@@ -4,55 +4,63 @@
 - REPRODUCED by execution (gap-filing reproducer, S9g): seeded row, authenticated
   session + CSRF token, emitted route handler called → `200 "SECRET-HASH-123"`;
   build reported `I-PROTECT-STRIP-001 … strips passwordHash` (false).
-- db0b83e69 — fix: `compiler/src/codegen/protect-flow.ts` (provenance flow) wired
-  at the `I-PROTECT-STRIP-001` drain in `emit-server.ts`; rewriter infos carry a
-  SQL skeleton; tests + 5 corrected conformance expectations + trucking baseline
-  + 7 new conformance cases.
+- db0b83e69 — fix: `compiler/src/codegen/protect-flow.ts` (provenance flow);
+  tests + 5 corrected conformance expectations + trucking baseline + 7 cases.
 - 4c6d333e5 — SPEC §14.8.9 amendment, E-PROTECT-006 §34 row, truthful
-  I-PROTECT-STRIP-001 row; SPEC-INDEX regen.
-- round 2 — adversarial pass found 4 more shipping shapes (JSON.parse roundtrip,
-  `"".concat`, `.replace` embed, `Array.from` mapper) + 5 found while closing
-  them (Promise executor, throw/catch, reject/.catch, getter, toJSON). Closed.
+  I-PROTECT-STRIP-001 row.
+- ca5588aad — adversarial round 2 (9 more shapes).
+- bd1ac2342 — pushed; security review → LAND-WITH-NITS conditional on F1/F2.
+- FIX ROUND (8b74c93a3 + merges 11bcd5f68 / 031f6d5b8 of origin/main):
+  - F1 HIGH cross-file helper: the flow now runs ONCE per compile in api.js over
+    every emitted server module, `./X.server.js` imports resolved to the emitting
+    module; emit-server only registers per-file strip records + span lookup.
+    Unresolved (host / stdlib / npm) imports are opaque host functions.
+  - F2 HIGH inverted default: any callee the compile does not contain, given a
+    protected scalar OR row, returns protected — only the explicit deriver
+    allowlist is exempt. charCodeAt/codePointAt removed from DERIVED_METHODS.
+  - F3 MED: every argument of `new Response(body, init)` (headers) +
+    `Response.redirect` / `Response.json` are sinks.
+  - F4 LOW: covered by the inverted default + `Object.defineProperty` modelling.
+  - F6 LOW: call-site sensitive — each distinct PROTECTED argument signature of a
+    helper is its own instance (closures carry their environment). First cut
+    keyed on callbacks too → 4016 instances / 245 closures / 3 s on one module
+    (timed out CONF-SESSION-8B); keying on the protected signature only → 40
+    instances / ~20 ms. Budget exhaustion fails closed (E-PROTECT-006).
+  - SPEC §14.8.9 S441 amendment rewritten with the bounds NORMATIVE; §34 row updated.
+  - 3 new conformance cases: scalar-helper-cross-file-e006 (multi-file),
+    response-header-e006, scalar-encoding-e006.
 
 ## The rule (also in the protect-flow.ts header)
 
 A value whose provenance includes a `protect=` column, and which is NOT still
-carried inside a descriptor-bearing row, SHALL NOT reach a compiler-emitted
-client-egress sink. The compiler proves this over the EMITTED server module and
-rejects the build with `E-PROTECT-006` — never strips at runtime (a stripped
-scalar silently changes what the program returns), never passes.
+carried inside a descriptor-bearing row, SHALL NOT reach a client-egress sink.
+The compiler proves this over ALL emitted server modules of the compile and
+rejects the build with `E-PROTECT-006` — never strips at runtime, never passes.
 
-- Provenance propagates through identity-preserving steps: binding, member /
-  index / destructuring extraction, object/array literal re-housing, spread,
-  container writes (push/set/Object.assign), string concat + templates, `?:`
-  `&&` `||` `??`, await, calls to module-defined functions (interprocedural,
-  params + returns), array callbacks, join/string transforms/embedding methods,
-  serializing/decoding built-ins, getters/toJSON, Promise resolution, throw→catch.
-- DERIVED (not rejected, §14.8.9 bound): comparison, arithmetic, predicate
-  methods, `.length`, result of passing a SCALAR to a function the module does
-  not define (`verifyPassword(pw, u.passwordHash)`).
-- `reveal("col")` honoured exactly as at the sink (column-keyed).
-- Sinks: every `_scrml_protect_redact(arg)` (server-fn/endpoint response,
-  /__serverLoad, /__mountHydrate, broadcast, watches), the §37 SSE frame
-  (`for await (const _scrml_val …)` — event/id bypass the redact), and the raw
-  serializers (`new Response(body)`, `Response.json(v)`, `.publish`, `.enqueue`,
-  `.send`) — enumerated over SERIALIZERS, not just redactor call sites.
-- `I-PROTECT-STRIP-001` fires only for a query whose row reached a redact sink
-  carrying an unrevealed protected column.
-- Unparseable server module → `E-PROTECT-006` (fail closed).
+- Provenance is PRESERVED BY DEFAULT through every step, including any call into
+  code the compile does not contain (fail closed).
+- DERIVER ALLOWLIST (the only exemptions): comparison/arithmetic operators, `!`,
+  `typeof`, `.length`, predicate/position methods (not charCodeAt/codePointAt),
+  `scrml:auth` verifyPassword/hashPassword/verifyTotp, `scrml:crypto`
+  hash/hmac/verifyHash, `Bun.password.*`, `Bun.hash`, `crypto.subtle.digest`,
+  `.digest()`, `Boolean`, `isNaN`, `Array.isArray`, `console.*`. NOT `Number`.
+- Module-defined functions: interprocedural, call-site sensitive.
+- `reveal("col")` honoured exactly as at the sink.
+- Sinks: `_scrml_protect_redact(arg)`, the §37 SSE frame, every argument of
+  `new Response`, `Response.redirect`, `Response.json`, `.publish`, `.enqueue`, `.send`.
+- `I-PROTECT-STRIP-001` only for a query whose row reached a redact sink (no fallback).
+- Unparseable module / exhausted budget → `E-PROTECT-006` (fail closed).
 
 ## Disclosed bounds
-- Extraction inside code the module does not contain (an import receiving a
-  whole row) is assumed descriptor-preserving.
-- Flow-insensitive (fails closed on reassignment).
-- `arguments[i]`, class instances, `Reflect`/Proxy tricks: not modelled (scrml
-  source has no classes; `arguments` is not idiomatic scrml).
+- DB round trip (write into a non-protected column, read back) — OUT of scope (F5).
+- Flow-insensitive within a function (reassignment to clean still protected — fails closed).
+- `Number(x)` deliberately NOT allowlisted (identity on a numeric protected column);
+  the reviewer's list included it.
 
-## Corpus sweep (2049 files: examples/ samples/ conformance/cases/ docs/readme-snippets/ docs/tutorial-snippets/)
-- Newly rejecting pre-existing files: NONE. E-PROTECT-006 fires only on the 5 new
-  e006 cases + 3 cases that already failed (E-PROTECT-004/005).
-- I-PROTECT-STRIP-001 dropped (correctly — row never reaches egress) on:
-  examples/23-trucking-dispatch/app.scrml, pages/auth/login.scrml,
-  samples/compilation-tests/protect-001-basic-auth.scrml, samples/login.scrml,
-  + the 5 conformance cases whose expectations pinned the false claim.
-- trucking-dispatch server output byte-identical before/after; compile time unchanged.
+## Corpus sweep (fix round): 2204 files = examples/ samples/ conformance/cases/
+docs/readme-snippets/ docs/tutorial-snippets/ + 135 read-only scrml-site + flogence copies,
+base = origin/main 650c47c29 vs tip
+- Newly failing: ONLY the 8 intentional `*-e006` conformance cases. No example,
+  sample, snippet, site or flogence file newly fails.
+- I-PROTECT-STRIP-001 dropped (truthfully) on trucking app.scrml + login.scrml,
+  protect-001-basic-auth.scrml, samples/login.scrml and 4 conformance cases.
