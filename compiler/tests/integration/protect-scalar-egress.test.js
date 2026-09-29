@@ -428,3 +428,70 @@ describe("S441 EXECUTED — the negatives still work on the wire", () => {
     expect(JSON.parse(bad.body)).toEqual({ ok: false });
   });
 });
+
+// ---------------------------------------------------------------------------
+// 4. S441 round 5 — the round-4 review's findings, compiled AND executed
+// ---------------------------------------------------------------------------
+const Q = (sql, ...rest) => fnBody([`const u = ?{\`${sql}\`}.get()`, ...rest]);
+
+describe("S441 round 5 — compile-time", () => {
+  const leaks = {
+    "F1 ({ length: h }).length": fnBody([ONE, "return ({ length: u.passwordHash }).length"]),
+    "F1 new Array(h).length": fnBody([ONE, "return new Array(u.passwordHash).length"]),
+    'F1 "x".repeat(h).length': fnBody([ONE, 'return "x".repeat(u.passwordHash).length']),
+    "F2 u.PASSWORDHASH off an upper-case SELECT": Q("SELECT id, PASSWORDHASH FROM users WHERE id = 1", "return u.PASSWORDHASH"),
+    "F2 omit with a case-variant key does not remove the column": "${\n  import { omit } from 'scrml:data'\n}\n" +
+      Q("SELECT id, PASSWORDHASH FROM users WHERE id = 1", 'return omit(u, ["PASSWORDHASH"])'),
+    "F3 an expression column read off the row": Q("SELECT id, lower(passwordHash) AS x FROM users WHERE id = 1", "return u.x"),
+    "F4 arr.find(..).x = h": fnBody([ONE, "const arr = [{ x: 1 }]", "arr.find(e => true).x = u.passwordHash", "return arr"]),
+    "F4 Map.get(..).x = h": fnBody([ONE, "const m = new Map()", "const o = { x: 1 }", 'm.set("k", o)', 'm.get("k").x = u.passwordHash', "return o"]),
+    "F4 Object.values(o)[0].x = h": fnBody([ONE, "const o = { a: { x: 1 } }", "Object.values(o)[0].x = u.passwordHash", "return o"]),
+    "F4 Object.setPrototypeOf": fnBody([ONE, "const o = { x: 1 }", "const p = { }", "Object.setPrototypeOf(o, p)", "p.h = u.passwordHash", "return { v: o.h }"]),
+  };
+  for (const [name, body] of Object.entries(leaks)) {
+    test(`${name} is rejected`, () => {
+      expect(compileMem(prog(body)).codes).toContain("E-PROTECT-006");
+    });
+  }
+  const clean = {
+    "u.passwordHash.length": fnBody([ONE, "return u.passwordHash.length"]),
+    "rows.map(r => r.passwordHash).length": fnBody([ALL, "return rows.map(r => r.passwordHash).length"]),
+    "an expression over a NON-protected column": Q("SELECT id, lower(name) AS x FROM users WHERE id = 1", "return { id: u.id, x: u.x }"),
+    'reveal("PASSWORDHASH") — reveal names are case-insensitive': fnBody([ONE, 'return u.reveal("PASSWORDHASH").passwordHash']),
+  };
+  for (const [name, body] of Object.entries(clean)) {
+    test(`${name} compiles`, () => {
+      expect(compileMem(prog(body)).codes).not.toContain("E-PROTECT-006");
+    });
+  }
+});
+
+describe("S441 round 5 EXECUTED — the row path strips what it used to ship", () => {
+  test("F2: SELECT PASSWORDHASH … return u — the driver keys it `passwordHash`, and it is stripped", async () => {
+    if (domPolluted()) return;
+    const { status, body } = await serveAndCall(prog(Q("SELECT id, PASSWORDHASH FROM users WHERE id = 1", "return u")), "{}");
+    expect(status).toBe(200);
+    expect(body).not.toContain("SECRET-HASH-123");
+    expect(JSON.parse(body)).toEqual({ id: 1 });
+  });
+
+  for (const expr of ["passwordHash || ''", "lower(passwordHash)", "hex(passwordHash)", '"passwordHash"', "users.PASSWORDHASH || ''"]) {
+    test(`F3: SELECT id, ${expr} AS x … return u — stripped wholesale`, async () => {
+      if (domPolluted()) return;
+      const { status, body, result } = await serveAndCall(prog(Q(`SELECT id, ${expr} AS x FROM users WHERE id = 1`, "return u")), "{}");
+      expect(status).toBe(200);
+      expect(body.toLowerCase()).not.toContain("secret-hash-123");
+      expect(body).not.toContain("5345435245542D");
+      expect(JSON.parse(body)).toEqual({});
+      const codes = [...(result.errors ?? []), ...(result.warnings ?? [])].map((d) => d.code);
+      expect(codes).toContain("I-PROTECT-STRIP-001");
+    });
+  }
+
+  test('reveal("PASSWORDHASH") admits the column (case-insensitive declassify)', async () => {
+    if (domPolluted()) return;
+    const { status, body } = await serveAndCall(prog(fnBody([ONE, 'return u.reveal("PASSWORDHASH")'])), "{}");
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toEqual({ id: 1, name: "ada", passwordHash: "SECRET-HASH-123" });
+  });
+});

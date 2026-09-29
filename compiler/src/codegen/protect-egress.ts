@@ -233,7 +233,11 @@ export function resolveProtectedOutputColumns(
   for (const col of proj.columns) {
     if (col.kind === "column" && col.table && col.column) {
       const cols = prot.get(foldIdent(col.table));
-      if (cols && cols.has(foldIdent(col.column))) out.add(col.outputName);
+      const declared = cols?.get(foldIdent(col.column));
+      // An UNALIASED column comes back keyed by its DECLARED name (SQLite:
+      // `SELECT PASSWORDHASH` → key `passwordHash`, measured) — record that,
+      // not the surface spelling; an alias comes back exactly as written.
+      if (declared !== undefined) out.add(col.outputName === col.column ? declared : col.outputName);
     } else if (col.kind === "star") {
       // `SELECT *` (no table) expands against every FROM/JOIN table; `table.*`
       // expands against that one table. The output column name of a starred
@@ -245,11 +249,117 @@ export function resolveProtectedOutputColumns(
         if (declared) for (const c of declared.values()) out.add(c);
       }
     }
-    // kind "opaque" (computed/expression column) carries no resolvable origin —
-    // it is a derived flow (§14.8.9 out-of-scope), not a protected-origin column.
+    else if (col.kind === "opaque" && opaqueColumnMayCarryProtected(col.raw, prot)) {
+      // ⚑ S441 round 5 (F3) — an EXPRESSION output column computed in SQL from a
+      // protected column IS that column's value, re-encoded by the database:
+      // `passwordHash || ''`, `lower()` / `hex()` / `CAST` / `substr` /
+      // `coalesce` / `json_object` / `group_concat`, `pin + 0`, a quoted or
+      // bracketed spelling (`"passwordHash"`, `[passwordHash]`), a
+      // table-qualified one, a scalar subquery. Round 4 treated every such
+      // column as a derived flow and emitted NO descriptor — MEASURED, each of
+      // those shapes served the hash (also on main). Its output key is not
+      // statically reliable (an unaliased expression is keyed by its own text,
+      // engine-specifically), so the row is stripped WHOLESALE — the same
+      // fail-closed degradation as unresolvable SQL (OVER-APPROXIMATION: a
+      // derived-in-SQL value such as `length(passwordHash)` or
+      // `passwordHash = ${x} AS ok` strips the whole row too).
+      return { all: true };
+    }
   }
   if (out.size === 0) return null;
   return { cols: [...out] };
+}
+
+/**
+ * The identifier-like tokens of one SQL projection entry, lexed STRUCTURALLY
+ * (not pattern-matched): `'…'` string literals are skipped (they are data, not
+ * references); `"…"`, `` `…` `` and `[…]` quoted identifiers are unwrapped;
+ * bare words are taken whole; every identifier is folded with `foldIdent`
+ * (SQLite identifiers are case-insensitive). A qualified reference
+ * `users.passwordHash` yields both segments. Also reports whether the entry
+ * contains a nested `SELECT`, and a PROJECTION star — a `*` whose previous
+ * token is `SELECT` / `DISTINCT` / `ALL` / `,` / `.` (a nested `SELECT *` or
+ * `t.*`), as opposed to `COUNT(*)` (after `(`) or multiplication (after an
+ * operand). (S441 round 5: treating EVERY `*` as a projection stripped the
+ * trucking-dispatch customer list wholesale over a `(SELECT COUNT(*) …)`.)
+ */
+export function lexSqlEntry(entry: string): { idents: string[]; hasSelect: boolean; hasStar: boolean } {
+  const idents: string[] = [];
+  let hasSelect = false;
+  let hasStar = false;
+  // The previous significant token, for classifying a `*`.
+  let prev = "";
+  let i = 0;
+  const n = entry.length;
+  const isWordStart = (c: string) => /[A-Za-z_\u0080-\uffff]/.test(c);
+  const isWord = (c: string) => /[A-Za-z0-9_$\u0080-\uffff]/.test(c);
+  while (i < n) {
+    const c = entry[i];
+    if (c === "'") {
+      // String literal; `''` is an escaped quote inside it.
+      i++;
+      while (i < n) {
+        if (entry[i] === "'" && entry[i + 1] === "'") { i += 2; continue; }
+        if (entry[i] === "'") { i++; break; }
+        i++;
+      }
+      continue;
+    }
+    if (c === '"' || c === "`" || c === "[") {
+      const close = c === "[" ? "]" : c;
+      let j = i + 1;
+      let s = "";
+      while (j < n) {
+        if (entry[j] === close && close !== "]" && entry[j + 1] === close) { s += close; j += 2; continue; }
+        if (entry[j] === close) { j++; break; }
+        s += entry[j];
+        j++;
+      }
+      idents.push(s.toLowerCase());
+      prev = "ident";
+      i = j;
+      continue;
+    }
+    if (isWordStart(c)) {
+      let j = i + 1;
+      while (j < n && isWord(entry[j])) j++;
+      const w = entry.slice(i, j).toLowerCase();
+      if (w === "select") hasSelect = true;
+      idents.push(w);
+      prev = w;
+      i = j;
+      continue;
+    }
+    if (/[0-9]/.test(c)) {
+      // A numeric literal (incl. `1e5`, `0x1F`) — not a reference.
+      let j = i + 1;
+      while (j < n && /[0-9A-Za-z_.]/.test(entry[j])) j++;
+      prev = "number";
+      i = j;
+      continue;
+    }
+    if (c === "*" && (prev === "select" || prev === "distinct" || prev === "all" || prev === "," || prev === ".")) hasStar = true;
+    if (!/\s/.test(c)) prev = c;
+    i++;
+  }
+  return { idents, hasSelect, hasStar };
+}
+
+/**
+ * May an EXPRESSION output column carry a protected column's value? Fail-closed:
+ * yes when any identifier in it (case-folded, quote-stripped, either segment of
+ * a qualified name) names a protected column of ANY protected table — the
+ * table is deliberately not required to match, because a scalar subquery can
+ * read a table the outer FROM does not name — or when it contains a nested
+ * `SELECT` with a `*` (a subquery whose projected columns are not visible here).
+ */
+function opaqueColumnMayCarryProtected(raw: string, prot: Map<string, Map<string, string>>): boolean {
+  const { idents, hasSelect, hasStar } = lexSqlEntry(raw);
+  if (hasSelect && hasStar) return true;
+  for (const id of idents) {
+    for (const cols of prot.values()) if (cols.has(id)) return true;
+  }
+  return false;
 }
 
 /**
@@ -297,8 +407,17 @@ export const SERVER_PROTECT_HELPER: string = [
   "    message: \"the server refused a response body it cannot redact: a `protect=` column could not be proven absent (SPEC §14.8.9). Return the value itself — the compiler envelopes and redacts it — instead of a hand-built Response.\",",
   "  } }), { status: 500, headers: { \"Content-Type\": \"application/json\" } });",
   "}",
+  "// SQL identifiers are CASE-INSENSITIVE (SQLite; Postgres folds unquoted names),",
+  "// so the row key the driver returns need not match the spelling in the SELECT:",
+  "// `SELECT PASSWORDHASH` comes back keyed `passwordHash`. Every comparison the",
+  "// floor makes — descriptor columns, reveal names, row keys — is on the folded",
+  "// name (S441 round 5: an exact-case compare shipped the hash).",
+  "function _scrml_protect_fold(c) {",
+  "  return typeof c === \"string\" ? c.toLowerCase() : c;",
+  "}",
   "function _scrml_protect_tag(value, cols) {",
   "  if (value == null || typeof value !== \"object\") return value;",
+  "  if (Array.isArray(cols)) cols = cols.map(_scrml_protect_fold);",
   "  if (Array.isArray(value)) {",
   "    for (const row of value) {",
   "      if (row != null && typeof row === \"object\" && !Array.isArray(row)) row[_SCRML_PROTECT] = { cols, revealed: [] };",
@@ -314,7 +433,7 @@ export const SERVER_PROTECT_HELPER: string = [
   "  const d = value[_SCRML_PROTECT];",
   "  if (!d) return value;",
   "  const next = { ...value };",
-  "  next[_SCRML_PROTECT] = { cols: d.cols, revealed: [...d.revealed, col] };",
+  "  next[_SCRML_PROTECT] = { cols: d.cols, revealed: [...d.revealed, _scrml_protect_fold(col)] };",
   "  return next;",
   "}",
   "function _scrml_protect_redact(value) {",
@@ -394,8 +513,9 @@ export const SERVER_PROTECT_HELPER: string = [
   "  const out = {};",
   "  let _changed = false;",
   "  for (const k of Object.keys(value)) {",
-  "    const isRevealed = revealed && revealed.indexOf(k) !== -1;",
-  "    if (!isRevealed && (stripAll || (protectedCols && protectedCols.indexOf(k) !== -1))) { _changed = true; continue; }",
+  "    const _kf = _scrml_protect_fold(k);",
+  "    const isRevealed = revealed && revealed.indexOf(_kf) !== -1;",
+  "    if (!isRevealed && (stripAll || (protectedCols && protectedCols.indexOf(_kf) !== -1))) { _changed = true; continue; }",
   "    const _rv = _scrml_protect_redact(value[k]);",
   "    if (_rv !== value[k]) _changed = true;",
   "    out[k] = _rv;",
@@ -438,7 +558,7 @@ function revealedColumnsIn(fnSource: string): Set<string> {
   while ((r = revealRe.exec(fnSource)) !== null) {
     const arg = r[1].trim();
     const lit = /^(["'`])([^"'`]*)\1$/.exec(arg);
-    if (lit) named.add(lit[2]);
+    if (lit) named.add(foldIdent(lit[2])); // reveal names compare case-insensitively (SQL identifiers)
   }
   return named;
 }
@@ -512,7 +632,7 @@ export function detectProtectedRawEgress(
     if ("all" in resolved) {
       undischarged = "*";
     } else {
-      const missing = resolved.cols.filter((c) => !revealed.has(c));
+      const missing = resolved.cols.filter((c) => !revealed.has(foldIdent(c)));
       if (missing.length === 0) continue;
       undischarged = missing;
     }

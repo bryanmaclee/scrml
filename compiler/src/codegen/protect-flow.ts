@@ -44,7 +44,10 @@
  *
  *   THE DERIVER ALLOWLIST (the only exemptions — everything else fails closed):
  *     - comparison / equality / relational / arithmetic operators, `!`, `typeof`;
- *     - `.length`, and the predicate / position methods in `DERIVED_METHODS`
+ *     - `.length` of a value whose length is a known count (the column's own
+ *       string, a string / array literal built from it, a mapped array, a row
+ *       array — `Taint.len`; NOT `({length: h})` or `new Array(u.pin)`), and
+ *       the predicate / position methods in `DERIVED_METHODS`
  *       (`includes`, `startsWith`, `indexOf`, …) — NOT `charCodeAt` /
  *       `codePointAt`, which are lossless;
  *     - one-way / boolean functions in `DERIVER_CALLS`: `scrml:auth`
@@ -102,8 +105,27 @@ interface RowPart {
   cols: Set<string>;
   /** The descriptor is the strip-all sentinel (unresolvable SQL). */
   all: boolean;
-  /** Columns `reveal`ed on EVERY path that reaches here (intersection). */
+  /** Columns `reveal`ed on EVERY path that reaches here (intersection) — FOLDED names. */
   revealed: Set<string>;
+}
+
+/**
+ * SQL identifiers are case-insensitive (SQLite; Postgres folds unquoted names),
+ * so every column comparison the flow makes is on the folded name — the same
+ * fold the runtime floor applies (`_scrml_protect_fold`). S441 round 5: the
+ * descriptor recorded the SELECT's surface spelling (`PASSWORDHASH`), the driver
+ * returned the declared key (`passwordHash`), and an exact-case compare shipped
+ * the hash.
+ */
+function foldCol(c: string): string {
+  return c.toLowerCase();
+}
+
+/** The descriptor column `key` names (case-insensitively), or null. */
+function rowColFor(row: RowPart, key: string): string | null {
+  const f = foldCol(key);
+  for (const c of row.cols) if (foldCol(c) === f) return c;
+  return null;
 }
 
 /**
@@ -126,6 +148,37 @@ interface Taint {
    * the one shared cell every alias reads.
    */
   refs?: Set<string>;
+  /**
+   * S441 round 5 (F1) — the protected labels the value's `.length` reveals.
+   * UNDEFINED means the fail-closed default: everything the value carries
+   * outside a row (`naked`). Only constructions whose length is known to be a
+   * DERIVED count set it explicitly: a column read off a row (the §14.8.9
+   * allowlisted `row.passwordHash.length`), string concatenation / templates of
+   * such values, array literals, `.map` / `.filter` / `.sort` of an array, a row
+   * array itself. Anything else — `({ length: h })`, `new Array(u.pin)`,
+   * `"x".repeat(u.pin)`, a method result the analysis has no model for — keeps
+   * the default, so its `.length` stays protected. (Round 4 treated `.length`
+   * as derived on ANY receiver; measured, `({length: h}).length` and
+   * `new Array(u.pin).length` shipped the value.)
+   */
+  len?: Map<string, string>;
+}
+
+/** What `.length` of the value reveals (see `Taint.len`). */
+function lenOf(t: Taint): Map<string, string> {
+  return t.len ?? naked(t);
+}
+
+/** A copy of `t` whose `.length` is the fail-closed default. */
+function lenDefault(t: Taint): Taint {
+  const r = { ...t };
+  delete r.len;
+  return r;
+}
+
+/** A copy of `t` whose `.length` reveals exactly `len`. */
+function withLen(t: Taint, len: Map<string, string>): Taint {
+  return { ...t, len: new Map(len) };
 }
 
 function clean(): Taint {
@@ -165,6 +218,12 @@ function join(...ts: Taint[]): Taint {
       for (const r of t.refs) out.refs.add(r);
     }
   }
+  // `.length` of a join is whatever `.length` of ANY part reveals.
+  if (ts.some((t) => t && t.len !== undefined)) {
+    const len = new Map<string, string>();
+    for (const t of ts) if (t) mergeMap(len, lenOf(t));
+    out.len = len;
+  }
   return out;
 }
 
@@ -190,7 +249,7 @@ function elemOf(t: Taint): Taint {
 /** The protected labels a row still carries (not `reveal`ed). */
 function unrevealed(row: RowPart): string[] {
   if (row.all) return [ALL_COLUMNS_LABEL];
-  return [...row.cols].filter((c) => !row.revealed.has(c));
+  return [...row.cols].filter((c) => !row.revealed.has(foldCol(c)));
 }
 
 /** Everything protected the value carries or could expose, row columns included. */
@@ -206,7 +265,8 @@ function taintKey(t: Taint): string {
     : "-";
   const f = [...t.fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
   const a = [...refsOf(t)].sort().join(",");
-  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}`;
+  const l = t.len ? [...t.len.keys()].sort().join(",") : "~";
+  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}#${l}`;
 }
 
 /** The protected part of a taint's key (no function values). */
@@ -245,6 +305,11 @@ function tainted(args: Taint[], site: string): Taint {
 const SERIALIZING_BUILTINS = new Set([
   "JSON.stringify", "JSON.parse", "Object.values", "Object.entries", "Object.fromEntries", "structuredClone",
   "Object.getOwnPropertyDescriptor", "Object.getOwnPropertyDescriptors", "Reflect.get", "Reflect.ownKeys",
+]);
+/** Of those, the ones whose result holds the argument's MEMBER objects themselves (aliases). */
+const ELEMENT_ALIASING_BUILTINS = new Set([
+  "Object.values", "Object.entries", "Object.fromEntries", "Reflect.get",
+  "Object.getOwnPropertyDescriptor", "Object.getOwnPropertyDescriptors",
 ]);
 /** Built-ins that return their argument (or a container of it) with the descriptor intact. */
 const IDENTITY_BUILTINS = new Set([
@@ -1262,10 +1327,10 @@ class FlowAnalysis {
         this.bindPattern(p.left, join(t, this.evalExpr(p.right, scope, fn)), scope, fn);
         return;
       case "MemberExpression": {
-        this.evalExpr(p.object, scope, fn);
+        const objT = this.evalExpr(p.object, scope, fn);
         // `o[h] = v` writes the KEY `h` into `o` as well as the value (N1).
         const k = p.computed ? keyOnly(this.evalExpr(p.property, scope, fn)) : clean();
-        this.mutateRoot(p.object, containerOf(join(t, k)), scope);
+        this.writeThrough(p.object, objT, containerOf(join(t, k)), scope);
         return;
       }
     }
@@ -1278,6 +1343,34 @@ class FlowAnalysis {
     if (e && e.type === "Identifier") this.mergeBinding(e.name, scope, t, true);
   }
 
+  /**
+   * A write INTO the object `expr` evaluates to (whose abstract value is
+   * `exprT`). Lands in the syntactic root binding (`a.b.c = v` → `a`) AND in
+   * every alias class the object may belong to — `exprT.refs`. S441 round 5
+   * (F4): the root-binding walk alone stopped at a call, so a write into an
+   * ELEMENT a collection method handed back — `arr.find(…).x = h`,
+   * `arr.at(0).x = h`, `m.get(k).x = h`, `Object.values(o)[0].x = h`,
+   * `it.next().value.x = h` — reached no binding and the container shipped.
+   */
+  private writeThrough(expr: any, exprT: Taint, t: Taint, scope: Scope): void {
+    this.mutateRoot(expr, t, scope);
+    for (const r of refsOf(exprT)) this.writeCell(r, t);
+  }
+
+  /** Merge a container write into the alias class of binding cell `key`. */
+  private writeCell(key: string, t: Taint): void {
+    for (const r of refsOf(t)) this.unite(key, r);
+    const plain = { ...t };
+    delete plain.refs;
+    const slot = this.find(key);
+    const prev = this.classWrites.get(slot) ?? clean();
+    const next = join(prev, plain);
+    if (taintKey(prev) !== taintKey(next)) {
+      this.classWrites.set(slot, next);
+      this.changed = true;
+    }
+  }
+
   // -------------------------------------------------------- expressions
 
   /**
@@ -1286,9 +1379,15 @@ class FlowAnalysis {
    */
   private memberRead(o: Taint, key: string | null, dynamic: boolean, node: any, fn: Instance | null): Taint {
     const r = clean();
-    // `.length` is a count — derived, whatever it is read off.
-    if (!dynamic && key === "length") return r;
+    // `.length` is DERIVED only where the value's length is known to be a
+    // count of independent identity (S441 round 5, F1 — see `Taint.len`); on
+    // any other receiver it is read like any other field, fail-closed.
+    if (!dynamic && key === "length") {
+      mergeMap(r.scalar, lenOf(o));
+      return r;
+    }
     const numeric = key !== null && /^\d+$/.test(key);
+    let columnRead = false;
     if (o.row) {
       if (dynamic) {
         // `rows[i]` (an element — still a row) OR `u[k]` (any column): both.
@@ -1297,10 +1396,13 @@ class FlowAnalysis {
       } else if (numeric) {
         r.row = copyRow(o.row);
       } else if (key !== null) {
-        // A named protected column keeps its name; any other column read off a
-        // strip-all row (unresolvable SQL) is protected-by-default, labelled `*`.
-        if (!o.row.revealed.has(key)) {
-          if (o.row.cols.has(key)) r.scalar.set(key, this.site(node, fn));
+        // A named protected column keeps its (declared) name; any other column
+        // read off a strip-all row (unresolvable SQL) is protected-by-default,
+        // labelled `*`. Column names compare case-insensitively (round 5, F2).
+        columnRead = true;
+        if (!o.row.revealed.has(foldCol(key))) {
+          const col = rowColFor(o.row, key);
+          if (col !== null) r.scalar.set(col, this.site(node, fn));
           else if (o.row.all) r.scalar.set(ALL_COLUMNS_LABEL, this.site(node, fn));
         }
       }
@@ -1317,6 +1419,10 @@ class FlowAnalysis {
     // does not (a row column cannot alias its row).
     const namedColumnOffRow = o.row !== null && !dynamic && !numeric && o.deep.size === 0;
     if (!namedColumnOffRow && refsOf(o).size > 0) r.refs = new Set(refsOf(o));
+    // A column read straight off a row is a primitive: its `.length` is the
+    // §14.8.9 allowlisted derived count. Anything that merged container
+    // contents (`o.deep`) may be an object with its own `length` — default.
+    if (columnRead && namedColumnOffRow && o.fns.size === 0) r.len = new Map();
     return r;
   }
 
@@ -1334,7 +1440,13 @@ class FlowAnalysis {
         return clean();
       case "TemplateLiteral": {
         const r = clean();
-        for (const e of node.expressions) mergeMap(r.scalar, naked(this.evalExpr(e, scope, fn)));
+        // The string's length is the sum of its parts' lengths (F1).
+        r.len = new Map();
+        for (const e of node.expressions) {
+          const v = this.evalExpr(e, scope, fn);
+          mergeMap(r.scalar, naked(v));
+          mergeMap(r.len, lenOf(v));
+        }
         return r;
       }
       case "TaggedTemplateExpression": {
@@ -1350,12 +1462,16 @@ class FlowAnalysis {
       }
       case "ArrayExpression": {
         let r = clean();
+        // An array literal's length is its element count — static, except that
+        // a spread contributes the spread value's own length (F1).
+        const len = new Map<string, string>();
         for (const el of node.elements) {
           if (!el) continue;
           const v = el.type === "SpreadElement" ? this.evalExpr(el.argument, scope, fn) : this.evalExpr(el, scope, fn);
           r = join(r, el.type === "SpreadElement" ? containerOf(elemOf(v)) : containerOf(v));
+          if (el.type === "SpreadElement") mergeMap(len, lenOf(v));
         }
-        return r;
+        return withLen(r, len);
       }
       case "ObjectExpression": {
         let r = clean();
@@ -1412,6 +1528,12 @@ class FlowAnalysis {
         const r = clean();
         mergeMap(r.scalar, naked(l));
         mergeMap(r.scalar, naked(rr));
+        // A concatenation's length is the sum of the operands' string lengths;
+        // an operand whose own length is not known-derived (`new Array(u.pin)`
+        // stringifies to `pin - 1` commas) keeps the result's length protected.
+        r.len = new Map();
+        mergeMap(r.len, lenOf(l));
+        mergeMap(r.len, lenOf(rr));
         return r;
       }
       case "LogicalExpression":
@@ -1563,7 +1685,9 @@ class FlowAnalysis {
     const site = this.site(node, fn);
     if (obj.row) {
       for (const c of unrevealed(obj.row)) {
-        const survives = c === ALL_COLUMNS_LABEL ? true : host.imported === "pick" ? keys.includes(c) : !keys.includes(c);
+        // JS keys are exact-case: `pick` keeps a column any case-variant key MAY
+        // name (over-approximation), `omit` removes it only on an exact match.
+        const survives = c === ALL_COLUMNS_LABEL ? true : host.imported === "pick" ? keys.some((k) => foldCol(k) === foldCol(c)) : !keys.includes(c);
         if (survives) r.scalar.set(c, site);
       }
     }
@@ -1608,7 +1732,7 @@ class FlowAnalysis {
         const col = staticKey(node.arguments[1]);
         if (v.row && col !== null) {
           const row = copyRow(v.row);
-          row.revealed.add(col);
+          row.revealed.add(foldCol(col));
           return { ...v, row, refs: undefined }; // reveal returns a NEW object (no alias)
         }
         return v;
@@ -1657,7 +1781,7 @@ class FlowAnalysis {
         // The descriptor's `value` / getter become a field of the target.
         const desc = args[2] ?? clean();
         const got = this.hasCallable(desc) ? this.applyFns(desc.fns, [], undefined, node, fn) : clean();
-        this.mutateRoot(node.arguments[0], containerOf(join(desc, got)), scope);
+        this.writeThrough(node.arguments[0], args[0] ?? clean(), containerOf(join(desc, got)), scope);
         return join(args[0] ?? clean(), containerOf(join(desc, got)));
       }
       if (path !== null) {
@@ -1688,7 +1812,7 @@ class FlowAnalysis {
         const col = staticKey(node.arguments[0]);
         if (col !== null) {
           const row = copyRow(recv.row);
-          row.revealed.add(col);
+          row.revealed.add(foldCol(col));
           return { ...recv, row, refs: undefined }; // a new object (no alias)
         }
       }
@@ -1699,7 +1823,7 @@ class FlowAnalysis {
       if (method !== null && MUTATING_METHODS.has(method)) {
         // `m.set(k, v)` stores the KEY too (N1).
         const written = method === "set" ? join(keyOnly(args[0] ?? clean()), args[1] ?? clean()) : method === "splice" ? join(...args.slice(2)) : join(...args);
-        this.mutateRoot(m.object, containerOf(written), scope);
+        this.writeThrough(m.object, recv, containerOf(written), scope);
         return method === "push" || method === "unshift" ? clean() : join(recv, containerOf(written));
       }
       // A method stored in an object the compile built (`api.f(x)`), or a
@@ -1733,6 +1857,12 @@ class FlowAnalysis {
       // `Buffer.from(h).toString("base64")`, `h.charCodeAt(0)`).
       if (this.hasCallable(viaField) && recv.row === null && recv.scalar.size === 0 && recv.deep.size === 0) return r;
       const out: Taint = { row: recv.row ? copyRow(recv.row) : null, scalar: new Map(recv.scalar), deep: new Map(recv.deep), fns: new Set() };
+      // …and it may BE (or hand back) an object reachable from the receiver or
+      // an argument — `arr.values().next().value`, `it.next().value`, a
+      // library `wrap(o)` — so it joins their alias classes (round 5, F4).
+      const aliases = new Set<string>(refsOf(recv));
+      for (const a of args) for (const x of refsOf(a)) aliases.add(x);
+      if (aliases.size > 0) out.refs = aliases;
       for (const a of args) mergeMap(out.scalar, everything(a, this.site(node, fn)));
       if (out.scalar.size > 0) mergeMap(out.deep, out.scalar);
       return join(r, out);
@@ -1776,18 +1906,44 @@ class FlowAnalysis {
   private builtin(path: string, args: Taint[], node: any, fn: Instance | null): Taint | null {
     if (SERIALIZING_BUILTINS.has(path)) {
       // The descriptor is a Symbol key: these drop it and keep the column.
-      return tainted(args, `\`${path}(…)\` of a protected value in \`${this.displayName(fn?.stat.node ?? null)}\``);
+      const r = tainted(args, `\`${path}(…)\` of a protected value in \`${this.displayName(fn?.stat.node ?? null)}\``);
+      // `Object.values(o)` / `entries` / `fromEntries` / `Reflect.get` hand back
+      // the SAME member objects — a write into one lands in `o` (round 5, F4).
+      if (ELEMENT_ALIASING_BUILTINS.has(path)) {
+        const aliases = new Set<string>();
+        for (const a of args) for (const x of refsOf(a)) aliases.add(x);
+        if (aliases.size > 0) r.refs = aliases;
+      }
+      return r;
+    }
+    if (path === "Object.setPrototypeOf" || path === "Reflect.setPrototypeOf") {
+      // `o` now INHERITS everything `p` holds, and every later write into `p`
+      // is readable through `o` (`o.h` after `p.h = h`) — one alias class, and
+      // `p`'s current contents are written into it (round 5, F4).
+      const o = args[0] ?? clean();
+      const p = args[1] ?? clean();
+      for (const a of refsOf(o)) for (const b of refsOf(p)) this.unite(a, b);
+      if (node?.arguments?.[0]) this.writeThrough(node.arguments[0], o, containerOf(p), fn?.scope ?? this.curMod!.scope);
+      return path === "Reflect.setPrototypeOf" ? clean() : o;
+    }
+    if (path === "Object.create") {
+      // A fresh object whose prototype IS `p`: it reads through to `p`'s class.
+      return lenDefault(join(...args.map(containerOf)));
+    }
+    if (path === "Object.getPrototypeOf" || path === "Reflect.getPrototypeOf") {
+      return lenDefault(elemOf(args[0] ?? clean()));
     }
     if (path === "String") {
       // `String(x)` embeds a scalar verbatim; a row stringifies as
       // "[object Object]" and carries nothing.
       const r = clean();
-      for (const a of args) mergeMap(r.scalar, naked(a));
+      r.len = new Map();
+      for (const a of args) { mergeMap(r.scalar, naked(a)); mergeMap(r.len, lenOf(a)); }
       return r;
     }
     if (path === "Object.assign" && node?.arguments?.[0]) {
       // Writes every source into the TARGET object (round 4, F2).
-      this.mutateRoot(node.arguments[0], containerOf(join(...args.slice(1))), fn?.scope ?? this.curMod!.scope);
+      this.writeThrough(node.arguments[0], args[0] ?? clean(), containerOf(join(...args.slice(1))), fn?.scope ?? this.curMod!.scope);
     }
     if (path === "Object.keys") {
       // A row's keys are its column NAMES, not its values. Only a container that
@@ -1798,8 +1954,10 @@ class FlowAnalysis {
       return r;
     }
     if (IDENTITY_BUILTINS.has(path)) {
-      if (path === "Array.of") return join(...args.map(containerOf));
-      return join(...args);
+      // The result's `.length` is NOT the argument's (F1): `new Array(u.pin)`
+      // has length `pin`, `Array.from({ length: h })` has length `h`.
+      if (path === "Array.of") return lenDefault(join(...args.map(containerOf)));
+      return lenDefault(join(...args));
     }
     return null;
   }
@@ -1826,6 +1984,8 @@ class FlowAnalysis {
     }
     switch (method) {
       case "map":
+        // Same element count as the receiver (F1).
+        return withLen(containerOf(cbRet), lenOf(recv));
       case "flatMap":
         return containerOf(cbRet);
       case "filter":

@@ -277,6 +277,71 @@ async function _scrml_handler_s_1(req) {
   test("an unparseable module is reported, not passed", () => {
     expect(analyzeProtectFlow("function (").parseError).not.toBeNull();
   });
+
+  // S441 round 5, F1 — `.length` is derived only where it is a known count.
+  test("F1: `.length` of a receiver that is not a known string / array carries its protection", () => {
+    for (const body of [
+      "return ({ length: u.passwordHash }).length;",
+      "return new Array(u.passwordHash).length;",
+      "const o = { length: u.passwordHash }; return o.length;",
+      "const { length } = { length: u.passwordHash }; return length;",
+      'return "x".repeat(u.passwordHash).length;',
+      'return "".padEnd(u.passwordHash).length;',
+      "return Array.from({ length: u.passwordHash }).length;",
+      "return [...Array(u.passwordHash)].length;",
+      "const a = []; a.length = u.passwordHash; return a.length;",
+      'return (new Array(u.passwordHash) + "").length;',
+      "function mk(n) { return { length: n }; } return mk(u.passwordHash).length;",
+    ]) {
+      expect([body, leakCols(mod(body))]).toEqual([body, ["passwordHash"]]);
+    }
+  });
+
+  test("F1: `.length` of the column itself, a string built from it, an array of it, and rows stays derived", () => {
+    for (const body of [
+      "return u.passwordHash.length;",
+      "const h = u.passwordHash; return h.length;",
+      "return `a${u.passwordHash}`.length;",
+      'return ("a" + u.passwordHash).length;',
+      "return [u.passwordHash].length;",
+      "return [u, u].length;",
+    ]) {
+      expect([body, leakCols(mod(body))]).toEqual([body, []]);
+    }
+  });
+
+  // S441 round 5, F2 — column names compare case-insensitively.
+  test("F2: a descriptor column matches a member read of any case, and reveal is case-insensitive", () => {
+    const upper = (body) => mod(body).replace('["passwordHash"]', '["PASSWORDHASH"]');
+    expect(leakCols(upper("return u.passwordHash;"))).toEqual(["PASSWORDHASH"]);
+    expect(leakCols(mod("return u.PASSWORDHASH;"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return _scrml_protect_reveal(u, "PASSWORDHASH").passwordHash;'))).toEqual([]);
+  });
+
+  // S441 round 5, F4 — a write into an element a collection method hands back
+  // lands in the collection.
+  test("F4: element-returning methods join the container's alias class", () => {
+    for (const body of [
+      "const arr = [{ x: 1 }]; arr.find((e) => true).x = u.passwordHash; return arr;",
+      "const arr = [{ x: 1 }]; arr.findLast((e) => true).x = u.passwordHash; return arr;",
+      "const arr = [{ x: 1 }]; arr.filter((e) => true)[0].x = u.passwordHash; return arr;",
+      "const arr = [{ x: 1 }]; arr.at(0).x = u.passwordHash; return arr;",
+      "const e = { x: 1 }; const arr = [e]; arr.pop().x = u.passwordHash; return e;",
+      "const arr = [{ x: 1 }]; arr.sort()[0].x = u.passwordHash; return arr;",
+      "const m = new Map(); const o = { x: 1 }; m.set('k', o); m.get('k').x = u.passwordHash; return o;",
+      "const k = {}; const o = { x: 1 }; const w = new WeakMap(); w.set(k, o); w.get(k).x = u.passwordHash; return o;",
+      "const o = { a: { x: 1 } }; Object.values(o)[0].x = u.passwordHash; return o;",
+      "const o = { a: { x: 1 } }; Object.entries(o)[0][1].x = u.passwordHash; return o;",
+      "const arr = [{ x: 1 }]; arr.values().next().value.x = u.passwordHash; return arr;",
+      "const o = { x: 1 }; const p = {}; Object.setPrototypeOf(o, p); p.h = u.passwordHash; return { v: o.h };",
+      "const p = {}; const w = Object.create(p); p.h = u.passwordHash; return { v: w.h };",
+      "const arr = [[]]; arr.find((e) => true).push(u.passwordHash); return arr;",
+      "const arr = [{}]; Object.assign(arr.find((e) => true), { x: u.passwordHash }); return arr;",
+    ]) {
+      expect([body, leakCols(mod(body))]).toEqual([body, ["passwordHash"]]);
+    }
+    expect(leakCols(mod("const arr = [{ x: 1 }]; arr.find((e) => true).x = u.name; return arr;"))).toEqual([]);
+  });
 });
 
 describe("buildProtectFlowDiagnostics", () => {
