@@ -320,6 +320,8 @@ const MUTATIONS = [
      "        if (xe is some && te is some) return mayBeNot(xe, te)\n", ""],
     ["S442 r6 REVERSE: `T | not` into `T | not` refused",
      "            if (ti is some) return mayBeNot(xi, ti)\n", ""],
+    ["S442 r7 N2: a `T | not` element type printed unparenthesized (`int | not[]`)",
+     "        if (maybeInner(e) is some) return \"(\" + typeName(e) + \")\"\n", ""],
     ["S442 r7 C: the `not` literal into a non-int return / argument accepted",
      "        if (isAbsentVT(v)) return checkAbsent(env, target, span, what, ts)\n", ""],
     ["S442 r7 C: `not` elements of an untyped array literal accepted",

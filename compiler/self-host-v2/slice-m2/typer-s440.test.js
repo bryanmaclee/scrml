@@ -737,6 +737,14 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + "    <ks:string[replace]=([])/>\n    function f() { @ks = [not, not] }")).toEqual(["E-TYPE-041", "E-TYPE-041"]);
     expect(inApp(O + "    function g(z: int[]) { }\n    function f() { g([not]) }")).toEqual(["E-TYPE-041"]);
   });
+  test("r7 N2 — a `T | not` element type prints parenthesized: `(int | not)[]`", () => {
+    const d = run([LIB(), app(O + "    function f() { let js: int[] = [1, not] }", "<p>x</p>")]).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-TYPE-031"]);
+    expect(d[0].message).toContain("`(int | not)[]`");
+    // twin: a plain sequence prints unparenthesized
+    const d2 = run([LIB(), app(O + "    function f() { let ks: int[] = [\"s\"] }", "<p>x</p>")]).diags;
+    expect(d2[0].message).toContain("`int[]`");
+  });
   test("r7 C twins — `not` into `T | not` (return, argument, element of `T[] | not`… as the whole value); a mixed `[1, not]` reported ONCE (E-TYPE-031)", () => {
     expect(inApp(O + "    function g(z: string | not) -> string | not { return not }\n    function f() { g(not) }")).toEqual([]);
     expect(inApp(O + "    function f() { let ks: int[] | not = not }")).toEqual([]);

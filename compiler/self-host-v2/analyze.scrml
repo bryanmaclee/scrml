@@ -4070,9 +4070,16 @@ ${
             .Str :> "string"
             .Bool :> "bool"
             .Named(sym: s) :> s.hint
-            .Seq(elem: e) :> typeName(e) + "[]"
+            .Seq(elem: e) :> elemName(e) + "[]"
             .Maybe(inner: i) :> typeName(i) + " | not"
         }
+    }
+
+    // A sequence's element type as written before `[]`: a `T | not` element is
+    // parenthesized — `(int | not)[]`, not `int | not[]` (r7 N2).
+    fn elemName(e: Type) -> string {
+        if (maybeInner(e) is some) return "(" + typeName(e) + ")"
+        return typeName(e)
     }
 
     // A type's kind, for the assignability table: 0 int · 1 number · 2 string ·
