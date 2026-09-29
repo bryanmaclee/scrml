@@ -4074,3 +4074,11 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3583] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/atomics-shared-memory-dpa-056-2026-09-28.md` · verdict: shared MUTABLE memory is the wrong layer; lean A+ (~0.7) shared-nothing zero-copy (lin-send = transfer, grant-less tape shared-not-copied); ⚑ examples/13-worker broken today (bundle never written + send() clobbers when-message))** · ADVISORY · ⚑ 4 PA framing points listed OPEN in the artifact
 
 [3584] dpa · **(dpa: ran-before-supersede → `scrml-support/docs/deep-dives/value-mutability-sequences-tuples-dpa-052-2026-09-28.md` · the dPA ran dpa-052 before #1135 superseded it; it did NOT re-argue the §66 core — residuals only: silent alias writes under value semantics (5 routes), COW-on-unique as a perf contract (spread-accumulate 8,670× slower at 50k), element-level spreads bypass sub-field graphs (kanban); offered to §66.22)** · status left `superseded` — the PA's call
+
+[3585] land · S440: #1125 #1129 #1131 #1133 #1137 #1139 (code) + #1126 #1127 #1128 #1130 #1132 #1134 #1135 #1136 (docs); E-ERROR-002 + CSS-T3 HELD on branches (fix rounds done, targeted check owed)
+
+[3586] rule · S440 ~100 rulings (user-voice S440): JS-WAT Q1-12 (operators numbers-only, !/&&/|| booleans, T|not narrowed, truthiness (c), var/this/void/delete/with/eval/Promise rejected, no implicit globals, ASI, int enforced, Dates as values, sort, on-mount conformance, @cell=serverFn race fix) · dpa-037 (NaN defined + comparison family) · dpa-052 Q1-Q10 · dpa-054 #1-#8 (core decimal in the bootstrap) · dpa-055 R0-R8 (tensors: manipulation+retrieval, dtype tapes, bf16, pgvector, scrml:ml) · dpa-056 R1-R7 (no shared mutable memory; share immutable, transfer lin) · dpa-053 (B) · sequence kind named `tape`
+
+[3587] find · JS-WAT gauntlet: 352 probes, 273 silent leaks, 1 warned → scrml-support/docs/deep-dives/js-wat-gauntlet-2026-09-28/ (+ truthiness/operator measurement)
+
+[3588] friction · four fix rounds each found a finding of the round's OWN making (security r1 block-shadow accept-all; re-land r2 effect loop; "~" r2 keyword-as-property; Date r1 NaN vs a same-day ruling) — pre-set stop conditions ended each; the dPA missed S440 items because the queue was merged but not PULLED to the disk it reads (per-clone) and had no table rows

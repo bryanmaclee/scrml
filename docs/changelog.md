@@ -2,6 +2,19 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S440 — 2026-09-28/29 (bryan · ASUS)
+
+A ruling-heavy session driven by a JS "stupid behaviour" gauntlet (352 probes, 273 silent leaks) and four dPA deep-dives — ~100 bryan rulings, all in `scrml-support/user-voice-scrml.md` S440. Every code landing went through S239 adversarial review; four needed fix rounds for findings of their own making.
+
+- **#1125** — a refused build (E-MW-007/008) writes no dist (Peter's hold, ruled (b)).
+- **#1129** — bootstrap: Peter's #1109 review fixes re-landed over the typer + tables; spread writes are ONE snapshot (strict), ALL-OR-NOTHING (one `rt.batch`), duplicate override key refused; four S239 rounds (a partial-apply and an effect-loop both PA-reproduced and fixed).
+- **#1131** — `"~"` and three sibling raw-text rewrites no longer corrupt string/regex literals; the literal fence's regex-vs-division reading fixed at the root (three rounds).
+- **#1133** — SPEC text for the S440 rulings: E-CALL-ARITY, E-HANDLE-REDECLARE, E-STRUCT-DUPLICATE-KEY, E-EACH-NOT-SEQUENCE, E-SELECT-OPTION-NOT-VARIANT, §66.11.3 one-snapshot/all-or-nothing, `${not}` renders nothing, and the 22-item queue (drift-reviewed twice against the ledger).
+- **#1137** — Dates/built-ins in reactive cells no longer break the page; `==` compares built-ins by value (by brand; SameValueZero per the dpa-037 ruling); the server `==` is sliced from the client runtime; `_scrml_deep_set` fails loud on a non-plain target.
+- **#1139** — SECURITY: nested async helpers no longer bypass the sync-callback fail-closed guards (an accept-all on `xs.some(x => inner(x))`); block-scoped, fails closed on ambiguity; verified with real `scrml:auth` hashing.
+- Docs: #1126/#1128 return-legs to Peter; #1127 review of Peter's S438 codes + new HIGH `g-engine-msg-arm-alternation-emits-arms-as-text`; #1130 coercion gaps; #1132/#1134/#1135/#1136 dPA queue (dpa-054/055/056 banked, drained, rows fixed); 49 new gaps + 16 notes from the gauntlet and the DDs (this wrap).
+- HELD on branches for next session (fix rounds complete, one targeted check each): E-ERROR-002 handler conformance restore (+ §19.6.6 render-time); bootstrap CSS + `<theme>` T3 (§8.4 step 1).
+
 ## S439 — 2026-09-27/28 (bryan · ASUS)
 
 The bootstrap got its first measurement against the conformance corpus, and a typer. M3 items 1–3 were built and adversarially reviewed; the corpus grade was rebuilt around a bite matrix after review showed the first headline certified `if=` with zero positive evidence. bryan ruled Peter's six-note queue ("all recs") and the rulings were written into SPEC after a drift review caught three widenings in the PA's own briefs.

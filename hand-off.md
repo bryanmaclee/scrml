@@ -1,3 +1,87 @@
+# scrml — Session 440 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. SOLO session (S438-peter, S439 both wrapped).
+> **Rulings authority:** `scrml-support/user-voice-scrml.md` §S440 — ~100 rulings, each with the answered text. Read it before building any of them; the PA's restatements below are pointers, not the authority.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 1. Two HELD branches — one targeted S239 check each, then land (fix rounds are complete)
+- **E-ERROR-002 handler conformance** — branch `worktree-agent-ae3f795fdfd7f8631` @ `0f5786c52`, worktree retained.
+  Final round addressed N1 (§19.6.6 now render-time only, ruling #22) · N2 (component guard arms get props) · N4
+  (`event` shadows props in handlers) · N5 (arrow default/rest params skipped, listed not-modelled) · N6 (wording,
+  message no longer advises `<errorBoundary>` at handler sites) · arrows checked per S440 F6. Conformance 1050/1057.
+  ⚑ At landing, reconcile with #1133: §41.14.3 fires E-ERROR-005 for a formFor with NO boundary, and the formFor
+  submit dispatch is "the one handler-time route to a boundary" (PA reading) — §19.6.6 must carry both.
+- **Bootstrap CSS + `<theme>` T3 (dpa-051 §8.4 step 1)** — branch `worktree-agent-a07d7b136031a04cd` @ `6da77d5f8`,
+  worktree retained. Round 1 review was LAND; the fix round added R4 (element-level `#{}` program-global + SPEC §9.1),
+  R5 (E-THEME-TOKEN-CELL-COLLISION §66.20 row), F1-F7 (oracle choices labelled; reset/decl-order/charset now bite).
+  CSS half 38/38; bite matrix CSS 32 certified / 0 uncertified; CG 18/18 unchanged. Touches `core.scrml` (additive) —
+  3-way with main (the re-land #1129 added `Stmt.Commit`). Pending: its "~" charCodeAt workaround is removable (#1131 landed).
+- The truthiness/operator MEASUREMENT branch `worktree-agent-a527fbde1412285fa` @ `c8a96aa60` is RETAINED: its
+  `docs/changes/s440-truthiness-measure/tools/` are worth landing; its `compiler/src` instrumentation must NOT land.
+  Data + summary are already in `scrml-support/docs/deep-dives/js-wat-gauntlet-2026-09-28/`.
+
+### 2. Queued dispatches (RULED, not started)
+- **SECURITY first:** F5 — inline handler `${ if (serverFn()) }` and `on mount` `.some`/nested helpers never await
+  server calls → accept-all (PA-reproduced; gap filed). F4 — an async helper escaping as a value (`const g = m`,
+  object/array, user HOF, `Array.from(xs, m)`) is still an accept-all; RULED: compile error except into awaited
+  combinators. Both touch the #1139 emit code (`local-async-fns.ts`, `emit-expr.ts`) — one dispatch or serial.
+- **#12** `@cell = serverFn()` fired detached (a race) — §13.2 conformance, impl#1 exception RULED.
+- **dpa-054 §8 #1** — Postgres `int8` → `int` (loud >2^53); `numeric`/`decimal` → `string` + schema warning; fix the
+  `scrml introspect` mapper — impl#1 exception RULED.
+- The two #1139 fail-closed false positives (gaps `g-sync-callback-rawtext-scan-false-positives`,
+  `g-sync-local-with-async-name-treated-async`) — ride with the F4/F5 dispatch.
+- dpa-056 D1/D2 — the shipped worker example is broken (bundle never written; `.send()` overwrites the handler).
+- Bootstrap: typer follow-up for S440 #1/#2/#3/#5/#6/#7 + duplicate keys everywhere + truthiness (c) + operators +
+  `!`/`&&`/`||` booleans + `T|not` narrowing + int enforced + `decimal` (dpa-054 #2 A) + dpa-052 Q1-Q6; then grow the
+  front end to all six §66.19 programs (was held behind #1129, now unblocked).
+- **SPEC pass 2** (not written yet): JS-WAT Q1-Q12 as ruled, truthiness (c) incl. Q1/Q2, the operator rules, dpa-037
+  (four calls), dpa-052 Q1-Q10, dpa-053 (B), dpa-054 #2-#8, dpa-055 R0-R8, dpa-056 R1-R7, the `tape` naming + docs jab
+  ("scrml has no objects. It has values, and tapes of cells to hold them."), §45.2 line for date/timestamp values,
+  the §66.10 line on JS-interop class instances losing in-place tracking (#1137). Drift-review it word-for-word.
+- Bank as a dpa item: client-side foreign placement under declared capabilities (dpa-056 R6 option b, RULED "bank").
+- Maps are stale (stamp `fb21983a`); refresh over `compiler/self-host-v2/` and the S440 runtime changes.
+
+### 3. bryan's queue (open)
+- dpa-037 `min`/`max` flavor (754-2019 `minimum` NaN-propagating vs `minimumNumber` NaN-ignoring) — owed with the build.
+- dpa-054 #2 A rep is not ruled (PA likely: scaled integer runtime, string on the wire, NUMERIC in SQL).
+- Anything the SPEC pass 2 drift review finds unruled.
+
+## 🔭 DURABLE
+**A fix round's own finding is the norm, not the exception.** Four of the six code landings needed a round because the
+PREVIOUS round introduced something: security r1 (a block-shadow accept-all), re-land r2 (an effect loop from the
+strict snapshot), `"~"` r2 (keyword-as-property), Date r1 (NaN vs a ruling made hours later). Every one was caught by
+the next adversarial pass, and pre-set stop conditions ended each loop in one guard. Budget a round per landing.
+
+**A ruling can land between a brief and its review.** The Date fix encoded NaN-irreflexive behaviour because dpa-037
+was ruled while it ran; the reviewer caught it only because the PA put the new ruling in the review brief. When a
+ruling touches in-flight work, route it to the reviewer, not just the dev.
+
+**Merged is not on disk.** The dPA missed dpa-055/056 because #1134 was merged on GitHub but not pulled into the
+checkout it reads, and the authoritative CURRENT-STATUS table had no rows for them. Banking a dpa item = section +
+table row + merged + PULLED.
+
+**The corpus says nothing about value-position and nested async.** Four security probes returned a corpus
+differential of zero — the corpus never exercises these shapes. A clean differential there is not evidence.
+
+## ⚑ MISSES (mine)
+1. ★★ My SPEC brief widened two rulings ("cell/field", "handle/declaration"); the SPEC agent caught it by reading the ledger.
+2. ★★ Banked dpa-054/055/056 without CURRENT-STATUS table rows, and did not pull #1134 before the dPA fired.
+3. ★ A stray `cat >> /dev/null` in a compound command hung on stdin; killed by PID.
+4. ★ A `git reset --hard` in a routine re-sync was (rightly) refused by the classifier — local tips already matched.
+5. ★ Resolved one FACTS conflict by `--theirs` + regen (generated file — correct), and nearly missed that a
+   push was refused for stale FACTS until the hook said so.
+
+## Gate at close
+- Merged S440: #1125 #1126 #1127 #1128 #1129 #1130 #1131 #1132 #1133 #1134 #1135 #1136 #1137 #1139 (+ bot #1138).
+  Cloud `gate` green on each; `tracking` failing as on main.
+- Review floor: 0 owed (markers added this wrap).
+- Worktrees removed (landed): a4ee a6e1 a96b a9f8 ab13 ab6e + S439's a70c afe9. Retained: ae3f (E-ERROR-002),
+  a07d (CSS), a527 (measure tools). Older non-S440 worktrees untouched.
+- Board: S440 WRAPPED (scrml-support).
+
+---
+
 # scrml — Session 439 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: **S438-peter
