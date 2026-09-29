@@ -97,9 +97,11 @@ describe("initializers — §7.5.1 position 2, exactly", () => {
   test("E-TYPE-041 — `not` as the initializer of a non-optional annotation", () => {
     expect(codes([boxLib("export <box label:string=\"\"/>\nrenders <p>${label}</p>\n"), boxApp("<box label=(not)/>")])).toEqual(["E-TYPE-041"]);
   });
-  test("stays silent (SPEC-exact) — an `int` annotation is OUTSIDE §7.5.1's set (\"firing on `<n>: int = \\\"s\\\"` would invent a rule\")", () => {
-    expect(inApp("    <let n:int=\"s\"/>")).toEqual([]);
-    expect(codes([boxLib("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxApp("<box n=(\"s\")/>")])).toEqual([]);
+  // RULED S440 (JS-WAT 7(a), "enforce `int`"; PA note "§7.5.1's provable domain widens to `int` with it"):
+  // supersedes SPEC §7.5.1's "`int` is deliberately OUTSIDE" (SPEC pass 2 owes the text).
+  test("E-TYPE-031 (int enforced, S440) — an `int` annotation given a string literal", () => {
+    expect(inApp("    <let n:int=\"s\"/>")).toEqual(["E-TYPE-031"]);
+    expect(codes([boxLib("export <box n:int=0/>\nrenders <p>${n}</p>\n"), boxApp("<box n=(\"s\")/>")])).toEqual(["E-TYPE-031"]);
   });
   test("stays silent (SPEC-exact) — a NON-literal use-site value is outside position 2's literal rule", () => {
     expect(inApp("    <n:int=3/>", "<dropdown label=(@n) options=([\"a\"])/>")).toEqual([]);
@@ -136,10 +138,10 @@ describe("a scope binds each name once", () => {
   test("E-BOOTSTRAP-REDECLARE — a program cell named like a declaration (`@dropdown` would name both)", () => {
     expect(inApp("    <let dropdown:int=0/>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
   });
-  test("E-BOOTSTRAP-REDECLARE — two handles of one name in one `<each>` row", () => {
+  test("E-HANDLE-REDECLARE — two handles of one name in one `<each>` row", () => {
     expect(inApp("    type L:struct = { id: int, name: string }\n    <lines:L[]=([{ id: 1, name: \"a\" }])/>",
       "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/><dropdown as=q label=\"2\" options=([\"a\"])/></each>"))
-      .toEqual(["E-BOOTSTRAP-REDECLARE"]);
+      .toEqual(["E-HANDLE-REDECLARE"]);
   });
   test("legal — a ROW-scoped handle may reuse a program-level handle's name (§66.7.4: \"It is not an error\")", () => {
     expect(inApp("    type L:struct = { id: int, name: string }\n    <lines:L[]=([{ id: 1, name: \"a\" }])/>",
@@ -165,9 +167,9 @@ describe("a scope binds each name once", () => {
 // Calls and `<each>` (bootstrap-local codes) beyond the pins.
 // ---------------------------------------------------------------------------
 describe("calls and `<each in=…>`", () => {
-  test("E-BOOTSTRAP-CALL-ARITY — in a handler and in markup interpolation", () => {
-    expect(inApp("    function g(a: int) -> int { return a }", "<button onclick=g()>x</button>")).toEqual(["E-BOOTSTRAP-CALL-ARITY"]);
-    expect(inApp("    function g(a: int) -> int { return a }", "<p>${g(1, 2)}</p>")).toEqual(["E-BOOTSTRAP-CALL-ARITY"]);
+  test("E-CALL-ARITY — in a handler and in markup interpolation", () => {
+    expect(inApp("    function g(a: int) -> int { return a }", "<button onclick=g()>x</button>")).toEqual(["E-CALL-ARITY"]);
+    expect(inApp("    function g(a: int) -> int { return a }", "<p>${g(1, 2)}</p>")).toEqual(["E-CALL-ARITY"]);
   });
   test("a `-> void` function is legal and its call is silent", () => {
     expect(inApp("    function k() -> void { }\n    function m() { k() }")).toEqual([]);
@@ -175,9 +177,9 @@ describe("calls and `<each in=…>`", () => {
   test("E-TYPE-UNKNOWN — an unknown return type name (now resolved by the binder)", () => {
     expect(inApp("    function h() -> Nope { return 1 }")).toEqual(["E-TYPE-UNKNOWN"]);
   });
-  test("E-BOOTSTRAP-EACH-NOT-SEQUENCE — a string, a struct", () => {
-    expect(inApp("    <s=\"abc\"/>", "<each in=@s as c><p>${c}</p></each>")).toEqual(["E-BOOTSTRAP-EACH-NOT-SEQUENCE"]);
-    expect(inApp("    type P:struct = { x: int }\n    <p:P=({ x: 1 })/>", "<each in=@p as c><p>x</p></each>")).toEqual(["E-BOOTSTRAP-EACH-NOT-SEQUENCE"]);
+  test("E-EACH-NOT-SEQUENCE — a string, a struct", () => {
+    expect(inApp("    <s=\"abc\"/>", "<each in=@s as c><p>${c}</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
+    expect(inApp("    type P:struct = { x: int }\n    <p:P=({ x: 1 })/>", "<each in=@p as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
   });
   test("twin silent — a sequence field read bare inside a declaration's renders (the library's `<each in=options>`)", () => {
     expect(codes([LIB(), app("", "<dropdown label=\"1\" options=([\"a\"])/>")])).toEqual([]);
@@ -189,13 +191,15 @@ describe("calls and `<each in=…>`", () => {
 // fire. (Function-typed attributes, O8, are not parseable by the slice's front
 // end — `<cb:fn()…>` is E-PARSE-TAG — so they have no control yet; neither has a
 // `T | not` cell opener, `<x:string|not=…/>`, same reason.)
+// S442: three S439 controls moved OUT of this list because S440 RULED them
+// errors — `@s || "x"` on strings (Gotcha Q2), a truthy `if=@label` on a string
+// (truthiness (c)), a `number` into an `int` cell (JS-WAT 7(a)); each is now a
+// positive test in typer-s440.test.js.
 // ---------------------------------------------------------------------------
 describe("adversarial controls — adjacent shapes stay silent", () => {
   const C = [
-    ["`||` of strings into a string cell (an operand, not a bool)", "    <let s:string=\"\"/>\n    function f() { @s = @s || \"x\" }"],
     ["a ternary of ints into an int cell, with a bool test", "    <let b:bool=false/>\n    <let x:int=0/>\n    function f() { @x = @b ? 1 : 2 }"],
     ["an int into a `number` cell", "    <let r:number=0.5/>\n    function f() { @r = 2 }"],
-    ["a `number` into an `int` cell (int refines number, S404 — not provable here)", "    <let r:number=0.5/>\n    <let x:int=0/>\n    function f() { @x = @r }"],
     ["`not` and a value into a `T | not` struct field", "    type O:struct = { let v: string | not }\n    <let o:O=({ v: not })/>\n    function f() { @o.v = not\n @o.v = \"a\" }"],
     ["a `T | not` parameter into a `T` cell (may be `not`: unproven, not wrong)", "    <let t:string=\"\"/>\n    function f(s: string | not) { @t = s }"],
     ["an enum variant into an enum cell", "    <let o:Openness=.Closed/>\n    function f() { @o = .Opened }"],
@@ -203,7 +207,6 @@ describe("adversarial controls — adjacent shapes stay silent", () => {
     ["a sequence's `.length` into an int cell", "    <audit:string[free, end]=([])/>\n    <let n:int=0/>\n    function f() { @audit.push(\"x\")\n @n = @audit.length }"],
     ["a read through a `given` narrowing", "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value } }", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>"],
     ["a row alias and `@.` inside `<each>`", "    type L:struct = { id: int, name: string }\n    <lines:L[]=([{ id: 1, name: \"a\" }])/>", "<each in=@lines key=@.id as line><p>${line.name} ${@.id}</p><dropdown label=line.name options=([\"a\"])/></each>"],
-    ["a truthy `if=` on a use and a `not`-able condition", "    <let label:string=\"\"/>", "<dropdown if=@label label=\"1\" options=([\"a\"])/>"],
     ["`reset(@x)` of a `let` cell", "    <let x:int=0/>\n    function f() { reset(@x) }"],
     ["a local rebinding (§66.11.5 is out of the write contracts)", "    function f() { let a = 1\n a = 2 }"],
   ];
@@ -380,10 +383,10 @@ describe("C — no check against what failed to parse", () => {
   });
   test("no arity check against an untyped / malformed parameter list (default value, `b?:`)", () => {
     const g = inApp("    function g(a: int, b: int = 1) { }\n    function f() { g(1) }");
-    expect(g).not.toContain("E-BOOTSTRAP-CALL-ARITY");
+    expect(g).not.toContain("E-CALL-ARITY");
     expect(g.every((c) => c === "E-BOOTSTRAP-UNSUPPORTED")).toBe(true);
     const h = inApp("    function h(a: int, b?: bool) { }\n    function f() { h(1) }");
-    expect(h).not.toContain("E-BOOTSTRAP-CALL-ARITY");
+    expect(h).not.toContain("E-CALL-ARITY");
   });
   test("a return type that failed to parse is not resolved (no E-TYPE-UNKNOWN \"unknown type ``\")", () => {
     expect(inApp("    function g() -> [int, string] { }")).not.toContain("E-TYPE-UNKNOWN");
@@ -428,9 +431,9 @@ describe("F — SPEC-silent duplicates (bootstrap-local, owe rulings)", () => {
 });
 
 describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () => {
-  test("E-BOOTSTRAP-EACH-NOT-SEQUENCE — `in=\"abc\"` and `in=not`, like a cell of that type", () => {
-    expect(inApp("", "<each in=\"abc\" as c><p>x</p></each>")).toEqual(["E-BOOTSTRAP-EACH-NOT-SEQUENCE"]);
-    expect(inApp("", "<each in=not as c><p>x</p></each>")).toEqual(["E-BOOTSTRAP-EACH-NOT-SEQUENCE"]);
+  test("E-EACH-NOT-SEQUENCE — `in=\"abc\"` and `in=not`, like a cell of that type", () => {
+    expect(inApp("", "<each in=\"abc\" as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
+    expect(inApp("", "<each in=not as c><p>x</p></each>")).toEqual(["E-EACH-NOT-SEQUENCE"]);
   });
   test("twin silent — `in=([1, 2])`", () => {
     expect(inApp("", "<each in=([1, 2]) as c><p>${c}</p></each>")).toEqual([]);
@@ -440,11 +443,11 @@ describe("G — `<each in=>` literals, row-scoped handles, exclusive arms", () =
       "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/><p>${@q.value}</p></each>")).toEqual([]);
   });
   test("still refused — a PROGRAM-scope `as=q` beside a program cell `q`", () => {
-    expect(inApp("    <let q:int=0/>", "<dropdown as=q label=\"1\" options=([\"a\"])/>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+    expect(inApp("    <let q:int=0/>", "<dropdown as=q label=\"1\" options=([\"a\"])/>")).toEqual(["E-HANDLE-REDECLARE"]);
   });
-  test("kept (owes a ruling) — one `as=x` in each of two mutually exclusive `if=` arms", () => {
+  test("RULED S440 #5 (iii) (an error for now) — one `as=x` in each of two mutually exclusive `if=` arms", () => {
     expect(inApp("    <let b:bool=false/>", "<div if=@b><dropdown as=x label=\"1\" options=([\"a\"])/></div><div if=(!@b)><dropdown as=x label=\"2\" options=([\"a\"])/></div>"))
-      .toEqual(["E-BOOTSTRAP-REDECLARE"]);
+      .toEqual(["E-HANDLE-REDECLARE"]);
   });
   test("silent — a mixed-arm ternary (`@b ? 1 : \"s\"`) into an int cell: unprovable", () => {
     expect(inApp("    <let b:bool=false/>\n    <let x:int=0/>\n    function f() { @x = @b ? 1 : \"s\" }")).toEqual([]);
@@ -499,17 +502,17 @@ describe("R2-1 — a program cell is visible only in the program's own file (§7
   });
 });
 
-describe("R2-2 — PA INTERIM: an `as=` handle may not shadow a cell visible in its file, in ANY scope", () => {
+describe("R2-2 — (PA interim S439, RULED S440 #5 (ii) + #7) an `as=` handle may not shadow a cell visible in its file, in ANY scope", () => {
   const LINES = "    type L:struct = { id: int }\n    <lines:L[]=([{ id: 1 }])/>\n    <let q:int=0/>";
-  test("E-BOOTSTRAP-REDECLARE — a ROW-scoped `as=q` beside the program cell `q`; the message names both", () => {
+  test("E-HANDLE-REDECLARE — a ROW-scoped `as=q` beside the program cell `q`; the message names both", () => {
     const r = frontEnd(mods, [LIB(), app(LINES, "<each in=@lines key=@.id as line><dropdown as=q label=\"1\" options=([\"a\"])/></each>")]);
-    expect(r.diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-HANDLE-REDECLARE"]);
     expect(r.diags[0].message).toContain("as=q");
     expect(r.diags[0].message).toContain("cell `@q`");
   });
-  test("E-BOOTSTRAP-REDECLARE — a same-file declaration's `renders` handle `q` beside the program cell `q`", () => {
+  test("E-HANDLE-REDECLARE — a same-file declaration's `renders` handle `q` beside the program cell `q`", () => {
     const src = "${ import { dropdown } from \"./lib/dropdown.scrml\" }\n<box n:int=0/>\nrenders <div><dropdown as=q label=\"L\" options=([\"a\"])/></div>\n<program>\n    <let q:string=\"c\"/>\n    <main><box/></main>\n</program>\n";
-    expect(codes([LIB(), f2("app.scrml", src)])).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+    expect(codes([LIB(), f2("app.scrml", src)])).toEqual(["E-HANDLE-REDECLARE"]);
   });
   test("legal — a LIBRARY declaration's handle `q` while the app has a cell `q` (not visible there)", () => {
     const lib = f2("lib/box2.scrml", "${ import { dropdown } from \"./dropdown.scrml\" }\nexport <box2 n:int=0/>\nrenders <div><dropdown as=q label=\"L\" options=([\"a\"])/><p>${@q.value}</p></div>\n");
@@ -546,8 +549,8 @@ describe("R2-4 — §7.5.1 position 1: an annotated `let` / `const` initializer"
   test("twins silent — matching literals; `string | not` given `not`", () => {
     expect(inApp(F("let a: string = \"x\"\n let b: bool = true\n const c: number = 1\n let d: string | not = not"))).toEqual([]);
   });
-  test("stays silent (SPEC-exact) — `int` is outside §7.5.1's literal set", () => {
-    expect(inApp(F("let a: int = \"s\""))).toEqual([]);
+  test("E-TYPE-031 (int enforced, S440 JS-WAT 7(a)) — `let a: int = \"s\"`", () => {
+    expect(inApp(F("let a: int = \"s\""))).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — a struct literal initializer, field by field (`let v: P = { x: 1, y: \"s\" }`)", () => {
     const P = "    type P:struct = { x: int, y: int }\n";
