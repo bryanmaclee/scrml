@@ -6568,12 +6568,12 @@
     "SPAN-COORD": 6
   },
   "stdlib/cron/index.scrml": {
-    "COUNT-LENGTH": 1,
+    "COUNT-LENGTH": 2,
     "EXTRA-FIELD": 12,
-    "FIELD-SHAPE": 5,
+    "FIELD-SHAPE": 9,
     "KIND-NAME": 3,
-    "MISSING-FIELD": 17,
-    "SPAN-COORD": 5
+    "MISSING-FIELD": 41,
+    "SPAN-COORD": 6
   },
   "stdlib/crypto/index.scrml": {
     "COUNT-LENGTH": 4,
@@ -6671,12 +6671,12 @@
     "SPAN-COORD": 10
   },
   "stdlib/http/index.scrml": {
-    "KIND-NAME": 25,
-    "FIELD-SHAPE": 82,
-    "MISSING-FIELD": 300,
-    "EXTRA-FIELD": 76,
+    "KIND-NAME": 27,
+    "FIELD-SHAPE": 87,
+    "MISSING-FIELD": 341,
+    "EXTRA-FIELD": 110,
     "COUNT-LENGTH": 5,
-    "SPAN-COORD": 230
+    "SPAN-COORD": 236
   },
   "stdlib/math/index.scrml": {
     "COUNT-LENGTH": 2,
