@@ -2870,7 +2870,8 @@ function rejectBodyTopProseNative(block, source, ctx) {
         "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
         "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
         "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
-        "</p>`) or write it as a display-text literal (`\"" + shown + "\"`, §4.18.3).",
+        "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+        + "\"`, §4.18.3).",
         { start, end, line: stLine, col: body[fi].span.col ?? 1 },
     ));
     block.body = kept.concat(tailBody);

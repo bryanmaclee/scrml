@@ -91,17 +91,42 @@ function scanLiteralClose(raw, from) {
     return -1;
 }
 
+// Words that, as the last token before a line break, mean the next line is
+// their operand (`@a and⏎ "d"`, `typeof⏎ "x"`) — S441 review #9.
+const CONTINUATION_WORDS = new Set(["and", "or", "in", "of", "instanceof", "is", "typeof", "new", "void", "delete"]);
+
+// Characters that, OPENING the next non-blank line, continue the expression
+// the literal ended (`"a"⏎ + "b"`, `"abc"⏎ .toUpperCase()`) — S441 review #9/#10.
+const LEADING_CONTINUATION_CHARS = new Set(["+", "-", "*", "/", "%", ".", "?", "&", "|", "^", ",", "="]);
+
 // restOfLineIsStatementEnd — predicate. After a closing quote at `at`, the rest
-// of the line is only whitespace, an optional `;`, and an optional `//` comment.
+// of the line is only whitespace, an optional `;`, and an optional `//` comment
+// — and (unless a `;` ended it) the next non-blank line does not open with an
+// operator / `.` / a word operator that would continue the expression.
 function restOfLineIsStatementEnd(raw, at) {
     let i = at;
+    let sawSemi = false;
     while (i < raw.length) {
         const c = raw.charAt(i);
-        if (c === "\n") return true;
-        if (c === " " || c === "\t" || c === "\r" || c === ";") { i += 1; continue; }
-        if (c === "/" && raw.charAt(i + 1) === "/") return true;
+        if (c === "\n") break;
+        if (c === ";") { sawSemi = true; i += 1; continue; }
+        if (c === " " || c === "\t" || c === "\r") { i += 1; continue; }
+        if (c === "/" && raw.charAt(i + 1) === "/") {
+            while (i < raw.length && raw.charAt(i) !== "\n") i += 1;
+            break;
+        }
         return false;
     }
+    if (sawSemi) return true;
+    // Look at the next non-blank line.
+    let j = i;
+    while (j < raw.length && (raw.charAt(j) === "\n" || raw.charAt(j) === " " || raw.charAt(j) === "\t" || raw.charAt(j) === "\r")) j += 1;
+    if (j >= raw.length) return true;
+    const n = raw.charAt(j);
+    if (n === "/" && (raw.charAt(j + 1) === "/" || raw.charAt(j + 1) === "*")) return true;
+    if (LEADING_CONTINUATION_CHARS.has(n)) return false;
+    const w = /^[A-Za-z_$]+/.exec(raw.slice(j));
+    if (w && (w[0] === "and" || w[0] === "or") && !/^[A-Za-z0-9_$]/.test(raw.charAt(j + w[0].length))) return false;
     return true;
 }
 
@@ -114,6 +139,7 @@ export function segmentBodyTopItems(items) {
     // Code-scan state, carried across items of the same body.
     let depth = 0;            // ( [ { nesting in code
     let lastSig = "";         // last significant code char ("" = statement start)
+    let lastWord = "";        // the word token lastSig ended (for CONTINUATION_WORDS)
     let lineClean = true;     // only whitespace since the last line break / break item
     let inTemplate = false;   // inside a code backtick template across items
     let inBlockComment = false;
@@ -223,7 +249,8 @@ export function segmentBodyTopItems(items) {
             }
             if (c === "\"") {
                 const statementStart = depth === 0 && lineClean
-                    && (lastSig === "" || CONTINUATION_CHARS.has(lastSig) === false);
+                    && (lastSig === "" || CONTINUATION_CHARS.has(lastSig) === false)
+                    && CONTINUATION_WORDS.has(lastWord) === false;
                 if (statementStart) {
                     const close = scanLiteralClose(raw, i + 1);
                     if (close === -1) {
@@ -265,10 +292,21 @@ export function segmentBodyTopItems(items) {
                 lineClean = false;
                 continue;
             }
+            if (/[A-Za-z_$]/.test(c) && (i === 0 || /[A-Za-z0-9_$@]/.test(raw.charAt(i - 1)) === false)) {
+                // A whole word token: remember it for CONTINUATION_WORDS.
+                let j = i;
+                while (j < raw.length && /[A-Za-z0-9_$]/.test(raw.charAt(j))) j += 1;
+                lastWord = raw.slice(i, j);
+                lastSig = raw.charAt(j - 1);
+                lineClean = false;
+                i = j;
+                continue;
+            }
             if (c === "(" || c === "[" || c === "{") depth += 1;
             if ((c === ")" || c === "]" || c === "}") && depth > 0) depth -= 1;
             // A closing `}` ends a statement (`fn f() { }⏎ "x"`).
             lastSig = c === "}" || c === ";" ? "" : c;
+            lastWord = "";
             lineClean = false;
             i += 1;
         }

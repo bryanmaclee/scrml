@@ -128,3 +128,38 @@ describe("#8 — a body-top CODE template literal stays whole (not cut at `${`)"
     expect(r.body).toContain("<p id=\"z\">z</p>");
   });
 });
+
+for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native"]]) {
+  describe(`#9/#10 — a \`"..."\` whose expression continues on the next line is code, not display text (${label})`, () => {
+    test("`\"abc\"⏎ .toUpperCase()` is not rendered", () => {
+      const r = compile("<program>\n\"abc\"\n  .toUpperCase()\n<p id=\"z\">z</p>\n</program>\n", parser);
+      expect(r.body).toBe("<p id=\"z\">z</p>");
+    });
+    test("`\"a\"⏎ + \"b\"` is not rendered", () => {
+      const r = compile("<program>\n\"a\"\n  + \"b\"\n<p id=\"z\">z</p>\n</program>\n", parser);
+      expect(r.body).toBe("<p id=\"z\">z</p>");
+    });
+    test("control: `\"a\";⏎ + x` — a `;` ends the literal statement, so it renders", () => {
+      const r = compile("<program>\n\"shown\";\n<p id=\"z\">z</p>\n</program>\n", parser);
+      expect(r.body).toContain("shown");
+    });
+  });
+}
+
+describe("#9 — `@a and⏎ \"d\"`: a word operator at a line end makes the next-line string its operand (default)", () => {
+  test("the string is not split out as display text", () => {
+    const r = compile("<program>\n<a> = true\nconst s = @a and\n  \"d\"\n<p id=\"z\">${s}</p>\n</program>\n");
+    expect(r.errors).toHaveLength(0);
+    expect(r.body).not.toContain(">d<");
+    expect(r.client).toContain("&&");
+  });
+});
+
+for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native"]]) {
+  test(`#11 — the suggested display-text literal is itself valid (quotes escaped) (${label})`, () => {
+    const r = compile("<program>\nprose then \"quoted\" word\n<p id=\"z\">z</p>\n</program>\n", parser);
+    const e = r.errors.find((x) => x.code === "E-UNQUOTED-DISPLAY-TEXT");
+    expect(e).toBeDefined();
+    expect(e.message).toContain('"prose then \\"quoted\\" word"');
+  });
+}

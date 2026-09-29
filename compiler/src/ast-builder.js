@@ -1389,7 +1389,7 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
     `\`<page>\` / \`<channel>\` body is code (SPEC §40.8, S441) — loose prose is ` +
     `not allowed there. If this is displayed text, declare it: wrap it in a ` +
     `markup element (\`<p>${shown}</p>\`) or write it as a display-text literal ` +
-    `(\`"${shown}"\`, §4.18.3).`,
+    `(\`"${shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"\`, §4.18.3).`,
     { file: filePath, start, end, line: lineNo, col: 1 + (leadWs < 0 ? 0 : leadWs) },
   ));
   for (const st of tail) body.push(st);
