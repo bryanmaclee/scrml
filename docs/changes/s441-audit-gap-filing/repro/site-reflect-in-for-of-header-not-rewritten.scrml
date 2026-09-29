@@ -1,0 +1,23 @@
+// S441 reproducer — addendum-2 S4: `reflect(T)` directly in a `for … of` header inside `^{}` fails E-META-EVAL-001.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-reflect-in-for-of-header-not-rewritten.scrml --output-dir <scratch>
+// Expected: §22.4.2 "`reflect()` is the single, unified API … The programmer always writes `reflect(expr)`
+//           regardless of whether the argument is known at compile time"; a compile-time constant
+//           (`reflect(User)`) is a "Direct registry lookup inlined at compile time".
+// Actual:   exit 1 `error [E-META-EVAL-001]: Compile-time meta evaluation failed: Signup is not defined`.
+//           Control: `const info = reflect(Signup)` then `for (const field of info.fields)` → exit 0.
+//           Locus guess (agent-located-verify): compiler/src/meta-eval.ts rewriteReflectCalls
+//           (bare type name → string) is not applied to the for-of iterable expression.
+<program>
+type Signup:struct = {
+  email:    string,
+  name:     string
+}
+<form>
+  ^{
+    for (const field of reflect(Signup).fields) {
+      emit(`<label>${field.name} <input type="text" name="${field.name}"></label>`)
+    }
+  }
+</form>
+</program>

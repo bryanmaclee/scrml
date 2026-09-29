@@ -1,0 +1,19 @@
+// S441 reproducer — addendum item 26: unquoted numeric supervision attributes `max-restarts=3 within=60` on a
+// nested <program> fail E-SCOPE-001, though SPEC's own example writes them unquoted.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/supervision-attrs-unquoted-number-e-scope-001.scrml --output-dir <scratch>
+// Expected: compiles — see the gap for the SPEC example quoted.
+// Actual:   exit 1: `error [E-SCOPE-001]: Unquoted identifier `3` in attribute `max-restarts` cannot be resolved in
+//           the current scope. Did you mean to quote it as a string (`"3"`), or use `@` for a reactive variable
+//           (`@3`)?` and the same for `within`/`60`. The quoted form `max-restarts="3" within="60"` compiles.
+<program>
+    <program name="stats" restart="on-error" max-restarts=3 within=60>
+        ${
+            when message(data) {
+                send({ total: data.n * 2 })
+            }
+        }
+    </>
+    <total> = 0
+    <p>${@total}</p>
+</program>

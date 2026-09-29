@@ -1,0 +1,18 @@
+// S441 reproducer — item 2: `topic=@room` is emitted as the literal topic string "room".
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/channel-dynamic-topic-emitted-as-literal-name.scrml --output-dir <scratch>
+// Expected: §38.6.2 (SPEC.md:~22767) "When `topic=@var` is dynamic, the compiler SHALL emit a topic
+//           subscription/unsubscription call in the client IIFE that fires on every write to `@var`."
+//           (§38.11 instead says topic= "SHALL be static literals" — SPEC-vs-SPEC, see the gap. Under
+//           either sentence the observed output is wrong.)
+// Actual:   exit 0, zero diagnostics. server.js:
+//           `server.upgrade(req, { data: { __ch: "rooms", __topic: "room" } })`; client.js comment
+//           `<channel name="rooms" topic="room">`. No subscription call; every client of every room joins the
+//           topic "room" (the cell's NAME), so broadcasts reach all rooms.
+<program>
+<room> = "a"
+<channel name="rooms" topic=@room>
+    <items> = []
+</>
+<p>${@items.length}</p>
+</>

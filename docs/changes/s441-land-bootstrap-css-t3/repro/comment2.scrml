@@ -1,0 +1,10 @@
+<program>
+  #{
+      .panel {
+          color: red;
+          // subtle scanline overlay
+          padding: 4px;
+      }
+  }
+  <div class="panel">x</div>
+</program>

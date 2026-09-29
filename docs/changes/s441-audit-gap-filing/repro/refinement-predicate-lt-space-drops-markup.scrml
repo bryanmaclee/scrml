@@ -1,0 +1,16 @@
+// S441 reproducer — item 7: `< 255` (space after `<`) in a top-level refinement predicate silently eats the
+// declaration's initializer AND the following markup.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/refinement-predicate-lt-space-drops-markup.scrml --output-dir <scratch>
+// Expected: `<pw>` initialised to "longenough" and the <input> rendered — `.length < 255` is a comparison in a
+//           §53 predicate, not a tag opener. Control: `.length <255` (no space) compiles correctly (input
+//           rendered) — the whitespace after `<` is the trigger.
+// Actual:   exit 0 with only `warning [W-WHITESPACE-001]: Opener `< 255>` uses whitespace between `<` and the
+//           identifier. The canonical form is no-space (`<255>`)…` (advice that is itself wrong).
+//           client.js: `_scrml_cs_reactive_set("pw", null)` (init lost); HTML body has no <input> — only
+//           `<p><span data-scrml-logic=…></span></p>`.
+<program>
+<pw>: string(.length > 7 && .length < 255) = "longenough"
+<input bind:value=@pw/>
+<p>${@pw}</p>
+</>

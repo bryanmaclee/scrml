@@ -1,0 +1,25 @@
+{
+  "spec": "§65.8, §9.1",
+  "rationale": "The component rule `.card { color: green }` applies; the program-global `#{}` (with its hoisted `@import`) does not disturb it. §65.3.4: the built-in reset ships default-on — `margin` zeroed on `body`, `box-sizing: border-box` on every element.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "body",
+          "prop": "margin-top",
+          "value": "0px"
+        },
+        {
+          "sel": "body > *",
+          "prop": "box-sizing",
+          "value": "border-box"
+        },
+        {
+          "sel": ".card",
+          "prop": "color",
+          "value": "rgb(0, 128, 0)"
+        }
+      ]
+    }
+  ]
+}
