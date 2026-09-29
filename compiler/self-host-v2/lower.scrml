@@ -261,6 +261,9 @@ ${
             .Assign(target: t) :> missing()
             .ArrayLit(elems: es) :> Expr.ArrayOf(lowerExprs(c, es))
             .ObjectLit(props: ps) :> valueExpr(c, valueFact(c.t.values, e.nid), ps)
+            .Spread(e: sx) :> missing()
+            .Index(obj: ix) :> missing()
+            .Lambda(params: lp) :> missing()
         }
     }
 
@@ -450,6 +453,7 @@ ${
             .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value)
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
             .EAssignLocal(sym: s) :> assignLocal(c, s, value)
+            .EEdits(w: w, elems: es) :> editStmts(c, w, es)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
@@ -474,6 +478,9 @@ ${
             .Ternary(test: t) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -485,6 +492,30 @@ ${
     fn writeStmt(c: LC, w: WriteFact, value: AExpr | not) -> Stmt[] {
         if (value is not) return []
         return [Stmt.Write(w.cap, instOf(c, w.inst), w.edit, lowerExpr(c, value), w.check)]
+    }
+
+    // s442 — a recognized sequence shape (§66.11.2): `@x = [...@x, a, b]` is the
+    // end-appends of `a` then `b` (the same edits as `@x.push(a); @x.push(b)`);
+    // `@x = [a, b, ...@x]` the front-prepends of `b` then `a`, so the result
+    // reads `[a, b, …]`. Every element is evaluated before the first write —
+    // the array literal is one value built from one snapshot (§66.10).
+    fn editStmts(c: LC, w: WriteFact, elems: AExpr[]) -> Stmt[] {
+        let values: Expr[] = []
+        for (const x of elems) { values = values.concat([lowerExpr(c, x)]) }
+        const prepend: boolean = w.edit == EditKind.Prepend
+        let out: Stmt[] = []
+        if (prepend) {
+            let k: int = values.length - 1
+            while (k >= 0) {
+                out = out.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, values[k], w.check)])
+                k = k - 1
+            }
+            return out
+        }
+        for (const v of values) {
+            out = out.concat([Stmt.Write(w.cap, instOf(c, w.inst), w.edit, v, w.check)])
+        }
+        return out
     }
 
     fn assignLocal(c: LC, s: Sym, value: AExpr | not) -> Stmt[] {
@@ -589,6 +620,9 @@ ${
         const k: AExprK = e.k
         return match k {
             .ObjectLit(props: ps) :> ps
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []

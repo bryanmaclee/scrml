@@ -54,6 +54,13 @@ ${
         Assign(target: AExpr, value: AExpr),         // statement position only (analyze checks)
         ArrayLit(elems: AExpr[]),
         ObjectLit(props: AProp[]),
+        // s442 (§66.19.5): an array element `...e` (an object literal's spread is
+        // AProp.spread); `a[i]`; an arrow function `x => e` / `(a, b) => e`
+        // (expression body). Each is legal only where analyze recognizes it
+        // (an edit shape, §66.11.2) — Core has no spread, index or function value.
+        Spread(e: AExpr),
+        Index(obj: AExpr, idx: AExpr),
+        Lambda(params: string[], body: AExpr),
     }
 
     // -------------------------------------------------------------------------
