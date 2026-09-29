@@ -728,6 +728,20 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + "    function g(z: int[] | not) { }\n    function f() { g([@o.n]) }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + "    <let b:bool=false/>\n    function f() { let k2: int[] | not = @b ? [@o.n] : not }")).toEqual(["E-TYPE-031"]);
   });
+  // r7 C: code E-TYPE-041 (§42.3.1: `not` into a non-optional type) — the code every other position already
+  // emits for the `not` LITERAL (a write, an annotated local, `return not` / `g(not)` into `int`); one shape, one code.
+  test("r7 C — the `not` literal into a non-optional return / argument / element is E-TYPE-041 for every type", () => {
+    expect(inApp(O + "    function h() -> string { return not }")).toEqual(["E-TYPE-041"]);
+    expect(inApp(O + "    function g(z: string) { }\n    function f() { g(not) }")).toEqual(["E-TYPE-041"]);
+    expect(inApp(O + "    function f() { let ks: string[] = [not] }")).toEqual(["E-TYPE-041"]);
+    expect(inApp(O + "    <ks:string[replace]=([])/>\n    function f() { @ks = [not, not] }")).toEqual(["E-TYPE-041", "E-TYPE-041"]);
+    expect(inApp(O + "    function g(z: int[]) { }\n    function f() { g([not]) }")).toEqual(["E-TYPE-041"]);
+  });
+  test("r7 C twins — `not` into `T | not` (return, argument, element of `T[] | not`… as the whole value); a mixed `[1, not]` reported ONCE (E-TYPE-031)", () => {
+    expect(inApp(O + "    function g(z: string | not) -> string | not { return not }\n    function f() { g(not) }")).toEqual([]);
+    expect(inApp(O + "    function f() { let ks: int[] | not = not }")).toEqual([]);
+    expect(inApp(O + "    function f() { let js: int[] = [1, not] }")).toEqual(["E-TYPE-031"]);
+  });
   test("r7 B twins — `not` itself into `int[] | not`; a narrowed element; present elements", () => {
     expect(inApp(O + "    function f() { let ks: int[] | not = not }")).toEqual([]);
     expect(inApp(O + "    function f() { if (@o.n != not) { let ks: int[] | not = [@o.n] } }")).toEqual([]);

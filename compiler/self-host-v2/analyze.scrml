@@ -5017,6 +5017,7 @@ ${
                 } else {
                     ts = checkMaybeNot(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)   // r6: only the `T | not` rule
                 }
+                ts = checkNotElems(env, args[i], pt, ts)
             }
             i = i + 1
         }
@@ -5029,18 +5030,19 @@ ${
         if (e is not) return ts
         const rt: Type | not = env.fret
         if (rt is not) return ts
-        if (!hasInt(rt)) return checkMaybeNot(env, exprType0(ts, e.nid), rt, e.span, "the return value", ts)   // r6: any other type — only the `T | not` rule
-        return checkValue(env, exprType0(ts, e.nid), rt, e.span, "the return value", ts)
+        const ts1: TypeState = checkNotElems(env, e, rt, ts)
+        if (!hasInt(rt)) return checkMaybeNot(env, exprType0(ts1, e.nid), rt, e.span, "the return value", ts1)   // r6: any other type — only the `T | not` rule
+        return checkValue(env, exprType0(ts1, e.nid), rt, e.span, "the return value", ts1)
     }
 
     // A non-literal initializer into an `int`-bearing annotation (a literal is
     // checkInit's; checking it here too would report it twice).
     // The struct literals inside an attribute-valued initializer, field by
     // field (as a write's and an annotated local's are — spelling-independent).
-    fn checkAttrLitFields(env: TEnv, v: AAttrValue, ts: TypeState) -> TypeState {
+    fn checkAttrLitFields(env: TEnv, v: AAttrValue, target: Type, ts: TypeState) -> TypeState {
         const x: AExpr | not = valueExpr(v)
         if (x is not) return ts
-        return checkLitFields(env, x, ts)
+        return checkNotElems(env, x, target, checkLitFields(env, x, ts))
     }
 
     // r6: at a position checked for `int` only (a return, an argument, a
@@ -5049,10 +5051,58 @@ ${
     // (ruled S442) decides that question in every position that takes a `T`;
     // no ruling widens those positions for other type mismatches.
     fn checkMaybeNot(env: TEnv, v: VType, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
+        // r7 C: the `not` literal itself into a non-optional target — the
+        // same failure, reported with the code every other position already
+        // uses for it (E-TYPE-041, §42.3.1)
+        if (isAbsentVT(v)) return checkAbsent(env, target, span, what, ts)
         const x: Type | not = knownOf(v)
         if (x is not) return ts
         if (!mayBeNot(x, target)) return ts
         return checkKnown(env, x, target, span, what, ts)
+    }
+
+    // r7 C: `not` ELEMENTS of an array literal into a sequence whose element
+    // type is non-optional (`[not]` into `string[]`). Only when the array's
+    // own type is unproven (all elements `not` / unknown) — a typed array
+    // (`[1, not]`: `(int | not)[]`) is mayBeNot's, reported once there.
+    fn checkNotElems(env: TEnv, e: AExpr, target: Type, ts: TypeState) -> TypeState {
+        const es: AExpr[] = arrayElems(e)
+        if (es.length == 0) return ts
+        if (knownOf(exprType0(ts, e.nid)) is some) return ts
+        const te: Type | not = seqElem(unMaybe(target))
+        if (te is not) return ts
+        let out: TypeState = ts
+        for (const x of es) {
+            if (isNotLit(x)) {
+                out = checkAbsent(env, te, x.span, "an element of `" + typeName(target) + "`", out)
+            } else {
+                out = checkNotElems(env, x, te, out)
+            }
+        }
+        return out
+    }
+
+    fn arrayElems(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: es) :> es
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: x) :> []
+            .Assign(target: x) :> []
+            .ObjectLit(props: ps) :> []
+        }
     }
 
     fn checkIntInit(env: TEnv, target: Type, lk: int, v: VType, span: ASpan, what: string, ts: TypeState) -> TypeState {
@@ -5227,7 +5277,7 @@ ${
         if (annot is some) {
             let ts2: TypeState = checkInit(env, annot, literalKind(init), init.span, "`" + name + "`", r.ts)
             ts2 = checkIntInit(env, annot, literalKind(init), r.vt, init.span, "`" + name + "`", ts2)
-            ts2 = checkLitFields(env, init, ts2)
+            ts2 = checkNotElems(env, init, annot, checkLitFields(env, init, ts2))
             return keepTEnv(tWithLocal(env, sym, known(annot)), ts2)
         }
         return keepTEnv(tWithLocal(env, sym, r.vt), contribute(r.ts, sym, r.vt))
@@ -5395,7 +5445,7 @@ ${
         if (!f.trusted) return ts
         const target: Type | not = writeValueType(env.t, w)
         if (target is not) return ts
-        return checkLitFields(env, value, checkValue(env, v, target, value.span, what, ts))
+        return checkNotElems(env, value, target, checkLitFields(env, value, checkValue(env, v, target, value.span, what, ts)))
     }
 
     // The struct literals inside a written value: each named property against
@@ -5561,7 +5611,7 @@ ${
                     const lk: int = attrLiteralKind(a.value)
                     ts = checkInit(env, f.ty, lk, a.span, what, ts)
                     ts = checkIntInit(env, f.ty, lk, av, a.span, what, ts)
-                    ts = checkAttrLitFields(env, a.value, ts)
+                    ts = checkAttrLitFields(env, a.value, f.ty, ts)
                 }
             }
         }
@@ -5745,7 +5795,7 @@ ${
                 const lk: int = attrLiteralKind(f.init)
                 ts = checkInit(env, f.ty, lk, f.span, "`" + f.sym.hint + "`", ts)
                 ts = checkIntInit(env, f.ty, lk, rv.vt, f.span, "`" + f.sym.hint + "`", ts)
-                ts = checkAttrLitFields(env, f.init, ts)
+                ts = checkAttrLitFields(env, f.init, f.ty, ts)
             }
         }
         return ts
