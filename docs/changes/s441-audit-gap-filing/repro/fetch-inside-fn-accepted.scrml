@@ -1,0 +1,14 @@
+// S441 reproducer — item 8: a host `fetch()` call inside a `fn` body compiles clean.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/fetch-inside-fn-accepted.scrml --output-dir <scratch>
+// Expected: RULING-GATED. §34's E-FN-003 row reads "call to a non-`pure`, non-`fn` function"; §48.3.4's
+//           non-deterministic list is declared "exhaustive for the initial version" and does not name fetch.
+// Actual:   exit 0, zero diagnostics; client.js line 7: `fetch(u);` inside the `fn get` body (an un-awaited,
+//           fire-and-forget network request from a "pure" function).
+<program>
+fn get(u: string) -> number {
+    fetch(u)
+    return 1
+}
+<p>${get("x")}</p>
+</>

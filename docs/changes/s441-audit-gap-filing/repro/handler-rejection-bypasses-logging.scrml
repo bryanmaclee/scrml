@@ -1,0 +1,26 @@
+// S441 reproducer — addendum-4 R7: a rejected server call awaited inside an event handler escapes as an unhandled
+// promise rejection; no scrml logging surface sees it.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/handler-rejection-bypasses-logging.scrml --output-dir <scratch>
+// Expected: RULING-GATED (see the gap) — §19.6.8 B5 routes caught errors to the logging surface, but only for an
+//           <errorBoundary> subtree.
+// Actual:   exit 0. client.js: `async function _scrml_go2_5() { const a = await _scrml_fetch_double_4(1); … }` wired as
+//           `function(event) { _scrml_go2_5(); }` — no `.catch`. (In the review probe rv-cell12-out/p/s3/reject.scrml the
+//           detached single-assign form `@out = double(21)` does route to `_scrml_error_boundary_log`.)
+<program db="h.db">
+${
+    <out>: number = 0
+    <after>: string = "not-run"
+    <other>: number = 0
+    function double(n: number) -> number {
+        return ?{`SELECT ${n} * 2 AS v`}.get().v
+    }
+    function go2() {
+        const a = double(1)
+        @other = a
+        @after = "ran2"
+    }
+}
+<button onclick=go2()>b2</button>
+<p>${@after}</p>
+</program>

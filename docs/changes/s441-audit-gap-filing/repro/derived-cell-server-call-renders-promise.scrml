@@ -1,0 +1,15 @@
+// S441 reproducer — addendum-4 R5: a derived cell whose RHS calls a server function renders `[object Promise]`.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/derived-cell-server-call-renders-promise.scrml --output-dir <scratch>
+// Expected: see the gap (§6.6.19 E-DERIVED-SERVER-ONLY-REACH vs an awaited/refused call).
+// Actual:   see the gap.
+<program db="d.db">
+<schema>
+    items { id: integer primary key
+            qty: integer }
+</>
+<n> = 1
+function qtyOf(id) { return ?{`SELECT qty FROM items WHERE id = ${id}`}.get() }
+const <d> = qtyOf(@n)
+<p>${@d}</p>
+</program>

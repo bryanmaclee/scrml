@@ -1,0 +1,21 @@
+// S441 reproducer — item 11: W-LINT-008 ("{cond && <El>}", the React conditional) false-fires on §53 refinement
+// predicates `number(>0 && <10000)` that follow a `{` — a struct body and a `fn` body.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/w-lint-008-refinement-predicate.scrml --output-dir <scratch>
+// Expected: no W-LINT-008 — there is no JSX conditional here.
+// Actual:   exit 0 with `lint [W-LINT-008]: Line 13: Found '{cond && <El>}' — scrml uses '<El if=@cond>'. See §17.`
+//           and the same at Line 16 — the `{` opening the struct body and the `{` opening the `fn` body (whose
+//           `let safe:` annotation carries the predicate). The same predicate on a top-level cell,
+//           with no preceding `{`, does not fire. Root (traced): compiler/src/lint-ghost-patterns.js Pattern 8
+//           regex `/\{[^}]+&&\s*</g` — any `{ … && <` outside `${}`/comments matches, and `&& <10000` is exactly that.
+<program>
+<price>: number(>0 && <10000) = 5
+type Invoice:struct = {
+    amount: number(>0 && <10000)
+}
+fn discount(amount: number) -> number {
+    let safe: number(>0 && <10000) = amount
+    return safe
+}
+<p>${discount(@price)}</p>
+</>

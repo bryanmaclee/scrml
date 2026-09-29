@@ -1,0 +1,28 @@
+// S441 reproducer — item 3: the §8.10 Tier-2 loop hoist keys its Map by a column the SELECT never returns.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/nplus1-hoist-key-column-not-selected.scrml --output-dir <scratch>
+// Expected: §8.10.3 "The rewritten loop is observationally equivalent to the un-rewritten loop" —
+//           names([{id:1},{id:2},{id:3}]) returns the three rows.
+// Actual:   exit 0. server.js hoists `SELECT name FROM users WHERE id IN (...)` and then
+//           `for (const _r of rows) byKey.set(_r["id"], _r)` — `id` is not selected, so the Map's only key
+//           is `undefined` and every lookup yields null. EXECUTED against SQLite with the emitted lines
+//           verbatim: rows [{"name":"a"},{"name":"b"},{"name":"c"}], map keys [undefined],
+//           result [null,null,null]; the un-rewritten per-row loop returns all three rows.
+//           Silent data loss, no diagnostic.
+<program db="n.db">
+<schema>
+    users { id: integer primary key
+            name: text }
+</>
+function names(ids) {
+    const out = []
+    for (const x of ids) {
+        const u = ?{`SELECT name FROM users WHERE id = ${x.id}`}.get()
+        out.push(u)
+    }
+    return out
+}
+<rows> = []
+<button onclick={ @rows = names([{ id: 1 }, { id: 2 }, { id: 3 }]) }>load</button>
+<p>${@rows.length}</p>
+</>

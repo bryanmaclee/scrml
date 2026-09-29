@@ -1,0 +1,19 @@
+// S441 reproducer — addendum-5 N3: an imported name redeclared by a local `type X:struct` is accepted silently.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/import-shadowed-by-local-struct.scrml --output-dir <scratch>
+// Expected: a duplicate-declaration error for `AppErr` (imported enum vs local struct).
+// Actual:   exit 0, no diagnostic. The local struct wins, so `! AppErr` has no variants to check and `fail .Nope`
+//           emits `{ __scrml_error: true, type: "", variant: "Nope", data: null }` — also unchecked.
+<program>
+${
+    import { AppErr } from "./n3-errs.scrml"
+    type AppErr:struct = { a: number }
+    <out> = ""
+    function f(n: string) ! AppErr { if (n == "") fail .Nope }
+    function run() {
+        f("") !{ | .NotFound :> { @out = "nf" } | _ :> { @out = "o" } }
+    }
+}
+<button onclick=run()>go</button>
+<p>${@out}</p>
+</program>
