@@ -1,0 +1,24 @@
+// S441 reproducer — addendum-5 P1: `fail` in an expression position (`c && fail A.X`, `c ? fail .X : 2`).
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/fail-in-expression-position.scrml --output-dir <scratch>
+// Expected: a user-level diagnostic naming `fail` as a statement (§19), or a lowering.
+// Actual:   see the gap (`&&` form → E-CODEGEN-INVALID-LOGIC "compiler defect", emitted `n === 1 &&;` followed by an
+//           UNCONDITIONAL `return {__scrml_error…}`; ternary form → E-SCOPE-001 "Undeclared identifier `fail`").
+<program>
+type A:enum = { X, Y(msg: string) }
+<out> = ""
+function f(n: number) ! A {
+    n == 1 && fail A.X
+    return 1
+}
+function g(c: boolean) ! A {
+    let z = c ? fail .X : 2
+    return z
+}
+function run() {
+    f(1) !{ | .X :> { @out = "x" } | _ :> { @out = "o" } }
+    g(true) !{ | .X :> { @out = "gx" } | _ :> { @out = "go" } }
+}
+<button onclick=run()>go</button>
+<p>${@out}</p>
+</program>
