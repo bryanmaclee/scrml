@@ -50,3 +50,4 @@ Whitespace-after-`<` openers (§4.3 deprecated form) inside a free-text body: 1 
 `<p>5 < 7 is true</p>` today: E-CTX-001 (`'</program>' tries to close '<7>'`) + E-CTX-003 cascade. `x <3`, `a <= b`, stray `\` in `<p>`: compile, emitted verbatim.
 
 - 2026-09-29 STEP 2 (D) SPEC amendment written: §4.18 banner, §4.18.1 / .1a / .1b, §4.18.3 (`\"` deleted; B(2) OPEN), §4.18.4 note, §4.18.5 (revised), §4.18.7 lint wording, §4.18.9, §4.17 orthogonality note. SPEC-INDEX regenerated + §4 summary; facts --write (SPEC lines 40,761 → 40,932); conformance 1104/1111 + 7 xfail (unchanged by a SPEC-only edit).
+- 2026-09-29T17:49:06-06:00 STEP 3 — S442 follow-up rulings applied (closed exit set; cooked; catalog deleted; whitespace-only text kept; §4.3/§15.15.5 spaced opener = text). regen + facts --write (SPEC 40,964 lines); conformance 1104/1111 + 7 xfail.
