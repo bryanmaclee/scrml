@@ -1,0 +1,16 @@
+change-id: s441-audit-gap-filing
+
+Reproduce and FILE (ledger only — NO compiler/SPEC change) the compiler defects surfaced by the S441 public-surface audit. The public NERDME now points readers at docs/known-gaps.md for several of these, so each must exist there. List: /tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/3d8eae9f-f153-45e9-9c40-317c40f0c614/scratchpad/audit/NEW-BUGS.md (read in full; each item is a CLAIM with a probe path).
+
+STARTUP / PATH DISCIPLINE: pwd must start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-` and equal `git rev-parse --show-toplevel`; tree clean; based on origin/main. `bun install`. Edit/Write only absolute paths under your worktree; never cd into /home/bryan-maclee/scrmlMaster/scrml; never `git stash`; never `pkill -f`. Scratch under /tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/3d8eae9f-f153-45e9-9c40-317c40f0c614/scratchpad/s441-gaps/. First commit: this prompt verbatim → `docs/changes/s441-audit-gap-filing/BRIEF.md` + progress.md. Foreground commits, long timeout, never --no-verify.
+
+FOR EACH ITEM:
+1. Reproduce on your tree with a MINIMAL version-stamped reproducer saved to `docs/changes/s441-audit-gap-filing/repro/<slug>.scrml` (header comment: compiler SHA, command, expected vs actual). Compile: `bun compiler/bin/scrml.js compile <f> --output-dir <scratch>`; show the emitted line that proves it. Where behaviour matters, execute it.
+2. Search docs/known-gaps.md for an existing entry (by symptom AND by symbol — grep several phrasings). If one exists, add a dated S441 re-verification note to it instead of a duplicate.
+3. Governing-sentence gate: for each, quote the SPEC sentence it violates with §ref, or write "searched §X, §Y — no governing sentence found" (that makes it a ruling question, not a bug — mark status=ruling-gated). Items 4 (CSRF under auth) and 14 (db= on <page>) especially.
+4. File in the house format (read several recent S440 entries first and match them exactly): a `### g-<kebab-slug> — <one-line symptom> — \`NEW S441; SEV; open\`` heading + `<!-- @gap id=g-<slug> sev=HIGH|MED|LOW status=open locus=<path[:symbol]>|searched:<a>,<b> prov=empirical:S441-audit-<which> -->` + a short body (reproducer path, emitted evidence, governing sentence, fix direction if obvious — locus marked PA/agent-located-verify unless traced). Severity: HIGH = silent wrong output / security / data loss; MED = loud failure or wrong diagnostic on a supported form; LOW = cosmetic/stale text. Four tiers only (HIGH/MED/LOW/NOMINAL). Place them in a new `## S441` section (look at how S440 sections are organised).
+5. SPEC-text drift items (19, 20) and stale CLI strings (18): file each as a LOW/MED gap; do NOT edit SPEC or code.
+6. Items that do NOT reproduce: record them in progress.md as NOT-REPRODUCED with the table (what you ran, what you saw) — do not file.
+Then `bun scripts/state.ts --write` (regen counts; known-gaps.md is MIXED — only its generated count hunks change) and `bun scripts/state.ts --check`.
+
+`git push -u origin HEAD`. REPORT: worktree, branch, FINAL SHA (== pushed tip), a table: item # → gap id (new / existing-updated / not-reproduced) · sev · governing sentence or ruling-gated · one-line evidence. Call out explicitly: the CSRF verdict (bug vs ruling) with the quoted SPEC text. git status clean before DONE.

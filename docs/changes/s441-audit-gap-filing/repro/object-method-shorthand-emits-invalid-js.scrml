@@ -1,0 +1,14 @@
+// S441 reproducer — addendum-4 R6: object-literal method shorthand `{ run() { … } }` emits `{run: }`.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/object-method-shorthand-emits-invalid-js.scrml --output-dir <scratch>
+// Expected: a named E-*-NOT-IN-SCRML rejection (RULED S440 JS-WAT #4: method shorthand is not scrml).
+// Actual:   see the gap.
+<program>
+<out> = 0
+function go() {
+    const o = { run() { return 7 } }
+    @out = o.run()
+}
+<button onclick=go()>go</button>
+<p>${@out}</p>
+</program>

@@ -1,0 +1,14 @@
+// S441 reproducer — addendum-2 S3a: the §55.1 `is some` validator on a cell declaration silently drops the cell.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-is-some-cell-validator-drops-decl.scrml --output-dir <scratch>
+// Expected: §55.1 universal-core table row: `is some` | "Value exists …" | example use `<x is some>` |
+//           error tag `.NotSome`. The cell is declared with a validity surface.
+// Actual:   exit 1, but the declaration itself draws NO diagnostic; the cell is never registered, so the
+//           later reads fail: `E-SCOPE-001: Unquoted identifier `@mid` in attribute `bind:value`…` and
+//           `E-STATE-UNDECLARED: bare `@mid` read with no reactive cell in scope…` — both blame the read
+//           sites. Same with a type: `<mid: string is some> = ""`. Other validators (`req`, `gt(0)`) parse.
+<program>
+<mid is some> = ""
+<input bind:value=@mid>
+<p>${@mid}</p>
+</program>

@@ -1,0 +1,24 @@
+// S441 reproducer — item 12: reads inside an engine opener effect= block are invisible to the W-DEAD-FUNCTION
+// and E-DG-002 walkers (the README flagship docs/readme-snippets/tasks-app.scrml shows the same thing: a false
+// W-DEAD-FUNCTION on its loader and E-DG-002 on its user-id and task-list cells).
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/engine-effect-reads-invisible-to-dg.scrml --output-dir <scratch>
+// Expected: no W-DEAD-FUNCTION on the helper and no E-DG-002 on the seed cell — the effect uses both.
+// Actual:   exit 0 with W-DEAD-FUNCTION ("has no callers … It will be tree-shaken from the output") on the helper
+//           and E-DG-002 ("declared but never consumed") on the seed cell. Neither is true: client.js keeps the
+//           helper and the effect IIFE calls it with the seed cell's value. (E-DG-002 on the list cell is
+//           correct — it is only written.)
+// NOTE: this header deliberately avoids spelling the helper's or the cells' names. A `//` comment that
+//       mentions them SILENCES both warnings — the reference walkers read comment text (measured; see the gap).
+<program>
+type Phase:enum = { Loading, Ready }
+<seed>: number = 3
+<items> = []
+function build(n) { return [n, n + 1] }
+<engine for=Phase initial=.Loading effect=${
+    @items = build(@seed)
+}>
+    <Loading rule=.Ready>Loading</>
+    <Ready rule=.Loading>Ready</>
+</>
+</>

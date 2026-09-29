@@ -1,0 +1,18 @@
+// S441 reproducer — addendum-5 P6: an enum-typed payload argument to `fail` is not checked.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/fail-payload-variant-argument-unchecked.scrml --output-dir <scratch>
+// Expected: `E2.Nope` rejected — E2 has only X.
+// Actual:   exit 0. client.js: `return { __scrml_error: true, type: "E", variant: "A", data: { inner: E2.Nope } };`
+<program>
+${
+    type E:enum = { A(inner: E2), B }
+    type E2:enum = { X }
+    <out> = ""
+    function f(n: string) ! E { if (n == "") fail E.A(E2.Nope) }
+    function run() {
+        f("") !{ | .A :> { @out = "a" } | _ :> { @out = "o" } }
+    }
+}
+<button onclick=run()>go</button>
+<p>${@out}</p>
+</program>
