@@ -35,7 +35,7 @@ ${
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, Tables, TypedProgram,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
     export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
@@ -463,7 +463,7 @@ ${
             .ESpread(ws: ws, inst: si, snap: sn, fields: sf) :> spreadStmts(c, ws, si, sn, sf, value)
             .EReset(w: w, decl: d, idx: i) :> resetStmt(c, w, d, i)
             .EAssignLocal(sym: s) :> assignLocal(c, s, value)
-            .EEdits(w: w, elems: es, tmps: ts) :> editStmts(c, w, es, ts)
+            .EEdits(w: w, elems: es, tmps: ts, snap: sn) :> editStmts(c, w, es, ts, sn)
             not :> [Stmt.Eval(lowerExpr(c, e))]
         }
     }
@@ -513,12 +513,23 @@ ${
     // @x.length` twice reads the same length). Two or more writes form one
     // Commit (all-or-nothing, batched); one element needs no local — its value
     // is evaluated before its own single write.
-    fn editStmts(c: LC, w: WriteFact, elems: AExpr[], tmps: Sym[]) -> Stmt[] {
-        let values: Expr[] = []
-        for (const x of elems) { values = values.concat([lowerExpr(c, x)]) }
+    // r2 (RULED S442, "sequence spreads use one snapshot"): every `@x` read
+    // inside the elements reads the value from BEFORE the statement — the one
+    // snapshot, a Let emitted only when some element reads it (as the struct
+    // spread's, S440). The edit itself is still the classified append /
+    // prepend onto the target (a write a called function made to `@x` while
+    // the elements were evaluated survives, as a struct spread keeps a write
+    // to a field it does not override).
+    fn editStmts(c: LC, w: WriteFact, elems: AExpr[], tmps: Sym[], sn: SeqSnap) -> Stmt[] {
         const target: InstRef = instOf(c, w.inst)
-        if (values.length == 1) return [Stmt.Write(w.cap, target, w.edit, values[0], w.check)]
-        let lets: Stmt[] = []
+        const place: FieldRef[] = [{ owner: sn.decl, idx: sn.idx }]
+        const sc: LC = { t: c.t, file: c.file, subst: c.subst, snap: { decl: sn.decl, inst: target, path: place, whole: sn.local, fields: [] } }
+        let values: Expr[] = []
+        for (const x of elems) { values = values.concat([lowerExpr(sc, x)]) }
+        let pre: Stmt[] = []
+        if (anyReads(values, sn.local)) pre = [Stmt.Let(sn.local, Expr.Read(Place.Cell(sn.decl, target, place)))]
+        if (values.length == 1) return pre.concat([Stmt.Write(w.cap, target, w.edit, values[0], w.check)])
+        let lets: Stmt[] = pre
         let k = 0
         for (const v of values) {
             lets = lets.concat([Stmt.Let(tmps[k], v)])

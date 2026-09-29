@@ -407,6 +407,17 @@ const MUTATIONS = [
   { id: "s442 r1 F7: a growing shape on a fixed-length sequence accepted", file: `${SH}/analyze.scrml`,
     from: "        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, \"E-WRITE-INVARIANT\", fixedLengthMessage(f.sym.hint, shapeWhat(shape)))",
     to: "", tests: [T4("review-r1.test.js")] },
+  // ---- s442 r2 ----
+  { id: "s442 r2 item 1: O19 checked on the declaration only (a child's attribute silently dropped)", file: `${SH}/analyze.scrml`,
+    from: "        for (const c of childFields(d.body)) { st = o19Diags(file, c, st) }", to: "", tests: [T4("review-r2.test.js")] },
+  { id: "s442 r2 item 2: a removal on a fixed-length sequence accepted", file: `${SH}/analyze.scrml`,
+    from: "        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, \"E-WRITE-INVARIANT\", fixedShrinkMessage(f.sym.hint, what))", to: "", tests: [T4("review-r2.test.js")] },
+  { id: "s442 r2 item 2: `filter` on a fixed-length sequence accepted", file: `${SH}/analyze.scrml`,
+    from: "        if (shape == 3 && growsFixed(p.ty)) return", to: "        if (false) return", tests: [T4("review-r2.test.js")] },
+  { id: "s442 r2 item 3: a duplicate grant token accepted", file: `${SH}/analyze.scrml`,
+    from: "            if (seen.indexOf(g) >= 0) {", to: "            if (false) {", tests: [T4("review-r2.test.js")] },
+  { id: "s442 r2 item 4: a sequence spread's elements read `@x` LIVE (no one snapshot)", file: `${SH}/lower.scrml`,
+    from: "        for (const x of elems) { values = values.concat([lowerExpr(sc, x)]) }", to: "        for (const x of elems) { values = values.concat([lowerExpr(c, x)]) }", tests: [T4("review-r2.test.js")] },
   { id: "F8 wildcard inside an alternation not flagged", file: "scripts/lint-no-default-arm.js",
     from: "if (a.alts.length > 1 && a.alts.some(altIsWild)) {", to: "if (false) {", tests: [T("lint.test.js")] },
 ];
