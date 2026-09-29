@@ -402,6 +402,11 @@ const MUTATIONS = [
     from: "            \"end\"      :> GrantAxis.GRetired(\"append\", \"pop\")", to: "            \"end\"      :> GrantAxis.GGrow(SeqAt.End)", tests: [T4("grants.test.js")] },
   { id: "s442 grants: `pop` not recognized as a shrink grant", file: `${SH}/analyze.scrml`,
     from: "            \"pop\"      :> GrantAxis.GShrink(SeqAt.End)", to: "            \"pop\"      :> GrantAxis.GUnknown", tests: [T4("grants.test.js")] },
+  { id: "s442 r1 F7: push onto a fixed-length sequence accepted (it grows)", file: `${SH}/analyze.scrml`,
+    from: "        if (granted && growsFixed(p.ty)) return", to: "        if (false) return", tests: [T4("review-r1.test.js")] },
+  { id: "s442 r1 F7: a growing shape on a fixed-length sequence accepted", file: `${SH}/analyze.scrml`,
+    from: "        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, \"E-WRITE-INVARIANT\", fixedLengthMessage(f.sym.hint, shapeWhat(shape)))",
+    to: "", tests: [T4("review-r1.test.js")] },
   { id: "F8 wildcard inside an alternation not flagged", file: "scripts/lint-no-default-arm.js",
     from: "if (a.alts.length > 1 && a.alts.some(altIsWild)) {", to: "if (false) {", tests: [T("lint.test.js")] },
 ];

@@ -211,3 +211,17 @@ Reproduction (reviewer tests copied read-only to scratchpad/repro/, paths retarg
 - FINAL (HEAD): slice-m1 73/73 · lowered 73/73 · slice-m2 409/409 · slice-m3 29/29 · slice-m4 111 + 2 todo · lint 34/0 ·
   conformance 1047/1054 + 7 xfail · footprint 18/18, 579 not-yet, 447 front-end · mutations 144/144 RED ·
   bite 32 footprint + 12 front constructs certified.
+
+## F7 LANDED (PA approved, S442)
+- Applied F7-held.diff (re-sited by hand after the merge / token work): a GROWING edit — push / unshift, or the
+  `[...@x, e]` / `[e, ...@x]` shape — on a sequence whose length axis is FIXED (no `free`) is E-WRITE-INVARIANT.
+- Shared fixture change, slice-m2/front.test.js S440 N1 loop program: `<log:int[append]=([])/>` →
+  `<log:int[free, append]=([])/>`. Reasoning (PA): the fixture declared a fixed-length log and pushed into it, which
+  the ruled invariant forbids (§66.11.2 "invariants … are checked on EVERY write"; §66.12.1 "a sequence with no
+  grants is fully constrained" — omission of the length axis = fixed). Those tests are about spread-override
+  convergence, not length, so the fix does not change what they test (both still pass: box=1,0,1, log length 1).
+- Tests: review-r1.test.js "F7" (push, spread-append, unshift on fixed-length → E-WRITE-INVARIANT; the same on
+  `[free, append]` clean). 2 mutations rows.
+- Left as-is per PA: `[...@x, call()]` snapshot semantics (to bryan); the E-PARSE-SHORTHAND-GT §34 row is owed.
+- F7 FINAL: slice-m1 73/73 · lowered 73/73 · slice-m2 409/409 · slice-m3 29/29 · slice-m4 113 + 2 todo · lint 34/0 ·
+  mutations 146/146 RED · bite 32 footprint + 12 front certified · five pre-existing programs byte-identical to base.
