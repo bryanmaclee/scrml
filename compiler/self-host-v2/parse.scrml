@@ -1516,12 +1516,34 @@ ${
     // A tag in markup position: an element, a `<*x>` reference, or a declaration.
     fn parseMarkupNode(mp: MP) -> RNodeOne {
         const ro: ROpener = parseOpener(mp)
+        if (isThemeOpener(ro.o)) {
+            const m: MP = refuseTheme(ro.o, ro.mp)
+            const t: ANode = { nid: m.nid, span: mkSpan(ro.o.start, m.pos), k: ANodeK.Text("") }
+            return { n: t, mp: mBump(m) }
+        }
         const k: TagKind = tagKind(ro.o)
         return match k {
             .IsDecl :> declNode(finishDecl(ro.o, ro.mp, false))
             .IsElem :> elemNode(finishElem(ro.o, ro.mp))
             .IsProgram :> elemNode(finishElem(ro.o, mDiag(ro.mp, "E-PARSE-PROGRAM", "`<program>` inside markup", ro.o.start, ro.mp.pos)))
         }
+    }
+
+    // s442: `<theme>` (§66.17) — its declarations are tokens that lower to CSS
+    // custom properties (`:root { --brand: … }`, a `data-scrml-theme-mode`
+    // attribute per mode). The bootstrap has no CSS emission in this slice (the
+    // slice-m3 CSS files are held by another session), so the element is
+    // consumed whole and REPORTED — never parsed as markup (its token
+    // declarations would otherwise vanish silently).
+    fn isThemeOpener(o: Opener) -> boolean { return !o.star && o.name == "theme" }
+
+    fn refuseTheme(o: Opener, mp: MP) -> MP {
+        let m: MP = mp
+        if (!o.selfClosing) {
+            const kids: RNodes = parseKids(mp, o.name)
+            m = kids.mp
+        }
+        return mDiag(m, "E-BOOTSTRAP-UNSUPPORTED", "`<theme>` (§66.17 — tokens lower to CSS custom properties) is not in the bootstrap: it has no CSS emission in this slice", o.start, m.pos)
     }
 
     fn declNode(r: RDecl) -> RNodeOne {
@@ -1784,6 +1806,7 @@ ${
     fn parseTagItem(mp: MP, exported: boolean) -> RMItems {
         const ro: ROpener = parseOpener(mp)
         const o: Opener = ro.o
+        if (isThemeOpener(o)) return { items: [], mp: refuseTheme(o, ro.mp) }
         const k: TagKind = tagKind(o)
         return match k {
             .IsProgram :> programItem(o, ro.mp)

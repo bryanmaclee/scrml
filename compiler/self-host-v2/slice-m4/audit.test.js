@@ -152,6 +152,13 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
     expect(msg(4)).toContain("fixed");
   });
 
+  test("a wrong-typed element in the spread shape is E-TYPE-031 (§66.1 rule 5 — the element is the written value)", () => {
+    const src = replaceLine(fixture(), NEGATIVE[0].marker, "function neg() { @audit = [...@audit, 5] }");
+    expect(codes(src)).toEqual(["E-TYPE-031"]);
+    const src2 = replaceLine(fixture(), NEGATIVE[0].marker, "function neg() { @audit = [...@audit, { at: 1, actor: 2, action: \"a\" }] }");
+    expect(codes(src2)).toEqual(["E-TYPE-031"]);
+  });
+
   test("the same shapes are GRANTED on a type that grants them (the classifier, not a blanket refusal)", () => {
     const granted = fixture().replace("<audit:Entry[free, end]=[]/>", "<audit:Entry[free, end, front, anywhere, writable]=[]/>");
     // granted, but Core cannot lower a removal / a lambda: reported as outside the bootstrap, never as a grant error

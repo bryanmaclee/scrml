@@ -22,6 +22,7 @@ const ROOT = join(import.meta.dir, "..", "..", "..", "..");
 const SH = "compiler/self-host-v2";
 const T = (f) => `./${SH}/slice-m1/${f}`;
 const T2 = (f) => `./${SH}/slice-m2/${f}`;
+const T4 = (f) => `./${SH}/slice-m4/${f}`;
 const RT = `${SH}/slice-m1/runtime/runtime.js`;
 
 // The M3 typer mutations all edit analyze.scrml and are judged by the two
@@ -258,6 +259,40 @@ const MUTATIONS = [
     from: "        return plain(row.ty, addName(st, e.nid, NameFact.NLocal(row.bind)))",
     to: "        return plain(row.ty, addName(addName(st, e.nid, NameFact.NLocal(row.bind)), e.nid, NameFact.NLocal(row.bind)))",
     tests: [T2("tables.test.js")] },
+  // ---- s442: the §66.19 six-programs front end — its DIAGNOSTICS (codes-only; the runtime constructs are
+  // certified by the bite matrix's front section, slice-m3/bench/bite-matrix.js --front) ----
+  { id: "s442: `single` inside a multi-instance declaration accepted (E-COMPONENT-ENGINE-SCOPE never fires)", file: `${SH}/analyze.scrml`,
+    from: "            if (hasFlag(c.mods, \"single\")) {", to: "            if (false) {", tests: [T4("engine.test.js")] },
+  { id: "s442: a plain `<x/>` of a `single` cell rendered as HTML (the O55 refusal dropped)", file: `${SH}/analyze.scrml`,
+    from: "        if (sd is some) {\n            return addDiag(st, env.file, e.span, \"E-BOOTSTRAP-UNSUPPORTED\"",
+    to: "        if (false) {\n            return addDiag(st, env.file, e.span, \"E-BOOTSTRAP-UNSUPPORTED\"", tests: [T4("engine.test.js")] },
+  { id: "s442: validator flags accepted silently (the O25 refusal dropped)", file: `${SH}/parse.scrml`,
+    from: "            if (isValidatorWord(a.name)) {", to: "            if (false) {", tests: [T4("form.test.js")] },
+  { id: "s442: an ungranted recognized sequence shape accepted as a grant", file: `${SH}/analyze.scrml`,
+    from: "        const isGranted: boolean = f.grants.replace || hasEditKind(f.grants.edits, edit)\n        if (!isGranted || cap is not) {",
+    to: "        const isGranted: boolean = true\n        if (!isGranted || cap is not) {", tests: [T4("audit.test.js")] },
+  { id: "s442: `.shift()` classified at the END (granted by `end`)", file: `${SH}/analyze.scrml`,
+    from: "        let edit: EditKind = EditKind.Prepend\n        let what: string = \"a removal at the front\"",
+    to: "        let edit: EditKind = EditKind.Append\n        let what: string = \"a removal at the front\"", tests: [T4("audit.test.js")] },
+  { id: "s442: an element-field write judged by the TAPE's grants instead of the field's (dpa-052 Q3)", file: `${SH}/analyze.scrml`,
+    from: "        const fieldGranted: boolean = target.grants.replace || target.grants.edits.length > 0",
+    to: "        const fieldGranted: boolean = f.grants.replace || f.grants.edits.length > 0", tests: [T4("audit.test.js")] },
+  { id: "s442: a lambda parsed as its body alone (the `.filter(…)` shape never recognized)", file: `${SH}/parse.scrml`,
+    from: "        return mkE(body.tp, start, AExprK.Lambda(params, body.e))", to: "        return body", tests: [T4("parse.test.js"), T4("audit.test.js")] },
+  { id: "s442: the typer skips state-child bodies (Typing coverage)", file: `${SH}/analyze.scrml`,
+    from: "                for (const sc of stateChildOf(c)) { ts = typeNodes(env, sc.body, ts) }",
+    to: "                for (const sc of stateChildOf(c)) { ts = ts }", tests: [T4("typing.test.js")] },
+  { id: "s442: the typer skips a child field's own renders (Typing coverage)", file: `${SH}/analyze.scrml`,
+    from: "            if (r is some) ts = typeElem(env, r, ts)\n        }\n        return ts\n    }",
+    to: "            if (false) ts = typeElem(env, r, ts)\n        }\n        return ts\n    }", tests: [T4("typing.test.js")] },
+  { id: "s442: a spread-append's elements not checked against the element type", file: `${SH}/analyze.scrml`,
+    from: "            ts = checkWrite(env, ed.w, exprType0(ts, x.nid), x, \"an element of this sequence\", ts)",
+    to: "            ts = ts", tests: [T4("typing.test.js"), T4("audit.test.js")] },
+  { id: "s442: `<theme>` parsed as markup (its CSS refusal dropped — the tokens vanish silently)", file: `${SH}/parse.scrml`,
+    from: "    fn isThemeOpener(o: Opener) -> boolean { return !o.star && o.name == \"theme\" }",
+    to: "    fn isThemeOpener(o: Opener) -> boolean { return false }", tests: [T4("theme.test.js")] },
+  { id: "s442: a named shared instance read as a field-less declaration (its refusal dropped)", file: `${SH}/analyze.scrml`,
+    from: "                if (n != \"\" && declNames.indexOf(n) >= 0) {", to: "                if (false) {", tests: [T4("theme.test.js")] },
   { id: "F8 wildcard inside an alternation not flagged", file: "scripts/lint-no-default-arm.js",
     from: "if (a.alts.length > 1 && a.alts.some(altIsWild)) {", to: "if (false) {", tests: [T("lint.test.js")] },
 ];
@@ -317,7 +352,7 @@ try {
   }
   console.log("| mutation | result |\n|---|---|\n" + results.join("\n"));
   if (PROOF === "") {
-    const clean = run([`./${SH}/slice-m1/`, `./${SH}/slice-m2/`], MIRROR);
+    const clean = run([`./${SH}/slice-m1/`, `./${SH}/slice-m2/`, `./${SH}/slice-m4/`], MIRROR);
     console.log(`unmutated slice suite (on the mirror): exit ${clean.code}, ${clean.fails} failing`);
     if (clean.code !== 0) bad = bad + 1;
   }
