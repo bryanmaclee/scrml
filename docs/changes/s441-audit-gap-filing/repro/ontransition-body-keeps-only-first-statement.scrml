@@ -1,0 +1,21 @@
+// S441 reproducer — addendum-4 R1: an `<onTransition>` body keeps only its first statement.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/ontransition-body-keeps-only-first-statement.scrml --output-dir <scratch>
+// Expected: both writes run on the transition (§51 `<onTransition>` body is an ordinary logic body).
+// Actual:   see the gap — the emitted transition hook contains the first write only.
+<program>
+type Game:enum = { Title, Playing }
+type GameMsg:enum = { Tick, Quit }
+<score> = 0
+<seen> = ""
+<engine for=Game initial=.Playing accepts=GameMsg>
+    <Title rule=.Playing></>
+    <Playing rule=(.Title | .Playing)>
+        | .Tick :> { @score = @score + 1; .Playing }
+        | .Quit :> .Title
+        <onTransition to=.Title>${ @score = @score + 5; @seen = "t:" + @score }</>
+    </>
+</>
+<button onclick=@game.advance(.Quit)>Quit</button>
+<p>${@seen} ${@score}</p>
+</program>

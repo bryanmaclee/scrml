@@ -1,0 +1,17 @@
+// S441 reproducer — addendum-2 S3b: validators on a TOP-LEVEL (non-compound) cell produce no validity surface.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-top-level-cell-validators-no-validity-surface.scrml --output-dir <scratch>
+// Expected: §55.1 "Validators on Shape-1 plain cells and Shape-2 form-coupled cells fire identically";
+//           `@amount.isValid` is false for -5 and `@nm.isValid` false for "".
+// Actual:   exit 0, zero diagnostics. client.js has NO `_scrml_validator_fire` and no `.errors`/`.isValid`
+//           derived cells for either top-level cell; `${@amount.isValid}` lowers to
+//           `_scrml_cs_reactive_get("amount").isValid` → `(-5).isValid` → undefined. The SAME `<amount gt(0)>`
+//           as a child of a compound (`<form1> <amount gt(0)> = -5 </>`) emits
+//           `_scrml_cs_derived_declare("form1.amount.errors", …_scrml_validator_fire("gt", value, 0)…)`.
+//           (The audit's "gt(0) not checked on the initial value" is by design — §55.1 calls state-cell
+//           validators a reactive gate, not a §53 refinement — but here there is no gate at all.)
+<program>
+<nm req length(>=2)> = ""
+<amount gt(0)> = -5
+<p>${@nm.isValid} ${@amount.isValid}</p>
+</program>

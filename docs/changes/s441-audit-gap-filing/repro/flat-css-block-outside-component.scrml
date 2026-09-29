@@ -1,0 +1,17 @@
+// S441 reproducer — item 17: a flat-declaration `#{ padding: 16px; }` inside a plain element (not a component)
+// emits a bare declaration into `@layer global {}` (invalid CSS) and no inline style.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/flat-css-block-outside-component.scrml --output-dir <scratch>
+// Expected: §9.1 "`#{}` inside a markup element applies styles at the element level (inline or scoped per
+//           compiler settings)"; §65.4.1 "an inline flat `#{}` on an element is an anonymous style-value
+//           applied once" — i.e. `<div style="padding: 16px;">`.
+// Actual:   exit 0, no diagnostic. .css ends `@layer global {\npadding: 16px;\n}` (a declaration with no selector —
+//           browsers discard it); the HTML is a bare `<div>`. Inside `${ lift <div>#{ padding: 16px; }…</div> }`
+//           (the article's shape) `padding` appears in NO output file.
+<program>
+<name> = "Hello"
+<div>
+  #{ padding: 16px; }
+  <h2>${@name}</h2>
+</div>
+</program>

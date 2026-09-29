@@ -1,0 +1,33 @@
+// S441 reproducer — addendum item 24: `<#w>.send(…)` is deleted from a function declared bare in the <program>
+// body; the same function inside `${ }` keeps it.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/worker-send-dropped-from-bare-program-fn.scrml --output-dir <scratch>
+// Expected: §43.5.2 "`<#name>.send(data)` — send to nested program"; §40.8 — a bare `<program>` body is
+//           default-logic, mode-equivalent to `${ }` (the `${ }` wrapper is W-PROGRAM-REDUNDANT-LOGIC).
+// Actual:   exit 0, zero errors. The bare function lowers to
+//           `{ _scrml_cs_reactive_set("busy", true); }` — the send statement is gone; the `${ }`-wrapped twin
+//           keeps its `_scrml_worker_stats.send(…)` call.
+<program>
+    <program name="stats">
+        ${
+            when message(data) {
+                send({ total: data.n * 2 })
+            }
+        }
+    </>
+    <busy> = false
+    <n> = 3
+    function startBare() {
+        @busy = true
+        <#stats>.send({ n: @n })
+    }
+    ${
+        function startWrapped() {
+            @busy = true
+            <#stats>.send({ n: @n })
+        }
+    }
+    <button onclick=startBare()>bare</button>
+    <button onclick=startWrapped()>wrapped</button>
+    <p>${@busy}</p>
+</program>

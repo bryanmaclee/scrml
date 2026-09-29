@@ -1,0 +1,20 @@
+// S441 reproducer — item 1: a cross-program RPC assigned to a cell compiles to a literal `null` write.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/cross-program-call-assigned-to-cell-lowers-to-null.scrml --output-dir <scratch>
+// Expected: §43.5.1 — `<#compute>.add(1, 2)` is a cross-program call whose result reaches `@r`
+//           (or a hard diagnostic while the form is unsupported).
+// Actual:   exit 0, no error. client.js: `function _scrml_go_4() { _scrml_cs_reactive_set("r", null); }`
+//           — the call is gone; `@r` becomes null on click. The worker's `add` is also inlined into the
+//           MAIN client bundle (`function _scrml_add_3(a, b) { return a + b; }`), and
+//           `new Worker("compute.worker.js")` names a file that is never written.
+//           Sibling form `function go() { const result = <#compute>.add(1, 2); @r = result }` →
+//           E-CODEGEN-INVALID-LOGIC (`..._scrml_go_4() { const result; } ...`).
+<program>
+<program name="compute">
+    export function add(a: number, b: number) -> number { return a + b }
+</program>
+<r> = 0
+function go() { @r = <#compute>.add(1, 2) }
+<button onclick=go()>go</button>
+<p>${@r}</p>
+</>

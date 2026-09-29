@@ -24,8 +24,12 @@
 //   - Two passes then READ the binder's tables (M3 item 1): THE SCOPE PASS
 //     (a scope binds each name once — E-SCOPE-010, E-SCOPE-REDECLARE) and
 //     THE TYPER (a type per expression node in `Tables.typing`; writes,
-//     initializers, call arity and `<each in=>` checked — E-TYPE-031,
-//     E-TYPE-041). Where the SPEC names no rule they use bootstrap-local
+//     initializers, call arity, `<each in=>`, conditions and operator
+//     operands checked — E-TYPE-031, E-TYPE-041, E-CALL-ARITY,
+//     E-EACH-NOT-SEQUENCE, and the S440-ruled E-COND-NOT-BOOLEAN,
+//     E-OPERATOR-OPERAND-TYPE, E-OPERAND-NOT-NARROWED, E-INT-DIVISION, whose
+//     codes are PROPOSED here — no SPEC text names them yet). Where neither a
+//     ruling nor the SPEC names a rule they use bootstrap-local
 //     `E-BOOTSTRAP-*` codes; see each section's header for the sentences.
 //
 // Scope of slice M2: the §66 subset §66.19.1 (counter) and §66.19.3 (dropdown)
@@ -223,7 +227,11 @@ ${
     // on an Unknown).
     export type VType:enum = { Known(t: Type), Absent, Unknown }
     export type ExprType:struct = { nid: int, vt: VType }
-    export type Typing:struct = { exprs: ExprType[], at: int[] }
+    // `presence`: the condition nodes (`if`, `if=`, a ternary test) whose
+    // value is a `T | not` — a PRESENCE TEST (RULED S440, truthiness Q1: "a
+    // bare `@x` of type `T | not` IS a presence test … the compiler emits an
+    // absence check, never JS truthiness"). `lower` wraps each in `IsSome`.
+    export type Typing:struct = { exprs: ExprType[], at: int[], presence: int[] }
     // A local's WRITTEN type (`let a: T = …`), by its Sym (the binder's).
     export type LocalAnnot:struct = { sym: Sym, ty: Type }
 
@@ -960,9 +968,20 @@ ${
     }
 
     // L19: an integer literal infers `int`; a non-integer numeric literal `number`.
+    // A hex / binary / octal literal (`0xFE`, `0b101`, `0o17`) is an integer
+    // literal whatever its digits (s442 r2 F4: `0xE`'s `E` is a hex digit, not
+    // an exponent). SPEC: "An integer literal infers `int`".
     fn numType(raw: string) -> Type {
+        if (isRadixLiteral(raw)) return Type.Int
         if (raw.indexOf(".") >= 0 || raw.indexOf("e") >= 0 || raw.indexOf("E") >= 0) return Type.Num
         return Type.Int
+    }
+
+    fn isRadixLiteral(raw: string) -> boolean {
+        if (raw.length < 3) return false
+        if (raw.substring(0, 1) != "0") return false
+        const p: string = raw.substring(1, 2)
+        return p == "x" || p == "X" || p == "b" || p == "B" || p == "o" || p == "O"
     }
 
     fn hasFlag(mods: AAttr[], name: string) -> boolean {
@@ -2040,7 +2059,7 @@ ${
     // An object literal is a struct VALUE of the type its position expects,
     // constructed by field name (§66.18: never positionally).
     fn resolveObject(env: Env, e: AExpr, ps: AProp[], expected: Type | not, st0: AS) -> RX {
-        let st: AS = st0
+        let st: AS = dupKeys(env, ps, st0)
         const s: Sym | not = namedOf(expectedOr(expected))
         if (s is not) {
             return diagX(env, e, "E-TYPE-STRUCT-CONTEXT", "an object literal needs a struct type from its position (an annotated declaration or field)", resolvePropValues(env, ps, st))
@@ -2075,6 +2094,35 @@ ${
             j2 = j2 + 1
         }
         return plain(Type.Named(s), addValue(st, e.nid, ValueFact.VStructOf(s, order)))
+    }
+
+    // RULED S440 ("duplicate keys are an error in ANY struct literal": "a
+    // duplicate key in any struct literal (plain, nested, or the
+    // spread-override shape) is a compile error"); SPEC §14.3: "A duplicate
+    // key in any struct literal — a plain literal (`@p = { x: 5, x: 6, y: 1,
+    // z: 1 }`), a nested one, or the spread-override shape … — is a compile
+    // error, **`E-STRUCT-DUPLICATE-KEY`**." One report per repeated key, at
+    // the repeat, whatever the literal's type (a nested literal is resolved
+    // through here too). The spread-override shape — resolved as field edits,
+    // not through here — reports the same code (dupOverride).
+    fn dupKeys(env: Env, ps: AProp[], st0: AS) -> AS {
+        let st: AS = st0
+        let j = 0
+        while (j < ps.length) {
+            if (!ps[j].spread && keyBefore(ps, j)) st = dupOverride(env, st, ps[j])
+            j = j + 1
+        }
+        return st
+    }
+
+    // Is prop `j`'s key named by an earlier (non-spread) prop?
+    fn keyBefore(ps: AProp[], j: int) -> boolean {
+        let k = 0
+        while (k < j) {
+            if (!ps[k].spread && ps[k].name == ps[j].name) return true
+            k = k + 1
+        }
+        return false
     }
 
     fn expectedOr(t: Type | not) -> Type {
@@ -2436,9 +2484,10 @@ ${
         return false
     }
 
-    // Provisional bootstrap-local code (§66.20 names none; the §34 row is owed).
+    // A struct literal's repeated key — the spread-override shape and a plain
+    // literal alike (RULED S440; SPEC §14.3, §66.11.3; §34 E-STRUCT-DUPLICATE-KEY).
     fn dupOverride(env: Env, st: AS, pr: AProp) -> AS {
-        return addDiag(st, env.file, pr.span, "E-BOOTSTRAP-DUP-OVERRIDE", "`" + pr.name + "` is overridden twice in this spread — a spread-override edits each field once; keep one `" + pr.name + ": …` (ruled S440)")
+        return addDiag(st, env.file, pr.span, "E-STRUCT-DUPLICATE-KEY", "`" + pr.name + "` is named twice in this struct literal — a struct literal names each key at most once (in a spread, an override edits its field once); keep one `" + pr.name + ": …` (§14.3, ruled S440)")
     }
 
     // A write at a struct path (`@o.s = v`): the TARGET sub-field's own contract.
@@ -3619,7 +3668,7 @@ ${
         }
         if (asName == "") asName = "item"
         let elemTy: Type | not = not
-        if (srcTy is some) elemTy = seqElem(srcTy)
+        if (srcTy is some) elemTy = seqElem(unMaybe(srcTy))    // `S | not` iterates `S` (§17.7.2)
         const rs: RSym = mint(st, asName)
         st = rs.st
         let rowHandles: HandleInfo[] = []
@@ -3726,11 +3775,15 @@ ${
     //   - a `let` / `const` that redeclares a name of the SAME block of a
     //     function body (or, in its top-level block, a parameter) is
     //     E-SCOPE-REDECLARE (§7.3.3). A nested block may shadow.
-    //   - where the SPEC is silent — two `as=` of one name in one scope, a
-    //     handle named like a program cell or a declaration, two fields of one
-    //     declaration, two declarations of one name in one file, a
-    //     redeclaration inside an inline handler block — the bootstrap-local
-    //     E-BOOTSTRAP-REDECLARE (each owes a ruling);
+    //   - two `as=` of one name in one scope, or a handle named like a cell:
+    //     E-HANDLE-REDECLARE (ruled S440 #5 / #7; SPEC §66.7.2) — dupHandles;
+    //   - a duplicate top-level `function`: E-SCOPE-010 (ruled S440 #6; SPEC
+    //     §7.6) — dupFns;
+    //   - where no ruling / SPEC sentence names one — a handle or a program
+    //     cell named like a visible declaration, two fields of one
+    //     declaration, two declarations or types of one name in one file, two
+    //     parameters of one name, a redeclaration inside an inline handler
+    //     block — the bootstrap-local E-BOOTSTRAP-REDECLARE (each owes a ruling);
     //   - one name declared in two FILES (a declaration, a function): the
     //     bootstrap links ONE namespace, so it cannot tell them apart —
     //     E-BOOTSTRAP-UNSUPPORTED.
@@ -3890,7 +3943,11 @@ ${
         return out
     }
 
-    // Two functions of one name. In one file that is a file-scope duplicate.
+    // Two functions of one name. In one file that is a file-scope duplicate:
+    // RULED S440 (22-item queue #6, "duplicate top-level `function` →
+    // E-SCOPE-010, §7.6 text fixed to name `function`"); SPEC §7.6: "Two
+    // top-level `function` declarations of one name SHALL be a compile error
+    // (E-SCOPE-010: duplicate binding in file scope)".
     fn dupFns(t: Tables) -> Diag[] {
         let out: Diag[] = []
         let names: string[] = []
@@ -3902,7 +3959,7 @@ ${
                 const f: FnInfo = t.fns[j]
                 const first: FnInfo = t.fns[i]
                 if (first.file == f.file) {
-                    out = out.concat([mkDiag(f.file, f.span, "E-SCOPE-010", "function `" + names[j] + "` is already declared at file scope (at " + offsetOf(first.span) + ") — duplicate binding in file scope (§7.3.3 routes file-scope duplicates to E-SCOPE-010, §7.6)")])
+                    out = out.concat([mkDiag(f.file, f.span, "E-SCOPE-010", "function `" + names[j] + "` is already declared at file scope (at " + offsetOf(first.span) + ") — duplicate binding in file scope (§7.6; ruled S440 #6)")])
                 } else {
                     out = out.concat([mkDiag(f.file, f.span, "E-BOOTSTRAP-UNSUPPORTED", "function `" + names[j] + "` is also declared in `" + first.file + "` — " + oneNamespace(names[j]))])
                 }
@@ -3914,14 +3971,24 @@ ${
 
     // `as=` handles: one name per scope (a declaration's renders, or one
     // `<each>` row — §66.7.4), and never a name `@…` already means.
-    // `as=` handles. PA INTERIM RULING (S439 fix round 2, pending bryan): a
-    // handle in ANY scope — the program, a row (§66.7.4), a declaration's
-    // `renders` — whose name is a cell VISIBLE in its file is refused: the
-    // SPEC is silent on handle-vs-cell shadowing, and refusing is the limit /
-    // reversible direction (cf. E-NAME-COLLIDES-STATE, "locals cannot shadow
-    // state names"). Program cells are visible only in the program's own file
-    // (§7.6.1). A PROGRAM-scope handle also may not take a visible
-    // declaration's `@name` (its shared instance, §66.7.1).
+    // RULED S440 (#5 = PA rec: "(i) duplicate `as=` in one scope and (ii) a
+    // handle named like a cell are errors under one code
+    // (`E-HANDLE-REDECLARE`); (iii) the same name on mutually exclusive `if=`
+    // instances is an error for now, logged as a candidate widening"; #7 +
+    // SPEC-text OPEN #7: "a row `as=` handle may shadow a program-level
+    // HANDLE, not a CELL"). SPEC §66.7.2: "Each of the following is a compile
+    // error, `E-HANDLE-REDECLARE`". So:
+    //   - two handles of one name in one scope — (i), and (iii) when they sit
+    //     under `if=` (exclusive arms are one scope too) — E-HANDLE-REDECLARE;
+    //   - a handle in ANY scope — the program, a row (§66.7.4), a
+    //     declaration's `renders` — named like a cell VISIBLE in its file —
+    //     (ii) — E-HANDLE-REDECLARE. Program cells are visible only in the
+    //     program's own file (§7.6.1);
+    //   - a row / renders handle named like a PROGRAM handle is legal (#7):
+    //     different owners, never compared here.
+    // A PROGRAM-scope handle named like a visible declaration (whose `@name`
+    // is its shared instance, §66.7.1) is not a cell: no ruling names it, so
+    // it stays the bootstrap-local E-BOOTSTRAP-REDECLARE (owes a ruling).
     fn dupHandles(files: FileAst[], t: Tables) -> Diag[] {
         let out: Diag[] = []
         let prog: DeclInfo | not = declInfo(t, t.program)
@@ -3948,10 +4015,12 @@ ${
                 i = i + 1
             }
             if (dup is some) {
-                out = out.concat([mkDiag(h.file, h.span, "E-BOOTSTRAP-REDECLARE", "`as=" + h.name + "` — a handle `@" + h.name + "` is already bound in this scope (at " + offsetOf(dup.span) + "); a scope binds each handle name once (the SPEC names no code for this; bootstrap-local)")])
+                let why: string = ""
+                if (h.conditional || dup.conditional) why = " — even under mutually exclusive `if=` conditions (an error for now, ruled S440 #5 (iii))"
+                out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "`as=" + h.name + "` — a handle `@" + h.name + "` is already bound in this scope (at " + offsetOf(dup.span) + "); a scope binds each handle name once" + why + " (§66.7.2)")])
             } else if (h.file == progFile && cells.indexOf(h.name) >= 0) {
                 const cellAt: string = offsetOf(cellSpans[cells.indexOf(h.name)])
-                out = out.concat([mkDiag(h.file, h.span, "E-BOOTSTRAP-REDECLARE", "the handle `as=" + h.name + "` would shadow the cell `@" + h.name + "` (declared at " + cellAt + ") — a handle may not share a visible cell's name, in any scope; rename one of them (the SPEC is silent on handle-vs-cell shadowing; bootstrap-local, PA interim ruling)")])
+                out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "the handle `as=" + h.name + "` is named like the cell `@" + h.name + "` (declared at " + cellAt + ") — a handle may not share a cell's name, in any scope (a row handle may shadow a program-level HANDLE, never a cell); rename one of them (§66.7.2, §66.7.4)")])
             } else if (h.owner == progNid && visibleDeclNamed(files, t, h.file, h.name)) {
                 out = out.concat([mkDiag(h.file, h.span, "E-BOOTSTRAP-REDECLARE", "`as=" + h.name + "` — `@" + h.name + "` already names the shared instance of `<" + h.name + ">` (§66.7.1); a handle cannot take that name (the SPEC names no code for this; bootstrap-local)")])
             }
@@ -4101,25 +4170,32 @@ ${
     //     replace / transition, a field-at write, each override of a spread
     //     (O58 (b)), an appended / prepended element. A value PROVABLY not of
     //     the target's type is E-TYPE-031; the absence literal `not` into a
-    //     type without `| not` is E-TYPE-041 (§42.3.1).
+    //     type without `| not` is E-TYPE-041 (§42.3.1). RULED S440 (22-item
+    //     queue #1, "cell write type mismatch → E-TYPE-031"; SPEC-text OPEN
+    //     #1, "a wrong-typed FIELD write is E-TYPE-031 too"): §7.5.1
+    //     position 6.
     //   - INITIALIZERS — a declaration's own value / attribute default, and a
     //     use-site construction value, which IS that field's initializer for
-    //     that instance (§66.9 rule 8): exactly §7.5.1 position 2 — an
+    //     that instance (§66.9 rule 8): §7.5.1 position 2 — an `int` /
     //     `number` / `string` / `boolean` ANNOTATION given a literal of a
-    //     different primitive is E-TYPE-031 (`int` is outside that set, §7.5.1);
-    //     `not` into a non-optional annotation is E-TYPE-041.
-    //   - CALL ARITY: the SPEC names no rule — bootstrap-local
-    //     E-BOOTSTRAP-CALL-ARITY (owes a ruling).
-    //   - `<each in=…>`: the SPEC names no rule — bootstrap-local
-    //     E-BOOTSTRAP-EACH-NOT-SEQUENCE for a value provably not a sequence.
+    //     different primitive is E-TYPE-031 (`int` joined the set: RULED S440,
+    //     JS-WAT 7(a)); `not` into a non-optional annotation is E-TYPE-041.
+    //   - CALL ARITY: E-CALL-ARITY (ruled S440 #2; SPEC §7.3) — see typeCall.
+    //   - `<each in=…>`: E-EACH-NOT-SEQUENCE (ruled S440 #3; SPEC §17.7.2) for
+    //     a value provably not a sequence — see checkIterable.
+    //   - CONDITIONS (`if`, `if=`, a ternary test): a `bool` or a `T | not`
+    //     presence test, else E-COND-NOT-BOOLEAN (ruled S440 #4 = (c) + Q1/Q2)
+    //     — see checkCond; a presence test is recorded for `lower`.
+    //   - OPERATORS (ruled S440 Gotcha Q1-Q3, dpa-054 #3): E-OPERATOR-OPERAND-TYPE,
+    //     E-OPERAND-NOT-NARROWED, E-INT-DIVISION — see checkOperands; the
+    //     narrowing they need — see NARROWING.
     // What it deliberately does NOT check: an ARGUMENT's type (§7.5.1
-    // position 3: such a program "SHALL compile"), a return value (position
-    // 4), an operand (position 5), and a condition — `if=`, `if`, a ternary
-    // test are boolean-COERCIBLE (§17.1.1, §42.4, §49.2.3).
+    // position 3: such a program "SHALL compile") and a return value
+    // (position 4) — no ruling widened those.
     //
-    // Assignability is PROVABLE-OR-SILENT: a check fires only on `Fails`. An
-    // Unknown value, or a `number` into an `int` (int refines number, S404 —
-    // not provable either way at compile time), is never an error here.
+    // Assignability is PROVABLE-OR-SILENT: a check fires only on `Fails`, and
+    // an Unknown value is never an error here. `int` is ENFORCED (RULED S440,
+    // JS-WAT 7(a)): a `number` into an `int` is `Fails`.
     // =========================================================================
     export fn exprType(t: Tables, nid: int) -> VType {
         const i: int = slotOf(t.typing.at, nid)
@@ -4127,9 +4203,14 @@ ${
         return t.typing.exprs[i].vt
     }
 
+    // Is condition node `nid` a presence test (a `T | not` condition)?
+    export fn presenceTest(t: Tables, nid: int) -> boolean {
+        return t.typing.presence.indexOf(nid) >= 0
+    }
+
     // The settled pass's types, indexed by NodeId (the first entry per node;
     // the same one-pass build as `nidIndex`, over the entries' own nids).
-    fn typingOf(exprs: ExprType[]) -> Typing {
+    fn typingOf(exprs: ExprType[], presence: int[]) -> Typing {
         let top: int = -1
         for (const x of exprs) {
             if (x.nid > top) top = x.nid
@@ -4140,23 +4221,423 @@ ${
             if (exprs[i].nid >= 0) at[exprs[i].nid] = i
             i = i - 1
         }
-        return { exprs: exprs, at: at }
+        return { exprs: exprs, at: at, presence: presence }
     }
 
     // `contribs`: every value an UNANNOTATED `let` local is given — its
     // initializer and each later assignment (a local's type is their join).
-    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[] }
+    // `presence`: the presence-test condition nodes (Typing.presence).
+    type TypeState:struct = { exprs: ExprType[], diags: Diag[], contribs: LocalT[], presence: int[] }
     type RTyping:struct = { typing: Typing, diags: Diag[] }
     type LocalT:struct = { id: int, vt: VType }
     // The typer's view of where it is: the tables, the file, the locals'
     // types (by Sym id) in scope, and `settled` — the local types the
     // previous pass joined (they win over `locals`, see typeProgram).
-    type TEnv:struct = { t: Tables, file: string, errs: ASpan[], locals: LocalT[], settled: LocalT[] }
+    // `narrowed`: the PLACES proven present here (see NARROWING below), by
+    // place key — a `T | not` read of one of them is typed `T`.
+    // `fnw`: each function's WRITE SET (place keys it may write, transitively
+    // through its calls) — a call drops the narrowing of what its callee writes.
+    type TEnv:struct = { t: Tables, file: string, errs: ASpan[], locals: LocalT[], settled: LocalT[], narrowed: string[],
+                         fnw: FnW[] }
     type RVT:struct = { vt: VType, ts: TypeState }
     type RTEnv:struct = { env: TEnv, ts: TypeState }
 
     fn tWithLocal(env: TEnv, s: Sym, vt: VType) -> TEnv {
-        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals.concat([{ id: s.id, vt: vt }]), settled: env.settled }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals.concat([{ id: s.id, vt: vt }]), settled: env.settled,
+                 narrowed: env.narrowed, fnw: env.fnw }
+    }
+
+    // ---- NARROWING (for the S440 `T | not` operand rule) ------------------------
+    // RULED S440 (Gotcha Q3): "a `T | not` operand must be narrowed before `+`,
+    // arithmetic, comparison, or use in a template" — so the typer must know
+    // where a `T | not` place IS narrowed, or it would refuse correct code.
+    // The slice's narrowing forms (it parses no `is some` / `given` over a
+    // value): a presence comparison `x != not` / `x == not` (either side), a
+    // bare `T | not` condition `if (x)` (a presence test, truthiness Q1), and
+    // their `&&` / `||` / `!` combinations — narrowing the `if` / `else`
+    // branch, the ternary arm, the right operand of `&&` / `||`, an element
+    // under `if=` (its other attributes and children), and the rest of a
+    // block after an `if` whose other branch always `return`s. A place is
+    // named by its key: a local by its Sym (`#id`), a cell / handle path by
+    // its spelling (`@o.v`). A later bare write to the place (or a prefix of
+    // it) in the same block drops the narrowing. Narrowing only ever makes
+    // the typer SILENT (a narrowed read is `T`), so erring generous — a write
+    // in a NESTED block does not un-narrow — is the provable-or-silent side.
+    type Narrowing:struct = { yes: string[], no: string[] }
+
+    fn noNarrowing() -> Narrowing { return { yes: [], no: [] } }
+
+    fn tNarrow(env: TEnv, keys: string[]) -> TEnv {
+        let out: string[] = env.narrowed
+        for (const k of keys) {
+            if (k != "") out = out.concat([k])
+        }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw }
+    }
+
+    // Drop the narrowing of `key` and of every place under it.
+    fn tUnnarrow(env: TEnv, key: string) -> TEnv {
+        if (key == "") return env
+        let out: string[] = []
+        for (const k of env.narrowed) {
+            if (k != key && k.indexOf(key + ".") != 0) out = out.concat([k])
+        }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw }
+    }
+
+    // A place's key ("" — not a place the typer narrows).
+    fn nKey(env: TEnv, e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> localKey(nameFact(env.t.names, e.nid))
+            .At(name: n) :> "@" + n
+            .Member(obj: o, name: n) :> memberKey(nKey(env, o), n)
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: x) :> ""
+            .Assign(target: x) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
+        }
+    }
+
+    fn localKey(f: NameFact | not) -> string {
+        return match f {
+            .NLocal(sym: s) :> "#" + s.id
+            .NField(decl: d) :> ""
+            .NInst(decl: d) :> ""
+            .NStruct(owner: o) :> ""
+            .NFn(sym: s) :> ""
+            .NLength :> ""
+            not :> ""
+        }
+    }
+
+    fn isNotLit(e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .NotLit :> true
+            .Name(name: n) :> false
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: s) :> false
+            .Bool(v: b) :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Member(obj: o) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: x) :> false
+            .Assign(target: x) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
+        }
+    }
+
+    // What a condition proves present when it is true (`yes`) / false (`no`).
+    fn condNarrowing(env: TEnv, c: AExpr) -> Narrowing {
+        const k: AExprK = c.k
+        return match k {
+            .Binary(op: o, l: l, r: r) :> binNarrowing(env, o, l, r)
+            .Unary(op: o, e: x) :> unaryNarrowing(env, o, x)
+            .Name(name: n) :> placeNarrowing(env, c)
+            .At(name: n) :> placeNarrowing(env, c)
+            .Member(obj: o) :> placeNarrowing(env, c)
+            .AtItem :> noNarrowing()
+            .Num(raw: r) :> noNarrowing()
+            .Str(v: s) :> noNarrowing()
+            .Bool(v: b) :> noNarrowing()
+            .NotLit :> noNarrowing()
+            .Recovered :> noNarrowing()
+            .Variant(name: n) :> noNarrowing()
+            .Call(callee: x) :> noNarrowing()
+            .Ternary(test: x) :> noNarrowing()
+            .Assign(target: x) :> noNarrowing()
+            .ArrayLit(elems: es) :> noNarrowing()
+            .ObjectLit(props: ps) :> noNarrowing()
+            .Spread(e: sx) :> noNarrowing()
+            .Index(obj: ix) :> noNarrowing()
+            .Lambda(params: lp) :> noNarrowing()
+        }
+    }
+
+    // A bare place as a condition is a presence test (truthiness Q1): true ⇒ present.
+    // (F17: a match arm whose body is an object literal — arms call this instead.)
+    fn placeNarrowing(env: TEnv, c: AExpr) -> Narrowing { return { yes: [nKey(env, c)], no: [] } }
+
+    fn binNarrowing(env: TEnv, op: BinOp, l: AExpr, r: AExpr) -> Narrowing {
+        return match op {
+            .Ne :> presenceCmp(env, l, r, true)
+            .Eq :> presenceCmp(env, l, r, false)
+            .And :> andNarrowing(condNarrowing(env, l), condNarrowing(env, r))
+            .Or :> orNarrowing(condNarrowing(env, l), condNarrowing(env, r))
+            .Add :> noNarrowing()
+            .Sub :> noNarrowing()
+            .Mul :> noNarrowing()
+            .Div :> noNarrowing()
+            .Mod :> noNarrowing()
+            .Lt :> noNarrowing()
+            .Le :> noNarrowing()
+            .Gt :> noNarrowing()
+            .Ge :> noNarrowing()
+            .Pipe :> noNarrowing()
+        }
+    }
+
+    // `x != not` proves `x` present when true; `x == not` when false.
+    fn presenceCmp(env: TEnv, l: AExpr, r: AExpr, ne: boolean) -> Narrowing {
+        let key: string = ""
+        if (isNotLit(r)) key = nKey(env, l)
+        if (isNotLit(l)) key = nKey(env, r)
+        if (ne) return { yes: [key], no: [] }
+        return { yes: [], no: [key] }
+    }
+
+    fn andNarrowing(a: Narrowing, b: Narrowing) -> Narrowing { return { yes: a.yes.concat(b.yes), no: [] } }
+    fn orNarrowing(a: Narrowing, b: Narrowing) -> Narrowing { return { yes: [], no: a.no.concat(b.no) } }
+
+    fn unaryNarrowing(env: TEnv, op: UnOp, x: AExpr) -> Narrowing {
+        const isNot: boolean = op == UnOp.Not
+        if (!isNot) return noNarrowing()
+        const n: Narrowing = condNarrowing(env, x)
+        return { yes: n.no, no: n.yes }
+    }
+
+    // A place read: its `T | not` type is `T` where the place is narrowed.
+    fn narrowRead(env: TEnv, e: AExpr, vt: VType) -> VType {
+        const x: Type | not = knownOf(vt)
+        if (x is not) return vt
+        const inner: Type | not = maybeInner(x)
+        if (inner is not) return vt
+        const key: string = nKey(env, e)
+        if (key != "" && env.narrowed.indexOf(key) >= 0) return known(inner)
+        return vt
+    }
+
+    // Does a block always leave its function (its last statement a `return`,
+    // or an `if` both of whose branches do)?
+    fn exits(b: ABlock) -> boolean {
+        if (b.stmts.length == 0) return false
+        return stmtExits(b.stmts[b.stmts.length - 1])
+    }
+
+    fn stmtExits(s: AStmt) -> boolean {
+        const k: AStmtK = s.k
+        return match k {
+            .Return(e: e) :> true
+            .If(cond: c, thenB: t, elseB: el) :> bothExit(t, el)
+            .Eval(e: e) :> false
+            .Local(name: n) :> false
+            .Given(name: n) :> false
+        }
+    }
+
+    fn bothExit(t: ABlock, el: ABlock | not) -> boolean {
+        if (el is not) return false
+        return exits(t) && exits(el)
+    }
+
+    // ---- WRITE SETS (s442 r2 F1: a call may undo a narrowing) ------------------
+    // A function's write set: the place keys (`@o`, `@o.n`, spelled as
+    // placeKey spells them) its body writes — an assignment, `reset(@x)`, an
+    // edit call `@xs.push(…)` — and, transitively, what the functions it calls
+    // write. A `given c = @h` body's `c.f` is `@h.f`. Syntactic and whole
+    // program (the bootstrap links one namespace): over-approximate, so it only
+    // ever un-narrows MORE (never silences a report).
+    type FnW:struct = { name: string, keys: string[] }
+    type Alias:struct = { name: string, key: string }
+
+    fn exprKids(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .Member(obj: o) :> [o]
+            .Call(callee: c, args: a) :> [c].concat(a)
+            .Unary(op: o, e: x) :> [x]
+            .Binary(op: o, l: l, r: r) :> [l, r]
+            .Ternary(test: t, yes: y, no: n) :> [t, y, n]
+            .Assign(target: t, value: v) :> [t, v]
+            .ArrayLit(elems: es) :> es
+            .ObjectLit(props: ps) :> propValueList(ps)
+            .Spread(e: x) :> [x]
+            .Index(obj: o, idx: i) :> [o, i]
+            .Lambda(params: lp, body: b) :> [b]
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+        }
+    }
+
+    fn propValueList(ps: AProp[]) -> AExpr[] {
+        let out: AExpr[] = []
+        for (const p of ps) { out = out.concat([p.value]) }
+        return out
+    }
+
+    // What an expression writes: place keys, and `()name` for each call of `name`.
+    fn exprEffects(e: AExpr) -> string[] {
+        let out: string[] = ownEffect(e)
+        for (const x of exprKids(e)) { out = out.concat(exprEffects(x)) }
+        return out
+    }
+
+    fn ownEffect(e: AExpr) -> string[] {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t) :> [placeKey(t)]
+            .Call(callee: c, args: a) :> callEffect(c, a)
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: s) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: x) :> []
+            .ArrayLit(elems: es) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
+        }
+    }
+
+    fn callEffect(c: AExpr, a: AExpr[]) -> string[] {
+        const n: string = exprName(c)
+        if (n == "reset") {
+            if (a.length == 1) return [placeKey(a[0])]
+            return []
+        }
+        if (n != "") return ["()" + n]
+        const m: MethodCall | not = methodCall(c)
+        if (m is some) return [placeKey(m.obj)]
+        return []
+    }
+
+    fn blockEffects(b: ABlock, al: Alias[]) -> string[] {
+        let out: string[] = []
+        for (const s of b.stmts) { out = out.concat(stmtEffects(s, al)) }
+        return out
+    }
+
+    fn stmtEffects(s: AStmt, al: Alias[]) -> string[] {
+        const k: AStmtK = s.k
+        return match k {
+            .Eval(e: e) :> aliased(exprEffects(e), al)
+            .Local(name: n, init: i) :> aliased(exprEffects(i), al)
+            .Return(e: e) :> aliased(maybeEffects(e), al)
+            .If(cond: c, thenB: t, elseB: el) :> aliased(exprEffects(c), al).concat(blockEffects(t, al)).concat(elseEffects(el, al))
+            .Given(name: n, subject: sub, body: b) :> aliased(exprEffects(sub), al).concat(blockEffects(b, al.concat([aliasOf(n, sub)])))
+        }
+    }
+
+    fn aliasOf(n: string, sub: AExpr) -> Alias { return { name: n, key: placeKey(sub) } }
+
+    fn maybeEffects(e: AExpr | not) -> string[] {
+        if (e is not) return []
+        return exprEffects(e)
+    }
+
+    fn elseEffects(el: ABlock | not, al: Alias[]) -> string[] {
+        if (el is not) return []
+        return blockEffects(el, al)
+    }
+
+    // `c.f` inside `given c = @h` is `@h.f`.
+    fn aliased(keys: string[], al: Alias[]) -> string[] {
+        let out: string[] = []
+        for (const k of keys) {
+            let key: string = k
+            for (const a of al) {
+                if (a.key != "" && (key == a.name || key.indexOf(a.name + ".") == 0)) key = a.key + key.substring(a.name.length)
+            }
+            out = out.concat([key])
+        }
+        return out
+    }
+
+    fn fnKeysNamed(ws: FnW[], name: string) -> string[] {
+        let out: string[] = []
+        for (const w of ws) {
+            if (w.name == name) out = out.concat(w.keys)
+        }
+        return out
+    }
+
+    // Every function's write set, closed over its calls (a fixpoint: each pass
+    // adds keys, a key set is finite; bounded by the function count + 2).
+    fn fnWrites(files: FileAst[]) -> FnW[] {
+        let ws: FnW[] = []
+        for (const f of files) {
+            for (const af of fnItems(f.items)) { ws = ws.concat([{ name: af.name, keys: blockEffects(af.body, []) }]) }
+        }
+        let changed = true
+        let pass = 0
+        while (changed && pass < ws.length + 2) {
+            changed = false
+            let next: FnW[] = []
+            for (const w of ws) {
+                let keys: string[] = w.keys
+                for (const k of w.keys) {
+                    if (k.indexOf("()") == 0) {
+                        for (const c of fnKeysNamed(ws, k.substring(2))) {
+                            if (keys.indexOf(c) < 0) {
+                                keys = keys.concat([c])
+                                changed = true
+                            }
+                        }
+                    }
+                }
+                next = next.concat([{ name: w.name, keys: keys }])
+            }
+            ws = next
+            pass = pass + 1
+        }
+        return ws
+    }
+
+    // Drop the narrowing of every place a call inside `e` may write. Applied
+    // to an expression before it is typed (so a read in it is not narrowed
+    // across a call that clears the place — conservatively, a read BEFORE
+    // such a call in the same expression is un-narrowed too) and to a
+    // statement's continuation.
+    fn tCallUnnarrow(env: TEnv, e: AExpr) -> TEnv {
+        if (env.narrowed.length == 0) return env
+        let out: TEnv = env
+        for (const eff of exprEffects(e)) {
+            if (eff.indexOf("()") == 0) {
+                for (const k of fnKeysNamed(env.fnw, eff.substring(2))) {
+                    if (k.indexOf("@") == 0) out = tUnnarrow(out, k)
+                }
+            }
+        }
+        return out
     }
 
     fn findLocalT(ls: LocalT[], id: int) -> VType | not {
@@ -4177,15 +4658,19 @@ ${
     }
 
     fn record(ts: TypeState, nid: int, vt: VType) -> TypeState {
-        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs }
+        return { exprs: ts.exprs.concat([{ nid: nid, vt: vt }]), diags: ts.diags, contribs: ts.contribs, presence: ts.presence }
     }
 
     fn report(ts: TypeState, env: TEnv, span: ASpan, code: string, msg: string) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags.concat([mkDiag(env.file, span, code, msg)]), contribs: ts.contribs }
+        return { exprs: ts.exprs, diags: ts.diags.concat([mkDiag(env.file, span, code, msg)]), contribs: ts.contribs, presence: ts.presence }
     }
 
     fn contribute(ts: TypeState, s: Sym, vt: VType) -> TypeState {
-        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs.concat([{ id: s.id, vt: vt }]) }
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs.concat([{ id: s.id, vt: vt }]), presence: ts.presence }
+    }
+
+    fn markPresence(ts: TypeState, nid: int) -> TypeState {
+        return { exprs: ts.exprs, diags: ts.diags, contribs: ts.contribs, presence: ts.presence.concat([nid]) }
     }
 
     // A local's written type (`let a: T = …`), if it has one.
@@ -4265,6 +4750,13 @@ ${
         }
     }
 
+    // `T` for a `T | not`; any other type as it is.
+    fn unMaybe(ty: Type) -> Type {
+        const i: Type | not = maybeInner(ty)
+        if (i is some) return i
+        return ty
+    }
+
     fn typeName(ty: Type) -> string {
         return match ty {
             .Int :> "int"
@@ -4311,8 +4803,12 @@ ${
         const vk: int = kindOf(v)
         const tk: int = kindOf(target)
         if (tk == 0) {
+            // `int` ENFORCED (RULED S440, JS-WAT 7(a): "enforce `int` (bootstrap
+            // typer; `7 / 2` into `int` is an error; integer division explicit)";
+            // PA note: "§7.5.1's provable domain widens to `int` with it"): a
+            // `number` does not narrow to `int` implicitly — only an `int` fits.
+            // (int refines number, S404: an `int` into `number` fits, below.)
             if (vk == 0) return Verdict.Fits
-            if (vk == 1) return Verdict.Unproven      // number → int: int refines number (S404); not provable here
             return Verdict.Fails
         }
         if (tk == 1) {
@@ -4403,11 +4899,6 @@ ${
         }
     }
 
-    fn isBoolVT(v: VType) -> boolean {
-        const x: Type | not = knownOf(v)
-        if (x is not) return false
-        return kindOf(x) == 3
-    }
 
     fn litType(l: Literal) -> VType {
         return match l {
@@ -4427,12 +4918,31 @@ ${
         return match f {
             .NLocal(sym: s) :> tLocal(env, s)
             .NField(decl: d, inst: i, idx: x) :> fieldTypeOf(env.t, d, x)
-            .NInst(decl: d) :> known(Type.Named(d))
+            .NInst(decl: d, inst: i) :> known(instType(env.t, d, i))
             .NStruct(owner: o, idx: x) :> structFieldType(env.t, o, x)
             .NFn(sym: s) :> VType.Unknown
             .NLength :> known(Type.Int)
             not :> VType.Unknown
         }
+    }
+
+    // An instance's type: a handle to a conditionally-mounted instance is
+    // `T | not` (§66.7.5) — so a bare `if=@h` over it is a presence test, and
+    // an operator over it is un-narrowed; any other instance is `T`.
+    fn instType(t: Tables, d: Sym, i: InstRef) -> Type {
+        return match i {
+            .Alias(sym: s) :> handleType(t, d, s)
+            .Shared(decl: x) :> Type.Named(d)
+            .Lexical(depth: n) :> Type.Named(d)
+            .Narrowed(sym: s) :> Type.Named(d)
+        }
+    }
+
+    fn handleType(t: Tables, d: Sym, s: Sym) -> Type {
+        for (const h of t.handles) {
+            if (h.sym.id == s.id && h.conditional) return Type.Maybe(Type.Named(d))
+        }
+        return Type.Named(d)
     }
 
     // The function a callee names.
@@ -4636,7 +5146,13 @@ ${
 
     fn checkKnown(env: TEnv, x: Type, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
         if (fitsType(x, target) != Verdict.Fails) return ts
-        return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)")
+        return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
+    }
+
+    // A `number` into an `int` (RULED S440, JS-WAT 7(a)): say why and what to write.
+    fn intHint(x: Type, target: Type) -> string {
+        if (kindOf(target) == 0 && kindOf(x) == 1) return " — `int` is enforced: a `number` is not implicitly an `int` (integer division is explicit: `div(a, b, .Mode)`; ruled S440, JS-WAT 7(a))"
+        return ""
     }
 
     fn checkAbsent(env: TEnv, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
@@ -4644,15 +5160,19 @@ ${
         return report(ts, env, span, "E-TYPE-041", "`not` is assigned to " + what + " of non-optional type `" + typeName(target) + "` — only a `" + typeName(target) + " | not` position holds `not` (§42.3.1)")
     }
 
-    // §7.5.1 position 2 (and §66.9 rule 8 at a use site): an ANNOTATED
-    // `number` / `string` / `boolean` given a literal of a different primitive.
-    // `int` is outside the annotation set (§7.5.1: no section rules int /
-    // number assignability, so firing would invent a rule).
-    // 0 number literal · 1 string literal · 2 boolean literal · 3 `not` · -1 other.
+    // §7.5.1 positions 1 / 2 (and §66.9 rule 8 at a use site): an ANNOTATED
+    // `number` / `string` / `boolean` — and, RULED S440 (JS-WAT 7(a), "enforce
+    // `int`"; PA note: "§7.5.1's provable domain widens to `int` with it"),
+    // `int` — given a literal of a different primitive. An `int` takes an
+    // INTEGER literal only (`1.5` is not an `int`); a `number` takes either.
+    // (SPEC §7.5.1 still says `int` is "deliberately OUTSIDE" the set — the
+    // S440 ruling widens it; SPEC pass 2 owes the text.)
+    // 0 non-integer number literal · 4 integer literal · 1 string literal ·
+    // 2 boolean literal · 3 `not` · -1 other.
     fn literalKind(e: AExpr) -> int {
         const k: AExprK = e.k
         return match k {
-            .Num(raw: r) :> 0
+            .Num(raw: r) :> numLitKind(r)
             .Str(v: s) :> 1
             .Bool(v: b) :> 2
             .NotLit :> 3
@@ -4675,30 +5195,59 @@ ${
         }
     }
 
+    fn numLitKind(raw: string) -> int {
+        const t: Type = numType(raw)
+        const isInt: boolean = t == Type.Int
+        if (isInt) return 4
+        return 0
+    }
+
     // `-5` is a number literal; `!true` is an operator applied to one.
     fn negLiteralKind(o: UnOp, x: AExpr) -> int {
         const isNeg: boolean = o == UnOp.Neg
         if (!isNeg) return -1
-        if (literalKind(x) == 0) return 0
+        const lk: int = literalKind(x)
+        if (lk == 0 || lk == 4) return lk
         return -1
     }
 
     fn primitiveOfLiteral(lk: int) -> string {
-        if (lk == 0) return "number"
+        if (lk == 0) return "non-integer number"
+        if (lk == 4) return "number"
         if (lk == 1) return "string"
         return "boolean"
+    }
+
+    // Does an initializer literal of kind `lk` fit an annotation of kind `tk`?
+    // (-1: the annotation is outside the checked set — a named type, a
+    // sequence, `T | not` — and is not judged here.)
+    fn literalFits(tk: int, lk: int) -> int {
+        if (tk == 0) {
+            if (lk == 4) return 1
+            return 0
+        }
+        if (tk == 1) {
+            if (lk == 0 || lk == 4) return 1
+            return 0
+        }
+        if (tk == 2) {
+            if (lk == 1) return 1
+            return 0
+        }
+        if (tk == 3) {
+            if (lk == 2) return 1
+            return 0
+        }
+        return -1
     }
 
     fn checkInit(env: TEnv, target: Type, lk: int, span: ASpan, what: string, ts: TypeState) -> TypeState {
         if (lk < 0) return ts
         if (lk == 3) return checkAbsent(env, target, span, what, ts)
-        const tk: int = kindOf(target)
-        let want: int = -1
-        if (tk == 1) want = 0
-        if (tk == 2) want = 1
-        if (tk == 3) want = 2
-        if (want < 0 || want == lk) return ts
-        return report(ts, env, span, "E-TYPE-031", what + " is annotated `" + typeName(target) + "`, and its initializer is a " + primitiveOfLiteral(lk) + " literal (§7.5.1: an annotated `let` / `const` or declaration whose initializer is a literal of a different primitive; a use-site value is that field's initializer, §66.9 rule 8)")
+        if (literalFits(kindOf(target), lk) != 0) return ts
+        let lit: string = primitiveOfLiteral(lk)
+        if (kindOf(target) == 0 && lk == 0) lit = "non-integer number"
+        return report(ts, env, span, "E-TYPE-031", what + " is annotated `" + typeName(target) + "`, and its initializer is a " + lit + " literal (§7.5.1: an annotated `let` / `const` or declaration whose initializer is a literal of a different primitive; a use-site value is that field's initializer, §66.9 rule 8; `int` enforced, ruled S440 JS-WAT 7(a))")
     }
 
     fn attrLiteralKind(v: AAttrValue) -> int {
@@ -4719,7 +5268,7 @@ ${
     }
 
     fn typeExpr(env: TEnv, e: AExpr, ts: TypeState) -> RVT {
-        const r: RVT = typeExprK(env, e, ts)
+        const r: RVT = typeExprK(tCallUnnarrow(env, e), e, ts)
         return rvt(r.vt, record(r.ts, e.nid, r.vt))
     }
 
@@ -4728,8 +5277,8 @@ ${
         const vf: ValueFact | not = valueFact(env.t.values, e.nid)
         const k: AExprK = e.k
         return match k {
-            .Name(name: n) :> rvt(nameType(env, nf), ts)
-            .At(name: n) :> rvt(nameType(env, nf), ts)
+            .Name(name: n) :> rvt(narrowRead(env, e, nameType(env, nf)), ts)
+            .At(name: n) :> rvt(narrowRead(env, e, nameType(env, nf)), ts)
             .AtItem :> rvt(nameType(env, nf), ts)
             .Num(raw: r) :> rvt(valueType(vf), ts)
             .Str(v: s) :> rvt(valueType(vf), ts)
@@ -4737,10 +5286,10 @@ ${
             .NotLit :> rvt(VType.Absent, ts)
             .Recovered :> rvt(VType.Unknown, ts)                 // a parse-error placeholder is never typed
             .Variant(name: n) :> rvt(valueType(vf), ts)
-            .Member(obj: o, name: n) :> typeMember(env, nf, o, ts)
+            .Member(obj: o, name: n) :> typeMember(env, e, nf, o, ts)
             .Call(callee: c, args: args) :> typeCall(env, e, c, args, ts)
-            .Unary(op: o, e: x) :> typeUnary(env, o, x, ts)
-            .Binary(op: o, l: l, r: r) :> typeBinary(env, vf, l, r, ts)
+            .Unary(op: o, e: x) :> typeUnary(env, e, o, x, ts)
+            .Binary(op: o, l: l, r: r) :> typeBinary(env, e, vf, o, l, r, ts)
             .Ternary(test: x, yes: y, no: n) :> typeTernary(env, x, y, n, ts)
             .Assign(target: x, value: v) :> rvt(VType.Unknown, typeExpr(env, v, ts).ts)
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
@@ -4751,9 +5300,9 @@ ${
         }
     }
 
-    fn typeMember(env: TEnv, f: NameFact | not, obj: AExpr, ts: TypeState) -> RVT {
+    fn typeMember(env: TEnv, e: AExpr, f: NameFact | not, obj: AExpr, ts: TypeState) -> RVT {
         const ro: RVT = typeExpr(env, obj, ts)
-        return rvt(nameType(env, f), ro.ts)
+        return rvt(narrowRead(env, e, nameType(env, f)), ro.ts)
     }
 
     fn typePropValues(env: TEnv, ps: AProp[], ts0: TypeState) -> TypeState {
@@ -4762,23 +5311,211 @@ ${
         return ts
     }
 
-    fn typeUnary(env: TEnv, o: UnOp, x: AExpr, ts: TypeState) -> RVT {
+    fn typeUnary(env: TEnv, e: AExpr, o: UnOp, x: AExpr, ts: TypeState) -> RVT {
         const r: RVT = typeExpr(env, x, ts)
         const isNot: boolean = o == UnOp.Not
-        if (isNot) return rvt(known(Type.Bool), r.ts)
+        if (hasErrIn(env.errs, e.span)) {
+            // Rule C: an operation holding a parser error is not judged
+            if (isNot) return rvt(known(Type.Bool), r.ts)
+            return rvt(VType.Unknown, r.ts)
+        }
+        if (isNot) return rvt(known(Type.Bool), checkBoolOperand(env, x, r.vt, "`!`", r.ts))
+        const ts2: TypeState = checkNumOperand(env, x, r.vt, "unary `-`", r.ts)
+        if (ts2.diags.length > r.ts.diags.length) return rvt(VType.Unknown, ts2)
         const xt: Type | not = knownOf(r.vt)
-        if (xt is some && isNumericKind(xt)) return rvt(r.vt, r.ts)
-        return rvt(VType.Unknown, r.ts)
+        if (xt is some && isNumericKind(xt)) return rvt(r.vt, ts2)
+        return rvt(VType.Unknown, ts2)
     }
 
-    fn typeBinary(env: TEnv, f: ValueFact | not, l: AExpr, r: AExpr, ts: TypeState) -> RVT {
+    // `&&` / `||`: the right operand is evaluated only when the left one is
+    // true / false, so it is typed under that narrowing (`x != not && x > 0`).
+    fn typeBinary(env: TEnv, e: AExpr, f: ValueFact | not, bop: BinOp, l: AExpr, r: AExpr, ts: TypeState) -> RVT {
         const rl: RVT = typeExpr(env, l, ts)
-        const rr: RVT = typeExpr(env, r, rl.ts)
+        let renv: TEnv = env
+        const isAnd: boolean = bop == BinOp.And
+        const isOr: boolean = bop == BinOp.Or
+        if (isAnd) renv = tNarrow(env, condNarrowing(env, l).yes)
+        if (isOr) renv = tNarrow(env, condNarrowing(env, l).no)
+        const rr: RVT = typeExpr(renv, r, rl.ts)
         const op: PrimOp | not = opOf(f)
         if (op is not) return rvt(VType.Unknown, rr.ts)
-        return rvt(binaryType(op, rl.vt, rr.vt), rr.ts)
+        const ts2: TypeState = checkOperands(env, e, op, l, r, rl.vt, rr.vt, rr.ts)
+        // a refused operation has no type to pass on (no second report downstream)
+        if (ts2.diags.length > rr.ts.diags.length) return rvt(VType.Unknown, ts2)
+        return rvt(binaryType(op, rl.vt, rr.vt), ts2)
     }
-    // `&&` / `||` yield an OPERAND (JS semantics, §45.9): bool only when both are.
+
+    // ---- OPERATORS AND CONDITIONS (RULED S440) ----------------------------------
+    // Gotcha Q1: "arithmetic and relational operators take NUMBERS only; `+`
+    // takes two numbers or two strings; string ordering goes through an
+    // explicit compare." Gotcha Q2: "`!`, `&&`, `||` (and `and`/`or`) take
+    // booleans only; defaults use `??`." Gotcha Q3: "a `T | not` operand must
+    // be narrowed before `+`, arithmetic, comparison, or use in a template."
+    // Truthiness Q2: "an immediate error wherever the violation is PROVABLE,
+    // silence where the type is unknown (provable-or-silent)". dpa-054 #3: "`/`
+    // between two `int`s … is a compile error naming the fix".
+    // No SPEC text or code exists yet for these (SPEC pass 2 owes both), so the
+    // codes are PROPOSED here and flagged: E-OPERATOR-OPERAND-TYPE (an operand
+    // of a type the operator does not take), E-OPERAND-NOT-NARROWED (a `T |
+    // not` operand, un-narrowed, whose `T` the operator would take),
+    // E-INT-DIVISION (`/` on two `int`s), E-COND-NOT-BOOLEAN (a condition that
+    // is neither a `bool` nor a `T | not` presence test).
+    // `==` / `!=` are out of this rule (§45.3 E-EQ-001 is its own conformance
+    // item); a `T | not` compared with `not` is how a presence test is spelled.
+    fn checkOperands(env: TEnv, e: AExpr, op: PrimOp, l: AExpr, r: AExpr, a: VType, b: VType, ts: TypeState) -> TypeState {
+        // Rule C (S439): nothing is checked against what failed to parse — an
+        // operation whose own span holds a parser error is not judged.
+        if (hasErrIn(env.errs, e.span)) return ts
+        return match op {
+            .Add :> checkPlus(env, e, l, r, a, b, ts)
+            .Concat :> checkPlus(env, e, l, r, a, b, ts)
+            .Sub :> checkNumPair(env, e, l, r, a, b, "`-`", ts)
+            .Mul :> checkNumPair(env, e, l, r, a, b, "`*`", ts)
+            .Mod :> checkNumPair(env, e, l, r, a, b, "`%`", ts)
+            .Div :> checkDiv(env, e, l, r, a, b, ts)
+            .Lt :> checkNumPair(env, e, l, r, a, b, "`<`", ts)
+            .Le :> checkNumPair(env, e, l, r, a, b, "`<=`", ts)
+            .Gt :> checkNumPair(env, e, l, r, a, b, "`>`", ts)
+            .Ge :> checkNumPair(env, e, l, r, a, b, "`>=`", ts)
+            .And :> checkBoolOperand(env, r, b, "`&&`", checkBoolOperand(env, l, a, "`&&`", ts))
+            .Or :> checkBoolOperand(env, r, b, "`||`", checkBoolOperand(env, l, a, "`||`", ts))
+            .EqPrim :> ts
+            .NeqPrim :> ts
+            .EqStruct :> ts
+            .NeqStruct :> ts
+            .IsSome :> ts
+            .IsNot :> ts
+            .Not :> ts
+            .Neg :> ts
+            .Length :> ts
+        }
+    }
+
+    fn checkNumPair(env: TEnv, e: AExpr, l: AExpr, r: AExpr, a: VType, b: VType, what: string, ts: TypeState) -> TypeState {
+        return checkNumOperand(env, r, b, what, checkNumOperand(env, l, a, what, ts))
+    }
+
+    // `/` is float-only (dpa-054 #3): two provable `int`s are refused, naming `div`.
+    fn checkDiv(env: TEnv, e: AExpr, l: AExpr, r: AExpr, a: VType, b: VType, ts0: TypeState) -> TypeState {
+        const ts: TypeState = checkNumPair(env, e, l, r, a, b, "`/`", ts0)
+        if (ts.diags.length > ts0.diags.length) return ts
+        const x: Type | not = knownOf(a)
+        const y: Type | not = knownOf(b)
+        if (x is some && y is some) {
+            if (kindOf(unMaybe(x)) == 0 && kindOf(unMaybe(y)) == 0) {
+                return report(ts, env, e.span, "E-INT-DIVISION", "`/` between two `int`s — `/` is float-only (it divides `number`s); integer division is explicit: `div(a, b, .Mode)`, the rounding mode required (dpa-054 #3, ruled S440; `int` enforced, JS-WAT 7(a)). (`div` itself is not in the bootstrap yet.)")
+            }
+        }
+        return ts
+    }
+
+    // An arithmetic / relational operand: a number.
+    fn checkNumOperand(env: TEnv, x: AExpr, v: VType, what: string, ts: TypeState) -> TypeState {
+        return match v {
+            .Known(t: t) :> numKnown(env, x, t, what, ts)
+            .Absent :> operandType(env, x, "not", what, "numbers", ts)
+            .Unknown :> ts
+        }
+    }
+
+    fn numKnown(env: TEnv, x: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
+        if (isNumericKind(t)) return ts
+        const inner: Type | not = maybeInner(t)
+        if (inner is some) {
+            if (isNumericKind(inner)) return notNarrowed(env, x, t, what, ts)
+        }
+        return operandType(env, x, typeName(t), what, "numbers", ts)
+    }
+
+    // A `!` / `&&` / `||` operand: a bool.
+    fn checkBoolOperand(env: TEnv, x: AExpr, v: VType, what: string, ts: TypeState) -> TypeState {
+        return match v {
+            .Known(t: t) :> boolKnown(env, x, t, what, ts)
+            .Absent :> operandType(env, x, "not", what, "booleans", ts)
+            .Unknown :> ts
+        }
+    }
+
+    fn boolKnown(env: TEnv, x: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
+        if (kindOf(t) == 3) return ts
+        const inner: Type | not = maybeInner(t)
+        if (inner is some) {
+            if (kindOf(inner) == 3) return notNarrowed(env, x, t, what, ts)
+        }
+        return operandType(env, x, typeName(t), what, "booleans", ts)
+    }
+
+    // `+`: two numbers or two strings. Each operand first (a `T | not`, a
+    // bool, a struct … is refused whatever the other is), then the pair.
+    fn checkPlus(env: TEnv, e: AExpr, l: AExpr, r: AExpr, a: VType, b: VType, ts0: TypeState) -> TypeState {
+        const ts: TypeState = plusOperand(env, r, b, plusOperand(env, l, a, ts0))
+        if (ts.diags.length > ts0.diags.length) return ts
+        const x0: Type | not = knownOf(a)
+        const y0: Type | not = knownOf(b)
+        if (x0 is not || y0 is not) return ts
+        // an operand the check above let through as `T | not` (a joined local) counts as its `T`
+        const x: Type = unMaybe(x0)
+        const y: Type = unMaybe(y0)
+        if (isNumericKind(x) && isNumericKind(y)) return ts
+        if (kindOf(x) == 2 && kindOf(y) == 2) return ts
+        return report(ts, env, e.span, "E-OPERATOR-OPERAND-TYPE", "`+` takes two numbers or two strings, and this is `" + typeName(x) + " + " + typeName(y) + "` — convert explicitly (ruled S440, Gotcha Q1)")
+    }
+
+    fn plusOperand(env: TEnv, x: AExpr, v: VType, ts: TypeState) -> TypeState {
+        return match v {
+            .Known(t: t) :> plusKnown(env, x, t, ts)
+            .Absent :> operandType(env, x, "not", "`+`", "two numbers or two strings", ts)
+            .Unknown :> ts
+        }
+    }
+
+    fn plusKnown(env: TEnv, x: AExpr, t: Type, ts: TypeState) -> TypeState {
+        if (isNumericKind(t) || kindOf(t) == 2) return ts
+        const inner: Type | not = maybeInner(t)
+        if (inner is some) {
+            if (isNumericKind(inner) || kindOf(inner) == 2) return notNarrowed(env, x, t, "`+`", ts)
+        }
+        return operandType(env, x, typeName(t), "`+`", "two numbers or two strings", ts)
+    }
+
+    fn operandType(env: TEnv, x: AExpr, got: string, what: string, takes: string, ts: TypeState) -> TypeState {
+        let hint: string = ""
+        if (takes == "booleans") hint = " — compare explicitly (`n > 0`, `s != \"\"`, `x != not`)"
+        return report(ts, env, x.span, "E-OPERATOR-OPERAND-TYPE", what + " takes " + takes + ", and this operand is `" + got + "`" + hint + " (ruled S440, Gotcha Q1 / Q2)")
+    }
+
+    // A `T | not` operand not narrowed here (the NARROWING above is flow-joined,
+    // so a place is narrowed wherever it is provably present). s442 r2: the
+    // earlier carve-out for an unannotated local's JOINED `T | not` is gone —
+    // with flow narrowing it silenced only reads where the local may really be
+    // `not` (`let a = not; if (…) { a = 5 }; a + 1`).
+    fn notNarrowed(env: TEnv, x: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
+        return report(ts, env, x.span, "E-OPERAND-NOT-NARROWED", what + " on a `" + typeName(t) + "` operand — it may be `not`; narrow it first (`if (x != not) { … }`, `x != not && …`) (ruled S440, Gotcha Q3)")
+    }
+
+    // A condition — `if`, `if=`, a ternary test (truthiness (c), RULED S440 #4:
+    // "All conditions require a boolean, or a `T | not` presence test, and the
+    // truthiness of numbers and strings goes"; Q1: "a bare `@x` of type
+    // `T | not` IS a presence test … the compiler emits an absence check,
+    // never JS truthiness"; Q2: "an immediate error wherever the violation is
+    // PROVABLE, silence where the type is unknown … no §63 window").
+    fn checkCond(env: TEnv, c: AExpr, v: VType, what: string, ts: TypeState) -> TypeState {
+        if (hasErrIn(env.errs, c.span)) return ts          // Rule C: not judged across a parse error
+        return match v {
+            .Known(t: t) :> condKnown(env, c, t, what, ts)
+            .Absent :> markPresence(ts, c.nid)      // `not` as a condition: a presence test that is always false
+            .Unknown :> ts
+        }
+    }
+
+    fn condKnown(env: TEnv, c: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
+        if (kindOf(t) == 3) return ts
+        if (maybeInner(t) is some) return markPresence(ts, c.nid)
+        return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " needs a `bool` (or a `T | not` presence test), and this value is `" + typeName(t) + "` — a condition has no truthiness; compare explicitly (`n > 0`, `s != \"\"`, `xs.length > 0`) (ruled S440 #4 = (c))")
+    }
+    // `&&` / `||` take booleans only (RULED S440, Gotcha Q2 — superseding
+    // §45.9's "JS semantics", where they yield an operand): a legal `&&` / `||`
+    // is a `bool`, whatever the typer could prove of its operands.
     fn binaryType(op: PrimOp, a: VType, b: VType) -> VType {
         return match op {
             .EqPrim :> known(Type.Bool)
@@ -4792,8 +5529,8 @@ ${
             .IsSome :> known(Type.Bool)
             .IsNot :> known(Type.Bool)
             .Not :> known(Type.Bool)
-            .And :> boolPair(a, b)
-            .Or :> boolPair(a, b)
+            .And :> known(Type.Bool)
+            .Or :> known(Type.Bool)
             .Concat :> known(Type.Str)
             .Add :> numJoin(a, b)
             .Sub :> numJoin(a, b)
@@ -4805,10 +5542,6 @@ ${
         }
     }
 
-    fn boolPair(a: VType, b: VType) -> VType {
-        if (isBoolVT(a) && isBoolVT(b)) return known(Type.Bool)
-        return VType.Unknown
-    }
 
     fn divType(a: VType, b: VType) -> VType {
         const j: VType = numJoin(a, b)
@@ -4816,11 +5549,12 @@ ${
         return VType.Unknown
     }
 
+    // The test is a condition (checkCond); each arm is typed under its narrowing.
     fn typeTernary(env: TEnv, test: AExpr, yes: AExpr, no: AExpr, ts: TypeState) -> RVT {
-        // the test is boolean-COERCIBLE (§17.1.1, §49.2.3): typed, never checked
         const rt: RVT = typeExpr(env, test, ts)
-        const ry: RVT = typeExpr(env, yes, rt.ts)
-        const rn: RVT = typeExpr(env, no, ry.ts)
+        const n: Narrowing = condNarrowing(env, test)
+        const ry: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.yes), test), yes, checkCond(env, test, rt.vt, "a ternary test", rt.ts))
+        const rn: RVT = typeExpr(tCallUnnarrow(tNarrow(env, n.no), test), no, ry.ts)
         return rvt(joinVT(ry.vt, rn.vt), rn.ts)
     }
 
@@ -4843,9 +5577,20 @@ ${
         return rvt(VType.Unknown, ts)
     }
 
-    // A call of a named function: its arity against the declaration (the
-    // bootstrap has no default parameters, §7.3.2, so every parameter is
-    // required); its value is the declared return type.
+    // A call of a named function: its arity against the declaration, and its
+    // value is the declared return type.
+    // CALL ARITY — RULED S440 (#2 = PA rec: "make extra arguments an error
+    // now, and write the callback case down as the one reason that would
+    // reopen it"; "too few arguments is an error unless the parameter has a
+    // default (§7.3.2)"); SPEC §7.3: "A call that passes MORE arguments than
+    // the function declares parameters is a compile error, `E-CALL-ARITY`. A
+    // call that passes FEWER is a compile error too, unless each omitted
+    // parameter has a default (§7.3.2)." The slice front end parses no
+    // default, rest (`...xs`) or `?`-optional parameter: a signature holding
+    // one does not parse cleanly, its `arity` is -1, and no call of it is
+    // checked (the SPEC's PA reading — rest absorbs extras, `?` counts as
+    // defaulted — is honoured by never guessing). Checked only when the
+    // callee resolves statically to a function (provable-or-silent).
     fn typeCall(env: TEnv, e: AExpr, callee: AExpr, args: AExpr[], ts0: TypeState) -> RVT {
         let ts: TypeState = typeExprs(env, args, ts0)
         ts = typePlace(env, callee, VType.Unknown, ts)
@@ -4855,11 +5600,16 @@ ${
         if (fi is not) return rvt(VType.Unknown, ts)
         const n: int = fi.arity
         if (n >= 0 && n != args.length) {
-            ts = report(ts, env, e.span, "E-BOOTSTRAP-CALL-ARITY", "`" + fi.name + "` takes " + n + " argument(s) and is called with " + args.length + " — every parameter is required (bootstrap slice M3 has no default parameters, §7.3.2; the SPEC names no call-arity code, so this one is bootstrap-local)")
+            ts = report(ts, env, e.span, "E-CALL-ARITY", arityMessage(fi.name, n, args.length))
         }
         const ret: Type | not = fi.ret
         if (ret is some) return rvt(known(ret), ts)
         return rvt(VType.Unknown, ts)
+    }
+
+    fn arityMessage(name: string, n: int, got: int) -> string {
+        if (got > n) return "`" + name + "` takes " + n + " argument(s) and is called with " + got + " — an extra argument is an error (§7.3, E-CALL-ARITY; ruled S440 #2)"
+        return "`" + name + "` takes " + n + " argument(s) and is called with " + got + " — a missing argument is an error unless its parameter has a default (§7.3, §7.3.2; ruled S440 #2)"
     }
 
     fn fnInfoOf(t: Tables, s: Sym) -> FnInfo | not {
@@ -4871,6 +5621,12 @@ ${
 
     // ---- statements ------------------------------------------------------------
     fn typeBlock(env: TEnv, b: ABlock, ts0: TypeState) -> TypeState {
+        return typeBlockEnv(env, b, ts0).ts
+    }
+
+    // A block, and the env its last statement leaves (its narrowing is what
+    // an enclosing `if` / `given` joins, s442 r2 F1 / F3).
+    fn typeBlockEnv(env: TEnv, b: ABlock, ts0: TypeState) -> RTEnv {
         let ts: TypeState = ts0
         let env2: TEnv = env
         for (const s of b.stmts) {
@@ -4878,20 +5634,130 @@ ${
             env2 = r.env
             ts = r.ts
         }
-        return ts
+        return { env: env2, ts: ts }
     }
 
     fn keepTEnv(env: TEnv, ts: TypeState) -> RTEnv { return { env: env, ts: ts } }
 
+    // Each statement's continuation env: the narrowing a statement's CALLS
+    // may undo (a callee that writes the place, r2 F1) is dropped, and an
+    // `if` / `given` leaves the JOIN of its paths (r2 F1 / F3).
     fn typeStmt(env: TEnv, s: AStmt, ts: TypeState) -> RTEnv {
         const k: AStmtK = s.k
         return match k {
-            .Eval(e: e) :> keepTEnv(env, typeStmtExpr(env, e, ts))
-            .Local(name: n, init: i) :> typeLocal(env, s, n, i, ts)
+            .Eval(e: e) :> typeEvalStmt(env, e, ts)
+            .Local(name: n, init: i) :> typeLocal(tCallUnnarrow(env, i), s, n, i, ts)
             .Return(e: e) :> keepTEnv(env, typeMaybeExpr(env, e, ts))
-            .If(cond: c, thenB: tb, elseB: el) :> keepTEnv(env, typeIf(env, c, tb, el, ts))
-            .Given(name: n, subject: sub, body: b) :> keepTEnv(env, typeGiven(env, s, sub, b, ts))
+            .If(cond: c, thenB: tb, elseB: el) :> typeIf(env, c, tb, el, ts)
+            .Given(name: n, subject: sub, body: b) :> typeGiven(env, s, sub, b, ts)
         }
+    }
+
+    // `p = v`: drops the narrowing of `p` (and under it) — and, when `v` is
+    // PROVABLY present (a known type, not `T | not`), narrows `p` (r2 F3).
+    fn typeEvalStmt(env: TEnv, e: AExpr, ts0: TypeState) -> RTEnv {
+        const ts: TypeState = typeStmtExpr(env, e, ts0)
+        const key: string = writtenKey(env, e)
+        const out: TEnv = tUnnarrow(tCallUnnarrow(env, e), key)
+        if (key != "" && writesPresent(e, ts)) return keepTEnv(tNarrow(out, [key]), ts)
+        return keepTEnv(out, ts)
+    }
+
+    fn writesPresent(e: AExpr, ts: TypeState) -> boolean {
+        const v: AExpr | not = assignValue(e)
+        if (v is not) return false
+        const x: Type | not = knownOf(exprType0(ts, v.nid))
+        if (x is not) return false
+        return maybeInner(x) is not
+    }
+
+    fn assignValue(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t, value: v) :> v
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: s) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
+        }
+    }
+
+    // A statement `p = v` / `reset(p)` writes place `p`.
+    fn writtenKey(env: TEnv, e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Assign(target: t) :> assignKey(env, e, t)
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c, args: a) :> resetKey(env, c, a)
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: x) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
+        }
+    }
+
+    // A bare local target `a = v` carries no name fact (the binder records the
+    // rebinding as an effect of the statement): its key is the effect's local.
+    fn assignKey(env: TEnv, e: AExpr, t: AExpr) -> string {
+        if (exprName(t) != "") {
+            const s: Sym | not = assignedLocal(effectFact(env.t.effects, e.nid))
+            if (s is some) return "#" + s.id
+            return ""
+        }
+        return nKey(env, t)
+    }
+
+    fn resetKey(env: TEnv, c: AExpr, a: AExpr[]) -> string {
+        if (exprName(c) == "reset" && a.length == 1) return nKey(env, a[0])
+        return ""
+    }
+
+    // The narrowing an `if` leaves: the INTERSECTION of what each path leaves
+    // (a path that always `return`s leaves nothing to join — the other path's
+    // narrowing holds, e.g. after `if (x == not) { return }`). The env's own
+    // locals and settled types stay the enclosing block's.
+    fn joinPaths(env: TEnv, a: TEnv, aExits: boolean, b: TEnv, bExits: boolean) -> TEnv {
+        if (aExits && !bExits) return withNarrowed(env, b.narrowed)
+        if (bExits && !aExits) return withNarrowed(env, a.narrowed)
+        if (aExits && bExits) return env
+        let both: string[] = []
+        for (const k of a.narrowed) {
+            if (b.narrowed.indexOf(k) >= 0) both = both.concat([k])
+        }
+        return withNarrowed(env, both)
+    }
+
+    fn withNarrowed(env: TEnv, keys: string[]) -> TEnv {
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keys,
+                 fnw: env.fnw }
     }
 
     fn typeMaybeExpr(env: TEnv, e: AExpr | not, ts: TypeState) -> TypeState {
@@ -4918,19 +5784,29 @@ ${
         return keepTEnv(tWithLocal(env, sym, r.vt), contribute(r.ts, sym, r.vt))
     }
 
-    fn typeIf(env: TEnv, c: AExpr, tb: ABlock, el: ABlock | not, ts0: TypeState) -> TypeState {
-        // the condition is boolean-COERCIBLE (§17.1.1, §49.2.3): typed, never checked
-        let ts: TypeState = typeExpr(env, c, ts0).ts
-        ts = typeBlock(env, tb, ts)
-        if (el is some) ts = typeBlock(env, el, ts)
-        return ts
+    // The condition is checked (checkCond, ruled S440 #4 = (c)); each branch
+    // is typed under the condition's narrowing (less what the condition's own
+    // calls may undo); the statement leaves the join of both paths.
+    fn typeIf(env: TEnv, c: AExpr, tb: ABlock, el: ABlock | not, ts0: TypeState) -> RTEnv {
+        const rc: RVT = typeExpr(env, c, ts0)
+        let ts: TypeState = checkCond(env, c, rc.vt, "an `if` condition", rc.ts)
+        const n: Narrowing = condNarrowing(env, c)
+        const rt: RTEnv = typeBlockEnv(tCallUnnarrow(tNarrow(env, n.yes), c), tb, ts)
+        const noEnv: TEnv = tCallUnnarrow(tNarrow(env, n.no), c)
+        if (el is not) return keepTEnv(joinPaths(env, rt.env, exits(tb), noEnv, false), rt.ts)
+        const re: RTEnv = typeBlockEnv(noEnv, el, rt.ts)
+        return keepTEnv(joinPaths(env, rt.env, exits(tb), re.env, exits(el)), re.ts)
     }
 
-    fn typeGiven(env: TEnv, s: AStmt, subject: AExpr, body: ABlock, ts: TypeState) -> TypeState {
+    // The body may not run: what it leaves is joined with the path around it.
+    fn typeGiven(env: TEnv, s: AStmt, subject: AExpr, body: ABlock, ts: TypeState) -> RTEnv {
         const r: RVT = typeExpr(env, subject, ts)
         const sym: Sym | not = bindSym(bindFact(env.t.binds, s.nid))
-        if (sym is not) return typeBlock(env, body, r.ts)
-        return typeBlock(tWithLocal(env, sym, r.vt), body, r.ts)
+        const around: TEnv = tCallUnnarrow(env, subject)
+        let inner: TEnv = around
+        if (sym is some) inner = tWithLocal(around, sym, r.vt)
+        const rb: RTEnv = typeBlockEnv(inner, body, r.ts)
+        return keepTEnv(joinPaths(env, rb.env, false, around, false), rb.ts)
     }
 
     // A statement-position expression: a write is checked against the
@@ -5212,26 +6088,43 @@ ${
         }
     }
 
+    // An element's `if=` (L5): a condition (checkCond, ruled S440 #4 = (c)),
+    // typed FIRST — the element's other attributes and its children exist
+    // only while it holds, so they are typed under its narrowing (`renv`).
+    fn typeIfAttr(env: TEnv, e: AElem, ts: TypeState) -> RTEnv {
+        const a: AAttr | not = attrNamed(e.attrs, "if")
+        if (a is not) return keepTEnv(env, ts)
+        const x: AExpr | not = valueExpr(a.value)
+        if (x is not) return keepTEnv(env, ts)
+        const r: RVT = typeExpr(env, x, ts)
+        return keepTEnv(tCallUnnarrow(tNarrow(env, condNarrowing(env, x).yes), x), checkCond(env, x, r.vt, "`if=`", r.ts))
+    }
+
     fn typeHtml(env: TEnv, e: AElem, ts0: TypeState) -> TypeState {
-        let ts: TypeState = ts0
+        const ri: RTEnv = typeIfAttr(env, e, ts0)
+        const renv: TEnv = ri.env
+        let ts: TypeState = ri.ts
         for (const a of e.attrs) {
-            if (a.name != "if" && eventName(a.name) != "") {
-                ts = typeHandlerValue(env, a.value, ts)
+            if (a.name == "if") {
+                // typed above (typeIfAttr)
+            } else if (eventName(a.name) != "") {
+                ts = typeHandlerValue(renv, a.value, ts)
             } else {
-                // `if=` is boolean-COERCIBLE (§17.1.1): typed, never checked
-                ts = typeAttrValue(env, a.value, ts).ts
+                ts = typeAttrValue(renv, a.value, ts).ts
             }
         }
-        return typeNodes(env, e.kids, ts)
+        return typeNodes(renv, e.kids, ts)
     }
 
     // A USE: each construction value is the field's initializer for this
     // instance (§66.9 rule 8) — the §7.5.1 position-2 rule applies.
     fn typeUse(env: TEnv, e: AElem, decl: Sym, ts0: TypeState) -> TypeState {
-        let ts: TypeState = ts0
+        const ri: RTEnv = typeIfAttr(env, e, ts0)
+        const renv: TEnv = ri.env
+        let ts: TypeState = ri.ts
         const di: DeclInfo | not = declInfo(env.t, decl)
         for (const a of e.attrs) {
-            if (a.name != "as") ts = typeAttrValue(env, a.value, ts).ts
+            if (a.name != "as" && a.name != "if") ts = typeAttrValue(renv, a.value, ts).ts
             const i: int = constructIndex(attrFact(env.t.attrs, a.nid))
             if (di is some && i >= 0 && i < di.fields.length) {
                 const f: FieldInfo = di.fields[i]
@@ -5240,7 +6133,7 @@ ${
                 }
             }
         }
-        return typeNodes(env, e.kids, ts)
+        return typeNodes(renv, e.kids, ts)
     }
 
     // `<each in=…>`: a row scope whose binding is the source's element type.
@@ -5257,7 +6150,7 @@ ${
         let elem: VType = VType.Unknown
         const st: Type | not = knownOf(src)
         if (st is some) {
-            const et: Type | not = seqElem(st)
+            const et: Type | not = seqElem(unMaybe(st))
             if (et is some) elem = known(et)
         }
         let renv: TEnv = env
@@ -5268,10 +6161,17 @@ ${
         return typeNodes(renv, e.kids, ts)
     }
 
-    // The SPEC names no rule for the `in=` value's type (searched §17.7, §66.7):
-    // bootstrap-local — a value PROVABLY not a sequence (a scalar, a struct, an
-    // enum, an instance) is refused; a `T[] | not` or an unproven value is not.
-    // `in="abc"` is a string literal (checked like a string cell).
+    // RULED S440 (22-item queue #3, "`<each in=>` over a non-sequence → error,
+    // name a code (`E-EACH-NOT-SEQUENCE`)"; SPEC-text OPEN #3, "stay silent
+    // under the typer's provable-or-silent rule, and error only when the value
+    // is provably not a sequence"); SPEC §17.7.2: "`<each in=expr>` over a
+    // value that is not a sequence is a compile error, `E-EACH-NOT-SEQUENCE`
+    // … A value typed `S | not`, where `S` is a sequence, is admitted". A
+    // value PROVABLY not a sequence (a scalar, a string, a struct, an enum, an
+    // instance, or `T | not` over one of those) is refused; `S | not` over a
+    // sequence and an unproven value are not. `in="abc"` is a string literal
+    // (checked like a string cell); `in=not` is refused (it is never a
+    // sequence — kept from S439, the reversible direction).
     fn typeInValue(env: TEnv, v: AAttrValue, ts: TypeState) -> RVT {
         return match v {
             .Quoted(v: s) :> rvt(known(Type.Str), ts)
@@ -5284,13 +6184,15 @@ ${
 
     fn checkIterable(env: TEnv, v: VType, span: ASpan, ts: TypeState) -> TypeState {
         if (isAbsentVT(v)) {
-            return report(ts, env, span, "E-BOOTSTRAP-EACH-NOT-SEQUENCE", "`<each in=not>` — `not` is not a sequence (the SPEC names no code for this, so this one is bootstrap-local)")
+            return report(ts, env, span, "E-EACH-NOT-SEQUENCE", "`<each in=not>` — `not` is not a sequence (§17.7.2)")
         }
         const x: Type | not = knownOf(v)
         if (x is not) return ts
-        const k: int = kindOf(x)
-        if (k == 5 || k == 6) return ts
-        return report(ts, env, span, "E-BOOTSTRAP-EACH-NOT-SEQUENCE", "`<each in=…>` iterates a sequence, and this value is `" + typeName(x) + "` (for a count, `<each of=N>`, §17.7.2; the SPEC names no code for this, so this one is bootstrap-local)")
+        let s: Type = x
+        const inner: Type | not = maybeInner(x)
+        if (inner is some) s = inner                     // `S | not` is admitted when `S` is a sequence (§17.7.4)
+        if (kindOf(s) == 5) return ts
+        return report(ts, env, span, "E-EACH-NOT-SEQUENCE", "`<each in=…>` iterates a sequence (an array or a tuple), and this value is `" + typeName(x) + "` — for a count, `<each of=N>` (§17.7.2)")
     }
 
     // ---- the program ------------------------------------------------------------
@@ -5312,13 +6214,13 @@ ${
             const ts: TypeState = typePass(files, t, settled)
             const next: LocalT[] = joinContribs(ts.contribs)
             if (pass == 0) bound = 3 * next.length + 2
-            if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs), diags: ts.diags }
+            if (sameLocals(next, settled)) return { typing: typingOf(ts.exprs, ts.presence), diags: ts.diags }
             prev = settled
             settled = next
             pass = pass + 1
         }
         const last: TypeState = typePass(files, t, unknownWhereChanged(prev, settled))
-        return { typing: typingOf(last.exprs), diags: last.diags }
+        return { typing: typingOf(last.exprs, last.presence), diags: last.diags }
     }
 
     fn unknownWhereChanged(prev: LocalT[], cur: LocalT[]) -> LocalT[] {
@@ -5337,9 +6239,10 @@ ${
     }
 
     fn typePass(files: FileAst[], t: Tables, settled: LocalT[]) -> TypeState {
-        let ts: TypeState = { exprs: [], diags: [], contribs: [] }
+        let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [] }
+        const fnw: FnW[] = fnWrites(files)
         for (const f of files) {
-            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled }
+            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnw }
             for (const it of f.items) { ts = typeItem(env, it, ts) }
         }
         return ts
@@ -5456,7 +6359,7 @@ ${
         const fs: NodeFacts = indexed(st.facts)
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
-                                attrs: fs.attrs, annots: st.annots, typing: { exprs: [], at: [] } }
+                                attrs: fs.attrs, annots: st.annots, typing: { exprs: [], at: [], presence: [] } }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         const typed: RTyping = typeProgram(files, bound)
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,

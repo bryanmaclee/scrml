@@ -1,10 +1,4 @@
-// 04a-tier1-match.scrml — Tier 1: enum + match expression dispatch.
-//
-// Two Tier-1 dispatch shapes ship today. The structural block-form
-// `<match for=Type on=expr> <Variant>...</> </>` is the canonical markup/UI
-// dispatch shape (§18.0.1). The JS-style `match expr { arm :> value }` shown
-// below is the value-return form — handy in a logic block with `lift` in each
-// arm. Both share the same exhaustiveness check and payload destructuring.
+// 04a-tier1-match.scrml — Tier 1: an enum, and <match> to dispatch on it.
 
 <program>
 
@@ -22,19 +16,32 @@
     @phase = LoadPhase.Loaded(42)        // fake result for the demo
   }
 
-  function reset_phase() { @phase = .Idle }
+  // The value-return form of match: compute a value from the variant.
+  const <status> = match @phase {
+    .Idle        :> "idle"
+    .Loading     :> "loading"
+    .Loaded(n)   :> "loaded"
+    .Failed(msg) :> "failed"
+  }
 
-  <div>
-    ${
-      match @phase {
-        .Idle        :> { lift <button onclick=load()>Load</button> }
-        .Loading     :> { lift <p>Loading…</p> }
-        .Loaded(n)   :> { lift <p>Got ${n} rows.</p>
-                          lift <button onclick=reset_phase()>Reset</button> }
-        .Failed(msg) :> { lift <p class="err">Failed: ${msg}</p>
-                          lift <button onclick=reset_phase()>Try again</button> }
-      }
-    }
-  </div>
+  <p>Status: ${@status}</p>
+
+  // The block form of match: one child element per variant, holding its markup.
+  <match for=LoadPhase on=@phase>
+    <Idle>
+      <button onclick=load()>Load</button>
+    </Idle>
+    <Loading>
+      <p>Loading…</p>
+    </Loading>
+    <Loaded(n)>
+      <p>Got ${n} rows.</p>
+      <button onclick={ @phase = .Idle }>Reset</button>
+    </Loaded>
+    <Failed(msg)>
+      <p class="err">Failed: ${msg}</p>
+      <button onclick={ @phase = .Idle }>Try again</button>
+    </Failed>
+  </match>
 
 </program>
