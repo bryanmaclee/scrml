@@ -7,7 +7,8 @@ import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
-import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors } from "./emit-library-shared.ts";
+import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // The ONE stdlib-async predicate (Q5 `<repo>/stdlib/` carve-out + `isAsync`). Used
@@ -1415,6 +1416,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // non-awaitable position (sync callback / param default). Drained after the loop.
   const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];
 
+  // s441 (S440 F4) — every async-colored fn a client body uses as a VALUE.
+  const _clientEscapes: AsyncEscapeSite[] = [];
   // s440-sync-callback-async-helper — the async sets above are FILE-SCOPE: a
   // function declared INSIDE a client fn was in none of them, so it was emitted
   // `async` (its body awaits) and then called as if sync — `xs.some(x => inner(x))`
@@ -1433,7 +1436,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           }
         : null,
     };
-    for (const fn of _clientFns) annotateNestedAsyncHelpers(fn, _nestedFacts, /*sqlIsAsync*/ false);
+    for (const fn of _clientFns) annotateNestedAsyncHelpers(fn, _nestedFacts, /*sqlIsAsync*/ false, _clientEscapes);
+    // s441 (F5) — the same facts answer "is this name async?" for the bodies that
+    // never reach this pipeline: an inline event handler and an `on mount` block
+    // (emit-event-wiring / emit-reactive-wiring run after this, on the same ctx).
+    (ctx as unknown as { _clientAsyncFacts?: AsyncNameFacts })._clientAsyncFacts = _nestedFacts;
   }
 
   for (const fnNode of fnNodes) {
@@ -1681,6 +1688,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   for (const _sp of _clientSyncPeerCalls) {
     _pushClientLeak(syncCallbackErrorForSite(_sp, _serverFnNames, filePath));
   }
+  // s441 (S440 F4) — E-ASYNC-FN-ESCAPES-AS-VALUE for every value use collected above.
+  for (const err of asyncEscapeErrors(_clientEscapes, filePath)) _pushClientLeak(err);
 
   return { lines, fnNameMap };
 }

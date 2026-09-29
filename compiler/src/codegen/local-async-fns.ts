@@ -89,8 +89,64 @@ export interface LocalFnResolution {
 export const LOCAL_CALLEE_MARK = "_scrmlLocalCallee";
 export const LOCAL_REF_MARK = "_scrmlLocalFnRef";
 export const LOCAL_ASYNC_DECL_MARK = "_scrmlLocalAsync";
+/**
+ * s441 (g-sync-local-with-async-name-treated-async) — a call / by-reference ident
+ * that CERTAINLY resolves to a SYNC function declared in an enclosing scope, whose
+ * NAME is also an async outer name (`function verifyPassword(a, b) { return a - b }`
+ * beside an imported `verifyPassword`). The binding in scope decides, not the name:
+ * the sites that FAIL CLOSED on an async name (a `.sort` comparator, a sync
+ * callback) read this mark and stand down. It never removes an `await` — an awaited
+ * sync value is the same value — so a wrong resolution can only cost a diagnostic in
+ * a non-awaitable position, and the resolver it rests on is the block-scoped one the
+ * s440 fix round (F1) hardened.
+ */
+export const LOCAL_SYNC_SHADOW_MARK = "_scrmlLocalSyncShadow";
+/**
+ * s441 (g-sync-callback-rawtext-scan-false-positives) — the scope-aware async
+ * analysis of a RAW fragment (a block-body callback / template literal escape-hatch,
+ * a parameter default): which async calls and async-function values it holds,
+ * resolved against the scrml scope it sits in. Absent → not analysed (no annotate
+ * run, or the text did not parse) — consumers fall back to their name scan.
+ */
+export const RAW_ASYNC_MARK = "_scrmlRawAsync";
 
-const MARK_KEYS = new Set<string>([LOCAL_CALLEE_MARK, LOCAL_REF_MARK, LOCAL_ASYNC_DECL_MARK]);
+const MARK_KEYS = new Set<string>([LOCAL_CALLEE_MARK, LOCAL_REF_MARK, LOCAL_ASYNC_DECL_MARK, LOCAL_SYNC_SHADOW_MARK, RAW_ASYNC_MARK]);
+
+/** Does this call / ident certainly resolve to a SYNC nested function (see LOCAL_SYNC_SHADOW_MARK)? */
+export function localSyncShadowOf(node: unknown): boolean {
+  return !!node && typeof node === "object" && (node as ASTNode)[LOCAL_SYNC_SHADOW_MARK] === true;
+}
+
+/** How a name resolves async-wise at a point (see js-async-analysis `ResolvedAsync`). */
+export interface ResolvedAsyncName {
+  root: AsyncRoot;
+  /** A function declared inside the enclosing scrml function (a nested helper). */
+  local: boolean;
+}
+
+/** The RAW_ASYNC_MARK payload. */
+export interface RawAsyncUses {
+  calls: Array<ResolvedAsyncName & { name: string }>;
+  escapes: Array<ResolvedAsyncName & { name: string; position: string }>;
+}
+
+/** The scope-aware raw analysis of a raw-text node (or a param object), or null. */
+export function rawAsyncUsesOf(node: unknown): RawAsyncUses | null {
+  if (!node || typeof node !== "object") return null;
+  const m = (node as ASTNode)[RAW_ASYNC_MARK];
+  return m && typeof m === "object" ? (m as RawAsyncUses) : null;
+}
+
+/**
+ * s441 (S440 F4) — an async-colored function used as a VALUE: aliased, stored in an
+ * array/object, passed to a function that is not an awaited collection method,
+ * returned, or read as an object. Reported as E-ASYNC-FN-ESCAPES-AS-VALUE.
+ */
+export interface AsyncEscapeSite extends ResolvedAsyncName {
+  name: string;
+  position: string;
+  span: unknown;
+}
 
 /** The nested-function resolution of a CALL node, or null when its callee is not one. */
 export function localCalleeOf(node: unknown): LocalFnResolution | null {
@@ -198,8 +254,23 @@ function resolve(name: string, scope: Scope | null): Resolved {
 }
 
 /**
+ * The structural parent of a visited node: the owning AST node, the key it sits
+ * under, and its index when that key holds an array (call `args`, array
+ * `elements`, …). Arrays are transparent — an element's parent is the node that
+ * owns the array.
+ */
+interface ParentLink {
+  parent: ASTNode | null;
+  key: string | null;
+  index: number;
+  /** The nearest enclosing span with a REAL line/col (a diagnostic anchor). */
+  anchor?: unknown;
+}
+
+/**
  * Walk every node under `root` with its lexical scope, calling `onCall` for each
- * call and `onIdent` for each ident. `root` is a scope-owning node whose scope is
+ * call and `onIdent` for each ident (with its structural parent). `onNode`, when
+ * given, sees every non-array node. `root` is a scope-owning node whose scope is
  * `rootScope`. Nested `function-decl` / `lambda` nodes and statement arrays open
  * child scopes (cached in `scopes` so the fixpoint and the marking pass share them).
  */
@@ -208,8 +279,9 @@ function walkWithScopes(
   rootScope: Scope,
   scopes: Map<object, Scope>,
   onCall: (call: ASTNode, scope: Scope) => void,
-  onIdent: (ident: ASTNode, scope: Scope) => void,
+  onIdent: (ident: ASTNode, scope: Scope, link: ParentLink) => void,
   stopAtNestedFns: boolean,
+  onNode?: (node: ASTNode, scope: Scope, link: ParentLink) => void,
 ): void {
   const seen = new WeakSet<object>();
   const scopeFor = (owner: ASTNode, parent: Scope): Scope => {
@@ -230,40 +302,43 @@ function walkWithScopes(
     }
     return s;
   };
-  const visit = (node: unknown, scope: Scope): void => {
+  const visit = (node: unknown, scope: Scope, link: ParentLink): void => {
     if (!node || typeof node !== "object") return;
     if (seen.has(node as object)) return;
     seen.add(node as object);
     if (Array.isArray(node)) {
       const block = blockFor(node, scope);
-      for (const c of node) visit(c, block);
+      for (let i = 0; i < node.length; i++) visit(node[i], block, { parent: link.parent, key: link.key, index: i, anchor: link.anchor });
       return;
     }
     const n = node as ASTNode;
+    const anchor = hasRealPosition(n.span) ? n.span : link.anchor;
+    if (onNode) onNode(n, scope, link);
     if (isFnDecl(n)) {
       if (stopAtNestedFns) return;
       const inner = scopeFor(n, scope);
       // A param default is evaluated in the function's own scope.
-      visit(n.params, inner);
-      visit(n.body, inner);
+      visit(n.params, inner, { parent: n, key: "params", index: -1, anchor });
+      visit(n.body, inner, { parent: n, key: "body", index: -1, anchor });
       return;
     }
     if (n.kind === "lambda") {
       const inner = scopeFor(n, scope);
-      visit(n.params, inner);
-      visit(n.body, inner);
+      visit(n.params, inner, { parent: n, key: "params", index: -1, anchor });
+      visit(n.body, inner, { parent: n, key: "body", index: -1, anchor });
       return;
     }
     if (n.kind === "call") onCall(n, scope);
-    else if (n.kind === "ident") onIdent(n, scope);
+    else if (n.kind === "ident") onIdent(n, scope, link);
     for (const key of Object.keys(n)) {
       if (key === "span" || MARK_KEYS.has(key)) continue;
       const v = n[key];
-      if (v && typeof v === "object") visit(v, scope);
+      if (v && typeof v === "object") visit(v, scope, { parent: n, key, index: -1, anchor });
     }
   };
-  visit(root.params, rootScope);
-  visit(root.body, rootScope);
+  const rootAnchor = hasRealPosition(root.span) ? root.span : undefined;
+  visit(root.params, rootScope, { parent: root, key: "params", index: -1, anchor: rootAnchor });
+  visit(root.body, rootScope, { parent: root, key: "body", index: -1, anchor: rootAnchor });
 }
 
 export interface LocalAsyncAnnotateOpts {
@@ -288,6 +363,32 @@ export interface LocalAsyncAnnotateOpts {
    * member (injected: async-combinators.ts imports this module).
    */
   isByRefInvokingCall?: (call: ASTNode) => boolean;
+  /**
+   * s441 (S440 F4) — what may a call do with an async-colored function passed as
+   * argument `index`? `allowed`: the first argument of an awaited collection method
+   * (`.some`/`.filter`/… — lifted to the async combinator) or an argument of a
+   * fire-and-forget scheduler (`setTimeout` — it discards the return); `own-code`: a
+   * sync consumer that already fails closed (`.sort(inner)`); `escape`: anything else.
+   * Absent → every argument is an escape. Injected (async-combinators imports this module).
+   */
+  fnArgRole?: (call: ASTNode, index: number) => "allowed" | "own-code" | "escape";
+  /**
+   * s441 (FP1) — the scope-aware raw-fragment analyser (js-async-analysis
+   * `analyzeRawJsFragment`), injected to keep this module dependency-neutral.
+   */
+  analyzeRaw?: (raw: string, resolveFree: (name: string) => ResolvedAsyncName | null) => RawAsyncUses | null;
+  /** s441 (S440 F4) — sink for every async-colored function used as a value. */
+  escapes?: AsyncEscapeSite[];
+  /**
+   * s441 (S440 F4) — the outer names that are async-colored for the ESCAPE rule,
+   * when narrower than `outerAsync` (the await facts). The server emitter awaits
+   * every in-process peer, including a plain helper that route inference placed on
+   * the server only because a server fn references it; that helper is not an
+   * async-colored function in the ruling's sense (a server fn, an async stdlib
+   * function, or a helper that calls one), so it may be aliased. Absent →
+   * `outerAsync`.
+   */
+  escapeOuterAsync?: (name: string) => AsyncRoot | null;
 }
 
 /**
@@ -308,10 +409,9 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
   for (const [owner] of scopes) {
     if (owner !== fn && !Array.isArray(owner) && isFnDecl(owner as ASTNode)) nestedFns.push(owner as ASTNode);
   }
-  if (nestedFns.length === 0) {
-    clearMarks(fn);
-    return 0;
-  }
+  // s441 — no early return when there are no nested functions: the escape check
+  // (S440 F4), the sync-shadow marks and the raw-fragment analysis apply to every
+  // function body, nested helpers or not.
   // Every nested declaration by name, wherever it sits — for the AMBIGUOUS case.
   const declsByName = new Map<string, ASTNode[]>();
   for (const d of nestedFns) {
@@ -334,9 +434,9 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
     const consider = (name: string, scope: Scope): void => {
       const r = resolve(name, scope);
       if (r && !("fn" in r)) return; // a certain non-function local: not an async trigger
-      // A SYNC nested fn that shares an async outer name carries no call-site mark,
-      // so the call keeps the outer name's (awaiting) treatment — which makes THIS
-      // body await. Count the outer root either way (fail closed).
+      // A SYNC nested fn that shares an async outer name keeps its awaits (a sync-
+      // shadow mark only stands down a fail-closed site, never an `await`), so the
+      // call may still await in THIS body. Count the outer root either way (fail closed).
       const root = opts.outerAsync(name);
       if (root) list.push({ root });
       if (r) { list.push({ fn: r.fn }); return; }
@@ -353,8 +453,8 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
         // A by-reference ARGUMENT to a collection method (`xs.some(b)` / `xs.sort(b)`):
         // the method invokes it — awaited through the async combinator (so this body
         // awaits), or failed closed. Only those calls; any other callee's handling
-        // of a function argument is unknown (a scheduler discards it, a user HOF may
-        // await it), so it does not make THIS body await.
+        // of a function argument is unknown (a scheduler discards it; S440 F4 makes
+        // every other value use a compile error), so it does not make THIS body await.
         if (!opts.isByRefInvokingCall || !opts.isByRefInvokingCall(call)) return;
         for (const a of (Array.isArray(call.args) ? call.args : [])) {
           const an = a as ASTNode | null;
@@ -384,12 +484,12 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
     }
   }
 
-  // Pass 4 — mark. ONLY an ASYNC resolution is recorded (fix round, F1): a call that
-  // resolves to a SYNC nested function carries no mark and keeps the name-based
-  // treatment every other call gets. A mark can therefore only ever ADD an await or
-  // a rejection — it can never demote an async outer name to a bare call, whatever
-  // the resolver gets wrong. An unresolved name with an async same-named declaration
-  // in a non-enclosing block (the Annex B ambiguity) is marked async too.
+  // Pass 4 — mark. An ASYNC resolution is recorded on the call / ident (fix round,
+  // F1): the mark adds an await or a rejection. A resolution to a SYNC nested
+  // function is recorded ONLY as the sync-shadow mark (s441, FP2), which the
+  // fail-closed sites read and nothing else — an async outer name is never demoted
+  // to a bare call. An unresolved name with an async same-named declaration in a
+  // non-enclosing block (the Annex B ambiguity) is marked async too.
   const asyncResolution = (name: string, scope: Scope): LocalFnResolution | null => {
     const r = resolve(name, scope);
     if (r && "fn" in r) {
@@ -403,6 +503,35 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
     }
     return null;
   };
+  const isSyncShadow = (name: string, scope: Scope): boolean => {
+    const r = resolve(name, scope);
+    return !!r && "fn" in r && !asyncRoot.has(r.fn);
+  };
+  // s441 — is `name`, at this point, an async-colored function (and why)? The
+  // binding in scope decides; a free name asks the emitter's outer facts.
+  const resolveAsyncAt = (name: string, scope: Scope): ResolvedAsyncName | null => {
+    const local = asyncResolution(name, scope);
+    if (local && local.root) return { root: local.root, local: true };
+    if (resolve(name, scope)) return null;
+    const outer = opts.outerAsync(name);
+    return outer ? { root: outer, local: false } : null;
+  };
+  const escapeSink = opts.escapes ?? null;
+  const escapeOuter = opts.escapeOuterAsync ?? opts.outerAsync;
+  const reportEscape = (name: string, res: ResolvedAsyncName, position: string, span: unknown): void => {
+    if (!escapeSink) return;
+    if (!res.local && !escapeOuter(name)) return;
+    escapeSink.push({ name, root: res.root, local: res.local, position, span });
+  };
+  // The RAW fragments this function emits verbatim — analysed with the scope they
+  // sit in (s441, FP1). The analysis result rides on the node for the drains.
+  const markRaw = (holder: ASTNode, raw: string, scope: Scope, span: unknown): void => {
+    if (!opts.analyzeRaw) { delete holder[RAW_ASYNC_MARK]; return; }
+    const uses = opts.analyzeRaw(raw, (nm) => resolveAsyncAt(nm, scope));
+    if (!uses) { delete holder[RAW_ASYNC_MARK]; return; }
+    holder[RAW_ASYNC_MARK] = uses;
+    for (const e of uses.escapes) reportEscape(e.name, e, e.position, span);
+  };
   for (const d of nestedFns) {
     const r = asyncRoot.get(d);
     if (r) d[LOCAL_ASYNC_DECL_MARK] = r;
@@ -415,35 +544,109 @@ export function annotateLocalAsyncFns(fnNode: unknown, opts: LocalAsyncAnnotateO
       const res = nm ? asyncResolution(nm, scope) : null;
       if (res) call[LOCAL_CALLEE_MARK] = res;
       else delete call[LOCAL_CALLEE_MARK];
+      if (!res && nm && isSyncShadow(nm, scope)) call[LOCAL_SYNC_SHADOW_MARK] = true;
+      else delete call[LOCAL_SYNC_SHADOW_MARK];
     },
-    (ident, scope) => {
-      const res = typeof ident.name === "string" ? asyncResolution(ident.name, scope) : null;
+    (ident, scope, link) => {
+      const nm = typeof ident.name === "string" ? ident.name : null;
+      const res = nm ? asyncResolution(nm, scope) : null;
       if (res) ident[LOCAL_REF_MARK] = res;
       else delete ident[LOCAL_REF_MARK];
+      if (!res && nm && isSyncShadow(nm, scope)) ident[LOCAL_SYNC_SHADOW_MARK] = true;
+      else delete ident[LOCAL_SYNC_SHADOW_MARK];
+      // s441 (S440 F4) — an async-colored function used as a VALUE.
+      if (!nm || !escapeSink) return;
+      const asyncRes = resolveAsyncAt(nm, scope);
+      if (!asyncRes) return;
+      const position = valuePositionOf(link, opts.fnArgRole);
+      if (position) reportEscape(nm, asyncRes, position, anchorDiagnosticSpan(ident.span, link.anchor));
     },
     false,
+    (node, scope, link) => {
+      // A `{ m }` shorthand property stores the binding `m` as a value.
+      if (node.kind === "shorthand" && typeof node.name === "string" && escapeSink) {
+        const asyncRes = resolveAsyncAt(node.name, scope);
+        if (asyncRes) reportEscape(node.name, asyncRes, "stored in an object", anchorDiagnosticSpan(node.span, link.anchor));
+      }
+      // Raw fragments: a block-body callback / raw expression, a template literal.
+      if ((node.kind === "escape-hatch" || (node.kind === "lit" && node.litType === "template")) &&
+          typeof node.raw === "string") {
+        markRaw(node, node.raw, scope, anchorDiagnosticSpan(node.span, link.anchor));
+      }
+      // A parameter's text default (spliced verbatim by `paramSignature`).
+      if (link.key === "params" && typeof node.defaultValue === "string" && node.defaultValue.trim() !== "") {
+        markRaw(node, node.defaultValue, scope, anchorDiagnosticSpan(node.span, link.anchor));
+      }
+    },
   );
   return asyncRoot.size;
 }
 
-/** Remove every mark under `fn` (a function with no nested declarations). */
-function clearMarks(fn: ASTNode): void {
-  const seen = new WeakSet<object>();
-  const visit = (node: unknown): void => {
-    if (!node || typeof node !== "object") return;
-    if (seen.has(node as object)) return;
-    seen.add(node as object);
-    if (Array.isArray(node)) { for (const c of node) visit(c); return; }
-    const n = node as ASTNode;
-    for (const k of MARK_KEYS) if (k in n) delete n[k];
-    for (const key of Object.keys(n)) {
-      if (key === "span") continue;
-      const v = n[key];
-      if (v && typeof v === "object") visit(v);
+/**
+ * s441 (S440 F4) — where does an ident that names an async-colored function sit,
+ * as a VALUE? `null` when the position is not a value use: the callee of a call
+ * (awaited / failed closed by the call machinery), an assignment target, or an
+ * argument the call sanctions (`fnArgRole`: the first argument of an awaited
+ * collection method, an argument of a fire-and-forget scheduler, or a sync
+ * consumer with its own fail-closed code).
+ */
+function valuePositionOf(
+  link: ParentLink,
+  fnArgRole?: (call: ASTNode, index: number) => "allowed" | "own-code" | "escape",
+): string | null {
+  const p = link.parent;
+  if (!p) return "used as a value";
+  const kind = p.kind as string | undefined;
+  switch (kind) {
+    case "call": {
+      if (link.key === "callee") return null;
+      if (link.key === "args") {
+        const role = fnArgRole ? fnArgRole(p, link.index) : "escape";
+        if (role !== "escape") return null;
+        const callee = p.callee as ASTNode | undefined;
+        const calleeText = calleeTextOf(callee);
+        return calleeText ? `passed as an argument to \`${calleeText}\`` : "passed as an argument";
+      }
+      return "used as a value";
     }
-  };
-  visit(fn.params);
-  visit(fn.body);
+    case "new":
+      if (link.key === "callee") return "constructed with `new`";
+      return "passed as an argument to a constructor";
+    case "member":
+    case "index":
+      return link.key === "object" ? "used as an object (a member read or `.call`/`.bind`)" : "used as a value";
+    case "array": return "stored in an array";
+    case "prop": return "stored in an object";
+    case "spread": return "spread as a value";
+    case "assign": return link.key === "target" ? null : "assigned to a variable or property";
+    case "unary":
+      // `typeof m` inspects the value without calling it — nothing can await wrong.
+      if ((p as { op?: unknown }).op === "typeof") return null;
+      return "used as an operand";
+    case "ternary":
+    case "binary":
+      return "used as an operand";
+    case "expr": return "returned as a value"; // a lambda's concise body
+    case "return-stmt": return "returned as a value";
+    case "let-decl":
+    case "const-decl":
+    case "tilde-decl":
+    case "lin-decl":
+    case "state-decl":
+      return "aliased by a variable declaration";
+    default: return "used as a value";
+  }
+}
+
+/** A short source-like rendering of a callee (`drive`, `Array.from`), or null. */
+function calleeTextOf(callee: ASTNode | undefined): string | null {
+  if (!callee) return null;
+  if (callee.kind === "ident" && typeof callee.name === "string") return callee.name;
+  if (callee.kind === "member" && typeof callee.property === "string") {
+    const obj = calleeTextOf(callee.object as ASTNode | undefined);
+    return obj ? `${obj}.${callee.property}` : `….${callee.property}`;
+  }
+  return null;
 }
 
 /**

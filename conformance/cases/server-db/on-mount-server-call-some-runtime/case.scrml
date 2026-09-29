@@ -1,0 +1,10 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+on mount {
+  function inner(x) { return isOk(x) }
+  const any = [1, 2, 3].some(x => inner(x))
+  @verdict = any ? "accepted" : "rejected"
+}
+<p id="out">${@verdict}</p>
+</program>
