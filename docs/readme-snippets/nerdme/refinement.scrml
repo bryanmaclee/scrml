@@ -1,0 +1,18 @@
+// NERDME.md "Runtime type validation" — gated by scripts/snippet-gate.js.
+<program>
+<price>: number(>0 && <10000) = 5
+<email>: string(email) = "a@b.co"
+
+type Invoice:struct = {
+    amount: number(>0 && <10000)
+    recipient: string(email)
+}
+
+fn discount(amount: number(>0 && <10000)) -> number {
+    let discounted = amount * 0.9
+    let safe: number(>0 && <10000) = discounted
+    return safe
+}
+
+<p>${discount(@price)} ${@email}</p>
+</>

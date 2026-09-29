@@ -1,0 +1,26 @@
+// 09-auth.scrml — sign-in required; admin-only data decided on the server.
+
+<program auth="required">
+
+  <report> = ""
+
+  // Reading `session` makes this a server function. The role check runs on
+  // the server, so a non-admin's response never contains the admin text.
+  function loadAdminReport() {
+    if (session.role is some && session.role == "Admin") {
+      return "3 signups are waiting for review."
+    }
+    return ""
+  }
+
+  function refresh() {
+    @report = loadAdminReport()
+  }
+
+  <div>
+    <h1>Dashboard</h1>
+    <button onclick=refresh()>Load admin report</button>
+    <p if=(@report != "")>${@report}</p>
+  </div>
+
+</program>

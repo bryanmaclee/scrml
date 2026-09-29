@@ -1,0 +1,24 @@
+// S441 reproducer — addendum-3 T1: a structural cell decl + function written directly in a `<db>` body
+// (no `${ }`) silently drops the decl, the function AND every markup sibling after it.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/tut-db-body-decls-silently-dropped.scrml --output-dir <scratch>
+// Expected: a refusal. §34 E-STATE-BLOCK-STATEMENT-FORM row: "A state-block body is markup context, NOT a
+//           `default-logic` locus (§4.18.1)"; S375 ruling 1 (recorded on g-state-block-statement-form-misses-a-
+//           wrapped-statement): logic at a `<db>`/state-block locus is REFUSED. The siblings W-STATE-BLOCK-BARE-
+//           WRITE-DECL (`@x = init`) and E-STATE-BLOCK-STATEMENT-FORM (`on mount`) exist for other forms.
+// Actual:   exit 0, ZERO diagnostics. The HTML <body> holds only the two <script> tags; client.js contains no
+//           reference to the cell or the function (grep count 0) — the button and paragraph are gone too.
+//           Control: the same body with the cell + function wrapped in `${ }` → both emitted, 7 renders.
+//           Variant: a `function …{}` line alone (no cell decl) is emitted into the page as literal TEXT.
+<program db="t1.db">
+<schema>
+    notes { id: integer primary key
+            body: text }
+</>
+<db src="t1.db" tables="notes">
+    <count> = 7
+    function bump() { @count = @count + 1 }
+    <button onclick=bump()>go</button>
+    <p>${@count}</p>
+</db>
+</program>
