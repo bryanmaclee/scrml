@@ -1,0 +1,38 @@
+// S441 reproducer — addendum-3 T3: a JS-style `match` arm that `lift`s a multi-line <form> containing
+// render-by-tag fields and `<errors of=>` renders garbage DOM, outside its host element.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/tut-match-lift-multiline-form-garbage-dom.scrml --output-dir <scratch>
+// Expected: the same DOM the block-form `<match for=Phase on=@phase>` produces for the identical form (measured
+//           control): `<label>Name <input type="text" required minlength="2" …> <span data-scrml-errors-anchor…>`,
+//           inside `<div class="host">`, with the onsubmit binding.
+// Actual:   exit 0, no diagnostic. EXECUTED (happy-dom): body is
+//           `<div class="host"> <span data-scrml-logic="_scrml_logic_1"></span> </div>
+//            <form><label>Name<name></name><errors of="null"></errors></label><label>Email<email></email></label>
+//            <button type="submit">Go</button></form>`
+//           — raw `<name>`/`<email>`/`<errors of="null">` elements (no inputs), no submit binding, the space after
+//           "Name" lost, and the form appended after the host div instead of inside it.
+//           Single-line sibling: `.Loaded(n) :> { lift <p>Got ${n} rows.</p> }` renders `<p>Got42rows.</p>`
+//           (block form renders "Block got 42 rows.").
+<program>
+type Phase:enum = { Editing, Done }
+<phase>: Phase = .Editing
+<signup>
+    <name  req length(>=2)> = <input type="text"/>
+    <email req>             = <input type="email"/>
+</>
+function submit() { @phase = .Done }
+<div class="host">
+${
+    match @phase {
+      .Editing :> {
+        lift <form onsubmit=submit()>
+          <label>Name <name/> <errors of=@signup.name/></label>
+          <label>Email <email/></label>
+          <button type="submit">Go</button>
+        </form>
+      }
+      .Done :> { lift <p>Thanks.</p> }
+    }
+}
+</div>
+</program>
