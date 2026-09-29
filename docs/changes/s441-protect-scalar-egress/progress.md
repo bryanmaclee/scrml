@@ -88,3 +88,34 @@ base = origin/main 650c47c29 vs tip
 - F17 `Bun.CryptoHasher(...).digest()` now fails closed (N6: no Bun.* derivers).
 - Corpus: 2213 files vs origin/main f0377fbf5 — newly failing = only the 10
   intentional `*-e006` cases.
+
+## Round 4 (round-3 re-review DO-NOT-LAND; bryan ruling "ratify with the changes, arithmetic stays protected")
+- b36376f3f — F3: protect origin matching case-insensitive per SQLite rules
+  (`FROM USERS` emitted no tag at all — also on main). Unresolvable quoted /
+  schema-qualified forms degrade to strip-all. Cases select-upper-column-e006,
+  from-upper-table-e006, upper-table-row-strip.
+- e99676259 — F1: a value selected by a protected key is protected all the way
+  down (scalar AND deep) — `L[c].v`, `L[c].test()`, `Object.keys(L[c])`,
+  `M.get(c).v`. Cases lookup-field/-method/-keys-e006, map-get-field-e006.
+- 2fab69f9d — F2: alias classes (union-find over binding keys). Values carry the
+  binding cells they may BE; binding / containing / passing to a parameter unites
+  classes; a write INTO an object lands in the whole class; each binding's own
+  value stays its own. `_scrml_structural_eq` modelled as derived (its memo
+  structures otherwise alias both operands — measured, it made A16 fail).
+  Cases alias-write-e006, helper-mutates-param-e006, nested-container-write-e006.
+- d65c8ab6c — N3 RULING: arithmetic / bitwise / unary + - ~ / ++ -- / compound
+  assignment results are PROTECTED; comparisons, !, typeof stay derived. reveal
+  composes: `u.reveal("pin").pin * 3` is clean and ships (runtime case
+  reveal-then-arithmetic-clean, @total = 3702). Case arithmetic-e006.
+- SPEC §14.8.9 + §34 row reconciled (case-insensitive origin, aliases, keys all
+  the way down, arithmetic ruling normative; N4 position-oracle/implicit-flow
+  out-of-scope kept).
+- Reviewer repros (protect-rr3/c, 110 cases): every leaking case REJECTED;
+  negatives (clean, keysrow*, keysstr, omitok, pickok, pickrows, q1, q2, case5,
+  case7, f3main, n2c/n2e/n2i/n2j) compile. n2i/n2j are the N4 bound.
+- Noted fail-closed FP (LOW, kept): `omit({a: u}, ["b"])` rejected.
+- Noted separate codegen bug: `?{…}.get().passwordHash` drops the trailing member
+  (returns the row — stripped, safe) (f3main).
+- Corpus (2225 files vs origin/main f0377fbf5): newly failing = only the 20
+  intentional `*-e006` cases. Arithmetic ruling: 0 non-intentional failures.
+- Push of this round was DENIED by the permission classifier; local branch only.
