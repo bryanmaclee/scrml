@@ -723,6 +723,26 @@ ${attr}
     expect(o.codes).toEqual([]);
     expect(handlers(o.clientJs)[0]).toMatch(/^async function\(event\) \{ event\.preventDefault\(\);/);
   });
+  test("round 3 (N2): a `const ev = event` alias after the await → error", () => {
+    const o = app(`<form onsubmit=\${ const ev = event; @v = isOk(1) ? "a" : "r"; ev.preventDefault() }><button>s</button></form>`);
+    expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+  });
+  test("round 3 (N2): `event[\"preventDefault\"]()` after the await → error", () => {
+    const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; event["preventDefault"]() }><button>s</button></form>`);
+    expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+  });
+  test("round 3 (N2): a closure that calls preventDefault, invoked after the await → error", () => {
+    const o = app(`<form onsubmit=\${ const stop = () => event.preventDefault(); @v = isOk(1) ? "a" : "r"; stop() }><button>s</button></form>`);
+    expect(o.codes).toContain("E-EVENT-CONTROL-AFTER-AWAIT");
+  });
+  test("round 3 (N3): an inner `(event) => event.preventDefault()` parameter is not the handler's event", () => {
+    const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; const objs = [{ preventDefault: () => 0 }]; objs.forEach((event) => event.preventDefault()) }><button>s</button></form>`);
+    expect(o.codes).toEqual([]);
+  });
+  test("round 3 (N3): a block-local `const event` is not the handler's event", () => {
+    const o = app(`<form onsubmit=\${ @v = isOk(1) ? "a" : "r"; if (true) { const event = { preventDefault: () => 0 }; event.preventDefault() } }><button>s</button></form>`);
+    expect(o.codes).toEqual([]);
+  });
   test("control: a handler with no await may call preventDefault anywhere", () => {
     const o = app(`<form onsubmit=\${ @v = "x"; event.preventDefault() }><button>s</button></form>`);
     expect(o.codes).toEqual([]);

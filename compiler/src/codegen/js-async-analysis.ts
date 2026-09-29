@@ -189,9 +189,15 @@ function declareBlock(stmts: N[], scope: Scope): void {
     if (st.type === "FunctionDeclaration" && st.id) scope.decls.set(st.id.name, st);
     else if (st.type === "ClassDeclaration" && st.id) scope.decls.set(st.id.name, OTHER);
     else if (st.type === "VariableDeclaration" && st.kind !== "var") {
-      const names: string[] = [];
-      for (const d of st.declarations) patternNames(d.id, names);
-      for (const nm of names) scope.decls.set(nm, OTHER);
+      // s441 round 3 — a simple `const x = …` binds to its own id node (a distinct
+      // binding identity, so aliases of the event parameter can be followed);
+      // pattern-bound names stay the anonymous OTHER.
+      for (const d of st.declarations) {
+        if (d.id && d.id.type === "Identifier") { scope.decls.set(d.id.name, d.id); continue; }
+        const names: string[] = [];
+        patternNames(d.id, names);
+        for (const nm of names) scope.decls.set(nm, OTHER);
+      }
     }
   }
 }
@@ -236,6 +242,9 @@ function resolveScopes(root: N, rootScope: Scope): Resolution {
     for (const p of fn.params) patternNames(p, names);
     if (fn.body && fn.body.type === "BlockStatement") hoistedVars(fn.body.body, names);
     for (const nm of names) fs.decls.set(nm, OTHER);
+    // s441 round 3 — a simple identifier parameter binds to its own node (the
+    // handler's event parameter is matched by BINDING, not by name).
+    for (const p of fn.params) if (p && p.type === "Identifier") fs.decls.set(p.name, p);
     // `arguments` is implicitly bound in a non-arrow function.
     if (fn.type !== "ArrowFunctionExpression") fs.decls.set("arguments", OTHER);
     for (const p of fn.params) visitPattern(p, fs);
@@ -377,6 +386,13 @@ function needsWrap(node: N, parent: N): boolean {
     (parent.type === "NewExpression" && parent.callee === node) ||
     (parent.type === "TaggedTemplateExpression" && parent.tag === node)
   );
+}
+
+/** The static name a member expression reads (`o.x` or `o["x"]`), or null. */
+function memberName(m: N): string | null {
+  if (!m || m.type !== "MemberExpression") return null;
+  if (!m.computed) return m.property && m.property.type === "Identifier" ? m.property.name : null;
+  return m.property && m.property.type === "Literal" && typeof m.property.value === "string" ? m.property.value : null;
 }
 
 /** A short phrase naming where a function VALUE went, for the F4 diagnostic. */
@@ -547,9 +563,9 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
   const promiseMethods: Array<{ name: string; method: string }> = [];
   const PROMISE_METHODS = new Set(["then", "catch", "finally"]);
   const checkPromiseMethod = (node: N, parent: N, name: string): void => {
-    if (parent && parent.type === "MemberExpression" && parent.object === node && !parent.computed &&
-        parent.property && parent.property.type === "Identifier" && PROMISE_METHODS.has(parent.property.name)) {
-      promiseMethods.push({ name, method: parent.property.name });
+    if (parent && parent.type === "MemberExpression" && parent.object === node) {
+      const pm = memberName(parent);
+      if (pm !== null && PROMISE_METHODS.has(pm)) promiseMethods.push({ name, method: pm });
     }
   };
 
@@ -756,19 +772,70 @@ function analyze(src: string, program: N, P: number, bodyEnd: number, resolveFre
 
   visit(program, null, false, 0);
 
-  // Event control after the first own-level await (handlers only).
+  // Event control after the first own-level await (handlers only). The event is
+  // matched by BINDING (the handler's parameter, and `const ev = event` aliases of
+  // it), so an inner `(event) => …` parameter or a block-local `const event` is
+  // not it. A nested function that calls event control on it and is INVOKED after
+  // the first await is flagged too (fail closed; not traced further).
   const eventControlAfterAwait: Array<{ method: string }> = [];
-  if (opts.root && opts.eventParam && firstOwnAwait !== Infinity) {
+  const eventParamNode = opts.root && opts.root.params && opts.root.params[0] &&
+    opts.root.params[0].type === "Identifier" ? opts.root.params[0] : null;
+  if (opts.root && eventParamNode && firstOwnAwait !== Infinity) {
     const CONTROL = new Set(["preventDefault", "stopPropagation", "stopImmediatePropagation"]);
+    const eventBindings = new Set<N>([eventParamNode]);
+    const isEventRef = (id: N): boolean => !!id && id.type === "Identifier" && eventBindings.has(refs.get(id));
+    const eachNode = (n: N, fnVisit: (x: N) => void): void => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const c of n) eachNode(c, fnVisit); return; }
+      fnVisit(n);
+      for (const key of Object.keys(n)) {
+        if (key === "type" || key === "start" || key === "end") continue;
+        const v = n[key];
+        if (v && typeof v === "object") eachNode(v, fnVisit);
+      }
+    };
+    // Aliases: `const ev = event` (and aliases of aliases).
+    let grew = true;
+    while (grew) {
+      grew = false;
+      eachNode(opts.root.body, (n) => {
+        if (n.type === "VariableDeclarator" && n.id && n.id.type === "Identifier" && isEventRef(n.init) &&
+            !eventBindings.has(n.id)) { eventBindings.add(n.id); grew = true; }
+      });
+    }
+    const controlMethodOf = (n: N): string | null => {
+      if (n.type !== "CallExpression" || !n.callee || n.callee.type !== "MemberExpression") return null;
+      if (!isEventRef(n.callee.object)) return null;
+      const m = memberName(n.callee);
+      return m !== null && CONTROL.has(m) ? m : null;
+    };
+    // Nested functions that perform event control, by their binding.
+    const controlFns = new Map<N, string>();
+    eachNode(opts.root.body, (n) => {
+      if (!isFn(n)) return;
+      let method: string | null = null;
+      eachNode(n.body, (x) => { if (method === null) method = controlMethodOf(x); });
+      if (method === null) return;
+      if (n.type === "FunctionDeclaration") controlFns.set(n, method);
+    });
+    eachNode(opts.root.body, (n) => {
+      if (n.type === "VariableDeclarator" && n.id && n.id.type === "Identifier" && n.init && isFn(n.init)) {
+        let method: string | null = null;
+        eachNode(n.init.body, (x) => { if (method === null) method = controlMethodOf(x); });
+        if (method !== null) controlFns.set(n.id, method);
+      }
+    });
     const walk = (n: N): void => {
       if (!n || typeof n !== "object") return;
       if (Array.isArray(n)) { for (const c of n) walk(c); return; }
       if (n !== opts.root && isFn(n)) return;
-      if (n.type === "CallExpression" && n.callee && n.callee.type === "MemberExpression" && !n.callee.computed &&
-          n.callee.object && n.callee.object.type === "Identifier" && n.callee.object.name === opts.eventParam &&
-          refs.get(n.callee.object) !== undefined &&
-          n.callee.property && CONTROL.has(n.callee.property.name) && n.start > firstOwnAwait) {
-        eventControlAfterAwait.push({ method: n.callee.property.name });
+      if (n.start > firstOwnAwait) {
+        const m = controlMethodOf(n);
+        if (m !== null) eventControlAfterAwait.push({ method: m });
+        else if (n.type === "CallExpression" && n.callee && n.callee.type === "Identifier") {
+          const via = controlFns.get(refs.get(n.callee));
+          if (via) eventControlAfterAwait.push({ method: via });
+        }
       }
       for (const key of Object.keys(n)) {
         if (key === "type" || key === "start" || key === "end") continue;

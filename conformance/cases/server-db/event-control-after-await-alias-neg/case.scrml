@@ -1,0 +1,7 @@
+<program>
+<verdict> = "unset"
+<flag> = false
+server function isOk(n) { return n > 100 }
+<p id="out">${@verdict}</p>
+<form id="f" onsubmit=${ const ev = event; @verdict = isOk(1) ? "accepted" : "rejected"; ev.preventDefault() }><button>s</button></form>
+</program>
