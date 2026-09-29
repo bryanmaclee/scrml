@@ -4856,6 +4856,29 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return result;
   }
 
+  // S441 review #2 — `collectExprAfterLead(leadTok)`: the tail of a bare
+  // expression statement whose head (`@y`, `@y.a`, …) the caller already
+  // consumed. `collectExpr`'s newline / statement-keyword boundaries all key
+  // on `parts.length > 0`, which is false here, so a head followed by a
+  // statement on the NEXT line (`@y⏎return x`, `@y⏎if …`, `@y⏎const k = 5`)
+  // swallowed that statement and it was silently dropped. After a complete
+  // value, a later-line token that can only start a statement (a statement
+  // keyword, an identifier that is not a word operator, another `@cell`) is a
+  // boundary, exactly as JS ASI treats `a⏎b`.
+  const _LEAD_STMT_KEYWORDS = new Set(["lift", "function", "fn", "const", "let", "import", "export", "use", "type", "server", "for", "while", "do", "if", "return", "match", "partial", "switch", "try", "fail", "transaction", "throw", "continue", "break", "when", "given"]);
+  function collectExprAfterLead(leadTok) {
+    const nt = peek();
+    if (leadTok && leadTok.span && nt && nt.span && nt.kind !== "EOF"
+        && typeof nt.span.line === "number" && typeof leadTok.span.line === "number"
+        && nt.span.line > leadTok.span.line
+        && ((nt.kind === "KEYWORD" && _LEAD_STMT_KEYWORDS.has(nt.text))
+          || (nt.kind === "IDENT" && nt.text !== "and" && nt.text !== "or")
+          || nt.kind === "AT_IDENT")) {
+      return { expr: "", span: spanOf(leadTok, leadTok) };
+    }
+    return collectExpr();
+  }
+
   function collectExpr(stopAt = null, opts = null) {
     // Phase A1a Step 11.0a — when called from inside a Variant C compound
     // body, the RHS of a child state-decl must terminate at the next
@@ -5564,8 +5587,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
           // token is something OTHER than BLOCK_REF (e.g., `<NAME>`
           // sibling decl opener) on a later line.
           const VALUE_KEYWORDS = new Set(["true", "false", "null", "undefined", "this", "not"]);
+          // S441 review #1 — a word-form INFIX operator (`and` / `or`, §45.9) is
+          // IDENT-shaped but ENDS NOTHING: `@a and⏎ @b` continues the
+          // expression. Pre-S441 this was masked because an `@cell` never
+          // started a statement here; once it does (below), counting `and` as
+          // value-ending split `@a and` from `@b` (E-CODEGEN-INVALID-LOGIC).
           const lastEndsValue = (
-            lastKind === "IDENT" ||
+            (lastKind === "IDENT" && !WORD_INFIX_OPERATORS.has(lastText)) ||
             lastKind === "NUMBER" ||
             lastKind === "STRING" ||
             lastKind === "AT_IDENT" ||
@@ -9172,7 +9200,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
         // Not a write — a READ (e.g. @arr[i].foo()) — reconstruct as bare-expr
         // verbatim from the faithful path source-text suffix. Reads are NOT COW'd.
-        const { expr, span } = collectExpr();
+        const { expr, span } = collectExprAfterLead(peek(-1));
         const _be4 = startTok.text + pathStr + (expr ? " " + expr : "");
         return { id: ++counter.next, kind: "bare-expr", expr: _be4, exprNode: safeParseExprToNode(_be4, 0), span: spanOf(startTok, peek()) };
       }
@@ -9331,7 +9359,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
 
       // Otherwise: bare-expr starting with @name
-      const { expr, span } = collectExpr();
+      const { expr, span } = collectExprAfterLead(startTok);
       const _be5 = startTok.text + (expr ? " " + expr : "");
       return { id: ++counter.next, kind: "bare-expr", expr: _be5, exprNode: safeParseExprToNode(_be5, 0), span: spanOf(startTok, peek()) };
     }
@@ -13124,7 +13152,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
 
         // Not a write — a READ — reconstruct as bare-expr from the faithful
         // path source-text suffix. Reads are NOT COW'd.
-        const { expr, span } = collectExpr();
+        const { expr, span } = collectExprAfterLead(peek(-1));
         const _be9 = startTok.text + pathStr + (expr ? " " + expr : "");
         nodes.push({
           id: ++counter.next,
@@ -13261,7 +13289,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
 
       // @name used as expression (not declaration)
-      const { expr, span } = collectExpr();
+      const { expr, span } = collectExprAfterLead(startTok);
       const _be10 = startTok.text + (expr ? " " + expr : "");
       nodes.push({
         id: ++counter.next,
