@@ -664,14 +664,18 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(CELLS + "    function h() -> int { return 2.5 }")).toEqual(["E-TYPE-031"]);
     expect(inApp(CELLS + "    function h() -> int { return @r }")).toEqual(["E-TYPE-031"]);
     expect(inApp(CELLS + "    function h() -> int | not { return @r }")).toEqual(["E-TYPE-031"]);
-    // twins: an int; `not` into `int | not`; a non-int return type is not widened
-    expect(inApp(CELLS + "    function h() -> int { return @n + 1 }\n    function k() -> int | not { return not }\n    function s() -> string { return 5 }")).toEqual([]);
+    // twins: an int; `not` into `int | not`
+    expect(inApp(CELLS + "    function h() -> int { return @n + 1 }\n    function k() -> int | not { return not }")).toEqual([]);
+    // FLIPPED (r7 A) — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus (s442 r7 A). Was: silent ("a non-int return type is not widened").
+    expect(inApp(CELLS + "    function s() -> string { return 5 }")).toEqual(["E-TYPE-031"]);
   });
   test("r4 (c) — `int` enforced at ARGUMENTS into an `int` parameter", () => {
     expect(inApp(CELLS + "    function g(k: int) { }\n    function f() { g(@r) }")).toEqual(["E-TYPE-031"]);
     expect(inApp(CELLS + "    function g(k: int) { }\n    function f() { g(1.5) }")).toEqual(["E-TYPE-031"]);
-    // twins: an int argument; a number into a `number` parameter; a string parameter is not widened
-    expect(inApp(CELLS + "    function g(k: int, x: number, s: string) { }\n    function f() { g(@n, @r, 5) }")).toEqual([]);
+    // twins: an int argument; a number into a `number` parameter; a string into a string parameter
+    expect(inApp(CELLS + "    function g(k: int, x: number, s: string) { }\n    function f() { g(@n, @r, \"a\") }")).toEqual([]);
+    // FLIPPED (r7 A) — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus (s442 r7 A). Was: silent ("a string parameter is not widened").
+    expect(inApp(CELLS + "    function g(k: int, x: number, s: string) { }\n    function f() { g(@n, @r, 5) }")).toEqual(["E-TYPE-031"]);
   });
   test("r4 (c) — `int` enforced at ALL initializers (non-literal local / cell / use-site, struct-literal fields, `int[]` elements)", () => {
     expect(inApp(CELLS + "    function f() { let k: int = @r }")).toEqual(["E-TYPE-031"]);
@@ -706,8 +710,8 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + S + "    function h() -> string { return @o.v }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + S + "    function g(z: string) { }\n    function f() { g(@o.v) }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + S + "    function f() { let z: string = @o.v }")).toEqual(["E-TYPE-031"]);
-    // twin: those positions are NOT widened for other mismatches (§7.5.1 positions 3-5 stay unchecked for non-int types)
-    expect(inApp(O + S + "    function h() -> string { return 5 }\n    function g(z: string) { }\n    function f() { g(5) }")).toEqual([]);
+    // FLIPPED (r7 A) — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus (s442 r7 A). Was: silent ("positions 3-5 stay unchecked for non-int types").
+    expect(inApp(O + S + "    function h() -> string { return 5 }\n    function g(z: string) { }\n    function f() { g(5) }")).toEqual(["E-TYPE-031", "E-TYPE-031"]);
     const d = run([LIB(), app(O + S + "    function f() { @t = @o.v }", "<p>x</p>")]).diags;
     expect(d[0].message).toContain("narrow it first");
   });
@@ -736,6 +740,39 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + "    function f() { let ks: string[] = [not] }")).toEqual(["E-TYPE-041"]);
     expect(inApp(O + "    <ks:string[replace]=([])/>\n    function f() { @ks = [not, not] }")).toEqual(["E-TYPE-041", "E-TYPE-041"]);
     expect(inApp(O + "    function g(z: int[]) { }\n    function f() { g([not]) }")).toEqual(["E-TYPE-041"]);
+  });
+  // r7 A — prov=pa-ruled:§7.5.1 widening, positions 3-4, measured-zero corpus. SPEC §7.5.1: "This section is therefore
+  // amended to state what is PROVABLE, and the algorithm is expected to catch up to it. Widening §7.5.1 is the normal
+  // direction of change and each widening is additive."
+  test("r7 A — full assignability at ARGUMENTS and RETURNS for every type", () => {
+    const P = "    type P:struct = { x: int }\n    <let pp:P=({ x: 1 })/>\n";
+    expect(inApp(O + P + "    function g(z: string) { }\n    function f() { g(true) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function g(z: bool) { }\n    function f() { g(\"s\") }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function g(z: P) { }\n    function f() { g(5) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function g(z: Openness) { }\n    function f() { g(\"x\") }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function h() -> bool { return \"s\" }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function h() -> P { return @m }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + P + "    function h() -> string[] { return [1] }")).toEqual(["E-TYPE-031"]);
+  });
+  test("r7 A twins — matching types; an int into a `number` parameter / return; an unknown value is never checked", () => {
+    const P = "    type P:struct = { x: int }\n    <let pp:P=({ x: 1 })/>\n";
+    expect(inApp(O + P + "    function g(z: string, b: bool, p: P, o: Openness, n: number) { }\n    function f() { g(\"s\", true, @pp, .Closed, 1) }")).toEqual([]);
+    expect(inApp(O + P + "    function h() -> number { return 1 }\n    function k() -> P { return @pp }\n    function u() { }\n    function w() -> string { return u() }")).toEqual([]);
+  });
+  test("r7 A guard (i) — a return type that did not resolve (E-TYPE-UNKNOWN) is never checked or trusted", () => {
+    expect(inApp("    function h() -> Nope { return 1 }\n    <let s:string=\"\"/>\n    function f() { @s = h() }")).toEqual(["E-TYPE-UNKNOWN"]);
+    // twin: a resolved return type IS checked
+    expect(inApp("    function h() -> string { return 1 }")).toEqual(["E-TYPE-031"]);
+  });
+  test("r7 A guard (ii) — a callee declared in two files (mis-linked, already refused) is untrusted: no argument / return check", () => {
+    const a = { path: "lib/a.scrml", src: "${ function helper(k: int) -> int { return k }\n export function useA() -> int { return helper(1) } }\n" };
+    const b = { path: "lib/b.scrml", src: "${ function helper(s: string) -> string { return s }\n export function useB() -> string { return helper(\"b\") } }\n" };
+    const main = { path: "app.scrml", src: "${ import { useA } from \"./lib/a.scrml\" }\n${ import { useB } from \"./lib/b.scrml\" }\n<program>\n<main><p>${useA()} ${useB()}</p></main>\n</program>\n" };
+    expect(codes([a, b, main])).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+    // twin: a helper declared in ONE file is checked
+    const one = { path: "lib/a.scrml", src: "${ function helper(k: int) -> int { return k }\n export function useA() -> string { return helper(\"x\") } }\n" };
+    const main1 = { path: "app.scrml", src: "${ import { useA } from \"./lib/a.scrml\" }\n<program>\n<main><p>${useA()}</p></main>\n</program>\n" };
+    expect(codes([one, main1])).toEqual(["E-TYPE-031", "E-TYPE-031"]);
   });
   test("r7 N2 — a `T | not` element type prints parenthesized: `(int | not)[]`", () => {
     const d = run([LIB(), app(O + "    function f() { let js: int[] = [1, not] }", "<p>x</p>")]).diags;

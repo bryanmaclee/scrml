@@ -1305,7 +1305,10 @@ ${
                 if (at is some) {
                     if (!isVoidType(at) && !hasErrIn(f.errs, at.span)) {
                         const rt: RType = resolveType(fte, at, st)
-                        ret = rt.t
+                        // guard (i), r7 A: a return type that did not resolve
+                        // (E-TYPE-UNKNOWN answers with a placeholder type) is
+                        // left unresolved — never checked against, never trusted
+                        if (rt.st.diags.length == st.diags.length) ret = rt.t
                         st = rt.st
                     }
                 }
@@ -4978,10 +4981,29 @@ ${
         if (n >= 0 && n != args.length) {
             ts = report(ts, env, e.span, "E-CALL-ARITY", arityMessage(fi.name, n, args.length))
         }
-        if (n >= 0 && n == args.length) ts = checkIntArgs(env, fi.name, args, ts)
+        // guard (ii), r7 A: a callee whose name is declared in more than one
+        // file is mis-linked by the one-namespace bootstrap (already refused,
+        // E-BOOTSTRAP-UNSUPPORTED) — untrusted: no argument check, no return type
+        if (inManyFiles(env.t, fi.name)) return rvt(VType.Unknown, ts)
+        if (n >= 0 && n == args.length) ts = checkArgs(env, fi.name, args, ts)
         const ret: Type | not = fi.ret
         if (ret is some) return rvt(known(ret), ts)
         return rvt(VType.Unknown, ts)
+    }
+
+    // Is a function name declared in more than one file (guard (ii))?
+    fn inManyFiles(t: Tables, name: string) -> boolean {
+        let first: string = ""
+        for (const f of t.fns) {
+            if (f.name == name) {
+                if (first == "") {
+                    first = f.file
+                } else if (f.file != first) {
+                    return true
+                }
+            }
+        }
+        return false
     }
 
     // ---- `int` ENFORCEMENT AT EVERY §7.5.1 POSITION (r4 (c)) -------------------
@@ -5006,8 +5028,8 @@ ${
         return out
     }
 
-    // Each argument into an `int`-bearing parameter.
-    fn checkIntArgs(env: TEnv, name: string, args: AExpr[], ts0: TypeState) -> TypeState {
+    // Each argument against its parameter (§7.5.1 position 3; every type since r7 A — pa-ruled widening, measured-zero corpus).
+    fn checkArgs(env: TEnv, name: string, args: AExpr[], ts0: TypeState) -> TypeState {
         let ts: TypeState = ts0
         let pnids: int[] = []
         for (const w of env.fnw) {
@@ -5019,11 +5041,8 @@ ${
             const pt: Type | not = knownOf(paramType(bindFact(env.t.binds, pnids[i])))
             if (pt is some) {
                 const what: string = "argument " + (i + 1) + " of `" + name + "`"
-                if (hasInt(pt)) {
-                    ts = checkValue(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)
-                } else {
-                    ts = checkMaybeNot(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)   // r6: only the `T | not` rule
-                }
+                // r7 A: full assignability for EVERY parameter type (§7.5.1 position 3)
+                ts = checkValue(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)
                 ts = checkNotElems(env, args[i], pt, ts)
             }
             i = i + 1
@@ -5031,14 +5050,14 @@ ${
         return ts
     }
 
-    // `return v` in a function declared `-> T` with an `int`-bearing `T`.
+    // `return v` against the declared `-> T` (§7.5.1 position 4; every type since r7 A — pa-ruled widening, measured-zero corpus).
     fn typeReturn(env: TEnv, e: AExpr | not, ts0: TypeState) -> TypeState {
         const ts: TypeState = typeMaybeExpr(env, e, ts0)
         if (e is not) return ts
         const rt: Type | not = env.fret
         if (rt is not) return ts
         const ts1: TypeState = checkNotElems(env, e, rt, ts)
-        if (!hasInt(rt)) return checkMaybeNot(env, exprType0(ts1, e.nid), rt, e.span, "the return value", ts1)   // r6: any other type — only the `T | not` rule
+        // r7 A: full assignability for EVERY return type (§7.5.1 position 4)
         return checkValue(env, exprType0(ts1, e.nid), rt, e.span, "the return value", ts1)
     }
 
