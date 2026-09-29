@@ -1,0 +1,17 @@
+// repro s441-fail-bare-variant @ base cf62b4154 — bare `!` function, `fail .Generic("m")`
+<program>
+${
+    <out> = ""
+    function check(n: string) ! {
+        if (n == "") fail .Generic("empty")
+    }
+    function run() {
+        check("") !{
+            | err :> { @out = "failed"; return }
+        }
+        @out = "ok"
+    }
+}
+<button onclick=run()>go</>
+<p>${@out}</p>
+</program>

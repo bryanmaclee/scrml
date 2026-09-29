@@ -39,21 +39,23 @@ ${
     // wrapper which targets the in-process common case.
     // ---------------------------------------------------------------------------
 
-    /**
-     * Schedule a function to run on a cron pattern. Returns a CronJob handle
-     * with stop(), ref(), and unref() methods.
-     *
-     * @param pattern — cron expression (e.g. "0 * * * *", "@daily", "*/15 * * * *")
-     * @param handler — function called on each scheduled fire. May be async.
-     * @returns CronJob — handle with .stop(), .ref(), .unref() methods
-     *
-     * Example:
-     *   const job = schedule("0 0 * * *", async () => {
-     *       await sendDailyDigest()
-     *   })
-     *   // Later — stop the job:
-     *   job.stop()
-     */
+    // Schedule a function to run on a cron pattern. Returns a CronJob handle
+    // with stop(), ref(), and unref() methods.
+    //
+    // (This doc block uses `//` lines, not `/** */`: the step pattern
+    // "*/15 * * * *" contains `*/`, which would close a block comment early and
+    // turn the rest of this `${}` block into page text — S441.)
+    //
+    // @param pattern — cron expression (e.g. "0 * * * *", "@daily", "*/15 * * * *")
+    // @param handler — function called on each scheduled fire. May be async.
+    // @returns CronJob — handle with .stop(), .ref(), .unref() methods
+    //
+    // Example:
+    //   const job = schedule("0 0 * * *", async () => {
+    //       await sendDailyDigest()
+    //   })
+    //   // Later — stop the job:
+    //   job.stop()
     export function schedule(pattern, handler) {
         return Bun.cron(pattern, handler)
     }

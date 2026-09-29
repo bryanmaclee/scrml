@@ -1,0 +1,38 @@
+change-id: s440-bootstrap-css-theme-t3
+
+## CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (PATH-DISCIPLINE INCIDENT counter this session: 0)
+1. `pwd` MUST start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-`. `git rev-parse --show-toplevel` must equal it. `git status --short` clean. Else STOP and report.
+2. `git fetch origin && git merge --ff-only origin/main`; assert `git merge-base HEAD origin/main` == `git rev-parse origin/main`. Report your base SHA.
+3. `bun install` then `bun run pretest` (plainly from the worktree CWD — `bun --cwd <path> run` silently no-ops).
+4. Every Read/Edit/Write uses an ABSOLUTE path under YOUR worktree root; never a main-checkout path; never `cd` into main. Edit/Write for edits, not Bash heredocs.
+5. NEVER `git stash` (shared across worktrees). NEVER `pkill -f`/`killall` on a command string — kill by PID.
+6. First commit: archive THIS ENTIRE PROMPT verbatim to `docs/changes/s440-bootstrap-css-theme-t3/BRIEF.md`, message `WIP(s440-bootstrap-css-theme-t3): start at $(pwd)` (expanded).
+7. Commit after every meaningful change; append-only timestamped `docs/changes/s440-bootstrap-css-theme-t3/progress.md`. Code + its tests in ONE commit. Never `--no-verify`, never touch `core.hooksPath`. Commits run the full core suite (~4-5 min): Bash timeout 600000.
+
+## MAPS — REQUIRED FIRST READ
+`.claude/maps/primary.map.md` (stamp `fb21983a`, 2026-09-28) first; follow Task-Shape Routing (codegen/CSS). The maps predate the bootstrap M2/M3 landings — verify anything about `compiler/self-host-v2/` against source. Report load-bearing or not.
+
+## CONTEXT — read these first, IN FULL
+- `../scrml-support/docs/deep-dives/bootstrap-codegen-architecture-dpa-051-2026-09-26.md` — especially §3 (Core IR, pass discipline), §8.2 (module-done by conformance footprint), §8.3 (the ingest shim), §8.4 (port order). You are building **§8.4 step 1: "CSS + `<theme>` T3 tokens. Smallest, independent; FileOutput's `css` can be a separate P5 sub-seam, a small TS change allowed under 'one customer'."** (Path: that deep-dive lives in the sibling repo `/home/bryan-maclee/scrmlMaster/scrml-support/`; read-only.)
+- Rulings in force (bryan): dpa-051 R1 = (a) the S233 four-phase re-cut, `compiler/self-host/` FROZEN (reference only); R2 thin Core IR; R3 immutable runtime values; R5 build the throwaway ingest shim. A module is DONE by its conformance footprint; the shim is NEVER graded by parity with impl#1 output.
+- `compiler/SPEC.md` §66.17 (`<theme>` T3 — locate `grep -n '### 66.17'`), §65 in full (the CSS model: §65.2 flat specificity + conflict checker, §65.3 bounded cascade, §65.3.2 token lowering, §65.6 reactive theming, §65.8 @layer order), §9.1, §25, §26 as the css emit touches them. Quote governing sentences in progress.md.
+- `docs/changes/s439-bootstrap-m3-ingest/` (footprint + bite-matrix method) and `compiler/self-host-v2/slice-m3/` (harness, substitute.js, bench/). The grade command: `bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js --footprint --report <file>`; certification `bun compiler/self-host-v2/slice-m3/bench/bite-matrix.js`.
+
+## THE WORK
+1. **The css sub-seam.** Make `FileOutput.css` a separately swappable P5 sub-seam so the bootstrap can own CSS while impl#1 still owns html/clientJs/serverJs (dpa-051 §8.4: those three swap as ONE unit; css is independent). A small TS change in `compiler/src/` is allowed for the seam only. Locate the existing CG seam yourself (dpa-051 cites `pipeline-seam.ts:526-529` — PA-located-verify, from a derived doc). Keep impl#1's output byte-identical when the css sub-seam is not swapped (prove it: diff emitted css across the conformance corpus before/after, record the count).
+2. **A bootstrap CSS emitter in scrml** (`compiler/self-host-v2/`, a NEW module, e.g. `css.scrml`) that produces the css artifact from Core / the shim's input: scoped `#{}` (component `@scope` + donut), flat `#{}` → inline style (if that lives in html, it stays impl#1's — report), program-level global CSS, `:where()`-flat emission, the `@layer reset, global;` order + built-in reset layer, `@charset`/`@import` hoist, `<theme>` tokens → `:root` custom properties, `@token` → `var(--token)` in CSS position, and variant selector CSS `:root[data-scrml-theme-<cell>="<Variant>"]`. Decide the input representation per dpa-051 §3 (a thin Core css node, not impl#1's decorated AST) — the shim may translate impl#1's theme/style AST into it.
+3. **§66.17 T3 — implement ONLY the ruled items** (items 1-7): tokens as locked declarations inside a marker `<theme>`; a locked literal token → static `:root`; a locked token whose initializer is a `match` over an enum-typed cell → recognized variant selector CSS (one attribute write, zero re-render); an unrecognized match-over-enum token still lowers (per-token `:root` writes). The legacy `name = value;` body + `.Variant { }` blocks must still work through the shim (they are Stage-1 deprecated, not removed).
+   **OPEN — do NOT decide:** O47 (a reactive token of any other shape, e.g. `<ink:string=(@userColor)/>`) and O17 (a) hyphenated names / non-string values, (b) `for=` still permitted, (c) the `@media (prefers-color-scheme)` auto-bind, (d) library-file placement. For each, the bootstrap must FAIL CLOSED: report the case as not-yet (footprint), never emit a guess. List every conformance case that hits an OPEN item in your report — that list is what bryan rules from.
+4. **Footprint + certification.** Extend the footprint grader so css-bearing cases are graded against the bootstrap css (and the bite matrix gets named corruptions of the css emitter — e.g. drop the `@scope` wrapper, drop `:where()`, swap layer order, drop a token — each of which must KILL at least one graded pass, else the construct is uncertified). Report: cases graded, css passes, certified constructs, not-yet reasons.
+
+## FOOTPRINT BOUNDARY (a sibling agent is editing the bootstrap front end right now)
+Do NOT edit `compiler/self-host-v2/{analyze,lower,parse,lex,check,print,ast,js}.scrml` or `slice-m1/`, `slice-m2/`. You MAY edit `ingest.scrml`, `core.scrml` (additive only — a new css node kind; report exactly what you added), `slice-m3/` (harness, substitute, bench), new files, `scripts/hybrid.ts`, and the minimal `compiler/src/` seam. If you genuinely need a front-end change (e.g. parsing `<theme>` §66 declarations from source), do NOT make it — record it as the next dispatch's input and use the shim path.
+
+## VERIFICATION
+- `bun test compiler/self-host-v2/slice-m1 compiler/self-host-v2/slice-m2 compiler/self-host-v2/slice-m3` + your new tests; `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance` green; `bun conformance/run.ts` counts unchanged for impl#1.
+- The 18/18 runtime passes must hold; the bite matrix must stay 0 uncertified.
+- R26: compile a few real sources with `<theme>` + scoped `#{}` through the css swap and diff against impl#1's css — report differences and classify each (bootstrap bug / impl#1 bug / spec-directed difference). Parity is NOT the grade, but an unexplained difference is a finding.
+- Adversarial self-check: nested components with scoped styles, a token referenced in a scoped block, two themes, a token/cell same name (§66.17 item 4 — one namespace; what fires?), `!important` (§65.7), an empty `#{}`.
+
+## REPORT (terse)
+WORKTREE_PATH · base SHA · FINAL_SHA · files touched · seam location (hypothesis held/wrong) · impl#1 byte-identity proof · footprint + bite-matrix numbers · OPEN-item case list (O17 a-d, O47) · front-end changes needed next · anything for the PA. Clean `git status` before reporting.

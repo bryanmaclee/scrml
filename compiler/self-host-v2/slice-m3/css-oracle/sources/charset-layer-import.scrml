@@ -1,0 +1,10 @@
+<program>
+  #{
+      @charset "UTF-8";
+      @import url("theme.css");
+      .note::before { content: "é"; }
+      p { margin-top: 8px; }
+  }
+  <p class="note" id="n">n</p>
+  <span class="imp">i</span>
+</program>
