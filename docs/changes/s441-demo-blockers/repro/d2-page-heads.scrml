@@ -1,0 +1,18 @@
+<!-- s441-demo-blockers DEFECT 2 repro (<page> body) — base cf62b4154: exit 0, all shipped as page text.
+     Fixed: E-TRY-NOT-IN-SCRML, E-SWITCH-FORBIDDEN, E-FOR-AWAIT-NOT-IN-SCRML. -->
+<page>
+<p>one</p>
+try {
+    load()
+} catch (e) {
+    log(e)
+}
+<p>two</p>
+switch (k) {
+    case 1: break
+}
+<p>three</p>
+for await (const x of xs) {
+    log(x)
+}
+</page>
