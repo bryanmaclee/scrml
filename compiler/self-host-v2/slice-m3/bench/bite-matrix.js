@@ -23,18 +23,27 @@
 // one of its corruptions (the stylesheet emitter css.scrml, or the stylesheet shim css-ingest.scrml)
 // makes a css pass fail its oracle while the case stays graded (bite-lib.js `judgeCssDeaths`).
 //
-// usage: bun compiler/self-host-v2/slice-m3/bench/bite-matrix.js [--report <path.md>] [--cg-only | --css-only]
+// FRONT-END PHASE (s442, bite-front.js): the §66 constructs the front end (lex / parse / analyze /
+// lower) gained for the §66.19 worked programs, certified against the slice-M4 BEHAVIOUR tests (each
+// program compiled from its verbatim SPEC source and run). A kill there is a behaviour test that fails
+// while the mutated program still compiles clean.
+//
+// usage: bun compiler/self-host-v2/slice-m3/bench/bite-matrix.js [--report <path.md>] [--cg-only | --css-only | --front]
 
 import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { judgeCssDeaths, judgeDeaths } from "./bite-lib.js";
+import { judgeFrontRun, isFrontKill } from "./bite-front.js";
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..");
 const SH = "compiler/self-host-v2";
 const PRINT = `${SH}/print.scrml`;
 const RT = `${SH}/slice-m1/runtime/runtime.js`;
 const INGEST = `${SH}/ingest.scrml`;
+const PARSE = `${SH}/parse.scrml`;
+const ANALYZE = `${SH}/analyze.scrml`;
+const LOWER = `${SH}/lower.scrml`;
 
 // Each mutation corrupts ONE construct. `from` must occur exactly once in `file`.
 const MUTATIONS = [
@@ -119,6 +128,88 @@ const MUTATIONS = [
   { c: "View.Text", id: "shim: markup text dropped", file: INGEST,
     from: "return viewsOf([View.Text(v)], [])", to: "return viewsOf([], [])" },
 ];
+
+// ---- the FRONT-END section (s442): construct → corruption → the slice-m4 behaviour tests it must kill ----
+// `tests` are slice-m4 test files; only their `behaviour` tests run (`-t behaviour`).
+const FRONT_MUTATIONS = [
+  // §66.19.6 — an engine as a `single` declaration
+  { c: "Parse.ShorthandBody", id: "a `:`-shorthand body's expression is dropped (an empty text)", file: PARSE,
+    from: "const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }",
+    to: 'const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }', tests: ["engine.test.js"] },
+  { c: "Analyze.StateBodies", id: "state-child bodies are never resolved (no facts for their expressions)", file: ANALYZE,
+    from: "st = resolveNodes(renv, stateBodies(ds), st)", to: "st = resolveNodes(renv, [], st)", tests: ["engine.test.js"] },
+  { c: "Analyze.StateView", id: "every state-view arm is keyed to the enum's first variant", file: ANALYZE,
+    from: "arms = arms.concat([{ variant: v, body: c.body }])", to: "arms = arms.concat([{ variant: 0, body: c.body }])", tests: ["engine.test.js"] },
+  { c: "Lower.StateView", id: "a state-view arm tests the NEXT variant", file: LOWER,
+    from: "Expr.Lit(Literal.Variant(v.enumSym, a.variant))", to: "Expr.Lit(Literal.Variant(v.enumSym, a.variant + 1))", tests: ["engine.test.js"] },
+  { c: "Analyze.NestedDecl", id: "a declaration inside `<program>` is not stubbed as a user declaration (its uses read as HTML)", file: ANALYZE,
+    from: "                if (isNestedUserDecl(d)) {\n                    const n: RDeclStubs", to: "                if (false) {\n                    const n: RDeclStubs", tests: ["engine.test.js"] },
+  { c: "Lower.NestedDeclSyntax", id: "a nested declaration's renders is never lowered", file: LOWER,
+    from: ".concat(nestedSyntaxes(file, p.items))", to: "", tests: ["engine.test.js"] },
+  // §66.19.5 — an append-only audit log (the fixture minus its Core-blocked constructs)
+  { c: "Analyze.SeqShape", id: "a recognized append shape records no element to write", file: ANALYZE,
+    from: "                elems = elems.concat([x])\n", to: "                elems = elems\n", tests: ["audit.test.js"] },
+  { c: "Analyze.SeqShape", id: "`[...@x, e]` classified as the front shape (a prepend)", file: ANALYZE,
+    from: "                    if (samePlaceSyntax(target, first)) return 1", to: "                    if (samePlaceSyntax(target, first)) return 2", tests: ["audit.test.js"] },
+  { c: "Lower.SeqEdits", id: "a one-element append shape's write is dropped", file: LOWER,
+    from: "        if (values.length == 1) return pre.concat([Stmt.Write(w.cap, target, w.edit, values[0], w.check)])", to: "        if (values.length == 1) return pre", tests: ["audit.test.js"] },
+  { c: "Lower.SeqEdits", id: "a prepend shape writes its elements in source order (the log would read b, a)", file: LOWER,
+    from: "        const prepend: boolean = w.edit == EditKind.Prepend", to: "        const prepend: boolean = false", tests: ["audit.test.js"] },
+  { c: "Parse.ArraySpread", id: "a spread element keeps only its operand's position (`[...@x, e]` read as `[e, ...@x]`)", file: PARSE,
+    from: "                out = out.concat([sp.e])", to: "                out = [sp.e].concat(out)", tests: ["audit.test.js"] },
+  // §66.19.2 — a validated form (the fixture minus its validators and binds)
+  { c: "Analyze.StarShared", id: "`<*x/>` of a shared instance inlines with no instance substitution", file: ANALYZE,
+    from: "MInline({ nodes: nodes, subst: InstRef.Shared(d.info.sym) })", to: "MInline({ nodes: nodes, subst: not })", tests: ["form.test.js"] },
+  { c: "Lower.Inline", id: "an inlined renders keeps the caller's instance context", file: LOWER,
+    from: "        const ic: LC = { t: c.t, file: c.file, subst: s, snap: not }", to: "        const ic: LC = { t: c.t, file: c.file, subst: c.subst, snap: not }", tests: ["form.test.js"] },
+  { c: "Analyze.ChildRenders", id: "`<*f/>` of a child field with renders inlines nothing", file: ANALYZE,
+    from: "MInline({ nodes: own, subst: not })", to: "MInline({ nodes: [], subst: not })", tests: ["form.test.js"] },
+  { c: "Analyze.ChildRenders", id: "a child field's renders is never resolved", file: ANALYZE,
+    from: "st = resolveNodes(renv, childRenders(ds), st)", to: "st = resolveNodes(renv, [], st)", tests: ["form.test.js"] },
+];
+
+function runFront(tests) {
+  const args = ["test", ...tests.map((t) => `./${SH}/slice-m4/${t}`), "-t", "behaviour"];
+  const r = spawnSync("bun", args, { cwd: MIRROR, encoding: "utf8", timeout: 600000, maxBuffer: 64 * 1024 * 1024 });
+  return judgeFrontRun((r.stdout ?? "") + (r.stderr ?? ""));
+}
+
+function frontSection(L) {
+  const frows = [];
+  const fkills = new Map();
+  const files = [...new Set(FRONT_MUTATIONS.flatMap((m) => m.tests))];
+  const clean = runFront(files);
+  const cleanOk = clean.ran && !clean.rejected && clean.fail === 0 && clean.pass > 0;
+  if (!cleanOk) bad = true;
+  for (const m of FRONT_MUTATIONS) {
+    const path = join(MIRROR, m.file);
+    const orig = readFileSync(path, "utf8");
+    const n = orig.split(m.from).length - 1;
+    if (n !== 1) {
+      frows.push(`| ${m.c} | ${m.id} | site found ${n}× — NOT RUN (hollow) | — |`);
+      bad = true;
+      continue;
+    }
+    try {
+      writeFileSync(path, orig.replace(m.from, m.to));
+      const j = runFront(m.tests);
+      if (!fkills.has(m.c)) fkills.set(m.c, 0);
+      if (isFrontKill(j)) fkills.set(m.c, fkills.get(m.c) + j.fail);
+      const verdict = isFrontKill(j) ? `${j.fail} of ${j.pass + j.fail} killed` : `**none — NOT a bite** (${j.why || "every behaviour test passed"})`;
+      frows.push(`| ${m.c} | ${m.id} | ${verdict} | ${m.tests.join(", ")} |`);
+    } finally {
+      writeFileSync(path, orig);
+    }
+  }
+  const constructs = [...new Set(FRONT_MUTATIONS.map((m) => m.c))];
+  const certified = constructs.filter((c) => (fkills.get(c) ?? 0) > 0);
+  const uncertified = constructs.filter((c) => !certified.includes(c));
+  L.push("# Bite matrix — front-end (§66) constructs, graded by the slice-M4 behaviour tests", "");
+  L.push(`Clean mirror behaviour run: ${clean.pass} pass / ${clean.fail} fail${cleanOk ? "" : " — **NOT CLEAN** (" + (clean.why || "failures") + ")"}.`, "");
+  L.push("| construct | corruption | behaviour tests killed (program still compiles clean) | tests |", "|---|---|---|---|", ...frows, "");
+  L.push(`## FRONT CERTIFIED (${certified.length})`, "", certified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
+  L.push(`## FRONT UNCERTIFIED (${uncertified.length})`, "", uncertified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
+}
 
 // ---- s440: the STYLESHEET pass (CSS sub-seam). A css pass is a graded case whose css ORACLE (computed
 // style in Chromium, SPEC-derived) held; a corruption certifies its construct only if a css pass dies. ----
@@ -231,7 +322,9 @@ function grade(stage, sub, only, outJson) {
 
 const argv = process.argv.slice(2);
 const reportPath = (() => { const i = argv.indexOf("--report"); return i === -1 ? null : argv[i + 1]; })();
-const phaseSel = argv.includes("--css-only") ? ["css"] : argv.includes("--cg-only") ? ["cg"] : ["cg", "css"];
+const FRONT_ONLY = argv.includes("--front");
+const phaseSel = FRONT_ONLY ? [] : argv.includes("--css-only") ? ["css"] : argv.includes("--cg-only") ? ["cg"] : ["cg", "css"];
+const withFront = FRONT_ONLY || !(argv.includes("--css-only") || argv.includes("--cg-only"));
 
 const PHASES = {
   cg: {
@@ -326,6 +419,11 @@ try {
     L.push(`### UNCERTIFIED (${uncertified.length}) — exercised by a pass, but no evidence it is implemented`, "");
     for (const u of uncertified) L.push(`- ${u}`);
     sections.push(L.join("\n"));
+  }
+  if (withFront) {
+    const F = [];
+    frontSection(F);
+    sections.push(F.join("\n"));
   }
   const text = ["# Bite matrix — footprint-grade construct certification", "", ...sections, "", `(${((performance.now() - t0) / 1000).toFixed(1)}s)`].join("\n") + "\n";
   console.log(text);

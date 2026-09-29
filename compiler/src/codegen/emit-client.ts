@@ -12,7 +12,9 @@ import { CGError } from "./errors.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
-import { emitFunctions } from "./emit-functions.ts";
+import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
+import { setActiveClientAsync } from "./js-async-analysis.ts";
+import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { getNodes, isServerOnlyNode } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { emitBindings } from "./emit-bindings.ts";
@@ -2324,6 +2326,19 @@ export function generateClientJs(ctx: CompileContext): string {
   //
   // See SCOPE-AND-DECOMPOSITION.md §3.4 (Option C-prime, RATIFIED) and
   // PHASE-0-SURVEY §7.3 finalized helper signature.
+  // s441 — compute the client async facts BEFORE any body-render stage and make
+  // them the ACTIVE client emission: the `<each>` row and lift handler emitters
+  // (deep call chains with no ctx) color their handlers against them (F5).
+  {
+    const _facts = clientAsyncFactsOf(ctx);
+    const _resolveFree = freeAsyncResolverFromFacts(_facts);
+    setActiveClientAsync({
+      resolveFree: _resolveFree,
+      report: (uses, span) => {
+        for (const err of jsAsyncUsesErrors(uses, span, ctx.filePath)) errors.push(err);
+      },
+    });
+  }
   const c12BodyRender = clientStage(ctx, "emit-engine-body-render", () => emitEngineBodyRenderForFile(fileAST, ctx));
   const c14BodyRender = clientStage(ctx, "emit-derived-engine-body-render", () => emitDerivedEngineBodyRenderForFile(fileAST, ctx));
   // S108 Phase 3 — match-block body render (SPEC §18.0.1). Mirrors C12/C14
@@ -2482,6 +2497,9 @@ export function generateClientJs(ctx: CompileContext): string {
   // `_scrml_fetch_with_csrf_retry` CALL (emit-functions.ts) without this DEF →
   // `ReferenceError` at load. It now emits whenever `csrfEnabled`.
   if (csrfEnabled) {
+    // The §39.2.3 meta tag is emitted exactly for an auth entry with csrf="auto"
+    // (codegen/index.ts), the same predicate the server's meta fill uses.
+    const _csrfMetaPresent = authMiddlewareEntry?.csrf === "auto";
     lines.push("// --- CSRF token helper (compiler-generated) ---");
     lines.push("function _scrml_get_csrf_token() {");
     // §39.2.3 canonical delivery — PREFER the <meta name="csrf-token"> element the
@@ -2535,6 +2553,28 @@ export function generateClientJs(ctx: CompileContext): string {
         }
       }
     }
+    // S441 review F3 — an auth + `csrf="auto"` page carries the §39.2.3
+    // `<meta name="csrf-token">`, and `_scrml_get_csrf_token()` prefers it. When
+    // that first-paint token is STALE (the session changed after the page was
+    // composed — re-login in another tab, a server restart), the server's CSRF 403
+    // plants THIS session's token in the readable `scrml_csrf` cookie, but the
+    // retry would re-read the stale meta and 403 again until a reload. Before the
+    // one retry, copy the freshly planted cookie token into the meta so the retry
+    // (and every later mutation on this page) sends the current token. Emitted only
+    // where the meta exists (the baseline double-submit path has no meta tag) and a
+    // retry exists to call it (both retry sites — the wrapper below and the
+    // Idempotency-Key branch in emit-functions.ts — exist only for a mutating fn).
+    if (_csrfMetaPresent && hasMutatingCsrfServerFn) {
+      lines.push("// After a CSRF 403: the response planted the current session token in the");
+      lines.push("// scrml_csrf cookie; make the meta tag agree so the retry does not resend a stale one.");
+      lines.push("function _scrml_csrf_sync_meta_from_cookie() {");
+      lines.push("  const _scrml_meta = (typeof document !== 'undefined' && document.querySelector) ? document.querySelector('meta[name=\"csrf-token\"]') : null;");
+      lines.push("  if (!_scrml_meta) return;");
+      lines.push("  const _scrml_fresh = document.cookie.match(/(?:^|;\\s*)scrml_csrf=([^;]+)/);");
+      lines.push("  if (_scrml_fresh) _scrml_meta.setAttribute('content', decodeURIComponent(_scrml_fresh[1]));");
+      lines.push("}");
+      lines.push("");
+    }
     if (hasMutatingCsrfServerFn) {
       // Cookie-less first POST receives a 403 with Set-Cookie (server plants
       // a fresh token). We retry exactly once, re-reading document.cookie
@@ -2548,6 +2588,7 @@ export function generateClientJs(ctx: CompileContext): string {
       lines.push("    body,");
       lines.push("  });");
       lines.push("  if (_scrml_resp.status === 403) {");
+      if (_csrfMetaPresent) lines.push("    _scrml_csrf_sync_meta_from_cookie();");
       lines.push("    _scrml_resp = await fetch(path, {");
       lines.push("      method,");
       lines.push('      headers: { "Content-Type": "application/json", "X-CSRF-Token": _scrml_get_csrf_token() },');
@@ -4201,6 +4242,8 @@ export function generateClientJs(ctx: CompileContext): string {
   // registered-request id set so it cannot leak into the next file's emission.
   setCurrentFileRequestIds(null);
   if (_ownsEmitLogicState) endEmitLogicFile();
+  // s441 — end of this file's client emission (see setActiveClientAsync above).
+  setActiveClientAsync(null);
 
   return clientCode;
 }

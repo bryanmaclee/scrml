@@ -79,6 +79,7 @@ ${
         wcap: Sym | not,
         init: AAttrValue,
         reads: string[],
+        shrink: SeqAt[],        // s442: the SHRINK places its sequence type grants (RULED S442 grow/shrink split)
     }
 
     // `nid` = the ADecl (user) / AProgram node. `file` = the defining file (E2).
@@ -125,6 +126,10 @@ ${
     // snapshot; see spreadEffect): the field (`ref`) and the local it is read
     // into when an override value reads it.
     export type SnapField:struct = { ref: FieldRef, local: Sym }
+    // r2 (RULED S442 "sequence spreads use one snapshot"): the one snapshot of a
+    // sequence shape's target — field `idx` of `decl` — read into `local` before
+    // any element is evaluated; every `@x` read inside the elements reads it.
+    export type SeqSnap:struct = { local: Sym, decl: Sym, idx: int }
 
     // How an attribute of an element is used.
     export type AttrKind:enum = {
@@ -171,6 +176,7 @@ ${
         ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[]), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
+        EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[], snap: SeqSnap), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first; r2: reads of `@x` see `snap`
     }
     export type BindFact:enum = {
         BBind(sym: Sym),                                  // a binder: a local statement, a function
@@ -182,7 +188,27 @@ ${
         MUse(decl: Sym, alias: Sym | not),                // an element that is a USE of a declaration
         MEach(bind: Sym, handles: Sym[]),                 // an <each> element
         MSlot,
+        MStateView(v: StateView),                         // `<*f/>` of a graph field: its state-child bodies (O5 (1i))
+        MInline(v: InlineView),                           // `<*x/>` rendered by inlining its markup (s442)
     }
+    // s442 — `<*x/>` (§66.6.2, "the existing one") rendered by INLINING markup
+    // that is already resolved in the right context: a child field's own
+    // `renders` inside its declaration's renders (`<*email/>`, `subst` = not —
+    // the current instance is already Lexical(0)), or a user declaration's
+    // `renders` for its shared instance at program top level (`<*signup/>`,
+    // `subst` = Shared(x): the renders' `.Lexical(0)` means that instance).
+    // Core has no View.Star (M1 D4; core.scrml is outside this slice), so the
+    // inline form is restricted to markup that constructs nothing (no use, no
+    // `as=`, no `<slot/>`) — every node reads / writes the ONE existing instance.
+    export type InlineView:struct = { nodes: ANode[], subst: InstRef | not }
+    // s442 — `<*f/>` of a field whose value carries a `rule=` graph with
+    // state-child BODIES: O5 RULED (1i) "a state-child's body is that
+    // variant's markup, rendered wherever the field renders". One arm per
+    // state-child that has a body: shown while the field (`decl`/`inst`/`idx`)
+    // holds variant `variant` of `enumSym`. The bodies are syntax (resolved in
+    // the declaring declaration's context, like its renders); lower lowers them.
+    export type StateArm:struct = { variant: int, body: ANode[] }
+    export type StateView:struct = { decl: Sym, inst: InstRef, idx: int, enumSym: Sym, arms: StateArm[] }
 
     // A family's side-table: its facts in the order the binder recorded them,
     // `nids[i]` the node `facts[i]` is about, and `at` — the NodeId index:
@@ -533,31 +559,142 @@ ${
         return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`") }
     }
 
-    // `T[g, …]` (⚑ O10 spelling): the grant words are permission AXES (§66.12.2).
+    // ---- the grant words (the ONE place a grant SPELLING is read) -------------
+    // RULED S442 (user-voice "the tape 'where it changes' axis splits grow from
+    // shrink; `anywhere` covers end/front", and "spellings are fine" for the six
+    // tokens): grow and shrink are SEPARATE grants at each place —
+    //   end:      `append` (grow) · `pop` (shrink)
+    //   front:    `prepend` (grow) · `shift` (shrink)
+    //   anywhere: `insert` (grow) · `remove` (shrink) — and anywhere COVERS end
+    //             and front (an insert grant admits appends and prepends, a
+    //             remove grant pops and shifts).
+    // The retired bare place tokens `end` / `front` / `anywhere` are refused,
+    // naming both halves (never guessing which was meant). The rest of O10 — the
+    // bracket-list form, `free` / `writable` / `replace`, the bounded-length
+    // token — is still OPEN; a respelling is an edit here only.
+    type GrantAxis:enum = { GFree, GWritable, GReplace, GGrow(at: SeqAt), GShrink(at: SeqAt), GRetired(grow: string, shrink: string), GUnknown }
+
+    fn grantAxis(w: string) -> GrantAxis {
+        return match w {
+            "free"     :> GrantAxis.GFree
+            "writable" :> GrantAxis.GWritable
+            "replace"  :> GrantAxis.GReplace
+            "append"   :> GrantAxis.GGrow(SeqAt.End)
+            "pop"      :> GrantAxis.GShrink(SeqAt.End)
+            "prepend"  :> GrantAxis.GGrow(SeqAt.Front)
+            "shift"    :> GrantAxis.GShrink(SeqAt.Front)
+            "insert"   :> GrantAxis.GGrow(SeqAt.Anywhere)
+            "remove"   :> GrantAxis.GShrink(SeqAt.Anywhere)
+            "end"      :> GrantAxis.GRetired("append", "pop")
+            "front"    :> GrantAxis.GRetired("prepend", "shift")
+            "anywhere" :> GrantAxis.GRetired("insert", "remove")
+            _          :> GrantAxis.GUnknown
+        }
+    }
+
+    // `T[g, …]` (⚑ O10 bracket form): the grant words are permission AXES
+    // (§66.12.2). Core's SeqGrants.at holds the GROW places (Core's edits
+    // Append / Prepend / Anywhere are all growing edits); the SHRINK places have
+    // no Core edit and are an analyze fact (FieldInfo.shrink, shrinkOf).
     fn resolveSeqType(te: TypeEnv, at: AType, elem: AType, gs: string[], st0: AS) -> RType {
         const re: RType = resolveType(te, elem, st0)
         let st: AS = re.st
         let length: LengthGrant = LengthGrant.Fixed
         let where: SeqAt[] = []
         let writable = false
+        let seen: string[] = []
         for (const g of gs) {
-            if (g == "free") {
+            const ax: GrantAxis = grantAxis(g)
+            // r2 N3: a grant named twice is refused (E-GRANT-UNKNOWN: the list
+            // is a SET of axis values; a repeat is not a value of any axis)
+            if (seen.indexOf(g) >= 0) {
+                st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", "`" + g + "` is granted twice — a grant list names each permission once (§66.12.2)")
+            }
+            seen = seen.concat([g])
+            if (ax == GrantAxis.GFree) {
                 length = LengthGrant.Free
-            } else if (g == "end") {
-                where = where.concat([SeqAt.End])
-            } else if (g == "front") {
-                where = where.concat([SeqAt.Front])
-            } else if (g == "anywhere") {
-                where = where.concat([SeqAt.Anywhere])
-            } else if (g == "writable") {
+            } else if (ax == GrantAxis.GWritable) {
                 writable = true
-            } else if (g == "replace") {
+            } else if (ax == GrantAxis.GReplace) {
                 // carried on the field's grant set (seqReplace), not on SeqGrants
             } else {
-                st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", "`" + g + "` is not a permission axis value (§66.12.2; there is no `any` / `all`, §66.12.4)")
+                const gp: SeqAt | not = growAt(ax)
+                if (gp is some) {
+                    where = where.concat([gp])
+                } else if (shrinkAt(ax) is not) {
+                    st = addDiag(st, te.file, at.span, "E-GRANT-UNKNOWN", grantUnknownMessage(g, ax))
+                }
             }
         }
         return { t: Type.Seq(re.t, { length: length, at: where, positionsWritable: writable }), st: st }
+    }
+
+    fn growAt(ax: GrantAxis) -> SeqAt | not {
+        return match ax {
+            .GGrow(at: a) :> a
+            .GShrink(at: a) :> not
+            .GRetired(grow: g) :> not
+            .GFree :> not
+            .GWritable :> not
+            .GReplace :> not
+            .GUnknown :> not
+        }
+    }
+
+    fn shrinkAt(ax: GrantAxis) -> SeqAt | not {
+        return match ax {
+            .GShrink(at: a) :> a
+            .GGrow(at: a) :> not
+            .GRetired(grow: g) :> not
+            .GFree :> not
+            .GWritable :> not
+            .GReplace :> not
+            .GUnknown :> not
+        }
+    }
+
+    fn grantUnknownMessage(g: string, ax: GrantAxis) -> string {
+        return match ax {
+            .GRetired(grow: gw, shrink: sw) :> "`" + g + "` no longer names a grant: growing and shrinking are separate grants at each place (RULED S442) — write `" + gw + "` (grow), `" + sw + "` (shrink), or both"
+            .GGrow(at: a) :> ""
+            .GShrink(at: a) :> ""
+            .GFree :> ""
+            .GWritable :> ""
+            .GReplace :> ""
+            .GUnknown :> "`" + g + "` is not a permission axis value (§66.12.2; there is no `any` / `all`, §66.12.4)"
+        }
+    }
+
+    // The SHRINK places a written sequence type grants (`pop` / `shift` / `remove`).
+    fn shrinkOf(aty: AType | not) -> SeqAt[] {
+        if (aty is not) return []
+        return shrinkWords(aty)
+    }
+
+    fn shrinkWords(aty: AType) -> SeqAt[] {
+        const k: ATypeK = aty.k
+        return match k {
+            .TSeq(elem: e, grants: gs) :> shrinkList(gs)
+            .TName(name: n) :> []
+            .TMaybe(inner: i) :> []
+        }
+    }
+
+    fn shrinkList(gs: string[]) -> SeqAt[] {
+        let out: SeqAt[] = []
+        for (const g of gs) {
+            const a: SeqAt | not = shrinkAt(grantAxis(g))
+            if (a is some) out = out.concat([a])
+        }
+        return out
+    }
+
+    // A removal at `place` is granted by a shrink grant there or `remove` (anywhere covers end / front).
+    fn shrinkGranted(shrink: SeqAt[], place: SeqAt) -> boolean {
+        for (const a of shrink) {
+            if (a == place || a == SeqAt.Anywhere) return true
+        }
+        return false
     }
 
     // Does a sequence type expression grant `replace` in its brackets?
@@ -586,6 +723,11 @@ ${
     fn seqEdits(g: SeqGrants) -> EditKind[] {
         let out: EditKind[] = []
         for (const a of g.at) { out = out.concat([seqAtEdit(a)]) }
+        // RULED S442: an anywhere-grow (`insert`) grant admits appends and prepends
+        if (hasEditKind(out, EditKind.Anywhere)) {
+            if (!hasEditKind(out, EditKind.Append)) out = out.concat([EditKind.Append])
+            if (!hasEditKind(out, EditKind.Prepend)) out = out.concat([EditKind.Prepend])
+        }
         if (g.positionsWritable) out = out.concat([EditKind.PositionWrite])
         return out
     }
@@ -797,7 +939,7 @@ ${
     fn declStubOf(k: AItemK, file: string, entry: string, st: AS) -> RDeclStubs {
         return match k {
             .DeclItem(d: d) :> userDeclStub(d, file, st)
-            .ProgramItem(p: p) :> programStub(p, file, entry, st)
+            .ProgramItem(p: p) :> withNestedStubs(programStub(p, file, entry, st), p, file)
             .ImportItem(i: i) :> noStubs(st)
             .TypeItem(t: t) :> noStubs(st)
             .FnItem(f: f) :> noStubs(st)
@@ -819,6 +961,33 @@ ${
     fn userDeclStub(d: ADecl, file: string, st: AS) -> RDeclStubs {
         const r: RSym = mint(st, d.name)
         return { ds: [{ sym: r.s, file: file, isProgram: false, d: d, p: not, nid: d.nid }], st: r.st }
+    }
+
+    // s442: a declaration with typed attributes or a `renders` written inside
+    // `<program>` is a USER declaration (a multi-instance type, §66.1) — the
+    // §66.19.6 `<card title:string>` — not a program field. Its instances come
+    // from its uses; the declaration itself renders nothing where it is
+    // written (the §66.19 programs render instances only through uses and
+    // `<*x/>`; ⚑ O38 — whether a program-level declaration is in "a markup
+    // position" — is not decided here). A declaration with neither stays a
+    // program field (R4), `single` or not.
+    fn isNestedUserDecl(d: ADecl) -> boolean {
+        return d.attrs.length > 0 || d.renders is some
+    }
+
+    fn withNestedStubs(r: RDeclStubs, p: AProgram, file: string) -> RDeclStubs {
+        let st: AS = r.st
+        let out: DeclStub[] = r.ds
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (isNestedUserDecl(d)) {
+                    const n: RDeclStubs = userDeclStub(d, file, st)
+                    out = out.concat(n.ds)
+                    st = n.st
+                }
+            }
+        }
+        return { ds: out, st: st }
     }
 
     fn programStub(p: AProgram, file: string, entry: string, st: AS) -> RDeclStubs {
@@ -855,6 +1024,9 @@ ${
             .Assign(target: t, value: v) :> exprReads(v)
             .ArrayLit(elems: es) :> listReads(es)
             .ObjectLit(props: ps) :> propReads(ps)
+            .Spread(e: x) :> exprReads(x)
+            .Index(obj: o, idx: i) :> exprReads(o).concat(exprReads(i))
+            .Lambda(params: ps2, body: b) :> exprReads(b)
             .Name(name: n) :> []
             .Num(raw: r) :> []
             .Str(v: s) :> []
@@ -910,6 +1082,9 @@ ${
             .Assign(target: t) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -988,7 +1163,7 @@ ${
         }
         const f: FieldInfo = {
             nid: nid, span: span, annotated: aty is some, trusted: true, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
-            exported: exported, wcap: wcap, init: init, reads: reads,
+            exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty),
         }
         return { f: f, st: st }
     }
@@ -1026,8 +1201,14 @@ ${
             return { graph: not, st: addDiag(st, te.file, children[0].span, "E-DECL-STATE-CHILD", "state-children need an enum-valued field (§66.13.2)") }
         }
         let edges: Edge[] = []
+        let seen: int[] = []
         for (const c of children) {
             const origin: int = variantIndex(g, es, c.name)
+            if (origin >= 0 && seen.indexOf(origin) >= 0) {
+                // r1 nit: one state-child per variant
+                st = addDiag(st, te.file, c.span, "E-DECL-STATE-CHILD", "`<" + c.name + ">` is declared twice in this graph — a variant has one state-child (its edges and body)")
+            }
+            seen = seen.concat([origin])
             if (origin < 0) {
                 st = addDiag(st, te.file, c.span, "E-DECL-STATE-CHILD", "`<" + c.name + ">` is not a variant of `" + es.hint + "` (O52: a state-child names a variant of the enclosing field)")
             } else {
@@ -1089,6 +1270,9 @@ ${
             .Assign(target: t) :> []
             .ArrayLit(elems: es) :> []
             .ObjectLit(props: ps) :> []
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
         }
     }
 
@@ -1116,6 +1300,11 @@ ${
             st = r.st
         }
         for (const c of childFields(d.body)) {
+            if (hasFlag(c.mods, "single")) {
+                // s442, §66.13.4: the Move-20 invariant — one declaration site
+                // inside N instances cannot be one instance.
+                st = addDiag(st, te.file, c.span, "E-COMPONENT-ENGINE-SCOPE", "`<" + c.name + " … single>` is a `single` declaration inside the multi-instance declaration `<" + d.name + ">` — every `<" + d.name + ">` instance would share one `" + c.name + "`. Drop `single`: an ordinary child field gives each `<" + d.name + ">` its own `" + c.name + "` (§66.13.4)")
+            }
             const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, st)
             out = out.concat([r2.f])
             st = r2.st
@@ -1129,8 +1318,8 @@ ${
         let out: FieldInfo[] = []
         for (const it of p.items) {
             for (const d of declsOfItem(it)) {
-                if (d.attrs.length > 0 || d.renders is some) {
-                    st = addDiag(st, te.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "a declaration with attributes or a `renders` inside `<program>` (a nested user declaration) is not in bootstrap slice M2 — declare it at file level")
+                if (isNestedUserDecl(d)) {
+                    // a user declaration (stubbed by withNestedStubs), not a field
                 } else {
                     const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, st)
                     out = out.concat([r.f])
@@ -1220,6 +1409,9 @@ ${
             .Assign(target: t) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -1343,7 +1535,7 @@ ${
         for (const f of fs) {
             out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: typeTrusted(errs, f.typeSpan),
                                 typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode, role: f.role, grants: f.grants,
-                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads }])
+                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink }])
         }
         return out
     }
@@ -1396,6 +1588,59 @@ ${
         }
     }
 
+    // s442: `<accent:swatch label="Accent" …/>` — a declaration whose own type
+    // names a DECLARATION is a named shared instance (§66.8.2; `:Decl` is a
+    // typed own value, #16). Not in the bootstrap: it is reported where it is
+    // written, instead of reading as a field-less declaration named `accent`.
+    fn namedInstanceDiags(ds: DeclStub[], declNames: string[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of ds) {
+            const d: ADecl | not = s.d
+            if (d is some) {
+                const n: string = ownTypeName(d)
+                if (n != "" && declNames.indexOf(n) >= 0) {
+                    st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
+                } else {
+                    st = o19Diags(s.file, d, st)
+                }
+            }
+        }
+        return st
+    }
+
+    // r1 G2 / r2 item 1: an own value AND typed attributes on one declaration —
+    // what `@x` then is, is ⚑ O19 (OPEN). Refused, not decided — on the
+    // declaration itself and on every child field, at any depth.
+    fn o19Diags(file: string, d: ADecl, st0: AS) -> AS {
+        let st: AS = st0
+        if (hasOwnValue(d.own) && d.attrs.length > 0) {
+            st = addDiag(st, file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ">` has an own value AND attributes — what `@" + d.name + "` then names is ⚑ O19 (not ruled); the bootstrap does not decide it")
+        }
+        for (const c of childFields(d.body)) { st = o19Diags(file, c, st) }
+        return st
+    }
+
+    fn hasOwnValue(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> false
+            .Quoted(v: x) :> true
+            .Bare(e: x) :> true
+            .Paren(e: x) :> true
+            .Braced(b: b) :> true
+        }
+    }
+
+    fn ownTypeName(d: ADecl) -> string {
+        const t: AType | not = d.ty
+        if (t is not) return ""
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n
+            .TSeq(elem: e) :> ""
+            .TMaybe(inner: i) :> ""
+        }
+    }
+
     // ---- Phase A driver -----------------------------------------------------------------
     type RGlobals:struct = { g: Globals, st: AS }
 
@@ -1419,6 +1664,7 @@ ${
             }
         }
         if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
+        st = namedInstanceDiags(rd.ds, declNames, st)
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, file: entry }
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
         st = rt.st
@@ -1649,6 +1895,9 @@ ${
             .Assign(target: t) :> diagX(env, e, "E-ASSIGN-POSITION", "an assignment is a statement — it cannot be used as a value", st)
             .ArrayLit(elems: es) :> resolveArray(env, e, es, expected, st)
             .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
+            .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
+            .Index(obj: o) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an index `a[i]` is in the bootstrap only as an element-field write target (dpa-052 Q3) — Core has no index read", st)
+            .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of a recognized edit shape (`@x = @x.filter(…)`, §66.11.2) — Core has no function value", st)
         }
     }
 
@@ -1730,6 +1979,9 @@ ${
             .Assign(target: t) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -1889,6 +2141,9 @@ ${
             .Assign(target: t) :> false
             .ArrayLit(elems: es) :> false
             .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
         }
     }
 
@@ -2080,6 +2335,9 @@ ${
             .Assign(target: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .ArrayLit(elems: es) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .ObjectLit(props: ps) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Spread(e: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Index(obj: o) :> noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "writing an element `a[i]` is in the bootstrap only as an element-FIELD write (`@xs[i].f = v`, dpa-052 Q3) — Core has no position-write place"))
+            .Lambda(params: ps2) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
         }
     }
 
@@ -2210,6 +2468,9 @@ ${
             .Assign(target: t) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -2247,6 +2508,16 @@ ${
 
     // `target = value` (statement position).
     fn resolveAssign(env: Env, e: AExpr, target: AExpr, value: AExpr, st0: AS) -> AS {
+        // s442: the recognized sequence reassignment shapes (§66.11.2) and an
+        // element-field write (dpa-052 Q3).
+        // r1 F1: only a CELL / field place — a local (or a place rooted in one)
+        // takes the ordinary local path below (E-ASSIGN-CONST, value resolution).
+        const shape: int = seqEditShape(target, value)
+        if (shape > 0 && !rootIsLocal(env, target)) return resolveSeqShape(env, e, target, value, shape, st0)
+        const ef: ElemFieldTarget | not = elemFieldTarget(target)
+        if (ef is some) {
+            if (!rootIsLocal(env, ef.seq)) return resolveElemFieldWrite(env, e, ef, value, st0)
+        }
         // `@inst = { ...@inst, f: v }` — the self-spread of an INSTANCE: field
         // edits of that instance (O58 (b)).
         if (isSelfSpread(target, value)) {
@@ -2420,6 +2691,9 @@ ${
         const k: AExprK = value.k
         return match k {
             .ObjectLit(props: ps) :> spreadsTarget(target, ps)
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps2) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -2475,6 +2749,9 @@ ${
             .Assign(target: t) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -2541,6 +2818,9 @@ ${
         const k: AExprK = v.k
         return match k {
             .ObjectLit(props: ps) :> ps
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -2605,12 +2885,24 @@ ${
             .Ternary(test: t) :> resolveExpr(env, e, not, st).st
             .ArrayLit(elems: es) :> resolveExpr(env, e, not, st).st
             .ObjectLit(props: ps) :> resolveExpr(env, e, not, st).st
+            .Spread(e: x) :> resolveExpr(env, e, not, st).st
+            .Index(obj: o) :> resolveExpr(env, e, not, st).st
+            .Lambda(params: ps2) :> resolveExpr(env, e, not, st).st
         }
     }
 
     fn resolveCallStmt(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st: AS) -> AS {
         if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
+        const rmv: MethodCall | not = removeCall(callee)
+        if (rmv is some) {
+            if (!rootIsLocal(env, rmv.obj)) return resolveRemoveCall(env, e, rmv, args, st)
+            return localEditRefused(env, e, rmv.method, args, st)
+        }
         const m: MethodCall | not = methodCall(callee)
+        if (m is some) {
+            // r1 F1 (the same deletion, pre-existing M2 shape): an edit call on a LOCAL
+            if (rootIsLocal(env, m.obj)) return localEditRefused(env, e, m.method, args, st)
+        }
         if (m is some) return resolveEditCall(env, e, m, args, st)
         return resolveExpr(env, e, not, st).st
     }
@@ -2639,6 +2931,9 @@ ${
             .Assign(target: t) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -2668,6 +2963,8 @@ ${
         }
         const cap: Sym | not = f.wcap
         const granted: boolean = f.grants.replace || f.grants.edits.indexOf(edit) >= 0 || hasEditKind(f.grants.edits, edit)
+        // r1 F7: a granted edit that GROWS a fixed-length sequence breaks its length invariant
+        if (granted && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, what))
         if (granted && cap is some) {
             return addEffect(st, e.nid, EffectFact.EWrite({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
         }
@@ -2681,6 +2978,439 @@ ${
             if (x == k) return true
         }
         return false
+    }
+
+    // =========================================================================
+    // s442 — recognized sequence edit shapes (§66.11.2: "Edits … are classified
+    // at compile time, from mutating method calls AND from recognized
+    // reassignment shapes").
+    //   1  `@x = [...@x, e1, …]`   an end-append per element
+    //   2  `@x = [e1, …, ...@x]`   a front-prepend per element
+    //   3  `@x = @x.filter(λ)`     a shrink-anywhere
+    //   4  `@x = @x.map(λ)`        a position-write
+    // 0 = not a recognized shape (an unclassifiable reassignment is a replace).
+    // =========================================================================
+    fn seqEditShape(target: AExpr, value: AExpr) -> int {
+        if (placeKey(target) == "") return 0
+        const es: AExpr[] = arrayElems(value)
+        if (es.length >= 2) {
+            const first: AExpr | not = spreadInner(es[0])
+            const last: AExpr | not = spreadInner(es[es.length - 1])
+            if (countSpreads(es) == 1) {
+                if (first is some) {
+                    if (samePlaceSyntax(target, first)) return 1
+                }
+                if (last is some) {
+                    if (samePlaceSyntax(target, last)) return 2
+                }
+            }
+            return 0
+        }
+        const m: MethodCall | not = callMethod(value)
+        if (m is some) {
+            if (samePlaceSyntax(target, m.obj)) {
+                if (m.method == "filter") return 3
+                if (m.method == "map") return 4
+            }
+        }
+        return 0
+    }
+
+    fn countSpreads(es: AExpr[]) -> int {
+        let n = 0
+        for (const x of es) {
+            if (spreadInner(x) is some) n = n + 1
+        }
+        return n
+    }
+
+    fn arrayElems(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: es) :> es
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: x) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: t) :> []
+            .Assign(target: t) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Index(obj: o) :> []
+            .Lambda(params: ps) :> []
+        }
+    }
+
+    fn spreadInner(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Spread(e: x) :> x
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    // `obj.method(…)` as a value: the call's method, when its callee is a member.
+    fn callMethod(e: AExpr) -> MethodCall | not {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: c) :> memberCall(c)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn memberCall(c: AExpr) -> MethodCall | not {
+        const k: AExprK = c.k
+        return match k {
+            .Member(obj: o, name: n) :> methodNamed(o, n)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn methodNamed(o: AExpr, n: string) -> MethodCall { return { obj: o, method: n } }
+
+    fn shapeEdit(shape: int) -> EditKind {
+        if (shape == 1) return EditKind.Append
+        if (shape == 2) return EditKind.Prepend
+        if (shape == 3) return EditKind.Anywhere
+        return EditKind.PositionWrite
+    }
+
+    fn shapeWhat(shape: int) -> string {
+        if (shape == 1) return "an end-append (§66.11.2: `@x = [...@x, e]` is the same edit as `@x.push(e)`)"
+        if (shape == 2) return "a front-prepend (`@x = [e, ...@x]`)"
+        if (shape == 3) return "a shrink-anywhere (§66.11.2: `@x = @x.filter(…)`; the `remove` grant)"
+        return "a position-write (§66.11.2: `@x = @x.map(…)`)"
+    }
+
+    fn resolveSeqShape(env: Env, e: AExpr, target: AExpr, value: AExpr, shape: int, st0: AS) -> AS {
+        const rp: RPlace = resolvePlace(env, target, st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        if (p is not) return st
+        st = writeGuards(env, p, target.span, st)
+        const f: FieldInfo = p.decl.fields[p.idx]
+        if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
+        // r1 nit: the shape over a value that is not a sequence is a type error
+        const pty: Type | not = p.ty
+        if (pty is some) {
+            if (seqElem(pty) is not) {
+                return addDiag(st, env.file, e.span, "E-TYPE-031", "`@" + f.sym.hint + "` is `" + typeName(pty) + "`, not a sequence — `[…]` is not a value of its type (§66.1 rule 5)")
+            }
+        }
+        const edit: EditKind = shapeEdit(shape)
+        const cap: Sym | not = f.wcap
+        let isGranted: boolean = f.grants.replace || hasEditKind(f.grants.edits, edit)
+        // RULED S442: `filter` SHRINKS anywhere — the `remove` grant, not `insert`
+        if (shape == 3) isGranted = f.grants.replace || shrinkGranted(f.shrink, SeqAt.Anywhere)
+        // a shrink-only field has no write capability (Core has no removal edit to
+        // name one for): the grant alone decides a shape that is never lowered
+        if (!isGranted || (cap is not && shape <= 2)) {
+            const isDerived: boolean = f.mode == FieldMode.Derived
+            if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-WRITE", derivedMessage(p, f))
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + " = …` is " + shapeWhat(shape) + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
+        }
+        // r2 N2: `filter` shrinks — impossible on a fixed-length sequence
+        if (shape == 3 && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedShrinkMessage(f.sym.hint, shapeWhat(shape)))
+        if (shape > 2) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + " = @" + f.sym.hint + "." + callMethodName(value) + "(…)` is granted, but Core has no function value to lower it with (core.scrml has no lambda / host call)")
+        }
+        // r1 F7: growing a FIXED-length sequence breaks its length invariant
+        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, shapeWhat(shape)))
+        let elemTy: Type | not = not
+        const pt: Type | not = p.ty
+        if (pt is some) elemTy = seqElem(pt)
+        let elems: AExpr[] = []
+        let tmps: Sym[] = []
+        for (const x of arrayElems(value)) {
+            const inner: AExpr | not = spreadInner(x)
+            if (inner is some) {
+                // the operand `...@x` reads the target itself (a read, no check)
+                st = resolveExpr(env, inner, pt, st).st
+            } else {
+                st = resolveExpr(env, x, elemTy, st).st
+                elems = elems.concat([x])
+                // r1 F5/F6: the array is ONE value — every new element is
+                // evaluated (left to right) into its local before any write
+                const m: RSym = mint(st, "elem")
+                st = m.st
+                tmps = tmps.concat([m.s])
+            }
+        }
+        const sn: RSym = mint(st, "before_" + f.sym.hint)
+        st = sn.st
+        const snap: SeqSnap = { local: sn.s, decl: p.decl.sym, idx: p.idx }
+        return addEffect(st, e.nid, EffectFact.EEdits({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }, elems, tmps, snap))
+    }
+
+    // r1 F1: is the place `e` names rooted in a local (a `let` / `const`, a
+    // parameter, a row binding)? Such a place is not a cell: the sequence
+    // shapes and edit calls classify CELL writes only.
+    fn rootIsLocal(env: Env, e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> lookupLocal(env, n) is some
+            .Member(obj: o) :> rootIsLocal(env, o)
+            .Index(obj: o) :> rootIsLocal(env, o)
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: x) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Lambda(params: ps) :> false
+        }
+    }
+
+    // An edit method on a local sequence: its values are resolved, and it is
+    // refused — Core has no in-place edit of a local (dpa-052 Q2 puts locals
+    // under their type's grants; the bootstrap cannot lower one either way).
+    fn localEditRefused(env: Env, e: AExpr, method: string, args: AExpr[], st0: AS) -> AS {
+        const st: AS = resolveExprs(env, args, not, st0)
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)")
+    }
+
+    // r1 F7: a sequence type whose length axis is FIXED (no `free` / bound,
+    // §66.12.1: omission is fully constrained) cannot grow — provably, so a
+    // growing edit is a compile error (§66.11.2 invariants; dpa-052 Q5).
+    fn growsFixed(t: Type | not) -> boolean {
+        if (t is not) return false
+        return seqFixed(t)
+    }
+
+    fn seqFixed(t: Type) -> boolean {
+        return match t {
+            .Seq(elem: el, grants: g) :> isFixedLength(g.length)
+            .Int :> false
+            .Num :> false
+            .Str :> false
+            .Bool :> false
+            .Named(sym: x) :> false
+            .Maybe(inner: i) :> false
+        }
+    }
+
+    fn isFixedLength(l: LengthGrant) -> boolean {
+        return match l {
+            .Fixed :> true
+            .Free :> false
+            .Bounded(min: a, max: b) :> false
+        }
+    }
+
+    fn fixedShrinkMessage(name: string, what: string) -> string {
+        return "`@" + name + "`: " + what + " shrinks the sequence, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)"
+    }
+
+    fn fixedLengthMessage(name: string, what: string) -> string {
+        return "`@" + name + "`: " + what + " grows the sequence, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)"
+    }
+
+    fn callMethodName(v: AExpr) -> string {
+        const m: MethodCall | not = callMethod(v)
+        if (m is some) return m.method
+        return "?"
+    }
+
+    // `@x.shift()` / `@x.pop()` — a removal at the front / end (§66.12.2: the
+    // "where it changes" axis; `push` + `pop` = "changes at the end").
+    fn removeCall(callee: AExpr) -> MethodCall | not {
+        const m: MethodCall | not = memberCall(callee)
+        if (m is not) return not
+        if (m.method == "shift" || m.method == "pop") return m
+        return not
+    }
+
+    fn resolveRemoveCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS {
+        const rp: RPlace = resolvePlace(env, m.obj, st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        if (p is not) return st
+        st = writeGuards(env, p, m.obj.span, st)
+        const f: FieldInfo = p.decl.fields[p.idx]
+        let place: SeqAt = SeqAt.Front
+        let what: string = "a removal at the front (the `shift` grant)"
+        if (m.method == "pop") {
+            place = SeqAt.End
+            what = "a removal at the end (the `pop` grant)"
+        }
+        // RULED S442: a removal needs a SHRINK grant there (or `remove`), never the grow grant
+        const isGranted: boolean = f.grants.replace || shrinkGranted(f.shrink, place)
+        if (!isGranted) {
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "." + m.method + "()` is " + what + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
+        }
+        // r2 N2 (F7's mirror): a removal SHRINKS — impossible on a fixed-length sequence
+        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedShrinkMessage(f.sym.hint, what))
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + "." + m.method + "()` is granted, but Core has no removal edit to lower it with (core.scrml EditKind)")
+    }
+
+    // `@xs[i].f = v` (dpa-052 Q3, RULED S440): an edit of field `f` at that
+    // position, judged by `f`'s own contract — not a position replace, not the
+    // `positions` permission. A field with no contract is fixed (§66.11.4).
+    type ElemFieldTarget:struct = { seq: AExpr, index: AExpr, field: string }
+
+    fn elemFieldTarget(t: AExpr) -> ElemFieldTarget | not {
+        const k: AExprK = t.k
+        return match k {
+            .Member(obj: o, name: n) :> indexedField(o, n)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn indexedField(o: AExpr, n: string) -> ElemFieldTarget | not {
+        const k: AExprK = o.k
+        return match k {
+            .Index(obj: s, idx: i) :> elemField(s, i, n)
+            .Name(name: x) :> not
+            .At(name: x) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: x) :> not
+            .Member(obj: x) :> not
+            .Call(callee: c) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn elemField(s: AExpr, i: AExpr, n: string) -> ElemFieldTarget { return { seq: s, index: i, field: n } }
+
+    fn resolveElemFieldWrite(env: Env, e: AExpr, ef: ElemFieldTarget, value: AExpr, st0: AS) -> AS {
+        const rp: RPlace = resolvePlace(env, ef.seq, st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        if (p is not) return st
+        st = writeGuards(env, p, ef.seq.span, st)
+        st = resolveExpr(env, ef.index, Type.Int, st).st
+        const f: FieldInfo = p.decl.fields[p.idx]
+        let elem: Type | not = not
+        const pt: Type | not = p.ty
+        if (pt is some) elem = seqElem(pt)
+        let target: FieldDef | not = not
+        let owner: string = ""
+        if (elem is some) {
+            const s: Sym | not = namedOf(elem)
+            if (s is some) {
+                const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
+                if (ti is some) {
+                    const fs: FieldDef[] | not = structFieldDefs(ti.def)
+                    if (fs is some) {
+                        owner = s.hint
+                        for (const fd of fs) {
+                            if (fd.sym.hint == ef.field) target = fd
+                        }
+                    }
+                }
+            }
+        }
+        if (owner == "") return addDiag(st, env.file, e.span, "E-ASSIGN-TARGET", "`@" + f.sym.hint + "[…]." + ef.field + "` — the elements of `@" + f.sym.hint + "` are not structs")
+        if (target is not) return addDiag(st, env.file, e.span, "E-SCOPE-001", "`" + owner + "` has no field `" + ef.field + "`")
+        st = resolveExpr(env, value, target.ty, st).st
+        const fieldGranted: boolean = target.grants.replace || target.grants.edits.length > 0
+        if (!fieldGranted) {
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "[…]." + ef.field + " = …` is an edit of `" + owner + "." + ef.field + "`, which carries no contract — it is fixed (§66.11.4; an element-field write is judged by that field's own contract, dpa-052 Q3)")
+        }
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + "[…]." + ef.field + " = …` is granted by `" + owner + "." + ef.field + "`'s contract, but a Core place has no index step to write it through (core.scrml FieldRef)")
     }
 
     fn resolveBlock(env: Env, b: ABlock, st0: AS) -> AS {
@@ -2795,15 +3525,32 @@ ${
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return addElem(st, e.nid, ElemFact.MSlot)
         const d: DeclSrc | not = declNamed(env.g, e.tag)
-        if (d is some) return resolveUse(env, e, d, st)
+        if (d is some) {
+            // O55 RULED (bryan S442): a plain use of a `single` declaration is an
+            // error; `<*x/>` is the only way to render it (§66.13.3).
+            if (d.info.single) return singleInstantiated(env, e, st)
+            return resolveUse(env, e, d, st)
+        }
+        // the same for a program cell declared `single` (§66.19.6 `<phase/>`)
+        const sd: ADecl | not = singleProgramField(env, e.tag)
+        if (sd is some) return singleInstantiated(env, e, st)
         return resolveHtml(env, e, st)
     }
 
     // `<*x …/>` (§66.6.2): the existing instance.
     fn resolveStar(env: Env, e: AElem, st0: AS) -> AS {
         let st: AS = st0
+        // s442: `<*f/>` naming a FIELD of the enclosing declaration (the
+        // program's cells included, R4) — THIS instance's own field (§66.6.2).
+        const sf: StarField | not = starField(env, e.tag)
+        if (sf is some) return resolveStarField(env, e, sf, st)
         const d: DeclSrc | not = declNamed(env.g, e.tag)
         if (d is not) {
+            // r1 nit: a field of SOME user declaration, named out of its scope
+            const owner: string = fieldOwnerName(env.g, e.tag)
+            if (owner != "") {
+                return addDiag(st, env.file, e.span, "E-SCOPE-001", "`<*" + e.tag + "/>` — `" + e.tag + "` is a field of `<" + owner + ">`; `<*" + e.tag + "/>` names it only inside `<" + owner + ">`'s renders (§66.6.2)")
+            }
             return addDiag(st, env.file, e.span, "E-DECL-STAR-PREDEFINED", "`<*" + e.tag + "/>` — a predefined (HTML) declaration has no shared instance (§66.6.5)")
         }
         for (const a of e.attrs) {
@@ -2812,9 +3559,201 @@ ${
             }
         }
         if (st.diags.length == st0.diags.length) {
-            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "rendering an existing instance `<*" + e.tag + "/>` is not in bootstrap slice M2 Core (no View.Star yet)")
+            // s442: the shared instance, inlined (resolveStarShared)
+            st = resolveStarShared(env, e, d, st)
         }
         return st
+    }
+
+    // ---- s442: `<*f/>` of a field, and state-child bodies ----------------------
+    // The field `<*name/>` names from here: a field of the enclosing user
+    // declaration (its renders), else a cell of the program visible here.
+    type StarField:struct = { decl: DeclInfo, inst: InstRef, idx: int, src: DeclSrc }
+
+    fn starField(env: Env, name: string) -> StarField | not {
+        const d: DeclSrc | not = ctxDecl(env)
+        if (d is some) {
+            if (!d.isProgram) {
+                const i: int = fieldIndex(d.info, name)
+                if (i >= 0) return { decl: d.info, inst: InstRef.Lexical(0), idx: i, src: d }
+            }
+        }
+        const pi: DeclInfo | not = programInfo(env)
+        const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
+        if (pi is some && ps is some) {
+            const j: int = fieldIndex(pi, name)
+            if (j >= 0) return { decl: pi, inst: programInst(env), idx: j, src: ps }
+        }
+        return not
+    }
+
+    // A field with a `rule=` graph whose state-children carry bodies renders
+    // the body of the variant it holds (O5 (1i)). Anything else a `<*f/>` could
+    // mean — a child declaration's own `renders`, a field with no markup
+    // (⚑ O51) — is outside this construct and reported.
+    fn resolveStarField(env: Env, e: AElem, sf: StarField, st0: AS) -> AS {
+        let st: AS = st0
+        const f: FieldInfo = sf.decl.fields[sf.idx]
+        if (e.attrs.length > 0) {
+            return addDiag(st, env.file, e.span, "E-DECL-STAR-REF-ATTR-WRITE", "`<*" + e.tag + ">` names the field `" + e.tag + "` of this instance — a `<*x>` reference takes no attributes here (§66.6.7)")
+        }
+        // s442: a child field with its own `renders` (§66.4 rule 2: "a field that
+        // needs its own … `renders` … is a CHILD declaration") renders it here,
+        // for THIS instance (§66.6.2) — resolved in this declaration's context.
+        const own: ANode[] = fieldRenders(sf.src, f.nid)
+        if (own.length > 0) return addElem(st, e.nid, ElemFact.MInline({ nodes: own, subst: not }))
+        const g: TransitionGraph | not = f.graph
+        const children: AStateChild[] = fieldStateChildren(sf.src, f.nid)
+        let arms: StateArm[] = []
+        if (g is some) {
+            for (const c of children) {
+                const v: int = variantIndex(env.g.types, g.enumSym, c.name)
+                if (v >= 0 && c.body.length > 0) arms = arms.concat([{ variant: v, body: c.body }])
+            }
+            if (arms.length > 0) {
+                const sv: StateView = { decl: sf.decl.sym, inst: sf.inst, idx: sf.idx, enumSym: g.enumSym, arms: arms }
+                return addElem(st, e.nid, ElemFact.MStateView(sv))
+            }
+        }
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — rendering a field is in the bootstrap only for a `rule=` graph field whose state-children have bodies (O5 (1i)); `" + e.tag + "` has none (a field with no markup of its own is ⚑ O51)")
+    }
+
+    // The state-children of the field declared by the ADecl `fieldNid` inside
+    // the declaration `ds` (a program cell, or a user declaration's child).
+    fn fieldStateChildren(ds: DeclSrc, fieldNid: int) -> AStateChild[] {
+        for (const fd of fieldDecls(ds)) {
+            if (fd.nid == fieldNid) {
+                let out: AStateChild[] = []
+                for (const c of fd.body) { out = out.concat(stateChildOf(c)) }
+                return out
+            }
+        }
+        return []
+    }
+
+    // The `renders` of the field declared by the ADecl `fieldNid` in `ds` (as
+    // one node, nid -1 — the renders AElem carries the facts), else none.
+    fn fieldRenders(ds: DeclSrc, fieldNid: int) -> ANode[] {
+        for (const fd of fieldDecls(ds)) {
+            if (fd.nid == fieldNid) return rendersOf(fd)
+        }
+        return []
+    }
+
+    // Every child field's own `renders` in `ds`, resolved in `ds`'s context.
+    fn childRenders(ds: DeclSrc) -> ANode[] {
+        const p: AProgram | not = ds.p
+        if (p is some) return []
+        let out: ANode[] = []
+        for (const fd of fieldDecls(ds)) { out = out.concat(rendersOf(fd)) }
+        return out
+    }
+
+    // s442: `<*x/>` of a user declaration at program top level — its shared
+    // instance (§66.6.2, §66.6.4), rendered by inlining its renders.
+    fn resolveStarShared(env: Env, e: AElem, d: DeclSrc, st: AS) -> AS {
+        if (!inProgramCtx(env)) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` inside a declaration's `renders` (the lexically nearest `" + e.tag + "`, §66.6.2) is not in the bootstrap — only a child field (`<*f/>`) or, at program top level, the shared instance")
+        }
+        const nodes: ANode[] = rendersNodes(d)
+        if (nodes.length == 0) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — `<" + e.tag + ">` has no `renders` (a use of a declaration with no markup is ⚑ O51)")
+        }
+        // r1 G3: an attribute with no default (⚑ O33) has no value in the shared
+        // instance — provably, since a `<*x/>` reference sets nothing (§66.6.7).
+        for (const f of d.info.fields) {
+            if (isAttributeRole(f.role) && !hasOwnValue(f.init)) {
+                return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — `<" + e.tag + ">`'s attribute `" + f.sym.hint + "` has no default, and a `<*x/>` reference sets none: its value in the shared instance is ⚑ O33 (not ruled)")
+            }
+        }
+        if (!constructsNothing(env.g, nodes)) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — `<" + e.tag + ">`'s renders constructs instances (a use, `as=` or `<slot/>`); Core has no View.Star to render an existing instance's own children (M1 D4), so the bootstrap only inlines markup that constructs nothing")
+        }
+        return addElem(st, e.nid, ElemFact.MInline({ nodes: nodes, subst: InstRef.Shared(d.info.sym) }))
+    }
+
+    fn isAttributeRole(r: FieldRole) -> boolean {
+        return match r {
+            .Attribute :> true
+            .Child :> false
+        }
+    }
+
+    fn constructsNothing(g: Globals, nodes: ANode[]) -> boolean {
+        for (const n of nodes) {
+            if (!nodeConstructsNothing(g, n)) return false
+        }
+        return true
+    }
+
+    fn nodeConstructsNothing(g: Globals, n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> elemConstructsNothing(g, e)
+            .Text(text: t) :> true
+            .Interp(e: x) :> true
+            .DeclNode(d: d) :> false
+        }
+    }
+
+    fn elemConstructsNothing(g: Globals, e: AElem) -> boolean {
+        if (e.tag == "slot") return false
+        if (!e.star && declNamed(g, e.tag) is some) return false
+        if (attrNamed(e.attrs, "as") is some && e.tag != "each") return false
+        return constructsNothing(g, e.kids)
+    }
+
+    // The ADecls that are fields of `ds`: the program's cells (its body's
+    // declarations that are not nested user declarations), or a user
+    // declaration's child fields.
+    fn fieldDecls(ds: DeclSrc) -> ADecl[] {
+        const p: AProgram | not = ds.p
+        if (p is some) {
+            let out: ADecl[] = []
+            for (const it of p.items) {
+                for (const d of declsOfItem(it)) {
+                    if (!isNestedUserDecl(d)) out = out.concat([d])
+                }
+            }
+            return out
+        }
+        const ud: ADecl | not = ds.d
+        if (ud is some) return childFields(ud.body)
+        return []
+    }
+
+    // Every state-child body of `ds`'s fields, resolved in `ds`'s context (O5
+    // (1i): the body is that variant's markup, like the declaration's renders).
+    fn stateBodies(ds: DeclSrc) -> ANode[] {
+        let out: ANode[] = []
+        for (const fd of fieldDecls(ds)) {
+            for (const c of fd.body) {
+                for (const sc of stateChildOf(c)) { out = out.concat(sc.body) }
+            }
+        }
+        return out
+    }
+
+    fn fieldOwnerName(g: Globals, name: string) -> string {
+        for (const d of g.decls) {
+            if (!d.isProgram && fieldIndex(d.info, name) >= 0) return d.info.sym.hint
+        }
+        return ""
+    }
+
+    // s442: the program's cell `name` when it was declared `single` (§66.13.3).
+    fn singleProgramField(env: Env, name: string) -> ADecl | not {
+        if (programInfo(env) is not) return not
+        const ps: DeclSrc | not = findDeclSrc(env.g, env.g.program)
+        if (ps is not) return not
+        for (const d of fieldDecls(ps)) {
+            if (d.name == name && hasFlag(d.mods, "single")) return d
+        }
+        return not
+    }
+
+    fn singleInstantiated(env: Env, e: AElem, st: AS) -> AS {
+        return addDiag(st, env.file, e.span, "E-DECL-SINGLE-INSTANTIATED", "`<" + e.tag + "/>` makes a new instance of `" + e.tag + "`, which is declared `single` — it has exactly one instance; render that one with `<*" + e.tag + "/>` (§66.13.3, O55 ruled S442)")
     }
 
     fn eventName(attr: string) -> string {
@@ -3026,6 +3965,10 @@ ${
             // renders
             const renv: Env = declEnv(g, ds, true)
             st = resolveNodes(renv, rendersNodes(ds), st)
+            // s442: state-child bodies (O5 (1i)), in the same context
+            st = resolveNodes(renv, stateBodies(ds), st)
+            // s442: a child field's own renders (§66.4 rule 2), in the same context
+            st = resolveNodes(renv, childRenders(ds), st)
         }
         const prog: DeclSrc | not = findDeclSrc(g, g.program)
         let progHandles: HandleInfo[] = []
@@ -3627,6 +4570,9 @@ ${
             .Assign(target: x) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -3662,6 +4608,9 @@ ${
             .Assign(target: x) :> false
             .ArrayLit(elems: es) :> false
             .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
         }
     }
 
@@ -3686,6 +4635,9 @@ ${
             .Assign(target: x) :> noNarrowing()
             .ArrayLit(elems: es) :> noNarrowing()
             .ObjectLit(props: ps) :> noNarrowing()
+            .Spread(e: sx) :> noNarrowing()
+            .Index(obj: ix) :> noNarrowing()
+            .Lambda(params: lp) :> noNarrowing()
         }
     }
 
@@ -3786,6 +4738,9 @@ ${
             .Assign(target: t, value: v) :> [t, v]
             .ArrayLit(elems: es) :> es
             .ObjectLit(props: ps) :> propValueList(ps)
+            .Spread(e: x) :> [x]
+            .Index(obj: o, idx: i) :> [o, i]
+            .Lambda(params: lp, body: b) :> [b]
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -3831,6 +4786,9 @@ ${
             .Ternary(test: x) :> []
             .ArrayLit(elems: es) :> []
             .ObjectLit(props: ps) :> []
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
         }
     }
 
@@ -4349,6 +5307,7 @@ ${
             .ESpread(ws: ws) :> ws
             .EReset(w: w) :> []
             .EAssignLocal(sym: s) :> []
+            .EEdits(w: w) :> [oneWrite(w)]
             not :> []
         }
     }
@@ -4361,6 +5320,7 @@ ${
             .EWrite(w: w) :> false
             .ESpread(ws: ws) :> false
             .EAssignLocal(sym: s) :> false
+            .EEdits(w: w) :> false
             not :> false
         }
     }
@@ -4372,6 +5332,7 @@ ${
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
             .EReset(w: w) :> not
+            .EEdits(w: w) :> not
             not :> not
         }
     }
@@ -4399,6 +5360,8 @@ ${
             .MEach(bind: b) :> not
             .MHtml :> not
             .MSlot :> not
+            .MStateView(v: v) :> not
+            .MInline(v: v) :> not
             not :> not
         }
     }
@@ -4410,6 +5373,8 @@ ${
             .MUse(decl: d) :> not
             .MHtml :> not
             .MSlot :> not
+            .MStateView(v: v) :> not
+            .MInline(v: v) :> not
             not :> not
         }
     }
@@ -4478,22 +5443,30 @@ ${
     }
 
     fn checkKnown(env: TEnv, x: Type, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
-        // r5 R6: an UN-NARROWED `T | not` into a non-optional `int`-bearing
-        // position may put `not` into an `int` (§34 E-TYPE-031: "a value is
-        // assigned to a position whose declared type it does not satisfy").
-        // (A narrowed value reads as `T` and never reaches here as `T | not`.)
-        // Scoped to `int` targets — the S442 int ruling; for other types the
-        // S439 "unproven" reading of a `T | not` into `T` stands (flagged).
-        if (maybeInner(x) is some && maybeInner(target) is not && hasInt(target)) {
-            const xi: Type | not = maybeInner(x)
-            if (xi is some) {
-                if (fitsType(xi, target) != Verdict.Fails) {
-                    return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` — it may be `not`; narrow it first (`if (x != not) { … }`) (§34 E-TYPE-031; `int` enforced, ruled S442)")
-                }
-            }
+        if (mayBeNot(x, target)) {
+            return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` — a `T | not` is not a `T`: it may be `not`; narrow it first (`if (x != not) { … }`) (§34 E-TYPE-031; ruled S442: \"`T | not` into `T` is an error for all types\")")
         }
         if (fitsType(x, target) != Verdict.Fails) return ts
         return report(ts, env, span, "E-TYPE-031", what + " expects `" + typeName(target) + "`, and this value is `" + typeName(x) + "` (§66.1 rule 5: every cell and field write is type-checked against the target's declared type)" + intHint(unMaybe(x), unMaybe(target)))
+    }
+
+    // An UN-NARROWED `T | not` into a non-optional `T` position — at any depth
+    // of sequence elements (`[@o.n]` into `int[]`). RULED S442 (dpa-058 list
+    // item 4): "`T | not` into `T` is an error for EVERY type … A `T | not`
+    // isn't a `T`" — bryan: "if the lifecycle says T | not then it can only
+    // end as not". Supersedes the S439 "unproven, not wrong" reading. (A
+    // narrowed value reads as `T` and never reaches here as `T | not`; a value
+    // whose `T` itself does not fit is fitsType's plain Fails.)
+    fn mayBeNot(x: Type, target: Type) -> boolean {
+        const xi: Type | not = maybeInner(x)
+        if (xi is some) {
+            if (maybeInner(target) is some) return false
+            return fitsType(xi, target) != Verdict.Fails
+        }
+        const xe: Type | not = seqElem(x)
+        const te: Type | not = seqElem(target)
+        if (xe is some && te is some) return mayBeNot(xe, te)
+        return false
     }
 
     // A `number` into an `int` (RULED S440, JS-WAT 7(a)): say why and what to write.
@@ -4536,6 +5509,9 @@ ${
             .Assign(target: x) :> -1
             .ArrayLit(elems: es) :> -1
             .ObjectLit(props: ps) :> -1
+            .Spread(e: sx) :> -1
+            .Index(obj: ix) :> -1
+            .Lambda(params: lp) :> -1
         }
     }
 
@@ -4638,6 +5614,9 @@ ${
             .Assign(target: x, value: v) :> rvt(VType.Unknown, typeExpr(env, v, ts).ts)
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
             .ObjectLit(props: ps) :> rvt(valueType(vf), typePropValues(env, ps, ts))
+            .Spread(e: x) :> rvt(VType.Unknown, typeExpr(env, x, ts).ts)
+            .Index(obj: o, idx: i) :> rvt(VType.Unknown, typeExpr(env, i, typeExpr(env, o, ts).ts).ts)
+            .Lambda(params: ps2) :> rvt(VType.Unknown, ts)
         }
     }
 
@@ -4998,7 +5977,12 @@ ${
         while (i < args.length) {
             const pt: Type | not = knownOf(paramType(bindFact(env.t.binds, pnids[i])))
             if (pt is some) {
-                if (hasInt(pt)) ts = checkValue(env, exprType0(ts, args[i].nid), pt, args[i].span, "argument " + (i + 1) + " of `" + name + "`", ts)
+                const what: string = "argument " + (i + 1) + " of `" + name + "`"
+                if (hasInt(pt)) {
+                    ts = checkValue(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)
+                } else {
+                    ts = checkMaybeNot(env, exprType0(ts, args[i].nid), pt, args[i].span, what, ts)   // r6: only the `T | not` rule
+                }
             }
             i = i + 1
         }
@@ -5011,7 +5995,7 @@ ${
         if (e is not) return ts
         const rt: Type | not = env.fret
         if (rt is not) return ts
-        if (!hasInt(rt)) return ts
+        if (!hasInt(rt)) return checkMaybeNot(env, exprType0(ts, e.nid), rt, e.span, "the return value", ts)   // r6: any other type — only the `T | not` rule
         return checkValue(env, exprType0(ts, e.nid), rt, e.span, "the return value", ts)
     }
 
@@ -5025,9 +6009,21 @@ ${
         return checkLitFields(env, x, ts)
     }
 
+    // r6: at a position checked for `int` only (a return, an argument, a
+    // non-literal initializer), a target of any OTHER type is checked for the
+    // `T | not` rule alone — "`T | not` into `T` is an error for all types"
+    // (ruled S442) decides that question in every position that takes a `T`;
+    // no ruling widens those positions for other type mismatches.
+    fn checkMaybeNot(env: TEnv, v: VType, target: Type, span: ASpan, what: string, ts: TypeState) -> TypeState {
+        const x: Type | not = knownOf(v)
+        if (x is not) return ts
+        if (!mayBeNot(x, target)) return ts
+        return checkKnown(env, x, target, span, what, ts)
+    }
+
     fn checkIntInit(env: TEnv, target: Type, lk: int, v: VType, span: ASpan, what: string, ts: TypeState) -> TypeState {
         if (lk >= 0) return ts
-        if (!hasInt(target)) return ts
+        if (!hasInt(target)) return checkMaybeNot(env, v, target, span, what, ts)
         return checkValue(env, v, target, span, what, ts)
     }
 
@@ -5115,6 +6111,9 @@ ${
             .Ternary(test: x) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -5139,6 +6138,9 @@ ${
             .Ternary(test: x) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -5250,11 +6252,17 @@ ${
             .Ternary(test: x) :> typeExpr(env, e, ts).ts
             .ArrayLit(elems: es) :> typeExpr(env, e, ts).ts
             .ObjectLit(props: ps) :> typeExpr(env, e, ts).ts
+            .Spread(e: x) :> typeExpr(env, e, ts).ts
+            .Index(obj: o) :> typeExpr(env, e, ts).ts
+            .Lambda(params: ps2) :> typeExpr(env, e, ts).ts
         }
     }
 
     fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts0: TypeState) -> TypeState {
         const f: EffectFact | not = effectFact(env.t.effects, e.nid)
+        // s442: a recognized append / prepend shape — each ELEMENT is the written value
+        const ed: EditsOf | not = editsOf(f)
+        if (ed is some) return typeEditsAssign(env, e, target, value, ed, ts0)
         const ws: SpreadWrite[] = effectWrites(f)
         const ps: AProp[] = propsOf(value)
         if (ws.length > 0 && ws[0].prop >= 0) {
@@ -5297,6 +6305,31 @@ ${
         return record(ts2, e.nid, VType.Unknown)
     }
 
+    // s442 — `@x = [...@x, a, b]`: the array is typed as a value, then each
+    // element is checked as the edit's written value (the element type).
+    type EditsOf:struct = { w: WriteFact, elems: AExpr[] }
+
+    fn editsOf(f: EffectFact | not) -> EditsOf | not {
+        return match f {
+            .EEdits(w: w, elems: es) :> editsPair(w, es)
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            .EAssignLocal(sym: s) :> not
+            not :> not
+        }
+    }
+
+    fn editsPair(w: WriteFact, es: AExpr[]) -> EditsOf { return { w: w, elems: es } }
+
+    fn typeEditsAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ed: EditsOf, ts0: TypeState) -> TypeState {
+        let ts: TypeState = typePlace(env, target, VType.Unknown, typeExpr(env, value, ts0).ts)
+        for (const x of ed.elems) {
+            ts = checkWrite(env, ed.w, exprType0(ts, x.nid), x, "an element of this sequence", ts)
+        }
+        return record(ts, e.nid, VType.Unknown)
+    }
+
     // A write target (a PLACE): recorded with the type the place holds; the
     // instance / struct it is reached through typed as a value.
     fn typePlace(env: TEnv, target: AExpr, placeType: VType, ts: TypeState) -> TypeState {
@@ -5326,6 +6359,9 @@ ${
             .Assign(target: x) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -5374,6 +6410,9 @@ ${
         const k: AExprK = e.k
         return match k {
             .ObjectLit(props: ps) :> checkObjFields(env, e, ps, ts)
+            .Spread(e: x) :> ts
+            .Index(obj: o) :> ts
+            .Lambda(params: ps2) :> ts
             .ArrayLit(elems: es) :> checkLitList(env, es, ts)
             .Ternary(test: x, yes: y, no: n) :> checkLitFields(env, n, checkLitFields(env, y, ts))
             .Name(name: n) :> ts
@@ -5681,6 +6720,27 @@ ${
     fn typeProgramBody(env: TEnv, p: AProgram, ts0: TypeState) -> TypeState {
         let ts: TypeState = typeFieldInits(env, declByNid(env.t, p.nid), ts0)
         for (const it of p.items) { ts = typeProgramItem(env, it, ts) }
+        // s442: the program cells' state-child bodies (O5 (1i))
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (!isNestedUserDecl(d)) ts = typeFieldMarkup(env, [d], ts)
+            }
+        }
+        return ts
+    }
+
+    // s442: the markup a field carries — its state-child bodies (O5 (1i)) and
+    // its own `renders` (a child declaration's, §66.4 rule 2) — typed where
+    // the binder resolved it (the declaring declaration's context).
+    fn typeFieldMarkup(env: TEnv, fds: ADecl[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        for (const fd of fds) {
+            for (const c of fd.body) {
+                for (const sc of stateChildOf(c)) { ts = typeNodes(env, sc.body, ts) }
+            }
+            const r: AElem | not = fd.renders
+            if (r is some) ts = typeElem(env, r, ts)
+        }
         return ts
     }
 
@@ -5689,7 +6749,7 @@ ${
         return match k {
             .FnItem(f: f) :> typeFn(env, f, ts)
             .MarkupItem(n: n) :> typeNode(env, n, ts)
-            .DeclItem(d: d) :> ts
+            .DeclItem(d: d) :> typeUserDecl(env, d, ts)
             .ProgramItem(p: p) :> ts
             .ImportItem(i: i) :> ts
             .TypeItem(t: x) :> ts
@@ -5697,7 +6757,9 @@ ${
     }
 
     fn typeUserDecl(env: TEnv, d: ADecl, ts0: TypeState) -> TypeState {
-        const ts: TypeState = typeFieldInits(env, declByNid(env.t, d.nid), ts0)
+        let ts: TypeState = typeFieldInits(env, declByNid(env.t, d.nid), ts0)
+        // s442: its child fields' markup (only a user declaration has child fields)
+        if (declByNid(env.t, d.nid) is some) ts = typeFieldMarkup(env, childFields(d.body), ts)
         const r: AElem | not = d.renders
         if (r is not) return ts
         return typeElem(env, r, ts)

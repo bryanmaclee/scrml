@@ -1,0 +1,14 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+function decide() {
+  function setTimeout(f) { return f() }
+  return setTimeout(() => isOk(1)) ? "accepted" : "rejected"
+}
+function go() {
+  @verdict = decide()
+}
+<button id="go" onclick=go()>go</button>
+<button id="h" onclick=${ function queueMicrotask(f) { return f() } @verdict = queueMicrotask(() => isOk(1)) ? "accepted" : "rejected" }>h</button>
+<p id="out">${@verdict}</p>
+</program>

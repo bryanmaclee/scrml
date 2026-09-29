@@ -1,0 +1,32 @@
+<program>
+    type Phase:enum = { Idle, Loading, Done, Failed }
+
+    <phase:Phase=.Idle single>                      // one vehicle; the name IS the variable (§66.13.3)
+        <Idle    rule=.Loading : "Ready">              // ⚑ O52: state-child marker + `:`-shorthand body
+        <Loading rule=(.Done | .Failed) : "Loading…">
+        <Done    rule=.Idle : "Done">
+        <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
+    </>
+
+    <card title:string>                             // a multi-instance declaration
+        <status:Phase=.Idle>                        // a per-instance transition graph — legal
+            <Idle    rule=.Loading/>              // ⚑ O52: state-child marker
+            <Loading rule=(.Done | .Failed)/>
+            <Done    rule=.Idle/>
+            <Failed  rule=.Idle/>
+        </>
+        // writing `single` on `status` here → E-COMPONENT-ENGINE-SCOPE (a single inside a multi-instance declaration)
+    </>
+    renders <article><h3>${title}</h3><p>${status}</p></article>
+
+    function load()   { @phase = .Loading }         // along an edge of the graph
+    function finish() { @phase = .Done }            // legal from .Loading; a no-op from .Done (§51.0.F.1); E-ENGINE-INVALID-TRANSITION otherwise
+
+    <main>
+        <p><*phase/></p>                            // ⚑ O5: how the state-child bodies render
+        <button onclick=load()>Load</button>
+        <card title="One"/>
+        <card title="Two"/>                         // each card has its own `status`
+        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55) -->
+    </main>
+</program>

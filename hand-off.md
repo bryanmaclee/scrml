@@ -1,3 +1,56 @@
+# scrml — Session 441 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: S442-bryan-xps worked the free lanes (bootstrap typer, maps, dPA drain) on its own branches.
+> **Rulings authority:** `scrml-support/user-voice-scrml.md` §S441. **Live state authority:** the S441 board `scrml-support/handOffs/active-sessions/S441-bryan.md` (LIVE CHECKPOINT section) — it carries every branch tip and review verdict.
+> **Why this session:** bryan is featured in coderlegion's "developer spotlight" (article + video, ~2026-10-06..09). Every public surface was audited; the audit turned up a run of real security holes, and most of the session went into closing them through S239 rounds.
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 1. Security holes still OPEN on main (filed §S441c; fix these first)
+- **`<page auth="required">` protects nothing** (`g-page-auth-required-protects-nothing`, HIGH) — anonymous GET serves the page, page server fns run anonymously. And a nested `<program auth=>` inside `<program db>` has its auth silently discarded (`g-nested-program-auth-attr-silently-ignored`, HIGH — measured fail-open: anon POST writes rows). Relevant to the interview: "auth-gated pages" is a claim someone might test.
+- **Protected-column egress on main:** `FROM USERS` (case) skips tagging entirely → whole row incl. hash ships (PA-reproduced); SQL-expression output columns (`passwordHash||''`, `lower()`, `hex()`, `CAST`, `json_object`, `pin+0`) get no descriptor → ship. Both fixed-or-half-fixed on the HELD protect branch (§2).
+
+### 2. HELD branches (worktrees retained; each has a progress.md)
+- **Protected-column egress §14.8.9** — `worktree-agent-a8aefdb4c19a10c1a` @ `049390932` (main merged), tag `review/s441-protect-r4`. §14.8.9 RATIFIED twice (+ arithmetic stays protected; `reveal("col")` is the declassify path — verified by execution). Round-4 review DO-NOT-LAND. **Dispatch a FRESH agent** (the old one is at ~750k ctx) with the round-5 brief on the board: (1) CRIT `.length` derived on any receiver; (2) case-normalise at tag+redactor+flow; (3) expression/quoted/subquery columns → `cols:"*"`; (4) element-returning collection methods join the alias class. Reproduce each first (reviewer-reported).
+- **Declared prose (§40.8, ruled)** — `worktree-agent-ab276a0b05f6a84cf` @ `25b38fc8b` + UNCOMMITTED round-4 WIP (agent died at the context limit). WIP saved: `scrml-support/handOffs/s442-salvage/declared-prose-r4-wip.patch` (19 files, +666; also staged in the worktree). Round-4 brief: the COVERAGE INVARIANT — every non-whitespace body-top byte ends up in a statement span or an E-UNQUOTED-DISPLAY-TEXT span, both front ends (closes `★ ✓ →` vanishing [new regression], `<count> = 0⏎© 2026 Acme Inc` vanishing, dropped code lines). WIP includes the root cause of #4 (an interpolated template folds to its empty `value`). Then a fresh full review.
+- **`| err :>` binds the error value (ruled)** — `worktree-agent-a04c8bb9665851ec9` @ `1a12e5a9b`. The `match` reader residual (`g-match-payload-binding-resolves-by-bare-variant-name`) unfinished (classifier blocked the agent's grep); new HIGH `g-server-bundle-does-not-export-imported-enum`.
+
+### 3. Follow-ups from what landed (filed §S441c)
+- #1163 edges: loop back-edge + container-mutation taint (MED, regressions vs sync handlers), cross-module scheduler write (MED, accept-all), `arguments`, computed global writes, 3 FP nits.
+- #1162 edges: manifest closure steerable by a client string (MED); no `public/` convention (ruling for bryan — robots.txt/ACME 404); SVG CSP; worker seeds; failed-build manifest.
+- Test-gate hole (MED): runtime tests silently skip under happy-dom in the one-process hook; `compiler/tests/commands/` not in the hook.
+- flogence: `src/ports/dispatch-tool.scrml:128-129` (`runLane` passed to `runGatedAgentic`) is now E-ASYNC-FN-ESCAPES-AS-VALUE — inbox note sent at wrap.
+
+### 4. Spotlight (bryan-owned; ~2026-10-06..09)
+- Facts sheet: `scrml-support/docs/spotlight/FACTS-SHEET-2026-09-29.md` (numbers from FACTS.md; shipped/specified/ruled kept separate; a "Don't say" list). Refresh its numbers + add the S441 security story before the interview. Open items in it: how he got into programming; "about 20 vs a dozen" compilers.
+- bryan's interview draft: `scrml-support/docs/spotlight/spotLightReply.txt` (PRIVATE — never the public repo; the original is untracked at the scrml root).
+- **README rewrite is NOT done** — deferred behind #12 (#1158, now merged). Ruled shape: one language README, two registers — a CI-gated compiling-today body (`docs/readme-snippets/` + `scripts/snippet-gate.js`, banner removed) + one labelled "where the language is going" before/after section (§66 + S440 rulings). Highest-value remaining spotlight item.
+- Site: scrml.dev published S441; compiler pin held at `50478f0e` (nested for-lift wrapper-div regression, gap filed).
+
+### 5. bryan's queue
+- Declared prose #7: body-top code that does nothing (`do it now`, `import stuff`, bare `404`) — PA rec: compile error (E-UNQUOTED-DISPLAY-TEXT), not a W- warning.
+- `public/` static convention (above). formFor no-JS fallback direction. `csrf="off"` without `auth=` is inert (PA rec: a warning).
+
+## 🔭 DURABLE
+**Text scanning loses to adversaries; three rounds proved it twice.** F4/F5 and declared prose each spent three rounds patching shapes a text/regex scan missed; each next review found more. The fix both times was structural — resolve by scope on the AST (scheduler), poison a binding (event), a coverage invariant (prose). When a second round finds a NEW shape of the same class, stop and change the mechanism.
+
+**A green hook is not a run test.** A red CSRF test committed through the full hook: runtime tests guarded on `globalThis.document` skip themselves when browser tests share the process. Agents asked "how did this pass the hook?" found it; ask that question whenever a review finds a red test on a hook-gated commit.
+
+**Audits of the public face found the worst holes.** The spotlight audit (docs accuracy) led to: static serving handing out the database, server source and session store; CSRF absent under auth; cross-site WebSocket hijack; one-time tokens replayable in the flagship example; `<page auth>` gating nothing. None were on anyone's list.
+
+**Classifier friction (resolved by ruling).** Sub-agent pushes of their own worktree branches were repeatedly denied; the PA then pushing drew an "Auto-Mode Bypass" denial. bryan RULED the standing push authorization covers it (user-voice S441). A permission rule for agent-worktree push/grep would remove the friction.
+
+## Landed S441
+#1141 NERDME · #1142 docs/package.json · #1143 dpa-057 bank · #1145 tutorial + snippet drift gate · #1146 59 audit gaps · #1147 `fail .Variant` · #1149 bootstrap CSS+`<theme>` T3 · #1150 E-ERROR-002 handler conformance · #1152 stdlib comment leak + gate · #1153 inline-block-handler lint · #1155 example 23 token guards · #1158 `@cell = serverFn()` awaited (#12) · #1161 CSRF default + WS Origin · #1162 static-serve allowlist · #1163 async-escape F4/F5. Site published.
+
+## Review ledger
+Markers written for #1140-#1143, #1146, #1149, #1150, #1153, #1158, #1161-#1163. STILL OWED from S441: #1145, #1147, #1152, #1155 — their S239 reviews ran before a context compaction and the PA could not reconstruct the verdicts from artifacts; reconstruct from the S441 transcript (`3d8eae9f…jsonl`) or re-review, don't guess. #1144/#1148/#1151/#1154/#1157/#1159 are S442's.
+
+## Worktrees
+Retain: agent-a8aefdb4c19a10c1a (protect), agent-ab276a0b05f6a84cf (prose, WIP staged), agent-a04c8bb9665851ec9 (err-arm). Review tags `review/s441-*` are LOCAL only. Scratch worktrees under the S441 session scratchpad are disposable.
+
+---
+
 # scrml — Session 440 (bryan · ASUS-Vivobook) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. SOLO session (S438-peter, S439 both wrapped).

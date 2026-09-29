@@ -1309,6 +1309,9 @@ const BODY_TOP_PROSE_HEADS = {
 function stmtHasInvalidOwnExpr(st) {
   if (!st || typeof st !== "object") return false;
   if (st.kind === "html-fragment") return true;
+  // An `on mount { … }` / `on dismount { … }` desugars to a bare-expr whose
+  // exprNode is the BODY (a statement list), not a head — code by its head.
+  if (st._onMountEffect === true) return false;
   const heads = BODY_TOP_PROSE_HEADS[st.kind];
   if (!heads) return false;
   for (const key of heads) {

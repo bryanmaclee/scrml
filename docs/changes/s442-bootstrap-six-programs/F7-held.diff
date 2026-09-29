@@ -1,0 +1,39 @@
+2733a2734,2735
+>         // r1 F7: a granted edit that GROWS a fixed-length sequence breaks its length invariant
+>         if (granted && growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, what))
+2939a2942,2943
+>         // r1 F7: growing a FIXED-length sequence breaks its length invariant
+>         if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedLengthMessage(f.sym.hint, shapeWhat(shape)))
+2997a3002,3033
+>     }
+> 
+>     // r1 F7: a sequence type whose length axis is FIXED (no `free` / bound,
+>     // §66.12.1: omission is fully constrained) cannot grow — provably, so a
+>     // growing edit is a compile error (§66.11.2 invariants; dpa-052 Q5).
+>     fn growsFixed(t: Type | not) -> boolean {
+>         if (t is not) return false
+>         return seqFixed(t)
+>     }
+> 
+>     fn seqFixed(t: Type) -> boolean {
+>         return match t {
+>             .Seq(elem: el, grants: g) :> isFixedLength(g.length)
+>             .Int :> false
+>             .Num :> false
+>             .Str :> false
+>             .Bool :> false
+>             .Named(sym: x) :> false
+>             .Maybe(inner: i) :> false
+>         }
+>     }
+> 
+>     fn isFixedLength(l: LengthGrant) -> boolean {
+>         return match l {
+>             .Fixed :> true
+>             .Free :> false
+>             .Bounded(min: a, max: b) :> false
+>         }
+>     }
+> 
+>     fn fixedLengthMessage(name: string, what: string) -> string {
+>         return "`@" + name + "`: " + what + " grows the sequence, and its type fixes the length (no `free` grant, §66.12.1–§66.12.2) — the write provably breaks the length invariant (§66.11.2)"
