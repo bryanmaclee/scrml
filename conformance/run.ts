@@ -971,6 +971,7 @@ async function runtimeBody(c: LoadedCase, structuredKeys: string[]): Promise<str
           auxFiles: c.auxFiles,
           serverDb: e.serverDb,
           ssr,
+          viewer: e.firstPaint?.viewer,
           sqlEngine: e.sqlEngine,
         })
       : await run(c.source, e.input ?? [], c.auxFiles, e.serverStub ?? {});
@@ -988,6 +989,16 @@ async function runtimeBody(c: LoadedCase, structuredKeys: string[]): Promise<str
       }
       for (const s of e.firstPaint.notContains ?? []) {
         if (fp.includes(s)) failures.push("firstPaint: expected NOT to contain " + JSON.stringify(s));
+      }
+    }
+    // S441 — the anonymous document request is redirected (§52.13).
+    if (e.firstPaint.anonymousRedirect !== undefined) {
+      const ad = (r as { anonymousDocument?: { status: number; location: string | null } }).anonymousDocument;
+      if (!ad || ad.status < 300 || ad.status > 399 || ad.location !== e.firstPaint.anonymousRedirect) {
+        failures.push(
+          "firstPaint: anonymous document expected to redirect to " + JSON.stringify(e.firstPaint.anonymousRedirect) +
+          ", got " + (ad ? `${ad.status} ${JSON.stringify(ad.location)}` : "no response"),
+        );
       }
     }
   }
