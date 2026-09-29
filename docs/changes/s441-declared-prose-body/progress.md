@@ -25,3 +25,13 @@
   nested-path xfail re-signed (the statement DROP is fixed by the AT_IDENT ASI boundary; a notify miss
   remains — known-gaps note). Samples: postgres-program-driver (CREATE TABLE into `${}`),
   phase3-is-in-when-guard-093 (malformed `<#tick ...>` -> `<p if=...>`).
+- 15b8c0026 feat — implementation + SPEC + tests + conformance + samples (pre-commit 32,404 pass / 0 fail)
+- eeb5ac7c2 fix — strict check judges statement HEADS only (a `when` bodyExpr was misread); CE snippet
+  reparse wrapper `<program>` -> `<div>`. Browser failure set == base worktree b2d3a3d56 (minus TodoMVC env).
+- VERIFIED: measure-loose-body-prose -> 0 loose runs in <program>/<page>/<channel> bodies, both front
+  ends, 0 live/native divergence at this locus; conformance 1061/1068 + 7 xfail; snippet-gate 122/122.
+- Corpus differential (true base worktree vs head, 2,244 files, both front ends): live changes only in
+  the re-authored conformance fixtures + stdlib/http (comment leak; sibling agent's fix) + migrated
+  samples; scrml-site / flogence / examples / readme+tutorial snippets unchanged (live). Native:
+  `use foreign:` bodies now lifted (native parser lacks `use foreign:` — pre-existing gap), bare writes
+  and `on mount` now lifted in 4 samples (matching live).
