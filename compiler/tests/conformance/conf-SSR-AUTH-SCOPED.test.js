@@ -146,7 +146,10 @@ describe("CONF-SSR-AUTH-SCOPED (runtime-half): the compiled bundle omits the see
     const compose = factory(stubSql, Bun);
     expect(typeof compose).toBe("function");
 
-    const resp = await compose({});          // anonymous request — no cookies, no session
+    // anonymous request — no cookies, no session. A real request shape (url +
+    // headers), as the host passes: an auth app's compose reads the session for the
+    // §39.2.3 csrf-token meta fill (§40.2 S441 — csrf="auto" is the default under auth=).
+    const resp = await compose({ url: "http://localhost/", method: "GET", headers: { get: () => null } });
     const html = await resp.text();
     const seedMatch = /<script type="application\/json" id="__scrml_ssr_state">([\s\S]*?)<\/script>/.exec(html);
     const seed = seedMatch ? JSON.parse(seedMatch[1]) : {};

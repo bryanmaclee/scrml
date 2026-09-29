@@ -983,7 +983,16 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
     let mountSource = html;
     if (ssr) {
       if (!mod.compose) throw new Error("server-eval SSR: emitted serverJs has no _scrml_ssr_compose_handler");
-      const resp = await mod.compose({});
+      // An ANONYMOUS page GET, shaped like the dispatch requests above (the host
+      // always hands the compose handler a request). Passing `{}` stopped being
+      // enough once an auth app's compose reads the session for the §39.2.3
+      // `<meta name="csrf-token">` fill — which every `auth=` app now does
+      // (§40.2 S441: csrf="auto" is the default under auth=).
+      const resp = await mod.compose({
+        url: "http://localhost/",
+        method: "GET",
+        headers: { get: (_k: string) => null },
+      });
       firstPaint = await resp.text();
       seedState = extractSsrSeed(firstPaint);
       mountSource = firstPaint;
