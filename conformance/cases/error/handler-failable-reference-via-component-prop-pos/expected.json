@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-failable-reference-via-component-prop-pos",
+  "description": "A component wires its `onSave` prop as a RAW handler reference (`onclick=onSave`). The call site `<Btn onSave=risky/>` passes a `!` function, so that instance's `onclick` is a failable handler reference: E-ERROR-002, exactly once, reported at the call-site prop. The call site `<Btn onSave=plain/>` passes a non-failable function and is clean.",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S441 \"yes on references\"",
+  "rationale": "§19.4.3 (S441) — a failable function passed as a handler reference SHALL be E-ERROR-002 in every position a handler is checked in, including a component body; the call site is where the failable function is chosen.",
+  "expect": {
+    "codes": ["E-ERROR-002"],
+    "codeCounts": { "E-ERROR-002": 1 },
+    "notCodes": [],
+    "severity": { "E-ERROR-002": "error" }
+  }
+}
