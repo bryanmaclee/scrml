@@ -122,3 +122,63 @@ base = origin/main 650c47c29 vs tip
 
 ## Round 5 (fresh agent; round-4 review DO-NOT-LAND)
 - start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-ab2240605e359d289, base = 049390932 + merge origin/main 6dccbd6cf (10120709a).
+- Harness: scratch s443-protect/probe.mjs — compile, seed sqlite (hash
+  SECRET-HASH-123, pin 4321), serve the emitted routes with Bun.serve, POST the
+  getIt route over real HTTP, print status + body. Before = `git archive` of the
+  merged base; after = the worktree.
+- ALL FOUR findings + the nit REPRODUCED over HTTP on the merged base
+  (F1 `({length:h}).length` 200 "SECRET-HASH-123", `new Array(u.pin).length`
+  200 4321; F2 `SELECT id, PASSWORDHASH … return u` 200 {"id":1,"passwordHash":…};
+  F3 every expression shape 200 with the value (hex: 5345…); F4 all ten
+  element / prototype shapes 200 with the hash; NIT reveal("PIN") E-PROTECT-006).
+- Fixes (protect-flow.ts, protect-egress.ts):
+  - F1: `Taint.len` — what `.length` reveals; explicit-derived only for a column
+    read off a row, template / concat / String() of such, array literals (+ spread
+    lengths), `.map` / `.filter` / `.sort`, row arrays. Default = naked (fail closed).
+    Identity builtins (`Array`, `Array.from`, `Object.assign` …) reset to default.
+  - F2: descriptor records the DECLARED name for an unaliased column; runtime
+    `_scrml_protect_fold` in tag / reveal / redact; flow compares folded
+    (`rowColFor`, revealed stored folded). pick = fold-match (over-approx), omit =
+    exact match only (a case-variant omit key does not remove the runtime key).
+  - F3: `lexSqlEntry` (structural lexer: strings skipped, "…" `…` […] unwrapped,
+    words folded) over each OPAQUE projection entry; any protected column name, or a
+    nested projection `*` (previous token SELECT/DISTINCT/ALL/,/.), → `{all:true}`.
+    First cut treated every `*` as projection and stripped trucking-dispatch's
+    customer list over `(SELECT COUNT(*) …)` — caught by the trucking baseline test.
+  - F4: `writeThrough` — a container write lands in the syntactic root binding AND
+    every alias class of the written-into value (`refs`); unmodelled-method results
+    carry receiver + argument refs; Object.values/entries/fromEntries/Reflect.get
+    carry arg refs; Object.setPrototypeOf unites + writes proto contents;
+    Object.create / getPrototypeOf modelled.
+  - NIT: reveal names folded (flow, runtime, E-PROTECT-004 revealedColumnsIn).
+- 03a05dbc0 — unrelated flake that blocked the commit gate: §64
+  standalone-tool-target liveness test re-called `reader.read()` every 200 ms tick
+  and lost the port line to the abandoned read (2/3 fails at load ~7). One pending
+  read carried across ticks; 4/4 pass.
+- ea597b5bc — the fix + tests (unit, integration compiled AND executed) + 4
+  conformance cases (select-upper-column-row-strip-runtime,
+  expr-column-row-strip-runtime, length-object-e006, element-alias-write-e006).
+  Pre-commit gate 32952 pass / 0 fail.
+- After (HTTP): every F1-F4 shape rejected (E-PROTECT-006) or stripped
+  (row → {"id":1} / {}); self-check set (repeat/padEnd/Array.from/spread/
+  a.length=/String(Array)/destructure/helper/Object.create/findLast/entries/
+  push-via-find/Object.assign-via-find/omit(["PASSWORDHASH"])/users.PASSWORDHASH)
+  all closed; negatives unchanged (h.length 15, [h].length 1, map.length,
+  template length, count(*), lower(name), pick/omit, clean find-write).
+- OVER-APPROXIMATIONS (fail closed, reported): SQL-derived values
+  (`length(passwordHash)`, `passwordHash = ${x} AS ok`) strip the row wholesale;
+  any identifier in an expression column that spells a protected column name of
+  ANY protected table counts; `.length` of an unmodelled method result
+  (`u.passwordHash.trim().length` — was 200 15, now E-PROTECT-006); pick with a
+  case-variant key keeps the column; unmodelled-method results alias receiver +
+  arguments.
+- MIGRATION (2166 files: examples/ samples/ conformance/cases/
+  docs/readme-snippets/ stdlib/, one compile per file):
+  vs round-4 base: changed = the 3 new intentional conformance cases only
+  (+ stdlib async/await deltas that are a harness artifact — both archived
+  compilers show them identically, main vs base shows none). vs origin/main: the
+  round 1-4 intentional set (I-PROTECT-STRIP-001 1->0 on trucking app/login,
+  samples/login, protect-001-basic-auth; the *-e006 cases) + the new cases.
+  No real example / sample / snippet / stdlib file gains E-PROTECT-006.
+  The first F3 cut DID change one real example (trucking customers.scrml,
+  row stripped wholesale over `(SELECT COUNT(*) …)`); fixed before commit.
