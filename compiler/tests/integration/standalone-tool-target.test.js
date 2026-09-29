@@ -293,12 +293,23 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
       let port = null;
       const deadline = Date.now() + 10000;
       try {
+        // ONE pending read, carried across ticks. Re-calling `reader.read()` on
+        // every 200 ms tick queued a SECOND read while the first was still
+        // pending; the chunk then resolved the abandoned first promise and was
+        // lost, so a tool slower than 200 ms to print (a loaded machine) failed
+        // with stdout="" although it had printed its port (measured S443).
+        let pending = null;
         while (Date.now() < deadline && proc.exitCode === null) {
+          if (pending === null) {
+            pending = reader.read();
+            pending.catch(() => {}); // releaseLock() below rejects a still-pending read
+          }
           const chunk = await Promise.race([
-            reader.read(),
+            pending,
             Bun.sleep(200).then(() => "TICK"),
           ]);
           if (chunk === "TICK") continue;
+          pending = null;
           if (chunk.done) break;
           out += dec.decode(chunk.value, { stream: true });
           const m = out.match(/SCRML_TOOL_PORT=(\d+)/);
