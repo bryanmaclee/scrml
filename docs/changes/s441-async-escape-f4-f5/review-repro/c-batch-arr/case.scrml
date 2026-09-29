@@ -1,0 +1,14 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+function decide() {
+const a = isOk(1)
+const o = [isOk(2)]
+return (a || o[0]) ? "accepted" : "rejected"
+}
+function go() {
+@verdict = decide()
+}
+<button id="go" onclick=go()>go</button>
+<p id="out">${@verdict}</p>
+</program>

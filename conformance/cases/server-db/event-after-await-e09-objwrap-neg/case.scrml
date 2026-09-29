@@ -1,0 +1,6 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+<form id="f" onsubmit=${ const o = { e: event }; @verdict = isOk(1) ? "a" : "r"; o.e.preventDefault() }><button>s</button></form>
+<p id="out">${@verdict}</p>
+</program>

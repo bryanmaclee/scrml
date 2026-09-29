@@ -19,6 +19,10 @@ import { nsName } from "./chunk-namespace.ts";
 import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
+import type { AsyncNameFacts } from "./async-combinators.ts";
+import { colorAsyncFunctionExpr, unanalyzableHandlerUses } from "./js-async-analysis.ts";
+import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
+import { clientAsyncFactsOf } from "./emit-functions.ts";
 
 /** An event binding recorded by HTML gen and consumed by client JS gen. */
 interface EventBinding {
@@ -37,6 +41,8 @@ interface EventBinding {
   handlerBlock?: { stmts: any[] };
   /** Phase 4: structured ExprNode for each handler arg. */
   handlerArgExprNodes?: ExprNode[];
+  /** s441 — the source span of the handler attribute (diagnostic anchor). */
+  span?: unknown;
   /**
    * Phase A10 (S78, 2026-05-10) — engine arm context tag.
    * Set when this event binding was emitted while the registry was inside
@@ -455,6 +461,33 @@ function exprUsesServerFn(expr: string, serverFnNames: Set<string>): boolean {
     if (re.test(expr)) return true;
   }
   return false;
+}
+
+/**
+ * s441 (g-server-call-in-inline-handler-condition-unawaited) — apply §13.2 to one
+ * emitted event-handler function expression. An inline / block handler value is
+ * lowered through the string rewriter, never through the function-body pipeline
+ * that awaits server calls, so `onclick=${ if (isOk(1)) {…} }` shipped
+ * `if (isOk(1))` — a Promise, always truthy: the branch ran for every input.
+ * The emitted text is analysed with acorn against the SAME async facts the client
+ * function bodies use (stashed by emitFunctions): async calls in await-legal
+ * positions are awaited and the handler becomes `async`; a clean-family callback
+ * is lifted to `_scrml_<m>Async`; everything the compiler cannot await, and every
+ * async function used as a value, is reported. Unparseable text is left unchanged.
+ */
+function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileContext): string {
+  if (!handlerExpr) return handlerExpr;
+  const facts = clientAsyncFactsOf(ctx);
+  const resolveFree = freeAsyncResolverFromFacts(facts);
+  const colored = colorAsyncFunctionExpr(handlerExpr, resolveFree);
+  if (!colored) {
+    // s441 fix round — fail CLOSED on handler text the analysis cannot read.
+    const u = unanalyzableHandlerUses(handlerExpr, resolveFree);
+    if (u) for (const err of jsAsyncUsesErrors(u, span, ctx.filePath)) ctx.errors.push(err);
+    return handlerExpr;
+  }
+  for (const err of jsAsyncUsesErrors(colored, span, ctx.filePath)) ctx.errors.push(err);
+  return colored.code;
 }
 
 export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, string>): string[] {
@@ -1293,6 +1326,13 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
       }
       } // close S97 reactive-method-call else branch
     }
+
+    // s441 (g-server-call-in-inline-handler-condition-unawaited) — §13.2 in a
+    // handler body: every async call the handler makes is awaited (the handler
+    // becomes `async`), an async callback of a clean-family method is lifted to
+    // its awaited combinator, and an async call that cannot be awaited — or an
+    // async function used as a value (S440 F4) — fails closed.
+    handlerExpr = colorHandlerAsync(handlerExpr, binding.span, ctx);
 
     if (!byEventType.has(eventName)) {
       byEventType.set(eventName, []);

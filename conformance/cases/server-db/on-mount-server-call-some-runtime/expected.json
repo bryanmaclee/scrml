@@ -1,0 +1,16 @@
+{
+  "id": "server-db-on-mount-server-call-some-runtime",
+  "description": "SECURITY (s441, F5). An `on mount` block declares a helper wrapping a server call and uses it in a `.some` callback. The server answers false for every element, so `.some` MUST be false (\"rejected\"). Before s441 the mount body only awaited DIRECT server calls in statement positions: the helper was emitted sync and `.some` saw a Promise per element — \"accepted\" for every input. The helper is now emitted async and the callback lifted to the awaited combinator, exactly as in a function body.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: every server call site SHALL be awaited and any function containing one SHALL be async — in an `on mount` block (§6.7.1a) as in a function body (ruling S440 JS-WAT #11).",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-SERVER-FN-IN-SYNC-CALLBACK", "E-ASYNC-FN-ESCAPES-AS-VALUE"],
+    "serverStub": { "isOk": false },
+    "input": [{ "wait": "settle" }],
+    "state": { "verdict": "rejected" },
+    "domAnchored": [{ "selector": "#out", "text": "rejected" }]
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "server-db-async-fn-escapes-as-value-handler-neg",
+  "description": "SECURITY (s441, S440 F4 in a handler body). An inline event handler passes the server function `isOk` as a value to a user function, which calls it and tests the result — an unawaited Promise, always truthy (\"accepted\" for every input). Ruled S440 (F4): an async-colored function may not escape as a value; the rule is enforced in handler bodies too (S440 JS-WAT #11).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: an async-colored function SHALL NOT be used as a value; passing a server function to a function that is not an awaited collection method SHALL be a compile error (E-ASYNC-FN-ESCAPES-AS-VALUE, §34), in every body the compiler emits.",
+  "expect": {
+    "codes": ["E-ASYNC-FN-ESCAPES-AS-VALUE"],
+    "severity": { "E-ASYNC-FN-ESCAPES-AS-VALUE": "error" }
+  }
+}

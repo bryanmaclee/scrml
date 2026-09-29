@@ -1,0 +1,16 @@
+{
+  "id": "server-db-event-after-await-e13-fndecl-neg",
+  "description": "s441 round 4 (review round 3, finding 3). A handler that awaits a server call then uses the event a function declaration that uses the event, invoked after the await. By then the browser has already acted on the event, so the control has no effect (the form submits). Rounds 2-3 matched call shapes and each shape was bypassed; round 4 POISONS the event binding after the first await: any use of the event, or of anything derived from it, other than a plain read of a non-control property is E-EVENT-CONTROL-AFTER-AWAIT.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "\u00a713.2",
+  "rationale": "\u00a713.2: after a handler's first await, only plain reads of non-control event properties are allowed; every other use of the event or a value derived from it SHALL be E-EVENT-CONTROL-AFTER-AWAIT (\u00a734).",
+  "expect": {
+    "codes": [
+      "E-EVENT-CONTROL-AFTER-AWAIT"
+    ],
+    "severity": {
+      "E-EVENT-CONTROL-AFTER-AWAIT": "error"
+    }
+  }
+}
