@@ -1,0 +1,18 @@
+<program>
+${
+  import { verifyPassword } from 'scrml:auth'
+}
+<out> = ""
+server function check(pw, hash) {
+  function m(h) { return verifyPassword(pw, h) }
+  const ok = m(hash)
+  const o = { m: (x) => x + 1 }
+  const ys = [1, 2].map(x => { return o.m(x) })
+  return ok ? ys.join(",") : "no"
+}
+function go() {
+  @out = check("x", "y")
+}
+<p id="out">${@out}</p>
+<button id="go" onclick=go()>go</button>
+</program>
