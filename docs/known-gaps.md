@@ -19853,8 +19853,10 @@ a `!` function, so `?` there has nowhere to propagate — E-ERROR-003 is the nam
 `function(event) { event.preventDefault(); …; _scrml_fetch_persistSignup_N(values); }` — the failure value is dropped.
 §41.14.3 mandates the `! ErrorType` signature but specifies no handling/display path for the error it produces.
 **Fix direction — RULED S440 (22-item queue, #19):** a `formFor` submit handler's error routes to the nearest
-`<errorBoundary>`; with no enclosing boundary, E-ERROR-005. Not implemented (needs the §41.14.3 SPEC text + the
-submit-dispatch routing + the static E-ERROR-005 check).
+`<errorBoundary>`; with no enclosing boundary, E-ERROR-005. Not implemented. The SPEC text has landed (§41.14.3,
+#1133; §19.6.6 names it as the one handler-time route to a boundary, S441); still needed: the submit-dispatch
+routing + the static E-ERROR-005 check. Re-measured S441: with an enclosing `<errorBoundary>` the dispatch still
+discards the result (not routed); with none, the `<formFor>` compiles with no E-ERROR-005.
 
 ### g-handler-block-does-not-hoist-function-declarations — `onclick={ @r = inner(); function inner() {…} }` is E-SCOPE-001, though a function body hoists the same declaration — `NEW S437; LOW; open`
 <!-- @gap id=g-handler-block-does-not-hoist-function-declarations sev=LOW status=open locus=compiler/src/type-system.ts(visitAttr's §5.2.3 handler-statement walk visits statements in order; the function-decl pre-bind the function-body walk gets is not applied to handlerBlock.stmts) prov=review:S437-round5-review-item-b;empirical:S437-round5-reproduced-by-compile -->
