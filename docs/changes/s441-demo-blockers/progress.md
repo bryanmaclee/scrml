@@ -59,3 +59,9 @@
 - Branch carries Fix 1 ONLY: compiler/src/lint-ghost-patterns.js + its unit test
   (compiler/tests/unit/lint-ghost-inline-block-handler-s441.test.js), incl. the attribute-boundary nit.
 - Expected corpus diagnostic diff vs main: exactly the W-LINT-007/013 removals inside `on…={ … }` blocks.
+- MEASURED at eed298e8a vs origin/main 55a9f3d5c (only compiler/src/lint-ghost-patterns.js differs),
+  2095 files, errors + warnings + lint streams: 0 newly failing, 0 newly passing, 0 error/warning
+  changes; 60 files change ONLY in the lint stream, all removals (W-LINT-007 −125, W-LINT-013 −100),
+  every file containing an `on…={ … }` block (conformance/cases/markup-handler 50, derived 1,
+  docs/readme-snippets 3, docs/tutorial-snippets 6). Suite 25986 pass / 0 fail; conformance
+  1047/1054 + 7 xfail (== main).
