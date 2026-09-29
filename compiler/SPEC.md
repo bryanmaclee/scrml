@@ -1230,7 +1230,7 @@ name.** The two productions are **duals, not one model wearing two hats**:
 
 | production | governs | default | exit sequence(s) | escape into the default |
 |---|---|---|---|---|
-| **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error — §4.18.1b); `//` comments (§4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
+| **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error, `~{` test — §4.18.1b); `//` comments (§4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
 | **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) | code | `"` opens a display-text literal (§4.18.3) | none — the display-text literal has NO character escapes (S442: `\"`, `\\`, `\${` deleted; ⚑ OPEN residue — §4.18.3) |
 
 - The body mode SHALL be determined by the **enclosing element kind**, never by the lexical content of the body.
@@ -1277,6 +1277,11 @@ others."* So `5 < 7` is just text.
      - `#{` — CSS inline (§3.1 table, parent Markup/State);
      - `^{` — meta (§22.2) and `!{` — error context (§19; sigil rule §4.11). Neither is a row of the §3.1 table; both
        are named by the ruling itself.
+     - `~{` — test context (§19.12). Not a §3.1 row and not named by the ruling; listed as an exit because the block
+       splitter opens it in a markup body today (corpus: 0 in free-text bodies) — the ruling's "and so on".
+       `provenance: rationale:PA S442 — preserves current behaviour; bryan veto`
+     - `_{` — foreign code (§23) — is **neither an exit nor content**: in a markup body it stays an ERROR,
+       `E-FOREIGN-004`, as today. `provenance: rationale:PA S442 — preserves current behaviour; bryan veto`
      - NOT exits: `?{` — the §3.1 table's third row, whose parent is Logic only; in a markup body it is text (§4.17
        S108 note, §8.1).
   2. **`//` comments** — §4.7 suppression; the comment runs to end of line and is not content.
@@ -1289,12 +1294,7 @@ others."* So `5 < 7` is just text.
   heuristics — `lint-w-interp-in-raw-content.js` `detectToken` grew three because nobody wrote "and no others".)*
   *(The round-2 draft's two-member set — `${` and `<`+[a-zA-Z!/?] — was incomplete: read literally it turned 459 `//`
   comments, 87 `#{`, 29 `^{` and 5 `!{` corpus blocks, and the `<*x/>` / `<_ …>` / `<.Variant …>` tag forms, into
-  page text. The follow-up ruling replaces it. Counts: `docs/changes/s442-dpa045-spec/progress.md`.)*
-  > ⚑ **OPEN — two brace sigils the ruling's "and so on" does not settle.** `~{` (the test context, §19.12) is
-  > opened by the block splitter in a markup body today (corpus: 0 in free-text bodies) but is neither a §3.1 row nor
-  > named by the ruling. `_{` (foreign code, §23) in a markup body is `E-FOREIGN-004` today — whether it stays a
-  > recognized-then-rejected sigil or becomes content is not ruled.
-- `<` SHALL be a markup-open attempt **if and only if** immediately followed by `[a-zA-Z!/?*_.]`. A `<` followed by
+  page text. The follow-up ruling replaces it. Counts: `docs/changes/s442-dpa045-spec/progress.md`.)*- `<` SHALL be a markup-open attempt **if and only if** immediately followed by `[a-zA-Z!/?*_.]`. A `<` followed by
   anything else is ordinary content — not recognized, not an error. *(Closes the `<`+SPACE gap: `a < b` is content,
   matching HTML5.)* **The spaced opener `< tag>` is therefore content in a free-text body** — the deprecated
   whitespace-after-`<` form of §4.3 / §15.15.5 is no longer an opener there (RULED, S442 follow-up: *"The deprecated
@@ -1539,7 +1539,7 @@ The `text` block kind (at the block-splitter layer) and the corresponding `TextN
 - §3.4 — V5-strict access form per context; the engine-state-child / match-arm / `:`-shorthand loci are code-default-body loci.
 - §4.14 — the `:`-shorthand body form; a `:`-shorthand body is a single code-default expression.
 - §4.15 — the structural-elements registry; `<engine>` / `<match>` body-form notes.
-- §3.1 / §4.7 / §19 / §22.2 — the context sigils and `//` comments that are members of the free-text closed exit set (§4.18.1b, S442).
+- §3.1 / §4.7 / §19 / §19.12 / §22.2 — the context sigils and `//` comments that are members of the free-text closed exit set (§4.18.1b, S442).
 - §4.3 / §15.15.5 — the deprecated spaced opener `< tag>`, which is content inside a free-text body (S442).
 - §66.6 / §18.0.1 — the `<*x/>`, `<_ …>`, `<.Variant …>` tag forms admitted by the `<`+[a-zA-Z!/?*_.] exit class (S442).
 - §4.17 — `<pre>` / `<code>` raw-content (orthogonal mechanism — see the orthogonality note above). S442: raw content is a **third, orthogonal text-mode production** — zero active sequences, its only exit its own matching close tag, matched by name (§4.18.1a).
