@@ -119,9 +119,8 @@ function toggle(id) {
         <p>Saved.</p>
         <onTimeout after=1.5s to=.Editing/>
     </>
-    <Rejected msg rule=(.Saving | .Editing)>
+    <Rejected msg rule=.Saving>
         <p class="err">${msg}</p>
-        <onTimeout after=3s to=.Editing/>
     </>
 </>
 
