@@ -167,7 +167,7 @@ ${
         ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[]), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
-        EEdits(w: WriteFact, elems: AExpr[]),             // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2)
+        EEdits(w: WriteFact, elems: AExpr[], tmps: Sym[]), // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2); r1: each element evaluated into `tmps[i]` first
     }
     export type BindFact:enum = {
         BBind(sym: Sym),                                  // a binder: a local statement, a function
@@ -1061,8 +1061,14 @@ ${
             return { graph: not, st: addDiag(st, te.file, children[0].span, "E-DECL-STATE-CHILD", "state-children need an enum-valued field (§66.13.2)") }
         }
         let edges: Edge[] = []
+        let seen: int[] = []
         for (const c of children) {
             const origin: int = variantIndex(g, es, c.name)
+            if (origin >= 0 && seen.indexOf(origin) >= 0) {
+                // r1 nit: one state-child per variant
+                st = addDiag(st, te.file, c.span, "E-DECL-STATE-CHILD", "`<" + c.name + ">` is declared twice in this graph — a variant has one state-child (its edges and body)")
+            }
+            seen = seen.concat([origin])
             if (origin < 0) {
                 st = addDiag(st, te.file, c.span, "E-DECL-STATE-CHILD", "`<" + c.name + ">` is not a variant of `" + es.hint + "` (O52: a state-child names a variant of the enclosing field)")
             } else {
@@ -2273,10 +2279,14 @@ ${
     fn resolveAssign(env: Env, e: AExpr, target: AExpr, value: AExpr, st0: AS) -> AS {
         // s442: the recognized sequence reassignment shapes (§66.11.2) and an
         // element-field write (dpa-052 Q3).
+        // r1 F1: only a CELL / field place — a local (or a place rooted in one)
+        // takes the ordinary local path below (E-ASSIGN-CONST, value resolution).
         const shape: int = seqEditShape(target, value)
-        if (shape > 0) return resolveSeqShape(env, e, target, value, shape, st0)
+        if (shape > 0 && !rootIsLocal(env, target)) return resolveSeqShape(env, e, target, value, shape, st0)
         const ef: ElemFieldTarget | not = elemFieldTarget(target)
-        if (ef is some) return resolveElemFieldWrite(env, e, ef, value, st0)
+        if (ef is some) {
+            if (!rootIsLocal(env, ef.seq)) return resolveElemFieldWrite(env, e, ef, value, st0)
+        }
         // `@inst = { ...@inst, f: v }` — the self-spread of an INSTANCE: field
         // edits of that instance (O58 (b)).
         if (isSelfSpread(target, value)) {
@@ -2652,8 +2662,15 @@ ${
     fn resolveCallStmt(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st: AS) -> AS {
         if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
         const rmv: MethodCall | not = removeCall(callee)
-        if (rmv is some) return resolveRemoveCall(env, e, rmv, args, st)
+        if (rmv is some) {
+            if (!rootIsLocal(env, rmv.obj)) return resolveRemoveCall(env, e, rmv, args, st)
+            return localEditRefused(env, e, rmv.method, args, st)
+        }
         const m: MethodCall | not = methodCall(callee)
+        if (m is some) {
+            // r1 F1 (the same deletion, pre-existing M2 shape): an edit call on a LOCAL
+            if (rootIsLocal(env, m.obj)) return localEditRefused(env, e, m.method, args, st)
+        }
         if (m is some) return resolveEditCall(env, e, m, args, st)
         return resolveExpr(env, e, not, st).st
     }
@@ -2902,6 +2919,13 @@ ${
         st = writeGuards(env, p, target.span, st)
         const f: FieldInfo = p.decl.fields[p.idx]
         if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
+        // r1 nit: the shape over a value that is not a sequence is a type error
+        const pty: Type | not = p.ty
+        if (pty is some) {
+            if (seqElem(pty) is not) {
+                return addDiag(st, env.file, e.span, "E-TYPE-031", "`@" + f.sym.hint + "` is `" + typeName(pty) + "`, not a sequence — `[…]` is not a value of its type (§66.1 rule 5)")
+            }
+        }
         const edit: EditKind = shapeEdit(shape)
         const cap: Sym | not = f.wcap
         const isGranted: boolean = f.grants.replace || hasEditKind(f.grants.edits, edit)
@@ -2917,6 +2941,7 @@ ${
         const pt: Type | not = p.ty
         if (pt is some) elemTy = seqElem(pt)
         let elems: AExpr[] = []
+        let tmps: Sym[] = []
         for (const x of arrayElems(value)) {
             const inner: AExpr | not = spreadInner(x)
             if (inner is some) {
@@ -2925,9 +2950,51 @@ ${
             } else {
                 st = resolveExpr(env, x, elemTy, st).st
                 elems = elems.concat([x])
+                // r1 F5/F6: the array is ONE value — every new element is
+                // evaluated (left to right) into its local before any write
+                const m: RSym = mint(st, "elem")
+                st = m.st
+                tmps = tmps.concat([m.s])
             }
         }
-        return addEffect(st, e.nid, EffectFact.EEdits({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }, elems))
+        return addEffect(st, e.nid, EffectFact.EEdits({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }, elems, tmps))
+    }
+
+    // r1 F1: is the place `e` names rooted in a local (a `let` / `const`, a
+    // parameter, a row binding)? Such a place is not a cell: the sequence
+    // shapes and edit calls classify CELL writes only.
+    fn rootIsLocal(env: Env, e: AExpr) -> boolean {
+        const k: AExprK = e.k
+        return match k {
+            .Name(name: n) :> lookupLocal(env, n) is some
+            .Member(obj: o) :> rootIsLocal(env, o)
+            .Index(obj: o) :> rootIsLocal(env, o)
+            .At(name: n) :> false
+            .AtItem :> false
+            .Num(raw: r) :> false
+            .Str(v: x) :> false
+            .Bool(v: b) :> false
+            .NotLit :> false
+            .Recovered :> false
+            .Variant(name: n) :> false
+            .Call(callee: c) :> false
+            .Unary(op: o) :> false
+            .Binary(op: o) :> false
+            .Ternary(test: t) :> false
+            .Assign(target: t) :> false
+            .ArrayLit(elems: es) :> false
+            .ObjectLit(props: ps) :> false
+            .Spread(e: x) :> false
+            .Lambda(params: ps) :> false
+        }
+    }
+
+    // An edit method on a local sequence: its values are resolved, and it is
+    // refused — Core has no in-place edit of a local (dpa-052 Q2 puts locals
+    // under their type's grants; the bootstrap cannot lower one either way).
+    fn localEditRefused(env: Env, e: AExpr, method: string, args: AExpr[], st0: AS) -> AS {
+        const st: AS = resolveExprs(env, args, not, st0)
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + method + "(…)` on a local sequence is not in the bootstrap — Core has no edit of a local (write a new value: `let t = …`)")
     }
 
     fn callMethodName(v: AExpr) -> string {
@@ -3174,15 +3241,15 @@ ${
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return addElem(st, e.nid, ElemFact.MSlot)
         const d: DeclSrc | not = declNamed(env.g, e.tag)
-        if (d is some) return resolveUse(env, e, d, st)
-        // s442: a plain `<x/>` of a `single` declaration is ⚑ O55 (OPEN: an
-        // error, E-DECL-SINGLE-INSTANTIATED, or a render of the one instance).
-        // Not decided — refused as outside the bootstrap, never rendered as an
-        // HTML element of that name.
-        const sd: ADecl | not = singleProgramField(env, e.tag)
-        if (sd is some) {
-            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + "/>` is a plain use of the `single` declaration `" + e.tag + "` — whether that is an error (E-DECL-SINGLE-INSTANTIATED) or renders the one instance is ⚑ O55 (not ruled); render it with `<*" + e.tag + "/>`")
+        if (d is some) {
+            // O55 RULED (bryan S442): a plain use of a `single` declaration is an
+            // error; `<*x/>` is the only way to render it (§66.13.3).
+            if (d.info.single) return singleInstantiated(env, e, st)
+            return resolveUse(env, e, d, st)
         }
+        // the same for a program cell declared `single` (§66.19.6 `<phase/>`)
+        const sd: ADecl | not = singleProgramField(env, e.tag)
+        if (sd is some) return singleInstantiated(env, e, st)
         return resolveHtml(env, e, st)
     }
 
@@ -3195,6 +3262,11 @@ ${
         if (sf is some) return resolveStarField(env, e, sf, st)
         const d: DeclSrc | not = declNamed(env.g, e.tag)
         if (d is not) {
+            // r1 nit: a field of SOME user declaration, named out of its scope
+            const owner: string = fieldOwnerName(env.g, e.tag)
+            if (owner != "") {
+                return addDiag(st, env.file, e.span, "E-SCOPE-001", "`<*" + e.tag + "/>` — `" + e.tag + "` is a field of `<" + owner + ">`; `<*" + e.tag + "/>` names it only inside `<" + owner + ">`'s renders (§66.6.2)")
+            }
             return addDiag(st, env.file, e.span, "E-DECL-STAR-PREDEFINED", "`<*" + e.tag + "/>` — a predefined (HTML) declaration has no shared instance (§66.6.5)")
         }
         for (const a of e.attrs) {
@@ -3364,6 +3436,13 @@ ${
         return out
     }
 
+    fn fieldOwnerName(g: Globals, name: string) -> string {
+        for (const d of g.decls) {
+            if (!d.isProgram && fieldIndex(d.info, name) >= 0) return d.info.sym.hint
+        }
+        return ""
+    }
+
     // s442: the program's cell `name` when it was declared `single` (§66.13.3).
     fn singleProgramField(env: Env, name: string) -> ADecl | not {
         if (programInfo(env) is not) return not
@@ -3373,6 +3452,10 @@ ${
             if (d.name == name && hasFlag(d.mods, "single")) return d
         }
         return not
+    }
+
+    fn singleInstantiated(env: Env, e: AElem, st: AS) -> AS {
+        return addDiag(st, env.file, e.span, "E-DECL-SINGLE-INSTANTIATED", "`<" + e.tag + "/>` makes a new instance of `" + e.tag + "`, which is declared `single` — it has exactly one instance; render that one with `<*" + e.tag + "/>` (§66.13.3, O55 ruled S442)")
     }
 
     fn eventName(attr: string) -> string {
