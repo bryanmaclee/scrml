@@ -5,6 +5,12 @@
   repro/d1-inline-block-handler.scrml); fixed in compiler/src/lint-ghost-patterns.js (tag-opener walk
   recognises `on<event>={` by the parser's isEventHandlerAttrName, steps over the block, block joins
   logic ranges). Test: compiler/tests/unit/lint-ghost-inline-block-handler-s441.test.js. Committed 78e529397.
+- ⛔ DEFECT 2 fix — WITHDRAWN — superseded by bryan's S441 ruling. bryan rejected the body-top
+  grammar-head lift as brittle (a prose-vs-code pattern matcher; `try`⏎`{`, throw / await / import()
+  all still leak) and ruled the ROOT instead: `<program>` / `<page>` bodies carry no loose prose —
+  prose must be declared (an element or a `"..."` literal). That is a separate SPEC + implementation
+  arc. All Fix-2 source, tests and conformance cases were reverted to origin/main on this branch;
+  the notes below and repro/d2-*.scrml are kept as evidence for the root arc.
 - DEFECT 2 (§7.2.1 constructs at <program>/<page> body-top ship as page text): reproduced
   (repro/d2-*.scrml, all exit 0 + page text on base). Fixed by a grammar-head lift gate
   (`forbiddenConstructHead`) in ast-builder.js liftBareDeclarations + the native mirror
@@ -47,3 +53,9 @@
     inside an `on…={ … }` block (51 conformance/cases/markup-handler + derived, 3 docs/readme-snippets/nerdme
     added by the main merge). CORRECTION to the first report: "0 code-set changes" measured errors only;
     the lint stream DID change (51 files at 29b33762, 54 after the merge).
+
+## Final shape (after the S441 ruling)
+
+- Branch carries Fix 1 ONLY: compiler/src/lint-ghost-patterns.js + its unit test
+  (compiler/tests/unit/lint-ghost-inline-block-handler-s441.test.js), incl. the attribute-boundary nit.
+- Expected corpus diagnostic diff vs main: exactly the W-LINT-007/013 removals inside `on…={ … }` blocks.

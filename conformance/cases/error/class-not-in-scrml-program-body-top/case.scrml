@@ -1,8 +1,0 @@
-<program>
-<count> = 0
-<p>${@count}</p>
-
-class Counter {
-    constructor() { this.n = 0 }
-}
-</program>

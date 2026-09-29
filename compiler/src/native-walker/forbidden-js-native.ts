@@ -320,7 +320,7 @@ export function forbiddenJsDiagnosticsForDefault(filePath: string, source: strin
 
   let diags: Diag[] = [];
   try {
-    const r: any = nativeParseFile(filePath, nativeSource, { fileRoot: true });
+    const r: any = nativeParseFile(filePath, nativeSource);
     for (const e of r?.errors || []) { const d = toDiag(e, filePath); if (d) diags.push(d); }
     diags = diags.concat(nativeForbiddenJsAttrDiagnostics(r?.ast, nativeSource, filePath));
   } catch {

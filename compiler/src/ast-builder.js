@@ -766,142 +766,6 @@ const TOPLEVEL_ON_LIFECYCLE_RE =
   /^\s*on\s+(?:mount|dismount)\s*\{/;
 
 /**
- * S441 (s441-demo-blockers, DEFECT 2) — a SPEC §7.2.1 "JavaScript construct that
- * is not scrml" leading a text run at a declaration site (the §40.8
- * `<program>` / `<page>` / `<channel>` default-logic body-top, or file top level).
- *
- * §7.2.1: the constructs are "rejected at the parse layer, each under a code of
- * the `E-*-NOT-IN-SCRML` family". Inside `${ }` they are. At the body-top none of
- * the declaration lift gates matched them, so the run fell to
- * `result.push(block)` and SHIPPED AS PAGE TEXT at exit 0 — `class Counter { … }`
- * rendered in the page, and `W-PROGRAM-REDUNDANT-LOGIC` tells authors to write
- * exactly that shape. Lifting the run by its GRAMMAR HEAD (the S439 #2 precedent:
- * a bare `when` "SHALL be lifted into the logic context by that grammar head, as
- * … an `on mount {` block is") routes it through the SAME parser that rejects it
- * inside `${ }`, so it gets the same diagnostic from the same code path — no
- * second, per-keyword error site.
- *
- * Only a construct written as a complete, brace-delimited block is recognised,
- * because only that separates code from prose (the criterion the §40.8 S378
- * note / ruling 3 hold states: prose at this body-top renders and is a working
- * shape). S441 review round: the head alone is NOT enough — `try {this} at home`,
- * `class {A} notes`, `switch (on) {the lights} now` are prose that renders. So
- * each recognised shape must satisfy ALL of:
- *   1. the grammar head and its `{` sit on ONE line (`class Notes⏎{today}` is prose);
- *   2. the `{` has a matching `}` INSIDE the text run — a block holding markup is
- *      split by the block splitter, so it never matches (`try { <b>x</b> }`), and
- *      a tag-shaped `<x>` inside the braces also rejects;
- *   3. a single-line body is empty or statement-shaped (holds `(`, `=`, `;`, `@`,
- *      or starts with a statement keyword) — `{this}`, `{with}`, `{today}` are not;
- *   4. nothing but whitespace / `;` follows the closing `}` on its line — except
- *      `try`, which MUST be followed by `catch` or `finally` (JS requires one).
- * The heads:
- *   - `class`     — `class Name {` / `class Name extends Ident(.Ident)* {`
- *                   (optionally `export` / `export default`; a NAME is required)
- *   - `async`     — `async function name(…) {` / `async fn name(…) {` /
- *                   `async fn name {`, optional `-> T` / `: T` annotation
- *                   (optionally `export` / `server`)
- *   - `try`       — `try {…} catch|finally`
- *   - `switch`    — `switch (…) {` whose body holds a `case …:` or `default:`
- *   - `for await` — `for await (<binding> of <expr>) {`
- * RESIDUAL (stays page text, as on base): a construct that fails a rule above
- * though it is code — `try { x }` with no catch, `class A { x }` (a lone field),
- * `switch (x) { }` (no case), a braceless `for await (…) stmt`, a class /
- * function whose body contains markup — and the braceless EXPRESSION statements
- * (the §40.8 bare-call limb, an open operator question): `throw expr`,
- * `await expr`, a dynamic `import(…)`, an `async (…) =>` arrow statement.
- *
- * MIRRORED in `compiler/native-parser/parse-markup.js` (`forbiddenConstructHead`)
- * so the native tree — which decides `E-CLASS-NOT-IN-SCRML` for BOTH pipelines
- * (§7.2.1) — sees the same logic block. Keep the two in sync; a drift-guard test
- * compares them (`default-logic-forbidden-construct-lift-s441.test.js`).
- *
- * @param {string} raw — the text run
- * @returns {string|null} the construct's keyword, or null
- */
-const _FCH_CLASS_RE =
-  /^\s*(?:export[ \t]+(?:default[ \t]+)?)?class[ \t]+[A-Za-z_$][\w$]*(?:[ \t]+extends[ \t]+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)?[ \t]*\{/;
-const _FCH_TRY_RE = /^\s*try[ \t]*\{/;
-const _FCH_SWITCH_RE = /^\s*switch[ \t]*(?=\()/;
-const _FCH_FOR_AWAIT_RE = /^\s*for[ \t]+await[ \t]*(?=\()/;
-const _FCH_FOR_AWAIT_HEAD_RE = /^\s*(?:(?:const|let|var)\s+)?[\w$\[\]{},\s]+?\s+of\s+\S/;
-const _FCH_ASYNC_RE =
-  /^\s*(?:export[ \t]+(?:default[ \t]+)?)?(?:server[ \t]+)?async[ \t]+(?:function|fn)\b[ \t]*\*?[ \t]*[A-Za-z_$][\w$]*[ \t]*/;
-const _FCH_TAG_RE = /<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?\/?>/;
-const _FCH_STMT_KW_RE = /^\s*(?:return|let|const|var|if|for|while|lift|fail|case|default)\b/;
-
-export function forbiddenConstructHead(raw) {
-  if (typeof raw !== "string") return null;
-  const lead = raw.match(/^\s*/)[0].length;
-  // Rules 1-4 (see above) for the block whose `{` is at `braceAt`.
-  const blockOk = (braceAt, kind) => {
-    if (raw[braceAt] !== "{" || raw.slice(lead, braceAt).includes("\n")) return false;
-    const close = _skipBalanced(raw, braceAt, "{", "}");
-    if (close === -1) return false;
-    const body = raw.slice(braceAt + 1, close - 1);
-    if (_FCH_TAG_RE.test(body)) return false;
-    if (!body.includes("\n") && body.trim() !== "" && !/[(=;@]/.test(body) && !_FCH_STMT_KW_RE.test(body)) return false;
-    if (kind === "switch" && !/\bcase\b[^:]*:|\bdefault[ \t]*:/.test(body)) return false;
-    if (kind === "try") return /^\s*(?:catch|finally)\b/.test(raw.slice(close));
-    return /^[ \t;]*(?:\n|$)/.test(raw.slice(close));
-  };
-  let m = raw.match(_FCH_CLASS_RE);
-  if (m && blockOk(m[0].length - 1, "class")) return "class";
-  m = raw.match(_FCH_TRY_RE);
-  if (m && blockOk(m[0].length - 1, "try")) return "try";
-  m = raw.match(_FCH_SWITCH_RE);
-  if (m) {
-    const after = _skipBalanced(raw, m[0].length, "(", ")");
-    const b = after === -1 ? null : raw.slice(after).match(/^[ \t]*\{/);
-    if (b && blockOk(after + b[0].length - 1, "switch")) return "switch";
-  }
-  m = raw.match(_FCH_FOR_AWAIT_RE);
-  if (m) {
-    const open = m[0].length;
-    const after = _skipBalanced(raw, open, "(", ")");
-    const b = after === -1 ? null : raw.slice(after).match(/^[ \t]*\{/);
-    if (b && _FCH_FOR_AWAIT_HEAD_RE.test(raw.slice(open + 1, after - 1)) &&
-        blockOk(after + b[0].length - 1, "for await")) return "for await";
-  }
-  m = raw.match(_FCH_ASYNC_RE);
-  if (m) {
-    let i = m[0].length;
-    if (raw[i] === "(") {
-      i = _skipBalanced(raw, i, "(", ")");
-      if (i === -1) return null;
-    }
-    // Optional return annotation (`-> T` / `: T`) up to the body brace, same line.
-    const b = raw.slice(i).match(/^[ \t]*(?:(?:->|:)[^{\n]*)?\{/);
-    if (b && blockOk(i + b[0].length - 1, "async")) return "async";
-  }
-  return null;
-}
-
-/**
- * From `i` (at an `open` char), return the index just past its matching `close`,
- * skipping quoted strings; -1 when unbalanced. Helper for `forbiddenConstructHead`.
- */
-function _skipBalanced(s, i, open, close) {
-  let depth = 0;
-  let quote = null;
-  for (; i < s.length; i++) {
-    const c = s[i];
-    if (quote !== null) {
-      if (c === "\\") { i++; continue; }
-      if (c === quote) quote = null;
-      continue;
-    }
-    if (c === "\"" || c === "'" || c === "`") { quote = c; continue; }
-    if (c === open) depth++;
-    else if (c === close) {
-      depth--;
-      if (depth === 0) return i + 1;
-    }
-  }
-  return -1;
-}
-
-/**
  * change-id bare-control-flow-in-markup-diagnostic-2026-06-17 (S203).
  *
  * A text run inside a MARKUP body whose leading non-whitespace token is a bare
@@ -1328,7 +1192,7 @@ function shiftBlockSpans(blocks, delta, lineDelta = 0) {
 // must be scanned for the bare-write-decl lint. (`engine`/`machine` are EXCLUDED
 // — they route to engine-decl, a different grammar with no bare-`@x=` decl site.)
 const _STATE_BLOCK_BARE_WRITE_NAMES = new Set(["db", "state", "schema"]);
-function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }, isDefaultLogicBody = false, isFileRoot = false) {
+function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }, isDefaultLogicBody = false) {
   const result = [];
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i];
@@ -1787,7 +1651,7 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
           // own lift rules (BARE_DECL_RE / TOPLEVEL_STATE_DECL_RE) fire.
           // Forward isDefaultLogicBody so Unit CC lift gating composes.
           const last = result.pop();
-          const lifted = liftBareDeclarations([last], errors, filePath, parentType, _p3aSynthCounter, isDefaultLogicBody, isFileRoot);
+          const lifted = liftBareDeclarations([last], errors, filePath, parentType, _p3aSynthCounter, isDefaultLogicBody);
           for (const b of lifted) result.push(b);
         }
         // Pair the trailer `(export )?(const|let) NAME = ` with the next
@@ -2046,40 +1910,6 @@ function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aS
         // S180 D3.1 — synthetic block PREPENDS a fictional `${` to raw while
         // keeping span at body[0]; the `case "logic"` handler keys on this flag
         // to NOT advance bodyOffset past the (non-existent) `${`.
-        _bareDeclLift: true,
-      });
-      continue;
-    }
-
-    // S441 — a §7.2.1 not-scrml construct (`class`, `async function`, `try`,
-    // `switch`, `for await`) leading a text run at a declaration site. Lift it
-    // by its grammar head so the logic parser rejects it with the same
-    // E-*-NOT-IN-SCRML code it gets inside `${ }`, instead of the run shipping
-    // as page text. Scope is EXACTLY the §40.8 default-logic body-top
-    // (`<program>` / `<page>` / `<channel>` direct children — isDefaultLogicBody)
-    // plus a real FILE's top level (isFileRoot) — the same scope the native
-    // mirror uses. `parentType === null` is NOT used for the file top: `buildAST`
-    // is re-entered on fragments (`<match>` arm bodies, error-boundary /
-    // component bodies) whose top level is also null, so a null-parent gate
-    // fired inside `<match>` arms on this pipeline only. `isFileRoot` is set
-    // only by api.js's per-file TAB call (`buildAST(bs, tok, { fileRoot: true })`)
-    // and is not propagated into children. NOT state-block bodies, `<match>`
-    // arms or engine state-children: those loci have their own open body-mode
-    // questions. See `forbiddenConstructHead`.
-    if (block.type === "text" && (isDefaultLogicBody || isFileRoot) && forbiddenConstructHead(block.raw) !== null) {
-      result.push({
-        type: "logic",
-        raw: "${" + block.raw + "}",
-        span: block.span,
-        depth: block.depth,
-        children: [],
-        name: null,
-        closerForm: null,
-        // (no component flag: a logic block is never a component, and readers
-        // test it `!== true`)
-        _synthetic: true,
-        _forbiddenConstructLift: true,  // diagnostic marker — S441 lift origin
-        // S180 D3.1 — synthetic block PREPENDS a fictional `${` (see above).
         _bareDeclLift: true,
       });
       continue;
@@ -20712,7 +20542,7 @@ function collectHoisted(nodes) {
  * @param {{ filePath: string, blocks: import('./block-splitter.js').Block[] }} bsOutput
  * @returns {{ filePath: string, ast: FileAST, errors: TABError[] }}
  */
-export function buildAST(bsOutput, tokenizerOverrides, options) {
+export function buildAST(bsOutput, tokenizerOverrides) {
   const { filePath, blocks } = bsOutput;
 
   // When self-hosted tokenizer overrides are provided, install them as the
@@ -20735,7 +20565,7 @@ export function buildAST(bsOutput, tokenizerOverrides, options) {
   // Lift bare top-level declarations (type, fn, function, server fn/function)
   // into synthetic logic blocks before building the AST. This allows users to
   // write them without an explicit ${ } wrapper.
-  const liftedBlocks = liftBareDeclarations(blocks, errors, filePath, null, { next: 0 }, false, !!(options && options.fileRoot));
+  const liftedBlocks = liftBareDeclarations(blocks, errors, filePath);
 
   // Build each top-level block into an ASTNode
   let nodes = liftedBlocks.map(block => buildBlock(block, filePath, null, counter, errors)).filter(Boolean);
