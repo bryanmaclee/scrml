@@ -25,7 +25,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname, join } from "path";
-import { writeFileSync, mkdirSync, readFileSync, existsSync } from "fs";
+import { writeFileSync, mkdirSync, readFileSync, existsSync, rmSync } from "fs";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { compileScrml } from "../../src/api.js";
 import { effectiveCsrfUnderAuth } from "../../src/compute-program-config.ts";
@@ -328,5 +328,20 @@ describe("client — a stale first-paint CSRF meta token recovers on the one ret
   test("the baseline (no auth=) client has no meta tag and emits no sync helper", () => {
     const v = compileVariant("retry-baseline", "");
     expect(v.clientJs).not.toContain("_scrml_csrf_sync_meta_from_cookie");
+  });
+});
+
+// S441 review round 3 — `scrml dev` never cleans its output dir, so a `.server.js`
+// can outlive its `.html`. Its compose route must not keep answering for a document
+// that is gone: dev uses a compose handler only for the .html resolution actually
+// lands on (here: none → 404), never by raw request path.
+describe("scrml dev — a compose route whose document is gone answers nothing", () => {
+  test("auth app compiled, its .html deleted: GET /app is a 404, not a 302 from the orphaned compose route", async () => {
+    const v = compileVariant("stale-compose", ` auth="required"`);
+    rmSync(join(v.outDir, "app.html"), { force: true });
+    const { loadServerRoutes, devDispatch } = await import("../../src/commands/dev.js");
+    await loadServerRoutes(v.outDir);
+    const res = await devDispatch(new Request("http://localhost/app"), null, v.outDir, {});
+    expect(res.status).toBe(404);
   });
 });

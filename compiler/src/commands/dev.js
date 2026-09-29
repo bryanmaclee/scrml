@@ -214,6 +214,17 @@ let registeredOnions = [];
 /** @type {Map<string, (req: Request) => (Response | null)>} */
 let registeredProtectedDocs = new Map();
 
+// §52.8 / §39.2.3 — request-time COMPOSE handlers (`_scrml_route___ssr`: the SSR seed
+// and the `<meta name="csrf-token">` fill), keyed like `registeredProtectedDocs` by
+// the SERVE_DIR-relative .html they compose (lowercased). The compose route serves a
+// DOCUMENT, so dev does NOT dispatch it by request path: it is used only when the
+// static loop has resolved a request to that exact .html on disk. Path dispatch made
+// it a second document decider — a `.server.js` that outlived its `.html` (dev never
+// cleans its output dir) kept a compose route at `/` and 302'd a request resolution
+// would have served from a DIFFERENT, public document (S441 review round 3).
+/** @type {Map<string, (req: Request) => Promise<Response>>} */
+let registeredComposeDocs = new Map();
+
 /**
  * Test/introspection accessor for the currently mounted §40.3 onion. Still an
  * ARRAY (of length 0 or 1) so a caller can ask "is one mounted?" without a
@@ -323,6 +334,7 @@ export async function loadServerRoutes(outputDir) {
   registeredWsHandlers = null;
   registeredOnions = [];
   registeredProtectedDocs = new Map();
+  registeredComposeDocs = new Map();
 
   // F-COMPILE-001 Option A: outputDir may be a tree when sources have nested
   // subdirectories. Walk recursively for *.server.js entries.
@@ -377,6 +389,14 @@ export async function loadServerRoutes(outputDir) {
       if (exportName === "_scrml_protected_document" && typeof value.guard === "function") {
         const htmlRel = relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html").toLowerCase();
         registeredProtectedDocs.set(htmlRel, value.guard);
+        continue;
+      }
+
+      // §52.8 / §39.2.3 — the document COMPOSE route. Registered against this
+      // module's .html, NOT as a path route (see registeredComposeDocs).
+      if (exportName === "_scrml_route___ssr" && typeof value.handler === "function") {
+        const htmlRel = relPath.replace(/\\/g, "/").replace(/\.server\.js$/, ".html").toLowerCase();
+        registeredComposeDocs.set(htmlRel, value.handler);
         continue;
       }
 
@@ -1141,6 +1161,22 @@ export async function devDispatch(req, server, serveDir, opts) {
     const resolvedDocGate = gateProtectedDoc(req, relative(serveDir, candidate));
     if (resolvedDocGate) return resolvedDocGate;
 
+    // §52.8 / §39.2.3 — this resolved document has a request-time compose handler
+    // (SSR seed / csrf-token meta fill). Run it HERE, on the file resolution chose,
+    // never by raw request path. Outside the tolerant try below, for the same reason
+    // as the gate: a compose handler that throws must be loud, not fall through to a
+    // different file. The handler runs its own §52.13 gate too (a redirect or any
+    // non-200 answer is returned as-is).
+    let composedHtml = null;
+    const composeDoc = candidate.endsWith(".html")
+      ? registeredComposeDocs.get(relative(serveDir, candidate).split(/[\\/]/).join("/").toLowerCase())
+      : undefined;
+    if (composeDoc) {
+      const composed = await composeDoc(req);
+      if (!composed || composed.status !== 200) return composed;
+      composedHtml = await composed.text();
+    }
+
     // Serving IO, and it must stay tolerant. `scrml dev` rewrites `dist/` on every
     // recompile while requests are in flight, so a candidate can be unlinked or
     // replaced between the `statSync` above and the read below. That race has to fall
@@ -1151,7 +1187,7 @@ export async function devDispatch(req, server, serveDir, opts) {
       const file = Bun.file(candidate);
       // Inject hot-reload script into HTML responses
       if (candidate.endsWith(".html")) {
-        const html = await file.text();
+        const html = composedHtml ?? await file.text();
         return new Response(injectHotReloadScript(html), {
           headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-cache" },
         });
