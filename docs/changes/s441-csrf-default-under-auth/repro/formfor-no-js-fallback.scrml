@@ -1,0 +1,23 @@
+// S441 reproducer (g-formfor-no-js-fallback-posts-to-a-404-route-and-drops-the-csrf-field).
+// Compile. html: <form ... action="/api/__ri_route_persistSignup_1" method="POST"> + <input type="hidden" name="_csrf" value="">.
+// server.js: the route is mounted at "/_scrml/__ri_route_persistSignup_1", parses req.json(), never reads `_csrf`.
+${
+  import { formFor } from 'scrml:data'
+  type SignupError:enum = { Rejected(reason: string) }
+  type Signup:struct = {
+    name:  string req length(>=2)
+  }
+  server function persistSignup(values: Signup) ! SignupError {
+    ?{`INSERT INTO notes (body) VALUES (${values.name})`}.run()
+    return "ok"
+  }
+}
+<program db="./c.db" auth="required">
+<schema>
+    notes { id: integer primary key
+            body: text }
+</>
+<errorBoundary>
+  <formFor for=Signup onsubmit=persistSignup/>
+</errorBoundary>
+</program>

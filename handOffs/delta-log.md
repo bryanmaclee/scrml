@@ -4082,3 +4082,7 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3587] find · JS-WAT gauntlet: 352 probes, 273 silent leaks, 1 warned → scrml-support/docs/deep-dives/js-wat-gauntlet-2026-09-28/ (+ truthiness/operator measurement)
 
 [3588] friction · four fix rounds each found a finding of the round's OWN making (security r1 block-shadow accept-all; re-land r2 effect loop; "~" r2 keyword-as-property; Date r1 NaN vs a same-day ruling) — pre-set stop conditions ended each; the dPA missed S440 items because the queue was merged but not PULLED to the disk it reads (per-clone) and had no table rows
+
+[3589] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md` · verdict: O25 (a) bind always written; (b) native validator subset follows the bind, conditional on compiler `novalidate` (R1); 9 impl#1 defects routed)**
+
+[3590] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/server-helper-return-leak-placement-dpa-057-2026-09-29.md` · verdict: D now — already SPEC §13.4, app mode non-conformant, no ruling needed; B egress-registry floor for bryan; A relay pull-up on top; C rejected; 4 HIGH defects routed)**

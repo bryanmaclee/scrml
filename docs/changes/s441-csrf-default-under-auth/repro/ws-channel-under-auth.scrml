@@ -1,0 +1,16 @@
+// S441 reproducer (g-ws-upgrade-no-origin-check-cross-site-websocket-hijacking).
+// Compile to <out>, then: bun ws-cross-origin-probe.ts <out>
+// Actual: {"anonCrossOrigin":"REJECTED","cookieCrossOrigin":"OPEN","victimReceived":[<attacker's onserver:message broadcast>, <attacker's __sync count=999>]}
+<program db="./c.db" auth="required">
+  <channel name="chat" auth="required" onserver:message=onMsg(msg)>
+    <count> = 0
+    function onMsg(msg) {
+      broadcast({ got: msg })
+    }
+    function tally(delta) {
+      broadcast({ total: delta })
+    }
+  </channel>
+  <p>${@count}</p>
+  <button onclick=tally(1)>Tally</button>
+</program>

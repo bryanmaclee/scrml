@@ -1,0 +1,12 @@
+// S441 reproducer (g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth). Only W-ATTR-002 fires;
+// server.js has no _scrml_auth_check — the page and every server fn are public.
+<program db="./c.db" auth="Required">
+<schema>
+    notes { id: integer primary key
+            body: text }
+</>
+function add(body) {
+    ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
+}
+<button onclick=add("x")>add</button>
+</>

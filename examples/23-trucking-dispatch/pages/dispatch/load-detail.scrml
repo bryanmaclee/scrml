@@ -446,8 +446,9 @@
                    is unconsumed, show "rate confirmation pending" pill. The
                    customer redeems the token on /customer/loads/:id by
                    clicking "Sign rate confirmation". The DB-side single-use
-                   guard (consumed_at IS NULL → ok; affected rows = 0 means
-                   already consumed) provides the durable lin enforcement,
+                   guard (UPDATE … WHERE consumed_at IS NULL RETURNING token;
+                   no returned row means already consumed or never issued)
+                   provides the durable lin enforcement,
                    and at the call site each fn declares its lin parameter
                    exactly once per §35.2.1. -->
               <section if=(@currentLoad.status == "Booked" && @acceptanceToken != "") class="bg-amber-50 border border-amber-200 rounded-lg p-4">
