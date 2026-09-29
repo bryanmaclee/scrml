@@ -4349,6 +4349,88 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
   return found;
 }
 
+/**
+ * §52.13 (S443, g-page-auth-required-protects-nothing) — find the file's
+ * `<page auth="required">` declaration, if any.
+ *
+ * A route is a FILE (buildPageRouteTree maps one file to one URL pattern), and a
+ * `<page>` is that route's per-route attribute container (§40.8). So a
+ * `<page auth="required">` anywhere in the file makes the file's route an
+ * `auth="required"` scope: its document, its compose route and every server
+ * function it declares SHALL be gated. This walk looks for `"required"`
+ * SPECIFICALLY — unlike getExplicitAuthDeclaration, it does not stop at the
+ * first `<page auth=>` of any value and does not let a `<program auth=>` in the
+ * same file answer first — so a stricter page declaration is never shadowed by
+ * a laxer one elsewhere in the file (fail closed).
+ */
+function findPageAuthRequired(fileAST: FileAST): {
+  loginRedirect: string | null;
+  csrf: string | null;
+  sessionSecure: string | null;
+} | null {
+  const nodes: any[] =
+    (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
+
+  const readStringAttr = (attrs: any[] | undefined, name: string): string | null => {
+    if (!Array.isArray(attrs)) return null;
+    const a = attrs.find((x: any) => x && x.name === name);
+    if (!a || !a.value || a.value.kind !== "string-literal") return null;
+    return a.value.value ?? null;
+  };
+
+  let found: { loginRedirect: string | null; csrf: string | null; sessionSecure: string | null } | null = null;
+  const walk = (ns: any[] | undefined): void => {
+    if (found || !Array.isArray(ns)) return;
+    for (const node of ns) {
+      if (found) return;
+      if (!node || node.kind !== "markup") continue;
+      if (node.tag === "page" && readStringAttr(node.attrs, "auth") === "required") {
+        found = {
+          loginRedirect: readStringAttr(node.attrs, "loginRedirect"),
+          csrf: readStringAttr(node.attrs, "csrf"),
+          sessionSecure: readStringAttr(node.attrs, "session-secure"),
+        };
+        return;
+      }
+      walk(node.children);
+    }
+  };
+  walk(nodes);
+  return found;
+}
+
+/**
+ * Build the auth-middleware entry for a `<page auth="required">` unit. Shared by
+ * Step 8a-page (every such page) and the Step 8b explicit-required limb.
+ * §20.5.1 (S438) — the session fields carry ONLY what this unit itself declares.
+ * A `<page>` carries no `sessionExpiry=`, and one without `session-secure=`
+ * declares no cookie mode, so both stay undefined and the shared resolver
+ * answers from the enclosing `<program>` (or the program stash, or the secure
+ * default). A 2+-`<program>` file keeps the pre-S438 stamp (see Step 8b).
+ */
+function pageAuthRequiredEntry(
+  filePath: string,
+  decl: { loginRedirect: string | null; csrf: string | null; sessionExpiry?: string | null; sessionSecure: string | null },
+  multiProgram: boolean,
+): AuthMiddleware {
+  const entry: AuthMiddleware = {
+    filePath,
+    auth: "required",
+    loginRedirect: decl.loginRedirect ?? "/login",
+    // §40.2 / §52.13 (S441) — `csrf="auto"` is the default under `auth=`.
+    csrf: effectiveCsrfUnderAuth(decl.csrf),
+  };
+  if (multiProgram) {
+    // Pre-S438 stamp, byte-identical (see multiProgramFile in Step 8b).
+    entry.sessionExpiry = decl.sessionExpiry ?? "1h";
+    entry.sessionSecure = (decl.sessionSecure ?? "true") !== "false";
+  } else {
+    if (decl.sessionExpiry != null) entry.sessionExpiry = decl.sessionExpiry;
+    if (decl.sessionSecure != null) entry.sessionSecure = decl.sessionSecure !== "false";
+  }
+  return entry;
+}
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -6262,6 +6344,30 @@ export function runRI(input: RIInput): RIOutput {
     });
   }
 
+  // 8a-page (S443, g-page-auth-required-protects-nothing): a `<page auth="required">`
+  // is an auth scope on its own — §52.13 names `<page>` among the elements whose
+  // `auth="required"` makes "every request to this scope" authenticated. Before
+  // S443 a page's auth= was consulted ONLY on the protect= auto-escalation path
+  // (8b), so a page with no protected columns got no `_scrml_auth_check`, no
+  // protected-document guard, no compose-route gate and only the baseline CSRF
+  // arm: anonymous GET → 200 with the page body; anonymous POST → the server fn
+  // ran. Registering the entry here gives the page exactly the gate
+  // `<program auth="required">` gets (emit-server consumes the one entry).
+  // A `<program auth="required">` in the same file already registered in 8a.
+  for (const fileAST of files) {
+    if (authMiddleware.has(fileAST.filePath)) continue;
+    const pageDecl = findPageAuthRequired(fileAST);
+    if (!pageDecl) continue;
+    authMiddleware.set(
+      fileAST.filePath,
+      pageAuthRequiredEntry(
+        fileAST.filePath,
+        pageDecl,
+        countUnitProgramNodes(getNodes(fileAST as any)) >= 2,
+      ),
+    );
+  }
+
   // 8b: Auto-escalate auth for files with protect= fields
   if (protectAnalysis && protectAnalysis.views) {
     const filesWithProtectedFields = new Set<string>();
@@ -6338,21 +6444,10 @@ export function runRI(input: RIInput): RIOutput {
         // `session-secure=` declares no cookie mode, so both stay undefined and
         // the shared resolver answers from the enclosing `<program>` (or the
         // program stash, or the secure default). See the AuthMiddleware fields.
-        const pageEntry: AuthMiddleware = {
-          filePath,
-          auth: "required",
-          loginRedirect: explicit.loginRedirect ?? "/login",
-          csrf: effectiveCsrfUnderAuth(explicit.csrf),
-        };
-        if (multiProgramFile.has(filePath)) {
-          // Pre-S438 stamp, byte-identical (see multiProgramFile above).
-          pageEntry.sessionExpiry = explicit.sessionExpiry ?? "1h";
-          pageEntry.sessionSecure = (explicit.sessionSecure ?? "true") !== "false";
-        } else {
-          if (explicit.sessionExpiry != null) pageEntry.sessionExpiry = explicit.sessionExpiry;
-          if (explicit.sessionSecure != null) pageEntry.sessionSecure = explicit.sessionSecure !== "false";
-        }
-        authMiddleware.set(filePath, pageEntry);
+        // S443: Step 8a-page now registers every `<page auth="required">`, so the
+        // .has() guard above normally skips this file; kept as the same builder
+        // for defense in depth.
+        authMiddleware.set(filePath, pageAuthRequiredEntry(filePath, explicit, multiProgramFile.has(filePath)));
         continue;
       }
 
