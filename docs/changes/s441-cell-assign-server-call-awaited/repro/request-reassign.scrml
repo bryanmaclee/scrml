@@ -1,0 +1,22 @@
+<program>
+
+${
+  server function loadValue() {
+    lift 42
+  }
+  function refresh() {
+    @data = loadValue()
+    @seen = @data
+  }
+  @seen = 0
+}
+
+<div>
+  <request id="req1">
+    ${ @data = loadValue() }
+  </>
+  <p id="out">${@data}</p>
+  <button id="refresh" onclick=refresh()>r</button>
+</div>
+
+</program>

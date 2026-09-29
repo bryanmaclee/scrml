@@ -1,0 +1,21 @@
+${
+    <a> : number = 0
+    <seen> : string = ""
+    server fn one(n: number) : number {
+        return n + 1
+    }
+    server fn two(n: number) : number {
+        return n * 10
+    }
+    function bump() {
+        @a = 50
+        return 1
+    }
+    function go() {
+        @a = one(1)
+        const r = two(bump())
+        @seen = "a=" + @a + " r=" + r
+    }
+}
+<button id="b" onclick=go()>b</>
+<p id="s">${@seen}</>

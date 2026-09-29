@@ -48,10 +48,10 @@ const SHAPES = [
     want: ["E-CALL-ARITY"],
     files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1, 2) }", "<p>x</p>")],
     twin: () => [LIB(), app("    function g(a: int, b: int) { }\n    function f() { g(1, 2) }", "<p>x</p>")] },
-  { name: "a call with a wrong argument type — STAYS SILENT",
-    // §7.5.1: "Positions 3-5 are NOT YET CHECKED. A program that assigns a non-assignable value at those
-    // positions SHALL compile." (position 3 = argument; "BLOCKED" on the S404 int-refinement landing).
-    want: [],
+  { name: "a call with a wrong argument type into an `int` parameter",
+    // RULED S442: "`int` enforcement reaches every §7.5.1 position (returns, arguments, all initializers)" —
+    // supersedes, for `int`-bearing parameters, §7.5.1's "Positions 3-5 are NOT YET CHECKED" (other types: still unchecked).
+    want: ["E-TYPE-031"],
     files: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(\"s\") }", "<p>x</p>")],
     twin: () => [LIB(), app("    function g(a: int) { }\n    function f() { g(1) }", "<p>x</p>")] },
   { name: "`<each in=@x>` over an int",

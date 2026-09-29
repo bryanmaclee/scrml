@@ -1,0 +1,14 @@
+{
+  "id": "lifecycle-boot-effect-reset-restores-init",
+  "description": "§6.8.2 + §51.0.H Form 3 — a cell first written by an engine opener `effect=` (`@tasks = loadTasks()`, no other declaration) is reset to that write's value by `reset(@tasks)`. The effect loads [1, 2]; #grow pushes 3; #rst resets; @tasks is [1, 2] again. Pins s441 F2: lowering the effect body as a FUNCTION body dropped the effect write's reset registration, so `reset(@tasks)` became a silent no-op and @tasks stayed [1, 2, 3].",
+  "language-version": "1.0",
+  "spec": "§6.8.2",
+  "rationale": "§6.8.1: \"If `default=` is absent, `reset(@cell)` SHALL re-evaluate the init expression at reset time and write the result to the cell.\" The implicitly-declared @tasks has no `default=`, so reset re-evaluates its init (the effect's `loadTasks()`), undoing the push.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#grow" }, { "wait": "settle" }, { "click": "#rst" }, { "wait": "settle" }],
+    "state": { "tasks": [1, 2], "phase": "Editing" },
+    "domAnchored": [{ "selector": "#count", "text": "Tasks: 2" }]
+  }
+}
