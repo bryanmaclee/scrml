@@ -1442,6 +1442,35 @@ ${
         }
     }
 
+    // s442: `<accent:swatch label="Accent" …/>` — a declaration whose own type
+    // names a DECLARATION is a named shared instance (§66.8.2; `:Decl` is a
+    // typed own value, #16). Not in the bootstrap: it is reported where it is
+    // written, instead of reading as a field-less declaration named `accent`.
+    fn namedInstanceDiags(ds: DeclStub[], declNames: string[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const s of ds) {
+            const d: ADecl | not = s.d
+            if (d is some) {
+                const n: string = ownTypeName(d)
+                if (n != "" && declNames.indexOf(n) >= 0) {
+                    st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
+                }
+            }
+        }
+        return st
+    }
+
+    fn ownTypeName(d: ADecl) -> string {
+        const t: AType | not = d.ty
+        if (t is not) return ""
+        const k: ATypeK = t.k
+        return match k {
+            .TName(name: n) :> n
+            .TSeq(elem: e) :> ""
+            .TMaybe(inner: i) :> ""
+        }
+    }
+
     // ---- Phase A driver -----------------------------------------------------------------
     type RGlobals:struct = { g: Globals, st: AS }
 
@@ -1465,6 +1494,7 @@ ${
             }
         }
         if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
+        st = namedInstanceDiags(rd.ds, declNames, st)
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, file: entry }
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
         st = rt.st
