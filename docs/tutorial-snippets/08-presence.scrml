@@ -1,0 +1,19 @@
+// 08-presence.scrml — `!` negates a boolean; `not` is the absence value.
+
+<program>
+
+  type User:struct = { name: string }
+
+  <user>: User? = not              // optional — starts absent
+  <loggedIn> = false
+
+  const <message> = @user is some ? "Hello, " + @user.name : "Sign in to continue"
+
+  <div>
+    <p>${@message}</p>
+
+    <button if=(!@loggedIn) onclick={ @user = { name: "Ada" }; @loggedIn = true }>Sign in</button>
+    <button else onclick={ @user = not; @loggedIn = false }>Sign out</button>
+  </div>
+
+</program>
