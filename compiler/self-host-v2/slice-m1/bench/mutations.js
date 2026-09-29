@@ -359,7 +359,7 @@ const MUTATIONS = [
     from: "        if (e.attrs.length > 0) {\n            return addDiag(st, env.file, e.span, \"E-DECL-STAR-REF-ATTR-WRITE\"",
     to: "        if (false) {\n            return addDiag(st, env.file, e.span, \"E-DECL-STAR-REF-ATTR-WRITE\"", tests: [T4("review-r1.test.js")] },
   { id: "s442 r1 G2: an own value AND attributes accepted (O19 decided silently)", file: `${SH}/analyze.scrml`,
-    from: "                } else if (hasOwnValue(d.own) && d.attrs.length > 0) {", to: "                } else if (false) {", tests: [T4("review-r1.test.js")] },
+    from: "        if (hasOwnValue(d.own) && d.attrs.length > 0) {", to: "        if (false) {", tests: [T4("review-r1.test.js")] },
   { id: "s442 r1 G3: `<*x/>` of a declaration with a default-less attribute accepted (O33 → a runtime throw)", file: `${SH}/analyze.scrml`,
     from: "            if (isAttributeRole(f.role) && !hasOwnValue(f.init)) {", to: "            if (false) {", tests: [T4("review-r1.test.js")] },
   { id: "s442: validator flags accepted silently (the O25 refusal dropped)", file: `${SH}/parse.scrml`,

@@ -225,3 +225,29 @@ Reproduction (reviewer tests copied read-only to scratchpad/repro/, paths retarg
 - Left as-is per PA: `[...@x, call()]` snapshot semantics (to bryan); the E-PARSE-SHORTHAND-GT §34 row is owed.
 - F7 FINAL: slice-m1 73/73 · lowered 73/73 · slice-m2 409/409 · slice-m3 29/29 · slice-m4 113 + 2 todo · lint 34/0 ·
   mutations 146/146 RED · bite 32 footprint + 12 front certified · five pre-existing programs byte-identical to base.
+
+## FIX ROUND r2 (re-review of 2bd817a9 — one blocker)
+Reproduced first (scratchpad/r2probe.js at 2bd817a9): item 1 — `<box a:int=1><c:int=0 s:int=7/></>` (void and bodied)
+compiled clean with `s` absent from Core; item 2 — pop / shift / filter under `[pop]` / `[shift]` / `[remove]` (no
+`free`) reported "granted"; item 3 — `[free, append, append]` accepted silently.
+- Item 1 FIXED (blocker) — `o19Diags` checks the declaration AND every child field at any depth: E-BOOTSTRAP-UNSUPPORTED
+  naming ⚑ O19. Tests: void child, bodied child, grandchild, twin (own value, no attributes — runs `1|0`).
+- Item 2 FIXED — a removal (pop / shift) or `filter` on a fixed-length sequence → E-WRITE-INVARIANT ("shrinks …"),
+  F7's mirror. Twin: `[free, pop]` stays granted.
+- Item 3 FIXED — a grant token named twice → **E-GRANT-UNKNOWN** ("granted twice"). Choice: no §66.20 / §34 code names
+  a repeated grant; E-GRANT-UNKNOWN is the grant-list code, and a repeat is not a value of any axis. (W-GRANT-REDUNDANT
+  is a warning about `replace` + edits, not a refusal.)
+- Item 4 IMPLEMENTED — RULED S442 (user-voice "…sequence spreads use one snapshot…"): every `@x` read inside
+  `[...@x, …]` / `[…, ...@x]` reads ONE snapshot taken before the statement (analyze mints `SeqSnap`; lower emits the
+  snapshot Let only when an element reads it, as the S440 struct spread does). F5/F6 shapes unchanged (review-r1
+  tests still green). ⚑ FLAG — the PA's restatement says the statement's RESULT is "old-@audit + mk2's return" (the
+  inner push lost). Implemented instead: the READS are snapshotted (the ruling's own parenthetical: "the inner push is
+  not observed by the statement's READS"), and the write stays the classified append onto the current value, so
+  mk2's own push survives — as a struct spread keeps a write to a field it does not override ("struct and tape
+  spreads work the same way"). The restated result would REMOVE an entry from an append-only log (a shrink its grant
+  forbids), so it cannot be lowered as the append the grant admits. If bryan meant the result, that needs a ruling on
+  what happens to the intervening entry (refuse at runtime, or a replace).
+  Test: review-r2 item 4 — `[...@audit, mk2(), { at: @audit.length }]` reads 2 (snapshot) though mk2 pushed.
+- No previously-passing pin changed. Five pre-existing programs byte-identical (dumpcore). 5 mutation rows (+1 re-sited:
+  the r1 G2 row's site moved into o19Diags).
+- N1 and N4 (r2 reviewer nits): left as recorded nits, per the PA.
