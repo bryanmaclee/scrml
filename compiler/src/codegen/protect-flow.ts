@@ -1,5 +1,5 @@
 /**
- * §14.8.9 — protected-column PROVENANCE FLOW over the emitted server module.
+ * §14.8.9 — protected-column PROVENANCE FLOW over the emitted server modules.
  *
  * WHY THIS EXISTS (S441, `g-protected-column-escapes-redaction-as-scalar`).
  *
@@ -13,48 +13,52 @@
  * the sink a plain string, and a primitive cannot carry a descriptor, so the
  * redactor has nothing to read: MEASURED, HTTP 200 body `"SECRET-HASH-123"`,
  * while `I-PROTECT-STRIP-001` claimed the column had been stripped. The same is
- * true of every shape that re-houses the extracted value somewhere the
- * descriptor does not reach — `{ h: u.passwordHash }`, `[u.passwordHash]`,
- * `"x" + u.passwordHash`, a template, `const { passwordHash } = u`, a helper
- * `pick(u)`, `rows.map(r => r.passwordHash)`, `JSON.stringify(u)`.
+ * true of every shape that re-houses or re-encodes the extracted value.
  *
  * No runtime mechanism can repair that at the sink: the descriptor lives on the
  * container, and by the time the sink runs the container is gone. The only
  * place the provenance of an extracted value is still known is the code that
- * extracted it. So this module reads that code.
+ * extracted it. So this module reads that code — ALL of it: every server module
+ * of the compile, with the imports between them resolved (S441 fix round F1: a
+ * helper in another file was the first thing the review used to walk around a
+ * single-module analysis).
  *
  * THE RULE (stated once; the comments below refer back to it):
  *
  *   A value whose provenance includes a `protect=` column, and which is NOT
- *   still carried inside a descriptor-bearing row, SHALL NOT reach a
- *   compiler-emitted client-egress sink. The compiler proves this over the
- *   EMITTED server module and rejects the build (`E-PROTECT-006`) — it does not
- *   strip at runtime, because a stripped scalar would silently change what the
- *   program returns, and it does not pass, because that is the leak.
+ *   still carried inside a descriptor-bearing row, SHALL NOT reach a client-
+ *   egress sink. The compiler proves this over the EMITTED server modules and
+ *   rejects the build (`E-PROTECT-006`) — it does not strip at runtime, because
+ *   a stripped scalar would silently change what the program returns, and it
+ *   does not pass, because that is the leak.
  *
- *   "Provenance includes a protected column" means the value IS the column's
- *   value, or CONTAINS it, reached through identity-preserving steps only:
- *   binding, member / index / destructuring extraction, re-housing in an object
- *   or array literal, spread, `push`/`set`/`Object.assign` into a container,
- *   string concatenation and template interpolation (the value is embedded
- *   verbatim), `? :` / `&&` / `||` / `??`, `await`, a call to a function this
- *   module defines (analysed interprocedurally — parameters and returns), an
- *   array-callback (`map`, `filter`, `find`, `reduce`, …), `join` /
- *   `toString`, the string methods that return a slice or transform of the
- *   receiver or embed an argument (`concat`, `replace`, …), the ECMAScript
- *   built-ins that copy, serialize or decode their argument (`String`,
- *   `JSON.stringify`, `JSON.parse`, `Object.values`, `structuredClone`, … — see
- *   `SERIALIZING_BUILTINS` / `STRINGIFY_BUILTINS` / `IDENTITY_BUILTINS`), a
- *   getter or `toJSON` in an object literal (the sink's `JSON.stringify`
- *   invokes it), `new Promise` resolution, and `throw` → `catch` / reject →
- *   `.catch`.
+ *   Provenance is PRESERVED BY DEFAULT. A value computed from a protected value
+ *   by any step the analysis does not positively know to be a DERIVER of
+ *   independent identity stays protected — including every call into code the
+ *   compile does not contain (a host / stdlib / npm import, a platform API).
+ *   S441 fix round F2 inverted this default: the first cut treated "a scalar
+ *   passed to a function the module does not define" as derived, and
+ *   `Buffer.from(h).toString("base64")`, `new URL("…?h=" + h).search`,
+ *   `new Error(h).message` and a charCode round-trip all SHIPPED the hash. A
+ *   reversible encoding is not a derived value; only an explicit allowlist is.
  *
- *   A value that is COMPUTED from the column — a comparison, arithmetic, a
- *   boolean predicate method (`includes`, `startsWith`, …), `.length`, or the
- *   result of passing the scalar to a function the module does not define
- *   (`verifyPassword(pw, u.passwordHash)`, `Bun.password.verify(...)`) — is a
- *   DERIVED flow, which §14.8.9 places outside the soundness claim. It is not
- *   rejected. This is what keeps the canonical login shape compiling.
+ *   THE DERIVER ALLOWLIST (the only exemptions — everything else fails closed):
+ *     - comparison / equality / relational / arithmetic operators, `!`, `typeof`;
+ *     - `.length`, and the predicate / position methods in `DERIVED_METHODS`
+ *       (`includes`, `startsWith`, `indexOf`, …) — NOT `charCodeAt` /
+ *       `codePointAt`, which are lossless;
+ *     - one-way / boolean functions in `DERIVER_CALLS`: `scrml:auth`
+ *       `verifyPassword` / `hashPassword` / `verifyTotp`, `scrml:crypto`
+ *       `hash` / `hmac` / `verifyHash`, `Bun.password.*`, `Bun.hash`,
+ *       `crypto.subtle.digest`, a hasher's `.digest()`, `Boolean`,
+ *       `Array.isArray`, `Number.isNaN` / `isNaN`, `console.*` (returns nothing).
+ *     (`Number(x)` is deliberately NOT allowlisted: on a numeric protected column
+ *     it is the identity.)
+ *
+ *   Calls to functions the compile DOES contain are analysed interprocedurally
+ *   and CALL-SITE SENSITIVELY (each distinct argument signature gets its own
+ *   instance of the callee — F6: a helper used both on the hash and on a name no
+ *   longer poisons the clean call).
  *
  *   `reveal("col")` is honoured exactly as at the sink: reading a column off a
  *   value that `reveal`ed it is a declassified read.
@@ -63,26 +67,25 @@
  * response, `<endpoint>` arm, SSR `/__serverLoad`, `/__mountHydrate`, channel
  * `broadcast()`, the `watches=` feed — wraps its payload in
  * `_scrml_protect_redact(...)` when protect is active, so the argument of that
- * call IS the sink. The §37 SSE stream additionally serializes `event` / `id`
- * off each yielded frame outside the redact, so the whole frame bound by the
- * compiler's `for await (const _scrml_val of …)` loop is a sink too.
+ * call IS a sink. The §37 SSE frame (`for await (const _scrml_val …)`) is a sink
+ * as a whole (`event` / `id` are serialized outside the redact). And the raw
+ * serializers are sinks whether or not a redact is in front of them — every
+ * argument of `new Response(body, init)` (F3: the `init` HEADERS — a `Location`
+ * or `Set-Cookie` built from the hash — are egress too), `Response.redirect`,
+ * `Response.json`, `….publish`, `….enqueue`, `….send`.
  *
- * WHAT THIS DOES NOT COVER (disclosed, not hidden):
- *   - derived flows, as above (§14.8.9's own bound);
- *   - extraction performed INSIDE code this module does not contain — an
- *     imported function that receives a whole row is assumed to return rows
- *     as rows (descriptor-preserving, like a module helper), not to extract;
+ * WHAT THIS DOES NOT COVER (disclosed; also in SPEC §14.8.9 / §34):
+ *   - derived flows through the allowlist above (§14.8.9's own bound);
+ *   - a DB round trip — writing the value into a non-protected column and
+ *     reading it back is a new row with a non-protected origin (F5);
  *   - flow-insensitivity: a binding's taint is the union of everything ever
  *     assigned to it, so a variable reassigned from a protected value to a
  *     clean one is still treated as protected (fails CLOSED, never open).
  *
- * WHY THE EMITTED MODULE AND NOT THE SCRML AST. The emitted module is where the
- * provenance SOURCES (`_scrml_protect_tag(<rows>, <cols>)`, placed by the
- * compiler at query lowering) and the SINKS (`_scrml_protect_redact(<payload>)`)
- * are both explicit, and it is exactly the code that runs. It parses by
- * construction (`validate-emit.ts` gates that), and acorn reads it exactly — no
- * text predicate (the `egress-field-scan.ts` / `findAuthoredResponseConstruction`
- * precedent).
+ * WHY THE EMITTED MODULES AND NOT THE SCRML AST. They are where the provenance
+ * SOURCES (`_scrml_protect_tag(<rows>, <cols>)`) and the SINKS are both explicit,
+ * and they are exactly the code that runs. They parse by construction
+ * (`validate-emit.ts` gates that), and acorn reads them exactly.
  */
 
 // @ts-ignore — acorn ships its own types but the compiler imports it untyped elsewhere.
@@ -93,8 +96,8 @@ import { CGError } from "./errors.ts";
 export const ALL_COLUMNS_LABEL = "*";
 
 interface RowPart {
-  /** `_scrml_protect_tag` call sites (by source offset) this row came from. */
-  tags: Set<number>;
+  /** `_scrml_protect_tag` call sites (module-qualified) this row came from. */
+  tags: Set<string>;
   /** Protected OUTPUT column names the descriptor names. */
   cols: Set<string>;
   /** The descriptor is the strip-all sentinel (unresolvable SQL). */
@@ -104,34 +107,33 @@ interface RowPart {
 }
 
 /**
- * The abstract value. `scalar` = the value itself is (or embeds verbatim) a
- * protected column; `deep` = the value is a container holding one outside any
- * descriptor. Both map label -> the first extraction site seen (for the
- * diagnostic). `row` = the value is, or contains, a descriptor-bearing row —
- * which the sink strips, so it is SAFE on its own. `fns` = function values.
+ * The abstract value. `scalar` = the value itself is (or embeds) a protected
+ * column; `deep` = the value is a container holding one outside any descriptor.
+ * Both map label -> the first extraction site seen (for the diagnostic). `row` =
+ * the value is, or contains, a descriptor-bearing row — which the redact sink
+ * strips, so it is SAFE there on its own. `fns` = function values (closures).
  */
 interface Taint {
   row: RowPart | null;
   scalar: Map<string, string>;
   deep: Map<string, string>;
-  fns: Set<any>;
+  fns: Set<Closure>;
 }
 
 function clean(): Taint {
   return { row: null, scalar: new Map(), deep: new Map(), fns: new Set() };
 }
 
+function copyRow(r: RowPart): RowPart {
+  return { tags: new Set(r.tags), cols: new Set(r.cols), all: r.all, revealed: new Set(r.revealed) };
+}
+
 function joinRow(a: RowPart | null, b: RowPart | null): RowPart | null {
-  if (!a) return b ? { tags: new Set(b.tags), cols: new Set(b.cols), all: b.all, revealed: new Set(b.revealed) } : null;
-  if (!b) return { tags: new Set(a.tags), cols: new Set(a.cols), all: a.all, revealed: new Set(a.revealed) };
+  if (!a) return b ? copyRow(b) : null;
+  if (!b) return copyRow(a);
   const revealed = new Set<string>();
   for (const c of a.revealed) if (b.revealed.has(c)) revealed.add(c);
-  return {
-    tags: new Set([...a.tags, ...b.tags]),
-    cols: new Set([...a.cols, ...b.cols]),
-    all: a.all || b.all,
-    revealed,
-  };
+  return { tags: new Set([...a.tags, ...b.tags]), cols: new Set([...a.cols, ...b.cols]), all: a.all || b.all, revealed };
 }
 
 function mergeMap(into: Map<string, string>, from: Map<string, string>): void {
@@ -160,13 +162,12 @@ function naked(t: Taint): Map<string, string> {
 
 /** The value, placed inside a fresh container (object / array literal slot). */
 function containerOf(t: Taint): Taint {
-  return { row: t.row ? joinRow(null, t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns) };
+  return { row: t.row ? copyRow(t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns) };
 }
 
 /** An element / field of the value, when WHICH one is not statically known. */
 function elemOf(t: Taint): Taint {
-  const scalar = naked(t);
-  return { row: t.row ? joinRow(null, t.row) : null, scalar, deep: new Map(t.deep), fns: new Set(t.fns) };
+  return { row: t.row ? copyRow(t.row) : null, scalar: naked(t), deep: new Map(t.deep), fns: new Set(t.fns) };
 }
 
 /** The protected labels a row still carries (not `reveal`ed). */
@@ -175,38 +176,73 @@ function unrevealed(row: RowPart): string[] {
   return [...row.cols].filter((c) => !row.revealed.has(c));
 }
 
+/** Everything protected the value carries or could expose, row columns included. */
+function everything(t: Taint, site: string): Map<string, string> {
+  const m = naked(t);
+  if (t.row) for (const c of unrevealed(t.row)) if (!m.has(c)) m.set(c, site);
+  return m;
+}
+
 function taintKey(t: Taint): string {
   const r = t.row
     ? `${[...t.row.tags].sort().join(",")}|${[...t.row.cols].sort().join(",")}|${t.row.all}|${[...t.row.revealed].sort().join(",")}`
     : "-";
-  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${t.fns.size}`;
+  const f = [...t.fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
+  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}`;
+}
+
+/** The protected part of a taint's key (no function values). */
+function protKey(t: Taint): string {
+  const r = t.row
+    ? `${[...t.row.tags].sort().join(",")}|${[...t.row.cols].sort().join(",")}|${t.row.all}|${[...t.row.revealed].sort().join(",")}`
+    : "-";
+  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}`;
+}
+
+const CLEAN_KEY = protKey(clean());
+
+/** Fail-closed result: everything any argument carried comes out naked. */
+function tainted(args: Taint[], site: string): Taint {
+  const r = clean();
+  for (const a of args) mergeMap(r.scalar, everything(a, site));
+  r.deep = new Map(r.scalar);
+  return r;
 }
 
 /**
- * ECMAScript built-ins whose result SERIALIZES / COPIES the argument's DATA
- * such that a Symbol-keyed descriptor does not survive — a row passed in comes
- * back out as naked protected data. `String(row)` is "[object Object]" and is
- * handled separately (`STRINGIFY_BUILTINS`), because it serializes a scalar
- * verbatim but a row not at all.
+ * ECMAScript built-ins whose result COPIES the argument's data such that the
+ * Symbol-keyed descriptor does not survive — a row passed in comes out naked.
  */
 const SERIALIZING_BUILTINS = new Set([
   "JSON.stringify", "JSON.parse", "Object.values", "Object.entries", "Object.fromEntries", "structuredClone",
+  "Object.getOwnPropertyDescriptor", "Object.getOwnPropertyDescriptors", "Reflect.get", "Reflect.ownKeys",
 ]);
-/**
- * Built-ins that embed (or decode) a SCALAR argument verbatim in a string
- * result. (`JSON.parse` is in `SERIALIZING_BUILTINS`: it rebuilds DATA, so
- * `JSON.parse(JSON.stringify(row)).passwordHash` must stay protected.)
- */
-const STRINGIFY_BUILTINS = new Set([
-  "String", "encodeURIComponent", "encodeURI", "escape", "btoa", "String.raw",
-  "decodeURIComponent", "decodeURI", "unescape", "atob",
-]);
-/** Built-ins that return their argument (or a container of it) unchanged. */
+/** Built-ins that return their argument (or a container of it) with the descriptor intact. */
 const IDENTITY_BUILTINS = new Set([
   "Object.assign", "Object.freeze", "Object.seal", "Array.from", "Array.of",
   "Promise.resolve", "Promise.all", "Promise.allSettled", "Promise.any", "Promise.race",
   "Map", "Set", "Array", "Object", "WeakMap",
 ]);
+/**
+ * THE DERIVER ALLOWLIST for calls — results of independent identity (one-way
+ * digests, booleans, nothing). Global dotted paths; `scrml:` stdlib exports are
+ * matched by `isStdlibDeriver`. Anything NOT here that receives a protected value
+ * returns a protected value (fail closed).
+ */
+const DERIVER_CALLS = new Set([
+  "Boolean", "isNaN", "isFinite", "Number.isNaN", "Number.isFinite", "Number.isInteger", "Array.isArray",
+  "Bun.password.hash", "Bun.password.verify", "Bun.password.hashSync", "Bun.password.verifySync", "Bun.hash",
+  "crypto.subtle.digest", "crypto.timingSafeEqual",
+  "console.log", "console.error", "console.warn", "console.info", "console.debug", "console.trace",
+]);
+const STDLIB_DERIVERS: Record<string, Set<string>> = {
+  auth: new Set(["verifyPassword", "hashPassword", "verifyTotp"]),
+  crypto: new Set(["hash", "hmac", "verifyHash"]),
+};
+function isStdlibDeriver(source: string, imported: string): boolean {
+  const m = /(?:^scrml:|(?:^|\/)_scrml\/)([a-z]+)(?:\.js)?$/.exec(source);
+  return !!m && !!STDLIB_DERIVERS[m[1]]?.has(imported);
+}
 
 /** Array callbacks: element-param methods (and what their result is). */
 const CALLBACK_METHODS = new Set([
@@ -214,51 +250,85 @@ const CALLBACK_METHODS = new Set([
   "findIndex", "findLastIndex", "sort", "toSorted", "reduce", "reduceRight", "then", "catch", "finally",
 ]);
 /** Methods that write their arguments INTO the receiver. */
-const MUTATING_METHODS = new Set(["push", "unshift", "splice", "set", "add", "fill"]);
+const MUTATING_METHODS = new Set(["push", "unshift", "splice", "set", "add", "fill", "append", "update", "write"]);
 /** Methods that return a single element of the receiver. */
 const ELEMENT_METHODS = new Set(["at", "pop", "shift", "get", "charAt"]);
-/** Methods that serialize the receiver's elements into a string. */
-const JOINING_METHODS = new Set(["join", "toString", "toLocaleString"]);
 /**
- * Methods whose ARGUMENTS end up verbatim in the result, whatever the receiver
- * is: `"".concat(x)`, `"X".replace("X", x)`, `s.padStart(n, x)`, `a.join(x)`.
- * (A method on a clean receiver is otherwise treated as derived from its
- * arguments — `Bun.password.verify(pw, hash)` — so these must be named.)
- */
-const EMBEDDING_METHODS = new Set(["concat", "replace", "replaceAll", "padStart", "padEnd", "join", "with", "toSpliced"]);
-/**
- * Methods whose result is a predicate / position / comparison over the
- * receiver — a DERIVED value of independent identity (§14.8.9 bound).
+ * Methods whose result is a predicate / position / comparison / digest over the
+ * receiver — a DERIVED value of independent identity (§14.8.9 bound). NOT
+ * `charCodeAt` / `codePointAt`: a character code is lossless.
  */
 const DERIVED_METHODS = new Set([
   "includes", "indexOf", "lastIndexOf", "startsWith", "endsWith", "localeCompare",
-  "charCodeAt", "codePointAt", "search", "test", "has", "hasOwnProperty",
-  "isPrototypeOf", "propertyIsEnumerable", "getTime", "delete", "forEach",
+  "search", "test", "has", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable",
+  "getTime", "delete", "forEach", "digest", "every", "some", "findIndex", "findLastIndex",
 ]);
+/**
+ * Methods that execute SQL. The result is a new row read from the database — a
+ * DB round trip, outside the egress guarantee (F5). Its arguments are bound
+ * parameters (server-side use).
+ */
+const SQL_METHODS = new Set(["unsafe"]);
 
 /** Compiler-runtime helpers the analysis models itself (never walked). */
 function isModelledHelperName(name: string): boolean {
   return name.startsWith("_scrml_protect_") || name.startsWith("_scrml_tenant_") || name === "_scrml_active_tenant";
 }
 
-interface Scope {
-  parent: Scope | null;
-  names: Set<string>;
-  id: number;
+interface Mod {
+  idx: number;
+  filePath: string;
+  src: string;
+  root: any;
+  scope: Scope;
+  /** local name -> where it comes from. */
+  imports: Map<string, { target: Mod | null; source: string; imported: string }>;
+  /** exported name -> local binding name. */
+  exports: Map<string, string>;
 }
 
-interface FnInfo {
+interface Scope {
+  id: number;
+  parent: Scope | null;
+  names: Set<string>;
+  mod: Mod;
+}
+
+/** Static facts about one function node. */
+interface FnStatic {
   node: any;
+  mod: Mod;
+  name: string;
+  names: Set<string>;
+  /** FunctionDeclarations hoisted into this function's scope. */
+  decls: any[];
+  isGen: boolean;
+  skip: boolean;
+}
+
+/** A function VALUE: a node + the scope instance it closes over (or a pseudo-function). */
+interface Closure {
+  cid: number;
+  node?: any;
+  env?: Scope;
+  resolver?: string;
+  rejecter?: true;
+  host?: { source: string; imported: string };
+}
+
+/** One analysed instance of a function: a closure called with one argument signature. */
+interface Instance {
+  closure: Closure;
+  stat: FnStatic;
   scope: Scope;
   ret: Taint;
   yields: Taint;
-  isGen: boolean;
-  name: string;
-  skip: boolean;
 }
 
 /** One leak: a protected value reaching a client-egress sink. */
 export interface ProtectFlowLeak {
+  /** Source file of the module whose egress ships it. */
+  filePath: string;
   /** Display name of the function whose egress ships it (demangled). */
   sinkFn: string;
   /** Protected label (output column name, or `*`). */
@@ -267,20 +337,25 @@ export interface ProtectFlowLeak {
   site: string;
   /** The function the extraction happened in (demangled), or null. */
   siteFn: string | null;
+  /** Source file the extraction happened in. */
+  siteFile: string | null;
 }
 
-/** One `_scrml_protect_tag` site: the SQL it wraps + whether a sink stripped it. */
+/** One `_scrml_protect_tag` site: the SQL it wraps + whether a redact sink stripped it. */
 export interface ProtectTagSite {
+  filePath: string;
   /** Static SQL skeleton — quasis with `${}` holes, whitespace-collapsed. */
   skeleton: string | null;
   cols: string[] | "*";
-  /** True iff a descriptor-bearing row from this site reached a sink with ≥1 unrevealed protected column. */
+  /** True iff a descriptor-bearing row from this site reached a REDACT sink with ≥1 unrevealed protected column. */
   stripped: boolean;
 }
 
 export interface ProtectFlowResult {
-  /** acorn could not parse the module — the flow is UNVERIFIED (caller fails closed). */
-  parseError: string | null;
+  /** filePath -> acorn parse error, for modules that did not parse. */
+  parseErrors: Map<string, string>;
+  /** The analysis budget ran out — nothing it says is a proof (fail closed). */
+  saturated: boolean;
   leaks: ProtectFlowLeak[];
   tagSites: ProtectTagSite[];
 }
@@ -321,56 +396,106 @@ export interface ProtectStripInfo {
   skeleton: string;
 }
 
+type SpanOf = (fnName: string) => { start: number; end: number; line?: number; col?: number } | null;
+
+// ---------------------------------------------------------------------------
+// The compile-wide registry. generateServerJs (per file) registers each
+// protect-active file's strip records + span lookup; api.js runs the flow ONCE
+// over every emitted server module of the compile, so an import between two
+// files is resolved rather than guessed.
+// ---------------------------------------------------------------------------
+const registry = new Map<string, { infos: ProtectStripInfo[]; spanOf: SpanOf }>();
+
+export function registerProtectModule(filePath: string, infos: ProtectStripInfo[], spanOf: SpanOf): void {
+  registry.set(filePath, { infos, spanOf });
+}
+
+/** Return and CLEAR the registry (one compile's worth). */
+export function takeProtectRegistry(): Map<string, { infos: ProtectStripInfo[]; spanOf: SpanOf }> {
+  const out = new Map(registry);
+  registry.clear();
+  return out;
+}
+
+export interface CompileModule {
+  filePath: string;
+  js: string;
+  /** Present for a protect-active file (it declares `protect=` columns). */
+  infos?: ProtectStripInfo[];
+  spanOf?: SpanOf;
+}
+
 /**
- * Run the provenance flow over a finished server module and turn it into the
- * §14.8.9 diagnostics:
+ * Run the provenance flow over a whole compile and return its diagnostics per
+ * source file:
  *
  *   - `E-PROTECT-006` (Error) for every protected value that reaches a client
  *     egress sink outside a descriptor-bearing row (THE RULE, file header);
- *   - `I-PROTECT-STRIP-001` (Info) ONLY for a query whose row the sink really
- *     stripped. It used to fire for every protected SELECT, so a query whose
- *     column left through `return u.passwordHash` was reported as "stripped"
- *     while it shipped. A query whose row never reaches a sink (a login that
- *     only verifies the hash) strips nothing and now reports nothing.
+ *   - `I-PROTECT-STRIP-001` (Info) ONLY for a query whose row a redact sink
+ *     really stripped. A query whose row never reaches one — a login that only
+ *     verifies the hash, a helper whose caller extracts the column — reports
+ *     nothing: the info never claims a strip that did not happen.
  *
- * An unparseable module is UNVERIFIED and fails CLOSED with `E-PROTECT-006`.
- * A rewriter record no emitted tag site can be matched to keeps the previous
- * (unconditional) report — the analysis cannot contradict what it cannot see.
+ * A protect-active module that does not parse is UNVERIFIED and fails CLOSED
+ * with `E-PROTECT-006`.
  *
- * @param spanOf  maps a demangled server-function name to its source span.
+ * @param resolveImport  maps (importer filePath, specifier) to the filePath of
+ *        another module of THIS compile, or null (a host / stdlib / npm import).
  */
-export function buildProtectFlowDiagnostics(
-  moduleJs: string,
-  infos: ProtectStripInfo[],
-  filePath: string,
-  spanOf: (fnName: string) => { start: number; end: number; line?: number; col?: number } | null,
-): CGError[] {
-  const out: CGError[] = [];
-  const fileSpan = { file: filePath, start: 0, end: 0 } as any;
-  const flow = analyzeProtectFlow(moduleJs);
-  if (flow.parseError !== null) {
-    out.push(new CGError(
+export function analyzeCompileProtectFlow(
+  modules: CompileModule[],
+  resolveImport: (fromFilePath: string, specifier: string) => string | null,
+): Map<string, CGError[]> {
+  const out = new Map<string, CGError[]>();
+  const push = (fp: string, e: CGError) => {
+    if (!out.has(fp)) out.set(fp, []);
+    out.get(fp)!.push(e);
+  };
+  const byPath = new Map(modules.map((m) => [m.filePath, m]));
+  const flow = runFlow(modules.map((m) => ({ filePath: m.filePath, js: m.js })), resolveImport);
+
+  if (flow.saturated) {
+    for (const m of modules) {
+      if (!m.infos) continue;
+      push(m.filePath, new CGError(
+        "E-PROTECT-006",
+        `E-PROTECT-006: the compiler could not finish proving that no \`protect=\` column leaves this compile's ` +
+        `server modules outside its row — the provenance analysis exhausted its budget. §14.8.9 fails closed on an ` +
+        `egress it cannot analyse. Please report this file: it is a compiler limitation, not a finding.`,
+        { file: m.filePath, start: 0, end: 0 } as any,
+        "error",
+      ));
+    }
+  }
+  for (const [fp, err] of flow.parseErrors) {
+    if (!byPath.get(fp)?.infos) continue; // not protect-active: validate-emit reports it
+    push(fp, new CGError(
       "E-PROTECT-006",
       `E-PROTECT-006: the compiler could not verify that no \`protect=\` column leaves this file's server module ` +
-      `outside its row: the emitted server module did not parse (${flow.parseError}). §14.8.9 fails closed on an ` +
+      `outside its row: the emitted server module did not parse (${err}). §14.8.9 fails closed on an ` +
       `egress it cannot analyse. This is a compiler defect — please report it with this file.`,
-      fileSpan,
+      { file: fp, start: 0, end: 0 } as any,
       "error",
     ));
-    return out;
   }
-  // ONE error per extraction (column + site), naming the most useful sink: the
-  // same `u.passwordHash` reaching both a route response and the SSR seed is one
-  // mistake, and it is fixed at the extraction, not at either sink.
+
+  // ONE error per extraction (column + site), naming the most useful sink.
   const isCompilerName = (n: string) => n.startsWith("_scrml_") || n === "<module>";
   const byExtraction = new Map<string, ProtectFlowLeak>();
   for (const leak of flow.leaks) {
-    const key = `${leak.column}\u0000${leak.site}`;
+    const key = `${leak.column}\u0000${leak.site}\u0000${leak.siteFile}`;
     const prev = byExtraction.get(key);
     if (!prev || (isCompilerName(prev.sinkFn) && !isCompilerName(leak.sinkFn))) byExtraction.set(key, leak);
   }
   for (const leak of byExtraction.values()) {
-    const span = spanOf(leak.sinkFn) ?? (leak.siteFn ? spanOf(leak.siteFn) : null);
+    const spanOf = byPath.get(leak.filePath)?.spanOf;
+    const siteSpanOf = leak.siteFile ? byPath.get(leak.siteFile)?.spanOf : undefined;
+    let span = spanOf ? spanOf(leak.sinkFn) : null;
+    let file = leak.filePath;
+    if (!span && leak.siteFn && siteSpanOf) {
+      span = siteSpanOf(leak.siteFn);
+      if (span) file = leak.siteFile!;
+    }
     const egress = isCompilerName(leak.sinkFn)
       ? `the compiler-emitted client egress \`${leak.sinkFn}\``
       : `the client egress of \`${leak.sinkFn}\``;
@@ -385,40 +510,76 @@ export function buildProtectFlowDiagnostics(
         `from the column (a comparison, \`verifyPassword(pw, row.${leak.column})\`); to send it deliberately, ` +
         `declassify it at the value — \`row.reveal("${leak.column}").${leak.column}\` (the name is the query's ` +
         `OUTPUT column name after aliasing)`;
-    out.push(new CGError(
+    push(file, new CGError(
       "E-PROTECT-006",
       `E-PROTECT-006: ${what} leaves the server outside its row — ${leak.site} reaches ${egress}. ` +
-      `The §14.8.9 egress floor strips a protected column using the origin descriptor ` +
-      `its ROW carries; a value taken out of the row — a field read, a destructure, a concatenation or template, ` +
-      `a new object or array holding it, \`JSON.stringify\` of the row — carries no descriptor, so the floor ` +
-      `cannot strip it and the compiler will not ship it. Resolution: ${resolution}.`,
-      span ? ({ file: filePath, ...span } as any) : fileSpan,
+      `The §14.8.9 egress floor strips a protected column using the origin descriptor its ROW carries; a value ` +
+      `taken out of the row — a field read, a destructure, a concatenation, template or encoding, a new object or ` +
+      `array holding it, \`JSON.stringify\` of the row, or anything passed through a function the compiler cannot ` +
+      `see into — carries no descriptor, so the floor cannot strip it and the compiler will not ship it. ` +
+      `Resolution: ${resolution}.`,
+      span ? ({ file, ...span } as any) : ({ file, start: 0, end: 0 } as any),
       "error",
     ));
   }
-  const strippedSkeletons = new Set<string>();
-  const knownSkeletons = new Set<string>();
-  for (const t of flow.tagSites) {
-    if (t.skeleton === null) continue;
-    knownSkeletons.add(t.skeleton);
-    if (t.stripped) strippedSkeletons.add(t.skeleton);
-  }
-  for (const info of infos) {
-    const matched = knownSkeletons.has(info.skeleton);
-    if (matched && !strippedSkeletons.has(info.skeleton)) continue;
-    const what = info.cols === "*"
-      ? "ALL columns (the query's column origins are not statically resolvable — fail-closed wholesale strip)"
-      : `protected column(s) ${info.cols.map((c) => `\`${c}\``).join(", ")}`;
-    out.push(new CGError(
-      "I-PROTECT-STRIP-001",
-      `I-PROTECT-STRIP-001: the egress floor strips ${what} from the client response of \`${info.sql}\` ` +
-      `(§14.8.9 — a \`protect=\` column never crosses the wire unredacted). To send a protected column ` +
-      `deliberately, declassify it at the value with \`reveal("col")\`; to silence this, project the column out of the SELECT.`,
-      fileSpan,
-      "info",
-    ));
+
+  // I-PROTECT-STRIP-001 — only for a query a redact sink ACTUALLY stripped.
+  for (const m of modules) {
+    if (!m.infos) continue;
+    const stripped = new Set<string>();
+    for (const t of flow.tagSites) if (t.filePath === m.filePath && t.stripped && t.skeleton !== null) stripped.add(t.skeleton);
+    for (const info of m.infos) {
+      if (!stripped.has(info.skeleton)) continue;
+      const what = info.cols === "*"
+        ? "ALL columns (the query's column origins are not statically resolvable — fail-closed wholesale strip)"
+        : `protected column(s) ${info.cols.map((c) => `\`${c}\``).join(", ")}`;
+      push(m.filePath, new CGError(
+        "I-PROTECT-STRIP-001",
+        `I-PROTECT-STRIP-001: the egress floor strips ${what} from the client response of \`${info.sql}\` ` +
+        `(§14.8.9 — a \`protect=\` column never crosses the wire unredacted). To send a protected column ` +
+        `deliberately, declassify it at the value with \`reveal("col")\`; to silence this, project the column out of the SELECT.`,
+        { file: m.filePath, start: 0, end: 0 } as any,
+        "info",
+      ));
+    }
   }
   return out;
+}
+
+/**
+ * Single-module convenience (unit tests): the diagnostics for one module with
+ * no cross-module imports.
+ */
+export function buildProtectFlowDiagnostics(
+  moduleJs: string,
+  infos: ProtectStripInfo[],
+  filePath: string,
+  spanOf: SpanOf,
+): CGError[] {
+  return analyzeCompileProtectFlow([{ filePath, js: moduleJs, infos, spanOf }], () => null).get(filePath) ?? [];
+}
+
+/** Single-module analysis (unit tests). */
+export function analyzeProtectFlow(moduleJs: string): ProtectFlowResult & { parseError: string | null } {
+  const r = runFlow([{ filePath: "<module>", js: moduleJs }], () => null);
+  return { ...r, parseError: r.parseErrors.get("<module>") ?? null };
+}
+
+function runFlow(
+  modules: Array<{ filePath: string; js: string }>,
+  resolveImport: (fromFilePath: string, specifier: string) => string | null,
+): ProtectFlowResult {
+  const parseErrors = new Map<string, string>();
+  const parsed: Array<{ filePath: string; js: string; root: any }> = [];
+  for (const m of modules) {
+    try {
+      parsed.push({ ...m, root: acorn.parse(m.js, PARSE_OPTIONS) });
+    } catch (e) {
+      parseErrors.set(m.filePath, (e as Error)?.message ?? String(e));
+    }
+  }
+  const r = new FlowAnalysis(parsed, resolveImport).run();
+  return { ...r, parseErrors };
 }
 
 function staticKey(node: any): string | null {
@@ -430,146 +591,170 @@ function staticKey(node: any): string | null {
   return null;
 }
 
-/**
- * Analyse an emitted server module. Returns the leaks (value with protected
- * provenance reaching a sink outside a descriptor) and, per tag site, whether
- * the sink actually stripped a column from it (drives `I-PROTECT-STRIP-001`).
- */
-export function analyzeProtectFlow(moduleJs: string): ProtectFlowResult {
-  let root: any;
-  try {
-    root = acorn.parse(moduleJs, PARSE_OPTIONS);
-  } catch (e) {
-    return { parseError: (e as Error)?.message ?? String(e), leaks: [], tagSites: [] };
-  }
-  return new FlowAnalysis(moduleJs, root).run();
+function isFnNode(n: any): boolean {
+  return !!n && (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression");
 }
 
+/** Per-closure instance cap: beyond it, calls share one widened instance (still sound — a union). */
+const MAX_INSTANCES_PER_CLOSURE = 24;
+/**
+ * Whole-compile budget. Pathological code (a recursive function that wraps a
+ * fresh closure into its own argument) can keep minting instances; past this
+ * budget the analysis stops and the result is UNVERIFIED — the caller fails
+ * CLOSED rather than report a partial proof as a clean one.
+ */
+const MAX_INSTANCES = 20000;
+const MAX_PASSES = 80;
+
 class FlowAnalysis {
-  private src: string;
-  private root: any;
+  private mods: Mod[] = [];
   private scopeSeq = 0;
-  private moduleScope: Scope;
-  private fnInfos = new Map<any, FnInfo>();
+  private cidSeq = 0;
+  private statics = new Map<any, FnStatic>();
   private fnParent = new Map<any, any>();
   private bindings = new Map<string, Taint>();
+  private closures = new Map<string, Closure>();
+  private instances = new Map<string, Instance>();
+  private instanceList: Instance[] = [];
+  private instanceCount = new Map<number, number>();
   private changed = false;
+  /** The budget ran out (instances or passes): the result is not a proof. */
+  saturated = false;
+  private curMod: Mod | null = null;
+  private inferredNames = new Map<any, string>();
+  private siteFnOf = new Map<string, { fn: string; file: string }>();
   /**
-   * Every client-egress point, of four kinds:
-   *   redact           — the argument of `_scrml_protect_redact(…)`: the sink
-   *                      every compiler-emitted egress routes its payload through;
-   *   frame            — the §37 SSE frame bound by `for await (const _scrml_val …)`
-   *                      (its `event` / `id` are serialized outside the redact);
-   *   serializer       — bytes leaving the server: `new Response(body)`,
-   *                      `….publish(topic, data)`, `….enqueue(chunk)`, `….send(msg)`;
+   * Every client-egress point:
+   *   redact           — the argument of `_scrml_protect_redact(…)`;
+   *   frame            — the §37 SSE frame (`for await (const _scrml_val …)`);
+   *   serializer       — every argument of `new Response(body, init)`,
+   *                      `Response.redirect(url, status)`, `….publish`,
+   *                      `….enqueue`, `….send` (the init HEADERS included);
    *   serializer-json  — `Response.json(value)`, which JSON-encodes a row itself.
-   * The serializer kinds are enumerated over the SERIALIZER, not the redactor, so
-   * an egress that never adopted the redact (the `/__mountHydrate` defect class)
-   * is still checked: what reaches it has not been through the floor.
    */
-  private sinks: Array<{ t: Taint; fnName: string; kind: "redact" | "frame" | "serializer" | "serializer-json" }> = [];
-  private tagMeta = new Map<number, { skeleton: string | null; cols: string[] | "*" }>();
+  private sinks: Array<{ t: Taint; fnName: string; kind: "redact" | "frame" | "serializer" | "serializer-json"; mod: Mod }> = [];
+  private tagMeta = new Map<string, { mod: Mod; skeleton: string | null; cols: string[] | "*" }>();
+  private resolved = new Map<string, Taint>();
+  private rejecter: Closure;
+  /** Everything ever thrown / rejected — what any `catch` may receive. */
+  private thrown: Taint = clean();
 
-  constructor(src: string, root: any) {
-    this.src = src;
-    this.root = root;
-    this.moduleScope = { parent: null, names: new Set(), id: this.scopeSeq++ };
+  constructor(parsed: Array<{ filePath: string; js: string; root: any }>, private resolveImport: (from: string, spec: string) => string | null) {
+    this.rejecter = { cid: this.cidSeq++, rejecter: true };
+    for (const p of parsed) {
+      const mod = { idx: this.mods.length, filePath: p.filePath, src: p.js, root: p.root, imports: new Map(), exports: new Map() } as unknown as Mod;
+      mod.scope = { id: this.scopeSeq++, parent: null, names: new Set(), mod };
+      this.mods.push(mod);
+    }
   }
 
-  run(): ProtectFlowResult {
-    this.declare(this.root, this.moduleScope, null);
-    this.collectInferredNames(this.root);
-    // Monotone fixpoint over a finite lattice (labels, tag ids and function
-    // nodes are all drawn from this module) — it terminates; the cap is a guard.
-    for (let pass = 0; pass < 64; pass++) {
+  private t0 = performance.now();
+  run(): { leaks: ProtectFlowLeak[]; tagSites: ProtectTagSite[]; saturated: boolean } {
+    const byPath = new Map(this.mods.map((m) => [m.filePath, m]));
+    for (const mod of this.mods) {
+      this.curMod = mod;
+      const decls: any[] = [];
+      this.declare(mod.root.body, mod.scope.names, decls, null, mod);
+      this.collectImportsExports(mod, byPath);
+      this.bindDecls(decls, mod.scope);
+      this.collectInferredNames(mod.root);
+    }
+    // Monotone fixpoint over a finite lattice — it terminates; the cap is a guard.
+    let converged = false;
+    for (let pass = 0; pass < MAX_PASSES && !this.saturated; pass++) {
       this.changed = false;
       this.sinks = [];
-      this.walkBody(this.root.body, this.moduleScope, null);
-      for (const info of this.fnInfos.values()) {
-        if (info.skip) continue;
-        const body = info.node.body;
-        if (body && body.type === "BlockStatement") this.walkBody(body.body, info.scope, info);
-        else if (body) this.addRet(info, this.evalExpr(body, info.scope, info));
+      for (const mod of this.mods) {
+        this.curMod = mod;
+        this.walkBody(mod.root.body, mod.scope, null);
       }
-      if (!this.changed) break;
+      for (let i = 0; i < this.instanceList.length && !this.saturated; i++) this.walkInstance(this.instanceList[i]);
+      if (!this.changed) { converged = true; break; }
+    }
+    if (!converged) this.saturated = true;
+    if (process.env.SCRML_PROTECT_FLOW_DEBUG) {
+      console.error(`[protect-flow] modules=${this.mods.length} instances=${this.instanceList.length} closures=${this.closures.size} converged=${converged} ms=${Math.round(performance.now() - this.t0)}`);
     }
     const leaks: ProtectFlowLeak[] = [];
     const seen = new Set<string>();
-    const stripped = new Set<number>();
+    const stripped = new Set<string>();
     for (const s of this.sinks) {
-      const shipped = naked(s.t);
-      // A serializer that JSON-encodes its argument WITHOUT the redact in front
-      // of it ships a row's protected columns as-is — the row is not safe there.
-      if (s.kind === "serializer-json" && s.t.row) {
-        for (const c of unrevealed(s.t.row)) if (!shipped.has(c)) shipped.set(c, "a protected row serialized without the §14.8.9 redact");
-      }
+      const shipped = s.kind === "serializer-json"
+        ? everything(s.t, "a protected row serialized by `Response.json` without the §14.8.9 redact")
+        : naked(s.t);
       for (const [col, site] of shipped) {
-        const key = `${s.fnName}\u0000${col}\u0000${site}`;
+        const key = `${s.mod.filePath}\u0000${s.fnName}\u0000${col}\u0000${site}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        leaks.push({ sinkFn: s.fnName, column: col, site, siteFn: this.siteFnOf.get(site) ?? null });
+        const sf = this.siteFnOf.get(site);
+        leaks.push({ filePath: s.mod.filePath, sinkFn: s.fnName, column: col, site, siteFn: sf?.fn ?? null, siteFile: sf?.file ?? s.mod.filePath });
       }
       if (s.kind === "redact" && s.t.row && unrevealed(s.t.row).length > 0) for (const id of s.t.row.tags) stripped.add(id);
     }
     const tagSites: ProtectTagSite[] = [];
-    for (const [id, meta] of this.tagMeta) tagSites.push({ skeleton: meta.skeleton, cols: meta.cols, stripped: stripped.has(id) });
-    return { parseError: null, leaks, tagSites };
+    for (const [id, meta] of this.tagMeta) {
+      tagSites.push({ filePath: meta.mod.filePath, skeleton: meta.skeleton, cols: meta.cols, stripped: stripped.has(id) });
+    }
+    return { leaks, tagSites, saturated: this.saturated };
   }
 
-  // ---------------------------------------------------------------- scopes
+  // ---------------------------------------------------------------- setup
 
-  private isFn(n: any): boolean {
-    return n && (n.type === "FunctionDeclaration" || n.type === "FunctionExpression" || n.type === "ArrowFunctionExpression");
-  }
-
-  /** Pre-pass: build the scope tree, register every function, hoist names. */
-  private declare(node: any, scope: Scope, curFn: any): void {
+  /**
+   * Hoist declared names of one function body (or module body) into `names`,
+   * collecting its FunctionDeclarations into `decls`, and record static facts
+   * for every nested function (recursively, each with its own names/decls).
+   */
+  private declare(node: any, names: Set<string>, decls: any[], curFn: any, mod: Mod): void {
     if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) {
-      for (const c of node) this.declare(c, scope, curFn);
+      for (const c of node) this.declare(c, names, decls, curFn, mod);
       return;
     }
-    if (this.isFn(node)) {
-      if (node.type === "FunctionDeclaration" && node.id) scope.names.add(node.id.name);
-      const fnScope: Scope = { parent: scope, names: new Set(), id: this.scopeSeq++ };
-      if (node.type === "FunctionExpression" && node.id) fnScope.names.add(node.id.name);
-      for (const p of node.params) this.patternNames(p, fnScope.names);
-      const name = node.id?.name ?? "";
-      const info: FnInfo = {
-        node, scope: fnScope, ret: clean(), yields: clean(), isGen: !!node.generator, name,
-        skip: node.type === "FunctionDeclaration" && !!name && isModelledHelperName(name),
-      };
-      this.fnInfos.set(node, info);
-      this.fnParent.set(node, curFn);
+    if (isFnNode(node)) {
       if (node.type === "FunctionDeclaration" && node.id) {
-        // A declared function's binding holds its function value.
-        this.bindings.set(`${scope.id}:${node.id.name}`, { ...clean(), fns: new Set([node]) });
+        names.add(node.id.name);
+        decls.push(node);
       }
-      if (node.type === "FunctionExpression" && node.id) {
-        this.bindings.set(`${fnScope.id}:${node.id.name}`, { ...clean(), fns: new Set([node]) });
-      }
-      this.declare(node.body, fnScope, node);
+      const fnNames = new Set<string>();
+      if (node.type === "FunctionExpression" && node.id) fnNames.add(node.id.name);
+      for (const p of node.params) this.patternNames(p, fnNames);
+      const fnDecls: any[] = [];
+      const name = node.id?.name ?? "";
+      this.statics.set(node, {
+        node, mod, name, names: fnNames, decls: fnDecls, isGen: !!node.generator,
+        skip: node.type === "FunctionDeclaration" && !!name && isModelledHelperName(name),
+      });
+      this.fnParent.set(node, curFn);
+      for (const p of node.params) this.declareInPattern(p, fnNames, fnDecls, node, mod);
+      this.declare(node.body, fnNames, fnDecls, node, mod);
       return;
     }
     switch (node.type) {
       case "VariableDeclaration":
-        for (const d of node.declarations) this.patternNames(d.id, scope.names);
+        for (const d of node.declarations) this.patternNames(d.id, names);
         break;
       case "ClassDeclaration":
-        if (node.id) scope.names.add(node.id.name);
+        if (node.id) names.add(node.id.name);
         break;
       case "ImportDeclaration":
-        for (const s of node.specifiers) if (s.local) scope.names.add(s.local.name);
+        for (const s of node.specifiers) if (s.local) names.add(s.local.name);
         return;
       case "CatchClause":
-        if (node.param) this.patternNames(node.param, scope.names);
+        if (node.param) this.patternNames(node.param, names);
         break;
     }
     for (const k in node) {
       if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
       const v = node[k];
-      if (v && typeof v === "object") this.declare(v, scope, curFn);
+      if (v && typeof v === "object") this.declare(v, names, decls, curFn, mod);
     }
+  }
+
+  /** Default-value expressions in parameters may contain functions. */
+  private declareInPattern(p: any, names: Set<string>, decls: any[], curFn: any, mod: Mod): void {
+    if (!p || typeof p !== "object") return;
+    if (p.type === "AssignmentPattern") this.declare(p.right, names, decls, curFn, mod);
   }
 
   private patternNames(p: any, into: Set<string>): void {
@@ -583,19 +768,163 @@ class FlowAnalysis {
     }
   }
 
+  private collectImportsExports(mod: Mod, byPath: Map<string, Mod>): void {
+    for (const st of mod.root.body) {
+      if (st.type === "ImportDeclaration") {
+        const source = String(st.source.value);
+        const targetPath = this.resolveImport(mod.filePath, source);
+        const target = targetPath ? byPath.get(targetPath) ?? null : null;
+        for (const s of st.specifiers) {
+          const imported = s.type === "ImportDefaultSpecifier" ? "default"
+            : s.type === "ImportNamespaceSpecifier" ? "*"
+            : (s.imported?.name ?? s.imported?.value ?? "");
+          mod.imports.set(s.local.name, { target, source, imported });
+        }
+      } else if (st.type === "ExportNamedDeclaration") {
+        if (st.declaration) {
+          const d = st.declaration;
+          if (d.id?.name) mod.exports.set(d.id.name, d.id.name);
+          if (d.type === "VariableDeclaration") {
+            const ns = new Set<string>();
+            for (const dd of d.declarations) this.patternNames(dd.id, ns);
+            for (const n of ns) mod.exports.set(n, n);
+          }
+        }
+        for (const s of st.specifiers ?? []) {
+          const local = s.local?.name ?? s.local?.value;
+          const exported = s.exported?.name ?? s.exported?.value;
+          if (local && exported && !st.source) mod.exports.set(exported, local);
+        }
+      } else if (st.type === "ExportDefaultDeclaration" && st.declaration?.id?.name) {
+        mod.exports.set("default", st.declaration.id.name);
+      }
+    }
+  }
+
+  /** Bind hoisted FunctionDeclarations in a scope instance to their closures. */
+  private bindDecls(decls: any[], scope: Scope): void {
+    for (const d of decls) {
+      const c = this.closureFor(d, scope);
+      const key = `${scope.id}:${d.id.name}`;
+      const prev = this.bindings.get(key) ?? clean();
+      if (!prev.fns.has(c)) this.bindings.set(key, join(prev, { ...clean(), fns: new Set([c]) }));
+    }
+  }
+
+  /**
+   * The closure for a function node evaluated in `env`. Creating one also
+   * creates its DEFAULT instance (every parameter clean) so that a function
+   * nobody in the compile calls — a route handler, a callback handed to a
+   * platform API — is still walked for the sinks inside it.
+   */
+  private closureFor(node: any, env: Scope): Closure {
+    const key = `${this.statics.get(node)?.mod.idx ?? -1}:${node.start}@${env.id}`;
+    let c = this.closures.get(key);
+    if (!c) {
+      c = { cid: this.cidSeq++, node, env };
+      this.closures.set(key, c);
+      this.instanceFor(c, [], undefined);
+    }
+    return c;
+  }
+
+  private instanceFor(c: Closure, args: Taint[], everyParam: Taint | undefined): Instance | null {
+    const stat = this.statics.get(c.node);
+    if (!stat || stat.skip) return null;
+    if (this.instanceList.length >= MAX_INSTANCES) { this.saturated = true; return null; }
+    // The context key is the PROTECTED signature of the arguments only — not the
+    // function values they carry. Calls that differ only in which callbacks they
+    // pass share an instance (the callbacks union into the parameter — still
+    // sound); calls that differ in what PROTECTED data they pass do not. Keying on
+    // the callbacks too minted a fresh instance per closure environment and
+    // exploded (measured: 4016 instances for 245 closures in one module).
+    const keys = args.map(protKey);
+    while (keys.length > 0 && keys[keys.length - 1] === CLEAN_KEY) keys.pop(); // trailing clean args == absent
+    let argKey = everyParam ? (protKey(everyParam) === CLEAN_KEY ? "" : `*${protKey(everyParam)}`) : keys.join(";");
+    const count = this.instanceCount.get(c.cid) ?? 0;
+    if (!this.instances.has(`${c.cid}|${argKey}`) && count >= MAX_INSTANCES_PER_CLOSURE) argKey = "~wide";
+    const key = `${c.cid}|${argKey}`;
+    let inst = this.instances.get(key);
+    if (!inst) {
+      const scope: Scope = { id: this.scopeSeq++, parent: c.env!, names: stat.names, mod: stat.mod };
+      inst = { closure: c, stat, scope, ret: clean(), yields: clean() };
+      this.instances.set(key, inst);
+      this.instanceList.push(inst);
+      this.instanceCount.set(c.cid, count + 1);
+      this.changed = true;
+      if (stat.node.type === "FunctionExpression" && stat.node.id) {
+        this.bindings.set(`${scope.id}:${stat.node.id.name}`, { ...clean(), fns: new Set([c]) });
+      }
+      this.bindDecls(stat.decls, scope);
+    }
+    // Bind (merge) this call's arguments into the instance's parameters.
+    const saved = this.curMod;
+    this.curMod = stat.mod;
+    stat.node.params.forEach((p: any, i: number) => {
+      if (everyParam) this.bindPattern(p.type === "RestElement" ? p.argument : p, everyParam, inst!.scope, inst!);
+      else if (p.type === "RestElement") this.bindPattern(p.argument, containerOf(join(...args.slice(i))), inst!.scope, inst!);
+      else this.bindPattern(p, args[i] ?? clean(), inst!.scope, inst!);
+    });
+    this.curMod = saved;
+    return inst;
+  }
+
+  private walkInstance(inst: Instance): void {
+    this.curMod = inst.stat.mod;
+    const body = inst.stat.node.body;
+    if (body && body.type === "BlockStatement") this.walkBody(body.body, inst.scope, inst);
+    else if (body) this.addRet(inst, this.evalExpr(body, inst.scope, inst));
+  }
+
+  // ---------------------------------------------------------------- bindings
+
   private resolve(name: string, scope: Scope): Scope | null {
     for (let s: Scope | null = scope; s; s = s.parent) if (s.names.has(name)) return s;
     return null;
   }
 
-  private getBinding(name: string, scope: Scope): Taint {
+  private getBinding(name: string, scope: Scope, depth = 0): Taint {
     const s = this.resolve(name, scope);
     if (!s) return clean();
+    if (s.parent === null) {
+      const imp = s.mod.imports.get(name);
+      if (imp) return this.importValue(imp, depth);
+    }
     return this.bindings.get(`${s.id}:${name}`) ?? clean();
   }
 
+  /** The value of an imported binding: the exporting module's binding, or a host function. */
+  private importValue(imp: { target: Mod | null; source: string; imported: string }, depth: number): Taint {
+    if (imp.target && imp.imported !== "*" && depth < 16) {
+      const local = imp.target.exports.get(imp.imported);
+      if (local) return this.getBinding(local, imp.target.scope, depth + 1);
+    }
+    if (imp.target && imp.imported === "*") {
+      // A namespace import of a compile module: any of its exports.
+      let t = clean();
+      for (const local of imp.target.exports.values()) t = join(t, this.getBinding(local, imp.target.scope, depth + 1));
+      return containerOf(t);
+    }
+    // Code outside the compile (stdlib / npm / platform): an opaque host function.
+    const key = `host:${imp.source}:${imp.imported}`;
+    let c = this.closures.get(key);
+    if (!c) {
+      c = { cid: this.cidSeq++, host: { source: imp.source, imported: imp.imported } };
+      this.closures.set(key, c);
+    }
+    return { ...clean(), fns: new Set([c]) };
+  }
+
   private mergeBinding(name: string, scope: Scope, t: Taint): void {
-    const s = this.resolve(name, scope) ?? this.moduleScope;
+    let s = this.resolve(name, scope) ?? scope.mod.scope;
+    // An assignment to an imported binding writes the exporting module's binding.
+    if (s.parent === null) {
+      const imp = s.mod.imports.get(name);
+      if (imp?.target) {
+        const local = imp.target.exports.get(imp.imported);
+        if (local) { name = local; s = imp.target.scope; }
+      }
+    }
     const key = `${s.id}:${name}`;
     const prev = this.bindings.get(key) ?? clean();
     const next = join(prev, t);
@@ -607,54 +936,47 @@ class FlowAnalysis {
     }
   }
 
-  private addRet(info: FnInfo, t: Taint): void {
-    const next = join(info.ret, t);
-    if (taintKey(next) !== taintKey(info.ret)) { info.ret = next; this.changed = true; }
+  private addRet(inst: Instance, t: Taint): void {
+    const next = join(inst.ret, t);
+    if (taintKey(next) !== taintKey(inst.ret)) { inst.ret = next; this.changed = true; }
   }
 
-  private addYield(info: FnInfo | null, t: Taint): void {
-    if (!info) return;
-    const next = join(info.yields, t);
-    if (taintKey(next) !== taintKey(info.yields)) { info.yields = next; this.changed = true; }
+  private addYield(inst: Instance | null, t: Taint): void {
+    if (!inst) return;
+    const next = join(inst.yields, t);
+    if (taintKey(next) !== taintKey(inst.yields)) { inst.yields = next; this.changed = true; }
+  }
+
+  private addThrown(t: Taint): void {
+    const next = join(this.thrown, t);
+    if (taintKey(next) !== taintKey(this.thrown)) { this.thrown = next; this.changed = true; }
   }
 
   // ------------------------------------------------------------ naming
 
-  /** Demangled display name of the function enclosing `fn` (for diagnostics). */
-  private displayName(fn: any): string {
+  /** Demangled display name of the function enclosing `fnNode` (for diagnostics). */
+  private displayName(fnNode: any): string {
     let fallback = "";
-    for (let f = fn; f; f = this.fnParent.get(f)) {
-      const info = this.fnInfos.get(f);
-      let name = info?.name ?? "";
-      if (!name) {
-        // `const broadcast = (…) => …` / `{ handler: async function (…) {…} }`
-        name = this.inferredName(f);
-      }
+    for (let f = fnNode; f; f = this.fnParent.get(f)) {
+      let name = this.statics.get(f)?.name ?? "";
+      if (!name) name = this.inferredNames.get(f) ?? "";
       if (!name) continue;
       const h = /^_scrml_handler_(.+?)(?:_\d+)?$/.exec(name);
       if (h) return h[1];
       if (name.startsWith("_scrml_")) { if (!fallback) fallback = name; continue; }
       return name;
     }
-    // Only compiler-internal names on the chain (an SSR / mount-hydrate /
-    // serverLoad handler): name the compiler egress itself.
     return fallback || "<module>";
   }
 
-  /** `const broadcast = (…) => …` — the binding name of an anonymous function value. */
-  private inferredNames = new Map<any, string>();
-  private inferredName(fn: any): string {
-    return this.inferredNames.get(fn) ?? "";
-  }
   private collectInferredNames(node: any): void {
     if (!node || typeof node !== "object") return;
     if (Array.isArray(node)) { for (const c of node) this.collectInferredNames(c); return; }
-    if (node.type === "VariableDeclarator" && node.id?.type === "Identifier" && this.isFn(node.init)) {
+    if (node.type === "VariableDeclarator" && node.id?.type === "Identifier" && isFnNode(node.init)) {
       this.inferredNames.set(node.init, node.id.name);
     }
-    // `export const _scrml_route_x = { handler: async function (…) {…} }`
     if (node.type === "VariableDeclarator" && node.id?.type === "Identifier" && node.init?.type === "ObjectExpression") {
-      for (const pr of node.init.properties) if (pr.type === "Property" && this.isFn(pr.value)) this.inferredNames.set(pr.value, node.id.name);
+      for (const pr of node.init.properties) if (pr.type === "Property" && isFnNode(pr.value)) this.inferredNames.set(pr.value, node.id.name);
     }
     for (const k in node) {
       if (k === "type" || k === "start" || k === "end" || k === "loc") continue;
@@ -663,23 +985,27 @@ class FlowAnalysis {
     }
   }
 
-  private site(node: any, fn: FnInfo | null): string {
-    let text = this.src.slice(node.start, node.end).replace(/\s+/g, " ");
+  private site(node: any, inst: Instance | null): string {
+    const mod = this.curMod!;
+    let text = mod.src.slice(node.start, node.end).replace(/\s+/g, " ");
     if (text.length > 70) text = text.slice(0, 67) + "...";
-    const where = this.displayName(fn?.node ?? null);
+    const where = this.displayName(inst?.stat.node ?? null);
     const s = `\`${text}\` in \`${where}\``;
-    this.siteFnOf.set(s, where);
+    if (!this.siteFnOf.has(s)) this.siteFnOf.set(s, { fn: where, file: mod.filePath });
     return s;
   }
-  private siteFnOf = new Map<string, string>();
+
+  private sink(t: Taint, inst: Instance | null, kind: "redact" | "frame" | "serializer" | "serializer-json"): void {
+    this.sinks.push({ t, fnName: this.displayName(inst?.stat.node ?? null), kind, mod: this.curMod! });
+  }
 
   // -------------------------------------------------------- statements
 
-  private walkBody(stmts: any[], scope: Scope, fn: FnInfo | null): void {
+  private walkBody(stmts: any[], scope: Scope, fn: Instance | null): void {
     for (const s of stmts) this.walkStmt(s, scope, fn);
   }
 
-  private walkStmt(node: any, scope: Scope, fn: FnInfo | null): void {
+  private walkStmt(node: any, scope: Scope, fn: Instance | null): void {
     if (!node) return;
     switch (node.type) {
       case "VariableDeclaration":
@@ -689,13 +1015,15 @@ class FlowAnalysis {
         }
         return;
       case "FunctionDeclaration":
-      case "ClassDeclaration":
       case "EmptyStatement":
       case "DebuggerStatement":
       case "BreakStatement":
       case "ContinueStatement":
       case "ImportDeclaration":
-        if (node.type === "ClassDeclaration") this.evalGeneric(node, scope, fn);
+      case "ExportAllDeclaration":
+        return;
+      case "ClassDeclaration":
+        this.evalGeneric(node, scope, fn);
         return;
       case "ReturnStatement":
         if (node.argument) {
@@ -739,7 +1067,7 @@ class FlowAnalysis {
           // §37 SSE: the compiler's own frame loop serializes `event` / `id` off
           // each yielded frame OUTSIDE the redact — the whole frame is a sink.
           if (node.type === "ForOfStatement" && node.await && id.type === "Identifier" && id.name === "_scrml_val") {
-            this.sinks.push({ t: el, fnName: this.displayName(fn?.node ?? null), kind: "frame" });
+            this.sink(el, fn, "frame");
           }
         } else {
           this.bindPattern(node.left, el, scope, fn);
@@ -750,7 +1078,7 @@ class FlowAnalysis {
       case "TryStatement":
         this.walkStmt(node.block, scope, fn);
         if (node.handler) {
-          // A `catch` may receive anything the module ever throws or rejects.
+          // A `catch` may receive anything the compile ever throws or rejects.
           if (node.handler.param) this.bindPattern(node.handler.param, this.thrown, scope, fn);
           this.walkStmt(node.handler.body, scope, fn);
         }
@@ -778,15 +1106,13 @@ class FlowAnalysis {
           else this.evalExpr(node.declaration, scope, fn);
         }
         return;
-      case "ExportAllDeclaration":
-        return;
       default:
         this.evalGeneric(node, scope, fn);
     }
   }
 
   /** Visit every expression under `node` for side effects; the node's own value is clean. */
-  private evalGeneric(node: any, scope: Scope, fn: FnInfo | null): Taint {
+  private evalGeneric(node: any, scope: Scope, fn: Instance | null): Taint {
     for (const k in node) {
       if (k === "type" || k === "start" || k === "end" || k === "loc" || k === "range") continue;
       const v = node[k];
@@ -794,7 +1120,7 @@ class FlowAnalysis {
       const items = Array.isArray(v) ? v : [v];
       for (const it of items) {
         if (!it || typeof it.type !== "string") continue;
-        if (this.isFn(it)) continue;
+        if (isFnNode(it)) { this.closureFor(it, scope); continue; } // class methods etc. — walked via their default instance
         if (/Statement$|Declaration$/.test(it.type)) this.walkStmt(it, scope, fn);
         else if (it.type === "ClassBody" || it.type === "MethodDefinition" || it.type === "PropertyDefinition") this.evalGeneric(it, scope, fn);
         else this.evalExpr(it, scope, fn);
@@ -805,7 +1131,7 @@ class FlowAnalysis {
 
   // -------------------------------------------------------- patterns
 
-  private bindPattern(p: any, t: Taint, scope: Scope, fn: FnInfo | null): void {
+  private bindPattern(p: any, t: Taint, scope: Scope, fn: Instance | null): void {
     if (!p) return;
     switch (p.type) {
       case "Identifier":
@@ -865,17 +1191,19 @@ class FlowAnalysis {
    * A field / index read off a value. This is where extraction happens: a
    * protected column read off a descriptor-bearing row becomes a NAKED scalar.
    */
-  private memberRead(o: Taint, key: string | null, dynamic: boolean, node: any, fn: FnInfo | null): Taint {
+  private memberRead(o: Taint, key: string | null, dynamic: boolean, node: any, fn: Instance | null): Taint {
     const r = clean();
+    // `.length` is a count — derived, whatever it is read off.
+    if (!dynamic && key === "length") return r;
     const numeric = key !== null && /^\d+$/.test(key);
     if (o.row) {
       if (dynamic) {
         // `rows[i]` (an element — still a row) OR `u[k]` (any column): both.
-        r.row = joinRow(null, o.row);
+        r.row = copyRow(o.row);
         for (const c of unrevealed(o.row)) r.scalar.set(c, this.site(node, fn));
       } else if (numeric) {
-        r.row = joinRow(null, o.row);
-      } else if (key !== null && key !== "length") {
+        r.row = copyRow(o.row);
+      } else if (key !== null) {
         // A named protected column keeps its name; any other column read off a
         // strip-all row (unresolvable SQL) is protected-by-default, labelled `*`.
         if (!o.row.revealed.has(key)) {
@@ -888,13 +1216,13 @@ class FlowAnalysis {
       mergeMap(r.scalar, o.deep);
       mergeMap(r.deep, o.deep);
     }
-    // A property of a primitive (`.length`) is derived; a CHARACTER of it is not.
+    // A property of a primitive is derived; a CHARACTER of it is not.
     if (o.scalar.size > 0 && (dynamic || numeric)) mergeMap(r.scalar, o.scalar);
     for (const f of o.fns) r.fns.add(f);
     return r;
   }
 
-  private evalExpr(node: any, scope: Scope, fn: FnInfo | null): Taint {
+  private evalExpr(node: any, scope: Scope, fn: Instance | null): Taint {
     if (!node) return clean();
     switch (node.type) {
       case "Identifier":
@@ -914,15 +1242,12 @@ class FlowAnalysis {
       case "TaggedTemplateExpression": {
         const tagT = this.evalExpr(node.tag, scope, fn);
         const args = node.quasi.expressions.map((e: any) => this.evalExpr(e, scope, fn));
-        if (tagT.fns.size > 0) return this.applyFns(tagT.fns, args);
+        if (this.hasCallable(tagT)) return this.applyFns(tagT.fns, args, undefined, node, fn);
         const path = this.globalPath(node.tag, scope);
-        if (path === "String.raw") {
-          const r = clean();
-          for (const a of args) mergeMap(r.scalar, naked(a));
-          return r;
-        }
+        if (path === "String.raw") return tainted(args, this.site(node, fn));
         // `_scrml_sql`…`` / `tx`…`` — a query. Its interpolations are bound
-        // parameters (server-side use), and its result is untagged data.
+        // parameters (server-side use), and its result is a row read from the
+        // database: a DB round trip is outside the egress guarantee (F5).
         return clean();
       }
       case "ArrayExpression": {
@@ -949,14 +1274,14 @@ class FlowAnalysis {
           // sink — what it returns is what ships.
           const keyName = pr.key?.type === "Identifier" ? pr.key.name : staticKey(pr.key);
           if (v.fns.size > 0 && (pr.kind === "get" || keyName === "toJSON")) {
-            r = join(r, containerOf(this.applyFns(v.fns, [])));
+            r = join(r, containerOf(this.applyFns(v.fns, [], undefined, node, fn)));
           }
         }
         return r;
       }
       case "FunctionExpression":
       case "ArrowFunctionExpression":
-        return { ...clean(), fns: new Set([node]) };
+        return { ...clean(), fns: new Set([this.closureFor(node, scope)]) };
       case "ClassExpression":
         return this.evalGeneric(node, scope, fn);
       case "UnaryExpression":
@@ -1033,52 +1358,72 @@ class FlowAnalysis {
     }
   }
 
-  /** `JSON.stringify` / `String` — the dotted path of an UNRESOLVED (global) callee. */
+  /**
+   * The dotted path of a callee rooted at an UNRESOLVED (global) identifier —
+   * `JSON.stringify`, `Bun.password.verify`, `String.prototype.concat.call` —
+   * or null when the root is a local / imported binding or the chain is computed.
+   */
   private globalPath(callee: any, scope: Scope): string | null {
-    if (callee.type === "Identifier") return this.resolve(callee.name, scope) ? null : callee.name;
-    if (callee.type === "MemberExpression" && !callee.computed && callee.object.type === "Identifier" && callee.property.type === "Identifier") {
-      if (this.resolve(callee.object.name, scope)) return null;
-      return `${callee.object.name}.${callee.property.name}`;
+    const parts: string[] = [];
+    let e = callee;
+    while (e && e.type === "MemberExpression") {
+      if (e.computed) {
+        const k = staticKey(e.property);
+        if (k === null) return null;
+        parts.unshift(k);
+      } else {
+        parts.unshift(e.property.name);
+      }
+      e = e.object;
     }
-    return null;
+    if (!e || e.type !== "Identifier" || this.resolve(e.name, scope)) return null;
+    parts.unshift(e.name);
+    return parts.join(".");
   }
 
-  // `new Promise` executors: the resolver pseudo-function per promise site, the
-  // value it was called with, and the shared rejecter (feeds `thrown`).
-  private resolvers = new Map<number, any>();
-  private resolved = new Map<number, Taint>();
-  private rejecter: any = { __rejecter: true };
-  /** Everything ever thrown / rejected — what any `catch` may receive. */
-  private thrown: Taint = clean();
-
-  private addThrown(t: Taint): void {
-    const next = join(this.thrown, t);
-    if (taintKey(next) !== taintKey(this.thrown)) { this.thrown = next; this.changed = true; }
+  private hasCallable(t: Taint): boolean {
+    return t.fns.size > 0;
   }
 
-  private applyFns(fns: Set<any>, args: Taint[], everyParam?: Taint): Taint {
+  /** Call every function value in `fns`; the result is the union of their returns. */
+  private applyFns(fns: Set<Closure>, args: Taint[], everyParam: Taint | undefined, node: any, fn: Instance | null): Taint {
     let r = clean();
-    for (const f of fns) {
-      if (f && f.__resolver !== undefined) {
-        const prev = this.resolved.get(f.__resolver) ?? clean();
+    for (const c of fns) {
+      if (c.resolver !== undefined) {
+        const prev = this.resolved.get(c.resolver) ?? clean();
         const next = join(prev, everyParam ?? args[0] ?? clean());
-        if (taintKey(next) !== taintKey(prev)) { this.resolved.set(f.__resolver, next); this.changed = true; }
+        if (taintKey(next) !== taintKey(prev)) { this.resolved.set(c.resolver, next); this.changed = true; }
         continue;
       }
-      if (f && f.__rejecter) { this.addThrown(everyParam ?? args[0] ?? clean()); continue; }
-      const info = this.fnInfos.get(f);
-      if (!info || info.skip) continue;
-      f.params.forEach((p: any, i: number) => {
-        if (everyParam) this.bindPattern(p.type === "RestElement" ? p.argument : p, everyParam, info.scope, info);
-        else if (p.type === "RestElement") this.bindPattern(p.argument, containerOf(join(...args.slice(i))), info.scope, info);
-        else this.bindPattern(p, args[i] ?? clean(), info.scope, info);
-      });
-      r = join(r, info.isGen ? containerOf(join(info.yields, info.ret)) : info.ret);
+      if (c.rejecter) { this.addThrown(everyParam ?? args[0] ?? clean()); continue; }
+      if (c.host) { r = join(r, this.hostCall(c.host, everyParam ? [everyParam] : args, node, fn)); continue; }
+      const inst = this.instanceFor(c, args, everyParam);
+      if (!inst) continue;
+      r = join(r, inst.stat.isGen ? containerOf(join(inst.yields, inst.ret)) : inst.ret);
     }
     return r;
   }
 
-  private evalCall(node: any, scope: Scope, fn: FnInfo | null): Taint {
+  /**
+   * A call into code the compile does not contain (a stdlib / npm import).
+   * FAIL CLOSED: everything protected the arguments carry comes out protected,
+   * unless the callee is an allowlisted DERIVER (a one-way digest / boolean).
+   */
+  private hostCall(host: { source: string; imported: string }, args: Taint[], node: any, fn: Instance | null): Taint {
+    if (isStdlibDeriver(host.source, host.imported)) return clean();
+    if (args.every((a) => everything(a, "").size === 0)) return clean();
+    return tainted(args, `${this.site(node, fn)} — \`${host.imported}\` from \`${host.source}\`, code the compiler cannot see into`);
+  }
+
+  /** A call to a global the analysis has no model for: same fail-closed rule. */
+  private unknownCall(path: string | null, args: Taint[], node: any, fn: Instance | null): Taint {
+    if (path !== null && DERIVER_CALLS.has(path)) return clean();
+    if (args.every((a) => everything(a, "").size === 0)) return clean();
+    const what = path ?? "an unmodelled callee";
+    return tainted(args, `${this.site(node, fn)} — \`${what}\`, which the compiler does not know to be a one-way deriver`);
+  }
+
+  private evalCall(node: any, scope: Scope, fn: Instance | null): Taint {
     const callee = node.callee;
     const args: Taint[] = node.arguments.map((a: any) =>
       a.type === "SpreadElement" ? elemOf(this.evalExpr(a.argument, scope, fn)) : this.evalExpr(a, scope, fn));
@@ -1093,24 +1438,25 @@ class FlowAnalysis {
         else if (colsArg?.type === "ArrayExpression") {
           cols = colsArg.elements.filter((e: any) => e?.type === "Literal" && typeof e.value === "string").map((e: any) => e.value);
         }
-        if (!this.tagMeta.has(node.start)) this.tagMeta.set(node.start, { skeleton: this.tagSkeleton(node.arguments[0]), cols });
+        const id = `${this.curMod!.idx}:${node.start}`;
+        if (!this.tagMeta.has(id)) this.tagMeta.set(id, { mod: this.curMod!, skeleton: this.tagSkeleton(node.arguments[0]), cols });
         return {
           ...clean(),
-          row: { tags: new Set([node.start]), cols: new Set(cols === "*" ? [] : cols), all: cols === "*", revealed: new Set() },
+          row: { tags: new Set([id]), cols: new Set(cols === "*" ? [] : cols), all: cols === "*", revealed: new Set() },
         };
       }
       if (name === "_scrml_protect_reveal") {
         const v = args[0] ?? clean();
         const col = staticKey(node.arguments[1]);
         if (v.row && col !== null) {
-          const row = joinRow(null, v.row)!;
+          const row = copyRow(v.row);
           row.revealed.add(col);
           return { ...v, row };
         }
         return v;
       }
       if (name === "_scrml_protect_redact") {
-        this.sinks.push({ t: args[0] ?? clean(), fnName: this.displayName(fn?.node ?? null), kind: "redact" });
+        this.sink(args[0] ?? clean(), fn, "redact");
         return clean();
       }
       if (isModelledHelperName(name)) {
@@ -1125,10 +1471,15 @@ class FlowAnalysis {
       const m = callee.type === "ChainExpression" ? callee.expression : callee;
       const path = this.globalPath(m, scope);
       if (path === "Response.json") {
-        this.sinks.push({ t: args[0] ?? clean(), fnName: this.displayName(fn?.node ?? null), kind: "serializer-json" });
+        this.sink(args[0] ?? clean(), fn, "serializer-json");
+        for (const a of args.slice(1)) this.sink(a, fn, "serializer");
         return clean();
       }
-      if (path === "Array.from" && args[1] && args[1].fns.size > 0) {
+      if (path === "Response.redirect") {
+        for (const a of args) this.sink(a, fn, "serializer");
+        return clean();
+      }
+      if (path === "Array.from" && args[1] && this.hasCallable(args[1])) {
         // `Array.from(rows, r => r.passwordHash)` — the mapper is a `.map`.
         return this.callbackMethod("map", args[0] ?? clean(), [args[1]], node, fn);
       }
@@ -1136,9 +1487,17 @@ class FlowAnalysis {
         this.addThrown(args[0] ?? clean());
         return clean();
       }
+      if (path === "Object.defineProperty" || path === "Reflect.defineProperty") {
+        // The descriptor's `value` / getter become a field of the target.
+        const desc = args[2] ?? clean();
+        const got = this.hasCallable(desc) ? this.applyFns(desc.fns, [], undefined, node, fn) : clean();
+        this.mutateRoot(node.arguments[0], containerOf(join(desc, got)), scope);
+        return join(args[0] ?? clean(), containerOf(join(desc, got)));
+      }
       if (path !== null) {
-        const b = this.builtin(path, args);
+        const b = this.builtin(path, args, node, fn);
         if (b) return b;
+        if (DERIVER_CALLS.has(path)) return clean();
       }
       const recv = this.evalExpr(m.object, scope, fn);
       let method: string | null = null;
@@ -1147,32 +1506,28 @@ class FlowAnalysis {
 
       // Bytes leaving the server: a channel publish, an SSE chunk, a WS send.
       const sinkArg = method === "publish" ? 1 : (method === "enqueue" || method === "send") ? 0 : -1;
-      if (sinkArg >= 0) {
-        this.sinks.push({ t: args[sinkArg] ?? clean(), fnName: this.displayName(fn?.node ?? null), kind: "serializer" });
-      }
+      if (sinkArg >= 0) this.sink(args[sinkArg] ?? clean(), fn, "serializer");
 
-      if ((method === "call" || method === "apply") && recv.fns.size > 0) {
-        if (method === "call") return this.applyFns(recv.fns, args.slice(1));
+      if ((method === "call" || method === "apply") && this.hasCallable(recv)) {
+        if (method === "call") return this.applyFns(recv.fns, args.slice(1), undefined, node, fn);
         // `f.apply(this, list)`: every parameter may receive any list element.
-        return this.applyFns(recv.fns, [], elemOf(args[1] ?? clean()));
+        return this.applyFns(recv.fns, [], elemOf(args[1] ?? clean()), node, fn);
       }
-      if (method === "bind" && recv.fns.size > 0) return { ...clean(), fns: new Set(recv.fns) };
+      if (method === "bind" && this.hasCallable(recv)) return { ...clean(), fns: new Set(recv.fns) };
 
       // `row.reveal("col")` left UNLOWERED — the scrml declassification written
-      // inside a `_{}` foreign block, where the compiler does not rewrite it to
-      // `_scrml_protect_reveal`. It is the author's explicit declassification of
-      // that column (the same reading E-PROTECT-004's suppression gives it); at
-      // runtime a plain row has no `.reveal`, so the call throws before anything
-      // ships. Honour it as a reveal rather than report a leak that cannot occur.
+      // inside a `_{}` foreign block. Honour it as a reveal (at runtime a plain
+      // row has no `.reveal`, so the call throws before anything ships).
       if (method === "reveal" && recv.row) {
         const col = staticKey(node.arguments[0]);
         if (col !== null) {
-          const row = joinRow(null, recv.row)!;
+          const row = copyRow(recv.row);
           row.revealed.add(col);
           return { ...recv, row };
         }
       }
 
+      if (method !== null && SQL_METHODS.has(method)) return clean();
       if (method !== null && CALLBACK_METHODS.has(method)) return this.callbackMethod(method, recv, args, node, fn);
 
       if (method !== null && MUTATING_METHODS.has(method)) {
@@ -1180,77 +1535,75 @@ class FlowAnalysis {
         this.mutateRoot(m.object, containerOf(written), scope);
         return method === "push" || method === "unshift" ? clean() : join(recv, containerOf(written));
       }
-      // A method stored in an object literal the module built (`api.f(x)`).
+      // A method stored in an object the compile built (`api.f(x)`), or a
+      // function value reached through a host namespace.
       const viaField = this.memberRead(recv, method, method === null, node, fn);
       let r = clean();
-      if (viaField.fns.size > 0) r = join(r, this.applyFns(viaField.fns, args));
+      if (this.hasCallable(viaField)) r = join(r, this.applyFns(viaField.fns, args, undefined, node, fn));
 
       if (method !== null && DERIVED_METHODS.has(method)) return r;
       if (method !== null && ELEMENT_METHODS.has(method)) return join(r, elemOf(recv));
-      if (method !== null && (JOINING_METHODS.has(method) || EMBEDDING_METHODS.has(method))) {
-        const s: Taint = JOINING_METHODS.has(method)
-          ? clean()
-          : { row: recv.row ? joinRow(null, recv.row) : null, scalar: new Map(recv.scalar), deep: new Map(recv.deep), fns: new Set() };
+      if (method === "join" || method === "toString" || method === "toLocaleString") {
+        // Serializes the receiver's elements (and a `join` separator).
+        const s = clean();
         mergeMap(s.scalar, naked(recv));
-        if (EMBEDDING_METHODS.has(method)) for (const a of args) mergeMap(s.scalar, naked(a));
+        for (const a of args) mergeMap(s.scalar, naked(a));
         return join(r, s);
       }
-      // Any other method: the result may be the receiver, a slice or transform
-      // of it (`slice`, `concat`, `trim`, `toUpperCase`, `replace`, `split`, …),
-      // or one of the arguments woven in. Fail CLOSED: keep all of it.
-      const out: Taint = { row: recv.row ? joinRow(null, recv.row) : null, scalar: new Map(recv.scalar), deep: new Map(recv.deep), fns: new Set() };
-      if (recv.scalar.size > 0 || recv.deep.size > 0) for (const a of args) mergeMap(out.scalar, naked(a));
+      // Any other method — a slice, transform, encoding, or something the
+      // analysis has no model for. FAIL CLOSED: the result carries the receiver
+      // AND every argument (`String.prototype.concat.call("", h)`,
+      // `Buffer.from(h).toString("base64")`, `h.charCodeAt(0)`).
+      if (this.hasCallable(viaField) && recv.row === null && recv.scalar.size === 0 && recv.deep.size === 0) return r;
+      const out: Taint = { row: recv.row ? copyRow(recv.row) : null, scalar: new Map(recv.scalar), deep: new Map(recv.deep), fns: new Set() };
+      for (const a of args) mergeMap(out.scalar, everything(a, this.site(node, fn)));
+      if (out.scalar.size > 0) mergeMap(out.deep, out.scalar);
       return join(r, out);
     }
 
     // --- plain calls -------------------------------------------------------------
     const ct = this.evalExpr(callee, scope, fn);
-    if (ct.fns.size > 0) return this.applyFns(ct.fns, args);
+    if (this.hasCallable(ct)) return this.applyFns(ct.fns, args, undefined, node, fn);
     const path = this.globalPath(callee, scope);
-    if (path === "Promise" && node.type === "NewExpression" && args[0] && args[0].fns.size > 0) {
+    if (path === "Promise" && node.type === "NewExpression" && args[0] && this.hasCallable(args[0])) {
       // `new Promise((resolve, reject) => resolve(u.passwordHash))` — the promise
-      // settles to whatever the executor passes to `resolve`. The executor's
-      // first parameter is bound to a resolver that records its argument here.
-      const key = node.start;
-      let resolver = this.resolvers.get(key);
-      if (!resolver) { resolver = { __resolver: key, params: [] }; this.resolvers.set(key, resolver); }
-      this.applyFns(args[0].fns, [{ ...clean(), fns: new Set([resolver]) }, { ...clean(), fns: new Set([this.rejecter]) }]);
+      // settles to whatever the executor passes to `resolve`.
+      const key = `${this.curMod!.idx}:${node.start}`;
+      const ckey = `resolver:${key}`;
+      let resolver = this.closures.get(ckey);
+      if (!resolver) { resolver = { cid: this.cidSeq++, resolver: key }; this.closures.set(ckey, resolver); }
+      this.applyFns(args[0].fns, [{ ...clean(), fns: new Set([resolver]) }, { ...clean(), fns: new Set([this.rejecter]) }], undefined, node, fn);
       return this.resolved.get(key) ?? clean();
     }
     if (path === "Response" && node.type === "NewExpression") {
-      // A response body the server sends. (An AUTHOR-built one is also
-      // E-PROTECT-005 and refused at runtime; a compiler-built one must only
-      // ever carry redacted bytes — this is what checks that.)
-      this.sinks.push({ t: args[0] ?? clean(), fnName: this.displayName(fn?.node ?? null), kind: "serializer" });
+      // A response the server sends: the BODY and the INIT (status + headers —
+      // a `Location` / `Set-Cookie` built from the hash is egress too, F3). An
+      // AUTHOR-built one with a body is also E-PROTECT-005 and refused at
+      // runtime; a null-body one is not, so its headers must be checked here.
+      for (const a of args) this.sink(a, fn, "serializer");
       return clean();
     }
     if (path !== null) {
-      const b = this.builtin(path, args);
+      const b = this.builtin(path, args, node, fn);
       if (b) return b;
     }
-    return this.opaqueCall(args);
+    return this.unknownCall(path, args, node, fn);
   }
 
   /** A callee identifier that a local binding shadows is not the runtime helper. */
   private resolveLocalShadow(name: string, scope: Scope): boolean {
     const s = this.resolve(name, scope);
-    return !!s && s !== this.moduleScope;
+    return !!s && s.parent !== null;
   }
 
-  private builtin(path: string, args: Taint[]): Taint | null {
+  private builtin(path: string, args: Taint[], node: any, fn: Instance | null): Taint | null {
     if (SERIALIZING_BUILTINS.has(path)) {
-      // The descriptor is a Symbol key: `JSON.stringify` / `Object.values` /
-      // `structuredClone` drop it and keep the column. Everything the row
-      // carried comes out NAKED.
-      const r = clean();
-      for (const a of args) {
-        mergeMap(r.scalar, naked(a));
-        if (a.row) for (const c of unrevealed(a.row)) if (!r.scalar.has(c)) r.scalar.set(c, `\`${path}(…)\` of a protected row`);
-      }
-      r.deep = new Map(r.scalar);
-      return r;
+      // The descriptor is a Symbol key: these drop it and keep the column.
+      return tainted(args, `\`${path}(…)\` of a protected value in \`${this.displayName(fn?.stat.node ?? null)}\``);
     }
-    if (STRINGIFY_BUILTINS.has(path)) {
+    if (path === "String") {
+      // `String(x)` embeds a scalar verbatim; a row stringifies as
+      // "[object Object]" and carries nothing.
       const r = clean();
       for (const a of args) mergeMap(r.scalar, naked(a));
       return r;
@@ -1262,37 +1615,21 @@ class FlowAnalysis {
     return null;
   }
 
-  /**
-   * A call into code this module does not define (an import, a platform API).
-   * A SCALAR argument yields a DERIVED result — `verifyPassword(pw, u.passwordHash)`
-   * is a boolean of independent identity (§14.8.9 bound). A CONTAINER argument
-   * is assumed returned as-is (descriptor-preserving), so its naked contents
-   * stay naked and its rows stay rows.
-   */
-  private opaqueCall(args: Taint[]): Taint {
-    const r = clean();
-    for (const a of args) {
-      if (a.row) r.row = joinRow(r.row, a.row);
-      mergeMap(r.deep, a.deep);
-    }
-    return r;
-  }
-
-  private callbackMethod(method: string, recv: Taint, args: Taint[], node: any, fn: FnInfo | null): Taint {
+  private callbackMethod(method: string, recv: Taint, args: Taint[], node: any, fn: Instance | null): Taint {
     const cb = args[0] ?? clean();
     const el = elemOf(recv);
     let cbRet = clean();
-    if (cb.fns.size > 0) {
+    if (this.hasCallable(cb)) {
       let params: Taint[];
       if (method === "reduce" || method === "reduceRight") params = [join(args[1] ?? clean()), el, clean(), recv];
       else if (method === "then") params = [recv];
       else if (method === "catch") params = [this.thrown];
       else if (method === "finally") params = [clean()];
       else params = [el, clean(), recv];
-      cbRet = this.applyFns(cb.fns, params);
+      cbRet = this.applyFns(cb.fns, params, undefined, node, fn);
       if (method === "reduce" || method === "reduceRight") {
         // The accumulator also receives every callback return.
-        cbRet = join(cbRet, this.applyFns(cb.fns, [cbRet, el, clean(), recv]));
+        cbRet = join(cbRet, this.applyFns(cb.fns, [join(args[1] ?? clean(), cbRet), el, clean(), recv], undefined, node, fn));
       }
     } else if (method === "map" || method === "flatMap") {
       // An opaque callback (`rows.map(format)`): the element may come back as-is.
@@ -1313,7 +1650,7 @@ class FlowAnalysis {
       case "reduceRight":
         return join(args[1] ?? clean(), cbRet);
       case "then":
-        return cb.fns.size > 0 ? cbRet : recv;
+        return this.hasCallable(cb) ? cbRet : recv;
       case "catch":
         return join(recv, cbRet);
       case "finally":

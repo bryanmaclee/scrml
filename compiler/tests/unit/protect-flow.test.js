@@ -38,7 +38,7 @@ describe("analyzeProtectFlow", () => {
   });
 
   test("a row that never reaches a sink is NOT recorded as stripped", () => {
-    const r = analyzeProtectFlow(mod("const ok = verify(pw, u.passwordHash); return { ok };"));
+    const r = analyzeProtectFlow(mod("const ok = Bun.password.verifySync(pw, u.passwordHash); return { ok };"));
     expect(r.leaks).toEqual([]);
     expect(r.tagSites[0].stripped).toBe(false);
   });
@@ -76,7 +76,39 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod('return u.passwordHash === "x";'))).toEqual([]);
     expect(leakCols(mod("return u.passwordHash.length;"))).toEqual([]);
     expect(leakCols(mod('return u.passwordHash.startsWith("$");'))).toEqual([]);
-    expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);"))).toEqual([]);
+    // `verifyPassword` from `scrml:auth` is on the DERIVER allowlist …
+    const AUTH = 'import { verifyPassword } from "./_scrml/auth.js";';
+    expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);", AUTH))).toEqual([]);
+  });
+
+  test("F2: a callee the compiler cannot see into FAILS CLOSED — only the allowlist is derived", () => {
+    // … the same call to a function NOT on the allowlist keeps the value protected.
+    expect(leakCols(mod("return await verifyPassword(pw, u.passwordHash);"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return mystery(u.passwordHash);", 'import { mystery } from "some-npm-pkg";'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return mystery(u);", 'import { mystery } from "some-npm-pkg";'))).toEqual(["passwordHash"]);
+    // The reversible encodings the review used on the first cut.
+    expect(leakCols(mod('return Buffer.from(u.passwordHash).toString("base64");'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return new URL("http://x/?h=" + u.passwordHash).search;'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return new Error(u.passwordHash).message;"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("const h = u.passwordHash; return String.fromCharCode(...Array.from(h, (c) => c.charCodeAt(0)));"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return u.passwordHash.charCodeAt(0);"))).toEqual(["passwordHash"]);
+    // F4 — no special case needed once the default is inverted.
+    expect(leakCols(mod('return String.prototype.concat.call("", u.passwordHash);'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return Array.prototype.join.call([u.passwordHash], "");'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return Object.getOwnPropertyDescriptor(u, "passwordHash").value;'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('const o = {}; Object.defineProperty(o, "x", { get: () => u.passwordHash, enumerable: true }); return o;'))).toEqual(["passwordHash"]);
+  });
+
+  test("F3: response HEADERS are egress — a null-body Response is checked too", () => {
+    expect(leakCols(mod('return new Response(null, { status: 302, headers: { Location: "/x?h=" + u.passwordHash } });'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return new Response(null, { status: 204, headers: { "Set-Cookie": "h=" + u.passwordHash } });'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return Response.redirect("/x?h=" + u.passwordHash, 302);'))).toEqual(["passwordHash"]);
+  });
+
+  test("F6: call-site sensitive — a helper used on the hash does not poison a clean call", () => {
+    const helper = "function norm(s) { return s.trim(); }";
+    expect(leakCols(mod("const ok = Bun.password.verifySync(pw, norm(u.passwordHash)); return norm(u.name);", helper))).toEqual([]);
+    expect(leakCols(mod("const a = norm(u.name); return norm(u.passwordHash);", helper))).toEqual(["passwordHash"]);
   });
 
   test("string transforms of the value are NOT derived — they carry it", () => {

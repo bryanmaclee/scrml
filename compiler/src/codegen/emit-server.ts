@@ -39,7 +39,7 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
-import { buildProtectFlowDiagnostics } from "./protect-flow.ts";
+import { registerProtectModule } from "./protect-flow.ts";
 import {
   buildTenantContext,
   resolveTenantScoping,
@@ -6850,20 +6850,19 @@ export function generateServerJs(
     }
   }
 
-  // §14.8.9 — the protected-column PROVENANCE FLOW (S441) over the finished
-  // server module (`protect-flow.ts`): `E-PROTECT-006` for a protected value
-  // that reaches a client-egress sink OUTSIDE its descriptor-bearing row (a
-  // scalar, a re-housed field, a concatenation — the floor cannot strip what no
-  // longer carries the descriptor), and `I-PROTECT-STRIP-001` (Info) only for a
-  // query whose row the sink actually stripped. Info is partitioned into
-  // result.warnings by api.js (non-fatal).
+  // §14.8.9 — the protected-column PROVENANCE FLOW (S441, `protect-flow.ts`)
+  // runs ONCE per compile, over EVERY emitted server module with the imports
+  // between them resolved (api.js, after codegen) — a per-file run cannot see a
+  // helper in another file. Here this file only REGISTERS its per-query strip
+  // records and its span lookup. That pass raises `E-PROTECT-006` (a protected
+  // value reaching a client egress outside its row) and `I-PROTECT-STRIP-001`
+  // (only for a query whose row a redact sink actually stripped).
   if (_protectActive) {
-    errors.push(...buildProtectFlowDiagnostics(
-      finalEmitted,
-      drainProtectInfosFromRewriter(),
+    registerProtectModule(
       filePath,
+      drainProtectInfosFromRewriter(),
       (name) => (fnNodes.find((f: any) => f?.name === name)?.span as any) ?? null,
-    ));
+    );
   }
   // §14.8.9 — release the protect context (mirrors the variant-fields release).
   setProtectContextForRewriter(null);

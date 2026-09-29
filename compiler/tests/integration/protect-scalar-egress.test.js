@@ -269,6 +269,98 @@ describe("S441 every egress sink", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 2c. S441 fix round — the review's findings, end to end
+// ---------------------------------------------------------------------------
+function compileFiles(files) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-protect-multi-"));
+  for (const [name, src] of Object.entries(files)) writeFileSync(join(dir, name), src);
+  const result = compileScrml({
+    inputFiles: Object.keys(files).map((f) => join(dir, f)), write: false, log: () => {},
+  });
+  const diags = [...(result.errors ?? []), ...(result.warnings ?? [])];
+  return { result, diags, codes: diags.map((d) => d.code) };
+}
+const HELPER = (withProtect) => `<program db="./app.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+    passwordHash: text
+  }
+</schema>
+${withProtect ? '<db src="./app.db" tables="users" protect="passwordHash"/>\n' : ""}\${
+export function pick(r) {
+    return r.passwordHash
+}
+export function pickName(r) {
+    return r.name
+}
+}
+</program>
+`;
+const importing = (name, ret) => prog(`\${\n  import { ${name} } from './helper.scrml'\n}\nfunction getIt() {\n    ${ONE}\n    return ${ret}\n}`);
+
+describe("S441 fix round F1 — a helper in ANOTHER FILE is analysed, not guessed", () => {
+  for (const withProtect of [false, true]) {
+    const label = withProtect ? "helper file declares protect=" : "helper file has no protect=";
+    test(`${label}: imported pick(u) returning the column is rejected`, () => {
+      const { codes } = compileFiles({ "helper.scrml": HELPER(withProtect), "app.scrml": importing("pick", "pick(u)") });
+      expect(codes).toContain("E-PROTECT-006");
+      // …and nothing claims the column was stripped: it never reached a redact as a row.
+      expect(codes).not.toContain("I-PROTECT-STRIP-001");
+    });
+    test(`${label}: imported pickName(u) returning a non-protected field compiles`, () => {
+      const { codes } = compileFiles({ "helper.scrml": HELPER(withProtect), "app.scrml": importing("pickName", "pickName(u)") });
+      expect(codes).not.toContain("E-PROTECT-006");
+    });
+  }
+});
+
+describe("S441 fix round F2/F3 — reversible encodings and response headers", () => {
+  const H = [ONE, "const h = u.passwordHash"];
+  const cases = {
+    "Buffer base64": fnBody([...H, 'return Buffer.from(h).toString("base64")']),
+    "URL search": fnBody([...H, 'return new URL("http://x/?h=" + h).search']),
+    "Error message": fnBody([...H, "return new Error(h).message"]),
+    "charCode round trip": fnBody([...H, "return String.fromCharCode(...Array.from(h, c => c.charCodeAt(0)))"]),
+    "Location header on a null-body Response": fnBody([ONE, 'return new Response(not, { status: 302, headers: { Location: "/x?h=" + u.passwordHash } })']),
+    "Set-Cookie header": fnBody([ONE, 'return new Response(not, { status: 204, headers: { "Set-Cookie": "h=" + u.passwordHash } })']),
+  };
+  for (const [name, body] of Object.entries(cases)) {
+    test(`${name} is rejected`, () => {
+      expect(compileMem(prog(body)).codes).toContain("E-PROTECT-006");
+    });
+  }
+  test("a null-body Response whose headers carry nothing protected compiles", () => {
+    const { codes } = compileMem(prog(fnBody([ONE, 'return new Response(not, { status: 302, headers: { Location: "/u/" + u.id } })'])));
+    expect(codes).not.toContain("E-PROTECT-006");
+  });
+});
+
+describe("S441 fix round — the reviewer's negative list stays clean", () => {
+  const IMP = "${\n  import { verifyPassword, hashPassword } from 'scrml:auth'\n}\n";
+  const clean = {
+    "shared helper at two call sites (F6)": [fnBody([ONE, 'const ok = verifyPassword("pw", norm(u.passwordHash))', "return norm(u.name)"]), IMP + "function norm(s) {\n    return s.trim()\n}\n"],
+    "rest-omit": [fnBody([ONE, "const { passwordHash, ...safe } = u", "return safe"]), ""],
+    "UPDATE … SET passwordHash = hashPassword(…)": [fnBody([ONE, 'const nh = hashPassword("new")', "?{`UPDATE users SET passwordHash = ${nh} WHERE id = ${u.id}`}.run()", "return { ok: true }"]), IMP],
+    "copy the hash to another column": [fnBody([ONE, "?{`UPDATE users SET passwordHash = ${u.passwordHash} WHERE id = 2`}.run()", "return { ok: true }"]), ""],
+    "server-side console.log": [fnBody([ONE, 'console.log("hash", u.passwordHash)', "return u.name"]), ""],
+    "boolean + name": [fnBody([ONE, 'return { hasPw: u.passwordHash != "", n: u.name }']), ""],
+    ".length": [fnBody([ONE, "return u.passwordHash.length"]), ""],
+    "truthy ternary": [fnBody([ONE, 'return u.passwordHash ? "set" : "unset"']), ""],
+    "verifyPassword bool": [fnBody([ONE, 'return verifyPassword("pw", u.passwordHash)']), IMP],
+    "hashPassword of the hash": [fnBody([ONE, "return hashPassword(u.passwordHash)"]), IMP],
+    "filter by hash then map name": [fnBody(["const rows = ?{`SELECT * FROM users`}.all()", 'return rows.filter(r => r.passwordHash != "").map(r => r.name)']), ""],
+  };
+  for (const [name, [body, extra]] of Object.entries(clean)) {
+    test(name, () => {
+      const { codes } = compileMem(prog(extra + body));
+      expect(codes).not.toContain("E-PROTECT-006");
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // 3. EXECUTED — what compiles still serves the right bytes
 // ---------------------------------------------------------------------------
 // happy-dom (registered globally by sibling browser tests in a full-suite run)
