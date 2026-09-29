@@ -1,0 +1,27 @@
+// S441 reproducer — item 10: a client read of a `protect=` field reports E-CG-001 "upstream invariant
+// violation" at 1:1 instead of a user-level diagnostic at the read site.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/protected-field-client-read-e-cg-001.scrml --output-dir <scratch>
+// Expected: a user-level error at the `<p>` read site naming `passwordHash` as protected (§34 E-PROTECT-001 "Protected field
+//           accessed on client type", §11.3.2 / §14.8.6).
+// Actual:   exit 1: `error [E-CG-001]: Protected field `passwordHash` found in client JS output. This indicates an
+//           upstream invariant violation.` span 1:1 (`<program db="t.db">`), stage CG. The info
+//           I-PROTECT-STRIP-001 on the SELECT is correct. (Artifacts are still written — see
+//           g-cli-emits-artifacts-on-failed-compile.)
+<program db="t.db">
+<db src="t.db" protect="passwordHash" tables="users"/>
+<schema>
+    users {
+        id: integer primary key
+        email: text
+        passwordHash: text
+    }
+</>
+function getUser(id) {
+    return ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+}
+<user> = not
+function load() { @user = getUser(1) }
+<p>${@user.passwordHash}</p>
+<button onclick=load()>go</button>
+</>

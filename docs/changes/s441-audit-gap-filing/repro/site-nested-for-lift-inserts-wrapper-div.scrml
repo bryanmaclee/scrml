@@ -1,0 +1,31 @@
+// S441 reproducer — addendum-2 S5 (REGRESSION): a `${ for … lift }` nested inside a lifted element is emitted
+// into an extra `<div>` list wrapper instead of appending to the lifted element.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-nested-for-lift-inserts-wrapper-div.scrml --output-dir <scratch>
+// Expected: §10.6 "A `lift` call inside a nested `${}` block SHALL append to the nearest enclosing element
+//           created by the outer `lift`" and §10.8 "`lift` inside a `${}` nested within a lifted element SHALL
+//           append to that element's children list" — the <span>s are children of `.code-line`.
+// Actual:   exit 0, no diagnostic. client.js:
+//           `const _scrml_list_wrapper_10 = document.createElement("div");`
+//           `_scrml_lift_el_7.appendChild(_scrml_list_wrapper_10);` — the inner spans land in a <div> inside
+//           `.code-line`, so `.code-line > span` selectors (scrml.dev's showcase) stop matching and an inline
+//           row becomes a block. At the site pin 50478f0e the same shape emitted
+//           `for (const cell of line.cells) { _scrml_lift_el_111.appendChild(<span>) }` (spans direct).
+//           Introduced by 52585b257 "fix(lift): nested for-lift re-reconciles inner list on outer cell
+//           REPLACE (#197)" — the reactive inner reconcile needs a container and uses a fresh <div>.
+<program>
+<lines> = [ { n: 1, cells: ["a", "b"] }, { n: 2, cells: ["c"] } ]
+<div class="pane">
+  ${
+    for (let line of @lines) {
+      lift <div class="code-line">
+        <span class="ln">${line.n}</span>${
+          for (let cell of line.cells) {
+            lift <span>${cell}</span>
+          }
+        }
+      </div>
+    }
+  }
+</div>
+</program>

@@ -14,9 +14,8 @@
     ${
       <count> = loadCount()
 
-      // No `server` keyword needed — these functions escalate to the server
-      // automatically because they touch a `?{}` SQL block. (Body-content
-      // inference, Insight 26 — the `server` keyword is deprecated.)
+      // No `server` keyword — these two functions run on the server because
+      // their bodies touch a `?{}` SQL block.
       function loadCount() {
         const row = ?{`SELECT value FROM counters WHERE id = 1`}.get()
         return row is some ? row.value : 0

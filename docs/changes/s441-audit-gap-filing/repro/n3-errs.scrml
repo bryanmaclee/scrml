@@ -1,0 +1,4 @@
+// S441 — helper module imported by import-shadowed-by-local-struct.scrml (addendum-5 N3).
+${
+    export type AppErr:enum = { NotFound, Bad(msg: string) }
+}

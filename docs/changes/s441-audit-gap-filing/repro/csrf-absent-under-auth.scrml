@@ -1,0 +1,21 @@
+// S441 reproducer — item 4: `<program auth="required">` with no `csrf=` emits NO CSRF check on a mutating route.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/csrf-absent-under-auth.scrml --output-dir <scratch>
+// Expected: RULING-GATED (see the gap). §40.2 / §39.2.3 define `csrf="auto"|"off"` but give no default for an
+//           auth= program without csrf=; the only sentence about absence is §40.2 "A `<program>` element
+//           with none of these attributes generates no middleware infrastructure."
+// Actual:   exit 0. server.js contains zero "csrf" (case-insensitive); `_scrml_handler_add_1` (POST) runs the
+//           auth check and then the INSERT. Controls, same body: drop auth= → baseline double-submit check
+//           (`_scrml_validate_csrf(req)` → 403); add csrf="auto" → session synchronizer-token check.
+//           So ADDING auth REMOVES the CSRF gate. Mitigation present: the session cookie is
+//           `HttpOnly; SameSite=Lax`, which blocks the classic cross-site form POST in current browsers.
+<program db="c.db" auth="required">
+<schema>
+    notes { id: integer primary key
+            body: text }
+</>
+function add(body) {
+    ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
+}
+<button onclick=add("x")>add</button>
+</>

@@ -1,0 +1,27 @@
+// S441 reproducer — addendum-4 R2: `!{}` on a cell assignment inside an inline `${ }` handler, and inside a
+// `const g = () => { … }` arrow, reaches the emitted JS as raw `!{` — exit 0, SyntaxError at load.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/error-handler-in-inline-handler-leaks-raw-bang-brace.scrml --output-dir <scratch>
+// Expected: §19 — `expr !{ | .Variant :> … }` lowers to a handled call (it does inside a named `function`).
+// Actual:   see the gap (emitted text + `node --check` result).
+<program>
+type LoadError:enum = { Boom(msg: string) }
+<out>: number = 0
+<seen>: string = ""
+function risky(n: number)! LoadError {
+    if (n < 0) { fail LoadError.Boom("neg") }
+    return n * 3
+}
+const g = () => {
+    @out = risky(2) !{
+        | .Boom(m) :> 0
+    }
+}
+function go() {
+    g()
+    @seen = "g:" + @out
+}
+<button onclick=${@out = risky(2) !{ | .Boom(m) :> 0 }}>inline</button>
+<button onclick=go()>arrow</button>
+<p>${@out} ${@seen}</p>
+</program>
