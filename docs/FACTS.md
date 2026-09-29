@@ -30,7 +30,7 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 | LSP capabilities | 7 |
 | editor integrations | 2 |
 | deploy targets | 4 |
-| public code samples under the compile gate | 24 |
+| public code samples under the compile gate | 25 |
 <!-- @generated:facts-table END -->
 
 ## Detail
