@@ -3,3 +3,4 @@
 - 2026-09-29T16:46:51-06:00 B: E-PROGRAM-NESTED-AUTH (codegen/index.ts detectNestedProgramAuth), SPEC §4.12.2 + §4.12.9 + §34 rows, §40.2 page note replaced; conf cases x4; integration tests
 - 2026-09-29T17:19:17-06:00 blast radius probed (variants/index/softnav/per-route/if-block/crosspage/dev parity/ex23); corpus 2082 units: 0 pre-existing changes; page emission test hardened (loginRedirect= on <page> is E-PAGE-INVALID-ATTR)
 - 2026-09-29T17:42:12-06:00 DONE: gate 26434 pass/0 fail; conformance 1108/1115 + 7 xfail (0 failed); pushing
+- 2026-09-29T17:54:02-06:00 R2: Step 8c member-page inheritance (non-entry-page + bare-markup, not _layout, no auth=); program loginRedirect reaches all page scopes (8a-page/8b/8c); SPEC §40.2 two paragraphs; migration 0 pages; new test 9 (6 red on r1)

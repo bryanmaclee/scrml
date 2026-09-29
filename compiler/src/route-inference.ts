@@ -6354,6 +6354,19 @@ export function runRI(input: RIInput): RIOutput {
   // ran. Registering the entry here gives the page exactly the gate
   // `<program auth="required">` gets (emit-server consumes the one entry).
   // A `<program auth="required">` in the same file already registered in 8a.
+  //
+  // The redirect target of a page scope (S443 round 2): `loginRedirect=` is not a
+  // `<page>` attribute (E-PAGE-INVALID-ATTR), so it comes from the application's
+  // `<program>` — the `loginRedirect=` of the web-application `<program>`(s) that
+  // declare `auth=` (their authConfig; "/login" when a program declares none).
+  // Two such programs that disagree answer nothing and the §52.13 default
+  // `/login` applies. Shared by 8a-page and 8c.
+  const programRedirects = new Set<string>();
+  for (const f of files) {
+    const cfg = f.authConfig ?? ((f as any).ast ? (f as any).ast.authConfig : null);
+    if (cfg && cfg.auth && !isToolProgram(f)) programRedirects.add(cfg.loginRedirect ?? "/login");
+  }
+  const programLoginRedirect: string = programRedirects.size === 1 ? [...programRedirects][0] : "/login";
   for (const fileAST of files) {
     if (authMiddleware.has(fileAST.filePath)) continue;
     const pageDecl = findPageAuthRequired(fileAST);
@@ -6362,7 +6375,7 @@ export function runRI(input: RIInput): RIOutput {
       fileAST.filePath,
       pageAuthRequiredEntry(
         fileAST.filePath,
-        pageDecl,
+        { ...pageDecl, loginRedirect: pageDecl.loginRedirect ?? programLoginRedirect },
         countUnitProgramNodes(getNodes(fileAST as any)) >= 2,
       ),
     );
@@ -6447,7 +6460,7 @@ export function runRI(input: RIInput): RIOutput {
         // S443: Step 8a-page now registers every `<page auth="required">`, so the
         // .has() guard above normally skips this file; kept as the same builder
         // for defense in depth.
-        authMiddleware.set(filePath, pageAuthRequiredEntry(filePath, explicit, multiProgramFile.has(filePath)));
+        authMiddleware.set(filePath, pageAuthRequiredEntry(filePath, { ...explicit, loginRedirect: explicit.loginRedirect ?? programLoginRedirect }, multiProgramFile.has(filePath)));
         continue;
       }
 
@@ -6461,7 +6474,7 @@ export function runRI(input: RIInput): RIOutput {
       const autoEntry: AuthMiddleware = {
         filePath,
         auth: "required",
-        loginRedirect: "/login",
+        loginRedirect: programLoginRedirect, // S443 — the program's loginRedirect= (else "/login")
         csrf: "auto",
         autoEscalated: true,
       };
@@ -6493,6 +6506,56 @@ export function runRI(input: RIInput): RIOutput {
         severity: "warning",
         filePath,
       });
+    }
+  }
+
+  // 8c (S443 round 2): a member page of a `<program auth="required">` application
+  // is inside that program's auth scope. §52.13: "`auth="required"` — every
+  // request to this scope SHALL be authenticated"; §34 W-AUTH-PAGE-INFERRED: a
+  // `<page>` without `auth=` under a `<program auth="required">` — "program-level
+  // auth still enforces at the request boundary". Before S443 it did not: entries
+  // are per FILE, the program's entry (8a) covered only the entry file, so a
+  // member route file with no `auth=` served its document and ran its server
+  // functions for anonymous callers (MEASURED: `/plain` 200 with the page body).
+  //
+  // Scope, deliberately narrow:
+  //   - the unit is a §40.8 member route file (`non-entry-page` shape: no
+  //     `<program>`, a top-level `<page>`; or `bare-markup`: top-level markup and
+  //     no `<program>`), not a `_layout.scrml` wrapper;
+  //   - it declares NO `auth=` anywhere. An explicit `auth="optional"` / `"none"`
+  //     page is left exactly as it was (whether it may relax a required program
+  //     is an open ruling — preserved, not decided, here); an explicit
+  //     `auth="required"` page was registered by 8a-page;
+  //   - a unit already registered (8a / 8a-page / 8b) keeps its entry.
+  // The entry is the `<page auth="required">` entry: csrf="auto" (the §40.2
+  // default under auth=), no session fields of its own (the shared resolver
+  // answers from the program, as for every page entry since S438).
+  const requiredProgramFiles = files.filter((f) => {
+    const cfg = f.authConfig ?? ((f as any).ast ? (f as any).ast.authConfig : null);
+    return cfg && cfg.auth === "required" && !isToolProgram(f);
+  });
+  if (requiredProgramFiles.length > 0) {
+    // The redirect target: the program's loginRedirect (see 8a-page).
+    const inheritedLoginRedirect = programLoginRedirect;
+    for (const fileAST of files) {
+      const filePath = fileAST.filePath;
+      if (authMiddleware.has(filePath)) continue;
+      const shape = (fileAST as any).fileShape ?? ((fileAST as any).ast ? (fileAST as any).ast.fileShape : undefined);
+      // `bare-markup` (top-level markup, no `<page>` wrapper — W-PROGRAM-001) also
+      // renders a served document of this application (MEASURED: `/side` 200), so
+      // it is in the scope too. A component/library file (`pure-module`) emits no
+      // document and is not gated.
+      if (shape !== "non-entry-page" && shape !== "bare-markup") continue;
+      if (filePath.replace(/\\/g, "/").split("/").pop() === "_layout.scrml") continue;
+      if (getExplicitAuthDeclaration(fileAST)) continue;
+      authMiddleware.set(
+        filePath,
+        pageAuthRequiredEntry(
+          filePath,
+          { loginRedirect: inheritedLoginRedirect, csrf: null, sessionSecure: null },
+          countUnitProgramNodes(getNodes(fileAST as any)) >= 2,
+        ),
+      );
     }
   }
 
