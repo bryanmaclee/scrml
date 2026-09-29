@@ -27020,6 +27020,34 @@ The routes registry array SHALL also de-duplicate by name — registering the
 same route binding multiple times is correctness-equivalent (same path /
 method / handler) but wasteful.
 
+### 47.13 Static-File Serving — Client-Artifact Allowlist
+
+**Added:** 2026-09-29 (S441). Resolves `g-static-server-serves-db-and-server-source`: both static-serving paths — the production `_server.js` (§47.12) and `scrml dev` — served ANY file that existed under the output directory, so an anonymous request received the SQLite database (`protect=` columns and password hashes included), the session store, every `*.server.js`, and `_server.js` itself.
+
+The output directory holds server-side artifacts beside the client ones (§47.9, §47.11, and the §20.5 session store, which lives at the dist root). A compiled server SHALL NOT serve server modules, databases, dotfiles, or sources as static files. Static serving is therefore an **allowlist**: a file is served if and only if
+
+1. it is NOT in a **denied class**, AND
+2. it is either a **client artifact** of the build or a **passive media asset**.
+
+Every other request that reaches the static fallback SHALL receive `404 Not Found` with a body that does not disclose the file's contents.
+
+**Denied classes.** These SHALL NOT be served, whatever the manifest says. The match SHALL be case-insensitive, because a case-insensitive filesystem serves `APP.SERVER.JS` from `app.server.js`.
+
+- server modules and anything named `*.server.*`, including `_server.js` and server source maps;
+- databases: `*.db`, `*.db-wal`, `*.db-shm`, `*.db-journal`, and `*.sqlite*`;
+- dotfiles and dot-directories (`.env`, `.git/…`, `.scrml-sessions.db`), meaning any path segment that begins with `.`;
+- `.scrml` sources;
+- source maps (`*.map`). A client map embeds the whole `.scrml` source as `sourcesContent`, server functions and SQL included, so a map is source disclosure;
+- any path that resolves outside the output directory.
+
+**Request-path handling.** The request path SHALL be percent-decoded before it is judged, so an encoded traversal (`%2e%2e`, `%2f`, `%5c`) is evaluated in the form the filesystem sees. The request SHALL be refused if the decoded path contains NUL, `\`, or `:`, if any segment begins with `.`, or if any segment ends in `.` or a space (on Windows, `app.db.` resolves to `app.db`). The allowlist SHALL be checked against the resolved candidate file, so every resolution rule passes through it: exact file, clean URL `<p>.html`, directory index, and dev's root fallback.
+
+**Client artifacts: the manifest.** The compiler SHALL record every artifact it writes for the browser: the HTML documents, the CSS, the client bundles (hashed or not, §47.9.8), the shared runtime, and the per-route chunks. It SHALL close that set over the relative module imports of its JavaScript members, which admits, for example, a `_scrml/<name>.js` shim that a client bundle imports and excludes a shim that only a server module imports. A closure target that falls in a denied class is not admitted. `compileScrml` returns the set as `clientAssets` (output-relative POSIX paths) and writes it to `<outputDir>/.scrml-client-assets.json`. That file is a dotfile, so it is itself unservable. `scrml build` SHALL bake the set into `_server.js`, so that nothing written into the deploy directory after the build can widen what the server serves. `scrml dev` SHALL read the manifest file, which it rewrites on every recompile. A missing manifest is an empty set, so the server fails closed. A stale artifact that the latest compile did not write is not in the set and is not served.
+
+**Passive media.** A file with one of the following extensions is served without a manifest entry, provided it is not in a denied class: `png`, `jpg`, `jpeg`, `gif`, `webp`, `avif`, `svg`, `ico`, `bmp`, `woff`, `woff2`, `ttf`, `otf`, `eot`, `mp3`, `mp4`, `webm`, `ogg`, `wav`. These are the images, icons, fonts, and audio/video an author places beside the build output. The SPEC defines no `public/` or assets directory. Any other file the build did not write for the browser is refused, including `.json`, `.txt`, and author `.js`.
+
+**One policy, both servers.** `scrml dev` and the production `_server.js` SHALL apply the identical decision. Implementation: `compiler/src/static-serve-policy-emitted.js` holds the policy functions. Dev imports them, and `generateServerEntry` copies their source text verbatim into `_server.js`. `collectClientAssets` in `compiler/src/static-serve-policy.js` computes the manifest.
+
 ---
 
 ## 48. The `fn` Keyword — Pure Functions

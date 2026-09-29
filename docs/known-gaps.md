@@ -19813,6 +19813,24 @@ base too); a function-valued prop called with the bare `onclick=act()` form is n
 (g-propagate-in-handler-silently-drops-error); a failable call in a `when … changes` body
 (g-when-changes-body-failable-call-unchecked).
 
+### g-static-server-serves-db-and-server-source — the production `_server.js` and `scrml dev` served ANY file in the output dir to anyone: the SQLite database, the session store, every `*.server.js`, `_server.js` itself — `NEW S441; HIGH (security, CRITICAL); RESOLVED S441`
+<!-- @gap id=g-static-server-serves-db-and-server-source sev=HIGH status=resolved locus=compiler/src/static-serve-policy-emitted.js(the one allowlist policy — dev imports it, build copies its text into _server.js);compiler/src/commands/build.js(generateServerEntry static dispatch);compiler/src/commands/dev.js(devDispatch static loop);compiler/src/api.js(clientAssets manifest) prov=repro:PA-S441-curl-app.db-200 -->
+
+With `<program db="app.db">` built by `scrml build` and run from its dist dir, `curl /app.db` returned 200 and the
+whole database (`protect=` columns and password hashes included), `/app.server.js` returned the server source (SQL,
+auth logic), and `/_server.js` returned itself. Both static loops (the emitted `_server.js` and `devDispatch`) served
+whatever file a candidate path resolved to. The same hole exposed `.scrml-sessions.db` (the §20.5 session store sits at
+the dist root), `serverfns.json` and the other MCP sidecars, and `*.map` files, which embed the whole `.scrml` source as
+`sourcesContent`. **RESOLVED S441** by SPEC §47.13: static serving is an ALLOWLIST. A file is served iff it is not in a
+denied class (`*.server.*`/`_server.js`, `*.db*`/`*.sqlite*`, any dot-segment, `.scrml`, `*.map`, outside the root;
+case-insensitive) AND it is either in the build's client-asset manifest or passive media (images, fonts, audio/video).
+The manifest is what `compileScrml` wrote for the browser, closed over those files' relative imports. It is written to
+`.scrml-client-assets.json` (a dotfile, so it is unservable), baked into `_server.js`, and re-read by dev. Request paths
+are percent-decoded, then refused on traversal, dot-segments, `\`, `:`, NUL, or a trailing dot or space. Dev and prod
+run one policy source. Pinned by `compiler/tests/integration/static-serve-allowlist.test.js`, which runs the real
+`_server.js` and the real dev app child in child processes and probes them over raw sockets, and by
+`compiler/tests/commands/static-serve-allowlist-dev-http.test.js`, which runs a whole `scrml dev`.
+
 ### g-failable-handler-reference-unchecked — `onclick=risky` (a `!` function wired by reference) compiled clean and discarded its error on every click — `NEW S441; HIGH; RESOLVED S441`
 <!-- @gap id=g-failable-handler-reference-unchecked sev=HIGH status=resolved locus=compiler/src/type-system.ts(visitAttr — the §19.4.3 handler-value check now also fires on a REFERENCE value via handlerValueAsReference; formFor exempt, scope-resolved, declared-`!` only) prov=review:S441-e-error-002-review;ruling:user-voice-scrml.md-S441-yes-on-references -->
 
