@@ -4,7 +4,7 @@
 - [x] tutorial markers + snippet reconciliation (18 marked blocks, 15 files + 3 excerpts)
 - [x] §0/§2.2/§2.3/§3/§4/§5/§6/§7/§9/§10/prose fixes
 - [x] verify: snippet-gate 114/114 + drift 18/0; every block compiled + node --check; runtime-rendered in happy-dom
-- [ ] push
+- [x] push (merged origin/main #1141 first; FACTS regen)
 
 Findings beyond the brief (compiler, not fixed here):
 - `<db>` body without `${}`: everything inside silently dropped, exit 0 (old 06-failable shipped an empty app).
