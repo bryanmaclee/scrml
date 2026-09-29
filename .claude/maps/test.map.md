@@ -1,6 +1,31 @@
 # test.map.md
 # project: scrml
-# updated: 2026-09-28T04:40:15Z  commit: fb21983a
+# updated: 2026-09-29T13:38:25Z  commit: cf62b415
+# ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
+# refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
+# --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
+# == `origin/main` (`git fetch --dry-run`: main not advanced; no fork). Source-relevant: #1117 (bootstrap M3 typer + scope pass), #1118 (ingest shim + footprint
+# grader + bite matrix), #1122 (analyze facts -> six NodeId-indexed family tables), #1129 (re-land #1109 review fixes +
+# spread all-or-nothing `Stmt.Commit` + strict snapshot + E-BOOTSTRAP-DUP-OVERRIDE), #1125 (E-MW-007/008 refused build
+# writes no dist), #1131 ("~" + 3 sibling rewrites fenced out of literals), #1137 (Date/built-ins in cells; `==` on
+# built-ins), #1139 (nested async helpers vs sync-callback guards, SECURITY). SPEC-only: #1120 (S439 rulings), #1133
+# (S440 rulings). The rest are wrap / inbox / dpa-queue / gaps / review / @generated bookkeeping.
+# ⛑ **FIGURES RE-EXECUTED AT `cf62b415`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **268,394 lines / 213 files** per FACTS (+1,450 lines, +2 files:
+# `codegen/local-async-fns.ts`, `commands/refusal-gate.js`) · test files **1,515** (+6) · `compiler/SPEC.md` **40,663**
+# lines (+264) · conformance **1054** cases (+7) · §34 catalog **839** rows (+4), range `20443..21365`.
+# `bun conformance/run.ts` (impl#1) -> **1047/1054 pass + 7 xfail**.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **948 -> 952** · W 183 · I 10 · H 2 FLAT · unique codes
+# **803 -> 807**. **ADDED = {`E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-SELECT-OPTION-NOT-VARIANT`,
+# `E-STRUCT-DUPLICATE-KEY`} — all four rows say "Nominal / not yet emitted" (impl pending); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `cf62b415` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# 28 files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **325/325** (6 files) ·
+# `slice-m3/` **24/24** (3 files) · footprint grade (`bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js
+# --footprint`) -> runtime **18 pass / 0 fail**, codes-only 10/0, crashed 0, not-yet 579, front-end 447. The S438 CRLF
+# drift-guard failures are gone (the guard is CRLF-safe since #1129, and this clone is LF).
+# ⚑ `file:line` citations in S440 sections were grep-derived at `cf62b415`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S438 HEADER (stamp `fb21983a`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
 # `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
 # merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
@@ -402,6 +427,59 @@
 # **62** are `count: 0` and **all 62 are count-only**; **18** are MIXED (a count AND a first-match
 # check) and **all 18 are `count: 1`** — those 18 are exactly what #822 un-blinded.
 #
+
+## S440 — TEST SURFACE DELTA (`fb21983a..cf62b415`)
+
+### Bootstrap suites — `compiler/self-host-v2/` (outside the bunfig root: plain `bun test` never runs them)
+Measured at `cf62b415` (Linux clone):
+| command | result | files |
+|---|---|---|
+| `bun scripts/lint-no-default-arm.js` | 28 files, 0 violations, 0 opt-outs | — (the "non-first alternation arm" rule is RETIRED, #1129; a wildcard inside an alternation is still flagged) |
+| `bun test ./compiler/self-host-v2/slice-m1/` | **73 pass / 0 fail** | 6 (`check`, `lint`, `runtime`, `counter.browser`, `dropdown.browser`, `valuesem.browser`) |
+| `SLICE_CORE=lowered bun test ./compiler/self-host-v2/slice-m1/` | **73 pass / 0 fail** | same 6, over the Cores the M2 front end LOWERS from source |
+| `bun test ./compiler/self-host-v2/slice-m2/` | **325 pass / 0 fail** (was 74 at `fb21983a`) | 6: `front` (diagnostics + S437/S440 rulings end to end in happy-dom), `parse` (FileAst shape, NodeIds, §4 invariant, CRLF-safe section-scoped §66.19 drift guard), `lower` (THE M2 PROOF: lowered == hand-built oracle modulo Sym bijection), `tables` (NEW #1122: one fact per node per family, index agrees with key column, `exprType` == first-match scan), `typer` (NEW #1117: every check family with a well-typed twin, adversarial false-fire controls, `Typing` coverage, §66.19 programs emit zero typer codes), `typer-gap` (the eleven F-A shapes, each with a twin) |
+| `bun test ./compiler/self-host-v2/slice-m3/` | **24 pass / 0 fail** (NEW dir, #1118) | 3: `ingest` (impl#1 FileAST -> Core node by node for real conformance cases; not-yet discipline; every ingested Core passes `checkCore`), `footprint` (classifier graded / not-yet / front-end / crashed; end-to-end over a synthetic cases dir), `bite` (`judgeDeaths`: only a KILL certifies) |
+
+**Where a typer / scope diagnostic test goes:** `slice-m2/typer.test.js` (a check family: negative + well-typed
+twin + adversarial silent controls) or `slice-m2/typer-gap.test.js` (the F-A pins). Both use `loadM2()` +
+`frontEnd(mods, files)` / `readSlice` from `slice-m2/lowered.js`; `frontEnd` returns `{ asts, typed, core, diags,
+nodes, ms }` and diagnostics carry `{ code, file, span, message }`. The governing-sentence table for every typer code
+is `docs/changes/s439-bootstrap-m3-typer/progress.md`.
+**Where a parse / lower test goes:** `slice-m2/parse.test.js` (FileAst + parse diagnostics), `slice-m2/lower.test.js`
+(Core equality via `compareCore`), `slice-m2/front.test.js` (end to end in happy-dom via `slice-m1/load-program.js`).
+
+### Proof harnesses (NOT in CI — run by hand)
+- `bun compiler/self-host-v2/slice-m1/bench/mutations.js` — applies each named mutation to a MIRROR under `.tmp/`,
+  expects RED; exits non-zero if any mutation is NOT RUN (site not found exactly once) or GREEN. Covers M1 review
+  items, M2 front end, the M3 typer (`TYPER` rows edit `analyze.scrml`), and six S440 mutations (F1 snapshot, F2
+  narrowing, commit order/grouping/edge check, C7). Per the #1129 commit message: 77 mutations, 0 problems.
+  Self-tests: `MUTATIONS_PROOF=absent` / `MUTATIONS_PROOF=harmless` must exit non-zero.
+- `bun compiler/self-host-v2/slice-m3/bench/bite-matrix.js [--report <path.md>]` — certifies the footprint grade's
+  construct set: per construct, corrupts a mirror of printer / runtime / ingest and re-grades the runtime passes;
+  CERTIFIED only if a corruption KILLS a graded pass. Exit 0 / 1 (site not found once, or clean mirror differs) / 2.
+  Last recorded: `docs/changes/s439-bootstrap-m3-ingest/bite-matrix-2026-09-27.md` — 32 CERTIFIED / 0 UNCERTIFIED.
+- Footprint grade: `bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js --footprint
+  [--filter s] [--only a,b] [--report p.md] [--json p]`. Re-run at `cf62b415`: runtime 18/0, codes-only 10/0,
+  crashed 0, not-yet 579, front-end 447 (28 of 28 graded cases run). Codes-only passes are impl#1 front-end codes
+  and never count as bootstrap evidence.
+
+### `compiler/tests/` — 6 new files (1,509 -> 1,515 per FACTS)
+| file | pins |
+|---|---|
+| `unit/s440-date-in-cell-and-eq.test.js` | #1137: Date/built-in in a cell renders; `_scrml_structural_eq` per built-in class; `_scrml_deep_set` refuses non-plain containers; server copy sliced from client runtime |
+| `unit/s440-nested-helper-async-sync-callback.test.js` | #1139: nested async helpers awaited / lifted / failed closed (`.some`, `.sort`, direct call, block-scoped shadowing) |
+| `unit/tilde-string-literal-fence.test.js` | #1131: `~` inside string / template / regex literals is not rewritten |
+| `unit/code-segments-division-after-literal.test.js` | #1131 fix round: `rewriteCodeSegments` regex-vs-division sees the significant prefix |
+| `unit/conformance-normalize-template-anchor.test.js` | #1118: `conformance/normalize.ts` strips impl#1's EMPTY `_scrml_scrml_(chain_)?tpl_N` anchors only |
+| `commands/refusal-writes-no-dist.test.js` | #1125: E-MW-007/E-MW-008 leave the output dir untouched (absent, or byte-identical to the last good build) |
+
+### Conformance — 1047 -> 1054 cases (impl#1 1047 pass + 7 xfail)
+NEW: `auth/nested-helper-{block-shadowed-import-sort-neg,server-block-body-callback-neg,verify-password-sort-neg}`,
+`server-db/nested-helper-{server-fn-some-runtime,server-fn-sort-neg,sibling-block-let-some-runtime}` (#1139),
+`reactive/reset-handler-nonzero-initial` (#1118). MODIFIED: `reactive/reset-handler`, `reactive/toggle-show`
+expected.json (#1118). `conformance/adapters/impl1-ts.ts` gains `setClientExecutor(executor | null)` — a hybrid whose
+CG is the bootstrap installs `substitute.js` `executeClient`; `null` = impl#1's own execution.
+
 
 ## S438 — TEST SURFACE DELTA (`9941a504c..fb21983a`)
 
@@ -1196,7 +1274,7 @@ inherited the same population). `pa-base v2.13 §8` names it THE TRUNCATED PROBE
 tool is marked `HARD REQ n` at its site so a future editor can see what they would be removing.
 
 ## Tags
-#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout #1398-tests #category-dirs-plus-root-level #browser-tier-not-in-pre-commit #state-block-statement-form-suite #known-open-pinned-not-endorsed #s437b #9941a504c #conformance-1047 #xfail-7 #slice-m1-tests
+#scrml #map #test #which-runtime-executed #scrml-runtime-vs-template #chunk-pruning #conformance-blind-spot #ternary-markup-giti033 #reconciliation-chunk #types-baseline #stdlib-client-registry #instrument-integrity #test-tier-vs-merge-gate #bite-proof #recursive-recount #bun-test #happy-dom #playwright #conformance #ci-gate #browser-baseline #failure-name-set #bidirectional-baseline #failure-baseline-json #skipped-step-behind-red-step #gate-topology #gate-hole #non-blocking-tier #documented-failure-baseline #cry-wolf #s34-census #expect-codes-only #pin-vs-mention #runtime-surfaced #e-mw-006-dead #e-channel-inside-page #execute-dont-grep #vacuous-test-skip #generated-test-artifact #property-tests #§51.13 #engine-audit #route-region #§20.8.8 #shell-timer-non-regression #migrate-codemod #fail-closed-codemod #rt-suffix #mounts-absent-pairs #not-codes-discrimination #structural-if #§17.1.2 #lint-diagnostics-stream #dbauth #live-pg-skip-graceful #cloud-ci-http-flaky #snippet-gate #facts-gate #spec-index-gate #§34.0 #gap-marker-parser #proven-gate #new-ref-push-skip #changelog-dereferenced #facts-md-authority #e-fn-equals-body #reparse-swallowed-errors #subparse-span-rebase #match-arm-autoawait #crossmodule-async-markup #conformance-855 #cps-choke-point-landed #w-if-in-each #corpus-emit-differential #corpus-check-goggles #pre-land-gate #codegen-task-shape #dual-goggle #node-check-blind-to-tla #bun-vm-script-blind #truncated-probe #hard-req-markers #1878-sources #7254-artifacts #exit-code-2-invalid-comparison #self-retiring-guard #async-name-provider #u1-browser-runtime-test #execute-dont-grep #failure-baseline-unchanged-is-a-claim #narrowed-blanket-assertion #reset-init-thunk-reassignment #each-nested-if-not-reactive #mangler-region-fencing #execute-dont-grep #residual-map-in-suite #negative-dependency-test #authed-server-fn-response-http #real-http-assertion #oracle-shared-the-blind-spot #s276-shape #tolerate-or-assert-bare #show-false-ssr-REVERTED #ctrl-017-020-revert-guard #counter-gate-case #test-deleted-with-reverted-code #keyword-prefixed-tail #rcdata-restricted-parent #880-conformance #1334-tests #neg-case-is-the-assertion #escape-hatch-case #prescribed-fix-compiles-clean #emit-path-matrix #e-sql-006-neg-matrix #all-paths-trio #member-assign-tail-voids #two-routes-disagreeing #§18.5-four-routes #expected-json-is-the-assertion #rationale-prose-is-not #derived-dir-not-new #probe-defects-in-scope #state-gap-integrity #1339-tests #883-conformance #position-axis #enumeration-missed-a-member #export-for-testability #cannot-isolate-the-subject #collect-file-level-binding-roots-no-seen-set #same-class-opposite-failure-modes #silent-miscompile-vs-fail-loud #assert-emitted-text-not-a-diagnostic #absence-of-emission-has-no-code #deny-set-danger-is-over-inclusion #artifact-tier-catches-the-leak #facts-counts-only-test-js #1361-is-not-a-contradiction #conformance-tier-vs-conformance-cases #read-the-expected-json #notcodeprefixes #1378-tests #expect-shapes #validate-expect-containers #expect-vocabulary #empty-assertion-rejected #serverstub-is-input #instrument-integrity #bracketed-vs-parsed #refuse-unparsed-entries #refuse-degenerate-scope #exit-2-instrument-broken #delta-lint #delta-log-baseline #merge-union-gitattributes #optional-marker-token #grep-match-is-not-assertion #invariant-56-timeout #seven-new-merge-blockers #bite-proven #declaration-form-parameterised #pinned-343 #spacing-agnostic-assertion #field-presence-not-byte-layout #1398-tests #category-dirs-plus-root-level #browser-tier-not-in-pre-commit #state-block-statement-form-suite #known-open-pinned-not-endorsed #s437b #9941a504c #conformance-1047 #xfail-7 #slice-m1-tests #s440 #cf62b415 #slice-m3 #footprint-grade #bite-matrix #mutation-harness #typer-tests
 #ctrl-025-028 #tilde-accumulator #codecounts-is-an-emission-property #neg-case-pins-cardinality #case-flipped-sides #integration-tier-is-not-gated #1425-tests #897-conformance
 #1436-tests #897-conformance-flat #normative-widening-zero-conformance-cases #template-literal-classification-suite #unit-pin-is-not-a-conformance-pin
 #s405 #1440-tests #905-conformance #54-category-dirs #root-level-test-files-14 #mapgen-keys-on-first-subdir #definition-boundary-not-stale-figure #conformance-corpus-bridge-outside #engine-statechild-prose-punctuation #already-broken-upstream-pinned #mechanical-seam-test #mediation-marked #the-split-describe-block #protect-case-dir-10 #zero-over-an-unexercised-path #unloweredscrmlsyntax #emitted-bytes-gate #test-generated-regenerated

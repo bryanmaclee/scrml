@@ -545,7 +545,7 @@ REGISTRY.set("program", {
     // Session/auth attributes (Option C hybrid — approved 2026-03-28)
     ["auth",          attr("string")],    // "required" | "optional" | absent (default: absent)
     ["loginRedirect", attr("string")],    // redirect path when auth fails (default: "/login")
-    ["csrf",          attr("string")],    // "auto" | "off" (default: "off")
+    ["csrf",          attr("string")],    // "auto" | "off" (default under auth=: "auto" — §40.2 S441)
     ["sessionExpiry", attr("string")],    // session TTL (default: "1h")
     ["session-secure", attr("string")],   // §20.5.1 (i29e B4b) — "true" | "false" (default: "true" → __Host- + always-Secure)
     // §40.7 documentary attributes (HTML head metadata, Phase A1a 2026-05-05)
