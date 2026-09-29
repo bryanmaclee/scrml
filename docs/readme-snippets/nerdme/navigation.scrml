@@ -1,0 +1,11 @@
+// NERDME.md "Client navigation" — the persistent shell. Gated by scripts/snippet-gate.js.
+// In a real app the routes live in pages/*.scrml and compose into <outlet/>.
+<program>
+<nav>
+    <a href="/">Home</a>
+    <a href="/settings">Settings</a>
+    <a href="/logout" hard>Log out</a>
+</nav>
+<button onclick=navigate("/settings")>Open settings</button>
+<outlet/>
+</program>
