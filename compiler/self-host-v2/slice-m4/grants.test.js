@@ -63,6 +63,13 @@ describe("`[free, insert, remove, writable]` — anywhere covers end and front",
     program.f();
     expect([...document.querySelectorAll("main li")].map((li) => li.textContent)).toEqual(["a", "b", "c"]);
   });
+  test("`filter` is a SHRINK: granted by `remove`, refused under `insert` alone", () => {
+    expect(codes("string[free, remove]", `@xs = @xs.filter(x => true)`)).toEqual(GRANTED_NOT_LOWERED);
+    expect(codes("string[free, insert]", `@xs = @xs.filter(x => true)`)).toEqual(["E-WRITE-NOT-GRANTED"]);
+  });
+  test("a SHRINK-only type (`[free, pop]`) grants pop (no growing grant needed)", () => {
+    expect(codes("string[free, pop]", `@xs.pop()`)).toEqual(GRANTED_NOT_LOWERED);
+  });
   test("`remove` alone grants no growing edit", () => {
     expect(codes("string[free, remove]", `@xs.push("a")`)).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
