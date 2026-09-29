@@ -34,3 +34,33 @@ the ingest shim's / impl#1's form, not the §66 front end's).
 
 PLAN (least missing surface first): 66.19.5 audit → 66.19.6 engine → 66.19.2 form → 66.19.4 theme (non-CSS parts only,
 if reached). Core-blocked constructs are implemented up to the Core boundary and reported.
+
+## Log (continued)
+- 2026-09-29 — PLAN CHANGE: §66.19.6 first — it is the one program with no Core-blocked construct (the survey's
+  audit row needs a host call and `bind:`, neither expressible in Core, and core.scrml is off-limits).
+- 2026-09-29 — §66.19.6 (engine as `single`) — FRONT END + RUN TEST GREEN:
+  - lex: `LexStop.Shorthand` (a `:`-shorthand body stops before the opener's depth-0 `>` / `/>`).
+  - ast: `AStateChild.body: ANode[]` (O5 RULED (1i): a state-child's body is that variant's markup).
+  - parse: §4.14 `:`-shorthand body on any opener (`parseShorthand` → one Interp node; `/>` after it is
+    E-CLOSER-001; on a void element E-COLON-SHORTHAND-ON-VOID; on a declaration opener E-PARSE-SHORTHAND);
+    state-children take a shorthand or a bare body (the E-PARSE-STATE-CHILD refusal is gone).
+  - analyze (ADDITIVE, commit 5cf1ba3d): a declaration with typed attributes / `renders` inside `<program>` is a
+    USER declaration (`isNestedUserDecl`, `withNestedStubs`; `programFields` skips it instead of refusing);
+    `<*f/>` of a field of the enclosing declaration (program cells included) whose `rule=` graph has state-child
+    bodies → `ElemFact.MStateView(StateView{decl, inst, idx, enumSym, arms})`; state-child bodies are resolved
+    in the declaring declaration's context (`stateBodies`); `single` on a child field of a multi-instance
+    declaration → E-COMPONENT-ENGINE-SCOPE (§66.13.4); a plain `<x/>` of a `single` program cell →
+    E-BOOTSTRAP-UNSUPPORTED naming ⚑ O55 (never an HTML element); typer walks nested declarations.
+  - lower: nested declarations' renders (`nestedSyntaxes`); `MStateView` → `View.Cond` (one arm per body,
+    test = field EqPrim variant).
+  - DECISION D-S442-1: `<phase:Phase=.Idle single>` (own value + state-children, no attributes) is a PROGRAM
+    CELL (R4: the program is a `single` declaration whose top-level declarations are its fields) — the same
+    representation as `<let count:int=0/>`; `single` is a no-op there (a program cell is one by construction).
+    A `single` USER declaration with an own value would need O19 (own value + attributes) — not met by §66.19.6.
+  - Tests: slice-m4/sources.test.js (drift guard, 4 sections) + slice-m4/engine.test.js (front end, 8 behaviour
+    tests run in happy-dom, negative lines: E-COMPONENT-ENGINE-SCOPE exact; E-DECL-SINGLE-INSTANTIATED = todo O55).
+  - Bite: slice-m3/bench/bite-matrix.js gained a FRONT-END section (bite-front.js, judged in bite.test.js):
+    6 front constructs, all CERTIFIED against the behaviour tests (`--front`, 18.5 s).
+  - Environment: two pre-commit runs failed on timing-sensitive impl#1 tests (a live-Postgres hook timeout,
+    an arrow-SQL test at 7.3 s > 5 s) while a bite run loaded the machine; the retry with no concurrent load
+    passed. Not a Bun-version artifact; heavy runs and commits are now serialized.

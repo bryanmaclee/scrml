@@ -17,18 +17,27 @@
 //                 gate must not pass silently);
 //             2 = a grade run itself failed to run.
 //
-// usage: bun compiler/self-host-v2/slice-m3/bench/bite-matrix.js [--report <path.md>]
+// FRONT-END SECTION (s442, bite-front.js): the §66 constructs the front end (lex / parse / analyze /
+// lower) gained for the §66.19 worked programs, certified against the slice-M4 BEHAVIOUR tests (each
+// program compiled from its verbatim SPEC source and run). A kill there is a behaviour test that fails
+// while the mutated program still compiles clean. `--front` runs this section alone.
+//
+// usage: bun compiler/self-host-v2/slice-m3/bench/bite-matrix.js [--front] [--report <path.md>]
 
 import { cpSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { judgeDeaths } from "./bite-lib.js";
+import { judgeFrontRun, isFrontKill } from "./bite-front.js";
 
 const ROOT = join(import.meta.dir, "..", "..", "..", "..");
 const SH = "compiler/self-host-v2";
 const PRINT = `${SH}/print.scrml`;
 const RT = `${SH}/slice-m1/runtime/runtime.js`;
 const INGEST = `${SH}/ingest.scrml`;
+const PARSE = `${SH}/parse.scrml`;
+const ANALYZE = `${SH}/analyze.scrml`;
+const LOWER = `${SH}/lower.scrml`;
 
 // Each mutation corrupts ONE construct. `from` must occur exactly once in `file`.
 const MUTATIONS = [
@@ -114,6 +123,68 @@ const MUTATIONS = [
     from: "return viewsOf([View.Text(v)], [])", to: "return viewsOf([], [])" },
 ];
 
+// ---- the FRONT-END section (s442): construct → corruption → the slice-m4 behaviour tests it must kill ----
+// `tests` are slice-m4 test files; only their `behaviour` tests run (`-t behaviour`).
+const FRONT_MUTATIONS = [
+  // §66.19.6 — an engine as a `single` declaration
+  { c: "Parse.ShorthandBody", id: "a `:`-shorthand body's expression is dropped (an empty text)", file: PARSE,
+    from: "const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }",
+    to: 'const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }', tests: ["engine.test.js"] },
+  { c: "Analyze.StateBodies", id: "state-child bodies are never resolved (no facts for their expressions)", file: ANALYZE,
+    from: "st = resolveNodes(renv, stateBodies(ds), st)", to: "st = resolveNodes(renv, [], st)", tests: ["engine.test.js"] },
+  { c: "Analyze.StateView", id: "every state-view arm is keyed to the enum's first variant", file: ANALYZE,
+    from: "arms = arms.concat([{ variant: v, body: c.body }])", to: "arms = arms.concat([{ variant: 0, body: c.body }])", tests: ["engine.test.js"] },
+  { c: "Lower.StateView", id: "a state-view arm tests the NEXT variant", file: LOWER,
+    from: "Expr.Lit(Literal.Variant(v.enumSym, a.variant))", to: "Expr.Lit(Literal.Variant(v.enumSym, a.variant + 1))", tests: ["engine.test.js"] },
+  { c: "Analyze.NestedDecl", id: "a declaration inside `<program>` is not stubbed as a user declaration (its uses read as HTML)", file: ANALYZE,
+    from: "                if (isNestedUserDecl(d)) {\n                    const n: RDeclStubs", to: "                if (false) {\n                    const n: RDeclStubs", tests: ["engine.test.js"] },
+  { c: "Lower.NestedDeclSyntax", id: "a nested declaration's renders is never lowered", file: LOWER,
+    from: ".concat(nestedSyntaxes(file, p.items))", to: "", tests: ["engine.test.js"] },
+];
+
+function runFront(tests) {
+  const args = ["test", ...tests.map((t) => `./${SH}/slice-m4/${t}`), "-t", "behaviour"];
+  const r = spawnSync("bun", args, { cwd: MIRROR, encoding: "utf8", timeout: 600000, maxBuffer: 64 * 1024 * 1024 });
+  return judgeFrontRun((r.stdout ?? "") + (r.stderr ?? ""));
+}
+
+function frontSection(L) {
+  const frows = [];
+  const fkills = new Map();
+  const files = [...new Set(FRONT_MUTATIONS.flatMap((m) => m.tests))];
+  const clean = runFront(files);
+  const cleanOk = clean.ran && !clean.rejected && clean.fail === 0 && clean.pass > 0;
+  if (!cleanOk) bad = true;
+  for (const m of FRONT_MUTATIONS) {
+    const path = join(MIRROR, m.file);
+    const orig = readFileSync(path, "utf8");
+    const n = orig.split(m.from).length - 1;
+    if (n !== 1) {
+      frows.push(`| ${m.c} | ${m.id} | site found ${n}× — NOT RUN (hollow) | — |`);
+      bad = true;
+      continue;
+    }
+    try {
+      writeFileSync(path, orig.replace(m.from, m.to));
+      const j = runFront(m.tests);
+      if (!fkills.has(m.c)) fkills.set(m.c, 0);
+      if (isFrontKill(j)) fkills.set(m.c, fkills.get(m.c) + j.fail);
+      const verdict = isFrontKill(j) ? `${j.fail} of ${j.pass + j.fail} killed` : `**none — NOT a bite** (${j.why || "every behaviour test passed"})`;
+      frows.push(`| ${m.c} | ${m.id} | ${verdict} | ${m.tests.join(", ")} |`);
+    } finally {
+      writeFileSync(path, orig);
+    }
+  }
+  const constructs = [...new Set(FRONT_MUTATIONS.map((m) => m.c))];
+  const certified = constructs.filter((c) => (fkills.get(c) ?? 0) > 0);
+  const uncertified = constructs.filter((c) => !certified.includes(c));
+  L.push("# Bite matrix — front-end (§66) constructs, graded by the slice-M4 behaviour tests", "");
+  L.push(`Clean mirror behaviour run: ${clean.pass} pass / ${clean.fail} fail${cleanOk ? "" : " — **NOT CLEAN** (" + (clean.why || "failures") + ")"}.`, "");
+  L.push("| construct | corruption | behaviour tests killed (program still compiles clean) | tests |", "|---|---|---|---|", ...frows, "");
+  L.push(`## FRONT CERTIFIED (${certified.length})`, "", certified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
+  L.push(`## FRONT UNCERTIFIED (${uncertified.length})`, "", uncertified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
+}
+
 function grade(sub, only, outJson) {
   const args = ["scripts/hybrid.ts", "--swap", `CG=${sub}`, "--footprint", "--json", outJson];
   if (only) args.push("--only", only.join(","));
@@ -130,6 +201,7 @@ function grade(sub, only, outJson) {
 }
 
 const reportPath = (() => { const i = process.argv.indexOf("--report"); return i === -1 ? null : process.argv[i + 1]; })();
+const FRONT_ONLY = process.argv.includes("--front");
 
 const MIRROR = join(ROOT, ".tmp", `bite-matrix-${process.pid}`);
 rmSync(MIRROR, { recursive: true, force: true });
@@ -147,6 +219,15 @@ const rows = [];
 const kills = new Map(); // construct → Set(killed runtime passes)
 const t0 = performance.now();
 try {
+  if (FRONT_ONLY) {
+    const L = [];
+    frontSection(L);
+    L.push("", `(${((performance.now() - t0) / 1000).toFixed(1)}s)`);
+    const text = L.join("\n") + "\n";
+    console.log(text);
+    if (reportPath) writeFileSync(reportPath, text);
+    process.exitCode = bad ? 1 : 0;
+  } else {
   // The clean grade on the SOURCE, then the unmutated mirror must reproduce it exactly.
   const clean = grade(join(ROOT, SH, "slice-m3", "substitute.js"), null, OUT);
   if (!clean.ran) { console.error(`the clean grade did not run: ${clean.why}`); process.exit(2); }
@@ -196,10 +277,13 @@ try {
   L.push(`## CERTIFIED (${certified.length}) — a corruption kills ≥1 runtime pass`, "", certified.map((c) => "`" + c + "`").join(" · ") || "(none)", "");
   L.push(`## UNCERTIFIED (${uncertified.length}) — exercised by a passing runtime case, but no evidence it is implemented`, "");
   for (const u of uncertified) L.push(`- ${u}`);
+  L.push("");
+  frontSection(L);
   L.push("", `(${((performance.now() - t0) / 1000).toFixed(1)}s)`);
   const text = L.join("\n") + "\n";
   console.log(text);
   if (reportPath) writeFileSync(reportPath, text);
+  }
 } finally {
   rmSync(MIRROR, { recursive: true, force: true });
 }

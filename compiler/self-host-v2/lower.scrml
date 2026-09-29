@@ -35,7 +35,7 @@ ${
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
-             NameFact, ValueFact, EffectFact, BindFact, ElemFact, Tables, TypedProgram,
+             NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, Tables, TypedProgram,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo } from "./analyze.scrml"
 
     export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
@@ -671,8 +671,23 @@ ${
             .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
+            .MStateView(v: v) :> [stateView(c, v)]
             not :> []
         }
+    }
+
+    // s442 — `<*f/>` of a graph field (O5 (1i)): a View.Cond with one arm per
+    // state-child body, each shown while the field holds that variant. The
+    // test reads the field (a nullary-variant compare, EqPrim — §45) through
+    // the instance analyze resolved; the bodies are lowered in place.
+    fn stateView(c: LC, v: StateView) -> View {
+        const read: Expr = cellRead(c, v.decl, instOf(c, v.inst), [{ owner: v.decl, idx: v.idx }])
+        let arms: CondArm[] = []
+        for (const a of v.arms) {
+            const test: Expr = Expr.Prim(PrimOp.EqPrim, [read, Expr.Lit(Literal.Variant(v.enumSym, a.variant))])
+            arms = arms.concat([{ test: test, body: lowerNodes(c, a.body) }])
+        }
+        return View.Cond(arms)
     }
 
     fn attrKind(c: LC, a: AAttr) -> AttrKind | not {
@@ -865,7 +880,7 @@ ${
         const k: AItemK = it.k
         return match k {
             .DeclItem(d: d) :> [userSyntax(file, d)]
-            .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true }]
+            .ProgramItem(p: p) :> [{ nid: p.nid, file: file, renders: programMarkup(p.items), hasRenders: true }].concat(nestedSyntaxes(file, p.items))
             .ImportItem(i: i) :> []
             .TypeItem(t: t) :> []
             .FnItem(f: f) :> []
@@ -878,6 +893,29 @@ ${
         if (r is not) return { nid: d.nid, file: file, renders: [], hasRenders: false }
         const node: ANode = { nid: -1, span: r.span, k: ANodeK.Elem(r) }
         return { nid: d.nid, file: file, renders: [node], hasRenders: true }
+    }
+
+    // s442: the declarations written inside `<program>` (a nested user
+    // declaration's renders is its own; a program cell's is none — syntaxOf
+    // is keyed by the declaration's nid, so a cell's entry is never asked for).
+    fn nestedSyntaxes(file: string, items: AItem[]) -> DeclSyntax[] {
+        let out: DeclSyntax[] = []
+        for (const it of items) {
+            const k: AItemK = it.k
+            out = out.concat(nestedDeclSyntax(file, k))
+        }
+        return out
+    }
+
+    fn nestedDeclSyntax(file: string, k: AItemK) -> DeclSyntax[] {
+        return match k {
+            .DeclItem(d: d) :> [userSyntax(file, d)]
+            .MarkupItem(n: n) :> []
+            .ImportItem(i: i) :> []
+            .TypeItem(t: t) :> []
+            .FnItem(f: f) :> []
+            .ProgramItem(p: p) :> []
+        }
     }
 
     fn programMarkup(items: AItem[]) -> ANode[] {
