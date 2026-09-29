@@ -1460,10 +1460,24 @@ ${
                 const n: string = ownTypeName(d)
                 if (n != "" && declNames.indexOf(n) >= 0) {
                     st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
+                } else if (hasOwnValue(d.own) && d.attrs.length > 0) {
+                    // r1 G2: an own value AND typed attributes on one declaration —
+                    // what `@x` then is, is ⚑ O19 (OPEN). Refused, not decided.
+                    st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ">` has an own value AND attributes — what `@" + d.name + "` then names is ⚑ O19 (not ruled); the bootstrap does not decide it")
                 }
             }
         }
         return st
+    }
+
+    fn hasOwnValue(v: AAttrValue) -> boolean {
+        return match v {
+            .NoValue :> false
+            .Quoted(v: x) :> true
+            .Bare(e: x) :> true
+            .Paren(e: x) :> true
+            .Braced(b: b) :> true
+        }
     }
 
     fn ownTypeName(d: ADecl) -> string {
@@ -3375,10 +3389,24 @@ ${
         if (nodes.length == 0) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — `<" + e.tag + ">` has no `renders` (a use of a declaration with no markup is ⚑ O51)")
         }
+        // r1 G3: an attribute with no default (⚑ O33) has no value in the shared
+        // instance — provably, since a `<*x/>` reference sets nothing (§66.6.7).
+        for (const f of d.info.fields) {
+            if (isAttributeRole(f.role) && !hasOwnValue(f.init)) {
+                return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — `<" + e.tag + ">`'s attribute `" + f.sym.hint + "` has no default, and a `<*x/>` reference sets none: its value in the shared instance is ⚑ O33 (not ruled)")
+            }
+        }
         if (!constructsNothing(env.g, nodes)) {
             return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — `<" + e.tag + ">`'s renders constructs instances (a use, `as=` or `<slot/>`); Core has no View.Star to render an existing instance's own children (M1 D4), so the bootstrap only inlines markup that constructs nothing")
         }
         return addElem(st, e.nid, ElemFact.MInline({ nodes: nodes, subst: InstRef.Shared(d.info.sym) }))
+    }
+
+    fn isAttributeRole(r: FieldRole) -> boolean {
+        return match r {
+            .Attribute :> true
+            .Child :> false
+        }
     }
 
     fn constructsNothing(g: Globals, nodes: ANode[]) -> boolean {
