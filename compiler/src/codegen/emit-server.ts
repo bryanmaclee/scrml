@@ -6171,6 +6171,20 @@ export function generateServerJs(
         );
       }
       lines.push(`async function _scrml_ssr_compose_handler(_scrml_req) {`);
+      // §52.13 — this route SERVES the page document, so under `auth="required"` it
+      // runs the same gate as `_scrml_protected_document.guard` (the host's static
+      // branch). It is mounted as a route and dispatched BEFORE that static branch,
+      // so without this an anonymous GET of the page path got the markup at 200
+      // (S441 review F1 — reopened g-auth-required-does-not-protect-the-served-html-
+      // document once csrf="auto", which always emits this route, became the default
+      // under auth=). The gate runs first: no seed query executes for an anonymous
+      // request. `authMiddlewareEntry` here is always an auth="required" entry (the
+      // only mode route-inference registers), and `_scrml_auth_check` is emitted for
+      // every such web-app unit — the same condition this route is emitted under.
+      if (authMiddlewareEntry) {
+        lines.push(`  const _scrml_doc_auth = _scrml_auth_check(_scrml_req);`);
+        lines.push(`  if (_scrml_doc_auth) return _scrml_doc_auth;`);
+      }
       if (_hasSsrSeed) {
         lines.push(`  const _scrml_ssr_state = {};`);
       }
@@ -6365,6 +6379,40 @@ export function generateServerJs(
   if (channelNodes.length > 0) {
     const wsHandlerLines = emitChannelWsHandlers(channelNodes, errors, filePath ?? "");
     for (const l of wsHandlerLines) lines.push(l);
+
+    // §40.2 (S441 ruling "yes on origin check") — the WebSocket upgrade is a GET,
+    // outside the CSRF token mechanism, and a browser attaches the session cookie to
+    // it. Without an Origin check a page on ANOTHER origin could open this socket as
+    // the signed-in viewer (cross-site WebSocket hijacking): measured, it drove the
+    // author's onserver:message handler and relayed a `__sync` write to every
+    // subscriber. One helper per server module; every channel upgrade route calls it.
+    // Web-app shape only: a headless program's channels carry no cookie credential.
+    if (_webAppShape) {
+      lines.push("// --- §40.2 WebSocket upgrade Origin check (compiler-generated) ---");
+      lines.push("// A browser always sends Origin on a WebSocket handshake. Accept the upgrade only when it");
+      lines.push("// names THIS server: the same host (X-Forwarded-Host when a proxy sets it, else the");
+      lines.push("// request's own host) and the same scheme (X-Forwarded-Proto, else the request's), except");
+      lines.push("// that an https page is accepted on a request that reached us as plain http (TLS ended at");
+      lines.push("// a proxy that sets no X-Forwarded-Proto). `Origin: null` (an opaque origin) is refused.");
+      lines.push("// No Origin header at all is a non-browser client, which cannot carry a victim's ambient");
+      lines.push("// cookie — allowed; the channel's auth check below still applies to it.");
+      lines.push("function _scrml_ws_origin_ok(req) {");
+      lines.push("  const origin = req.headers.get('origin');");
+      lines.push("  if (origin === null) return true;");
+      lines.push("  try {");
+      lines.push("    const _o = new URL(origin);");
+      lines.push("    const _u = new URL(req.url);");
+      lines.push("    const _host = (req.headers.get('x-forwarded-host') || '').split(',')[0].trim() || _u.host;");
+      lines.push("    const _proto = ((req.headers.get('x-forwarded-proto') || '').split(',')[0].trim() || _u.protocol.replace(':', '')).toLowerCase().replace(/^ws(s?)$/, 'http$1');");
+      lines.push("    const _self = new URL(_proto + '://' + _host);");
+      lines.push("    if (_o.host !== _self.host) return false;");
+      lines.push("    return _o.protocol === _self.protocol || (_o.protocol === 'https:' && _self.protocol === 'http:');");
+      lines.push("  } catch {");
+      lines.push("    return false;");
+      lines.push("  }");
+      lines.push("}");
+      lines.push("");
+    }
 
     for (const chNode of channelNodes) {
       const chServerLines = emitChannelServerJs(

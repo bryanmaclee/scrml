@@ -278,6 +278,16 @@ path is used — non-perturbing).
   composed `_scrml_ssr_compose_handler` output. Presence selects SSR mode (compose
   → mount the first-paint → seed `window.__scrml_ssr_state` → hydrate). `ssr:true`
   forces SSR mode without a first-paint assertion.
+- **`firstPaint.viewer`** — `"anonymous"` (default) | `"authenticated"` (S441). WHO
+  requests the document. An `auth="required"` page redirects an anonymous document
+  request (§52.13; §40.2 compose-route bullet), so its first paint is observable only
+  as an authenticated viewer. impl#1 authenticates by planting a session record the
+  emitted middleware resolves; the client half of the run stays anonymous.
+- **`firstPaint.anonymousRedirect`** — the expected `Location` of the ANONYMOUS document
+  request (always made in SSR mode), which SHALL be a 3xx redirect (S441, §52.13).
+  **Status: added S441 by the `s441-csrf-default-under-auth` fix round — NOT yet
+  ratified** as normative contract verbs (the ratified set above is `serverDb` +
+  `firstPaint`'s `contains`/`notContains`).
 
 **Contract status — RATIFIED (S236, user "ratify both").** `serverDb` + `firstPaint`
 are **RATIFIED normative language-1.0 conformance contract verbs** (impl#2 MUST honor

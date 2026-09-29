@@ -75,6 +75,24 @@ export interface McpConfig {
   mode: "dev-only" | "always";
 }
 
+/**
+ * §40.2 (S441 ruling) — the effective `csrf=` mode of a scope that declares `auth=`.
+ *
+ * Under `auth=`, `csrf="auto"` is the DEFAULT and only the literal `csrf="off"` opts
+ * out. It fails closed: an absent `csrf=` and any value outside the §52.13 set
+ * (`"auto" | "off"`; a bad literal already surfaces W-ATTR-002 — e.g. the retired
+ * `csrf="on"`) both resolve to `"auto"`, the same re-default-to-safe rule
+ * `session-secure=` follows. Before S441 an absent `csrf=` resolved to `"off"`, so
+ * adding `auth="required"` to an app REMOVED its CSRF gate
+ * (g-auth-program-without-csrf-attr-emits-no-csrf-check).
+ *
+ * The single source for every `csrf=` read on an auth-declaring scope: the
+ * `<program auth=>` config below, and route-inference's `<page auth=>` entry.
+ */
+export function effectiveCsrfUnderAuth(raw: string | null | undefined): "auto" | "off" {
+  return raw === "off" ? "off" : "auto";
+}
+
 export interface ProgramConfig {
   authConfig: AuthConfig | null;
   middlewareConfig: MiddlewareConfig | null;
@@ -117,7 +135,8 @@ export function computeProgramConfig(nodes: any[]): ProgramConfig {
     const authVal = getAttrValue("auth");
     if (authVal) {
       const loginRedirect = getAttrValue("loginRedirect") ?? "/login";
-      const csrf = getAttrValue("csrf") ?? "off";
+      // §40.2 — `csrf="auto"` is the default under `auth=`; only `csrf="off"` opts out.
+      const csrf = effectiveCsrfUnderAuth(getAttrValue("csrf"));
       const sessionExpiry = getAttrValue("sessionExpiry") ?? "1h";
       // §20.5.1 (S266, i29e B4b) — the session-cookie Secure mode ("true" default
       // → `__Host-scrml_sid` + always-Secure; "false" → plain `scrml_sid`, no

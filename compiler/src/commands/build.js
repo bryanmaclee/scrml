@@ -6,7 +6,9 @@
  * server entry point (dist/_server.js) that:
  *  - Imports all *.server.js route handler exports
  *  - Registers routes in a Bun.serve() fetch handler
- *  - Serves static files (HTML, CSS, client.js, runtime) as fallback
+ *  - Serves static files as fallback — ONLY the build's client artifacts and
+ *    passive media (SPEC §47.13 allowlist; never server modules, databases,
+ *    dotfiles, sources or maps)
  *  - Exposes a health check at /_scrml/health
  *  - Respects the PORT env var (default 3000)
  *  - Wires WebSocket channels (_scrml_ws_handlers) into Bun.serve() websocket: option
@@ -21,6 +23,7 @@ import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
 import { hasApplicationScopeRefusal, noFilesWrittenLine } from "./refusal-gate.js";
+import { STATIC_POLICY_EMIT_SOURCE } from "../static-serve-policy.js";
 
 /** Valid deployment target identifiers. */
 const VALID_TARGETS = ["fly", "railway", "render", "static", "docker"];
@@ -355,7 +358,7 @@ export function describeServerUnit(source, relPath) {
  *   build's `--idle-timeout` flag is not set.
  * @returns {string}
  */
-export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120, hashedAssets = []) {
+export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout = 120, hashedAssets = [], clientAssets = []) {
   const lines = [];
 
   // Determine if any module exports _scrml_ws_handlers (WebSocket channels present)
@@ -562,6 +565,19 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   lines.push("}");
   lines.push("");
 
+  // SPEC §47.13 — the static-serving ALLOWLIST (g-static-server-serves-db-and-server-
+  // source). The functions are emitted from the SAME source `scrml dev` imports
+  // (compiler/src/static-serve-policy.js), so the two servers cannot drift. The
+  // allowlist itself is the build's client-asset manifest, baked in here rather
+  // than read from disk at startup: nothing written into the deploy directory
+  // after the build can widen what this server hands out.
+  lines.push("// The client-asset manifest: every file this build wrote for the browser, plus");
+  lines.push("// what those files import. The ONLY non-media files this server hands out.");
+  lines.push(`const _SCRML_CLIENT_ASSETS = new Set(${JSON.stringify([...clientAssets].sort())});`);
+  lines.push("");
+  lines.push(STATIC_POLICY_EMIT_SOURCE);
+  lines.push("");
+
   // §40.3 — the dispatch body is emitted ONCE and mounted two ways: inline in
   // `async fetch()` when the program has no handle() onion (byte-identical to the
   // pre-onion output), or as a standalone `_scrml_dispatch(req, server)` that the
@@ -585,21 +601,25 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   dispatchBody.push("    }");
   dispatchBody.push("  }");
   dispatchBody.push("");
-  dispatchBody.push("  // Static file serving");
-  dispatchBody.push('  const pathname = url.pathname === "/" ? "/index.html" : url.pathname;');
+  dispatchBody.push("  // Static file serving — SPEC §47.13 allowlist (fail-closed)");
+  dispatchBody.push("  const staticPath = _scrml_static_request_path(url.pathname);");
+  dispatchBody.push('  if (staticPath === false) return new Response("Not found", { status: 404 });');
+  dispatchBody.push('  const pathname = staticPath === "/" ? "/index.html" : staticPath;');
   dispatchBody.push("  const candidates = [");
   dispatchBody.push("    join(SERVE_DIR, pathname),");
   dispatchBody.push("    join(SERVE_DIR, `${pathname}.html`),");
   dispatchBody.push("  ];");
   dispatchBody.push("");
   dispatchBody.push("  for (const candidate of candidates) {");
+  dispatchBody.push('    const rel = relative(SERVE_DIR, candidate).split(/[\\\\/]/).join("/");');
+  dispatchBody.push("    // Decided BEFORE the filesystem is touched: a denied path is never even stat'ed.");
+  dispatchBody.push("    if (!_scrml_static_servable(rel, _SCRML_CLIENT_ASSETS)) continue;");
   dispatchBody.push("    try {");
   dispatchBody.push("      const st = statSync(candidate);");
   dispatchBody.push("      if (st.isFile()) {");
   dispatchBody.push("        // adopter-#82 — cache policy: content-hashed artifacts (by exact");
   dispatchBody.push("        // set membership) are immutable; the HTML entry is no-cache; other");
   dispatchBody.push("        // static assets revalidate via ETag / Last-Modified → 304.");
-  dispatchBody.push('        const rel = relative(SERVE_DIR, candidate).split(/[\\\\/]/).join("/");');
   if (protectedDocs.length > 0) {
     // §52.13 — gate an auth-required document BEFORE serving (or 304-ing) it: an
     // unauthenticated request redirects to loginRedirect instead of leaking the
@@ -1049,7 +1069,7 @@ export async function runBuild(args) {
   // emitted server serves `immutable` by membership, not by filename shape.
   let serverEntry;
   try {
-    serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || []);
+    serverEntry = generateServerEntry(serverModules, mcpOpts, opts.idleTimeout, result.hashedAssets || [], result.clientAssets || []);
   } catch (err) {
     // §40.3/§40.8 E-MW-007 — more than one application declared a request
     // pipeline in this build. Report it as a build failure naming every

@@ -77,7 +77,9 @@ function buildFixture(label, sources) {
   expect(result.errors ?? []).toEqual([]);
 
   const modules = discoverServerRoutes(dist);
-  writeFileSync(join(dist, "_server.js"), generateServerEntry(modules));
+  // SPEC §47.13 — pass the client-asset manifest exactly as `scrml build` does;
+  // without it the emitted server serves no client artifact (fail-closed).
+  writeFileSync(join(dist, "_server.js"), generateServerEntry(modules, null, 120, [], result.clientAssets));
 
   return { dir: dist, assets: readdirSync(dist), entryFiles };
 }

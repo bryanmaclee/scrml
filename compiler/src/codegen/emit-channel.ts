@@ -876,6 +876,14 @@ export function emitChannelServerJs(node: any, errors: CGError[], filePath: stri
   lines.push(`  isWebSocket: true,`);
   lines.push(`  handler: (req, server) => {`);
 
+  // §40.2 (S441 ruling) — refuse a cross-origin upgrade (cross-site WebSocket
+  // hijacking). `_scrml_ws_origin_ok` is emitted once per web-app server module by
+  // emit-server.ts, under the same `webAppShape` condition as this call.
+  if (webAppShape) {
+    lines.push(`    // Cross-origin upgrade refused (§40.2 — cross-site WebSocket hijacking)`);
+    lines.push(`    if (!_scrml_ws_origin_ok(req)) return new Response("Cross-origin WebSocket upgrade refused", { status: 403 });`);
+  }
+
   // Fork 2A — the cookie-session WS upgrade auth guard is WEB-APP-ONLY. `_scrml_auth_check`
   // is emitted only in web-app shape (emit-server.ts gates its definition on
   // `_webAppShape`), so a headless listener-owning program must NOT reference it —
