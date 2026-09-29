@@ -16594,6 +16594,240 @@ function isCallableOrOpaqueHandlerStmt(stmt, value) {
 }
 
 /**
+ * Parse ONE handler value's raw text as a §5.2.3 statement list — the function-body
+ * statement grammar (§7.3). Shared by `attachHandlerStatementList` (TAB / tree
+ * paths) and `parseHandlerStatementsForCheck` (the type system's check-only view).
+ * Returns `null` when the value yields no statement view (the frame did not come
+ * back as ONE function and there were no parse errors, or the parser threw); else
+ * `{ tokens, stmts, parseErrors }` (`stmts` may be null when parse errors exist).
+ */
+function parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol) {
+  const parseErrors = [];
+  let tokens, stmts;
+  try {
+    // Parse the value as a FUNCTION BODY — §5.2.3: "the same statement grammar
+    // as a function body (§7.3)". The value's own tokens are framed as
+    // `function <synthetic>() { … }` and the body of the resulting
+    // function-decl is taken, so the statements come from the nested-body path
+    // (`parseOneStatement`) exactly as a function body's do: a `@x = …` is a
+    // WRITE (`_isReactiveAssign`, write-checked by SYM like any function-body
+    // write — round-4 #3), not a top-level declaration. The frame tokens borrow
+    // the first real token's span; the statements keep their own file spans.
+    tokens = tokenizeLogic(value.raw, baseOffset, baseLine, baseCol, []);
+    const inner = tokens.slice();
+    const last = inner[inner.length - 1];
+    const eof = last && last.kind === "EOF" ? inner.pop() : null;
+    const frameSpan = (inner[0] ?? eof)?.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol };
+    const frame = (kind, text) => ({ kind, text, span: frameSpan });
+    const framed = [
+      frame("KEYWORD", "function"), frame("IDENT", "__scrml_handler_block__"),
+      frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
+      ...inner,
+      frame("PUNCT", "}"), eof ?? frame("EOF", ""),
+    ];
+    // The tree path (`attachHandlerStatementListsInTree`, e.g. a `<match>` arm
+    // re-parsed by the native front-end at emit time) has no source block. The
+    // statement parser dereferences `parentBlock.type` whenever it builds a child
+    // block — a `!{}` guard is one — so a null parent THREW here, the catch below
+    // swallowed it, and the arm's handler fell back to the single-expression
+    // path: the guard and every later statement were silently dropped (S440 F3).
+    // A handler value always sits on a markup element, so that is its parent kind.
+    const parent = parentBlock ?? { type: "markup", raw: value.raw, span: value.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol } };
+    const top = parseLogicBody(framed, filePath, [], parent, idCounter, parseErrors, "logic");
+    // The frame not coming back as ONE function means the value broke out of it
+    // (e.g. an unbalanced `}`): no statement view; parse errors are still judged below.
+    stmts = Array.isArray(top) && top.length === 1 && top[0] && top[0].kind === "function-decl" && Array.isArray(top[0].body)
+      ? top[0].body
+      : null;
+    if (stmts === null && parseErrors.length === 0) return null;
+  } catch (_e) {
+    return null; // the statement view is optional; the existing single-expression path stands
+  }
+  return { tokens, stmts, parseErrors };
+}
+
+/** Only a FATAL diagnostic (no severity, or "error") disqualifies a handler parse. */
+function isFatalHandlerParseError(e) {
+  return !!e && typeof e === "object" &&
+    (e.severity === "error" || (e.severity === undefined && !(typeof e.code === "string" && /^[WI]-/.test(e.code))));
+}
+
+/**
+ * Index of the bracket matching `raw[open]` (`(`/`{`/`[`), skipping string and
+ * template literals; -1 when unbalanced.
+ */
+function matchHandlerBracket(raw, open) {
+  const pairs = { "(": ")", "{": "}", "[": "]" };
+  const stack = [];
+  for (let i = open; i < raw.length; i++) {
+    const c = raw[i];
+    if (c === '"' || c === "'" || c === "`") {
+      for (i++; i < raw.length && raw[i] !== c; i++) if (raw[i] === "\\") i++;
+      continue;
+    }
+    if (pairs[c]) stack.push(pairs[c]);
+    else if (c === ")" || c === "}" || c === "]") {
+      if (stack.pop() !== c) return -1;
+      if (stack.length === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Split an ARROW-valued handler (`[async] (p) => BODY`, `[async] p => BODY`) into
+ * its parameter text and body text. A braced body `{ … }` that closes at the end
+ * of the value yields its interior; anything else is an expression body. Returns
+ * null when `raw` is not an arrow.
+ */
+function splitArrowHandlerValue(raw) {
+  let i = 0;
+  const n = raw.length;
+  const ws = () => { while (i < n && /\s/.test(raw[i])) i++; };
+  ws();
+  if (raw.startsWith("async", i) && /[\s(]/.test(raw[i + 5] ?? "")) { i += 5; ws(); }
+  let paramText;
+  if (raw[i] === "(") {
+    const close = matchHandlerBracket(raw, i);
+    if (close < 0) return null;
+    paramText = raw.slice(i + 1, close).trim();
+    i = close + 1;
+  } else {
+    const m = /^[A-Za-z_$][A-Za-z0-9_$]*/.exec(raw.slice(i));
+    if (!m || m[0] === "function") return null;
+    paramText = m[0];
+    i += m[0].length;
+  }
+  ws();
+  if (!raw.startsWith("=>", i)) return null;
+  i += 2;
+  ws();
+  if (raw[i] === "{") {
+    const close = matchHandlerBracket(raw, i);
+    if (close >= 0 && raw.slice(close + 1).trim() === "") {
+      return { paramText, body: raw.slice(i + 1, close), bodyOffset: i + 1, braced: true };
+    }
+    // `(e) => { … }; more` — the arrow is only the FIRST statement of a sequence.
+    return null;
+  }
+  return { paramText, body: raw.slice(i), bodyOffset: i, braced: false };
+}
+
+/**
+ * §19.4.3 (S440 ruling — "check arrow bodies. An arrow body runs on the event
+ * exactly like `{ risky() }`, so check it the same way and emit its guard") —
+ * the statement list of an ARROW-valued handler's body, parsed with the same
+ * function-body statement grammar as an inline block. The arrow's parameter
+ * receives the event, so a single parameter `p` becomes a leading
+ * `const p = event` statement (binding it for the checker and for the
+ * statement-list emitter). Returns `undefined` when the value is not an
+ * arrow-valued handler this view models (not an arrow; an arrow that is only the
+ * first statement of a sequence; more than one parameter), else
+ * `{ stmts, fatal, nonFatal }`.
+ */
+function parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol) {
+  const split = splitArrowHandlerValue(value.raw);
+  if (!split) return undefined;
+  const { paramText, body, bodyOffset } = split;
+  // Top-level comma → several parameters; a handler passes only the event.
+  let depth = 0, multi = false;
+  for (const c of paramText) {
+    if (c === "(" || c === "{" || c === "[") depth++;
+    else if (c === ")" || c === "}" || c === "]") depth--;
+    else if (c === "," && depth === 0) { multi = true; break; }
+  }
+  // Several parameters: not modelled (a handler passes only the event) — left to
+  // the regular path, which emits the arrow as-is and does not check its body.
+  // Same for a NON-SIMPLE parameter — a default (`e = 1`), a rest (`...a`), or a
+  // destructuring pattern carrying a default (`({ t } = {})`, `({ t = 1 })`):
+  // the `const <param> = event` prelude cannot express it (S440 N5 — it emitted
+  // `const e = 1 = event`, E-CODEGEN-INVALID-LOGIC).
+  if (multi || /=|\.\.\./.test(paramText)) return undefined;
+  const prefix = value.raw.slice(0, bodyOffset);
+  const nl = (prefix.match(/\n/g) ?? []).length;
+  const bodyLine = baseLine + nl;
+  const bodyCol = nl === 0 ? baseCol + bodyOffset : bodyOffset - prefix.lastIndexOf("\n");
+  const bodyRes = parseHandlerStatementListCore(
+    { raw: body, span: value.span }, filePath, idCounter, parentBlock,
+    baseOffset + bodyOffset, bodyLine, bodyCol,
+  );
+  if (!bodyRes || !Array.isArray(bodyRes.stmts)) return { stmts: [], fatal: true, nonFatal: [] };
+  // An expression body is ONE expression. When the text after `=>` parses to
+  // several statements (`() => @r = 1; @r2 = 2`), the arrow is only the first
+  // statement of a sequence — not an arrow-valued handler; the regular
+  // statement-list path owns it (and reports it).
+  if (!split.braced && bodyRes.stmts.length !== 1) return undefined;
+  let prelude = [];
+  const param = paramText.replace(/\s*:\s*[A-Za-z_$][\w$.<>\[\]| ]*$/, "").trim(); // drop a type annotation
+  if (param !== "" && param !== "event") {
+    const preRes = parseHandlerStatementListCore(
+      { raw: `const ${param} = event`, span: value.span }, filePath, idCounter, parentBlock,
+      baseOffset, baseLine, baseCol,
+    );
+    if (!preRes || !Array.isArray(preRes.stmts) || preRes.parseErrors.some(isFatalHandlerParseError)) {
+      return { stmts: [], fatal: true, nonFatal: [] };
+    }
+    prelude = preRes.stmts;
+    for (const st of prelude) if (st && typeof st === "object") st._handlerParamPrelude = true;
+  }
+  const fatal = bodyRes.parseErrors.some(isFatalHandlerParseError);
+  const nonFatal = bodyRes.parseErrors.filter((e) => e && typeof e === "object" && !isFatalHandlerParseError(e));
+  return { stmts: [...prelude, ...bodyRes.stmts], fatal, nonFatal };
+}
+
+/** Does a statement list hold a `!{}` guard anywhere (not inside a nested function)? */
+function handlerStmtsContainGuard(node, seen = new Set()) {
+  if (!node || typeof node !== "object" || seen.has(node)) return false;
+  seen.add(node);
+  if (Array.isArray(node)) return node.some((x) => handlerStmtsContainGuard(x, seen));
+  if (node.kind === "guarded-expr") return true;
+  if (node.kind === "function-decl") return false;
+  for (const k of Object.keys(node)) {
+    if (k === "span") continue;
+    const v = node[k];
+    if (v && typeof v === "object" && handlerStmtsContainGuard(v, seen)) return true;
+  }
+  return false;
+}
+
+const _handlerCheckStmtIds = { next: HANDLER_STMT_ID_BASE + 750_000_000 };
+
+/**
+ * §19.4.3 (S440) — the statement view of an event-handler value FOR CHECKING
+ * ONLY, independent of which codegen path the value takes. A one-statement,
+ * single-line value keeps the single-expression codegen path (no `handlerBlock`)
+ * but its statement — `if (c) risky()`, `for (…) risky()`, `risky()` — must be
+ * checked exactly as the same statement in a multi-statement handler is, or the
+ * answer depends on the statement count again. An ARROW-valued handler
+ * (`${(e) => risky()}`, `${() => { … }}`) yields its BODY's statements (S440
+ * ruling: an arrow body runs on the event exactly like `{ … }`). Returns the
+ * parsed statements, or `null` when there is nothing to check this way: an
+ * unparseable value, or a callable / opaque one (a function reference, an escape
+ * hatch). The nodes are fresh (their own id range) and are never emitted.
+ */
+export function parseHandlerStatementsForCheck(value, filePath) {
+  if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return null;
+  const sp = value.span ?? {};
+  const arrow = parseArrowHandlerStatements(
+    value, filePath, _handlerCheckStmtIds, null,
+    typeof sp.start === "number" ? sp.start : 0,
+    typeof sp.line === "number" ? sp.line : 1,
+    typeof sp.col === "number" ? sp.col : 1,
+  );
+  if (arrow !== undefined) return arrow.fatal ? null : arrow.stmts;
+  const res = parseHandlerStatementListCore(
+    value, filePath, _handlerCheckStmtIds, null,
+    typeof sp.start === "number" ? sp.start : 0,
+    typeof sp.line === "number" ? sp.line : 1,
+    typeof sp.col === "number" ? sp.col : 1,
+  );
+  if (!res || !Array.isArray(res.stmts) || res.stmts.length === 0) return null;
+  if (res.parseErrors.some(isFatalHandlerParseError)) return null;
+  if (res.stmts.length === 1 && isCallableOrOpaqueHandlerStmt(res.stmts[0], value)) return null;
+  return res.stmts;
+}
+
+/**
  * Parse ONE handler value as a §5.2.3 statement list and decide how it lowers.
  *
  *   - Clean parse, 2+ statements          → `value.handlerBlock = { stmts }`.
@@ -16618,39 +16852,22 @@ function isCallableOrOpaqueHandlerStmt(stmt, value) {
  */
 function attachHandlerStatementList(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol, opener, errors) {
   if (!value || value.kind !== "expr" || typeof value.raw !== "string" || value.raw.trim() === "") return;
-  const parseErrors = [];
-  let tokens, stmts;
-  try {
-    // Parse the value as a FUNCTION BODY — §5.2.3: "the same statement grammar
-    // as a function body (§7.3)". The value's own tokens are framed as
-    // `function <synthetic>() { … }` and the body of the resulting
-    // function-decl is taken, so the statements come from the nested-body path
-    // (`parseOneStatement`) exactly as a function body's do: a `@x = …` is a
-    // WRITE (`_isReactiveAssign`, write-checked by SYM like any function-body
-    // write — round-4 #3), not a top-level declaration. The frame tokens borrow
-    // the first real token's span; the statements keep their own file spans.
-    tokens = tokenizeLogic(value.raw, baseOffset, baseLine, baseCol, []);
-    const inner = tokens.slice();
-    const last = inner[inner.length - 1];
-    const eof = last && last.kind === "EOF" ? inner.pop() : null;
-    const frameSpan = (inner[0] ?? eof)?.span ?? { file: filePath, start: baseOffset, end: baseOffset, line: baseLine, col: baseCol };
-    const frame = (kind, text) => ({ kind, text, span: frameSpan });
-    const framed = [
-      frame("KEYWORD", "function"), frame("IDENT", "__scrml_handler_block__"),
-      frame("PUNCT", "("), frame("PUNCT", ")"), frame("PUNCT", "{"),
-      ...inner,
-      frame("PUNCT", "}"), eof ?? frame("EOF", ""),
-    ];
-    const top = parseLogicBody(framed, filePath, [], parentBlock, idCounter, parseErrors, "logic");
-    // The frame not coming back as ONE function means the value broke out of it
-    // (e.g. an unbalanced `}`): no statement view; parse errors are still judged below.
-    stmts = Array.isArray(top) && top.length === 1 && top[0] && top[0].kind === "function-decl" && Array.isArray(top[0].body)
-      ? top[0].body
-      : null;
-    if (stmts === null && parseErrors.length === 0) return;
-  } catch (_e) {
-    return; // the statement view is optional; the existing single-expression path stands
+  // An ARROW-valued handler keeps the as-is arrow emission — unless its body
+  // holds a `!{}` guard. The expression view of `(e) => risky() !{ … }` stops at
+  // the call, so the guard was silently dropped (emitted `(e) => _scrml_risky()`).
+  // Such an arrow lowers through its body's statement list instead (S440 ruling:
+  // "check it the same way and emit its guard").
+  const arrow = parseArrowHandlerStatements(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
+  if (arrow !== undefined) {
+    if (!arrow.fatal && arrow.stmts.length > 0 && handlerStmtsContainGuard(arrow.stmts)) {
+      value.handlerBlock = { stmts: arrow.stmts };
+      if (Array.isArray(errors)) for (const e of arrow.nonFatal) { e.fromHandlerStatementList = true; errors.push(e); }
+    }
+    return;
   }
+  const res = parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, baseOffset, baseLine, baseCol);
+  if (!res) return;
+  const { tokens, stmts, parseErrors } = res;
   const count = Array.isArray(stmts) ? stmts.length : 0;
   // Only a FATAL diagnostic (no severity, or "error") disqualifies the parse.
   // Warnings / Info (e.g. W-MAP-DUPLICATE-LITERAL-KEY on `@m = ["k": 1, "k": 2]`)
@@ -16659,8 +16876,7 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   // warning and left the build to fail E-CODEGEN-INVALID-LOGIC).
   // (api.js also routes by code prefix — a W-/I- code with no severity is a
   // warning / info, not an error.)
-  const isFatal = (e) => !!e && typeof e === "object" &&
-    (e.severity === "error" || (e.severity === undefined && !(typeof e.code === "string" && /^[WI]-/.test(e.code))));
+  const isFatal = isFatalHandlerParseError;
   const fatal = parseErrors.filter(isFatal);
   const nonFatal = parseErrors.filter((e) => e && typeof e === "object" && !isFatal(e));
   // Report diagnostics from this parse without duplicating a code an
@@ -16704,6 +16920,18 @@ function attachHandlerStatementList(value, filePath, idCounter, parentBlock, bas
   if (count === 0) return;
   if (count === 1) {
     if (isCallableOrOpaqueHandlerStmt(stmts[0], value)) return;
+    // A `!{}`-guarded call (`onclick={ risky() !{ | .E :> … } }`) is NOT
+    // byte-identical on the single-expression path: the expression view stops at
+    // the call, so the guard's arms were silently dropped and the failure went
+    // unhandled at runtime (§5.2.3 "No statement of the block SHALL be dropped").
+    // The statement view carries the guard, so a guarded statement always takes
+    // it — which is also what lets the §19.4.3 check see the call as handled
+    // (S440: E-ERROR-002 follows the unhandled call in every handler form).
+    if (stmts[0] && stmts[0].kind === "guarded-expr") {
+      value.handlerBlock = { stmts };
+      report(nonFatal);
+      return;
+    }
     if (!value.raw.trim().includes("\n")) return;
   }
   value.handlerBlock = { stmts };
@@ -16757,8 +16985,16 @@ function attachHandlerStatementLists(attrs, block, filePath, counter, errors) {
  * (tokenizeLogic + parseLogicBody) as the only source of handler statement lists.
  * Statement spans are anchored at the value's own span (these re-parsed trees are
  * body-local anyway). Idempotent: a value that already has `handlerBlock` is left.
+ *
+ * `options.synthesizeExprNode` (default true) also gives a value with no
+ * `exprNode` the node TAB would have built. The component-body re-parse
+ * (component-expander `reparseSynthesizedFile`) passes false: its prop
+ * substitution rewrites a value's RAW text when there is no `exprNode`, and an
+ * `exprNode` it cannot substitute through (an `if` statement's escape hatch)
+ * would leave the prop name unreplaced in the emitted handler.
  */
-export function attachHandlerStatementListsInTree(nodes, filePath) {
+export function attachHandlerStatementListsInTree(nodes, filePath, options = {}) {
+  const synthesizeExprNode = options.synthesizeExprNode !== false;
   const idCounter = { next: HANDLER_STMT_ID_BASE + 500_000_000 };
   const seen = new Set();
   const visit = (n) => {
@@ -16776,7 +17012,7 @@ export function attachHandlerStatementListsInTree(nodes, filePath) {
         // here — which mis-lowers a leading comment or a `;` inside a regex
         // (`/;/` → `/; /`). Give the value the node TAB itself would have built,
         // from the same function, so a match-arm handler lowers like any other.
-        if (attr.value.kind === "expr" && typeof attr.value.raw === "string" && !attr.value.exprNode) {
+        if (synthesizeExprNode && attr.value.kind === "expr" && typeof attr.value.raw === "string" && !attr.value.exprNode) {
           try {
             // Held-warning parse (round 5 F4): the trailing-content warning is
             // printed below only if no statement list ends up handling it.
