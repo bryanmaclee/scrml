@@ -1007,6 +1007,155 @@ export function analyzeRawJsFragment(raw: string, resolveFree: FreeAsyncResolver
 }
 
 // ---------------------------------------------------------------------------
+// Scheduler exemption — is the global scheduler provably the one called?
+// ---------------------------------------------------------------------------
+
+/**
+ * s441 round 4 (review round 3, findings 1-2) — the fire-and-forget exemption
+ * (`setTimeout(fn)` discards fn's return) is sound only for the GLOBAL scheduler.
+ * Returns the scheduler names that are NOT provably global in this file, decided
+ * on the TREE (the round-2/3 text scans were bypassed by a string holding `//` or
+ * `/*` that hid a destructure):
+ *
+ *   - a scheduler name in any BINDING or KEY position anywhere in the file — a
+ *     declaration (any pattern form), a parameter, a function / class / method
+ *     name, a catch parameter, an import alias, an object-literal key — withdraws
+ *     it (a whole-file over-approximation of scope: fail closed);
+ *   - a WRITE to it — `setTimeout = …`, `globalThis.setTimeout = …`,
+ *     `window.setTimeout = …`, `x["setTimeout"] = …`, `++`/`delete` — withdraws it;
+ *   - a string literal naming it, in a file that also calls a reflective writer
+ *     (`Object.defineProperty`/`defineProperties`/`assign`/`setPrototypeOf`,
+ *     `Reflect.set`/`defineProperty`), withdraws it.
+ *
+ * Code the tree holds as TEXT (escape-hatch bodies, handler values, template
+ * literals, parameter defaults, `on mount` bodies) is parsed with acorn and held
+ * to the same rules (its references resolved by the same scope resolver); text
+ * that mentions a scheduler name and does not parse withdraws it. Prose (markup
+ * text, comments) and ordinary string values do not count — a scheduler name in
+ * a string is not a binding.
+ */
+export function schedulerNamesNotProvablyGlobal(fileAST: unknown): Set<string> {
+  const out = new Set<string>();
+  if (!fileAST || typeof fileAST !== "object") return out;
+  const NAMES = KNOWN_DISCARD_HOF as ReadonlySet<string>;
+  const literalNames = new Set<string>();
+  let reflective = false;
+  const REFLECTIVE = new Set(["defineProperty", "defineProperties", "assign", "setPrototypeOf", "set"]);
+  const SKIP_KEYS = new Set(["_sourceText", "sourceText", "filePath", "file", "span"]);
+  const PROSE_KINDS = new Set(["text", "comment"]);
+  const leadingIdent = (s: string): string | null => {
+    const m = s.trim().replace(/^\.\.\./, "").match(/^[A-Za-z_$][A-Za-z0-9_$]*/);
+    return m ? m[0] : null;
+  };
+  const mentions = (s: string): string[] => {
+    const hits: string[] = [];
+    for (const nm of NAMES) if (s.includes(nm) && new RegExp(`(^|[^A-Za-z0-9_$])${nm}(?![A-Za-z0-9_$])`).test(s)) hits.push(nm);
+    return hits;
+  };
+
+  // --- acorn side ---------------------------------------------------------
+  const scanText = (text: string): void => {
+    const hits = mentions(text);
+    const wantsReflective = /\b(defineProperty|defineProperties|assign|setPrototypeOf|Reflect)\b/.test(text);
+    if (hits.length === 0 && !wantsReflective) return;
+    let program: N | null = null;
+    for (const [pre, post] of [["", ""], ["(", "\n)"], ["(async function() {\n", "\n})"], ["`", "`"]] as const) {
+      program = tryParse(pre + text + post);
+      if (program) break;
+    }
+    if (!program) { for (const nm of hits) out.add(nm); return; }
+    const { refs, assignTargets } = resolveScopes(program, newScope(null));
+    const walk = (n: N, parent: N, grand: N): void => {
+      if (!n || typeof n !== "object") return;
+      if (Array.isArray(n)) { for (const c of n) walk(c, parent, grand); return; }
+      if (typeof n.type !== "string") return;
+      if (n.type === "CallExpression" && n.callee && n.callee.type === "MemberExpression") {
+        const m = memberName(n.callee);
+        if (m !== null && REFLECTIVE.has(m)) reflective = true;
+      }
+      const isWriteTarget = (x: N, px: N): boolean =>
+        !!px && ((px.type === "AssignmentExpression" && px.left === x) ||
+          (px.type === "UpdateExpression") ||
+          (px.type === "UnaryExpression" && px.operator === "delete"));
+      if (n.type === "Identifier" && NAMES.has(n.name)) {
+        if (assignTargets.has(n)) out.add(n.name);
+        else if (refs.has(n)) { if (parent && parent.type === "UpdateExpression") out.add(n.name); }
+        else if (parent && parent.type === "MemberExpression" && parent.property === n && !parent.computed) {
+          if (isWriteTarget(parent, grand)) out.add(n.name);
+        } else out.add(n.name); // a declaration, parameter, key, method name, label, …
+      }
+      if (n.type === "Literal" && typeof n.value === "string" && NAMES.has(n.value)) {
+        literalNames.add(n.value);
+        if (parent && parent.type === "MemberExpression" && parent.property === n && isWriteTarget(parent, grand)) out.add(n.value);
+      }
+      for (const key of Object.keys(n)) {
+        if (key === "type" || key === "start" || key === "end") continue;
+        const v = n[key];
+        if (v && typeof v === "object") walk(v, n, parent);
+      }
+    };
+    walk(program, null, null);
+  };
+
+  // --- structured AST side -------------------------------------------------
+  const seen = new WeakSet<object>();
+  const visit = (n: unknown, parent: Record<string, unknown> | null, parentKey: string | null): void => {
+    if (!n || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) {
+      for (const c of n) {
+        if (typeof c === "string") {
+          const li = leadingIdent(c);
+          if (li !== null && NAMES.has(li)) out.add(li); // a parameter / name list entry
+          else if (mentions(c).length) scanText(c);
+        } else visit(c, parent, parentKey);
+      }
+      return;
+    }
+    const node = n as Record<string, unknown>;
+    const kind = typeof node.kind === "string" ? node.kind : "";
+    const isWriteTarget = (): boolean => {
+      if (!parent) return false;
+      if (parent.kind === "assign" && parentKey === "target") return true;
+      if (parent.kind === "unary" && (parent.op === "++" || parent.op === "--" || parent.op === "delete")) return true;
+      return false;
+    };
+    if (kind === "call") {
+      const c = node.callee as Record<string, unknown> | undefined;
+      if (c && c.kind === "member" && typeof c.property === "string" && REFLECTIVE.has(c.property)) reflective = true;
+    }
+    for (const key of Object.keys(node)) {
+      if (SKIP_KEYS.has(key)) continue;
+      const v = node[key];
+      if (typeof v === "string") {
+        if (NAMES.has(v)) {
+          if (kind === "ident" && key === "name") { if (isWriteTarget()) out.add(v); }
+          else if (kind === "call" && key === "name") { /* a call — allowed */ }
+          else if (kind === "member" && key === "property") { if (isWriteTarget()) out.add(v); }
+          else if (kind === "lit" && (key === "value" || key === "raw")) literalNames.add(v);
+          else if (PROSE_KINDS.has(kind)) { /* prose */ }
+          else out.add(v); // a binding / key / name position
+          continue;
+        }
+        const li = leadingIdent(v);
+        if (li !== null && NAMES.has(li) && (key === "name" || key === "bindName" || key === "rest" || key === "local" || key === "alias")) {
+          out.add(li); // `setTimeout:Type` / pattern binding
+          continue;
+        }
+        if (PROSE_KINDS.has(kind)) continue;
+        if (kind === "lit" && node.litType !== "template") continue; // a string value
+        if (mentions(v).length || /\b(defineProperty|defineProperties|setPrototypeOf|Reflect)\b/.test(v)) scanText(v);
+      } else if (v && typeof v === "object") {
+        visit(v, node, key);
+      }
+    }
+  };
+  visit(fileAST, null, null);
+  if (reflective) for (const nm of literalNames) out.add(nm);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Own-level `await` — does a body await at ITS OWN function level?
 // ---------------------------------------------------------------------------
 

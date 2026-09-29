@@ -39,7 +39,7 @@ import {
 import type { AsyncRoot, AsyncEscapeSite, RawAsyncUses } from "./local-async-fns.ts";
 // s441 — scope-aware analysis of raw JS fragments (FP1) and of emitted handler /
 // mount bodies (F5); the async-escape check (S440 F4).
-import { analyzeRawJsFragment } from "./js-async-analysis.ts";
+import { analyzeRawJsFragment, schedulerNamesNotProvablyGlobal } from "./js-async-analysis.ts";
 import type { FreeAsyncResolver, JsAsyncUses } from "./js-async-analysis.ts";
 
 /** A loosely-typed AST node. */
@@ -495,45 +495,12 @@ export function freeAsyncResolverFromFacts(facts: AsyncNameFacts): FreeAsyncReso
 export function fileBoundNamesOf(fileAST: unknown, sourceText?: string | null): Set<string> {
   const out = new Set<string>();
   if (!fileAST || typeof fileAST !== "object") return out;
-  // s441 fix round 3 (review N1) — a scheduler name the source BINDS in any form
-  // (a destructuring pattern, a `for…of` binding, a parameter, a catch clause, an
-  // import alias, …) at any depth is not the global scheduler. Rather than model
-  // every binding form, the exemption is narrowed to what can be proven from the
-  // text: a scheduler name counts as unbound only when EVERY occurrence in the
-  // source is a plain call `name(` (not after `function`) or a member read
-  // `.name`. Any other occurrence — including one in a string or comment —
-  // withdraws the exemption for the whole file (fail CLOSED: the async fn value
-  // is then reported as an escape). `const { setTimeout } = globalThis` is
-  // withdrawn too (sound, conservative).
-  const rawSrc = typeof sourceText === "string" ? sourceText
-    : typeof (fileAST as { _sourceText?: unknown })._sourceText === "string" ? (fileAST as { _sourceText: string })._sourceText
-    : null;
-  // Comments are not bindings: a `// … setTimeout …` note must not withdraw the
-  // exemption (it failed flogence's `setTimeout(() => hydrate(), 0)` calls).
-  // Stripped: `/* … */`, `<!-- … -->`, and a `//` comment that starts a line or
-  // follows whitespace (a `http://` URL does not match). Strings are NOT stripped —
-  // markup prose apostrophes make a text-level string scanner unreliable, and a
-  // mis-opened "string" could hide a real binding (fail open); a mention inside a
-  // string stays a withdrawal (fail closed).
-  const src = rawSrc === null ? null : rawSrc
-    .replace(/\/\*[\s\S]*?\*\//g, " ")
-    .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/(^|\s)\/\/[^\n]*/g, "$1");
-  if (src !== null) {
-    for (const nm of KNOWN_DISCARD_HOF) {
-      if (!src.includes(nm)) continue;
-      const re = new RegExp(`(^|[^A-Za-z0-9_$])${nm}(?![A-Za-z0-9_$])`, "g");
-      let m: RegExpExecArray | null;
-      while ((m = re.exec(src)) !== null) {
-        const start = m.index + m[1].length;
-        const before = src.slice(Math.max(0, start - 40), start);
-        const after = src.slice(start + nm.length, start + nm.length + 40);
-        const isMember = /\.\s*$/.test(before);
-        const isCall = /^\s*\(/.test(after) && !/\bfunction\s*\*?\s*$/.test(before);
-        if (!isMember && !isCall) { out.add(nm); break; }
-      }
-    }
-  }
+  // s441 round 4 (review round 3, findings 1-2) — the scheduler exemption is
+  // decided on the TREE (`schedulerNamesNotProvablyGlobal`): any binding, key or
+  // write of a scheduler name anywhere in the file withdraws it (fail closed). The
+  // round-2/3 text scans are gone — a string holding `//` or `/*` hid a binding.
+  void sourceText;
+  for (const nm of schedulerNamesNotProvablyGlobal(fileAST)) out.add(nm);
   for (const k of buildCalleeImportMap(fileAST as ASTNode).keys()) out.add(k);
   const seen = new WeakSet<object>();
   const visit = (node: unknown): void => {

@@ -707,6 +707,24 @@ function go() {
 `);
     expect(o.codes).toEqual([]);
   });
+  // round 4 — scope on the TREE (review round 3, findings 1-2)
+  for (const [label, decl] of [
+    ["a destructure hidden after a `\" //\"` string (x02)", `const u = " //"; const { setTimeout } = { setTimeout: (f) => f(hash) }`],
+    ["a destructure between `\"/*\"` and `\"*/\"` strings (x04)", `const u = "/*"; const { setTimeout } = { setTimeout: (f) => f(hash) }; const w = "*/"`],
+    ["`globalThis.setTimeout = …` (s09)", `globalThis.setTimeout = (f) => f(hash)`],
+    ["`window.setTimeout = …` (s15)", `window.setTimeout = (f) => f(hash)`],
+    ["`globalThis[\"setTimeout\"] = …`", `globalThis["setTimeout"] = (f) => f(hash)`],
+    ["`Object.defineProperty(globalThis, \"setTimeout\", …)`", `Object.defineProperty(globalThis, "setTimeout", { value: (f) => f(hash) })`],
+  ]) {
+    test(`round 4: ${label} → the scheduler is not provably global → escape`, () => {
+      const o = serverNested(decl, `setTimeout(m)`);
+      expect(o.codes).toContain(ESCAPE);
+    });
+  }
+  test("round 4: a scheduler name in a plain STRING does not withdraw the exemption", () => {
+    const o = serverNested(`const label = "setTimeout"`, `setTimeout(m, 10) && label`);
+    expect(o.codes).toEqual([]);
+  });
   test("control: the GLOBAL setTimeout still takes an async fn / callback", () => {
     const o = serverNested(`setTimeout(m, 10)`, `true`);
     expect(o.codes).toEqual([]);
