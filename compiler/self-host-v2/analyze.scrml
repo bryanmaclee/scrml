@@ -180,7 +180,18 @@ ${
         MEach(bind: Sym, handles: Sym[]),                 // an <each> element
         MSlot,
         MStateView(v: StateView),                         // `<*f/>` of a graph field: its state-child bodies (O5 (1i))
+        MInline(v: InlineView),                           // `<*x/>` rendered by inlining its markup (s442)
     }
+    // s442 — `<*x/>` (§66.6.2, "the existing one") rendered by INLINING markup
+    // that is already resolved in the right context: a child field's own
+    // `renders` inside its declaration's renders (`<*email/>`, `subst` = not —
+    // the current instance is already Lexical(0)), or a user declaration's
+    // `renders` for its shared instance at program top level (`<*signup/>`,
+    // `subst` = Shared(x): the renders' `.Lexical(0)` means that instance).
+    // Core has no View.Star (M1 D4; core.scrml is outside this slice), so the
+    // inline form is restricted to markup that constructs nothing (no use, no
+    // `as=`, no `<slot/>`) — every node reads / writes the ONE existing instance.
+    export type InlineView:struct = { nodes: ANode[], subst: InstRef | not }
     // s442 — `<*f/>` of a field whose value carries a `rule=` graph with
     // state-child BODIES: O5 RULED (1i) "a state-child's body is that
     // variant's markup, rendered wherever the field renders". One arm per
@@ -3162,7 +3173,8 @@ ${
             }
         }
         if (st.diags.length == st0.diags.length) {
-            st = addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "rendering an existing instance `<*" + e.tag + "/>` is not in bootstrap slice M2 Core (no View.Star yet)")
+            // s442: the shared instance, inlined (resolveStarShared)
+            st = resolveStarShared(env, e, d, st)
         }
         return st
     }
@@ -3199,6 +3211,11 @@ ${
         if (e.attrs.length > 0) {
             return addDiag(st, env.file, e.span, "E-DECL-STAR-REF-ATTR-WRITE", "`<*" + e.tag + ">` names the field `" + e.tag + "` of this instance — a `<*x>` reference takes no attributes here (§66.6.7)")
         }
+        // s442: a child field with its own `renders` (§66.4 rule 2: "a field that
+        // needs its own … `renders` … is a CHILD declaration") renders it here,
+        // for THIS instance (§66.6.2) — resolved in this declaration's context.
+        const own: ANode[] = fieldRenders(sf.src, f.nid)
+        if (own.length > 0) return addElem(st, e.nid, ElemFact.MInline({ nodes: own, subst: not }))
         const g: TransitionGraph | not = f.graph
         const children: AStateChild[] = fieldStateChildren(sf.src, f.nid)
         let arms: StateArm[] = []
@@ -3226,6 +3243,64 @@ ${
             }
         }
         return []
+    }
+
+    // The `renders` of the field declared by the ADecl `fieldNid` in `ds` (as
+    // one node, nid -1 — the renders AElem carries the facts), else none.
+    fn fieldRenders(ds: DeclSrc, fieldNid: int) -> ANode[] {
+        for (const fd of fieldDecls(ds)) {
+            if (fd.nid == fieldNid) return rendersOf(fd)
+        }
+        return []
+    }
+
+    // Every child field's own `renders` in `ds`, resolved in `ds`'s context.
+    fn childRenders(ds: DeclSrc) -> ANode[] {
+        const p: AProgram | not = ds.p
+        if (p is some) return []
+        let out: ANode[] = []
+        for (const fd of fieldDecls(ds)) { out = out.concat(rendersOf(fd)) }
+        return out
+    }
+
+    // s442: `<*x/>` of a user declaration at program top level — its shared
+    // instance (§66.6.2, §66.6.4), rendered by inlining its renders.
+    fn resolveStarShared(env: Env, e: AElem, d: DeclSrc, st: AS) -> AS {
+        if (!inProgramCtx(env)) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` inside a declaration's `renders` (the lexically nearest `" + e.tag + "`, §66.6.2) is not in the bootstrap — only a child field (`<*f/>`) or, at program top level, the shared instance")
+        }
+        const nodes: ANode[] = rendersNodes(d)
+        if (nodes.length == 0) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — `<" + e.tag + ">` has no `renders` (a use of a declaration with no markup is ⚑ O51)")
+        }
+        if (!constructsNothing(env.g, nodes)) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<*" + e.tag + "/>` — `<" + e.tag + ">`'s renders constructs instances (a use, `as=` or `<slot/>`); Core has no View.Star to render an existing instance's own children (M1 D4), so the bootstrap only inlines markup that constructs nothing")
+        }
+        return addElem(st, e.nid, ElemFact.MInline({ nodes: nodes, subst: InstRef.Shared(d.info.sym) }))
+    }
+
+    fn constructsNothing(g: Globals, nodes: ANode[]) -> boolean {
+        for (const n of nodes) {
+            if (!nodeConstructsNothing(g, n)) return false
+        }
+        return true
+    }
+
+    fn nodeConstructsNothing(g: Globals, n: ANode) -> boolean {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> elemConstructsNothing(g, e)
+            .Text(text: t) :> true
+            .Interp(e: x) :> true
+            .DeclNode(d: d) :> false
+        }
+    }
+
+    fn elemConstructsNothing(g: Globals, e: AElem) -> boolean {
+        if (e.tag == "slot") return false
+        if (!e.star && declNamed(g, e.tag) is some) return false
+        if (attrNamed(e.attrs, "as") is some && e.tag != "each") return false
+        return constructsNothing(g, e.kids)
     }
 
     // The ADecls that are fields of `ds`: the program's cells (its body's
@@ -3462,6 +3537,8 @@ ${
             st = resolveNodes(renv, rendersNodes(ds), st)
             // s442: state-child bodies (O5 (1i)), in the same context
             st = resolveNodes(renv, stateBodies(ds), st)
+            // s442: a child field's own renders (§66.4 rule 2), in the same context
+            st = resolveNodes(renv, childRenders(ds), st)
         }
         const prog: DeclSrc | not = findDeclSrc(g, g.program)
         let progHandles: HandleInfo[] = []
@@ -4335,6 +4412,7 @@ ${
             .MHtml :> not
             .MSlot :> not
             .MStateView(v: v) :> not
+            .MInline(v: v) :> not
             not :> not
         }
     }
@@ -4347,6 +4425,7 @@ ${
             .MHtml :> not
             .MSlot :> not
             .MStateView(v: v) :> not
+            .MInline(v: v) :> not
             not :> not
         }
     }
@@ -5147,6 +5226,27 @@ ${
     fn typeProgramBody(env: TEnv, p: AProgram, ts0: TypeState) -> TypeState {
         let ts: TypeState = typeFieldInits(env, declByNid(env.t, p.nid), ts0)
         for (const it of p.items) { ts = typeProgramItem(env, it, ts) }
+        // s442: the program cells' state-child bodies (O5 (1i))
+        for (const it of p.items) {
+            for (const d of declsOfItem(it)) {
+                if (!isNestedUserDecl(d)) ts = typeFieldMarkup(env, [d], ts)
+            }
+        }
+        return ts
+    }
+
+    // s442: the markup a field carries — its state-child bodies (O5 (1i)) and
+    // its own `renders` (a child declaration's, §66.4 rule 2) — typed where
+    // the binder resolved it (the declaring declaration's context).
+    fn typeFieldMarkup(env: TEnv, fds: ADecl[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        for (const fd of fds) {
+            for (const c of fd.body) {
+                for (const sc of stateChildOf(c)) { ts = typeNodes(env, sc.body, ts) }
+            }
+            const r: AElem | not = fd.renders
+            if (r is some) ts = typeElem(env, r, ts)
+        }
         return ts
     }
 
@@ -5163,7 +5263,9 @@ ${
     }
 
     fn typeUserDecl(env: TEnv, d: ADecl, ts0: TypeState) -> TypeState {
-        const ts: TypeState = typeFieldInits(env, declByNid(env.t, d.nid), ts0)
+        let ts: TypeState = typeFieldInits(env, declByNid(env.t, d.nid), ts0)
+        // s442: its child fields' markup (only a user declaration has child fields)
+        if (declByNid(env.t, d.nid) is some) ts = typeFieldMarkup(env, childFields(d.body), ts)
         const r: AElem | not = d.renders
         if (r is not) return ts
         return typeElem(env, r, ts)
