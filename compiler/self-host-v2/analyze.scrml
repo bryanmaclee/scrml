@@ -3581,22 +3581,16 @@ ${
         let drop: string[] = [key]
         // rows are outer-first: one ordered pass also drops a NESTED row whose
         // source lies under an already-dropped row (`<each in=g.kids>`, r5 R1)
+        // (A write strictly UNDER a source — `@xs[0].n` — also drops, but the
+        // slice parser drops indexing (residue R7), so that limb is unreachable.)
         for (const r of env.rows) {
-            if (r.key != "" && placesOverlap(r.key, key)) {
-                drop = drop.concat([r.name])
-            } else if (r.key != "" && underAny(r.key, drop)) {
-                drop = drop.concat([r.name])
-            }
+            if (r.key != "" && (underAny(r.key, drop) || underAny(key, [r.key]))) drop = drop.concat([r.name])
         }
         let out: string[] = []
         for (const k of env.narrowed) {
             if (!underAny(k, drop)) out = out.concat([k])
         }
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows, fret: env.fret }
-    }
-
-    fn placesOverlap(a: string, b: string) -> boolean {
-        return a == b || a.indexOf(b + ".") == 0 || b.indexOf(a + ".") == 0
     }
 
     // Is `k` one of `keys`, or a place under one?
