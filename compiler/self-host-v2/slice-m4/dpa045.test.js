@@ -70,13 +70,65 @@ describe("dpa-045 B(3) — `\\\"` is not an escape in a display-text literal", (
     const d = run(state('"a\\"b"')).diags;
     expect(d[0].code).toBe("E-PARSE-001");
   });
-  test("twin (behaviour): `\\\\` in a display-text literal still renders one backslash (B(2) is not ruled — the rest of the catalog is untouched)", async () => {
-    expect(await html(P('<p : "a\\\\b">'))).toBe("<p>a\\b</p><b>end</b>");
+  test("B(2) RULED delete (follow-up): `\\\\` is no longer an escape — both backslashes are content", async () => {
+    expect(await html(P('<p : "a\\\\b">'))).toBe("<p>a\\\\b</p><b>end</b>");
   });
   test("twin: `\\\"` in a LOGIC string is still an escape (the deletion is the display-text literal's only)", async () => {
     expect(await html(P('<p>${"a\\"b"}</p>'))).toBe('<p>a"b</p><b>end</b>');
   });
   test("twin (behaviour): a state-child display-text literal renders without its quotes", async () => {
     expect(await html(state('"Ready"'))).toBe("<p>Ready<!--if--></p><b>end</b>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dpa-045 follow-ups (RULED S442): the full closed exit set; cooked; the whole
+// display-text escape catalog deleted; whitespace-only text kept.
+// ---------------------------------------------------------------------------
+describe("follow-up 1 — the closed exit set of free text", () => {
+  test("`?{` / `^{` / `!{` are exits (§3.1 context sigils): skipped whole and reported, never text", () => {
+    for (const sig of ["?", "^", "!"]) {
+      const d = run(P(`<p>a ${sig}{ x } b</p>`)).diags;
+      expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(d[0].message).toContain(sig + "{");
+    }
+  });
+  test("twin (behaviour): a lone `^` / `!` / `?` (no `{`) is content", async () => {
+    expect(await html(P("<p>a ^ b ! c ? d</p>"))).toBe("<p>a ^ b ! c ? d</p><b>end</b>");
+  });
+  test("`<_` and `<.` open tags (scrml's own tag forms) — the bootstrap has no `<match>`, so the arm is not built", () => {
+    expect(run(P("<p>x <_ y</p>")).diags.length).toBeGreaterThan(0);
+    expect(run(P("<p>x <.A y</p>")).diags.length).toBeGreaterThan(0);
+  });
+  test("the spaced `< tag>` opener is content (behaviour)", async () => {
+    expect(await html(P("<p>x < b>y</p>"))).toBe("<p>x &lt; b&gt;y</p><b>end</b>");
+  });
+});
+
+describe("follow-up 2 — cooked: the node handed on has its delimiters removed", () => {
+  test("a display-text literal's value carries no quotes; free text is its bytes", () => {
+    const r = run(state('"Ready"'));
+    const strs = [];
+    (function walk(x) { if (Array.isArray(x)) { x.forEach(walk); return; } if (!x || typeof x !== "object") return; if (x.k && x.k.variant === "Str") strs.push(x.k.data.v); Object.values(x).forEach(walk); })(r.asts);
+    expect(strs).toContain("Ready");
+    expect(strs.some((v) => v.includes('"'))).toBe(false);
+  });
+});
+
+describe("follow-up 3 — a display-text literal has no character escapes; `${…}` inside it interpolates (§4.18.4)", () => {
+  test("behaviour: `:`-shorthand `\"Count ${@n} items\"` renders the interpolation", async () => {
+    expect(await html(P('<p : "Count ${@n} items">'))).toBe("<p>Count 5 items</p><b>end</b>");
+  });
+  test("behaviour: a `\"` inside the interpolation does not end the literal", async () => {
+    expect(await html(P('<p : "x ${ @n == 5 ? "five" : "no" } y">'))).toBe("<p>x five y</p><b>end</b>");
+  });
+  test("behaviour: a state-child body `\"Loaded ${@n} rows\"`", async () => {
+    expect(await html(state('"Loaded ${@n} rows"'))).toBe("<p>Loaded 5 rows<!--if--></p><b>end</b>");
+  });
+  test("behaviour: `\\${` is no longer an escape — the backslash is content and `${` still interpolates", async () => {
+    expect(await html(P('<p : "a \\${@n} b">'))).toBe("<p>a \\5 b</p><b>end</b>");
+  });
+  test("an interpolating display-text literal nested in a larger expression is reported, not rendered raw", () => {
+    expect(run(P('<p : @n == 5 ? "a ${@n}" : "b">')).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
   });
 });
