@@ -2,15 +2,14 @@
 
 <program>
 
-<channel name="chat" topic="lobby">
-  <messages> = []
+  <channel name="chat" topic="lobby">
+    <messages> = []
 
-  function postMessage(author, body) {
-    @messages = [...@messages, { author, body, ts: Date.now() }]
-  }
-</>
+    function postMessage(author, body) {
+      @messages = [...@messages, { author, body, ts: Date.now() }]
+    }
+  </>
 
-${
   <username> = ""
   <draft>    = ""
 
@@ -19,21 +18,18 @@ ${
     postMessage(@username, @draft)
     reset(@draft)
   }
-}
 
-<div class="chat">
-  <input type="text" bind:value=@username placeholder="Your name"/>
-  <ul>
-    ${
-      for (let m of @messages) {
-        lift <li><strong>${m.author}</strong>: ${m.body}</li>
-      }
-    }
-  </ul>
-  <form onsubmit=send()>
-    <input type="text" bind:value=@draft placeholder="Message"/>
-    <button type="submit">Send</button>
-  </form>
-</div>
+  <div class="chat">
+    <input type="text" bind:value=@username placeholder="Your name"/>
+    <ul>
+      <each in=@messages as m key=m.ts>
+        <li><strong>${m.author}</strong>: ${m.body}</li>
+      </each>
+    </ul>
+    <form onsubmit=send()>
+      <input type="text" bind:value=@draft placeholder="Message"/>
+      <button type="submit">Send</button>
+    </form>
+  </div>
 
 </program>
