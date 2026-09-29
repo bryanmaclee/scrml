@@ -2234,37 +2234,75 @@ const TOPLEVEL_STATE_DECL_RE =
 
 // forbiddenConstructHead — calculation. A VERBATIM port of ast-builder.js's
 // `forbiddenConstructHead` (S441): the keyword of a SPEC §7.2.1 not-scrml
-// construct whose brace-delimited grammar head leads `raw` — `class`,
-// `async function|fn`, `try`, `switch`, `for await` — or null. Only
-// brace-delimited heads, so prose (`class of 2026`, `try harder`) never
+// construct written as a complete brace-delimited block leading `raw` —
+// `class`, `async function|fn`, `try`, `switch`, `for await` — or null. The
+// head and its `{` share one line; the `}` closes inside the run; the body holds
+// no markup and, when single-line, is empty or statement-shaped; only
+// whitespace follows the `}` (`try` needs `catch`/`finally`); `switch` needs a
+// `case`/`default`. So prose (`class of 2026`, `try {this} at home`) never
 // matches. If the live function changes, this copy must change in lockstep;
 // `default-logic-forbidden-construct-lift-s441.test.js` compares the two.
+const FCH_CLASS_RE =
+    /^\s*(?:export[ \t]+(?:default[ \t]+)?)?class[ \t]+[A-Za-z_$][\w$]*(?:[ \t]+extends[ \t]+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)?[ \t]*\{/;
+const FCH_TRY_RE = /^\s*try[ \t]*\{/;
+const FCH_SWITCH_RE = /^\s*switch[ \t]*(?=\()/;
+const FCH_FOR_AWAIT_RE = /^\s*for[ \t]+await[ \t]*(?=\()/;
+const FCH_FOR_AWAIT_HEAD_RE = /^\s*(?:(?:const|let|var)\s+)?[\w$\[\]{},\s]+?\s+of\s+\S/;
+const FCH_ASYNC_RE =
+    /^\s*(?:export[ \t]+(?:default[ \t]+)?)?(?:server[ \t]+)?async[ \t]+(?:function|fn)\b[ \t]*\*?[ \t]*[A-Za-z_$][\w$]*[ \t]*/;
+const FCH_TAG_RE = /<\/?[A-Za-z][\w-]*(?:\s[^<>]*)?\/?>/;
+const FCH_STMT_KW_RE = /^\s*(?:return|let|const|var|if|for|while|lift|fail|case|default)\b/;
+
+function fchBlockOk(raw, lead, braceAt, kind) {
+    if (raw[braceAt] !== "{" || raw.slice(lead, braceAt).includes("\n")) return false;
+    const close = skipBalancedNative(raw, braceAt, "{", "}");
+    if (close === -1) return false;
+    const body = raw.slice(braceAt + 1, close - 1);
+    if (FCH_TAG_RE.test(body)) return false;
+    if (body.includes("\n") === false && body.trim() !== ""
+        && /[(=;@]/.test(body) === false && FCH_STMT_KW_RE.test(body) === false) return false;
+    if (kind === "switch" && /\bcase\b[^:]*:|\bdefault[ \t]*:/.test(body) === false) return false;
+    if (kind === "try") return /^\s*(?:catch|finally)\b/.test(raw.slice(close));
+    return /^[ \t;]*(?:\n|$)/.test(raw.slice(close));
+}
+
 export function forbiddenConstructHead(raw) {
     if (typeof raw !== "string") return null;
-    if (/^\s*(?:export\s+(?:default\s+)?)?class\b(?:\s+[A-Za-z_$][\w$]*)?\s*(?:extends\s+[^{};\n]+)?\{/.test(raw)) return "class";
-    if (/^\s*try\s*\{/.test(raw)) return "try";
-    const sw = raw.match(/^\s*switch\s*(?=\()/);
-    if (sw !== null) {
-        const after = skipBalancedParensNative(raw, sw[0].length);
-        if (after !== -1 && /^\s*\{/.test(raw.slice(after))) return "switch";
+    const lead = raw.match(/^\s*/)[0].length;
+    let m = raw.match(FCH_CLASS_RE);
+    if (m !== null && fchBlockOk(raw, lead, m[0].length - 1, "class")) return "class";
+    m = raw.match(FCH_TRY_RE);
+    if (m !== null && fchBlockOk(raw, lead, m[0].length - 1, "try")) return "try";
+    m = raw.match(FCH_SWITCH_RE);
+    if (m !== null) {
+        const after = skipBalancedNative(raw, m[0].length, "(", ")");
+        const b = after === -1 ? null : raw.slice(after).match(/^[ \t]*\{/);
+        if (b !== null && fchBlockOk(raw, lead, after + b[0].length - 1, "switch")) return "switch";
     }
-    const fa = raw.match(/^\s*for\s+await\s*(?=\()/);
-    if (fa !== null && skipBalancedParensNative(raw, fa[0].length) !== -1) return "for await";
-    const as = raw.match(/^\s*(?:export\s+(?:default\s+)?)?(?:server\s+)?async\s+(?:function|fn)\b\s*\*?\s*[A-Za-z_$][\w$]*\s*/);
-    if (as !== null) {
-        let i = as[0].length;
+    m = raw.match(FCH_FOR_AWAIT_RE);
+    if (m !== null) {
+        const open = m[0].length;
+        const after = skipBalancedNative(raw, open, "(", ")");
+        const b = after === -1 ? null : raw.slice(after).match(/^[ \t]*\{/);
+        if (b !== null && FCH_FOR_AWAIT_HEAD_RE.test(raw.slice(open + 1, after - 1))
+            && fchBlockOk(raw, lead, after + b[0].length - 1, "for await")) return "for await";
+    }
+    m = raw.match(FCH_ASYNC_RE);
+    if (m !== null) {
+        let i = m[0].length;
         if (raw[i] === "(") {
-            i = skipBalancedParensNative(raw, i);
+            i = skipBalancedNative(raw, i, "(", ")");
             if (i === -1) return null;
         }
-        if (/^\s*(?:(?:->|:)[^{\n]*)?\{/.test(raw.slice(i))) return "async";
+        const b = raw.slice(i).match(/^[ \t]*(?:(?:->|:)[^{\n]*)?\{/);
+        if (b !== null && fchBlockOk(raw, lead, i + b[0].length - 1, "async")) return "async";
     }
     return null;
 }
 
-// skipBalancedParensNative — calculation. From `i` (at a `(`), the index just
-// past its matching `)`, skipping quoted strings; -1 when unbalanced.
-function skipBalancedParensNative(s, start) {
+// skipBalancedNative — calculation. From `start` (at an `open` char), the index
+// just past its matching `close`, skipping quoted strings; -1 when unbalanced.
+function skipBalancedNative(s, start, open, close) {
     let depth = 0;
     let quote = null;
     let i = start;
@@ -2277,8 +2315,8 @@ function skipBalancedParensNative(s, start) {
             continue;
         }
         if (c === "\"" || c === "'" || c === "`") { quote = c; i = i + 1; continue; }
-        if (c === "(") depth = depth + 1;
-        else if (c === ")") {
+        if (c === open) depth = depth + 1;
+        else if (c === close) {
             depth = depth - 1;
             if (depth === 0) return i + 1;
         }
@@ -2705,7 +2743,7 @@ function spliceAttrsIntoBodyRootNative(bodyRootRaw, outerAttrSource) {
 // when it consumes it. `synthCounter` is a `{ next }` record threaded through
 // the recursion so channel-export helper names are file-unique (mirrors the
 // live `_p3aSynthCounter`). It defaults at the top call.
-export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
+export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter, isDefaultLogicBody, isFileRoot) {
     const result = [];
     if (Array.isArray(blocks) === false) return result;
     const counter = (synthCounter !== undefined && synthCounter !== null)
@@ -2739,7 +2777,7 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             const name = typeof block.name === "string" ? block.name : "";
             const isDeclSite = parentType !== "markup" && isProgramFamilyRoot(name);
             const childContext = isDeclSite ? "state" : "markup";
-            const lifted = liftBareBlocks(block.children, source, childContext, ctx, counter);
+            const lifted = liftBareBlocks(block.children, source, childContext, ctx, counter, isDeclSite);
             result.push({ ...block, children: lifted });
             i = i + 1;
             continue;
@@ -2785,7 +2823,7 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             if (hasMarkupNext) {
                 const m = raw.match(BARE_DECL_NAME_EQ_AT_END_RE);
                 if (m !== null) {
-                    const paired = liftPairedDeclEq(block, next, m, source, ctx, parentType, counter);
+                    const paired = liftPairedDeclEq(block, next, m, source, ctx, parentType, counter, isDefaultLogicBody === true, isFileRoot === true);
                     for (const b of paired) result.push(b);
                     i = i + 2; // the Text block + the consumed markup block
                     continue;
@@ -2856,7 +2894,12 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             // oracle's `forbiddenConstructHead` lift so the native tree sees
             // the construct and its productions fire the E-*-NOT-IN-SCRML code
             // (this tree decides E-CLASS-NOT-IN-SCRML for BOTH pipelines).
-            if (forbiddenConstructHead(raw) !== null) {
+            // Scope: EXACTLY the §40.8 default-logic body-top
+            // (`isDefaultLogicBody` — `<program>` / `<page>` / `<channel>`
+            // direct children) plus a real FILE's top level (`isFileRoot`, set
+            // only by `nativeParseFile(…, { fileRoot: true })` — never on a
+            // re-parsed `<match>` / engine fragment), as the live oracle gates it.
+            if ((isDefaultLogicBody === true || isFileRoot === true) && forbiddenConstructHead(raw) !== null) {
                 result.push(synthLiftedLogicBlock(block, source, ctx));
                 i = i + 1;
                 continue;
@@ -2936,7 +2979,7 @@ function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter) {
         // children are recursed here — `<channel>` is an `isProgramFamilyRoot`
         // declaration site (childContext "state").
         const channelChildren = liftBareBlocks(
-            markupBlock.children, source, "state", ctx, counter);
+            markupBlock.children, source, "state", ctx, counter, true);
         out.push({ ...markupBlock, children: channelChildren, _channelExport: channelName });
         return { blocks: out };
     }
@@ -3073,7 +3116,7 @@ function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter) {
 // leading prefix is re-emitted + re-lifted as its own Text block.
 //
 // Returns the block array to splice into the result.
-function liftPairedDeclEq(textBlock, markupBlock, m, source, ctx, parentType, counter) {
+function liftPairedDeclEq(textBlock, markupBlock, m, source, ctx, parentType, counter, isDefaultLogicBody, isFileRoot) {
     const prefixRaw = m[1];
     const trailerRaw = m[2];
     const out = [];
@@ -3082,7 +3125,7 @@ function liftPairedDeclEq(textBlock, markupBlock, m, source, ctx, parentType, co
     // SAME as this pass's parentType (ast-builder.js L1114).
     const prefixBlock = synthPrefixTextBlock(textBlock, prefixRaw);
     if (prefixBlock !== null) {
-        const reLifted = liftBareBlocks([prefixBlock], source, parentType, ctx, counter);
+        const reLifted = liftBareBlocks([prefixBlock], source, parentType, ctx, counter, isDefaultLogicBody, isFileRoot);
         for (const b of reLifted) out.push(b);
     }
     // Build the synthetic logic body: the trimmed trailer (`(export )?

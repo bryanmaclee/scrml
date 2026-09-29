@@ -102,20 +102,84 @@ describe("S441 — the WORD is not the construct: prose and attributes stay sile
       expect(r.errors).toEqual([]);
     });
   }
+
+  // S441 review round — prose that carries BRACES (and a head split across lines)
+  // rendered as text on base and must still render as text; both pipelines.
+  const PROSE_WITH_BRACES = {
+    "`try {this} at home`": `try {this} at home`,
+    "`try` then `{this}` on the next line": `try\n{this} at home`,
+    "`class {A} notes` (no class name)": `class {A} notes`,
+    "`class Notes` then `{today}` on the next line": `class Notes\n{today}`,
+    "`class Room extends the house {with} doors`": `class Room extends the house {with} doors`,
+    "`switch (on) {the lights} now`": `switch (on) {the lights} now`,
+    "`switch (on) the lights {now}`": `switch (on) the lights {now}`,
+    "`switch (on)` then `the lights {now}`": `switch (on)\nthe lights {now}`,
+    "`async function is great (really) {ok}`": `async function is great (really) {ok}`,
+    "`for await (x of y) the band plays`": `for await (x of y) the band plays`,
+    "`try { <b>bold</b> } at home` (a block holding markup)": `try { <b>bold</b> } at home`,
+    "`class A { it's }` (an apostrophe, not a string)": `class A { it's fine }`,
+  };
+  for (const [name, line] of Object.entries(PROSE_WITH_BRACES)) {
+    for (const parser of [undefined, "scrml-native"]) {
+      test(`${name} stays text (${parser ?? "default"})`, () => {
+        const r = compile(`<program>\n<p>x</p>\n${line}\n<p>y</p>\n</program>\n`, parser ? { parser } : {});
+        for (const code of FAMILY) expect(codesOf(r)).not.toContain(code);
+      });
+    }
+  }
+});
+
+describe("S441 review round — scope is exactly the default-logic body-top + a real file top", () => {
+  const FAMILY = ["E-CLASS-NOT-IN-SCRML", "E-TRY-NOT-IN-SCRML", "E-SWITCH-FORBIDDEN", "E-ASYNC-NOT-IN-SCRML", "E-FOR-AWAIT-NOT-IN-SCRML"];
+  const NOT_IN_SCOPE = {
+    "a `<match>` arm body (inline)": `type P:enum = { A, B }\n<ph>: P = .A\n<match on=@ph>\n  <A>class Foo { }</>\n  <B>"b"</>\n</match>`,
+    "a `<match>` arm body (block)": `type P:enum = { A, B }\n<ph>: P = .A\n<match on=@ph>\n  <A>\n    class Foo { }\n  </>\n  <B>"b"</>\n</match>`,
+    "an engine state-child": `type Game:enum = { Title, Playing }\n<engine for=Game initial=.Title>\n    <Title rule=.Playing>\n      class Foo { }\n    </>\n    <Playing rule=.Title>\n      try { go() } catch (e) { }\n    </>\n</>`,
+    "an ordinary markup element body": `<div>\nclass A { }\n</div>`,
+  };
+  for (const [name, body] of Object.entries(NOT_IN_SCOPE)) {
+    for (const parser of [undefined, "scrml-native"]) {
+      test(`${name}: not lifted (${parser ?? "default"})`, () => {
+        const r = compile(`<program>\n${body}\n</program>\n`, parser ? { parser } : {});
+        for (const code of FAMILY) expect(codesOf(r)).not.toContain(code);
+      });
+    }
+  }
+  for (const parser of [undefined, "scrml-native"]) {
+    test(`a class at the FILE top (before <program>) fires (${parser ?? "default"})`, () => {
+      const r = compile(`class A { }\n<program>\n<p>a</p>\n</program>\n`, parser ? { parser } : {});
+      expect(codesOf(r)).toContain("E-CLASS-NOT-IN-SCRML");
+    });
+    test(`a class in a <channel> body fires (${parser ?? "default"})`, () => {
+      const r = compile(`<channel name="c">\n<p>x</p>\nclass Foo { }\n</channel>\n`, parser ? { parser } : {});
+      expect(codesOf(r)).toContain("E-CLASS-NOT-IN-SCRML");
+    });
+  }
 });
 
 describe("S441 — live and native recognisers agree (drift guard)", () => {
   const TABLE = [
-    ["class Foo {", "class"], ["export class Foo {", "class"], ["export default class {", "class"],
-    ["class Foo extends Bar {", "class"], ["class Foo\n{", "class"], ["  class A extends mix(B, C) {", "class"],
-    ["try {", "try"], ["try{", "try"],
-    ["switch (x) {", "switch"], ["switch (f(a, \")\")) {", "switch"],
-    ["for await (const x of y) log(x)", "for await"],
-    ["async function f() {", "async"], ["async function f(a, b) -> number {", "async"], ["export async function f() {", "async"],
-    ["server async function f() {", "async"], ["async fn f {", "async"], ["async fn f(x) {", "async"],
-    ["class of 2026", null], ["classify {", null], ["class action extends to all", null], ["try harder", null],
-    ["switch it off (now)", null], ["switch (on) the light", null], ["async function calls are slow", null],
-    ["for await the day", null], ["throw new Error(\"x\")", null], ["await load()", null], ["import(\"./x.js\")", null],
+    // code — recognised
+    ["class Foo { }", "class"], ["export class Foo { }", "class"], ["export default class Foo {\n}", "class"],
+    ["class Foo extends Bar {\n  m() { return 1 }\n}", "class"], ["class Foo extends a.b.C { x = 1 }", "class"],
+    ["class Foo {\n  constructor() { this.n = 0 }\n}\n", "class"], ["class Foo { };", "class"],
+    ["try { go() } catch (e) { }", "try"], ["try{\n  x\n} finally {\n}", "try"], ["try {\n  go()\n}\ncatch (e) {}", "try"],
+    ["switch (x) {\n  case 1: break\n}", "switch"], ["switch (f(a, \")\")) { default: go() }", "switch"],
+    ["for await (const x of y) {\n  log(x)\n}", "for await"], ["for await (x of @xs) { log(x) }", "for await"],
+    ["async function f() {\n  return 1\n}", "async"], ["async function f(a, b) -> number { return a }", "async"],
+    ["export async function f() { }", "async"], ["server async fn load() -> int { return 1 }", "async"],
+    ["async fn f { }", "async"], ["async fn f(x) {\n}", "async"],
+    // prose / not the complete construct — not recognised
+    ["class of 2026", null], ["classify {x}", null], ["class action extends to all", null], ["try harder", null],
+    ["class {A} notes", null], ["export default class {\n}", null], ["class Notes\n{today}", null],
+    ["class Room extends the house {with} doors", null], ["class A { x }", null], ["class A {\n}\ntrailing prose", "class"],
+    ["class A { } and more", null], ["class A {", null], ["class A { <b>x</b> }", null],
+    ["try {this} at home", null], ["try\n{this} at home", null], ["try { x }", null], ["try { go() }", null],
+    ["switch it off (now)", null], ["switch (on) the light", null], ["switch (on) {the lights} now", null],
+    ["switch (x) { }", null], ["switch (on)\n{ case 1: }", null],
+    ["async function calls are slow", null], ["async function is great (really) {ok}", null],
+    ["for await the day", null], ["for await (x of y) the band plays", null], ["for await (the results) { go() }", null],
+    ["throw new Error(\"x\")", null], ["await load()", null], ["import(\"./x.js\")", null],
     ["async () => 1", null], ["<p>class Foo {</p>", null], ["The class Foo { } example", null],
   ];
   for (const [raw, want] of TABLE) {

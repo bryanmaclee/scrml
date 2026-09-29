@@ -1526,7 +1526,8 @@ function _compileScrmlImpl(options = {}) {
         // default pipeline is untouched.
         const result = nativeParseFile(
           bsResult.filePath,
-          sourceByFile.get(bsResult.filePath) ?? "");
+          sourceByFile.get(bsResult.filePath) ?? "",
+          { fileRoot: true });
         if (result && result.ast) {
           if (Array.isArray(result.errors) === false) result.errors = [];
           populateNativeAttrValueExprNodes(
@@ -1548,7 +1549,10 @@ function _compileScrmlImpl(options = {}) {
       }
     : selfHostModules?.buildAST
       ? (bsResult) => _tabEntry(bsResult)
-      : (bsResult) => _tabEntry(bsResult, selfHostModules?.tokenizer ?? null);
+      // `fileRoot` (S441): this is a real FILE's top level, not a re-entered
+      // fragment (a `<match>` arm, an error-boundary body) — see
+      // liftBareDeclarations' §7.2.1 construct gate.
+      : (bsResult) => _tabEntry(bsResult, selfHostModules?.tokenizer ?? null, { fileRoot: true });
   const tabResults = [];
   // Keep bsResult alongside tabResult for the Gauntlet Phase 1 check pass
   // (some diagnostics need to inspect the raw block tree before TAB drops

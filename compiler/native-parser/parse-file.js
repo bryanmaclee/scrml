@@ -91,7 +91,7 @@ import { isVoidElementName } from "./tag-frame.js";
 // non-mappable BlockKind). Defensive: a non-string `source` folds to an empty
 // FileAST with no nodes.
 // =============================================================================
-export function nativeParseFile(filePath, source) {
+export function nativeParseFile(filePath, source, options) {
     const safeSource = typeof source === "string" ? source : "";
     const safePath = typeof filePath === "string" ? filePath : "";
 
@@ -132,7 +132,8 @@ export function nativeParseFile(filePath, source) {
     //     threaded so a lifted logic body's diagnostics route into
     //     `ctx.diagnostics` — collected by step 1a below (the lift runs
     //     BEFORE the collection so a lifted-body diagnostic is not missed).
-    const blocks = liftBareBlocks(rawBlocks, safeSource, null, ctx);
+    const blocks = liftBareBlocks(rawBlocks, safeSource, null, ctx, undefined, false,
+        options !== undefined && options !== null && options.fileRoot === true);
 
     // 1a. Collect the native parser's diagnostics. `ctx.diagnostics` is
     //     lazily-created (tag-frame.js `ensureDiagnostics`) — it is `undefined`

@@ -471,7 +471,7 @@ function buildFunctionBodyRanges(source, skipMerged) {
  * Is the `{` at `braceOffset` (inside a markup opener) the opening brace of a
  * §5.2.3 inline-block event-handler value — `on<event>={ … }`? Reads back from
  * the brace: optional whitespace, `=`, optional whitespace, then an attribute
- * name that starts at an attribute boundary (whitespace) and satisfies the
+ * name that starts at an attribute boundary (whitespace or a closing value quote/brace/paren) and satisfies the
  * parser's own `isEventHandlerAttrName`. A `${` value is not this form (the
  * char before `{` is `$`, not `=`), and is already a logic range.
  *
@@ -487,7 +487,12 @@ function isInlineBlockHandlerBrace(source, braceOffset) {
   while (k >= 0 && /\s/.test(source[k])) k--;
   const nameEnd = k + 1;
   while (k >= 0 && /[A-Za-z0-9_:-]/.test(source[k])) k--;
-  if (k < 0 || !/\s/.test(source[k])) return false;
+  // Attribute boundary: whitespace, or the close of the previous attribute's
+  // value (`class="a"onclick={…}`, `x={v}onclick={…}`, `f(a)onclick={…}`) —
+  // the boundaries the attribute scanner itself accepts. Anything else (a
+  // name char was already consumed; `@`, `:`-prefixed junk, `=`) is not an
+  // attribute start.
+  if (k < 0 || !/[\s"'})\]]/.test(source[k])) return false;
   const name = source.slice(k + 1, nameEnd);
   // A camelCase `onClick={…}` is the React shape itself (W-LINT-004's target);
   // the whole attribute is the ghost, so its braces are left to W-LINT-007 as

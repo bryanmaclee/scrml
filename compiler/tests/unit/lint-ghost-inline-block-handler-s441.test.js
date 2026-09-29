@@ -52,6 +52,8 @@ const SILENT_SHAPES = {
   "namespaced on: event": `<div on:custom={ @count = 1; @msg = "c" }>d</div>`,
   "block followed by more attributes": `<button onclick={ @count = 1; @msg = "a" } class="btn" disabled=@busy>x</button>`,
   "string holding a brace inside the block": `<button onclick={ @msg = "}"; @count = 2 }>x</button>`,
+  "no whitespace after a quoted value": `<button class="a"onclick={ @count = 1; @msg = "q" }>x</button>`,
+  "no whitespace after a braced value": `<button title=\${"t"}onclick={ @count = 1; @msg = "b" }>x</button>`,
 };
 
 describe("S441 — §5.2.3 inline-block handlers are silent under W-LINT-007 / W-LINT-013", () => {
