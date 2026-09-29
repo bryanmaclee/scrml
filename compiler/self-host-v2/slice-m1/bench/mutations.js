@@ -286,6 +286,10 @@ const MUTATIONS = [
      "        if (isAnd) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).yes), l)", "        if (isAnd) renv = tNarrow(env, condNarrowing(env, l).yes)"],
     ["S442 r3 N1: `||`'s right operand narrowed across the left operand's writing call",
      "        if (isOr) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).no), l)", "        if (isOr) renv = tNarrow(env, condNarrowing(env, l).no)"],
+    ["S442 r3 N3: a write of an `<each>` source keeps the row binding's narrowing",
+     "            if (r.key != \"\" && placesOverlap(r.key, key)) drop = drop.concat([r.name])\n", ""],
+    ["S442 r3 N3: the row binding never tied to its source",
+     "        if (bind is some) renv = tWithRow(tWithLocal(env, bind, elem), bind, eachSourceKey(env, e))", "        if (bind is some) renv = tWithLocal(env, bind, elem)"],
     // ---- s442 fix round r1 (review F1 / F2 / F3) ----
     ["S442 r1 F1: `a && b` typed from its operands again (the `&&` arm of Q2)",
      "            .And :> known(Type.Bool)", "            .And :> VType.Unknown"],

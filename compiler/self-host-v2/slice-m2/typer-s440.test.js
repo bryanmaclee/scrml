@@ -454,6 +454,17 @@ describe("#8 — a `T | not` operand must be narrowed first (Gotcha Q3)", () => 
     expect(inApp(O + KB + "    function f() { @bb = @o.n != not && keepB() && @o.n + 1 > 0 }")).toEqual([]);
     expect(inApp(O + KB + "    function f() { @bb = @o.n == not || !keepB() || @o.n + 1 > 0 }")).toEqual([]);
   });
+  const XS = "    <xs:O[replace]=([{ v: \"\", n: 0, f: false }])/>\n    function clearXs() { @xs = [{ v: not, n: not, f: not }] }\n    function other() { @m = 2 }\n";
+  const row = (body) => `<each in=@xs as x><p if=(x.n != not)><button onclick={ ${body}\n @m = x.n + 1 }>b</button></p></each>`;
+  test("r3 N3 — a write of an `<each>` source (direct, or by a callee) drops the row binding's narrowing", () => {
+    expect(inApp(O + XS, row("clearXs()"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+    expect(inApp(O + XS, row("@xs = [{ v: not, n: not, f: not }]"))).toEqual(["E-OPERAND-NOT-NARROWED"]);
+  });
+  test("r3 N3 twin — a write elsewhere keeps the row narrowing; the narrowed row read itself is silent", () => {
+    expect(inApp(O + XS, row("other()"))).toEqual([]);
+    expect(inApp(O + XS, row("@o.n = not"))).toEqual([]);
+    expect(inApp(O + XS, "<each in=@xs as x><p if=(x.n != not)>${x.n + 1}</p></each>")).toEqual([]);
+  });
   test("r2 F1a twin — a call whose callee writes OTHER places keeps the narrowing", () => {
     expect(inApp(O + "    function h() { @m = 2\n @o.v = \"x\" }\n    function f() { if (@o.n != not) { h()\n @m = @o.n + 1 } }")).toEqual([]);
   });

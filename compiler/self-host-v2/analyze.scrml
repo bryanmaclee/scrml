@@ -3478,13 +3478,13 @@ ${
     // `fnw`: each function's WRITE SET (place keys it may write, transitively
     // through its calls) — a call drops the narrowing of what its callee writes.
     type TEnv:struct = { t: Tables, file: string, errs: ASpan[], locals: LocalT[], settled: LocalT[], narrowed: string[],
-                         fnw: FnW[] }
+                         fnw: FnW[], rows: Alias[] }
     type RVT:struct = { vt: VType, ts: TypeState }
     type RTEnv:struct = { env: TEnv, ts: TypeState }
 
     fn tWithLocal(env: TEnv, s: Sym, vt: VType) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals.concat([{ id: s.id, vt: vt }]), settled: env.settled,
-                 narrowed: env.narrowed, fnw: env.fnw }
+                 narrowed: env.narrowed, fnw: env.fnw, rows: env.rows }
     }
 
     // ---- NARROWING (for the S440 `T | not` operand rule) ------------------------
@@ -3512,17 +3512,41 @@ ${
         for (const k of keys) {
             if (k != "") out = out.concat([k])
         }
-        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows }
     }
 
     // Drop the narrowing of `key` and of every place under it.
+    // (r3 N3) An `<each>` row binding (`rows`: its `#id` key → its source's
+    // place key) is an element OF its source: a write to the source (or to a
+    // place over / under it) drops the row binding's narrowings too.
     fn tUnnarrow(env: TEnv, key: string) -> TEnv {
         if (key == "") return env
+        let drop: string[] = [key]
+        for (const r of env.rows) {
+            if (r.key != "" && placesOverlap(r.key, key)) drop = drop.concat([r.name])
+        }
         let out: string[] = []
         for (const k of env.narrowed) {
-            if (k != key && k.indexOf(key + ".") != 0) out = out.concat([k])
+            if (!underAny(k, drop)) out = out.concat([k])
         }
-        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw }
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: out, fnw: env.fnw, rows: env.rows }
+    }
+
+    fn placesOverlap(a: string, b: string) -> boolean {
+        return a == b || a.indexOf(b + ".") == 0 || b.indexOf(a + ".") == 0
+    }
+
+    // Is `k` one of `keys`, or a place under one?
+    fn underAny(k: string, keys: string[]) -> boolean {
+        for (const d of keys) {
+            if (k == d || k.indexOf(d + ".") == 0) return true
+        }
+        return false
+    }
+
+    fn tWithRow(env: TEnv, bind: Sym, src: string) -> TEnv {
+        return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: env.narrowed,
+                 fnw: env.fnw, rows: env.rows.concat([{ name: "#" + bind.id, key: src }]) }
     }
 
     // A place's key ("" — not a place the typer narrows).
@@ -4963,7 +4987,7 @@ ${
 
     fn withNarrowed(env: TEnv, keys: string[]) -> TEnv {
         return { t: env.t, file: env.file, errs: env.errs, locals: env.locals, settled: env.settled, narrowed: keys,
-                 fnw: env.fnw }
+                 fnw: env.fnw, rows: env.rows }
     }
 
     fn typeMaybeExpr(env: TEnv, e: AExpr | not, ts: TypeState) -> TypeState {
@@ -5324,7 +5348,7 @@ ${
         }
         let renv: TEnv = env
         const bind: Sym | not = eachBind(elemFact(env.t.elems, e.nid))
-        if (bind is some) renv = tWithLocal(env, bind, elem)
+        if (bind is some) renv = tWithRow(tWithLocal(env, bind, elem), bind, eachSourceKey(env, e))
         const keyA: AAttr | not = attrNamed(e.attrs, "key")
         if (keyA is some) ts = typeAttrValue(renv, keyA.value, ts).ts
         return typeNodes(renv, e.kids, ts)
@@ -5349,6 +5373,15 @@ ${
             .NoValue :> rvt(VType.Unknown, ts)
             .Braced(b: b) :> rvt(VType.Unknown, ts)
         }
+    }
+
+    // The place an `<each in=…>` iterates ("" — not a place: a literal, a call).
+    fn eachSourceKey(env: TEnv, e: AElem) -> string {
+        const a: AAttr | not = attrNamed(e.attrs, "in")
+        if (a is not) return ""
+        const x: AExpr | not = valueExpr(a.value)
+        if (x is not) return ""
+        return nKey(env, x)
     }
 
     fn checkIterable(env: TEnv, v: VType, span: ASpan, ts: TypeState) -> TypeState {
@@ -5411,7 +5444,7 @@ ${
         let ts: TypeState = { exprs: [], diags: [], contribs: [], presence: [] }
         const fnw: FnW[] = fnWrites(files)
         for (const f of files) {
-            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnw }
+            const env: TEnv = { t: t, file: f.path, errs: f.errs, locals: [], settled: settled, narrowed: [], fnw: fnw, rows: [] }
             for (const it of f.items) { ts = typeItem(env, it, ts) }
         }
         return ts
