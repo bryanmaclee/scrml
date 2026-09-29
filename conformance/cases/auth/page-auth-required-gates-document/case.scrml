@@ -1,0 +1,5 @@
+<program>
+<page auth="required">
+<p class="secret">page-secret-marker</p>
+</page>
+</program>
