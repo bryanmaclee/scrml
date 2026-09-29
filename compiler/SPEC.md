@@ -7248,8 +7248,14 @@ Valid inside markup and state contexts, and at program scope (top-level in the p
 
 - A `#{}` block MAY appear at the top level of a file (outside any markup element). Top-level `#{}` is valid and SHALL compile.
 - Top-level `#{}` compiles to a stylesheet that is included in the page's global styles, applied to the entire document.
-- `#{}` inside a markup element that is not inside a component (state type constructor) is **program-global**: its rules compile exactly as a program-level `#{}` — global CSS with no `@scope` wrapper, in the `global` cascade layer (§65.5, §65.8). A plain element creates no scope; component scoping is DQ-7 below. (A flat-declaration block — bare `property: value;` pairs with no selector — inlines only on a constructor root, DQ-7; this rule places selector rules.)
+- `#{}` inside a markup element that is not inside a component (state type constructor) is **program-global**: its rules compile exactly as a program-level `#{}` — global CSS with no `@scope` wrapper, in the `global` cascade layer (§65.5, §65.8). A plain element creates no scope; component scoping is DQ-7 below. This rule places **selector rules**.
   > **Provenance:** ruling:user-voice-scrml.md S440 (all recs #2, item 4). Replaces "applies styles at the element level (inline or scoped per compiler settings)" — no such compiler setting existed.
+  >
+  > ⚑ **OPEN — flat-declaration blocks outside the DQ-7 case are UNRULED.** A flat-declaration `#{}` (bare `property: value;` pairs, no selector) is ruled only by DQ-7 below (inside a constructor scope → inline `style=` on the containing element). Ruling #4 (S440) placed selector rules only; it did not rule these two cases, and neither has a normative reading yet:
+  > 1. **A flat block in a plain markup element** (not inside a component) — impl#1 today emits the bare declarations inside `@layer global { … }` with no selector: invalid CSS the browser discards, so the block has no effect, and no diagnostic.
+  > 2. **A flat block in an element nested inside a component** (not the constructor root) — impl#1 today drops it silently: no `style=`, no CSS, no diagnostic.
+  >
+  > The bootstrap's stylesheet shim refuses both (not-yet) rather than guess. Tracked as `g-impl1-flat-css-block-on-plain-element-emits-dead-css` and `g-impl1-flat-css-block-nested-in-component-dropped` (docs/known-gaps.md).
 - Using `#{}` at top level SHALL NOT be a compile error or warning.
 
 **Normative statements (DQ-7 — CSS Scoping):**
@@ -40551,7 +40557,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-GRANT-UNKNOWN`** | Error | A grant token that is not a permission axis value — including `any` / `all`, which do not exist (§66.12.4). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FIELD-PRIVATE-WRITE`** | Error | A write from a file other than the defining file to a field that is not `export`ed (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-FOREIGN-REPLACE-PRIVATE`** | Error | A whole-value replace, from outside the defining file, of a value whose type has any private field (§66.14). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell (or another token) are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
+| **`E-THEME-TOKEN-CELL-COLLISION`** | Error | A `<theme>` token and a cell are declared with the same name in one program — tokens and cells share ONE namespace (§66.17 item 4), so the pair cannot coexist silently. The message names both declarations. (No existing code fits: `E-NAME-COLLIDES-STATE` is a *local* reusing a cell name, §6.1.3; `E-SCOPE-REDECLARE` is function-body scope, §7.3.3.) **Nominal / spec-ahead — not yet emitted** (impl#1 does not implement §66; the bootstrap front end does not parse T3 yet, so it has no fire site). Provenance: ruling:user-voice-scrml.md S440 (all recs #2, item 5). |
 
 **Cross-reference (not a §66 code):** a field overridden twice in one spread-override shape
 (`{ ...@g, phase: .Gone, phase: .Live }`, §66.11.3 item 1) is `E-STRUCT-DUPLICATE-KEY` — a language-wide
