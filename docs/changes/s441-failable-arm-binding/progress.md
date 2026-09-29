@@ -13,3 +13,7 @@
   F1/F3/F5 fixed at one root (imported enum decls in buildVariantFieldsRegistry, both passes). F4 fixed (data:{} unit normalize).
   F2 → carried-gap note in SPEC §19.4.3.1 + witness on g-bang-brace-arm-bodies-have-no-tree-form + test.failing/sibling.
   F7 SPEC table of arm forms. F6 filed. F8 09 comment + ledger line refreshed. 8 gaps filed under §S441.
+- REVIEW ROUND 3 (re-review of c4b0d8db9, DO-NOT-LAND): merged origin/main (57b144549; §19.4.3.1 moved after main's rewritten event-handler text).
+  R2-1 fixed (type-directed registry: fail by target enum, !{} arms by typer-annotated errorTypeName or runtime envelope `type`; own enum wins bare-name).
+  R2-2: arms + `| err :>` fixed; `match` reader residual NOT fixed (pinned test.failing; gap filed) — a permission denial blocked inspecting the match-reader call sites.
+  R2-3 fixed (renamed/`*` re-exports). R2-4 fixed (unit only by declared schema). R2-5 SPEC row limited + ⚑ carried gap + filed.

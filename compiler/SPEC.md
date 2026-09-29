@@ -14859,7 +14859,7 @@ A handler handles the call the way any other caller does: `onclick={ risky() !{ 
 handler         ::= expression '!{' handler-arm+ '}'
 handler-arm     ::= '|'? handler-pattern (':>' | '=>' | '->') arm-body
 handler-pattern ::= variant-pattern                      // §18.2 — `.V`, `::V`, `.V(a, b)`
-                  | ('.' | '::') VariantName Identifier  // `| ::Network msg :>` — space-form payload binding
+                  | ('.' | '::') VariantName Identifier  // `| ::Network msg :>` — space form; single-field variants only
                   | '_' Identifier?                      // the wildcard; with a name, binds the PAYLOAD
                   | Identifier                           // the identifier-binding arm; binds the ERROR VALUE
 ```
@@ -14871,10 +14871,20 @@ What each form binds:
 | arm | matches | the name is bound to |
 |---|---|---|
 | `\| .V(a, b) :>` / `\| ::V(a, b) :>` | variant `V` | each name to the declared payload field at its position |
-| `\| ::V msg :>` / `\| .V msg :>` | variant `V` | the variant's FIRST declared payload field (for a single-field variant, the field value) |
+| `\| ::V msg :>` / `\| .V msg :>` (single-field `V`) | variant `V` | the value of `V`'s one payload field |
 | `\| _ :>` | every remaining variant | nothing |
 | `\| _ e :>` | every remaining variant | the variant's **payload** — the field-keyed payload object, or no value for a unit variant. NOT the error value |
 | `\| e :>` | every remaining variant | the **error value** (the bullets below) |
+
+The space form binds ONE name, so it is defined only for a single-field variant; a multi-field
+variant is bound with the parenthesized form, one name per field (§18.7 — no partial binding,
+E-TYPE-021).
+
+> ⚑ **Carried impl#1 gap — the space form on a multi-field variant.** impl#1 accepts
+> `| ::Two x :>` on `Two(a: string, b: number)` without a diagnostic and binds `x` to the FIRST
+> field (`a`). That is a partial binding §18.7 does not allow; it is not ratified here. Gap
+> `g-errarm-space-form-multi-field-binds-first-field` (`docs/known-gaps.md`); today's behaviour is
+> pinned by `compiler/tests/integration/s441-errarm-type-directed.test.js`.
 
 `| _ e :>` and `| e :>` are both catch-alls and differ ONLY in what the name holds: the explicit
 wildcard binds the payload, the bare identifier binds the whole error value. Code that reads a

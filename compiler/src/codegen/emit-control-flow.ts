@@ -64,6 +64,9 @@ function getBatchInListCap(): number {
 
 let _variantFields: Map<string, string[]> | null = null;
 let _variantFieldCollisions: Set<string> | null = null;
+// s441 R2-1/R2-2 — TYPE-DIRECTED schema: enum name (incl. aliases of imported
+// enums) → variant → declared field names (`null` = unit variant).
+let _variantsByEnum: Map<string, Map<string, string[] | null>> | null = null;
 
 /**
  * §41.13 — the fixed ParseError payload-variant schema. ParseError is imported
@@ -83,9 +86,18 @@ const PARSE_ERROR_VARIANT_FIELDS: ReadonlyArray<readonly [string, string[]]> = [
 export function setVariantFieldsForFile(
   variantFields: Map<string, string[]> | null,
   collisions?: Set<string> | null,
+  byEnum?: Map<string, Map<string, string[] | null>> | null,
 ): void {
   _variantFields = variantFields;
   _variantFieldCollisions = collisions ?? null;
+  _variantsByEnum = byEnum ? new Map(byEnum) : null;
+  // ParseError (§41.13) is imported from `scrml:data`, so no decl reaches the
+  // by-enum map; seed it (its one unit variant is MissingDiscriminator).
+  if (_variantsByEnum && !_variantsByEnum.has("ParseError")) {
+    const pe = new Map<string, string[] | null>([["MissingDiscriminator", null]]);
+    for (const [name, fields] of PARSE_ERROR_VARIANT_FIELDS) pe.set(name, [...fields]);
+    _variantsByEnum.set("ParseError", pe);
+  }
   // Seed the ParseError schema for parseVariant binding resolution. Only fill
   // in variants the file does NOT already declare — a file-local enum of the
   // same name always wins (and a genuine cross-enum collision keeps the entry,
@@ -117,10 +129,57 @@ export function setVariantFieldsForFile(
  * `Enum.Variant(args)` the enum-namespaced constructor handles the
  * disambiguation correctly).
  */
-export function getVariantFieldSchema(variantName: string): string[] | null {
+export function getVariantFieldSchema(variantName: string, enumName?: string | null): string[] | null {
+  // s441 R2-1 — type-directed first: when the caller knows the enum, the answer
+  // is that enum's declaration, whatever other enums share the variant name.
+  if (enumName && _variantsByEnum) {
+    const m = _variantsByEnum.get(enumName);
+    if (m && m.has(variantName)) return m.get(variantName) ?? null;
+  }
   if (!_variantFields) return null;
   if (_variantFieldCollisions && _variantFieldCollisions.has(variantName)) return null;
   return _variantFields.get(variantName) ?? null;
+}
+
+/**
+ * s441 R2-2 — true when a bare variant name has no single answer: it is in the
+ * collision set (declared by two own enums, or two imported ones with no own
+ * declaration). A reader that cannot learn the enum type must not guess.
+ */
+export function isVariantNameAmbiguous(variantName: string): boolean {
+  return !!(_variantFieldCollisions && _variantFieldCollisions.has(variantName));
+}
+
+/**
+ * s441 R2-2 / R2-4 — every enum (by any name the file knows it by) that
+ * declares `variantName`, with that variant's fields (`null` = unit). Used to
+ * emit a RUNTIME type-keyed projection off an error envelope's `type` field
+ * when the enum is not known at compile time.
+ */
+export function getVariantSchemasByEnum(variantName: string): Array<[string, string[] | null]> {
+  const out: Array<[string, string[] | null]> = [];
+  if (!_variantsByEnum) return out;
+  for (const [enumName, m] of _variantsByEnum) {
+    if (m.has(variantName)) out.push([enumName, m.get(variantName) ?? null]);
+  }
+  return out;
+}
+
+/** s441 R2-4 — the unit variants of `enumName`, or null when the enum is unknown. */
+export function getEnumUnitVariants(enumName: string): string[] | null {
+  const m = _variantsByEnum?.get(enumName);
+  if (!m) return null;
+  return [...m].filter(([, f]) => f === null).map(([n]) => n);
+}
+
+/** s441 R2-4 — every known `Enum.Variant` pair whose variant is a unit variant. */
+export function getAllUnitVariantKeys(): string[] {
+  const out: string[] = [];
+  if (!_variantsByEnum) return out;
+  for (const [enumName, m] of _variantsByEnum) {
+    for (const [v, f] of m) if (f === null) out.push(enumName + "." + v);
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------

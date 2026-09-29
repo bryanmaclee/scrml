@@ -2006,10 +2006,10 @@ export function generateClientJs(ctx: CompileContext): string {
   // escape-hatch expressions, and other legacy emission surfaces lower to
   // the canonical `{ variant, data }` tagged-object literal (matches the
   // structured AST path in emit-expr.ts:emitCall).
-  const { fields, collisions } = clientStage(ctx, "build-variant-fields-registry", () =>
+  const { fields, collisions, byEnum } = clientStage(ctx, "build-variant-fields-registry", () =>
     buildVariantFieldsRegistry(fileAST)
   );
-  setVariantFieldsForFile(fields, collisions);
+  setVariantFieldsForFile(fields, collisions, byEnum);
   setVariantFieldsForRewriter(fields, collisions);
 
   // g-request-ref-nested-in-lift-misroute (CONVERGENCE, S349-peter) — establish
@@ -4148,52 +4148,93 @@ export function generateClientJs(ctx: CompileContext): string {
 // ---------------------------------------------------------------------------
 
 // s441 F1/F3 — per-compile map: importing file (posix path) → the enum
-// type-decls it imports from other `.scrml` files. Set once per compile by
-// codegen/index.ts:runCG (collectImportedEnumDeclsByFile) and read by
-// buildVariantFieldsRegistry on BOTH the client and the server pass, so an
-// imported enum's payload field names are known where it is used — the `fail`
-// emitter keys its payload, and the `!{}` / `match` readers project it, the
-// same way as in the declaring file. `null` = no cross-file info (harnesses).
-let _importedEnumDeclsByFile: Map<string, TypeDecl[]> | null = null;
+// type-decls it imports from other `.scrml` files, each with the name(s) the
+// importer knows it by. Set once per compile by codegen/index.ts:runCG
+// (collectImportedEnumDeclsByFile) and read by buildVariantFieldsRegistry on
+// BOTH the client and the server pass. `null` = no cross-file info (harnesses).
+type ImportedEnumEntry = { decl: TypeDecl; names: string[] };
+let _importedEnumDeclsByFile: Map<string, ImportedEnumEntry[]> | null = null;
 
-export function setImportedEnumDeclsByFile(m: Map<string, TypeDecl[]> | null): void {
+export function setImportedEnumDeclsByFile(m: Map<string, ImportedEnumEntry[]> | null): void {
   _importedEnumDeclsByFile = m;
 }
 
-function _importedEnumDeclsFor(fileAST: any): TypeDecl[] {
+function _importedEnumDeclsFor(fileAST: any): ImportedEnumEntry[] {
   if (!_importedEnumDeclsByFile) return [];
   const fp: string | undefined = fileAST?.filePath ?? fileAST?.ast?.filePath;
   if (!fp) return [];
   return _importedEnumDeclsByFile.get(toPosix(fp)) ?? [];
 }
 
+/**
+ * The file's variant→payload-field registry, in two forms:
+ *
+ * - `byEnum` — TYPE-DIRECTED: enum name (and every alias the file knows an
+ *   imported enum by) → variant → declared field names (`null` = unit
+ *   variant). A reader that knows the enum type (a `fail` target, an `!{}`
+ *   handler whose callee's error type the typer resolved, a runtime envelope's
+ *   `type`) resolves exactly, whatever other enums share the variant name.
+ *
+ * - `fields` / `collisions` — the BARE-NAME fallback for readers that do not
+ *   know the enum. A name declared by the file's OWN enums always resolves to
+ *   the own declaration (an imported enum can never change what a local enum's
+ *   variant means — s441 R2-1); an imported variant name fills in only when no
+ *   own enum declares that name and exactly one imported enum does.
+ *   `collisions` = names declared by two OWN enums (unchanged behaviour).
+ */
 export function buildVariantFieldsRegistry(fileAST: any): {
   fields: Map<string, string[]>;
   collisions: Set<string>;
+  byEnum: Map<string, Map<string, string[] | null>>;
 } {
   const fields = new Map<string, string[]>();
   const collisions = new Set<string>();
+  const byEnum = new Map<string, Map<string, string[] | null>>();
   const ownDecls: TypeDecl[] = fileAST?.typeDecls ?? fileAST?.ast?.typeDecls ?? [];
-  // Own decls first, then imported enums. A variant name declared by two enums
-  // (own + imported, or two imports) is a collision exactly as two local enums
-  // are: the readers fall back to their conservative no-schema path.
-  const importedDecls = _importedEnumDeclsFor(fileAST).filter((d) => !ownDecls.includes(d));
-  const typeDecls: TypeDecl[] = [...ownDecls, ...importedDecls];
+  const isEnum = (d: TypeDecl) => d && d.kind === "type-decl" && d.typeKind === "enum";
 
-  for (const decl of typeDecls) {
-    if (decl.kind !== "type-decl" || decl.typeKind !== "enum") continue;
-    const info = getAllVariantInfo(decl);
-    for (const v of info) {
-      if (v.fieldNames === null) continue; // unit variants have no bindings
-      if (fields.has(v.name)) {
-        // Same variant name used in a second enum → positional ambiguity.
-        collisions.add(v.name);
-      } else {
-        fields.set(v.name, v.fieldNames);
-      }
+  const schemaOf = (decl: TypeDecl): Map<string, string[] | null> => {
+    const m = new Map<string, string[] | null>();
+    for (const v of getAllVariantInfo(decl)) m.set(v.name, v.fieldNames);
+    return m;
+  };
+
+  // Own enums: bare names + by-enum.
+  const ownVariantNames = new Set<string>();
+  for (const decl of ownDecls) {
+    if (!isEnum(decl)) continue;
+    const schema = schemaOf(decl);
+    byEnum.set(decl.name, schema);
+    for (const [name, fieldNames] of schema) {
+      ownVariantNames.add(name);
+      if (fieldNames === null) continue; // unit variants have no bindings
+      if (fields.has(name)) collisions.add(name);
+      else fields.set(name, fieldNames);
     }
   }
-  return { fields, collisions };
+
+  // Imported enums: by-enum under every known name; a bare name only where no
+  // own enum declares it AND exactly one imported enum does. A name two imported
+  // enums share gets NO bare-name entry — not a collision entry either: that
+  // leaves the bare-name readers exactly where they were before imported enums
+  // were visible at all (s441 R2-2: never worse than before), while the
+  // type-directed readers (by-enum, or the envelope's runtime `type`) resolve it.
+  const importedFieldNames = new Map<string, string[]>();
+  const importedShared = new Set<string>();
+  for (const { decl, names } of _importedEnumDeclsFor(fileAST)) {
+    if (!isEnum(decl) || ownDecls.includes(decl)) continue;
+    const schema = schemaOf(decl);
+    for (const n of new Set([decl.name, ...names])) if (!byEnum.has(n)) byEnum.set(n, schema);
+    for (const [name, fieldNames] of schema) {
+      if (ownVariantNames.has(name) || fieldNames === null) continue;
+      if (importedFieldNames.has(name)) importedShared.add(name);
+      else importedFieldNames.set(name, fieldNames);
+    }
+  }
+  for (const [name, fieldNames] of importedFieldNames) {
+    if (!importedShared.has(name)) fields.set(name, fieldNames);
+  }
+  return { fields, collisions, byEnum };
 }
 
 // ---------------------------------------------------------------------------

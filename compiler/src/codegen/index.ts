@@ -1111,17 +1111,20 @@ function findMatchingCloseIdx(html: string, tag: string, fromIdx: number): numbe
  * state belongs here too.
  */
 /**
- * s441 F1/F3 — for every file in the compile, the ENUM type-decls it imports
- * from other `.scrml` files in the same compile, keyed by the importer's posix
- * path. Follows `export { X } from "./other.scrml"` re-export chains through the
- * importGraph `exports[].reExportSource` edges (cycle-safe). A non-enum or an
- * unresolvable name contributes nothing. Local aliases are irrelevant here: the
- * consumer keys by VARIANT name, which aliasing does not change.
+ * s441 F1/F3 (+ R2-3) — for every file in the compile, the ENUM type-decls it
+ * imports from other `.scrml` files in the same compile, keyed by the importer's
+ * posix path. Each entry carries the decl AND the name(s) the importer knows it
+ * by (`import { IE as X }` → "X"; a renamed re-export `export { IE as JE }` →
+ * "JE"), so a `fail JE.V` / an `! JE` handler resolves to IE's schema. Follows
+ * re-export chains through the importGraph `exports[]` edges — `localName` maps
+ * a renamed re-export back to the source-side name, `re-export-all` (`export *`)
+ * chases the same name — and is cycle-safe. A non-enum or an unresolvable name
+ * contributes nothing.
  */
 function collectImportedEnumDeclsByFile(
   files: any[],
   importGraph: Map<string, any> | null,
-): Map<string, any[]> | null {
+): Map<string, Array<{ decl: any; names: string[] }>> | null {
   if (!importGraph || importGraph.size === 0) return null;
   const declsByPath = new Map<string, any[]>();
   for (const f of files) {
@@ -1138,23 +1141,32 @@ function collectImportedEnumDeclsByFile(
     if (own) return own;
     const entry = importGraph.get(absSource) ?? importGraph.get(toPosix(absSource));
     for (const exp of (entry?.exports ?? []) as any[]) {
-      if (exp?.name !== name || !exp?.reExportSource) continue;
-      const found = findEnum(exp.reExportSource, name, seen);
+      if (!exp?.reExportSource) continue;
+      let sourceName: string | null = null;
+      if (exp.isReExportAll) sourceName = name;
+      else if (exp.name === name) sourceName = typeof exp.localName === "string" && exp.localName ? exp.localName : name;
+      if (!sourceName) continue;
+      const found = findEnum(exp.reExportSource, sourceName, seen);
       if (found) return found;
     }
     return null;
   };
-  const out = new Map<string, any[]>();
+  const out = new Map<string, Array<{ decl: any; names: string[] }>>();
   for (const [fp, entry] of importGraph) {
-    const found: any[] = [];
+    const found: Array<{ decl: any; names: string[] }> = [];
     for (const imp of (entry?.imports ?? []) as any[]) {
       if (!imp?.absSource) continue;
-      const names: string[] = Array.isArray(imp.specifiers) && imp.specifiers.length > 0
-        ? imp.specifiers.map((sp: any) => sp.imported)
-        : (imp.names ?? []);
-      for (const n of names) {
-        const decl = findEnum(imp.absSource, n, new Set());
-        if (decl && !found.includes(decl)) found.push(decl);
+      const pairs: Array<{ imported: string; local: string }> =
+        Array.isArray(imp.specifiers) && imp.specifiers.length > 0
+          ? imp.specifiers.map((sp: any) => ({ imported: sp.imported, local: sp.local ?? sp.imported }))
+          : (imp.names ?? []).map((n: string) => ({ imported: n, local: n }));
+      for (const { imported, local } of pairs) {
+        const decl = findEnum(imp.absSource, imported, new Set());
+        if (!decl) continue;
+        const hit = found.find((e) => e.decl === decl);
+        const names = [local, imported].filter((n, i, arr) => n && arr.indexOf(n) === i);
+        if (hit) { for (const n of names) if (!hit.names.includes(n)) hit.names.push(n); }
+        else found.push({ decl, names });
       }
     }
     if (found.length > 0) out.set(toPosix(fp), found);

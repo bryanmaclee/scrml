@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 205 | 4 |
-| MED | 397 | 0 |
+| MED | 399 | 0 |
 | LOW | 173 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -4281,6 +4281,25 @@ objects. Probe: `scratchpad/rv-errarm-out/p5.js` (the PA review harness).
 `_scrml_fetch_isMissing_N` on the client (a server route), and `function go() { @r = isMissing(…) }` then trips
 E-CPS-NONIDEM-NO-STORAGE. A comparison against a stdlib enum's unit variant has no server trigger; the `scrml:data`
 import is apparently read as a server capability. Reproduced on `main`.
+
+### g-errarm-space-form-multi-field-binds-first-field — `| ::Two x :>` on a multi-field variant `Two(a, b)` compiles clean and binds `x` to the FIRST field; §18.7 allows no partial binding (E-TYPE-021) — `NEW S441; **MED**; open`
+<!-- @gap id=g-errarm-space-form-multi-field-binds-first-field sev=MED status=open locus=compiler/src/codegen/emit-logic.ts(emitGuardedArmBinding-single-name-branch)+compiler/src/type-system.ts(guarded-expr-arm-checks) prov=review:S441-errarm-r2-R2-5-executed-sc/space -->
+PA review scenario `sc/space`: `| ::One m :>` binds `"m"` (correct — single field), `| ::Two x :>` binds `"x"` (the
+first of `Two("x", 2)`), no diagnostic. SPEC §19.4.3.1 (S441) defines the space form for single-field variants only and
+carries this as a ⚑ impl gap; it is NOT ratified. **Direction:** E-TYPE-021 on the space form when the variant has more
+than one field (newly-rejecting — measure the corpus first). Pinned: `compiler/tests/integration/s441-errarm-type-directed.test.js`.
+
+### g-match-payload-binding-resolves-by-bare-variant-name — a `match` arm `.One(msg)` binds its payload by the bare variant NAME, so when two enums visible to the file share the name (two imports, or local + imported) the binding is unbound (`ReferenceError`) or takes the OTHER enum's field — `NEW S441; **MED**; open`
+<!-- @gap id=g-match-payload-binding-resolves-by-bare-variant-name sev=MED status=open locus=compiler/src/codegen/emit-control-flow.ts(emitVariantBindingPrelude/emitMatchExpr-getVariantFieldSchema-call-sites) prov=review:S441-errarm-r2-R2-2-executed-sc/impColl+sc/localColl -->
+The S441 round-3 fix made the registry type-directed (`byEnum`) and moved the `fail` emitter and the `!{}` arm readers
+onto it (plus a runtime projection off the envelope's `type`), but the `match` binding readers still call the bare-name
+lookup. Executed: `sc/impColl` (IE and JE both declare `One`/`Two`) → `desc(err)` throws `ReferenceError: msg is not
+defined`; `sc/localColl` (local `LE.One(zz)` + imported `IE.One(msg)`) → `desc(err)` over an `IE` value yields
+`"O:undefined"` (the local field). Neither was reachable before S441 (an imported enum had no schema at all, and the old
+`| err :>` handed `match` a payload that never matched). **Fix:** pass the scrutinee's enum type to the prelude (the
+typer resolves it for exhaustiveness), and where it genuinely cannot be determined emit `E-VARIANT-AMBIGUOUS` — §34 row:
+"the position has no statically-known enum type context … §18.0.3 covers match-arm patterns. Qualify the variant". Pinned
+by two `test.failing` cases in `compiler/tests/integration/s441-errarm-type-directed.test.js`.
 
 ## §S326 — gaps filed S326 (2026-08-06, bryan; surfaced while landing the inherited S325 arcs)
 

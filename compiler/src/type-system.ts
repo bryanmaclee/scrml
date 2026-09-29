@@ -12484,6 +12484,10 @@ function annotateNodes(
 
         // Step 3: look up the function's errorType from our pre-built map.
         const errorTypeName = calleeName ? (fnErrorTypes.get(calleeName) ?? null) : null;
+        // s441 R2-1 — hand the resolved error enum to codegen, so the `!{}` arm
+        // bindings resolve their payload fields by the enum TYPE, not by a bare
+        // variant name another enum may share (emit-logic.ts guarded-expr).
+        if (errorTypeName) (n as Record<string, unknown>).errorTypeName = errorTypeName;
 
         // Step 4: if we have a named errorType, look it up in the typeRegistry.
         if (errorTypeName) {

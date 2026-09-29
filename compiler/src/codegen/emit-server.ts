@@ -2301,7 +2301,7 @@ export function generateServerJs(
   // (event-handler / escape-hatch paths) lower to the canonical
   // `{ variant, data }` tagged-object literal. Mirrors the client setup in
   // emit-client.ts:generateClientJs. Released at the bottom of this function.
-  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions } =
+  const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions, byEnum: _scrmlVariantsByEnum } =
     buildVariantFieldsRegistry(fileAST);
   setVariantFieldsForRewriter(_scrmlVariantFields, _scrmlVariantCollisions);
   // s441 D2 — publish the SAME registry to emit-control-flow, which the `fail`
@@ -2311,7 +2311,7 @@ export function generateServerJs(
   // value on `.data` while the client read `.data.<field>` — the §19.9.1
   // envelope must be one shape on both sides of the wire (§19.9.4 "the
   // serialization boundary SHALL be transparent"). Released at the bottom.
-  setVariantFieldsForFile(_scrmlVariantFields, _scrmlVariantCollisions);
+  setVariantFieldsForFile(_scrmlVariantFields, _scrmlVariantCollisions, _scrmlVariantsByEnum);
 
   // §14.8.9 — arm the SERVER SQL-lowering pass to tag protected-origin `?{}`
   // SELECT results with the `_scrml_protect_tag(...)` descriptor. Released

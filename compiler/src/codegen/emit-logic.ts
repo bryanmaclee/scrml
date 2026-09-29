@@ -4,7 +4,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { extractSqlParams, rewriteTildeRef, buildTaggedTemplate, protectTagSqlResult, boolCoerceSqlResult, _lowerTenantForQuery } from "./rewrite.js";
 import { emitExpr, emitExprField, arrowBodyNeedsParens, arrowBodyStringNeedsParens, isStdlibAsyncCallee, type EmitExprContext } from "./emit-expr.ts";
 import { stripLeakedComments, isLeakedComment, splitBareExprStatements, splitMergedStatements } from "./compat/parser-workarounds.js";
-import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, armCondition, type MatchArm } from "./emit-control-flow.ts";
+import { emitIfStmt, emitForStmt, emitWhileStmt, emitDoWhileStmt, emitBreakStmt, emitContinueStmt, emitTryStmt, emitDeferScope, emitDeferRegistration, emitMatchExpr, emitSwitchStmt, rewriteBlockBody, splitMultiArmString, parseMatchArm, matchArmInlineToMatchArm, emitVariantBindingPrelude, hasPayloadBindingOrTaggedVariant, isFailableOkMatch, emitMatchTagDiscriminator, getVariantFieldSchema, isVariantNameAmbiguous, getVariantSchemasByEnum, getEnumUnitVariants, getAllUnitVariantKeys, armCondition, type MatchArm } from "./emit-control-flow.ts";
 import { isDestructurePattern, nameOrPatternText } from "./emit-destructure-pattern.ts";
 import { markDeclaredImmutable, markDeclaredMutable, tildeDeclIsRebind, clearLiftScope } from "./declared-name-marks.ts";
 import { emitLiftExpr, emitCreateElementFromMarkup, emitMarkupValueExpr, forHeadKeyword, loopBodyDeclaredNames } from "./emit-lift.js";
@@ -634,7 +634,8 @@ function emitFailExpr(node: FailExprLike, opts: EmitLogicOpts): string {
     data = "null";
   } else {
     const argParts = _splitTopLevelCommas(rawArgs);
-    const schema = getVariantFieldSchema(variant);
+    // s441 R2-1 — the fail target's enum type is known here; resolve by it.
+    const schema = getVariantFieldSchema(variant, enumType || null);
     // §51.3.2 / §19.3.2 — the error envelope's `.data` is a field-keyed object
     // whose keys are the variant's DECLARED payload field names, for BOTH single-
     // AND multi-field variants (matching the enum constructor `Shape.Circle(10)`
@@ -799,10 +800,28 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
  *   producer side, which likewise emits the bare `.data` value for a single
  *   unknown-schema arg, keeping the reader and writer in step.
  */
-function emitGuardedArmBinding(binding: string, variantName: string, resultVar: string): string[] {
+function emitGuardedArmBinding(binding: string, variantName: string, resultVar: string, enumName: string | null = null): string[] {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0 && s !== "_");
   if (names.length === 0) return [];
-  const schema = variantName ? getVariantFieldSchema(variantName) : null;
+  // s441 R2-2 — a variant name declared by more than one enum the file can see
+  // (two own enums, own + imported, two imports), with the handled call's error
+  // type unknown at compile time: do not guess from the bare name. The envelope
+  // carries its enum in `type`, so project the field by the enum at RUNTIME.
+  // (Aliases of one imported enum share one schema object, so they count once.)
+  const _cands = variantName && !enumName ? getVariantSchemasByEnum(variantName) : [];
+  if (_cands.length > 0 && (isVariantNameAmbiguous(variantName) || new Set(_cands.map(([, f]) => f)).size > 1)) {
+    const cands = _cands.filter(([, f]) => Array.isArray(f) && f.length > 0);
+    if (cands.length > 0) {
+      const out: string[] = [];
+      for (let i = 0; i < names.length; i++) {
+        const table: Record<string, string> = {};
+        for (const [en, f] of cands) if (f && i < f.length) table[en] = f[i];
+        out.push(`    const ${names[i]} = ${resultVar}.data[${JSON.stringify(table).replace(/,/g, ", ").replace(/:/g, ": ")}[${resultVar}.type]];`);
+      }
+      return out;
+    }
+  }
+  const schema = variantName ? getVariantFieldSchema(variantName, enumName) : null;
   if (names.length === 1) {
     // Declared single-field variant → project the field (§51.3.2). No schema
     // (wildcard / ambient variant) → bind the whole `.data` payload.
@@ -826,10 +845,9 @@ function emitGuardedArmBinding(binding: string, variantName: string, resultVar: 
  * §19.4.3.1 identifier-binding catch-all arm (`| err :> …`, parsed as the
  * wildcard pattern `_` carrying a single binding name, flagged `identifierArm`
  * by the parser — the explicit-wildcard spelling `| _ e :>` is NOT flagged and
- * keeps its payload binding, see the S441 report): the name binds the
- * ERROR VALUE itself, normalized from the wire/return envelope
- * `{ __scrml_error, type, variant, data }` to the enum-value representation —
- * the same value the enum constructor produces:
+ * keeps its payload binding): the name binds the ERROR VALUE itself, normalized
+ * from the wire/return envelope `{ __scrml_error, type, variant, data }` to the
+ * enum-value representation — the same value the enum constructor produces:
  *
  *   - unit variant    -> the variant value (`"EmptyName"`, what
  *                        `ContactError.EmptyName` evaluates to)
@@ -840,19 +858,30 @@ function emitGuardedArmBinding(binding: string, variantName: string, resultVar: 
  * a constructed value. Identical on the client and server passes. Ruling:
  * user-voice-scrml.md S441 ("`| err :>` binds the error value").
  *
+ * Unit detection (s441 R2-4): `data == null` is always "no payload". A producer
+ * that emits `data: {}` for a unit variant (parseVariant's
+ * `ParseError.MissingDiscriminator`) is recognized ONLY by the declared schema —
+ * the handled enum's unit variants when the typer resolved it, else the file's
+ * known `Enum.Variant` unit pairs matched against the envelope's `type` — never
+ * by the shape of an unknown payload.
+ *
  * Returns null for a multi-name binding (`| _ (a, b) :>`), which keeps the
  * positional payload projection of emitGuardedArmBinding.
  */
-function emitCatchAllErrorValueBinding(binding: string, resultVar: string): string[] | null {
+function emitCatchAllErrorValueBinding(binding: string, resultVar: string, enumName: string | null = null): string[] | null {
   const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
   if (names.length !== 1 || names[0] === "_") return null;
-  // A unit variant carries no payload. Most producers emit `data: null`; some
-  // emit an empty object (parseVariant's `ParseError.MissingDiscriminator` —
-  // `data: {}`). Both are "no payload" and normalize to the unit value; a
-  // payload variant always has at least one field, so this never hides one.
-  const d = `${resultVar}.data`;
+  const r = resultVar;
+  let isUnit = `${r}.data == null`;
+  const units = enumName ? getEnumUnitVariants(enumName) : null;
+  if (units) {
+    if (units.length > 0) isUnit = `(${r}.data == null || ${JSON.stringify(units).replace(/,/g, ", ")}.includes(${r}.variant))`;
+  } else {
+    const keys = getAllUnitVariantKeys();
+    if (keys.length > 0) isUnit = `(${r}.data == null || ${JSON.stringify(keys).replace(/,/g, ", ")}.includes(${r}.type + "." + ${r}.variant))`;
+  }
   return [
-    `    const ${names[0]} = (${d} == null || (typeof ${d} === "object" && Object.keys(${d}).length === 0)) ? ${resultVar}.variant : { variant: ${resultVar}.variant, data: ${d} };`,
+    `    const ${names[0]} = ${isUnit} ? ${r}.variant : { variant: ${r}.variant, data: ${r}.data };`,
   ];
 }
 
@@ -3988,6 +4017,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       };
 
       if (arms.length > 0) {
+        // s441 R2-1 — the handled call's error enum, when the typer resolved it
+        // (type-system.ts annotates the guarded-expr node with `errorTypeName`).
+        const _handledEnum: string | null = typeof (node as any).errorTypeName === "string" ? (node as any).errorTypeName : null;
         const hasWildcard = arms.some((a: LogicArm) => a.pattern === "_");
         let isFirst = true;
         for (const arm of arms) {
@@ -3999,7 +4031,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (arm.pattern === "_") {
             lines.push(`  ${isFirst ? "" : "else "}{`);
             if (arm.binding && arm.binding !== "_") {
-              const catchAll = arm.identifierArm ? emitCatchAllErrorValueBinding(arm.binding, resultVar) : null;
+              const catchAll = arm.identifierArm ? emitCatchAllErrorValueBinding(arm.binding, resultVar, _handledEnum) : null;
               const bindLines = catchAll ?? emitGuardedArmBinding(arm.binding, "", resultVar);
               for (const l of bindLines) lines.push(l);
             }
@@ -4010,7 +4042,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
             const cond = `${resultVar}.variant === ${JSON.stringify(variantName)}`;
             lines.push(`  ${isFirst ? "if" : "else if"} (${cond}) {`);
             if (arm.binding && arm.binding !== "_") {
-              for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar)) lines.push(l);
+              for (const l of emitGuardedArmBinding(arm.binding, variantName, resultVar, _handledEnum)) lines.push(l);
             }
             for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
             lines.push(`  }`);
