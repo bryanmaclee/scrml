@@ -271,6 +271,17 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
       .toEqual(["E-DECL-HANDLE-NOT-NARROWED"]);
     expect(inApp("", "<dropdown as=country label=\"1\" options=([\"a\"])/><p if=@country>x</p>")).toEqual(["E-COND-NOT-BOOLEAN"]);
   });
+  test("r4 (a) — a bare `bool | not` condition is E-COND-NOT-BOOLEAN naming both fixes (ruled S442)", () => {
+    const d = run([LIB(), app(O, "<p if=@o.f>x</p>")]).diags;
+    expect(d.map((x) => x.code)).toEqual(["E-COND-NOT-BOOLEAN"]);
+    expect(d[0].message).toContain("x != not");
+    expect(d[0].message).toContain("x == true");
+    expect(inApp(O + "    function f() { if (@o.f) { @m = 1 } }")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
+  test("r4 (a) twins — `@o.f == true`, `@o.f != not`, and a NARROWED `bool | not` (a value test) are legal", () => {
+    expect(inApp(O, "<p if=(@o.f == true)>x</p><p if=(@o.f != not)>y</p>")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.f != not) { if (@o.f) { @m = 1 } } }")).toEqual([]);
+  });
   test("Q1 — a `bool` condition is NOT recorded as a presence test", () => {
     const r = run([LIB(), app(CELLS, "<p if=@b>x</p>")]);
     expect(r.typed.tables.typing.presence).toEqual([]);

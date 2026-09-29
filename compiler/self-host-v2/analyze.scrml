@@ -4746,7 +4746,18 @@ ${
 
     fn condKnown(env: TEnv, c: AExpr, t: Type, what: string, ts: TypeState) -> TypeState {
         if (kindOf(t) == 3) return ts
-        if (maybeInner(t) is some) return markPresence(ts, c.nid)
+        const inner: Type | not = maybeInner(t)
+        if (inner is some) {
+            // RULED S442 (six typer questions): "a bare `bool | not` in a
+            // condition is an ERROR naming both fixes (`@f is some` / `@f ==
+            // true`) — the same spelling otherwise flips meaning inside vs
+            // outside a narrowing". (A NARROWED `bool | not` reads as `bool`
+            // and stays a value test.)
+            if (kindOf(inner) == 3) {
+                return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " is a bare `bool | not` — ambiguous: say `x != not` (is it present? — `is some` once the slice parses it) or `x == true` (is it true?) (ruled S442)")
+            }
+            return markPresence(ts, c.nid)
+        }
         return report(ts, env, c.span, "E-COND-NOT-BOOLEAN", what + " needs a `bool` (or a `T | not` presence test), and this value is `" + typeName(t) + "` — a condition has no truthiness; compare explicitly (`n > 0`, `s != \"\"`, `xs.length > 0`) (ruled S440 #4 = (c))")
     }
     // `&&` / `||` take booleans only (RULED S440, Gotcha Q2 — superseding

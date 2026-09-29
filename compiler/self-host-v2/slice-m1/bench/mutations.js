@@ -286,6 +286,8 @@ const MUTATIONS = [
      "        if (isAnd) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).yes), l)", "        if (isAnd) renv = tNarrow(env, condNarrowing(env, l).yes)"],
     ["S442 r3 N1: `||`'s right operand narrowed across the left operand's writing call",
      "        if (isOr) renv = tCallUnnarrow(tNarrow(env, condNarrowing(env, l).no), l)", "        if (isOr) renv = tNarrow(env, condNarrowing(env, l).no)"],
+    ["S442 r4 (a): a bare `bool | not` condition taken as a presence test again",
+     "            if (kindOf(inner) == 3) {\n                return report(", "            if (false) {\n                return report("],
     ["S442 r3 N3: a write of an `<each>` source keeps the row binding's narrowing",
      "            if (r.key != \"\" && placesOverlap(r.key, key)) drop = drop.concat([r.name])\n", ""],
     ["S442 r3 N3: the row binding never tied to its source",
