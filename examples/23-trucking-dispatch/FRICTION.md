@@ -1998,6 +1998,17 @@ strips it back out for the SQL bind. Adds 1 LOC + 1 cognitive step
 per consume site (M6 has 3 such sites: `signRateConfirmationServer`,
 `uploadBolServer`, `markPaidServer`).
 
+> **S441 correction (s441-ex23-run-changes).** The shipped M6 sites bound
+> this `.run()` and then tested `result.changes == 0`. `.run()` returns
+> **void** (SPEC §8.5.1 — "Source code that previously read `result.changes`
+> … no longer works"), so `.changes` was always undefined and the guard never
+> fired: replayed, concurrent, and never-issued tokens were all accepted
+> (reproduced by execution against the compiled handlers). The sites now use
+> the §8.5.1-sanctioned `RETURNING` form — `UPDATE … AND consumed_at IS NULL
+> RETURNING token` with `.get()` and an `is not` check. The compiler accepted
+> the void-field read with no diagnostic; filed as
+> `g-run-result-field-read-compiles-silently`.
+
 **Suggests:** Either:
 - Extend §35.3's consume-detection to recognize `${linVar}` inside SQL
   `?{}` interpolation as a consume event (this is the obvious
