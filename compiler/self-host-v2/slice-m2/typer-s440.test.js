@@ -162,8 +162,14 @@ describe("#5 / #7 — handle names (E-HANDLE-REDECLARE)", () => {
     expect(inApp("", DD("a") + DD("b", "2"))).toEqual([]);
     expect(inApp(LINES, row(DD("a")) + row(DD("a", "2")))).toEqual([]);
   });
-  test("un-ruled, kept bootstrap-local — a program handle named like a visible DECLARATION (its shared instance, §66.7.1)", () => {
-    expect(inApp("", DD("dropdown"))).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  test("r4 (d) — a handle named like a visible DECLARATION → E-HANDLE-REDECLARE; a cell → E-SCOPE-010 (ruled S442)", () => {
+    expect(inApp("", DD("dropdown"))).toEqual(["E-HANDLE-REDECLARE"]);
+    expect(inApp("    <let dropdown:int=0/>")).toEqual(["E-SCOPE-010"]);
+  });
+  test("r4 (d) twins — a name no visible declaration holds; a declaration visible only in ANOTHER file", () => {
+    expect(inApp("    <let dropdownOpen:bool=false/>", DD("picker"))).toEqual([]);
+    const other = { path: "lib/other.scrml", src: "<card title:string=\"\"/>\nrenders <p>x</p>\n" };
+    expect(codes([other, { path: "app.scrml", src: "<program>\n    <let card:int=0/>\n<main><p>x</p></main>\n</program>\n" }])).toEqual([]);
   });
 });
 

@@ -3076,7 +3076,7 @@ ${
                     }
                 } else if (d.sym.id == t.program.id && visibleDeclNamed(files, t, d.file, names[j])) {
                     // `@x` would name both the cell and `<x>`'s shared instance (§66.7.1)
-                    out = out.concat([mkDiag(d.file, d.fields[j].span, "E-BOOTSTRAP-REDECLARE", "`" + names[j] + "` — `@" + names[j] + "` already names the shared instance of `<" + names[j] + ">` (§66.7.1); a program cell cannot take that name (the SPEC names no code for this; bootstrap-local)")])
+                    out = out.concat([mkDiag(d.file, d.fields[j].span, "E-SCOPE-010", "`" + names[j] + "` — `@" + names[j] + "` already names the shared instance of `<" + names[j] + ">` (§66.7.1); a program cell cannot take that name (a cell named like a visible declaration is E-SCOPE-010, ruled S442)")])
                 }
                 j = j + 1
             }
@@ -3262,7 +3262,7 @@ ${
                 const cellAt: string = offsetOf(cellSpans[cells.indexOf(h.name)])
                 out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "the handle `as=" + h.name + "` is named like the cell `@" + h.name + "` (declared at " + cellAt + ") — a handle may not share a cell's name, in any scope (a row handle may shadow a program-level HANDLE, never a cell); rename one of them (§66.7.2, §66.7.4)")])
             } else if (h.owner == progNid && visibleDeclNamed(files, t, h.file, h.name)) {
-                out = out.concat([mkDiag(h.file, h.span, "E-BOOTSTRAP-REDECLARE", "`as=" + h.name + "` — `@" + h.name + "` already names the shared instance of `<" + h.name + ">` (§66.7.1); a handle cannot take that name (the SPEC names no code for this; bootstrap-local)")])
+                out = out.concat([mkDiag(h.file, h.span, "E-HANDLE-REDECLARE", "`as=" + h.name + "` — `@" + h.name + "` already names the shared instance of `<" + h.name + ">` (§66.7.1); a handle cannot take that name (a handle named like a visible declaration is E-HANDLE-REDECLARE, ruled S442)")])
             }
             j = j + 1
         }
