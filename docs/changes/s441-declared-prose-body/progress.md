@@ -74,3 +74,15 @@ LAST COMPARISONS (re-run before landing — none were re-run after the round-3 f
   its TodoMVC env gap).
 - Corpus differential (2,244 files, both front ends) + measure-loose-body-prose: at eeb5ac7c2.
 - Pre-commit gate at 6cc98e2f3: 32,714 pass / 0 fail. Conformance at 6cc98e2f3: 1084/1091 + 7 xfail.
+
+## ROUND 4 (fresh agent, salvage + finish) — BRIEF-round4.md
+
+- 18ec64a0a — salvaged r4 WIP applied at 25b38fc8b, MINUS its emit-expr.ts client reuse of
+  emitServerTemplateLit (the S437 round-5 shape reverted for silent miscompiles — known-gaps
+  g-client-template-interpolation-lowering-needs-a-structural-emitter (c)). Kept the constant-folder
+  fix (an interpolated template is RUNTIME, not its empty `value`): on base `<p>${ `count is ${@n}` }</p>`
+  rendered EMPTY silently; now the cell form is the loud carried gap, plain interpolation renders.
+  body-top/template-cell-renders pinned XFAIL on that gap; engine-statechild case 5 re-pinned.
+- 0c573401e — merge origin/main (SPEC-INDEX ours+regen, FACTS theirs+regen, known-gaps count hunk).
+  Merge interaction: main's new s441-async-escape F5 `on mount { const … }` at body top was judged as
+  a prose head → `_onMountEffect` nodes are code by head (not judged).
