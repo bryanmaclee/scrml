@@ -1,6 +1,31 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-28T04:40:15Z  commit: fb21983a
+# generated: 2026-09-29T13:38:25Z  commit: cf62b415
+# ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
+# refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
+# --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
+# == `origin/main` (`git fetch --dry-run`: main not advanced; no fork). Source-relevant: #1117 (bootstrap M3 typer + scope pass), #1118 (ingest shim + footprint
+# grader + bite matrix), #1122 (analyze facts -> six NodeId-indexed family tables), #1129 (re-land #1109 review fixes +
+# spread all-or-nothing `Stmt.Commit` + strict snapshot + E-BOOTSTRAP-DUP-OVERRIDE), #1125 (E-MW-007/008 refused build
+# writes no dist), #1131 ("~" + 3 sibling rewrites fenced out of literals), #1137 (Date/built-ins in cells; `==` on
+# built-ins), #1139 (nested async helpers vs sync-callback guards, SECURITY). SPEC-only: #1120 (S439 rulings), #1133
+# (S440 rulings). The rest are wrap / inbox / dpa-queue / gaps / review / @generated bookkeeping.
+# ⛑ **FIGURES RE-EXECUTED AT `cf62b415`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **268,394 lines / 213 files** per FACTS (+1,450 lines, +2 files:
+# `codegen/local-async-fns.ts`, `commands/refusal-gate.js`) · test files **1,515** (+6) · `compiler/SPEC.md` **40,663**
+# lines (+264) · conformance **1054** cases (+7) · §34 catalog **839** rows (+4), range `20443..21365`.
+# `bun conformance/run.ts` (impl#1) -> **1047/1054 pass + 7 xfail**.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **948 -> 952** · W 183 · I 10 · H 2 FLAT · unique codes
+# **803 -> 807**. **ADDED = {`E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-SELECT-OPTION-NOT-VARIANT`,
+# `E-STRUCT-DUPLICATE-KEY`} — all four rows say "Nominal / not yet emitted" (impl pending); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `cf62b415` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# 28 files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **325/325** (6 files) ·
+# `slice-m3/` **24/24** (3 files) · footprint grade (`bun scripts/hybrid.ts --swap CG=compiler/self-host-v2/slice-m3/substitute.js
+# --footprint`) -> runtime **18 pass / 0 fail**, codes-only 10/0, crashed 0, not-yet 579, front-end 447. The S438 CRLF
+# drift-guard failures are gone (the guard is CRLF-safe since #1129, and this clone is LF).
+# ⚑ `file:line` citations in S440 sections were grep-derived at `cf62b415`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S438 HEADER (stamp `fb21983a`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S438 STAMP — `9941a504c` -> `fb21983a`. 9 COMMITS (#1109-#1119), SESSION S438 (incremental refresh, branch
 # `wrap/s438`).** MAP-STAMP RULE at write time: `git log --oneline 9941a504c..fb21983a` -> 9 commits; `git
 # merge-base --is-ancestor 9941a504c fb21983a` -> exit 0 (inbound ancestor check satisfied); HEAD `fb21983a` ==
@@ -189,6 +214,59 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S440 pass (this pass, stamp `cf62b415`)
+
+**Scope: INCREMENTAL, targeted at the window's landings** (not a full re-scan). In-scope docs changed in-window:
+`compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `conformance/README.md`, `docs/FACTS.md`, `docs/changelog.md`,
+`docs/known-gaps.md`, `docs/pr-reviews.md`, `hand-off.md`, `master-list.md`, `compiler/self-host-v2/slice-m2/progress.md`,
+and 21 NEW `docs/changes/{s439-*,s440-*}/*.md` dispatch artifacts. Out of scope: `handOffs/**` (historical);
+the two UNTRACKED `docs/articles/*` files (not in any commit; not scanned).
+
+Total docs checked this pass: 31. Compliant: 30. Non-compliant: 0 new. Uncertain: 2 new (U-S440-1 is a code/test item surfaced by the SPEC scan; U-S440-2 is `master-list.md`).
+Gates re-run at `cf62b415`: `bun scripts/facts.ts --check` PASS · `bun scripts/regen-spec-index.ts --check` OK (72/72,
+0 stale) · `bun scripts/state.ts --check` **FAIL on `@generated:recent-sessions` (master-list.md)** + WARN known-gaps
+heading/marker drift **52** (unchanged) + WARN maps 23 behind (cleared by this pass's stamp).
+
+### Docs scanned this window — verdicts
+| doc | verdict |
+|---|---|
+| `compiler/SPEC.md` (+264) | compliant — the 4 new §34 rows (`E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-SELECT-OPTION-NOT-VARIANT`, `E-STRUCT-DUPLICATE-KEY`) and the extended rows each say "Nominal / not yet emitted" with a measured exit 0 — declared-ahead honestly per §34.0, not a false claim |
+| `compiler/SPEC-INDEX.md` | compliant (regen check OK) |
+| `conformance/README.md` | compliant — the `_scrml_scrml_(chain_)?tpl_N` empty-anchor strip it describes is in `conformance/normalize.ts` and pinned by `compiler/tests/unit/conformance-normalize-template-anchor.test.js` |
+| `docs/FACTS.md` | compliant (PASS) |
+| `docs/changelog.md` · `docs/pr-reviews.md` · `hand-off.md` | compliant (ledgers / session hand-off matching the landed commits) |
+| `docs/known-gaps.md` | compliant for the window's edits; standing heading/marker drift is the tracked WARN (52) |
+| `master-list.md` | see U-S440-2 |
+| `compiler/self-host-v2/slice-m2/progress.md` (+12) | compliant — its "F-A CLOSED" entry matches the landed typer (verified: `checkScopes` / `typeProgram` exist; typer suites pass) |
+| `docs/changes/s439-*` / `s440-*` (21) | compliant — dispatch artifacts, historical by design. The dated `footprint-2026-09-27.md` records not-yet 573 at 1048 cases; re-run at `cf62b415` gives 579 at 1054 (corpus grew; runtime 18/0 unchanged) — a dated snapshot, not drift |
+
+### U-S440-1. Bootstrap diagnostic names vs the S440 SPEC rows — code/test drift, not a doc defect
+**Where:** `compiler/self-host-v2/analyze.scrml` (`E-BOOTSTRAP-CALL-ARITY`, `E-BOOTSTRAP-EACH-NOT-SEQUENCE`,
+`E-BOOTSTRAP-DUP-OVERRIDE`), their pins in `slice-m2/typer.test.js` / `typer-gap.test.js` / `front.test.js`, and the
+`typer-gap.test.js` header ("the SPEC names no rule — the bootstrap rejects with a bootstrap-local `E-BOOTSTRAP-*`
+code"). `docs/changes/s439-bootstrap-m3-typer/progress.md` rows 2 and 4 say "OWES A RULING".
+**Why uncertain:** #1133 has since named `E-CALL-ARITY` (§7.3), `E-EACH-NOT-SEQUENCE` (§17.7.2) and
+`E-STRUCT-DUPLICATE-KEY` (§14.3 / §66.11.3, incl. the spread-override shape). The dispatch progress.md is historical
+(compliant); the live code and test header now pin superseded names.
+**What to check:** whether the queued bootstrap typer follow-up (hand-off S440 §2) renames these codes and updates
+the test header, or whether bootstrap-local names are meant to stay until a separate pass.
+
+### U-S440-2. `master-list.md` `@generated:recent-sessions` stale at HEAD after the S440 wrap
+**Where:** `master-list.md`; `bun scripts/state.ts --check` FAIL at `cf62b415`.
+**Why uncertain:** the S438 pass saw the same FAIL and treated it as expected mid-session state. At `cf62b415` the S440
+wrap (#1140) has landed and it still FAILs, so it is either a missed regen at wrap or expected between sessions.
+**What to check:** run `bun scripts/state.ts` (regen) and see whether the diff is just the S440 entry.
+
+### Carried items
+| item | re-checked at `cf62b415` | result |
+|---|---|---|
+| N-S437b-2 `g-library-meta-import-async-not-awaited` moot by ruling | `grep -n 'status=' docs/known-gaps.md` | **STILL LIVE** — marker still `status=open` (now `:12259`) |
+| N-S405-1, N-S422-1/2/3, N-S437b-3 | not re-executed (nothing in the window touches their locus) | carried, not re-confirmed |
+
+Map self-correction (not a repo doc): the S438 `dependencies.map.md` said `slice-m2/compare.js` imports `core.scrml` /
+`walk.scrml` and left out `lower.scrml`'s imports of `walk.scrml` and `analyze.scrml`. Corrected in its S440 section.
+
 
 ## Summary — S438 pass (this pass, stamp `fb21983a`)
 
@@ -3601,7 +3679,7 @@ consecutive passes have recommended a deterministic map-currency gate; nothing h
 
 
 ## Tags
-#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #zero-diff-is-not-correctness #generated-maps-regenerated #symbol-locus-not-line-locus #invariant-71 #invariant-72
+#non-compliance #project-mapper #cleanup #scrml #spec-stale-table #stale-locus #symbol-not-line #self-contradicting-map #routing-hole #reproduce-dont-relay #docs-changes-are-evidence-not-spec #line-ref-drift #merge-base-not-tip #fail-open-predicate #w-dead-function-wrong-locus #usage-analyzer-is-not-the-locus #routing-omission #chunk-pruning-blind-spot #ternary-markup-giti033 #off-by-nine-line-citation #tree-shaken-claim-false #not-on-main-exclusion-rot #routing-gap #section-40-8 #e-control-flow-in-markup #spec-vs-code-drift #sum-never-executed #branch-vanished-mid-pass #§18.5-four-routes #single-classifier-overstatement #map-stamp-rule #outbound-stamp-check #inbound-vs-outbound #squash-merge-orphans-a-branch-tip #three-of-five-stamps-orphaned #fe14c9b2-orphaned-ten-sessions #silent-instrument #behind-count-unavailable #mandatory-step-unanswerable #stale-orphaned-doc-comment #route-inference-3643 #fail-open-surface-restored-by-a-doc #filesscanned-is-environment-dependent #a-filesystem-walk-is-not-a-repo-fact #baked-line-number-in-tool-output #s305-citation-ruling #generated-md-never-tracked #untracked-artifact-no-gate-can-see #grep-hit-is-not-a-fire-site #w-lint-nnn-placeholder #w-lint-009-is-a-comment #spec-ahead-vs-shipped #ratified-is-not-implemented #six-leaking-positions #scope-barred-from-known-gaps #n12-spec-diff-grep-false-positives #code-is-new-only-if-absent-at-base #n13-census-reclassification #instrument-changed-not-catalog #c4-method-corrected #comment-is-not-a-fire #prose-is-not-a-row #n9-inverted #phrase-propagated-into-source #c3-narrower-than-recorded #watermark-moved-mid-run #run-outbound-check-at-write-time #maps-staleness-is-warn-only #112-commits-behind-no-failure #corpus-zero-debt-enforcement #wrong-file-not-drifted-line #internally-contradictory-figure #one-sha-on-two-lines #zero-diff-is-not-correctness #generated-maps-regenerated #symbol-locus-not-line-locus #invariant-71 #invariant-72 #s440 #cf62b415 #u-s440-1 #u-s440-2
 #plan-block-arm-lift-two-callsites #leaf-predicate-not-segmenter #§12.2-per-function-scope
 #§12.6-wrong-module-set #spec-internal-contradiction #escalation-vs-async-set #gap-ledger-stale-open
 #three-gaps-open-but-landed #s248-no-op-dispatch-class #cross-operator-ledger-blindness

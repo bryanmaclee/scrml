@@ -674,6 +674,16 @@ export interface FirstPaintAssertion {
   contains?: string[];
   /** No substring may appear (e.g. a §14.8.9-protected column / its value). */
   notContains?: string[];
+  /** WHO requests the document (S441). `"anonymous"` (default) — no session.
+   *  `"authenticated"` — a viewer who passes the page's `auth=` gate. An
+   *  `auth="required"` page's document redirects an anonymous viewer (§52.13,
+   *  §40.2 compose-route bullet), so its first paint is only observable as an
+   *  authenticated viewer. The rest of the run (client hydration) stays anonymous. */
+  viewer?: "anonymous" | "authenticated";
+  /** S441 — the ANONYMOUS document request (made in addition to the `viewer`
+   *  one) SHALL be refused with a redirect (§52.13: "unauthenticated requests are
+   *  redirected to loginRedirect"). The value is the expected redirect target. */
+  anonymousRedirect?: string;
 }
 
 /** The subset of the emitted server module the harness drives. */
@@ -979,6 +989,9 @@ function extractSsrSeed(firstPaint: string): unknown {
 export interface ServerRunResult extends RunResult {
   /** The composed SSR first-paint HTML (SSR mode only; else undefined). */
   firstPaint?: string;
+  /** SSR mode: the ANONYMOUS document response (status + Location), always
+   *  measured so a case can assert the §52.13 redirect. */
+  anonymousDocument?: { status: number; location: string | null };
 }
 
 export interface ServerRunOptions {
@@ -988,6 +1001,8 @@ export interface ServerRunOptions {
   serverDb: ServerDb;
   /** When true, compose the SSR first-paint, mount THAT + seed, then hydrate. */
   ssr?: boolean;
+  /** SSR mode: who requests the document (see FirstPaintAssertion.viewer). */
+  viewer?: "anonymous" | "authenticated";
   /** Fork A opt-in. `"real"` stands up a real seeded Bun.SQL in-memory SQLite
    *  (Fork B: DDL from the case's `<schema>`, loose-infer fallback) as
    *  `_scrml_sql` — so WHERE / bound params / JOIN / RETURNING / aggregate /
@@ -1005,7 +1020,7 @@ export interface ServerRunOptions {
  * non-determinism never reaches asserted output.
  */
 export async function runServer(source: string, opts: ServerRunOptions): Promise<ServerRunResult> {
-  const { input = [], auxFiles = {}, serverDb, ssr = false, sqlEngine = "stub" } = opts;
+  const { input = [], auxFiles = {}, serverDb, ssr = false, sqlEngine = "stub", viewer = "anonymous" } = opts;
   if (GlobalRegistrator.isRegistered) await GlobalRegistrator.unregister();
   // A real document URL is required for happy-dom's cookie jar (the baseline CSRF
   // double-submit reads/writes `document.cookie`); about:blank rejects cookies.
@@ -1041,11 +1056,39 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
     // SSR mode: compose the first-paint, mount THAT (its <body>), and seed
     // window.__scrml_ssr_state so the client hydrates the server rows in place.
     let firstPaint: string | undefined;
+    let anonymousDocument: { status: number; location: string | null } | undefined;
     let seedState: unknown = null;
     let mountSource = html;
     if (ssr) {
       if (!mod.compose) throw new Error("server-eval SSR: emitted serverJs has no _scrml_ssr_compose_handler");
-      const resp = await mod.compose({});
+      // A page GET shaped like the dispatch requests above (the host always hands
+      // the compose handler a request). The ANONYMOUS request is always made, so a
+      // case can assert the §52.13 document redirect; the first paint comes from
+      // the `viewer` request. An "authenticated" viewer is a session record the
+      // emitted session middleware resolves (userId set) + its cookie — the same
+      // state a login leaves behind. impl-private: impl#2 authenticates its own way.
+      const docReq = (cookie: string | null) => ({
+        url: "http://localhost/",
+        method: "GET",
+        headers: { get: (k: string) => (String(k).toLowerCase() === "cookie" ? cookie : null) },
+      });
+      const anon = (await mod.compose(docReq(null))) as any;
+      anonymousDocument = {
+        status: anon.status,
+        location: anon.headers && typeof anon.headers.get === "function" ? anon.headers.get("Location") : null,
+      };
+      let resp = anon;
+      if (viewer === "authenticated") {
+        const store: Map<string, unknown> = ((globalThis as any).__scrml_session_store ??= new Map());
+        const sid = "conformance-viewer-" + Math.random().toString(36).slice(2);
+        store.set(sid, { userId: 1, role: null });
+        const cookieName = serverJs.includes("__Host-scrml_sid") ? "__Host-scrml_sid" : "scrml_sid";
+        try {
+          resp = await mod.compose(docReq(cookieName + "=" + sid));
+        } finally {
+          store.delete(sid);
+        }
+      }
       firstPaint = await resp.text();
       seedState = extractSsrSeed(firstPaint);
       mountSource = firstPaint;
@@ -1072,7 +1115,7 @@ export async function runServer(source: string, opts: ServerRunOptions): Promise
 
     const state = hook && hook.snapshot ? hook.snapshot() : { cells: {}, derived: {} };
     const dom = normalizeDom(doc.body);
-    return { dom, state, body: doc.body, firstPaint };
+    return { dom, state, body: doc.body, firstPaint, anonymousDocument };
   } finally {
     rmSync(dir, { recursive: true, force: true });
     delete (globalThis as any).__scrml_conformance;

@@ -3,7 +3,7 @@
   "description": "§52.15.5 (S255) round-3 defect 4 — a PUBLIC (auth=none) callable-init cell coalesced with a GATED one is NOT swept into the gated group: it stays SSR-seeded (its rows are server-rendered into the first paint + carried in window.__scrml_ssr_state), while the gated @secretCell is omitted (client-hydrated behind its per-cell /__mountHydrate gate). The E-ADAPTER SSR path composes the anon first-paint: @publicCell rows are PRESENT, @secretCell rows are ABSENT. The I-SSR-AUTH-SCOPED-CLIENT-HYDRATED info lint fires only on the gated @secretCell. (Round-2 gated + omitted the WHOLE callable group all-or-nothing → the public cell never hydrated for anon; the per-cell omission fixes that.)",
   "language-version": "1.0",
   "spec": "§52.15.5, §52.8, §8.11",
-  "rationale": "§52.15.5: the SSR seed is omitted PER CELL — a gated callable cell is omitted, a public callable cell stays seeded. The coalesced /__mountHydrate route gates each cell by its OWN auth (public always served, gated only to the authorized), never collapsing to one route gate.",
+  "rationale": "§52.15.5: the SSR seed is omitted PER CELL — a gated callable cell is omitted, a public callable cell stays seeded. The coalesced /__mountHydrate route gates each cell by its OWN auth (public always served, gated only to the authorized), never collapsing to one route gate. S441 (§40.2 compose-route bullet, §52.13): the page is `auth=\"required\"`, so the anonymous document request is REDIRECTED to /login (`anonymousRedirect`) and the first paint is composed for an AUTHENTICATED viewer (`viewer`). The omission is unchanged under the gate: one composed document goes to every admitted viewer, so an unscoped auth-scoped cell is still kept out of it (no other user's rows in this viewer's paint).",
   "expect": {
     "codes": ["I-SSR-AUTH-SCOPED-CLIENT-HYDRATED"],
     "notCodes": [],
@@ -19,6 +19,8 @@
       ]
     },
     "firstPaint": {
+      "viewer": "authenticated",
+      "anonymousRedirect": "/login",
       "contains": [
         "<li data-scrml-key=\"10\" class=\"pub\">PublicRow</li>",
         "<script type=\"application/json\" id=\"__scrml_ssr_state\">",

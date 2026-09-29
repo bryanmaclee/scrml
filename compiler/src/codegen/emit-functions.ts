@@ -1009,6 +1009,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
         lines.push(`  let _scrml_resp;`);
         lines.push(`  if (_scrml_resp_initial.status === 403) {`);
         lines.push(`    // CSRF token may have been minted on the 403; retry with the freshly-planted token.`);
+        // S441 review F3 — a stale §39.2.3 meta token would otherwise win the re-read.
+        if ((ctx as any).authMiddleware?.csrf === "auto") lines.push(`    _scrml_csrf_sync_meta_from_cookie();`);
         lines.push(`    const _scrml_csrf_retry_token = ${_csrfTokenExpr};`);
         lines.push(`    _scrml_resp = await fetch(${JSON.stringify(batchPath)}, {`);
         lines.push(`      method: ${JSON.stringify(httpMethod)},`);
