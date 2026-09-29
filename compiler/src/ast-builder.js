@@ -1275,25 +1275,28 @@ function splitBodyTopDisplayLiterals(blocks, errors, filePath) {
 
 // S441 — `rejectBodyTopProse`: the strict half of the body-top code rule
 // (SPEC §40.8 S441 bullet, §4.18.7). `body` is the statement list the logic
-// parser built for one body-top run. The statement collector is lenient: it
-// hands acorn whatever tokens it gathered, and acorn's `parseExpressionAt`
-// keeps the longest valid prefix — so the prose `Welcome to the dashboard.`
-// becomes a bare expression `Welcome` with the rest silently dropped. A
-// top-level statement one of whose OWN expressions (not a nested statement's —
-// a function body with a bug is code with a bug, not prose) lost content that
-// way (`hasLostTrailingContent`) or could not be parsed at all (a `ParseError`
-// escape hatch) is not valid code. Each maximal run of such statements is ONE
-// `E-UNQUOTED-DISPLAY-TEXT` naming the declared-prose forms; the statements
-// are dropped and the diagnostics their own parse raised (an `E-EQ-005` for a
-// prose `is`, …) are withdrawn, so the author sees the root cause rather than
-// an `E-SCOPE-001` on the first word. Returns the number rejected.
-// The statement shapes prose actually lands in, and the HEAD-expression field
-// of each. Only a head is judged: other expression-valued fields (a `when`
-// statement's `bodyExpr`, a handler body, ...) hold a statement LIST that is not
-// a single expression by design, so a lost tail there says nothing.
-// Declarations are never judged - they are code by their head keyword, and a
-// broken initializer has its own diagnostics (E-CODEGEN-INVALID-LOGIC for
-// `-@a ** 2`, ...).
+// parser built for one body-top run (`srcText`, starting at source offset
+// `srcOffset`). The statement collector is lenient: it hands acorn whatever
+// tokens it gathered, and acorn's `parseExpressionAt` keeps the longest valid
+// prefix — so the prose `Welcome to the dashboard.` becomes a bare expression
+// `Welcome` with the rest silently dropped, and a prose line ending in `.`
+// swallows the NEXT line too (`Welcome here.⏎<count> = 0` collected as one
+// markup-ish fragment, the declaration lost — S441 review #3).
+//
+// So the check is LINE-granular at the first failure: the first statement that
+// is not valid code (`stmtHasInvalidOwnExpr`, or an `html-fragment` — markup
+// text in statement position) marks its first source LINE as prose; everything
+// after that line is RE-PARSED as body-top code (`reparseTail`), so a
+// declaration / function / statement below a prose line survives (no cascade).
+// Consecutive prose lines merge into ONE `E-UNQUOTED-DISPLAY-TEXT` naming the
+// declared-prose forms; the rejected statements' own diagnostics (an `E-EQ-005`
+// for a prose `is`, an E-SCOPE-001 on the first word, …) are withdrawn.
+//
+// The statement shapes prose lands in, and the HEAD-expression field of each.
+// Only a head is judged: other expression-valued fields (a `when` statement's
+// `bodyExpr`, a handler body, ...) hold a statement LIST that is not a single
+// expression by design. Declarations are never judged - they are code by their
+// head keyword, and a broken initializer has its own diagnostics.
 const BODY_TOP_PROSE_HEADS = {
   "bare-expr": ["exprNode"],
   "if-stmt": ["condExpr"],
@@ -1303,6 +1306,7 @@ const BODY_TOP_PROSE_HEADS = {
 };
 function stmtHasInvalidOwnExpr(st) {
   if (!st || typeof st !== "object") return false;
+  if (st.kind === "html-fragment") return true;
   const heads = BODY_TOP_PROSE_HEADS[st.kind];
   if (!heads) return false;
   for (const key of heads) {
@@ -1314,62 +1318,74 @@ function stmtHasInvalidOwnExpr(st) {
   return false;
 }
 
-function rejectBodyTopProse(body, bodyRaw, bodyOffset, errors, errsBefore, filePath) {
+function errStart(e) {
+  if (!e) return undefined;
+  if (e.tabSpan && typeof e.tabSpan.start === "number") return e.tabSpan.start;
+  if (e.span && typeof e.span.start === "number") return e.span.start;
+  return undefined;
+}
+
+function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePath, reparseTail, srcLine = 1) {
   if (!Array.isArray(body) || body.length === 0) return 0;
-  const stmtEnd = (si) => {
-    const sp = body[si].span;
-    const next = body[si + 1];
-    const nextStart = next && next.span && typeof next.span.start === "number" ? next.span.start : Infinity;
-    const end = typeof sp.end === "number" ? sp.end : sp.start + 1;
-    return Math.max(sp.start + 1, Math.min(end, nextStart));
-  };
-  const flagged = body.map((st) => !!(st && st.span && typeof st.span.start === "number") && stmtHasInvalidOwnExpr(st));
-  let rejected = 0;
-  const ranges = [];
-  for (let si = 0; si < body.length; si++) {
-    if (!flagged[si]) continue;
-    let sj = si;
-    while (sj + 1 < body.length && flagged[sj + 1]) sj++;
-    const start = body[si].span.start;
-    const end = stmtEnd(sj);
-    ranges.push([start, end]);
-    const slice = bodyRaw.slice(Math.max(0, start - bodyOffset), Math.max(0, end - bodyOffset));
-    const firstLine = (slice.split("\n").find((l) => l.trim() !== "") || slice).trim();
-    const shown = firstLine.length > 80 ? firstLine.slice(0, 77) + "..." : firstLine;
-    const sp = body[si].span;
-    errors.push(new TABError(
-      "E-UNQUOTED-DISPLAY-TEXT",
-      `E-UNQUOTED-DISPLAY-TEXT: \`${shown}\` is not valid code. A \`<program>\` / ` +
-      `\`<page>\` / \`<channel>\` body is code (SPEC §40.8, S441) — loose prose is ` +
-      `not allowed there. If this is displayed text, declare it: wrap it in a ` +
-      `markup element (\`<p>${shown}</p>\`) or write it as a display-text literal ` +
-      `(\`"${shown}"\`, §4.18.3).`,
-      { file: filePath, start, end, line: sp.line ?? 1, col: sp.col ?? 1 },
-    ));
-    rejected += sj - si + 1;
-    si = sj;
-  }
-  if (ranges.length > 0) {
-    // Withdraw the diagnostics the rejected statements' own parse raised.
-    const startOf = (e) => {
-      if (!e) return undefined;
-      if (e.tabSpan && typeof e.tabSpan.start === "number") return e.tabSpan.start;
-      if (e.span && typeof e.span.start === "number") return e.span.start;
-      return undefined;
-    };
-    for (let k = errors.length - 1; k >= errsBefore; k--) {
-      const s0 = startOf(errors[k]);
-      if (errors[k] && errors[k].code !== "E-UNQUOTED-DISPLAY-TEXT" && typeof s0 === "number"
-          && ranges.some(([a, b]) => s0 >= a && s0 < b)) errors.splice(k, 1);
+  const fi = body.findIndex((st) => !!(st && st.span && typeof st.span.start === "number") && stmtHasInvalidOwnExpr(st));
+  if (fi < 0) {
+    // A lone identifier IS valid code (`Counter`) and is checked as code; mark
+    // it so E-SCOPE-001 can name the declared-prose forms (§4.18.7 SHOULD).
+    for (const st of body) {
+      if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
     }
-    for (let si = body.length - 1; si >= 0; si--) if (flagged[si]) body.splice(si, 1);
+    return 0;
   }
-  // A lone identifier IS valid code (`Counter`) and is checked as code; mark
-  // it so E-SCOPE-001 can name the declared-prose forms (§4.18.7 SHOULD).
+  // Prose is LINE-granular: the whole source line holding the first invalid
+  // statement is prose, including any statements the lenient collector cut
+  // from the SAME line before it (`Items for sale (…)` collects as a valid
+  // bare `Items` plus an invalid `for …`).
+  const firstRel = Math.max(0, body[fi].span.start - srcOffset);
+  const lineStartRel = srcText.lastIndexOf("\n", firstRel - 1) + 1;
+  const leadWs = srcText.slice(lineStartRel).search(/\S/);
+  const rel = lineStartRel + (leadWs < 0 ? 0 : leadWs);
+  const start = srcOffset + rel;
+  let cut = fi;
+  while (cut > 0 && body[cut - 1] && body[cut - 1].span && body[cut - 1].span.start >= start) cut--;
+  const nl = srcText.indexOf("\n", rel);
+  let end = srcOffset + (nl === -1 ? srcText.length : nl);
+  // Withdraw every diagnostic this parse raised from the rejected line on —
+  // the tail is re-parsed below and reports for itself.
+  for (let k = errors.length - 1; k >= errsBefore; k--) {
+    const s0 = errStart(errors[k]);
+    if (typeof s0 === "number" && s0 >= start) errors.splice(k, 1);
+  }
+  body.splice(cut);
   for (const st of body) {
     if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
   }
-  return rejected;
+  const lineText = srcText.slice(rel, nl === -1 ? srcText.length : nl).trim();
+  const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+  const lineNo = srcLine + (srcText.slice(0, rel).match(/\n/g) || []).length;
+  let tail = [];
+  if (nl !== -1 && srcText.slice(nl + 1).trim() !== "") {
+    const mark = errors.length;
+    tail = reparseTail(nl + 1) || [];
+    const lead = srcText.slice(nl + 1).search(/\S/);
+    const tailFirst = srcOffset + nl + 1 + (lead < 0 ? 0 : lead);
+    const k = errors.findIndex((e, i) => i >= mark && e && e.code === "E-UNQUOTED-DISPLAY-TEXT" && errStart(e) === tailFirst);
+    if (k >= 0) {
+      // The next line is prose too: one diagnostic for the whole run.
+      end = errors[k].tabSpan && typeof errors[k].tabSpan.end === "number" ? errors[k].tabSpan.end : end;
+      errors.splice(k, 1);
+    }
+  }
+  errors.push(new TABError(
+    "E-UNQUOTED-DISPLAY-TEXT",
+    `E-UNQUOTED-DISPLAY-TEXT: \`${shown}\` is not valid code. A \`<program>\` / ` +
+    `\`<page>\` / \`<channel>\` body is code (SPEC §40.8, S441) — loose prose is ` +
+    `not allowed there. If this is displayed text, declare it: wrap it in a ` +
+    `markup element (\`<p>${shown}</p>\`) or write it as a display-text literal ` +
+    `(\`"${shown}"\`, §4.18.3).`,
+    { file: filePath, start, end, line: lineNo, col: 1 + (leadWs < 0 ? 0 : leadWs) },
+  ));
+  for (const st of tail) body.push(st);
+  return 1;
 }
 
 function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }, isDefaultLogicBody = false) {
@@ -19955,7 +19971,31 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
         const _tw = captureTrailingContentWarnings(() =>
           parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic"));
         body = _tw.result;
-        const _rejected = rejectBodyTopProse(body, bodyRaw, bodyOffset, errors, _errsBefore, filePath);
+        // Re-parse the text after a rejected prose line as body-top code
+        // (S441 review #3/#5 — the line-granular recovery; see
+        // rejectBodyTopProse). `_rawBody` is the ORIGINAL run text (before the
+        // worker/state-ref preprocessing), anchored at `bodyOffset`.
+        const _reparseTail = (relStart) => {
+          const _tailText = _rawBody.slice(relStart);
+          const _tailSpan = subBlockSpan(
+            { ...block.span, start: bodyOffset, line: bodyLine, col: bodyCol },
+            _rawBody, relStart, _rawBody.length);
+          const _tailBlock = {
+            type: "logic",
+            raw: "${" + _tailText + "}",
+            span: _tailSpan,
+            depth: block.depth,
+            children: [],
+            name: null,
+            closerForm: null,
+            _synthetic: true,
+            _bareDeclLift: true,
+            _bodyTop: true,
+          };
+          const _tailNode = buildBlock(_tailBlock, filePath, parentContextKind, counter, errors, parentStateName);
+          return _tailNode && Array.isArray(_tailNode.body) ? _tailNode.body : [];
+        };
+        const _rejected = rejectBodyTopProse(body, _rawBody, bodyOffset, errors, _errsBefore, filePath, _reparseTail, bodyLine);
         if (_rejected === 0) for (const w of _tw.warnings) console.warn(w);
       } else {
         body = parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic");

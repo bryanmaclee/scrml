@@ -2764,9 +2764,9 @@ function rejectBodyTopProseNative(block, source, ctx) {
     const span = block.span;
     const blockStart = span !== undefined && span !== null && typeof span.start === "number" ? span.start : 0;
     const blockEnd = span !== undefined && span !== null && typeof span.end === "number" ? span.end : blockStart;
-    const diags = ctx.diagnostics.filter((d) => d !== null && d !== undefined && d.span !== undefined
-        && d.span !== null && typeof d.span.start === "number"
-        && d.span.start >= blockStart && d.span.start <= blockEnd && BODY_TOP_PARSE_DIAG_RE.test(d.code));
+    const inBlock = (d) => d !== null && d !== undefined && d.span !== undefined && d.span !== null
+        && typeof d.span.start === "number" && d.span.start >= blockStart && d.span.start <= blockEnd;
+    const diags = ctx.diagnostics.filter((d) => inBlock(d) && BODY_TOP_PARSE_DIAG_RE.test(d.code));
     if (diags.length === 0) return;
     const starts = body.map((st) => (st && st.span && typeof st.span.start === "number") ? st.span.start : null);
     const stmtIndexAt = (off) => {
@@ -2776,7 +2776,11 @@ function rejectBodyTopProseNative(block, source, ctx) {
     };
     const flagged = body.map(() => false);
     for (const d of diags) {
-        const k = stmtIndexAt(d.span.start);
+        let k = stmtIndexAt(d.span.start);
+        // `Welcome.⏎<count> = 0` — "expected a property name after '.'" is
+        // reported AT the next statement's first token; it belongs to the
+        // statement whose trailing `.` is unfinished.
+        if (k > 0 && d.code === "E-EXPR-MEMBER-NAME" && starts[k] === d.span.start) k = k - 1;
         if (k < 0) continue;
         flagged[k] = true;
         if (d.code === "E-STMT-MISSING-SEMICOLON" && k > 0 && starts[k - 1] !== null) {
@@ -2784,51 +2788,64 @@ function rejectBodyTopProseNative(block, source, ctx) {
             if (between.includes("\n") === false) flagged[k - 1] = true;
         }
     }
-    const ranges = [];
-    for (let si = 0; si < body.length; si++) {
+    // The FIRST qualifying group (see the header): its first source LINE is
+    // prose; everything after that line is re-parsed as body-top code, so a
+    // declaration below a prose line survives (S441 review #3/#5 — mirrors
+    // ast-builder.js rejectBodyTopProse).
+    let fi = -1;
+    for (let si = 0; si < body.length && fi < 0; si++) {
         if (flagged[si] === false) continue;
         let sj = si;
         while (sj + 1 < body.length && flagged[sj + 1]) sj = sj + 1;
-        const start = starts[si];
-        const end = sj + 1 < body.length && starts[sj + 1] !== null ? starts[sj + 1] : blockEnd;
-        const text = source.slice(start, end);
-        // A block the pre-S441 lifts claimed (a `type` / `function` / state
-        // decl …) is code by its head; the native statement parser still has
-        // gaps there (a failure inside such a block also fails inside an
-        // explicit `${ … }`), so only a run of juxtaposed bare EXPRESSION
-        // statements — the shape prose takes — is called prose in it. A
-        // catch-all block (text that used to render) is judged whole.
+        const gEnd = sj + 1 < body.length && starts[sj + 1] !== null ? starts[sj + 1] : blockEnd;
+        const text = source.slice(starts[si], gEnd);
         const allExprStmts = body.slice(si, sj + 1).every((st) => st && st.kind === "ExprStmt");
-        if (BODY_TOP_CODE_HEAD_RE.test(text) === false && (block._bodyTopCatchAll === true || allExprStmts)) {
-            ranges.push([start, end, si, sj]);
-        }
+        if (BODY_TOP_CODE_HEAD_RE.test(text) === false && (block._bodyTopCatchAll === true || allExprStmts)) fi = si;
         si = sj;
     }
-    if (ranges.length === 0) return;
-    for (const [start, end] of ranges) {
-        const slice = source.slice(start, end);
-        const firstLine = (slice.split("\n").find((l) => l.trim() !== "") || slice).trim();
-        const shown = firstLine.length > 80 ? firstLine.slice(0, 77) + "..." : firstLine;
-        const st = body[ranges.find((r) => r[0] === start)[2]];
-        pushDiagnostic(ctx, makeDiagnostic(
-            "E-UNQUOTED-DISPLAY-TEXT",
-            "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
-            "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
-            "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
-            "</p>`) or write it as a display-text literal (`\"" + shown + "\"`, §4.18.3).",
-            { start, end, line: st.span.line ?? 1, col: st.span.col ?? 1 },
-        ));
+    if (fi < 0) return;
+    const start = starts[fi];
+    const nlAt = source.indexOf("\n", start);
+    const lineEnd = (nlAt === -1 || nlAt >= blockEnd) ? blockEnd : nlAt;
+    let end = lineEnd;
+    // Withdraw this parse's diagnostics from the rejected line on; the tail
+    // re-parse below reports for itself.
+    ctx.diagnostics = ctx.diagnostics.filter((d) => !(inBlock(d) && d.span.start >= start));
+    const kept = body.slice(0, fi);
+    const lineText = source.slice(start, lineEnd).trim();
+    const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+    const stLine = body[fi] && body[fi].span && typeof body[fi].span.line === "number" ? body[fi].span.line : 1;
+    let tailBody = [];
+    if (lineEnd < blockEnd && source.slice(lineEnd + 1, blockEnd).trim() !== "") {
+        const tailStart = lineEnd + 1;
+        const tailLine = stLine + 1;
+        const mark = ctx.diagnostics.length;
+        const tailBlock = {
+            ...block,
+            span: { ...span, start: tailStart, end: blockEnd, line: tailLine, col: 1 },
+            body: parseLogicBodyBestEffort(source.slice(tailStart, blockEnd), ctx, tailStart, tailLine, 1),
+        };
+        rejectBodyTopProseNative(tailBlock, source, ctx);
+        tailBody = tailBlock.body;
+        const lead = source.slice(tailStart, blockEnd).search(/\S/);
+        const tailFirst = tailStart + (lead < 0 ? 0 : lead);
+        const k = ctx.diagnostics.findIndex((d, i) => i >= mark && d && d.code === "E-UNQUOTED-DISPLAY-TEXT"
+            && d.span && d.span.start === tailFirst);
+        if (k >= 0) {
+            // The next line is prose too: one diagnostic for the whole run.
+            end = ctx.diagnostics[k].span.end;
+            ctx.diagnostics.splice(k, 1);
+        }
     }
-    // Withdraw the rejected statements' own parse diagnostics.
-    ctx.diagnostics = ctx.diagnostics.filter((d) => {
-        if (d === null || d === undefined || d.span === undefined || d.span === null) return true;
-        if (d.code === "E-UNQUOTED-DISPLAY-TEXT") return true;
-        return ranges.some(([a, b]) => d.span.start >= a
-            && (d.span.start < b || (b === blockEnd && d.span.start === b))) === false;
-    });
-    const drop = new Set();
-    for (const [, , si, sj] of ranges) for (let k = si; k <= sj; k++) drop.add(k);
-    block.body = body.filter((_, k) => drop.has(k) === false);
+    pushDiagnostic(ctx, makeDiagnostic(
+        "E-UNQUOTED-DISPLAY-TEXT",
+        "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
+        "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
+        "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
+        "</p>`) or write it as a display-text literal (`\"" + shown + "\"`, §4.18.3).",
+        { start, end, line: stLine, col: body[fi].span.col ?? 1 },
+    ));
+    block.body = kept.concat(tailBody);
 }
 
 // liftBareBlocks — calculation (pure; returns a new array, no mutation). The

@@ -6672,11 +6672,11 @@
   },
   "stdlib/http/index.scrml": {
     "KIND-NAME": 26,
-    "FIELD-SHAPE": 86,
-    "MISSING-FIELD": 331,
+    "FIELD-SHAPE": 87,
+    "MISSING-FIELD": 326,
     "EXTRA-FIELD": 84,
     "COUNT-LENGTH": 7,
-    "SPAN-COORD": 235
+    "SPAN-COORD": 234
   },
   "stdlib/math/index.scrml": {
     "COUNT-LENGTH": 2,
@@ -6821,5 +6821,5 @@
     "MISSING-FIELD": 407,
     "SPAN-COORD": 63
   },
-  "__NOTE_S441__": "S441 declared-prose-body: rows regenerated for fixtures whose <program>/<page>/<channel> body-top runs are now lifted as code in BOTH front ends (rust-dev-debate-dashboard: native now lifts `on mount {}`; the 4 trucking channels: SPAN-COORD improved; stdlib/http: its comment-leaked module tail is now parsed as code; phase3-is-in-when-guard-093: source migrated)."
+  "__NOTE_S441__": "S441 declared-prose-body: rows regenerated for fixtures whose <program>/<page>/<channel> body-top runs are now lifted as code in BOTH front ends (rust-dev-debate-dashboard: native now lifts `on mount {}`; the 4 trucking channels: SPAN-COORD improved; stdlib/http: its comment-leaked module tail is now parsed as code; phase3-is-in-when-guard-093: source migrated). [review round: stdlib/http row regenerated after the line-granular prose recovery.]"
 }

@@ -61,3 +61,34 @@ describe("#2 — a bare `@cell` expression statement stops at a statement on the
     expect(r.client).toContain("return 7;");
   });
 });
+
+for (const [label, parser] of [["default", null], ["scrml-native", "scrml-native"]]) {
+  describe(`#3/#4/#5 — a prose line that swallows the next line is rejected; the next line survives (${label})`, () => {
+    test("`Welcome here.⏎<count> = 0` → ONE E-UNQUOTED-DISPLAY-TEXT, the declaration still exists", () => {
+      const r = compile("<program>\nWelcome here.\n<count> = 0\n<p>${@count}</p>\n</program>\n", parser);
+      expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    });
+    test("`Welcome here.⏎<count> = 0` with no read still errors (was 0 errors, both lines vanished)", () => {
+      const r = compile("<program>\nWelcome here.\n<count> = 0\n<p>static</p>\n</program>\n", parser);
+      expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    });
+    for (const line of ["Welcome here", "Welcome.", "Welcome here!", "Hi there, friend.", "Welcome to the app"]) {
+      test(`\`${line}⏎<count> = 0\` → only E-UNQUOTED-DISPLAY-TEXT`, () => {
+        const r = compile(`<program>\n${line}\n<count> = 0\n<p>\${@count}</p>\n</program>\n`, parser);
+        expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+      });
+    }
+    test("`Welcome here.⏎function go(){…}` → no E-SCOPE-001 cascade on `go`", () => {
+      const r = compile("<program>\nWelcome here.\nfunction go() { return 1 }\n<p>${go()}</p>\n</program>\n", parser);
+      expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    });
+    test("`Totals below.⏎const <b> = @a * 2` → the derived cell survives", () => {
+      const r = compile("<program>\n<a> = 1\nTotals below.\nconst <b> = @a * 2\n<p>${@b}</p>\n</program>\n", parser);
+      expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    });
+    test("three prose lines in a row are ONE diagnostic", () => {
+      const r = compile("<program>\nWelcome to the dashboard.\nif you want the archive, ask an admin.\nItems for sale (all of them) ship on Friday.\n<p>x</p>\n</program>\n", parser);
+      expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    });
+  });
+}
