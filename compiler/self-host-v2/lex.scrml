@@ -1083,6 +1083,7 @@ ${
         BareValue,   // an unquoted attribute value: stop at depth 0 before trivia, `>` or `/>`
         Statement,   // a `function` / `type` declaration: stop after a `}` that returns to depth 0
         Line,        // a braceless declaration (`import … from "…"`): stop at depth 0 before a newline
+        Shorthand,   // a `:`-shorthand body (§4.14): stop at depth 0 before the `>` (or `/>`) that ends the opener
     }
     export type LexRun:struct = { tokens: Token[], end: int }
 
@@ -1119,6 +1120,7 @@ ${
         return match stop {
             .BareValue :> isTrivia(c0) || c0 == 62 || (c0 == 47 && peekCode(st.cur, 1) == 62)
             .Line      :> lineEndsAt(skipBlanks(st.cur))
+            .Shorthand :> endsOpener(skipTriviaAhead(st.cur))
             .Balanced  :> false
             .Statement :> false
         }
@@ -1132,6 +1134,7 @@ ${
             .Statement :> lastIsCloser(st, true)
             .BareValue :> false
             .Line      :> false
+            .Shorthand :> false
         }
     }
 
@@ -1146,6 +1149,23 @@ ${
     fn skipBlanks(cur: Cursor) -> Cursor {
         let c = cur
         while (isWhitespace(peekCode(c, 0))) {
+            c = advance(c, 1)
+        }
+        return c
+    }
+
+    // §4.14: a `:`-shorthand body runs to the `>` that terminates the opener.
+    // Looked for past trivia (a step may consume whitespace and the next token
+    // together); `/>` is reported by the parser (E-CLOSER-001: no closer on a
+    // `:`-shorthand body).
+    fn endsOpener(c: Cursor) -> boolean {
+        const c0: int = peekCode(c, 0)
+        return c0 == 62 || (c0 == 47 && peekCode(c, 1) == 62)
+    }
+
+    fn skipTriviaAhead(cur: Cursor) -> Cursor {
+        let c = cur
+        while (isTrivia(peekCode(c, 0))) {
             c = advance(c, 1)
         }
         return c

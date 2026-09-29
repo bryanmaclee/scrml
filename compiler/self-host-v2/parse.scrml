@@ -1065,6 +1065,7 @@ ${
         typed: ADeclAttr[],
         attrs: AAttr[],
         selfClosing: boolean,
+        short: ANode | not,
     }
     type ROpener:struct = { o: Opener, mp: MP }
 
@@ -1123,11 +1124,19 @@ ${
         let typed: ADeclAttr[] = []
         let attrs: AAttr[] = []
         let selfClosing = false
+        let short: ANode | not = not
         let going = true
         while (going) {
             m = skipSpace(m)
             if (mEof(m)) {
                 m = mDiag(m, "E-PARSE-TAG", "unterminated tag `<" + nm.w + "`", start, m.pos)
+                going = false
+            } else if (chAt(m, 0) == ":" && isSpaceCh(chAt(m, -1))) {
+                // §4.14: a whitespace-preceded `:` opens the `:`-shorthand body —
+                // one expression, running to the `>` that ends the opener.
+                const rs: RNodeOne = parseShorthand(m)
+                short = rs.n
+                m = rs.mp
                 going = false
             } else if (mLooking(m, "/>")) {
                 selfClosing = true
@@ -1149,8 +1158,38 @@ ${
             }
         }
         const o: Opener = { start: start, star: star, isLet: isLet, name: nm.w, ty: ty, own: own,
-                            typed: typed, attrs: attrs, selfClosing: selfClosing }
+                            typed: typed, attrs: attrs, selfClosing: selfClosing, short: short }
         return { o: o, mp: m }
+    }
+
+    // At the `:` of a `:`-shorthand body (§4.14): the single expression, as an
+    // Interp node, then the opener's `>` (consumed). There is no closer: a
+    // `/>` here is E-CLOSER-001 (§4.14 "closer present on `:`-shorthand body").
+    // The expression ends at the first depth-0 `>` (a comparison inside it
+    // must be parenthesized, as in any opener value, §66.2.4).
+    fn parseShorthand(mp: MP) -> RNodeOne {
+        const start: int = mp.pos
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)
+        let t: TP = tp
+        let e: AExpr = { nid: t.nid, span: mkSpan(start, start + 1), k: AExprK.Recovered }
+        if (atEnd(t)) {
+            t = diagAt(t, "E-PARSE-SHORTHAND", "a `:`-shorthand body needs one expression before the `>` (§4.14)", cur(t))
+            t = bumpId(t)
+        } else {
+            const r: RExpr = parseTernary(t)
+            e = r.e
+            t = expectRegionEnd(r.tp)
+        }
+        let m: MP = skipSpace(backToMarkup(mp, t))
+        if (mLooking(m, "/>")) {
+            m = mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `/` (`<tag … : expr>`, §4.14)", m.pos, m.pos + 2), 2)
+        } else if (chAt(m, 0) == ">") {
+            m = mAdv(m, 1)
+        } else {
+            m = mDiag(m, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m.pos, m.pos + 1)
+        }
+        const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }
+        return { n: n, mp: mBump(m) }
     }
 
     type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], mp: MP }
@@ -1280,6 +1319,14 @@ ${
             // a typed attribute on `<*x …>` is meaningless — a reference declares nothing
             return elemFrom(o, [], mDiag(mp, "E-PARSE-TAG", "a `<*" + o.name + ">` reference cannot declare typed attributes", o.start, mp.pos))
         }
+        const sh: ANode | not = o.short
+        if (sh is some) {
+            // §4.14 / §24: a non-void element's `:`-shorthand body IS its one child
+            if (isVoidTag(o.name)) {
+                return elemFrom(o, [], mDiag(mp, "E-COLON-SHORTHAND-ON-VOID", "`<" + o.name + ">` is a void element — it has no body for a `:`-shorthand (bind a value through an attribute, §4.14)", o.start, mp.pos))
+            }
+            return elemFrom(o, [sh], mp)
+        }
         if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
         const kids: RNodes = parseKids(mp, o.name)
         return elemFrom(o, kids.nodes, kids.mp)
@@ -1405,7 +1452,9 @@ ${
             }
         }
         let body: ADeclChild[] = []
-        if (!o.selfClosing) {
+        if (o.short is some) {
+            m = mDiag(m, "E-PARSE-SHORTHAND", "a declaration has no `:`-shorthand body — its markup is its `renders` (§66.5); a `:`-shorthand body belongs to an element or a state-child (§4.14)", o.start, m.pos)
+        } else if (!o.selfClosing) {
             const rb: RChildren = parseDeclBody(m, o.name)
             body = rb.cs
             m = rb.mp
@@ -1542,12 +1591,18 @@ ${
             return { c: ADeclChild.ChildField(rd.d), mp: rd.mp }
         }
         let m: MP = ro.mp
-        if (!o.selfClosing) {
-            m = mDiag(m, "E-PARSE-STATE-CHILD", "a state-child body is not in bootstrap slice M2 — write `<" + o.name + " rule=…/>`", o.start, m.pos)
-            const skip: RChildren = parseDeclBody(m, o.name)
-            m = skip.mp
+        // O5 RULED (1i): a state-child's body is that variant's markup — a
+        // `:`-shorthand expression (§4.14) or a bare body up to its closer.
+        let body: ANode[] = []
+        const sh: ANode | not = o.short
+        if (sh is some) {
+            body = [sh]
+        } else if (!o.selfClosing) {
+            const kids: RNodes = parseKids(m, o.name)
+            body = kids.nodes
+            m = kids.mp
         }
-        const sc: AStateChild = { nid: m.nid, span: mkSpan(o.start, m.pos), name: o.name, attrs: o.attrs }
+        const sc: AStateChild = { nid: m.nid, span: mkSpan(o.start, m.pos), name: o.name, attrs: o.attrs, body: body }
         return { c: ADeclChild.StateChild(sc), mp: mBump(m) }
     }
 

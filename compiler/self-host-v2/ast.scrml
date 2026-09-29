@@ -136,7 +136,11 @@ ${
     }
     // A state-child (O52 ruled): a tag in a declaration body with neither an own
     // value nor a typed attribute — it names a variant of the enclosing field.
-    export type AStateChild:struct = { nid: int, span: ASpan, name: string, attrs: AAttr[] }
+    // `body` = that variant's markup (O5 RULED (1i): "a state-child's body is
+    // that variant's markup, rendered wherever the field renders"): the one
+    // Interp node of a `:`-shorthand body (§4.14, `<Idle rule=.X : "Ready">`),
+    // the children of a bare body (`<Idle rule=.X>…</>`), or none (void).
+    export type AStateChild:struct = { nid: int, span: ASpan, name: string, attrs: AAttr[], body: ANode[] }
 
     export type ADeclChild:enum = {
         ChildField(d: ADecl),
