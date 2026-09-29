@@ -1,0 +1,10 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+function refresh() { @verdict = isOk(1) ? "accepted" : "rejected" }
+on mount {
+ document.getElementById("go").addEventListener("click", refresh)
+}
+<button id="go">go</button>
+<p id="out">${@verdict}</p>
+</program>

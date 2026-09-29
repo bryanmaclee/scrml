@@ -12,7 +12,9 @@ import { CGError } from "./errors.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
 import { rewriteCodeSegments, findObjectShorthandRegions } from "./code-segments.ts";
 import { scanClientEgress } from "./egress-field-scan.ts";
-import { emitFunctions } from "./emit-functions.ts";
+import { emitFunctions, clientAsyncFactsOf } from "./emit-functions.ts";
+import { setActiveClientAsync } from "./js-async-analysis.ts";
+import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { getNodes, isServerOnlyNode } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
 import { emitBindings } from "./emit-bindings.ts";
@@ -2324,6 +2326,19 @@ export function generateClientJs(ctx: CompileContext): string {
   //
   // See SCOPE-AND-DECOMPOSITION.md §3.4 (Option C-prime, RATIFIED) and
   // PHASE-0-SURVEY §7.3 finalized helper signature.
+  // s441 — compute the client async facts BEFORE any body-render stage and make
+  // them the ACTIVE client emission: the `<each>` row and lift handler emitters
+  // (deep call chains with no ctx) color their handlers against them (F5).
+  {
+    const _facts = clientAsyncFactsOf(ctx);
+    const _resolveFree = freeAsyncResolverFromFacts(_facts);
+    setActiveClientAsync({
+      resolveFree: _resolveFree,
+      report: (uses, span) => {
+        for (const err of jsAsyncUsesErrors(uses, span, ctx.filePath)) errors.push(err);
+      },
+    });
+  }
   const c12BodyRender = clientStage(ctx, "emit-engine-body-render", () => emitEngineBodyRenderForFile(fileAST, ctx));
   const c14BodyRender = clientStage(ctx, "emit-derived-engine-body-render", () => emitDerivedEngineBodyRenderForFile(fileAST, ctx));
   // S108 Phase 3 — match-block body render (SPEC §18.0.1). Mirrors C12/C14
@@ -4227,6 +4242,8 @@ export function generateClientJs(ctx: CompileContext): string {
   // registered-request id set so it cannot leak into the next file's emission.
   setCurrentFileRequestIds(null);
   if (_ownsEmitLogicState) endEmitLogicFile();
+  // s441 — end of this file's client emission (see setActiveClientAsync above).
+  setActiveClientAsync(null);
 
   return clientCode;
 }

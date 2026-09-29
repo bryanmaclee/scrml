@@ -1,0 +1,11 @@
+<program>
+<v> = 0
+server function a(n) { return n }
+server function b(n) { return n }
+on mount {
+  a(1)
+  b(2)
+}
+<button id="go" onclick=${ a(3); b(4) }>go</button>
+<p>${@v}</p>
+</program>

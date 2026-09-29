@@ -1,0 +1,16 @@
+<program>
+<v> = "unset"
+<xs> = [1, 2, 3]
+server function isOk(n) { return n > 100 }
+<p id="out">${@v}</p>
+<button id="b1" onclick=${ @v = isOk(1) ? "ternary-yes" : "ternary-no" }>1</button>
+<button id="b2" onclick=${ if (isOk(1) && @v == "unset") { @v = "and-yes" } }>2</button>
+<button id="b3" onclick=${ if (isOk(1) || false) { @v = "or-yes" } }>3</button>
+<button id="b4" onclick=${ @v = `tmpl ${isOk(1)}` }>4</button>
+<button id="b5" onclick=${ if (isOk(1) == true) { @v = "eq-yes" } }>5</button>
+<button id="b6" onclick={ const ys = @xs.filter(x => isOk(x)); @v = "filter " + ys.length }>6</button>
+<button id="b7" onclick={ const { a = isOk(1) } = {}; @v = a ? "dflt-yes" : "dflt-no" }>7</button>
+<button id="b8" onclick=${ () => { @xs.forEach(x => { if (isOk(x)) { @v = "each-yes" } }) } }>8</button>
+<button id="b9" onclick={ let i = 0; while (isOk(i)) { i = i + 1 }; @v = "while " + i }>9</button>
+<button id="b10" onclick={ const s = [...@xs].sort((a, b) => isOk(a) ? 1 : -1); @v = "sort " + s.length }>10</button>
+</program>

@@ -4086,3 +4086,11 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3589] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md` · verdict: O25 (a) bind always written; (b) native validator subset follows the bind, conditional on compiler `novalidate` (R1); 9 impl#1 defects routed)**
 
 [3590] dpa · **(dpa: complete → `scrml-support/docs/deep-dives/server-helper-return-leak-placement-dpa-057-2026-09-29.md` · verdict: D now — already SPEC §13.4, app mode non-conformant, no ruling needed; B egress-registry floor for bryan; A relay pull-up on top; C rejected; 4 HIGH defects routed)**
+
+[3591] land · S441: #1141 #1142 #1145 #1146 (docs/audit) + #1147 #1149 #1150 #1152 #1153 #1155 #1158 #1161 #1162 #1163 (code; four SECURITY: #1155 #1161 #1162 #1163); site published; protect §14.8.9 + declared prose + err-arm HELD on branches for S442
+
+[3592] rule · S441 (user-voice S441): one-README-two-registers + facts sheet; site; `fail .Variant`; handler references are E-ERROR-002; loose prose not allowed in program/page bodies (declared prose); `| err :>` binds the error; csrf="auto" under auth; WS Origin check; §14.8.9 ratified ×2 + arithmetic stays protected (declassify = reveal); firstPaint keys; standing push authorization covers agent branches
+
+[3593] find · spotlight audit → security: static server served the DB + session store + server source (on main, fixed #1162); CSRF absent under auth (#1161); WS hijack (#1161); example-23 tokens replayable (#1155); `<page auth="required">` and nested `<program auth>` gate nothing (OPEN, HIGH); protect= bypassed by SQL case + SQL expressions (OPEN, HIGH)
+
+[3594] friction · text-scan fixes lost to adversarial review three rounds running (F4/F5, declared prose); structural rules (scope resolution, binding poisoning, coverage invariant) ended it. A red test passed the full hook because runtime tests skip under happy-dom in the one-process hook (gap filed). Sub-agent pushes classifier-denied repeatedly (ruled covered)

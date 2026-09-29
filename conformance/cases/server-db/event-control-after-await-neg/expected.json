@@ -1,0 +1,12 @@
+{
+  "id": "server-db-event-control-after-await-neg",
+  "description": "s441 fix round (review:S441-f4f5-review). Since s441 a handler that calls a server function awaits it and runs as an async function. `event.preventDefault()` placed AFTER that call now runs after the handler has yielded — the browser has already submitted the form (reviewer-executed: defaultPrevented false; true before s441). The compiler refuses it rather than silently letting the form submit, and does not move the call (a conditional preventDefault would change meaning).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: preventDefault / stopPropagation / stopImmediatePropagation on the handler's event parameter after its first await SHALL be a compile error (E-EVENT-CONTROL-AFTER-AWAIT, §34).",
+  "expect": {
+    "codes": ["E-EVENT-CONTROL-AFTER-AWAIT"],
+    "severity": { "E-EVENT-CONTROL-AFTER-AWAIT": "error" }
+  }
+}

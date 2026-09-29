@@ -7,7 +7,8 @@ import { isServerOnlyNode, collectFunctions } from "./collect.ts";
 import { scheduleStatements, buildCalleeImportMap, isProvablyReadOnlyServerFn } from "./scheduling.js";
 // Seam-A colorless-async Gap 2 (GITI-037) — the transitive async-coloring fixpoint
 // + the shared no-silent-leak structural detectors / diagnostics (S239).
-import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers } from "./emit-library-shared.ts";
+import { computeAsyncFnNames, collectNonAwaitableAsyncCalls, collectAliasedAsyncCalls, aliasedAsyncCallError, syncCallbackErrorForSite, annotateNestedAsyncHelpers, asyncEscapeErrors, fileBoundNamesOf } from "./emit-library-shared.ts";
+import type { AsyncEscapeSite } from "./local-async-fns.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
 import { buildMachineBindingsMap } from "./emit-reactive-wiring.js";
 // The ONE stdlib-async predicate (Q5 `<repo>/stdlib/` carve-out + `isAsync`). Used
@@ -566,6 +567,97 @@ function emitMultiBatchWrapper(opts: {
   lines.push(`      data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} },`);
   lines.push(`    };`);
   lines.push(`  }`);
+}
+
+/**
+ * The CLIENT async-coloring sets for one file (moved verbatim out of
+ * `emitFunctions` by s441 so the handler / `on mount` / row-handler emitters —
+ * some of which run BEFORE `emitFunctions` — ask the SAME question):
+ *   - `clientFns`          — the client-boundary fns (coloring input);
+ *   - `serverFnNames`      — this file's server-boundary fn names;
+ *   - `clientAsyncFnNames` — the transitive async fixpoint over the client fns.
+ */
+export function computeClientAsyncSets(
+  ctx: CompileContext,
+  fnNodes: ASTNode[],
+  _calleeMap: ReturnType<typeof buildCalleeImportMap>,
+  _exportRegistry: CompileContext["exportRegistry"] | null,
+): { clientFns: ASTNode[]; serverFnNames: Set<string>; clientAsyncFnNames: Set<string> } {
+  const _endpointClientSkipIds = (ctx.routeMap as { endpointClientSkipIds?: Set<string> }).endpointClientSkipIds;
+  const _clientFns = fnNodes.filter((fn) => {
+    const id = `${ctx.filePath}::${(fn.span as ASTNode)?.start}`;
+    const r = ctx.routeMap.functions.get(id);
+    if (r && r.boundary === "server") return false;
+    // S259 bucket (b) client-scope [6] — mirror the client-emit loop's exclusions
+    // so a SERVER-ONLY fn never pollutes the client coloring input: `handle()`
+    // middleware (server-only, no client body) + an `<endpoint>` private server
+    // helper (§61.6, retained server-side, tree-shaken from .client.js).
+    if ((fn as { isHandleEscapeHatch?: boolean }).isHandleEscapeHatch) return false;
+    if (_endpointClientSkipIds && _endpointClientSkipIds.has(id)) return false;
+    // A user-source `async function` is FORBIDDEN (§19.9.8, E-ASYNC-NOT-IN-SCRML)
+    // — a hard error, not compiler-managed async. Excluded so it neither colors
+    // nor peer-awaits: compiler-managed async is INFERRED (stdlib/server/CPS),
+    // never user-written `async`. (The auto-await classifier stays stdlib-only.)
+    if ((fn as { isAsync?: boolean }).isAsync === true) return false;
+    return true;
+  });
+  // Cleanup 9 — the server-fn names; the server-direct seed now derives from
+  // computeAsyncFnNames's SINGLE structural callee walk (a fn calling one of these
+  // is async — its call lowers to an awaited fetch stub), replacing the second,
+  // non-transitive top-level-only hasServerCallees scan.
+  const _serverFnNames = new Set<string>();
+  for (const [_id, route] of ctx.routeMap.functions) {
+    // F5 (S239 round 3) — same cross-file collision as scheduling.ts's
+    // `_clientServerFnNames`: `routeMap` spans the WHOLE resolved import graph and
+    // the owning file lives only in the map KEY, so an unfiltered walk pulled another
+    // file's server-fn names into THIS file's client emission. Filtering here fixes
+    // both consumers at once: the U1 call-site await (threaded into `fnOpts`) AND the
+    // `callsServerFn` async-coloring seed below — which must agree, since U1's gate
+    // (`clientAsyncBody`) is derived from that very coloring. Letting them disagree
+    // is precisely how a stranded `await` gets built.
+    if (!_id.startsWith(`${ctx.filePath}::`)) continue;
+    if (route.boundary === "server" && route.functionName) _serverFnNames.add(route.functionName as string);
+  }
+  const _clientAsyncSeed = new Set<string>();
+  const _crossImportSeed = (ctx.fileAST as any)?._asyncImportedLocals as Set<string> | undefined;
+  if (_crossImportSeed) for (const n of _crossImportSeed) _clientAsyncSeed.add(n);
+  const _clientAsyncFnNames = computeAsyncFnNames(
+    _clientFns,
+    null,
+    _clientAsyncSeed,
+    _calleeMap,
+    _exportRegistry,
+    _serverFnNames,
+  );
+  return { clientFns: _clientFns, serverFnNames: _serverFnNames, clientAsyncFnNames: _clientAsyncFnNames };
+}
+
+/**
+ * s441 — the client async facts (server fns · the transitive client async set ·
+ * the stdlib classifier) for `ctx`, computed once and cached on the ctx. Every
+ * client emitter that lowers a body OUTSIDE the function pipeline (an inline /
+ * block event handler, an `on mount` block, an `<each>` row handler) reads it.
+ */
+export function clientAsyncFactsOf(ctx: CompileContext): AsyncNameFacts {
+  const holder = ctx as unknown as { _clientAsyncFacts?: AsyncNameFacts };
+  if (holder._clientAsyncFacts) return holder._clientAsyncFacts;
+  const calleeMap = buildCalleeImportMap(ctx.fileAST as any);
+  const exportRegistry = ctx.exportRegistry ?? null;
+  const fnNodes: ASTNode[] = (ctx.analysis?.fnNodes ?? collectFunctions(ctx.fileAST)) as ASTNode[];
+  const { serverFnNames, clientAsyncFnNames } = computeClientAsyncSets(ctx, fnNodes, calleeMap, exportRegistry);
+  const facts: AsyncNameFacts = {
+    boundNames: fileBoundNamesOf(ctx.fileAST),
+    asyncFnNames: clientAsyncFnNames,
+    serverFnNames,
+    isStdlibAsync: (calleeMap && exportRegistry && exportRegistry.size > 0)
+      ? (n: string): boolean => {
+          const src = calleeMap.get(n);
+          return !!src && isPromiseReturningStdlibFn(n, src, exportRegistry);
+        }
+      : null,
+  };
+  holder._clientAsyncFacts = facts;
+  return facts;
 }
 
 /**
@@ -1327,52 +1419,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
       _readOnlyServerFnNames.add(fn.name as string);
     }
   }
-  const _endpointClientSkipIds = (routeMap as { endpointClientSkipIds?: Set<string> }).endpointClientSkipIds;
-  const _clientFns = fnNodes.filter((fn) => {
-    const id = `${filePath}::${(fn.span as ASTNode)?.start}`;
-    const r = routeMap.functions.get(id);
-    if (r && r.boundary === "server") return false;
-    // S259 bucket (b) client-scope [6] — mirror the client-emit loop's exclusions
-    // so a SERVER-ONLY fn never pollutes the client coloring input: `handle()`
-    // middleware (server-only, no client body) + an `<endpoint>` private server
-    // helper (§61.6, retained server-side, tree-shaken from .client.js).
-    if ((fn as { isHandleEscapeHatch?: boolean }).isHandleEscapeHatch) return false;
-    if (_endpointClientSkipIds && _endpointClientSkipIds.has(id)) return false;
-    // A user-source `async function` is FORBIDDEN (§19.9.8, E-ASYNC-NOT-IN-SCRML)
-    // — a hard error, not compiler-managed async. Excluded so it neither colors
-    // nor peer-awaits: compiler-managed async is INFERRED (stdlib/server/CPS),
-    // never user-written `async`. (The auto-await classifier stays stdlib-only.)
-    if ((fn as { isAsync?: boolean }).isAsync === true) return false;
-    return true;
-  });
-  // Cleanup 9 — the server-fn names; the server-direct seed now derives from
-  // computeAsyncFnNames's SINGLE structural callee walk (a fn calling one of these
-  // is async — its call lowers to an awaited fetch stub), replacing the second,
-  // non-transitive top-level-only hasServerCallees scan.
-  const _serverFnNames = new Set<string>();
-  for (const [_id, route] of routeMap.functions) {
-    // F5 (S239 round 3) — same cross-file collision as scheduling.ts's
-    // `_clientServerFnNames`: `routeMap` spans the WHOLE resolved import graph and
-    // the owning file lives only in the map KEY, so an unfiltered walk pulled another
-    // file's server-fn names into THIS file's client emission. Filtering here fixes
-    // both consumers at once: the U1 call-site await (threaded into `fnOpts`) AND the
-    // `callsServerFn` async-coloring seed below — which must agree, since U1's gate
-    // (`clientAsyncBody`) is derived from that very coloring. Letting them disagree
-    // is precisely how a stranded `await` gets built.
-    if (!_id.startsWith(`${filePath}::`)) continue;
-    if (route.boundary === "server" && route.functionName) _serverFnNames.add(route.functionName as string);
-  }
-  const _clientAsyncSeed = new Set<string>();
-  const _crossImportSeed = (ctx.fileAST as any)?._asyncImportedLocals as Set<string> | undefined;
-  if (_crossImportSeed) for (const n of _crossImportSeed) _clientAsyncSeed.add(n);
-  const _clientAsyncFnNames = computeAsyncFnNames(
-    _clientFns,
-    null,
-    _clientAsyncSeed,
-    _calleeMap,
-    _exportRegistry,
-    _serverFnNames,
-  );
+  const { clientFns: _clientFns, serverFnNames: _serverFnNames, clientAsyncFnNames: _clientAsyncFnNames } =
+    computeClientAsyncSets(ctx, fnNodes, _calleeMap, _exportRegistry);
   // The PEER-AWAIT set is the coloring set restricted to the names NO OTHER
   // auto-await surface owns. `computeAsyncFnNames` returns exactly
   // `seed ∪ {local async fn names}`, so the set partitions cleanly into:
@@ -1427,6 +1475,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // non-awaitable position (sync callback / param default). Drained after the loop.
   const _clientSyncPeerCalls: Array<{ name: string; span: unknown }> = [];
 
+  // s441 (S440 F4) — every async-colored fn a client body uses as a VALUE.
+  const _clientEscapes: AsyncEscapeSite[] = [];
   // s440-sync-callback-async-helper — the async sets above are FILE-SCOPE: a
   // function declared INSIDE a client fn was in none of them, so it was emitted
   // `async` (its body awaits) and then called as if sync — `xs.some(x => inner(x))`
@@ -1436,6 +1486,7 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   // detector, the nested-decl emitter and the drain below all read the marks.
   {
     const _nestedFacts: AsyncNameFacts = {
+      boundNames: fileBoundNamesOf(ctx.fileAST),
       asyncFnNames: _clientAsyncFnNames,
       serverFnNames: _serverFnNames,
       isStdlibAsync: (_calleeMap && _exportRegistry && _exportRegistry.size > 0)
@@ -1445,7 +1496,11 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
           }
         : null,
     };
-    for (const fn of _clientFns) annotateNestedAsyncHelpers(fn, _nestedFacts, /*sqlIsAsync*/ false);
+    for (const fn of _clientFns) annotateNestedAsyncHelpers(fn, _nestedFacts, /*sqlIsAsync*/ false, _clientEscapes);
+    // s441 (F5) — the same facts answer "is this name async?" for the bodies that
+    // never reach this pipeline: an inline event handler, an `on mount` block, an
+    // `<each>` row handler (`clientAsyncFactsOf` — computed from the same sets).
+    (ctx as unknown as { _clientAsyncFacts?: AsyncNameFacts })._clientAsyncFacts = _nestedFacts;
   }
 
   for (const fnNode of fnNodes) {
@@ -1693,6 +1748,8 @@ export function emitFunctions(ctx: CompileContext): { lines: string[]; fnNameMap
   for (const _sp of _clientSyncPeerCalls) {
     _pushClientLeak(syncCallbackErrorForSite(_sp, _serverFnNames, filePath));
   }
+  // s441 (S440 F4) — E-ASYNC-FN-ESCAPES-AS-VALUE for every value use collected above.
+  for (const err of asyncEscapeErrors(_clientEscapes, filePath)) _pushClientLeak(err);
 
   return { lines, fnNameMap };
 }
