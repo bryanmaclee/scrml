@@ -13313,6 +13313,14 @@ Note: `variant-pattern` accepts both `.` (canonical) and `::` (alias) notation (
 separator is `:>` (canonical); `=>` and `->` are deprecated aliases accepted during the
 deprecation window (surfacing `W-MATCH-ARROW-LEGACY`, §34). `is-pattern` defined in §18.17.
 
+**`!{}` handler arms (§19.4.3).** An `!{}` error-handler arm uses this `arm-pattern` grammar and
+additionally admits the **identifier-binding arm** `| err :> …` — a bare identifier in pattern
+position, which is a catch-all (it matches every error variant, like `_`) that BINDS the error
+value to that name. Its grammar and semantics are normative at §19.4.3.1. The identifier-binding
+arm is an `!{}` handler form only; it is not added to `match` `arm-pattern`.
+
+> **Provenance:** ruling:user-voice-scrml.md S441 "your recs on the rest" (| err :> binds the error value)
+
 **Multi-scrutinee head (§18.19, S224).** The `match` head MAY be a parenthesized comma-list of
 scrutinees — `match (e1, …, eN) { (p1, …, pN) :> body }` — dispatching on the JOINT case of N
 values (the standalone, value-return sibling of the engine `(state × message)` arm form,
@@ -14814,6 +14822,44 @@ A call to a `!` function SHALL NOT be ignored. The caller MUST do one of the fol
 4. **Contain** inside `<errorBoundary>`: in markup context, an `<errorBoundary>` catches the error
 
 Failing to handle the result of a `!` function call in any of these ways SHALL be a compile error: **E-ERROR-002** -- `Result of failable function '{name}' is not handled. Either match the result, propagate with '?', catch with '!{}', or wrap in '<errorBoundary>'.`
+
+##### 19.4.3.1 `!{}` handler arms and the identifier-binding arm
+
+```
+handler         ::= expression '!{' handler-arm+ '}'
+handler-arm     ::= '|'? handler-pattern (':>' | '=>' | '->') arm-body
+handler-pattern ::= variant-pattern            // §18.2 — `.V`, `::V`, `.V(a, b)`
+                  | '_'                        // the wildcard; binds nothing
+                  | Identifier                 // the identifier-binding arm (catch-all)
+```
+
+`variant-pattern`, `arm-body` and the separators are the §18.2 productions.
+
+- An **identifier-binding arm** `| err :> body` SHALL match every error variant the handled call can
+  produce, exactly as `_` does. It satisfies handler exhaustiveness for the variants not named by an
+  earlier arm, and it satisfies the §19.16.3 catch-all requirement on a deferred handler.
+- The identifier SHALL be bound, inside `body`, to the **error value** — the value of the error
+  enum that the callee's `fail` produced. It is NOT the variant's payload. The bound value SHALL be in
+  the same representation as a constructed value of that enum: for a unit variant, the variant value
+  itself (what `ErrorType.V` evaluates to); for a payload variant, the value with its payload fields
+  (what `ErrorType.V(args)` evaluates to). So `err == ErrorType.V`, `err == ErrorType.V(args)` and
+  `match err { … }` SHALL behave as they do on a constructed value, and the value MAY be stored in
+  state (`@phase = .Failed(err)`) and matched later.
+- The binding SHALL be the same on the client and on the server: the rule applies to an `!{}`
+  handler in a client function and to one in a server function body. A failure produced on the
+  server and received over the §19.9.1 envelope binds the same value as a local failure (§19.9.4).
+- A payload binding written on a named variant (`| .InvalidEmail(email) :>`) is unchanged: it binds
+  the payload field, not the error value.
+
+```scrml
+function handleSubmit() {
+    validate() !{
+        | err :> { @phase = .Failed(err); return }   // err : ContactError — the whole error value
+    }
+}
+```
+
+> **Provenance:** ruling:user-voice-scrml.md S441 "your recs on the rest" (| err :> binds the error value)
 
 **Event-handler bodies — impl#1's handler exemption follows the call, not the statement count (S439 ruling #14).** The SPEC has NO handler exemption: the E-ERROR-002 sentence above and §19.4.4 ("An unhandled `!` function call SHALL be a compile error") are unconditional. impl#1 alone exempts some handler bodies. The ruling: whatever answer applies to an unhandled `!` call in an event-handler body (§5.2.3) SHALL follow the unhandled failable call, NOT the number of statements in the handler — a handler whose whole body is `risky()` and a handler whose body is `risky(); @r = 1` get the same answer. ⚑ impl#1 today (measured S437) splits on the count: `onclick={ risky(); @r = 1 }` is E-ERROR-002, while `onclick=risky()`, `onclick={ risky() }` and a multi-line `onclick={ risky() }` compile at exit 0. That is the split the ruling rejects.
 

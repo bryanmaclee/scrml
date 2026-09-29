@@ -92,7 +92,23 @@ export function parseErrorArms(bodyText) {
         // The pattern — `::Name`, `.Variant`, or `_`. Anything else is not
         // an arm start; skip the character and continue (best-effort, the
         // same posture parseErrorTokens takes for unrecognized tokens).
-        const pat = scanErrorPattern(src, p);
+        let pat = scanErrorPattern(src, p);
+        let identifierArm = false;
+        // The identifier-binding catch-all `| err :> …` (§18.2 / §19.4.3, S441
+        // ruling): a bare identifier directly followed by an arm arrow is the
+        // wildcard pattern carrying a binding — the same arm the live parser
+        // (ast-builder.js parseErrorTokens) builds. The binding is left for the
+        // binding scan below to consume.
+        if (pat === null && isErrorIdentStart(src.charAt(p))) {
+            let q = p;
+            while (q < len && isErrorIdentChar(src.charAt(q))) {
+                q = q + 1;
+            }
+            if (scanErrorArrow(src, skipErrorWhitespace(src, q)) > skipErrorWhitespace(src, q)) {
+                pat = { pattern: "_", end: p };
+                identifierArm = true;
+            }
+        }
         if (pat === null) {
             // Not an arm boundary — advance past this character so the
             // scan always makes progress.
@@ -128,12 +144,14 @@ export function parseErrorArms(bodyText) {
         const handler = src.substring(handlerStart, handlerEnd).trim();
         p = handlerEnd;
 
-        arms.push({
+        const arm = {
             pattern: pattern,
             binding: binding,
             handler: handler,
             span: makeErrorLocalSpan(armStart, p),
-        });
+        };
+        if (identifierArm) arm.identifierArm = true;
+        arms.push(arm);
     }
 
     return arms;

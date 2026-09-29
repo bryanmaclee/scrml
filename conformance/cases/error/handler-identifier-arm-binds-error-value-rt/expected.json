@@ -1,0 +1,27 @@
+{
+  "id": "error-handler-identifier-arm-binds-error-value-rt",
+  "description": "§19.4.3.1 (RUNTIME) — the identifier-binding `!{}` arm `| err :> …` binds the ERROR VALUE in the enum-value representation: a unit variant compares equal to `FormError.EmptyName`, a payload variant is matched by `describe(err)`, and both can be held in `.Failed(err)` and rendered by the `<Failed err>` arm. Pre-fix (s441 D1) the arm bound the payload (`null` for a unit variant, the bare field object for a payload variant), so @unitSeen stayed false, @message was undefined and the rendered message was empty.",
+  "language-version": "1.0",
+  "spec": "§19.4.3.1",
+  "source-test": "compiler/tests/integration/s441-catch-all-arm-binds-error-value.test.js",
+  "rationale": "§19.4.3.1: the identifier SHALL be bound to the error value, in the same representation as a constructed value of that enum, so `err == ErrorType.V` and `match err` behave as on a constructed value, and the value MAY be stored in state and matched later. Provenance: user-voice-scrml.md S441 ruling (`| err :>` binds the error value). The two clicks drive the unit path then the payload path; the state assertions read the held value and the derived strings.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "input": [
+      { "click": "#empty" },
+      { "wait": "settle" },
+      { "click": "#bad" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "unitSeen": true,
+      "message": "nope is not valid.",
+      "phase": { "variant": "Failed", "data": { "err": { "variant": "BadEmail", "data": { "email": "nope" } } } }
+    },
+    "domAnchored": [
+      { "selector": "#shown", "text": "nope is not valid." }
+    ]
+  }
+}

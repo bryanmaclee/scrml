@@ -5,3 +5,7 @@
 - D2 reproduced (repro/d2-server-fail-single-field.scrml): server `data: "queue full"` vs client `.data.reason`. Root: setVariantFieldsForFile set on client pass only. Fix: emit-server.ts publishes the registry on the server pass too.
 - D3 found: 09 read `result.changes` off `?{}.run()` (void per §8.5.1) -> SubmitFailed never fired. 09 migrated to INSERT ... RETURNING id + `.get()` + `is not`.
 - corpus diff base vs fix (examples/ samples/ conformance/cases, 2021 files): only examples/09 changed.
+- merged origin/main (1cf7cc93d; FACTS conflict taken from main, regenerated at the end).
+- D1 RULED (user-voice-scrml.md S441, verified): `| err :>` binds the error value. Implemented: ast-builder parseErrorTokens flags `identifierArm`; emit-logic binds `R.data == null ? R.variant : { variant, data }`; native parse-error-body.js (+ .scrml mirror) recognizes the arm. `| _ e :>` (explicit wildcard + name) left binding the payload (flogence reads `e.message` through it) — surfaced.
+- SPEC: §18.2 note + new §19.4.3.1 (grammar + normative bullets + provenance).
+- corpus diff (base2 = post-merge pre-D1): examples/09, 16, 29 + samples/login.scrml (pre-existing compile failure).

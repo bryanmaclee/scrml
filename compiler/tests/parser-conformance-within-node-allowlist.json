@@ -151,7 +151,7 @@
     "EXTRA-FIELD": 34,
     "FIELD-SHAPE": 25,
     "KIND-NAME": 5,
-    "MISSING-FIELD": 50,
+    "MISSING-FIELD": 52,
     "SPAN-COORD": 61
   },
   "examples/10-inline-tests.scrml": {

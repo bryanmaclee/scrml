@@ -1,0 +1,47 @@
+type FormError:enum = {
+    EmptyName
+    BadEmail(email: string)
+}
+
+type Phase:enum = { Editing, Failed(err: FormError) }
+
+<email> = ""
+<phase>: Phase = .Editing
+<unitSeen> = false
+<message> = ""
+
+function validate() ! FormError {
+    if (@email == "") fail .EmptyName
+    fail .BadEmail(@email)
+}
+
+fn isEmptyName(e: FormError) -> bool { return e == FormError.EmptyName }
+
+fn describe(e: FormError) -> string {
+    return match e {
+        .EmptyName       :> "Name is required."
+        .BadEmail(email) :> email + " is not valid."
+    }
+}
+
+function submitEmpty() {
+    @email = ""
+    validate() !{
+        | err :> { @unitSeen = isEmptyName(err); @phase = .Failed(err); return }
+    }
+}
+
+function submitBad() {
+    @email = "nope"
+    validate() !{
+        | err :> { @message = describe(err); @phase = .Failed(err); return }
+    }
+}
+
+<button id="empty" onclick=submitEmpty()>empty</>
+<button id="bad" onclick=submitBad()>bad</>
+<p id="m">${@message} ${@unitSeen}</>
+<match for=Phase on=@phase>
+    <Editing><p id="shown">editing</p></>
+    <Failed err><p id="shown">${describe(err)}</p></>
+</>

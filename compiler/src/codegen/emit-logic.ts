@@ -597,6 +597,10 @@ interface LogicArm {
   pattern?: string;
   binding?: string;
   handler?: string;
+  // §19.4.3.1 (S441): the arm was written `| err :>` — a bare identifier in
+  // pattern position (no `_` / `.V` / `::V`). Set by ast-builder.js
+  // parseErrorTokens and native-parser/parse-error-body.js. Binds the error VALUE.
+  identifierArm?: boolean;
   // errarm-refail (§19.5.2 / §19.3): the fail-expr node attached by
   // ast-builder.js (parseErrorTokens) when this arm's body is a bare re-`fail`
   // (`{ fail EnumType::Variant(args) }`). When present, emitArmBody lowers it
@@ -786,11 +790,12 @@ function emitArmBody(arm: LogicArm, errVar: string, machineBindings?: Map<string
  *   multi-field share the schema resolution so a single-field `!{}` arm reads
  *   the value the same way `match` / `<errorBoundary>` do (the D2 fix). ParseError
  *   (imported) resolves via the fixed schema registered in setVariantFieldsForFile.
- * - Unknown-schema variant (a wildcard catch-all `| e :>`, or an ambient/
- *   undeclared error variant with no declared payload — e.g. a server-fn
- *   `::NetworkError e`): there is no declared field to project, so the single
- *   name binds the whole `.data` payload — the established catch-all shape and
- *   the only correct choice absent a field name. This mirrors emitFailExpr's
+ * - Unknown-schema variant (an ambient/undeclared error variant with no
+ *   declared payload — e.g. a server-fn `::NetworkError e`): there is no
+ *   declared field to project, so the single name binds the whole `.data`
+ *   payload — the only correct choice absent a field name. (The single-name
+ *   catch-all `| e :>` does NOT come here: it binds the error VALUE, see
+ *   emitCatchAllErrorValueBinding — S441 ruling.) This mirrors emitFailExpr's
  *   producer side, which likewise emits the bare `.data` value for a single
  *   unknown-schema arg, keeping the reader and writer in step.
  */
@@ -815,6 +820,35 @@ function emitGuardedArmBinding(binding: string, variantName: string, resultVar: 
     out.push(`    const ${names[i]} = ${resultVar}.data.${field};`);
   }
   return out;
+}
+
+/**
+ * §19.4.3.1 identifier-binding catch-all arm (`| err :> …`, parsed as the
+ * wildcard pattern `_` carrying a single binding name, flagged `identifierArm`
+ * by the parser — the explicit-wildcard spelling `| _ e :>` is NOT flagged and
+ * keeps its payload binding, see the S441 report): the name binds the
+ * ERROR VALUE itself, normalized from the wire/return envelope
+ * `{ __scrml_error, type, variant, data }` to the enum-value representation —
+ * the same value the enum constructor produces:
+ *
+ *   - unit variant    -> the variant value (`"EmptyName"`, what
+ *                        `ContactError.EmptyName` evaluates to)
+ *   - payload variant -> `{ variant, data }` with the field-keyed payload (what
+ *                        `ContactError.InvalidEmail(x)` evaluates to)
+ *
+ * so `err == ContactError.EmptyName` and `match err { … }` behave as they do on
+ * a constructed value. Identical on the client and server passes. Ruling:
+ * user-voice-scrml.md S441 ("`| err :>` binds the error value").
+ *
+ * Returns null for a multi-name binding (`| _ (a, b) :>`), which keeps the
+ * positional payload projection of emitGuardedArmBinding.
+ */
+function emitCatchAllErrorValueBinding(binding: string, resultVar: string): string[] | null {
+  const names = binding.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
+  if (names.length !== 1 || names[0] === "_") return null;
+  return [
+    `    const ${names[0]} = ${resultVar}.data == null ? ${resultVar}.variant : { variant: ${resultVar}.variant, data: ${resultVar}.data };`,
+  ];
 }
 
 // ---------------------------------------------------------------------------
@@ -3960,7 +3994,9 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (arm.pattern === "_") {
             lines.push(`  ${isFirst ? "" : "else "}{`);
             if (arm.binding && arm.binding !== "_") {
-              for (const l of emitGuardedArmBinding(arm.binding, "", resultVar)) lines.push(l);
+              const catchAll = arm.identifierArm ? emitCatchAllErrorValueBinding(arm.binding, resultVar) : null;
+              const bindLines = catchAll ?? emitGuardedArmBinding(arm.binding, "", resultVar);
+              for (const l of bindLines) lines.push(l);
             }
             for (const l of emitArmAssign(armCode, armIsExpr)) lines.push(l);
             lines.push(`  }`);

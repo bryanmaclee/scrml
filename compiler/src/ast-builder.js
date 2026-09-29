@@ -15970,6 +15970,11 @@ function parseErrorTokens(tokens, filePath) {
       // Pattern: `::TypeName`, `.Variant` (bare-dot per §14.10 / M9), or `_`
       let pattern = "_";
       let binding = "";
+      // §19.4.3.1 (S441 ruling) — set when an explicit pattern token was consumed.
+      // An arm with NO pattern token and a bare identifier binding is the
+      // identifier-binding arm `| err :>`, which binds the error VALUE.
+      let patternTokenSeen = false;
+      let identifierArm = false;
 
       if (i < tokens.length && tokens[i].kind === "OPERATOR" && tokens[i].text === "::") {
         i++; // consume `::`
@@ -15977,6 +15982,7 @@ function parseErrorTokens(tokens, filePath) {
           pattern = "::" + tokens[i].text;
           i++;
         }
+        patternTokenSeen = true;
       } else if (
         // S83 B8 follow-on — bare-dot variant pattern `.Variant` (canonical
         // §14.10 / M9 bare-variant inference; used heavily by examples since
@@ -15994,9 +16000,11 @@ function parseErrorTokens(tokens, filePath) {
         i++; // consume `.`
         pattern = "." + tokens[i].text;
         i++; // consume IDENT
+        patternTokenSeen = true;
       } else if (i < tokens.length && tokens[i].text === "_") {
         pattern = "_";
         i++;
+        patternTokenSeen = true;
       }
 
       // Binding variable: bare ident, or `(ident, ...)` tuple-style (§19.4.3
@@ -16023,6 +16031,7 @@ function parseErrorTokens(tokens, filePath) {
       } else if (i < tokens.length && (tokens[i].kind === "IDENT")) {
         binding = tokens[i].text;
         i++;
+        if (!patternTokenSeen) identifierArm = true;
       }
 
       // Arm arrow — `:>` (canonical), `=>` / `->` (deprecated aliases, §18.2).
@@ -16080,6 +16089,7 @@ function parseErrorTokens(tokens, filePath) {
         handler: _handlerTrimmed,
         handlerExpr: _parseHandlerExpr(_handlerTrimmed, filePath, tokenSpan(armStart, filePath)?.start ?? 0),
         armArrow,
+        ...(identifierArm ? { identifierArm: true } : {}),
         span: tokenSpan(armStart, filePath),
       });
     } else if (tok.kind === "OPERATOR" && tok.text === "::") {

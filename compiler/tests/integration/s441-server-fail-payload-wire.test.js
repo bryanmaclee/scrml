@@ -281,12 +281,10 @@ describe("s441 — examples/09-error-handling.scrml end to end", () => {
     expect(api.get("phase").variant).toBe("Failed");
   });
 
-  // DEFECT 1 — BLOCKED ON A RULING. Every 09 error message below renders blank
-  // because the catch-all arm `| err :>` binds the envelope's `.data` (the
-  // PAYLOAD), not the error value, and SPEC §19 / §18.2 does not define what a
-  // bare-identifier `!{}` arm binds (no `identifier` alternative in
-  // `arm-pattern`). Un-skip when the ruling lands with its codegen fix.
-  const blocked = test.skip;
+  // DEFECT 1 (ruled S441): the catch-all arm `| err :>` binds the error VALUE.
+  // Pre-fix it bound the envelope's `.data` (the PAYLOAD — `null` for a unit
+  // variant), so every message below rendered blank.
+  const blocked = test;
 
   blocked("empty name renders 'Name is required.'", async () => {
     await mount09();

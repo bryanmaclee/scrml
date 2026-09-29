@@ -195,6 +195,21 @@ ${
             return { pattern: "_", end: p + 1 }
         }
 
+        // The identifier-binding catch-all `| err :> …` (§18.2 / §19.4.3,
+        // S441 ruling): a bare identifier directly followed by an arm arrow
+        // is the wildcard pattern carrying a binding. The pattern consumes
+        // nothing (`end: p`) so the binding scan picks the identifier up.
+        if (isErrorIdentStart(src.charAt(p))) {
+            @q = p
+            while (@q < len && isErrorIdentChar(src.charAt(@q))) {
+                @q = @q + 1
+            }
+            const afterName = skipErrorWhitespace(src, @q)
+            if (scanErrorArrow(src, afterName) > afterName) {
+                return { pattern: "_", end: p }
+            }
+        }
+
         return not
     }
 
