@@ -12,3 +12,5 @@
 - F5 session/destroy CSRF: filed (not a one-line gate); gaps filed: formFor no-JS fallback (MED), auth= invalid/dynamic fail-open (HIGH); WS gap filed + resolved
 - corpus r2: 68 server.js doc-gate, 51 server.js origin check (every channel app), 50 client.js sync helper; 0 other changes
 - conformance 1063/1070 + 7 xfail, 0 FAIL; pre-commit 32492 pass / 0 fail
+- round 3: F1a test now asserts anon compose 302; F1b dev serves compose handlers only via static resolution (6dcbce350); gaps filed: g-page-auth-required-protects-nothing (HIGH), g-nested-program-auth-attr-silently-ignored (HIGH, measured fail-open, not the LOW the brief expected); SPEC §40.2 CSRF bullet scoped to <program>; the proxy MUST strip X-Forwarded-*
+- why red tests were committed: csrf-canonical-delivery's runtime test returns early when happy-dom globals exist (the full-suite run), so it passed vacuously; compiler/tests/commands is not in the pre-commit gate
