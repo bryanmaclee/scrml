@@ -1,0 +1,12 @@
+{
+  "id": "server-db-async-call-then-in-handler-neg",
+  "description": "s441 fix round (review:S441-f4f5-review). An inline handler chains `.then` on a server call. Since s441 the handler awaits the call for you, so the emitted `(await isOk(1)).then(…)` reads `.then` off the resolved boolean — a TypeError at run time, silently breaking code that previously worked on the Promise. It is now a compile error naming the fix (drop `.then`; the call is awaited).",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "§13.2",
+  "rationale": "§13.2: a call the compiler awaits yields the resolved value; reading `.then`/`.catch`/`.finally` off it SHALL be a compile error (E-ASYNC-CALL-PROMISE-METHOD, §34).",
+  "expect": {
+    "codes": ["E-ASYNC-CALL-PROMISE-METHOD"],
+    "severity": { "E-ASYNC-CALL-PROMISE-METHOD": "error" }
+  }
+}

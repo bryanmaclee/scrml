@@ -1,0 +1,8 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+${ const check = (n) => isOk(n) }
+function go() { @verdict = check(1) ? "accepted" : "rejected" }
+<button id="go" onclick=go()>go</button>
+<p id="out">${@verdict}</p>
+</program>

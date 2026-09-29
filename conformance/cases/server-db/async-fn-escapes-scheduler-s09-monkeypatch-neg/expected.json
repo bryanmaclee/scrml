@@ -1,0 +1,16 @@
+{
+  "id": "server-db-async-fn-escapes-scheduler-s09-monkeypatch-neg",
+  "description": "SECURITY (s441 round 4, review round 3 findings 1-2; reviewer-executed: a wrong password accepted). The fire-and-forget exemption requires the GLOBAL scheduler. Here the scheduler is replaced by a `globalThis.setTimeout = (f) => f(1)` write at file scope, so passing an async-colored function to it hands back an unawaited Promise \u2014 always truthy. The exemption is now decided on the tree (any binding, key or write of the scheduler name anywhere in the file withdraws it), not on the text.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "\u00a713.2",
+  "rationale": "\u00a713.2: the fire-and-forget exemption applies only to the global scheduler; when the file binds or writes the scheduler name, passing an async-colored function to it SHALL be E-ASYNC-FN-ESCAPES-AS-VALUE (\u00a734).",
+  "expect": {
+    "codes": [
+      "E-ASYNC-FN-ESCAPES-AS-VALUE"
+    ],
+    "severity": {
+      "E-ASYNC-FN-ESCAPES-AS-VALUE": "error"
+    }
+  }
+}

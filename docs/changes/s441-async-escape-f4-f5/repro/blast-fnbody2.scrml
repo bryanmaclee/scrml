@@ -1,0 +1,30 @@
+<program>
+${
+  import { verifyPassword } from 'scrml:auth'
+}
+<v> = "unset"
+server function isOk(n) { return n > 100 }
+server function srv(pw, h) {
+  const a = verifyPassword(pw, h) ? "t" : "f"
+  const b = verifyPassword(pw, h) && true
+  const c = `x ${verifyPassword(pw, h)}`
+  let i = 0
+  while (verifyPassword(pw, h)) { i = i + 1 }
+  const { d = verifyPassword(pw, h) } = {}
+  const e = [h].map(x => verifyPassword(pw, x))
+  return a + b + c + i + d + e
+}
+function cli() {
+  const a = isOk(1) ? "t" : "f"
+  const b = isOk(1) && true
+  let i = 0
+  while (isOk(i)) { i = i + 1 }
+  const { d = isOk(1) } = {}
+  return a + b + i + d
+}
+function go() {
+  @v = cli() + srv("a", "b")
+}
+<p id="out">${@v}</p>
+<button id="go" onclick=go()>go</button>
+</program>

@@ -1,0 +1,13 @@
+<program>
+<v> = "unset"
+<n> = 0
+server function count() { return 7 }
+function refresh() { @n = count() }
+function tick() {
+  @n = count()
+  setTimeout(refresh, 10)
+  setTimeout(() => { @n = count() }, 20)
+}
+<button id="t" onclick=tick()>t</button>
+<p>${@n} ${@v}</p>
+</program>

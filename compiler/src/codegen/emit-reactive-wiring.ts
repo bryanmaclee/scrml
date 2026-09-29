@@ -21,6 +21,10 @@ import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from 
 import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emitDeclRhsSqlLoad } from "./emit-sync.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
 import { liftEmittedStatementAwaits, emittedCodeCallsServerFn, _clientServerFnNames } from "./scheduling.ts";
+import type { AsyncNameFacts } from "./async-combinators.ts";
+import { colorAsyncStatements, analyzeRawJsFragment } from "./js-async-analysis.ts";
+import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
+import { clientAsyncFactsOf } from "./emit-functions.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { LogicBinding, NestedLiftGroup } from "./binding-registry.ts";
@@ -1182,6 +1186,24 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       const _errsBefore = errors.length;
       const _seededBefore = seededConstFallbackCount();
       const code = emitLogicNode(stmt, groupEmitOpts);
+      // s441 (S440 F4) — a top-level logic statement is module-init code, outside
+      // every function body the lexical escape check walks: `${ const checks =
+      // [isOk] }` then `checks[0](x)` in a fn handed out a Promise-returning server
+      // fn as a plain value. Report every async-colored fn this statement uses as a
+      // value (calls here are owned by the module-init await paths, unchanged).
+      // Only the user's own declarations / expression statements: a `lift` (or any
+      // other markup-lowering node) emits compiler-built DOM code — a component's
+      // callback prop lowered to `el.setAttribute("onX", fn)` is not the user's
+      // value flow, and the recognizer must not read compiler text as user intent.
+      const _tlKind = (stmt as any).kind as string | undefined;
+      const _tlUserStmt = _tlKind === "let-decl" || _tlKind === "const-decl" || _tlKind === "tilde-decl" ||
+        _tlKind === "lin-decl" || _tlKind === "state-decl" || _tlKind === "bare-expr";
+      if (code && _tlUserStmt && (stmt as any)._onMountEffect !== true) {
+        const _tlUses = analyzeRawJsFragment(code, freeAsyncResolverFromFacts(clientAsyncFactsOf(ctx)));
+        if (_tlUses && _tlUses.escapes.length > 0) {
+          for (const err of jsAsyncUsesErrors({ calls: [], escapes: _tlUses.escapes }, (stmt as any).span, ctx.filePath)) errors.push(err);
+        }
+      }
       const _sideRange = {
         nested: [_nestedBefore, nestedListRef ? nestedListRef.length : 0] as [number, number],
         errs: [_errsBefore, errors.length] as [number, number],
@@ -1215,6 +1237,43 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       // reference them: the wrap changes no visible binding. Gated on the body
       // actually calling a server fn — a mount block without one emits
       // byte-identically to before.
+      // s441 (g-server-call-in-inline-handler-condition-unawaited) — the lift above
+      // awaited only DIRECT server-fn calls in statement positions: a server call
+      // in a `.some` callback, a nested helper wrapping one (`function inner(x) {
+      // return isOk(x) }` then `if (inner(1))`), and a call to a transitively-async
+      // CLIENT fn all stayed bare — a Promise tested as a boolean, true for every
+      // input. The body is now analysed with acorn against the SAME async facts the
+      // client function bodies use: every async call in an await-legal position is
+      // awaited (the block becomes async), a nested helper that reaches one is
+      // emitted `async`, a clean-family callback is lifted to its awaited
+      // combinator, and what cannot be awaited — or an async fn used as a value
+      // (S440 F4) — fails closed. A body that does not parse keeps the old lift.
+      if (code && (stmt as any)._onMountEffect === true) {
+        const _mountFacts = clientAsyncFactsOf(ctx);
+        const colored = colorAsyncStatements(code, freeAsyncResolverFromFacts(_mountFacts));
+        if (colored) {
+          for (const err of jsAsyncUsesErrors(colored, (stmt as any).span, ctx.filePath)) errors.push(err);
+          if (colored.rootAsync) {
+            const indented = colored.code
+              .split("\n")
+              .map((l) => (l.length ? "  " + l : l))
+              .join("\n");
+            codes.push(
+              `// §6.7.1a \`on mount\` — async scope for the server calls in this block (§13.2).\n` +
+              `(async () => {\n${indented}\n})().catch(_scrml_async_err => _scrml_error_boundary_log("on mount", _scrml_async_err));`,
+            );
+            codeStmts.push(stmt);
+            stmtSideRanges.push({ ..._sideRange, onMount: true } as any);
+            continue;
+          }
+          if (colored.code !== code) {
+            codes.push(colored.code);
+            codeStmts.push(stmt);
+            stmtSideRanges.push({ ..._sideRange, onMount: true } as any);
+            continue;
+          }
+        }
+      }
       if (code && (stmt as any)._onMountEffect === true && ctx.routeMap && emittedCodeCallsServerFn(code, ctx.routeMap)) {
         const awaited = liftEmittedStatementAwaits(code, ctx.routeMap, ctx.filePath ?? "");
         const indented = awaited

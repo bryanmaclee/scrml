@@ -1,0 +1,6 @@
+<program>
+<verdict> = "unset"
+server function isOk(n) { return n > 100 }
+<p id="out">${@verdict}</p>
+<a id="f" href="/elsewhere" onclick=${ if (isOk(1)) { @verdict = "accepted" } else { event.preventDefault(); @verdict = "rejected" } }>link</a>
+</program>

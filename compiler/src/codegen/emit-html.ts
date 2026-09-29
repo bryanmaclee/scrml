@@ -3423,6 +3423,8 @@ export function generateHtml(
                 handlerExpr: val.raw,
                 handlerExprNode: val.exprNode,
                 ...(val.handlerBlock ? { handlerBlock: val.handlerBlock } : {}),
+                // s441 — anchors a diagnostic about the handler body (F5 / F4).
+                span: (attr as { span?: unknown }).span ?? (val as { span?: unknown }).span ?? (node as { span?: unknown }).span,
               });
             }
           } else if (REACTIVE_BOOL_ATTRS.has(name)) {
@@ -3660,6 +3662,7 @@ export function generateHtml(
                   handlerName: val.name,
                   handlerArgs: val.args ?? [],
                   handlerArgExprNodes: val.argExprNodes,
+                  span: (attr as { span?: unknown }).span ?? (node as { span?: unknown }).span,
                   // Bug 58 (S140): propagate the formFor compound cell name so the
                   // submit handler sets `@<cell>.submitted = true` + passes `values`
                   // (the collected compound value) into the handler per §41.14.3.

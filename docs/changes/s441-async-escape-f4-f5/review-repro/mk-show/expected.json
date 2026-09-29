@@ -1,0 +1,25 @@
+{
+ "id": "probe-mk-show",
+ "description": "probe",
+ "language-version": "1.0",
+ "spec": "\u00a713.2",
+ "expect": {
+  "codes": [],
+  "serverStub": {
+   "isOk": false
+  },
+  "input": [
+   {
+    "wait": "settle"
+   }
+  ],
+  "domAnchored": [
+   {
+    "selector": "#secret",
+    "attr": {
+     "style": "display: none;"
+    }
+   }
+  ]
+ }
+}
