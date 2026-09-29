@@ -1148,7 +1148,7 @@ ${
         typed: ADeclAttr[],
         attrs: AAttr[],
         selfClosing: boolean,
-        short: ANode | not,
+        short: ANode[] | not,
     }
     type ROpener:struct = { o: Opener, mp: MP }
 
@@ -1207,7 +1207,7 @@ ${
         let typed: ADeclAttr[] = []
         let attrs: AAttr[] = []
         let selfClosing = false
-        let short: ANode | not = not
+        let short: ANode[] | not = not
         let going = true
         while (going) {
             m = skipSpace(m)
@@ -1217,8 +1217,8 @@ ${
             } else if (chAt(m, 0) == ":" && isSpaceCh(chAt(m, -1))) {
                 // §4.14: a whitespace-preceded `:` opens the `:`-shorthand body —
                 // one expression, running to the `>` that ends the opener.
-                const rs: RNodeOne = parseShorthand(m, nm.w)
-                short = rs.n
+                const rs: RNodes = parseShorthand(m, nm.w)
+                short = rs.nodes
                 m = rs.mp
                 going = false
             } else if (mLooking(m, "/>")) {
@@ -1254,7 +1254,7 @@ ${
     // the opener's end — when the rest of the line after that `>` holds
     // another `>`, the body was a comparison: E-PARSE-SHORTHAND-GT (parenthesize
     // it, `(@n > 3)`), and the tail is consumed, never rendered as text.
-    fn parseShorthand(mp: MP, tag: string) -> RNodeOne {
+    fn parseShorthand(mp: MP, tag: string) -> RNodes {
         const start: int = mp.pos
         const at: MP = skipSpace(mAdv(mp, 1))
         if (chAt(at, 0) == "<" && isNameStart(chAt(at, 1))) {
@@ -1265,13 +1265,13 @@ ${
             } else {
                 m0 = mDiag(m0, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m0.pos, m0.pos + 1)
             }
-            return { n: inner.n, mp: closerAfterShorthand(m0, tag) }
+            return { nodes: [inner.n], mp: closerAfterShorthand(m0, tag) }
         }
         if (chAt(at, 0) == ">") {
             // an empty `:`-shorthand body: one diagnostic, the opener still ends
             const em: MP = mDiag(mAdv(at, 1), "E-PARSE-SHORTHAND", "a `:`-shorthand body needs one expression before the `>` (§4.14)", start, at.pos + 1)
             const en: ANode = { nid: em.nid, span: mkSpan(start, em.pos), k: ANodeK.Text("") }
-            return { n: en, mp: mBump(em) }
+            return { nodes: [en], mp: mBump(em) }
         }
         const tp: TP = displayEscapeDiags(regionTP(mAdv(mp, 1), LexStop.Shorthand))
         let t: TP = tp
@@ -1294,8 +1294,97 @@ ${
         } else {
             m = mDiag(m, "E-PARSE-SHORTHAND", "expected the `>` that ends the opener after a `:`-shorthand body (§4.14)", m.pos, m.pos + 1)
         }
-        const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }
-        return { n: n, mp: mBump(m) }
+        // §4.18.4: a display-text literal carrying `${…}` is one literal of
+        // literal segments and interpolations — rendered as its segments
+        return displayNodes(m, e, start, tp)
+    }
+
+    // The body nodes of a code-default expression `e` (spanning from `start`):
+    // one Interp — or, when `e` is a display-text literal carrying `${ … }`
+    // (§4.18.4), its literal segments (Text) and interpolations (Interp), in
+    // order. A `${`-carrying display-text literal nested inside a larger
+    // expression is not built (reported).
+    fn displayNodes(m: MP, e: AExpr, start: int, tp: TP) -> RNodes {
+        if (isDisplayTemplate(m.src, e)) {
+            const split: RNodes = splitDisplay(m, e.span.start, e.span.end)
+            return { nodes: split.nodes, mp: mAt(split.mp, m.pos) }
+        }
+        let mm: MP = m
+        for (const t of tp.toks) {
+            if (t.cls == TC.Str && t.text.substring(0, 1) == "\"" && t.text.indexOf(interpOpen()) >= 0) {
+                mm = mDiag(mm, "E-BOOTSTRAP-UNSUPPORTED", "a display-text literal carrying an interpolation (§4.18.4) inside a larger expression is not in the bootstrap — make it the whole body", t.start, t.end)
+            }
+        }
+        const n: ANode = { nid: mm.nid, span: mkSpan(start, mm.pos), k: ANodeK.Interp(e) }
+        return { nodes: [n], mp: mBump(mm) }
+    }
+
+    // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
+    // the two characters are joined at run time.
+    fn interpOpen() -> string { return "$" + "{" }
+
+    fn isDisplayTemplate(src: string, e: AExpr) -> boolean {
+        if (src.substring(e.span.start, e.span.start + 1) != "\"") return false
+        const v: string = strLit(e)
+        return v.indexOf(interpOpen()) >= 0
+    }
+
+    fn strLit(e: AExpr) -> string {
+        const k: AExprK = e.k
+        return match k {
+            .Str(v: x) :> x
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Num(raw: r) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Unary(op: o) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: es) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: x) :> ""
+            .Index(obj: o) :> ""
+            .Lambda(params: ps) :> ""
+        }
+    }
+
+    // A display-text literal's source span (quotes included) → Text segments +
+    // Interp nodes. No escapes (RULED S442: the literal has none); each `${`'s
+    // extent is the canonical walker's (parseInterp → lexFrom Balanced).
+    fn splitDisplay(mp: MP, start: int, end: int) -> RNodes {
+        let m: MP = mAt(mp, start + 1)
+        let out: ANode[] = []
+        let text: string = ""
+        let textStart: int = m.pos
+        while (m.pos < end - 1) {
+            if (atInterp(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                const ri: RNodeOne = parseInterp(m)
+                out = out.concat([ri.n])
+                m = ri.mp
+                textStart = m.pos
+            } else {
+                if (text == "") textStart = m.pos
+                text = text + chAt(m, 0)
+                m = mAdv(m, 1)
+            }
+        }
+        if (text != "") {
+            out = out.concat([textNode(m, textStart, text)])
+            m = mBump(m)
+        }
+        return { nodes: out, mp: m }
     }
 
     // dpa-045 B(3) (RULED S442: `\"` is deleted from the display-text literal):
@@ -1377,9 +1466,10 @@ ${
                 const r: RExpr = parseAssign(tp)
                 if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
                     const back: MP = backToMarkup(m, r.tp)
-                    const n: ANode = { nid: back.nid, span: mkSpan(before, runEnd), k: ANodeK.Interp(r.e) }
-                    out = out.concat([n])
-                    m = mBump(back)
+                    // §4.18.4: a `${`-carrying display-text literal renders as its segments
+                    const dn: RNodes = displayNodes(back, r.e, before, tp)
+                    out = out.concat(dn.nodes)
+                    m = dn.mp
                 } else {
                     const text: string = m.src.substring(before, runEnd).trim()
                     m = mDiag(mAt(m, runEnd), "E-UNQUOTED-DISPLAY-TEXT", "display text in a `<" + tag + ">` state-child body must be a quoted display-text literal — did you mean `\"" + text + "\"`? (a code-default body, §4.18.1 / §4.18.7)", before, runEnd)
@@ -1538,13 +1628,13 @@ ${
             // a typed attribute on `<*x …>` is meaningless — a reference declares nothing
             return elemFrom(o, [], mDiag(mp, "E-PARSE-TAG", "a `<*" + o.name + ">` reference cannot declare typed attributes", o.start, mp.pos))
         }
-        const sh: ANode | not = o.short
+        const sh: ANode[] | not = o.short
         if (sh is some) {
             // §4.14 / §24: a non-void element's `:`-shorthand body IS its one child
             if (isVoidTag(o.name)) {
                 return elemFrom(o, [], mDiag(mp, "E-COLON-SHORTHAND-ON-VOID", "`<" + o.name + ">` is a void element — it has no body for a `:`-shorthand (bind a value through an attribute, §4.14)", o.start, mp.pos))
             }
-            return elemFrom(o, [sh], mp)
+            return elemFrom(o, sh, mp)
         }
         if (o.selfClosing || isVoidTag(o.name)) return elemFrom(o, [], mp)
         const kids: RNodes = parseKids(mp, o.name)
@@ -1575,6 +1665,14 @@ ${
                     text = ""
                 }
                 m = skipCss(m)
+                textStart = m.pos
+            } else if (atOtherSigil(m)) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                m = skipSigil(m)
                 textStart = m.pos
             } else if (atInterp(m)) {
                 if (text != "") {
@@ -1615,10 +1713,29 @@ ${
     // tag. Any other `<` (`a < b`, `5 <7`) is content, not an error.
     // ⚑ `*` is admitted too: `<*x/>` is §66.6's existing-instance reference,
     // which the ruled class (HTML5-derived) does not list — flagged for the PA.
+    // RULED S442 (dpa-045 follow-ups): the class is a letter, `!`, `/`, `?`,
+    // `*`, `_`, `.` — `*` / `_` / `.` are scrml's own tag forms (`<*x/>`,
+    // `<_ …>`, `<.Variant …>`). That list, and no others.
     fn opensTag(c: string) -> boolean {
         if (c >= "a" && c <= "z") return true
         if (c >= "A" && c <= "Z") return true
-        return c == "!" || c == "/" || c == "?" || c == "*"
+        return c == "!" || c == "/" || c == "?" || c == "*" || c == "_" || c == "."
+    }
+
+    // RULED S442: every §3.1 context sigil is an exit of free text — `${` (an
+    // interpolation), `#{` (CSS), and `?{` / `^{` / `!{`, which the bootstrap
+    // does not build: skipped whole by the canonical walker and reported.
+    fn atOtherSigil(mp: MP) -> boolean {
+        if (chAt(mp, 1) != "{") return false
+        const c: string = chAt(mp, 0)
+        return c == "?" || c == "^" || c == "!"
+    }
+
+    fn skipSigil(mp: MP) -> MP {
+        const start: int = mp.pos
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Balanced)
+        const m: MP = backToMarkup(mp, tp)
+        return mDiag(mAt(m, lastEnd(tp)), "E-BOOTSTRAP-UNSUPPORTED", "a `" + chAt(mp, 0) + "{…}` context in markup is not in the bootstrap (§3.1)", start, lastEnd(tp))
     }
 
     fn textNode(mp: MP, start: int, text: string) -> ANode {
@@ -1855,9 +1972,9 @@ ${
         // O5 RULED (1i): a state-child's body is that variant's markup — a
         // `:`-shorthand expression (§4.14) or a bare body up to its closer.
         let body: ANode[] = []
-        const sh: ANode | not = o.short
+        const sh: ANode[] | not = o.short
         if (sh is some) {
-            body = [sh]
+            body = sh
         } else if (!o.selfClosing) {
             // r1 F4: a state-child body is CODE-DEFAULT (§4.18.1)
             const kids: RNodes = parseCodeBody(m, o.name)
