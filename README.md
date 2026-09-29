@@ -203,7 +203,7 @@ You wrote a schema, three database functions, some state, three handlers and a s
 
 **Validators live on the declaration.** `req`, `length(…)`, `pattern(…)` and friends ride on a cell as attributes. On a compound cell they produce a read-only validity surface (`@form.isValid`, per-field `.errors` / `.touched`) that `<errors of=@form.field/>` renders ([example 30](examples/30-validated-form.scrml)), and on an input they become the matching HTML attributes. No separate validation library.
 
-**No npm.** scrml ships its own standard library ([21 modules](docs/FACTS.md)), imported as `scrml:<name>`. An app has no package manager and no dependency tree. (Third-party code still gets in, through an explicit, named, capability-gated surface instead of an auto-resolved graph.)
+**No npm.** scrml ships its own standard library ([21 modules](docs/FACTS.md)), imported as `scrml:<name>`. An app has no package manager and no dependency tree. (Third-party code still gets in, but through an explicit, named surface, not an auto-resolved graph. You can declare the capabilities it needs; in this version that declaration is advisory, not enforced.)
 
 ---
 
@@ -395,13 +395,13 @@ A short brief on each feature that works today. Each links to the full mechanics
 
 **Type-derived apps:** `formFor(T)` / `schemaFor(T)` / `tableFor(T, rows)` generate a form, the SQL DDL and a table from one struct. → [deep dive](./NERDME.md#type-derived-apps--formfor--schemafor--tablefor)
 
-**Realtime & workers:** state declared inside `<channel>` syncs across every connected client over a WebSocket the compiler sets up. A nested `<program>` is a Web Worker with typed messages ([example 13](examples/13-worker.scrml)). → [deep dive](./NERDME.md#realtime-and-workers)
+**Realtime:** state declared inside `<channel>` syncs across every connected client over a WebSocket the compiler sets up. (A nested `<program>` as a Web Worker is specified, but broken at runtime today: the worker file is never written. [Example 13](examples/13-worker.scrml) shows the syntax.) → [deep dive](./NERDME.md#realtime-and-workers)
 
 **Client navigation:** `navigate(path)` moves between `<page>`s, rendered into the `<program>` shell's `<outlet>`. → [example 21](examples/21-navigation.scrml)
 
 **Typed external APIs:** `<api>` types an HTTP backend you don't own, and `<endpoint>` types a route that someone else's client calls; a request variant with no handler is a compile error. → [examples 32](examples/32-external-api.scrml) / [33](examples/33-endpoint.scrml)
 
-**The `~` pipeline & linear types:** `~` holds an unnamed intermediate for the next statement to consume exactly once. `lin` makes any value exactly-once, checked across branches and loops. → [deep dive](./NERDME.md#linear-types-and-the--accumulator)
+**The `~` pipeline & linear types:** `~` holds an unnamed intermediate for the next statement to consume. `lin` makes a value exactly-once: using it twice, never, or on only one branch is a compile error (`E-LIN-002` / `-001` / `-003`), and so is using it inside a loop. → [deep dive](./NERDME.md#linear-types-and-the--accumulator)
 
 **Pure functions — `fn`:** purity is compiler-*enforced*. No SQL, no DOM writes, no reactive writes, no non-determinism: break one and it won't compile. `function` is the general callable. → [deep dive](./NERDME.md#pure-functions--fn)
 
@@ -457,7 +457,7 @@ The [`examples/`](examples/) directory holds one app per file. Every one of them
 | [10-inline-tests](examples/10-inline-tests.scrml) | `~{}` inline tests |
 | [11-meta-programming](examples/11-meta-programming.scrml) | `^{}` meta blocks, `emit()`, `reflect()` |
 | [12-snippets-slots](examples/12-snippets-slots.scrml) | Named content slots in components |
-| [13-worker](examples/13-worker.scrml) | Web workers as nested programs with typed messaging |
+| [13-worker](examples/13-worker.scrml) | A nested `<program>` as a Web Worker. Compiles, but **broken at runtime**: the worker file is never written |
 | [14-mario-state-machine](examples/14-mario-state-machine.scrml) | Enum states and `<engine>` transition enforcement |
 | [15-channel-chat](examples/15-channel-chat.scrml) | `<channel>` realtime, auto-synced channel state |
 | [16-remote-data](examples/16-remote-data.scrml) | Loading as a `Phase` enum, failure routed into `.Failed` |
@@ -467,7 +467,7 @@ The [`examples/`](examples/) directory holds one app per file. Every one of them
 | [20-middleware](examples/20-middleware.scrml) | `<program>` middleware attributes + `handle()` |
 | [21-navigation](examples/21-navigation.scrml) | `navigate()` + `route` |
 | [22-multifile](examples/22-multifile/) | Cross-file `import`/`export`, pure-type files |
-| [23-trucking-dispatch](examples/23-trucking-dispatch/) | A multi-page app with a real `/login` and role gates |
+| [23-trucking-dispatch](examples/23-trucking-dispatch/) | A multi-file dispatch app: pages per role, channels, `lin` tokens. Its login flow is **broken today**: signing in doesn't create a session, so the gated pages still redirect |
 | [24-tilde-pipeline](examples/24-tilde-pipeline.scrml) | The `~` pipeline accumulator |
 | [25-triage-board](examples/25-triage-board.scrml) | Drag-and-drop between columns, struct + enum state |
 | [26-type-derived-schema](examples/26-type-derived-schema.scrml) | `schemaFor(Type)`: SQL DDL from a struct |
