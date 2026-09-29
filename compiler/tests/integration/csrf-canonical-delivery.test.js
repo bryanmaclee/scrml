@@ -253,9 +253,14 @@ describe("end-to-end — first POST with the delivered token PASSES (no 403); fa
     // No SSR-state scaffolding on a csrf-only compose route.
     expect(html).not.toContain("window.__scrml_ssr_state");
 
-    // Anonymous first paint → the meta stays empty (no session token to inject).
+    // Anonymous request for the document → redirected, never composed (§52.13; §40.2
+    // compose-route bullet, S441). This used to assert an empty meta on an anonymous
+    // 200 — i.e. it pinned the compose route serving an auth="required" page to an
+    // unauthenticated viewer, which was the bug.
     const anonCompose = await composeRoute.handler(new Request(`http://localhost${composeRoute.path}`, {}));
-    expect(await anonCompose.text()).toContain('<meta name="csrf-token" content="">');
+    expect(anonCompose.status).toBe(302);
+    expect(anonCompose.headers.get("Location")).toBe("/login");
+    expect(await anonCompose.text()).not.toContain("csrf-token");
 
     // D3 integration — a first POST carrying the delivered token PASSES (no 403).
     const postWith = (headers) => new Request(`http://localhost${mutRoute.path}`, { method: "POST", headers, body: JSON.stringify({ name: "delivered" }) });

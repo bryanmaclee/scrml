@@ -174,8 +174,16 @@ describe("S3: AST builder auth attribute defaults", () => {
     expect(result.ast.authConfig.loginRedirect).toBe("/login");
   });
 
-  test("csrf defaults to off", () => {
+  // §40.2 (S441 ruling) — under auth=, csrf="auto" is the default; only an
+  // explicit csrf="off" opts out. (Pre-S441 this defaulted to "off", so adding
+  // auth= removed the CSRF gate — g-auth-program-without-csrf-attr-emits-no-csrf-check.)
+  test("csrf defaults to auto under auth=", () => {
     const result = parseSource('<program auth="required">\n</program>');
+    expect(result.ast.authConfig.csrf).toBe("auto");
+  });
+
+  test("explicit csrf=\"off\" opts out", () => {
+    const result = parseSource('<program auth="required" csrf="off">\n</program>');
     expect(result.ast.authConfig.csrf).toBe("off");
   });
 
