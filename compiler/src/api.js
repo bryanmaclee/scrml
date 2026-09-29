@@ -45,6 +45,7 @@ import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
 import { checkCssConflicts } from "./codegen/css-conflict-check.ts";
+import { generateCss } from "./codegen/emit-css.ts";
 import { stripPagesPrefix } from "./codegen/utils.ts";
 import { runMetaEval } from "./meta-eval.ts";
 import { resolveModules, resolveModulePath, resolveModulePathNative } from "./module-resolver.js";
@@ -2836,6 +2837,9 @@ function _compileScrmlImpl(options = {}) {
   const _runCG = seams.pick("CG", runCG);
   const cgResult = stage("CG", () => _runCG({
     files: metaFiles,
+    // s440-bootstrap-css-theme-t3 — the CSS sub-seam of CG (pipeline-seam.ts `CSS`): `generateCss`
+    // itself unless a bootstrap stylesheet emitter is swapped in (identity pick → byte-identical).
+    generateCss: seams.pick("CSS", generateCss),
     routeMap: riResult.routeMap,
     depGraph: dgResult.depGraph,
     protectAnalysis: paResult.protectAnalysis,

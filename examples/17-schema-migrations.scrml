@@ -1,10 +1,11 @@
 // Example 17: Schema declaration — `<schema>` block (§39).
 // Demonstrates v0.3 program-as-container shape + declarative DB schema.
-// The developer states what the database SHOULD look like; the
-// compiler reads the live schema, computes the diff, and generates
-// migration SQL. `scrml migrate` applies it. No hand-written
-// `ALTER TABLE`. Styling uses co-located scoped `#{}` blocks per
-// markup section (S86 styling rule).
+// The developer states what the database SHOULD look like;
+// `scrml db-migrate examples/17-schema-migrations.scrml --db examples/notes.db`
+// reads the live schema, computes the diff, and applies the migration
+// SQL (add `--dry-run` to print the plan without applying it). No
+// hand-written `ALTER TABLE`. Styling uses co-located `#{}` blocks per
+// markup section.
 //
 // Note: `<schema>` requires `<program db="...">` (NOT `<db src=...>`).
 // The `db=` attribute on `<program>` tells the compiler which file to

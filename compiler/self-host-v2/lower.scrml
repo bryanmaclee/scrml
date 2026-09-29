@@ -36,7 +36,7 @@ ${
     import { Node, allNodes } from "./walk.scrml"
     import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, Tables, TypedProgram,
-             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo } from "./analyze.scrml"
+             nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
     export type Lowered:struct = { core: CoreProgram, diags: Diag[] }
 
@@ -240,7 +240,17 @@ ${
         return out
     }
 
+    // A condition the typer recorded as a PRESENCE TEST (a `T | not` value in
+    // an `if` / `if=` / ternary test — RULED S440, truthiness Q1: "the compiler
+    // emits an absence check, never JS truthiness") lowers to `IsSome(x)`.
+    // (s442 — additive; the decision is the typer's `Typing.presence`.)
     export fn lowerExpr(c: LC, e: AExpr) -> Expr {
+        const x: Expr = lowerExprK(c, e)
+        if (presenceTest(c.t, e.nid)) return Expr.Prim(PrimOp.IsSome, [x])
+        return x
+    }
+
+    fn lowerExprK(c: LC, e: AExpr) -> Expr {
         const k: AExprK = e.k
         return match k {
             .Name(name: n) :> readName(c, nameFact(c.t.names, e.nid))

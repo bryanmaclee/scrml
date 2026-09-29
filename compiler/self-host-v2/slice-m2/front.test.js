@@ -634,22 +634,23 @@ renders <p class="box">\${a},\${b},\${c}</p>
 
 // ---------------------------------------------------------------------------
 // RULED S440: a DUPLICATE override key in a spread-override literal is a
-// compile error. §66.20 names no code: provisional bootstrap-local
-// E-BOOTSTRAP-DUP-OVERRIDE (a §34 row is owed — progress.md).
+// compile error — E-STRUCT-DUPLICATE-KEY (§14.3 / §66.11.3, §34; the
+// bootstrap-local E-BOOTSTRAP-DUP-OVERRIDE is retired, s442). The plain /
+// nested literal half of the same rule: slice-m2/typer-s440.test.js.
 // ---------------------------------------------------------------------------
-describe("RULED S440 — a duplicate override key is a compile error (E-BOOTSTRAP-DUP-OVERRIDE)", () => {
+describe("RULED S440 — a duplicate override key is a compile error (E-STRUCT-DUPLICATE-KEY)", () => {
   test("an INSTANCE spread `{ ...@g, phase: .Gone, phase: .Live }` is refused, once, at the second key", () => {
     const r = run([gateProgram(`${LIVE}\n    function go() { @g = { ...@g, phase: .Gone, phase: .Live } }`)]);
-    expect(codes(r)).toEqual(["E-BOOTSTRAP-DUP-OVERRIDE"]);
-    expect(r.diags[0].message).toContain("`phase` is overridden twice");
+    expect(codes(r)).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
+    expect(r.diags[0].message).toContain("`phase` is named twice");
   });
 
   test("a STRUCT-CELL spread `{ ...@p, x: 5, x: 6 }` is refused", () => {
-    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, x: 6 } }")]))).toEqual(["E-BOOTSTRAP-DUP-OVERRIDE"]);
+    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, x: 6 } }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY"]);
   });
 
   test("three of one key report twice; distinct keys are fine", () => {
-    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 1, x: 6, x: 7 } }")]))).toEqual(["E-BOOTSTRAP-DUP-OVERRIDE", "E-BOOTSTRAP-DUP-OVERRIDE"]);
+    expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 1, x: 6, x: 7 } }")]))).toEqual(["E-STRUCT-DUPLICATE-KEY", "E-STRUCT-DUPLICATE-KEY"]);
     expect(codes(run([TRIPLE("    function go() { @p = { ...@p, x: 5, y: 6 } }")]))).toEqual([]);
   });
 });

@@ -1,0 +1,13 @@
+<program>
+  type Mode:enum = { Light, Dark }
+  <let mode:Mode=.Light/>
+  <theme>
+      <brand:string="#338967"/>
+      <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>
+  </theme>
+  const Card = <div props={}>
+      #{ .card { color: @ink; background-color: @brand; } }
+      <div class="card">hi</div>
+  </>
+  <Card/>
+</program>

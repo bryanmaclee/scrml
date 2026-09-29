@@ -1,0 +1,16 @@
+// =============================================================================
+// self-host-v2 / slice-m3 / css-bundle.scrml — the compile ENTRY for the
+// bootstrap stylesheet pass (s440): impl#1 lowers the library modules' `match`
+// through its real emitter only when the compile set contains a `<program>`
+// entry (progress.md F1 / F11). It imports the stylesheet emitter, the css
+// ingest shim and the hand-built stylesheet Cores. It renders nothing.
+// =============================================================================
+<program>
+    import { mkSym } from "../core.scrml"
+    import { emitCss, cssFootprint } from "../css.scrml"
+    import { t3Worked } from "./css.core.scrml"
+    import { ingestCss } from "../css-ingest.scrml"
+    import { mkNode } from "../ingest.scrml"
+
+    fn cssBundleProbe() -> int { return mkSym(0, "probe").id }
+</program>

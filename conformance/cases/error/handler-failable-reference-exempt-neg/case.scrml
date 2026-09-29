@@ -1,0 +1,27 @@
+${
+  import { formFor } from 'scrml:data'
+
+  type SignupError:enum = { Rejected(reason: string) }
+
+  type Signup:struct = {
+    name: string req length(>=2)
+  }
+
+  server function persistSignup(values: Signup) ! SignupError {
+    return "ok"
+  }
+
+  function risky()! -> SignupError { fail SignupError.Rejected("no") }
+  function plain() { return 1 }
+}
+<program>
+  <fns> = [plain]
+  <errorBoundary fallback={<div>Submit failed</div>}>
+    <formFor for=Signup onsubmit=persistSignup/>
+  </>
+  <ul>
+    <each in=@fns as risky>
+      <li><button class="row" onclick=risky>row</></li>
+    </each>
+  </ul>
+</program>
