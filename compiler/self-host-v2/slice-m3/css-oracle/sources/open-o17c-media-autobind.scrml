@@ -1,0 +1,14 @@
+<program>
+  <mode> = .Light
+  <theme for=@mode>
+      ink = #111111;
+      @media (prefers-color-scheme: dark) {
+          ink = #eeeeee;
+      }
+  </theme>
+  const Card = <div props={}>
+      #{ .t { color: @ink; } }
+      <p class="t">t</p>
+  </>
+  <Card/>
+</program>

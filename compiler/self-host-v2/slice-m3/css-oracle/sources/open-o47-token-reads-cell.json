@@ -1,0 +1,6 @@
+{
+  "spec": "§66.17 O47",
+  "open": "O47",
+  "rationale": "OPEN: a token whose initializer reads a cell in a non-match shape (`<ink:string=(@userColor)/>`; here its legacy spelling). Fail closed.",
+  "steps": []
+}

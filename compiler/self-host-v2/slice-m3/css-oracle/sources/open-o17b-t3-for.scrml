@@ -1,0 +1,8 @@
+<program>
+  type Mode:enum = { Light, Dark }
+  <let mode:Mode=.Light/>
+  <theme for=@mode>
+      <ink:string=(match @mode { .Light :> "#0f172a"  .Dark :> "#e2e8f0" })/>
+  </theme>
+  <p>x</p>
+</program>

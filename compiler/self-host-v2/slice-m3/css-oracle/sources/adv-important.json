@@ -1,0 +1,5 @@
+{
+  "spec": "§65.7",
+  "rationale": "Internal `!important` SHALL fire E-STYLE-IMPORTANT-INTERNAL (not implemented anywhere yet); the stylesheet pass cannot classify internal vs interop — fail closed.",
+  "steps": []
+}

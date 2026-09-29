@@ -1,0 +1,10 @@
+<program>
+<div class="box">
+  #{ .box p { color: red; } }
+  <p>hi</p>
+</div>
+<section>
+  #{ color: blue; padding: 4px; }
+  <p>flat</p>
+</section>
+</program>
