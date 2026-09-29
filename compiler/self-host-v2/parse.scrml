@@ -1273,7 +1273,7 @@ ${
             const en: ANode = { nid: em.nid, span: mkSpan(start, em.pos), k: ANodeK.Text("") }
             return { n: en, mp: mBump(em) }
         }
-        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)
+        const tp: TP = displayEscapeDiags(regionTP(mAdv(mp, 1), LexStop.Shorthand))
         let t: TP = tp
         let e: AExpr = { nid: t.nid, span: mkSpan(start, start + 1), k: AExprK.Recovered }
         if (atEnd(t)) {
@@ -1296,6 +1296,19 @@ ${
         }
         const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }
         return { n: n, mp: mBump(m) }
+    }
+
+    // dpa-045 B(3) (RULED S442: `\"` is deleted from the display-text literal):
+    // the lexer (display mode) ends the literal at that `"` and keeps the
+    // backslash as content; here it is reported, E-PARSE-001 (a backslash
+    // followed by a character that is not an escape, §4.18.3) — once per region.
+    fn displayEscapeDiags(tp: TP) -> TP {
+        for (const t of tp.toks) {
+            if (t.cls == TC.Str && t.text.length >= 3 && t.text.substring(0, 1) == "\"" && t.text.substring(t.text.length - 2) == "\\\"") {
+                return diagAt(tp, "E-PARSE-001", "`\\\"` is not an escape in a display-text literal (dpa-045, ruled S442): the `\"` ENDS the literal here. A display-text literal cannot contain `\"` — split the text, or render the quote from logic", t)
+            }
+        }
+        return tp
     }
 
     // r1 F3: after the shorthand's `>`: another `>` later on the same line
@@ -1356,7 +1369,10 @@ ${
                 m = tagNode.mp
             } else {
                 const before: int = m.pos
-                const tp: TP = regionTP(m, LexStop.CodeBody)
+                const tp0: TP = regionTP(m, LexStop.CodeBody)
+                const escBad: boolean = displayEscapeDiags(tp0).diags.length > tp0.diags.length
+                if (escBad) m = mDiag(m, "E-PARSE-001", "`\\\"` is not an escape in a display-text literal (dpa-045, ruled S442): the `\"` ENDS the literal here. A display-text literal cannot contain `\"` — split the text, or render the quote from logic", m.pos, lastEnd(tp0))
+                const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file }
                 const runEnd: int = lastEnd(tp)
                 const r: RExpr = parseAssign(tp)
                 if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
@@ -1570,7 +1586,7 @@ ${
                 out = out.concat([ri.n])
                 m = ri.mp
                 textStart = m.pos
-            } else if (chAt(m, 0) == "<") {
+            } else if (chAt(m, 0) == "<" && opensTag(chAt(m, 1))) {
                 if (text != "") {
                     out = out.concat([textNode(m, textStart, text)])
                     m = mBump(m)
@@ -1592,6 +1608,17 @@ ${
         }
         if (mLooking(m, "</")) m = parseCloser(m, tag)
         return { nodes: out, mp: m }
+    }
+
+    // dpa-045 D (RULED S442): free text has exactly two ways out — `${` opens
+    // logic, and `<` IMMEDIATELY followed by a letter, `!`, `/` or `?` opens a
+    // tag. Any other `<` (`a < b`, `5 <7`) is content, not an error.
+    // ⚑ `*` is admitted too: `<*x/>` is §66.6's existing-instance reference,
+    // which the ruled class (HTML5-derived) does not list — flagged for the PA.
+    fn opensTag(c: string) -> boolean {
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        return c == "!" || c == "/" || c == "?" || c == "*"
     }
 
     fn textNode(mp: MP, start: int, text: string) -> ANode {
