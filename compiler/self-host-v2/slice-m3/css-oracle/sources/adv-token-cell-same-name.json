@@ -1,0 +1,5 @@
+{
+  "spec": "§66.17 item 4",
+  "rationale": "One namespace: a token and a same-named cell cannot coexist silently — the duplicate declaration is analyze's to diagnose; the stylesheet pass fails closed.",
+  "steps": []
+}

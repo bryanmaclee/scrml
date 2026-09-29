@@ -1,0 +1,20 @@
+{
+  "spec": "§65.2.4, §65.2.2",
+  "rationale": "`input[type=\"submit\"]` (red) and `input[type=\"button\"]` (blue) are disjoint; each input gets its own rule's value.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": "input[type=submit]",
+          "prop": "color",
+          "value": "rgb(255, 0, 0)"
+        },
+        {
+          "sel": "input[type=button]",
+          "prop": "color",
+          "value": "rgb(0, 0, 255)"
+        }
+      ]
+    }
+  ]
+}

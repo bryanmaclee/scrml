@@ -15,7 +15,7 @@ Use `lin` for values where "it got used twice" or "it got silently dropped" is a
 - **One-time authentication tokens, nonces, CSRF values.** A second use is a protocol violation; a zero-use is a silent drop.
 - **Transaction handles, DB statements that must be submitted.** Forgetting to submit leaves the transaction dangling.
 - **Database payloads destined for a single `INSERT`.** Re-using the same payload in two mutations is almost always a bug.
-- **Values that carry ownership or identity you do not want to copy.** A session id, a Server-Sent-Events subscription handle, a one-shot promise.
+- **Values that carry ownership or identity you do not want to copy.** A session id, a Server-Sent-Events subscription handle, a single-use capability.
 
 Use `let` or `const` for everything else. Reactive `@vars`, lookup keys that you want to reference multiple times, shared configuration, render data — none of these want `lin`. If the reader of your code would not be surprised that a value is used in two places, you are not looking at a `lin` value.
 
@@ -88,8 +88,8 @@ lift token   // consumption — moves the value into the ~ pipeline
 ```scrml
 lin ticket = nextTicket()
 match ticket {
-    .Small => …
-    .Large => …
+    .Small :> …
+    .Large :> …
 }
 ```
 

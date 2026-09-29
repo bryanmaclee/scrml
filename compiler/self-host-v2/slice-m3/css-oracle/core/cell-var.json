@@ -1,0 +1,10 @@
+{
+  "core": "cellVarUnit",
+  "spec": "§25.7, §65.3.2",
+  "rationale": "§25.7 / §65.3.2: a `@name` that is a declared cell (not a theme token) lowers to the reactive-cell bridge `var(--scrml-name)`. The stylesheet's half of the bridge is that the use site reads it; the runtime's half writes `--scrml-name` (the page stands in for it). NOTE: impl#1's clientJs does NOT write `--scrml-<cell>` for a stylesheet rule (only for a flat inline `#{}`) — the bridge is dead end-to-end in impl#1 for scoped/global rules (progress.md, R26).",
+  "html": "<div data-scrml=\"Card\"><div class=\"box\">b</div></div>",
+  "steps": [
+    { "rootStyle": ["--scrml-w", "10px"], "expect": [{ "sel": ".box", "prop": "width", "value": "10px" }] },
+    { "rootStyle": ["--scrml-w", "20px"], "expect": [{ "sel": ".box", "prop": "width", "value": "20px" }] }
+  ]
+}
