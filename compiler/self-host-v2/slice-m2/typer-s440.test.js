@@ -717,7 +717,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
   });
   test("r6 — a sequence ELEMENT that may be `not` into a non-optional element type (`[@o.n]` into `int[]`)", () => {
     expect(inApp(O + "    function f() { let ks: int[] = [@o.n] }")).toEqual(["E-TYPE-031"]);
-    expect(inApp(O + "    <ks:int[free, end]=([])/>\n    function f() { @ks.push(@o.n) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    <ks:int[free, append]=([])/>\n    function f() { @ks.push(@o.n) }")).toEqual(["E-TYPE-031"]);
   });
   // (r7 N1: the `(int | not)[]` twin is deleted — the slice parser cannot spell a parenthesized element type,
   // so it checked nothing; the reachable optional-sequence twins are in "r7 B".)
@@ -802,7 +802,7 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp("    <let q:int=2.0/>")).toEqual(["E-TYPE-031"]);
   });
   test("E-TYPE-031 — a non-integer element pushed onto an `int[]`", () => {
-    expect(inApp("    <ks:int[free, end]=([])/>\n    function f() { @ks.push(1.5) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    <ks:int[free, append]=([])/>\n    function f() { @ks.push(1.5) }")).toEqual(["E-TYPE-031"]);
   });
   test("twins silent — `number / int` is float division; int arithmetic; an int into a number; integer literals", () => {
     expect(inApp(CELLS + "    function f() { @r = @r / 2\n @r = 7.0 / 2\n @n = @n * 2 + 1\n @r = @n }")).toEqual([]);

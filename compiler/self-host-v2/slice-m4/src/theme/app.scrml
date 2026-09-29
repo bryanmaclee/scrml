@@ -1,0 +1,16 @@
+// app.scrml
+${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } from "./lib/brand-theme.scrml" }
+
+<program>
+    <main>
+        <h1>Palette</h1>
+        <div>
+            <*accent/>                                         // THE accent — live wherever it is referenced
+            <*warn/>
+            <swatch label="Danger" hex=@danger/>               // a fresh chip: a new instance, by construction
+        </div>
+        <p>Brand colour: ${@brand}</p>                         // a token read from logic — one namespace (§66.17)
+        <button onclick=useWarnAsAccent()>Use warn as accent</button>
+        <button onclick=toggleMode()>Toggle theme</button>     // one attribute write; zero re-render (§66.17)
+    </main>
+</program>

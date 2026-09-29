@@ -41,8 +41,8 @@ describe("writes are type-checked against the target (§66.1 rule 5)", () => {
     { name: "`not` into an `int` cell → E-TYPE-041 (§42.3.1)", want: ["E-TYPE-041"],
       bad: ["    <let x:int=0/>\n    function f() { @x = not }"], ok: ["    <let x:int=0/>\n    function f() { @x = 1 }"] },
     { name: "an end-append of the wrong element type", want: ["E-TYPE-031"],
-      bad: ["    <audit:string[free, end]=([])/>\n    function f() { @audit.push(5) }"],
-      ok: ["    <audit:string[free, end]=([])/>\n    function f() { @audit.push(\"x\") }"] },
+      bad: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.push(5) }"],
+      ok: ["    <audit:string[free, append]=([])/>\n    function f() { @audit.push(\"x\") }"] },
     { name: "a spread override of a struct cell (O58 (b) field edit)", want: ["E-TYPE-031"],
       bad: ["    type P:struct = { let x: int, let y: int }\n    <let p:P=({ x: 1, y: 2 })/>\n    function f() { @p = { ...@p, y: \"s\" } }"],
       ok: ["    type P:struct = { let x: int, let y: int }\n    <let p:P=({ x: 1, y: 2 })/>\n    function f() { @p = { ...@p, y: 5 } }"] },
@@ -205,7 +205,7 @@ describe("adversarial controls — adjacent shapes stay silent", () => {
     // error for all types (user-voice S442 "`T | not` into `T` is an error for all types"); now a positive test in typer-s440.test.js)
     ["an enum variant into an enum cell", "    <let o:Openness=.Closed/>\n    function f() { @o = .Opened }"],
     ["a seeded `let` (reactive initializer) and a use-site live value", "    <let src:string=\"a\"/>\n    <let draft:string=@src/>", "<dropdown label=(@src) options=([\"a\"]) value=(@draft)/>"],
-    ["a sequence's `.length` into an int cell", "    <audit:string[free, end]=([])/>\n    <let n:int=0/>\n    function f() { @audit.push(\"x\")\n @n = @audit.length }"],
+    ["a sequence's `.length` into an int cell", "    <audit:string[free, append]=([])/>\n    <let n:int=0/>\n    function f() { @audit.push(\"x\")\n @n = @audit.length }"],
     ["a read through a `given` narrowing", "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n    function f() { given c = @color :> { @seen = c.value } }", "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>"],
     ["a row alias and `@.` inside `<each>`", "    type L:struct = { id: int, name: string }\n    <lines:L[]=([{ id: 1, name: \"a\" }])/>", "<each in=@lines key=@.id as line><p>${line.name} ${@.id}</p><dropdown label=line.name options=([\"a\"])/></each>"],
     ["`reset(@x)` of a `let` cell", "    <let x:int=0/>\n    function f() { reset(@x) }"],
@@ -290,20 +290,26 @@ describe("the typer's table — a type per expression node (Tables.typing)", () 
 // outside the slice front end, so they carry parse / unsupported codes — the
 // point is that the typer changes no list: not E-TYPE-UNKNOWN, not
 // E-BOOTSTRAP-UNSUPPORTED, nothing. (If §66.19 changes, re-measure on base.)
+// RE-MEASURED s442 (six-programs): the front end grew (slice-m4) — .6 After now
+// compiles clean; .2 / .5 carry only their Core-blocked / ⚑ O25 constructs
+// (E-BOOTSTRAP-UNSUPPORTED); .4's library now reports `<theme>` (CSS) and its two
+// named shared instances as unsupported. Still no typer code in any list.
 // ---------------------------------------------------------------------------
 const BASE_66_19 = [
   [],
-  ["E-PARSE-CLOSER", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED"],
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
   ["E-PROGRAM-MISSING"],
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-TYPE-VARIANT"],
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPECTED", "E-PARSE-TRAILING", "E-PARSE-TRAILING", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPECTED", "E-PARSE-TRAILING", "E-PARSE-TRAILING", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
   ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPR", "E-PARSE-EXPR", "E-PARSE-EXPR", "E-PARSE-EXPR", "E-PARSE-EXPR", "E-TYPE-STRUCT-CONTEXT", "E-WRITE-NOT-GRANTED"],
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-CLOSER", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-SCOPE-001", "E-SCOPE-001"],
-  ["E-PARSE-CLOSER", "E-PARSE-CLOSER", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-DECL-BODY", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-STATE-CHILD", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-TAG", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED"],
+  // §66.19.5: re-measured at the S442 SPEC amendment (`Entry[free, append]`) — only its Core-blocked constructs
+  // remain (2× Date.now() host call + 1 bind:), no grant diagnostic.
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-SCOPE-001"],
+  [],
 ];
 
-describe("zero delta vs base b7c863235 — §66.19 programs and the M2 fixtures", () => {
+describe("the §66.19 programs and the M2 fixtures — no typer / scope code; every §66.19 block's diagnostic list pinned (re-measured s442)", () => {
   for (const name of Object.keys(PROGRAMS)) {
     test(`${name}: no diagnostic (base: none either — compileProgram throws on ANY)`, () => {
       expect(() => compileProgram(mods, name)).not.toThrow();
@@ -331,7 +337,7 @@ describe("A — a local's type: its annotation, else the join of everything it i
     expect(inApp("    <let s:string=\"\"/>\n    function f() { let a: string | not = not\n @s = a }")).toEqual(["E-TYPE-031"]);
   });
   test("legal — the same shape in an inline handler block, and through `.push`", () => {
-    expect(inApp("    <audit:string[free, end]=([])/>\n    function f() { let a = not\n a = \"x\"\n @audit.push(a) }",
+    expect(inApp("    <audit:string[free, append]=([])/>\n    function f() { let a = not\n a = \"x\"\n @audit.push(a) }",
       "<button onclick={ let b = not; b = \"y\"; @audit.push(b) }>x</button>")).toEqual([]);
   });
   test("silent — `let a = \"s\"; a = 1` then `@x = a` into int: the join is unprovable (was a false E-TYPE-031)", () => {
@@ -364,7 +370,7 @@ describe("B — a whole-struct replace by a literal checks every field (spelling
     expect(inApp(P + "    function f() { @p = { x: 1, y: 2 } }")).toEqual([]);
   });
   test("E-TYPE-031 — a struct literal inside an appended element", () => {
-    const L = "    type L:struct = { id: int, name: string }\n    <ls:L[free, end]=([])/>\n";
+    const L = "    type L:struct = { id: int, name: string }\n    <ls:L[free, append]=([])/>\n";
     expect(inApp(L + "    function f() { @ls.push({ id: 1, name: 5 }) }")).toEqual(["E-TYPE-031"]);
     expect(inApp(L + "    function f() { @ls.push({ id: 1, name: \"a\" }) }")).toEqual([]);
   });

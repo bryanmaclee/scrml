@@ -7918,6 +7918,19 @@ The compiler SHALL:
 - The compiler SHALL wrap any function containing at least one server call in an `async` function in generated code.
 - The developer SHALL write flat, synchronous-looking code. The compiler SHALL produce optimal async execution patterns from this code.
 - Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them.
+- These statements apply to EVERY body the compiler emits, including an inline event-handler value (`onclick=${…}` / `onclick={…}`) and an `on mount` block (§6.7.1a): a server call there SHALL be awaited, and the handler or block SHALL run in an `async` scope when it awaits.
+- An **async-colored function** is one the compiler emits `async`: a server function, a Promise-returning standard-library function, or any function that (transitively) calls one. An async-colored function SHALL NOT be used as a value. It MAY be called directly (the compiler awaits the call), and it MAY be passed as the first argument of an awaited collection method (`.some`, `.every`, `.find`, `.findIndex`, `.filter`, `.map`, `.forEach`, `.reduce`, `.flatMap` — the compiler lowers the call to a combinator that awaits every invocation). Passing it to any other function (a user-written higher-order function, `Array.from(xs, fn)`, `new Promise(fn)`), aliasing it, storing it in an array or object, returning it, or reading it as an object SHALL be a compile error (`E-ASYNC-FN-ESCAPES-AS-VALUE`). Every such position would hand a caller an unawaited Promise, which is always truthy — a check written against it passes for every input. The compiler does NOT insert an implicit `await` at every call of a function-typed value. Two positions are not uses as a value: an argument of a fire-and-forget scheduler (`setTimeout`, `setInterval`, `setImmediate`, `queueMicrotask`, `requestAnimationFrame`, `requestIdleCallback`), which discards the return; and `typeof f`. A synchronous consumer with no awaited form (`.sort(f)`, `.findLast(f)`) keeps its own error (`E-SERVER-FN-IN-SYNC-CALLBACK` / `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`).
+
+> **Provenance:** ruling:user-voice-scrml.md S440 F4 ("async helpers may not escape as values"; rejected alternative: implicit await on every call of a function-typed value) · ruling:user-voice-scrml.md S440 JS-WAT #11 (`on mount` / inline handler bodies are subject to every rule) · s441-async-escape-f4-f5
+
+- The fire-and-forget exemption applies only to the GLOBAL scheduler. A callee the program itself binds under a scheduler's name (a local, parameter, file-scope function, top-level declaration or import named `setTimeout`, …) is an ordinary function, and passing an async-colored function to it SHALL be `E-ASYNC-FN-ESCAPES-AS-VALUE` The scheduler is global only when the file neither binds its name in any form (a declaration of any pattern shape, a parameter, a function, class or method name, a catch parameter, an import alias, an object-literal key) nor writes it (`setTimeout = …`, `globalThis.setTimeout = …`, `window.setTimeout = …`, a computed write, or a reflective definition such as `Object.defineProperty(globalThis, "setTimeout", …)`); otherwise no exemption is given (fail closed). A scheduler name inside a plain string or a comment is neither.
+- When a handler awaits (above), it runs asynchronously from its first `await` on; by then the browser has performed the event's default action and propagated it. After the handler's first `await` (in source order, once the awaited operand has been evaluated), the handler's event parameter — identified by BINDING, not by name — and every value derived from it SHALL be usable only for a plain read of a non-control property (`event.target`, `event.key`, …). Any other use SHALL be a compile error (`E-EVENT-CONTROL-AFTER-AWAIT`): reading, calling, `.call`/`.bind`-ing or assigning a control member (`preventDefault`, `stopPropagation`, `stopImmediatePropagation`, `returnValue`, `cancelBubble`); a computed member access with a non-literal key; passing the event as an argument; and any use of a value derived from the event — an alias in any binding form (`const`/`let` declaration or later assignment, array or object destructuring of a control member or rest, a container that holds it), a control method taken off it, or a function that uses the event other than by a plain non-control read. A value derived BEFORE the first `await` is equally restricted after it. A destructure of non-control fields (`const { target } = event`) binds plain values and is not restricted. The compiler SHALL NOT move a call (a conditional call would change meaning). "After" is source order, so a call in a branch that does not follow the awaiting branch (`if (c) { … await … } else { event.preventDefault() }`), or after an `await` in a branch that was not taken, is also rejected — a known conservative case: move the call before the first server call. An inner parameter or a block-local binding that is also named `event` is a different binding and is not restricted.
+- A call the compiler awaits yields the resolved value, not a Promise. Reading `.then`, `.catch` or `.finally` off such a call SHALL be a compile error (`E-ASYNC-CALL-PROMISE-METHOD`).
+- If the compiler cannot analyse an event handler's body (its text does not parse) and the body references an async-colored function, the build SHALL fail (`E-ASYNC-HANDLER-UNANALYZABLE`) rather than ship the call unawaited.
+
+> **Provenance:** review:S441-f4f5-review (scheduler shadow bypass; `preventDefault`/`stopPropagation` after the first await; `.then` on an auto-awaited call; fail-closed unanalysable handler) · s441-async-escape-f4-f5 fix round
+
+⚑ **Carried impl#1 gaps — the statements of this section are the language rule; impl#1 does not yet meet them everywhere.** Open holes, each filed in `docs/known-gaps.md`: `g-promise-all-batch-puts-unawaited-call-under-sync-operator` (a client function's parallel batch tests an un-awaited call under `?`/`!`/`&&`, object/array literals); `g-markup-gate-tests-server-call-promise` (`if=`/`show=`/`disabled=`/`${f() ? … }` on a server call); `g-top-level-async-closure-called-later-accept-all` (top-level `const check = (n) => isOk(n)`, function expressions, object methods); `g-cross-file-async-helper-called-unawaited` (an imported helper that calls a server function); `g-top-level-derived-from-async-helper-holds-promise` (`const ok = isOk(1)` / `<ok> = m(1)` at top level); `g-handler-local-shadowing-server-fn-renamed-to-fetch` (a handler local named like a server function); `g-handler-independent-server-calls-serialized` (§13.2 parallelization in handler / `on mount` bodies); and the pre-existing `g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources`.
 
 ### 13.3 Worked Example
 
@@ -20589,6 +20602,10 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-SQL-005 | §8.1.1 | Unrecognized database connection string prefix in `db=` attribute | Error |
 | E-SERVER-FN-IN-SYNC-CALLBACK | §13.2 | A **peer server-fn** call appears in a **server** function in a position where the compiler CANNOT insert `await` — a synchronous `.some`/`.sort`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default. scrml has no source `await` (§13.1), so the compiler auto-awaits peer calls in awaitable positions; a **bare** emission here returns an unawaited Promise, which is **always truthy** — the same accept-everything hazard the async-stdlib sibling below describes. **FAIL-CLOSED** — a hard compile error rather than a silent wrong answer (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body (e.g. hoist it into a `for` loop). The peer-server-fn twin of `E-ASYNC-STDLIB-IN-SYNC-CALLBACK`. (Catalog addition S305 — the code was LIVE at `compiler/src/codegen/emit-server.ts` and reachable from source [verified by execution], but carried no row: its sibling's row named it in prose while it had none of its own, so the freeze gate could neither pin nor honestly defer it. Closes `g-e-server-fn-in-sync-callback-uncatalogued`.) | Error |
 | E-ASYNC-STDLIB-IN-SYNC-CALLBACK | §13.2 | A Promise-returning stdlib call (`scrml:auth` `verifyPassword`/`hashPassword`, `scrml:crypto`, `scrml:redis`, `scrml:http`, …) appears in a **server** function in a position where the compiler CANNOT insert `await`: a synchronous `.some`/`.find`/`.filter`/`.map` callback body, a nested lambda, or a parameter default (`await` is illegal in all three — a sync callback yields values, not Promises, and a default is evaluated eagerly). scrml has no source `await` (§13.1), so the compiler auto-awaits Promise-returning stdlib calls in awaitable positions (§13.2) — but a **bare** emission here returns an unawaited Promise, which is **always truthy**: `hashes.some(h => verifyPassword(pw, h))` accepts EVERY password (an accept-all auth bypass). **FAIL-CLOSED** — a hard compile error rather than a silent security leak (§49 no-silent-bad-output). Resolution: restructure so the call runs in the server function's async body — e.g. hoist it into a `for` loop (`for (const x of xs) { const r = verifyPassword(…); … }`). The async-stdlib sibling of the peer-server-fn `E-SERVER-FN-IN-SYNC-CALLBACK`. (Issue #26 Finding-2 — S239 adversarial review of the auth-bypass auto-await fix; emitted at `compiler/src/codegen/emit-server.ts`.) | Error |
+| E-ASYNC-CALL-PROMISE-METHOD | §13.2 | `.then`, `.catch` or `.finally` is read off a call the compiler awaits for you (a server function, a Promise-returning stdlib function, a helper that calls one). The await yields the RESOLVED value, so `(await f()).then(…)` throws a TypeError at run time for any non-thenable result. Became reachable in inline event handlers and `on mount` blocks once they gained §13.2 auto-await (s441), where it silently broke code that previously chained on the Promise. Resolution: remove `.then(…)` and use the value directly — `const r = f(…)` then work with `r`; handle a failure with `!{}` (§19). (Catalog addition s441 fix round — review:S441-f4f5-review; emitted from `compiler/src/codegen/js-async-analysis.ts` (`checkPromiseMethod`) via `jsAsyncUsesErrors` in `compiler/src/codegen/emit-library-shared.ts`, for handler and `on mount` bodies. A `.then` on an awaited call inside an ordinary function body is not yet diagnosed — carried under g-auto-await-family-not-closed.) | Error |
+| E-ASYNC-HANDLER-UNANALYZABLE | §13.2 | An event handler's body references an async-colored function but the compiler could not analyse the handler's code (its emitted text does not parse), so it cannot insert the `await` §13.2 requires. **FAIL-CLOSED**: the build fails rather than ship an unawaited call (a Promise is always truthy). Resolution: move the body into a named function and reference it (`onclick=handle()`); report it — it indicates a compiler defect. (Catalog addition s441 fix round — review:S441-f4f5-review; emitted from `compiler/src/codegen/js-async-analysis.ts` (`unanalyzableHandlerUses`) via `emit-event-wiring.ts` / the active-client-emission handler path.) | Error |
+| E-ASYNC-FN-ESCAPES-AS-VALUE | §13.2 | An **async-colored function** — one the compiler emits `async`: a server function, a Promise-returning stdlib function (`scrml:auth` `verifyPassword`, …), or a helper that transitively calls one (including a helper declared inside another function) — is used as a **value**: aliased (`const g = m`), stored in an array or object (`[m]`, `{ f: m }`, `{ m }`), passed to a function that is not an awaited collection method (a user-written higher-order function `drive(m)`, `Array.from(xs, m)`, `new Promise(m)`, `el.addEventListener("x", m)`), returned, or read as an object (`m.call(…)`). Whoever calls it through that value receives an unawaited Promise, which is **always truthy** — `drive(m)` with `drive(f) { return f(pw) }` accepts EVERY password (the accept-all the sync-callback codes exist to prevent, one level of indirection away). The compiler inserts `await` only at call sites it can see (§13.2) and does not implicitly await every call of a function-typed value. **FAIL-CLOSED** hard error. Checked in every body: function bodies (client, server, library, tool — nested helpers included), raw block-body callbacks and template interpolations, inline event handlers and `on mount` blocks. NOT a value use: a direct call; the first argument of `.some`/`.every`/`.find`/`.findIndex`/`.filter`/`.map`/`.forEach`/`.reduce`/`.flatMap` (lowered to an awaited combinator); an argument of a fire-and-forget scheduler (`setTimeout` & co. discard the return); `typeof m`. Resolution: call the function directly (`m(…)`) where its value is needed, or pass it to an awaited collection method. (Catalog addition s441 — ruling:user-voice-scrml.md S440 F4; closes `g-async-helper-escaping-as-a-value-accept-all`; emitted from `compiler/src/codegen/local-async-fns.ts` + `compiler/src/codegen/js-async-analysis.ts`.) | Error |
+| E-EVENT-CONTROL-AFTER-AWAIT | §13.2 | After an event handler's first `await` (an awaited server / async call, §13.2), the handler's event parameter, or a value derived from it, is used other than by a plain read of a non-control property: a control member (`preventDefault`, `stopPropagation`, `stopImmediatePropagation`, `returnValue`, `cancelBubble`) is read, called, `.call`/`.bind`-ed or assigned; a computed member with a non-literal key is read; the event is passed as an argument; or an alias, container, destructured control method or closure that misuses the event is used. The handler has yielded to the event loop: the browser has already performed the default action (the form submitted, the link navigated) or propagated the event, and cancelling it now has no effect. The event is followed by BINDING (scope-resolved), so an inner `(event) => …` parameter or a block-local `const event` is not it. **Hard error; not auto-moved** — hoisting a conditional `preventDefault` would change which events it applies to. Resolution: call it before the first server call; if it depends on the server's answer, call it unconditionally first and perform the action yourself when the answer allows. (Catalog addition s441 fix round — review:S441-f4f5-review; widened s441 round 4 from call shapes to binding poisoning after the round-3 review bypassed the shape list; emitted from `compiler/src/codegen/js-async-analysis.ts` (`analyze`, handler roots) via `jsAsyncUsesErrors`.) | Error |
 | E-WASM-001 | §23.3 | Call char not in default registry and no `callchar=` declaration | Error |
 | E-WASM-002 | §23.3 | Call-char function called with no corresponding `extern` declaration | Error |
 | E-WASM-003 | §23.3 | `extern` declaration references a call char with no matching `<program>` | Error |
@@ -27032,6 +27049,34 @@ exactly one server.js.
 The routes registry array SHALL also de-duplicate by name — registering the
 same route binding multiple times is correctness-equivalent (same path /
 method / handler) but wasteful.
+
+### 47.13 Static-File Serving — Client-Artifact Allowlist
+
+**Added:** 2026-09-29 (S441). Resolves `g-static-server-serves-db-and-server-source`: both static-serving paths — the production `_server.js` (§47.12) and `scrml dev` — served ANY file that existed under the output directory, so an anonymous request received the SQLite database (`protect=` columns and password hashes included), the session store, every `*.server.js`, and `_server.js` itself.
+
+The output directory holds server-side artifacts beside the client ones (§47.9, §47.11, and the §20.5 session store, which lives at the dist root). A compiled server SHALL NOT serve server modules, databases, dotfiles, or sources as static files. Static serving is therefore an **allowlist**: a file is served if and only if
+
+1. it is NOT in a **denied class**, AND
+2. it is either a **client artifact** of the build or a **passive media asset**.
+
+Every other request that reaches the static fallback SHALL receive `404 Not Found` with a body that does not disclose the file's contents.
+
+**Denied classes.** These SHALL NOT be served, whatever the manifest says. The match SHALL be case-insensitive, because a case-insensitive filesystem serves `APP.SERVER.JS` from `app.server.js`.
+
+- server modules and anything named `*.server.*`, including `_server.js` and server source maps;
+- databases: `*.db`, `*.db-wal`, `*.db-shm`, `*.db-journal`, and `*.sqlite*`;
+- dotfiles and dot-directories (`.env`, `.git/…`, `.scrml-sessions.db`), meaning any path segment that begins with `.`;
+- `.scrml` sources;
+- source maps (`*.map`). A client map embeds the whole `.scrml` source as `sourcesContent`, server functions and SQL included, so a map is source disclosure;
+- any path that resolves outside the output directory.
+
+**Request-path handling.** The request path SHALL be percent-decoded before it is judged, so an encoded traversal (`%2e%2e`, `%2f`, `%5c`) is evaluated in the form the filesystem sees. The request SHALL be refused if the decoded path contains NUL, `\`, or `:`, if any segment begins with `.`, or if any segment ends in `.` or a space (on Windows, `app.db.` resolves to `app.db`). The allowlist SHALL be checked against the resolved candidate file, so every resolution rule passes through it: exact file, clean URL `<p>.html`, directory index, and dev's root fallback.
+
+**Client artifacts: the manifest.** The compiler SHALL record every artifact it writes for the browser: the HTML documents, the CSS, the client bundles (hashed or not, §47.9.8), the shared runtime, and the per-route chunks. It SHALL close that set over the relative module imports of its JavaScript members, which admits, for example, a `_scrml/<name>.js` shim that a client bundle imports and excludes a shim that only a server module imports. A closure target that falls in a denied class is not admitted. `compileScrml` returns the set as `clientAssets` (output-relative POSIX paths) and writes it to `<outputDir>/.scrml-client-assets.json`. That file is a dotfile, so it is itself unservable. `scrml build` SHALL bake the set into `_server.js`, so that nothing written into the deploy directory after the build can widen what the server serves. `scrml dev` SHALL read the manifest file, which it rewrites on every recompile. A missing manifest is an empty set, so the server fails closed. A stale artifact that the latest compile did not write is not in the set and is not served.
+
+**Passive media.** A file with one of the following extensions is served without a manifest entry, provided it is not in a denied class: `png`, `jpg`, `jpeg`, `gif`, `webp`, `avif`, `svg`, `ico`, `bmp`, `woff`, `woff2`, `ttf`, `otf`, `eot`, `mp3`, `mp4`, `webm`, `ogg`, `wav`. These are the images, icons, fonts, and audio/video an author places beside the build output. The SPEC defines no `public/` or assets directory. Any other file the build did not write for the browser is refused, including `.json`, `.txt`, and author `.js`.
+
+**One policy, both servers.** `scrml dev` and the production `_server.js` SHALL apply the identical decision. Implementation: `compiler/src/static-serve-policy-emitted.js` holds the policy functions. Dev imports them, and `generateServerEntry` copies their source text verbatim into `_server.js`. `collectClientAssets` in `compiler/src/static-serve-policy.js` computes the manifest.
 
 ---
 
@@ -39702,7 +39747,7 @@ Data is **immutable by default**. A write is legal only when the target's **type
 | none (omission) | nothing — the target is FIXED |
 | a lifecycle `(A to B)` | a write along the declared path `A → B` (a lifecycle IS a write contract — §66.11.6) |
 | a transition graph (`rule=` state-children, §66.13) | a write along the graph's edges |
-| sequence edit grants (§66.12) | the granted edits (end / front / anywhere, positions, length) |
+| sequence edit grants (§66.12) | the granted edits (grow and shrink, each granted separately at end / front / anywhere — S442, §66.12.2; positions; length) |
 | `replace` (on a scalar: `let`, §66.9) | replacing the whole value, bounded by the invariants |
 
 #### 66.11.2 Permissions govern the transition, never the spelling
@@ -39712,10 +39757,11 @@ of check:
 
 1. **Invariants** — length bounds and per-position types (§66.12) — are checked on **EVERY** write, however it
    is spelled.
-2. **Edits** — end / front / anywhere / positions-writable — are **classified at compile time**, from mutating
-   method calls AND from **recognized reassignment shapes**:
-   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.push(e)`);
-   - `@x = @x.filter(…)` is a **shrink-anywhere**;
+2. **Edits** — grow / shrink at the end / front / anywhere (each a separate grant, S442 — §66.12.2) and
+   positions-writable — are **classified at compile time**, from mutating method calls AND from **recognized
+   reassignment shapes**:
+   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.push(e)`; granted by `append`);
+   - `@x = @x.filter(…)` is a **shrink-anywhere** (granted by `remove`);
    - `@x = @x.map(…)` is a **position-write**.
 3. **`replace`** — writing an unrelated whole value, including `reset(@x)` and a server reload of the cell — is
    its **OWN explicit grant**, still **bounded by the invariants**. `replace` is NOT an "any" grant.
@@ -39886,11 +39932,38 @@ using only non-mutating operations). Permissions are therefore **axes**, checkab
 | Axis | Values |
 |---|---|
 | **length** | fixed · bounded (e.g. `1..10`) · free |
-| **where it changes** | end · front · anywhere |
+| **where it changes** | grow and shrink, granted SEPARATELY at each place: end (`append` · `pop`) · front (`prepend` · `shift`) · anywhere (`insert` · `remove`) — `anywhere` covers end and front |
 | **positions** | read-only · writable |
 | **position types** | uniform (an array) · per-position (a tuple) |
 
-`push` + `pop` together are "free length, changes at the end" — a stack. A splice is "changes anywhere".
+> **Amendment S442 — the "where it changes" axis splits grow from shrink; `anywhere` covers end and front.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"*, ratifying the PA's text:
+> *"the 'where it changes' axis needs to separate growing from shrinking. Rec: split `end` into `append` (grow at
+> the end) and `pop` (shrink at the end), and likewise `front`/`anywhere`. An audit log becomes `Entry[free,
+> append]` — genuinely append-only; a stack is `Frame[free, append, pop]`."* and *"Rec: yes — `anywhere`
+> includes `end` and `front` … `anywhere` means grow/shrink at any position."*
+> **Provenance (tokens):** ruling:user-voice-scrml.md S442 — *"spellings are fine"* (the grow/shrink grant tokens,
+> O10 part): `append`/`pop`, `prepend`/`shift`, `insert`/`remove` are the grant spellings for grow/shrink at the
+> end / front / anywhere.
+> **supersedes:** the sentence *"`push` + `pop` together are "free length, changes at the end" — a stack. A splice
+> is "changes anywhere"."*, and the single-token `end` · `front` · `anywhere` values of this axis. It closes the
+> contradiction with §66.19.5, where `[free, end]` granted `pop`, so the "provably append-only" log was poppable.
+
+**Grow and shrink are separate grants at each place** (end / front / anywhere):
+
+| Place | Grow | Shrink |
+|---|---|---|
+| end | `append` | `pop` |
+| front | `prepend` | `shift` |
+| anywhere | `insert` | `remove` |
+
+**`anywhere` covers `end` and `front`:** an anywhere-grow grant (`insert`) admits appends and prepends; an
+anywhere-shrink grant (`remove`) admits pops and shifts.
+
+A stack grants both halves at the end — `Frame[free, append, pop]`. An append-only log grants only the grow half —
+`Entry[free, append]` (§66.19.5). A splice changes anywhere: its removals are a shrink-anywhere (`remove`), its
+insertions a grow-anywhere (`insert`). (The bracket-list form these examples are written in is still ⚑ O10; the six
+tokens are ruled.)
 
 #### 66.12.3 Permissions live on the TYPE
 
@@ -39913,6 +39986,14 @@ an argument whose type grants MORE than the parameter's is ACCEPTED; the callee 
 grants. (`Edit[any]` in that text was later ruled out — there is no `any`, §66.12.4; the direction survives with any
 superset grant.)
 
+> **Amendment S442 — reading the quoted `Edit[end]` under the grow/shrink split (§66.12.2).** The block above is
+> the answered S435 text, kept verbatim. Its single-token `end` is superseded: `end` is now two grants, `append`
+> (grow) and `pop` (shrink). `pushEdit` only grows its parameter, so in current spelling its parameter and return
+> are `Edit[append]`. The call-site direction is unchanged: an argument whose type grants more (e.g.
+> `Edit[append, pop]`) is accepted where the parameter grants only `append`.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 1: *"split `end` into
+> `append` (grow at the end) and `pop` (shrink at the end)"*); tokens: S442 — *"spellings are fine"*.
+
 > ✅ **RULED S435 — O37 = (c)** (bryan: *"c"*): a call's write-back into a cell is an EDIT only when the compiler CERTIFIES the callee — it runs the §66.11.2 edit classifier over the function body once and records the edit kind it performs on its parameter (e.g. `return [...a, e]` → an end-append of `a`) as part of its signature; `@audit = appended(@audit, e)` is then that edit and is checked against the cell's grants. An uncertifiable callee's result is a `replace`. NOT trust-the-return-type (unsound). Direction: a more-permissive argument is accepted where a parameter grants less (answered "type" text). The prior OPEN text follows for the record.
 >
 > *(superseded)* **O37: write-back of a helper's result into a `replace`-less sequence.** The same answered
@@ -39924,7 +40005,16 @@ superset grant.)
 > callee's BODY as an edit kind (the compiler classifies what the function does to its parameter); **(c)** leave
 > it a `replace` (helpers cannot write into `replace`-less sequences). PA lean: (b), certify.
 
-> ⚑ **OPEN (not ruled) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
+> ✅ **RULED S442 — O10, in part: the six grow/shrink grant tokens.** `append` / `pop` (end), `prepend` / `shift`
+> (front), `insert` / `remove` (anywhere) are the grant spellings for grow / shrink at each place (§66.12.2).
+> **O10 stays OPEN for the rest:** the bracket-list-on-the-element-type form itself (`Entry[free, append]`),
+> `free` / `writable` / `replace` as tokens, and the bounded-length token (`1..10`). The single-token `end` /
+> `front` / `anywhere` quoted below are superseded by the S442 split (§66.12.2). The prior OPEN text follows for
+> the record, narrowed as stated here.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"spellings are fine"* (answering *"The token spelling —
+> `append`/`pop`, `prepend`/`shift`, `insert`/`remove` — is still your call under O10."*).
+>
+> ⚑ **OPEN (not ruled, narrowed S442) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
 > answered *"1 yes, 2 yes"* (the one-axis ruling) are a bracket list on the element type — `Entry[free, end]`
 > (append-only), `Todo[free, anywhere, writable, replace]`, and a tuple with `replace`, `[:number, :number,
 > replace]` — and `Edit[end]` in a parameter appears in an earlier sketch explicitly marked "illustrative, not a
@@ -40047,9 +40137,15 @@ applies to enum-typed fields: the graph's coverage of the enum and its edges are
 
 A declaration marked **`single`** is a singleton: singleton-ness is an opt-in MODIFIER, not a separate vehicle
 (ruling:S435 (PA proposal text answered "a") — *"Singleton-ness becomes opt-in"*). Its shared instance (§66.6.4) is
-reached as `<*x/>` in markup and `@x` in logic. That a plain use `<x/>` of a `single` declaration is an ERROR
-(`E-DECL-SINGLE-INSTANTIATED`, §66.20) is the DD §5.a mechanism (*"`single` forbids plain instances"*); the answered
-Q6 text implies it ("singleton") but does not state the error — ⚑ O55.
+reached as `<*x/>` in markup and `@x` in logic. **A plain use `<x/>` of a `single` declaration is an ERROR,
+`E-DECL-SINGLE-INSTANTIATED` (§66.20); `<*x/>` is the only way to render it** (O55, ruled S442 — below).
+
+> **Amendment S442 — O55 ruled: a plain use of a `single` declaration is an error.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*, item 1 ratifying the
+> PA's text: *"a plain `<phase/>` of a `single` declaration is either an error (`E-DECL-SINGLE-INSTANTIATED`) or it
+> renders the one instance. Rec: error. `<*phase/>` already says 'the existing one'."*
+> **supersedes:** the prior sentence here, which named the error only as the DD §5.a mechanism ("`single` forbids
+> plain instances"), implied but not stated by the answered Q6 text — ⚑ O55.
 
 **`<engine>` is re-expressed as a `single` declaration whose value carries a transition graph** — one vehicle for
 "a typed thing with a transition contract". **Spelling: ruling:S435 (PA proposal text answered "a")** — the Q6
@@ -40112,7 +40208,11 @@ form (an ordinary, non-`single` declaration, keyed per row, §66.7.3). **Nominal
 *(Former O6 — the spelling of `single` — is CLOSED: the trailing modifier appears in the PA text bryan answered
 "a", above. Note it differs from `let`'s prefix position; that asymmetry is the ruled text, not an OPEN item.)*
 
-> ⚑ **OPEN (not ruled) — O55: a plain use of a `single` declaration.** Whether `<x/>` of a `single` declaration
+> ✅ **RULED S442 — O55 = error** (ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*): a
+> plain use of a `single` declaration is `E-DECL-SINGLE-INSTANTIATED`; `<*x/>` is the only way to render it. The
+> prior OPEN text follows for the record.
+>
+> *(superseded)* **O55: a plain use of a `single` declaration.** Whether `<x/>` of a `single` declaration
 > is an error (DD §5.a: *"`single` forbids plain instances"*; `E-DECL-SINGLE-INSTANTIATED`), or renders the one
 > instance (engine parity: `<EngineName/>` mounts the singleton, §51.0.D), is not stated in the answered text.
 
@@ -40482,11 +40582,22 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 
 #### 66.19.5 An append-only audit log
 
+> **Amendment S442 — the log grants `append` only, so it is genuinely append-only.** Under the S442 grow/shrink
+> split (§66.12.2) the former `Entry[free, end]` granted `pop` too, so the "provably append-only" log was
+> poppable. The type is now `Entry[free, append]` and `@audit.pop()` is refused.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 1: *"An audit log
+> becomes `Entry[free, append]` — genuinely append-only"*); tokens: S442 — *"spellings are fine"*. The
+> `@audit[0].action` comment gives the one real reason per ruling:user-voice-scrml.md S440 dpa-052 Q3 — *"a, next
+> Q"* (*"an element-field write is a FIELD edit of that field … fix §66.19.5's two-reason comment to the one real
+> reason"*).
+> **supersedes:** `<audit:Entry[free, end]=[]/>` and its *"changes at the end"* comment; the two-reason
+> `@audit[0].action` comment.
+
 ```scrml
 <program>
     type Entry:struct = { at: number, actor: string, action: string }   // fields carry no contract → fixed
 
-    <audit:Entry[free, end]=[]/>                    // free length, changes at the end, NO replace — ⚑ O10 spelling
+    <audit:Entry[free, append]=[]/>                 // free length, grows at the end only, NO replace — ⚑ O10: bracket form (tokens ruled S442)
     <let actor:string="ops"/>
 
     function record(action: string) {
@@ -40499,9 +40610,10 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
     // reset(@audit)                                 → E-WRITE-NOT-GRANTED (reset is a replace)
     // @audit = appended(@audit, e)                  → legal IF `appended` is certified an end-append (O37 RULED (c)): "fine" in the answered "type" text; a
     //                                                 `replace` under the later one-axis rule — with bryan
-    // @audit.shift()                                → E-WRITE-NOT-GRANTED (changes at the front)
+    // @audit.pop()                                  → E-WRITE-NOT-GRANTED (shrinks at the end; only `append` is granted)
+    // @audit.shift()                                → E-WRITE-NOT-GRANTED (shrinks at the front)
     // @audit = @audit.filter(e => e.actor != "x")   → E-WRITE-NOT-GRANTED (shrink-anywhere)
-    // @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (positions read-only; Entry.action is fixed)
+    // @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (a FIELD edit of `action`, and Entry.action is fixed)
     // let snapshot = @audit                         → a SNAPSHOT (§66.10): a later record() does not change it
 
     <main>
@@ -40516,8 +40628,11 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 </program>
 ```
 
-Without a `replace` grant the log is provably append-only: no statement in the program can remove or rewrite an
-entry, and the compiler checks that on every write however it is spelled (§66.11.3).
+The log's type grants one edit — grow at the end (`append`) — and no `replace`, so it is provably append-only: no
+shrink (`pop`, `shift`, `remove`) is granted, so no statement in the program can remove an entry; no `prepend` or
+`insert`, so entries arrive only at the end; positions are read-only, so no entry can be replaced; and the element
+type's fields are locked by omission (S440 dpa-052 Q3), so no entry can be rewritten. The compiler checks that on
+every write however it is spelled (§66.11.2, §66.11.3).
 
 #### 66.19.6 An engine re-expressed as a `single` declaration
 
@@ -40571,7 +40686,7 @@ After:
         <button onclick=load()>Load</button>
         <card title="One"/>
         <card title="Two"/>                         // each card has its own `status`
-        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55) -->
+        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55, ruled S442): <*phase/> is the only way to render it -->
     </main>
 </program>
 ```
@@ -40593,7 +40708,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3); `<*x/>` is the only way to render it. O55 RULED S442 (formerly conditional on O55). **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"* (item 1). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
@@ -40605,6 +40720,23 @@ emitter). Every code below is Nominal on impl#1.
 **Cross-reference (not a §66 code):** a field overridden twice in one spread-override shape
 (`{ ...@g, phase: .Gone, phase: .Live }`, §66.11.3 item 1) is `E-STRUCT-DUPLICATE-KEY` — a language-wide
 struct-literal code whose home is §14.3 and whose row is in §34.
+
+**Typer codes accepted S442 (language-wide — not §66-form codes).**
+
+> **Amendment S442 — four typer codes accepted.** The S440 truthiness and operator rulings (and dpa-054 #3) had
+> no named codes; S442 accepts the four below. Their full SPEC text is the S440 SPEC pass (not yet written); these
+> rows only name them. Each is **Nominal — not yet emitted by impl#1; the bootstrap emits them.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 3: *"accept
+> `E-COND-NOT-BOOLEAN`, `E-OPERATOR-OPERAND-TYPE`, `E-OPERAND-NOT-NARROWED`, `E-INT-DIVISION`"*). Meanings from
+> ruling:user-voice-scrml.md S440 — *"#4 = (c)"*; *"all recs on 1-3 and dpa-037"* (Truthiness Q1/Q2, Gotcha
+> Q1–Q3); dpa-054 #3 (`/` is float-only).
+
+| Code | Severity | Fires when |
+|---|---|---|
+| **`E-COND-NOT-BOOLEAN`** | Error | A condition — `if=`, an `if` / `while` statement, a ternary test — whose value is provably neither a `bool` nor a `T \| not` presence test: numbers and strings have no truthiness (write `@count > 0`, `@user is some`). Provable-or-silent: an error wherever the violation is provable, silence where the type is unknown; no §63 window (S440 #4 = (c), Truthiness Q2). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-OPERATOR-OPERAND-TYPE`** | Error | An operand of a type its operator does not take: an arithmetic or relational operator on a non-number; `+` on anything but two numbers or two strings (string ordering goes through an explicit compare); `!`, `&&`, `\|\|` (and `and` / `or`) on a non-boolean — defaults use `??` (S440 Gotcha Q1, Q2). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-OPERAND-NOT-NARROWED`** | Error | A `T \| not` operand not narrowed before `+`, arithmetic, comparison, or use in a string template (S440 Gotcha Q3). A markup `${@o.n}` without narrowing stays SILENT (`${not}` renders nothing, S442). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-INT-DIVISION`** | Error | `/` between two `int`s: `/` is float-only (it divides `number`s); integer division is explicit, `div(a, b, .Mode)`, the rounding mode required (S440 dpa-054 #3). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
 
 **Retained codes with a restated condition or message**
 
@@ -40657,7 +40789,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O7 | §66.13 | Whether contract kinds combine on one field (lifecycle + graph; `let` + graph — `replace` subsumes edits, §66.11.3, so `let` would make a graph dead); the fate of §14.12.4's carve-out. |
 | ~~O8~~ RULED wiring | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
 | O9 | §66.15.2 | Named and parametric slots on a declaration. |
-| O10 | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. |
+| O10 (narrowed S442) | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. PARTLY RULED S442: the six grow/shrink tokens (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`) are ruled. Still OPEN: the bracket-list-on-the-element-type form itself, `free` / `writable` / `replace` as tokens, the bounded-length token (`1..10`). Provenance: ruling:user-voice-scrml.md S442 — *"spellings are fine"*. |
 | O12 | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). |
 | O13 | §66.9 | Whether logic-local `const` (and §50.8.5's keywordless-binding-is-`const`) retires. |
 | O14 | §66.11 | Whether field contracts govern non-cell (local) values — reversing §50.9's `const`-property-write sentence (lean: yes — an error; the §50.9 reversal was parked on dpa-052, which has ruled). |
@@ -40687,7 +40819,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O52~~ RULED | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
 | O25 | §66.5.5 | Record gap: implicit bind vs explicit `bind:` in `renders`, and whether validators reach the `renders` input (§6.4.2 steps 3–4). |
 | O54 | §66.6.3 | Record gap: whether `@x` inside `x`'s own `renders` names the current instance (DD #8, not in the answered text). |
-| O55 | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. |
+| ~~O55~~ RULED S442 = error | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. RULED: a plain use is `E-DECL-SINGLE-INSTANTIATED`; `<*x/>` is the only way to render it. Provenance: ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*. |
 | ~~O56~~ RULED narrow (S437: confirmed not re-widened by "identities yes") | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
 | O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
 | ~~O57~~ RULED S437 = no | §66.11.3 | Does a contract-free (fixed / locked) sub-field bound a whole-struct `replace`? RULED no — else O3's struct-level `let` is a dead grant. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
@@ -40698,6 +40830,8 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 Closed by the PA proposal text bryan answered (the terse-answer rule, §66 preamble): O6 (`single` is a trailing
 modifier — Q6 "a"), O40 (the `given` binding writes the instance — lists "yes"; its scope is O56), O53 (`let` / `export let` on attributes; `export <child>` —
 Q6 "a", "E2, move on", "yes, :struct,"). Ruled S437 (*"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*): O21 (by derivation from L6), O57, O58, O59, O60.
+Ruled S442: O55 (*"1 your rec, 2 deliberate, 3 your rec"* — a plain use of a `single` declaration is an error);
+O10 in part (*"spellings are fine"* — the six grow/shrink tokens; the rest of O10 stays OPEN).
 
 ### 66.23 Cross-references
 

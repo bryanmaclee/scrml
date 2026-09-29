@@ -1,0 +1,14 @@
+{
+  "id": "server-db-event-after-await-e25-before-ok-pos",
+  "description": "s441 round 4 control. A handler with an awaited server call and `event.preventDefault()` BEFORE the first await compiles: the event poisoning follows the handler's event BINDING (scope-resolved), not the name, and applies only after the first await.",
+  "language-version": "1.0",
+  "source-test": "compiler/tests/unit/s441-async-escape-f4-f5.test.js",
+  "spec": "\u00a713.2",
+  "rationale": "\u00a713.2: the rule concerns the handler's own event parameter after its first await; other bindings named `event`, and uses before the await, are unaffected.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-EVENT-CONTROL-AFTER-AWAIT"
+    ]
+  }
+}

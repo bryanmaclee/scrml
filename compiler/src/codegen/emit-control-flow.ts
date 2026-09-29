@@ -8,6 +8,7 @@ import { emitStringFromTree } from "../expression-parser.ts";
 import { iterableHasReactiveRefs, forBodyLiftsMarkup, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { isDestructurePattern, emitDestructurePatternText } from "./emit-destructure-pattern.ts";
 import { CGError } from "./errors.ts";
+import { fnTextHasOwnAwait } from "./js-async-analysis.ts";
 
 // ---------------------------------------------------------------------------
 // Module-level Tier 2 hoist registry (§8.10)
@@ -2325,9 +2326,7 @@ function emitMultiScrutineeMatch(
   // any `await` in code position makes the IIFE `await (async function(){…})()`.
   // Fail-safe direction matches the sibling scan — a false positive is a needless
   // (valid) async IIFE; a false negative is a broken bundle.
-  const _multiBodyHasAwait = lines
-    .slice(1)
-    .some((l) => /\bawait\b/.test(_stripStringLiteralsForAwaitScan(l)));
+  const _multiBodyHasAwait = _iifeHasOwnAwait(lines);
   lines[0] = (matchMode === "server" || _multiBodyHasAwait)
     ? `await (async function() {`
     : `(function() {`;
@@ -2779,13 +2778,25 @@ export function emitMatchExpr(node: any, opts?: any): string {
   // callback never reaches here: `emitLambda` sets `peerAwaitable = false`, so
   // `emitCall` emits bare and the body has no `await` → the IIFE stays sync and
   // emission is byte-identical to pre-U1.
-  const _bodyHasAwait = iifeLines
-    .slice(1)
-    .some((l) => /\bawait\b/.test(_stripStringLiteralsForAwaitScan(l)));
+  const _bodyHasAwait = _iifeHasOwnAwait(iifeLines);
   iifeLines[0] = (_matchMode === "server" || _bodyHasAwait)
     ? `await (async function() {`
     : `(function() {`;
   return iifeLines.join("\n");
+}
+
+/**
+ * Does this match IIFE's body await at the IIFE's OWN level? (s441) The body is
+ * parsed and an `await` inside a NESTED function — an `async function(event)`
+ * handler lifted inside an arm — does not count: it belongs to the handler, and
+ * counting it made the IIFE `await (async function() {…})()` inside a synchronous
+ * `_scrml_effect` (invalid JS). When the text does not parse, the token scan
+ * below decides, erring toward async exactly as before.
+ */
+function _iifeHasOwnAwait(iifeLines: string[]): boolean {
+  const precise = fnTextHasOwnAwait("(async function() {\n" + iifeLines.slice(1).join("\n"));
+  if (precise !== null) return precise;
+  return iifeLines.slice(1).some((l) => /\bawait\b/.test(_stripStringLiteralsForAwaitScan(l)));
 }
 
 /**

@@ -102,6 +102,8 @@ export interface EventBinding {
    * Absent on call-ref (`fn()`) and expression (`${}`) bindings.
    */
   bareRefHandler?: boolean;
+  /** s441 — the source span of the handler attribute (diagnostic anchor). */
+  span?: unknown;
 }
 
 /** A logic binding recorded by HTML gen and consumed by client JS gen. */
