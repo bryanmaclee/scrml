@@ -1,3 +1,4 @@
 - 2026-09-29T16:24:05-06:00 start at /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aeea2fc505bd3a76c; base 6dccbd6cf
 - 2026-09-29T16:29:17-06:00 A: route-inference Step 8a-page registers <page auth=required> entry; probes: page 302/302/302 (was 200/200/200)
 - 2026-09-29T16:46:51-06:00 B: E-PROGRAM-NESTED-AUTH (codegen/index.ts detectNestedProgramAuth), SPEC §4.12.2 + §4.12.9 + §34 rows, §40.2 page note replaced; conf cases x4; integration tests
+- 2026-09-29T17:19:17-06:00 blast radius probed (variants/index/softnav/per-route/if-block/crosspage/dev parity/ex23); corpus 2082 units: 0 pre-existing changes; page emission test hardened (loginRedirect= on <page> is E-PAGE-INVALID-ATTR)

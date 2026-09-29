@@ -195,6 +195,9 @@ describe("§52.13 — emission for a `<page auth=\"required\">` unit", () => {
     writeFileSync(input, source);
     const out = join(root, "dist");
     const r = compileScrml({ inputFiles: [input], write: true, outputDir: out, log: () => {} });
+    // Every shape here is valid scrml — an emission assertion on an erroring
+    // compile would pass for the wrong reason.
+    expect((r.errors ?? []).filter((e) => e.code?.startsWith("E-")).map((e) => e.code)).toEqual([]);
     const base = rel.split("/").pop().replace(/\.scrml$/, "");
     const read = (f) => (existsSync(join(out, f)) ? readFileSync(join(out, f), "utf-8") : "");
     return { r, serverJs: read(`${base}.server.js`) };
@@ -214,12 +217,13 @@ describe("§52.13 — emission for a `<page auth=\"required\">` unit", () => {
     expect(serverJs).toContain("export const _scrml_protected_document");
   });
 
-  test("loginRedirect= on the page is honoured", () => {
-    const { serverJs } = compileOne(
-      "emit-redirect",
-      `<page auth="required" loginRedirect="/signin">\n<p>x</p>\n</page>\n`,
-    );
-    expect(serverJs).toContain(`Location: "/signin"`);
+  test("the page scope redirects to the §52.13 default /login and compiles clean", () => {
+    // `loginRedirect=` is not a `<page>` attribute (E-PAGE-INVALID-ATTR — the
+    // per-route set is db/auth/csrf/ratelimit/keep-alive), so a page scope uses
+    // the default target.
+    const { r, serverJs } = compileOne("emit-redirect", `<page auth="required">\n<p>x</p>\n</page>\n`);
+    expect((r.errors ?? []).filter((e) => e.code?.startsWith("E-"))).toEqual([]);
+    expect(serverJs).toContain(`Location: "/login"`);
   });
 
   test("csrf=\"off\" on the page is the only opt-out", () => {
