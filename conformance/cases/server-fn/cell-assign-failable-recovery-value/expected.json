@@ -1,0 +1,18 @@
+{
+  "id": "server-fn-cell-assign-failable-recovery-value",
+  "description": "§19.4.3 — a VALUE-form recovery arm on a cell-assigned failable SERVER call: `@result = risky(-1) !{ | .Boom(m) :> \"recovered: \" + m }`. The stub answers the Boom envelope; the arm's value lands in @result, and the statement after the handler reads it (`saw recovered: neg`). The server-escalated twin of error/handler-recovery-into-cell (which covers the client-local callee).",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "rationale": "§19.4.3: a non-escalating arm produces a value that becomes the result of the guarded expression; for `@cell = call() !{…}` that value is written into the cell (never the raw envelope). §13.2: the server call is awaited at its call site, so the recovery happens before the next statement reads @result.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "serverStub": { "risky": { "__serverError": { "type": "LoadError", "variant": "Boom", "data": { "msg": "neg" } } } },
+    "state": { "result": "recovered: neg", "after": "saw recovered: neg" },
+    "domAnchored": [
+      { "selector": "#out", "text": "recovered: neg" },
+      { "selector": "#after", "text": "saw recovered: neg" }
+    ]
+  }
+}

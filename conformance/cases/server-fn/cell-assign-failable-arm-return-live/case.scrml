@@ -1,0 +1,21 @@
+${
+    type LoadError:enum = {
+        Boom(msg: string)
+    }
+    <out> : number = 0
+    <seen> : string = "none"
+    <after> : string = "not-run"
+    server function risky(n: number)! LoadError {
+        if (n < 0) { fail LoadError.Boom("neg") }
+        return n * 3
+    }
+    function load() {
+        @out = risky(2) !{
+            | .Boom(m) :> { @seen = "boom:" + m; return }
+        }
+        @after = "ran"
+    }
+}
+<button id="load" onclick=load()>Load</>
+<p id="seen">${@seen}</>
+<p id="after">${@after}</>

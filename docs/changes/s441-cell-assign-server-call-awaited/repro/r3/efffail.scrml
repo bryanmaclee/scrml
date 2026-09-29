@@ -1,0 +1,39 @@
+${
+    type Phase:enum = { Loading, Empty, Editing }
+    type LoadError:enum = {
+        Boom(msg: string)
+    }
+    <out> : number = 0
+    <seen> : string = "none"
+    <after> : string = "not-run"
+    <flag> : boolean = true
+    server function risky(n: number)! LoadError {
+        if (n < 0) { fail LoadError.Boom("neg") }
+        return n * 3
+    }
+    function other() {
+        @seen = "other"
+    }
+}
+<engine for=Phase initial=.Loading effect=${
+    if (@flag) {
+        @out = risky(-1) !{
+            | .Boom(m) :> { @seen = "nested:" + m; return }
+        }
+    }
+    @out = risky(-1) !{
+        | .Boom(m) :> { @seen = "boom:" + m; return }
+    }
+    @after = "ran"
+    @phase = .Editing
+}>
+    <Loading rule=(.Empty | .Editing)>Loading…</>
+    <Empty rule=.Loading>None.</>
+    <Editing rule=.Loading>ok</>
+</>
+<program>
+<button id="x" onclick=other()>x</>
+<p id="seen">${@seen}</>
+<p id="after">${@after}</>
+<p id="out">${@out}</>
+</program>

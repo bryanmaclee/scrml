@@ -472,19 +472,21 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
     expect(js).not.toMatch(/let\s+_scrml__scrml_result_\d+\s*=\s*\(async/);
   });
 
-  test("the await binds a `const <resultVar>` INSIDE the IIFE", () => {
+  test("the await binds a `let <resultVar>` INSIDE the IIFE", () => {
     const result = compile(errArmHandlerFx);
     const js = result.outputs.get(errArmHandlerFx).clientJs;
-    // `(async () => { const <resultVar> = await _scrml_fetch_loadData_N(); ... `
-    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*\{\s*const\s+_scrml__scrml_result_\d+\s*=\s*await\s+_scrml_fetch_loadData_\d+\([^)]*\);/);
+    // `(async () => { let <resultVar> = await _scrml_fetch_loadData_N(); ... `
+    // s441: `let`, not `const` — a value-form arm assigns its recovery value to
+    // <resultVar>, which threw "Assignment to constant variable" on a `const`.
+    expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*\{\s*let\s+_scrml__scrml_result_\d+\s*=\s*await\s+_scrml_fetch_loadData_\d+\([^)]*\);/);
   });
 
-  test("the `__scrml_error` guard + arm dispatch now reads the resolved const", () => {
+  test("the `__scrml_error` guard + arm dispatch now reads the resolved binding", () => {
     const result = compile(errArmHandlerFx);
     const js = result.outputs.get(errArmHandlerFx).clientJs;
-    // Capture the in-IIFE const name, then assert the guard reads IT (resolved
+    // Capture the in-IIFE binding name, then assert the guard reads IT (resolved
     // envelope), not a promise.
-    const m = js.match(/const\s+(_scrml__scrml_result_\d+)\s*=\s*await\s+_scrml_fetch_loadData_\d+/);
+    const m = js.match(/let\s+(_scrml__scrml_result_\d+)\s*=\s*await\s+_scrml_fetch_loadData_\d+/);
     expect(m).not.toBeNull();
     const rv = m[1];
     expect(js).toContain(`if (${rv} && ${rv}.__scrml_error) {`);
@@ -496,7 +498,7 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
   test("a happy-path `else` sets the cell to the resolved value", () => {
     const result = compile(errArmHandlerFx);
     const js = result.outputs.get(errArmHandlerFx).clientJs;
-    const m = js.match(/const\s+(_scrml__scrml_result_\d+)\s*=\s*await\s+_scrml_fetch_loadData_\d+/);
+    const m = js.match(/let\s+(_scrml__scrml_result_\d+)\s*=\s*await\s+_scrml_fetch_loadData_\d+/);
     const rv = m[1];
     expect(js).toMatch(new RegExp(`\\}\\s*else\\s*\\{\\s*_scrml_cs_reactive_set\\("data",\\s*${rv}\\);`));
   });
@@ -525,6 +527,6 @@ describe("§8: ss41 — `!{}` error arm reads the resolved envelope (not the IIF
     // `(async () => _scrml_reactive_set("data", await stub()))().catch(...)`.
     expect(js).toMatch(/\(async\s*\(\s*\)\s*=>\s*_scrml_cs_reactive_set\("data",\s*await\s+_scrml_fetch_loadValue_\d+\(\)\s*\)\)\(\s*\)\.catch\(_scrml_async_err\s*=>\s*_scrml_error_boundary_log\("data",\s*_scrml_async_err\)\)\s*;/);
     // And it must NOT acquire the block-form IIFE (that is error-arm-only).
-    expect(js).not.toMatch(/\(async\s*\(\s*\)\s*=>\s*\{\s*const\s+_scrml__scrml_result_\d+/);
+    expect(js).not.toMatch(/\(async\s*\(\s*\)\s*=>\s*\{\s*let\s+_scrml__scrml_result_\d+/);
   });
 });
