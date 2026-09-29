@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 209 | 4 |
-| MED | 408 | 0 |
-| LOW | 178 | 0 |
+| HIGH | 211 | 4 |
+| MED | 415 | 0 |
+| LOW | 188 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -20813,6 +20813,77 @@ From the round-2 review probes (session scratch `rv-f4f5-r2-out/{ev,pm}/`): `ev/
 > **Round-3 residuals of E-EVENT-CONTROL-AFTER-AWAIT (review N2/N3), conservative by design, SPEC §13.2 names them:** "after" is source order, so `if (c) { … await … } else { event.preventDefault() }` (`ev/else-branch.scrml`) and a call after an `await` in a branch that was not taken (`ev/first-await-in-untaken-if.scrml`) are rejected though they would run in time. A closure passed elsewhere (not invoked by name after the await) is not traced.
 
 > **Not filed, pre-existing, noted for the fix of E-ASYNC-CALL-PROMISE-METHOD's reach:** `docs/changes/s441-async-escape-f4-f5/review-repro/then-fn` — `isOk(1).then(…)` inside an ordinary FUNCTION body emits `(await f(1)).then(…)` (a TypeError) on base `cf62b4154` too; the new code covers handler and `on mount` bodies only. Carried under g-auto-await-family-not-closed-150-bare-server-call-sites-in-clean-sources.
+
+## §S441c — security-review findings at the S441 wrap (2026-09-29; PA-reproduced where marked, otherwise reviewer-executed; reproducers in the S441 session scratch `protect-rr3/`, `protect-rr4/`, `static-rr/`, `csrf-rr3/`, `f4f5-rr4/`)
+
+### g-protect-origin-match-case-sensitive — `protect=` origin matching is case-sensitive; SQLite identifiers are not: `SELECT * FROM USERS …` emits no `_scrml_protect_tag`, so even the whole-row strip is gone — `NEW S441`; **HIGH** (security, fail-open); open
+PA-reproduced on main `3c4e6cf47`: `getUser` returning `?{\`SELECT * FROM USERS WHERE id = ${id}\`}.get()…` served `{"id":1,"name":"bob","passwordHash":"SECRET-HASH-123"}`. Also `SELECT PASSWORDHASH`, `passwordhash AS x`, `u.PasswordHash`. A fix is on the held branch `worktree-agent-a8aefdb4c19a10c1a` but the round-4 review found it half-done: tags record the SURFACE spelling (`["PASSWORDHASH"]`) and the runtime redactor compares keys exact-case, so `SELECT PASSWORDHASH … return u` still ships. Fix: normalise case at tag, redactor and flow.
+<!-- @gap id=g-protect-origin-match-case-sensitive sev=HIGH status=open locus=compiler/src(resolveProtectedOutputColumns + runtime _scrml_protect redactor key compare) prov=empirical:S441-PA-f3main -->
+
+### g-protect-sql-expression-column-no-descriptor — an output column that is a SQL EXPRESSION over a protected column (or quoted/bracketed/subquery) gets no protect descriptor, so the value ships — `NEW S441`; **HIGH** (security, fail-open); open
+Reviewer-executed (round-4 review, served over HTTP): `passwordHash || '' AS x`, `CAST(passwordHash AS TEXT)`, `substr(…)`, `coalesce(…)`, `lower(…)`, `hex(…)`, `json_object('h', passwordHash)`, `group_concat(…)`, `"passwordhash" AS x`, `[passwordHash] AS x`, `(SELECT passwordHash FROM users LIMIT 1) AS q`, `pin + 0 AS x` — all return the value from a plain `return u`. Pre-existing on main. SPEC §14.8.9 requires an unresolvable origin to degrade to the wholesale strip. Fix: any output column whose expression references a protected column (case-insensitively) or cannot be resolved gets `cols:"*"`.
+<!-- @gap id=g-protect-sql-expression-column-no-descriptor sev=HIGH status=open locus=compiler/src(resolveProtectedOutputColumns — expression output columns) prov=review:S441-protect-r4-review -->
+
+### g-sql-get-trailing-member-dropped — `return ?{…}.get().passwordHash` emits code returning the WHOLE ROW; the trailing member read is dropped — `NEW S441`; **MED** (silent wrong output; masked for protected columns by the row strip); open
+PA-observed on main `3c4e6cf47` (the f3main probe returned the whole row, not the field). Needs a non-protected-column reproducer to confirm scope.
+<!-- @gap id=g-sql-get-trailing-member-dropped sev=MED status=open locus=searched:compiler/src/codegen(SQL chain .get() member continuation) prov=empirical:S441-PA-f3main -->
+
+### g-reexport-only-module-emits-no-server-js — a `.scrml` that only re-exports (`export { nm } from './b.scrml'`) emits no `.server.js`, so an importer's `./c.server.js` import dangles — `NEW S441`; **MED** (broken output; fails closed under protect); open
+Reported by the protect round-3 agent (case X1c). Needs PA reproduction.
+<!-- @gap id=g-reexport-only-module-emits-no-server-js sev=MED status=open locus=searched:compiler/src/codegen(server module emission for re-export-only files) prov=review:S441-protect-r3 -->
+
+### g-static-manifest-closure-steerable-by-string-literal — the client-asset manifest's import closure regex-scans raw bundle text, so a client string literal can admit an arbitrary dist file (e.g. a non-`.db`-named database) — `NEW S441`; **MED** (security; needs author-written string); open
+Reviewer-reproduced on #1162's merged tip `7cff98bb9`: 03-contact-book with `<db src="contacts.data">` plus a client fn returning `"see import './contacts.data'"`, rebuilt in place → manifest lists `contacts.data`, `GET /contacts.data` = 200 with the database. Fix: follow closure targets ending `.js`/`.mjs` only (parse imports with acorn) and add every declared `<db src>` path to the denied set.
+<!-- @gap id=g-static-manifest-closure-steerable-by-string-literal sev=MED status=open locus=compiler/src/static-serve-policy.js(collectClientAssets) prov=review:S441-static-review -->
+
+### g-static-no-public-dir-convention — author-placed static files (`robots.txt`, `site.webmanifest`, PDFs, `.well-known/acme-challenge/*`, JSON, vendored JS) now 404 with no way to admit them — `NEW S441`; **LOW** (design gap, fail-closed by §47.13); ruling-gated
+Intended by §47.13 (#1162), which admits only build outputs plus passive media. A declared `public/` directory (copied into dist and added to the manifest) is a LANGUAGE decision for bryan. Operator cost: ACME/TLS and security.txt break.
+<!-- @gap id=g-static-no-public-dir-convention sev=LOW status=ruling-gated locus=compiler/SPEC.md(§47.13) prov=review:S441-static-review -->
+
+### g-static-svg-served-without-csp — passive-media SVG is served with no CSP; an SVG opened as a document runs its own script, contradicting §47.13's "none of these types runs as script" — `NEW S441`; **LOW**; open
+Fix: send `Content-Security-Policy: script-src 'none'` (or `sandbox`) on `.svg`, or drop the claim.
+<!-- @gap id=g-static-svg-served-without-csp sev=LOW status=open locus=compiler/src/static-serve-policy-emitted.js prov=review:S441-static-review -->
+
+### g-static-manifest-worker-bundles-not-seeded — the manifest seeds only `.html`/`.css`/`.client*.js`; when worker bundles are written (they are not yet — dpa-056 D1) they will 404 — `NEW S441`; **LOW**; open
+<!-- @gap id=g-static-manifest-worker-bundles-not-seeded sev=LOW status=open locus=compiler/src/static-serve-policy.js(collectClientAssets seeds) prov=review:S441-static-review -->
+
+### g-static-manifest-written-on-failed-build — a failed build (E-PA-002) still writes `.scrml-client-assets.json` — `NEW S441`; **LOW** (fails closed); open
+<!-- @gap id=g-static-manifest-written-on-failed-build sev=LOW status=open locus=compiler/src/api.js(compileScrml manifest write) prov=review:S441-static-review -->
+
+### g-precommit-runtime-tests-silently-skip-under-happy-dom — in-process runtime tests guarded by `typeof globalThis.document !== "undefined"` return early when the pre-commit hook runs unit+integration+conformance in ONE bun process (happy-dom globals leak in from sibling browser tests), so a red test passes; and `compiler/tests/commands/` is not in the hook set at all — `NEW S441`; **MED** (test-gate hole; a green hook overstates coverage); open
+Found by the CSRF agent: `csrf-canonical-delivery.test.js` failed alone (8 pass/1 fail) but passed after `stdlib-client-registry.test.js` (46/0), which is how a red commit got through. `auth-protected-document-served` (commands/) never runs in the hook. Fix: run such runtime tests in a child process (as the new CSRF/WS/static tests do) or reset globals; add `compiler/tests/commands` to the hook.
+<!-- @gap id=g-precommit-runtime-tests-silently-skip-under-happy-dom sev=MED status=open locus=.git-hooks pre-commit + compiler/tests/integration(runtime-guarded tests) prov=empirical:S441-csrf-r3 -->
+
+### g-csrf-compose-meta-dev-prod-parity — prod fills the CSRF meta only on the compose route's exact path (`/`); authenticated `GET /index` and `/index.html` get `meta=""` and no SSR seed, so the first mutation costs a 403 + retry; dev fills every path that resolves to the document — `NEW S441`; **LOW**; open
+<!-- @gap id=g-csrf-compose-meta-dev-prod-parity sev=LOW status=open locus=compiler/src/commands/build.js(generateServerEntry compose routing) prov=review:S441-csrf-r3-review -->
+
+### g-dev-hotreload-stale-server-module-keeps-guard — dev never cleans its output dir; after a recompile removes auth AND the server fns, the stale `index.server.js` keeps its guard and the now-public page stays 302 — `NEW S441`; **LOW** (fails closed; prod `scrml build` has the same stale-output exposure); open
+<!-- @gap id=g-dev-hotreload-stale-server-module-keeps-guard sev=LOW status=open locus=compiler/src/commands/dev.js(output-dir staleness) prov=review:S441-csrf-r3-review -->
+
+### g-example23-login-redirect-404 — 23-trucking-dispatch's auth gate redirects to `/login` but the page lives at `/auth/login`, so the prod server 404s — `NEW S441`; **LOW** (flagship example); open
+<!-- @gap id=g-example23-login-redirect-404 sev=LOW status=open locus=examples/23-trucking-dispatch(auth loginPath) prov=review:S441-static-review -->
+
+### g-event-control-after-await-loop-back-edge — E-EVENT-CONTROL-AFTER-AWAIT orders by SOURCE position, so a control call that sits BEFORE the await in a loop body but runs on the next pass is missed — `NEW S441` (#1163); **MED** (regression vs the pre-#1163 sync handler: the form submits natively); open
+Reviewer-executed (`f4f5-rr4/c/b07-loop`, `b08-while`): `onsubmit=${ for (let i = 0; i < 2; i++) { if (i > 0) { event.preventDefault() } @verdict = isOk(i) ? "a" : "r" } }` builds. Fix: inside any loop whose body has an own-level await, every use in the loop counts as after it.
+<!-- @gap id=g-event-control-after-await-loop-back-edge sev=MED status=open locus=compiler/src/js-async-analysis.ts(event poisoning — await ordering) prov=review:S441-f4f5-r4-review -->
+
+### g-event-taint-container-mutation — mutating an EXISTING container with the event is not a taint source: `box.push(event)`, `o.e = event`, `arr[0] = event`, `m.set("e", event)`, `Object.defineProperty(o,"e",{value:event})`, `o.f = () => event.preventDefault()`, `window.pd = …` all ship control after an await — `NEW S441` (#1163); **MED** (regression vs the sync handler); open
+Reviewer-executed (`f4f5-rr4/c/b01,b02,b03,b04,b14,b15,b21,b24`). Fix: a tainted value on the right of a member write, or as an argument to any call before the await, taints the root object and the receiver.
+<!-- @gap id=g-event-taint-container-mutation sev=MED status=open locus=compiler/src/js-async-analysis.ts(event taint fixpoint) prov=review:S441-f4f5-r4-review -->
+
+### g-event-taint-arguments — `const a = arguments; …await…; a[0].preventDefault()` builds: `arguments` in the root handler is not tainted — `NEW S441` (#1163); **LOW**; open
+<!-- @gap id=g-event-taint-arguments sev=LOW status=open locus=compiler/src/js-async-analysis.ts prov=review:S441-f4f5-r4-review -->
+
+### g-scheduler-exemption-per-file-not-per-build — the global-scheduler exemption is decided per FILE; a helper module that writes `globalThis.setTimeout = (f)=>f(1)` (in an exported fn or at top level) leaves the app's `setTimeout(isOk) ? "a" : "r"` exempt → accept-all — `NEW S441` (#1163); **MED** (security; a polyfill/fake-timer shim is a plausible source); open
+Reviewer-executed (`f4f5-rr4/c/a17-xmod`, `a19-xmod-sideeffect`). Fix: withdraw the exemption for any name ANY module in the build withdraws.
+<!-- @gap id=g-scheduler-exemption-per-file-not-per-build sev=MED status=open locus=compiler/src/js-async-analysis.ts(schedulerNamesNotProvablyGlobal) prov=review:S441-f4f5-r4-review -->
+
+### g-scheduler-computed-reflective-global-write — non-literal computed or reflective writes onto `globalThis`/`window` (`globalThis["set"+"Timeout"]=`, `` globalThis[`setTimeout`]= ``, `globalThis[k]=`, `Object.defineProperty(globalThis,"set"+"Timeout",…)`) do not withdraw the exemption — `NEW S441` (#1163); **LOW**; open
+Fix: a non-literal-key write or reflective write onto a global object withdraws every scheduler name.
+<!-- @gap id=g-scheduler-computed-reflective-global-write sev=LOW status=open locus=compiler/src/js-async-analysis.ts(schedulerNamesNotProvablyGlobal) prov=review:S441-f4f5-r4-review -->
+
+### g-async-escape-rules-false-positives — fail-closed false positives from #1163: an object key named `setTimeout` (`{setTimeout:5}`) withdraws the exemption file-wide; a nested plain-value destructure `const {target:{value}} = event` before an await is rejected; `typeof event` after an await is rejected — `NEW S441` (#1163); **LOW**; open
+<!-- @gap id=g-async-escape-rules-false-positives sev=LOW status=open locus=compiler/src/js-async-analysis.ts prov=review:S441-f4f5-r4-review -->
 
 ## §S442 — dpa-058 (O25 renders/bind/validators) defects D1-D9 (2026-09-29; D1 fixed in impl#1 per bryan S442 ruling item 1(6); D2-D9 each re-executed on `650c47c2` in the s442-textarea-d1 worktree; probe sources = the repro lines below, compiled with `bun run compiler/src/cli.js compile <file> -o <dir>`)
 
