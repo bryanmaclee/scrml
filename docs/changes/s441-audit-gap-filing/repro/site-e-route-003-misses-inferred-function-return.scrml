@@ -1,0 +1,24 @@
+// S441 reproducer — addendum-2 S9d: E-ROUTE-003 does not fire when the non-serializable return type is INFERRED.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-e-route-003-misses-inferred-function-return.scrml --output-dir <scratch>
+// Expected: §12.5.3 "A server function MAY declare a return type with `->` … If absent, the compiler infers the
+//           return type from the body." + "Return types that are not JSON-serializable SHALL be a compile error
+//           (E-ROUTE-003 …). The non-serializable kinds are: a **function** …"
+// Actual:   exit 0, zero diagnostics. server.js: `return () => r;` inside the route, then
+//           `new Response(JSON.stringify(_scrml_result ?? null), …)` — JSON.stringify of a function is
+//           `undefined`, so the client receives `null` and `@n` silently becomes null.
+<program db="./app.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+  }
+</schema>
+function getFn() {
+    const r = ?{`SELECT name FROM users`}.all()
+    return () => r
+}
+<n> = 0
+<button onclick=${ @n = getFn() }>x</button>
+<p>${@n}</p>
+</program>

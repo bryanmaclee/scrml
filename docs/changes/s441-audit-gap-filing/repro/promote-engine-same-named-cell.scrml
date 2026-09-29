@@ -1,0 +1,15 @@
+// S441 re-verification — item 9 (existing gap g-promote-engine-same-named-cell-no-lift).
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js promote --engine docs/changes/s441-audit-gap-filing/repro/promote-engine-same-named-cell.scrml --dry-run
+// Expected: §56.6 — `--engine` lifts the <match> to an active <engine>.
+// Actual:   exit 1: `failed … rewritten source failed to compile — file left untouched:
+//           E-ENGINE-VAR-DUPLICATE: engine variable `door` collides with a separately-declared state cell <door>`.
+//           Fails safe (file untouched); the idiomatic separately-declared cell is exactly the shape that fails.
+<program>
+type Door:enum = { Closed, Open }
+<door>: Door = .Closed
+<match for=Door on=@door>
+    <Closed rule=.Open><button onclick={ @door = .Open }>Open</button></>
+    <Open rule=.Closed><button onclick={ @door = .Closed }>Close</button></>
+</match>
+</program>

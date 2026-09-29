@@ -1,0 +1,24 @@
+// S441 reproducer — addendum-4 R3: `!{}` on a cell assignment inside a `when @x changes` body is dropped with only a
+// "statement boundary not detected" warning.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/error-handler-in-when-body-dropped.scrml --output-dir <scratch>
+// Expected: §19 handler lowering, as in a `function` body.
+// Actual:   see the gap.
+<program>
+type LoadError:enum = { Boom(msg: string) }
+<n> = 0
+<out>: number = 0
+<seen>: string = ""
+function risky(n: number)! LoadError {
+    if (n < 0) { fail LoadError.Boom("neg") }
+    return n * 3
+}
+when @n changes {
+    @out = risky(@n) !{
+        | .Boom(m) :> { @seen = "boom"; return }
+    }
+    @seen = "w:" + @out
+}
+<button onclick=${@n = @n + 1}>b</button>
+<p>${@seen}</p>
+</program>

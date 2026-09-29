@@ -1,0 +1,25 @@
+// S441 reproducer — addendum-5 P7: a server-side `fail A.Y("missing")` ships the single-field payload RAW, while the
+// client handler reads it FIELD-KEYED.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/failable-single-field-payload-shape-mismatch.scrml --output-dir <scratch>
+// Expected: the handler arm `.Y(m)` binds m = "missing".
+// Actual:   exit 0. server.js: `return { __scrml_error: true, type: "A", variant: "Y", data: "missing" };`
+//           client.js: `const m = _scrml__scrml_result_6.data.msg;` → `"missing".msg` → undefined; @out is set to
+//           undefined. (A live S441 agent is fixing this.)
+<program db="t.db">
+<schema>
+    t { id: integer primary key }
+</>
+type A:enum = { X, Y(msg: string) }
+<out> = ""
+function f(n: number) ! A {
+    const r = ?{`SELECT id FROM t WHERE id = ${n}`}.get()
+    if (r is not) fail A.Y("missing")
+    return 1
+}
+function run() {
+    f(1) !{ | .Y(m) :> { @out = m } | _ :> { @out = "o" } }
+}
+<button onclick=run()>go</button>
+<p>${@out}</p>
+</program>

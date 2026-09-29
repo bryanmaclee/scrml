@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `edb36d565` — Merge branch 'worktree-agent-a6e146f20b188f650' into wrap/s440 — **LOCAL-ONLY**
+- `cf62b4154` — wrap(s440): a JS gotcha gauntlet and four deep-dives turned into ~100 rulings (#1140) — **pushed**
 - `d79d461d4` — wrap(s439): the bootstrap got a typer and its first corpus grade, and a grade is only evidence if breaking the thing breaks it (#1124) — **pushed**
 - `d1df3c64c` — wrap(s438): five landed on green, three hold refs, and every fix re-created its class one level away until a stop condition ended it (#1121) — **pushed**
 - `88a75073c` — wrap(s437): the bootstrap's first slice held its design claim, dpa-051 ruled, §66 rulings written after two PA restatements were caught widening them (#1110) — **pushed**

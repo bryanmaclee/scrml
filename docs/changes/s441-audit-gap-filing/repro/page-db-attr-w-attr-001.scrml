@@ -1,0 +1,20 @@
+// S441 reproducer — item 14: `db=` (and `ratelimit=`) on <page> is SPEC-sanctioned but unimplemented.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/page-db-attr-w-attr-001.scrml --output-dir <scratch>
+// Expected: SPEC §4.15 (SPEC.md:~1097) + §40.8 (SPEC.md:~24205): "The five per-route attributes are
+//           `db=`, `auth=`, `csrf=`, `ratelimit=`, `keep-alive`" — db= accepted and scoping the page's `?{}`.
+// Actual:   exit 1. `warning [W-ATTR-001]: Attribute `db=` is not recognized on `<page>`. It is currently
+//           forwarded to the rendered HTML as-is and has no compile-time effect.` (same for `ratelimit=`), then
+//           `error [E-SQL-004]: a `?{}` SQL block has no `db=` declaration in any ancestor `<program>`` —
+//           the page's db= is inert. The warning is accurate about the implementation; the implementation
+//           is behind the SPEC. Registry root (traced): compiler/src/attribute-registry.js
+//           ELEMENT_ATTR_REGISTRY.set("page") omits db + ratelimit; db scopes are read only from
+//           `<program db=>` (codegen/index.ts annotateDbScopes) and `<db src=>` (emit-server.ts collectDbScopes).
+<program>
+<page db="notes.db" ratelimit="100/min">
+    function count() { return ?{`SELECT 1 AS n`}.get() }
+    <n> = 0
+    <button onclick=count()>go</button>
+    <p>${@n}</p>
+</page>
+</program>

@@ -1,0 +1,30 @@
+// S441 reproducer — addendum-2 S9b: a helper called only inside a `?{}` interpolation is not emitted server-side;
+// the route throws ReferenceError on every call.
+// Compiler SHA: cf62b4154 (origin/main at dispatch)
+// Command: bun compiler/bin/scrml.js compile docs/changes/s441-audit-gap-filing/repro/site-helper-in-sql-interpolation-missing-server-side.scrml --output-dir <scratch>
+// Expected: §12.2 Trigger 5 — "A function … called only from server-classified callers and never from a
+//           client-classified function, SHALL escalate to server by inheritance"; the helper is available to
+//           the server route that interpolates it.
+// Actual:   exit 0 with a FALSE `warning [W-DEAD-FUNCTION]` on the helper ("has no callers … will be
+//           tree-shaken"). server.js interpolates the helper call bare inside the `_scrml_sql` template, with
+//           no definition of the helper in server.js (it is emitted only into client.js).
+//           EXECUTED (imported server.js, called the route handler with a valid CSRF cookie/header pair):
+//           `ReferenceError: <helper> is not defined`. Same root as the RESOLVED
+//           g-session-not-rewritten-inside-sql-interpolation: a `?{}` interpolation is captured as raw text
+//           (rewrite.ts ~:387), so neither the call-graph walk nor the server emit sees the call.
+// NOTE: this header avoids spelling the helper's name — a comment naming it silences the W-DEAD-FUNCTION.
+<program db="./app.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+  }
+</schema>
+function norm(s: string) -> string { return s.trim().toLowerCase() }
+function find(name: string) {
+    return ?{`SELECT id, name FROM users WHERE name = ${norm(name)}`}.all()
+}
+<rows> = []
+<button onclick=${ @rows = find(" Ada ") }>x</button>
+<p>${@rows.length}</p>
+</program>

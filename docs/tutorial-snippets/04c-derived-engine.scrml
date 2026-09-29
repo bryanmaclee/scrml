@@ -1,0 +1,30 @@
+// 04c-derived-engine.scrml — a derived engine projects one enum onto another.
+
+<program>
+
+  type MarioState:enum = { Small, Big, Fire, Cape }
+  type HealthRisk:enum = { AtRisk, Safe }
+
+  <engine for=MarioState initial=.Small>
+    <Small rule=(.Big | .Fire | .Cape)></>
+    <Big   rule=(.Small | .Fire | .Cape)></>
+    <Fire  rule=(.Small | .Big | .Cape)></>
+    <Cape  rule=(.Small | .Big | .Fire)></>
+  </>
+
+  // @healthRisk is recomputed from @marioState; it cannot be written directly.
+  <engine for=HealthRisk derived=match @marioState {
+    .Small               :> .AtRisk
+    .Big | .Fire | .Cape :> .Safe
+  }>
+    <AtRisk/>
+    <Safe/>
+  </>
+
+  <div>
+    <p>Mario: ${@marioState} — risk: ${@healthRisk}</p>
+    <button onclick={ @marioState = .Big }>Mushroom</button>
+    <button onclick={ @marioState = .Small }>Hit</button>
+  </div>
+
+</program>
