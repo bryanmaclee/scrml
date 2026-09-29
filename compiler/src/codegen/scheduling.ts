@@ -981,7 +981,15 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     return injectFnBodyServerCallAwaits(code, _isPromiseCallee);
   };
 
-  const fnHasServerCalls = hasServerCallees(fnNode, routeMap, filePath, null, null);
+  // s441 F1 — a top-level whole-result server cell write (`@a = one(1)`) is a
+  // batch candidate, so it must reach the grouping path below. `hasServerCallees`
+  // (the async-colouring classifier) does not look at `state-decl` nodes; this
+  // local disjunct opens the grouping path without changing that classifier.
+  const _fileServerFnNames = clientAsyncBody ? _clientServerFnNames(routeMap, filePath) : null;
+  const fnHasServerCellWrite = !!_fileServerFnNames && _fileServerFnNames.size > 0 && body.some((st: any) =>
+    st && st.kind === "state-decl" && st.initExpr && st.initExpr.kind === "call" &&
+    st.initExpr.callee && st.initExpr.callee.kind === "ident" && _fileServerFnNames.has(st.initExpr.callee.name));
+  const fnHasServerCalls = hasServerCallees(fnNode, routeMap, filePath, null, null) || fnHasServerCellWrite;
   if (!fnHasServerCalls || !depGraph || !depGraph.nodes || depGraph.nodes.size === 0) {
     // No server calls or no dependency graph info — emit sequentially
     for (const stmt of body) {
@@ -1181,6 +1189,93 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     }
   }
 
+  // s441 F1 (§13.2: "Independent server calls in the same function body SHALL be
+  // parallelized in generated code unless there is a data dependency between
+  // them") — a WHOLE-RESULT cell write of a server call, `@a = one(1)`, is a
+  // batch member too. Until s441 it was fired as a detached IIFE, so two such
+  // writes were concurrent but unsequenced; awaiting them in place made them
+  // strictly serial. Batching restores the parallelism WITH the sequencing: the
+  // calls go into the `Promise.all`, and the writes land after it, in SOURCE
+  // ORDER, before anything that follows the batch runs.
+  //
+  // THE RULE (correctness first -- any doubt keeps the writes sequential):
+  //   - the statement is exactly `@cell = serverFn(args)` (a `state-decl`
+  //     reassignment whose init is a direct, non-optional call to one of this
+  //     file's server fns -- not an engine variable, not derived, not
+  //     debounced/throttled, no `default=`), in an async host;
+  //   - its call's arguments read no cell written by an earlier batch member
+  //     (a data dependency), and no decl member reads a cell a cell-write
+  //     member writes (it would read before the write lands);
+  //   - NO statement between the members: once a cell write is in the batch
+  //     (or is the candidate), a statement that cannot join ENDS the batch
+  //     rather than being skipped over. A skipped statement would be emitted
+  //     AFTER the batch's writes and could observe a write the source placed
+  //     after it, or have side effects of its own;
+  //   - control dependence ends the batch as it always has: `!{}`
+  //     (`guarded-expr`, whose arm may `return`), `if`/loops/`match`/`return`/
+  //     `fail`/... are `isControlFlowBoundary`, so a failable load followed by
+  //     another load stays sequential.
+  // Consequence the rule accepts (same as the const-form batch): if one call
+  // rejects, `Promise.all` rejects and NO write of the batch lands.
+  const _batchServerFnNames: Set<string> = clientAsyncBody ? _clientServerFnNames(routeMap, filePath) : new Set<string>();
+  const _engineVarNamesForBatch: Set<string> = engineVarNames ?? new Set<string>();
+  interface CellWriteBatchInfo { cell: string; callExpr: string; before: string; after: string }
+  const _cellWriteInfo = new Map<number, CellWriteBatchInfo | null>();
+  function cellWriteBatchInfo(idx: number): CellWriteBatchInfo | null {
+    if (_cellWriteInfo.has(idx)) return _cellWriteInfo.get(idx)!;
+    let info: CellWriteBatchInfo | null = null;
+    const st = body[idx] as any;
+    if (
+      _batchServerFnNames.size > 0 &&
+      st && st.kind === "state-decl" &&
+      typeof st.name === "string" && st.name.length > 0 &&
+      st.structuralForm !== true &&
+      st.isConst !== true && st.shape !== "derived" &&
+      !st.defaultExpr && !st.reactivity && !st.sqlNode &&
+      !_engineVarNamesForBatch.has(st.name) &&
+      st.initExpr && st.initExpr.kind === "call" && !st.initExpr.optional &&
+      st.initExpr.callee && st.initExpr.callee.kind === "ident" &&
+      _batchServerFnNames.has(st.initExpr.callee.name)
+    ) {
+      const code = emitLogicNode(st, emitOpts);
+      const callee = st.initExpr.callee.name as string;
+      const needle = `await ${callee}(`;
+      const at = typeof code === "string" ? code.indexOf(needle) : -1;
+      // Exactly one awaited call to the callee, and the statement is a single
+      // `_scrml_reactive_set(...)` line -- anything else stays sequential.
+      if (at >= 0 && code.indexOf(needle, at + 1) < 0 && /^\s*_scrml_reactive_set\(/.test(code) && !code.includes("\n")) {
+        let depth = 0;
+        let k = at + needle.length - 1;
+        for (; k < code.length; k++) {
+          const ch = code[k];
+          if (ch === "(") depth++;
+          else if (ch === ")") { depth--; if (depth === 0) break; }
+        }
+        if (depth === 0 && k < code.length) {
+          info = {
+            cell: st.name,
+            callExpr: code.slice(at + "await ".length, k + 1),
+            before: code.slice(0, at),
+            after: code.slice(k + 1),
+          };
+        }
+      }
+    }
+    _cellWriteInfo.set(idx, info);
+    return info;
+  }
+  // Does this statement read one of `cells`? Conservative: a reactive read of
+  // the quoted cell name anywhere in the call / init text counts.
+  function readsAnyCell(idx: number, cells: Set<string>): boolean {
+    if (cells.size === 0) return false;
+    const info = cellWriteBatchInfo(idx);
+    const text = info ? info.callExpr : extractInitExpr(body[idx] as ASTNode);
+    for (const c of cells) {
+      if (text.includes(`@${c}`) || text.includes(`_scrml_reactive_get(${JSON.stringify(c)}`)) return true;
+    }
+    return false;
+  }
+
   // Group independent statements (those with no inter-dependencies among the group)
   const visited = new Set<number>();
   let i = 0;
@@ -1199,7 +1294,12 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
     // S212 — a decl whose binding is reassigned later (a `let` accumulator)
     // also forces the group to stay size-1: a multi-member batch would const-
     // destructure it, breaking the later reassignment.
-    const seedIsNonDecl = !isDeclShapeStmt(body[i] as ASTNode) || declIsReassignedLater(body[i] as ASTNode);
+    const seedIsCellWrite = !seedIsControlFlowBoundary && cellWriteBatchInfo(i) !== null;
+    const seedIsNonDecl = !seedIsCellWrite && (!isDeclShapeStmt(body[i] as ASTNode) || declIsReassignedLater(body[i] as ASTNode));
+    // s441 F1 -- cells written by cell-write members so far, and whether any
+    // statement has been skipped (not joined) since the seed.
+    const groupWrittenCells = new Set<string>(seedIsCellWrite ? [cellWriteBatchInfo(i)!.cell] : []);
+    let skippedSinceSeed = false;
 
     for (let j = i + 1; j < body.length; j++) {
       // #165 g-batch-hoist-across-control-flow — a control-transfer statement
@@ -1227,12 +1327,21 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       // cross-server-call parallelization is declined; the write stays put. A
       // non-decl SEED likewise can't batch. (The S212 pure-DECL skip is
       // unaffected — a decl is not a non-decl, so it still `continue`s below.)
-      if (seedIsNonDecl || !isDeclShapeStmt(body[j] as ASTNode)) break;
+      // s441 F1 -- a whole-result server cell write is batch-eligible (see the
+      // rule above); it may not join across a skipped statement.
+      const candIsCellWrite = cellWriteBatchInfo(j) !== null;
+      if (seedIsNonDecl || (!candIsCellWrite && !isDeclShapeStmt(body[j] as ASTNode))) break;
+      if (candIsCellWrite && skippedSinceSeed) break;
       // S212 — a reassigned-later decl (`let acc = []`) can't be const-
       // destructured into the batch, but it is a pure binding (no observable
       // side effect), so it is SKIPPED, not a boundary — a later independent
-      // decl may still batch across it.
-      if (declIsReassignedLater(body[j] as ASTNode)) continue;
+      // decl may still batch across it. (s441 -- not across a cell write: once
+      // one is in the batch, a non-joining statement ends it.)
+      if (!candIsCellWrite && declIsReassignedLater(body[j] as ASTNode)) {
+        if (groupWrittenCells.size > 0) break;
+        skippedSinceSeed = true;
+        continue;
+      }
       // S212 — a Promise.all member may only depend on statements declared
       // BEFORE the batch (index < the seed `i`). The batch is emitted as a
       // unit at the seed's position, and all prior groups (indices < i) are
@@ -1250,9 +1359,16 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
           break;
         }
       }
+      // s441 F1 -- a data dependency on a cell a member writes (the member's
+      // write lands only after the batch) forbids joining.
+      if (independent && readsAnyCell(j, groupWrittenCells)) independent = false;
       if (independent) {
         group.push(j);
         visited.add(j);
+        if (candIsCellWrite) groupWrittenCells.add(cellWriteBatchInfo(j)!.cell);
+      } else {
+        if (groupWrittenCells.size > 0 || candIsCellWrite) break;
+        skippedSinceSeed = true;
       }
     }
 
@@ -1260,6 +1376,8 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       // Multiple independent operations — wrap in Promise.all
       const varNames: string[] = [];
       const callExprs: string[] = [];
+      // s441 F1 -- the cell writes, landed after the batch in source order.
+      const deferredWrites: string[] = [];
 
       for (const idx of group) {
         const stmt = body[idx];
@@ -1272,6 +1390,14 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
             `Move it to a server-side function or remove the client boundary.`,
             ((stmt as ASTNode).span ?? { file: filePath, start: 0, end: 0, line: 1, col: 1 }) as object,
           ));
+          continue;
+        }
+        const cw = cellWriteBatchInfo(idx);
+        if (cw) {
+          const tmp = genVar("tmp");
+          varNames.push(tmp);
+          callExprs.push(cw.callExpr);
+          deferredWrites.push(`${cw.before}${tmp}${cw.after}`);
           continue;
         }
         const code = emitLogicNode(stmt, emitOpts);
@@ -1296,6 +1422,7 @@ export function scheduleStatements(body: ASTNode[], fnNode: ASTNode, routeMap: R
       } else if (callExprs.length === 1) {
         lines.push(`const ${varNames[0]} = await ${callExprs[0]};`);
       }
+      for (const w of deferredWrites) lines.push(w);
     } else {
       // Single statement — emit with await if it has dependencies on prior statements
       const stmt = body[group[0]];

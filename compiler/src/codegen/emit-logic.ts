@@ -457,6 +457,21 @@ export interface EmitLogicOpts {
    */
   insideFunctionBody?: boolean;
   /**
+   * s441 — the statements are lowered inside a JS function WRAPPER whose own
+   * `return` is the author's `return`, although they are NOT a function body for
+   * declaration purposes (`insideFunctionBody` stays false, so a cell write keeps
+   * its `_scrml_init_set` reset thunk exactly as at top level). The one host
+   * today is the engine opener `effect=` (§51.0.H Form 3), emitted as
+   * `(function () { … })()` / `(async function () { … })()`. Read ONLY by the
+   * `!{}` lowering: a terminal arm `return` stays a real `return` out of the
+   * effect (instead of the top-level `<result> = null` rewrite, after which the
+   * effect ran on and the recovery write-back stored null into the cell), and an
+   * unhandled variant escalates with `return <result>`. Not threaded into nested
+   * blocks: a `!{}` nested in an `if` inside an effect keeps the top-level
+   * lowering (unchanged from before s441).
+   */
+  returnExitsWrapper?: boolean;
+  /**
    * C2 — Function body registry for transitive reactive-dep extraction
    * through function calls in derived-cell init expressions. Closes the
    * §6.6.3 line 2470-2482 normative gap (transitive deps recorded as if
@@ -1295,9 +1310,14 @@ function _emitInitThunkSidecar(node: any, qualifiedName: string, opts: EmitLogic
     typeof _thunkAnno === "string" &&
     isMapTypeAnnotation(_thunkAnno) &&
     _thunkAnno.trim().endsWith("@ordered");
+  // s441 — `clientAsyncBody: false`: the thunk is a SYNCHRONOUS arrow, so a
+  // server call in it must stay bare (an `await` there is a SyntaxError). The
+  // runtime's `_scrml_reset_apply` settles a thenable thunk result itself. Only
+  // reachable with `clientAsyncBody` set in a non-function-body host — the
+  // async engine opener `effect=`.
   const _thunkExprCtx: EmitExprContext = _thunkInitOrderedMap
-    ? { ..._makeExprCtx(opts), emitMapLitOrdered: true }
-    : _makeExprCtx(opts);
+    ? { ..._makeExprCtx(opts), clientAsyncBody: false, emitMapLitOrdered: true }
+    : { ..._makeExprCtx(opts), clientAsyncBody: false };
 
   // Prefer the structured `initExpr` (Phase 3 fast path); fall back to the
   // raw `init` string when only the legacy AST shape is available. Both
@@ -3127,12 +3147,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path
       // when the enclosing fn is server-bound.
-      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "do-while-stmt":
       // R25-Bug-42 (S138): thread `boundary` so SQL-bearing yield/return
       // statements inside the loop body emit via the server case "sql" path.
-      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
+      return emitDoWhileStmt(node, { declaredNames: opts.declaredNames, insideFunctionBody: opts.insideFunctionBody, boundary: opts.boundary, channelOwnedCells: opts.channelOwnedCells, serverFnNames: opts.serverFnNames, /* s441 F4 — the host-async flag travels WITH serverFnNames (the S239-F4 if-hop fix, missed on the while/do-while hops) */ clientAsyncBody: (opts as { clientAsyncBody?: boolean }).clientAsyncBody, serverFnPeerAliasNames: opts.serverFnPeerAliasNames, serverFnPeerDispatchObjs: opts.serverFnPeerDispatchObjs, syncPeerCalls: opts.syncPeerCalls, ...(opts.asyncRouteMap ? { asyncRouteMap: opts.asyncRouteMap, asyncCalleeMap: opts.asyncCalleeMap, asyncExportRegistry: opts.asyncExportRegistry, asyncFilePath: opts.asyncFilePath } : {}), ...(opts.requestIds ? { requestIds: opts.requestIds } : {}), ...(opts.mapVarNames ? { mapVarNames: opts.mapVarNames } : {}), ...(opts.setVarNames ? { setVarNames: opts.setVarNames } : {}), ...(opts.orderedMapVarNames ? { orderedMapVarNames: opts.orderedMapVarNames } : {}), ...(opts.localMapVarNames ? { localMapVarNames: opts.localMapVarNames } : {}), ...(opts.localSetVarNames ? { localSetVarNames: opts.localSetVarNames } : {}), ...(opts.localOrderedMapVarNames ? { localOrderedMapVarNames: opts.localOrderedMapVarNames } : {}) });
 
     case "break-stmt":
       return emitBreakStmt(node);
@@ -3869,7 +3889,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // result (the binding takes it) instead of an illegal return. A bare
       // `return;` (no value) becomes `resultVar = null` (canonical absence).
       const rewriteTopLevelReturn = (stmt: string): string => {
-        if (opts.insideFunctionBody) return stmt;
+        if (opts.insideFunctionBody || opts.returnExitsWrapper) return stmt;
         const m = stmt.match(/^return\b\s*([\s\S]*?)\s*;?$/);
         if (!m) return stmt;
         const val = (m[1] ?? "").trim();
@@ -3985,11 +4005,11 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           // unhandled error simply remains the value of resultVar (and of any
           // `var binding = resultVar` emitted below), which is the correct
           // top-level semantics — no statement is needed.
-          if (opts.insideFunctionBody && !opts.inDeferredBody) {
+          if ((opts.insideFunctionBody || opts.returnExitsWrapper) && !opts.inDeferredBody) {
             lines.push(`  else { return ${resultVar}; }`);
           }
         }
-      } else if (opts.insideFunctionBody && !opts.inDeferredBody) {
+      } else if ((opts.insideFunctionBody || opts.returnExitsWrapper) && !opts.inDeferredBody) {
         lines.push(`  return ${resultVar};`);
       }
 

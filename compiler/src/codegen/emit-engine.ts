@@ -1992,20 +1992,22 @@ export function emitEngineOpenerEffect(
   // `initial=` later does NOT re-run it.
   //
   // s441 (g-cell-assign-server-call-fired-detached, §13.2) — the body is a CPS
-  // host like any client function body. It is lowered as a FUNCTION body
-  // (`insideFunctionBody`) with `clientAsyncBody` + the file's server-fn names,
-  // so a server call is awaited AT ITS CALL SITE and the statements after it see
-  // the resolved value. The wrapper is `async` exactly when an `await` was
-  // emitted (the §6.7.4 `when`-body discipline, emit-logic.ts `when-effect`);
-  // a body with no server call keeps the synchronous wrapper byte-for-byte.
+  // host like any client function body. It is lowered with `clientAsyncBody` +
+  // the file's server-fn names, so a server call is awaited AT ITS CALL SITE and
+  // the statements after it see the resolved value. The wrapper is `async`
+  // exactly when an `await` was emitted (the §6.7.4 `when`-body discipline,
+  // emit-logic.ts `when-effect`). It is deliberately NOT lowered as a function
+  // body (`insideFunctionBody` stays false): a cell write in the effect keeps
+  // registering its `_scrml_init_set` reset thunk exactly as before, so a body
+  // with no server call emits byte-for-byte what it did before s441.
   // Before this, the forced-sync wrapper left every server write to the
   // post-server-fn-iife-wrap pass, which fired it DETACHED: in the README
   // flagship `@tasks = loadTasks(@userId) !{…}` resolved AFTER the following
   // `@phase = @tasks.length == 0 ? .Empty : .Editing` had already read the
-  // empty initial list, so the engine always booted to `.Empty`. Lowering as a
-  // function body also keeps an arm's `return` a real `return` out of the
-  // effect (it was rewritten to `<result> = null`, and the recovery write-back
-  // then stored that null into the cell).
+  // empty initial list, so the engine always booted to `.Empty`.
+  // `returnExitsWrapper` keeps a `!{}` arm's `return` a real `return` out of the
+  // effect (it was rewritten to `<result> = null`, the effect ran on, and the
+  // recovery write-back stored that null into the cell).
   const _effectAsyncOpts = serverFnNames && serverFnNames.size > 0
     ? { clientAsyncBody: true, serverFnNames }
     : {};
@@ -2014,7 +2016,7 @@ export function emitEngineOpenerEffect(
   if (stmts) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const logic = require("./emit-logic.ts") as { emitLogicBody: (nodes: any[], opts: any) => string[] };
-    const emitted = logic.emitLogicBody(stmts, { ...emitOpts, boundary: "client", insideFunctionBody: true, ..._effectAsyncOpts });
+    const emitted = logic.emitLogicBody(stmts, { ...emitOpts, boundary: "client", returnExitsWrapper: true, ..._effectAsyncOpts });
     for (const l of emitted) {
       _effectBody.push(`  ${l}`);
     }

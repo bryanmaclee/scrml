@@ -36,6 +36,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { compileScrml } from "../../src/api.js";
 import { run } from "../../../conformance/adapters/impl1-ts.ts";
+import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 
@@ -355,5 +356,141 @@ describe("s441 §6 — README flagship: engine opener `effect=` boots to the loa
     });
     expect(r.state.cells.phase).toEqual({ variant: "ErrorState", data: { msg: "down" } });
     expect(r.state.cells.tasks).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// s441 fix round (review F1/F2/F4)
+// ---------------------------------------------------------------------------
+
+
+/**
+ * Run with the adapter's stub fetch WRAPPED so every server call logs
+ * `start <fn>` when issued and `end <fn>` when answered (the answer is held
+ * for a few microtasks, so two concurrent calls interleave start/start/end/end
+ * and two sequential ones start/end/start/end).
+ */
+async function runLoggingCallOrder(src, steps, stub) {
+  const log = [];
+  const RE = /__ri_route_(.+?)_\d+/;
+  const origRegister = GlobalRegistrator.register.bind(GlobalRegistrator);
+  GlobalRegistrator.register = (...a) => {
+    const r = origRegister(...a);
+    let inner = globalThis.fetch;
+    Object.defineProperty(globalThis, "fetch", {
+      configurable: true,
+      get: () => inner,
+      set: (v) => {
+        inner = v && v.__s441 ? v : Object.assign(async (u, init) => {
+          const n = String(typeof u === "string" ? u : u?.url).match(RE)?.[1] ?? "?";
+          log.push("start " + n);
+          for (let i = 0; i < 5; i++) await Promise.resolve();
+          const res = await v(u, init);
+          log.push("end " + n);
+          return res;
+        }, { __s441: true });
+      },
+    });
+    return r;
+  };
+  try {
+    const r = await run(src, steps, {}, stub);
+    return { r, log };
+  } finally {
+    GlobalRegistrator.register = origRegister;
+  }
+}
+
+const BATCH = readFileSync(join(REPO, "docs/changes/s441-cell-assign-server-call-awaited/repro/parallel-batch.scrml"), "utf8");
+
+describe("s441 F1 — independent whole-result cell writes are parallelized (§13.2), dependent ones stay sequential", () => {
+  const js = clientJs(BATCH);
+
+  test("independent `@a = one(1); @b = two(2)` → one Promise.all, then the writes in source order", () => {
+    const body = fnBody(js, "indep");
+    expect(body).toMatch(/const \[(_scrml_tmp_\d+), (_scrml_tmp_\d+)\] = await Promise\.all\(\[\n\s*_scrml_fetch_one_\d+\(1\),\n\s*_scrml_fetch_two_\d+\(2\)\n\s*\]\);\n\s*_scrml_cs_reactive_set\("a", \1\);\n\s*_scrml_cs_reactive_set\("b", \2\);/);
+  });
+
+  test("execution: both calls are in flight together, and the read after the batch sees both writes", async () => {
+    const { r, log } = await runLoggingCallOrder(BATCH, [{ click: "#indep" }, { wait: "settle" }], { one: 1, two: 2 });
+    expect(log.slice(0, 2)).toEqual(["start one", "start two"]);
+    expect(r.state.cells.seen).toBe("indep:1,2");
+  });
+
+  test("data dependency (`two(@a)`), an intervening statement, a decl reading the write, a `!{}` load — all stay sequential", async () => {
+    for (const name of ["dep", "between", "declReads", "failable"]) {
+      expect(fnBody(js, name)).not.toContain("Promise.all");
+    }
+    const { r, log } = await runLoggingCallOrder(BATCH, [{ click: "#dep" }, { wait: "settle" }], { one: 5, two: 6 });
+    expect(log).toEqual(["start one", "end one", "start two", "end two"]);
+    expect(r.state.cells.seen).toBe("dep:6");
+  });
+});
+
+describe("s441 F2 — an engine opener `effect=` with no server call keeps its reset registration", () => {
+  const src = `\${
+    type Phase:enum = { Loading, Empty, Editing }
+    function grow() {
+        @tasks.push(3)
+    }
+    function doReset() {
+        reset(@tasks)
+    }
+}
+const loadTasks = () => [1, 2]
+<engine for=Phase initial=.Loading effect=\${
+    @tasks = loadTasks()
+    @phase = @tasks.length == 0 ? .Empty : .Editing
+}>
+    <Loading rule=(.Empty | .Editing)>Loading…</>
+    <Empty rule=.Loading>None.</>
+    <Editing rule=.Loading>\${@tasks.length} tasks</>
+</>
+<program>
+<button id="grow" onclick=grow()>g</>
+<button id="rst" onclick=doReset()>r</>
+<p id="count">Tasks: \${@tasks.length}</>
+</program>
+`;
+  test("the synchronous wrapper registers the init thunk; reset(@tasks) restores [1, 2]", async () => {
+    const js = clientJs(src);
+    expect(js).toContain(`(function () {`);
+    expect(js).toMatch(/_scrml_cs_init_set\("tasks", \(\) => _scrml_loadTasks_\d+\(\)\);|_scrml_cs_init_set\("tasks", \(\) => loadTasks\(\)\);/);
+    const r = await run(src, [{ click: "#grow" }, { wait: "settle" }, { click: "#rst" }, { wait: "settle" }], {}, {});
+    expect(r.state.cells.tasks).toEqual([1, 2]);
+  });
+});
+
+describe("s441 F4 — `while` / `do…while` bodies in an async function await in place", () => {
+  const src = `\${
+    <out> : number = 0
+    <seen> : string = ""
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    function w() {
+        let i = 0
+        while (i < 2) { @out = double(i); i = i + 1 }
+        @seen = "w:" + @out
+    }
+    function d() {
+        let i = 0
+        do { @out = double(i); i = i + 1 } while (i < 2)
+        @seen = "d:" + @out
+    }
+}
+<button id="w" onclick=w()>w</>
+<button id="d" onclick=d()>d</>
+<p>\${@seen}</>
+`;
+  test("no detached write in either loop; the read after the loop sees the last write", async () => {
+    const js = clientJs(src);
+    expect(fnBody(js, "w")).toMatch(/_scrml_cs_reactive_set\("out", await _scrml_fetch_double_\d+\(i\)\);/);
+    expect(fnBody(js, "d")).toMatch(/_scrml_cs_reactive_set\("out", await _scrml_fetch_double_\d+\(i\)\);/);
+    expect(js).not.toMatch(DETACHED);
+    const r1 = await run(src, [{ click: "#w" }, { wait: "settle" }], {}, { double: 5 });
+    expect(r1.state.cells.seen).toBe("w:5"); // pre-fix: "w:0"
+    const r2 = await run(src, [{ click: "#d" }, { wait: "settle" }], {}, { double: 5 });
+    expect(r2.state.cells.seen).toBe("d:5");
   });
 });

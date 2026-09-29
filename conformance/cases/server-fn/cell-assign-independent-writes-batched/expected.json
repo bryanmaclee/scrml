@@ -1,0 +1,15 @@
+{
+  "id": "server-fn-cell-assign-independent-writes-batched",
+  "description": "§13.2 — two independent whole-result cell writes of server calls, `@a = one(1); @b = two(2)`, followed by a read of both. impl#1 runs the two calls concurrently (a Promise.all batch) and lands the writes in source order before the read, so #indep yields `indep:7,7` with the stub answering 7 for both fns. The observable contract pinned here is the SEQUENCING half (the read sees both writes); whether the calls overlap is timing, which this harness does not observe.",
+  "language-version": "1.0",
+  "spec": "§13.2",
+  "rationale": "§13.2: \"Independent server calls in the same function body SHALL be parallelized in generated code unless there is a data dependency between them\" and dependent operations SHALL be sequenced with `await`. The read `@seen = … @a … @b` depends on both writes, so it must observe both resolved values whatever the scheduling of the two calls.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#indep" }, { "wait": "settle" }],
+    "serverStub": { "one": 7, "two": 7 },
+    "state": { "a": 7, "b": 7, "seen": "indep:7,7" },
+    "domAnchored": [{ "selector": "#seen", "text": "indep:7,7" }]
+  }
+}
