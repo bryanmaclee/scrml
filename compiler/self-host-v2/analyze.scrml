@@ -167,6 +167,7 @@ ${
         ESpread(ws: SpreadWrite[], inst: Sym, snap: Sym, fields: SnapField[]), // a spread assignment: FieldAt edits (O58 (b)); the instance + snapshot locals
         EReset(w: WriteFact, decl: Sym, idx: int),        // reset(@x): a replace with x's initializer (L4)
         EAssignLocal(sym: Sym),                           // a `let` local rebinding (§66.11.5)
+        EEdits(w: WriteFact, elems: AExpr[]),             // s442: `@x = [...@x, a, b]` — one edit per element (§66.11.2)
     }
     export type BindFact:enum = {
         BBind(sym: Sym),                                  // a binder: a local statement, a function
@@ -883,6 +884,9 @@ ${
             .Assign(target: t, value: v) :> exprReads(v)
             .ArrayLit(elems: es) :> listReads(es)
             .ObjectLit(props: ps) :> propReads(ps)
+            .Spread(e: x) :> exprReads(x)
+            .Index(obj: o, idx: i) :> exprReads(o).concat(exprReads(i))
+            .Lambda(params: ps2, body: b) :> exprReads(b)
             .Name(name: n) :> []
             .Num(raw: r) :> []
             .Str(v: s) :> []
@@ -938,6 +942,9 @@ ${
             .Assign(target: t) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -1106,6 +1113,9 @@ ${
             .Assign(target: t) :> []
             .ArrayLit(elems: es) :> []
             .ObjectLit(props: ps) :> []
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
         }
     }
 
@@ -1242,6 +1252,9 @@ ${
             .Assign(target: t) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -1635,6 +1648,9 @@ ${
             .Assign(target: t) :> diagX(env, e, "E-ASSIGN-POSITION", "an assignment is a statement — it cannot be used as a value", st)
             .ArrayLit(elems: es) :> resolveArray(env, e, es, expected, st)
             .ObjectLit(props: ps) :> resolveObject(env, e, ps, expected, st)
+            .Spread(e: x) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an array spread `...` is in the bootstrap only as a recognized edit shape (`@x = [...@x, e]`, §66.11.2) — Core has no spread value", st)
+            .Index(obj: o) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an index `a[i]` is in the bootstrap only as an element-field write target (dpa-052 Q3) — Core has no index read", st)
+            .Lambda(params: ps2) :> diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "an arrow function is in the bootstrap only as the argument of a recognized edit shape (`@x = @x.filter(…)`, §66.11.2) — Core has no function value", st)
         }
     }
 
@@ -1716,6 +1732,9 @@ ${
             .Assign(target: t) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -1873,6 +1892,9 @@ ${
             .Assign(target: t) :> false
             .ArrayLit(elems: es) :> false
             .ObjectLit(props: ps) :> false
+            .Spread(e: sx) :> false
+            .Index(obj: ix) :> false
+            .Lambda(params: lp) :> false
         }
     }
 
@@ -2035,6 +2057,9 @@ ${
             .Assign(target: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .ArrayLit(elems: es) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
             .ObjectLit(props: ps) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Spread(e: x) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
+            .Index(obj: o) :> noPlace(addDiag(st, env.file, t.span, "E-BOOTSTRAP-UNSUPPORTED", "writing an element `a[i]` is in the bootstrap only as an element-FIELD write (`@xs[i].f = v`, dpa-052 Q3) — Core has no position-write place"))
+            .Lambda(params: ps2) :> noPlace(addDiag(st, env.file, t.span, "E-ASSIGN-TARGET", "not a writable place"))
         }
     }
 
@@ -2165,6 +2190,9 @@ ${
             .Assign(target: t) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -2202,6 +2230,12 @@ ${
 
     // `target = value` (statement position).
     fn resolveAssign(env: Env, e: AExpr, target: AExpr, value: AExpr, st0: AS) -> AS {
+        // s442: the recognized sequence reassignment shapes (§66.11.2) and an
+        // element-field write (dpa-052 Q3).
+        const shape: int = seqEditShape(target, value)
+        if (shape > 0) return resolveSeqShape(env, e, target, value, shape, st0)
+        const ef: ElemFieldTarget | not = elemFieldTarget(target)
+        if (ef is some) return resolveElemFieldWrite(env, e, ef, value, st0)
         // `@inst = { ...@inst, f: v }` — the self-spread of an INSTANCE: field
         // edits of that instance (O58 (b)).
         if (isSelfSpread(target, value)) {
@@ -2374,6 +2408,9 @@ ${
         const k: AExprK = value.k
         return match k {
             .ObjectLit(props: ps) :> spreadsTarget(target, ps)
+            .Spread(e: x) :> false
+            .Index(obj: o) :> false
+            .Lambda(params: ps2) :> false
             .Name(name: n) :> false
             .At(name: n) :> false
             .AtItem :> false
@@ -2429,6 +2466,9 @@ ${
             .Assign(target: t) :> ""
             .ArrayLit(elems: es) :> ""
             .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
         }
     }
 
@@ -2495,6 +2535,9 @@ ${
         const k: AExprK = v.k
         return match k {
             .ObjectLit(props: ps) :> ps
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
             .Name(name: n) :> []
             .At(name: n) :> []
             .AtItem :> []
@@ -2559,11 +2602,16 @@ ${
             .Ternary(test: t) :> resolveExpr(env, e, not, st).st
             .ArrayLit(elems: es) :> resolveExpr(env, e, not, st).st
             .ObjectLit(props: ps) :> resolveExpr(env, e, not, st).st
+            .Spread(e: x) :> resolveExpr(env, e, not, st).st
+            .Index(obj: o) :> resolveExpr(env, e, not, st).st
+            .Lambda(params: ps2) :> resolveExpr(env, e, not, st).st
         }
     }
 
     fn resolveCallStmt(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st: AS) -> AS {
         if (exprName(callee) == "reset") return resolveReset(env, e, args, st)
+        const rmv: MethodCall | not = removeCall(callee)
+        if (rmv is some) return resolveRemoveCall(env, e, rmv, args, st)
         const m: MethodCall | not = methodCall(callee)
         if (m is some) return resolveEditCall(env, e, m, args, st)
         return resolveExpr(env, e, not, st).st
@@ -2593,6 +2641,9 @@ ${
             .Assign(target: t) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -2635,6 +2686,339 @@ ${
             if (x == k) return true
         }
         return false
+    }
+
+    // =========================================================================
+    // s442 — recognized sequence edit shapes (§66.11.2: "Edits … are classified
+    // at compile time, from mutating method calls AND from recognized
+    // reassignment shapes").
+    //   1  `@x = [...@x, e1, …]`   an end-append per element
+    //   2  `@x = [e1, …, ...@x]`   a front-prepend per element
+    //   3  `@x = @x.filter(λ)`     a shrink-anywhere
+    //   4  `@x = @x.map(λ)`        a position-write
+    // 0 = not a recognized shape (an unclassifiable reassignment is a replace).
+    // =========================================================================
+    fn seqEditShape(target: AExpr, value: AExpr) -> int {
+        if (placeKey(target) == "") return 0
+        const es: AExpr[] = arrayElems(value)
+        if (es.length >= 2) {
+            const first: AExpr | not = spreadInner(es[0])
+            const last: AExpr | not = spreadInner(es[es.length - 1])
+            if (countSpreads(es) == 1) {
+                if (first is some) {
+                    if (samePlaceSyntax(target, first)) return 1
+                }
+                if (last is some) {
+                    if (samePlaceSyntax(target, last)) return 2
+                }
+            }
+            return 0
+        }
+        const m: MethodCall | not = callMethod(value)
+        if (m is some) {
+            if (samePlaceSyntax(target, m.obj)) {
+                if (m.method == "filter") return 3
+                if (m.method == "map") return 4
+            }
+        }
+        return 0
+    }
+
+    fn countSpreads(es: AExpr[]) -> int {
+        let n = 0
+        for (const x of es) {
+            if (spreadInner(x) is some) n = n + 1
+        }
+        return n
+    }
+
+    fn arrayElems(e: AExpr) -> AExpr[] {
+        const k: AExprK = e.k
+        return match k {
+            .ArrayLit(elems: es) :> es
+            .Name(name: n) :> []
+            .At(name: n) :> []
+            .AtItem :> []
+            .Num(raw: r) :> []
+            .Str(v: x) :> []
+            .Bool(v: b) :> []
+            .NotLit :> []
+            .Recovered :> []
+            .Variant(name: n) :> []
+            .Member(obj: o) :> []
+            .Call(callee: c) :> []
+            .Unary(op: o) :> []
+            .Binary(op: o) :> []
+            .Ternary(test: t) :> []
+            .Assign(target: t) :> []
+            .ObjectLit(props: ps) :> []
+            .Spread(e: x) :> []
+            .Index(obj: o) :> []
+            .Lambda(params: ps) :> []
+        }
+    }
+
+    fn spreadInner(e: AExpr) -> AExpr | not {
+        const k: AExprK = e.k
+        return match k {
+            .Spread(e: x) :> x
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    // `obj.method(…)` as a value: the call's method, when its callee is a member.
+    fn callMethod(e: AExpr) -> MethodCall | not {
+        const k: AExprK = e.k
+        return match k {
+            .Call(callee: c) :> memberCall(c)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Member(obj: o) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn memberCall(c: AExpr) -> MethodCall | not {
+        const k: AExprK = c.k
+        return match k {
+            .Member(obj: o, name: n) :> methodNamed(o, n)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: x) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: t) :> not
+            .Assign(target: t) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn methodNamed(o: AExpr, n: string) -> MethodCall { return { obj: o, method: n } }
+
+    fn shapeEdit(shape: int) -> EditKind {
+        if (shape == 1) return EditKind.Append
+        if (shape == 2) return EditKind.Prepend
+        if (shape == 3) return EditKind.Anywhere
+        return EditKind.PositionWrite
+    }
+
+    fn shapeWhat(shape: int) -> string {
+        if (shape == 1) return "an end-append (§66.11.2: `@x = [...@x, e]` is the same edit as `@x.push(e)`)"
+        if (shape == 2) return "a front-prepend (`@x = [e, ...@x]`)"
+        if (shape == 3) return "a shrink-anywhere (§66.11.2: `@x = @x.filter(…)`)"
+        return "a position-write (§66.11.2: `@x = @x.map(…)`)"
+    }
+
+    fn resolveSeqShape(env: Env, e: AExpr, target: AExpr, value: AExpr, shape: int, st0: AS) -> AS {
+        const rp: RPlace = resolvePlace(env, target, st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        if (p is not) return st
+        st = writeGuards(env, p, target.span, st)
+        const f: FieldInfo = p.decl.fields[p.idx]
+        if (p.path.length > 0) return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "an edit of a sub-field sequence is not in bootstrap slice M2")
+        const edit: EditKind = shapeEdit(shape)
+        const cap: Sym | not = f.wcap
+        const isGranted: boolean = f.grants.replace || hasEditKind(f.grants.edits, edit)
+        if (!isGranted || cap is not) {
+            const isDerived: boolean = f.mode == FieldMode.Derived
+            if (isDerived) return addDiag(st, env.file, e.span, "E-DERIVED-WRITE", derivedMessage(p, f))
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + " = …` is " + shapeWhat(shape) + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
+        }
+        if (shape > 2) {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + " = @" + f.sym.hint + "." + callMethodName(value) + "(…)` is granted, but Core has no function value to lower it with (core.scrml has no lambda / host call)")
+        }
+        let elemTy: Type | not = not
+        const pt: Type | not = p.ty
+        if (pt is some) elemTy = seqElem(pt)
+        let elems: AExpr[] = []
+        for (const x of arrayElems(value)) {
+            const inner: AExpr | not = spreadInner(x)
+            if (inner is some) {
+                // the operand `...@x` reads the target itself (a read, no check)
+                st = resolveExpr(env, inner, pt, st).st
+            } else {
+                st = resolveExpr(env, x, elemTy, st).st
+                elems = elems.concat([x])
+            }
+        }
+        return addEffect(st, e.nid, EffectFact.EEdits({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }, elems))
+    }
+
+    fn callMethodName(v: AExpr) -> string {
+        const m: MethodCall | not = callMethod(v)
+        if (m is some) return m.method
+        return "?"
+    }
+
+    // `@x.shift()` / `@x.pop()` — a removal at the front / end (§66.12.2: the
+    // "where it changes" axis; `push` + `pop` = "changes at the end").
+    fn removeCall(callee: AExpr) -> MethodCall | not {
+        const m: MethodCall | not = memberCall(callee)
+        if (m is not) return not
+        if (m.method == "shift" || m.method == "pop") return m
+        return not
+    }
+
+    fn resolveRemoveCall(env: Env, e: AExpr, m: MethodCall, args: AExpr[], st0: AS) -> AS {
+        const rp: RPlace = resolvePlace(env, m.obj, st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        if (p is not) return st
+        st = writeGuards(env, p, m.obj.span, st)
+        const f: FieldInfo = p.decl.fields[p.idx]
+        let edit: EditKind = EditKind.Prepend
+        let what: string = "a removal at the front"
+        if (m.method == "pop") {
+            edit = EditKind.Append
+            what = "a removal at the end"
+        }
+        const isGranted: boolean = f.grants.replace || hasEditKind(f.grants.edits, edit)
+        if (!isGranted || f.wcap is not) {
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "." + m.method + "()` is " + what + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
+        }
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + "." + m.method + "()` is granted, but Core has no removal edit to lower it with (core.scrml EditKind)")
+    }
+
+    // `@xs[i].f = v` (dpa-052 Q3, RULED S440): an edit of field `f` at that
+    // position, judged by `f`'s own contract — not a position replace, not the
+    // `positions` permission. A field with no contract is fixed (§66.11.4).
+    type ElemFieldTarget:struct = { seq: AExpr, index: AExpr, field: string }
+
+    fn elemFieldTarget(t: AExpr) -> ElemFieldTarget | not {
+        const k: AExprK = t.k
+        return match k {
+            .Member(obj: o, name: n) :> indexedField(o, n)
+            .Name(name: n) :> not
+            .At(name: n) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: n) :> not
+            .Call(callee: c) :> not
+            .Unary(op: o) :> not
+            .Binary(op: o) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Index(obj: o) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn indexedField(o: AExpr, n: string) -> ElemFieldTarget | not {
+        const k: AExprK = o.k
+        return match k {
+            .Index(obj: s, idx: i) :> elemField(s, i, n)
+            .Name(name: x) :> not
+            .At(name: x) :> not
+            .AtItem :> not
+            .Num(raw: r) :> not
+            .Str(v: x) :> not
+            .Bool(v: b) :> not
+            .NotLit :> not
+            .Recovered :> not
+            .Variant(name: x) :> not
+            .Member(obj: x) :> not
+            .Call(callee: c) :> not
+            .Unary(op: x) :> not
+            .Binary(op: x) :> not
+            .Ternary(test: x) :> not
+            .Assign(target: x) :> not
+            .ArrayLit(elems: es) :> not
+            .ObjectLit(props: ps) :> not
+            .Spread(e: x) :> not
+            .Lambda(params: ps) :> not
+        }
+    }
+
+    fn elemField(s: AExpr, i: AExpr, n: string) -> ElemFieldTarget { return { seq: s, index: i, field: n } }
+
+    fn resolveElemFieldWrite(env: Env, e: AExpr, ef: ElemFieldTarget, value: AExpr, st0: AS) -> AS {
+        const rp: RPlace = resolvePlace(env, ef.seq, st0)
+        let st: AS = rp.st
+        const p: WPlace | not = rp.place
+        if (p is not) return st
+        st = writeGuards(env, p, ef.seq.span, st)
+        st = resolveExpr(env, ef.index, Type.Int, st).st
+        const f: FieldInfo = p.decl.fields[p.idx]
+        let elem: Type | not = not
+        const pt: Type | not = p.ty
+        if (pt is some) elem = seqElem(pt)
+        let target: FieldDef | not = not
+        let owner: string = ""
+        if (elem is some) {
+            const s: Sym | not = namedOf(elem)
+            if (s is some) {
+                const ti: TypeInfo | not = typeInfoOf(env.g.types, s)
+                if (ti is some) {
+                    const fs: FieldDef[] | not = structFieldDefs(ti.def)
+                    if (fs is some) {
+                        owner = s.hint
+                        for (const fd of fs) {
+                            if (fd.sym.hint == ef.field) target = fd
+                        }
+                    }
+                }
+            }
+        }
+        if (owner == "") return addDiag(st, env.file, e.span, "E-ASSIGN-TARGET", "`@" + f.sym.hint + "[…]." + ef.field + "` — the elements of `@" + f.sym.hint + "` are not structs")
+        if (target is not) return addDiag(st, env.file, e.span, "E-SCOPE-001", "`" + owner + "` has no field `" + ef.field + "`")
+        st = resolveExpr(env, value, target.ty, st).st
+        const fieldGranted: boolean = target.grants.replace || target.grants.edits.length > 0
+        if (!fieldGranted) {
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "[…]." + ef.field + " = …` is an edit of `" + owner + "." + ef.field + "`, which carries no contract — it is fixed (§66.11.4; an element-field write is judged by that field's own contract, dpa-052 Q3)")
+        }
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + "[…]." + ef.field + " = …` is granted by `" + owner + "." + ef.field + "`'s contract, but a Core place has no index step to write it through (core.scrml FieldRef)")
     }
 
     fn resolveBlock(env: Env, b: ABlock, st0: AS) -> AS {
@@ -3897,6 +4281,7 @@ ${
             .ESpread(ws: ws) :> ws
             .EReset(w: w) :> []
             .EAssignLocal(sym: s) :> []
+            .EEdits(w: w) :> [oneWrite(w)]
             not :> []
         }
     }
@@ -3909,6 +4294,7 @@ ${
             .EWrite(w: w) :> false
             .ESpread(ws: ws) :> false
             .EAssignLocal(sym: s) :> false
+            .EEdits(w: w) :> false
             not :> false
         }
     }
@@ -3920,6 +4306,7 @@ ${
             .EWrite(w: w) :> not
             .ESpread(ws: ws) :> not
             .EReset(w: w) :> not
+            .EEdits(w: w) :> not
             not :> not
         }
     }
@@ -4062,6 +4449,9 @@ ${
             .Assign(target: x) :> -1
             .ArrayLit(elems: es) :> -1
             .ObjectLit(props: ps) :> -1
+            .Spread(e: sx) :> -1
+            .Index(obj: ix) :> -1
+            .Lambda(params: lp) :> -1
         }
     }
 
@@ -4135,6 +4525,9 @@ ${
             .Assign(target: x, value: v) :> rvt(VType.Unknown, typeExpr(env, v, ts).ts)
             .ArrayLit(elems: es) :> typeArray(env, es, ts)
             .ObjectLit(props: ps) :> rvt(valueType(vf), typePropValues(env, ps, ts))
+            .Spread(e: x) :> rvt(VType.Unknown, typeExpr(env, x, ts).ts)
+            .Index(obj: o, idx: i) :> rvt(VType.Unknown, typeExpr(env, i, typeExpr(env, o, ts).ts).ts)
+            .Lambda(params: ps2) :> rvt(VType.Unknown, ts)
         }
     }
 
@@ -4342,11 +4735,17 @@ ${
             .Ternary(test: x) :> typeExpr(env, e, ts).ts
             .ArrayLit(elems: es) :> typeExpr(env, e, ts).ts
             .ObjectLit(props: ps) :> typeExpr(env, e, ts).ts
+            .Spread(e: x) :> typeExpr(env, e, ts).ts
+            .Index(obj: o) :> typeExpr(env, e, ts).ts
+            .Lambda(params: ps2) :> typeExpr(env, e, ts).ts
         }
     }
 
     fn typeAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ts0: TypeState) -> TypeState {
         const f: EffectFact | not = effectFact(env.t.effects, e.nid)
+        // s442: a recognized append / prepend shape — each ELEMENT is the written value
+        const ed: EditsOf | not = editsOf(f)
+        if (ed is some) return typeEditsAssign(env, e, target, value, ed, ts0)
         const ws: SpreadWrite[] = effectWrites(f)
         const ps: AProp[] = propsOf(value)
         if (ws.length > 0 && ws[0].prop >= 0) {
@@ -4389,6 +4788,31 @@ ${
         return record(ts2, e.nid, VType.Unknown)
     }
 
+    // s442 — `@x = [...@x, a, b]`: the array is typed as a value, then each
+    // element is checked as the edit's written value (the element type).
+    type EditsOf:struct = { w: WriteFact, elems: AExpr[] }
+
+    fn editsOf(f: EffectFact | not) -> EditsOf | not {
+        return match f {
+            .EEdits(w: w, elems: es) :> editsPair(w, es)
+            .EWrite(w: w) :> not
+            .ESpread(ws: ws) :> not
+            .EReset(w: w) :> not
+            .EAssignLocal(sym: s) :> not
+            not :> not
+        }
+    }
+
+    fn editsPair(w: WriteFact, es: AExpr[]) -> EditsOf { return { w: w, elems: es } }
+
+    fn typeEditsAssign(env: TEnv, e: AExpr, target: AExpr, value: AExpr, ed: EditsOf, ts0: TypeState) -> TypeState {
+        let ts: TypeState = typePlace(env, target, VType.Unknown, typeExpr(env, value, ts0).ts)
+        for (const x of ed.elems) {
+            ts = checkWrite(env, ed.w, exprType0(ts, x.nid), x, "an element of this sequence", ts)
+        }
+        return record(ts, e.nid, VType.Unknown)
+    }
+
     // A write target (a PLACE): recorded with the type the place holds; the
     // instance / struct it is reached through typed as a value.
     fn typePlace(env: TEnv, target: AExpr, placeType: VType, ts: TypeState) -> TypeState {
@@ -4418,6 +4842,9 @@ ${
             .Assign(target: x) :> not
             .ArrayLit(elems: es) :> not
             .ObjectLit(props: ps) :> not
+            .Spread(e: sx) :> not
+            .Index(obj: ix) :> not
+            .Lambda(params: lp) :> not
         }
     }
 
@@ -4466,6 +4893,9 @@ ${
         const k: AExprK = e.k
         return match k {
             .ObjectLit(props: ps) :> checkObjFields(env, e, ps, ts)
+            .Spread(e: x) :> ts
+            .Index(obj: o) :> ts
+            .Lambda(params: ps2) :> ts
             .ArrayLit(elems: es) :> checkLitList(env, es, ts)
             .Ternary(test: x, yes: y, no: n) :> checkLitFields(env, n, checkLitFields(env, y, ts))
             .Name(name: n) :> ts
