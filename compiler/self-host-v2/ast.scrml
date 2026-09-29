@@ -54,6 +54,13 @@ ${
         Assign(target: AExpr, value: AExpr),         // statement position only (analyze checks)
         ArrayLit(elems: AExpr[]),
         ObjectLit(props: AProp[]),
+        // s442 (§66.19.5): an array element `...e` (an object literal's spread is
+        // AProp.spread); `a[i]`; an arrow function `x => e` / `(a, b) => e`
+        // (expression body). Each is legal only where analyze recognizes it
+        // (an edit shape, §66.11.2) — Core has no spread, index or function value.
+        Spread(e: AExpr),
+        Index(obj: AExpr, idx: AExpr),
+        Lambda(params: string[], body: AExpr),
     }
 
     // -------------------------------------------------------------------------
@@ -136,7 +143,11 @@ ${
     }
     // A state-child (O52 ruled): a tag in a declaration body with neither an own
     // value nor a typed attribute — it names a variant of the enclosing field.
-    export type AStateChild:struct = { nid: int, span: ASpan, name: string, attrs: AAttr[] }
+    // `body` = that variant's markup (O5 RULED (1i): "a state-child's body is
+    // that variant's markup, rendered wherever the field renders"): the one
+    // Interp node of a `:`-shorthand body (§4.14, `<Idle rule=.X : "Ready">`),
+    // the children of a bare body (`<Idle rule=.X>…</>`), or none (void).
+    export type AStateChild:struct = { nid: int, span: ASpan, name: string, attrs: AAttr[], body: ANode[] }
 
     export type ADeclChild:enum = {
         ChildField(d: ADecl),

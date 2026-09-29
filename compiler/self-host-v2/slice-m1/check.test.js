@@ -26,7 +26,7 @@ function withStmts(core, stmts) {
 
 // The counter program plus a struct-typed field `pt: Point` where
 //   Point = { x: let int, y: int (no contract), z: int with a non-replace contract,
-//             w: string[free, end] (append-only: an edit grant, no `replace`) }
+//             w: string[free, append] (append-only: an edit grant, no `replace`) }
 // `ptGrants` is the resolved grant set of the program field `pt`.
 function pointCore(ptGrants) {
   const core = cores.counter();
