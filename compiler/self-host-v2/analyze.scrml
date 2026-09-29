@@ -4494,10 +4494,15 @@ ${
     // whose `T` itself does not fit is fitsType's plain Fails.)
     fn mayBeNot(x: Type, target: Type) -> boolean {
         const xi: Type | not = maybeInner(x)
+        const ti: Type | not = maybeInner(target)
         if (xi is some) {
-            if (maybeInner(target) is some) return false
+            // both optional: the outer `not` is admitted — look inside (r7 B)
+            if (ti is some) return mayBeNot(xi, ti)
             return fitsType(xi, target) != Verdict.Fails
         }
+        // an optional TARGET admits the outer `not`, not a `not` element
+        // inside (`[@o.n]` into `int[] | not`, r7 B)
+        if (ti is some) return mayBeNot(x, ti)
         const xe: Type | not = seqElem(x)
         const te: Type | not = seqElem(target)
         if (xe is some && te is some) return mayBeNot(xe, te)

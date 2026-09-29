@@ -715,12 +715,23 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     expect(inApp(O + "    function f() { let ks: int[] = [@o.n] }")).toEqual(["E-TYPE-031"]);
     expect(inApp(O + "    <ks:int[free, end]=([])/>\n    function f() { @ks.push(@o.n) }")).toEqual(["E-TYPE-031"]);
   });
-  test("r6 twins — narrowed; `T | not` into `T | not`; `not` into `T | not`; an element into `(T | not)[]`", () => {
+  // (r7 N1: the `(int | not)[]` twin is deleted — the slice parser cannot spell a parenthesized element type,
+  // so it checked nothing; the reachable optional-sequence twins are in "r7 B".)
+  test("r6 twins — narrowed; `T | not` into `T | not`; `not` into `T | not`", () => {
     const S = "    <let t:string=\"\"/>\n    type Q:struct = { let v: string | not }\n    <let q:Q=({ v: not })/>\n";
     expect(inApp(O + S + "    function f() { if (@o.v != not) { @t = @o.v } }")).toEqual([]);
     expect(inApp(O + S + "    function f() { @q.v = @o.v\n @q.v = not }")).toEqual([]);
     expect(inApp(O + "    function f() { if (@o.n != not) { let ks: int[] = [@o.n] } }")).toEqual([]);
-    expect(inApp(O + "    function f() { let ks: (int | not)[] = [@o.n] }")).not.toContain("E-TYPE-031");
+  });
+  test("r7 B — an optional-SEQUENCE target still checks its elements (`[@o.n]` into `int[] | not`)", () => {
+    expect(inApp(O + "    function f() { let ks: int[] | not = [@o.n] }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    function g(z: int[] | not) { }\n    function f() { g([@o.n]) }")).toEqual(["E-TYPE-031"]);
+    expect(inApp(O + "    <let b:bool=false/>\n    function f() { let k2: int[] | not = @b ? [@o.n] : not }")).toEqual(["E-TYPE-031"]);
+  });
+  test("r7 B twins — `not` itself into `int[] | not`; a narrowed element; present elements", () => {
+    expect(inApp(O + "    function f() { let ks: int[] | not = not }")).toEqual([]);
+    expect(inApp(O + "    function f() { if (@o.n != not) { let ks: int[] | not = [@o.n] } }")).toEqual([]);
+    expect(inApp(O + "    function g(z: int[] | not) { }\n    function f() { g([1, 2])\n g(not) }")).toEqual([]);
   });
   test("r4 (c) twins — int-typed initializers stay silent; `1e3` / `2.0` into int stay errors", () => {
     expect(inApp(CELLS + "    <let q:int=(@n * 2)/>\n    <ks:int[]=([1, 2])/>\n    function f() { let k: int = @n }")).toEqual([]);
