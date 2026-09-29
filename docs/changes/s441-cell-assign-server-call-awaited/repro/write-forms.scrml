@@ -1,0 +1,55 @@
+${
+    type Rec:struct = { v: number }
+    <out> : number = 0
+    <rec> : Rec = { v: 0 }
+    <list> : number[] = []
+    <seen> : string = ""
+    <flag> : boolean = true
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    server fn rec(n: number) : Rec {
+        return { v: n }
+    }
+    function field() {
+        @rec.v = double(5)
+        @seen = "field:" + @rec.v
+    }
+    function plusEq() {
+        @out = 1
+        @out += double(5)
+        @seen = "plusEq:" + @out
+    }
+    function spread() {
+        @list = [...@list, double(3)]
+        @seen = "spread:" + @list.length + ":" + @list[0]
+    }
+    function member() {
+        @out = rec(7).v
+        @seen = "member:" + @out
+    }
+    function inIf() {
+        if (@flag) {
+            @out = double(4)
+            @seen = "inIf:" + @out
+        }
+    }
+    function inLoop() {
+        for (let i = 0; i < 2; i = i + 1) {
+            @out = double(i + 10)
+            @seen = @seen + "loop:" + @out + ";"
+        }
+    }
+    function whole() {
+        @out = double(21)
+        @seen = "whole:" + @out
+    }
+}
+<button id="field" onclick=field()>f</>
+<button id="plusEq" onclick=plusEq()>p</>
+<button id="spread" onclick=spread()>s</>
+<button id="member" onclick=member()>m</>
+<button id="inIf" onclick=inIf()>i</>
+<button id="inLoop" onclick=inLoop()>l</>
+<button id="whole" onclick=whole()>w</>
+<p id="seen">${@seen}</>

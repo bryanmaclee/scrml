@@ -1952,6 +1952,7 @@ export function emitEngineServerSourceHydrationsForFile(fileAST: any): string[] 
 export function emitEngineOpenerEffect(
   meta: EngineMetadata,
   emitOpts: import("./emit-logic.ts").EmitLogicOpts,
+  serverFnNames: Set<string> | null = null,
 ): string[] {
   const lines: string[] = [];
   const openerEffect = meta.openerEffect;
@@ -1989,15 +1990,39 @@ export function emitEngineOpenerEffect(
   // self-contained module-init statement. Boot-only: emitted on the module-init
   // path exactly once; NOT inside any per-arm re-entry handler, so re-entering
   // `initial=` later does NOT re-run it.
-  lines.push(`(function () {`);
+  //
+  // s441 (g-cell-assign-server-call-fired-detached, §13.2) — the body is a CPS
+  // host like any client function body. It is lowered as a FUNCTION body
+  // (`insideFunctionBody`) with `clientAsyncBody` + the file's server-fn names,
+  // so a server call is awaited AT ITS CALL SITE and the statements after it see
+  // the resolved value. The wrapper is `async` exactly when an `await` was
+  // emitted (the §6.7.4 `when`-body discipline, emit-logic.ts `when-effect`);
+  // a body with no server call keeps the synchronous wrapper byte-for-byte.
+  // Before this, the forced-sync wrapper left every server write to the
+  // post-server-fn-iife-wrap pass, which fired it DETACHED: in the README
+  // flagship `@tasks = loadTasks(@userId) !{…}` resolved AFTER the following
+  // `@phase = @tasks.length == 0 ? .Empty : .Editing` had already read the
+  // empty initial list, so the engine always booted to `.Empty`. Lowering as a
+  // function body also keeps an arm's `return` a real `return` out of the
+  // effect (it was rewritten to `<result> = null`, and the recovery write-back
+  // then stored that null into the cell).
+  const _effectAsyncOpts = serverFnNames && serverFnNames.size > 0
+    ? { clientAsyncBody: true, serverFnNames }
+    : {};
+  let _effectIsAsync = false;
+  const _effectBody: string[] = [];
   if (stmts) {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const logic = require("./emit-logic.ts") as { emitLogicBody: (nodes: any[], opts: any) => string[] };
-    const emitted = logic.emitLogicBody(stmts, { ...emitOpts, boundary: "client" });
+    const emitted = logic.emitLogicBody(stmts, { ...emitOpts, boundary: "client", insideFunctionBody: true, ..._effectAsyncOpts });
     for (const l of emitted) {
-      lines.push(`  ${l}`);
+      _effectBody.push(`  ${l}`);
     }
-  } else {
+    _effectIsAsync = emitted.some((l) => /\bawait\b/.test(l));
+  }
+  lines.push(_effectIsAsync ? `(async function () {` : `(function () {`);
+  for (const l of _effectBody) lines.push(l);
+  if (!stmts) {
     // Defensive fallback — re-parse failed. Fall back to the single-expression
     // rewrite so a simple body still emits (and a malformed multi-statement
     // body surfaces a loud downstream JS parse error rather than silently
@@ -2005,7 +2030,15 @@ export function emitEngineOpenerEffect(
     const lowered = rewriteHookExprText(openerEffect);
     lines.push(`  ${lowered};`);
   }
-  lines.push(`})();`);
+  // A boot effect runs at module init and nothing awaits it, so an async one
+  // routes a rejection (a network failure in its server call) to the scrml
+  // uncaught surface instead of a bare browser `unhandledrejection` — the same
+  // backstop the module-init auto-await IIFE carries.
+  lines.push(
+    _effectIsAsync
+      ? `})().catch(_scrml_async_err => _scrml_error_boundary_log(${JSON.stringify(`${meta.varName} effect=`)}, _scrml_async_err));`
+      : `})();`,
+  );
   return lines;
 }
 
@@ -2029,7 +2062,7 @@ export function emitEngineOpenerEffect(
  * substrate engines); they also reject E-ENGINE-EFFECT-ON-DERIVED at SYM, so
  * a derived engine never reaches this emitter with a non-null openerEffect.
  */
-export function emitEngineOpenerEffectsForFile(fileAST: any): string[] {
+export function emitEngineOpenerEffectsForFile(fileAST: any, serverFnNames: Set<string> | null = null): string[] {
   const decls = collectC12EngineDecls(fileAST);
   if (decls.length === 0) return [];
   // Only build the (non-trivial) engine-aware opts if at least one engine
@@ -2064,7 +2097,7 @@ export function emitEngineOpenerEffectsForFile(fileAST: any): string[] {
   const lines: string[] = [];
   for (const decl of decls) {
     const meta = decl._record!.engineMeta!;
-    const effectLines = emitEngineOpenerEffect(meta, emitOpts);
+    const effectLines = emitEngineOpenerEffect(meta, emitOpts, serverFnNames);
     for (const l of effectLines) lines.push(l);
   }
   return lines;

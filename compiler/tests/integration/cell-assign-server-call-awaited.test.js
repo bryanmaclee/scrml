@@ -1,0 +1,359 @@
+/**
+ * cell-assign-server-call-awaited.test.js — s441 (g-cell-assign-server-call-fired-detached)
+ *
+ * SPEC §13.2: "The compiler SHALL insert `await` at every call site where a
+ * server-generated fetch call is made" and SHALL "Sequence dependent operations
+ * using `await`". RULING (S440 JS-WAT #12): `@cell = serverFn()` fired detached is
+ * fixed in impl#1 as a §13.2 conformance restoration.
+ *
+ * THE DEFECT. emit-expr already awaited a client->server call at its call site in
+ * an async host (U1), so the body arrived at emit-client's
+ * `post-server-fn-iife-wrap` pass as `_scrml_reactive_set("out", await stub(21))`
+ * — correct. That pass ABSORBED the `await` and re-emitted the site as a DETACHED
+ * `(async () => _scrml_reactive_set(…, await stub(…)))().catch(…)`, so the next
+ * statement read the pre-fetch value and successive writes raced. Every other
+ * write form (`@x.f = s()`, `@x += s()`, `[...@l, s()]`, `s().field`) was already
+ * awaited in place — only the WHOLE-RESULT form was un-done.
+ *
+ * Same mechanism, fixed together:
+ *   - the `!{}` failable cell-assign (g-failable-cell-load-fire-and-forget-stale-
+ *     read-dead-return; S435 ruling "lift") — awaited in place, so an arm's
+ *     `return` returns from the author's function and a later read sees the
+ *     resolved cell; the result binding is `let` (a value arm assigns it — the
+ *     old `const` threw "Assignment to constant variable" on the error path);
+ *   - the engine opener `effect=` (§51.0.H Form 3) — lowered as an async function
+ *     body, so the README flagship boots to `.Editing` when rows exist (it always
+ *     booted to `.Empty`);
+ *   - a `<request>` body cell reassigned in a FUNCTION no longer has the §6.7.7
+ *     settle machine spliced into that function.
+ *
+ * Where the host genuinely cannot await (a module-init statement of a classic
+ * script), the IIFE survives — that is the case it was built for.
+ */
+
+import { describe, test, expect } from "bun:test";
+import { readFileSync } from "fs";
+import { join } from "path";
+import { compileScrml } from "../../src/api.js";
+import { run } from "../../../conformance/adapters/impl1-ts.ts";
+import { mkdtempSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+
+const REPO = join(import.meta.dir, "../../..");
+
+function clientJs(src) {
+  const dir = mkdtempSync(join(tmpdir(), "s441-cell-"));
+  const file = join(dir, "app.scrml");
+  writeFileSync(file, src);
+  const result = compileScrml({ inputFiles: [file], outputDir: join(dir, "dist"), write: false });
+  expect(result.errors).toEqual([]);
+  return result.outputs.get(file).clientJs;
+}
+
+/** The body text of the emitted client function whose source name is `name`. */
+function fnBody(js, name) {
+  const re = new RegExp(`async function _scrml_${name}_\\d+\\([^)]*\\) \\{\\n([\\s\\S]*?)\\n\\}\\n`);
+  const m = js.match(re);
+  expect(m).not.toBeNull();
+  return m[1];
+}
+
+const DETACHED = /\(async \(\) => _scrml_cs_reactive_set\(/;
+
+const WRITE_FORMS = `\${
+    type Rec:struct = { v: number }
+    <out> : number = 0
+    <rec> : Rec = { v: 0 }
+    <list> : number[] = []
+    <seen> : string = ""
+    <flag> : boolean = true
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    server fn rec(n: number) : Rec {
+        return { v: n }
+    }
+    function whole() {
+        @out = double(21)
+        @seen = "whole:" + @out
+    }
+    function field() {
+        @rec.v = double(5)
+        @seen = "field:" + @rec.v
+    }
+    function plusEq() {
+        @out = 1
+        @out += double(5)
+        @seen = "plusEq:" + @out
+    }
+    function spread() {
+        @list = [...@list, double(3)]
+        @seen = "spread:" + @list.length
+    }
+    function member() {
+        @out = rec(7).v
+        @seen = "member:" + @out
+    }
+    function inIf() {
+        if (@flag) {
+            @out = double(4)
+            @seen = "inIf:" + @out
+        }
+    }
+    function inLoop() {
+        for (let i = 0; i < 2; i = i + 1) {
+            @out = double(i + 10)
+            @seen = @seen + "loop:" + @out + ";"
+        }
+    }
+}
+<button id="whole" onclick=whole()>w</>
+<button id="field" onclick=field()>f</>
+<button id="plusEq" onclick=plusEq()>p</>
+<button id="spread" onclick=spread()>s</>
+<button id="member" onclick=member()>m</>
+<button id="inIf" onclick=inIf()>i</>
+<button id="inLoop" onclick=inLoop()>l</>
+<p id="seen">\${@seen}</>
+`;
+
+describe("s441 §1 — every write form of a server call inside a function is awaited IN PLACE", () => {
+  const js = clientJs(WRITE_FORMS);
+
+  test("whole-result `@out = double(21)` — awaited in place, not a detached IIFE", () => {
+    const body = fnBody(js, "whole");
+    expect(body).toMatch(/_scrml_cs_reactive_set\("out", await _scrml_fetch_double_\d+\(21\)\);/);
+    expect(body).not.toMatch(DETACHED);
+  });
+
+  test("`@out = double(4)` inside an `if` arm — awaited in place", () => {
+    const body = fnBody(js, "inIf");
+    expect(body).toMatch(/_scrml_cs_reactive_set\("out", await _scrml_fetch_double_\d+\(4\)\);/);
+    expect(body).not.toMatch(DETACHED);
+  });
+
+  test("`@out = double(i + 10)` inside a `for` loop — awaited in place (each iteration sequenced)", () => {
+    const body = fnBody(js, "inLoop");
+    expect(body).toMatch(/_scrml_cs_reactive_set\("out", await _scrml_fetch_double_\d+\(i \+ 10\)\);/);
+    expect(body).not.toMatch(DETACHED);
+  });
+
+  test("the other write forms stay awaited in place (field / += / spread / member tail)", () => {
+    expect(fnBody(js, "field")).toMatch(/_scrml_deep_set\([^;]*await _scrml_fetch_double_\d+\(5\)\)\);/);
+    expect(fnBody(js, "plusEq")).toMatch(/_scrml_cs_reactive_get\("out"\) \+ await _scrml_fetch_double_\d+\(5\)\);/);
+    expect(fnBody(js, "spread")).toMatch(/await _scrml_fetch_double_\d+\(3\)\]\)\);/);
+    expect(fnBody(js, "member")).toMatch(/\(await _scrml_fetch_rec_\d+\(7\)\)\.v\);/);
+  });
+
+  test("no detached cell-set IIFE survives anywhere in the file (every write is in an async host)", () => {
+    expect(js).not.toMatch(DETACHED);
+  });
+});
+
+describe("s441 §2 — execution: the write lands before the next statement reads it", () => {
+  test("each write form: the statement after the write sees the resolved value", async () => {
+    const cases = [
+      ["#whole", "whole:42", 21],
+      ["#field", "field:10", 5],
+      ["#member", "member:7", null],
+      ["#inIf", "inIf:8", 4],
+    ];
+    for (const [sel, expected] of cases) {
+      const stub = sel === "#member" ? { rec: { v: 7 } } : { double: sel === "#whole" ? 42 : sel === "#field" ? 10 : 8 };
+      const r = await run(WRITE_FORMS, [{ click: sel }, { wait: "settle" }], {}, stub);
+      expect(r.state.cells.seen).toBe(expected);
+    }
+  });
+
+  test("`@out = double(1); @out = double(2); @out = @out + 100` — source order, not arrival order", async () => {
+    const src = `\${
+    <out> : number = 0
+    <final> : number = -1
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    function seq() {
+        @out = double(1)
+        @out = double(2)
+        @out = @out + 100
+        @final = @out
+    }
+}
+<button id="seq" onclick=seq()>Seq</>
+<p id="final">\${@final}</>
+`;
+    const r = await run(src, [{ click: "#seq" }, { wait: "settle" }], {}, { double: 7 });
+    // Pre-fix: final = 100 (stale 0 + 100) and out = 7 (a detached write resolved last).
+    expect(r.state.cells.final).toBe(107);
+    expect(r.state.cells.out).toBe(107);
+  });
+});
+
+const FAILABLE = `\${
+    type LoadError:enum = {
+        Boom(msg: string)
+    }
+    <out> : number = 0
+    <seen> : string = "none"
+    <after> : string = "not-run"
+    <result> : string = "init"
+    server function risky(n: number)! LoadError {
+        if (n < 0) { fail LoadError.Boom("neg") }
+        return n * 3
+    }
+    function load() {
+        @out = risky(2) !{
+            | .Boom(m) :> { @seen = "boom:" + m; return }
+        }
+        @after = "ran:" + @out
+    }
+    function recover() {
+        @result = risky(-1) !{
+            | .Boom(m) :> "recovered: " + m
+        }
+        @after = "saw " + @result
+    }
+}
+<button id="load" onclick=load()>Load</>
+<button id="recover" onclick=recover()>Recover</>
+<p id="after">\${@after}</>
+`;
+
+const BOOM = { __serverError: { type: "LoadError", variant: "Boom", data: { msg: "neg" } } };
+
+describe("s441 §3 — the `!{}` failable cell-assign (same mechanism; S435 ruling: lift)", () => {
+  test("emit: awaited in place with a `let` result binding — no IIFE around the handler", () => {
+    const body = fnBody(clientJs(FAILABLE), "load");
+    expect(body).toMatch(/let (_scrml__scrml_result_\d+) = await _scrml_fetch_risky_\d+\(2\);/);
+    expect(body).not.toMatch(/\(async \(\) => \{/);
+    // The success path writes the cell only in the `else` (never the envelope).
+    expect(body).toMatch(/\} else \{\n\s*_scrml_cs_reactive_set\("out", _scrml__scrml_result_\d+\);\n\s*\}/);
+  });
+
+  test("error path: the arm's `return` returns from the AUTHOR's function", async () => {
+    const r = await run(FAILABLE, [{ click: "#load" }, { wait: "settle" }], {}, { risky: BOOM });
+    expect(r.state.cells.seen).toBe("boom:neg");
+    expect(r.state.cells.after).toBe("not-run"); // pre-fix: "ran:0"
+    expect(r.state.cells.out).toBe(0); // the envelope never lands in the cell
+  });
+
+  test("success path: the statement after the handler reads the resolved cell", async () => {
+    const r = await run(FAILABLE, [{ click: "#load" }, { wait: "settle" }], {}, { risky: 9 });
+    expect(r.state.cells.out).toBe(9);
+    expect(r.state.cells.after).toBe("ran:9"); // pre-fix: "ran:0"
+  });
+
+  test("value-form recovery arm lands in the cell (pre-fix: `const` binding threw on the arm's assignment)", async () => {
+    const r = await run(FAILABLE, [{ click: "#recover" }, { wait: "settle" }], {}, { risky: BOOM });
+    expect(r.state.cells.result).toBe("recovered: neg");
+    expect(r.state.cells.after).toBe("saw recovered: neg");
+  });
+
+  test("module-init (no async host) keeps the IIFE, now with a `let` binding so a value arm can assign it", async () => {
+    const src = `\${
+    type LoadError:enum = {
+        Boom(msg: string)
+    }
+    server function risky(n: number)! LoadError {
+        if (n < 0) { fail LoadError.Boom("neg") }
+        return "ok"
+    }
+    @data = risky(-1) !{
+        | .Boom(m) :> "recovered: " + m
+    }
+}
+<p id="out">\${@data}</p>
+`;
+    const js = clientJs(src);
+    expect(js).toMatch(/\(async \(\) => \{\n\s*let _scrml__scrml_result_\d+ = await _scrml_fetch_risky_\d+\(-1\);/);
+    const r = await run(src, [{ wait: "settle" }], {}, { risky: BOOM });
+    expect(r.state.cells.data).toBe("recovered: neg");
+  });
+});
+
+describe("s441 §4 — module-init has no async host: the IIFE is the only legal shape and stays", () => {
+  test("a top-level `@top = double(50)` keeps the auto-await IIFE + `.catch` backstop", () => {
+    const js = clientJs(`\${
+    <top> : number = 0
+    server fn double(n: number) : number {
+        return n * 2
+    }
+    @top = double(50)
+}
+<p id="top">\${@top}</p>
+`);
+    expect(js).toMatch(/\(async \(\) => _scrml_cs_reactive_set\("top", await _scrml_fetch_double_\d+\(50\)\)\)\(\)\.catch\(_scrml_async_err => _scrml_error_boundary_log\("top", _scrml_async_err\)\);/);
+  });
+});
+
+describe("s441 §5 — a `<request>` body cell reassigned inside a function", () => {
+  const src = `<program>
+
+\${
+  server function loadValue() {
+    lift 42
+  }
+  function refresh() {
+    @data = loadValue()
+    @seen = @data
+  }
+  @seen = 0
+}
+
+<div>
+  <request id="req1">
+    \${ @data = loadValue() }
+  </>
+  <p id="out">\${@data}</p>
+  <button id="refresh" onclick=refresh()>r</button>
+</div>
+
+</program>
+`;
+  test("the function's write is awaited in place; the settle machine drives the MOUNT fetch, not the function", () => {
+    const js = clientJs(src);
+    const body = fnBody(js, "refresh");
+    expect(body).toMatch(/_scrml_cs_reactive_set\("data", await _scrml_fetch_loadValue_\d+\(\)\);/);
+    expect(body).not.toContain("_scrml_request_req1_fetch");
+    // Exactly one settle machine, at module scope.
+    expect(js.match(/async function _scrml_request_req1_fetch\(\)/g)?.length).toBe(1);
+    expect(js).toMatch(/^_scrml_request_req1_fetch\(\);$/m);
+  });
+});
+
+describe("s441 §6 — README flagship: engine opener `effect=` boots to the loaded phase", () => {
+  const src = readFileSync(join(REPO, "docs/readme-snippets/tasks-app.scrml"), "utf8");
+  const rows = [{ id: 1, text: "a", completed_at: null }, { id: 2, text: "b", completed_at: null }];
+
+  test("emit: the boot effect is an async function awaiting the load in place", () => {
+    const js = clientJs(src);
+    const m = js.match(/\/\/ §51\.0\.H Form 3 opener effect=[^\n]*\n([\s\S]*?)\n\/\/ --- ref=/);
+    expect(m).not.toBeNull();
+    const effect = m[1];
+    expect(effect.startsWith("(async function () {")).toBe(true);
+    expect(effect).toMatch(/let _scrml__scrml_result_\d+ = await _scrml_fetch_loadTasks_\d+\(/);
+    expect(effect).not.toMatch(/\(async \(\) => \{/);
+    // The arm's `return` stays a real return (it was rewritten to `<result> = null`).
+    expect(effect).not.toMatch(/_scrml__scrml_result_\d+ = null;/);
+    expect(effect).toContain(`.catch(_scrml_async_err => _scrml_error_boundary_log("phase effect=", _scrml_async_err));`);
+  });
+
+  test("rows exist -> phase is Editing (pre-fix: always Empty)", async () => {
+    const r = await run(src, [{ wait: "settle" }], {}, { loadTasks: rows });
+    expect(r.state.cells.tasks).toEqual(rows);
+    expect(r.state.cells.phase).toBe("Editing");
+  });
+
+  test("no rows -> phase is Empty", async () => {
+    const r = await run(src, [{ wait: "settle" }], {}, { loadTasks: [] });
+    expect(r.state.cells.phase).toBe("Empty");
+  });
+
+  test("Network failure -> ErrorState, and the list is left untouched (pre-fix: TypeError on the error path)", async () => {
+    const r = await run(src, [{ wait: "settle" }], {}, {
+      loadTasks: { __serverError: { type: "LoadError", variant: "Network", data: { msg: "down" } } },
+    });
+    expect(r.state.cells.phase).toEqual({ variant: "ErrorState", data: { msg: "down" } });
+    expect(r.state.cells.tasks).toEqual([]);
+  });
+});
