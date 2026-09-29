@@ -132,7 +132,7 @@ describe("more §66.20 diagnostics the subset reaches", () => {
   });
 
   test("E-WRITE-NOT-GRANTED — `reset` of a field without `replace` (L4: reset IS a replace)", () => {
-    const app = appWith("<p>x</p>", "    <audit:string[free, end]=([])/>\n    function f() { reset(@audit) }");
+    const app = appWith("<p>x</p>", "    <audit:string[free, append]=([])/>\n    function f() { reset(@audit) }");
     expect(codes(run([LIB(), app]))).toEqual(["E-WRITE-NOT-GRANTED"]);
   });
 });
@@ -570,7 +570,7 @@ renders <p class="box">\${a},\${b},\${c}</p>
     path: "n1.scrml",
     src: `${BOX}<program>
     <let n:int=0/>
-    <log:int[end]=([])/>
+    <log:int[append]=([])/>
     function stamp() -> int {
         @log.push(1)
         return 1

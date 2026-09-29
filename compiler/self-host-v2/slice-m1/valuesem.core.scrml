@@ -8,7 +8,7 @@
 // used by the §6.1 O(n)-copy measurement.
 //
 //   <program>
-//       <audit:string[free, end]=([])/>      // append-only (⚑ O10: grant spelling; ⚑ O32: `([])`)
+//       <audit:string[free, append]=([])/>      // append-only (⚑ O10: grant spelling; ⚑ O32: `([])`)
 //       <let seen:int=0/>
 //       function log() {
 //           let before = @audit              // a snapshot (§66.10)
