@@ -14439,24 +14439,63 @@ function annotateNodes(
           // already skipped by `handlerValueAsBareCall`). Same scope as the call
           // form: declared-`!` callees only, resolved through scope.
           const refName = handlerValueAsReference(value);
-          const parentTag = parent && typeof parent === "object"
-            ? (parent as Record<string, unknown>).tag
+          const parentRec = parent && typeof parent === "object"
+            ? (parent as Record<string, unknown>)
             : undefined;
+          const parentTag = parentRec ? parentRec.tag : undefined;
+          // A component root's attrs are a MERGE of its own attributes and the
+          // call site's props (component-expander stamps the declared prop names
+          // as `_componentPropNames`). A declared prop whose name starts with
+          // `on` (`<Btn onSave=risky/>`) is a callback VALUE handed to the
+          // component, not a DOM event handler — the component decides what to
+          // do with it (it may guard the call). Only a DOM event-handler attr
+          // is a handler reference (S441 review B1).
+          const declaredProps = parentRec && Array.isArray(parentRec._componentPropNames)
+            ? (parentRec._componentPropNames as unknown[])
+            : null;
+          const isDeclaredComponentProp = !!declaredProps && declaredProps.includes(attr.name);
           if (
             refName
+            && !isDeclaredComponentProp
             && parentTag !== "formFor"
             && fnCanFail.has(refName)
             && !fnCpsImplicitFailable.has(refName)
           ) {
+            // Inside an expanded component, a handler that wires a callback PROP
+            // as its raw reference (`onclick=onSave`) was substituted with the
+            // call site's value (`<Btn onSave=risky/>`); its own span points into
+            // the synthetic `file#Btn` body re-parse (line 1, col 1). Report at the
+            // CALL-SITE prop attribute instead: that is where the failable function
+            // is chosen (one diagnostic per call site; a call site passing a
+            // non-failable function is clean) and where the author can act.
+            let reportSpan = valueSpan as Span;
+            let viaProp = "";
+            const expandedFrom = parentRec && typeof parentRec._expandedFrom === "string"
+              ? (parentRec._expandedFrom as string)
+              : null;
+            if (declaredProps && expandedFrom && Array.isArray(parentRec!.attrs)) {
+              for (const a of parentRec!.attrs as ASTNodeLike[]) {
+                if (
+                  a && typeof a.name === "string" && declaredProps.includes(a.name)
+                  && handlerValueAsReference(a.value as ASTNodeLike) === refName
+                  && a.span
+                ) {
+                  reportSpan = a.span as Span;
+                  viaProp = ` (passed to component '${expandedFrom}' as prop '${a.name}', which it wires as its ` +
+                    `'${attr.name as string}' handler)`;
+                  break;
+                }
+              }
+            }
             withHandlerCheckContext(() => {
               if (isShadowedByLocalBinding(refName)) return;
               errors.push(new TSError(
                 "E-ERROR-002",
-                `E-ERROR-002: Failable function '${refName}' is passed as an event-handler reference, so the ` +
+                `E-ERROR-002: Failable function '${refName}' is passed as an event-handler reference${viaProp}, so the ` +
                 `event would call it and discard its error. Call it in a handler that handles the result ` +
                 `(e.g. '${attr.name as string}={ ${refName}() !{ | .Variant :> … } }'), or wire a function that ` +
                 `handles it. An '<errorBoundary>' does not catch errors raised in event handlers (§19.6.6).`,
-                valueSpan as Span,
+                reportSpan,
               ));
             });
           }

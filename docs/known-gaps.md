@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 175 | 4 |
-| MED | 363 | 0 |
+| MED | 365 | 0 |
 | LOW | 162 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -19821,6 +19821,28 @@ error value is discarded by the dispatcher (runtime probe: S441 review `rt/prop-
 With the same `risky()!`, `${ when @r changes { risky() } }` compiles at exit 0 while `${ on mount { risky() } }` is
 E-ERROR-002. §19.4.3 exempts neither. Split from the HIGH `?` entry above because it is a missing diagnostic on a
 reactive body, not a handler; the runtime effect was not probed.
+
+### g-failable-handler-indirect-reference-unchecked — an INDIRECT reference to a `!` function as a handler is not caught — `NEW S441 (filed; follow-up); MED; open`
+<!-- @gap id=g-failable-handler-indirect-reference-unchecked sev=MED status=open locus=compiler/src/type-system.ts(handlerValueAsReference — recognises only a bare identifier naming a declared-`!` function; no value-flow tracking of function values) prov=review:S441-e-error-002-review-r2-N2;empirical:S441-reproduced-by-compile -->
+
+The S441 reference rule (§19.4.3 "Handler references") catches a DIRECT reference (`onclick=risky`, `${risky}`,
+`{ risky }`). Measured S441, each of these compiles at exit 0 although the dispatcher calls `risky` and discards its
+error: `<fnc> = risky` + `onclick=@fnc`; `const o = { m: risky }` + `onclick=o.m`; `onclick=${ @c ? risky : plain }`;
+`const h = risky` + `onclick=h`. An imported `!` function is not recognised as failable at all (the carried §19.4.3
+gap), so its reference is unchecked too (relayed from the review; not re-executed). These are outside the ruling's
+direct-reference scope as implemented; catching them needs function-value flow (or a type-level failable marker on
+function values). Follow-up.
+
+### g-component-on-prop-leaks-as-dom-listener — a declared `on*` component prop is ALSO wired as a DOM event listener on the component root — `NEW S441 (filed; pre-existing); MED; open`
+<!-- @gap id=g-component-on-prop-leaks-as-dom-listener sev=MED status=open locus=compiler/src/component-expander.ts(the call-site attrs — declared props included — are merged onto the expanded root's `attrs`)+compiler/src/codegen/emit-event-wiring.ts(any `on*` attr on an element is wired as an event handler; `_componentPropNames` is not consulted) prov=review:S441-e-error-002-review-r2;empirical:S441-reproduced-on-branch-and-main -->
+
+`${ const Show = <p props={ onSave: function }>hi</> }` + `<Show onSave=risky/>` emits
+`data-scrml-bind-onSave="…"` on the `<p>` and `el.addEventListener("Save", _scrml_risky_N)` in client JS — the
+callback prop becomes a listener for a DOM event named `Save`. Same on origin/main. Silent wrong wiring: nothing fires
+today because no `Save` event is dispatched, but a custom event of that name would call the function (and discard a
+failable's error); the prop is also exposed in the DOM. emit-html already consults `_componentPropNames` for reactive
+value attrs (S239 finding 7); event wiring does not. The §19.4.3 check skips declared props (S441 review B1), so this
+is a codegen-only bug.
 
 ### g-component-handler-prop-in-value-position-unsubstituted — a component handler emits a raw prop name inside an `if` body, an arrow body, or a `match` statement — `NEW S440 (filed; pre-existing); MED; open`
 <!-- @gap id=g-component-handler-prop-in-value-position-unsubstituted sev=MED status=open locus=compiler/src/component-expander.ts(substituteProps — a one-statement handler value keeps its RAW text / exprNode and the leading-identifier raw rewrite does not reach into an if-statement body, an arrow body, or a match statement) prov=review:S440-final-round-N3;empirical:S440-reproduced-by-emit-both-trees -->

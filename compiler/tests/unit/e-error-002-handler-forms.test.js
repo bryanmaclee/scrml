@@ -328,12 +328,40 @@ describe("§19.4.3 (S441 \"yes on references\") — a failable function passed a
     ["an <each> row alias that shadows the failable name", `<ul><each in=@items as risky><li><button class="row" onclick=risky>x</></></each></>`],
     ["a component prop that shadows the failable name", `\${ const Btn = <button props={ risky: function } onclick=risky>go</> }\n<Btn risky=plain/>`],
     ["a reactive read is not a function reference", `<button onclick=@r>x</>`],
+    // S441 review B1 — a declared `on*` component PROP is a callback value, not a
+    // DOM handler: the call site passing a failable is not a handler reference.
+    ["an on* component prop the component HANDLES (guarded call)",
+      `\${ const Btn = <button props={ onSave: function } onclick={ onSave() !{ | .Empty :> @r = 1 } }>go</> }\n<Btn onSave=risky/>`],
+    ["an on* component prop never used as a handler",
+      `\${ const Show = <p props={ onSave: function }>hi</> }\n<Show onSave=risky/>`],
   ];
   for (const [label, body] of CLEAN) {
     test(`clean: ${label}`, () => {
       expect(count(compileBody(body).errors, "E-ERROR-002")).toBe(0);
     });
   }
+
+  test("a component that wires an on* prop as its RAW handler fires once per failable call site, at the call-site prop (N1)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "e-error-002-ref-prop-"));
+    try {
+      const file = join(dir, "case.scrml");
+      const src = HEADER +
+        "\n${ const Btn = <button props={ onSave: function } onclick=onSave>go</> }\n" +
+        "<Btn onSave=risky/>\n" +
+        "<Btn onSave=plain/>\n";
+      writeFileSync(file, src);
+      const r = compileScrml({ inputFiles: [file], write: false, outputDir: join(dir, "out"), log: () => {} });
+      const errs = (r.errors ?? []).filter((d) => d.code === "E-ERROR-002");
+      expect(errs.length).toBe(1);
+      const lines = src.split("\n");
+      const riskyLine = lines.findIndex((l) => l === "<Btn onSave=risky/>") + 1;
+      expect(errs[0].span.line).toBe(riskyLine);
+      expect(String(errs[0].span.file ?? "")).not.toContain("#Btn");
+      expect(String(errs[0].message)).toContain("as prop 'onSave'");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   test("clean: <formFor onsubmit=failable/> is exempt (the §19.6.6 / §41.14.3 submit route)", () => {
     const dir = mkdtempSync(join(tmpdir(), "e-error-002-ref-ff-"));
