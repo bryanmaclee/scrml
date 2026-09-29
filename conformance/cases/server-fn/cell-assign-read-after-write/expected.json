@@ -1,0 +1,15 @@
+{
+  "id": "server-fn-cell-assign-read-after-write",
+  "description": "§13.2 — a whole-result reactive write of a server call, `@out = double(21)`, is SEQUENCED: the next statement `@seen = @out` reads the RESOLVED value, not the pre-fetch one. The stub answers 42; after the #go click and a settle, @seen is 42. The pre-fix emit fired the write as a detached async IIFE, so @seen captured the stale initial 0 while @out became 42 only later (g-cell-assign-server-call-fired-detached).",
+  "language-version": "1.0",
+  "spec": "§13.2",
+  "rationale": "§13.2: \"The compiler SHALL insert `await` at every call site where a server-generated fetch call is made\" and SHALL \"Sequence dependent operations using `await`\". `@seen = @out` depends on the write before it, so it must observe the server call's result. The developer writes flat, synchronous-looking code; the read after the write must behave as the flat code reads.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "input": [{ "click": "#go" }, { "wait": "settle" }],
+    "serverStub": { "double": 42 },
+    "state": { "out": 42, "seen": 42 },
+    "domAnchored": [{ "selector": "#seen", "text": "42" }]
+  }
+}

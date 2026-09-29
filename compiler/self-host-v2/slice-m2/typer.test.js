@@ -132,11 +132,11 @@ describe("a scope binds each name once", () => {
   test("twin silent — one `let` per handler block", () => {
     expect(inApp("    <let n:int=0/>", "<button onclick={ let a = 1; @n = a }>x</button>")).toEqual([]);
   });
-  test("E-BOOTSTRAP-REDECLARE — a handle named like a declaration (`@dropdown` is its shared instance)", () => {
-    expect(inApp("", "<dropdown as=dropdown label=\"1\" options=([\"a\"])/>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  test("E-HANDLE-REDECLARE (ruled S442) — a handle named like a declaration (`@dropdown` is its shared instance)", () => {
+    expect(inApp("", "<dropdown as=dropdown label=\"1\" options=([\"a\"])/>")).toEqual(["E-HANDLE-REDECLARE"]);
   });
-  test("E-BOOTSTRAP-REDECLARE — a program cell named like a declaration (`@dropdown` would name both)", () => {
-    expect(inApp("    <let dropdown:int=0/>")).toEqual(["E-BOOTSTRAP-REDECLARE"]);
+  test("E-SCOPE-010 (ruled S442) — a program cell named like a declaration (`@dropdown` would name both)", () => {
+    expect(inApp("    <let dropdown:int=0/>")).toEqual(["E-SCOPE-010"]);
   });
   test("E-HANDLE-REDECLARE — two handles of one name in one `<each>` row", () => {
     expect(inApp("    type L:struct = { id: int, name: string }\n    <lines:L[]=([{ id: 1, name: \"a\" }])/>",

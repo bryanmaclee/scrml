@@ -1,0 +1,20 @@
+${
+    type E:enum = {
+        A
+        B httpStatus(404)
+        C
+    }
+    function f(x: number) ! E {
+        if (x == 1) fail E.A
+        if (x == 2) fail E.B
+        if (x == 3) fail E.C
+        return x
+    }
+    <out> = 0
+    function go() {
+        @out = f(2) !{
+            | err :> { @out = -1; return }
+        }
+    }
+}
+<button onclick=go()>${@out}</button>

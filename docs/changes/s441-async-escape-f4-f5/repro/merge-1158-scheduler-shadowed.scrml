@@ -1,0 +1,13 @@
+<program>
+<v> = "unset"
+<n> = 0
+server function count() { return 7 }
+function refresh() { @n = count() }
+function shadowed() {
+  const [setTimeout] = [(f) => f()]
+  @n = count()
+  @v = setTimeout(refresh) ? "a" : "r"
+}
+<button id="s" onclick=shadowed()>s</button>
+<p>${@n} ${@v}</p>
+</program>
