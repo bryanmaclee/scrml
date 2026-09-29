@@ -2,7 +2,7 @@ import { genVar } from "./var-counter.ts";
 import { emitStringFromTree, exprNodeContainsMemberAccess, parseExprToNode } from "../expression-parser.ts";
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "../types/ast.ts";
-import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS } from "./utils.ts";
+import { escapeHtmlAttr, VOID_ELEMENTS, HTML_BOOLEAN_ATTRS, htmlParserHonorsSelfClose } from "./utils.ts";
 import { nsId } from "./chunk-namespace.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { validateEmittedArtifact } from "./validate-emit.ts";
@@ -3754,7 +3754,18 @@ export function generateHtml(
         parts.push(` data-scrml-rcdata="${_rcdataPlaceholderId}"`);
       }
 
-      if (isSelfClosing || isVoid) {
+      // S442 D1 — a source self-close (`<textarea/>`, `<div/>`) means "no
+      // children" (§4.14 body forms; §15 "`<X/>` is equivalent to `<X></X>`"),
+      // but the browser's HTML parser IGNORES a trailing `/` on a non-void
+      // HTML-namespace element: `<textarea />` opens an escapable-raw-text
+      // element that swallows the rest of the document as text, and `<div />`
+      // reparents every following sibling. So `/>` is emitted ONLY where the
+      // parser honours it (void elements; svg/math foreign content — see
+      // `htmlParserHonorsSelfClose`). Every other self-closed element falls
+      // through to the ordinary open + (zero children) + `</tag>` path, so it
+      // is byte-identical to the explicit empty form `<tag></tag>` (incl. the
+      // `<form>` CSRF input and the if= guard bookkeeping).
+      if (isVoid || (isSelfClosing && htmlParserHonorsSelfClose(tag, markupParentStack))) {
         parts.push(" />");
         return;
       }
