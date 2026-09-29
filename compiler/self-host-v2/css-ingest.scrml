@@ -240,13 +240,10 @@ ${
     fn emptyComplex() -> ComplexSel { return { head: { parts: [] }, links: [] } }
     fn complexErr(msg: string) -> ComplexR { return { sel: emptyComplex(), err: msg } }
 
-    // impl#1 F18 (progress.md): the one-char string literal of a tilde is rewritten to
-    // "__scrml_tilde__" inside `${}` (the §32 `~` lowering reaches into string literals), so the
-    // later-sibling combinator is recognized by its char code (126).
     fn combOf(c: string) -> Combinator | not {
         if (c == ">") return Combinator.DirectChild
         if (c == "+") return Combinator.NextSibling
-        if (c.length == 1 && c.charCodeAt(0) == 126) return Combinator.LaterSibling
+        if (c == "~") return Combinator.LaterSibling
         return not
     }
 

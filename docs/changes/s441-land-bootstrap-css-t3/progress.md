@@ -1,3 +1,5 @@
 # progress — s441-land-bootstrap-css-t3
 
 - 2026-09-29 startup verified: pwd == toplevel == /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-a68d37fa845f4736c; tree clean; merge-base == origin/main == cf62b4154; bun install ok.
+- 2026-09-29 merged worktree-agent-a07d7b136031a04cd -> bff89def8. Only textual conflict: compiler/SPEC-INDEX.md (generated) -> took HEAD + regen-spec-index.ts. core.scrml / SPEC.md auto-merged (disjoint additive hunks). main never touched api.js/index.ts/hybrid.ts/pipeline-seam.ts since 7e4bc8155. FACTS regenerated; known-gaps untouched by either the branch or state.ts --write. master-list.md recent-sessions drift from state.ts reverted (PA-owned). Hook: 32341 pass / 0 fail.
+- 2026-09-29 workaround removed: css-ingest.scrml combOf now `c == "~"`. Evidence: tilde-probe.js shows compiled `_scrml_structural_eq(c, "~")`, no __scrml_tilde__ in the module; css.test.js 27/27; mutation control (`"~"`->`"?"`) fails "round-trips every shape" -> the `~` path is covered.
