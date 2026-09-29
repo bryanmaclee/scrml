@@ -64,3 +64,27 @@ base = origin/main 650c47c29 vs tip
   sample, snippet, site or flogence file newly fails.
 - I-PROTECT-STRIP-001 dropped (truthfully) on trucking app.scrml + login.scrml,
   protect-001-basic-auth.scrml, samples/login.scrml and 4 conformance cases.
+
+## Round 3 (after round-2 review LAND-WITH-NITS, gated on N1)
+- e0bfed2dc — N1 (object KEY carries provenance: `{[h]:1}`, `o[h]=v`, `m.set(h,v)`,
+  reduce index-by), N2 (lookup keyed by a protected value is protected; `.get(h[i])`),
+  predicate-method names trusted only on string-like receivers (user `.digest()`/
+  `.test()` on an object fails closed), `getTime` removed from DERIVED, N5
+  (`Object.keys(row)` clean; `scrml:data` pick/omit modelled with literal keys;
+  `export {x} from` resolved), N6 (all `Bun.*` off the allowlist), debug line has
+  `passes=`. Conformance computed-key-e006, reduce-index-by-e006.
+- 8142f7c90 — SPEC: arithmetic provenance stated as OPEN (derived in this
+  version, `x*1`/`+x` pass), keys-are-data, position-oracle / implicit-flow bound,
+  no `Bun.*`, pick/omit + re-exports.
+- d12a2c4a7 — merge origin/main f0377fbf5.
+- Probes p1-p12: remaining ships are exactly the out-of-scope set — arithmetic
+  identity on a protected number (A12 `*1`, A13 unary `+`, A22 `-0`: OPEN,
+  pending ruling), implicit branch copy (A16) and position oracles (A9/A18 —
+  N4 bound), DB round trip (F5).
+- Not fixed (fail closed, reported): X1/X1c re-export-only `c.scrml` emits NO
+  `.server.js`, so `import { nm } from "./c.server.js"` dangles; the flow treats it
+  as a host import (fails closed — E-PROTECT-006 even for the clean `nm`). That is
+  a separate emission gap (re-export-only module not emitted), not a flow bug.
+- F17 `Bun.CryptoHasher(...).digest()` now fails closed (N6: no Bun.* derivers).
+- Corpus: 2213 files vs origin/main f0377fbf5 — newly failing = only the 10
+  intentional `*-e006` cases.
