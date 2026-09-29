@@ -249,6 +249,12 @@ describe("S441 every egress sink", () => {
     // `event` / `id` are serialized OUTSIDE the redact — the whole frame is the sink.
     ["SSE event name", sseProg("{ event: u.passwordHash, data: 1 }"), sseProg('{ event: "user", data: u.name }')],
     ["channel broadcast()", channelProg("u.passwordHash"), channelProg("u")],
+    // §38.4: a channel-cell write lowers to broadcast({ __type: "__sync", __val: … }).
+    [
+      "channel-cell write (@cell = …)",
+      channelProg("u").replace("<messages> = []", '<lastHash> = ""').replace("broadcast(u)", "@lastHash = u.passwordHash"),
+      channelProg("u").replace("<messages> = []", '<lastName> = ""').replace("broadcast(u)", "@lastName = u.name"),
+    ],
     ["SSR /__serverLoad + /__mountHydrate", mountProg("u.passwordHash"), mountProg("u")],
     ["<endpoint> arm", endpointProg("u.passwordHash"), endpointProg("u")],
   ];
