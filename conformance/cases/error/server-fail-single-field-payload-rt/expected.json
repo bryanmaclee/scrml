@@ -1,0 +1,23 @@
+{
+  "id": "error-server-fail-single-field-payload-rt",
+  "description": "§19.9.1 / §19.9.4 (RUNTIME, real server bundle) — a SERVER-side `fail .Down(\"queue full\")` of a SINGLE-field variant reaches the CLIENT `!{ | ::Down(reason) :> … }` arm with `reason` bound to the payload value. The server fn is placed on the server by its `?{}` read (§12 Trigger 1); the seeded `outbox` table is empty, so it fails. Pre-fix (s441 D2) the server bundle emitted `data: \"queue full\"` (raw) while the client arm read `data.reason`, so @msg was \"down: undefined\".",
+  "language-version": "1.0",
+  "spec": "§19.9.1",
+  "source-test": "compiler/tests/integration/s441-server-fail-payload-wire.test.js",
+  "rationale": "§19.9.1: the server serializes a failure as `{ __scrml_error: true, type, variant, data: { ... } }` — the canonical `fail`-expression envelope, `.data` field-keyed. §19.9.4: \"Client code SHALL handle server function errors identically to local function errors. The serialization boundary SHALL be transparent to the developer.\" `serverDb` runs the REAL emitted server bundle (the `serverStub` directive would translate a hand-written envelope and hide the server emit). @msg is consumed by the <p> interpolation; the assertion is state-only.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "outbox": []
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "msg": "down: queue full"
+    }
+  }
+}

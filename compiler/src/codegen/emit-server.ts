@@ -13,6 +13,7 @@ import { collectChannelNodes, emitChannelServerJs, emitChannelWsHandlers, emitCh
 import { serverRewriteEmitted, setVariantFieldsForRewriter, setProtectContextForRewriter, drainProtectInfosFromRewriter, setTenantContextForRewriter, drainTenantStripsFromRewriter, drainTenantAcrossesFromRewriter, setBoolColumnsForRewriter } from "./rewrite.js";
 import { buildBoolColumnsFromFileAST, SERVER_BOOL_COERCE_HELPER } from "./bool-coerce.ts";
 import { buildVariantFieldsRegistry, emitEnumVariantObjects, emitEnumLookupTables } from "./emit-client.js";
+import { setVariantFieldsForFile } from "./emit-control-flow.ts";
 import { emitExpr, emitExprField, setServerAsyncClassifier, resetSessionValueUseErrors, drainSessionValueUseErrors, type EmitExprContext } from "./emit-expr.ts";
 import {
   readRawUnitSessionAttr,
@@ -2303,6 +2304,14 @@ export function generateServerJs(
   const { fields: _scrmlVariantFields, collisions: _scrmlVariantCollisions } =
     buildVariantFieldsRegistry(fileAST);
   setVariantFieldsForRewriter(_scrmlVariantFields, _scrmlVariantCollisions);
+  // s441 D2 — publish the SAME registry to emit-control-flow, which the `fail`
+  // emitter (emit-logic.ts:emitFailExpr) and the `!{}` / `match` payload-binding
+  // readers consult. It was set on the CLIENT pass only, so a server-side
+  // single-field `fail .V(x)` fell into the no-schema branch and put the raw
+  // value on `.data` while the client read `.data.<field>` — the §19.9.1
+  // envelope must be one shape on both sides of the wire (§19.9.4 "the
+  // serialization boundary SHALL be transparent"). Released at the bottom.
+  setVariantFieldsForFile(_scrmlVariantFields, _scrmlVariantCollisions);
 
   // §14.8.9 — arm the SERVER SQL-lowering pass to tag protected-origin `?{}`
   // SELECT results with the `_scrml_protect_tag(...)` descriptor. Released
@@ -6919,6 +6928,7 @@ export function generateServerJs(
   // will re-populate for its own pass; clearing here keeps state from leaking
   // when only the server emit runs (e.g. dry-run / partial pipelines).
   setVariantFieldsForRewriter(null, null);
+  setVariantFieldsForFile(null, null);
 
   // g-pure-module-server-emit (S207): server-import tree-shaking — prune pass.
   // Now that the full server body is assembled, decide which deferred local-

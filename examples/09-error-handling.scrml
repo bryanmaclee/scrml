@@ -78,6 +78,10 @@
     // database write never runs on the client. A real app's outbox worker
     // would pick up the queued row and deliver the email; here a zero-row
     // insert (the DB rejected the write) surfaces SubmitFailed.
+    //
+    // `.run()` returns nothing (§8.5.1), so the write outcome is read back with
+    // a `RETURNING` clause: the INSERT hands back the row it wrote, or no row
+    // at all when the database dropped the write.
     function submit(name: string, email: string, body: string) ! ContactError {
         ?{`
           CREATE TABLE IF NOT EXISTS contact_messages (
@@ -88,11 +92,12 @@
             received_at timestamp DEFAULT CURRENT_TIMESTAMP
           )
         `}.run()
-        const result = ?{`
+        const queued = ?{`
           INSERT INTO contact_messages (name, email, body)
           VALUES (${name}, ${email}, ${body})
-        `}.run()
-        if (result.changes == 0) fail .SubmitFailed("message could not be queued")
+          RETURNING id
+        `}.get()
+        if (queued is not) fail .SubmitFailed("message could not be queued")
     }
 
     // handleSubmit() is the whole lesson. Each `!{}` handler does ONE thing:

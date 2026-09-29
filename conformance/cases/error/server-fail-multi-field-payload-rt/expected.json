@@ -1,0 +1,23 @@
+{
+  "id": "error-server-fail-multi-field-payload-rt",
+  "description": "§19.9.1 / §19.9.4 (RUNTIME, real server bundle) — a SERVER-side `fail .Rejected(503, \"queue full\")` of a TWO-field variant reaches the CLIENT `!{ | ::Rejected(code, reason) :> … }` arm with both bindings resolved by field name. Pre-fix (s441 D2) the server pass had no variant field schema, so it keyed the payload positionally (`data: { _0: 503, _1: \"queue full\" }`) while the client arm read `data.code` / `data.reason`, so @msg was \"undefined (undefined)\".",
+  "language-version": "1.0",
+  "spec": "§19.9.1",
+  "source-test": "compiler/tests/integration/s441-server-fail-payload-wire.test.js",
+  "rationale": "§19.9.1: the wire envelope's `.data` is the field-keyed payload `{ ... }`, identical on both sides; §19.9.4 makes the serialization boundary transparent. Multi-field companion of error/server-fail-single-field-payload-rt: the same null server-pass schema broke both shapes (raw value for one field, `_0`/`_1` keys for several). `serverDb` runs the REAL emitted server bundle.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {
+      "outbox": []
+    },
+    "input": [
+      { "click": "#go" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "msg": "queue full (503)"
+    }
+  }
+}

@@ -1,0 +1,27 @@
+<program db="./app.db">
+${
+    type QueueError:enum = {
+        Down(reason: string)
+        Other
+    }
+
+    <msg> = "none"
+
+    // The `?{}` read places send() on the SERVER (§12 Trigger 1); an empty
+    // outbox makes it fail with a single-field payload.
+    function send() ! QueueError {
+        const rows = ?{`SELECT id FROM outbox`}.all()
+        if (rows.length == 0) fail .Down("queue full")
+    }
+
+    function go() {
+        send() !{
+            | ::Down(reason) :> { @msg = "down: " + reason; return }
+            | ::Other        :> { @msg = "other"; return }
+        }
+        @msg = "sent"
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@msg}</>
+</program>

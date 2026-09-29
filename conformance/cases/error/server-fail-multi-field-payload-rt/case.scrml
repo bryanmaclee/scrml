@@ -1,0 +1,27 @@
+<program db="./app.db">
+${
+    type QueueError:enum = {
+        Rejected(code: int, reason: string)
+        Other
+    }
+
+    <msg> = "none"
+
+    // The `?{}` read places send() on the SERVER (§12 Trigger 1); an empty
+    // outbox makes it fail with a two-field payload.
+    function send() ! QueueError {
+        const rows = ?{`SELECT id FROM outbox`}.all()
+        if (rows.length == 0) fail .Rejected(503, "queue full")
+    }
+
+    function go() {
+        send() !{
+            | ::Rejected(code, reason) :> { @msg = reason + " (" + code + ")"; return }
+            | ::Other                  :> { @msg = "other"; return }
+        }
+        @msg = "sent"
+    }
+}
+<button id="go" onclick=go()>go</>
+<p id="out">${@msg}</>
+</program>

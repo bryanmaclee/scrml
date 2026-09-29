@@ -149,11 +149,12 @@ export function setVariantFieldsForRewriter(
  *     data, so consulting it as a fallback resolves the field names on the server
  *     pass too.
  *
- * Deliberately NOT folded into `getVariantFieldSchema`: the fail-state lowering
- * (`emit-logic.ts:emitFailExpr`) and the match / `!{}` binding-projection paths
- * ALSO read `getVariantFieldSchema` and MUST keep their existing server-pass
- * behavior (a null schema → bare-value `.data`). Only the constructor call site
- * in emit-expr opts into this fallback, so those paths remain byte-identical.
+ * s441 D2 supersedes the "server pass stays null" premise above: generateServerJs
+ * now ALSO publishes the registry to `setVariantFieldsForFile`, because the
+ * null server-pass schema made `emit-logic.ts:emitFailExpr` put a single-field
+ * `fail` payload on `.data` RAW while the client read it field-keyed (§19.9.1 /
+ * §19.9.4 — one envelope shape across the wire). The two registries now carry
+ * the same data on both passes; this fallback remains for the constructor site.
  */
 export function getVariantFieldSchemaFromRewriter(variantName: string): string[] | null {
   if (!_rewriterVariantFields) return null;
