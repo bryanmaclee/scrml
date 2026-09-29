@@ -251,3 +251,16 @@ compiled clean with `s` absent from Core; item 2 — pop / shift / filter under 
 - No previously-passing pin changed. Five pre-existing programs byte-identical (dumpcore). 5 mutation rows (+1 re-sited:
   the r1 G2 row's site moved into o19Diags).
 - N1 and N4 (r2 reviewer nits): left as recorded nits, per the PA.
+
+## r2 MERGE (#1157) + FINAL
+- Pre-merge r2 tip f3005959. Merge a074fb02 (origin/main 8367a6b8 = #1157; main also carried the s440 CSS bite phase).
+  Conflicts: slice-m3/bench/bite-matrix.js (main's cg/css phase loop kept; s442 FRONT phase added — `--front` alone,
+  default runs cg + css + front) and slice-m3/bite.test.js (both judgement suites kept). analyze / lower / mutations /
+  typer tests auto-merged; no #1157 match over AExprK lacked the Spread/Index/Lambda arms. First merge-commit attempt
+  failed the pre-commit hook on the known live-Postgres hook timeout (§14.8.11 M2 db-migrate acceptance); the retry
+  passed.
+- Post-merge: one bite row (Lower.SeqEdits one-element append) was hollow — its site moved with r2 item 4 — re-sited.
+- FINAL: slice-m1 73/73 · lowered 73/73 · slice-m2 431/431 · slice-m3 60/60 · slice-m4 123 + 2 todo · lint 58 files / 0 ·
+  conformance (impl#1) 1063/1070 + 7 xfail (main grew 1054 → 1070) · footprint 18/18 runtime, 587 not-yet, 455
+  front-end · mutations 170/170 RED · bite: CG 32 + CSS 32 certified (mirrors reproduced) + FRONT 12 certified ·
+  five pre-existing programs byte-identical to base (dumpcore).

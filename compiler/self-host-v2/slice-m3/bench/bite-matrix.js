@@ -152,7 +152,7 @@ const FRONT_MUTATIONS = [
   { c: "Analyze.SeqShape", id: "`[...@x, e]` classified as the front shape (a prepend)", file: ANALYZE,
     from: "                    if (samePlaceSyntax(target, first)) return 1", to: "                    if (samePlaceSyntax(target, first)) return 2", tests: ["audit.test.js"] },
   { c: "Lower.SeqEdits", id: "a one-element append shape's write is dropped", file: LOWER,
-    from: "        if (values.length == 1) return [Stmt.Write(w.cap, target, w.edit, values[0], w.check)]", to: "        if (values.length == 1) return []", tests: ["audit.test.js"] },
+    from: "        if (values.length == 1) return pre.concat([Stmt.Write(w.cap, target, w.edit, values[0], w.check)])", to: "        if (values.length == 1) return pre", tests: ["audit.test.js"] },
   { c: "Lower.SeqEdits", id: "a prepend shape writes its elements in source order (the log would read b, a)", file: LOWER,
     from: "        const prepend: boolean = w.edit == EditKind.Prepend", to: "        const prepend: boolean = false", tests: ["audit.test.js"] },
   { c: "Parse.ArraySpread", id: "a spread element keeps only its operand's position (`[...@x, e]` read as `[e, ...@x]`)", file: PARSE,
