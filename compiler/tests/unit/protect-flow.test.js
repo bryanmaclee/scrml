@@ -185,6 +185,22 @@ describe("analyzeProtectFlow", () => {
     expect(leakCols(mod('const L = { a: { v: 1 } }; return L[u.name].v;'))).toEqual([]);
   });
 
+  test("round 4 F2: a write through an ALIAS or a helper PARAMETER lands in the shared object", () => {
+    const H = "const h = u.passwordHash; ";
+    expect(leakCols(mod(H + "const o = {}; const o2 = o; o2.x = h; return o;"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(H + "const o = {}; const o2 = o; o2[h] = 1; return Object.keys(o);"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(H + "const m = new Map(); const box = { m }; box.m.set(h, 1); return [...m.keys()];"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(H + "const arr = [{}]; const first = arr[0]; first[h] = 1; return Object.keys(arr[0]);"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(H + "const o = {}; const r = [o]; r[0].x = h; return o;"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(H + "const o = {}; setv(o, h); return o;", "function setv(o, v) { o.x = v; }"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(H + "const m = new Map(); put(m, h); return [...m.keys()];", "function put(m, k) { m.set(k, 1); }"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod(H + "const o = {}; Object.assign(o, { x: h }); return o;"))).toEqual(["passwordHash"]);
+    // An alias that is never written through stays clean.
+    expect(leakCols(mod(H + "const o = { n: u.name }; const o2 = o; return o2;"))).toEqual([]);
+    // A comparison helper does not make its operands alias (`==` is derived).
+    expect(leakCols(mod(H + 'const A = "AB"; let s = ""; for (const c of A) { if (_scrml_structural_eq(h, c)) { } s = s + c; } return s;'))).toEqual([]);
+  });
+
   test("round 3: allowlisted method NAMES on an object carrying protected data are not trusted", () => {
     expect(leakCols(mod("const o = { digest: () => u.passwordHash }; return o.digest();"))).toEqual(["passwordHash"]);
     expect(leakCols(mod("const o = { includes: (x) => u.passwordHash }; return o.includes(1);"))).toEqual(["passwordHash"]);

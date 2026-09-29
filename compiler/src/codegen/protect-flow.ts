@@ -118,10 +118,22 @@ interface Taint {
   scalar: Map<string, string>;
   deep: Map<string, string>;
   fns: Set<Closure>;
+  /**
+   * Binding CELLS this value may be the same object as (round 4, F2). A value
+   * read from a binding carries that binding's cell; binding it elsewhere, or
+   * passing it to a parameter, UNIFIES the two cells — so a write through any
+   * alias (`const o2 = o; o2.x = h`, `setv(o, h)`, `box.m.set(h, 1)`) lands in
+   * the one shared cell every alias reads.
+   */
+  refs?: Set<string>;
 }
 
 function clean(): Taint {
   return { row: null, scalar: new Map(), deep: new Map(), fns: new Set() };
+}
+
+function refsOf(t: Taint): Set<string> {
+  return t.refs ?? new Set();
 }
 
 function copyRow(r: RowPart): RowPart {
@@ -148,6 +160,10 @@ function join(...ts: Taint[]): Taint {
     mergeMap(out.scalar, t.scalar);
     mergeMap(out.deep, t.deep);
     for (const f of t.fns) out.fns.add(f);
+    if (t.refs && t.refs.size > 0) {
+      if (!out.refs) out.refs = new Set();
+      for (const r of t.refs) out.refs.add(r);
+    }
   }
   return out;
 }
@@ -162,12 +178,13 @@ function naked(t: Taint): Map<string, string> {
 
 /** The value, placed inside a fresh container (object / array literal slot). */
 function containerOf(t: Taint): Taint {
-  return { row: t.row ? copyRow(t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns) };
+  // The container HOLDS the value — if it is an object, the container reaches it.
+  return { row: t.row ? copyRow(t.row) : null, scalar: new Map(), deep: naked(t), fns: new Set(t.fns), refs: new Set(refsOf(t)) };
 }
 
 /** An element / field of the value, when WHICH one is not statically known. */
 function elemOf(t: Taint): Taint {
-  return { row: t.row ? copyRow(t.row) : null, scalar: naked(t), deep: new Map(t.deep), fns: new Set(t.fns) };
+  return { row: t.row ? copyRow(t.row) : null, scalar: naked(t), deep: new Map(t.deep), fns: new Set(t.fns), refs: new Set(refsOf(t)) };
 }
 
 /** The protected labels a row still carries (not `reveal`ed). */
@@ -188,7 +205,8 @@ function taintKey(t: Taint): string {
     ? `${[...t.row.tags].sort().join(",")}|${[...t.row.cols].sort().join(",")}|${t.row.all}|${[...t.row.revealed].sort().join(",")}`
     : "-";
   const f = [...t.fns].map((c) => c.cid).sort((a, b) => a - b).join(",");
-  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}`;
+  const a = [...refsOf(t)].sort().join(",");
+  return `${r}#${[...t.scalar.keys()].sort().join(",")}#${[...t.deep.keys()].sort().join(",")}#${f}#${a}`;
 }
 
 /** The protected part of a taint's key (no function values). */
@@ -213,6 +231,10 @@ function tainted(args: Taint[], site: string): Taint {
   const r = clean();
   for (const a of args) mergeMap(r.scalar, everything(a, site));
   r.deep = new Map(r.scalar);
+  // NOT aliased to the arguments: the result is already fail-closed (every
+  // protected label comes out naked), and aliasing it back into an argument's
+  // cell would poison that argument with the result's naked labels (measured:
+  // `const s = truncate(u, 3); return { id: u.id }` was rejected).
   return r;
 }
 
@@ -278,7 +300,8 @@ const SQL_METHODS = new Set(["unsafe"]);
 
 /** Compiler-runtime helpers the analysis models itself (never walked). */
 function isModelledHelperName(name: string): boolean {
-  return name.startsWith("_scrml_protect_") || name.startsWith("_scrml_tenant_") || name === "_scrml_active_tenant";
+  return name.startsWith("_scrml_protect_") || name.startsWith("_scrml_tenant_") || name === "_scrml_active_tenant"
+    || name === "_scrml_structural_eq";
 }
 
 interface Mod {
@@ -903,6 +926,35 @@ class FlowAnalysis {
     return null;
   }
 
+  // ---- ALIAS CLASSES (round 4, F2) ----------------------------------------
+  // Bindings that may hold the SAME object form one alias class (union-find
+  // over binding keys). What is shared by a class is only what is WRITTEN INTO
+  // the object — a container write through any alias (`o2.x = h`, `setv(o, h)`
+  // in a helper, `box.m.set(h, 1)`) lands in `classWrites` for the whole class
+  // and every alias reads it. Each binding's OWN assigned value stays its own:
+  // merging whole values would make two primitives compared by a helper
+  // (`_scrml_structural_eq(h[i], c)`) contaminate each other.
+  private classWrites = new Map<string, Taint>();
+  private cellParent = new Map<string, string>();
+  private find(k: string): string {
+    let r = k;
+    while (this.cellParent.has(r)) r = this.cellParent.get(r)!;
+    let c = k;
+    while (this.cellParent.has(c)) { const n = this.cellParent.get(c)!; this.cellParent.set(c, r); c = n; }
+    return r;
+  }
+  /** Two bindings may hold the same object: from now on they are ONE alias class. */
+  private unite(a: string, b: string): void {
+    const ra = this.find(a), rb = this.find(b);
+    if (ra === rb) return;
+    const merged = join(this.classWrites.get(ra) ?? clean(), this.classWrites.get(rb) ?? clean());
+    delete merged.refs;
+    this.cellParent.set(rb, ra);
+    this.classWrites.delete(rb);
+    this.classWrites.set(ra, merged);
+    this.changed = true;
+  }
+
   private getBinding(name: string, scope: Scope, depth = 0): Taint {
     const s = this.resolve(name, scope);
     if (!s) return clean();
@@ -910,7 +962,11 @@ class FlowAnalysis {
       const imp = s.mod.imports.get(name);
       if (imp) return this.importValue(imp, depth);
     }
-    return this.bindings.get(`${s.id}:${name}`) ?? clean();
+    const key = `${s.id}:${name}`;
+    const own = this.bindings.get(key) ?? clean();
+    const writes = this.classWrites.get(this.find(key));
+    const t = writes ? join(own, writes) : own;
+    return { ...t, refs: new Set([key]) };
   }
 
   /** The value of an imported binding: the exporting module's binding, or a host function. */
@@ -935,7 +991,7 @@ class FlowAnalysis {
     return { ...clean(), fns: new Set([c]) };
   }
 
-  private mergeBinding(name: string, scope: Scope, t: Taint): void {
+  private mergeBinding(name: string, scope: Scope, t: Taint, isWrite = false): void {
     let s = this.resolve(name, scope) ?? scope.mod.scope;
     // An assignment to an imported binding writes the exporting module's binding.
     if (s.parent === null) {
@@ -946,13 +1002,21 @@ class FlowAnalysis {
       }
     }
     const key = `${s.id}:${name}`;
-    const prev = this.bindings.get(key) ?? clean();
-    const next = join(prev, t);
+    // The value may BE another binding's object — join its alias class.
+    for (const r of refsOf(t)) this.unite(key, r);
+    const plain = { ...t };
+    delete plain.refs;
+    // A write INTO the object goes to the whole alias class; an assignment of
+    // the binding itself stays the binding's own.
+    const store = isWrite ? this.classWrites : this.bindings;
+    const slot = isWrite ? this.find(key) : key;
+    const prev = store.get(slot) ?? clean();
+    const next = join(prev, plain);
     if (taintKey(prev) !== taintKey(next)) {
-      this.bindings.set(key, next);
+      store.set(slot, next);
       this.changed = true;
-    } else if (!this.bindings.has(key)) {
-      this.bindings.set(key, next);
+    } else if (!store.has(slot)) {
+      store.set(slot, next);
     }
   }
 
@@ -1204,7 +1268,7 @@ class FlowAnalysis {
   private mutateRoot(expr: any, t: Taint, scope: Scope): void {
     let e = expr;
     while (e && (e.type === "MemberExpression" || e.type === "ChainExpression")) e = e.type === "ChainExpression" ? e.expression : e.object;
-    if (e && e.type === "Identifier") this.mergeBinding(e.name, scope, t);
+    if (e && e.type === "Identifier") this.mergeBinding(e.name, scope, t, true);
   }
 
   // -------------------------------------------------------- expressions
@@ -1241,6 +1305,11 @@ class FlowAnalysis {
     // A property of a primitive is derived; a CHARACTER of it is not.
     if (o.scalar.size > 0 && (dynamic || numeric)) mergeMap(r.scalar, o.scalar);
     for (const f of o.fns) r.fns.add(f);
+    // The read may yield an object REACHABLE from `o` (`arr[0]`, `box.m`) — it
+    // aliases into `o`'s cell. A named column read off a row is a primitive and
+    // does not (a row column cannot alias its row).
+    const namedColumnOffRow = o.row !== null && !dynamic && !numeric && o.deep.size === 0;
+    if (!namedColumnOffRow && refsOf(o).size > 0) r.refs = new Set(refsOf(o));
     return r;
   }
 
@@ -1521,12 +1590,20 @@ class FlowAnalysis {
         if (v.row && col !== null) {
           const row = copyRow(v.row);
           row.revealed.add(col);
-          return { ...v, row };
+          return { ...v, row, refs: undefined }; // reveal returns a NEW object (no alias)
         }
         return v;
       }
       if (name === "_scrml_protect_redact") {
         this.sink(args[0] ?? clean(), fn, "redact");
+        return clean();
+      }
+      if (name === "_scrml_structural_eq") {
+        // scrml's `==` / `!=` on non-primitive operands lowers to this runtime
+        // helper. It is a COMPARISON — a derived boolean, exactly like `==` —
+        // and it is modelled as one rather than walked: its internals put both
+        // operands into shared memo structures, which the alias analysis would
+        // (soundly but uselessly) read as the two operands aliasing each other.
         return clean();
       }
       if (isModelledHelperName(name)) {
@@ -1593,7 +1670,7 @@ class FlowAnalysis {
         if (col !== null) {
           const row = copyRow(recv.row);
           row.revealed.add(col);
-          return { ...recv, row };
+          return { ...recv, row, refs: undefined }; // a new object (no alias)
         }
       }
 
@@ -1688,6 +1765,10 @@ class FlowAnalysis {
       const r = clean();
       for (const a of args) mergeMap(r.scalar, naked(a));
       return r;
+    }
+    if (path === "Object.assign" && node?.arguments?.[0]) {
+      // Writes every source into the TARGET object (round 4, F2).
+      this.mutateRoot(node.arguments[0], containerOf(join(...args.slice(1))), fn?.scope ?? this.curMod!.scope);
     }
     if (path === "Object.keys") {
       // A row's keys are its column NAMES, not its values. Only a container that
