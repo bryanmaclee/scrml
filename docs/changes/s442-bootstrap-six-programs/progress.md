@@ -105,8 +105,9 @@ if reached). Core-blocked constructs are implemented up to the Core boundary and
   vanished silently; analyze refuses the named shared instances `<accent:swatch …/>` (§66.8.2) where written.
   Not built: `match` in an opener value, `@mode = …` on a library top-level `let` (⚑ O39). slice-m4/theme.test.js
   pins the refusals; the run is a `test.todo`.
-- 2026-09-29 — code certification: slice-m1/bench/mutations.js gained 14 s442 rows (every new diagnostic /
-  refusal and the typer walks) — 94 mutations, 0 problems (all RED; clean mirror suite incl. slice-m4 green).
+- 2026-09-29 — code certification: slice-m1/bench/mutations.js gained 12 s442 rows (base 82 → 94; every new
+  diagnostic / refusal and the typer walks) — 94 mutations, 0 problems (all RED; clean mirror suite incl. slice-m4
+  green). [CORRECTED in r1 (G4): an earlier line said 14.]
 
 ## FINAL STATE (HEAD at report time)
 
@@ -140,3 +141,45 @@ Reproduction (reviewer tests copied read-only to scratchpad/repro/, paths retarg
   E-WRITE-NOT-GRANTED, not a type error (r3); `<*status/>` at top → E-DECL-STAR-PREDEFINED "predefined (HTML)" (r10);
   duplicate `<Idle>` state-children accepted silently (r6 stateChildDup).
 - NEW RULING (bryan S442): O55 = a plain use of a `single` declaration is E-DECL-SINGLE-INSTANTIATED.
+
+### r1 fixes (per finding — each has a test in slice-m4/review-r1.test.js and a mutations.js row)
+- F1 FIXED — `rootIsLocal`: the §66.11.2 shapes, element-field writes and `.shift/.pop` classify CELL places only; a
+  place rooted in a local falls through to the ordinary local path (E-ASSIGN-CONST, value resolution → the spread /
+  lambda is refused E-BOOTSTRAP-UNSUPPORTED). The same deletion existed on base for `s.push(e)` on a local (M2's
+  resolveEditCall returned silently) — now refused (`localEditRefused`). Evidence: repro/r2.test.js now reports
+  diagnostics for all 5 probes.
+- F2 FIXED (O55 RULED S442 — plain use of a `single` declaration → E-DECL-SINGLE-INSTANTIATED): user declarations
+  (`d.info.single`) and program cells declared `single`. §66.19.6's `<phase/>` negative line is now a real test.
+- F3 FIXED — lex `endsOpener` never splits `>=`; a bare `>` comparison (another `>` on the same line after the
+  opener's `>`, with content between) is **E-PARSE-SHORTHAND-GT** (bootstrap-local parse code: §34 has no fitting
+  row — E-CTX-003 is unclosed-context, not this; a §34 row is owed) and the tail is consumed, never page text.
+  Nits: `<p : x></>` / `</p>` right after → E-CLOSER-001 alone; `<p : <span>x</span>>` is markup-as-value (built,
+  not refused — §1.4 / §4.14 make it legal); `<p : >` one diagnostic.
+- F4 FIXED — state-child bodies are CODE-DEFAULT (§4.18.1): `parseCodeBody` + `LexStop.CodeBody`; a run must be ONE
+  expression, else E-UNQUOTED-DISPLAY-TEXT suggesting `"<run>"`; nested tags keep free text; whitespace between
+  items is not display text. (Choice: two quoted literals in a row, `"a" "b"`, are one run of two expressions →
+  E-UNQUOTED-DISPLAY-TEXT; the SPEC does not say whether a code-default body holds several expressions.)
+- F5/F6 FIXED — EEdits carries one analyze-minted local per element; lower evaluates every element LEFT TO RIGHT into
+  its local, then writes (a Commit for ≥ 2 writes; prepends in reverse so the result reads in source order).
+  NOTE (not decided): the reviewer's `[...@audit, mk2()]` with mk2 pushing keeps the inner push (evaluate, then one
+  append) — as the PA stated; a STRICT snapshot of `@audit` for sequence shapes (S440 ruled it for struct spreads)
+  would drop it. Reads of `@x` inside the elements are live, not snapshotted.
+- F7 NOT LANDED — STOP CONDITION: refusing an append on a fixed-length sequence (E-WRITE-INVARIANT, both push and
+  the spread shape) turns slice-m2/front.test.js "S440 N1 … side-effecting override … converges" (guarded +
+  unguarded) RED: its fixture declares `<log:int[end]=([])/>` (fixed length) and pushes. Reverted (hunk-level; the
+  implementation is saved as docs/changes/s442-bootstrap-six-programs/F7-held.diff). To land it the PA must approve
+  changing that slice-m2 fixture to `int[free, end]` (it is, per §66.12.1, an ill-formed program today).
+- Nits FIXED: duplicate state-child → E-DECL-STATE-CHILD; a shape over a non-sequence → E-TYPE-031; `<*f/>` of another
+  declaration's field → E-SCOPE-001 naming the owner (not "predefined (HTML)").
+- G1 FIXED — tests + mutation rows for resolveStarShared's constructs-nothing / program-top-level / no-renders checks
+  and resolveStarField's E-DECL-STAR-REF-ATTR-WRITE.
+- G2 FIXED — own value + attributes (nested and file-level) → E-BOOTSTRAP-UNSUPPORTED naming ⚑ O19.
+- G3 FIXED — `<*x/>` of a declaration with a default-less attribute → compile-time E-BOOTSTRAP-UNSUPPORTED naming ⚑ O33.
+- G4 — the mutation count above corrected; slice-m2/typer.test.js's "zero delta vs base b7c863235" describe retitled.
+  NOTE: the `<theme>` refusal newly REJECTS the conformance-corpus programs `style/theme-misplaced` and
+  `style/theme-tokens-recognized` when run through the bootstrap front end (fail-closed; base silently dropped their
+  token declarations).
+- Stop-condition check: the five pre-existing slice programs' lowered Core AND printed output are byte-identical to
+  base (review-six-b/dumpcore.js at HEAD vs review-six-b/out-base: `diff -rq` clean).
+- Mutations: 112 (94 + 18 r1 rows), 0 problems. Bite (front): 12 constructs certified (one Lower.SeqEdits row
+  re-sited after the editStmts rewrite).
