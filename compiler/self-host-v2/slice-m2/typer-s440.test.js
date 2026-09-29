@@ -302,6 +302,15 @@ describe("#7 — conditions (E-COND-NOT-BOOLEAN) and presence tests", () => {
     expect(inApp(S, DDC + "<p if=@color>${@color.value}</p>")).toEqual([]);
     expect(inApp(S + "    function f() { if (@color) { @seen = @color.value } }\n    function g() { @seen = @color ? @color.value : \"\" }", DDC)).toEqual([]);
   });
+  test("r5 R3 — a REPEATED presence test inside a region that already narrowed the handle stays legal", () => {
+    const S = "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n";
+    const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";
+    expect(inApp(S, DDC + "<div if=@color><p if=@color>${@color.value}</p></div>")).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { if (@color) { @seen = @color.value } } }", DDC)).toEqual([]);
+    expect(inApp(S + "    function f() { if (@color) { @seen = @color ? @color.value : \"\" } }", DDC)).toEqual([]);
+    // twin: an ALWAYS-mounted handle is still not a condition
+    expect(inApp(S, "<dropdown as=country label=\"1\" options=([\"a\"])/><div if=@show><p if=@country>x</p></div>")).toEqual(["E-COND-NOT-BOOLEAN"]);
+  });
   test("r4 (b) twins — the S437 rule still binds OUTSIDE the test: a sibling read, an else branch", () => {
     const S = "    <let show:bool=false/>\n    <let seen:string=\"\"/>\n";
     const DDC = "<div if=@show><dropdown as=color label=\"1\" options=([\"a\"])/></div>";

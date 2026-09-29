@@ -309,6 +309,8 @@ const MUTATIONS = [
      "            if (kindOf(inner) == 3) {\n                return report(", "            if (false) {\n                return report("],
     ["S442 r3 N3: a write of an `<each>` source keeps the row binding's narrowing",
      "            if (r.key != \"\" && placesOverlap(r.key, key)) drop = drop.concat([r.name])\n", ""],
+    ["S442 r5 R3: a repeated conditional-handle presence test inside its narrowing refused",
+     "        if (isCondHandle(env, c)) return markPresence(ts, c.nid)\n", ""],
     ["S442 r5 R1: a nested row whose source lies under a dropped row keeps its narrowing (one level only)",
      "            } else if (r.key != \"\" && underAny(r.key, drop)) {\n                drop = drop.concat([r.name])\n",
      "            } else if (false) {\n                drop = drop.concat([r.name])\n"],

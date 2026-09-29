@@ -4238,6 +4238,40 @@ ${
         }
     }
 
+    // Is `c` a bare `@h` naming a CONDITIONALLY-mounted handle?
+    fn isCondHandle(env: TEnv, c: AExpr) -> boolean {
+        if (atName(c) == "") return false
+        return condAlias(env.t, nameFact(env.t.names, c.nid))
+    }
+
+    fn condAlias(t: Tables, f: NameFact | not) -> boolean {
+        return match f {
+            .NInst(decl: d, inst: i) :> condAliasInst(t, i)
+            .NLocal(sym: s) :> false
+            .NField(decl: d) :> false
+            .NStruct(owner: o) :> false
+            .NFn(sym: s) :> false
+            .NLength :> false
+            not :> false
+        }
+    }
+
+    fn condAliasInst(t: Tables, i: InstRef) -> boolean {
+        return match i {
+            .Alias(sym: s) :> handleConditional(t, s)
+            .Shared(decl: d) :> false
+            .Lexical(depth: n) :> false
+            .Narrowed(sym: s) :> false
+        }
+    }
+
+    fn handleConditional(t: Tables, s: Sym) -> boolean {
+        for (const h of t.handles) {
+            if (h.sym.id == s.id) return h.conditional
+        }
+        return false
+    }
+
     // An instance's type: a handle to a conditionally-mounted instance is
     // `T | not` (§66.7.5) — so a bare `if=@h` over it is a presence test, and
     // an operator over it is un-narrowed; any other instance is `T`.
@@ -4800,6 +4834,10 @@ ${
     // PROVABLE, silence where the type is unknown … no §63 window").
     fn checkCond(env: TEnv, c: AExpr, v: VType, what: string, ts: TypeState) -> TypeState {
         if (hasErrIn(env.errs, c.span)) return ts          // Rule C: not judged across a parse error
+        // r5 R3: a bare conditional-handle presence test stays a presence
+        // test inside a region that already narrowed it (trivially true) —
+        // ruled S442, "`if=@color` is legal".
+        if (isCondHandle(env, c)) return markPresence(ts, c.nid)
         return match v {
             .Known(t: t) :> condKnown(env, c, t, what, ts)
             .Absent :> markPresence(ts, c.nid)      // `not` as a condition: a presence test that is always false
