@@ -303,7 +303,7 @@ const BASE_66_19 = [
   [],
 ];
 
-describe("zero delta vs base b7c863235 — §66.19 programs and the M2 fixtures", () => {
+describe("the §66.19 programs and the M2 fixtures — no typer / scope code; every §66.19 block's diagnostic list pinned (re-measured s442)", () => {
   for (const name of Object.keys(PROGRAMS)) {
     test(`${name}: no diagnostic (base: none either — compileProgram throws on ANY)`, () => {
       expect(() => compileProgram(mods, name)).not.toThrow();
