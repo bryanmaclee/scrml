@@ -17,7 +17,7 @@ const codes = (src) => run(src).diags.map((d) => d.code);
 const E = '{ at: 1, actor: "a", action: "b" }';
 const withFn = (fn, type) => {
   let s = auditFixture();
-  if (type) s = s.replace("<audit:Entry[free, end]=[]/>", type);
+  if (type) s = s.replace("<audit:Entry[free, append]=[]/>", type);
   return s.replace("function record(action: string) {", fn + "\n    function record(action: string) {");
 };
 const rows = () => [...document.querySelectorAll("main > ul > li")].map((li) => li.textContent);
@@ -33,7 +33,7 @@ describe("F1 — a sequence shape / edit call on a LOCAL is never deleted", () =
   });
   test("`s = s.filter(…)` on a local, and a parameter: refused", () => {
     expect(codes(withFn(`function lp() -> int {\n let s = @audit\n s = s.filter(e => false)\n return s.length\n }`))).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
-    expect(codes(withFn(`function lp(s: Entry[free, end]) -> int {\n s = [...s, ${E}]\n return s.length\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
+    expect(codes(withFn(`function lp(s: Entry[free, append]) -> int {\n s = [...s, ${E}]\n return s.length\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
   });
   test("`s.push(e)` / `s.shift()` / `s[0].f = v` on a local: refused (a diagnostic each), not dropped", () => {
     expect(codes(withFn(`function lp() {\n let s = @audit\n s.push(${E})\n }`))).toContain("E-BOOTSTRAP-UNSUPPORTED");
@@ -124,7 +124,7 @@ describe("F5 / F6 — a sequence shape is ONE value: its elements are evaluated 
     function pre() { @audit = [mk("a"), mk("b"), ...@audit] }`;
   let program;
   beforeAll(async () => {
-    const src = withFn(fns, "<audit:Entry[free, end, front]=[]/>").replace("<li>${e.actor}: ${e.action}</li>", "<li>${e.actor}: ${e.action} @${e.at}</li>");
+    const src = withFn(fns, "<audit:Entry[free, append, prepend]=[]/>").replace("<li>${e.actor}: ${e.action}</li>", "<li>${e.actor}: ${e.action} @${e.at}</li>");
     const r = run(src);
     expect(r.diags).toEqual([]);
     ({ program } = await loadProgram(r.core, "r1-order", ["app", "pre", "record"]));

@@ -160,7 +160,7 @@ describe("§66.19.5 — negative lines (each → E-WRITE-NOT-GRANTED)", () => {
   });
 
   test("the same shapes are GRANTED on a type that grants them (the classifier, not a blanket refusal)", () => {
-    const granted = fixture().replace("<audit:Entry[free, end]=[]/>", "<audit:Entry[free, end, front, anywhere, writable]=[]/>");
+    const granted = fixture().replace("<audit:Entry[free, append]=[]/>", "<audit:Entry[free, append, prepend, shift, remove, writable]=[]/>");
     // granted, but Core cannot lower a removal / a lambda: reported as outside the bootstrap, never as a grant error
     const src = replaceLine(granted, NEGATIVE[2].marker, `function neg() { ${NEGATIVE[2].body} }`);
     expect(codes(src)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

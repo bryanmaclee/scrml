@@ -32,7 +32,7 @@ export function auditFixture() {
 
 /** The audit fixture granting `front` too, with two more recognized shapes (§66.11.2). */
 export function auditShapesFixture() {
-  let s = editOnce(auditFixture(), "<audit:Entry[free, end]=[]/>", "<audit:Entry[free, end, front]=[]/>");
+  let s = editOnce(auditFixture(), "<audit:Entry[free, append]=[]/>", "<audit:Entry[free, append, prepend]=[]/>");
   s = replaceLine(s, "function recordBySpread(action: string) {", [
     "function recordTwo(a: string, b: string) {",
     "        @audit = [...@audit, { at: 1, actor: @actor, action: a }, { at: 2, actor: @actor, action: b }]",

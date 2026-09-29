@@ -1,7 +1,7 @@
 <program>
     type Entry:struct = { at: number, actor: string, action: string }   // fields carry no contract → fixed
 
-    <audit:Entry[free, end]=[]/>                    // free length, changes at the end, NO replace — ⚑ O10 spelling
+    <audit:Entry[free, append]=[]/>                    // free length, changes at the end, NO replace — ⚑ O10 spelling
     <let actor:string="ops"/>
 
     function record(action: string) {
