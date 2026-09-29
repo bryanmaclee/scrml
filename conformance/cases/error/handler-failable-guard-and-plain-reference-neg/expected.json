@@ -1,0 +1,14 @@
+{
+  "id": "error-handler-failable-guard-and-plain-reference-neg",
+  "description": "Two event handlers that do NOT fire E-ERROR-002. `onclick=bump` is a reference to a NON-failable function. `onclick={ risky() !{ | .Empty :> @r = 7 } }` handles the call with an exhaustive `!{}`. Clicking the guarded button runs the arm: @r lands 7, which shows the one-statement guard is emitted rather than dropped. (Before S441 this case was handler-failable-reference-and-guard-neg and pinned `onclick=risky` — a FAILABLE reference — clean; S441 ruled that E-ERROR-002, see handler-failable-reference-pos.)",
+  "language-version": "1.0",
+  "spec": "§19.4.3",
+  "provenance": "ruling:user-voice-scrml.md S439 #14 + S440 \"all recs\" (restore conformance); S441 \"yes on references\"",
+  "rationale": "§19.4.3 — a call handled with `!{}` satisfies the handling requirement, and only a reference to a `!` function is E-ERROR-002 (S441); a non-failable reference is an ordinary handler. §5.2.3 — no statement of a handler SHALL be dropped, so the guard's arm has to run.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-ERROR-002"],
+    "input": [{ "click": "#guarded" }],
+    "state": { "r": 7 }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "spec": "§65.3.2, §25.7, §66.17 item 1",
+  "rationale": "Two `<theme>` blocks declare tokens into one namespace; each lowers to a `:root` custom property; a token may reference another (`ring = @brand` → `var(--brand)`); every `@token` use site reads its `var(--token)`.",
+  "steps": [
+    {
+      "expect": [
+        {
+          "sel": ".a",
+          "prop": "color",
+          "value": "rgb(37, 99, 235)"
+        },
+        {
+          "sel": ".b",
+          "prop": "color",
+          "value": "rgb(220, 38, 38)"
+        },
+        {
+          "sel": ".c",
+          "prop": "color",
+          "value": "rgb(37, 99, 235)"
+        }
+      ]
+    }
+  ]
+}

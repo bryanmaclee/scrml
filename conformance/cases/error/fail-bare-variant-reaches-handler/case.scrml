@@ -1,0 +1,33 @@
+${
+    type LoadError:enum = {
+        NotFound(id: string)
+        Timeout
+    }
+
+    type Phase:enum = {
+        Idle
+        Missing(id: string)
+        TimedOut
+    }
+
+    // Bare `fail .Variant` — the variant resolves against the declared `! LoadError`.
+    function load(id: string)! LoadError {
+        if (id == "missing") fail .NotFound(id)
+        if (id == "slow") fail .Timeout
+        return id
+    }
+}
+
+<phase> = Phase.Idle
+
+${
+    function handleMissing() {
+        let r = load("missing") !{
+            | .NotFound(mid) :> @phase = Phase.Missing(mid)
+            | .Timeout :> @phase = Phase.TimedOut
+        }
+    }
+}
+
+<button id="btn-missing" onclick=handleMissing()>missing</>
+<div id="out">${@phase}</>

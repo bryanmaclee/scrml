@@ -1,0 +1,15 @@
+// repro s441-fail-bare-variant @ base cf62b4154 — non-canonical `enum E {…}`: INVALID bare variant silently accepted?
+<program>
+${
+    enum E { EmptyName, Bad }
+    function check(n: string) ! E {
+        if (n == "") fail .Nope
+    }
+    function run() {
+        check("") !{
+            | .EmptyName :> { return }
+        }
+    }
+}
+<button onclick=run()>go</>
+</program>

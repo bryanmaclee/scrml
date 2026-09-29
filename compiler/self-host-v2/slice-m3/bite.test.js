@@ -3,7 +3,21 @@
 // front-end), made crash, or dropped from the report is NOT a bite (review round 2, item 4).
 
 import { describe, test, expect } from "bun:test";
-import { judgeDeaths } from "./bench/bite-lib.js";
+import { judgeCssDeaths, judgeDeaths } from "./bench/bite-lib.js";
+
+describe("judgeCssDeaths (s440)", () => {
+  test("only a still-graded css result whose oracle failed is a kill", () => {
+    const report = { css: { results: [
+      { relDir: "k", cls: "graded", pass: false },
+      { relDir: "s", cls: "graded", pass: true },
+      { relDir: "n", cls: "not-yet", pass: null },
+      { relDir: "u", cls: "graded", pass: null },
+    ] } };
+    const { killed, lost } = judgeCssDeaths(["k", "s", "n", "u", "gone"], report);
+    expect(killed).toEqual(["k"]);
+    expect(lost.map((x) => x.relDir)).toEqual(["n", "u", "gone"]);
+  });
+});
 
 const PASSES = ["a/killed", "a/survived", "a/crashed", "a/not-yet", "a/front-end", "a/missing"];
 

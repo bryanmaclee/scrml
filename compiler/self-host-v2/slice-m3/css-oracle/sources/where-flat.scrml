@@ -1,0 +1,13 @@
+<program>
+  const Panel = <div props={}>
+      #{
+          button[disabled] { color: rgb(128, 128, 128); }
+          .card .btn       { color: red; }
+      }
+      <div class="card">
+          <button class="btn" id="on">on</button>
+          <button class="btn" id="off" disabled="disabled">off</button>
+      </div>
+  </>
+  <Panel/>
+</program>
