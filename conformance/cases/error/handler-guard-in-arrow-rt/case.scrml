@@ -1,0 +1,12 @@
+type LoadError:enum = { Empty, Bad }
+
+${
+    function risky()! -> LoadError { fail LoadError.Empty }
+}
+
+<r> = 0
+<kind> = ""
+
+<button id="expr" onclick=${(e) => risky() !{ | .Empty :> @r = 1 | .Bad :> @r = 2 }}>expr</>
+<button id="block" onclick=${(e) => { risky() !{ | .Empty :> @r = @r + 10 | .Bad :> @r = 2 }; @kind = e.type }}>block</>
+<p id="out">${@r} ${@kind}</p>
