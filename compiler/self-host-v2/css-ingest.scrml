@@ -20,7 +20,9 @@
 //     each expansion root); the FIRST expansion of a component contributes and
 //     later expansions of the same component are skipped (the rules are the
 //     component's, not the use site's). A block that is ONLY bare declarations
-//     is the inline `style=""` form (§9.1) — that is html's, not the sheet's.
+//     and sits DIRECTLY on the constructor root (the node carrying
+//     `_expandedFrom` — checked: `Place.root`) is the inline `style=""` form
+//     (§9.1 DQ-7) — html's, not the sheet's; the shim contributes nothing for it.
 //   - `<program reset="none">` → no reset (§65.3.4).
 //   - the LEGACY `<theme>` body (Stage-1 deprecated, §66.21 — still works):
 //     `name = value;` → a Constant token (§66.17 item 2); a base token re-bound by
@@ -43,8 +45,9 @@
 //   `!important` (§65.7: internal vs interop is not classified yet); a computed
 //   `@` expression; `@apply` (§26.8); an at-rule block (`@media`, …); a
 //   selector this shim cannot parse (§65.2.5: fail loud, never forgive); a flat
-//   (selector-less) declaration at program or plain-element level (no selector to
-//   apply to — §9.1 inlines flat blocks only on a component root); a file with
+//   (selector-less) declaration anywhere but a whole-flat block directly on a
+//   constructor root — at program level, in a plain element, or in an element
+//   nested inside a component (§9.1 DQ-6 ⚑ OPEN: those cases are unruled); a file with
 //   no `<program>` (where its reset goes is not specified); a `<style>` block.
 //
 // RULE 7 (text). The css payload IS text in impl#1's AST — a rule's `selector`
@@ -370,7 +373,10 @@ ${
     // =========================================================================
     // level: "program" (under `<program>` / `${}` / the file top), "element"
     // (inside a non-component element), "component" (inside an instance).
-    type Place:struct = { level: string, scope: string, dup: boolean }
+    // root: at "component" level, the position is a DIRECT child of the expansion
+    // root (the constructor's root element, the one carrying `_expandedFrom`) —
+    // the only place a flat-declaration `#{}` has a ruled meaning (§9.1 DQ-7).
+    type Place:struct = { level: string, scope: string, dup: boolean, root: boolean }
     type Found:struct = { node: INode, at: Place }
     type Acc:struct = {
         programs: INode[],
@@ -411,8 +417,10 @@ ${
     // The position a node's CHILDREN are at.
     fn childPlace(n: INode, at: Place, seen: string[]) -> Place {
         const origin: string | not = strAt(n, "_expandedFrom")
-        if (origin is some) return { level: "component", scope: origin, dup: at.dup || hasStr(seen, origin) }
-        if (at.level == "component") return at
+        if (origin is some) return { level: "component", scope: origin, dup: at.dup || hasStr(seen, origin), root: true }
+        // Any node below the root inside an instance (an element, an each-block, a
+        // `${}` …) moves its children off the root: fail closed, never widen.
+        if (at.level == "component") return { level: at.level, scope: at.scope, dup: at.dup, root: false }
         const k: string = kindAt(n)
         if (k == "logic") return at
         if (k == "markup") {
@@ -420,10 +428,10 @@ ${
             if (tag is some) {
                 if (tag == "program") return at
             }
-            return { level: "element", scope: "", dup: at.dup }
+            return { level: "element", scope: "", dup: at.dup, root: false }
         }
         // Any other node kind (an each-block, an if-chain, a text node …) — not program level.
-        return { level: "element", scope: "", dup: at.dup }
+        return { level: "element", scope: "", dup: at.dup, root: false }
     }
 
     fn sameIdSeen(bs: Found[], n: INode) -> boolean {
@@ -787,13 +795,16 @@ ${
         }
         // R4 (S440): a `#{}` in a plain (non-component) element is program-global.
         const global: boolean = b.at.level == "program" || b.at.level == "element"
-        if (flat == rules.length && b.at.level == "component") {
-            // The inline `style=""` form (§9.1) — html's, not the stylesheet's.
+        if (flat == rules.length && b.at.level == "component" && b.at.root) {
+            // The inline `style=""` form on the constructor root (§9.1 DQ-7) — html's, not the stylesheet's.
             return { charsets: sh.charsets, imports: sh.imports, global: sh.global, scopes: sh.scopes, why: why }
         }
         if (flat > 0) {
+            // A flat block anywhere else is UNRULED (§9.1 DQ-6 ⚑ OPEN note): a plain element, or an
+            // element nested inside a component (not its root), or a flat block mixed with rules.
+            const where: string = b.at.level == "component" && !b.at.root ? "component level, below the constructor root," : b.at.level + " level"
             return { charsets: sh.charsets, imports: sh.imports, global: sh.global, scopes: sh.scopes,
-                     why: why.concat(["bare css declarations in a `#{}` at " + b.at.level + " level, with no selector to apply to"]) }
+                     why: why.concat(["bare css declarations in a `#{}` at " + where + " with no selector to apply to (§9.1: unruled)"]) }
         }
         let charsets: string[] = sh.charsets
         let imports: CssImport[] = sh.imports
@@ -857,7 +868,7 @@ ${
     }
 
     export fn ingestCss(ast: INode, mode: string) -> CssIngest {
-        const top: Place = { level: "program", scope: "", dup: false }
+        const top: Place = { level: "program", scope: "", dup: false, root: false }
         const acc0: Acc = { programs: [], cells: [], themes: [], blocks: [], seen: [], why: [] }
         const acc: Acc = visitList(acc0, listAt(ast, "nodes"), top)
         const reset: ResetR = resetOf(acc.programs)

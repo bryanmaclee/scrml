@@ -247,6 +247,29 @@ ${body}
     expect(el.some((w) => w.includes("at element level"))).toBe(true);
   });
 
+  test("§9.1 DQ-6 ⚑ OPEN: a flat block on an element NESTED inside a component fails closed; on the constructor root it is html's", () => {
+    const card = (rootFlat, nestedFlat) => `<program>
+  const Card = <div props={}>
+      ${rootFlat ? "#{ color: red; }" : ""}
+      <section>
+          ${nestedFlat ? "#{ padding: 3px; }" : ""}
+          <span>x</span>
+      </section>
+  </>
+  <Card/>
+</program>
+`;
+    // root only: the ruled DQ-7 inline form — no reason, and no stylesheet contribution.
+    const r = ingest(card(true, false)).results[0];
+    expect(r.why).toEqual([]);
+    expect(r.unit.scopes).toEqual([]);
+    // nested (with or without a root flat block): unruled → not-yet, never a silent pass-through.
+    for (const src of [card(false, true), card(true, true)]) {
+      const why = whyOf(src);
+      expect(why.some((w) => w.includes("below the constructor root"))).toBe(true);
+    }
+  });
+
   test("a variant re-binding a name with no base value (E-THEME-TOKEN-UNKNOWN is analyze's)", () => {
     const why = whyOf(caseSource("style/theme-variant-rebind-unknown"));
     expect(why.some((w) => w.includes("no base value"))).toBe(true);
