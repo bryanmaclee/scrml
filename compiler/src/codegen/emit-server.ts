@@ -54,7 +54,7 @@ import { buildSsrEachRenderers, SSR_RENDER_HELPER } from "./emit-ssr-render.ts";
 // `.server.js` that references `_scrml_map_*` (reachability-gated below). Without
 // it a server fn building/returning a map or set throws `ReferenceError:
 // _scrml_map_from_entries is not defined` at request time (green compile).
-import { SERVER_VALUE_NATIVE_MAP_HELPER } from "../runtime-template.js";
+import { SERVER_VALUE_NATIVE_MAP_HELPER, SERVER_STRUCTURAL_EQ_SOURCE } from "../runtime-template.js";
 
 // g-pure-module-server-emit (S207): sentinel line marking where deferred
 // local-`.scrml` server imports are re-injected after usage-pruning. Pruned by
@@ -72,46 +72,15 @@ const LOCAL_SERVER_IMPORT_SENTINEL = "// __SCRML_LOCAL_SERVER_IMPORTS__";
 // route-handler path (generateServerJs) and the value-only path
 // (generateValueOnlyServerJs, g-const-only-module-no-server-emit) inline the
 // IDENTICAL helper — no drift.
-export const SERVER_STRUCTURAL_EQ_HELPER = [
-  "",
-  "// --- §45 Structural equality helper (inlined for server, no client runtime here) ---",
-  "function _scrml_structural_eq(a, b) {",
-  "  if (a === b) return true;",
-  "  if (a === null || b === null || a === undefined || b === undefined) return false;",
-  "  if (typeof a !== typeof b) return false;",
-  "  if (typeof a !== \"object\") return a === b;",
-  "  if (Array.isArray(a)) {",
-  "    if (!Array.isArray(b) || a.length !== b.length) return false;",
-  "    for (let i = 0; i < a.length; i++) {",
-  "      if (!_scrml_structural_eq(a[i], b[i])) return false;",
-  "    }",
-  "    return true;",
-  "  }",
-  // Enum-variant check: `_tag` is a discriminator string set by the
-  // emitter. `!= null` (loose) covers both null + undefined absence,
-  // avoiding the bare `undefined` keyword (W-CG-UNDEFINED-INTERPOLATION).
-  "  if (a._tag != null && b._tag != null) {",
-  "    if (a._tag !== b._tag) return false;",
-  "    const aKeys = Object.keys(a);",
-  "    const bKeys = Object.keys(b);",
-  "    if (aKeys.length !== bKeys.length) return false;",
-  "    for (const key of aKeys) {",
-  "      if (key === \"_tag\") continue;",
-  "      if (!_scrml_structural_eq(a[key], b[key])) return false;",
-  "    }",
-  "    return true;",
-  "  }",
-  "  const aKeys = Object.keys(a);",
-  "  const bKeys = Object.keys(b);",
-  "  if (aKeys.length !== bKeys.length) return false;",
-  "  for (const key of aKeys) {",
-  "    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;",
-  "    if (!_scrml_structural_eq(a[key], b[key])) return false;",
-  "  }",
-  "  return true;",
-  "}",
-  "",
-].join("\n");
+//
+// s440-date-in-cell-and-eq: the function body is now SLICED from the client
+// runtime (SERVER_STRUCTURAL_EQ_SOURCE) instead of hand-copied here. The old
+// copy had drifted (no §59 map branch, no cycle guard, and every Date == every
+// other Date), so client and server could disagree on the same `==`.
+export const SERVER_STRUCTURAL_EQ_HELPER =
+  "\n// --- §45 Structural equality helper (inlined for server, no client runtime here) ---\n" +
+  SERVER_STRUCTURAL_EQ_SOURCE +
+  "\n";
 
 // Re-indenting a server-fn body without corrupting a multi-line template literal is
 // now the ONE shared `indentBodyLines` in ./utils.ts (S361 — it also gained regex

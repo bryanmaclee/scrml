@@ -81,34 +81,34 @@ describe("lint-no-default-arm — pattern classification", () => {
   test("a total enum match with no default arm is clean (alternation as the FIRST arm)", () => {
     expect(count(`match m { .B | .C :> 2\n .A :> 1 }`)).toBe(0);
   });
-  test("F8 REVIEW CASE: `_` inside a later alternation is flagged (impl#1 drops that arm silently)", () => {
+  test("F8 REVIEW CASE: `_` inside a later alternation is flagged (a default arm by another spelling)", () => {
     const v = lintText(`match k { .B :> 0\n _ | .A :> 1 }`).violations;
     expect(v.length).toBe(1);
     expect(v[0].line).toBe(2);
-    expect(v[0].message).toContain("alternation arm `_ | .A` is not the first arm");
+    expect(v[0].message).toContain("wildcard inside the alternation `_ | .A`");
   });
   test("F8: `_` inside a FIRST-arm alternation of an enum match is a default arm", () => {
     const v = lintText(`match k { _ | .A :> 1\n .B :> 0 }`).violations;
     expect(v.length).toBe(1);
     expect(v[0].message).toContain("wildcard inside the alternation `_ | .A`");
   });
-  test("F8/F12: any alternation arm that is not first is flagged — enum or literal match", () => {
-    expect(count(`match m { .A :> 1\n .B | .C :> 2 }`)).toBe(1);
-    expect(count(`match m { .A :> 1\n .B |\n .C :> 2 }`)).toBe(1);
-    expect(count(`match s { "a" :> 1\n "b" | "c" :> 2 }`)).toBe(1);
+  test("F12 retired (S440, impl#1 fixed by #1119): an alternation arm in ANY position is clean — enum or literal match", () => {
+    expect(count(`match m { .A :> 1\n .B | .C :> 2 }`)).toBe(0);
+    expect(count(`match m { .A :> 1\n .B |\n .C :> 2 }`)).toBe(0);
+    expect(count(`match s { "a" :> 1\n "b" | "c" :> 2 }`)).toBe(0);
     expect(count(`match m { .A | .B :> 1\n .C :> 2 }`)).toBe(0);
   });
-  test("F8 bite on the real tree: plant a non-first alternation in core.scrml → RED; remove → GREEN", () => {
+  test("F8 bite on the real tree: plant a wildcard inside a later alternation in core.scrml → RED; remove → GREEN", () => {
     const scratch = mkdtempSync(join(tmpdir(), "no-default-arm-alt-"));
     cpSync(TREE, scratch, { recursive: true });
     const corePath = join(scratch, "core.scrml");
     const clean = readFileSync(corePath, "utf8");
     const at = clean.lastIndexOf("}");
-    const plant = "\n    export fn isText(t: Type) -> boolean {\n        return match t {\n            .Str :> true\n            .Int | .Num | .Bool :> false\n        }\n    }\n";
+    const plant = "\n    export fn isText(t: Type) -> boolean {\n        return match t {\n            .Str :> true\n            _ | .Int :> false\n        }\n    }\n";
     writeFileSync(corePath, clean.slice(0, at) + plant + clean.slice(at));
     const red = lintTree(scratch);
     expect(red.violations.length).toBe(1);
-    expect(red.violations[0].message).toContain("is not the first arm");
+    expect(red.violations[0].message).toContain("wildcard inside the alternation");
     writeFileSync(corePath, clean);
     expect(lintTree(scratch).violations).toEqual([]);
   });

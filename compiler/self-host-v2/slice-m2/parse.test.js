@@ -34,15 +34,42 @@ function strayStrings(x, key = "", out = []) {
   return out;
 }
 
+// Line endings are normalized (a CRLF checkout of SPEC.md and of the sources
+// is the same text), and each source is compared with the code blocks of ITS
+// OWN §66.19 section — not with "some scrml block anywhere in the SPEC".
+const lf = (t) => t.replace(/\r\n/g, "\n");
+
+/** The ```scrml blocks of SPEC section `#### <num> …`, up to the next heading of level ≤ 4. */
+function sectionBlocks(spec, num) {
+  const text = lf(spec);
+  const head = text.indexOf("\n#### " + num + " ");
+  if (head < 0) throw new Error("SPEC section not found: " + num);
+  const rest = text.slice(head + 1);
+  const next = rest.slice(1).search(/\n#{1,4} /);
+  const body = next < 0 ? rest : rest.slice(0, next + 1);
+  return [...body.matchAll(/```scrml\n([\s\S]*?)```/g)].map((m) => m[1]);
+}
+
 describe("the §66.19 sources are the SPEC's code blocks, verbatim (drift guard)", () => {
   const spec = readFileSync(join(import.meta.dir, "..", "..", "SPEC.md"), "utf8");
-  const blocks = [...spec.matchAll(/```scrml\n([\s\S]*?)```/g)].map((m) => m[1]);
-  test("counter.scrml is §66.19.1", () => {
-    expect(blocks).toContain(source("counter.scrml"));
+  test("counter.scrml is §66.19.1's one block", () => {
+    expect(sectionBlocks(spec, "66.19.1")).toEqual([lf(source("counter.scrml"))]);
   });
-  test("lib/dropdown.scrml + app.scrml are the two §66.19.3 blocks", () => {
-    expect(blocks).toContain(source("lib/dropdown.scrml"));
-    expect(blocks).toContain(source("app.scrml"));
+  test("lib/dropdown.scrml + app.scrml are the two §66.19.3 blocks, in order", () => {
+    expect(sectionBlocks(spec, "66.19.3")).toEqual([lf(source("lib/dropdown.scrml")), lf(source("app.scrml"))]);
+  });
+  test("the guard bites: an edited §66.19.1 / §66.19.3 block, or another section's block, does not match", () => {
+    const counter = lf(source("counter.scrml"));
+    const edited = lf(spec).replace(counter, counter.replace("count", "kount"));
+    expect(edited !== lf(spec)).toBe(true);       // the source IS in the SPEC to be edited
+    expect(sectionBlocks(edited, "66.19.1")).not.toEqual([counter]);
+    const app = lf(source("app.scrml"));
+    const edited3 = lf(spec).replace(app, app.replace("Country", "Nation"));
+    expect(edited3 !== lf(spec)).toBe(true);
+    expect(sectionBlocks(edited3, "66.19.3")).not.toEqual([lf(source("lib/dropdown.scrml")), app]);
+    // §66.19.2's block is a real scrml block of the SPEC, but it is not §66.19.1's
+    expect(sectionBlocks(spec, "66.19.2").length).toBe(1);
+    expect(sectionBlocks(spec, "66.19.1")).not.toContain(sectionBlocks(spec, "66.19.2")[0]);
   });
 });
 
