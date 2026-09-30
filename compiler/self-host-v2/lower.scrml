@@ -36,7 +36,7 @@ ${
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADecl, AProgram, AItem, AItemK, FileAst, Diag,
              mkSpan } from "./ast.scrml"
     import { Node, allNodes } from "./walk.scrml"
-    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind,
+    import { FieldInfo, DeclInfo, HandleInfo, TypeInfo, FnInfo, WriteFact, SpreadWrite, SnapField, AttrKind, HtmlAttrPair,
              NameFact, ValueFact, EffectFact, BindFact, ElemFact, StateArm, StateView, InlineView, SeqSnap, Tables, TypedProgram,
              nameFact, valueFact, effectFact, bindFact, elemFact, attrFact, declInfo, presenceTest } from "./analyze.scrml"
 
@@ -856,7 +856,7 @@ ${
     fn lowerElem(c: LC, e: AElem) -> View[] {
         const f: ElemFact | not = elemFact(c.t.elems, e.nid)
         return match f {
-            .MHtml :> condWrap(c, e, [View.El(e.tag, htmlAttrs(c, e.attrs), lowerNodes(c, e.kids))])
+            .MHtml :> condWrap(c, e, [View.El(e.tag, htmlAttrs(c, e.attrs).concat(noValidate(c, e)), lowerNodes(c, e.kids))])
             .MUse(decl: d, alias: a) :> condWrap(c, e, [View.Instance(d, constructAttrs(c, e.attrs), lowerNodes(c, e.kids), a)])
             .MEach(bind: b, handles: hs) :> [eachView(c, e, b, hs)]
             .MSlot :> [View.Slot]
@@ -865,6 +865,13 @@ ${
             .MStar(decl: d, inst: i) :> [View.Star(d, instOf(c, i))]
             not :> []
         }
+    }
+
+    // s444 Phase B (RULED S442 (3): "the compiler adds `novalidate` to any form
+    // carrying lowered attributes") — analyze listed the forms.
+    fn noValidate(c: LC, e: AElem) -> Attr[] {
+        if (c.t.novalidate.indexOf(e.nid) >= 0) return [Attr.Static("novalidate", "")]
+        return []
     }
 
     // s442 — `<*x/>` by inlining (analyze's InlineView): the markup, lowered in
@@ -943,8 +950,16 @@ ${
             .AEachIn :> []
             .AEachKey :> []
             .AEachAs :> []
-            .ABind(kind: bk, w: w, decl: d, idx: x, sink: sk) :> [bindAttr(c, bk, w, d, x, sk)]
+            .ABind(kind: bk, w: w, decl: d, idx: x, sink: sk, vattrs: vs) :> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))
         }
+    }
+
+    // s444 Phase B (dpa-058, RULED S442 (2)) — the bound field's validators'
+    // HTML-native attributes (analyze computed them for THIS element).
+    fn validatorAttrs(vs: HtmlAttrPair[]) -> Attr[] {
+        let out: Attr[] = []
+        for (const v of vs) { out = out.concat([Attr.Static(v.name, v.value)]) }
+        return out
     }
 
     // s444 — `bind:value=@p` / `bind:checked=@p` → Attr.Bind: the read of the

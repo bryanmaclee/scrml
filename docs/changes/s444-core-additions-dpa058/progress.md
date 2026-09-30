@@ -103,3 +103,59 @@
   | 66.19.2 | validated form | **everything but the validators RUNS from source** (binds, O54, `<*signup/>` Star); validators → Phase B |
   | 66.19.4 | theme library | BLOCKED (unchanged: `<theme>` CSS, named shared instances, `match` in an opener, ⚑ O39) |
 - PHASE-A-DONE 2026-09-30 — Phase A committed + verified; pushed as feat/s444-core-additions-dpa058.
+- 2026-09-30 PHASE B (dpa-058 build) — started on the working tree while Phase A's full mutation run was in flight;
+  Phase A is committed / verified / pushed on its own (see PHASE-A-DONE) and B is replayed on top.
+  RULINGS (ruling:user-voice-scrml.md S442 "⭐⭐ RULED — dpa-058 (O25) = all PA recs", item 1 (1)–(5), quoted):
+   (1) *"Always write the bind … with no implicit bind, ever."* — by construction: the bootstrap never binds an
+       element that does not write `bind:` (a validated field whose renders holds an unbound input is dead → (5)).
+   (2) *"Validators follow the bind"* — the HTML-native subset (`required`, `minlength`/`maxlength`, `min`/`max`,
+       `pattern` only when exact) lands on every native `input`/`textarea`/`select` whose `bind:` targets that
+       declaration's value, wherever the bind is written; no bind → validity surface only.
+   (3) *"the compiler adds `novalidate` to any form carrying lowered attributes."*
+   (4) O54 = (a) — `@email` inside `email`'s own `renders` is this instance (landed in Phase A, D7).
+   (5) *"Silently dead validators become errors"* — validators on a top-level scalar with no surface (§55.5 Edge A)
+       or on a declaration nothing binds, and `@x.isValid` on a no-surface cell → an error.
+  BUILT:
+   - ast/parse: `AValidator{name, arg: AValArg{NoArgs, Cmp(op,e), Exprs(es), Regex(source,flags)}}`,
+     `ADecl.validators` (source order, §55.12); a validator CALL on an element → E-PARSE-ATTR; a non-validator call in
+     a tag → E-PARSE-ATTR (was: every `name(…)` skipped + O25 refusal).
+   - analyze: `FieldInfo.vals: ValInfo[]` — each honored validator with its HTML lowering; `ABind.vattrs` — the
+     lowered attributes for THAT element (HTML applicability; a hand-written attribute of the same name wins);
+     `Tables.novalidate` — the forms; `validatorPass` (dead binds + forms); surface-property reads.
+   - lower: Attr.Static per lowered attribute next to the Attr.Bind; `novalidate` on the listed forms. Core unchanged.
+   - SPEC §34: rows E-VALIDATOR-DEAD, E-VALIDITY-NO-SURFACE (bootstrap emitter provenance; impl#1 Nominal, §34.0);
+     SPEC-INDEX regenerated. `bun scripts/s34-census.ts --check-new` PASS.
+  DECISIONS (⚑ PA):
+   B1 THE VALIDITY SURFACE (§55.5–§55.7) IS NOT BUILT. The bootstrap honors a validator ONLY through its exact HTML
+      form; a validator with none — `eq`/`neq`/`gt`/`lt`/`gte`/`lte`/`oneOf`/`notIn`, a non-literal `min`/`max`, an
+      inexact `pattern`, `req` on a boolean, a Level-1 message `req("…")` — is E-BOOTSTRAP-UNSUPPORTED (never kept
+      inert). `@decl.isValid` / `@decl.field.errors` (a surface that EXISTS per §55.5/§55.6) → E-BOOTSTRAP-UNSUPPORTED;
+      a write to one → E-SYNTHESIZED-WRITE. Building the surface is the next item (it needs: per-instance errors /
+      isValid / touched Deriveds, the ValidationError payload types (§55.9 `asIs` / `regex` have no bootstrap type),
+      the compound `errors` map shape, and a ruling on WHICH submit marks `submitted`).
+   B2 (5)'s "a declaration nothing binds" is applied as written: a validated child field that no `bind:` targets is
+      E-VALIDATOR-DEAD EVEN IF logic writes it. The dpa-058 deep-dive's R4 said "nothing ever binds or writes", and
+      its P2b case D (`renders <button onclick=(@color = "teal")>`, surface only) would be legal under R4 — the ruling
+      text drops "or writes". With the surface unbuilt the two readings coincide in the bootstrap today; they differ
+      once the surface lands. ⚑ PA: confirm the reading.
+   B3 (5)'s "top-level scalar with no surface" is applied to EVERY program cell with validators — bound or not
+      (Edge A: a top-level cell synthesizes no surface, and under (3) its lowered attributes cannot block, so nothing
+      observes the validators). ⚑ PA: the deep-dive (P2b §55 bullet) expected a bound top-level scalar to "at least
+      get `required`"; the ruling's (5) makes it an error — confirm.
+   B4 HTML lowering, exact only: `req` → `required=""` on a STRING value (text-like inputs, textarea, select);
+      `length(>=N / <=N / >N / <N / ==N)` (N an int literal) → minlength / maxlength (integer lengths: `>N` = `>=N+1`);
+      `min(n)` / `max(n)` (numeric literal) → min / max on number / range / date-time inputs (unreachable today: a
+      numeric place cannot be bound — D2); `pattern(/re/)` → `pattern="re"` only when: no flags, anchored `^…$`, no
+      top-level `|`, and the plain subset (letters/digits/`_`/space/`@`/`.*+?-`, groups `(…)`/`(?:…)`, `{n,m}`, `\d\w\s`
+      + escaped syntax chars, classes of alnum/ranges/`\d\w\s`) that reads the same under HTML's `v`-flag compile of
+      `^(?:p)$`. A validator whose attribute does not apply to the bound element (e.g. `length` on a `<select>`) →
+      E-BOOTSTRAP-UNSUPPORTED at that bind.
+   B5 `novalidate` looks THROUGH `<*f/>` inlines, `<*x/>` Stars, uses `<x/>`, `<each>` rows and state-view arms (a
+      use's inputs are in the form's DOM); a form that already writes `novalidate` gets no second one.
+   B6 Validators are honored only on a CHILD field of a user declaration; on a user declaration's own opener or a
+      field at depth ≥ 2 → E-BOOTSTRAP-UNSUPPORTED (not reached by the six programs).
+   B7 New codes: **E-VALIDATOR-DEAD**, **E-VALIDITY-NO-SURFACE** (§34 rows added, Nominal for impl#1). Reused:
+      E-DERIVED-WITH-VALIDATORS (§55.14), E-SYNTHESIZED-WRITE (§55.5), E-TYPE-031 (§55.1 applicability).
+  impl#1 DOGFOOD: F-s444-2 recurred outside a match arm — a struct-literal string in a `for` body containing
+  `(RULED S442 (5)). Bind it` → E-CODEGEN-INVALID-LOGIC; `(a whole-value replace). Declare` elsewhere compiles — the
+  trigger involves `(…)). ` + a capital; reworded (". " → " — ").

@@ -47,7 +47,7 @@ ${
              DeclKind, HostCall, SeqFn, BindKind, mkSym, noGrants, replaceGrant, typeDefSym } from "./core.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
-             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl,
+             AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl, AValArg, AValidator,
              AProgram, AItem, AItemK, FileAst, Diag, mkSpan } from "./ast.scrml"
 
     // =========================================================================
@@ -80,7 +80,15 @@ ${
         init: AAttrValue,
         reads: string[],
         shrink: SeqAt[],        // s442: the SHRINK places its sequence type grants (RULED S442 grow/shrink split)
+        vals: ValInfo[],        // s444 Phase B: its validators, as the bootstrap honors them (their HTML-native lowering)
     }
+
+    // s444 Phase B (dpa-058, RULED S442 (2)) — one validator of a field and its
+    // HTML-native lowering (`required`, `minlength` / `maxlength`, `min` /
+    // `max`, `pattern` only when exact): the attributes that land on every
+    // native input / textarea / select whose `bind:` targets the field's value.
+    export type HtmlAttrPair:struct = { name: string, value: string }
+    export type ValInfo:struct = { name: string, span: ASpan, attrs: HtmlAttrPair[] }
 
     // `nid` = the ADecl (user) / AProgram node. `file` = the defining file (E2).
     export type DeclInfo:struct = {
@@ -146,7 +154,7 @@ ${
         // contract, as `@x = v` / `@x.f = v`), the declaration field it
         // targets (`decl` / `idx`, the Phase-B validator join) and the
         // event-value local (`sink`, minted here).
-        ABind(kind: BindKind, w: WriteFact, decl: Sym, idx: int, sink: Sym),
+        ABind(kind: BindKind, w: WriteFact, decl: Sym, idx: int, sink: Sym, vattrs: HtmlAttrPair[]),
     }
 
     // ---- THE NODE FACTS, by family (M3 item 2) --------------------------------
@@ -272,6 +280,7 @@ ${
         annots: LocalAnnot[],
         unresolved: Unresolved,
         typing: Typing,
+        novalidate: int[],      // s444 Phase B (RULED S442 (3)): the `<form>` elements the compiler adds `novalidate` to
     }
 
     export type TypedProgram:struct = { files: FileAst[], tables: Tables, diags: Diag[] }
@@ -1175,8 +1184,12 @@ ${
     type RField:struct = { f: FieldInfo, st: AS }
 
     // One field: its type, mode (§66.9), grants (L3/L18, §66.12), graph, capability.
+    // `vals` / `where` (s444 Phase B): the field's validators, and where the
+    // field stands — 0 an attribute (it has none, §66.4 rule 1), 1 a child
+    // field of a user declaration (honored), 2 a program cell (a top-level
+    // scalar: no surface → dead, RULED S442 (5)).
     fn fieldOf(te: TypeEnv, g: TypeInfo[], nid: int, span: ASpan, name: string, isLet: boolean, exported: boolean,
-               aty: AType | not, init: AAttrValue, body: ADeclChild[], role: FieldRole, st0: AS) -> RField {
+               aty: AType | not, init: AAttrValue, body: ADeclChild[], role: FieldRole, vals: AValidator[], where: int, st0: AS) -> RField {
         let st: AS = st0
         const rs: RSym = mint(st, name)
         st = rs.st
@@ -1228,11 +1241,319 @@ ${
             wcap = rw.s
             st = rw.st
         }
+        const rv: RVals = fieldVals(te.file, name, ty, mode, vals, where, st)
+        st = rv.st
         const f: FieldInfo = {
             nid: nid, span: span, annotated: aty is some, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
-            exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty),
+            exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty), vals: rv.vs,
         }
         return { f: f, st: st }
+    }
+
+    // =========================================================================
+    // s444 Phase B — VALIDATORS (dpa-058, RULED S442). The bootstrap honors a
+    // validator through its HTML-native lowering only (RULED S442 (2): "the
+    // HTML-native subset (`required`, `minlength`/`maxlength`, `min`/`max`,
+    // `pattern` only when exact) lands on every native `input`/`textarea`/
+    // `select` whose `bind:` targets that declaration's value") — the §55.5
+    // validity surface is not in the bootstrap, so a validator with no exact
+    // HTML form is refused (E-BOOTSTRAP-UNSUPPORTED), never kept inert.
+    // =========================================================================
+    type RVals:struct = { vs: ValInfo[], st: AS }
+    type RVal:struct = { v: ValInfo | not, st: AS }
+
+    fn fieldVals(file: string, name: string, ty: Type, mode: FieldMode, vals: AValidator[], where: int, st0: AS) -> RVals {
+        let st: AS = st0
+        if (vals.length == 0) return { vs: [], st: st }
+        if (where == 2) {
+            return { vs: [], st: addDiag(st, file, vals[0].span, "E-VALIDATOR-DEAD", "`" + name + "` is a top-level cell — it has no validity surface (§55.5 Edge A: single-value top-level cells synthesize none), so its validators can never be observed; silently dead validators are errors (dpa-058, RULED S442 (5)) — make it a validated CHILD field of a declaration (`<form><let " + name + "…/></>`, §55.5, §66.4 rule 2) and bind it") }
+        }
+        if (where != 1) return { vs: [], st: addDiag(st, file, vals[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators here are not in the bootstrap (only on a child field of a declaration)") }
+        const isDerived: boolean = mode == FieldMode.Derived
+        if (isDerived) {
+            return { vs: [], st: addDiag(st, file, vals[0].span, "E-DERIVED-WITH-VALIDATORS", "`" + name + "` is derived (a locked declaration whose initializer reads cells) — validators on a derived value are rejected (§55.14); constrain it with a refinement type instead") }
+        }
+        let out: ValInfo[] = []
+        for (const v of vals) {
+            const r: RVal = valInfoOf(file, ty, v, st)
+            st = r.st
+            const vi: ValInfo | not = r.v
+            if (vi is some) out = out.concat([vi])
+        }
+        return { vs: out, st: st }
+    }
+
+    fn noSurfaceMsg(what: string) -> string {
+        return what + " — the bootstrap honors a validator only through its exact HTML-native form (dpa-058, RULED S442 (2)); the §55.5 validity surface that would evaluate it is not in the bootstrap yet"
+    }
+
+    fn pair(n: string, v: string) -> HtmlAttrPair { return { name: n, value: v } }
+
+    fn valOk(v: AValidator, attrs: HtmlAttrPair[], st: AS) -> RVal {
+        return { v: { name: v.name, span: v.span, attrs: attrs }, st: st }
+    }
+
+    fn valBad(file: string, v: AValidator, code: string, msg: string, st: AS) -> RVal {
+        return { v: not, st: addDiag(st, file, v.span, code, msg) }
+    }
+
+    fn isStrLike(t: Type) -> boolean {
+        const mi: Type | not = maybeInner(t)
+        if (mi is some) return mi == Type.Str
+        return t == Type.Str
+    }
+
+    fn isNumLike(t: Type) -> boolean {
+        let x: Type = t
+        const mi: Type | not = maybeInner(t)
+        if (mi is some) x = mi
+        return x == Type.Int || x == Type.Num
+    }
+
+    fn valInfoOf(file: string, ty: Type, v: AValidator, st: AS) -> RVal {
+        const a: AValArg = v.arg
+        return match a {
+            .NoArgs :> bareVal(file, ty, v, st)
+            .Cmp(op: op, e: x) :> cmpVal(file, ty, v, op, x, st)
+            .Exprs(es: es) :> exprsVal(file, ty, v, es, st)
+            .Regex(source: src, flags: fl) :> regexVal(file, ty, v, src, fl, st)
+        }
+    }
+
+    // `req` (§55.1: `""` fails, `not` fails) → `required` on a STRING value: HTML
+    // `required` fails exactly the empty value. On a boolean it would mean
+    // "checked" (not exact); on a number / sequence / struct there is no form.
+    fn bareVal(file: string, ty: Type, v: AValidator, st: AS) -> RVal {
+        if (v.name != "req") return valBad(file, v, "E-PARSE-ATTR", "`" + v.name + "` needs its argument: `" + v.name + "(…)` (§55.1)", st)
+        if (isStrLike(ty)) return valOk(v, [pair("required", "")], st)
+        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`req` on a `" + typeName(ty) + "` value has no exact HTML form (only a string's `required`)"), st)
+    }
+
+    // `length(>=N)` / `(<=N)` / `(>N)` / `(<N)` / `(==N)` on a string, N an int
+    // literal → `minlength` / `maxlength` (integer lengths: `> N` is `>= N+1`).
+    fn cmpVal(file: string, ty: Type, v: AValidator, op: string, x: AExpr, st: AS) -> RVal {
+        if (v.name != "length") return valBad(file, v, "E-PARSE-ATTR", "`" + v.name + "(" + op + " …)` — only `length` takes a comparison (§55.1)", st)
+        if (!isStrLike(ty) && seqElem(ty) is not) return valBad(file, v, "E-TYPE-031", "`length(…)` applies to a string or a sequence, and this value is `" + typeName(ty) + "` (§55.1)", st)
+        const n: int = intLit(x)
+        if (!isStrLike(ty) || n < 0) return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`length(" + op + " …)` here has no exact HTML form (a string's length against an int literal)"), st)
+        if (op == ">=") return valOk(v, [pair("minlength", "" + n)], st)
+        if (op == ">") return valOk(v, [pair("minlength", "" + (n + 1))], st)
+        if (op == "<=") return valOk(v, [pair("maxlength", "" + n)], st)
+        if (op == "<" && n >= 1) return valOk(v, [pair("maxlength", "" + (n - 1))], st)
+        if (op == "==") return valOk(v, [pair("minlength", "" + n), pair("maxlength", "" + n)], st)
+        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`length(" + op + " " + n + ")` has no exact HTML form"), st)
+    }
+
+    // `min(n)` / `max(n)` on a number, n a numeric literal → `min` / `max`. A
+    // Level-1 message (`req("…")`, §55.10) has no reader in the bootstrap (no
+    // `messageFor`, no `<errors>`). The rest of §55.1 has no HTML form.
+    fn exprsVal(file: string, ty: Type, v: AValidator, es: AExpr[], st: AS) -> RVal {
+        if (v.name == "req") return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", "`req(\"…\")` — a Level-1 message (§55.10) is read by `messageFor` / `<errors>`, which are not in the bootstrap", st)
+        if (v.name == "length") return valBad(file, v, "E-PARSE-ATTR", "`length(…)` takes a comparison: `length(>=N)` (§55.1)", st)
+        if (v.name == "pattern") return valBad(file, v, "E-PARSE-ATTR", "`pattern(…)` takes a regex literal: `pattern(/…/)` (§55.1)", st)
+        if (v.name == "min" || v.name == "max") {
+            if (!isNumLike(ty)) return valBad(file, v, "E-TYPE-031", "`" + v.name + "(…)` applies to a number, and this value is `" + typeName(ty) + "` (§55.1)", st)
+            const lit: string = numLitText(es)
+            if (lit == "") return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + v.name + "(…)` with a non-literal bound has no static HTML form"), st)
+            return valOk(v, [pair(v.name, lit)], st)
+        }
+        return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + v.name + "(…)` has no HTML-native form"), st)
+    }
+
+    // `pattern(/re/)` on a string → `pattern="re"` ONLY WHEN EXACT (RULED S442
+    // (2), dpa-058 D6): no flags, anchored `^…$`, no top-level alternation, and
+    // written in the subset that reads the same under HTML's `v`-mode regex.
+    fn regexVal(file: string, ty: Type, v: AValidator, src: string, flags: string, st: AS) -> RVal {
+        if (v.name != "pattern") return valBad(file, v, "E-PARSE-ATTR", "`" + v.name + "(…)` does not take a regex (§55.1)", st)
+        if (!isStrLike(ty)) return valBad(file, v, "E-TYPE-031", "`pattern(…)` applies to a string, and this value is `" + typeName(ty) + "` (§55.1)", st)
+        if (flags != "" || !exactPattern(src)) {
+            return valBad(file, v, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`pattern(/" + src + "/" + flags + ")` is not exact as an HTML `pattern` (it needs no flags, `^…$` anchoring, no top-level `|`, and plain characters / classes)"), st)
+        }
+        return valOk(v, [pair("pattern", src)], st)
+    }
+
+    // The value of a non-negative int literal (-1: not one).
+    fn intLit(x: AExpr) -> int {
+        const k: AExprK = x.k
+        return match k {
+            .Num(raw: r) :> intOfRaw(r)
+            .Name(name: n) :> -1
+            .At(name: n) :> -1
+            .AtItem :> -1
+            .Str(v: s) :> -1
+            .Bool(v: b) :> -1
+            .NotLit :> -1
+            .Recovered :> -1
+            .Variant(name: n) :> -1
+            .Member(obj: o) :> -1
+            .Call(callee: c) :> -1
+            .Unary(op: o) :> -1
+            .Binary(op: o) :> -1
+            .Ternary(test: t) :> -1
+            .Assign(target: t) :> -1
+            .ArrayLit(elems: es) :> -1
+            .ObjectLit(props: ps) :> -1
+            .Spread(e: sx) :> -1
+            .Index(obj: ix) :> -1
+            .Lambda(params: lp) :> -1
+        }
+    }
+
+    fn intOfRaw(r: string) -> int {
+        if (numType(r) != Type.Int || isRadixLiteral(r)) return -1
+        const n: number = Number(r)
+        return n
+    }
+
+    // The text of the one numeric literal argument (`-` allowed) — "" otherwise.
+    fn numLitText(es: AExpr[]) -> string {
+        if (es.length != 1) return ""
+        const k: AExprK = es[0].k
+        return match k {
+            .Num(raw: r) :> decimalText(r)
+            .Unary(op: o, e: x) :> negText(o, x)
+            .Name(name: n) :> ""
+            .At(name: n) :> ""
+            .AtItem :> ""
+            .Str(v: s) :> ""
+            .Bool(v: b) :> ""
+            .NotLit :> ""
+            .Recovered :> ""
+            .Variant(name: n) :> ""
+            .Member(obj: o) :> ""
+            .Call(callee: c) :> ""
+            .Binary(op: o) :> ""
+            .Ternary(test: t) :> ""
+            .Assign(target: t) :> ""
+            .ArrayLit(elems: xs) :> ""
+            .ObjectLit(props: ps) :> ""
+            .Spread(e: sx) :> ""
+            .Index(obj: ix) :> ""
+            .Lambda(params: lp) :> ""
+        }
+    }
+
+    fn decimalText(r: string) -> string {
+        if (isRadixLiteral(r)) return ""
+        return r
+    }
+
+    fn negText(o: UnOp, x: AExpr) -> string {
+        const isNeg: boolean = o == UnOp.Neg
+        if (!isNeg) return ""
+        const t: string = numLitText([x])
+        if (t == "") return ""
+        return "-" + t
+    }
+
+    // EXACT as HTML's `pattern` (compiled `^(?:p)$` with the `v` flag): anchored
+    // `^…$`, no `|` outside a group, and only the plain subset — letters,
+    // digits, `_`, space, `.`, `*`, `+`, `?`, `@`, `-` (outside a class),
+    // groups `(…)` / `(?:…)`, `{n}` / `{n,m}`, the escapes `\d \w \s \D \W \S`
+    // and escaped syntax characters, and classes of letters / digits / `_` /
+    // ranges / those escapes. Anything else is not claimed exact.
+    fn exactPattern(src: string) -> boolean {
+        if (src.length < 2) return false
+        if (src.substring(0, 1) != "^") return false
+        if (src.substring(src.length - 1) != "$") return false
+        if (src.length >= 2 && src.substring(src.length - 2, src.length - 1) == "\\") return false
+        let i = 1
+        let depth = 0
+        const end: int = src.length - 1
+        while (i < end) {
+            const c: string = src.substring(i, i + 1)
+            if (c == "\\") {
+                if (!safeEscape(src.substring(i + 1, i + 2))) return false
+                i = i + 2
+            } else if (c == "[") {
+                const close: int = classEnd(src, i + 1)
+                if (close < 0) return false
+                i = close + 1
+            } else if (c == "(") {
+                depth = depth + 1
+                if (src.substring(i + 1, i + 2) == "?") {
+                    if (src.substring(i + 2, i + 3) != ":") return false
+                    i = i + 3
+                } else {
+                    i = i + 1
+                }
+            } else if (c == ")") {
+                depth = depth - 1
+                if (depth < 0) return false
+                i = i + 1
+            } else if (c == "|") {
+                if (depth == 0) return false
+                i = i + 1
+            } else if (c == "{") {
+                const q: int = quantEnd(src, i + 1)
+                if (q < 0) return false
+                i = q + 1
+            } else if (plainChar(c) || c == "." || c == "*" || c == "+" || c == "?" || c == "-") {
+                i = i + 1
+            } else {
+                return false
+            }
+        }
+        return depth == 0
+    }
+
+    fn plainChar(c: string) -> boolean {
+        if (c == "_" || c == " " || c == "@") return true
+        return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9")
+    }
+
+    fn alnum(c: string) -> boolean {
+        return (c >= "a" && c <= "z") || (c >= "A" && c <= "Z") || (c >= "0" && c <= "9")
+    }
+
+    fn safeEscape(c: string) -> boolean {
+        return c == "d" || c == "w" || c == "s" || c == "D" || c == "W" || c == "S" ||
+               c == "." || c == "*" || c == "+" || c == "?" || c == "(" || c == ")" || c == "[" || c == "]" ||
+               c == "{" || c == "}" || c == "|" || c == "^" || c == "$" || c == "/" || c == "\\"
+    }
+
+    // The index of the `]` closing a class opened before `from` (-1: not in the subset).
+    fn classEnd(src: string, from: int) -> int {
+        let i: int = from
+        if (src.substring(i, i + 1) == "^") i = i + 1
+        let first = true
+        while (i < src.length) {
+            const c: string = src.substring(i, i + 1)
+            if (c == "]") {
+                if (first) return -1
+                return i
+            }
+            if (c == "\\") {
+                const e: string = src.substring(i + 1, i + 2)
+                if (!(e == "d" || e == "w" || e == "s" || e == "D" || e == "W" || e == "S")) return -1
+                i = i + 2
+            } else if (alnum(c) && src.substring(i + 1, i + 2) == "-" && alnum(src.substring(i + 2, i + 3))) {
+                i = i + 3
+            } else if (alnum(c) || c == "_") {
+                i = i + 1
+            } else {
+                return -1
+            }
+            first = false
+        }
+        return -1
+    }
+
+    // The index of the `}` ending a `{n}` / `{n,}` / `{n,m}` quantifier (-1: not one).
+    fn quantEnd(src: string, from: int) -> int {
+        let i: int = from
+        let digits = 0
+        while (i < src.length && src.substring(i, i + 1) >= "0" && src.substring(i, i + 1) <= "9") {
+            i = i + 1
+            digits = digits + 1
+        }
+        if (digits == 0) return -1
+        if (src.substring(i, i + 1) == ",") {
+            i = i + 1
+            while (i < src.length && src.substring(i, i + 1) >= "0" && src.substring(i, i + 1) <= "9") { i = i + 1 }
+        }
+        if (src.substring(i, i + 1) != "}") return -1
+        return i
     }
 
     // The struct sub-field writes a field of struct type grants (M1 D12: a
@@ -1362,7 +1683,7 @@ ${
         let st: AS = st0
         let out: FieldInfo[] = []
         for (const a of d.attrs) {
-            const r: RField = fieldOf(te, g, a.nid, a.span, a.name, a.isLet, a.exported, a.ty, a.dflt, [], FieldRole.Attribute, st)
+            const r: RField = fieldOf(te, g, a.nid, a.span, a.name, a.isLet, a.exported, a.ty, a.dflt, [], FieldRole.Attribute, [], 0, st)
             out = out.concat([r.f])
             st = r.st
         }
@@ -1372,7 +1693,7 @@ ${
                 // inside N instances cannot be one instance.
                 st = addDiag(st, te.file, c.span, "E-COMPONENT-ENGINE-SCOPE", "`<" + c.name + " … single>` is a `single` declaration inside the multi-instance declaration `<" + d.name + ">` — every `<" + d.name + ">` instance would share one `" + c.name + "`. Drop `single`: an ordinary child field gives each `<" + d.name + ">` its own `" + c.name + "` (§66.13.4)")
             }
-            const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, st)
+            const r2: RField = fieldOf(te, g, c.nid, c.span, c.name, c.isLet, c.exported, c.ty, c.own, c.body, FieldRole.Child, c.validators, 1, st)
             out = out.concat([r2.f])
             st = r2.st
         }
@@ -1388,7 +1709,7 @@ ${
                 if (isNestedUserDecl(d)) {
                     // a user declaration (stubbed by withNestedStubs), not a field
                 } else {
-                    const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, st)
+                    const r: RField = fieldOf(te, g, d.nid, d.span, d.name, d.isLet, d.exported, d.ty, d.own, d.body, FieldRole.Child, d.validators, 2, st)
                     out = out.concat([r.f])
                     st = r.st
                 }
@@ -1605,7 +1926,7 @@ ${
         for (const f of fs) {
             out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted && typeTrusted(errs, f.typeSpan),
                                 typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode, role: f.role, grants: f.grants,
-                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink }])
+                                graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink, vals: f.vals }])
         }
         return out
     }
@@ -1673,6 +1994,9 @@ ${
                 } else {
                     st = o19Diags(s.file, d, st)
                     st = openerWordDiags(s.file, fileErrs(files, s.file), d, st)
+                    // s444 Phase B: a user declaration's OWN validators, and a field's below depth 1
+                    if (d.validators.length > 0) st = addDiag(st, s.file, d.validators[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators on `<" + d.name + ">`'s own opener bind its own value (§66.4 rule 3) — a user declaration's own value is not bindable in the bootstrap; put them on a child field")
+                    for (const c of childFields(d.body)) { st = deepValidatorDiags(s.file, c.body, st) }
                 }
             }
             const p: AProgram | not = s.p
@@ -1681,6 +2005,7 @@ ${
                 for (const it of p.items) {
                     for (const c of declsOfItem(it)) {
                         if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(s.file, fileErrs(files, s.file), c, st)
+                        if (!isNestedUserDecl(c)) st = deepValidatorDiags(s.file, c.body, st)
                     }
                 }
             }
@@ -1694,6 +2019,17 @@ ${
     // Every other word is refused here, on the declaration and on every child
     // field at any depth. (A named shared instance's construction words are
     // not opener words — it is refused as a whole, namedInstanceDiags.)
+    // s444 Phase B: validators on a declaration nested BELOW a child field (the
+    // bootstrap models one level of child fields) are refused, never dropped.
+    fn deepValidatorDiags(file: string, body: ADeclChild[], st0: AS) -> AS {
+        let st: AS = st0
+        for (const g of childFields(body)) {
+            if (g.validators.length > 0) st = addDiag(st, file, g.validators[0].span, "E-BOOTSTRAP-UNSUPPORTED", "validators on `<" + g.name + ">` (a field nested below a child field) are not in the bootstrap")
+            st = deepValidatorDiags(file, g.body, st)
+        }
+        return st
+    }
+
     // A declaration holding a parse error is recovery debris there (Rule C).
     fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, st0: AS) -> AS {
         let st: AS = st0
@@ -2235,9 +2571,20 @@ ${
             const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
             if (d is not) return diagX(env, e, "E-SCOPE-001", "unknown declaration", st)
             const i: int = fieldIndex(d.info, name)
+            if (i < 0 && isSurfaceProp(name) && !d.isProgram) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", surfaceDeferred("@" + d.info.sym.hint + "." + name, "§55.5"), st)
             if (i < 0) return diagX(env, e, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + name + "`", st)
             return { x: { ty: d.info.fields[i].ty, inst: not, iDecl: not, maybe: ro.x.maybe },
                      st: addName(st, e.nid, NameFact.NField(iDecl, inst, i)) }
+        }
+        // s444 Phase B — the synthesized validity surface of a FIELD read
+        // (`@c.isValid`): a program cell has none (§55.5 Edge A — RULED S442 (5)
+        // "`@x.isValid` on a no-surface cell → an error"); a declaration's child
+        // field has one (§55.6), not built in the bootstrap yet.
+        if (isSurfaceProp(name)) {
+            const nf: NameFact | not = nameFactIn(st, obj.nid)
+            const where: int = fieldReadKind(env, nf)
+            if (where == 2) return diagX(env, e, "E-VALIDITY-NO-SURFACE", "`." + name + "` — `" + exprLabel(obj) + "` is a top-level cell, and a single-value top-level cell has no validity surface (§55.5 Edge A); only a declaration and its child fields synthesize `isValid` / `errors` / `touched` / `submitted` (dpa-058, RULED S442 (5))", st)
+            if (where == 1) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", surfaceDeferred(exprLabel(obj) + "." + name, "§55.6"), st)
         }
         const t: Type | not = ro.x.ty
         if (t is some) {
@@ -2258,6 +2605,47 @@ ${
             }
         }
         return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "member access `." + name + "` on a value that is not a struct or an instance is not in bootstrap slice M2", st)
+    }
+
+    // s444 Phase B — the synthesized validity-surface properties (§55.5–§55.7).
+    fn isSurfaceProp(n: string) -> boolean {
+        return n == "isValid" || n == "errors" || n == "touched" || n == "submitted"
+    }
+
+    fn surfaceDeferred(what: string, sec: string) -> string {
+        return "`" + what + "` reads the synthesized validity surface (" + sec + "), which is not in the bootstrap yet"
+    }
+
+    fn exprLabel(e: AExpr) -> string {
+        const k: string = placeKey(e)
+        if (k == "") return "this value"
+        return k
+    }
+
+    // The fact recorded so far for node `nid` (the binder's names list, unindexed).
+    fn nameFactIn(st: AS, nid: int) -> NameFact | not {
+        const i: int = st.facts.names.nids.indexOf(nid)
+        if (i < 0) return not
+        return st.facts.names.facts[i]
+    }
+
+    // 2 = a read of a program cell (top level), 1 = a read of a user
+    // declaration's field, 0 = anything else.
+    fn fieldReadKind(env: Env, f: NameFact | not) -> int {
+        return match f {
+            .NField(decl: d) :> declKindOf(env, d)
+            .NLocal(sym: s) :> 0
+            .NInst(decl: d) :> 0
+            .NStruct(owner: o) :> 0
+            .NFn(sym: s) :> 0
+            .NLength :> 0
+            not :> 0
+        }
+    }
+
+    fn declKindOf(env: Env, d: Sym) -> int {
+        if (d.id == env.g.program.id) return 2
+        return 1
     }
 
     fn resolveCall(env: Env, e: AExpr, callee: AExpr, args: AExpr[], st0: AS) -> RX {
@@ -2708,6 +3096,7 @@ ${
             const d: DeclSrc | not = findDeclSrc(env.g, iDecl)
             if (d is not) return noPlace(st)
             const i: int = fieldIndex(d.info, name)
+            if (i < 0 && isSurfaceProp(name) && !d.isProgram) return noPlace(addDiag(st, env.file, t.span, "E-SYNTHESIZED-WRITE", "`@" + d.info.sym.hint + "." + name + "` is a synthesized validity property — read-only (§55.5, §55.7)"))
             if (i < 0) return noPlace(addDiag(st, env.file, t.span, "E-SCOPE-001", "`<" + d.info.sym.hint + ">` has no field `" + name + "`"))
             return { place: { decl: d.info, inst: inst, idx: i, path: [], ty: d.info.fields[i].ty, maybe: ro.x.maybe },
                      local: not, st: st }
@@ -4287,8 +4676,77 @@ ${
         st = rw.st
         const w: WriteFact | not = rw.w
         if (w is not) return st
+        // s444 Phase B (RULED S442 (2)): the target field's validators land on
+        // this native element — "wherever the bind is written"; a hand-written
+        // attribute of the same name wins (it is the element's markup)
+        let vattrs: HtmlAttrPair[] = []
+        if (p.path.length == 0) {
+            const lb: RPairs = bindValAttrs(env, e, a, f, kind, st)
+            vattrs = lb.ps
+            st = lb.st
+        }
         const m: RSym = mint(st, "v")
-        return addAttr(m.st, a.nid, AttrKind.ABind(kind, w, p.decl.sym, p.idx, m.s))
+        return addAttr(m.st, a.nid, AttrKind.ABind(kind, w, p.decl.sym, p.idx, m.s, vattrs))
+    }
+
+    type RPairs:struct = { ps: HtmlAttrPair[], st: AS }
+
+    // Each validator's HTML attributes, where they apply to this element (HTML's
+    // own applicability: `required` on text-like inputs / textarea / select;
+    // `minlength` / `maxlength` / `pattern` on text-like inputs (and textarea
+    // for the lengths); `min` / `max` on number / range / date-time inputs). A
+    // validator with no form on THIS element is refused — it would be inert here.
+    fn bindValAttrs(env: Env, e: AElem, a: AAttr, f: FieldInfo, kind: BindKind, st0: AS) -> RPairs {
+        let st: AS = st0
+        let out: HtmlAttrPair[] = []
+        const itype: string = inputType(e)
+        for (const v of f.vals) {
+            for (const h of v.attrs) {
+                if (!htmlApplies(h.name, e.tag, itype, kind)) {
+                    st = addDiag(st, env.file, a.span, "E-BOOTSTRAP-UNSUPPORTED", noSurfaceMsg("`" + f.sym.hint + "`'s validator `" + v.name + "` has no HTML form (`" + h.name + "`) on `<" + e.tag + typeSuffix(e, itype) + ">`"))
+                } else if (attrNamed(e.attrs, h.name) is not && !hasPairNamed(out, h.name)) {
+                    out = out.concat([h])
+                }
+            }
+        }
+        return { ps: out, st: st }
+    }
+
+    fn hasPairNamed(ps: HtmlAttrPair[], n: string) -> boolean {
+        for (const p of ps) {
+            if (p.name == n) return true
+        }
+        return false
+    }
+
+    fn inputType(e: AElem) -> string {
+        if (e.tag != "input") return ""
+        const t: string = staticAttrText(e.attrs, "type")
+        if (t == "") return "text"
+        return t.toLowerCase()
+    }
+
+    fn typeSuffix(e: AElem, itype: string) -> string {
+        if (e.tag != "input") return ""
+        return " type=\"" + itype + "\""
+    }
+
+    fn isTextInput(t: string) -> boolean {
+        return t == "text" || t == "search" || t == "url" || t == "tel" || t == "email" || t == "password"
+    }
+
+    fn isRangedInput(t: string) -> boolean {
+        return t == "number" || t == "range" || t == "date" || t == "month" || t == "week" || t == "time" || t == "datetime-local"
+    }
+
+    fn htmlApplies(name: string, tag: string, itype: string, kind: BindKind) -> boolean {
+        const isValue: boolean = kind == BindKind.Value
+        if (!isValue) return false
+        if (name == "required") return tag == "textarea" || tag == "select" || (tag == "input" && (isTextInput(itype) || isRangedInput(itype)))
+        if (name == "minlength" || name == "maxlength") return tag == "textarea" || (tag == "input" && isTextInput(itype))
+        if (name == "pattern") return tag == "input" && isTextInput(itype)
+        if (name == "min" || name == "max") return tag == "input" && isRangedInput(itype)
+        return false
     }
 
     // "" = the value a bind writes fits the place; "coerce" = a numeric place
@@ -7436,8 +7894,30 @@ ${
             }
             const r: AElem | not = fd.renders
             if (r is some) ts = typeElem(env, r, ts)
+            ts = typeValidatorArgs(env, fd.validators, ts)
         }
         return ts
+    }
+
+    // s444 Phase B: a validator's argument expressions are typed as values
+    // (the typer covers every expression node; nothing is checked here — the
+    // binder judged each validator's applicability, fieldVals).
+    fn typeValidatorArgs(env: TEnv, vs: AValidator[], ts0: TypeState) -> TypeState {
+        let ts: TypeState = ts0
+        for (const v of vs) {
+            const a: AValArg = v.arg
+            ts = typeValArg(env, a, ts)
+        }
+        return ts
+    }
+
+    fn typeValArg(env: TEnv, a: AValArg, ts: TypeState) -> TypeState {
+        return match a {
+            .Cmp(op: op, e: x) :> typeExpr(env, x, ts).ts
+            .Exprs(es: es) :> typeExprs(env, es, ts)
+            .NoArgs :> ts
+            .Regex(source: s) :> ts
+        }
     }
 
     fn typeProgramItem(env: TEnv, it: AItem, ts: TypeState) -> TypeState {
@@ -7525,13 +8005,221 @@ ${
         const fs: NodeFacts = indexed(st.facts)
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
-                                attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] } }
+                                attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] },
+                                novalidate: [] }
         const scopeDiags: Diag[] = checkScopes(files, bound)
+        // s444 Phase B: dead validators (RULED S442 (5)) and the forms that take `novalidate` (RULED S442 (3))
+        const vp: ValPass = validatorPass(ra.g, bound)
         const typed: RTyping = typeProgram(files, bound)
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
-                            elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing }
-        return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(typed.diags) }
+                            elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing,
+                            novalidate: vp.forms }
+        return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(vp.diags).concat(typed.diags) }
+    }
+
+    // =========================================================================
+    // s444 Phase B — THE VALIDATOR PASS, over the bound tables.
+    //  - RULED S442 (5) "Silently dead validators become errors": a validated
+    //    child field that NO `bind:` targets → E-VALIDATOR-DEAD (its validators
+    //    reach the DOM only through a bound element, RULED S442 (2); a program
+    //    cell's are refused in fieldVals).
+    //  - RULED S442 (3) "the compiler adds `novalidate` to any form carrying
+    //    lowered attributes": every `<form>` whose markup — through `<*f/>`
+    //    inlines, `<*x/>` Stars, uses, `<each>` rows and state-view arms — holds
+    //    a bound element with lowered validator attributes.
+    // =========================================================================
+    type ValPass:struct = { diags: Diag[], forms: int[] }
+    type BindKey:struct = { decl: int, idx: int }
+
+    fn validatorPass(g: Globals, t: Tables) -> ValPass {
+        let keys: BindKey[] = []
+        for (const k of t.attrs.facts) { keys = keys.concat(bindKeyOf(k)) }
+        let diags: Diag[] = []
+        for (const ds of g.decls) {
+            if (!ds.isProgram) {
+                let i = 0
+                for (const f of ds.info.fields) {
+                    if (f.vals.length > 0 && !hasBindKey(keys, ds.info.sym.id, i)) {
+                        diags = diags.concat([{ code: "E-VALIDATOR-DEAD", file: ds.file, span: f.span,
+                            message: "`" + f.sym.hint + "` has validators, but no `bind:` targets `@" + f.sym.hint + "` — a validator reaches the page only through the element that binds its value (dpa-058, RULED S442 (1)/(2): the bind is always written), so these are silently dead; silently dead validators are errors (RULED S442 (5)) — bind it in its `renders`: `renders <input bind:value=@" + f.sym.hint + "/>`" }])
+                    }
+                    i = i + 1
+                }
+            }
+        }
+        let forms: int[] = []
+        for (const ds of g.decls) {
+            for (const n of declMarkup(ds)) { forms = forms.concat(formsIn(g, t, n)) }
+        }
+        return { diags: diags, forms: forms }
+    }
+
+    fn bindKeyOf(k: AttrKind) -> BindKey[] {
+        return match k {
+            .ABind(w: w, decl: d, idx: i) :> bindKeyFor(w, d, i)
+            .AStatic :> []
+            .ABound :> []
+            .AOn(event: ev) :> []
+            .AIf :> []
+            .AConstruct(field: x) :> []
+            .AAs :> []
+            .AEachIn :> []
+            .AEachKey :> []
+            .AEachAs :> []
+        }
+    }
+
+    // Only a bind of the field's WHOLE value (not a sub-field path) is its bind.
+    fn bindKeyFor(w: WriteFact, d: Sym, i: int) -> BindKey[] {
+        const isWhole: boolean = w.edit == EditKind.Replace
+        if (!isWhole) return []
+        return [{ decl: d.id, idx: i }]
+    }
+
+    fn hasBindKey(ks: BindKey[], d: int, i: int) -> boolean {
+        for (const k of ks) {
+            if (k.decl == d && k.idx == i) return true
+        }
+        return false
+    }
+
+    // All the markup a declaration owns: its renders, state-child bodies, child renders.
+    fn declMarkup(ds: DeclSrc) -> ANode[] {
+        let out: ANode[] = rendersNodes(ds).concat(stateBodies(ds))
+        if (ds.p is not) {
+            for (const fd of fieldDecls(ds)) { out = out.concat(rendersOf(fd)) }
+        }
+        return out
+    }
+
+    // The `<form>` elements under `n` that carry lowered attributes.
+    fn formsIn(g: Globals, t: Tables, n: ANode) -> int[] {
+        const k: ANodeK = n.k
+        return match k {
+            .Elem(e: e) :> formsInElem(g, t, e)
+            .Text(text: x) :> []
+            .Interp(e: x) :> []
+            .DeclNode(d: d) :> []
+        }
+    }
+
+    fn formsInElem(g: Globals, t: Tables, e: AElem) -> int[] {
+        let out: int[] = []
+        if (e.tag == "form" && !e.star && isHtmlFact(elemFact(t.elems, e.nid)) && attrNamed(e.attrs, "novalidate") is not) {
+            if (carries(g, t, [e], [])) out = [e.nid]
+        }
+        for (const k of e.kids) { out = out.concat(formsIn(g, t, k)) }
+        return out
+    }
+
+    fn isHtmlFact(f: ElemFact | not) -> boolean {
+        return match f {
+            .MHtml :> true
+            .MUse(decl: d) :> false
+            .MEach(bind: b) :> false
+            .MSlot :> false
+            .MStateView(v: v) :> false
+            .MInline(v: v) :> false
+            .MStar(decl: d) :> false
+            not :> false
+        }
+    }
+
+    // Does this markup hold a bound element with lowered attributes? `seen` —
+    // the declarations already being expanded (a renders may reach itself).
+    fn carries(g: Globals, t: Tables, es: AElem[], seen: int[]) -> boolean {
+        for (const e of es) {
+            if (elemCarries(g, t, e, seen)) return true
+        }
+        return false
+    }
+
+    fn nodesCarry(g: Globals, t: Tables, ns: ANode[], seen: int[]) -> boolean {
+        for (const n of ns) {
+            const k: ANodeK = n.k
+            const el: AElem | not = elemOfNode(k)
+            if (el is some) {
+                if (elemCarries(g, t, el, seen)) return true
+            }
+        }
+        return false
+    }
+
+    fn elemOfNode(k: ANodeK) -> AElem | not {
+        return match k {
+            .Elem(e: e) :> e
+            .Text(text: x) :> not
+            .Interp(e: x) :> not
+            .DeclNode(d: d) :> not
+        }
+    }
+
+    fn elemCarries(g: Globals, t: Tables, e: AElem, seen: int[]) -> boolean {
+        for (const a of e.attrs) {
+            if (lowersAttrs(attrFact(t.attrs, a.nid))) return true
+        }
+        const f: ElemFact | not = elemFact(t.elems, e.nid)
+        const via: ANode[] = expansion(g, f, seen)
+        if (nodesCarry(g, t, via, seen.concat(expandedDecl(f)))) return true
+        return nodesCarry(g, t, e.kids, seen)
+    }
+
+    fn lowersAttrs(k: AttrKind | not) -> boolean {
+        return match k {
+            .ABind(vattrs: vs) :> vs.length > 0
+            .AStatic :> false
+            .ABound :> false
+            .AOn(event: ev) :> false
+            .AIf :> false
+            .AConstruct(field: x) :> false
+            .AAs :> false
+            .AEachIn :> false
+            .AEachKey :> false
+            .AEachAs :> false
+            not :> false
+        }
+    }
+
+    // The markup an element stands for beyond its own children: an inlined
+    // renders, a Star's / a use's declaration renders, state-view arm bodies.
+    fn expansion(g: Globals, f: ElemFact | not, seen: int[]) -> ANode[] {
+        return match f {
+            .MInline(v: v) :> v.nodes
+            .MStar(decl: d) :> declRendersOnce(g, d, seen)
+            .MUse(decl: d) :> declRendersOnce(g, d, seen)
+            .MStateView(v: v) :> stateArmNodes(v)
+            .MHtml :> []
+            .MEach(bind: b) :> []
+            .MSlot :> []
+            not :> []
+        }
+    }
+
+    fn expandedDecl(f: ElemFact | not) -> int[] {
+        return match f {
+            .MStar(decl: d) :> [d.id]
+            .MUse(decl: d) :> [d.id]
+            .MInline(v: v) :> []
+            .MStateView(v: v) :> []
+            .MHtml :> []
+            .MEach(bind: b) :> []
+            .MSlot :> []
+            not :> []
+        }
+    }
+
+    fn declRendersOnce(g: Globals, d: Sym, seen: int[]) -> ANode[] {
+        if (seen.indexOf(d.id) >= 0) return []
+        const ds: DeclSrc | not = findDeclSrc(g, d)
+        if (ds is not) return []
+        return declMarkup(ds)
+    }
+
+    fn stateArmNodes(v: StateView) -> ANode[] {
+        let out: ANode[] = []
+        for (const a of v.arms) { out = out.concat(a.body) }
+        return out
     }
 
     // Every imported name must be an EXPORTED type / declaration / function of a

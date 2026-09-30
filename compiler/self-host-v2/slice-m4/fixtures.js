@@ -3,8 +3,7 @@
 // site moved throws instead of silently doing nothing). Each edit says why.
 // s444: §66.19.5 and §66.19.2 RUN FROM SOURCE now (audit.test.js / form.test.js
 // load the verbatim programs); what is left here is determinism for the older
-// review suites (a fixed clock, a button for the actor) and the validators
-// (Phase B).
+// review suites (a fixed clock, a button for the actor) and probe lines.
 
 import { readM4, replaceLine } from "./harness.js";
 
@@ -48,14 +47,12 @@ export function auditShapesFixture() {
 }
 
 /**
- * §66.19.2 minus its validators only (s444: the three binds run — Core has
- * the bind form). The validators land in Phase B (dpa-058, RULED S442).
- * `extraMain` is appended after the `<*signup/>` line.
+ * §66.19.2 VERBATIM (s444: the binds are Core binds, Phase A; the validators
+ * land per dpa-058, Phase B) with probe markup `extraMain` appended after the
+ * `<*signup/>` line — the one edit.
  */
 export function formFixture(extraMain = "") {
   let s = readM4("src/form/signup.scrml");
-  s = editOnce(s, ` req length(>=5)/>`, `/>`);
-  s = editOnce(s, ` req length(>=8)/>`, `/>`);
   s = replaceLine(s, "render the shared signup instance", `<*signup/>${extraMain}`);
   return s;
 }

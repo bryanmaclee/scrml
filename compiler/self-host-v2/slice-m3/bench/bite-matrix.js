@@ -162,9 +162,9 @@ const FRONT_MUTATIONS = [
   { c: "Analyze.Host", id: "`Date.now()` records no host fact (lowered as a missing value)", file: ANALYZE,
     from: "            .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))", to: "            .HostOk :> plain(Type.Num, st)", tests: ["audit.test.js"] },
   { c: "Analyze.Bind", id: "a bind records no attribute fact (the element is not bound)", file: ANALYZE,
-    from: "        return addAttr(m.st, a.nid, AttrKind.ABind(kind, w, p.decl.sym, p.idx, m.s))", to: "        return m.st", tests: ["audit.test.js", "form.test.js"] },
+    from: "        return addAttr(m.st, a.nid, AttrKind.ABind(kind, w, p.decl.sym, p.idx, m.s, vattrs))", to: "        return m.st", tests: ["audit.test.js", "form.test.js"] },
   { c: "Lower.Bind", id: "lower drops the bind", file: LOWER,
-    from: "            .ABind(kind: bk, w: w, decl: d, idx: x, sink: sk) :> [bindAttr(c, bk, w, d, x, sk)]", to: "            .ABind(kind: bk, w: w, decl: d, idx: x, sink: sk) :> []", tests: ["audit.test.js", "form.test.js"] },
+    from: ":> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))", to: ":> [].concat(validatorAttrs(vs))", tests: ["audit.test.js", "form.test.js"] },
   // §66.19.2 — a validated form (s444: the verbatim program minus its validators — Phase B)
   { c: "Analyze.Star", id: "`<*x/>` of a declaration names no Star (the shared form is never rendered)", file: ANALYZE,
     from: "        return addElem(st, e.nid, ElemFact.MStar(d.info.sym, InstRef.Shared(d.info.sym)))", to: "        return st", tests: ["form.test.js"] },

@@ -1,12 +1,13 @@
 // form.test.js — SPEC §66.19.2 "A validated form (with a `single` save-status
 // declaration)".
 //
-// s444 Phase A: everything but the validators RUNS — the three binds are Core
-// binds (Attr.Bind), `@email` inside `email`'s own renders is this instance
-// (O54 = (a), RULED S442), and `<*signup/>` is a Core View.Star (the existing
-// shared instance). The validators `req` / `length(…)` are Phase B (dpa-058,
-// RULED S442) — until then the verbatim program reports exactly them, and the
-// fixture drops only them (the one derived edit).
+// s444: the VERBATIM program compiles clean and RUNS. Phase A — the three binds
+// are Core binds (Attr.Bind), `@email` inside `email`'s own renders is this
+// instance (O54 = (a), RULED S442), `<*signup/>` is a Core View.Star (the
+// existing shared instance). Phase B (dpa-058, RULED S442) — the validators
+// `req` / `length(…)` land on the bound inputs as `required` / `minlength`,
+// and the form carries `novalidate` (validators.test.js pins the attributes).
+// The fixture only appends probe markup to `<main>`.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
 import { loadM2, frontEnd, compileClean, replaceLine, negativeLines, readM4 } from "./harness.js";
@@ -25,18 +26,10 @@ const run = (src) => frontEnd(mods, [{ path: "signup.scrml", src }]);
 const codes = (src) => run(src).diags.map((d) => d.code);
 
 describe("§66.19.2 — the front end", () => {
-  test("the VERBATIM program: exactly the validators (Phase B) are reported, nothing else", () => {
-    const src = SRC();
-    const got = run(src).diags.map((d) => [d.code, src.slice(d.span.start, d.span.start + 12)]).sort();
-    expect(got).toEqual([
-      ["E-BOOTSTRAP-UNSUPPORTED", "length(>=5)/"],
-      ["E-BOOTSTRAP-UNSUPPORTED", "length(>=8)/"],
-      ["E-BOOTSTRAP-UNSUPPORTED", "req length(>"],
-      ["E-BOOTSTRAP-UNSUPPORTED", "req length(>"],
-    ]);
-    for (const d of run(src).diags.filter((x) => /req|length/.test(src.slice(x.span.start, x.span.start + 6)))) {
-      expect(d.message).toContain("O25");
-    }
+  test("the VERBATIM program compiles clean (s444: binds, O54, Star, and the dpa-058 validators)", () => {
+    const r = run(SRC());
+    expect(r.diags).toEqual([]);
+    expect(mods.check.checkCore(r.core)).toEqual([]);
   });
 
   test("the fixture compiles clean and its Core is well-formed", () => {
@@ -79,7 +72,7 @@ describe("§66.19.2 — the front end", () => {
   });
 });
 
-describe("§66.19.2 — behaviour (validators dropped, everything else as written, run)", () => {
+describe("§66.19.2 — behaviour (the verbatim program + a probe line, run)", () => {
   beforeAll(async () => {
     const core = compileClean(mods, [{ path: "signup.scrml", src: fixture(`\n        <p class="probe">\${@signup.email}|\${@signup.password}</p>`) }], "§66.19.2 fixture").core;
     await loadProgram(core, "form");
