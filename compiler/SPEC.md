@@ -9284,6 +9284,17 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
   what it returns, and leave no function-valued property in what it hands the serializer, at any
   depth. (Measured on base and round 6b: `{ toJSON: () => u }`, `u.toJSON = () => ({ ...u })`,
   `{ ...u, toJSON: () => u }` and `{ data: { toJSON: () => [u] } }` each served the full row.)
+- **The sink OWNS serialization (S443 round 6d).** Every client-egress sink SHALL serialize a
+  SNAPSHOT it built itself — a fresh tree of plain objects, arrays and primitives in which every
+  property was read exactly once, every `toJSON` invoked once, every function, Symbol and accessor
+  removed, and every marked column stripped — and SHALL NOT hand the serializer any object the
+  author's code can still reach. The snapshot follows the serializer's own rules (omitted values,
+  `null` in arrays, boxed primitives, a `Date` through the built-in conversion captured at load,
+  a cycle is an error), so the bytes of plain data are unchanged. (Measured at round 6c: an object
+  on a non-plain prototype whose getter answered `"ok"` on the first read and the row on the
+  second was walked once, then handed as-is to the serializer, which read the getter again and
+  served the full row. Two losses to runtime-object tricks — `toJSON`, then getters — are why the
+  rule is ownership of serialization, not a smarter walk.) The CPS error envelope is such a sink.
 (Measured before round 6: `delete u[Symbol.for("scrml.protect.origin")]`, pushing onto the
 descriptor's reveal list, and deleting a copy's Symbol-keyed properties each served the full row.)
 
@@ -9405,8 +9416,18 @@ halves, and a conformant implementation SHALL enforce both:
      declassifier, provided the key is not itself protected.
      ⚑ **S443 round 6c — the decision needs POSITIVE evidence, and fails closed without it.** A key
      declassifies only when its provenance is entirely a runtime secret source — a read under
-     `process.env` / `Bun.env` / `import.meta.env`, a database value, or the result of a host
-     (stdlib / npm) call such as a configuration or secret-store read — and has NO constant part: a
+     `process.env` / `Bun.env` / `import.meta.env`, a database value, or the result of a host call
+     that DOES I/O, reads a secret or configuration, or draws entropy — at this revision the stdlib
+     calls `scrml:process` `env` (THE configuration read; there is no separate config module) /
+     `argv`, `scrml:fs` `readFileSync` / `readdirSync`, `scrml:http` `get` / `post` / `put` / `del`
+     / `patch`, `scrml:redis` `get` / `getBuffer` / `smembers`, `scrml:random` `random` /
+     `randomInt`, `scrml:crypto` `generateToken` / `generateUUID` — and has NO constant part. A pure
+     stdlib function carries its arguments' constness (`scrml:path` `normalize("public-key")` and
+     `scrml:crypto` `hash("sha256", "public")` are constants; `normalize(env("K"))` is runtime), and
+     an npm / host function the compiler has no model for is NOT evidence of a secret (fail closed:
+     a constant). ~~or the result of a host (stdlib / npm) call such as a configuration or
+     secret-store read~~ *(round-6c wording, SUPERSEDED S443 round 6d: any host call counted, and pure
+     helpers of constants laundered a constant key — review, measured.)* Not constant-free: a
      constant computed through a call (`String.fromCharCode(107, 101, 121)`, `JSON.parse('"key"')`,
      `String(Math.PI)`), a key with no evidence at all (a free name, a parameter no caller shows), and
      a concatenation with a constant part (`"k" + process.env.K` is `"kundefined"` when the variable
