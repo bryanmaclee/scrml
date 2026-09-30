@@ -21,9 +21,9 @@ Also absent: the §34 diagnostic-code total. It is load-bearing but not reliably
 | fact | value |
 |---|---|
 | compiler version | `0.8.0` |
-| live compiler source (`compiler/src`) | 274,398 lines across 217 files |
-| test files | 1,529 |
-| specification lines (`compiler/SPEC.md`) | 40,886 |
+| live compiler source (`compiler/src`) | 274,467 lines across 217 files |
+| test files | 1,530 |
+| specification lines (`compiler/SPEC.md`) | 40,975 |
 | conformance cases | 1139 |
 | standard-library modules | 21 |
 | CLI verbs | 11 |
