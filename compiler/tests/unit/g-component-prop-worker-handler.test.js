@@ -190,12 +190,15 @@ function compileToClient(src) {
 
 // The PARENT-side worker handler (`const <binding> = event.data`), not the
 // worker's own internal `when message(d)` listener.
+// The hook is a listener (`addEventListener("message", …)`, dpa-056 D2); the
+// `const m = event.data.data` anchor skips the `.send()` reply router, which
+// is also a "message" listener but binds no hook variable.
 function parentOnmessageBody(clientJs) {
-  const m = clientJs.match(/onmessage\s*=\s*function\(event\)\s*\{([\s\S]*?)\};/);
+  const m = clientJs.match(/addEventListener\("message", function\(event\)\s*\{(\s*const \w+ = event\.data\.data;[\s\S]*?)\}\);/);
   return m ? m[1] : "";
 }
 function onerrorBody(clientJs) {
-  const m = clientJs.match(/onerror\s*=\s*function\([^)]*\)\s*\{([\s\S]*?)\};/);
+  const m = clientJs.match(/addEventListener\("error", function\([^)]*\)\s*\{([\s\S]*?)\}\);/);
   return m ? m[1] : "";
 }
 

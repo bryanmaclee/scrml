@@ -124,7 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
-- `b8dc1cbf1` — wrap(s442): bootstrap typer + §66.19 programs landed, three rulings (tape grants, dpa-058, dpa-045 axiom) — and every landing needed a round to fix its own round — **LOCAL-ONLY**
+- `7b15ffcdc` — wrap(s442): final gate state + #1167/#1169/#1170 review markers — **LOCAL-ONLY**
 - `7b77eecd6` — wrap(s441): the spotlight audit found the security holes — four closed, two HIGHs filed for S442 (#1165) — **pushed**
 - `cf62b4154` — wrap(s440): a JS gotcha gauntlet and four deep-dives turned into ~100 rulings (#1140) — **pushed**
 - `d79d461d4` — wrap(s439): the bootstrap got a typer and its first corpus grade, and a grade is only evidence if breaking the thing breaks it (#1124) — **pushed**

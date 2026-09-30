@@ -1,0 +1,11 @@
+<program>
+  type Step:enum = { Idle, Loading, Done }
+  <engine for=Step initial=.Idle>
+    <Idle rule=.Loading>"   WSN  engine   block   literal   "</>
+    <Loading rule=.Done : "   WSO  engine  shorthand   ">
+    <Done rule=.Idle>
+      <span>   WSP  engine-nested-span   </span>
+    </>
+  </>
+  <p>WSS ${@step.variant}</p>
+</program>
