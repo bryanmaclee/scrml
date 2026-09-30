@@ -286,7 +286,13 @@ type LE:enum = { NotFound(id: string) renders <p class="rend">No #\${id}</p>, Ne
 <div if=@show><render of=@err/></div>
 </program>
 `, "render");
-    expect(texts("p.rend")).toEqual(["No 42"]);
+    // S441 round 5e — the source text is `No #${id}`, so the render is
+    // `No #42`. This expectation used to be "No 42": it encoded a content-loss
+    // bug (the `renders` markup was rebuilt from logic tokens, which dropped
+    // the `#` — the logic tokenizer has no token for it — and joined the rest
+    // with spaces). dpa-045 (S442): free text is literal and "Whitespace is
+    // kept exactly"; `#` before `${` is content, not the `#{` CSS exit.
+    expect(texts("p.rend")).toEqual(["No #42"]);
   });
 
   test("<errors of=…/> renders the field's error", () => {

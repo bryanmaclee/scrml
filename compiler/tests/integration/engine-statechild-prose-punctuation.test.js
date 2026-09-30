@@ -256,14 +256,22 @@ describe("engine state-child prose punctuation — adversarial scope holds", () 
       "${ type S:enum = { A, B } }",
       "${ <n>:int = 3 }",
       "<engine for=S initial=.A>",
-      "  <A rule=.B><p>${ `count is ${@n}` }</p></>",
+      "  <A rule=.B><p>${ `count is ${1 + 2}` }</p></>",
       "  <B><p>done</p></>",
       "</>",
       "</program>",
       "",
     ].join("\n");
-    const { errors } = compileSource("backtick-template", src);
+    // S441 round 4: the interpolation was `${@n}`. That compiled clean only
+    // because the constant folder folded EVERY interpolated template to ""
+    // (the paragraph rendered empty — silent). With the folder fixed, a cell
+    // read inside a client template hits the carried, LOUD gap
+    // g-client-template-interpolation-lowering-needs-a-structural-emitter;
+    // this case pins the SCANNER (backtick + `${` inside a state-child), so it
+    // interpolates a plain expression and asserts the template now renders.
+    const { errors, clientJs } = compileSource("backtick-template", src);
     expect(codes(errors)).toEqual([]);
+    expect(clientJs).toContain("count is");
   });
 
   test("case 6: a NESTED engine inside a state-child, with apostrophes in BOTH bodies", () => {

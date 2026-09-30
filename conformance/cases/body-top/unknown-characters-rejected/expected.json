@@ -1,0 +1,16 @@
+{
+  "id": "body-top-unknown-characters-rejected",
+  "description": "Characters the logic tokenizer has no token for (`★ ✓ →`) do not vanish: E-UNQUOTED-DISPLAY-TEXT (S441 round 4 coverage invariant).",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.18.7",
+  "source-test": "compiler/tests/unit/s441-review-r4.test.js",
+  "rationale": "§40.8 S441 bullet: every non-whitespace, non-comment byte of a body-top run is inside a parsed statement or an E-UNQUOTED-DISPLAY-TEXT diagnostic — text never silently vanishes.",
+  "expect": {
+    "codes": [
+      "E-UNQUOTED-DISPLAY-TEXT"
+    ],
+    "codeCounts": {
+      "E-UNQUOTED-DISPLAY-TEXT": 1
+    }
+  }
+}
