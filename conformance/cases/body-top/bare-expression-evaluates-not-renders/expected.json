@@ -1,10 +1,10 @@
 {
   "id": "body-top-bare-expression-evaluates-not-renders",
-  "description": "A bare expression statement at a <program> body-top is evaluated, not rendered (ruled S441 item 3): the page shows only the declared <p>.",
+  "description": "A bare expression statement WITH AN EFFECT at a <program> body-top is evaluated, not rendered (ruled S441 item 3): the page shows only the declared <p>. (Since ruling S445 item 2 the statement must have an effect — the former bare `@count` here is now E-STMT-NO-EFFECT, see body-top/no-effect-statement-rejected.)",
   "language-version": "1.0",
   "spec": "§40.8, §4.18.1, §4.18.7",
   "source-test": "compiler/tests/unit/s441-declared-prose-body.test.js",
-  "rationale": "§40.8 S441 bullet (ruling: user-voice-scrml.md S441 \"prose should be declared as such\" + \"declared-prose implementation: yes to all four\"): a `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code, checked exactly as inside `${ … }`, never page text; displayed text is declared by a markup element or a `\"...\"` display-text literal; a bare run that is not valid code is E-UNQUOTED-DISPLAY-TEXT.",
+  "rationale": "§40.8 S441 bullet (ruling: user-voice-scrml.md S441 \"prose should be declared as such\" + \"declared-prose implementation: yes to all four\"): a `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code, checked exactly as inside `${ … }`, never page text; S445 item 2: an expression statement with no effect is an error, a call is an effect.",
   "expect": {
     "codes": [],
     "notCodePrefixes": [

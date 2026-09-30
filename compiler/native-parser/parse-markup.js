@@ -106,7 +106,7 @@ import { makeParseExprContext, parseExpression } from "./parse-expr.js";
 import { parseProgram } from "./parse-stmt.js";
 // S441 — the body-top display-text segmenter shared with the live front end.
 import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose, uncoveredSegments } from "./body-top-prose.js";
-import { typeDeclExtent, declExtent, functionHeadGap, liveStmtCompilesNothing, liveTreeDropsText } from "./body-top-coverage.js";
+import { typeDeclExtent, declExtent, functionHeadGap, liveStmtNothingReason, liveLabelIsTargeted, liveTreeDropsText } from "./body-top-coverage.js";
 import { translateStmtList } from "./translate-stmt.js";
 import { atEnd } from "./token-cursor.js";
 // MK4 — the markup<->JS seam (R1 spike §3). The seam helpers centralize the
@@ -2830,14 +2830,19 @@ function nativeFunctionHasNoBody(st, source, nextStart) {
     const texts = toks.filter((t) => t && t.kind !== "EOF").map((t) => String(t.text ?? ""));
     return declExtent("function", texts).nothing === true;
 }
-function nativeStmtCompilesNothing(st, source, nextStart) {
-    if (st === null || st === undefined || st.kind === "Empty") return false;
-    if (nativeFunctionHasNoBody(st, source, nextStart)) return true;
+// nativeStmtNothingReason — why the statement compiles nothing (see the
+// shared liveStmtNothingReason: "literal" / "no-effect" / "nothing"), or null.
+function nativeStmtNothingReason(st, source, nextStart) {
+    if (st === null || st === undefined || st.kind === "Empty") return null;
+    if (nativeFunctionHasNoBody(st, source, nextStart)) return "nothing";
     const live = nativeTranslate(st);
-    if (live === null) return false;
-    if (labelSurvives(st, live) === false) return true;
-    if (live.length === 1 && liveStmtCompilesNothing(live[0])) return true;
-    return false;
+    if (live === null) return null;
+    if (labelSurvives(st, live) === false) return "nothing";
+    if (live.length === 1) return liveStmtNothingReason(live[0]);
+    return null;
+}
+function nativeStmtCompilesNothing(st, source, nextStart) {
+    return nativeStmtNothingReason(st, source, nextStart) !== null;
 }
 function nativeStmtDropsText(st) {
     if (st === null || st === undefined || typeof st.kind !== "string" || st.kind === "Empty") return false;
@@ -2873,6 +2878,12 @@ function nativeTypeAliasRest(st, source, outer) {
         restEnd: base + toks[toks.length - 1].span.end,
         keptRaw: eq >= 0 ? toks.slice(eq + 1, n).map((t) => t.text).join(" ") : st.raw,
     };
+}
+function noEffectNativeMessage(shown) {
+    return "`" + shown + "` has no effect. An expression statement at the top of a `<program>` / `<page>` / " +
+        "`<channel>` body must do something — a call, an assignment, `++` / `--`, or a `send` (SPEC §40.8, " +
+        "S445). To show a value, declare it: `<span>${" + shown + "}</span>` or a display-text literal `\"${" +
+        shown + "}\"` (§4.18.4).";
 }
 function unquotedNativeMessage(shown) {
     return "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
@@ -2910,6 +2921,21 @@ function rejectBodyTopProseNative(block, source, ctx) {
         const b = st0.span.start + toks[gap[1] - 1].span.end;
         const shown0 = source.slice(a, b).trim();
         const shown = shown0.length > 80 ? shown0.slice(0, 77) + "..." : shown0;
+        const pre = source.slice(0, a);
+        pushDiagnostic(ctx, makeDiagnostic("E-UNQUOTED-DISPLAY-TEXT", unquotedNativeMessage(shown),
+            { start: a, end: b, line: (pre.match(/\n/g) || []).length + 1, col: a - (pre.lastIndexOf("\n") + 1) + 1 }));
+    }
+    // Ruling S445 item 2 — "a label nothing targets is also an error": the
+    // loop stays, the `label:` is reported (the live front end does the same).
+    for (const st0 of body) {
+        if (!st0 || st0.kind !== "Labeled" || !st0.span || typeof st0.span.start !== "number") continue;
+        const live = nativeTranslate(st0);
+        if (live === null || live.length !== 1 || live[0].label !== st0.label || liveLabelIsTargeted(live[0])) continue;
+        const colon = source.indexOf(":", st0.span.start);
+        if (colon < 0 || colon > st0.span.end) continue;
+        const a = st0.span.start;
+        const b = colon + 1;
+        const shown = source.slice(a, b).trim();
         const pre = source.slice(0, a);
         pushDiagnostic(ctx, makeDiagnostic("E-UNQUOTED-DISPLAY-TEXT", unquotedNativeMessage(shown),
             { start: a, end: b, line: (pre.match(/\n/g) || []).length + 1, col: a - (pre.lastIndexOf("\n") + 1) + 1 }));
@@ -2956,6 +2982,8 @@ function rejectBodyTopProseNative(block, source, ctx) {
         return idx;
     };
     const flagged = body.map((st, k) => isSeqStmt(st) || nothing[k]);
+    // (Statements a parse diagnostic is attributed to — not valid code.)
+    const diagFlagged = body.map(() => false);
     // A diagnostic past the END of every statement that could own it, on a
     // later line (`<count> = 0⏎...` — the error-recovery statement for `...`
     // carries the previous statement's span): its own line is the prose.
@@ -2986,9 +3014,10 @@ function rejectBodyTopProseNative(block, source, ctx) {
         if (k > 0 && d.code === "E-EXPR-MEMBER-NAME" && starts[k] === d.span.start) k = k - 1;
         if (k < 0) continue;
         flagged[k] = true;
+        diagFlagged[k] = true;
         if (d.code === "E-STMT-MISSING-SEMICOLON" && k > 0 && starts[k - 1] !== null) {
             const between = source.slice(starts[k - 1], d.span.start);
-            if (between.includes("\n") === false) flagged[k - 1] = true;
+            if (between.includes("\n") === false) { flagged[k - 1] = true; diagFlagged[k - 1] = true; }
         }
     }
     // The FIRST qualifying group (see the header): its first source LINE is
@@ -3019,7 +3048,14 @@ function rejectBodyTopProseNative(block, source, ctx) {
         // label) keeps the code-head rule below.
         const lineStartOff = source.lastIndexOf("\n", starts[si] - 1) + 1;
         const firstNonWs = lineStartOff + source.slice(lineStartOff).search(/\S/);
-        const lineCompilesNothing = nothing[si] && starts[si] === firstNonWs;
+        // (Not when a parse diagnostic sits on that line: a statement the
+        // native parser split out of a line it could not read — `use` in
+        // `use foreign:svc { … }`, a native gap — is not a statement that
+        // "does nothing"; its diagnostics stand.)
+        const lineEndAbs = source.indexOf("\n", firstNonWs);
+        const lineHasDiag = diags.some((d) => d.span.start >= lineStartOff
+            && d.span.start < (lineEndAbs === -1 ? blockEnd : lineEndAbs));
+        const lineCompilesNothing = nothing[si] && starts[si] === firstNonWs && !lineHasDiag;
         if (lineCompilesNothing
                 || (BODY_TOP_CODE_HEAD_RE.test(text) === false && (block._bodyTopCatchAll === true || allExprStmts))) fi = si;
         // Round 5 — only the group's FIRST line is decided here; a flagged
@@ -3035,6 +3071,15 @@ function rejectBodyTopProseNative(block, source, ctx) {
     // whole line holding the first flagged statement is rejected, including
     // statements the parser cut from that line before it (`(optional) fill
     // this in` → a valid `(optional)` plus an invalid `fill this in`).
+    // Ruling S445 item 2 — valid code with no effect is reported as that.
+    // Only when that statement IS the whole line (no other statement and no
+    // parse diagnostic on it): `Welcome` in `Welcome to the app` is prose.
+    const lineOfOff = (off) => (source.slice(0, off).match(/\n/g) || []).length;
+    const fiAlone = fi >= 0 && starts[fi] !== null
+        && !body.some((st, k) => k !== fi && starts[k] !== null && lineOfOff(starts[k]) === lineOfOff(starts[fi]))
+        && !diags.some((d) => lineOfOff(d.span.start) === lineOfOff(starts[fi]))
+        && diagFlagged[fi] !== true && !isSeqStmt(body[fi]);
+    const fiNoEffect = fiAlone && nativeStmtNothingReason(body[fi], source, fi + 1 < body.length && starts[fi + 1] !== null ? starts[fi + 1] : undefined) === "no-effect";
     let fs = fi >= 0 ? starts[fi] : orphanFs;
     while (fs < blockEnd && /\s/.test(source[fs])) fs = fs + 1;
     if (orphanFs >= 0 && orphanFs < fs) fs = orphanFs;
@@ -3069,7 +3114,7 @@ function rejectBodyTopProseNative(block, source, ctx) {
         tailBody = tailBlock.body;
         const lead = source.slice(tailStart, blockEnd).search(/\S/);
         const tailFirst = tailStart + (lead < 0 ? 0 : lead);
-        const k = ctx.diagnostics.findIndex((d, i) => i >= mark && d && d.code === "E-UNQUOTED-DISPLAY-TEXT"
+        const k = fiNoEffect ? -1 : ctx.diagnostics.findIndex((d, i) => i >= mark && d && d.code === "E-UNQUOTED-DISPLAY-TEXT"
             && d.span && d.span.start === tailFirst);
         if (k >= 0) {
             // The next line is prose too: one diagnostic for the whole run.
@@ -3078,7 +3123,8 @@ function rejectBodyTopProseNative(block, source, ctx) {
         }
     }
     pushDiagnostic(ctx, makeDiagnostic(
-        "E-UNQUOTED-DISPLAY-TEXT",
+        fiNoEffect ? "E-STMT-NO-EFFECT" : "E-UNQUOTED-DISPLAY-TEXT",
+        fiNoEffect ? noEffectNativeMessage(shown) :
         "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
         "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
         "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +

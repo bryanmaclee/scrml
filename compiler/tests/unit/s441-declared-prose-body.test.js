@@ -91,10 +91,13 @@ for (const [label, parser] of PIPELINES) {
       expect(compile("<program>\n<channel name=\"c\">\n  <msgs> = []\n  hello channel prose\n</>\n<p>x</p>\n</program>\n", parser).codes)
         .toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
     });
-    test("a lone identifier is code: E-SCOPE-001, whose message names the declared-prose forms", () => {
+    test("a lone identifier has no effect: E-STMT-NO-EFFECT (ruling S445 #2), naming the declared forms", () => {
+      // Was E-SCOPE-001 (S441 (3)); S445 item 2: an expression statement with
+      // no effect is an error.
       const r = compile("<program>\nCounter\n<p>x</p>\n</program>\n", parser);
-      expect(r.codes).toEqual(["E-SCOPE-001"]);
-      expect(r.errors[0].message).toContain("<p>Counter</p>");
+      expect(r.codes).toEqual(["E-STMT-NO-EFFECT"]);
+      expect(r.errors[0].message).toContain("has no effect");
+      expect(r.errors[0].message).toContain("${Counter}");
     });
     for (const [src, code] of [
       ["try\n{\n  log(1)\n} catch (e) { }", "E-TRY-NOT-IN-SCRML"],
@@ -135,10 +138,15 @@ for (const [label, parser] of PIPELINES) {
       expect(r.codes).toEqual(["E-CTX-001"]);
       expect(r.body).toContain("<p>x</p>");
     });
-    test("a bare expression statement is evaluated, not rendered", () => {
-      const r = compile("<program>\n<count> = 3\n@count\n<p>done</p>\n</program>\n", parser);
+    test("a bare expression statement with an effect is evaluated, not rendered", () => {
+      const r = compile("<program>\n<count> = 3\nconsole.log(@count)\n<p>done</p>\n</program>\n", parser);
       expect(r.errors).toHaveLength(0);
       expect(r.body).toBe("<p>done</p>");
+    });
+    test("a bare `@count` has no effect: E-STMT-NO-EFFECT (ruling S445 #2 — supersedes the S441 (3) example)", () => {
+      const r = compile("<program>\n<count> = 3\n@count\n<p>done</p>\n</program>\n", parser);
+      expect(r.codes).toEqual(["E-STMT-NO-EFFECT"]);
+      expect(r.errors[0].message).toContain("`@count` has no effect");
     });
     test("a bare write at body-top is legal (E-WRITE-NOT-IN-LOGIC-CONTEXT retired)", () => {
       const r = compile("<program>\n<count> = 0\n@count = 5\n<p>${@count}</p>\n</program>\n", parser);

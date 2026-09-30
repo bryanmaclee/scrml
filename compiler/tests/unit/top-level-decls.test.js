@@ -261,16 +261,14 @@ describe("plain text is not lifted to logic blocks", () => {
     expect(errors.filter(e => e.code === "E-UNQUOTED-DISPLAY-TEXT")).toHaveLength(1);
   });
 
-  test("S441 — 'typewriter' (a lone identifier) in a <program> body is code: lifted as a bare expression, not text", () => {
-    // `typewriter` is valid code (an identifier), so it is NOT E-UNQUOTED —
-    // it is checked as code downstream (E-SCOPE-001 when undeclared).
+  test("S441/S445 — 'typewriter' (a lone identifier) in a <program> body is code, not text — and has no effect: E-STMT-NO-EFFECT", () => {
+    // `typewriter` is valid code (an identifier), so it is NOT E-UNQUOTED.
+    // Ruling S445 item 2: an expression statement with no effect is an error
+    // (was: checked downstream, E-SCOPE-001 when undeclared).
     const bsResult = splitBlocks("test.scrml", "<program>typewriter</program>");
-    const { ast, errors } = buildAST(bsResult);
-    const programNode = ast.nodes.find(n => n.kind === "markup" && n.tag === "program");
-    const logicChildren = (programNode?.children || []).filter(n => n.kind === "logic");
-    expect(logicChildren).toHaveLength(1);
-    expect(logicChildren[0].body[0].kind).toBe("bare-expr");
+    const { errors } = buildAST(bsResult);
     expect(errors.filter(e => e.code === "E-UNQUOTED-DISPLAY-TEXT")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-STMT-NO-EFFECT")).toHaveLength(1);
   });
 
   test("S441 — text inside a markup element in a <program> body stays free text", () => {

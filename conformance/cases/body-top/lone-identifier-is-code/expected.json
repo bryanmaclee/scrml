@@ -1,16 +1,17 @@
 {
   "id": "body-top-lone-identifier-is-code",
-  "description": "A lone identifier IS valid code, so it is checked as code: E-SCOPE-001 (undeclared), not E-UNQUOTED-DISPLAY-TEXT.",
+  "description": "A lone identifier IS valid code, so it is checked as code — and as a statement it has no effect: E-STMT-NO-EFFECT (ruling S445 item 2; was E-SCOPE-001 under S441 (3)), not E-UNQUOTED-DISPLAY-TEXT.",
   "language-version": "1.0",
   "spec": "§40.8, §4.18.1, §4.18.7",
   "source-test": "compiler/tests/unit/s441-declared-prose-body.test.js",
-  "rationale": "§40.8 S441 bullet (ruling: user-voice-scrml.md S441 \"prose should be declared as such\" + \"declared-prose implementation: yes to all four\"): a `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code, checked exactly as inside `${ … }`, never page text; displayed text is declared by a markup element or a `\"...\"` display-text literal; a bare run that is not valid code is E-UNQUOTED-DISPLAY-TEXT.",
+  "rationale": "§40.8: a `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code. Ruling user-voice-scrml.md S445 item 2: \"Any expression statement with no effect is an error.\" A lone name is valid code with no effect, reported as that.",
   "expect": {
     "codes": [
-      "E-SCOPE-001"
+      "E-STMT-NO-EFFECT"
     ],
     "notCodes": [
-      "E-UNQUOTED-DISPLAY-TEXT"
+      "E-UNQUOTED-DISPLAY-TEXT",
+      "E-INTERNAL-BODY-TOP-DROPPED"
     ]
   }
 }

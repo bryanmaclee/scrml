@@ -55,7 +55,7 @@ import {
 
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
 import { segmentBodyTopItems } from "../native-parser/body-top-prose.js";
-import { declExtent, liveStmtCompilesNothing } from "../native-parser/body-top-coverage.js";
+import { declExtent, liveStmtNothingReason, liveLabelIsTargeted } from "../native-parser/body-top-coverage.js";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -1541,6 +1541,32 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
   const leadWs = srcText.slice(lineStartRel).search(/\S/);
   const rel = lineStartRel + (leadWs < 0 ? 0 : leadWs);
   const start = srcOffset + rel;
+  // Ruling S445 item 2 — a statement that is valid code but has NO EFFECT
+  // (`@count`, `@a == 1`) is reported as that, not as "not valid code".
+  // Only when that statement IS the whole line: a no-effect word that is one
+  // piece of a prose line (`Welcome` in `Welcome to the app`) is prose.
+  const fiLine = body[fi] && body[fi].span ? body[fi].span.line : -1;
+  const fiAlone = fiLine > 0
+    && !(fi > 0 && body[fi - 1] && body[fi - 1].span && body[fi - 1].span.line === fiLine && body[fi - 1].span.start !== body[fi].span.start)
+    && !(body[fi + 1] && body[fi + 1].span && body[fi + 1].span.line === fiLine)
+    && !stmtLostTail(body[fi]);
+  // …and the line is ONE valid expression (`★`, `!!!`, `Hello, world`,
+  // `not available` are not code at all — prose, E-UNQUOTED-DISPLAY-TEXT).
+  const lineIsOneExpr = (() => {
+    if (!fiAlone || !body[fi].span) return false;
+    const r0 = body[fi].span.start - srcOffset;
+    const ls = srcText.lastIndexOf("\n", r0 - 1) + 1;
+    const le = srcText.indexOf("\n", r0);
+    const txt = srcText.slice(ls, le === -1 ? srcText.length : le).trim().replace(/;$/, "");
+    try {
+      const n = parseExprToNode(txt, "", 0);
+      return !!n && !hasLostTrailingContent(n) && n._notPrefixNegation !== true
+        && !(n.kind === "escape-hatch" && (n.nativeKind === "ParseError" || n.nativeKind === "SequenceExpression" || n.nativeKind === "SkippedExpr"));
+    } catch {
+      return false;
+    }
+  })();
+  const fiNoEffect = lineIsOneExpr && !!(body[fi]._s441Accepted && body[fi]._s441Accepted.reason === "no-effect");
   let cut = fi;
   while (cut > 0 && body[cut - 1] && body[cut - 1].span && body[cut - 1].span.start >= start) cut--;
   const nl = srcText.indexOf("\n", rel);
@@ -1565,14 +1591,16 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
     tail = reparseTail(nl + 1) || [];
     const lead = srcText.slice(nl + 1).search(/\S/);
     const tailFirst = srcOffset + nl + 1 + (lead < 0 ? 0 : lead);
-    const k = errors.findIndex((e, i) => i >= mark && e && e.code === "E-UNQUOTED-DISPLAY-TEXT" && errStart(e) === tailFirst);
+    const k = fiNoEffect ? -1 : errors.findIndex((e, i) => i >= mark && e && e.code === "E-UNQUOTED-DISPLAY-TEXT" && errStart(e) === tailFirst);
     if (k >= 0) {
       // The next line is prose too: one diagnostic for the whole run.
       end = errors[k].tabSpan && typeof errors[k].tabSpan.end === "number" ? errors[k].tabSpan.end : end;
       errors.splice(k, 1);
     }
   }
-  errors.push(new TABError(
+  errors.push(fiNoEffect
+    ? noEffectError(filePath, shown, start, end, lineNo, 1 + (leadWs < 0 ? 0 : leadWs))
+    : new TABError(
     "E-UNQUOTED-DISPLAY-TEXT",
     `E-UNQUOTED-DISPLAY-TEXT: \`${shown}\` is not valid code. A \`<program>\` / ` +
     `\`<page>\` / \`<channel>\` body is code (SPEC §40.8, S441) — loose prose is ` +
@@ -1583,6 +1611,19 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
   ));
   for (const st of tail) body.push(st);
   return 1;
+}
+
+// noEffectError — ruling S445 item 2 (SPEC §40.8): an expression statement at a
+// \`<program>\` / \`<page>\` / \`<channel>\` body top that has no effect.
+function noEffectError(filePath, shown, start, end, line, col) {
+  return new TABError(
+    "E-STMT-NO-EFFECT",
+    `E-STMT-NO-EFFECT: \`${shown}\` has no effect. An expression statement at the top of a ` +
+    `\`<program>\` / \`<page>\` / \`<channel>\` body must do something — a call, an assignment, ` +
+    `\`++\` / \`--\`, or a \`send\` (SPEC §40.8, S445). To show a value, declare it: ` +
+    `\`<span>\${${shown}}</span>\` or a display-text literal \`"\${${shown}}"\` (§4.18.4).`,
+    { file: filePath, start, end, line, col },
+  );
 }
 
 // S441 round 4 — see the call site in buildBlock's `logic` case. Returns a new
@@ -1680,7 +1721,14 @@ function bodyTopAcceptance(node, consumed) {
   const texts = consumed.map((t) => (t.kind === "STRING" ? "\"" : "") + String(t.text ?? ""));
   // The live-shape judgment both front ends share (the native front end
   // applies it to the bridge's translation of its statement).
-  if (liveStmtCompilesNothing(node)) return { nothing: true };
+  const _why = liveStmtNothingReason(node);
+  if (_why) return { nothing: true, reason: _why };
+  // Ruling S445 item 2 — a label nothing targets compiles nothing: the loop
+  // stays, the `label:` tokens are reported (a gap at the head).
+  if (typeof node.label === "string" && node.label !== "" && !liveLabelIsTargeted(node)
+      && texts[0] === node.label && texts[1] === ":") {
+    return { count: consumed.length, gap: [0, 2] };
+  }
   let res = null;
   switch (node.kind) {
     case "import-decl": {
@@ -12723,7 +12771,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       if (acc) {
         let rec;
         if (acc.nothing) {
-          rec = { nothing: true };
+          rec = { nothing: true, reason: acc.reason };
         } else {
           const lastTok = consumed[acc.count - 1];
           const rest = consumed.slice(acc.count);

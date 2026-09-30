@@ -316,11 +316,89 @@ export function liveExprIsInert(node) {
 // kind, no name — `export data`, `export default …`); a `type` with neither a
 // kind nor a body. Both front ends judge the statement they will actually hand
 // to codegen with this one function.
+// ---------------------------------------------------------------------------
+// Ruling S445 item 2 — "Any expression statement with no effect is an error.
+// An effect means a call, an assignment, `++`/`--`, or a `send`. … Calls always
+// count as effects, even calls to pure functions." `liveExprHasEffect` walks an
+// expression for one: a call (a `send(…)` and a tagged template are calls; so
+// is `new`), an assignment (compound too, anywhere inside the expression),
+// `++` / `--`, `delete` (it mutates), a `?{ … }` SQL block (it executes), a
+// `reset(…)`. The body of a lambda is not run by evaluating the lambda, so it
+// is not searched. An expression this function cannot see into (an escape-
+// hatch carrying source text the structured parser did not model, markup-as-
+// value, a match) is counted as an effect — fail open is the wrong way here
+// only in that it keeps today's behaviour; the known shapes are all modelled.
+// ---------------------------------------------------------------------------
+const EFFECT_EXPR_KINDS = new Set(["call", "new", "assign", "sql-ref", "reset", "markup-value", "match-expr"]);
+const EFFECT_UNARY_OPS = new Set(["++", "--", "delete", "await"]);
+export function liveExprHasEffect(node, depth = 0) {
+    if (node === null || typeof node !== "object" || depth > 300) return false;
+    if (Array.isArray(node)) return node.some((x) => liveExprHasEffect(x, depth + 1));
+    if (typeof node.kind === "string") {
+        if (EFFECT_EXPR_KINDS.has(node.kind)) return true;
+        if (node.kind === "unary" && EFFECT_UNARY_OPS.has(node.op)) return true;
+        if (node.kind === "lambda") return false;
+        // An expression the structured parser did not model is an escape-hatch
+        // whose content this walk cannot see: it counts as an effect (the
+        // conservative answer — a `class`, a sequence, a parse failure each
+        // have their own diagnostic), EXCEPT `this`, the one pure atom both
+        // front ends leave unmodeled. An EMPTY escape-hatch is a translation
+        // drop, reported by the coverage check — never "no effect".
+        if (node.kind === "escape-hatch") {
+            return !(node.nativeKind === "ThisExpression" || node.nativeKind === "This");
+        }
+    }
+    for (const k of Object.keys(node)) {
+        if (k === "span") continue;
+        const v = node[k];
+        if (v !== null && typeof v === "object" && liveExprHasEffect(v, depth + 1)) return true;
+    }
+    return false;
+}
+
+// liveStmtNoEffectReason — why a live-shape statement compiles nothing, or null:
+//   "literal"   — an expression statement built only from literals (`404`):
+//                 indistinguishable from undeclared display text, reported as
+//                 E-UNQUOTED-DISPLAY-TEXT (ruling S443 item 4);
+//   "no-effect" — an expression statement that names something but does
+//                 nothing (`@count`, `@a == 1`, `x => y`), E-STMT-NO-EFFECT
+//                 (ruling S445 item 2);
+//   "nothing"   — a declaration whose grammar is not satisfied.
+export function liveStmtNothingReason(st) {
+    if (!st || typeof st !== "object") return null;
+    if (st.kind === "bare-expr") {
+        if (st._onMountEffect === true || !st.exprNode || typeof st.exprNode !== "object") return null;
+        if (liveExprIsInert(st.exprNode)) return "literal";
+        return liveExprHasEffect(st.exprNode) ? null : "no-effect";
+    }
+    return liveStmtCompilesNothing(st) ? "nothing" : null;
+}
+
+// liveLabelIsTargeted — ruling S445 item 2: "a label nothing targets is also
+// an error". True when a live-shape labelled statement (a loop carrying
+// `label`) contains a `break` / `continue` naming that label.
+export function liveLabelIsTargeted(st) {
+    if (!st || typeof st !== "object" || typeof st.label !== "string" || st.label === "") return true;
+    const name = st.label;
+    const walk = (n, d) => {
+        if (n === null || typeof n !== "object" || d > 400) return false;
+        if (Array.isArray(n)) return n.some((x) => walk(x, d + 1));
+        if ((n.kind === "break-stmt" || n.kind === "continue-stmt") && n.label === name) return true;
+        for (const k of Object.keys(n)) {
+            if (k === "span") continue;
+            const v = n[k];
+            if (v !== null && typeof v === "object" && walk(v, d + 1)) return true;
+        }
+        return false;
+    };
+    return walk(st.body, 0);
+}
+
 export function liveStmtCompilesNothing(st) {
     if (!st || typeof st !== "object") return false;
     switch (st.kind) {
         case "bare-expr":
-            return st._onMountEffect !== true && liveExprIsInert(st.exprNode);
+            return liveStmtNothingReason(st) !== null;
         case "import-decl":
             // No source, or no binding (`import "./x.js"` — §21.3 admits named
             // and default imports only; codegen emits nothing for it).

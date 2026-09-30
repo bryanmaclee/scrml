@@ -61,7 +61,7 @@ for (const [label, parser] of BOTH) {
       expect(r.errors[0].message).toContain("`5 items`");
       expect(at(r.errors[0]).line).toBe(4);
     });
-    for (const code of ["\"abc\".toUpperCase()", "\"Count: \" + @count", "\"a,b\".split(\",\").forEach(x => console.log(x))"]) {
+    for (const code of ["\"abc\".toUpperCase()", "console.log(\"Count: \" + @count)", "\"a,b\".split(\",\").forEach(x => console.log(x))"]) {
       test(`code line after a declaration runs: \`${code}\``, () => {
         const r = compile(`<program>\n<count> = 0\n${code}\n<p id="z">end \${@count}</p>\n</program>\n`, parser);
         expect(r.errors).toHaveLength(0);

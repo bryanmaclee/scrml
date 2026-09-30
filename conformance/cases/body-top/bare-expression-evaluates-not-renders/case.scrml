@@ -1,5 +1,5 @@
 <program>
 <count> = 3
-@count
+console.log(@count)
 <p id="p">done</p>
 </program>

@@ -95,13 +95,20 @@ for (const [label, parser] of BOTH) {
         expect(at(r.errors[0]).line).toBe(3);
       });
     }
-    test("a label on a LOOP is code (§49), not prose", () => {
-      // (A labelled `break` does not compile inside an explicit `${ … }`
-      // either — a pre-existing codegen gap outside this check — so the
-      // loop here does not use its label.)
+    test("a label a `break` targets is code (§49)", () => {
+      // (A labelled `break` then fails codegen — E-CODEGEN-INVALID-LOGIC, a
+      // pre-existing gap the label check does not own; the body-top check
+      // itself accepts the label.)
+      const r = compile("outer: for (const a of [1]) { for (const b of [2]) { if (b) { break outer } log(\"loop\" + b) } }", parser);
+      expect(r.codes).not.toContain("E-UNQUOTED-DISPLAY-TEXT");
+      expect(r.codes).not.toContain("E-STMT-NO-EFFECT");
+      expect(r.codes).not.toContain("E-INTERNAL-BODY-TOP-DROPPED");
+    });
+    test("a label nothing targets is an error on the label; the loop compiles (ruling S445 #2)", () => {
       const r = compile("outer: for (const x of [1, 2]) { log(\"loop\" + x) }", parser);
-      expect(r.codes).toEqual([]);
-      expect(r.client).toContain("loop");
+      expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+      expect(r.errors[0].message).toContain("`outer");
+      expect(at(r.errors[0]).line).toBe(3);
     });
   });
 }
@@ -180,12 +187,43 @@ for (const [label, parser] of BOTH) {
   });
 
   describe(`D3 — a bare read before a state declaration is two statements (${label})`, () => {
-    for (const src of ["<count> = 0\n@count\n<total> = 0\n<p>${@count} ${@total}</p>", "<o> = { a: 1 }\n@o.a\n<total> = 0\n<p>${@o.a} ${@total}</p>"]) {
-      test(`${JSON.stringify(src)} compiles clean`, () => {
+    // (Since ruling S445 #2 the bare read is itself an error — "has no
+    // effect" — but on ITS line only: the declaration below it survives.)
+    for (const [src, read] of [["<count> = 0\n@count\n<total> = 0\n<p>${@count} ${@total}</p>", "@count"], ["<o> = { a: 1 }\n@o.a\n<total> = 0\n<p>${@o.a} ${@total}</p>", "@o.a"]]) {
+      test(`${JSON.stringify(src)} → E-STMT-NO-EFFECT on \`${read}\`, the declaration survives`, () => {
         const r = compile(src, parser);
+        expect(r.codes).toEqual(["E-STMT-NO-EFFECT"]);
+        expect(r.errors[0].message).toContain("`" + read + "` has no effect");
+        expect(at(r.errors[0]).line).toBe(4);
+      });
+    }
+  });
+
+  describe(`S445 #2 — an expression statement with no effect is an error (${label})`, () => {
+    const PRE = "<a> = 0\n<count> = 0\n<x> = false\n<o> = { a: 1 }\nfunction step() { return 1 }\n";
+    for (const src of ["@a == 1", "\"Total: \" + @count", "!@x", "typeof @x", "@x ? 1 : 2", "\"abc\".length", "x => x", "this", "@count", "@o.a", "step"]) {
+      test(`\`${src}\` → E-STMT-NO-EFFECT`, () => {
+        const r = compile(PRE + src + "\n<p>${@a}${@count}${@x}${@o.a}</p>", parser);
+        expect(r.codes).toEqual(["E-STMT-NO-EFFECT"]);
+        expect(r.errors[0].message).toContain("has no effect");
+      });
+    }
+    test("`--@a` has an effect (a body-top check never rejects it; codegen of a prefix `--` on a cell is a separate, pre-existing E-CODEGEN gap)", () => {
+      const r = compile(PRE + "--@a\n<p>${@a}${@count}${@x}${@o.a}</p>", parser);
+      expect(r.codes).not.toContain("E-STMT-NO-EFFECT");
+      expect(r.codes).not.toContain("E-UNQUOTED-DISPLAY-TEXT");
+    });
+    for (const src of ["step()", "log(@a)", "@a = 1", "@a += 1", "@a++", "@o.a = 2", "(@a = 5)", "\"abc\".toUpperCase()", "@x ? step() : log(1)", "@a == 1 || step()", "new Date()", "on mount { log(1) }"]) {
+      test(`\`${src}\` has an effect → compiles clean`, () => {
+        const r = compile(PRE + src + "\n<p>${@a}${@count}${@x}${@o.a}</p>", parser);
         expect(r.codes).toEqual([]);
       });
     }
+    test("an untargeted label on a `while` is reported on the label; the loop compiles", () => {
+      const r = compile(PRE + "Instructions:\nwhile (@a != 3) { @a = @a + 1 }\n<p>${@a}${@count}${@x}${@o.a}</p>", parser);
+      expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+      expect(r.errors[0].message).toContain("Instructions");
+    });
   });
 }
 

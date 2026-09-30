@@ -217,3 +217,43 @@ HELD FOR BRYAN (not changed, per PA): the "does nothing" rule's reach over pure 
   `@a == 1`, `"Total: " + @count`, `!@x`, a regex literal `/hello world/`, an unreferenced label on a loop
   (`Instructions:⏎while …`). Today these compile (they name a cell / are a loop); EXPECTED-FAILING if the
   ruling extends "does nothing" to them — no code or test pins either way.
+
+## ROUND 5c — re-review of 53161db07 (LAND-WITH-NITS) + ruling S445 #2
+
+- 4b7280a33 — R1 (must, default, introduced ≤ round 4): `for (let i = 0; i != 3; i++) {…}` at a body top was
+  E-UNQUOTED (the prose check judged the whole parenthesised C-style header as ONE expression). The head is
+  now judged by its clauses (condition, update, a non-declaration init); prose inside a header is still
+  rejected. BEFORE: E-UNQUOTED (default); AFTER: clean, loop emitted. Native unchanged: fails closed
+  (E-INTERNAL) because the bridge emits `for (; …)` — the pre-existing native bridge gap.
+  R2 (default + native): `function f() -> number oops junk { … }` / `function f(): number junk {⏎…⏎}`
+  compiled CLEAN with the junk gone. Shared functionHeadEnd / functionHeadGap: tokens between the head's
+  grammar end (params, `-> T` / `: T`, `!` / `! -> E` / `! E`, modifier calls) and the body `{` are
+  E-UNQUOTED on both parsers; the body compiles. (The gate caught `! LoadError` — the arrow-less failable
+  form — being read as junk before commit; fixed.) Native `: T` on `function` still does not parse (gap).
+- S445 #2 unit: "Any expression statement with no effect is an error." Shared liveExprHasEffect (call —
+  incl. `send`, `new`, method, pure fn —, assignment incl. compound/nested, `++`/`--`, `delete`, `?{}`,
+  `reset`; a lambda body is not searched; an unmodeled escape-hatch counts as an effect except `this`).
+  New code E-STMT-NO-EFFECT (§34 row) for valid code that does nothing (`@count`, `@o.a`, `@a == 1`,
+  `"Total: " + @count`, `!@x`, `typeof @x`, `@x ? 1 : 2`, `"abc".length`, `x => y`, `this`, a bare name) —
+  reported as "has no effect", naming `<span>${…}</span>` / `"${…}"`; only when the statement IS its
+  whole line (a no-effect word inside a prose line stays E-UNQUOTED). Literal-only statements stay
+  E-UNQUOTED (ruling S443 #4). An untargeted label (`Instructions:⏎while …`, `outer: for … {}` with no
+  `break outer`) → E-UNQUOTED on the label; the loop compiles. SPEC §40.8 bullets updated with the ruling
+  quoted + provenance (supersedes S441 (3)'s `@count` example only); §4.18.7 note. D3's `@count⏎<total>`
+  is now E-STMT-NO-EFFECT on `@count`, the declaration survives. Re-pinned tests: lone identifier
+  (E-SCOPE-001 → E-STMT-NO-EFFECT), bare-expression-evaluates (now `console.log(@count)`), r4 "Count:"
+  code line (now a call), top-level-decls `typewriter`, the r5 label/D3 tests; conformance
+  lone-identifier-is-code + bare-expression-evaluates-not-renders re-authored, NEW
+  body-top/no-effect-statement-rejected.
+- MEASURED (vs main c53b297a7; write:true re-check on main for every newly failing file):
+  default — newly failing = ONLY conformance body-top/* + ctrl-012 cases (the ones that pin these rules);
+  0 files in examples / samples / readme-snippets / scrml-site / flogence. E-STMT-NO-EFFECT fires in 0 corpus
+  files outside its own test cases — ruling S445 #2 needs no migration.
+  native — the same conformance set, plus native bridge / parser gaps main hid: examples/29 +
+  4 components/* (main fails at write: E-CODEGEN-INVALID-LOGIC), capability/undeclared-with-foreign
+  (`use foreign:` — native has no production) and auth/program-nested-worker (`when message(d)`), both of
+  which main native compiled CLEAN because the line shipped as page text.
+- FUZZ (4 seeds x 300 x 2 parsers): E-INTERNAL 0; oracle violations = the `-N` / `[..]` continuation class
+  only (dpa-063 pending). Prose-free bodies now fail more (25–41 per seed, E-UNQUOTED): the fuzz's own
+  code generator writes `outerN: for (…) { … }` with no `break` — an untargeted label, an error by S445 #2.
+- Suites: 27,094 run / 27,012 pass / 0 fail; conformance 1170/1178 + 8 xfail, 0 FAIL.
