@@ -32,6 +32,14 @@
 //       RuntimeEdge for it (L8).
 //   C7  a Commit (all-or-nothing spread edit, RULED S440) holds ≥ 2 Writes and
 //       nothing else, each storing a Local (the snapshot its Let evaluated)
+//   C8  (s444) a Bind writes exactly its event-value sink, once, to the place
+//       its `read` reads (Replace or FieldAt of that field)
+//   C9  (s444) a removal's value: RemoveEnd / RemoveFront carry an Int count
+//       ≥ 1; RemoveAnywhere carries `SeqCall(Filter, <the field itself>, λ)`
+//   C10 (s444) a Star's instance resolves to its declaration (C4's rule), and
+//       that declaration has a renders
+//   (C3 covers the s444 edits: the removals by the field's grants; ElemAt by
+//   the ELEMENT field's own contract, dpa-052 Q3.)
 // A diagnostic is a message string (§4 permits strings as text).
 // =============================================================================
 ${

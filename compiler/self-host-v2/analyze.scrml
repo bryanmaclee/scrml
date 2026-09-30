@@ -2309,31 +2309,62 @@ ${
         let st: AS = ro.st
         let elem: Type | not = not
         const ot: Type | not = ro.x.ty
+        const isFilter: boolean = m.method == "filter"
+        // what a refusal still answers (a filter keeps the receiver's type), so
+        // a `.length` after a refused call is not a second report
+        let guess: Type | not = not
+        if (isFilter) guess = ot
         if (ot is some) {
             elem = seqElem(ot)
-            if (elem is not) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "(…)` on a value that is not a sequence (it is `" + typeName(ot) + "`)", st)
+            if (elem is not) return plain(not, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "(…)` on a value that is not a sequence (it is `" + typeName(ot) + "`)"))
         }
-        if (args.length != 1) return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "(…)` takes one arrow function `x => …`", resolveExprs(env, args, not, st))
-        const lam: AExpr = args[0]
+        const lam: AExpr | not = oneArg(args)
+        if (lam is not) return plain(guess, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`." + m.method + "(…)` takes one arrow function `x => …`"))
         const ps: string[] = lambdaParams(lam)
         if (!isLambda(lam) || ps.length != 1) {
-            return diagX(env, e, "E-BOOTSTRAP-UNSUPPORTED", "the argument of `." + m.method + "(…)` must be an arrow function of one parameter, `x => …` (the bootstrap has no other function value)", resolveExprs(env, args, not, st))
+            return plain(guess, addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "the argument of `." + m.method + "(…)` must be an arrow function of one parameter, `x => …` (the bootstrap has no other function value)"))
         }
         let want: Type | not = not
         let op: SeqFn = SeqFn.Map
-        let result: Type | not = not
-        if (m.method == "filter") {
+        if (isFilter) {
             want = Type.Bool
             op = SeqFn.Filter
-            result = ot
         }
-        st = resolveLambda(env, lam, ps, elem, want, st)
+        const rl: RX = resolveLambda(env, lam, ps, elem, want, st)
+        st = rl.st
+        // a filter keeps the receiver's type; a map is a sequence of the body's
+        // type with the receiver's length (a value — its grants are the receiver's)
+        let result: Type | not = guess
+        if (!isFilter) result = mappedType(ot, rl.x.ty)
         return plain(result, addValue(st, e.nid, ValueFact.VSeqCall(op)))
     }
 
+    fn oneArg(args: AExpr[]) -> AExpr | not {
+        if (args.length != 1) return not
+        return args[0]
+    }
+
+    fn mappedType(src: Type | not, body: Type | not) -> Type | not {
+        if (src is not || body is not) return not
+        return mappedOf(src, body)
+    }
+
+    fn mappedOf(src: Type, body: Type) -> Type | not {
+        return match src {
+            .Seq(elem: el, grants: g) :> Type.Seq(body, g)
+            .Int :> not
+            .Num :> not
+            .Str :> not
+            .Bool :> not
+            .Named(sym: x) :> not
+            .Maybe(inner: i) :> not
+        }
+    }
+
     // A lambda: its parameters are minted locals (typed `ty` when known, via
-    // the annotation table the typer reads); its body is resolved with them in scope.
-    fn resolveLambda(env: Env, lam: AExpr, ps: string[], ty: Type | not, want: Type | not, st0: AS) -> AS {
+    // the annotation table the typer reads); its body is resolved with them in
+    // scope. Answers the body's type.
+    fn resolveLambda(env: Env, lam: AExpr, ps: string[], ty: Type | not, want: Type | not, st0: AS) -> RX {
         let st: AS = st0
         let env2: Env = env
         let syms: Sym[] = []
@@ -2346,8 +2377,8 @@ ${
         }
         st = addValue(st, lam.nid, ValueFact.VLambda(syms))
         const b: AExpr | not = lambdaBody(lam)
-        if (b is some) st = resolveExpr(env2, b, want, st).st
-        return st
+        if (b is not) return plain(not, st)
+        return resolveExpr(env2, b, want, st)
     }
 
     fn isLambda(e: AExpr) -> boolean { return lambdaBody(e) is some }
@@ -3481,7 +3512,7 @@ ${
             // filtered sequence (C9: a filter of the field itself); `@x =
             // @x.map(λ)` — a PositionWrite of the mapped sequence
             st = resolveExpr(env, value, p.ty, st).st
-            if (cap is not) return st
+            if (cap is not) return noCapability(env, e, st)
             if (shape == 3) return addEffect(st, e.nid, EffectFact.EWrite({ cap: cap, inst: p.inst, edit: EditKind.RemoveAnywhere, check: Check.Static }))
             return addEffect(st, e.nid, EffectFact.EWrite({ cap: cap, inst: p.inst, edit: EditKind.PositionWrite, check: Check.Static }))
         }
@@ -3592,6 +3623,14 @@ ${
         return "?"
     }
 
+    // s444: a write the classifier GRANTED whose field has no write capability
+    // — impossible by construction (a granted edit is in the field's grants,
+    // so the field has a capability, §66.11.1 / check.scrml C1). Reported, never
+    // dropped silently.
+    fn noCapability(env: Env, e: AExpr, st: AS) -> AS {
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "internal: this write is granted but its field has no write capability (a bootstrap defect — please report it)")
+    }
+
     // `@x.shift()` / `@x.pop()` — a removal at the front / end (§66.12.2: the
     // "where it changes" axis; `push` + `pop` = "changes at the end").
     fn removeCall(callee: AExpr) -> MethodCall | not {
@@ -3633,7 +3672,7 @@ ${
         let edit: EditKind = EditKind.RemoveFront
         if (m.method == "pop") edit = EditKind.RemoveEnd
         const cap: Sym | not = f.wcap
-        if (cap is not) return st
+        if (cap is not) return noCapability(env, e, st)
         return addEffect(st, e.nid, EffectFact.ERemove({ cap: cap, inst: p.inst, edit: edit, check: Check.Static }))
     }
 
@@ -3743,7 +3782,7 @@ ${
             return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "[…]." + ef.field + " = …` replaces `" + owner + "." + ef.field + "`, whose contract grants edits but no `replace` (§66.11.4, dpa-052 Q3)")
         }
         const cap: Sym | not = f.wcap
-        if (cap is not || elemSym is not) return st
+        if (cap is not || elemSym is not) return noCapability(env, e, st)
         return addEffect(st, e.nid, EffectFact.EElemAt(cap, p.inst, ef.index, [{ owner: elemSym, idx: targetIdx }]))
     }
 
