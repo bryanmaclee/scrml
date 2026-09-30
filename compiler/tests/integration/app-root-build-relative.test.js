@@ -323,15 +323,23 @@ describe("W-AUTH-REQUIRED-NOT-INHERITED names the build root actually used and h
     expect(d.message).toContain("the build root the compiler was given");
     expect(d.message).toContain(`"${root.replace(/\\/g, "/")}"`);
     expect(d.message).toContain(`the route file "pages/index.scrml"`);
-    expect(d.message).toContain("compile the project directory");
+    expect(d.message).toContain("compileScrml's buildRoot");
   });
   test("an inferred root", () => {
-    // side.scrml (bare markup at the top) keeps the inferred root at the project
-    // directory; with only the pages/ files the inferred root would be pages/ itself
-    // and index.scrml — an entry file directly in it — would be the application's.
-    const root = writeProject("w-inferred", { ...ENTRY_IN_PAGES, "side.scrml": `<p>side-marker</p>\n` });
+    // No root given: lib/x.scrml is the one <program> outside pages/ and routes/,
+    // so it is the entry and the build root is its directory; pages/index.scrml's
+    // required <program> is a route file's own, and pages/about.scrml is public.
+    const root = writeProject("w-inferred", { ...ENTRY_IN_PAGES, "lib/x.scrml": `<program>\n<p>lib-marker</p>\n</program>\n` });
     const [d] = diag(compile(root), "W-AUTH-REQUIRED-NOT-INHERITED");
-    expect(d.message).toContain("the build root inferred from the input files");
+    expect(d.message).toContain("the build root inferred from the application's entry file");
+    expect(d.message).toContain("x.scrml");
+  });
+  test("no root given and the entry placed under pages/: the entry IS the application (fail closed, no warning)", () => {
+    const root = writeProject("w-entry-in-pages-inferred", { ...ENTRY_IN_PAGES, "side.scrml": `<p>side-marker</p>\n` });
+    const r = compile(root);
+    expect(codes(r)).not.toContain("W-AUTH-REQUIRED-NOT-INHERITED");
+    expect(isGuarded(r, root, "pages/about.scrml")).toBe(true);
+    expect(isGuarded(r, root, "side.scrml")).toBe(true);
   });
 });
 

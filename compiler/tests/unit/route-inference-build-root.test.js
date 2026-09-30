@@ -1,20 +1,28 @@
 /**
- * S445 — route files are classified RELATIVE TO THE BUILD ROOT (§40.2 / §40.8).
+ * S445 — the build-root rule (SPEC §40.8 "The build root"; route-inference.ts
+ * `resolveBuildRoot`). Route files are classified relative to the build root; a
+ * given root is used as is, and with none the root is the directory of the
+ * application's entry file. With no single entry file the pre-S445 classification
+ * (a pages/ or routes/ component anywhere in the path) stands.
  *
- * g-app-root-route-prefix-matched-on-absolute-path: before S445 `findRoutePrefix`
- * searched `/pages/` and `/routes/` in the ABSOLUTE path, so a directory named
- * `pages` or `routes` above the project turned every file into a route file (no
- * application `<program>` identified → the member pages of a required app public).
+ * g-app-root-route-prefix-matched-on-absolute-path: before S445 `/pages/` and
+ * `/routes/` were searched in the ABSOLUTE path, so a directory named `pages` or
+ * `routes` above the project turned the entry file into a route file.
  * End-to-end coverage: compiler/tests/integration/app-root-build-relative.test.js.
  */
 
 import { describe, test, expect } from "bun:test";
-import { runRI, buildPageRouteTree, computeBuildRoot } from "../../src/route-inference.js";
+import { runRI, buildPageRouteTree, resolveBuildRoot } from "../../src/route-inference.js";
 
-function makeFileAST(filePath) {
+// A page (no <program>) or, with `program: true`, a file whose first top-level
+// node is a <program> — the application-entry shape.
+function makeFileAST(filePath, { program = false } = {}) {
+  const span = { file: filePath, start: 0, end: 0, line: 1, col: 1 };
   return {
     filePath,
-    nodes: [{ id: 1, kind: "logic", body: [], span: { file: filePath, start: 0, end: 0, line: 1, col: 1 } }],
+    nodes: program
+      ? [{ id: 1, kind: "markup", tag: "program", attrs: [], children: [], span }]
+      : [{ id: 1, kind: "logic", body: [], span }],
     imports: [],
     exports: [],
     components: [],
@@ -22,38 +30,82 @@ function makeFileAST(filePath) {
     spans: new Map(),
   };
 }
+const prog = (p) => makeFileAST(p, { program: true });
+const page = (p) => makeFileAST(p);
+const urls = (pages) => Object.fromEntries([...pages].map(([k, v]) => [k, v.urlPattern]));
 
-describe("buildPageRouteTree — the build root's ancestors are never route directories", () => {
-  test("a project under /x/pages/f2/: app.scrml is not a route file; pages/about.scrml is /about", () => {
-    const files = [makeFileAST("/x/pages/f2/app.scrml"), makeFileAST("/x/pages/f2/pages/about.scrml")];
-    const pages = buildPageRouteTree(files, "/x/pages/f2");
-    expect(pages.get("/x/pages/f2/app.scrml").urlPattern).toBe("/");
-    // Before S445: "/f2/pages/about" (the relative path was taken after the FIRST /pages/).
-    expect(pages.get("/x/pages/f2/pages/about.scrml").urlPattern).toBe("/about");
+describe("resolveBuildRoot", () => {
+  test("given root: used as is", () => {
+    const r = resolveBuildRoot([prog("/x/pages/f2/app.scrml")], "/x/pages/f2/");
+    expect(r).toMatchObject({ origin: "given", root: "/x/pages/f2" });
+    expect(r.candidates.map((f) => f.filePath)).toEqual(["/x/pages/f2/app.scrml"]);
   });
 
-  test("the implicit build root (no argument) gives the same answer", () => {
-    const files = [makeFileAST("/x/routes/f3/app.scrml"), makeFileAST("/x/routes/f3/pages/about.scrml")];
-    const pages = buildPageRouteTree(files);
-    expect(pages.get("/x/routes/f3/app.scrml").urlPattern).toBe("/");
-    expect(pages.get("/x/routes/f3/pages/about.scrml").urlPattern).toBe("/about");
+  test("one entry outside any pages/routes directory: the root is its directory", () => {
+    const r = resolveBuildRoot([prog("/p/app.scrml"), page("/p/pages/a.scrml")]);
+    expect(r).toMatchObject({ origin: "inferred", root: "/p" });
   });
 
-  test("a nested pages/admin/pages/x.scrml inside the build root stays a route (first route dir wins)", () => {
-    const files = [makeFileAST("/x/pages/f2/app.scrml"), makeFileAST("/x/pages/f2/pages/admin/pages/x.scrml")];
-    const pages = buildPageRouteTree(files, "/x/pages/f2");
+  test("the entry under a pages/ ANCESTOR: still the entry (shallowest <program>)", () => {
+    const r = resolveBuildRoot([prog("/x/pages/f2/app.scrml"), page("/x/pages/f2/pages/a.scrml")]);
+    expect(r).toMatchObject({ origin: "inferred", root: "/x/pages/f2" });
+  });
+
+  test("a deeper route file's own <program> does not compete with the shallowest", () => {
+    const r = resolveBuildRoot([prog("/x/pages/f/app.scrml"), prog("/x/pages/f/pages/tool.scrml")]);
+    expect(r.candidates.map((f) => f.filePath)).toEqual(["/x/pages/f/app.scrml"]);
+  });
+
+  test("no <program>: no root (legacy classification)", () => {
+    expect(resolveBuildRoot([page("/e/pages/customer/home.scrml")])).toMatchObject({ origin: "none", root: "" });
+  });
+
+  test("several <program>s at the same depth: no root (§40.2 ambiguity)", () => {
+    const r = resolveBuildRoot([prog("/p/routes/index.scrml"), prog("/p/routes/loads.scrml")]);
+    expect(r.origin).toBe("none");
+    expect(r.candidates.length).toBe(2);
+  });
+});
+
+describe("buildPageRouteTree under the build-root rule", () => {
+  test("a project under /x/pages/f2/: app.scrml is /, pages/about.scrml is /about", () => {
+    const pages = buildPageRouteTree([prog("/x/pages/f2/app.scrml"), page("/x/pages/f2/pages/about.scrml")]);
+    // Before S445: "/f2/app" and "/f2/pages/about".
+    expect(urls(pages)).toEqual({ "/x/pages/f2/app.scrml": "/", "/x/pages/f2/pages/about.scrml": "/about" });
+  });
+
+  test("a flat route directory with its entry beside its pages: /about, /login", () => {
+    const pages = buildPageRouteTree([
+      prog("/x/pages/app.scrml"),
+      page("/x/pages/about.scrml"),
+      page("/x/pages/login.scrml"),
+    ]);
+    expect(pages.get("/x/pages/about.scrml").urlPattern).toBe("/about");
+    expect(pages.get("/x/pages/login.scrml").urlPattern).toBe("/login");
+  });
+
+  test("a project directory named pages holding its own pages/: /about (not /pages/about)", () => {
+    const pages = buildPageRouteTree([prog("/x/pages/app.scrml"), page("/x/pages/pages/about.scrml")]);
+    expect(pages.get("/x/pages/pages/about.scrml").urlPattern).toBe("/about");
+  });
+
+  test("a nested pages/admin/pages/x.scrml stays /admin/pages/x (first route dir below the root)", () => {
+    const pages = buildPageRouteTree([prog("/x/pages/f2/app.scrml"), page("/x/pages/f2/pages/admin/pages/x.scrml")]);
     expect(pages.get("/x/pages/f2/pages/admin/pages/x.scrml").urlPattern).toBe("/admin/pages/x");
   });
 
-  test("the routes/ tiebreak still applies inside the build root", () => {
-    const files = [makeFileAST("/x/pages/proj/pages/routes/foo.scrml")];
-    const pages = buildPageRouteTree(files, "/x/pages/proj");
-    // relative "pages/routes/foo.scrml": routes/ is looked up first → /foo
+  test("the routes/ tiebreak still applies below the root", () => {
+    const pages = buildPageRouteTree([prog("/x/pages/proj/app.scrml"), page("/x/pages/proj/pages/routes/foo.scrml")]);
     expect(pages.get("/x/pages/proj/pages/routes/foo.scrml").urlPattern).toBe("/foo");
   });
 
-  test("Windows separators: C:\\pages\\proj is an ancestor, C:\\pages\\proj\\pages the route dir", () => {
-    const files = [makeFileAST("C:\\pages\\proj\\app.scrml"), makeFileAST("C:\\pages\\proj\\pages\\users\\[id].scrml")];
+  test("no <program>: pre-S445 classification (a lone nested page keeps its URL)", () => {
+    const pages = buildPageRouteTree([page("/e/23/pages/customer/home.scrml")]);
+    expect(pages.get("/e/23/pages/customer/home.scrml").urlPattern).toBe("/customer/home");
+  });
+
+  test("Windows separators", () => {
+    const files = [prog("C:\\pages\\proj\\app.scrml"), page("C:\\pages\\proj\\pages\\users\\[id].scrml")];
     for (const root of ["C:\\pages\\proj", "C:/pages/proj", "C:\\pages\\proj\\", undefined]) {
       const pages = buildPageRouteTree(files, root);
       expect(pages.get("C:\\pages\\proj\\app.scrml").urlPattern).toBe("/");
@@ -61,67 +113,26 @@ describe("buildPageRouteTree — the build root's ancestors are never route dire
     }
   });
 
-  test("_layout.scrml under the real route dir is still excluded and still binds (ancestor pages/ present)", () => {
-    const files = [
-      makeFileAST("/x/pages/f2/pages/_layout.scrml"),
-      makeFileAST("/x/pages/f2/pages/index.scrml"),
-      makeFileAST("/x/pages/f2/app.scrml"),
-    ];
-    const pages = buildPageRouteTree(files, "/x/pages/f2");
+  test("_layout.scrml under the real route dir is excluded and binds (ancestor pages/ present)", () => {
+    const pages = buildPageRouteTree([
+      page("/x/pages/f2/pages/_layout.scrml"),
+      page("/x/pages/f2/pages/index.scrml"),
+      prog("/x/pages/f2/app.scrml"),
+    ]);
     expect(pages.has("/x/pages/f2/pages/_layout.scrml")).toBe(false);
     expect(pages.get("/x/pages/f2/pages/index.scrml").urlPattern).toBe("/");
     expect(pages.get("/x/pages/f2/pages/index.scrml").layoutFilePath).toBe("/x/pages/f2/pages/_layout.scrml");
   });
 
-  test("a file outside an explicit build root is not a route file", () => {
-    const files = [makeFileAST("/elsewhere/pages/x.scrml"), makeFileAST("/proj/app.scrml")];
-    const pages = buildPageRouteTree(files, "/proj");
+  test("a file outside a given build root is not a route file", () => {
+    const pages = buildPageRouteTree([page("/elsewhere/pages/x.scrml"), page("/proj/app.scrml")], "/proj");
     expect(pages.get("/elsewhere/pages/x.scrml").urlPattern).toBe("/");
   });
 
-  test("runRI takes the build root from its input", () => {
-    const files = [makeFileAST("/x/pages/f2/pages/about.scrml"), makeFileAST("/x/pages/f2/app.scrml")];
+  test("runRI takes a given build root from its input", () => {
+    const files = [page("/x/pages/f2/pages/about.scrml"), page("/x/pages/f2/app.scrml")];
     const { routeMap } = runRI({ files, protectAnalysis: { views: new Map() }, buildRoot: "/x/pages/f2" });
     expect(routeMap.pages.get("/x/pages/f2/pages/about.scrml").urlPattern).toBe("/about");
     expect(routeMap.pages.get("/x/pages/f2/app.scrml").urlPattern).toBe("/");
-  });
-});
-
-describe("computeBuildRoot", () => {
-  test("one file → its directory; N files → their segment-aligned common directory", () => {
-    expect(computeBuildRoot(["/a/b/c.scrml"])).toBe("/a/b");
-    expect(computeBuildRoot(["/a/b/c.scrml", "/a/b/sub/d.scrml"])).toBe("/a/b");
-    expect(computeBuildRoot(["/a/bc/x.scrml", "/a/b/y.scrml"])).toBe("/a");
-    expect(computeBuildRoot(["/p/x.scrml", "/q/y.scrml"])).toBe("");
-    expect(computeBuildRoot([])).toBe("");
-  });
-
-  test("a project that LIVES in a directory named pages keeps its own root", () => {
-    expect(computeBuildRoot(["/x/pages/app.scrml", "/x/pages/pages/about.scrml"])).toBe("/x/pages");
-    expect(computeBuildRoot(["/x/pages/f2/app.scrml", "/x/pages/f2/pages/about.scrml"])).toBe("/x/pages/f2");
-  });
-
-  test("the files of one route directory compiled on their own: the root is its parent", () => {
-    expect(computeBuildRoot(["/p/routes/index.scrml", "/p/routes/loads.scrml"])).toBe("/p");
-    expect(computeBuildRoot(["/p/pages/about.scrml"])).toBe("/p");
-    expect(computeBuildRoot(["/p/pages/about.scrml", "/p/pages/users/[id].scrml"])).toBe("/p");
-  });
-
-  test("an application entry file directly in a pages/-named common dir keeps the root there (S445 review F1)", () => {
-    const flat = ["/x/pages/app.scrml", "/x/pages/about.scrml", "/x/pages/login.scrml"];
-    const isEntry = (p) => p.endsWith("/app.scrml");
-    expect(computeBuildRoot(flat, isEntry)).toBe("/x/pages");
-    // No entry among them: the route-set rule applies.
-    expect(computeBuildRoot(flat)).toBe("/x");
-    // An entry BELOW the common dir does not block the rule (it is under the route dir).
-    expect(computeBuildRoot(["/p/pages/a.scrml", "/p/pages/sub/app.scrml"], (p) => p.endsWith("app.scrml"))).toBe("/p");
-  });
-
-  test("only the root's OWN last segment is inspected — never a farther ancestor", () => {
-    expect(computeBuildRoot(["/x/pages/f2/app.scrml", "/x/pages/f2/side.scrml"])).toBe("/x/pages/f2");
-  });
-
-  test("Windows separators are normalized", () => {
-    expect(computeBuildRoot(["C:\\pages\\proj\\app.scrml", "C:\\pages\\proj\\pages\\a.scrml"])).toBe("C:/pages/proj");
   });
 });

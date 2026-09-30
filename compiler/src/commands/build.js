@@ -972,8 +972,6 @@ export async function runBuild(args) {
 
   const result = compileScrml({
     inputFiles,
-    // S445 — the build root (§40.8) is the directory given; route files are under ITS pages/ / routes/.
-    buildRoot: opts.inputDir,
     outputDir,
     beforeWrite,
     verbose: opts.verbose,

@@ -26,7 +26,7 @@
 import { statSync, readdirSync, watch, writeFileSync, rmSync, readFileSync } from "fs";
 import { tmpdir } from "os";
 import { resolve, dirname, join, basename, relative } from "path";
-import { compileScrml, buildRootFromArgs, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
+import { compileScrml, scanDirectory, findOutputFiles, toPosixSpecifier } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { stripRedundantCode } from "./diagnostic-format.js";
 import { selectRequestOnion, formatOnionConflict } from "./select-request-onion.js";
@@ -84,8 +84,6 @@ Examples:
  */
 function parseArgs(args) {
   const inputFiles = [];
-  const inputDirs = [];
-  const fileArgs = [];
   let outputDir = null;
   let verbose = false;
   let convertLegacyCss = false;
@@ -157,7 +155,6 @@ function parseArgs(args) {
       process.exit(0);
     } else if (arg.endsWith(".scrml")) {
       inputFiles.push(resolve(arg));
-      fileArgs.push(arg);
     } else {
       // Directory?
       try {
@@ -165,7 +162,6 @@ function parseArgs(args) {
         if (stat.isDirectory()) {
           const dirFiles = scanDirectory(arg);
           inputFiles.push(...dirFiles);
-          inputDirs.push(resolve(arg));
           continue;
         }
       } catch { /* not a directory */ }
@@ -174,13 +170,7 @@ function parseArgs(args) {
     }
   }
 
-  // S445 — the build root (§40.8) is the directory the user named: route files are
-  // the files under ITS pages/ / routes/ (§40.2). With a directory argument it is the
-  // common directory of the arguments; with file arguments only, route inference
-  // infers it from the files (buildRootFromArgs → undefined).
-  const buildRoot = buildRootFromArgs(inputDirs, fileArgs);
-
-  return { inputFiles, buildRoot, outputDir, verbose, convertLegacyCss, embedRuntime, port, idleTimeout, gather, validateEmit, moduleFormat };
+  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, port, idleTimeout, gather, validateEmit, moduleFormat };
 }
 
 // ---------------------------------------------------------------------------
@@ -568,7 +558,7 @@ export function compileThrowDiagnostic(err) {
  * @returns {{ success: boolean, outputDir: string }}
  */
 function runOnce(opts, gatheredOut) {
-  const { inputFiles, buildRoot, outputDir, verbose, convertLegacyCss, embedRuntime, gather, validateEmit, moduleFormat } = opts;
+  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, gather, validateEmit, moduleFormat } = opts;
 
   // ESM chunks arc — operational heads-up when --module-format=esm is selected
   // (esm now runs in a browser as of Unit 3, but is experimental/opt-in; classic
@@ -581,7 +571,6 @@ function runOnce(opts, gatheredOut) {
   try {
     result = compileScrml({
       inputFiles,
-      buildRoot,
       outputDir,
       verbose,
       convertLegacyCss,
