@@ -195,3 +195,39 @@ describe("R2 — the unterminated-literal scan (displayCloseAt) honours the esca
     expect(await html(stateLast('"say \\"x\\""'))).toBe(W('<p>say "x"<!--if--></p>'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// RULED S444 ("standalone only, your rec"): in a code-default body a `"…"` is a
+// display-text literal ONLY when it stands alone as the body statement. A
+// string operand inside an expression is an ORDINARY string with the ordinary
+// logic-string escapes — no display escape table, no E-PARSE-001.
+// ---------------------------------------------------------------------------
+describe("standalone only — a `\"…\"` inside an expression is an ordinary string", () => {
+  test("`:`-shorthand `@n == 5 ? \"many\\nx\" : \"few\"`: clean, and `\\n` decodes to a NEWLINE in the value", async () => {
+    const src = P('<p : @n == 5 ? "many\\nx" : "few">');
+    expect(collect(run(src), "Str", "v")).toContain("many\nx");
+    expect(await html(src)).toBe(W("<p>many\nx</p>"));
+  });
+  test("state-child body `@n == 5 ? \"a\\tb\" : \"c\"`: clean, `\\t` is a tab", async () => {
+    expect(await html(state('@n == 5 ? "a\\tb" : "c"'))).toBe(W("<p>a\tb<!--if--></p>"));
+  });
+  test("twin: a call argument `f(\"a\\\"b\\tc\")` is an ordinary string", async () => {
+    expect(await html(P('<p : f("a\\"b\\tc")>', "    fn f(s: string) -> string { return s }"))).toBe(W('<p>a"b\tc</p>'));
+  });
+  test("twin: a concatenation operand `\"a\\tb\" + @s` is an ordinary string", async () => {
+    expect(await html(P('<p : "a\\tb" + @s>', '    <let s:string="Z"/>'))).toBe(W("<p>a\tbZ</p>"));
+  });
+  test("twin: an unknown escape in an ordinary string is NOT E-PARSE-001 (the logic identity escape: `\\q` → `q`)", () => {
+    const r = run(P('<p : @n == 5 ? "a\\qb" : "c">'));
+    expect(r.diags).toEqual([]);
+    expect(collect(r, "Str", "v")).toContain("aqb");
+  });
+  test("contrast: a STANDALONE `\"x\\n\"` is still a display-text literal — E-PARSE-001 (both loci)", () => {
+    expect(codes(P('<p : "x\\n">'))).toEqual(["E-PARSE-001"]);
+    expect(codes(state('"x\\n"'))).toEqual(["E-PARSE-001"]);
+  });
+  test("contrast: a standalone literal keeps its display escapes — `\"\\${x}\"` is literal text; the nested ordinary string's `\\$` is the logic escape", async () => {
+    expect(await html(P('<p : "\\${x}">'))).toBe(W("<p>${x}</p>"));
+    expect(await html(P('<p : @n == 5 ? "a \\${x}" : "b">'))).toBe(W("<p>a ${x}</p>"));
+  });
+});
