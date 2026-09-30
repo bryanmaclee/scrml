@@ -1,0 +1,5 @@
+<program auth="none">
+<page auth="required">
+<p>members</p>
+</page>
+</program>

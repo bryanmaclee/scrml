@@ -1,0 +1,30 @@
+<program>
+  type Phase:enum = { Idle, Loading, Done }
+  <phase>: Phase = .Idle
+  <items> = ["a", "b"]
+  <show> = true
+  const Box = <div class="box">
+      WSJ   comp   body   ${@phase.variant}   tail
+  </>
+  <Box/>
+  <match for=Phase on=@phase>
+    <Idle>
+      <p>   WSK  match-arm   nested-p   </p>
+    </>
+    <Loading>"   WSL  match   block   literal   "</>
+    <_>
+      <p>WSM fallback</p>
+    </>
+  </match>
+  <engine for=Phase initial=.Idle>
+    <Idle rule=.Loading>"   WSN  engine   block   literal   "</>
+    <Loading rule=.Done : "   WSO  engine  shorthand   ">
+    <Done rule=.Idle>
+      <span>   WSP  engine-nested-span   </span>
+    </>
+  </>
+  <div if=@show>   WSQ  if-guarded   div   </div>
+  <ul>
+    ${ for (let it of @items) { lift <li>   WSR  lifted   ${it}   li   </li> } }
+  </ul>
+</program>

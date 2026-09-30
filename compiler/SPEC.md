@@ -410,6 +410,7 @@ A space (or tab, or newline) between `<` and the identifier is the **deprecated*
 **Migration path:**
 
 - P1: both forms (`<state-type>` and `< state-type>`) compile. The space-after-`<` form emits W-WHITESPACE-001 (deprecation warning).
+  > **Amendment S442 (dpa-045) — inside a free-text body the spaced form is TEXT.** In a plain-markup free-text body (§4.18.1) a `<` is a markup-open attempt only when immediately followed by `[a-zA-Z!/?*_.]` (§4.18.1b), so `< tag>` there is content, not an opener, and no W-WHITESPACE-001 fires on it. The spaced form keeps the P1 behaviour above everywhere else (e.g. a `<program>` / `<page>` body, §40.8). impl#1 still treats it as an opener in a free-text body; affected corpus: **one** conformance case, `conformance/cases/control-flow/ctrl-004-else-on-state-opener-pos` (not edited). **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 1 — *"The deprecated `< tag>` spaced opener becomes text (1 conformance case)."* · supersedes: "both forms compile" for a spaced opener inside a free-text body.
 - Removal (a future MAJOR language-version event; unscheduled per §63.7): the space-after-`<` form is removed; uniform `<identifier>` becomes the only legal opener (E-WHITESPACE-001).
 - The compiler resolves `<identifier>` against the unified state-type registry (§15.X) at NR (Stage 3.05). Casing is irrelevant to resolution; convention is PascalCase for components and lowercase for HTML elements / built-in scrml lifecycle types.
 
@@ -750,6 +751,14 @@ The top-level `<program>` MUST NOT have a `name=` attribute (it is the implicit 
 Nested `<program>` elements SHOULD have a `name=` attribute for reference and diagnostics;
 an unnamed nested `<program>` generates a compiler-assigned identifier (W-PROGRAM-001).
 
+`auth=` is not in the table above: a nested `<program>` is not an auth scope. An `auth=`
+attribute on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor —
+SHALL be a compile error (`E-PROGRAM-NESTED-AUTH`), whatever its value; the compiler SHALL
+NOT accept it silently. The error names the fix: put `auth=` on the top-level `<program>`
+(the whole application) or on the `<page>` that needs it (§52.13).
+
+> **Provenance:** spec:§4.12.2 (nested-attribute table omits auth=) · pa-ruled:S443
+
 #### 4.12.3 Execution Context Types
 
 Nested `<program>` covers four distinct execution context types determined by attribute
@@ -901,6 +910,7 @@ mechanism depends on the execution context type:
 | E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-001 | Nested `<program>` has no `name=` attribute | Warning |
 | W-PROGRAM-TITLE-NESTED | Documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>` (see §40.7) | Warning |
+| E-PROGRAM-NESTED-AUTH | `auth=` appears on a nested `<program>` (one with a `<program>` or `<page>` ancestor); see §4.12.2. Emitted at `compiler/src/codegen/index.ts` (`detectNestedProgramAuth`). | Error |
 | E-STORY-UNKNOWN | `story="<name>"` references a build story not declared in the `scrml.toml` `[story]` table (see §58) | Error |
 | W-STORY-ON-TOP-LEVEL | `story=` appears on the top-level `<program>`; ignored — the top-level build story is owned by `[story] default` (see §58) | Warning |
 
@@ -1168,6 +1178,8 @@ Counter is now ${@count}:
 **S108 sibling — markup-text-mode SQL gate (Bug 4 C-narrow).** This section's raw-content rule for `<pre>` / `<code>` is one side of a broader locus-gating principle: a sigil-prefix opener is recognized only inside its normatively-permitted parent context. The companion rule, ratified S108 via deep-dive `scrml-support/docs/deep-dives/bug-4-docs-mode-escape-2026-05-19.md`, gates the `?{` SQL opener on Logic-parent context per §3.1 + §8.1 — bare `?{` in markup-text body is text (the `?` accumulates literally; the `{` is tracked as an orphan-brace and pairs with a matching `}` if present). Together the two rules collapse into the invariant: **`?{` is a SQL opener only where SPEC §3.1 normatively places SQL — inside Logic.** This eliminates the pre-S108 dogfood-bug surface where bare `?{` in adopter prose ("`<p>The ?{ syntax opens SQL</p>`") catastrophically consumed the rest of the file as SQL, producing an EOF-cascade. Adopters no longer need entity-escapes for `?{` in prose. (Q-BUG4-OPEN-1 surfaced the question of extending the same gate to `!{` / `^{` / `_{`; deferred pending friction signal — the dogfood report named only `?{` + `/`.)
 
 > **Orthogonality note (S111 — quoted-text model).** Raw-content status (this section) and the **code-default body mode** (§4.18) are orthogonal mechanisms. `<pre>` / `<code>` remain raw-content elements with plain free-text-mode bodies; the quoted-text model's scope (b) does NOT change their treatment. A `<pre>` / `<code>` opened inside a code-default body (e.g. as a plain-markup child of an engine state-child body) follows the §4.18 rule for plain-markup elements: it opens a free-text body, and within that body raw-content scanning applies as specified here.
+>
+> **Amendment S442 (dpa-045).** Raw content is a **third, orthogonal text-mode production**, not a free-text body with exits switched off: *"`<pre>`/`<code>` raw content is a third, orthogonal production — zero active sequences, not two, its only exit its own matching close tag, matched by name."* (§4.18.1a). The two §4.18 text-mode productions (free-text, code-default — §4.18.1) do not extend to this section; the element-kind rule above (a `<pre>`/`<code>` inside a code-default body opens its own body, not a code-default one) is unchanged. **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" · dPA artifact `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round2-2026-09-08.md` (Q1 draft §4.18.1a) · supersedes: *"with plain free-text-mode bodies"* in the second sentence above (read: with raw-content bodies).
 
 ### 4.18 Code-default body mode and the display-text literal (S111 — quoted-text model, scope b)
 
@@ -1175,27 +1187,186 @@ Counter is now ${@count}:
 
 This subsection is the **single canonical definition** of the code-default body mode and the display-text literal. §3.4, §4.14, §4.15, §18.0.1, and §51.0 cross-reference this subsection; they do NOT re-define the literal grammar.
 
-#### 4.18.1 The two §4.18 body modes
+> **Amendment S442 — dpa-045: plain-markup text (AXIOM-LEVEL). The two text-mode productions (§4.18.1 / §4.18.1a /
+> §4.18.1b), whitespace kept exactly (§4.18.5), and the display-text literal's character escapes deleted (§4.18.3).**
+> Free text (plain-markup bodies, literal by default) and code-default (engine state-children, match arms,
+> `:`-shorthand; display text inside `"…"`) are specified as a pair of **text-mode productions** — duals, not one model.
+> Neither is a string literal, and neither may be called one.
+>
+> **Status: Nominal/spec-ahead.** *"This amendment SHALL NOT be read as ratifying working behavior for either
+> production's escape table. It ratifies the RULE; the rule is not yet true of the compiler in the production it
+> already governs, let alone the one this amendment adds. Ratifying the free-text escape clause without also scheduling
+> the propagation fix repeats, in real time and with the debate's own eyes open, exactly the defect class Call 1
+> named."* The propagation fixes are scheduled by the same ruling (B): (1) route the free-text `${` scan through the
+> proper brace scanner; (2) make the §4.18.3 escape table actually work OR delete it from SPEC — not neither
+> (RULED S442 follow-up: **delete** — §4.18.3); (3) delete the `\"` escape (done — §4.18.3). B(1) and the
+> whitespace fixes (§4.18.5) are built in the BOOTSTRAP; impl#1 only if one proves to be security (S435 policy). The loop census (C — every scanner that independently decides where a body
+> ends) runs against the bootstrap's `parse.scrml`, not impl#1.
+>
+> **The six implementer pins** — each is part of the ratified wording, and each is stated where it applies:
+> (1) the free-text exit set is a CLOSED enumeration, *"these and no others"* (§4.18.1b — its CONTENT RULED by the
+> S442 follow-up); (2) whitespace verbatim, with §4.18.5's collapse claim deleted in this same amendment (§4.18.5);
+> (3) extent-vs-content is a PROPERTY, not a procedure (§4.18.1b); (4) cooked-or-raw is stated normatively — RULED
+> cooked (§4.18.1b); (5) the free-text escape policy DIVERGES
+> from §4.18.3, deliberately and in writing (§4.18.1b); (6) the grammar-vs-conformance disclaimer (§4.18.1b).
+>
+> **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" (dpa-045 = D + A + B + E, C in the bootstrap; *"D —
+> ratify (a′) with the round-2 drafted wording"*) · dPA artifact
+> `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round2-2026-09-08.md` (Q1 "THE RATIFIABLE WORDING",
+> the six pins, the status tag; "THE CALLS FOR BRYAN" A–E); round 1:
+> `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-2026-09-07.md` (Repair 1 — the HTML5 `<` lookahead)
+> · E measurements (run before this text landed, per the ruling): `docs/changes/s442-dpa045-spec/progress.md`
+> · ruling:user-voice-scrml.md S442 — "your recs" (**dpa-045 follow-ups: the full closed exit set; cooked; delete the
+> rest of the escape catalog; whitespace-only text kept** — answering the two build agents' finding that the drafted
+> exit set "`${` and `<`+[a-zA-Z!/?] and no others" was incomplete).
+> **supersedes:** the prior §4.18.1 table and its free-text row (*"free text, recognized as today (heuristic text/code
+> boundary …)"*); the one-model ("string-literal") framing; §4.18.5's free-text bullet (*"runs of whitespace collapse,
+> leading/trailing whitespace strips"*) and its "two whitespace regimes" paragraph; §4.18.3's whole escape catalog
+> (`\"`, `\\`, `\${`); the drafted two-member exit set (replaced by the follow-up's closed set, §4.18.1b); the
+> §4.3 / §15.15.5 spaced `< tag>` opener inside a free-text body.
 
-A markup/state body — the content between a tag opener's `>` and the matching closer (`</>` / `</tagname>`) — is scanned by the block splitter in one of two body modes that **this amendment governs**:
+#### 4.18.1 The two text-mode productions
 
-| Body mode | Bodies that have it | What a bare (unquoted) run means |
-|---|---|---|
-| **free-text mode** | Plain-markup elements: HTML elements (`<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component-element bodies, the `<errors>` override-template body. | A bare run is **display text** — free text, recognized as today (heuristic text/code boundary; `${...}` is the delimited code exception). UNCHANGED by this amendment. |
-| **code-default mode** | The three **code-bearing loci**: engine state-child bodies (§51.0), match block-form arm bodies (§18.0.1), and `:`-shorthand bodies (§4.14). | A bare run is **code** — an identifier, a keyword, a call, member access, a nested `<tag>` (markup-as-value, §1.4), or a `${...}` interpolation. Display text in a code-default body MUST be written as a **display-text literal** (`"..."`, §4.18.3). |
+*(Amendment S442 — the round-2 drafted §4.18.1. Three edits to the drafted text, all ruled: the free-text row keeps
+the prior §4.18.1's HTML-element list; its exit column is the follow-up's closed set (§4.18.1b); and the code-default
+escape column is empty — `\"` deleted per B(3), `\\` / `\${` per B(2) = delete. See the banner above.)*
+
+A markup/state body — the content between a tag opener's `>` and the matching closer (`</>` / `</tagname>`) — is
+scanned by exactly one of two **text-mode productions**. A text-mode production is a region whose extent and internal
+escape/exit points are decidable by bounded lookahead over raw bytes, with no reference to any name, binding, or
+previously established context. **Neither production is a string literal, and this section deliberately avoids that
+name.** The two productions are **duals, not one model wearing two hats**:
+
+| production | governs | default | exit sequence(s) | escape into the default |
+|---|---|---|---|---|
+| **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error, `~{` test — §4.18.1b); `//` comments (§4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
+| **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) | code | `"` opens a display-text literal (§4.18.3) | none — the display-text literal has NO character escapes (S442: `\"`, `\\`, `\${` deleted; ⚑ OPEN residue — §4.18.3) |
+
+- The body mode SHALL be determined by the **enclosing element kind**, never by the lexical content of the body.
+  *(Unchanged from the prior §4.18.1.)* An engine state-child body is code-default because it is an engine state-child
+  body — independent of what it contains.
+- **Prior drafts described these as one "string-literal" model. That framing is withdrawn.**
+- In a code-default body a bare run is **code** — an identifier, a keyword, a call, member access, a nested `<tag>`
+  (markup-as-value, §1.4), or a `${...}` interpolation (§4.18.2); display text MUST be written as a **display-text
+  literal** (`"..."`, §4.18.3). In a free-text body a bare run is **display text**, literal by default, left only by
+  the exit sequences of §4.18.1b.
+- ~~A bare run is **display text** — free text, recognized as today (heuristic text/code boundary; `${...}` is the
+  delimited code exception). UNCHANGED by this amendment.~~ *(superseded S442 — the free-text row above; the free-text
+  boundary is the closed exit grammar of §4.18.1b, not a heuristic)*
 
 **Normative statements:**
 
 - The block splitter SHALL assign a body mode to every markup/state body at the point the body's opener is recognized. The default body mode is **free-text mode**. A body is in **code-default mode** if and only if it is one of the three code-bearing loci enumerated above.
-- The body mode SHALL be determined by the **enclosing element kind**, not by the lexical content of the body. An engine state-child body is code-default because it is an engine state-child body — independent of what it contains.
 - Body modes nest. A plain-markup element opened *inside* a code-default body (e.g. a `<button>` inside an engine state-child body) opens a **free-text-mode** body — the inner element's body mode is its own, not inherited from the enclosing code-default body. Conversely, an engine / match opened inside a free-text body opens code-default bodies for its state-children / arms. Each body carries its own mode; the mode in effect at any cursor position is the mode of the innermost enclosing body.
-- This amendment is **scope (b)**: it changes the body mode of the three code-bearing loci only. Every other body that this section classifies — all plain markup — stays in free-text mode and is **unchanged**. There is no syntactic position outside the three code-bearing loci where this amendment alters how a body is scanned.
+- This amendment is **scope (b)**: it changes the body mode of the three code-bearing loci only. Every other body that this section classifies — all plain markup — stays in free-text mode and is **unchanged**. There is no syntactic position outside the three code-bearing loci where this amendment alters how a body is scanned. *(S442: "this amendment" here is S111. The S442 amendment DOES specify how a free-text body is scanned — §4.18.1b's exit grammar and §4.18.5's verbatim whitespace; which bodies are free-text is unchanged.)*
 
 **S111 amendment (2026-05-20) — `default-logic` is a distinct third body-mode; §4.18 does not classify it.** The `<program>` / `<page>` body parses in **`default-logic` mode** — a distinct third body-mode, owned and defined by §40.8 (v0.3 program shape). `default-logic` mode is neither free-text mode nor code-default mode: in a `<program>` / `<page>` body a bare top-level declaration (`<x> = 0`, `function f() { ... }`) auto-lifts to the logic context, which is not free-text display-text scanning and is not the code-default text/code boundary. The §4.18 free-text / code-default split governs **only** the relationship between the three code-bearing loci (engine state-children, match block-form arms, `:`-shorthand bodies) and plain markup; it does **not** classify or reclassify the `<program>` / `<page>` body. The `<program>` / `<page>` body is therefore intentionally absent from the free-text-mode row above — its mode is `default-logic`, per §40.8. (This note reconciles §4.18.1's original free-text-mode listing with §40.8's `default-logic` statement; the native-parser charter deep-dive surfaced the inconsistency.)
 
+#### 4.18.1a The shared principle
+
+*(Amendment S442 — the round-2 drafted §4.18.1a.)*
+
+An active sequence is active **to the recognizer, at scan time, unconditionally** — never a convention a downstream
+stage chooses to honour. *(Note: this does not extend §4.18 to §4.17. `<pre>`/`<code>` raw content is a third,
+orthogonal production — zero active sequences, not two, its only exit its own matching close tag, matched by name.)*
+
+#### 4.18.1b The free-text production's exit grammar
+
+*(Amendment S442 — the round-2 drafted §4.18.1b, plus the pins it names. Status Nominal/spec-ahead — see the §4.18
+banner.)*
+
+**Free text's closed exit set (RULED, S442 follow-up — the ruling's words):** *"Free text's closed exit set is:
+(1) every context sigil §3.1 already defines (`${`, `#{`, `^{`, `!{`, and so on); (2) `//` comments (§4.7); (3) `<`
+followed by a letter, `!`, `/`, `?`, `*`, `_` or `.` — the three additions are scrml's own tag forms. That list, and no
+others."* So `5 < 7` is just text.
+
+- **Closed exit set (pin 1).** A free-text body is left by exactly these sequences — **that list, and no others**:
+  1. **The context sigils** (a `{`-delimited context opens; content resumes at its matching `}`):
+     - `${` — logic (§3.1 table, parent Markup/State);
+     - `#{` — CSS inline (§3.1 table, parent Markup/State);
+     - `^{` — meta (§22.2) and `!{` — error context (§19; sigil rule §4.11). Neither is a row of the §3.1 table; both
+       are named by the ruling itself.
+     - `~{` — test context (§19.12). Not a §3.1 row and not named by the ruling; listed as an exit because the block
+       splitter opens it in a markup body today (corpus: 0 in free-text bodies) — the ruling's "and so on".
+       `provenance: rationale:PA S442 — preserves current behaviour; bryan veto`
+     - `_{` — foreign code (§23) — is **neither an exit nor content**: in a markup body it stays an ERROR,
+       `E-FOREIGN-004`, as today. `provenance: rationale:PA S442 — preserves current behaviour; bryan veto`
+     - NOT exits: `?{` — the §3.1 table's third row, whose parent is Logic only; in a markup body it is text (§4.17
+       S108 note, §8.1).
+  2. **`//` comments** — §4.7 suppression; the comment runs to end of line and is not content.
+  3. **`<` immediately followed by `[a-zA-Z!/?*_.]`** — opens or closes a nested element: a tag opener, `</>`,
+     `</tag>`, `<!-- -->` (`!`), and scrml's own tag forms `<*x/>` (the existing instance, §66.6), `<_ …>` (the
+     wildcard arm) and `<.Variant …>` (a variant arm, §18.0.1).
+
+  Every other byte and sequence in a free-text body is content. *(Pin 1's reason, from the artifact: an exit set
+  written as prose instead of a closed enumeration becomes an "advisory recognizer over an inert region" that grows
+  heuristics — `lint-w-interp-in-raw-content.js` `detectToken` grew three because nobody wrote "and no others".)*
+  *(The round-2 draft's two-member set — `${` and `<`+[a-zA-Z!/?] — was incomplete: read literally it turned 459 `//`
+  comments, 87 `#{`, 29 `^{` and 5 `!{` corpus blocks, and the `<*x/>` / `<_ …>` / `<.Variant …>` tag forms, into
+  page text. The follow-up ruling replaces it. Counts: `docs/changes/s442-dpa045-spec/progress.md`.)*- `<` SHALL be a markup-open attempt **if and only if** immediately followed by `[a-zA-Z!/?*_.]`. A `<` followed by
+  anything else is ordinary content — not recognized, not an error. *(Closes the `<`+SPACE gap: `a < b` is content,
+  matching HTML5.)* **The spaced opener `< tag>` is therefore content in a free-text body** — the deprecated
+  whitespace-after-`<` form of §4.3 / §15.15.5 is no longer an opener there (RULED, S442 follow-up: *"The deprecated
+  `< tag>` spaced opener becomes text"*). Affected corpus: **one** conformance case,
+  `conformance/cases/control-flow/ctrl-004-else-on-state-opener-pos` (`< profile else name(string)/>` inside a
+  `<div>` body) — impl#1 still treats it as an opener; the case is not edited by this amendment.
+- **`<`+letter is an irreducible collision, not a defect of this rule.** No bounded lookahead distinguishes "naming a
+  tag" from "prose beginning with a letter after `<`." HTML5 resolves it as a tag-open attempt; this amendment adopts
+  the same resolution.
+- ⚑ **An interpolation's extent — `${` to its balancing `}` — SHALL be determined by lexing the interpolation body and
+  tracking brace-token depth over the resulting token stream (the `findInterpolationCloseOffset` shape), never by
+  counting raw `{`/`}` bytes. A raw-byte counter is NON-CONFORMANT: it cannot distinguish a `{` inside a nested
+  string, comment, or template literal from a structural brace** — e.g. `${"${"}`.
+- **A behavior-change claim SHALL be stated per surface** — inert / newly-accepting-as-bug-fix /
+  newly-accepting-as-DX-regression — never as one global "inert" claim. (This amendment's own claims are in the table
+  below.)
+- **Extent vs content is a PROPERTY, not a procedure (pin 3).** *The body's extent is determined by the delimiters
+  alone; no byte inside the body may change where the body ends.* The body's end is set by its delimiters alone. No
+  character inside can move it.
+- **Cooked (pin 4 — RULED).** The node handed to codegen SHALL be **cooked**: delimiters removed and escapes
+  decoded. For a display-text literal, the `"` delimiters are removed before any downstream stage receives the content,
+  and no downstream stage SHALL re-scan that content for escapes. (With §4.18.3's catalog deleted there are no escapes
+  left to decode; the rule still binds the delimiters and forbids a downstream re-scan.) For the free-text production,
+  cooked and raw are the same bytes — the production has no delimiters inside the run and no escapes (pin 5).
+  *(Round 2 Call 2 measured two shipped modules disagreeing: `parse-file.js:316` hands codegen the verbatim source
+  including quotes; `emit-match.ts:647` strips the delimiters and decodes the escapes. impl#1 divergence.)*
+  > **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 2 — *"Cooked — the node handed to codegen
+  > has delimiters removed and escapes decoded (dpa-045 pin 4). → RULED."*
+- **The free-text escape policy DIVERGES from §4.18.3 — deliberately (pin 5).** The free-text production has **no
+  escape table**. **A stray `\` in free text is just content** — silent content: not an escape, not an error, not a
+  diagnostic. §4.18.3's former escape set and its `E-PARSE-001` malformed-escape rule for `\x` (both deleted S442)
+  never applied to a free-text body, and no escape rule SHALL be applied to one. (The artifact names the hazard: that rule
+  extended to free text would newly-reject every Windows path, every `\n` in prose, every regex in a `<p>` — "one word
+  away … the word being 'literal' spanning both productions.") *Informative:* a literal `${` in free text is written
+  with a DELIMITER escape — interpolate the text, e.g. `${"$"}{5}` — never a character escape (round 2, Q3).
+- **Grammar vs conformance (pin 6).** This subsection specifies a grammar property (bounded-lookahead decidability); it
+  does NOT thereby claim the shipping compiler computes this production's extent via a single canonical scan. Where
+  more than one component independently computes an extent for the same body, this subsection's guarantee holds only
+  where those components are demonstrated to agree; an extent mismatch at such a locus is a **conformance bug against
+  this subsection**, not evidence against the grammar.
+
+**Per-surface behaviour-change claims (S442; measured at `6dccbd6c` unless marked "round 2").** Every claim is a
+claim about the rule; the shipping compiler has not moved (Nominal/spec-ahead).
+
+| surface | today | under §4.18.1b / §4.18.5 | claim |
+|---|---|---|---|
+| `<` + a byte outside `[a-zA-Z!/?*_.]` in free text, e.g. `<p>5 < 7 is true</p>` | fails — `E-CTX-001` (`'</program>' tries to close '<7>'`) + `E-CTX-003` cascade | content | newly-accepting-as-bug-fix |
+| `<` + digit / `=` in free text (`x <3`, `a <= b`) | content | content | inert |
+| `${…}` whose body holds a string brace, `<p>Use the ${"${"} syntax</p>` | fails — `E-CTX-003` Unclosed 'logic' + Unclosed 'p' (round 2) | balanced by token depth | newly-accepting-as-bug-fix |
+| stray `\` in free text (`C:\Users\bryan`, `\n`, `\d+` in a `<p>`) | rendered as written; corpus uses: **0** | content | inert |
+| `\${` in free text | `\` + a live interpolation — `Cost: \${5}` emits `Cost: \5` (round 2) | the same: `\` is content, `${` exits | inert |
+| whitespace — static-HTML path (plain markup at top level / in `<program>`, `if=` templates, markup nested in match arms and engine state-children, both display-text-literal loci) | verbatim, byte for byte | verbatim | inert |
+| whitespace — component-definition bodies (`const Box = <div>…</>`) | runs collapse to one space, indentation stripped, tab → space; one case ADDS a trailing space | verbatim | emitted-output change (conformance fix; no acceptance change) |
+| whitespace — markup built from logic (`lift <li>…</li>`, markup-as-value `const m = <p>…</p>`) | each text segment trimmed and collapsed; the whitespace next to `${…}` is DELETED (`   lifted   ${it}   li` renders `liftedali`) | verbatim | emitted-output change (bug-fix — today's output drops content) |
+| `\"` in a code-default display-text literal | `:`-shorthand: `E-ENGINE-STATE-CHILD-MISSING` for children present in source (round 2) | not an escape: `\` is content and the `"` closes the literal (§4.18.3) | changes meaning at the SPEC level; corpus uses: **0** |
+| `\\` / `\${` in a code-default display-text literal | `\\` renders `\\` (cooked value discarded); `\${` is a no-op — the interpolation fires (round 2) | not escapes: `\` is content; `${` opens an interpolation | changes meaning at the SPEC level; corpus uses: **0** / **0** |
+| `//` comments, `#{`, `^{`, `!{` blocks in a free-text body | exits (459 / 87 / 29 / 5 corpus blocks) | exits | inert |
+| the spaced opener `< tag>` in a free-text body | an opener + W-WHITESPACE-001 | content | changes meaning — was an opener, is now text; corpus: **1** (`ctrl-004`, conformance) |
+| `<*x/>`, `<_ …>`, `<.Variant …>` in a free-text body | tag forms | tag forms | inert |
+
 #### 4.18.2 What a bare run means in code-default mode
 
-In a code-default-mode body, the block splitter and tokenizer do NOT apply the free-text heuristics. A bare (unquoted) run of source characters is parsed as **code**, following the universal scrml expression grammar (§7 logic-context grammar):
+In a code-default-mode body, the block splitter and tokenizer do NOT apply the free-text production (§4.18.1b). A bare (unquoted) run of source characters is parsed as **code**, following the universal scrml expression grammar (§7 logic-context grammar):
 
 - A bare identifier resolves as an expression — a local identifier, or a keyword. (Reactive state access still requires the `@` sigil per §1.6 / §6.1 — the code-default body mode does not change the V5-strict access rule.)
 - A call (`fn(...)`), member access (`a.b.c`), and a literal (number, boolean, `not`) are code.
@@ -1213,7 +1384,7 @@ A **display-text literal** is the vehicle for plain display text inside a code-d
 
 ```
 display-text-literal ::= '"' ( literal-segment | interpolation )* '"'
-literal-segment      ::= (any character except '"', '\', or the '${' sequence)+
+literal-segment      ::= (any character except '"' or the '${' sequence)+     -- S442: '\' is ordinary (no escapes)
 interpolation        ::= '${' expression '}'
 ```
 
@@ -1221,7 +1392,11 @@ interpolation        ::= '${' expression '}'
 
 - A display-text literal is delimited by the double-quote character `"` on both ends. The double-quote is the **only** display-text-literal delimiter. This matches the §5 attribute-string convention (`attr="value"` — §5.1), which is `"`-only; scrml uses one string delimiter language-wide.
 - The apostrophe `'` is an **ordinary interior character** of a display-text literal — it carries no delimiter role and requires no escape. `"Don't worry — it's fine"` is a single well-formed literal. The backtick `` ` `` is likewise an ordinary interior character and is NOT a display-text delimiter.
-- A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)
+- ~~A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)~~ *(superseded S442 — next bullet)*
+- **Amendment S442 — the display-text literal has NO character escapes.** The whole former catalog is deleted: `\"` (B(3)), and `\\` and `\${` (B(2) = delete). A `\` inside a display-text literal is an ordinary content character; there is no malformed-escape error (`E-PARSE-001` no longer fires on `\x` here). Consequently `\"` is a `\` followed by the closing `"`, `\\` is two backslashes, and `\${` is a `\` followed by an interpolation. The free-text production has never had an escape table (§4.18.1b, pin 5), so neither text-mode production has character escapes.
+  > **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" (B(3): *"delete the `\"` escape"*) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 3 — *"B(2) = delete the rest of the §4.18.3 display-text escape catalog (`\\`, `\${`) — measured zero uses in 2,138 files. → RULED. (With B(3), the code-default display-text literal has no character escapes.)"* · dPA artifact `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round2-2026-09-08.md` Q3 (*"Consider DELETING `\"` from §4.18.3 rather than fixing it … a character-escape is Class D machinery"*; *"Resolve root cause A one way or the other, but not neither"*) · supersedes: the struck three-escape sentence above. **Direction of change:** changes meaning at the SPEC level for `\"` / `\\` / `\${` inside a display-text literal. Evidence (S442 E measurement, `docs/changes/s442-dpa045-spec/progress.md`): across 2,138 `.scrml` files the catalog had **zero uses** — `\"` 0, `\\` 0, `\${` 0 — in 40 display-text literals (37 `:`-shorthand, 3 block-form). Shipping state (round 2 + S442): `\"` mis-scans (`E-ENGINE-STATE-CHILD-MISSING` for children present in source); `\\` passes only because the cooked value is discarded; `\${` is a no-op; the block splitter splits `"lit \${5}"` into text + a live `${5}` logic block. impl#1 divergences.
+  >
+  > ⚑ **OPEN (residue — the ledger's scope note, verbatim):** *"with the catalog deleted, how an author writes a literal `"` or a literal `${` inside a code-default display-text literal is an OPEN residue (the dPA artifact already flagged the `"` case) — not decided here."* (The artifact: scrml has one string delimiter language-wide, so a `"` inside a display-text literal *"has no delimiter answer"*; it places *"the generalizable raw-content marker"* at that hole.)
 - A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7.
 
 **Worked example — display-text literals in code-default bodies:**
@@ -1245,7 +1420,7 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
 - `${expr}` inside a display-text literal opens a logic context per §3.1, exactly as `${...}` does elsewhere. The `expr` follows logic-context grammar; `@`-sigil reactive access applies normally.
 - A display-text literal carrying one or more `${...}` interpolations is a single body child — a template-string-valued display-text node interleaving literal-text segments and interpolated expressions. It is NOT decomposed into sibling text + interpolation children.
 - The `${...}` interpolation token keeps a single meaning across the language: "interpolate an expression here." It is the same token in an attribute-value string (`attr="${@x}"` — §5, already template-string-shaped) and in a body display-text literal. A display-text literal is the body-position analogue of the attribute-value string.
-- A literal `${` sequence intended as display text (not an interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. The escape is rare in practice (the `${` sequence is the interpolation opener inside the literal and is normally used for that purpose).
+- ~~A literal `${` sequence intended as display text (not an interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. The escape is rare in practice (the `${` sequence is the interpolation opener inside the literal and is normally used for that purpose).~~ *(superseded S442 — the `\${` escape is deleted, §4.18.3 (B(2) = delete); how to write a literal `${` inside a display-text literal is ⚑ OPEN — the §4.18.3 residue)*
 
 **Worked example — interpolation inside the literal:**
 
@@ -1258,7 +1433,7 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
 
 `"Loaded ${@result.count} rows"` is **one** display-text literal — literal segment `Loaded `, interpolation `${@result.count}`, literal segment ` rows`. The whitespace around the interpolation is inside the quotes and is therefore content (§4.18.5).
 
-#### 4.18.5 Whitespace inside the literal
+#### 4.18.5 Whitespace — kept exactly in both productions (revised S442)
 
 Whitespace inside a display-text literal is **verbatim** — preserved exactly as written, byte for byte. A run of spaces is that run of spaces; a newline inside a multi-line display-text literal is a newline in the rendered output. The literal *is* the whitespace declaration; there is no collapse and no leading/trailing strip inside a display-text literal.
 
@@ -1266,9 +1441,41 @@ Whitespace inside a display-text literal is **verbatim** — preserved exactly a
 
 - Inside a display-text literal, every whitespace character (space, tab, newline) between the opening `"` and the closing `"` SHALL be preserved verbatim in the rendered display text. `"two  spaces"` renders two spaces.
 - Whitespace **outside** a display-text literal but inside a code-default body — whitespace between a literal and a sibling value, between two nested tags, between a value and a closer — is **source formatting** and is NOT content. It is ignored, exactly as whitespace between function arguments is ignored.
-- Plain-markup free-text-mode bodies (§4.18.1) are **unchanged**: they retain HTML-style whitespace handling — runs of whitespace collapse, leading/trailing whitespace strips. This amendment does NOT alter free-text-body whitespace. The verbatim-whitespace guarantee is a property of the display-text literal, not of free-text bodies.
+- ~~Plain-markup free-text-mode bodies (§4.18.1) are **unchanged**: they retain HTML-style whitespace handling — runs of whitespace collapse, leading/trailing whitespace strips. This amendment does NOT alter free-text-body whitespace. The verbatim-whitespace guarantee is a property of the display-text literal, not of free-text bodies.~~ *(superseded S442 — deleted as a documentation defect; see "Whitespace (revised)" below)*
 
-This is the resolved-by-coupling consequence of scope (b): the display-text literal gets the verbatim-whitespace guarantee where it is wanted (the code-bearing loci); plain-markup `<p>` / `<h1>` prose keeps HTML-collapse. Two whitespace regimes, split by body mode — the same split as the body-mode split itself (§4.18.1).
+~~This is the resolved-by-coupling consequence of scope (b): the display-text literal gets the verbatim-whitespace guarantee where it is wanted (the code-bearing loci); plain-markup `<p>` / `<h1>` prose keeps HTML-collapse. Two whitespace regimes, split by body mode — the same split as the body-mode split itself (§4.18.1).~~ *(superseded S442)*
+
+**Whitespace (revised) — Amendment S442 (pin 2).** §4.18.5's claimed collapse regime *("runs of whitespace collapse,
+leading/trailing whitespace strips")* **is false against the shipping compiler and is DELETED as a documentation
+defect.** Both productions preserve whitespace verbatim. Visual collapse is the browser's `white-space: normal`
+default, downstream and identical under every pole. **Whitespace is kept exactly.**
+
+- A free-text body is a **region** (§4.18.1): its whitespace — including the newline and indentation after the
+  opener's `>` and before the closer — SHALL be preserved verbatim in the emitted text. No stage SHALL collapse runs,
+  strip leading or trailing whitespace, or drop the whitespace adjacent to a `${…}` interpolation. *(Pin 2's reason,
+  from the artifact: with the body a region, a strip rule "on a literal" gets implemented on the region — "lit#114,
+  built deliberately, from scrml's own spec".)*
+- **Whitespace-only text between elements is kept exactly too** (RULED, S442 follow-up item 4). A run of free text
+  that is only whitespace — including one that contains a newline, e.g. the newline + indentation between two sibling
+  elements — is content like any other run and SHALL NOT be dropped or normalized.
+  > **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 4 — *"Whitespace-only text between
+  > elements is kept exactly too (the bootstrap `lower` currently drops whitespace-only text containing a newline —
+  > L13), done in the bootstrap together with the measured component-body and `lift`-segment whitespace fixes; it
+  > deliberately changes the pre-existing programs' lowered output. → RULED."*
+- The code-default rules above are unchanged: whitespace inside a display-text literal is content; whitespace between
+  values in a code-default body is source formatting.
+- **impl#1 divergences (measured, S442 E(a), `docs/changes/s442-dpa045-spec/progress.md`).** The static-HTML path
+  already conforms (plain markup, `if=` templates, markup nested in match arms / engine state-children, both
+  display-text-literal loci: byte-identical). Two paths do not: **component-definition bodies** (runs collapse,
+  indentation stripped, tab → space, one case adds a trailing space) and **markup built from logic** (`lift`,
+  markup-as-value — each text segment trimmed and collapsed, and the whitespace next to `${…}` deleted, so
+  `   lifted   ${it}   li` renders `liftedali` — **content loss**, not cosmetic). Per the ruling these are fixed in
+  the BOOTSTRAP; in impl#1 they are filed as gaps, fixed only if the S435 policy admits them. The per-surface claims
+  are in the §4.18.1b table.
+  > **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" (D: *"Whitespace is kept exactly"* (SPEC §4.18.5's
+  > collapse claim deleted)) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups, scope note (*"impl#1 whitespace
+  > defects found by the E measurement … are filed as gaps, fixed in impl#1 only if the S435 policy admits them"*) ·
+  > dPA artifact round 2, Q1 draft "4.18.5 — Whitespace (revised)" + pin 2 · supersedes: the two struck passages above.
 
 #### 4.18.6 Auto-HTML-escaping of literal text content
 
@@ -1326,8 +1533,8 @@ and gets **literal quote marks** in the rendered output — `<p>` is a free-text
 
 **Normative statements (`W-DISPLAY-TEXT-OVERQUOTE`):**
 
-- The lint SHALL fire when, inside a code-default body (engine state-child body §51.0, match block-form arm body §18.0.1, or `:`-shorthand body §4.14), a **plain-markup element** (an HTML element whose body is free-text per §4.18.1 — NOT a component, NOT a scrml structural element) has, after ignoring whitespace-only source formatting, **exactly one** body child that is a single `"..."` display-text literal (no interior unescaped `"`).
-- The lint SHALL NOT fire on: (a) a `"..."` display-text literal written **directly** in the code-default body — that is the CORRECT §4.18.3 form, quotes stripped on emit; (b) bare free text in a plain-markup body — that is correct verbatim display text; (c) a `"..."` literal in plain markup that is **outside** any code-default-body context — there is no code-default habit to carry, so no footgun; (d) a **non-sole-content** quoted run such as `<p>"a" and "b"</p>` — the interior unescaped quotes show the adopter intends literal quote marks; (e) a `:`-shorthand body that **is** a display-text literal (`<Idle : "Waiting…">`) — the quotes are stripped per §4.18.3 (correct), so the over-quote never reaches the output.
+- The lint SHALL fire when, inside a code-default body (engine state-child body §51.0, match block-form arm body §18.0.1, or `:`-shorthand body §4.14), a **plain-markup element** (an HTML element whose body is free-text per §4.18.1 — NOT a component, NOT a scrml structural element) has, after ignoring whitespace-only source formatting, **exactly one** body child that is a single `"..."` display-text literal (no interior `"` — S442: a free-text body has no escapes, §4.18.1b pin 5, so "unescaped" is dropped).
+- The lint SHALL NOT fire on: (a) a `"..."` display-text literal written **directly** in the code-default body — that is the CORRECT §4.18.3 form, quotes stripped on emit; (b) bare free text in a plain-markup body — that is correct verbatim display text; (c) a `"..."` literal in plain markup that is **outside** any code-default-body context — there is no code-default habit to carry, so no footgun; (d) a **non-sole-content** quoted run such as `<p>"a" and "b"</p>` — the interior quotes show the adopter intends literal quote marks; (e) a `:`-shorthand body that **is** a display-text literal (`<Idle : "Waiting…">`) — the quotes are stripped per §4.18.3 (correct), so the over-quote never reaches the output.
 - `W-DISPLAY-TEXT-OVERQUOTE` partitions into `result.warnings` (non-fatal, info). It is lint-only: it changes no emitted output — the literal quotes still render (the verbatim free-text behavior is unchanged); the lint only surfaces the surprise. (This is the INVERSE footgun of `E-UNQUOTED-DISPLAY-TEXT`, which is the under-quoting case in the code-default body itself; `E-UNQUOTED-DISPLAY-TEXT` remains spec-ahead/unwired — `W-DISPLAY-TEXT-OVERQUOTE` is a separate, independently-wired lint.)
 
 #### 4.18.8 The `text` block / AST kind survives
@@ -1341,7 +1548,10 @@ The `text` block kind (at the block-splitter layer) and the corresponding `TextN
 - §3.4 — V5-strict access form per context; the engine-state-child / match-arm / `:`-shorthand loci are code-default-body loci.
 - §4.14 — the `:`-shorthand body form; a `:`-shorthand body is a single code-default expression.
 - §4.15 — the structural-elements registry; `<engine>` / `<match>` body-form notes.
-- §4.17 — `<pre>` / `<code>` raw-content (orthogonal mechanism — see the orthogonality note above).
+- §3.1 / §4.7 / §19 / §19.12 / §22.2 — the context sigils and `//` comments that are members of the free-text closed exit set (§4.18.1b, S442).
+- §4.3 / §15.15.5 — the deprecated spaced opener `< tag>`, which is content inside a free-text body (S442).
+- §66.6 / §18.0.1 — the `<*x/>`, `<_ …>`, `<.Variant …>` tag forms admitted by the `<`+[a-zA-Z!/?*_.] exit class (S442).
+- §4.17 — `<pre>` / `<code>` raw-content (orthogonal mechanism — see the orthogonality note above). S442: raw content is a **third, orthogonal text-mode production** — zero active sequences, its only exit its own matching close tag, matched by name (§4.18.1a).
 - §5 / §5.1 — attribute quoting; the `"`-only attribute-string convention, the precedent this subsection's `"`-only display-text literal matches.
 - §18.0.1 — match block-form arms (a code-default-body locus).
 - §51.0 / §51.0.B / §51.0.I — engine state-children (code-default-body loci).
@@ -9006,7 +9216,26 @@ prerender payload, a channel `broadcast()` published frame (§38), and a `server
 sinks; a value the compiler serializes to the client passes through one of them, and each reads the
 provenance descriptor and redacts. The strip keys on the column's
 resolved source **`(table, column)` origin, never its surface name** — so `SELECT passwordHash
-AS h` is redacted identically to `SELECT passwordHash`. The redaction is the **load-bearing
+AS h` is redacted identically to `SELECT passwordHash`. Origin matching SHALL follow SQLite identifier
+rules: table and column identifiers are compared CASE-INSENSITIVELY, quoted or not, with a schema
+qualifier (`main.users`) ignored — `SELECT * FROM USERS`, `SELECT PASSWORDHASH` and `u.PasswordHash`
+all resolve to the protected origin. (S441 round 4: the lookup was exact-case, so `FROM USERS`
+emitted no descriptor at all and the whole-row strip vanished — measured, also on main.) Every
+column comparison the floor makes — the descriptor, a `reveal` name, the row key at the sink — SHALL
+be on the case-folded name, and the descriptor SHALL record the name the row actually carries: an
+unaliased column's DECLARED name (the driver returns `SELECT PASSWORDHASH` keyed `passwordHash`), an
+alias exactly as written. (S441 round 5: the descriptor recorded the surface spelling, the strip
+compared exact-case, and `SELECT PASSWORDHASH … return u` served the hash — measured.) A query
+whose origins cannot be resolved still degrades to the wholesale strip, never to "no protected
+column". An output column COMPUTED in SQL — an expression, function call, cast, concatenation, a
+quoted / bracketed / backticked spelling, or a scalar subquery — that references a protected column
+by any spelling (case-folded, quote-stripped, qualified or not), or that contains a nested
+projection `*`, IS that column's value re-encoded by the database; its output key is not
+statically reliable, so the row SHALL be stripped wholesale. This deliberately over-approximates: a
+value derived in SQL (`length(passwordHash)`, `passwordHash = ${x} AS ok`) strips its row too.
+(S441 round 5: such a column carried no descriptor, and `passwordHash || ''`, `lower()`, `hex()`,
+`CAST`, `substr`, `coalesce`, `json_object`, `group_concat`, `pin + 0`, `"passwordHash"` and a
+scalar subquery each served the value — measured, also on main.) The redaction is the **load-bearing
 guarantee**: it is sound *by construction*, not by proving any return clean.
 
 **The provenance map (shared primitive — a reuse).** At `?{}` query-lowering, every output column
@@ -9031,6 +9260,99 @@ cover:
 - **Unresolvable dynamic SQL** — a fully string-built `?{}` whose column origins cannot be
   statically resolved. Per the fail-closed policy below such a row is **stripped wholesale** at
   egress (every column dropped) with an `I-PROTECT-STRIP-001` lint; it is never accept-unknown.
+
+⚑ **S441 amendment — EXTRACTION IS AN EXPLICIT-COLUMN FLOW, AND THE RUNTIME STRIP CANNOT SEE IT.**
+The descriptor lives on the ROW. A value taken OUT of a row — `return u.passwordHash`, a new
+object or array holding it (`{ h: u.passwordHash }`, `[u.passwordHash]`), string concatenation or
+template interpolation, destructuring (`const { passwordHash } = u`), a helper that extracts from a
+row passed to it, `rows.map(r => r.passwordHash)`, `JSON.stringify(u)` — IS the protected column's
+value (it is not a derived flow of independent identity), but it carries no descriptor, so the
+sink has nothing to read. Prior revisions of this section called the floor sound by construction
+without that qualification; MEASURED at S441, `return u.passwordHash` served HTTP 200 with the
+hash in the body while `I-PROTECT-STRIP-001` reported the column stripped
+(`g-protected-column-escapes-redaction-as-scalar`). The guarantee is therefore stated in two
+halves, and a conformant implementation SHALL enforce both:
+1. **Rows** — a value that still is, or contains, a descriptor-bearing row is stripped at the sink
+   at runtime, by construction (the contract above).
+2. **Extracted values** — a value whose provenance includes a `protect=` column and which reaches a
+   client-egress sink OUTSIDE a descriptor-bearing row SHALL be rejected at compile time with
+   **`E-PROTECT-006`**. Rejection, not runtime stripping, is required: a stripped scalar would
+   silently change what the program returns. The obligation is bounded as follows, and these bounds
+   are normative:
+   - **Scope — the whole compile.** The analysis SHALL cover every server module the compile emits,
+     with the imports between them resolved: a helper in another `.scrml` file is analysed, not
+     assumed. (S441 fix round: splitting an extracting helper into a second file was the first
+     bypass of a single-module analysis — it compiled at exit 0 and served the hash.)
+   - **Provenance is preserved by default.** Any step not positively known to produce a value of
+     independent identity preserves it — including binding, member / index / destructuring
+     extraction, re-housing in an object or array literal, spread, writes into a container —
+     including a write through an ALIAS of that container or through a helper that receives it
+     (`const o2 = o; o2.x = h`, `setv(o, h)`, `box.m.set(h, 1)`: every binding that may hold the
+     same object sees the write), a write into an element a collection hands back
+     (`arr.find(…).x = h`, `arr.at(0).x = h`, `m.get(k).x = h`, `Object.values(o)[0].x = h`, an
+     iterator's `.next().value`), and a write into a prototype (`Object.setPrototypeOf(o, p)`,
+     `Object.create(p)`) — string
+     concatenation and template interpolation, conditional and logical operators, `await`, array
+     callbacks, getters and `toJSON` the serializer invokes, `throw` → `catch`, promise resolution,
+     encodings (`Buffer`, `btoa`, `encodeURIComponent`, character codes), and serializing built-ins.
+   - **Unresolvable callees fail closed.** A call into code the compile does not contain — a host,
+     stdlib or npm import, or a platform API — that receives a protected value (a scalar OR a whole
+     row) returns a protected value, unless the callee is on the deriver allowlist.
+   - **The derived-flow exemption is an explicit ALLOWLIST, not "any callee the module does not
+     define".** A value is DERIVED (outside the claim) only when produced by: a comparison, equality,
+     relational, `in` or `instanceof` operator, `!`, `typeof`, `void`, `delete` (never an arithmetic
+     one — see below); `.length` of a value whose length is a count of independent identity — the
+     column's own string, a string or array literal built from it, a `.map` / `.filter` / `.sort`
+     of an array, an array of rows — and of NO other value: `.length` of `({ length: h })`,
+     `new Array(u.pin)`, `"x".repeat(u.pin)` or an unmodelled method's result IS the value and
+     preserves provenance (S441 round 5: `.length` was derived on any receiver, and those shapes
+     served the value — measured); a predicate / position method (`includes`,
+     `startsWith`, `indexOf`, …, but NOT `charCodeAt` / `codePointAt`, which are lossless, and NOT
+     `getTime`, which is the identity on a number) called on a string-like receiver — the same
+     method NAME on an object carrying protected data is an unmodelled method and fails closed; or
+     an allowlisted one-way / boolean function — `scrml:auth` `verifyPassword` / `hashPassword` /
+     `verifyTotp`, `scrml:crypto` `hash` / `hmac` / `verifyHash`, `crypto.subtle.digest`, `Boolean`,
+     `console.*`. `Number(x)` is not on it (on a numeric protected column it is the identity), and
+     neither is any `Bun.*` API (`Bun.hash` is a non-cryptographic hash, brute-forceable on a
+     low-entropy column).
+   - **Arithmetic stays protected** (ruling, S441: "ratify with the changes, arithmetic stays
+     protected"). The result of an arithmetic, bitwise or shift operator (`+ - * / % **`, `& | ^ ~`,
+     `<< >> >>>`), of unary `+` / `-` / `~`, of `++` / `--`, and of a compound assignment on a
+     protected value IS protected, and so is anything derived from it: `u.pin * 1`, `+u.pin`,
+     `u.pin - 0` and `cost_price * qty` are `E-PROTECT-006` at egress. To compute with a protected
+     column, declassify it with `reveal`: `const r = u.reveal("cost_price"); return r.cost_price * qty`
+     is a declassified read followed by arithmetic, and ships.
+   - **Keys are data.** A protected value used as an object KEY (`{ [h]: 1 }`, `o[h] = v`,
+     `m.set(h, v)`) is carried into the container: a key is serialized as surely as a value. A
+     lookup KEYED by a protected value (`labels[h]`, `table[h[i]]`, `m.get(h[i])`) selects by the
+     secret, and its result is protected ALL THE WAY DOWN — a field read off it (`L[c].v`), a method
+     on it (`L[c].test()`), and `Object.keys(L[c])` are all protected. `Object.keys` of a
+     descriptor-bearing row yields column NAMES, not values, and is clean.
+   - **First-party helpers are modelled, not trusted.** `scrml:data` `pick(obj, keys)` /
+     `omit(obj, keys)` with a literal key list are modelled exactly (they copy into a fresh object,
+     so precisely the protected columns that survive the selection are protected — `pick(u, ["id",
+     "name"])` is clean); a non-literal key list fails closed. A `.scrml` re-export
+     (`export { x } from './b.scrml'`) is resolved to the module that defines `x`.
+   - **Sinks.** Every compiler-emitted client-egress serializer, AND every argument of an
+     author-built `Response` — its body AND its `init` (a `Location` or `Set-Cookie` header built
+     from the column is egress even on a null-body response) — `Response.redirect`, `Response.json`,
+     and channel publish / stream enqueue / socket send.
+   - **Out of scope: position oracles and implicit flows.** A position method given a protected
+     ARGUMENT (`ALPHABET.indexOf(h[i])`, `[...ALPHABET].findIndex(c => c == h[i])`) and an implicit /
+     control-dependence flow (`if (h[i] == c) s += c`) can each reconstruct the value character by
+     character; neither is within this version's guarantee.
+   - **Out of scope: a DB round trip.** Writing the value into a non-protected column and reading it
+     back yields a new row whose column origin is not protected; the egress guarantee does not
+     follow a value through the database. (Keeping a protected value out of a non-protected column
+     is a schema / write-path concern, not an egress one.)
+   - **Disclosed imprecision (fails closed, never open).** The analysis is call-site sensitive (each
+     distinct argument signature of a helper is analysed separately) but flow-INsensitive within a
+     function: a variable reassigned from a protected value to a clean one is still treated as
+     protected. An implementation that cannot finish the analysis — an unparseable emitted module,
+     or an exhausted analysis budget — SHALL fail closed with `E-PROTECT-006`.
+
+   `reveal("col")` discharges it for the named column exactly as at the sink; the name is compared
+   case-insensitively, as SQL identifiers are (`reveal("PIN")` declassifies `pin`).
 
 **Declassification — `reveal` (the sole admit path).** A protected-origin column reaches the
 client **iff** it is explicitly declassified via the field-level `reveal` construct at the value:
@@ -9120,7 +9442,16 @@ diagnosable build-time condition into a runtime failure.
 named-codes-land-with-impl precedent — Rule 4):
 - **`I-PROTECT-STRIP-001`** (Info) — names each column the egress sink stripped (the redaction is
   never silent — the dev sees what the floor removed). Also fires on the wholesale strip of an
-  unresolvable-dynamic-SQL row.
+  unresolvable-dynamic-SQL row. ⚑ **S441: it SHALL fire only for a query whose row actually reaches
+  a client-egress sink carrying an unrevealed protected column.** It previously fired for every
+  protected SELECT — including one whose column left as an extracted scalar, which it reported as
+  stripped while it shipped, and one used only server-side (a login that verifies the hash), where
+  nothing is stripped at all. An info that claims a strip that did not happen is a false
+  confidentiality claim, not a lint.
+- **`E-PROTECT-006`** (Error) — a value whose provenance includes a `protect=` column reaches a
+  compiler-emitted client-egress sink outside a descriptor-bearing row (the S441 amendment above).
+  Names the column, the extraction site and the egress. Also raised, fail-closed, when the emitted
+  server module cannot be analysed.
 - **`E-PROTECT-004`** (Error) — a protected-origin column co-occurs, in one function body, with a
   compiler-unanalyzable egress (a `_{}` foreign block or an `asIs` value) where strip-by-origin
   cannot be guaranteed, and it is not `reveal`-declassified for every protected output column of
@@ -9148,7 +9479,10 @@ consuming the stream that is about to be returned — and would replay it under 
 without its headers. Closing it needs a store that can hold status + headers + a buffered body,
 which is a §19.9.6 change.
 
-**The DX layer (deferred — incremental, not load-bearing).** An *early authoring-time* static
+**The DX layer (deferred — incremental, not load-bearing).** ⚑ *S441: this paragraph governs a
+protected-origin ROW. For an EXTRACTED value the compile-time check is not DX — it is the second
+half of the guarantee (`E-PROTECT-006`, above), because no runtime floor can see an extracted
+value.* An *early authoring-time* static
 error reading the **same** provenance map — flagging a protected-origin return at compile time
 before the floor strips it — is a **deferred incremental DX addition**. It would ride the existing
 server-function-return boundary gate at `type-system.ts` (where `E-ROUTE-003` / `E-ROUTE-004`
@@ -11311,6 +11645,8 @@ W-CASE-001 does NOT fire for:
 The block splitter's `Block.openerHadSpaceAfterLt: boolean` annotation drives **W-WHITESPACE-001**. NR (or BS, depending on implementation) emits the warning when an opener uses any whitespace between `<` and the identifier. The diagnostic recommends migration to the no-space canonical form via `scrml-migrate` (planned tooling).
 
 Both forms compile today. The warning is reserved to promote to **E-WHITESPACE-001** (hard error) only at a future MAJOR language-version event (unscheduled per §63.7).
+
+> **Amendment S442 (dpa-045).** Inside a plain-markup free-text body (§4.18.1) the spaced form is not an opener at all — `<` followed by a space is content (§4.18.1b) — so W-WHITESPACE-001 does not fire there; the text renders. Outside free-text bodies this subsection is unchanged. Affected corpus: one conformance case, `ctrl-004-else-on-state-opener-pos` (impl#1 divergence; case not edited). **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 1 · supersedes: "Both forms compile" for a spaced opener inside a free-text body.
 
 #### 15.15.6 NameRes Authority (Post-P3-FOLLOW)
 
@@ -16791,8 +17127,11 @@ compile set — so in a two-`<program>` build one unit's own declaration is sile
 governed by its sibling's (S433: `30m` and `7d` both emitted `maxAge=1800`).
 
 **Step 1 answers only with a DECLARED value, or with a `<program auth="required">`'s
-own defaults (S438).** Route inference writes an auth-middleware entry for two kinds of
-unit, and they differ in what the entry carries:
+own defaults (S438).** Route inference writes an auth-middleware entry for these kinds of
+unit, and they differ in what the entry carries (the second bullet's rule also governs the
+two page-scope kinds S443 added — a `<page auth="required">` with no `protect=` columns,
+and a member page with no `auth=` inside a `<program auth="required">`, §40.2: their entry
+carries no session field of its own, since a `<page>` can declare neither):
 - a `<program auth="required">` — the entry carries that program's `sessionExpiry=` /
   `session-secure=`, or the `1h` / secure defaults when it declares none. Those defaults
   ARE that program's own answer, which is why such a unit always resolves for itself
@@ -16809,7 +17148,7 @@ unit, and they differ in what the entry carries:
   counted by the same walk step 2 performs). Step 2 cannot say which of them is the
   unit's own: it answers with the LAST declaring `<program>` in document order
   (`g-two-programs-one-file-session-attr-last-wins`), and what a second `<program>` in
-  one file means is reserved for `E-PROGRAM-002`. For such a file the second kind of
+  one file means is reserved for `E-PROGRAM-002` — and since S443 two TOP-LEVEL `<program>`s in one file ARE `E-PROGRAM-002` (§40.8), so only the nested case below remains reachable. For such a file the second kind of
   entry keeps the `1h` / secure defaults (declared page values still apply), exactly as
   before S438, so a later program's `session-secure="false"` cannot strip `__Host-` from
   a gated unit. The "never weaker" guarantee above does NOT extend to OTHER session units
@@ -20582,6 +20921,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-TOOL-ROUTE-NEEDS-SERVE | §64.1 | An `<endpoint>` (§61) or SSE `server function* route=` (§37) appears in a `kind="tool"` program with NO `serve=` listener to host it. A non-serve tool emits no `Bun.serve`, so the route would be silently un-hosted (the tool appears to define an API but serves nothing) — FAIL-CLOSED (§49 no-silent-bad-output). Add `serve=PORT` (§64.9), or remove the route. (S255 — server-program-shape Fork 1A.) | Error |
 | E-PROGRAM-001 | §4.12 | Circular `<program>` nesting detected **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-TITLE-NESTED | §40.7 | A documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>`. Documentary attributes are meaningful only at the top level (HTML `<head>` semantics); workers have no DOM `<head>`. Move the attribute to the top-level `<program>` or remove it. (Phase A1a) | Warning |
+| E-PROGRAM-002 | §40.8, §20.5.1 | Two or more top-level `<program>` elements in ONE file (S443, same-file case only — the §40.8 cross-file case stays reserved). A file declares its top-level `<program>` exactly once; before S443 the second was silently mis-read (its `auth=`, session and middleware attributes ignored — a `<program auth="required">` after a plain one served its routes anonymously). A `<program>` NESTED in the first (worker / sidecar / scoped-db, §4.12) is not counted. Resolution: merge them into one `<program>`, or move the second into its own file. Emitted at `compiler/src/codegen/index.ts` (the top-level `<program>` count after `detectNestedProgramAuth`). Provenance: ruling:user-voice-scrml.md S443 item 3. | Error |
+| E-PROGRAM-NESTED-AUTH | §4.12.2, §52.13 | An `auth=` attribute appears on a nested `<program>` — any `<program>` with a `<program>` or `<page>` ancestor. `auth=` is not a nested-valid `<program>` attribute (the §4.12.2 table omits it): a nested `<program>` is not an auth scope, and before S443 its `auth=` was silently dropped, so a nested `<program auth="required">`'s server functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote a row). Fires for any value (a literal, an interpolation, or bare) — never a silent no-op. Resolution: put `auth=` on the top-level `<program>` (the whole application) or on the `<page>` that needs it, and remove it from the nested `<program>`. Emitted at `compiler/src/codegen/index.ts` (`detectNestedProgramAuth`). Provenance: spec:§4.12.2 · pa-ruled:S443 (`g-nested-program-auth-attr-silently-ignored`). | Error |
 | E-STORY-UNKNOWN | §58.9 | A `story="<name>"` attribute on a nested `<program>` references a `<name>` with no corresponding `[story.<name>]` entry in the project manifest (`scrml.toml`). Declare the build story in the manifest's `[story]` table, or correct the name. (S118 — Build Story, §58) | Error |
 | W-STORY-ON-TOP-LEVEL | §58.8 | A `story=` attribute appears on the top-level `<program>` (§40.8). The attribute is ignored — the top-level build story is owned exclusively by `[story] default` in `scrml.toml`. Remove the attribute, or set the project default in the manifest. (S118 — Build Story, §58) | Warning |
 | E-MAP-KEY-NOT-COMPARABLE | §59.4 | A value-native map (§59) key type is not §45-comparable (the general code; cross-references `E-EQ-003` for a function-containing key type). Map keys are identified by structural `==`, so a key type must be comparable. Resolution: use a comparable key type (primitive, struct of comparables, enum). (S168 — Value-Native Maps, §59) | Error |
@@ -20685,7 +21026,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROTECT-004 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` A protected-origin column (a `protect=` field, resolved BY ORIGIN through the SQL FROM/JOIN alias map — so alias-safe; `passwordHash AS h` is still caught) **co-occurs, in one function body,** with a compiler-unanalyzable egress — a `_{}` foreign-code block (§23) or an `asIs`-typed value (§14.1.1) — at a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38), or `server function*` SSE (§37) boundary, and the column is not `reveal`-declassified. Resolution: declassify EVERY protected output column of that query with `value.reveal("col")`, or project them out. The confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction. ⛔ **THIS IS A CONSERVATIVE LINT AND §14.8.9 NOW SAYS SO NORMATIVELY — DO NOT CITE IT AS A CONFIDENTIALITY GUARANTEE.** It is a per-body SOURCE-TEXT co-occurrence test, and ordinary function extraction defeats it: REPRODUCED at `8fa6854d`, the same code with the query in a helper and the raw egress in the caller compiled at exit 0 while the one-body form fired. Recognizing more spellings does not repair that — a completeness fix on this mechanism has no done-condition, which is exactly why the repair sat unscheduled for ~40 sessions. It bounds the §14.8.9 DERIVED-FLOW boundary, which that section already excludes from its soundness claim, so its incompleteness is disclosed rather than new. ⚑ **TWO CHANGES AT S405, BOTH NEWLY-REJECTING.** (a) **The `Response` kind LEFT this row** — an author-constructed `Response` is now `E-PROTECT-005`, raised structurally at emission, because that limb was the one whose text co-occurrence stood in for a REAL compiler-visible fact (the emitted envelope is fail-open on a `Response`). Do not re-add it here. (b) **Suppression is COLUMN-keyed, not existence-keyed** — previously ANY `.reveal(` anywhere in the body disarmed the gate for EVERY protected column in it, so `reveal("email")` silently declassified `passwordHash` (REPRODUCED). A strip-all (unresolvable-SQL) query can never be discharged by named reveals; a `.reveal(<non-literal>)` names no readable column and discharges nothing. ⚑ **AND THE `_{}` LIMB DID NOT FIRE ON THE SYNTAX §23 RECOMMENDS, WHICH IS WHY THIS ROW NOW STATES THE OPENER FAMILY.** §23.2 defines the opener as `_` + **zero or more** `=` + `{`, and `W-FOREIGN-001` steers authors AWAY from the level-0 `_{`; the predicate matched level 0 ONLY until S405, so it recognized exactly the spelling the compiler discourages. REPRODUCED at `8fa6854d`: `let w = _={ JSON.stringify(v) }=` in a `protect=` body compiled at exit 0 with no diagnostic and shipped `passwordHash` in full. Cases: `conformance/cases/protect/raw-egress-e004` (fires, level-1 opener) · `reveal-suppresses-e004` (discharged) · `reveal-wrong-column-e004` (NOT discharged — the column-keyed proof). *(Catalog addition S230 dpa-017; scope corrected + narrowed S405 arc A, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` via `detectProtectedRawEgress`.)* | Error |
 | E-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A server function, `<endpoint>` arm or `server function*` generator in a scope that declares `protect=` columns SERIALIZES ITS OWN RESPONSE BODY.** The compiler owns the §14.8.9 egress envelope and MEDIATES it — `_scrml_protect_redact` walks the value, reads each protected-origin descriptor and strips what was not `reveal`-declassified. It cannot mediate a body the author already serialized: that body is an opaque stream the floor cannot read, and the Symbol-keyed descriptor does not survive the author's own `JSON.stringify`. So the compiler refuses to emit an envelope it cannot mediate. Resolution: return the VALUE (the compiler serializes and redacts it for you); or move the function into a file that declares no `protect=` columns. ⛔ **THERE IS NO ESCAPE HATCH AND `reveal("col")` DELIBERATELY DOES NOT DISCHARGE IT.** `reveal` declassifies a NAMED COLUMN at a value the floor can still WALK; a hand-serialized body is not walkable, so there is no column to admit and nothing for the stamp to mean. ⚑ **THE UNIT IS THE BODY, NOT THE `Response` — AND GETTING THAT WRONG SHIPPED A BUILD BREAK WITH NO WORKAROUND.** The first S405 landing gated the full WHATWG producer set, including `Response.redirect` and `Response.error`, both of which have a NULL BODY. There is no stream to fail to inspect, so the error contradicted its own rationale, and its stated resolution ("return the value") **cannot produce a 302**. Combined with the no-escape-hatch rule that meant a `protect=` app could not redirect from a server fn or an `<endpoint>` arm AT ALL — REPRODUCED base-clean / tip-failing on a fn whose SELECT projected every protected column out. Now gated on BODY-CARRYING constructions only (`new Response(<body>, …)` and `Response.json(…)`); `new Response()` / `new Response(not, …)` are silent, and the two null-body statics raise `W-PROTECT-005` instead. **The adopter-facing contract is one sentence: a `protect=` app keeps full control of STATUS and HEADERS and gives up authoring the BODY.** ⛔ **IT IS FILE-SCOPED, NOT QUERY-SCOPED, AND THAT IS DELIBERATE.** It fires wherever the body is built, even in a function that selects no protected column. Keying it on the query would make it a per-body CO-OCCURRENCE test — the exact mechanism `E-PROTECT-004`'s `Response` limb was deleted for, since moving the query one function away defeats it (measured). Immunity to extraction is bought by keying on the CONSTRUCTION alone, and the message says so. ⚑ **EARLY WARNING, NOT THE GUARANTEE.** Detection is an acorn scan over the ALREADY-LOWERED body slice in CODE POSITION (the name inside a string literal or comment does not fire). A `Response` reached by ALIASING, `await fetch(...)`, `.clone()`, or a callee outside the slice is invisible to ANY syntactic scan; chasing those spellings is the unbounded fix this arc refuses. **Those are caught by §14.8.9 limb 3 — the RUNTIME refusal, where `instanceof Response` is exact.** An unparseable slice does not fire (fail-open FOR THE WARNING ONLY, defensible solely because limb 3 holds). Cases: `conformance/cases/protect/e-protect-005-pos` (fires) · `e-protect-005-neg` (same source, `protect=` removed, compiles) · `null-body-response-clean` (the null-body form is silent). *(Catalog addition S405 arc A, scope corrected in the S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`, scanning via `compiler/src/codegen/protect-egress.ts` `findAuthoredResponseConstruction`.)* | Error |
 | W-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A scope that declares `protect=` columns returns a response the COMPILER can prove payload-free but the RUNTIME sink cannot recognize as such** — on this implementation `Response.redirect(...)` and `Response.error()`. It COMPILES (there is no body for the §14.8.9 floor to fail to inspect, so `E-PROTECT-005` would be wrong), but the runtime guard still refuses it with a 500. Resolution: write the equivalent explicit null-body form, which BOTH limbs accept — `new Response(not, { status: 302, headers: { Location: "/where" } })`, `new Response(not, { status: 204 })`. ⚑ **THIS ROW EXISTS BECAUSE THE TWO LIMBS CAN PROVE DIFFERENT THINGS, AND THE SEAM HAD TO GO SOMEWHERE VISIBLE.** MEASURED on Bun 1.3.14: `new Response()` / `new Response(null, …)` give `.body === null`, but `Response.redirect(...)` and `Response.error()` give a **0-byte ReadableStream**, so the sink's non-destructive test cannot distinguish them from a body-carrying response. And it must not try: `new Response("s3cret", {status:302, headers:{Location:"/h"}})` presents IDENTICALLY — same `location`, no `content-length`, same `.body` shape — so any heuristic short of consuming (and destroying) the stream is unsound. ⛔ **The alternative to this warning is silence, and silence here is a WORSE defect than the build break it replaced**: the shape would compile clean and then 500 on the first request. A diagnosable build-time condition SHALL NOT be converted into a runtime failure. Cases: `conformance/cases/protect/w-protect-005-null-body-static` (fires) · `null-body-response-clean` (the named resolution, compiled — a diagnostic that names a working path owes a proof that it works). *(Catalog addition S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`.)* | Warning |
-| I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands.) | Info |
+| I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. ⚑ **S441: fires ONLY for a query whose row actually reaches a client-egress sink carrying an unrevealed protected column** — decided by the §14.8.9 provenance flow over the emitted server module. It used to fire for every protected SELECT, so a column that left as an extracted scalar was reported "stripped" while it shipped (`g-protected-column-escapes-redaction-as-scalar`), and a row used only server-side (a login that verifies the hash) was reported stripped when nothing was. Cases: `conformance/cases/protect/strip-info-select-star` (fires) · `login-verify-clean` · `nonprotected-field-runtime` · `reveal-client-visible-runtime` (silent — nothing stripped). (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands; S441 truthfulness fix at `compiler/src/codegen/protect-flow.ts` `buildProtectFlowDiagnostics`.) | Info |
+| E-PROTECT-006 | §14.8.9 | `provenance: brief s441-protect-scalar-egress (SECURITY HIGH, g-protected-column-escapes-redaction-as-scalar); PA ratification pending` **A value whose provenance includes a `protect=` column reaches a compiler-emitted client-egress sink OUTSIDE a descriptor-bearing row** — a server-fn / `<endpoint>` response, SSR `/__serverLoad`, `/__mountHydrate`, channel `broadcast()` (§38), or a `server function*` SSE frame (§37, including its `event` / `id`, which are serialized outside the redact). The §14.8.9 runtime floor strips a protected column by the origin descriptor its ROW carries; a value EXTRACTED from the row carries none, so before this code `return u.passwordHash` served HTTP 200 with the hash in the body (MEASURED). The analysis covers EVERY server module of the compile with imports between them resolved (a helper in another file is analysed). Provenance is PRESERVED BY DEFAULT: extraction, re-housing, concatenation / templates / encodings (`Buffer`, `btoa`, character codes), `await`, callbacks, getters / `toJSON`, `throw` → `catch`, and any call into code the compile does not contain (a host / stdlib / npm import or platform API) receiving a protected scalar or row — fail closed. The derived-flow exemption is an explicit ALLOWLIST: comparison / relational operators, `!`, `typeof`, `.length` of a value whose length is a known count (the column's own string, a string / array literal built from it, a mapped array, a row array — NOT `({ length: h })` or `new Array(u.pin)`, S441 round 5), predicate / position methods on a string-like receiver (not `charCodeAt` / `codePointAt` / `getTime`), and the one-way / boolean functions `scrml:auth` `verifyPassword` / `hashPassword` / `verifyTotp`, `scrml:crypto` `hash` / `hmac` / `verifyHash`, `crypto.subtle.digest`, `Boolean`, `console.*` — no `Bun.*` API. A protected value used as an object KEY, or as a lookup key, is protected (keys are data). `scrml:data` `pick` / `omit` with literal key lists and `.scrml` re-exports are modelled. Sinks: every compiler-emitted client-egress serializer plus every argument of an author-built `Response` (body AND `init` headers — `Location` / `Set-Cookie`), `Response.redirect`, `Response.json`, publish / enqueue / send. `reveal("col")` discharges it for the named OUTPUT column. Resolution: return the row itself (the floor strips the column), or only a derived value; to send it deliberately, `row.reveal("col").col`. Also raised, fail-closed, when an emitted server module cannot be parsed or the analysis budget runs out. ⚑ **Arithmetic stays protected** (ruling S441): an arithmetic / bitwise / unary `+ - ~` / `++ --` / compound-assignment result on a protected value is protected (`u.pin * 1`, `+u.pin`, `cost_price * qty`); compute with a protected column by declassifying it with `reveal`. ⚑ **Keys and aliases:** a protected value used as an object key or lookup key is protected all the way down (`L[c].v`, `Object.keys(L[c])`); a write through an alias or a helper parameter lands in every binding that may hold the object. Origin matching is case-insensitive per SQLite identifier rules. ⚑ **Bounds, disclosed:** position methods with a protected ARGUMENT and implicit / control-dependence flows are out of scope; a DB round trip (write into a non-protected column, read back) is out of scope; the analysis is call-site sensitive but flow-INsensitive within a function (a binding reassigned from a protected value to a clean one is still treated as protected — fails closed). Cases: `conformance/cases/protect/scalar-return-e006` · `scalar-in-new-object-e006` · `scalar-concat-e006` · `scalar-map-e006` · `scalar-helper-e006` · `scalar-helper-cross-file-e006` · `response-header-e006` · `scalar-encoding-e006` · `computed-key-e006` · `reduce-index-by-e006` · `lookup-field-e006` · `lookup-method-e006` · `map-get-field-e006` · `lookup-keys-e006` · `alias-write-e006` · `helper-mutates-param-e006` · `nested-container-write-e006` · `select-upper-column-e006` · `from-upper-table-e006` · `arithmetic-e006` (fire) · `upper-table-row-strip` · `reveal-then-arithmetic-clean` (compile) · `login-verify-clean` · `nonprotected-field-runtime` (silent). *(Catalog addition S441; emitted compile-wide at `compiler/src/api.js` `runProtectFlow` via `analyzeCompileProtectFlow` in `compiler/src/codegen/protect-flow.ts`.)* | Error |
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row-redaction floor has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar. In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
@@ -21285,6 +21627,9 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | I-AUTH-REDIRECT-UNRESOLVED | §40.1.1, §34 | Info-level: an `<auth>` / `<page auth=>` / `<program auth=>` gate carries a `redirect=` / `else=` / `loginRedirect=` target path string that does NOT match any URL pattern in the file set's `RouteMap.pages`. The gate REMAINS LEGAL at runtime (per OQ-A2-E + OQ-A3-B (a) S90 ratification the redirect target is the page author's concern, not a compile error) — the lint surfaces a probable typo or unimplemented route so adopters can confirm intent. Fires from the A-3.4 cross-ref pass (`compiler/src/auth-graph.ts` `crossRefRedirects`). Resolution: rename the redirect path to match an existing page URL pattern, OR add the missing page route. (Catalog addition S91 A-3.5; full prose at §40.1.1.) | Info |
 | W-AUTH-PAGE-INFERRED | §40.1.1, §34 | Info-level: a `<page>` element under a `<program auth="required">` enclosing scope lacks an explicit `auth=` attribute. Per OQ-A3-C (b) S90 ratification (explicit-per-page-only inheritance + lint nudge) the gate is NOT auto-inherited at the closure-analysis layer — program-level auth still enforces at the request boundary, but the closure-analyzer ships the page ungated. The lint nudges adopters to add explicit per-page `auth=` so closure analysis can classify the page accurately. Fires from the A-3.3 classifier (`compiler/src/auth-graph.ts` `classifyGates`). Resolution: add `auth="required"` (or the appropriate per-page value) to each `<page>` element, OR accept the program-level boundary enforcement as the sole gate. (Catalog addition S91 A-3.5; full prose at §40.1.1.) | Info |
 | W-AUTH-LOGIN-MISSING | §40.1.1, §40.9.11, §52.13 | Warning-level: a compilation unit contains one or more auth gates (`<program auth=>`, `<page auth=>`, `<auth role=>`, `<channel auth=>`) that declare a redirect target (`loginRedirect=` / `redirect=` / `else=`) but NO page in the compilation unit's `RouteMap.pages` matches ANY of the targets the gates name. Distinct from `I-AUTH-REDIRECT-UNRESOLVED` — that fires per-gate at INFO when one specific redirect path does not resolve; `W-AUTH-LOGIN-MISSING` fires AT MOST ONCE per compilation at WARNING level when the structural gap is TOTAL (no working login page exists anywhere). Fires from the A-3.4 cross-ref pass (`compiler/src/auth-graph.ts` `crossRefRedirects`) after the per-gate sweep, anchored at the first redirect-naming gate. Per OQ-1 two-tier severity ratification (docs/changes/03-contact-book-auth-redirect-SCOPING/SCOPING.md §5): the info-level per-gate signal is too quiet to surface the structural gap loudly enough; the warning loudly nudges adopters at compile time so the runtime-302-to-404 silent-failure window closes. The redirect target remains the page author's concern per OQ-A2-E (no entry-point synthesis); the warning points adopters at `scrml generate auth` to scaffold a working login page. Resolution: author a `<page>` at the gate's redirect target path (default `/login`), OR run `scrml generate auth` to scaffold one keyed to the project's `<db>` schema, OR drop the auth declaration if auth is not actually wired. (Catalog addition S91 03-contact-book-auth-redirect; full prose at §40.1.1 + §52.13.) | Warning |
+| W-AUTH-FILE-CONFLICT | §40.2, §52.13 | Warning-level: one file declares `auth="required"` at one site (its first top-level `<program>` or a `<page>`) and a laxer `auth=` (`"optional"` / `"none"`) at another. A route is one file and one served document, so the stricter declaration wins — the whole route (its document and every server function in the file) requires authentication and the laxer declaration has no effect. The message names both declarations with their positions. Resolution: move the public content to its own page file, or make the declarations agree. Emitted by route inference (`compiler/src/route-inference.ts` Step 8d). Provenance: S443 review F2 · rationale:one-route-per-file-fail-closed · pending-ruling:bryan-S443. | Warning |
+| W-AUTH-REDIRECT-LOOP | §40.2, §52.13 | Warning-level: an `auth="required"` route's unauthenticated-request redirect target (the application's top-level `<program>`'s `loginRedirect=`, default `/login`) is that route itself — compared CASE-SENSITIVELY (routing is case-sensitive; S443 r3 F5), ignoring a trailing `/`, a `.html` suffix and any query/fragment — so an anonymous request redirects in a loop and never reaches a login form (e.g. a `pages/login.scrml` declaring `<page auth="required">`). Resolution: give the login page `<page auth="optional">` or `<page auth="none">`, or point the `<program>`'s `loginRedirect=` at a page that does. Emitted by route inference (`compiler/src/route-inference.ts` Step 8e). Provenance: S443 review F3. | Warning |
+| W-AUTH-LOGIN-REDIRECT-AMBIGUOUS | §40.2, §52.13 | Warning-level: the build has no single application `<program>` (§40.2 — zero or several web-application files with a top-level `<program>` outside `pages/` / `routes/`) and its `<program>`s declare different `loginRedirect=` values, so a page scope (an explicit `<page auth="required">`, an inherited member page, or a `protect=`-escalated unit) redirects unauthenticated requests to the §52.13 default `/login`. Fires at most once per build, only when some page scope used that fallback; names the conflicting values. Resolution: build one application per output directory, or make the values agree. Emitted by route inference (`compiler/src/route-inference.ts` Step 8f). Provenance: S443 round 3 (review nit). | Warning |
 | W-AUTH-MIDDLEWARE-AUTO-INJECTED | §40.1.1, §12.2 | Warning-level: a compilation unit declares `protect=` fields but carries NO explicit `auth=` attribute on either `<program>` or any `<page>`. The compiler auto-injects auth middleware (`auth="required"`, `csrf="auto"`, `sessionExpiry="1h"`, `sessionSecure=true`) and warns so the adopter knows a gate was chosen FOR them. Does NOT fire when an explicit `auth=` exists at either level — an explicit `auth="optional"`/`"none"` is honoured and never escalated (that override was the `g-protect-overrides-page-auth` defect), and an explicit `auth="required"` registers the gate without the warning because the declaration is already explicit. Fires from Step 8b (`compiler/src/route-inference.ts`). **ALLOCATED S299 — this meaning previously shared `W-AUTH-001`**, which §52.11 defines as the unrelated "`<var server>` has no detectable initial load" guarantee fired from `type-system.ts`. One code, two unrelated meanings, only one documented — the same shape as the `E-IMPORT-007` triple-allocation, and resolved the same way bryan ruled that one (S297): allocate fresh rather than renumber the documented diagnostic, because additive is `inert` for existing source while renumbering is `semantics-changed` on a code adopters may key on. `W-AUTH-001` keeps its §52.11 meaning unchanged. Named rather than numbered — `W-AUTH-003` is free but sits in a gap beneath a used `W-AUTH-004`, and a skipped number is a retired-code hazard; the family already uses semantic names. | Warning |
 | W-AUTH-CONTENT-NOT-GATED | §34, §40.9.5 | Warning-level (security footgun): an `<auth role="X">` element is present in the compilation. `<auth role=>` gates only the JS mount/behaviour of its subtree (and only under `--emit-per-route`, which produces per-(entry-point, role) JS chunks) — it does NOT withhold served HTML content. The gated markup is emitted VERBATIM into the HTML payload by `emit-html.ts` (the `<auth>` element passes through as a literal tag and its children render as static markup) and is therefore visible to ALL viewers, regardless of role, including under `--emit-per-route` — that mode role-splits JS BEHAVIOUR only; the shared HTML still carries the gated subtree. The reachability solver DOES compute per-role visibility (`reachability-solver.ts` `computeAuthGatedBoundariesVisibleTo` / `isVisibleForRole`) but that verdict is consumed only by the route-splitter to scope JS mount sets — HTML emission never consults it. The warning is honest in BOTH modes: it does NOT claim `--emit-per-route` closes the content leak. Fires once per `<auth role=>` site (anchored at the gate span) from the A-3.5b content-lint pass (`compiler/src/auth-graph.ts` `flagContentNotGated`), for any auth-role-block gate that names a `role=` value. A bare `<auth>` or check-only `<auth check=>` (no `role=`) is out of scope (see E-AUTH-GRAPH-004 / W-AUTH-RUNTIME-FALLBACK). Resolution: do NOT rely on `<auth role>` for content secrecy — enforce sensitive gating server-side (e.g. branch in a server-fn / page loader on the authenticated role and omit the sensitive markup from the response body). The gate remains LEGAL — it is a JS-mount optimization, not a content-visibility control. (Catalog addition — GITI-027 part A; full prose at §40.9.5.) | Warning |
 | W-EACH-PROMOTABLE | §17.X (NEW per S130), §56 | Info-level lint: a `${ for (let x of @cell) { lift <markup/> } }` site is the Tier-0 iteration form per HU-1; the Tier-1 structural form `<each in=@cell as x>...</each>` (NEW SPEC §17.X) is more discoverable, composes with the `<empty>` sub-element + inferred `key=`, and is the canonical iteration shape per the S130 HU-1 ratifications. The lint message names the suggested mechanical promotion target (`<each in=@cell as x>...</each>`) and cross-refs the `bun scrml promote --each <file>[:line]` CLI helper (Landing 3 of the 5-landing iteration arc). Tier-0 form continues to compile cleanly; the lint is informational only. Mirrors the `I-MATCH-PROMOTABLE` (§56) pattern — declaration-site promotion lint along the case-analysis / iteration tier ladders. **Fires:** emitted by `compiler/src/lint-w-each-promotable.js` (Stage 6.4c in `api.js`); conservative fire conditions — for-stmt's iterable must contain a reactive `@cell` ref AND body must contain at least one `lift-expr`. (Catalog addition S130 HU-1 iteration Landing 1; cross-ref the §17.X NEW subsection introduced in Landing 2.) | Info |
@@ -23910,7 +24255,14 @@ The following attributes on `<program>` enable automatic middleware generation:
 - The compiler SHALL generate these middleware handlers as server-side code only. None of these constructs produce client-side JavaScript.
 - A `<program>` element with none of these attributes generates no middleware infrastructure beyond the CSRF protection §39.2.3 requires by default (baseline double-submit on state-mutating routes of an app without `auth=`; `csrf="auto"` under `auth=`, next statement). The absence of a middleware attribute SHALL NOT be a compile error or warning — an absent attribute means its default applies.
 - **CSRF under `auth=` is on by default.** When a `<program>` declares `auth=` and carries no `csrf=` attribute, the compiler SHALL treat it exactly as if it declared `csrf="auto"`: the emitted server, client and HTML SHALL be those of the explicit `csrf="auto"` form. Only the literal `csrf="off"` opts out. The default fails closed: a `csrf=` literal outside the §52.13 set (which emits `W-ATTR-002`) SHALL also resolve to `"auto"`, never to "no check". Routes that are CSRF-exempt by construction keep that exemption — the `<endpoint>` foreign-facing surface (§61.7), the SSE `route=` generator (§37.3, a `GET`), and every non-state-mutating (`GET`/`HEAD`) route, including `/__serverLoad`. The WebSocket upgrade (§38) is a `GET` and is outside the CSRF token mechanism; it is protected by the Origin check in the next statement instead.
-  *Current `<page auth=>` behaviour (not normative — recorded so this bullet is not read as covering it):* a `<page auth="required">` without `protect=` fields is not registered as an auth scope at all — its state-mutating routes get only the baseline double-submit check that every no-`auth=` app gets, not `csrf="auto"`, and the page itself is not auth-gated (`g-page-auth-required-protects-nothing`, open). A `<page auth="required">` whose file carries `protect=` fields IS registered, and the default above applies to it.
+  The same holds for a `<page auth="required">`, which is an auth scope on its own (§52.13) whether or not its file carries `protect=` fields: its served document, its compose route and every server function its file declares SHALL be gated exactly as a `<program auth="required">`'s are, and its state-mutating routes SHALL get `csrf="auto"` unless the page declares `csrf="off"`.
+  **One file, conflicting `auth=` values.** A route is a file (§47.9.2) and one served document, so a `<page auth="required">` anywhere in a file makes that file's route the gated scope, and a laxer `auth=` elsewhere in the same file — another `<page>`, or the file's `<program auth="none">` / `auth="optional"` — does not relax it; the same holds for a `<program auth="required">` with a laxer `<page auth=>` in its own file. The compiler SHALL emit `W-AUTH-FILE-CONFLICT` naming both declarations and stating that the stricter one wins.
+  > **Provenance:** ruling:user-voice-scrml.md S443 item 2 ("your recs" — one file is one route; the stricter declaration wins, W-AUTH-FILE-CONFLICT names both)
+  **The application's top-level `<program>`.** In this section and §52.13 it is the `<program>` of the application's entry file (§40.8): the one web-application file of the build (not a §64 tool) that has a top-level `<program>` and is not a route file under `pages/` or `routes/`. A `<program>` declared inside a route file is that file's own: its `auth=` governs that file only (as a `<program>` scope, above). When the build has zero such files, no application `<program>` is identified and nothing below is inherited. When it has several, the application is ambiguous and the member-page inheritance below SHALL fail closed: it applies if ANY of them declares `auth="required"`. *(S443 PA review of round 3: "several → nothing inherited" let one extra non-route file with its own top-level `<program>` un-gate every unannotated member page of a required application — measured `/about` 302 → 200.)*
+  **The redirect target of a page scope.** `loginRedirect=` is not a `<page>` attribute (`E-PAGE-INVALID-ATTR`), so a page scope's unauthenticated request SHALL be redirected to the `loginRedirect=` declared on the application's top-level `<program>`, or to the §52.13 default `/login` when it declares none. When no application `<program>` is identified, the single `loginRedirect=` value declared by the build's `<program>`s applies; when they declare different values, `/login` applies and the compiler SHALL emit `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` naming the values. This applies to every page scope: an explicit `<page auth="required">`, an inherited member page (next paragraph), and a `protect=`-escalated unit (§20.5.1). *(Before S443 round 2 every page scope redirected to `/login` whatever the program declared.)* When a gated route's redirect target is that route itself — compared case-sensitively (routing is case-sensitive), ignoring a trailing `/`, a `.html` suffix and any query or fragment — an anonymous request redirects in a loop; the compiler SHALL emit `W-AUTH-REDIRECT-LOOP` for that route.
+  **Member pages of a `<program auth="required">` are inside its scope.** When the application's top-level `<program>` declares `auth="required"`, every member route file of that application that declares no recognized `auth=` value of its own — a file with no `<program>` whose top-level markup is a `<page>` (§40.8), or top-level markup with no `<page>` wrapper, other than a `_layout.scrml` wrapper — SHALL be gated exactly as an explicit `<page auth="required">`: its served document, its compose route and every server function its file declares, with `csrf="auto"`. Only one of §52.13's three literals is a declaration: an unrecognized literal (`auth="Required"`, `auth="off"`, …, which emits `W-ATTR-002`) or a non-literal value declares nothing, and the page inherits — fail closed, as an unknown `csrf=` literal resolves to `"auto"`. A member page that declares `auth="optional"` or `auth="none"` is NOT gated by this rule: an explicit page value relaxes the application program's `auth="required"` for that page (a login or registration page must be reachable anonymously). *(Ruled by bryan, S443: "your recs" — ruling:user-voice-scrml.md S443 item 1.)*
+  > **Provenance:** spec:§52.13 + §34 W-AUTH-PAGE-INFERRED row ("program-level auth still enforces at the request boundary") · pa-ruled:S443 round 2 conformance restoration (before it, the `<program>`'s entry covered only the entry file, and an unannotated member page served its document at 200 and ran its server functions for anonymous callers). The redirect-target paragraph: pa-directed S443 round 2 (the round-1 text named "the page's `loginRedirect=`", which cannot be declared). The application-`<program>` definition, the unrecognized-literal rule, the ambiguity warning and case-sensitive loop comparison: S443 round 3 (adversarial review of 5390820dd, F1/F2/F5 — before it, any `<program auth="required">` anywhere in the build, including one inside a route file, gated every unannotated page of a public application, and a typo'd page `auth=` served the page publicly under a required application).
+  > **Provenance:** spec:§52.13 ("every request to this scope SHALL be authenticated"; `<page>` is named among the elements that accept `auth=`) · pa-ruled:S443 conformance restoration (`g-page-auth-required-protects-nothing` — before S443 a `<page auth="required">` without `protect=` fields was not registered as an auth scope at all: an anonymous `GET` served the page at 200 and an anonymous `POST` ran its server function).
 - **The WebSocket upgrade SHALL refuse a cross-origin handshake.** Every compiler-emitted WebSocket upgrade route of a web-application program (the §38 channel route `/_scrml_ws/<name>`) SHALL accept the upgrade only when the request's `Origin` names the server's own origin: the same host — taken from `X-Forwarded-Host` when a proxy sets it, else the request's own host — and the same scheme — `X-Forwarded-Proto`, else the request's — except that an `https` origin SHALL be accepted on a request that arrived as plain `http` (TLS terminated by a proxy that sets no `X-Forwarded-Proto`). Default ports compare equal to their omitted form. A mismatched origin, and the opaque `Origin: null`, SHALL be refused with `403` before the upgrade and before any channel handler runs. A handshake with NO `Origin` header is a non-browser client (a browser always sends one), which cannot carry a victim's ambient cookie; it SHALL be accepted, and the channel's own `auth=` session check (§38.5) SHALL still apply to it. The development server SHALL apply the same rule to the upgrade it proxies, before accepting the browser's socket. Because the check trusts `X-Forwarded-Host` / `X-Forwarded-Proto`, a deployment behind a reverse proxy MUST have that proxy strip or overwrite both headers on every inbound request; a proxy that passes a client-supplied value through lets a non-browser client choose the host the check compares against (a browser cannot set these headers on a WebSocket handshake, so the cross-site case stays closed either way). There is no allow-list for other origins in this version. A headless program (no cookie session) emits no Origin check.
 - **The HTML-composition route is a document request.** The request-time compose route that serves a page's first-paint HTML (§52.8 SSR pre-render; the §39.2.3 `<meta name="csrf-token">` fill, which every `csrf="auto"` scope emits) serves the SAME document as the static file. Under `auth="required"` it SHALL run the same §52.13 gate before composing anything: an unauthenticated request is redirected to `loginRedirect` and no seed query runs. It SHALL NOT be a path around the protected-document guard.
 
@@ -24261,6 +24613,8 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
 
 - A scrml **application** SHALL declare its top-level `<program>` element exactly ONCE, in the application's **entry file**. The entry file is the file resolved by the build root (e.g. `app.scrml` in a single-file app, or the source root of the compilation).
 - The `<program>` declaration SHALL NOT appear in any non-entry file of the same application. A second top-level `<program>` in any other file of the same compilation is `E-PROGRAM-002` (TBD — separate diagnostic; not part of Wave 1).
+- A second (or later) top-level `<program>` in the SAME file SHALL be `E-PROGRAM-002` (compile error). Before S443 it was silently mis-read — its `auth=`, session and middleware attributes were ignored, so a `<program auth="required">` after a plain `<program>` served its routes to anonymous callers. The cross-file case above stays reserved.
+  > **Provenance:** ruling:user-voice-scrml.md S443 item 3 ("your recs" — E-PROGRAM-002 covers the same-file case; measured 0 corpus files)
 - **Application-wide attributes** continue to live on `<program>`. These attributes are app-scope (not per-route): `title=`, `description=`, `version=`, `author=`, `license=` (documentary, §40.7); `cors=`, `cors-max-age=`, `log=`, `headers=`, `idempotency-store=`, `idempotency-ttl=`, `channel-reconnect=` (app-scope middleware, §40.2 + §38.3.1). The `<program>` is the canonical host scope for these concerns.
 - Inside `<program>`, the body parses in **default-logic mode** under v0.3. Bare top-level declarations (`<x> = 0`, `function f() { ... }`) auto-lift to the logic context without explicit `${...}` wrapping. The author MAY still write `${...}` explicitly for clarity, but redundant `${...}` at the top level of `<program>` fires `W-PROGRAM-REDUNDANT-LOGIC` (info-level lint; warning in v0.3, error in v0.4 per Q5 deprecation cycle). **S111 amendment (2026-05-20):** `default-logic` mode is a **distinct third body-mode**, owned by this section — it is neither the **free-text mode** nor the **code-default mode** of the quoted-text model's §4.18 body-mode split. The §4.18 free-text / code-default split governs only the three code-bearing loci (engine state-children, match block-form arms, `:`-shorthand bodies) versus plain markup; it does **not** classify or reclassify the `<program>` / `<page>` body. The complete body-mode picture is therefore three-way — free-text / code-default (both §4.18) and `default-logic` (this section). See §4.18.1 for the reciprocal note. (This amendment reconciles §40.8's `default-logic` statement with §4.18.1's body-mode listing; the native-parser charter deep-dive surfaced the inconsistency.)
 - **S123 amendment (2026-05-23) — auto-lift covers DECLARATIONS only, NOT writes.** Per the S122 user-voice Option-2 ratification, `default-logic` mode auto-lifts DECLARATIONS only — the structural state-decl form `<name> = expr`, the structural derived form `const <name> = expr`, function declarations (`function name() { ... }`, `fn name(...) { ... }`), type declarations (`type Name:enum = { ... }`), `let`/`const` local declarations, and `import` declarations. The bare V5-strict reactive WRITE form `@name = expr` is **NOT** a declaration — it is a write to a pre-declared cell, and writes ARE logic; logic goes in `${...}`. Bare `@name = expr` at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-body surface) SHALL fire `E-WRITE-NOT-IN-LOGIC-CONTEXT`. The fix is either (a) wrap in an explicit logic block `${ @name = ... }`, or (b) convert to a structural declaration `<name> = ...`. This is the COMPANION amendment to V-kill (commits `c22b3fda` + `c2d2741a` + `489e5943`): V-kill killed silent auto-state-cell synthesis inside `fn` / `function` / user-written `${...}` body contexts; Unit CC closes the default-logic body-top case that V-kill explicitly carved out. **Scope discrimination:** Unit CC fires ONLY at the IMMEDIATE body-top of the synthetic default-logic auto-lift wrapper. Bare `@name = expr` nested inside a function body (`function f() { @x = 5 }`) is governed by V-kill (the V-kill default-logic-lift carve-out is preserved at the parser level to keep blast radius narrow on the 110-file unmigrated corpus). The `<db>` / `<state>` STATE-block bodies (V5-strict state-block grammar per the per-block body conventions) are NOT default-logic-mode loci and are NOT affected by Unit CC; bare `@x = []` inside `<db>` direct-child position remains canonical. **Per-file exemption surface:** `compiler/src/unit-cc-exemption-list.json` provides a path-based suppression mechanism for the pre-S123 corpus (each adopter source file removes its own entry as migration completes). The exemption is intentionally per-file (not blanket) so migration progress is visible in version control. See `E-WRITE-NOT-IN-LOGIC-CONTEXT` in §34 for the diagnostic row + cross-reference.
@@ -27072,7 +27426,7 @@ Every other request that reaches the static fallback SHALL receive `404 Not Foun
 
 **Request-path handling.** The request path SHALL be percent-decoded before it is judged, so an encoded traversal (`%2e%2e`, `%2f`, `%5c`) is evaluated in the form the filesystem sees. The request SHALL be refused if the decoded path contains NUL, `\`, or `:`, if any segment begins with `.`, or if any segment ends in `.` or a space (on Windows, `app.db.` resolves to `app.db`). The allowlist SHALL be checked against the resolved candidate file, so every resolution rule passes through it: exact file, clean URL `<p>.html`, directory index, and dev's root fallback.
 
-**Client artifacts: the manifest.** The compiler SHALL record every artifact it writes for the browser: the HTML documents, the CSS, the client bundles (hashed or not, §47.9.8), the shared runtime, and the per-route chunks. It SHALL close that set over the relative module imports of its JavaScript members, which admits, for example, a `_scrml/<name>.js` shim that a client bundle imports and excludes a shim that only a server module imports. A closure target that falls in a denied class is not admitted. `compileScrml` returns the set as `clientAssets` (output-relative POSIX paths) and writes it to `<outputDir>/.scrml-client-assets.json`. That file is a dotfile, so it is itself unservable. `scrml build` SHALL bake the set into `_server.js`, so that nothing written into the deploy directory after the build can widen what the server serves. `scrml dev` SHALL read the manifest file, which it rewrites on every recompile. A missing manifest is an empty set, so the server fails closed. A stale artifact that the latest compile did not write is not in the set and is not served.
+**Client artifacts: the manifest.** The compiler SHALL record every artifact it writes for the browser: the HTML documents, the CSS, the client bundles (hashed or not, §47.9.8), the shared runtime, the per-route chunks, and the worker bundles of nested `<program>` workers (§4.12.4; `<page>-<name>.worker.js`, written beside the page that instantiates them). It SHALL close that set over the relative module imports of its JavaScript members, which admits, for example, a `_scrml/<name>.js` shim that a client bundle imports and excludes a shim that only a server module imports. A closure target that falls in a denied class is not admitted. `compileScrml` returns the set as `clientAssets` (output-relative POSIX paths) and writes it to `<outputDir>/.scrml-client-assets.json`. That file is a dotfile, so it is itself unservable. `scrml build` SHALL bake the set into `_server.js`, so that nothing written into the deploy directory after the build can widen what the server serves. `scrml dev` SHALL read the manifest file, which it rewrites on every recompile. A missing manifest is an empty set, so the server fails closed. A stale artifact that the latest compile did not write is not in the set and is not served.
 
 **Passive media.** A file with one of the following extensions is served without a manifest entry, provided it is not in a denied class: `png`, `jpg`, `jpeg`, `gif`, `webp`, `avif`, `svg`, `ico`, `bmp`, `woff`, `woff2`, `ttf`, `otf`, `eot`, `mp3`, `mp4`, `webm`, `ogg`, `wav`. These are the images, icons, fonts, and audio/video an author places beside the build output. The SPEC defines no `public/` or assets directory. Any other file the build did not write for the browser is refused, including `.json`, `.txt`, and author `.js`.
 
@@ -34140,6 +34494,16 @@ server functions until the ergonomic completion lands. See
 Any literal value not in the recognized set SHALL emit `W-ATTR-002`.
 The attribute is currently passed through to the rendered HTML as-is;
 the warning surfaces the gap without breaking existing behavior.
+
+For `auth=` the warning SHALL state the value's actual effect. On a
+`<page>`, an unrecognized value is not an auth declaration: the page
+inherits the application's gate when the application's top-level
+`<program>` declares `auth="required"`, and is otherwise public (§40.2,
+S443). On a `<program>`, an unrecognized value applies no auth gate at
+all — the program and its pages are public (current behaviour; tracked
+as `g-auth-attr-invalid-or-dynamic-value-compiles-to-no-auth`). On a
+`<channel>`, any `auth=` attribute gates the WebSocket upgrade as if it
+were `"required"`.
 
 This is consistent with the validation principle: silent acceptance of
 attribute values that have no compile-time effect is itself a P0

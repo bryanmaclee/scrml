@@ -1,0 +1,16 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT, pin INTEGER)`}
+  </schema>
+  <db src="app.db" protect="passwordHash, pin" tables="users">
+    ${
+      function getUser(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        const qty = 3
+        return { a: u.pin * 1, b: +u.pin, c: u.pin - 0, lineCost: u.pin * qty }
+      }
+    }
+  </db>
+  <user> = not
+  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+</program>

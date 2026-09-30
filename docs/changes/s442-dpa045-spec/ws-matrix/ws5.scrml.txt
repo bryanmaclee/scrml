@@ -1,0 +1,14 @@
+<program>
+  const Box = <div class="box">
+      <p>WSA line one
+          line two indented
+      line three</p>
+      <p>WSB	tab	sep</p>
+  </>
+  <Box/>
+  <div>
+      <p>WSC line one
+          line two indented
+      line three</p>
+  </div>
+</program>

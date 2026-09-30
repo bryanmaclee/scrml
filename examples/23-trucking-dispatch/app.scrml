@@ -32,7 +32,7 @@
 //   - Styling is inline Tailwind utility classes per S86 (utility-
 //     inline canonical; no file-top `#{}` placeholder).
 
-<program db="./dispatch.db" auth="required">
+<program db="./dispatch.db" auth="required" loginRedirect="/auth/login">
 
 <schema>
     users {
@@ -165,7 +165,6 @@
         import { generateToken } from 'scrml:crypto'
         import { createSessionStore } from 'scrml:store'
         import { rolePath, SESSION_TTL_SECONDS, SESSION_DB_PATH } from './models/auth.scrml'
-        import { runSeeds } from './seeds.scrml'
 
         // ---------------------------------------------------------------
         // Session helpers — the session token is stored in a SQLite KV
@@ -236,7 +235,7 @@
             return {
                 token: token,
                 user: userRow,
-                redirectTo: "/customer"
+                redirectTo: "/customer/home"
             }
         }
 
@@ -248,15 +247,13 @@
             return ?{`SELECT id, email, role, created_at, last_login_at FROM users WHERE id = ${userId}`}.get()
         }
 
-        // ---------------------------------------------------------------
-        // Idempotent seed-on-mount. seeds.scrml exports runSeeds() which
-        // INSERTs the demo dataset using ON CONFLICT DO NOTHING so re-runs
-        // are safe.
-        // ---------------------------------------------------------------
-
-        on mount {
-            runSeeds()
-        }
+        // Seeding (S443): dispatch.db ships PRE-SEEDED. The old `on mount {
+        // runSeeds() }` here ran on every composed page, called a route whose
+        // imported seeds module resolves `?{}` to an in-memory DB (the F-AUTH-002
+        // cross-file limitation), and 500'd; and under auth="required" an
+        // anonymous visitor never mounted this shell, so the users table stayed
+        // empty and no seeded account could log in. seeds.scrml's runSeeds() stays
+        // the canonical dataset; see README "Re-seed" for regenerating the DB.
     }
 
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -266,8 +263,8 @@
                 <span class="text-xs uppercase tracking-wider text-slate-400">auth scaffold</span>
             </div>
             <nav class="flex items-center gap-4 text-sm">
-                <a href="/login" class="hover:text-blue-300">Login</a>
-                <a href="/register" class="hover:text-blue-300">Register</a>
+                <a href="/auth/login" class="hover:text-blue-300">Login</a>
+                <a href="/auth/register" class="hover:text-blue-300">Register</a>
             </nav>
         </header>
 
@@ -282,8 +279,8 @@
             <div class="bg-white border border-slate-200 rounded-lg p-6">
                 <h2 class="text-xl font-semibold mb-3">Get started</h2>
                 <ul class="list-disc pl-6 space-y-2 text-slate-700">
-                    <li><a class="text-blue-600 hover:underline" href="/login">Sign in</a> with a seeded account.</li>
-                    <li><a class="text-blue-600 hover:underline" href="/register">Register</a> as a new customer.</li>
+                    <li><a class="text-blue-600 hover:underline" href="/auth/login">Sign in</a> with a seeded account.</li>
+                    <li><a class="text-blue-600 hover:underline" href="/auth/register">Register</a> as a new customer.</li>
                     <li>See <code class="bg-slate-100 px-1 rounded">README.md</code> for seeded credentials.</li>
                 </ul>
             </div>

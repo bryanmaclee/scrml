@@ -48,7 +48,7 @@ examples/23-trucking-dispatch/
 ├── app.scrml                  <program> root + <schema> + <db> + nav shell
 ├── schema.scrml               shared enum types + DDL reference comment
 ├── seeds.scrml                runSeeds() — INSERT-with-conflict-skip dataset
-├── dispatch.db                bootstrap SQLite (schema applied, seed data ready)
+├── dispatch.db                SQLite, schema applied AND pre-seeded (8 users, 8 loads, …)
 ├── models/
 │   └── auth.scrml             cookie helpers + role helpers + constants
 ├── components/
@@ -62,24 +62,24 @@ examples/23-trucking-dispatch/
 │   └── status-picker.scrml
 └── pages/
     ├── auth/
-    │   ├── login.scrml        /login
-    │   └── register.scrml     /register
+    │   ├── login.scrml        /auth/login
+    │   └── register.scrml     /auth/register
     ├── dispatch/
-    │   ├── board.scrml        /dispatch — kanban
+    │   ├── board.scrml        /dispatch/board — kanban
     │   ├── billing.scrml      /dispatch/billing
     │   ├── customers.scrml    /dispatch/customers
     │   ├── drivers.scrml      /dispatch/drivers
     │   ├── load-detail.scrml  /dispatch/loads/:id
     │   └── load-new.scrml     /dispatch/loads/new
     ├── driver/
-    │   ├── home.scrml         /driver
+    │   ├── home.scrml         /driver/home
     │   ├── hos.scrml          /driver/hos
     │   ├── load-detail.scrml  /driver/loads/:id
     │   ├── load-log.scrml     /driver/loads/:id/log
     │   ├── messages.scrml     /driver/messages
     │   └── profile.scrml      /driver/profile
     └── customer/
-        ├── home.scrml         /customer
+        ├── home.scrml         /customer/home
         ├── invoices.scrml     /customer/invoices
         ├── load-detail.scrml  /customer/loads/:id
         ├── loads.scrml        /customer/loads
@@ -122,48 +122,37 @@ adopters can't compile from declared schema alone. See FRICTION.md.)
 ## Run
 
 ```bash
-# Compile the example dir to dist/
-bun ./compiler/src/cli.js compile examples/23-trucking-dispatch/
+# from the repo root: build a deployable server + client bundle
+scrml build examples/23-trucking-dispatch -o /tmp/ex23
+cp examples/23-trucking-dispatch/dispatch.db /tmp/ex23/   # the pre-seeded database
+cd /tmp/ex23 && bun _server.js                             # http://localhost:3000
 ```
 
-**Expected (per scoping):** `dist/` contains an HTML/JS file per .scrml
-page, in a tree mirroring the source layout.
+Open `http://localhost:3000/auth/login` and sign in with a seeded account
+(below). Every other page requires a login: the root `<program>` declares
+`auth="required" loginRedirect="/auth/login"`, and the login / register pages
+opt out with `auth="optional"`.
 
-**Observed (post-W0a, 2026-04-30):** `dist/` is a tree-preserving layout —
-`pages/customer/home.scrml` emits to `dist/pages/customer/home.html`,
-`pages/driver/home.scrml` emits to `dist/pages/driver/home.html`, etc.
-32 source `.scrml` files produce 21 HTML / 32 client.js / 21 server.js
-across nested subdirs (`dist/pages/{auth,customer,dispatch,driver}/`,
-`dist/components/`, `dist/models/`, `dist/`). All distinct routes are
-present — F-COMPILE-001 RESOLVED (see FRICTION.md). Files without page
-shape (components, models, schema, seeds) emit only the artifacts they
-produce (typically `.client.js` only).
+**How login works.** `loginServer` verifies the password and then calls
+`session.set("userId", …)` / `session.set("role", …)` — the framework session
+(SPEC §20.5.1) that `<program auth="required">` checks. Each page's
+server functions read the user from `session.userId` (passed into its
+`getCurrentUser(userId)` helper, because `session` is readable only in the
+request-entry server function). Logout goes to `/auth/login?logout=1`, whose
+page calls `session.destroy()`.
 
-**Backstop:** if a future flag/refactor re-introduced output flattening
-that caused two source files to compute to the same dist path, the
-compiler would emit `E-CG-015` ("conflicting output paths") rather than
-silently overwrite. See SPEC.md §47.9.
-
-```bash
-# Dev-server mode (NOT YET WORKING — per OQ-2 below):
-bun ./compiler/src/cli.js dev examples/23-trucking-dispatch/
-# expected: app runs at http://localhost:3000
-# observed: dev-server bootstrap fails with scrml:auth import resolution error
-#           (post-M6 deep-dive will diagnose)
-```
-
-The compile-only output IS readable as static HTML now that
-F-COMPILE-001 is resolved (W0a, 2026-04-30), but interactive flows still
-require the runtime that the dev-server provides — see OQ-2 / W0b for
-the dev-server bootstrap dispatch.
+**Re-seed.** `dispatch.db` ships seeded. `seeds.scrml`'s `runSeeds()` is the
+canonical dataset; to regenerate the file, apply the `<schema>` and run
+`runSeeds()` once against it (the S443 regeneration compiled it as a one-off
+tool program — see `docs/changes/s443-example-23/progress.md`).
 
 ## Seeded credentials
 
 All seeded accounts share password `demo`. After login, users are
 redirected by role:
-- Dispatchers → `/dispatch`
-- Drivers → `/driver`
-- Customers → `/customer`
+- Dispatchers → `/dispatch/board`
+- Drivers → `/driver/home`
+- Customers → `/customer/home`
 
 | Role | Email |
 |---|---|
@@ -189,7 +178,7 @@ The seed dataset includes:
 
 ### Dispatcher
 - Login as `dispatcher@dispatch.example`.
-- `/dispatch` shows the kanban board. Click a load to open its detail page.
+- `/dispatch/board` shows the kanban board. Click a load to open its detail page.
 - On `/dispatch/loads/:id`, advance status (e.g. tendered → booked).
   When you book a load, an **acceptance lin-token** is minted; the
   page shows "Rate confirmation pending" with the token's prefix.
@@ -199,7 +188,7 @@ The seed dataset includes:
 
 ### Driver
 - Login as any `*.dispatch.example` driver (e.g. `doyle.briggs`).
-- `/driver` shows current assignment. Click into a load.
+- `/driver/home` shows current assignment. Click into a load.
 - On `/driver/loads/:id`, advance status (dispatched → loaded → in transit
   → delivered). Loading a load mints a **BOL lin-token**. The "Upload BOL"
   button is enabled only while the token is active. After first BOL
@@ -209,7 +198,7 @@ The seed dataset includes:
 
 ### Customer
 - Login as any `*.example` customer (e.g. `ops@basinenergy.example`).
-- `/customer` shows your loads + recent invoices.
+- `/customer/home` shows your loads + recent invoices.
 - On `/customer/loads/:id`, when status is `booked`, click **"Sign rate
   confirmation"**. This consumes the acceptance lin-token and advances
   the load to `dispatched`.
@@ -229,9 +218,12 @@ The 3 lin tokens (acceptance, BOL, payment) demonstrate the canonical
 
 2. **Runtime**: the `lin_tokens` table provides the durable single-use
    guard. The `consume` operation is `UPDATE lin_tokens SET consumed_at
-   = CURRENT_TIMESTAMP WHERE token = ? AND consumed_at IS NULL`. If
-   `changes == 0`, the token was already consumed (replay or race) and
-   the server fn returns an error.
+   = CURRENT_TIMESTAMP WHERE token = ? AND consumed_at IS NULL RETURNING
+   token`, read with `.get()`: no row back means the token was already
+   consumed (replay or race) or never issued, and the server fn returns an
+   error. (`.run()` returns nothing — §8.5.1 — so the outcome must come from
+   `RETURNING`, never from a field on `.run()`.) Every per-load driver action
+   also checks the driver is ASSIGNED to that load.
 
 The two layers are complementary: lin gives the static guarantee
 (within one function call); the DB guard gives the durable guarantee
