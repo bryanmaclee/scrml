@@ -2,6 +2,29 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S442 — 2026-09-29 (bryan · XPS, concurrent with S441)
+
+The bootstrap got the S440 typer rules end to end and grew to the §66.19 worked programs; bryan ruled the tape
+grow/shrink split, dpa-058 (renders / bind / validators) and dpa-045 (plain-markup text, axiom-level) — and every
+landing needed at least one review round to fix something its own round had made.
+
+- **Bootstrap typer** (#1151 #1157 #1159, #1167 queued): conditions (`E-COND-NOT-BOOLEAN`, bare `T | not` = a presence
+  test, bare `bool | not` refused), operators (`E-OPERATOR-OPERAND-TYPE`, `E-OPERAND-NOT-NARROWED`) with flow
+  narrowing, `int` enforced everywhere, `E-CALL-ARITY` / `E-EACH-NOT-SEQUENCE` / `E-HANDLE-REDECLARE` /
+  `E-STRUCT-DUPLICATE-KEY`, an un-narrowed `T | not` into `T` refused for every type, full checks at arguments and
+  returns (§7.5.1 widening, PA-ruled, measured-zero corpus).
+- **Bootstrap §66.19 programs** (#1164, #1169 queued): §66.19.6 (engine as a `single`) runs verbatim; audit log and
+  form run minus Core-blocked constructs; tape grants (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`);
+  O55 (`E-DECL-SINGLE-INSTANTIATED`); O19 / O33 refused at compile time.
+- **SPEC** (#1156, #1170 queued): §66.12 grow/shrink split + `anywhere`, O55, O10 tokens, four typer codes; §4.18
+  rewritten for dpa-045 (two text-mode productions, a closed exit set, cooked, no display-text escapes, whitespace
+  kept).
+- **impl#1** (#1160): a self-closed non-void element gets an explicit end tag (`<textarea/>` no longer swallows the
+  page); dpa-058 D2-D9 filed.
+- **Docs**: maps refreshed to cf62b415 (#1144); dpa-058 banked, drained, ruled (#1148 #1154 #1168); dpa-045 queue rows
+  de-duplicated. Article draft `docs/articles/tape-2026-09-29.md` (untracked, bryan's).
+- Held for Oct 2 (agent weekly limit): the dpa-045 bootstrap branch (unreviewed), typer r8, the dpa-058 build.
+
 ## S441 — 2026-09-29 (bryan · ASUS)
 
 Spotlight prep: every public surface was audited for old or wrong information, and the audit surfaced a run of real security holes. Most of the session went into closing them, with S239 adversarial review on every code landing.
@@ -7730,6 +7753,64 @@ Previous baseline (2026-05-03 after S53 close): **8,576 tests passing / 40 skipp
 ---
 
 ## Recently Landed
+
+### S443 (2026-09-29/30, bryan · ASUS) — the S441 review record was wrong, the auth holes closed, and two broken flagship examples work end to end
+
+**The arc.** Booted as successor to S442 (XPS, bootstrap lane) and took S441's held security pickup, whose
+worktrees lived on this machine. The session's most important finding was about the RECORD, not the code: a
+read-only reconstruction of the S441 transcript showed that three of four S441 PRs whose reviews were "lost
+in a compaction" (#1145 #1152 #1155) had **never been reviewed at all** — S441 had told bryan #1155 (the
+flagship's one-time-token security fix) was reviewed. All four got post-merge S239 reviews against their
+merge commits; #1147's un-re-reviewed fix-round commit turned out to carry a real regression (imported
+`AuthError` enums false-fired E-ERROR-009), fixed in #1172. Mid-session the sub-agent weekly quota ran out;
+reviews and landings continued PA-direct, disclosed as self-reviewed, and were re-reviewed by agents once the
+quota returned (outcomes below).
+
+**Landed (8 PRs):**
+- **#1171** — protected-column egress §14.8.9 (S441 rounds 1-4 + S443 round 5): extracted protected values are
+  E-PROTECT-006 at compile time; case-insensitive origin; SQL-computed columns over a protected column strip the
+  row (fail-closed over-approximation); `.length` a count only on known-count receivers; element-returning
+  collection methods join the alias class. Residual leak classes (all pre-existing, main shipped more) filed as
+  `g-protect-egress-round-6-residuals`.
+- **#1172** — a user enum named like a built-in error type (local, imported, re-exported) is the type the file
+  uses — the #1147 regression and the silent invalid-variant accept it hid.
+- **#1173** — `<page auth="required">` gates its document, compose route and server fns; `auth=` on a nested
+  `<program>` is E-PROGRAM-NESTED-AUTH; unannotated member pages inherit the application's required gate; the
+  program's `loginRedirect=` reaches page scopes; W-AUTH-FILE-CONFLICT / W-AUTH-REDIRECT-LOOP /
+  W-AUTH-LOGIN-REDIRECT-AMBIGUOUS. Three review rounds; the PA-direct round-3 review found "several root
+  candidates → nothing inherited" was fail-OPEN and fixed it (ee3af947b).
+- **#1174** — worker bundles are written and served; `.send()` no longer kills `when message from` handlers
+  (dpa-056 D1/D2) — examples/13 works in Chromium.
+- **#1175** — review ledger: post-merge markers, the S441 record corrected, §S443 gap filings.
+- **#1177** — two top-level `<program>`s in one file are E-PROGRAM-002 (bryan ruling; same-file only).
+- **#1180** — examples/23 works end to end: login creates a real framework session (the app's own token rode an
+  HttpOnly cookie set from JS, which browsers refuse), 18 pages read `session.userId`, BOL/POD check driver
+  assignment, the database ships seeded, links point at real pages; `scrml generate auth`'s template now
+  authenticates; examples/09 SubmitFailed reachable.
+- **#1183** — examples/23: no helper server routes — the post-merge review found #1180's per-page
+  `getCurrentUser(userId)` helpers were public routes (any logged-in user could enumerate accounts); lookups
+  inlined on `session.userId`, dead app-KV auth fns removed.
+- README (#1176) rewritten per the S441 two-register ruling — **held for bryan's read**.
+
+**Rulings (user-voice S443):** "your recs" ×7 — explicit page `optional`/`none` relaxes a required app; stricter
+`auth=` wins within a file; E-PROGRAM-002 same-file; body-top no-op code is an error; README held; derived SQL
+values over protected columns stay stripped; a bare digest of a protected value stays protected. Bun upgraded
+on ASUS (1.3.14 → 1.4.2). "no waiting, go now" (ex23 PA-direct).
+
+**Compiler defects found by dog-fooding the examples (filed):** a markup `${fn(@x.f)}` interpolation is ALSO
+emitted as a load-time statement and throws when `@x` is `not` (HIGH); an engine write inside a `!{}` arm
+bypasses the engine setter (HIGH); `class="…${…}"` templates don't lower scrml expressions; prod static has
+no directory index; worker supervision has no codegen.
+
+**Post-merge agent reviews (quota back):** #1173 → `finding` (a `/pages/` directory anywhere in the absolute
+project path disables member-page inheritance — HIGH, filed); #1177 → `finding` (a `<div>`-wrapped `<program auth>`
+runs anonymously — pre-existing HIGH, filed; message/SPEC text LOW); #1180 → `finding` (the helper-route enumeration,
+fixed #1183; plus pre-existing ex23 authz/routing holes, filed). Inbox triage: flint + flogence reports re-measured —
+two fixed (#900, #1046), three filed (incl. HIGH: a bare `{` in markup text swallows child tags); return legs sent.
+
+**Held for the next session:** declared-prose round 5 (round 4 DO-NOT-LAND; ruling #4 folds in), protect round
+6 (+ ruling #7), the `| err :>` S441 branch — briefs in `scrml-support/handOffs/s443-briefs/`.
+
 
 ### S433 (2026-09-26, Peter · AdiPDesk — a SECOND peter box, parallel to S432 on the laptop) — every fix that self-reported clean came back with a finding, and four measurement failures shared one shape
 

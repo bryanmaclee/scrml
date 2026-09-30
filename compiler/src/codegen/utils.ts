@@ -247,10 +247,68 @@ export function replaceCssVarRefs(value: string): string {
   return value.replace(/@([A-Za-z_$][A-Za-z0-9_$]*)/g, "var(--scrml-$1)");
 }
 
+/**
+ * HTML void elements — the ONLY HTML-namespace elements that have no end tag.
+ * The HTML Living Standard list is area, base, br, col, embed, hr, img, input,
+ * link, meta, source, track, wbr. `param` is retained: it was dropped from the
+ * content-model list, but the HTML parser still inserts-and-pops it like a void
+ * element ("A start tag whose tag name is one of: param, source, track"), so a
+ * `<param />` still parses as an empty element — emitting `</param>` would be
+ * a stray end tag.
+ *
+ * EVERY OTHER HTML element is non-void and MUST be emitted with an explicit end
+ * tag — see `htmlParserHonorsSelfClose` below (S442 D1).
+ */
 export const VOID_ELEMENTS = new Set<string>([
   "area", "base", "br", "col", "embed", "hr", "img", "input",
   "link", "meta", "param", "source", "track", "wbr",
 ]);
+
+/**
+ * S442 D1 — does the browser's HTML parser honour a trailing `/>` on this
+ * element, given its enclosing emitted-element stack (outermost first)?
+ *
+ * HTML Living Standard, parse error `non-void-html-element-start-tag-with-trailing-solidus`:
+ * "This error occurs if the parser encounters a start tag for an element that is
+ * not in the list of void elements or is not a part of foreign content (i.e., not
+ * an SVG or MathML element) that has a U+002F (/) code point right before the
+ * closing U+003E (>) code point. The parser behaves as if the U+002F (/) is not
+ * present." So `<textarea/>` OPENS a textarea (an escapable raw text element)
+ * that swallows every following byte up to `</textarea>` as text, and `<div/>`
+ * opens a div that reparents every following sibling into it.
+ *
+ * The self-closing flag IS acknowledged for:
+ *   - void elements (the `/` is inert, and there is no content anyway);
+ *   - `<svg>` / `<math>` themselves (the tree builder inserts a foreign element
+ *     and acknowledges the flag);
+ *   - any element whose NEAREST classifying ancestor is `<svg>` / `<math>`
+ *     (foreign content). An HTML integration point — `foreignObject` / `desc` /
+ *     `title` under SVG, `mi` / `mo` / `mn` / `ms` / `mtext` / `annotation-xml`
+ *     under MathML — switches its children BACK to HTML, where the rule above
+ *     applies again.
+ *
+ * Fail-safe direction: when the ancestor stack is incomplete (a nested emit
+ * that cannot see its outer context), this answers `false` and the caller emits
+ * an explicit end tag — which is correct in EVERY namespace. It can only ever
+ * err toward the always-correct form.
+ */
+const FOREIGN_ROOTS = new Set<string>(["svg", "math"]);
+const HTML_INTEGRATION_POINTS = new Set<string>([
+  "foreignobject", "desc", "title",
+  "mi", "mo", "mn", "ms", "mtext", "annotation-xml",
+]);
+
+export function htmlParserHonorsSelfClose(tag: string, ancestors: readonly string[]): boolean {
+  const t = tag.toLowerCase();
+  if (VOID_ELEMENTS.has(t)) return true;
+  if (FOREIGN_ROOTS.has(t)) return true;
+  for (let i = ancestors.length - 1; i >= 0; i--) {
+    const a = String(ancestors[i]).toLowerCase();
+    if (FOREIGN_ROOTS.has(a)) return true;
+    if (HTML_INTEGRATION_POINTS.has(a)) return false;
+  }
+  return false;
+}
 
 /**
  * i81 — HTML BOOLEAN attributes, excluded from the reactive VALUE-attr emitter.

@@ -302,10 +302,9 @@ const BASE_66_19 = [
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-TYPE-VARIANT"],
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-PARSE-EXPECTED", "E-PARSE-EXPECTED", "E-PARSE-TRAILING", "E-PARSE-TRAILING", "E-PROGRAM-MISSING", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
   ["E-DECL-STAR-PREDEFINED", "E-DECL-STAR-PREDEFINED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-IMPORT-NOT-EXPORTED", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001", "E-SCOPE-001"],
-  // §66.19.5: SPEC still writes `Entry[free, end]` — the retired place token is refused (RULED S442 grow/shrink
-  // split; E-GRANT-UNKNOWN) until the SPEC amendment for §66.12.2 / §66.19.5 lands (PENDING the SPEC PR), which
-  // leaves the log ungranted (two E-WRITE-NOT-GRANTED). Re-measure when that PR lands.
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-GRANT-UNKNOWN", "E-WRITE-NOT-GRANTED", "E-WRITE-NOT-GRANTED"],
+  // §66.19.5: re-measured at the S442 SPEC amendment (`Entry[free, append]`) — only its Core-blocked constructs
+  // remain (2× Date.now() host call + 1 bind:), no grant diagnostic.
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-SCOPE-001"],
   [],
 ];
@@ -330,7 +329,7 @@ describe("the §66.19 programs and the M2 fixtures — no typer / scope code; ev
 // Fix round 1 (adversarial review of the first cut).
 // ---------------------------------------------------------------------------
 describe("A — a local's type: its annotation, else the join of everything it is given", () => {
-  test("legal — `let a = not; a = \"x\"` then `@s = a` (§42.3.1: infer `T | not`; a `T | not` into `T` is unproven, silent)", () => {
+  test("legal — `let a = not; a = \"x\"` then `@s = a` (§42.3.1: infer `T | not`; the write of `\"x\"` narrows `a` — s442 r2 F3 — so the read is a `string`)", () => {
     expect(inApp("    <let s:string=\"\"/>\n    function f() { let a = not\n a = \"x\"\n @s = a }")).toEqual([]);
   });
   // FLIPPED (s442 r6) — provenance: ruling:user-voice-scrml.md S442 "`T | not` into `T` is an error for all types" ("A `T | not` isn't a `T`"; bryan: "if the lifecycle says T | not then it can only end as not"). Was: legal (S439 "unproven").

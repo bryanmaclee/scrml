@@ -1608,6 +1608,70 @@ export function runCG(input: CgInput): CgOutput {
     }
     detectNestedDocAttrs(nodes, 0);
 
+    // §4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=` is NOT
+    // a nested-valid `<program>` attribute. Auth config is read from the file's
+    // FIRST top-level `<program>` only (compute-program-config.ts), so a nested
+    // `<program auth="required">` compiled with no auth at all: its server
+    // functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote
+    // a row). "Nested" here is any `<program>` with a `<program>` OR `<page>`
+    // ancestor — a `<page>` is a per-route container inside the application's one
+    // `<program>` (§40.8), so a `<program>` under it is nested too, and its `auth=`
+    // was dropped the same way (MEASURED S443: 200 for an anonymous GET). Fail
+    // closed: any `auth=` there, whatever its value, is an error, never a no-op.
+    function detectNestedProgramAuth(parentChildren: any[], nested: boolean): void {
+      for (const node of parentChildren) {
+        if (!node || typeof node !== "object" || node.kind !== "markup") continue;
+        if (node.tag === "program" && nested) {
+          const attrs: any[] = node.attributes ?? node.attrs ?? [];
+          const authAttr = attrs.find((a: any) => a && a.name === "auth");
+          if (authAttr) {
+            const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+            errors.push(new CGError(
+              "E-PROGRAM-NESTED-AUTH",
+              "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> — a nested " +
+              "<program> is not an auth scope, so its server functions would run unauthenticated. " +
+              "Put `auth=` on the top-level <program> (the whole application) or on the " +
+              "<page> that needs it, and remove it from the nested <program>. (§4.12.2, §52.13)",
+              { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+              "error",
+            ));
+          }
+        }
+        if (Array.isArray(node.children) && node.children.length > 0) {
+          detectNestedProgramAuth(node.children, nested || node.tag === "program" || node.tag === "page");
+        }
+      }
+    }
+    detectNestedProgramAuth(nodes, false);
+
+    // §40.8 / §20.5.1 (S443, ruled by bryan — user-voice S443 item 3): a file declares
+    // its top-level `<program>` exactly once. Two or more top-level `<program>`
+    // elements in ONE file is `E-PROGRAM-002`. Before S443 the second one was
+    // silently mis-read: compute-program-config reads auth= from the FIRST
+    // top-level `<program>` only, so `<program>…</program><program auth="required">`
+    // served the second program's routes to anonymous callers
+    // (g-two-top-level-programs-one-file-second-auth-dropped). NARROW: same-file
+    // only — the §40.8 cross-file case stays reserved (library-shape.js,
+    // type-system.ts and the session-config comments above depend on it).
+    {
+      const topPrograms = (Array.isArray(nodes) ? nodes : []).filter(
+        (n: any) => n && typeof n === "object" && n.kind === "markup" && n.tag === "program",
+      );
+      for (const extra of topPrograms.slice(1)) {
+        const span = extra.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+        errors.push(new CGError(
+          "E-PROGRAM-002",
+          "E-PROGRAM-002: a file declares its top-level <program> exactly once, but this file " +
+          `has ${topPrograms.length}. Everything after the first is mis-read — its auth=, ` +
+          "session and middleware attributes are ignored, so its routes run with the FIRST " +
+          "program's settings. Merge them into one <program>, or move the second into its own " +
+          "file (a nested <program> inside the first is a worker or scoped-db context, §4.12). (§40.8)",
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "error",
+        ));
+      }
+    }
+
     extractWorkerPrograms(nodes);
 
     if (workerDefs.size > 0) {

@@ -1,6 +1,54 @@
 # auth.map.md
 # project: scrml
-# updated: 2026-09-29T13:38:25Z  commit: cf62b415
+# updated: 2026-09-30T15:32:25Z  commit: 5b1d0dab0
+# ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
+# write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
+# example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
+# `session.destroy()`, `<program … loginRedirect="/auth/login">`, driver BOL/POD/token reads guarded by `assignedDriverFor`,
+# `dispatch.db` ships pre-seeded (the `on mount { runSeeds() }` is gone); `stdlib/auth/templates/login.scrml` now calls
+# `session.set("userId", row.id)`; trucking smoke baseline drops `I-AUTH-REDIRECT-UNRESOLVED` / `W-AUTH-LOGIN-MISSING` /
+# `W-CG-CHUNK-PREFETCH-UNRESOLVED`, `W-TYPE-031-UNPROVEN` 321 -> 287). #1181 is the S444 map refresh itself.
+# ⛑ **`compiler/src` UNCHANGED over the window** (`git diff --stat 108ca89be..5b1d0dab0 -- compiler/src` empty) -> every S444
+# figure below stands; `bun scripts/facts.ts --check` PASS at `5b1d0dab0`. Known-gaps HIGH open 214 -> 215.
+# ⛑ **S444b ADDS S443 LOCI the reviews found missing** (grep-derived at `5b1d0dab0`; locate by SYMBOL after later commits):
+# route-inference Step 8 table + `appRoot` / `rootCandidates` / `findRoutePrefix` (matches on the ABSOLUTE path) ->
+# auth.map.md; `detectNestedProgramAuth`, E-PROGRAM-002 -> auth / error maps; `protect-flow.ts`, `emit-worker.ts`, worker
+# bundle writes in `api.js`, the §47.13 static-serve allowlist in `build.js` `generateServerEntry` -> structure / build maps.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444 HEADER (stamp `108ca89be`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
+# refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
+# commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
+# `auto` by default under `auth=`; compose route gated; WebSocket Origin check), #1162 (static serving is a client-asset
+# ALLOWLIST, §47.13), #1163 (async fn escaping as a value / event control after an await, S440 F4/F5), #1171
+# (protected-column egress `E-PROTECT-006`, §14.8.9), #1173 (`<page auth="required">` gates its page;
+# `E-PROGRAM-NESTED-AUTH`), #1177 (two top-level `<program>`s in one file = `E-PROGRAM-002`), #1174 (worker bundles
+# written + served, dpa-056 D1/D2), #1172 (user enum named like a built-in error type), #1150 (E-ERROR-002 handler
+# conformance), #1147 (bare `fail .Variant`), #1158 (`@cell = serverFn()` awaited in place), #1160 (self-closed non-void
+# element gets an end tag), #1153 (W-LINT-007/013 inline block handlers), #1152 (stdlib http/cron doc-comment leak),
+# #1155 (example 23 token guards). BOOTSTRAP: #1149 (CSS + `<theme>` T3 — `css.scrml`, `css-ingest.scrml`, CSS sub-seam),
+# #1151/#1157/#1159/#1167/#1169 (typer rounds), #1164 (the §66.19 worked programs — `slice-m4/`). SPEC-only: #1156
+# (tape grow/shrink, §66.x), #1170 (§4.18 dpa-045). The rest are docs / wrap / dpa-queue / gaps / ledger / @generated.
+# ⛑ **FIGURES RE-EXECUTED AT `108ca89be`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **275,016 lines / 217 files** per FACTS (+6,622 lines, +4 files:
+# `codegen/js-async-analysis.ts`, `codegen/protect-flow.ts`, `static-serve-policy.js`, `static-serve-policy-emitted.js`)
+# · test files **1,535** (+20) · `compiler/SPEC.md` **41,214** lines (+551) · conformance **1151** cases (+97) · §34
+# catalog **849** rows (+10), range `20832..21764`. `bun conformance/run.ts` (impl#1) -> **1144/1151 pass + 7 xfail**.
+# Census: PINNED 370 · IMPL-SITES 314 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **952 -> 960** · W **183 -> 186** · I 10 · H 2 FLAT ·
+# unique codes **807 -> 817**. **ADDED = {`E-ASYNC-CALL-PROMISE-METHOD`, `E-ASYNC-FN-ESCAPES-AS-VALUE`,
+# `E-ASYNC-HANDLER-UNANALYZABLE`, `E-EVENT-CONTROL-AFTER-AWAIT`, `E-PROGRAM-002`, `E-PROGRAM-NESTED-AUTH`,
+# `E-PROTECT-006`, `W-AUTH-FILE-CONFLICT`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS`, `W-AUTH-REDIRECT-LOOP`} — every one has a
+# live emitter in `compiler/src` (grep-verified); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `108ca89be` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# **58** files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **443/443** (7 files)
+# · `slice-m3/` **60/60** (5 files) · `slice-m4/` **130 pass + 1 todo / 131** (11 files; NOT in the CI gate — see
+# build.map.md) · CG footprint (`--swap CG=…/slice-m3/substitute.js --footprint`) -> runtime **18/0**, codes-only 10/0,
+# crashed 0, not-yet 666, front-end 457 · CSS footprint (`--swap CSS=…/slice-m3/css-substitute.js --footprint`) ->
+# runtime 320/0, codes-only 278/0, **CSS half 38/38** (conformance 17 · source 15 · core 6).
+# ⚑ `file:line` citations in S444 sections were grep-derived at `108ca89be`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S440 HEADER (stamp `cf62b415`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
 # refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
 # --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
@@ -410,6 +458,64 @@
 #
 
 scrml has THREE distinct auth-adjacent surfaces: (1) the compiler's own `<program auth=...>` declarative config that the codegen wires into emitted apps, (2) the `scrml:auth` / `scrml:oauth` stdlib modules an author imports for flow logic, and (3) the §20.5 `session` server builtin (NEW this window — the write half of the session model, landed in two passes). This map covers all three, plus the §14.8.9 protect-floor that backstops them, plus the §64.9 headless-target auth carve-out.
+
+## S444b — AUTH LOCI (grep at `5b1d0dab0`; `compiler/src` unchanged since `108ca89be`)
+
+### `route-inference.ts` Step 8 — auth-middleware collection, inside `runRI` (`:4481`)
+All steps write one `authMiddleware: Map<filePath, AuthMiddleware>`; emit-server consumes the one entry per file.
+| step | line | what it does |
+|---|---|---|
+| 8a | `:6357` | `<program auth="required">` registers its own file |
+| 8a-page | `:6375` | every `<page auth="required">` registers via `pageAuthRequiredEntry` (`:4439`) — same gate a required `<program>` gets (S443) |
+| app root | `:6393-6398` | `rootCandidates` = files that are NOT `isToolProgram`, NOT a route file (`findRoutePrefix(filePath)` null), and have a top-level `<program>` (`findTopLevelProgramNode`); `appRoot` = the single candidate, else `null` |
+| redirect | `:6408-6425` | `programLoginRedirect` = `appRoot`'s `loginRedirect=` else `"/login"`; no `appRoot` -> the one distinct value declared across non-tool files, else `"/login"` + `ambiguousRedirects` (feeds 8f) |
+| 8b | `:6437` | protect= auto-escalation; explicit `auth=` honoured via `getExplicitAuthDeclaration` (`:4283`); 2+-`<program>` files (`countUnitProgramNodes`) keep the pre-S438 stamped defaults |
+| 8c | `:6565` | member-page inheritance. `rootCfg` = `appRoot`'s `authConfig`; with several candidates, ANY candidate declaring `auth="required"` (fail closed). When required: every file with `fileShape` `non-entry-page` or `bare-markup`, not `_layout.scrml`, with no recognized (`required`/`optional`/`none`) decl from `collectFileAuthDecls` (`:4393`) gets `pageAuthRequiredEntry` |
+| 8d | `:6632` | `W-AUTH-FILE-CONFLICT` — one file declares `required` and a laxer value; stricter wins |
+| 8e | `:6663` | `W-AUTH-REDIRECT-LOOP` — entry's `loginRedirect` equals the route's own URL (route file: `pages.get(filePath).urlPattern`; else `/<basename>`, `index` also `/`); case-sensitive; strips trailing `/`, `.html`, query/fragment |
+| 8f | `:6700` | `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` — only when `ambiguousRedirects` is non-empty AND some entry is a page scope |
+
+`findRoutePrefix` (`:6856`) — `filePath.indexOf(prefix)` over `ROUTE_PREFIXES = ["/routes/", "/pages/"]` (`:6845`); first
+hit wins. ⚠ **It matches anywhere in the path, and `runRI` receives ABSOLUTE paths** (`api.js:1160`
+`resolvedInputFiles = inputFiles.map(f => resolve(f))`). A project checked out under any directory named `pages` or
+`routes` makes every file a "route file": `rootCandidates` is empty, `appRoot` is `null`, 8c inherits nothing, and 8e
+uses the route-pattern branch. PA-named gap `g-app-root-route-prefix-matched-on-absolute-path` — ⚠ **the ID is not in
+`docs/known-gaps.md` at `5b1d0dab0`** (grep empty). Other callers of `findRoutePrefix` in this file: `:6395`, `:6679`,
+`:6912` (`buildPageRouteTree`).
+
+### `codegen/index.ts` — nested-program auth + two-program files, inside `runCG` (`:1147`)
+- `detectNestedProgramAuth(parentChildren, nested)` `:1621`, called `:1645`. Recursive markup walk; `nested` becomes
+  true under a `<program>` OR `<page>`. Any `auth=` on a nested `<program>` (any value) -> `E-PROGRAM-NESTED-AUTH`
+  (`CGError`, severity error). Reason in source: auth config is read only from the file's FIRST top-level `<program>`
+  (`compute-program-config.ts`).
+- `E-PROGRAM-002` block `:1647-1672`: top-level `<program>` markup nodes of ONE file; each after the first is an error.
+  Same-file only; the cross-file §40.8 case stays reserved (comment `:1655`).
+- ⚠ The session-config diagnostic message at `:3158` still prints "E-PROGRAM-002 is reserved-not-implemented" (see
+  non-compliance U-S444b-1). Comments `:1964`, `:2005`, `:2026`, `:2084`, `:3241` say the same.
+
+### Example 23 + `scrml generate auth` template (#1180)
+- `examples/23-trucking-dispatch/app.scrml:35` — `<program db="./dispatch.db" auth="required" loginRedirect="/auth/login">`.
+  Login/register call `session.set("userId", …)`; pages read `session.userId`; logout `session.destroy()`.
+- `examples/23-trucking-dispatch/pages/driver/load-detail.scrml:182` — `assignedDriverFor(user, loadId)`; guards the
+  token read, BOL and POD server fns (`:203`, `:228`, `:263`).
+- `stdlib/auth/templates/login.scrml` — `loginServer` calls `session.set("userId", row.id)` after the password check.
+
+## S444 — AUTH-RELEVANT DELTA (`cf62b415..108ca89be`) — S441 security landings
+
+| PR | change | where |
+|---|---|---|
+| #1161 | `csrf="auto"` is the DEFAULT under `auth=`; only `csrf="off"` opts out; invalid values fail closed to `auto` | `compute-program-config.ts` `effectiveCsrfUnderAuth` |
+| #1161 | the compose route is gated like the page | `codegen/emit-server.ts`, `route-inference.ts` |
+| #1161 | WebSocket upgrade refuses cross-origin requests (403) | `codegen/emit-channel.ts` (`_scrml_ws_origin_ok(req)`), `commands/dev.js` |
+| #1162 | static serving is a client-asset allowlist — the DB, server source and session store are not downloadable | `static-serve-policy.js`, `static-serve-policy-emitted.js` (§47.13) |
+| #1163 | an async-colored fn (incl. `verifyPassword`) can no longer escape as a value into a sync slot (the accept-all shape left open at S440); event control after an `await` is an error | `codegen/js-async-analysis.ts`, `emit-library-shared.ts` (4 `E-ASYNC-*` / `E-EVENT-*` codes) |
+| #1171 | protected-column egress: a scalar extracted from a `protect=` row cannot reach a client sink; origin match case-insensitive; computed columns stripped | `codegen/protect-flow.ts`, `protect-egress.ts` (`E-PROTECT-006`) |
+| #1173 | `<page auth="required">` gates its page (document, compose route, server fns); member pages inherit the application `<program>`'s gate | `route-inference.ts` Step 8a-page, `pageAuthRequiredEntry` |
+| #1173 | `auth=` on a nested `<program>` is `E-PROGRAM-NESTED-AUTH` | `codegen/index.ts` `detectNestedProgramAuth` |
+| #1177 | a second top-level `<program>` in one file is `E-PROGRAM-002` (its `auth=` could previously be dropped) | `codegen/index.ts` |
+| #1173 | warnings `W-AUTH-FILE-CONFLICT`, `W-AUTH-REDIRECT-LOOP`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` | `route-inference.ts` |
+| #1155 | example 23 one-time-token guards read `.changes` off a void `.run()` — fixed in the example pages | `examples/23-trucking-dispatch/pages/**` |
+
 
 ## S440 — AUTH-RELEVANT DELTA (`fb21983a..cf62b415`)
 

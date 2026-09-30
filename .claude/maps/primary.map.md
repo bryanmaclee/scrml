@@ -1,6 +1,54 @@
 # primary.map.md
 # project: scrml
-# updated: 2026-09-29T13:38:25Z  commit: cf62b415
+# updated: 2026-09-30T15:32:25Z  commit: 5b1d0dab0
+# ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
+# write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
+# example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
+# `session.destroy()`, `<program … loginRedirect="/auth/login">`, driver BOL/POD/token reads guarded by `assignedDriverFor`,
+# `dispatch.db` ships pre-seeded (the `on mount { runSeeds() }` is gone); `stdlib/auth/templates/login.scrml` now calls
+# `session.set("userId", row.id)`; trucking smoke baseline drops `I-AUTH-REDIRECT-UNRESOLVED` / `W-AUTH-LOGIN-MISSING` /
+# `W-CG-CHUNK-PREFETCH-UNRESOLVED`, `W-TYPE-031-UNPROVEN` 321 -> 287). #1181 is the S444 map refresh itself.
+# ⛑ **`compiler/src` UNCHANGED over the window** (`git diff --stat 108ca89be..5b1d0dab0 -- compiler/src` empty) -> every S444
+# figure below stands; `bun scripts/facts.ts --check` PASS at `5b1d0dab0`. Known-gaps HIGH open 214 -> 215.
+# ⛑ **S444b ADDS S443 LOCI the reviews found missing** (grep-derived at `5b1d0dab0`; locate by SYMBOL after later commits):
+# route-inference Step 8 table + `appRoot` / `rootCandidates` / `findRoutePrefix` (matches on the ABSOLUTE path) ->
+# auth.map.md; `detectNestedProgramAuth`, E-PROGRAM-002 -> auth / error maps; `protect-flow.ts`, `emit-worker.ts`, worker
+# bundle writes in `api.js`, the §47.13 static-serve allowlist in `build.js` `generateServerEntry` -> structure / build maps.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444 HEADER (stamp `108ca89be`), CARRIED FOR PROVENANCE. ━━━━━━━
+# ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
+# refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
+# commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
+# `auto` by default under `auth=`; compose route gated; WebSocket Origin check), #1162 (static serving is a client-asset
+# ALLOWLIST, §47.13), #1163 (async fn escaping as a value / event control after an await, S440 F4/F5), #1171
+# (protected-column egress `E-PROTECT-006`, §14.8.9), #1173 (`<page auth="required">` gates its page;
+# `E-PROGRAM-NESTED-AUTH`), #1177 (two top-level `<program>`s in one file = `E-PROGRAM-002`), #1174 (worker bundles
+# written + served, dpa-056 D1/D2), #1172 (user enum named like a built-in error type), #1150 (E-ERROR-002 handler
+# conformance), #1147 (bare `fail .Variant`), #1158 (`@cell = serverFn()` awaited in place), #1160 (self-closed non-void
+# element gets an end tag), #1153 (W-LINT-007/013 inline block handlers), #1152 (stdlib http/cron doc-comment leak),
+# #1155 (example 23 token guards). BOOTSTRAP: #1149 (CSS + `<theme>` T3 — `css.scrml`, `css-ingest.scrml`, CSS sub-seam),
+# #1151/#1157/#1159/#1167/#1169 (typer rounds), #1164 (the §66.19 worked programs — `slice-m4/`). SPEC-only: #1156
+# (tape grow/shrink, §66.x), #1170 (§4.18 dpa-045). The rest are docs / wrap / dpa-queue / gaps / ledger / @generated.
+# ⛑ **FIGURES RE-EXECUTED AT `108ca89be`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **275,016 lines / 217 files** per FACTS (+6,622 lines, +4 files:
+# `codegen/js-async-analysis.ts`, `codegen/protect-flow.ts`, `static-serve-policy.js`, `static-serve-policy-emitted.js`)
+# · test files **1,535** (+20) · `compiler/SPEC.md` **41,214** lines (+551) · conformance **1151** cases (+97) · §34
+# catalog **849** rows (+10), range `20832..21764`. `bun conformance/run.ts` (impl#1) -> **1144/1151 pass + 7 xfail**.
+# Census: PINNED 370 · IMPL-SITES 314 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **952 -> 960** · W **183 -> 186** · I 10 · H 2 FLAT ·
+# unique codes **807 -> 817**. **ADDED = {`E-ASYNC-CALL-PROMISE-METHOD`, `E-ASYNC-FN-ESCAPES-AS-VALUE`,
+# `E-ASYNC-HANDLER-UNANALYZABLE`, `E-EVENT-CONTROL-AFTER-AWAIT`, `E-PROGRAM-002`, `E-PROGRAM-NESTED-AUTH`,
+# `E-PROTECT-006`, `W-AUTH-FILE-CONFLICT`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS`, `W-AUTH-REDIRECT-LOOP`} — every one has a
+# live emitter in `compiler/src` (grep-verified); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `108ca89be` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# **58** files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **443/443** (7 files)
+# · `slice-m3/` **60/60** (5 files) · `slice-m4/` **130 pass + 1 todo / 131** (11 files; NOT in the CI gate — see
+# build.map.md) · CG footprint (`--swap CG=…/slice-m3/substitute.js --footprint`) -> runtime **18/0**, codes-only 10/0,
+# crashed 0, not-yet 666, front-end 457 · CSS footprint (`--swap CSS=…/slice-m3/css-substitute.js --footprint`) ->
+# runtime 320/0, codes-only 278/0, **CSS half 38/38** (conformance 17 · source 15 · core 6).
+# ⚑ `file:line` citations in S444 sections were grep-derived at `108ca89be`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S440 HEADER (stamp `cf62b415`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
 # refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
 # --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
@@ -889,6 +937,48 @@ THIS one and exited 0 again. Nothing in the toolchain fails on stale maps.
 #
 # Per-window landing narratives stay DELETED (S302 ruling). **History lives in `docs/changelog.md` +
 # `handOffs/delta-log.md`.** What earns space here is rules a grep cannot find.
+
+## S444b — READ FIRST (facts at `5b1d0dab0`; the S444 block below still holds — `compiler/src` unchanged)
+- **Example 23 works end-to-end (#1180):** framework session (`session.set` / `session.userId` / `session.destroy()`),
+  `loginRedirect="/auth/login"`, `assignedDriverFor` guard, pre-seeded `dispatch.db`. `scrml generate auth`'s
+  `stdlib/auth/templates/login.scrml` now sets the session.
+- **New loci mapped:** route-inference Step 8 (8a … 8f) + `appRoot` / `rootCandidates` / `findRoutePrefix` -> auth.map.md;
+  `detectNestedProgramAuth` / `E-PROGRAM-002` -> auth + error maps; `protect-flow.ts`, `emit-worker.ts`, `api.js` worker
+  writes -> structure.map.md; `build.js` `generateServerEntry` §47.13 allowlist -> build.map.md.
+- ⚠ `findRoutePrefix` matches `/pages/` / `/routes/` anywhere in the ABSOLUTE path — a checkout under such a directory
+  loses `appRoot` (gap `g-app-root-route-prefix-matched-on-absolute-path`, not yet filed in `docs/known-gaps.md`).
+- Open S443 dogfood gaps near these loci: `g-markup-call-interpolation-emitted-as-module-statement` (HIGH),
+  `g-class-attr-template-does-not-lower-scrml-exprs`, `g-prod-static-no-directory-index`.
+
+## S444 — READ FIRST (facts at `108ca89be` that supersede the S440 block below)
+- **Security (S441/S443) — impl#1:** CSRF `auto` by default under `auth=`; WebSocket Origin check; static serving is a
+  client-asset allowlist (`static-serve-policy*.js`, §47.13); async fns cannot escape as values
+  (`codegen/js-async-analysis.ts`); protected-column scalar egress refused (`codegen/protect-flow.ts`, `E-PROTECT-006`);
+  `<page auth="required">` gates; `E-PROGRAM-NESTED-AUTH`; `E-PROGRAM-002` (same-file). → auth.map.md · error.map.md.
+- **Workers (#1174):** worker bundles are written and served; `.send()` no longer kills when-message handlers.
+- **Bootstrap:** stylesheet stage `css.scrml` + throwaway `css-ingest.scrml`; CG sub-seam `CSS`
+  (`hybrid.ts --swap CSS=…/css-substitute.js`); all six §66.19 programs compile from source (`slice-m4/`). Suites:
+  m1 73, lowered-m1 73, m2 443, m3 60, m4 130+1 todo. ⚑ `slice-m4/` is not in CI. → structure / test / build maps.
+- **Conformance 1144/1151 + 7 xfail** (+97 cases). §34: 849 rows; 10 new codes, all emitted.
+- **SPEC:** §4.18 rewritten (dpa-045); §66 tape grants; 41,214 lines.
+- ⚠ Precedent kept: `## Project Fingerprint`, `## Map Index`, `## Task-Shape Routing`, `## Key Facts` below are not touched.
+
+### Map index — S444 pass
+| map | S444 status |
+|---|---|
+| structure.map.md | delta — +4 `compiler/src` files; bootstrap `css.scrml`, `css-ingest.scrml`, `slice-m4/` |
+| dependencies.map.md | delta — static-serve-policy / js-async-analysis / protect-flow edges; bootstrap css edges; package.json metadata |
+| schema.map.md | delta — `compileScrml` `clientAssets` + manifest; `CSS` seam; protect-flow / js-async-analysis interfaces; `CssUnit` |
+| config.map.md | delta — `SCRML_PROTECT_FLOW_DEBUG`; `.scrml-client-assets.json`; csrf default |
+| build.map.md | delta — CSS footprint mode; snippet-drift; slice-m4 NOT in CI |
+| error.map.md | delta — 10 new codes (all emitted); E-ERROR-002 / E-ERROR-009 / W-LINT changes; bootstrap drift closed |
+| test.map.md | delta — bootstrap suites; +20 `compiler/tests` files; conformance +97 |
+| auth.map.md | delta — S441/S443 security table |
+| domain.map.md | delta — §4.18, §66 tape, §13.2, §14.8.9, §40 rulings |
+| infra.map.md | delta — no CI change; allowlist + worker serving in built servers |
+| migrations.map.md | zero-diff, stamp advanced |
+| non-compliance.report.md | targeted re-scan — see its S444 summary |
+
 
 ## S440 — READ FIRST (facts at `cf62b415` that supersede the S438 block below)
 - **The bootstrap (`compiler/self-host-v2/`) now has a typer, a scope pass, NodeId-indexed fact tables, and a corpus

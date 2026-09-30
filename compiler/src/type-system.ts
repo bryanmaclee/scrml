@@ -3308,7 +3308,19 @@ function resolveTypeExpr(expr: string, typeRegistry: Map<string, ResolvedType>):
 
   // Primitive lookup.
   if (BUILTIN_TYPES.has(trimmed)) {
-    return BUILTIN_TYPES.get(trimmed)!;
+    const builtin = BUILTIN_TYPES.get(trimmed)!;
+    // S443 — a user declaration (local, or imported and seeded into the
+    // registry) of a built-in error/enum type NAME (`AuthError`, `ParseError`,
+    // ...) wins over the built-in, as it already does in the registry itself
+    // (buildTypeRegistry overwrites the seeded built-in entry). Without this an
+    // annotation `e: AuthError` resolved to the empty built-in, so a `match`
+    // over the user's enum was never exhaustiveness-checked. Primitives are
+    // not user-shadowable here.
+    if (builtin.kind === "error" || builtin.kind === "enum") {
+      const declared = typeRegistry.get(trimmed);
+      if (declared && declared !== builtin && declared.kind !== "unknown") return declared;
+    }
+    return builtin;
   }
 
   // asIs keyword.
@@ -25149,7 +25161,8 @@ function checkEndpointDeclarations(
     //    are walked; a self-closing / empty (204 no-op) arm has no body to check.
     const bodyScope = new ScopeChain();
     for (const [tn, tt] of typeRegistry) {
-      if (!BUILTIN_TYPES.has(tn)) bodyScope.global.bind(tn, { kind: "type", resolvedType: tt });
+      // Identity, not name: a user type named like a built-in (S443) is bound.
+      if (tt !== BUILTIN_TYPES.get(tn)) bodyScope.global.bind(tn, { kind: "type", resolvedType: tt });
     }
     for (const arm of arms) {
       if (!arm || typeof arm !== "object") continue;
@@ -25269,7 +25282,18 @@ function processFile(
   if (importedTypes && importedTypes.size > 0) {
     for (const [name, type] of importedTypes) {
       // Local declarations always win — only seed if not already declared locally.
-      if (!typeRegistry.has(name) || typeRegistry.get(name)?.kind === 'unknown') {
+      // A user declaration, local OR imported, overrides a BUILT-IN entry of the
+      // same name (§19.3.3: "An error enum imported from another scrml file
+      // resolves exactly as a local one"; §21.3: type imports are first-class).
+      // buildTypeRegistry seeds BUILTIN_TYPES and a local `type X` overwrites
+      // it; an entry still IDENTICAL to the built-in object is therefore not a
+      // local declaration, and an import of that name must replace it. Before
+      // S443 an imported `AuthError:enum` (or any built-in error-type name,
+      // incl. the built-in `ParseError` enum) stayed shadowed by the built-in:
+      // `fail .V` false-fired E-ERROR-009 and `fail AuthError.Nope` was never
+      // variant-checked.
+      const existing = typeRegistry.get(name);
+      if (!existing || existing.kind === 'unknown' || existing === BUILTIN_TYPES.get(name)) {
         typeRegistry.set(name, type);
       }
     }
@@ -25355,8 +25379,11 @@ function processFile(
   const scopeChain = new ScopeChain();
 
   // Seed the global scope with all user-declared types from this file.
+  // Identity, not name: a user type (local or imported) named like a built-in
+  // error/enum type (`AuthError`, S443) is a user declaration and is bound
+  // over the built-in the ScopeChain constructor seeded.
   for (const [name, type] of typeRegistry) {
-    if (!BUILTIN_TYPES.has(name)) {
+    if (type !== BUILTIN_TYPES.get(name)) {
       scopeChain.global.bind(name, { kind: "type", resolvedType: type });
     }
   }

@@ -1,0 +1,11 @@
+{
+  "id": "w-auth-redirect-loop-neg",
+  "description": "§40.2 / §52.13 (S443 review F3) — the same `auth=\"required\"` program with `loginRedirect=\"/signin\"` (another route): no loop, W-AUTH-REDIRECT-LOOP does not fire.",
+  "language-version": "1.0",
+  "spec": "§40.2, §52.13",
+  "rationale": "§40.2 (S443): W-AUTH-REDIRECT-LOOP fires only when the redirect target is the gated route itself.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["W-AUTH-REDIRECT-LOOP"]
+  }
+}

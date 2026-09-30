@@ -21,16 +21,12 @@
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, invoices, loads">
 
     ${
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
-            if (userId is not) return not
-            return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
-        }
 
         function fetchCustomersServer(sessionToken) {
-            const user = getCurrentUser(sessionToken)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
@@ -69,7 +65,7 @@
             const tok = getSessionToken()
             const data = fetchCustomersServer(tok)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             @currentUser = data.user
@@ -89,11 +85,11 @@
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
-              <a href="/dispatch" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+              <a href="/dispatch/board" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
               <span class="text-xs uppercase tracking-wider text-slate-400">Customers</span>
           </div>
           <nav class="flex items-center gap-4 text-sm">
-              <a href="/dispatch" class="hover:text-blue-300">Board</a>
+              <a href="/dispatch/board" class="hover:text-blue-300">Board</a>
               <a href="/dispatch/drivers" class="hover:text-blue-300">Drivers</a>
               <a href="/dispatch/billing" class="hover:text-blue-300">Billing</a>
           </nav>

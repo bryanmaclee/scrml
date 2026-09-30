@@ -4094,3 +4094,31 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3593] find · spotlight audit → security: static server served the DB + session store + server source (on main, fixed #1162); CSRF absent under auth (#1161); WS hijack (#1161); example-23 tokens replayable (#1155); `<page auth="required">` and nested `<program auth>` gate nothing (OPEN, HIGH); protect= bypassed by SQL case + SQL expressions (OPEN, HIGH)
 
 [3594] friction · text-scan fixes lost to adversarial review three rounds running (F4/F5, declared prose); structural rules (scope resolution, binding poisoning, coverage invariant) ended it. A red test passed the full hook because runtime tests skip under happy-dom in the one-process hook (gap filed). Sub-agent pushes classifier-denied repeatedly (ruled covered)
+
+[3595] state · S442 (bryan/XPS) successor to S441 (ASUS); took S441's FREE lanes: bootstrap typer + §66.19 programs + maps; Bun 1.3.6→1.4.2 on XPS
+
+[3596] rule · S442 bryan: tape grow/shrink split (append/pop, prepend/shift, insert/remove — tokens ruled) + anywhere covers end/front; O55 = error; six typer recs (bool|not bare condition error, handle presence narrows, int everywhere, 4 codes); T|not into T error for all types; sequence spreads one snapshot → user-voice S442
+
+[3597] rule · S442 bryan: dpa-058 all recs (bind always written; validators follow the bind; novalidate; O54=(a); dead validators error; D1 fixed) + dpa-045 AXIOM ruled (a′: two text-mode productions; closed exit set = context sigils + // + <[a-zA-Z!/?*_.]; cooked; no display-text escapes; whitespace kept)
+
+[3598] land · S442: #1144 maps · #1148 bank dpa-058 · #1151 #1157 #1159 bootstrap typer · #1154 #1168 dpa drain/ruled · #1156 SPEC §66.12/O55 · #1160 impl#1 self-close · #1164 §66.19 programs; queued #1167 #1169 #1170
+
+[3599] find · dpa-045's ratified closed exit set omitted //, #{, ^{, !{ and the <* <_ <. tag forms (~580 corpus uses) — found independently by both build agents; bryan ruled the full list
+
+[3600] friction · S442 PA dropped 10 S441 gap entries (4 HIGH) resolving known-gaps.md with a keep-one-side regex; caught by id diff pre-push; + toggled auto-merge on S441's #1153 by a guessed PR number (reverted)
+
+[3601] state · S442 HELD for Oct 2 (agent weekly limit): feat/s442-dpa045-bootstrap @1fe0b22a UNREVIEWED; typer r8 on feat/s442-typer-r8-wip; dpa-058 bootstrap build; SPEC follow-up (4 PA readings); impl#1 gaps to file (liftedali content loss; _{ as text)
+
+[3602] land · S443: #1171 (protect §14.8.9 r1-r5) #1172 (builtin-name enum shadow — #1147 regression) #1173 (page auth / E-PROGRAM-NESTED-AUTH / member-page inheritance) #1174 (workers D1/D2, ex13 works) #1175 (ledger) #1177 (E-PROGRAM-002 same-file) #1180 (ex23 end-to-end) #1183 (ex23 no helper routes); README #1176 HELD for bryan
+
+[3603] find · S441's "reviews lost in compaction" was false for #1145 #1152 #1155 (never reviewed; #1155 told to bryan as reviewed) — post-merge reviews run; #1147's un-re-reviewed fix round carried a false E-ERROR-009 regression
+
+[3604] rule · S443 (user-voice S443): "your recs" ×7 — page optional/none relaxes a required app; stricter auth= wins per file; E-PROGRAM-002 same-file; body-top no-op code is an error; README held; derived SQL over protected cols stays stripped; bare digest stays protected · bun upgrade ASUS · "no waiting, go now" (ex23 PA-direct)
+
+[3605] find · post-merge agent reviews: #1173 abs-path /pages/ disables member-page inheritance (HIGH, fail-open); #1177 <div>-wrapped <program auth> runs anonymously (HIGH, pre-existing); #1180 getCurrentUser(userId) helper = public user-enumeration route (MED, introduced → fixed #1183) + ex23 authz/routing residuals
+
+[3606] find · ex23/ex13 dog-food → compiler defects: markup `${fn(@x.f)}` also emitted as a load-time statement (HIGH); engine write in !{} arm bypasses the setter (HIGH); class-attr template doesn't lower scrml exprs; prod static no directory index; WS handlers merged ×12; bare `{` in markup text swallows child tags (flint, HIGH)
+
+[3607] friction · sub-agent weekly quota exhausted mid-session (3 agents died); continued PA-direct with self-reviewed landings labelled; agent reviews re-run post-merge on quota return found real defects in all three
+
+[3608] state · S443 held for next session: prose r5 + protect r6 briefs (scrml-support/handOffs/s443-briefs/), ex23 residuals, err-arm branch, README #1176; S444-bryan-xps LIVE (successor)

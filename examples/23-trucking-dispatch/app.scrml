@@ -32,7 +32,7 @@
 //   - Styling is inline Tailwind utility classes per S86 (utility-
 //     inline canonical; no file-top `#{}` placeholder).
 
-<program db="./dispatch.db" auth="required">
+<program db="./dispatch.db" auth="required" loginRedirect="/auth/login">
 
 <schema>
     users {
@@ -161,102 +161,19 @@
 <db src="./dispatch.db" protect="password_hash" tables="users, customers, drivers, tractors, trailers, loads, assignments, log_entries, invoices, messages, lin_tokens">
 
     ${
-        import { hashPassword, verifyPassword } from 'scrml:auth'
-        import { generateToken } from 'scrml:crypto'
-        import { createSessionStore } from 'scrml:store'
-        import { rolePath, SESSION_TTL_SECONDS, SESSION_DB_PATH } from './models/auth.scrml'
-        import { runSeeds } from './seeds.scrml'
 
-        // ---------------------------------------------------------------
-        // Session helpers — the session token is stored in a SQLite KV
-        // (separate file from dispatch.db so session writes don't compete
-        // with main app transactions).
-        // ---------------------------------------------------------------
+        // Auth (S443): the login / register / logout server fns live on their own pages
+        // (pages/auth/*.scrml, auth="optional") and establish the FRAMEWORK session with
+        // session.set / session.destroy (§20.5.1). The old app-KV login/register/logout/
+        // getCurrentUser here were never called and each compiled to a public route.
 
-        function _sessionStore() {
-            return createSessionStore(SESSION_DB_PATH)
-        }
-
-        // ---------------------------------------------------------------
-        // Auth fns — INLINED here per F-AUTH-002 (cross-file ?{}-using
-        // server fns hit E-SQL-004; the importing page has no `<db>`
-        // ancestor that resolves the SQL block).
-        //
-        // No explicit `server` modifier — the body's ?{} blocks (login/
-        // register/getCurrentUser) auto-escalate structurally per Insight
-        // 26. logout escalates via caller-context-propagation through
-        // _sessionStore (D3, 2026-05-08).
-        // ---------------------------------------------------------------
-
-        function login(emailArg, password) {
-            const row = ?{`SELECT id, email, password_hash, role FROM users WHERE email = ${emailArg}`}.get()
-            if (row is not) return { error: "Invalid email or password" }
-
-            const ok = verifyPassword(password, row.password_hash)
-            if (!ok) return { error: "Invalid email or password" }
-
-            ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run()
-
-            const token = generateToken(32)
-            const store = _sessionStore()
-            store.set(token, row.id, SESSION_TTL_SECONDS)
-
-            return {
-                token: token,
-                user: { id: row.id, email: row.email, role: row.role },
-                redirectTo: rolePath(row.role)
-            }
-        }
-
-        function logout(sessionToken) {
-            if (sessionToken is some) {
-                const store = _sessionStore()
-                store.delete(sessionToken)
-            }
-            return { ok: true }
-        }
-
-        function register(emailArg, password, name, contact_phone, billing_address) {
-            const existing = ?{`SELECT id FROM users WHERE email = ${emailArg}`}.get()
-            if (existing is some) return { error: "Email already registered" }
-
-            const hash = hashPassword(password)
-            ?{`INSERT INTO users (email, password_hash, role) VALUES (${emailArg}, ${hash}, 'customer')`}.run()
-            const userRow = ?{`SELECT id, email, role FROM users WHERE email = ${emailArg}`}.get()
-
-            ?{`
-                INSERT INTO customers (user_id, name, contact_email, contact_phone, billing_address, payment_terms, account_status)
-                VALUES (${userRow.id}, ${name}, ${emailArg}, ${contact_phone}, ${billing_address}, 'net_30', 'active')
-            `}.run()
-
-            const token = generateToken(32)
-            const store = _sessionStore()
-            store.set(token, userRow.id, SESSION_TTL_SECONDS)
-
-            return {
-                token: token,
-                user: userRow,
-                redirectTo: "/customer"
-            }
-        }
-
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = _sessionStore()
-            const userId = store.get(sessionToken)
-            if (userId is not) return not
-            return ?{`SELECT id, email, role, created_at, last_login_at FROM users WHERE id = ${userId}`}.get()
-        }
-
-        // ---------------------------------------------------------------
-        // Idempotent seed-on-mount. seeds.scrml exports runSeeds() which
-        // INSERTs the demo dataset using ON CONFLICT DO NOTHING so re-runs
-        // are safe.
-        // ---------------------------------------------------------------
-
-        on mount {
-            runSeeds()
-        }
+        // Seeding (S443): dispatch.db ships PRE-SEEDED. The old `on mount {
+        // runSeeds() }` here ran on every composed page, called a route whose
+        // imported seeds module resolves `?{}` to an in-memory DB (the F-AUTH-002
+        // cross-file limitation), and 500'd; and under auth="required" an
+        // anonymous visitor never mounted this shell, so the users table stayed
+        // empty and no seeded account could log in. seeds.scrml's runSeeds() stays
+        // the canonical dataset; see README "Re-seed" for regenerating the DB.
     }
 
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -266,8 +183,8 @@
                 <span class="text-xs uppercase tracking-wider text-slate-400">auth scaffold</span>
             </div>
             <nav class="flex items-center gap-4 text-sm">
-                <a href="/login" class="hover:text-blue-300">Login</a>
-                <a href="/register" class="hover:text-blue-300">Register</a>
+                <a href="/auth/login" class="hover:text-blue-300">Login</a>
+                <a href="/auth/register" class="hover:text-blue-300">Register</a>
             </nav>
         </header>
 
@@ -282,8 +199,8 @@
             <div class="bg-white border border-slate-200 rounded-lg p-6">
                 <h2 class="text-xl font-semibold mb-3">Get started</h2>
                 <ul class="list-disc pl-6 space-y-2 text-slate-700">
-                    <li><a class="text-blue-600 hover:underline" href="/login">Sign in</a> with a seeded account.</li>
-                    <li><a class="text-blue-600 hover:underline" href="/register">Register</a> as a new customer.</li>
+                    <li><a class="text-blue-600 hover:underline" href="/auth/login">Sign in</a> with a seeded account.</li>
+                    <li><a class="text-blue-600 hover:underline" href="/auth/register">Register</a> as a new customer.</li>
                     <li>See <code class="bg-slate-100 px-1 rounded">README.md</code> for seeded credentials.</li>
                 </ul>
             </div>

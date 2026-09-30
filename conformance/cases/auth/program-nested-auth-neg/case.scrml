@@ -1,0 +1,12 @@
+<program db="./c.db" auth="required">
+<schema>
+    notes { id: integer primary key
+            body: text }
+</>
+<program>
+function add(body) {
+    ?{`INSERT INTO notes (body) VALUES (${body})`}.run()
+}
+<button onclick=add("x")>add</button>
+</>
+</>

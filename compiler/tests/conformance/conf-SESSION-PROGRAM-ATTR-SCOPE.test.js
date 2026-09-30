@@ -300,7 +300,9 @@ describe("CONF-SESSION-PROGRAM-ATTR-SCOPE §20.5.1 — program-scoped, not build
         { "ddd.scrml": `${PROG_A}\n${PROG_B}`, "pages/other.scrml": MEMBER_MINTER },
         order,
       );
-      expect(codes(result)).toEqual(["E-MW-008"]);
+      // S443 (bryan, user-voice item 3): two top-level <program>s in ONE file are now
+      // also E-PROGRAM-002 (same-file case only — the cross-file shape below stays legal).
+      expect(codes(result)).toEqual(["E-MW-008", "E-PROGRAM-002"]);
     });
   }
 
