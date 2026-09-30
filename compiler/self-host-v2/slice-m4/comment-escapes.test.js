@@ -149,11 +149,19 @@ describe("R2 — `\\\"` `\\\\` `\\${` are escapes in a display-text literal", ()
       expect(r.diags[0].span.end).toBe(at + 2);
     }
   });
+  test("recovery: a malformed escape keeps BOTH characters — the cooked value of `\"a\\qb\"` is `a\\qb` (never the logic decoder's `aqb`)", () => {
+    for (const src of [P('<p : "a\\qb">'), state('"a\\qb"')]) {
+      expect(collect(run(src), "Str", "v")).toContain("a\\qb");
+    }
+  });
   test("`\\n`, `\\t` and a `\\$` not followed by `{` are malformed too (E-PARSE-001 each)", () => {
     expect(codes(P('<p : "a\\nb\\tc\\$5">'))).toEqual(["E-PARSE-001", "E-PARSE-001", "E-PARSE-001"]);
   });
-  test("a `\\` inside the interpolation's string is the LOGIC string's escape — no E-PARSE-001", async () => {
-    expect(await html(P('<p : "x ${"a\\"b"} y">'))).toBe(W('<p>x a"b y</p>'));
+  test("a `\\` inside the interpolation's string is the LOGIC string's escape — `\\t` is a tab, no E-PARSE-001", async () => {
+    expect(await html(P('<p : "x ${"a\\tb"} y">'))).toBe(W("<p>x a\tb y</p>"));
+  });
+  test("twin: a LOGIC string in free text keeps the full escape set — `${\"a\\tb\"}` renders a tab (display mode is the code-default regions' only)", async () => {
+    expect(await html(P('<p>${"a\\tb"}</p>'))).toBe(W("<p>a\tb</p>"));
   });
   test("twin: free text stays escape-free — `\\\"` / `\\\\` / `\\q` in a `<p>` are content, no diagnostic", async () => {
     expect(await html(P('<p>a \\" b \\\\ c \\q</p>'))).toBe(W('<p>a \\" b \\\\ c \\q</p>'));
