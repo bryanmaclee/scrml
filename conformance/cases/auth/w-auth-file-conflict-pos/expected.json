@@ -1,0 +1,13 @@
+{
+  "id": "w-auth-file-conflict-pos",
+  "description": "§40.2 (S443 review F2) — one file declares `<program auth=\"none\">` and `<page auth=\"required\">`. A route is one file and one served document, so the stricter declaration wins (the route is gated) and W-AUTH-FILE-CONFLICT surfaces the overridden laxer declaration.",
+  "language-version": "1.0",
+  "spec": "§40.2, §52.13",
+  "rationale": "§40.2 (S443): 'a `<page auth=\"required\">` anywhere in a file makes that file's route the gated scope, and a laxer `auth=` elsewhere in the same file … does not relax it … The compiler SHALL emit `W-AUTH-FILE-CONFLICT` naming both declarations and stating that the stricter one wins.'",
+  "expect": {
+    "codes": ["W-AUTH-FILE-CONFLICT"],
+    "severity": { "W-AUTH-FILE-CONFLICT": "warning" },
+    "codeCounts": { "W-AUTH-FILE-CONFLICT": 1 },
+    "notCodePrefixes": ["E-"]
+  }
+}

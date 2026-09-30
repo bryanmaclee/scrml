@@ -4363,40 +4363,68 @@ function getExplicitAuthDeclaration(fileAST: FileAST): {
  * same file answer first — so a stricter page declaration is never shadowed by
  * a laxer one elsewhere in the file (fail closed).
  */
-function findPageAuthRequired(fileAST: FileAST): {
-  loginRedirect: string | null;
-  csrf: string | null;
-  sessionSecure: string | null;
-} | null {
+function findPageAuthRequired(fileAST: FileAST): { csrf: string | null } | null {
+  // Only `csrf=` is read from the page: `loginRedirect=` is not a `<page>` attribute
+  // (E-PAGE-INVALID-ATTR — the redirect target comes from the program), and the
+  // `<page>` limb of `session-secure=` is struck (§20.5.1, S440 #13).
+  let found: { csrf: string | null } | null = null;
+  for (const d of collectFileAuthDecls(fileAST)) {
+    if (d.site === "page" && d.value === "required") {
+      found = { csrf: readStringAttrOf(d.node.attrs, "csrf") };
+      break;
+    }
+  }
+  return found;
+}
+
+function readStringAttrOf(attrs: any[] | undefined, name: string): string | null {
+  if (!Array.isArray(attrs)) return null;
+  const a = attrs.find((x: any) => x && x.name === name);
+  if (!a || !a.value || a.value.kind !== "string-literal") return null;
+  return a.value.value ?? null;
+}
+
+/**
+ * Every literal `auth=` declaration that governs this file's route, in document
+ * order: the FIRST top-level `<program>` (the only one compute-program-config
+ * reads) and every `<page auth=>`. Nested `<program>`s are skipped — their `auth=`
+ * is E-PROGRAM-NESTED-AUTH, not a declaration of this route.
+ */
+function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page"; value: string; node: any; line: number; col: number }> {
   const nodes: any[] =
     (fileAST as any).nodes ?? ((fileAST as any).ast ? (fileAST as any).ast.nodes : []) ?? [];
-
-  const readStringAttr = (attrs: any[] | undefined, name: string): string | null => {
-    if (!Array.isArray(attrs)) return null;
-    const a = attrs.find((x: any) => x && x.name === name);
-    if (!a || !a.value || a.value.kind !== "string-literal") return null;
-    return a.value.value ?? null;
+  const out: Array<{ site: "program" | "page"; value: string; node: any; line: number; col: number }> = [];
+  const at = (node: any) => {
+    const a = Array.isArray(node.attrs) ? node.attrs.find((x: any) => x && x.name === "auth") : null;
+    const sp = (a && a.span) || node.span || {};
+    return { line: sp.line ?? 0, col: sp.col ?? 0 };
   };
-
-  let found: { loginRedirect: string | null; csrf: string | null; sessionSecure: string | null } | null = null;
-  const walk = (ns: any[] | undefined): void => {
-    if (found || !Array.isArray(ns)) return;
+  let firstProgramSeen = false;
+  const walk = (ns: any[] | undefined, topLevel: boolean): void => {
+    if (!Array.isArray(ns)) return;
     for (const node of ns) {
-      if (found) return;
       if (!node || node.kind !== "markup") continue;
-      if (node.tag === "page" && readStringAttr(node.attrs, "auth") === "required") {
-        found = {
-          loginRedirect: readStringAttr(node.attrs, "loginRedirect"),
-          csrf: readStringAttr(node.attrs, "csrf"),
-          sessionSecure: readStringAttr(node.attrs, "session-secure"),
-        };
-        return;
+      if (node.tag === "program") {
+        // Only the first top-level `<program>`'s auth= is this route's program
+        // declaration; a nested / second top-level one is not recorded (its
+        // children are still walked so a `<page auth=>` inside is never missed).
+        if (topLevel && !firstProgramSeen) {
+          firstProgramSeen = true;
+          const v = readStringAttrOf(node.attrs, "auth");
+          if (v) out.push({ site: "program", value: v, node, ...at(node) });
+        }
+        walk(node.children, false);
+        continue;
       }
-      walk(node.children);
+      if (node.tag === "page") {
+        const v = readStringAttrOf(node.attrs, "auth");
+        if (v) out.push({ site: "page", value: v, node, ...at(node) });
+      }
+      walk(node.children, false);
     }
   };
-  walk(nodes);
-  return found;
+  walk(nodes, true);
+  return out;
 }
 
 /**
@@ -6375,7 +6403,7 @@ export function runRI(input: RIInput): RIOutput {
       fileAST.filePath,
       pageAuthRequiredEntry(
         fileAST.filePath,
-        { ...pageDecl, loginRedirect: pageDecl.loginRedirect ?? programLoginRedirect },
+        { csrf: pageDecl.csrf, loginRedirect: programLoginRedirect, sessionSecure: null },
         countUnitProgramNodes(getNodes(fileAST as any)) >= 2,
       ),
     );
@@ -6557,6 +6585,72 @@ export function runRI(input: RIInput): RIOutput {
         ),
       );
     }
+  }
+
+  // 8d (S443 review F2): one file, conflicting auth= values. A route is one file
+  // and one document, so it cannot be half-served: when a file declares
+  // `auth="required"` at one site and a laxer value at another, the stricter one
+  // wins (8a / 8a-page gate the whole route). That is fail-closed but it silently
+  // overrides the laxer declaration, so it is said out loud.
+  const warn = (code: string, message: string, filePath: string, line: number, col: number): void => {
+    const e = new RIError(code, message, { file: filePath, start: 0, end: 0, line, col } as unknown as Span);
+    e.severity = "warning";
+    e.filePath = filePath;
+    errors.push(e);
+  };
+  for (const fileAST of files) {
+    const decls = collectFileAuthDecls(fileAST);
+    const strict = decls.find((d) => d.value === "required");
+    const lax = decls.filter((d) => d.value !== "required");
+    if (!strict || lax.length === 0) continue;
+    const where = (d: { site: string; value: string; line: number; col: number }) =>
+      `\`<${d.site} auth="${d.value}">\` at ${d.line}:${d.col}`;
+    warn(
+      "W-AUTH-FILE-CONFLICT",
+      `W-AUTH-FILE-CONFLICT: this file declares ${where(strict)} and ${lax.map(where).join(", ")}. ` +
+        `A route is one file and one document, so the stricter declaration wins: the whole route ` +
+        `(its document and every server function in this file) requires authentication and ` +
+        `${lax.length === 1 ? "the laxer declaration has" : "the laxer declarations have"} no effect. ` +
+        `Move the public content to its own page file, or make the declarations agree. (§40.2, §52.13)`,
+      fileAST.filePath,
+      lax[0].line,
+      lax[0].col,
+    );
+  }
+
+  // 8e (S443 review F3): a gated route whose redirect target is itself 302s to
+  // itself forever. Compare the entry's loginRedirect with the route's own URL
+  // (the page-route pattern for a `pages/`/`routes/` file, else `/<basename>`),
+  // ignoring a trailing `/`, a `.html` suffix and any query/fragment.
+  const normPath = (p: string): string => {
+    let s = p.split(/[?#]/)[0].replace(/\.html$/i, "");
+    if (s.length > 1) s = s.replace(/\/+$/, "");
+    return s.toLowerCase();
+  };
+  for (const [filePath, entry] of authMiddleware) {
+    if (entry.auth !== "required" || !entry.loginRedirect) continue;
+    const norm = filePath.replace(/\\/g, "/");
+    const base = norm.split("/").pop()!.replace(/\.scrml$/, "");
+    const own = new Set<string>();
+    if (findRoutePrefix(norm)) {
+      const pr = pages.get(filePath);
+      if (pr) own.add(normPath(pr.urlPattern));
+    } else {
+      own.add(normPath("/" + base));
+      if (base === "index") own.add("/");
+    }
+    if (!own.has(normPath(entry.loginRedirect))) continue;
+    warn(
+      "W-AUTH-REDIRECT-LOOP",
+      `W-AUTH-REDIRECT-LOOP: this route requires authentication and its unauthenticated requests ` +
+        `are redirected to "${entry.loginRedirect}" — which is this route itself, so an anonymous ` +
+        `visitor is redirected in a loop and never reaches a login form. Give the login page ` +
+        `\`<page auth="optional">\` or \`<page auth="none">\`, or point the <program>'s ` +
+        `loginRedirect= at a page that does. (§52.13)`,
+      filePath,
+      0,
+      0,
+    );
   }
 
   // ------------------------------------------------------------------

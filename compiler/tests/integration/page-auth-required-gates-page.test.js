@@ -232,6 +232,48 @@ describe("§52.13 — emission for a `<page auth=\"required\">` unit", () => {
     expect(serverJs).not.toContain("_scrml_validate_csrf(_scrml_req, _scrml_sessionForCsrf)");
   });
 
+  const codesOf = (r) => [...(r.errors ?? []), ...(r.warnings ?? [])].filter((d) => d && d.code);
+
+  test("W-AUTH-FILE-CONFLICT names both declarations when one file mixes required with a laxer auth=", () => {
+    for (const [label, src] of [
+      ["conflict-a", `<program auth="none">\n<page auth="required">\n<p>x</p>\n</page>\n</program>\n`],
+      ["conflict-b", `<program auth="required">\n<page auth="optional">\n<p>x</p>\n</page>\n</program>\n`],
+    ]) {
+      const { r } = compileOne(label, src, "app.scrml");
+      const w = codesOf(r).filter((d) => d.code === "W-AUTH-FILE-CONFLICT");
+      expect(w.length).toBe(1);
+      expect(w[0].message).toContain(`<page auth=`);
+      expect(w[0].message).toContain(`<program auth=`);
+      expect(w[0].message).toContain("stricter declaration wins");
+    }
+  });
+
+  test("W-AUTH-FILE-CONFLICT does not fire when the declarations agree or there is only one", () => {
+    for (const [label, src, rel] of [
+      ["agree", `<program auth="required">\n<page auth="required">\n<p>x</p>\n</page>\n</program>\n`, "app.scrml"],
+      ["single", SECRET, "pages/secret.scrml"],
+      ["lax-only", `<program auth="none">\n<page auth="optional">\n<p>x</p>\n</page>\n</program>\n`, "app.scrml"],
+    ]) {
+      const { r } = compileOne(label, src, rel);
+      expect(codesOf(r).map((d) => d.code)).not.toContain("W-AUTH-FILE-CONFLICT");
+    }
+  });
+
+  test("W-AUTH-REDIRECT-LOOP fires when a gated page IS the login target, and only then", () => {
+    const loop = compileOne("loop", `<page auth="required">\n<p>x</p>\n</page>\n`, "pages/login.scrml");
+    expect(codesOf(loop.r).map((d) => d.code)).toContain("W-AUTH-REDIRECT-LOOP");
+    const loopProgram = compileOne(
+      "loop-program",
+      `<program auth="required" loginRedirect="/app.html"><p>x</p></program>\n`,
+      "app.scrml",
+    );
+    expect(codesOf(loopProgram.r).map((d) => d.code)).toContain("W-AUTH-REDIRECT-LOOP");
+    const fine = compileOne("no-loop", SECRET, "pages/secret.scrml");
+    expect(codesOf(fine.r).map((d) => d.code)).not.toContain("W-AUTH-REDIRECT-LOOP");
+    const open = compileOne("login-open", `<page auth="none">\n<p>x</p>\n</page>\n`, "pages/login.scrml");
+    expect(codesOf(open.r).map((d) => d.code)).not.toContain("W-AUTH-REDIRECT-LOOP");
+  });
+
   test("a stricter page in the entry file is not shadowed by the program's auth=\"none\"", () => {
     const { serverJs } = compileOne(
       "emit-none-program",
