@@ -2067,9 +2067,10 @@ class FlowAnalysis {
       // A GLOBAL-rooted method (`Date.now()`, `Math.max(…)`, `crypto.randomUUID()`)
       // is a platform API, not a handle into the global heap: aliasing its
       // result to the global cell unified every value near a timestamp with
-      // every global store (measured: 750x slower on examples/23, and false
-      // global-store egresses). A global OBJECT reached by name or member
-      // (`const e = process.env; e.X = h`) still aliases it.
+      // every global store (measured: examples/23 did not finish in 400 s with
+      // it, 0.95 s without). A global OBJECT reached by name or member
+      // (`const e = process.env; e.X = h`) still aliases it. Disclosed in
+      // g-protect-egress-round-7-residuals: `process.env.valueOf().X = h`.
       if (path !== null) aliases.delete(GLOBAL_CELL);
       for (const a of args) for (const x of refsOf(a)) aliases.add(x);
       if (aliases.size > 0) out.refs = aliases;
