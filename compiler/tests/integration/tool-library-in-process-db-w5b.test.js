@@ -80,7 +80,7 @@ describe("W5b — tool imports a db-bound library (in-process `?{}`)", () => {
       expect(libJs).toContain("export async function insertItem");
       expect(libJs).toContain("export async function countItems");
       expect(libJs).toContain("await _scrml_sql`");
-      expect(libJs).toContain('new SQL("sqlite:./w5b.db")');
+      expect(libJs).toContain('new SQL(_scrml_sqlite_file("../w5b.db", "sqlite:./w5b.db"))');
       expect(libJs).not.toContain("= null; // SQL-init");
       // A schema-setup `?{}` fn with no return (flogence's ensureFspSchema shape).
       expect(libJs).toMatch(/export async function ensureSchema\(\) \{\s*await _scrml_sql`CREATE TABLE/);
@@ -91,7 +91,7 @@ describe("W5b — tool imports a db-bound library (in-process `?{}`)", () => {
       expect(toolJs).toMatch(/import \{[^}]*countItems[^}]*\} from "\.\/dblib\.js";/);
       expect(toolJs).toContain("await countItems()");
       // RUN — the imported db fns execute the SQL in-process.
-      rmSync(join(dist, "w5b.db"), { force: true });
+      writeFileSync(join(dir, "w5b.db"), ""); // s445: the declared db (source-dir-relative) must exist — scrml never creates it
       const run = Bun.spawnSync({ cmd: ["bun", "tool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
       expect(run.stderr.toString()).toBe("");
       expect(run.exitCode).toBe(0);
@@ -147,7 +147,7 @@ function main(args: string[]): number {
       expect(libJs).not.toContain("?{`");
       expect(libJs).not.toContain("_={");
       expect(libJs).toContain("export function taskLabel");
-      rmSync(join(dist, "fsp.db"), { force: true });
+      writeFileSync(join(dir, "fsp.db"), ""); // s445: the declared db (source-dir-relative) must exist — scrml never creates it
       const run = Bun.spawnSync({ cmd: ["bun", "fleet.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
       expect(run.stderr.toString()).toBe("");
       expect(run.exitCode).toBe(0);
@@ -177,7 +177,7 @@ await insertItem("x");
 await insertItem("y");
 await insertItem("z");
 console.log("srv count=" + (await countItems()) + " score=" + scoreOf(await countItems()));`);
-      rmSync(join(dist, "w5b.db"), { force: true });
+      writeFileSync(join(dir, "w5b.db"), ""); // s445: the declared db (source-dir-relative) must exist — scrml never creates it
       const run = Bun.spawnSync({ cmd: ["bun", "_consumer.mjs"], cwd: dist, stdout: "pipe", stderr: "pipe" });
       expect(run.stderr.toString()).toBe("");
       expect(run.exitCode).toBe(0);
@@ -311,7 +311,7 @@ function main(args: string[]): number {
       // The tool awaits the transitively-async report().
       const toolJs = readFileSync(join(dist, "ortool.js"), "utf8");
       expect(toolJs).toContain("await report()");
-      rmSync(join(dist, "o.db"), { force: true });
+      writeFileSync(join(dir, "o.db"), ""); // s445: the declared db (source-dir-relative) must exist — scrml never creates it
       const run = Bun.spawnSync({ cmd: ["bun", "ortool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
       expect(run.stderr.toString()).toBe("");
       expect(run.stdout.toString()).toContain("report=2");
@@ -365,7 +365,7 @@ function main(args: string[]): number {
       expect(depJs).toContain('from "./other.js"'); // .scrml → .js rewritten
       const t2Js = readFileSync(join(dist, "t2.js"), "utf8");
       expect(t2Js).toContain("await label(");
-      rmSync(join(dist, "x.db"), { force: true });
+      writeFileSync(join(dir, "x.db"), ""); // s445: the declared db (source-dir-relative) must exist — scrml never creates it
       const run = Bun.spawnSync({ cmd: ["bun", "t2.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
       expect(run.stderr.toString()).toBe("");
       expect(run.stdout.toString()).toContain("label=x:alpha");
@@ -412,7 +412,7 @@ function main(args: string[]): number {
       expect(errCodes(result)).toEqual([]);
       const libJs = readFileSync(join(dist, "elib.js"), "utf8");
       expect(libJs).toContain("export const Status = Object.freeze(");
-      rmSync(join(dist, "e.db"), { force: true });
+      writeFileSync(join(dir, "e.db"), ""); // s445: the declared db (source-dir-relative) must exist — scrml never creates it
       const run = Bun.spawnSync({ cmd: ["bun", "etool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
       expect(run.stderr.toString()).toBe("");
       expect(run.stdout.toString()).toContain("status=Open c=0");

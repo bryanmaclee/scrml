@@ -76,7 +76,7 @@ describe("CONF-W5B-IN-PROCESS-DB-LIBRARY: tool imports a db-bound library", () =
       const libJs = readFileSync(join(dist, "dblib.js"), "utf8");
       expect(libJs).toContain("export async function countItems");
       expect(libJs).toContain("await _scrml_sql`");
-      expect(libJs).toContain('new SQL("sqlite:./conf.db")');
+      expect(libJs).toContain('new SQL(_scrml_sqlite_file("../conf.db", "sqlite:./conf.db"))');
       // NOT the client null-stub.
       expect(libJs).not.toContain("= null; // SQL-init");
       // The tool imports the mapped `.js` module.
@@ -84,7 +84,7 @@ describe("CONF-W5B-IN-PROCESS-DB-LIBRARY: tool imports a db-bound library", () =
       expect(toolJs).toContain('from "./dblib.js"');
 
       // NORMATIVE runtime — the imported SQL executes in-process.
-      rmSync(join(dist, "conf.db"), { force: true });
+      writeFileSync(join(tmpDir, "conf.db"), ""); // s445: the declared db (source-dir-relative) must exist — scrml never creates it
       const run = Bun.spawnSync({ cmd: ["bun", "tool.js"], cwd: dist, stdout: "pipe", stderr: "pipe" });
       expect(run.stderr.toString()).toBe("");
       expect(run.exitCode).toBe(0);

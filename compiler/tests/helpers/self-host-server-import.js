@@ -5,7 +5,7 @@
  * WHY THIS EXISTS (Windows EBUSY teardown flake)
  * ------------------------------------------------
  * A compiled scrml server module declares, at module top-level,
- *   `const _scrml_sql = new SQL("sqlite:<file>")`
+ *   `const _scrml_sql = new SQL(_scrml_sqlite_file("<file>", …))`
  * (a Bun.SQL handle) and — correctly, for a long-lived server — never closes
  * it. When a test dynamic-imports such a module, that connection opens an OS
  * handle on the `.db` file and holds it for the lifetime of the test PROCESS.
@@ -31,31 +31,55 @@
  */
 
 import { readFileSync, writeFileSync, rmSync, existsSync } from "fs";
+import { resolve } from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 
 // Every cache-busted `import()` yields a FRESH module instance holding a FRESH
 // open SQL handle, so we must track and close each one — not just the last.
 const _openModules = new Set();
 
 /**
- * Rewrite the emitted relative SQLite connection string to an absolute path
- * (so the runtime queries hit the seeded test DB regardless of CWD), append a
- * disposal hook that closes the module's `_scrml_sql` handle, dynamic-import
- * the module (cache-busted → fresh in-process handle), register it for later
- * cleanup, and return it.
+ * s445 — assert that the compiled module at `serverJsPath` opens exactly
+ * `absDbPath` through its `_scrml_sqlite_file` handle (the specifier resolved
+ * against the module's own URL, as the emitted helper does at load time). Replaces
+ * the old test-side rewrite of a CWD-relative `sqlite:` literal: a regression to a
+ * CWD-relative (or any other) path fails here instead of opening another file.
  *
- * The connection rewrite is byte-identical to the bespoke `.replace(...)` the
- * affected tests previously inlined.
+ * @param {string} serverJsPath  Absolute path to the compiled module.
+ * @param {string} absDbPath     Absolute path of the database it must open.
+ */
+export function assertOpensDb(serverJsPath, absDbPath) {
+  const text = readFileSync(serverJsPath, "utf-8");
+  const m = /const _scrml_sql = new SQL\(_scrml_sqlite_file\(("(?:[^"\\]|\\.)*")/.exec(text);
+  if (!m) throw new Error(`assertOpensDb: ${serverJsPath} has no _scrml_sqlite_file handle`);
+  const opens = fileURLToPath(new URL(JSON.parse(m[1]), pathToFileURL(serverJsPath)));
+  if (resolve(opens) !== resolve(absDbPath)) {
+    throw new Error(`assertOpensDb: ${serverJsPath} opens ${opens}, not ${absDbPath}`);
+  }
+}
+
+/**
+ * Append a disposal hook that closes the module's `_scrml_sql` handle,
+ * dynamic-import the module (cache-busted → fresh in-process handle), register
+ * it for later cleanup, and return it.
+ *
+ * s445 — this used to REWRITE the emitted `new SQL("sqlite:./items.db")` literal
+ * to the seeded file's absolute path, because that literal was opened relative
+ * to the test process's CWD. The emitted handle now names the database relative
+ * to the DECLARING .scrml file (the file the compiler read), anchored at the
+ * module itself, so no rewrite is needed — and this helper instead ASSERTS that
+ * the module opens exactly `absDbPath`, so a regression to a CWD-relative (or
+ * any other) path fails here rather than quietly opening another file.
  *
  * @param {string} serverJsPath  Absolute path to the compiled `.server.js`.
  * @param {string} absDbPath     Absolute path to the seeded SQLite file.
  * @returns {Promise<object>}    The imported module namespace.
  */
 export async function patchAndImport(serverJsPath, absDbPath) {
-  const patched =
-    readFileSync(serverJsPath, "utf-8").replace(
-      'const _scrml_sql = new SQL("sqlite:./items.db");',
-      `const _scrml_sql = new SQL(${JSON.stringify("sqlite:" + absDbPath)});`,
-    ) + `\nexport const __closeSql = async () => { await _scrml_sql.close(); };\n`;
+  const text = readFileSync(serverJsPath, "utf-8");
+  // A module whose program never reaches the database declares no handle at all.
+  if (/const _scrml_sql = new SQL\(/.test(text)) assertOpensDb(serverJsPath, absDbPath);
+  const patched = text + `\nexport const __closeSql = async () => { await _scrml_sql.close(); };\n`;
   writeFileSync(serverJsPath, patched);
 
   const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);

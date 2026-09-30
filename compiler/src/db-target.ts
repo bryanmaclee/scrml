@@ -6,6 +6,8 @@
  * builds `resolveDbDriver` on it. Pure: no I/O.
  */
 
+import { resolve as resolvePath, dirname as dirnamePath } from "node:path";
+
 /**
  * THE classifier for a `db=` / `<db src=>` value (s430-dev-db-stub R2-1). Both
  * `resolveDbDriver` (codegen) and the protect-analyzer (compile-time schema
@@ -69,3 +71,38 @@ export function isDriverConnectionUri(raw: string): boolean {
   return k === "postgres" || k === "mysql";
 }
 
+
+/**
+ * THE resolver for a database FILE target (s445-dev-db-side-file) — the one place
+ * a `db=` / `<db src=>` value becomes an absolute filesystem path.
+ *
+ * A relative SQLite path is resolved against the directory of the SOURCE FILE THAT
+ * DECLARES IT — never against the process working directory. Two consumers call
+ * this and nothing else, so they cannot disagree about which file a value names:
+ *
+ *   - the compile-time schema read (`protect-analyzer.ts`, E-PA-002/003/004), and
+ *   - the emitted runtime handle (`codegen/sqlite-file-target.ts`, reached from
+ *     `emit-server.ts` and `emit-tool.ts`), which writes this same absolute path
+ *     into the server/tool module RELATIVE TO THE MODULE ITSELF, so `scrml dev`,
+ *     `scrml serve`, a built `_server.js` and a `kind="tool"` binary all open the
+ *     file the compiler checked, whatever directory the process was started in.
+ *
+ * Before this existed the two halves used different bases (compile: the source
+ * file's directory; runtime: the process CWD, via a literal re-relativized to the
+ * compile unit's output base), so `scrml dev` opened — and SQLite CREATED — an
+ * empty file the compiler never looked at, or one it did look at and then
+ * reported every declared table missing from (flogence S49/S51).
+ *
+ * SPEC is silent on the resolution base (§8.1.1 / §44.2 only say a plain path is
+ * `sqlite:`-prefixed); the declaring-file base is the one the compiler has always
+ * used for the schema read and that E-PA-004 names, and it matches how every other
+ * relative reference in a `.scrml` file resolves (§21 imports).
+ *
+ * `cls.sqlitePath` is the path with any `sqlite:` prefix removed; for a target the
+ * classifier does not call a sqlite file the trimmed value is resolved as-is, which
+ * reproduces the schema read's pre-existing behaviour for those kinds exactly.
+ * Pure: path arithmetic only, no filesystem access.
+ */
+export function resolveDbFilePath(cls: DbTargetClass, declaringSourceFile: string): string {
+  return resolvePath(dirnamePath(declaringSourceFile), cls.sqlitePath ?? cls.trimmed);
+}

@@ -100,7 +100,8 @@ function clientRenderedLints(errors) {
 async function composeFirstPaint(serverJs, html, dbRows) {
   const runnable = serverJs
     .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
-    .replace(/^\s*const _scrml_sql = new SQL\([^)]*\);\s*$/m, "")
+    .replace(/^\s*import\s+\{\s*existsSync as _scrml_db_file_exists\s*\}\s+from\s+"node:fs";\s*$/m, "")
+    .replace(/^\s*const _scrml_sql = new SQL\(.*\);\s*$/m, "")
     .replace(/^export\s+/gm, "")
     .replace(/import\.meta\.url/g, JSON.stringify("file:///app.scrml"));
   const _scrml_sql = () => Promise.resolve(dbRows.map((r) => ({ ...r })));

@@ -78,7 +78,9 @@ const PROBE = `
 import { Database } from "bun:sqlite";
 const outDir = process.argv[2];
 process.chdir(outDir);
-const db = new Database("c.db"); db.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); db.close();
+// db="./c.db" names the file beside app.scrml (s445: the declaring file's
+// directory, i.e. outDir/..), and the server never creates it — seed it first.
+const db = new Database("../c.db"); db.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); db.close();
 const store = (globalThis.__scrml_session_store ??= new Map());
 store.set("sid-alice", { userId: 1, role: "user" });
 const mod = await import(outDir + "/app.server.js");
@@ -94,7 +96,7 @@ const send = () => fetch(url, { method: "POST", headers: { "Content-Type": "appl
 let c = await send();
 const clientFirst = c.status;
 if (c.status === 403) { tok = ((c.headers.get("set-cookie") || "").match(/scrml_csrf=([^;]+)/) || [])[1] || ""; c = await send(); }
-const rows = new Database("c.db").query("SELECT body FROM notes ORDER BY id").all().map((r) => r.body);
+const rows = new Database("../c.db").query("SELECT body FROM notes ORDER BY id").all().map((r) => r.body);
 server.stop(true);
 console.log(JSON.stringify({ forged: forged.status, clientFirst, clientFinal: c.status, rows }));
 `;
@@ -193,6 +195,8 @@ describe("runtime over HTTP — the default fails closed", () => {
 const DOC_PROBE = `
 const [outDir, devJs] = process.argv.slice(2);
 process.chdir(outDir);
+// The declared db (beside app.scrml — s445) must exist: the server never creates it.
+{ const { Database } = await import("bun:sqlite"); new Database("../c.db").close(); }
 const store = (globalThis.__scrml_session_store ??= new Map());
 store.set("sid-alice", { userId: 1, role: "user" });
 const mod = await import(outDir + "/app.server.js");
@@ -262,7 +266,7 @@ describe("§52.13 — the csrf=\"auto\" compose route is a document request and 
 const RETRY_PROBE = `
 const [outDir, mode] = process.argv.slice(2);
 process.chdir(outDir);
-{ const { Database } = await import("bun:sqlite"); const d = new Database("c.db"); d.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); d.close(); }
+{ const { Database } = await import("bun:sqlite"); const d = new Database("../c.db"); d.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); d.close(); }
 const store = (globalThis.__scrml_session_store ??= new Map());
 store.set("sid-bob", { userId: 2, role: "user" });
 const mod = await import(outDir + "/app.server.js");

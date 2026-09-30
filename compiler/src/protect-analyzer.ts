@@ -64,7 +64,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
 import { redactDbUri } from "./db-uri-redact.ts";
 import { displayConnectionValue } from "./diagnostic-secrets.ts";
-import { classifyDbTarget, type DbTargetClass } from "./db-target.ts";
+import { classifyDbTarget, resolveDbFilePath, type DbTargetClass } from "./db-target.ts";
 // Import-free by construction (it takes an already-open handle, duck-typed on `.run`), so it
 // cannot drag `bun:sqlite`/`node:fs` into a stage that avoids them — and it is NOT a codegen
 // module, which this stage deliberately does not pull (see the schema-differ.js note below).
@@ -342,8 +342,9 @@ export function describeDbSource(
   const emptyDetail = isEmpty
     ? `That database is EMPTY — it has no tables or views at all (the file is ${sizeText}). An empty ` +
       `database is usually a stub created as a side effect when some other process (for ` +
-      `example a running server that resolves the same relative path from a different ` +
-      `working directory) opened this path before a real database existed there. If your ` +
+      `example a server built by an older scrml, or another tool, resolving the same ` +
+      `relative path from a different working directory) opened this path before a real ` +
+      `database existed there — a current scrml server never creates its database. If your ` +
       `real database lives elsewhere, delete this file and point \`src=\` at the real one. `
     : "";
   return {
@@ -1248,7 +1249,9 @@ function processDbBlock(
     // Use the (trimmed) URI as the cache key — no path resolution.
     dbPath = srcClass.trimmed;
   } else {
-    const resolvedRaw = resolve(sourceDir, srcClass.sqlitePath ?? srcClass.trimmed);
+    // s445 — THE shared resolver (db-target.ts): the emitted runtime handle opens
+    // exactly this path, so the schema read and the running server never disagree.
+    const resolvedRaw = resolveDbFilePath(srcClass, filePath);
 
     // realpathSync resolves symlinks to a canonical path. We only call it if
     // the file exists; if it doesn't exist, resolveDb() handles the missing case.

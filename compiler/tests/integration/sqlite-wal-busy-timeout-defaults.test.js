@@ -114,7 +114,8 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     const { errors, serverJs } = build("emit");
     expect(nonWarn(errors)).toEqual([]);
 
-    expect(serverJs).toContain('const _scrml_sql = new SQL("sqlite:./m.db")');
+    // s445 — a SQLite file opens through `_scrml_sqlite_file` (declaring-file-relative, never created).
+    expect(serverJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*m\.db", "\.\/m\.db"\)\);/);
     expect(serverJs).toContain("function _scrml_sqlite_configure(_h)");
     expect(serverJs).toContain("PRAGMA journal_mode = WAL");
     expect(serverJs).toContain("PRAGMA busy_timeout = 5000");
@@ -157,7 +158,8 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     // does. This fails loudly the moment anything reintroduces top-level await.
     const runnable = serverJs
       .replace(/^\s*import\s+\{\s*SQL\s*\}\s+from\s+"bun";\s*$/m, "")
-      .replace(/^\s*const _scrml_sql = new SQL\([^)]*\);\s*$/m, "")
+      .replace(/^\s*import\s+\{\s*existsSync as _scrml_db_file_exists\s*\}\s+from\s+"node:fs";\s*$/m, "")
+      .replace(/^\s*const _scrml_sql = new SQL\(.*\);\s*$/m, "")
       .replace(/^export\s+/gm, "")
       .replace(/import\.meta\.url/g, JSON.stringify("file:///case.scrml"));
     expect(runnable).toContain("_scrml_sqlite_configure");
@@ -172,7 +174,9 @@ describe("§44 — a file-backed sqlite handle gets WAL + a 5s busy-timeout by d
     expect(before.query("PRAGMA journal_mode").get().journal_mode).toBe("delete");
     before.close();
 
-    // The emitted handle is `sqlite:./m.db` — CWD-relative at runtime.
+    // (s445: the handle is resolved against the module, not the CWD — the chdir is
+    // kept only so this test does not depend on that property; see
+    // compiler/tests/integration/dev-db-no-side-file.test.js for the test that does.)
     const cwd = process.cwd();
     try {
       process.chdir(root);
@@ -304,7 +308,7 @@ function main(args: string[]) -> number {
   test("the emitted tool module carries the configure block and AWAITS it", () => {
     const { errors, toolJs } = buildTool("tool-emit");
     expect(nonWarn(errors)).toEqual([]);
-    expect(toolJs).toContain('const _scrml_sql = new SQL("sqlite:./app.db")');
+    expect(toolJs).toMatch(/const _scrml_sql = new SQL\(_scrml_sqlite_file\("[^"]*app\.db", "\.\/app\.db"\)\);/);
     expect(toolJs).toContain("PRAGMA busy_timeout = 5000");
     expect(toolJs).toContain("PRAGMA journal_mode = WAL");
     // AWAITED, not floating: the §64.3 harness ends with `process.exit(code)`, a hard
@@ -337,8 +341,8 @@ function main(args: string[]) -> number {
     await lock.stdout.getReader().read(); // LOCKED
 
     const t0 = Date.now();
-    // Run the emitted tool as a REAL process, from the project root (its handle is
-    // `sqlite:./app.db`, CWD-relative).
+    // Run the emitted tool as a REAL process, from the project root (its handle names
+    // `./app.db` relative to app.scrml — s445, independent of the CWD).
     const proc = Bun.spawn(["bun", toolPath], { cwd: root, stdout: "pipe", stderr: "pipe" });
     const stdout = await new Response(proc.stdout).text();
     const exitCode = await proc.exited;

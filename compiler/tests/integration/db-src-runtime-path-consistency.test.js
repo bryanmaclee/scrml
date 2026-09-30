@@ -14,15 +14,20 @@
  * opens `../m.db` (= the PARENT of the project root — a different, empty file)
  * -> "no such table".
  *
- * FIX. emit-server.ts now expresses the emitted SQLite FILE path relative to the
- * project root (outputBaseDir = the runtime cwd) for any source file NOT at the
- * project root. A root-level file keeps its verbatim `src=` (the common single-
- * dir case is byte-identical). After the fix both files resolve to <root>/m.db
- * from the project root.
+ * FIX (ss19 #9) re-relativized the literal to the project root, which only works
+ * when the process is STARTED in the project root.
+ *
+ * s445 (dev-db-side-file) replaced that: every emitted handle names the file the
+ * compiler resolved (the declaring file's directory), written RELATIVE TO THE
+ * EMITTED MODULE and opened via `_scrml_sqlite_file` without `create`. Both
+ * modules now open <root>/m.db from ANY working directory — asserted below by
+ * resolving each module's specifier against that module's own URL, and by
+ * running the page's route from an unrelated CWD.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { tmpdir } from "node:os";
 import { resolve, dirname, join } from "path";
 import { writeFileSync, rmSync, existsSync, mkdirSync, readFileSync } from "fs";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
@@ -63,6 +68,13 @@ const LOGIN_SRC = `<page auth="optional">
   </>
 </page>`;
 
+/** The absolute file an emitted module's SQLite handle opens (resolved against the module). */
+function opensFile(serverPath, js) {
+  const m = /new SQL\(_scrml_sqlite_file\(("(?:[^"\\]|\\.)*")/.exec(js);
+  if (!m) throw new Error("no _scrml_sqlite_file handle in " + serverPath);
+  return fileURLToPath(new URL(JSON.parse(m[1]), pathToFileURL(serverPath)));
+}
+
 /** Build a multi-dir project (app at root + pages/login) and compile it. */
 function buildProject() {
   const root = resolve(TMP_ROOT, `proj-${++counter}`);
@@ -91,8 +103,8 @@ function buildProject() {
 }
 
 describe("ss19 #9 — db src= emits a runtime-consistent path across directories", () => {
-  test("subdir page + root entry emit paths that resolve to the SAME db from the project root", () => {
-    const { errors, appServer, loginServer } = buildProject();
+  test("subdir page + root entry both open the SAME db — the one the compiler read", () => {
+    const { errors, root, appServer, loginServer } = buildProject();
     expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
     expect(existsSync(appServer)).toBe(true);
     expect(existsSync(loginServer)).toBe(true);
@@ -100,21 +112,16 @@ describe("ss19 #9 — db src= emits a runtime-consistent path across directories
     const appJs = readFileSync(appServer, "utf-8");
     const loginJs = readFileSync(loginServer, "utf-8");
 
-    // Root entry: verbatim src (no churn for files at the project root).
-    expect(appJs).toContain('new SQL("sqlite:./m.db")');
-    // Subdir page: re-relativized to the project root, NOT the file-relative
-    // `../m.db` (which would climb OUT of the project root at runtime).
-    expect(loginJs).toContain('new SQL("sqlite:m.db")');
-    expect(loginJs).not.toContain('new SQL("sqlite:../m.db")');
-
-    // The invariant: from cwd = project root, both literals resolve to the same
-    // absolute file.
-    const appConn = appJs.match(/new SQL\("sqlite:([^"]+)"\)/)[1];
-    const loginConn = loginJs.match(/new SQL\("sqlite:([^"]+)"\)/)[1];
-    expect(resolve("/proj", appConn)).toBe(resolve("/proj", loginConn));
+    // No CWD-relative `sqlite:` literal survives in either module.
+    expect(appJs).not.toContain('new SQL("sqlite:');
+    expect(loginJs).not.toContain('new SQL("sqlite:');
+    // The invariant: each module's handle, resolved against the module itself,
+    // is the seeded <root>/m.db — the file both `src=` values name.
+    expect(opensFile(appServer, appJs)).toBe(join(root, "m.db"));
+    expect(opensFile(loginServer, loginJs)).toBe(join(root, "m.db"));
   });
 
-  test("runtime: the subdir page opens the seeded db when run from the project root", async () => {
+  test("runtime: the subdir page opens the seeded db from an UNRELATED working directory", async () => {
     // happy-dom-polluted globals strip CSRF headers (see sql-server-fn-runtime).
     if (typeof globalThis.document !== "undefined") return;
 
@@ -122,7 +129,7 @@ describe("ss19 #9 — db src= emits a runtime-consistent path across directories
     expect(errors.filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
 
     const cwdBefore = process.cwd();
-    process.chdir(root); // run from the project root, like a deployed app
+    process.chdir(tmpdir()); // NOT the project root: the CWD must play no part (s445)
     try {
       const mod = await import(`file://${loginServer}?v=${Date.now()}-${Math.random()}`);
       const route = Object.values(mod).find(
@@ -146,7 +153,7 @@ describe("ss19 #9 — db src= emits a runtime-consistent path across directories
     }
   });
 
-  test("single-dir project: a root-level db src is emitted verbatim (no churn)", () => {
+  test("single-dir project: the root-level db opens beside app.scrml, module-relative", () => {
     const root = resolve(TMP_ROOT, `single-${++counter}`);
     mkdirSync(root, { recursive: true });
     const appPath = join(root, "app.scrml");
@@ -158,7 +165,8 @@ describe("ss19 #9 — db src= emits a runtime-consistent path across directories
     const result = compileScrml({ inputFiles: [appPath], write: true, outputDir: outDir });
     expect((result.errors ?? []).filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
     const appJs = readFileSync(join(outDir, "app.server.js"), "utf-8");
-    // Verbatim — the single-dir case must be byte-identical to pre-fix emission.
-    expect(appJs).toContain('new SQL("sqlite:./m.db")');
+    // dist/app.server.js -> ../m.db = <root>/m.db (the declaring file's directory).
+    expect(appJs).toContain('new SQL(_scrml_sqlite_file("../m.db", "./m.db"))');
+    expect(opensFile(join(outDir, "app.server.js"), appJs)).toBe(join(root, "m.db"));
   });
 });

@@ -25,6 +25,7 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
+import { sqliteFileHandleArg, SQLITE_FILE_HELPER_IMPORT, SQLITE_FILE_HELPER_LINES } from "./sqlite-file-target.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
@@ -6810,8 +6811,9 @@ export function generateServerJs(
   // already start with `sqlite:`, prepend `sqlite:` before passing to
   // `new SQL(...)`. Postgres / MySQL strings have explicit `postgres://` /
   // `mysql://` prefixes (per `db-driver.ts`) and pass through verbatim.
-  // For SQLite relative paths (e.g. `./contacts.db`) resolution is
-  // relative to CWD at runtime; this matches typical Bun.SQL usage.
+  // A SQLite FILE (e.g. `./contacts.db`) does NOT go through a `sqlite:` literal:
+  // it is resolved against the declaring source file's directory — never the
+  // runtime CWD — and opened without `create` (s445; codegen/sqlite-file-target.ts).
   const sqlIdentRe = /\b_scrml_sql(?:_\d+)?\b/g;
   const usedIdents = new Set<string>();
   let _m: RegExpExecArray | null;
@@ -6837,6 +6839,10 @@ export function generateServerJs(
     declLines.push("");
     declLines.push("// --- Bug 3a (§44.2): Bun.SQL handle declarations (compiler-generated) ---");
     declLines.push("import { SQL } from \"bun\";");
+    // s445 — where the SQLite-file helper (and its `node:fs` import) is spliced in,
+    // once the loop below has seen a file-backed handle that needs it.
+    const sqliteFileHelperAt = declLines.length;
+    let sqliteFileHandles = false;
     // Emit declarations in stable order: default `_scrml_sql` first, then
     // scoped `_scrml_sql_<n>` ascending. The declaration order must precede
     // any code that references the handle (the idempotency / structural-eq
@@ -6896,41 +6902,37 @@ export function generateServerJs(
         declLines.push(`const ${ident} = new SQL(":memory:");`);
         continue;
       }
-      // SQLite paths require `sqlite:` prefix or Bun.SQL defaults to
-      // postgres at module init (see comment block above).
+      // s445-dev-db-side-file — a SQLite FILE opens through `_scrml_sqlite_file`
+      // (codegen/sqlite-file-target.ts): the path the compile-time schema read
+      // resolved (the declaring file's directory — db-target.ts `resolveDbFilePath`),
+      // written relative to THIS module and opened without `create`. It replaces the
+      // ss19 #9 literal, which was re-relativized to the compile unit's output base
+      // and then opened CWD-relative — so `scrml dev` started from any other
+      // directory, or an artifact left by an earlier compile with a different base,
+      // made SQLite create an empty database where nobody (or only the compiler)
+      // looked. Every file-backed handle gets the §44 WAL/busy-timeout defaults.
+      const fileArg = scope.driver === "sqlite"
+        ? sqliteFileHandleArg(
+            scope.connectionString,
+            typeof filePath === "string" ? filePath : "",
+            (fileAST as any)._outputDir,
+            (fileAST as any)._outputBaseDir,
+          )
+        : null;
+      if (fileArg !== null) {
+        sqliteFileHandles = true;
+        declLines.push(`const ${ident} = new SQL(${fileArg});`);
+        sqliteConfiguredIdents.push(ident);
+        continue;
+      }
+      // `:memory:` and the network drivers. SQLite needs the `sqlite:` prefix or
+      // Bun.SQL defaults to postgres at module init (see comment block above).
       let connStr = scope.connectionString;
       if (
         scope.driver === "sqlite" &&
         !connStr.startsWith("sqlite:") &&
         connStr !== ":memory:"
       ) {
-        // ss19 #9 (g-db-src-compile-vs-runtime-path) — express the emitted path
-        // relative to the project root (the runtime cwd) so every source file
-        // that references the SAME physical db emits the SAME runtime path. The
-        // compiler resolves `src=` file-relative (protect-analyzer), but the
-        // emitted `sqlite:` literal is opened CWD-relative at runtime — so a
-        // <page> in a subdir (`src="../m.db"`) opened a DIFFERENT file than the
-        // root entry (`src="./m.db"`) when both run from the project root →
-        // "no such table". We re-relativize ONLY for files NOT at the project
-        // root; a root-level file keeps its verbatim src (the common single-dir
-        // case stays byte-identical). `relative(root, absDb)` always yields a
-        // path that, from cwd=root, resolves to absDb (a leading `..` for an
-        // out-of-root db is correct, matching the file-relative resolution).
-        const _baseDir = (fileAST as any)._outputBaseDir;
-        if (
-          typeof _baseDir === "string" && _baseDir.length > 0 &&
-          typeof filePath === "string" && filePath.length > 0
-        ) {
-          const _resolvedBase = _pathResolve(_baseDir);
-          const _sourceDir = _pathDirname(_pathResolve(filePath));
-          if (_sourceDir !== _resolvedBase) {
-            const _absDb = _pathResolve(_sourceDir, connStr);
-            const _relToRoot = _pathRelative(_resolvedBase, _absDb);
-            if (_relToRoot.length > 0) {
-              connStr = _relToRoot.replace(/\\/g, "/");
-            }
-          }
-        }
         connStr = "sqlite:" + connStr;
       }
       declLines.push(`const ${ident} = new SQL(${JSON.stringify(connStr)});`);
@@ -6943,6 +6945,9 @@ export function generateServerJs(
       if (sqliteWantsDefaults(scope.driver, connStr)) {
         sqliteConfiguredIdents.push(ident);
       }
+    }
+    if (sqliteFileHandles) {
+      declLines.splice(sqliteFileHelperAt, 0, SQLITE_FILE_HELPER_IMPORT, "", ...SQLITE_FILE_HELPER_LINES, "");
     }
     // §44 (S433) — SQLITE DURABILITY / CONCURRENCY DEFAULTS. The full rationale, the
     // measurements, and the three traps (constructor options are ignored; the `await` is

@@ -330,7 +330,11 @@ describe("§J multi-scope: both _scrml_sql_1 and _scrml_sql_2 produce decls when
 });
 
 describe("§K SQLite path normalization — sqlite: prefix added when missing", () => {
-  test("bare relative path gets sqlite: prefix", () => {
+  // s445 — a SQLite FILE no longer rides a `sqlite:` literal (opened CWD-relative,
+  // created on open). It opens through `_scrml_sqlite_file`, resolved against the
+  // declaring file's directory; with no output dir threaded (a direct
+  // generateServerJs call) the specifier is the file's absolute `file:` URL.
+  test("bare relative path opens the declaring-file-relative file, never CWD-relative", () => {
     const dbBlock = makeDbStateNode("./testdb.db");
     const fnNode = makeServerFn("getAll", [
       makeSqlNode("SELECT 1"),
@@ -351,9 +355,9 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
     });
     const ast = makeFileAST([programNode]);
     const serverJs = generateServerJs(ast, { functions: fnRouteMap }, [], null, null);
-    if (serverJs.includes("new SQL(")) {
-      expect(serverJs).toContain('new SQL("sqlite:./testdb.db")');
-    }
+    expect(serverJs).toContain('new SQL(_scrml_sqlite_file("file:///test/testdb.db", "./testdb.db"))');
+    expect(serverJs).not.toContain('"sqlite:./testdb.db"');
+    expect(serverJs).toContain('return { adapter: "sqlite", filename, create: false, readwrite: true };');
   });
 
   test(":memory: passes through WITHOUT sqlite: prefix (Bun.SQL recognizes it)", () => {

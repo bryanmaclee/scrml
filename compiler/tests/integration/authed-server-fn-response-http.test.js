@@ -58,6 +58,7 @@ import { perRunTmp } from "../helpers/per-run-tmp.js";
 import { Database } from "bun:sqlite";
 import { parse as acornParse } from "acorn";
 import { compileScrml } from "../../src/api.js";
+import { assertOpensDb } from "../helpers/self-host-server-import.js";
 
 const testDir = dirname(fileURLToPath(new URL(import.meta.url)));
 // A FRESH directory per run (S438) — see helpers/per-run-tmp.js: a fixed path left
@@ -90,17 +91,10 @@ function compile(scrmlSource, tagBase) {
 
   const result = compileScrml({ inputFiles: [tmpInput], write: true, outputDir: outDir });
   const serverJsPath = join(outDir, `${tag}.server.js`);
-  // The emitted handle is `new SQL("sqlite:./items.db")`, relative to CWD —
-  // rewrite to the absolute seeded file so the module resolves it wherever the
-  // suite runs from. (Same rewrite the sibling auth round-trips perform.)
-  if (existsSync(serverJsPath)) {
-    writeFileSync(
-      serverJsPath,
-      readFileSync(serverJsPath, "utf-8").replace(
-        'const _scrml_sql = new SQL("sqlite:./items.db");',
-        `const _scrml_sql = new SQL(${JSON.stringify("sqlite:" + dbPath)});`,
-      ),
-    );
+  // s445: the module opens the seeded file itself (declaring-file-relative, CWD-independent) — assert it.
+  // (A program that never reaches the database declares no handle to check.)
+  if (existsSync(serverJsPath) && readFileSync(serverJsPath, "utf-8").includes("new SQL(")) {
+    assertOpensDb(serverJsPath, dbPath);
   }
   return {
     errors: (result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? "")),

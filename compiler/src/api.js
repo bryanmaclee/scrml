@@ -2885,6 +2885,9 @@ function _compileScrmlImpl(options = {}) {
     // dependency <script> tags.
     importGraph: moduleResult.importGraph,
     outputBaseDir: cgOutputBaseDir,
+    // s445-dev-db-side-file — the write root, so emitted SQLite handles are
+    // anchored at their own module's location (codegen/sqlite-file-target.ts).
+    outputDir,
     // A-2.1 — pass Stage 7.6 ReachabilityRecord. Empty at A-2.1; consumed
     // by A-4 codegen wave once A-2.2..A-2.7 land the closure analysis.
     reachabilityRecord: rsResult.record,
