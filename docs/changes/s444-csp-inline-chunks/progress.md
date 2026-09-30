@@ -18,4 +18,5 @@
   - gate: 26792 pass / 72 skip / 0 fail.
 - [gaps] §S444e: resolved g-emit-per-route-inline-chunk-scripts-refused-under-strict-csp;
   filed (open, LOW) g-chunk-bootstrap-anonymous-fallback-misses-role-enum-anonymous-key.
-- [R26] corpus-emit-differential examples,samples base a83fd90ac vs head — see below.
+- [R26] corpus-emit-differential --roots examples,samples: base a83fd90ac (git-archive extract, so the tool flags provenance "unknown") vs head 890051c10 — 948/948 sources, compile outcomes identical (731 ok / 217 fail both), 4470/4470 artifacts byte-identical, syntax-failure set identical (26/26). Expected: --emit-per-route is opt-in and no corpus build uses it; the changed path is covered by tests + the Chromium probe.
+- [tests] top-level compiler/tests/*.test.js: 6384 pass / 15 skip / 0 fail. browser-navigate-cross-chunk: 3 fails, IDENTICAL on base a83fd90ac (pre-existing, not per-route related).
