@@ -1616,11 +1616,18 @@ ${
     // declaration itself and on every child field, at any depth.
     fn o19Diags(file: string, d: ADecl, st0: AS) -> AS {
         let st: AS = st0
-        if (hasOwnValue(d.own) && d.attrs.length > 0) {
-            st = addDiag(st, file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ">` has an own value AND attributes — what `@" + d.name + "` then names is ⚑ O19 (not ruled); the bootstrap does not decide it")
+        // r3: an own TYPE with no initializer (`<c:int s:int=7/>`) is an own value too
+        if ((hasOwnValue(d.own) || hasOwnType(d)) && d.attrs.length > 0) {
+            st = addDiag(st, file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ">` has an own value (or an own type) AND attributes — what `@" + d.name + "` then names is ⚑ O19 (not ruled); the bootstrap does not decide it")
         }
         for (const c of childFields(d.body)) { st = o19Diags(file, c, st) }
         return st
+    }
+
+    // A declared own type other than the `:struct` container marker (§66.2.2).
+    fn hasOwnType(d: ADecl) -> boolean {
+        if (d.ty is not) return false
+        return ownTypeName(d) != "struct"
     }
 
     fn hasOwnValue(v: AAttrValue) -> boolean {
@@ -3303,6 +3310,11 @@ ${
         if (p is not) return st
         st = writeGuards(env, p, m.obj.span, st)
         const f: FieldInfo = p.decl.fields[p.idx]
+        if (p.path.length > 0) {
+            // r3: a removal on a sub-field sequence is judged by THAT field's grants (dpa-052 Q6,
+            // the deepest field written) — not tracked here; refused, as `.push` on one is
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + placeKey(m.obj) + "." + m.method + "()` — an edit of a sub-field sequence is not in bootstrap slice M2 (it would be judged by that field's own grants, dpa-052 Q6)")
+        }
         let place: SeqAt = SeqAt.Front
         let what: string = "a removal at the front (the `shift` grant)"
         if (m.method == "pop") {
@@ -3311,12 +3323,14 @@ ${
         }
         // RULED S442: a removal needs a SHRINK grant there (or `remove`), never the grow grant
         const isGranted: boolean = f.grants.replace || shrinkGranted(f.shrink, place)
+        // r3 nit: messages name the place written (`@r.xs`), not only its field (`@r`)
+        const at: string = placeKey(m.obj)
         if (!isGranted) {
-            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`@" + f.sym.hint + "." + m.method + "()` is " + what + ", which `" + f.sym.hint + "`'s type does not grant (§66.12.2)")
+            return addDiag(st, env.file, e.span, "E-WRITE-NOT-GRANTED", "`" + at + "." + m.method + "()` is " + what + ", which `" + at + "`'s type does not grant (§66.12.2)")
         }
         // r2 N2 (F7's mirror): a removal SHRINKS — impossible on a fixed-length sequence
-        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedShrinkMessage(f.sym.hint, what))
-        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`@" + f.sym.hint + "." + m.method + "()` is granted, but Core has no removal edit to lower it with (core.scrml EditKind)")
+        if (growsFixed(p.ty)) return addDiag(st, env.file, e.span, "E-WRITE-INVARIANT", fixedShrinkMessage(at.substring(1), what))
+        return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`" + at + "." + m.method + "()` is granted, but Core has no removal edit to lower it with (core.scrml EditKind)")
     }
 
     // `@xs[i].f = v` (dpa-052 Q3, RULED S440): an edit of field `f` at that
