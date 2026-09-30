@@ -637,6 +637,17 @@ const MUTATIONS = [
     from: "        if (p.path.length > 0) {\n            // r3: a removal", to: "        if (false) {\n            // r3: a removal", tests: [T4("review-r3.test.js")] },
   { id: "s442 r3: the sub-field removal message names the containing field (`@r`)", file: `${SH}/analyze.scrml`,
     from: "\"`\" + placeKey(m.obj) + \".\" + m.method + \"()` — an edit of a sub-field", to: "\"`@\" + f.sym.hint + \".\" + m.method + \"()` — an edit of a sub-field", tests: [T4("review-r3.test.js")] },
+  // ---- s444 (PA addition): two fail-open shapes now fail closed ----
+  { id: "s444 PA: a scrml structural element falls through to MHtml (rendered as markup, no diagnostic)", file: `${SH}/analyze.scrml`,
+    from: "        if (owner != \"\") {\n            return addDiag(st, env.file, e.span, \"E-BOOTSTRAP-UNSUPPORTED\"", to: "        if (false) {\n            return addDiag(st, env.file, e.span, \"E-BOOTSTRAP-UNSUPPORTED\"", tests: [T4("failclosed.test.js")] },
+  { id: "s444 PA: `<request>` dropped from the structural registry", file: `${SH}/analyze.scrml`,
+    from: "            \"request\"       :> \"§6.7.7 async request\"\n", to: "", tests: [T4("failclosed.test.js")] },
+  { id: "s444 PA: an unknown declaration-opener word silently ignored", file: `${SH}/analyze.scrml`,
+    from: "            if (!isKnownOpenerWord(a.name) && a.name.indexOf(\":\") < 0) {", to: "            if (false) {", tests: [T4("failclosed.test.js")] },
+  { id: "s444 PA: a program CELL's opener words not checked (persist= ignored there)", file: `${SH}/analyze.scrml`,
+    from: "                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(", to: "                        if (false) st = openerWordDiags(", tests: [T4("failclosed.test.js")] },
+  { id: "s444 PA: opener words after a parse error reported (recovery debris)", file: `${SH}/analyze.scrml`,
+    from: "        if (hasErrIn(errs, d.span)) return st\n        for (const a of d.mods) {", to: "        for (const a of d.mods) {", tests: [T4("failclosed.test.js")] },
   { id: "F8 wildcard inside an alternation not flagged", file: "scripts/lint-no-default-arm.js",
     from: "if (a.alts.length > 1 && a.alts.some(altIsWild)) {", to: "if (false) {", tests: [T("lint.test.js")] },
 ];
@@ -672,7 +683,10 @@ const PROOFS = {
   harmless: [{ id: "PROOF harmless edit (a comment)", file: `${SH}/analyze.scrml`,
     from: "// self-host-v2 / analyze.scrml", to: "// self-host-v2 / analyze.scrml (harmless)", tests: [T2("typer-gap.test.js")] }],
 };
-const SET = PROOF === "" ? MUTATIONS : PROOFS[PROOF];
+// MUTATIONS_ONLY=<substring> runs only the rows whose id contains it (s444: a
+// quick check of a new batch; the full run is still THE GATE).
+const ONLY = process.env.MUTATIONS_ONLY ?? "";
+const SET = (PROOF === "" ? MUTATIONS : PROOFS[PROOF])?.filter((m) => ONLY === "" || m.id.includes(ONLY));
 if (!SET) throw new Error(`unknown MUTATIONS_PROOF=${PROOF}`);
 
 const t0 = performance.now();

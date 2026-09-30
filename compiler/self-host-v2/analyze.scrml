@@ -1621,7 +1621,7 @@ ${
     // names a DECLARATION is a named shared instance (§66.8.2; `:Decl` is a
     // typed own value, #16). Not in the bootstrap: it is reported where it is
     // written, instead of reading as a field-less declaration named `accent`.
-    fn namedInstanceDiags(ds: DeclStub[], declNames: string[], st0: AS) -> AS {
+    fn namedInstanceDiags(ds: DeclStub[], declNames: string[], files: FileAst[], st0: AS) -> AS {
         let st: AS = st0
         for (const s of ds) {
             const d: ADecl | not = s.d
@@ -1631,10 +1631,56 @@ ${
                     st = addDiag(st, s.file, d.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + d.name + ":" + n + " …/>` is a named shared instance of `<" + n + ">` (§66.8.2) — not in the bootstrap")
                 } else {
                     st = o19Diags(s.file, d, st)
+                    st = openerWordDiags(s.file, fileErrs(files, s.file), d, st)
+                }
+            }
+            const p: AProgram | not = s.p
+            if (p is some) {
+                // the program's cells (a nested user declaration is its own stub)
+                for (const it of p.items) {
+                    for (const c of declsOfItem(it)) {
+                        if (!isNestedUserDecl(c) && declNames.indexOf(ownTypeName(c)) < 0) st = openerWordDiags(s.file, fileErrs(files, s.file), c, st)
+                    }
                 }
             }
         }
         return st
+    }
+
+    // s444 (PA): an opener word the bootstrap does not READ used to land in
+    // ADecl.mods and be silently ignored (analyze reads only `single`; the
+    // parser reports validators) — e.g. §6.14 `persist="local" key="…"`.
+    // Every other word is refused here, on the declaration and on every child
+    // field at any depth. (A named shared instance's construction words are
+    // not opener words — it is refused as a whole, namedInstanceDiags.)
+    // A declaration holding a parse error is recovery debris there (Rule C).
+    fn openerWordDiags(file: string, errs: ASpan[], d: ADecl, st0: AS) -> AS {
+        let st: AS = st0
+        if (hasErrIn(errs, d.span)) return st
+        for (const a of d.mods) {
+            if (!isKnownOpenerWord(a.name) && a.name.indexOf(":") < 0) {
+                st = addDiag(st, file, a.span, "E-BOOTSTRAP-UNSUPPORTED", unknownOpenerMessage(a.name))
+            }
+        }
+        for (const c of childFields(d.body)) { st = openerWordDiags(file, errs, c, st) }
+        return st
+    }
+
+    // The declaration-opener words the bootstrap reads (besides the typed
+    // attributes and the own value): `single` (§66.13.3); the validator words
+    // are the parser's (it reports them, validatorMessage).
+    fn isKnownOpenerWord(w: string) -> boolean {
+        return w == "single" || isValidatorName(w)
+    }
+
+    fn isValidatorName(w: string) -> boolean {
+        return w == "req" || w == "length" || w == "pattern" || w == "min" || w == "max" || w == "gt" || w == "lt" ||
+               w == "gte" || w == "lte" || w == "eq" || w == "neq" || w == "oneOf" || w == "notIn"
+    }
+
+    fn unknownOpenerMessage(w: string) -> string {
+        if (w == "persist" || w == "key") return "`" + w + "=` on a declaration — §6.14 persist= is not in the bootstrap yet"
+        return "`" + w + "` in a declaration opener is not in the bootstrap — it reads only typed attributes, the own value, `single` and validators there, and never ignores a word it does not implement"
     }
 
     // r1 G2 / r2 item 1: an own value AND typed attributes on one declaration —
@@ -1700,7 +1746,7 @@ ${
             }
         }
         if (!hasProgram) st = addDiag(st, entry, mkSpan(0, 0), "E-PROGRAM-MISSING", "the entry file has no `<program>`")
-        st = namedInstanceDiags(rd.ds, declNames, st)
+        st = namedInstanceDiags(rd.ds, declNames, files, st)
         const te0: TypeEnv = { stubs: rs.stubs, declNames: declNames, declSyms: declSyms, file: entry }
         const rt: RTypeInfos = typeInfos(rs.stubs, te0, st)
         st = rt.st
@@ -3568,6 +3614,14 @@ ${
         if (e.star) return resolveStar(env, e, st)
         if (e.tag == "each") return resolveEach(env, e, st)
         if (e.tag == "slot") return addElem(st, e.nid, ElemFact.MSlot)
+        // s444 (PA): a scrml STRUCTURAL element the bootstrap does not
+        // implement is never an HTML element (§4.15, §24.4 "These element names
+        // SHALL NOT be treated as HTML elements") — refused, not rendered as
+        // markup (it used to fall through to MHtml with no diagnostic).
+        const owner: string = structuralOwner(e.tag)
+        if (owner != "") {
+            return addDiag(st, env.file, e.span, "E-BOOTSTRAP-UNSUPPORTED", "`<" + e.tag + ">` is a scrml structural element (" + owner + "), not an HTML element (§4.15, §24.4) — it is not in the bootstrap")
+        }
         const d: DeclSrc | not = declNamed(env.g, e.tag)
         if (d is some) {
             // O55 RULED (bryan S442): a plain use of a `single` declaration is an
@@ -3579,6 +3633,58 @@ ${
         const sd: ADecl | not = singleProgramField(env, e.tag)
         if (sd is some) return singleInstantiated(env, e, st)
         return resolveHtml(env, e, st)
+    }
+
+    // s444 (PA): the scrml structural / directive tags (§4.15, §24.4 and impl#1's
+    // name-resolver SCRML_NON_ELEMENT_TAGS: the placement table, §65, the
+    // document roots, definition blocks, directive sugar, the lifecycle tags,
+    // §36 input-state tags) the bootstrap does NOT implement — each with its
+    // owning section. `each` and `slot` are implemented (resolveElem); `<theme>`
+    // is refused by the parser; `<program>` parses as the program. Compared
+    // lowercase (`errorBoundary`, `onTransition`). "" = not one.
+    fn structuralOwner(tag: string) -> string {
+        const t: string = tag.toLowerCase()
+        return match t {
+            "request"       :> "§6.7.7 async request"
+            "poll"          :> "§6.7 lifecycle"
+            "timer"         :> "§6.7 lifecycle"
+            "timeout"       :> "§6.7.8 lifecycle"
+            "machine"       :> "§6.7 lifecycle"
+            "errorboundary" :> "§19 error boundary"
+            "db"            :> "§39 database"
+            "schema"        :> "§39.2"
+            "channel"       :> "§38"
+            "onchange"      :> "§38.13"
+            "auth"          :> "§40.9.5"
+            "page"          :> "§40"
+            "engine"        :> "§51.0 (retired into `single` declarations, §66.13.3)"
+            "ontransition"  :> "§51.0.H"
+            "ontimeout"     :> "§51.0.M"
+            "onidle"        :> "§51.0.R"
+            "errors"        :> "§55.8"
+            "match"         :> "§18.0.1"
+            "empty"         :> "§17.7 `<each>` fallback"
+            "render"        :> "§19.15"
+            "outlet"        :> "§20.8"
+            "column"        :> "§41.14"
+            "formfor"       :> "§41.14"
+            "tablefor"      :> "§41.14"
+            "if"            :> "a retired control-flow tag"
+            "else"          :> "a retired control-flow tag"
+            "else-if"       :> "a retired control-flow tag"
+            "component"     :> "§15"
+            "snippet"       :> "§16"
+            "partial"       :> "§16"
+            "foreign"       :> "§23.6"
+            "endpoint"      :> "§61"
+            "api"           :> "§60"
+            "markup"        :> "a legacy document root"
+            "defaults"      :> "§65.3.3"
+            "keyboard"      :> "§36 input state"
+            "mouse"         :> "§36 input state"
+            "gamepad"       :> "§36 input state"
+            _               :> ""
+        }
     }
 
     // `<*x …/>` (§66.6.2): the existing instance.

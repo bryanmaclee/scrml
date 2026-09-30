@@ -305,7 +305,9 @@ const BASE_66_19 = [
   // §66.19.5: re-measured at the S442 SPEC amendment (`Entry[free, append]`) — only its Core-blocked constructs
   // remain (2× Date.now() host call + 1 bind:), no grant diagnostic.
   ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
-  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED", "E-SCOPE-001"],
+  // §66.19.6 Before (the retired `<engine>`): s444 (PA) — `<engine>` is a scrml structural element and is refused
+  // WHOLE (it used to fall through as an HTML element, its state-children then failing one by one).
+  ["E-BOOTSTRAP-UNSUPPORTED", "E-BOOTSTRAP-UNSUPPORTED"],
   [],
 ];
 
