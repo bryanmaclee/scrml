@@ -6412,6 +6412,32 @@ export function runRI(input: RIInput): RIOutput {
   const rootCandidates = buildRootRes.candidates;
   const appRoot: FileAST | null = rootCandidates.length === 1 ? rootCandidates[0] : null;
 
+  // S445 re-review nit (a) — a GIVEN build root that does not contain an application
+  // `<program>` file of the build. Route files are classified relative to the given
+  // root only, so a `<program>` file outside it is neither a route file nor inside
+  // the application the root describes, and a page under the root may stop
+  // inheriting that program's gate (measured: `buildRoot="<src>/pages"` with the app
+  // at `<src>/app.scrml` — a member page holding a wrapped worker program became a
+  // second application and served its server fn anonymously). Say so; the root is
+  // the caller's configuration, so this warns rather than guessing a different root.
+  if (buildRootRes.origin === "given" && buildRoot !== "") {
+    for (const f of rootCandidates) {
+      const norm = f.filePath.replace(/\\/g, "/");
+      if (norm.startsWith(buildRoot + "/")) continue;
+      const w = new RIError(
+        "W-BUILD-ROOT-EXCLUDES-PROGRAM",
+        `W-BUILD-ROOT-EXCLUDES-PROGRAM: this file declares a top-level <program> but lies outside the ` +
+        `build root the compiler was given ("${buildRoot}"). Route files (pages/, routes/) are classified ` +
+        `relative to that root only, so pages under it may not inherit this program's auth= gate — they ` +
+        `can be served without authentication. Give the build root that contains the application's entry ` +
+        `file (compileScrml's buildRoot; §40.8 "The build root").`,
+        { file: f.filePath, start: 0, end: 0, line: 1, col: 1 } as any,
+      );
+      w.severity = "warning";
+      errors.push(w);
+    }
+  }
+
   // The redirect target of a page scope (S443 rounds 2-3): `loginRedirect=` is not a
   // `<page>` attribute (E-PAGE-INVALID-ATTR), so it comes from the application's
   // top-level `<program>`'s declared `loginRedirect=`, else the §52.13 default

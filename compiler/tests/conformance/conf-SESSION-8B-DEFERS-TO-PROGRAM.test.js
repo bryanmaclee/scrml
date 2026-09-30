@@ -342,7 +342,9 @@ const PLAIN_30D = `<program csrf="off" auth="optional" session-secure="false" se
 // dropped `auth="optional"` was never read there (auth config comes from the file's
 // first top-level `<program>` only), so what these tests pin — the session-attr
 // last-wins read against a later nested program — is unchanged.
-const PLAIN_30D_NESTED = PLAIN_30D.replace(` auth="optional"`, "");
+// S445 item 5 — `csrf=` is application-level too (E-PROGRAM-NESTED-ATTR on a nested
+// program), so the nested placement drops it as well; only the session attributes stay.
+const PLAIN_30D_NESTED = PLAIN_30D.replace(` auth="optional"`, "").replace(` csrf="off"`, "");
 const TWO_IN_FILE = {
   "nested": SECURE_15M.replace("\n</program>", `\n<div>${PLAIN_30D_NESTED}</div>\n</program>`),
 };
@@ -351,7 +353,7 @@ const TWO_IN_FILE = {
 // 2+-program carve-out itself is still reachable with a nested program that declares
 // NO session attribute (a scoped-db / worker program), and it still must keep the
 // stamped secure gate — pinned with this variant.
-const NESTED_NO_SESSION = `<program csrf="off"><p>x</p></program>`;
+const NESTED_NO_SESSION = `<program><p>x</p></program>`;
 const TWO_IN_FILE_NO_SESSION = {
   "nested": SECURE_15M.replace("\n</program>", `\n<div>${NESTED_NO_SESSION}</div>\n</program>`),
 };

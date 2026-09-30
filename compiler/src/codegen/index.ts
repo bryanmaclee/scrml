@@ -64,7 +64,9 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
-import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS } from "../program-role.ts";
+import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS, nestedProgramAttrVerdict } from "../program-role.ts";
+import { getElementAttrSchema } from "../attribute-registry.js";
+
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
@@ -108,6 +110,11 @@ import {
   type ChunkOutput,
   type ChunksManifest,
 } from "./route-splitter.ts";
+
+/** Membership in the `<program>` attribute registry (S445 item 5 — the closed set the nested rule ranges over). */
+const _programAttrSchema: any = getElementAttrSchema("program");
+const _isRegisteredProgramAttr = (n: string): boolean =>
+  !!(_programAttrSchema && _programAttrSchema.allowedAttrs && _programAttrSchema.allowedAttrs.has(n));
 
 // ---------------------------------------------------------------------------
 // Input / output types
@@ -1669,6 +1676,30 @@ export function runCG(input: CgInput): CgOutput {
             "error",
           ));
         }
+        // §4.12.2 (S445 item 5) — every OTHER application-level `<program>` attribute
+        // on a nested program fails loudly: the §4.12.2 table (+ §43.4 lifecycle) is
+        // the nested-valid list (program-role.ts `nestedProgramAttrVerdict`). Before
+        // S445 item 5 these were read from the top-level program only and silently
+        // dropped here — MEASURED (review of 5c706940b): a route file's nested
+        // `ratelimit="1/min"` stopped limiting (200/429/429 → 200/200/200) and its
+        // `headers="strict"` stopped sending CSP / X-Frame-Options.
+        for (const a of attrs) {
+          if (!a || typeof a.name !== "string") continue;
+          if (nestedProgramAttrVerdict(a.name, _isRegisteredProgramAttr) !== "E-PROGRAM-NESTED-ATTR") continue;
+          const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-ATTR",
+            `E-PROGRAM-NESTED-ATTR: \`${a.name}=\` is an application-level <program> attribute and ` +
+            "is not valid on a nested <program> " + _whyNested(node) + " — a nested <program> is " +
+            "a worker, sidecar or scoped-db context and carries only name=, lang=, db=, mode=, " +
+            "build=, port=, health=, route=, protect=, callchar=, story=, capabilities= and the " +
+            "§43.4 lifecycle attributes, so this setting would be silently ignored. Put it on " +
+            "the top-level <program> (the whole application) and remove it from the nested " +
+            "one. (§4.12.2)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
       }, _roleOpts);
       for (const extra of topPrograms.slice(1)) {
         const span = extra.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
@@ -1682,7 +1713,8 @@ export function runCG(input: CgInput): CgOutput {
           "the file does not compile. Merge them into one <program> carrying one set of " +
           "those settings, or build the second as a separate application. If the second is " +
           "meant as a worker, sidecar or scoped-db context, place it inside the first WITHOUT " +
-          "auth= or session attributes — a nested <program> takes neither (§4.12.2). (§40.8)",
+          "auth=, session or other application-level attributes — a nested <program> takes " +
+          "none of them (§4.12.2). (§40.8)",
           { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
           "error",
         ));

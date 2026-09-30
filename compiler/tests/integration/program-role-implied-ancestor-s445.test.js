@@ -161,6 +161,69 @@ describe("F2 — a top-level <program> produced by a component expansion is E-PR
   });
 });
 
+describe("S445 item 5 — E-PROGRAM-NESTED-ATTR: the §4.12.2 table is the whole nested-valid list", () => {
+  test("w/hnd: a route file's <program ratelimit= headers=> → two errors, and the build writes nothing", () => {
+    const files = {
+      "app.scrml": `<program>\n<p>home</p>\n</program>\n`,
+      "pages/x.scrml": `<program ratelimit="1/min" headers="strict">\n${MEMBER_FN}</program>\n`,
+    };
+    expect(compile(files).errors.map((e) => e.code)).toEqual(["E-PROGRAM-NESTED-ATTR", "E-PROGRAM-NESTED-ATTR"]);
+    const p = project(files);
+    const r = run(["build", p.src, "-o", p.dist]);
+    expect(r.exitCode).not.toBe(0);
+    expect(`${r.stdout}${r.stderr}`).toContain("E-PROGRAM-NESTED-ATTR");
+    expect(existsSync(p.dist)).toBe(false);
+  });
+
+  test("w/allattr: every app-level attribute on a route file's program fails; nested-valid ones and documentary ones do not error", () => {
+    const { errors, codes } = compile({
+      "app.scrml": APP, "pages/login.scrml": LOGIN,
+      "pages/member.scrml": `<program loginRedirect="/member-login" csrf="off" cors="*" log="structured" mcp idempotency-store="memory" title="Member" description="d" db="./m.db" lang="js">\n${MEMBER_FN}</program>\n`,
+    });
+    const offending = errors.filter((e) => e.code === "E-PROGRAM-NESTED-ATTR").map((e) => e.message.match(/`([a-zA-Z-]+)=`/)[1]).sort();
+    expect(offending).toEqual(["cors", "csrf", "idempotency-store", "log", "loginRedirect", "mcp"]);
+    expect(errors.every((e) => e.code === "E-PROGRAM-NESTED-ATTR")).toBe(true);
+    expect(codes).toContain("W-PROGRAM-TITLE-NESTED");
+  });
+
+  test("a structurally nested program (inside the app program, through a <div>) — same rule", () => {
+    const { errors } = compile({ "app.scrml": `<program>\n<div>\n<program name="w" cors="*" batch-in-list-cap="10">\nwhen message(d) { send(d) }\n</program>\n</div>\n<p>x</p>\n</program>\n` });
+    expect(errors.map((e) => e.code)).toEqual(["E-PROGRAM-NESTED-ATTR", "E-PROGRAM-NESTED-ATTR"]);
+  });
+
+  test("CONTROL — §4.12.2 nested-valid attributes, incl. the §43.4 lifecycle ones, are fine", () => {
+    const { errors } = compile({ "app.scrml": `<program>\n<program name="w" restart="on-error" max-restarts=3 within=60 autostart="false" capabilities=[network("x.com")]>\nwhen message(d) { send(d) }\n</program>\n<p>x</p>\n</program>\n` });
+    expect(errors.map((e) => e.code)).not.toContain("E-PROGRAM-NESTED-ATTR");
+  });
+
+  test("CONTROL — the same app-level attributes on the TOP-LEVEL program are fine", () => {
+    const { errors } = compile({ "app.scrml": `<div>\n<program ratelimit="1/min" headers="strict" cors="*" log="minimal">\n${MEMBER_FN}</program>\n</div>\n` });
+    expect(errors).toEqual([]);
+  });
+});
+
+describe("S445 re-review nit (a) — a given build root that excludes an application program warns", () => {
+  test("buildRoot=<src>/pages with the app at <src>/app.scrml → W-BUILD-ROOT-EXCLUDES-PROGRAM", () => {
+    const p = project({
+      "app.scrml": APP, "pages/login.scrml": LOGIN,
+      "pages/member.scrml": `<div>\n<program>\n${MEMBER_FN}</program>\n</div>\n`,
+    });
+    const r = compileScrml({ inputFiles: p.inputs, write: false, outputDir: p.dist, buildRoot: join(p.src, "pages"), log: () => {} });
+    const w = (r.warnings ?? []).filter((x) => x.code === "W-BUILD-ROOT-EXCLUDES-PROGRAM");
+    expect(w.length).toBe(1);
+    expect(w[0].message).toContain("outside the build root");
+  });
+
+  test("CONTROL — the correct root (or none) is silent", () => {
+    const files = { "app.scrml": APP, "pages/login.scrml": LOGIN, "pages/member.scrml": `<page>\n${MEMBER_FN}</page>\n` };
+    const p = project(files);
+    for (const buildRoot of [p.src, undefined]) {
+      const r = compileScrml({ inputFiles: p.inputs, write: false, outputDir: p.dist, ...(buildRoot ? { buildRoot } : {}), log: () => {} });
+      expect((r.warnings ?? []).map((x) => x.code)).not.toContain("W-BUILD-ROOT-EXCLUDES-PROGRAM");
+    }
+  });
+});
+
 describe("E-PROGRAM-002 advice no longer sends an auth= program inside the first", () => {
   test("the message says a nested program takes neither auth= nor session attributes", () => {
     const { errors } = compile({ "app.scrml": `<program><p>a</p></program>\n<div><program auth="required"><p>b</p></program></div>\n` });

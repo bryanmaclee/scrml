@@ -63,6 +63,52 @@ export interface ProgramRoleOptions {
  */
 export const NESTED_SESSION_ATTRS: ReadonlySet<string> = new Set(["sessionExpiry", "session-secure"]);
 
+/**
+ * §4.12.2 (S445 item 5) — the attributes a NESTED `<program>` MAY carry: the §4.12.2
+ * "Valid in nested?" table (`name=`, `lang=`, `db=`, `mode=`, `build=`, `port=`,
+ * `health=`, `route=`, `protect=`, `callchar=`, `story=`, `capabilities=`) plus the
+ * §43.4 lifecycle / supervision attributes of a nested execution context
+ * (`autostart=`, `restart=`, `max-restarts=`, `within=` — §43.4 declares them on the
+ * nested `<program>`; the §4.12.2 table lists them since S445).
+ *
+ * Every OTHER registered `<program>` attribute is application-level and is a compile
+ * error on a nested `<program>` — ONE rule (`nestedProgramAttrVerdict`), with two named
+ * specialisations kept from before: `auth=` → E-PROGRAM-NESTED-AUTH, a session
+ * attribute → E-PROGRAM-NESTED-SESSION, everything else → E-PROGRAM-NESTED-ATTR.
+ * Three kinds of attribute are NOT this rule's: the five documentary attributes keep
+ * W-PROGRAM-TITLE-NESTED (a warning — head metadata, not security config, §40.7);
+ * `kind=` / `serve=` keep E-TOOL-002 / E-TOOL-SERVE-MISPLACED (their own §64 errors);
+ * an attribute the `<program>` registry does not know keeps W-ATTR-001.
+ */
+export const NESTED_VALID_PROGRAM_ATTRS: ReadonlySet<string> = new Set([
+  "name", "lang", "db", "mode", "build", "port", "health", "route", "protect",
+  "callchar", "story", "capabilities",
+  "autostart", "restart", "max-restarts", "within",
+]);
+const NESTED_DOC_ATTRS: ReadonlySet<string> = new Set(["title", "description", "version", "author", "license"]);
+const NESTED_OWNED_ELSEWHERE: ReadonlySet<string> = new Set(["kind", "serve"]);
+
+export type NestedAttrVerdict =
+  | "valid"
+  | "E-PROGRAM-NESTED-AUTH"
+  | "E-PROGRAM-NESTED-SESSION"
+  | "E-PROGRAM-NESTED-ATTR"
+  | "other-diagnostic";
+
+/**
+ * The verdict for one attribute on a NESTED `<program>` (S445 item 5).
+ * `isRegisteredProgramAttr` is the `<program>` attribute registry's membership test
+ * (attribute-registry.js), passed in so this module stays dependency-free.
+ */
+export function nestedProgramAttrVerdict(name: string, isRegisteredProgramAttr: (n: string) => boolean): NestedAttrVerdict {
+  if (NESTED_VALID_PROGRAM_ATTRS.has(name)) return "valid";
+  if (name === "auth") return "E-PROGRAM-NESTED-AUTH";
+  if (NESTED_SESSION_ATTRS.has(name)) return "E-PROGRAM-NESTED-SESSION";
+  if (NESTED_DOC_ATTRS.has(name) || NESTED_OWNED_ELSEWHERE.has(name)) return "other-diagnostic";
+  if (!isRegisteredProgramAttr(name)) return "other-diagnostic";
+  return "E-PROGRAM-NESTED-ATTR";
+}
+
 /** The FileAST field the build-level stamp writes (see `stampImpliedProgramAncestors`). */
 export const IMPLIED_ANCESTOR_FIELD = "programHasImpliedAncestor";
 

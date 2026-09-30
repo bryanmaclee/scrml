@@ -368,16 +368,27 @@ describe("r3 nit — an unresolvable redirect target is said out loud", () => {
     expect(getProbe(fx, ["/s"])["/s"]).toEqual({ status: 302, location: "/login", marker: null });
   }, 60_000);
 
-  test("an identified application program answers; a route file's (nested, S445 #1) program's loginRedirect= does not make it ambiguous", () => {
-    // S445 item 1: the route file's `<program>` is nested (implied ancestor), so it is
-    // not a competing redirect declaration; `auth=` on it would be E-PROGRAM-NESTED-AUTH.
-    const fx = buildWithDiagnostics("root-answers", {
+  test("S445 #1 + #5: a route file's (nested) program's loginRedirect= is E-PROGRAM-NESTED-ATTR, never a competing redirect", () => {
+    // S445 item 1: the route file's `<program>` is nested (implied ancestor); S445 item 5:
+    // `loginRedirect=` is application-level, so on a nested program it fails loudly
+    // instead of being silently ignored.
+    const fx = buildWithDiagnostics("root-answers-nested", {
       "app.scrml": `<program><p>home-marker</p></program>\n`,
       "pages/admin.scrml": `<program loginRedirect="/admin-login"><p>admin-marker</p></program>\n`,
       "pages/s.scrml": `<page auth="required">\n<p>s-marker</p>\n</page>\n`,
     });
+    expect(fx.exitCode).not.toBe(0);
+    expect(fx.out).toContain("E-PROGRAM-NESTED-ATTR");
+    expect(fx.out).not.toContain("W-AUTH-LOGIN-REDIRECT-AMBIGUOUS");
+  }, 60_000);
+
+  test("an identified application program answers the page scope's redirect", () => {
+    const fx = buildWithDiagnostics("root-answers", {
+      "app.scrml": `<program loginRedirect="/signin"><p>home-marker</p></program>\n`,
+      "pages/s.scrml": `<page auth="required">\n<p>s-marker</p>\n</page>\n`,
+    });
     expect(fx.out).not.toContain("W-AUTH-LOGIN-REDIRECT-AMBIGUOUS");
     const res = getProbe(fx, ["/s"]);
-    expect(res["/s"]).toEqual({ status: 302, location: "/login", marker: null });
+    expect(res["/s"]).toEqual({ status: 302, location: "/signin", marker: null });
   }, 60_000);
 });

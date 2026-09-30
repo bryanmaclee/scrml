@@ -25,6 +25,8 @@
  * server functions answered anonymous callers, runnable by any `_server.js` left
  * from a previous build.
  *
+ * E-PROGRAM-NESTED-ATTR (§4.12.2, S445 item 5 — any other application-level attribute
+ * on a nested `<program>`, e.g. a route file's `ratelimit=` / `headers=`) and
  * E-PROGRAM-NESTED-SESSION (§4.12.2, S445 item 3 — a session attribute on a nested
  * `<program>`) and E-PROGRAM-CONFIG-UNREAD (§4.12 — a top-level `<program>` that only
  * exists after component expansion, whose config was never read) refuse it for the same
@@ -46,6 +48,7 @@ export const APPLICATION_SCOPE_REFUSALS = new Set([
   "E-PROGRAM-002",
   "E-PROGRAM-NESTED-AUTH",
   "E-PROGRAM-NESTED-SESSION",
+  "E-PROGRAM-NESTED-ATTR",
   "E-PROGRAM-CONFIG-UNREAD",
 ]);
 
