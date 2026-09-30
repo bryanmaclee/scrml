@@ -86,7 +86,12 @@ ${
             body: block([Stmt.Write(wCount, shared, EditKind.Replace, litInt(0), Check.Static)]),
         }
 
+        // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
+        // between elements is kept exactly — the newline + indentation of the
+        // source (the two `<!-- … -->` comments are dropped; the bytes around
+        // them stay). L13 (which dropped these runs) is retired.
         const main: View = el("main", [], [
+            textView("\n        "),
             el("p", [], [
                 textView("Count "),
                 dyn(readField(sProgram, here, COUNT)),
@@ -94,11 +99,14 @@ ${
                 dyn(readField(sProgram, here, DOUBLED)),
                 textView(")"),
             ]),
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sBump))])], [
                 textView("+"),
                 dyn(readField(sProgram, here, STEP)),
             ]),
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sRestart))])], [textView("Reset")]),
+            textView("\n        \n        \n    "),
         ])
 
         const program: Decl = {

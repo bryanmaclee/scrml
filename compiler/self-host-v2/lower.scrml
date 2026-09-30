@@ -12,8 +12,10 @@
 //   L7  c ? a : b          → Match over a bool with `true` / `false` arms
 //   L9  <each> w/o key=    → key: not
 //   L11 given c = @h :> {} → Let c = Handle(h); If(IsSome(c), {…})
-//   L13 whitespace-only text containing a newline is dropped; other text is
-//       kept verbatim (comments are gone already — the parser drops them)
+//   L13 RETIRED (dpa-045 follow-up 4, RULED S442 — SPEC §4.18.5): every
+//       free-text run is kept verbatim, whitespace-only runs (a newline +
+//       indentation between two elements) included; comments are gone
+//       already (the parser drops them, keeping the bytes around them)
 //   L14 the program's markup is its renders; `type`s → CoreProgram.types
 //   L15 one CoreProgram per LINKED program (files in link order)
 //   L17 field order (analyze built it); L18 graph fields (analyze); L19 int
@@ -733,13 +735,6 @@ ${
     // =========================================================================
     // Views.
     // =========================================================================
-    // L13: whitespace-only text that contains a newline is formatting.
-    fn isFormatting(t: string) -> boolean {
-        const s: string = t.trim()
-        if (s != "") return false
-        return t.indexOf("\n") >= 0
-    }
-
     fn lowerNodes(c: LC, ns: ANode[]) -> View[] {
         let out: View[] = []
         for (const n of ns) { out = out.concat(lowerNode(c, n)) }
@@ -756,8 +751,13 @@ ${
         }
     }
 
+    // dpa-045 follow-up 4 (RULED S442; SPEC §4.18.5 "whitespace-only text
+    // between elements is kept exactly too"): a Text node is free-text content
+    // (a code-default body never builds one for its formatting whitespace —
+    // parseCodeBody skips it) or a display-text literal segment — both
+    // verbatim. Only the parser's empty placeholder ("") renders nothing.
     fn textViews(t: string) -> View[] {
-        if (isFormatting(t)) return []
+        if (t == "") return []
         return [View.Text(t)]
     }
 

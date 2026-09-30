@@ -1285,6 +1285,13 @@ name.** The two productions are **duals, not one model wearing two hats**:
 
 **S111 amendment (2026-05-20) — `default-logic` is a distinct third body-mode; §4.18 does not classify it.** The `<program>` / `<page>` body parses in **`default-logic` mode** — a distinct third body-mode, owned and defined by §40.8 (v0.3 program shape). `default-logic` mode is neither free-text mode nor code-default mode: in a `<program>` / `<page>` body a bare top-level declaration (`<x> = 0`, `function f() { ... }`) auto-lifts to the logic context, which is not free-text display-text scanning and is not the code-default text/code boundary. The §4.18 free-text / code-default split governs **only** the relationship between the three code-bearing loci (engine state-children, match block-form arms, `:`-shorthand bodies) and plain markup; it does **not** classify or reclassify the `<program>` / `<page>` body. The `<program>` / `<page>` body is therefore intentionally absent from the free-text-mode row above — its mode is `default-logic`, per §40.8. (This note reconciles §4.18.1's original free-text-mode listing with §40.8's `default-logic` statement; the native-parser charter deep-dive surfaced the inconsistency.)
 
+**S444 note — a `<schema>` body is not free text.** A `<schema>` body (§39) is not display text and is not
+rendered. Its content is the §39.2 `schema-block` grammar (declarative `table-declaration`s and raw `CREATE TABLE`
+DDL), and §39 governs how that body is read. It is not in the free-text row above (which lists plain-markup element
+bodies, component bodies and the `<errors>` override template), and §4.18 does not classify it. This is the same
+position as the `<program>` / `<page>` `default-logic` body.
+> **Provenance:** rationale:§39.2 gives the `<schema>` body its own grammar (`schema-block ::= '<schema>' table-declaration* closer`) and the §4.18.1 free-text row does not list it, so treating its content as page text would contradict §39 (PA reading S444, bryan veto window)
+
 #### 4.18.1a The shared principle
 
 *(Amendment S442 — the round-2 drafted §4.18.1a.)*
@@ -1312,8 +1319,13 @@ others."* So `5 < 7` is just text.
      - `~{` — test context (§19.12). Not a §3.1 row and not named by the ruling; listed as an exit because the block
        splitter opens it in a markup body today (corpus: 0 in free-text bodies) — the ruling's "and so on".
        `provenance: rationale:PA S442 — preserves current behaviour; bryan veto`
-     - `_{` — foreign code (§23) — is **neither an exit nor content**: in a markup body it stays an ERROR,
-       `E-FOREIGN-004`, as today. `provenance: rationale:PA S442 — preserves current behaviour; bryan veto`
+     - `_{` — foreign code (§23) — is **neither an exit nor content**: in a markup body it is an ERROR,
+       `E-FOREIGN-004` — a markup element body is not one of §23.2.4's three valid contexts. The opener is the §23.2
+       opener, so a `_{` immediately after an identifier character (`my_{`) is not an opener and is content.
+       `provenance: rationale:PA S442 — preserves current behaviour; bryan veto` *(S444: the "preserves current
+       behaviour" premise was false for impl#1, which renders a markup-body `_{ … }` slice as page text with no
+       diagnostic — gap `g-foreign-block-in-markup-body-rendered-as-text`. The rule stands; impl#1 diverges.)*
+       > **Provenance:** rationale:§23.2.4 already makes a `_{}` in a markup element body E-FOREIGN-004; the struck "as today" was false for impl#1 (verified by execution at `108ca89b`) (PA reading S444, bryan veto window)
      - NOT exits: `?{` — the §3.1 table's third row, whose parent is Logic only; in a markup body it is text (§4.17
        S108 note, §8.1).
   2. **`//` comments** — §4.7 suppression; the comment runs to end of line and is not content.
@@ -18976,6 +18988,12 @@ SHALL emit a warning (W-FOREIGN-001) when a level-0 `_{}` block is used, recomme
 - The block splitter SHALL recognize `_` followed by zero or more `=` followed by `{` as a
   foreign code block opener. The block splitter SHALL store the opener level (the count of
   `=` characters).
+- **Identifier guard (S444).** A `_` immediately preceded by an identifier character (a letter,
+  digit, `_` or `$`) is the tail of that identifier, never a foreign code block opener. So `my_{`
+  in a markup body is content (§4.18.1b), and `my_={ a: 1 }` in a logic context is the identifier
+  `my_` followed by `= { a: 1 }`. A `_` at start of input or after whitespace or punctuation is
+  eligible.
+  > **Provenance:** rationale:records the guard impl#1 already applies (`matchForeignOpener`, block-splitter.js — `_` after `[A-Za-z0-9_$]` never opens; `my_={ a: 1 }` emits `my_ = {a: 1}`, verified by execution at `108ca89b`) so an assignment to an identifier ending in `_` is not a foreign block (PA reading S444, bryan veto window)
 - The block splitter SHALL scan for the matching closer: `}` followed by the same number of
   `=` characters as the opener. No other character sequence closes the foreign code block.
 - The interior of a `_{}` block is opaque. The compiler SHALL NOT parse, tokenize, or

@@ -764,6 +764,47 @@ describe("#9 — `int` enforced; `/` on two ints names `div`", () => {
     // twin: a resolved return type IS checked
     expect(inApp("    function h() -> string { return 1 }")).toEqual(["E-TYPE-031"]);
   });
+  // r8 F1 — Rule C for NAMES: a declared type that did not resolve (E-TYPE-UNKNOWN; the binder answers with a
+  // placeholder) is never checked against — mirroring guard (i) at parameters, struct fields, declaration fields
+  // and local annotations. Only the E-TYPE-UNKNOWN is reported.
+  test("r8 F1 — an unresolved PARAMETER type: no argument check, reads of it are unknown", () => {
+    expect(inApp("    function g(k: Nope) { }\n    function f() { g(1) }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(inApp("    function g(k: Nope[]) { }\n    function f() { g([1]) }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(inApp("    function g(k: Nope | not) { }\n    function f() { g(1) }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(inApp("    function g(k: Nope) { let n: int = k }")).toEqual(["E-TYPE-UNKNOWN"]);
+  });
+  test("r8 F1 — an unresolved struct FIELD / declaration field / local annotation is never checked against", () => {
+    expect(inApp("    type P:struct = { a: Nope }\n    function f() { let v: P = { a: 1 } }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(inApp("    <let x:Nope=1/>\n    function f() { @x = 2 }")).toEqual(["E-TYPE-UNKNOWN"]);
+    expect(inApp("    function f() { let a: Nope = 1\n a = 2 }")).toEqual(["E-TYPE-UNKNOWN"]);
+  });
+  test("r8 F1 twins — RESOLVED types at the same positions are checked", () => {
+    expect(inApp("    function g(k: int) { }\n    function f() { g(\"s\") }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    function g(k: string) { let n: int = k }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    type P:struct = { a: int, b: Nope }\n    function f() { let v: P = { a: \"s\", b: 1 } }")).toEqual(["E-TYPE-UNKNOWN", "E-TYPE-031"]);
+    expect(inApp("    <let x:int=0/>\n    function f() { @x = \"s\" }")).toEqual(["E-TYPE-031"]);
+    expect(inApp("    function f() { let a: int = 1\n a = \"s\" }")).toEqual(["E-TYPE-031"]);
+  });
+  // S444 review F1 — a READ of an unresolved declaration cell is unknown too (fieldTypeOf honours
+  // FieldInfo.trusted, as structFieldType honours Unresolved.fields).
+  test("S444 R1 — reading an unresolved DECLARATION cell is never checked against", () => {
+    expect(inApp("    <let x:Nope=1/>\n    function f() { let n: int = @x }")).toEqual(["E-TYPE-UNKNOWN"]);
+    // twin: a resolved cell read IS checked
+    expect(inApp("    <let x:string=\"a\"/>\n    function f() { let n: int = @x }")).toEqual(["E-TYPE-031"]);
+  });
+  // S444 review F2 — "unresolved" means the TYPE did not resolve (a name in it is unknown), not
+  // "resolving it reported anything": a bad GRANT word (E-GRANT-UNKNOWN) leaves `int[…]` a real
+  // type, so the independent mismatch is still reported (fail-closed) — at r8's sites AND r7's
+  // guard (i) (return types).
+  test("S444 R2 — a grant error does not make the type unresolved: the mismatch is still reported", () => {
+    expect(inApp("    function g(k: int[bogus]) { }\n    function f() { g([\"s\"]) }")).toEqual(["E-GRANT-UNKNOWN", "E-TYPE-031"]);
+    expect(inApp("    <let xs:int[append, append]=([])/>\n    function f() { @xs = [\"s\"] }")).toEqual(["E-GRANT-UNKNOWN", "E-GRANT-LET-ON-SEQUENCE", "E-TYPE-031"]);
+    expect(inApp("    function h() -> int[bogus] { return [\"s\"] }")).toEqual(["E-GRANT-UNKNOWN", "E-TYPE-031"]);
+    expect(inApp("    function f() { let a: int[bogus] = [\"s\"] }")).toEqual(["E-GRANT-UNKNOWN", "E-TYPE-031"]);
+    expect(inApp("    type P:struct = { a: int[bogus] }\n    function f() { let v: P = { a: [\"s\"] } }")).toEqual(["E-GRANT-UNKNOWN", "E-TYPE-031"]);
+    // twin: an unknown ELEMENT name still makes the whole type unresolved (grant error kept, no cascade)
+    expect(inApp("    function g(k: Nope[bogus]) { }\n    function f() { g(1) }")).toEqual(["E-TYPE-UNKNOWN", "E-GRANT-UNKNOWN"]);
+  });
   test("r7 A guard (ii) — a callee declared in two files (mis-linked, already refused) is untrusted: no argument / return check", () => {
     const a = { path: "lib/a.scrml", src: "${ function helper(k: int) -> int { return k }\n export function useA() -> int { return helper(1) } }\n" };
     const b = { path: "lib/b.scrml", src: "${ function helper(s: string) -> string { return s }\n export function useB() -> string { return helper(\"b\") } }\n" };
