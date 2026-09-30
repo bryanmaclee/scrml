@@ -467,7 +467,7 @@ The [`examples/`](examples/) directory holds one app per file. Every one of them
 | [20-middleware](examples/20-middleware.scrml) | `<program>` middleware attributes + `handle()` |
 | [21-navigation](examples/21-navigation.scrml) | `navigate()` + `route` |
 | [22-multifile](examples/22-multifile/) | Cross-file `import`/`export`, pure-type files |
-| [23-trucking-dispatch](examples/23-trucking-dispatch/) | A multi-file dispatch app: pages per role, channels, `lin` tokens. Its login flow is **broken today**: signing in doesn't create a session, so the gated pages still redirect |
+| [23-trucking-dispatch](examples/23-trucking-dispatch/) | A multi-file dispatch app: a real login, a portal per role (dispatcher, driver, customer), channels, single-use `lin` tokens. Ships a seeded database — see its README |
 | [24-tilde-pipeline](examples/24-tilde-pipeline.scrml) | The `~` pipeline accumulator |
 | [25-triage-board](examples/25-triage-board.scrml) | Drag-and-drop between columns, struct + enum state |
 | [26-type-derived-schema](examples/26-type-derived-schema.scrml) | `schemaFor(Type)`: SQL DDL from a struct |
