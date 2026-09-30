@@ -6381,11 +6381,11 @@ Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands w
 
 | Code | Trigger | Severity |
 |---|---|---|
-| `E-PERSIST-STORAGE-UNKNOWN` | `persist=` value is not `"local"` or `"session"` (including the deferred `"cookie"`, and IndexedDB) | Error |
-| `E-PERSIST-KEY-REQUIRED` | `persist=` without `key=` | Error |
-| `E-PERSIST-REVEALED` | `persist=` on a value carrying `reveal`-declassified protected provenance | Error |
-| `E-PERSIST-LIN` | `persist=` on a `lin` cell | Error |
-| `E-PERSIST-WITH-SERVER` | `persist=` on a server-authority cell | Error |
+| `E-PERSIST-STORAGE-UNKNOWN` | `persist=` value is not `"local"` or `"session"` (including the deferred `"cookie"`, and IndexedDB) — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-KEY-REQUIRED` | `persist=` without `key=` — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-REVEALED` | `persist=` on a value carrying `reveal`-declassified protected provenance — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-LIN` | `persist=` on a `lin` cell — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-WITH-SERVER` | `persist=` on a server-authority cell — Nominal / spec-ahead, not yet emitted | Error |
 
 **Cross-references:** §6.7.4 (the corrected localStorage idiom row) · §6.8 (the default value) · §6.13 (the sibling write-path attributes) · §13.2 (auto-await — the planned IndexedDB stdlib) · §14.8.9 (`reveal`) · §35 (`lin`) · §52 (authority — orthogonal) · §55 (synthesized-property precedent) · §57 / §59.10 (codec) · §65.6 / §66.17 (theme mode cell) · §66.9 (seed) · §66.16 (shared instance only).
 
