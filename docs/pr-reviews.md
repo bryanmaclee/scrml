@@ -1507,8 +1507,7 @@ their own recommendation**, and a wrong diagnosis there propagates into a fix di
 - All six sibling gap ids in the family cross-reference resolve in `known-gaps.md` (6/6).
 
 **#987 — the headline claim is true, and the citation sweep came back clean.** `git grep -l
-"^<<<<<<< " e74f5423` returns **`compiler/SPEC-INDEX.md`**: the commit four sessions of maps were
-stamped at did carry unmerged conflict markers. `conflict-marker-gate` at HEAD: 8232 files, 0
+"^stamped at did carry unmerged conflict markers. `conflict-marker-gate` at HEAD: 8232 files, 0
 markers, PASS. Swept **208 distinct file paths cited across the 13 maps** for existence: 10 do not
 resolve and **all ten are accounted for** — three the map itself labels *"does not exist"*, two are
 rows in the non-compliance report's own broken-cross-reference table (its finding, correctly
@@ -1972,6 +1971,19 @@ that the ledger is *substantively* wrong; a consumer of it can.
 <!-- @review pr=1133 verdict=finding by=S440-bryan date=2026-09-29 probe=SPEC-DRIFT-REVIEW-word-for-word-vs-ledger-x2:r1-FIX-FIRST-in=-S|not-contradiction+E-STRUCT-DUPLICATE-KEY-house-rule;r2-FIX-FIRST-select-formula+E-CALL-ARITY-variadics;PA-verified-last-touch-by-hand;s34-census-12-rows -->
 <!-- @review pr=1137 verdict=finding by=S440-bryan date=2026-09-29 probe=three-S239-rounds:r1-NaN-irreflexive-vs-dpa-037-ruling+Set-pairing+cross-realm+URL-deep_set;r2-spoof-toStringTag-silent-true-INTRODUCED-one-guard;client+server-copies-43-cases;corpus-every-diff-explained -->
 <!-- @review pr=1139 verdict=finding by=S440-bryan date=2026-09-29 probe=SECURITY-three-S239-rounds-REAL-scrml:auth-hashing:r1-F1-block-shadow-accept-all-INTRODUCED-PA-reproduced-fixed+F2-server-rawtext+F3-sibling-let;r2-final-LAND-two-fail-closed-FPs-filed;pre-existing-value-escape-accept-all-filed-ruled-F4 -->
+<!-- @review pr=1144 verdict=carve-out by=S442-bryan date=2026-09-29 probe=docs-only-maps-refresh(.claude/maps)-no-code-path -->
+<!-- @review pr=1148 verdict=carve-out by=S442-bryan date=2026-09-29 probe=docs-only-dpa-queue-bank-row+section -->
+<!-- @review pr=1151 verdict=finding by=S442-bryan date=2026-09-29 probe=S239-two-reviewers-19cadc78:A-soundness(4-MED:narrowing-survives-write,T|not-copies,present-write-unnarrows,hex-e-literal)+B-gates(4-LOW:unpinned-&&,rule-C,checkDiv,measure-diff-blind);two-fix-rounds;re-review-6bd560cd-LAND-WITH-NITS(N1-N3-followed-in-1157) -->
+<!-- @review pr=1154 verdict=carve-out by=S442-bryan date=2026-09-29 probe=docs-only-dpa-drain-breadcrumbs(dpa-queue+delta-log) -->
+<!-- @review pr=1156 verdict=carve-out by=S442-bryan date=2026-09-29 probe=SPEC-text-only+PA-drift-read-vs-ledger(S442-rulings);bootstrap-§66.19-drift-guard-sync-verified-slices-m1-m4-green -->
+<!-- @review pr=1157 verdict=finding by=S442-bryan date=2026-09-29 probe=S239-review-baa52660:R1-nested-each-MED+R3-R6;fix-r5;targeted-recheck-992e5279-LAND(all-5-CONFIRMED-FIXED) -->
+<!-- @review pr=1159 verdict=clean by=S442-bryan date=2026-09-29 probe=S239-review-a7134a85:no-false-positives-every-narrowing-form;flipped-pins-justified;corpus-0-newly-rejected-vs-cf62b415+8367a6b8;nits-F1-F2-pre-existing-routed-to-r7 -->
+<!-- @review pr=1160 verdict=clean by=S442-bryan date=2026-09-29 probe=S239-review-da88a6a8:839-unit-recompile-5-html-changed-0-js-css;Chromium-DOM-base-vs-fix(textarea/svg/math/integration-points);no-regression;2-LOW-pre-existing-followups -->
+<!-- @review pr=1164 verdict=finding by=S442-bryan date=2026-09-29 probe=S239-two-reviewers-5ceef638-DO-NOT-LAND(F1-HIGH-local-reassign-deleted+F2-single-ignored+F3-shorthand->=+F4-F7);r1-fixed;2bd817a9-DO-NOT-LAND(G2-child-fields);r2-fixed;targeted-recheck-d84867ed-LAND -->
+<!-- @review pr=1168 verdict=carve-out by=S442-bryan date=2026-09-29 probe=docs-only-dpa-queue-ruled-rows+native-parser-contract-note -->
+<!-- @review pr=1167 verdict=clean by=S442-bryan date=2026-09-29 probe=S239-review-ffa791ac-LAND-WITH-NITS:no-false-positives-from-§7.5.1-widening(numeric-widening,variants,T-into-T|not,grants-both-directions,recursion,imports);guards-tight;corpus-0-changed-vs-7de39cb6;post-review-merge-fix=3-missing-AExprK-arms(E-TYPE-020-by-construction)-slices-green -->
+<!-- @review pr=1169 verdict=clean by=S442-bryan date=2026-09-29 probe=S239-review-dbd69229-LAND-WITH-NITS:no-FP-no-FN-(own-type+attrs-every-spelling,sub-field-removals-named);re-cut-onto-main-after-1164-squash-slices-m1-m4-green -->
+<!-- @review pr=1170 verdict=carve-out by=S442-bryan date=2026-09-29 probe=SPEC-text-only(§4.18/§4.3/§15.15.5)+PA-drift-read-vs-ledger(dpa-045-two-rulings)+E-measurements-before-text;bootstrap-slices-green-on-each-merge -->
 <!-- S443 CORRECTION: the S441 hand-off/board said the reviews of #1145 #1152 #1155 ran before a compaction and only the verdicts were lost. A transcript reconstruction (S443, read-only agent over the S441 JSONL) found they NEVER ran — no dispatch, no review/s441-* tag, no PR-body line; S441 told bryan #1155 was reviewed. #1147 WAS reviewed but its fix-round code (3332713c5) was merged without the re-review. All four got post-merge S239 reviews at S443 against their merge commits; markers below record THOSE. -->
 <!-- @review pr=1145 verdict=finding by=S443-bryan date=2026-09-29 probe=post-merge-S239-on-55ebd22bb:drift-bite-both-ways(file+doc-edit-red/restore-green,full-gate-red-on-drift)+15-shape-escape-matrix+6-tutorial-claims-compiled+06-failable-happy-dom-render note=S441-merged-unreviewed;4xLOW-gate-holes-filed-g-s443-gate-and-test-infra-residuals -->
 <!-- @review pr=1147 verdict=finding by=S443-bryan date=2026-09-29 probe=S441-r1-review-LAND-WITH-NITS-on-635f99c6d(corpus-2086:FAIL-to-OK-6,OK-to-FAIL-0;bare-vs-qualified-codegen-identical)+S443-post-merge-narrow-re-review-of-3332713c5(corpus-differential-2074-src:0-diag-changes;20-shape-multifile-matrix) note=3332713c5-merged-without-re-review;MED-regression-imported-enum-named-like-builtin-false-E-ERROR-009-PA-reproduced-fixed-by-#1172 -->

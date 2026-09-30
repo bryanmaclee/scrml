@@ -2,6 +2,29 @@
 
 A rolling log of what just landed and what's actively underway in the compiler. For the full spec and pipeline docs see `compiler/SPEC.md` and `compiler/PIPELINE.md`.
 
+## S442 — 2026-09-29 (bryan · XPS, concurrent with S441)
+
+The bootstrap got the S440 typer rules end to end and grew to the §66.19 worked programs; bryan ruled the tape
+grow/shrink split, dpa-058 (renders / bind / validators) and dpa-045 (plain-markup text, axiom-level) — and every
+landing needed at least one review round to fix something its own round had made.
+
+- **Bootstrap typer** (#1151 #1157 #1159, #1167 queued): conditions (`E-COND-NOT-BOOLEAN`, bare `T | not` = a presence
+  test, bare `bool | not` refused), operators (`E-OPERATOR-OPERAND-TYPE`, `E-OPERAND-NOT-NARROWED`) with flow
+  narrowing, `int` enforced everywhere, `E-CALL-ARITY` / `E-EACH-NOT-SEQUENCE` / `E-HANDLE-REDECLARE` /
+  `E-STRUCT-DUPLICATE-KEY`, an un-narrowed `T | not` into `T` refused for every type, full checks at arguments and
+  returns (§7.5.1 widening, PA-ruled, measured-zero corpus).
+- **Bootstrap §66.19 programs** (#1164, #1169 queued): §66.19.6 (engine as a `single`) runs verbatim; audit log and
+  form run minus Core-blocked constructs; tape grants (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`);
+  O55 (`E-DECL-SINGLE-INSTANTIATED`); O19 / O33 refused at compile time.
+- **SPEC** (#1156, #1170 queued): §66.12 grow/shrink split + `anywhere`, O55, O10 tokens, four typer codes; §4.18
+  rewritten for dpa-045 (two text-mode productions, a closed exit set, cooked, no display-text escapes, whitespace
+  kept).
+- **impl#1** (#1160): a self-closed non-void element gets an explicit end tag (`<textarea/>` no longer swallows the
+  page); dpa-058 D2-D9 filed.
+- **Docs**: maps refreshed to cf62b415 (#1144); dpa-058 banked, drained, ruled (#1148 #1154 #1168); dpa-045 queue rows
+  de-duplicated. Article draft `docs/articles/tape-2026-09-29.md` (untracked, bryan's).
+- Held for Oct 2 (agent weekly limit): the dpa-045 bootstrap branch (unreviewed), typer r8, the dpa-058 build.
+
 ## S441 — 2026-09-29 (bryan · ASUS)
 
 Spotlight prep: every public surface was audited for old or wrong information, and the audit surfaced a run of real security holes. Most of the session went into closing them, with S239 adversarial review on every code landing.
