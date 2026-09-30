@@ -6,8 +6,9 @@
 //   B(1) an interpolation's extent is found by lexing its body and tracking
 //        brace-TOKEN depth (lex.scrml lexFrom, the census's canonical walker) —
 //        never by counting raw `{` / `}` bytes.
-//   B(3) `\"` is DELETED from the code-default display-text literal: the `"`
-//        ends the literal, and the parser reports E-PARSE-001.
+//   B(3) `\"` is DELETED from the code-default display-text literal: the `\` is
+//        content and the `"` ends the literal — no diagnostic (SPEC §4.18.3:
+//        "E-PARSE-001 no longer fires on `\x` here"; s444 r2 fix 1).
 // Census: docs/changes/s442-dpa045-bootstrap/census.md.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
@@ -29,6 +30,12 @@ async function html(src) {
   expect(r.diags.map((d) => d.code)).toEqual([]);
   await loadProgram(r.core, "d45-" + k++);
   return document.querySelector("main").innerHTML;
+}
+// Every Text node's text in the parsed ASTs, in order.
+function texts(r) {
+  const out = [];
+  (function walk(x) { if (Array.isArray(x)) { x.forEach(walk); return; } if (!x || typeof x !== "object") return; if (x.k && x.k.variant === "Text") out.push(x.k.data.text); Object.values(x).forEach(walk); })(r.asts);
+  return out;
 }
 const state = (idle) => P(`<p><*ph/></p>`, `    <ph:Ph=.A single>\n        <A rule=.B>${idle}</>\n        <B rule=.A : "B">\n    </>`);
 
@@ -64,14 +71,29 @@ describe("dpa-045 B(1) — an interpolation's extent is brace-TOKEN depth (behav
 });
 
 describe("dpa-045 B(3) — `\\\"` is not an escape in a display-text literal", () => {
-  test("in a `:`-shorthand body: E-PARSE-001 first (the `\"` ends the literal)", () => {
-    const d = run(P('<p : "a\\"b">')).diags;
-    expect(d[0].code).toBe("E-PARSE-001");
-    expect(d[0].message).toContain("ENDS the literal");
+  // s444 r2 fix 1 — SPEC §4.18.3 (Amendment S442): "A `\` inside a display-text
+  // literal is an ordinary content character; there is no malformed-escape
+  // error (`E-PARSE-001` no longer fires on `\x` here). Consequently `\"` is a
+  // `\` followed by the closing `"`".
+  test("behaviour: a `:`-shorthand `\"C:\\\"` renders `C:\\` — no diagnostic", async () => {
+    expect(await html(P('<p : "C:\\">'))).toBe(W("<p>C:\\</p>"));
   });
-  test("in a state-child code-default body: E-PARSE-001 first", () => {
-    const d = run(state('"a\\"b"')).diags;
-    expect(d[0].code).toBe("E-PARSE-001");
+  test("behaviour: a state-child body `\"C:\\\"` renders `C:\\` — no diagnostic", async () => {
+    expect(await html(state('"C:\\"'))).toBe(W("<p>C:\\<!--if--></p>"));
+  });
+  test("`\"a\\\"b\"`: the `\"` after the `\\` closes the literal, so `b` is what is left over — and never E-PARSE-001", () => {
+    const sh = run(P('<p : "a\\"b">')).diags.map((d) => d.code);
+    expect(sh[0]).toBe("E-PARSE-TRAILING");
+    expect(sh).not.toContain("E-PARSE-001");
+    const st = run(state('"a\\"b"')).diags.map((d) => d.code);
+    expect(st[0]).toBe("E-UNQUOTED-DISPLAY-TEXT");
+    expect(st).not.toContain("E-PARSE-001");
+  });
+  test("twin (state body): `\\\\` is two backslashes", async () => {
+    expect(await html(state('"a\\\\b"'))).toBe(W("<p>a\\\\b<!--if--></p>"));
+  });
+  test("twin (state body): `\\${@n}` is a `\\` then a live interpolation", async () => {
+    expect(await html(state('"a \\${@n} b"'))).toBe(W("<p>a \\5 b<!--if--></p>"));
   });
   test("B(2) RULED delete (follow-up): `\\\\` is no longer an escape — both backslashes are content", async () => {
     expect(await html(P('<p : "a\\\\b">'))).toBe(W("<p>a\\\\b</p>"));
@@ -89,11 +111,33 @@ describe("dpa-045 B(3) — `\\\"` is not an escape in a display-text literal", (
 // display-text escape catalog deleted; whitespace-only text kept.
 // ---------------------------------------------------------------------------
 describe("follow-up 1 — the closed exit set of free text", () => {
-  test("`^{` / `!{` / `~{` are exits (context sigils; `~{` per SPEC §4.18.1b): skipped whole and reported, never text", () => {
+  test("`^{` / `!{` / `~{` are exits (context sigils; `~{` per SPEC §4.18.1b): skipped whole and reported", () => {
     for (const sig of ["^", "!", "~"]) {
       const d = run(P(`<p>a ${sig}{ x = "</p> }" } b</p>`)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
       expect(d[0].message).toContain(sig + "{");
+    }
+  });
+  // s444 r2 fix 2 — SPEC §4.18.1b pin 3: "no byte inside the body may change
+  // where the body ends". The block ends at its BALANCING `}` (the canonical
+  // walker), not at the `}` inside the string: never text.
+  test("`^{` / `!{` / `~{` extent: a `}` (and a `</p>`) inside a string does not end the block — the text around it is exactly `a ` and ` b`", () => {
+    for (const sig of ["^", "!", "~"]) {
+      const src = P(`<p>a ${sig}{ x = "</p> }" } b</p>`);
+      const r = run(src);
+      const open = src.indexOf(sig + "{");
+      const close = src.indexOf("} b</p>") + 1;
+      expect(r.diags[0].span.start).toBe(open);
+      expect(r.diags[0].span.end).toBe(close);
+      expect(texts(r).filter((t) => t.trim() !== "")).toEqual(["a ", " b", "end"]);
+      expect(texts(r).some((t) => t.includes("}") || t.includes('"'))).toBe(false);
+    }
+  });
+  test("`^{` / `!{` / `~{` extent: a nested `{ … }` balances too", () => {
+    for (const sig of ["^", "!", "~"]) {
+      const r = run(P(`<p>a ${sig}{ f({ k: "}" }) } b</p>`));
+      expect(r.diags.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+      expect(texts(r).filter((t) => t.trim() !== "")).toEqual(["a ", " b", "end"]);
     }
   });
   test("twin (behaviour): `?{` is NOT an exit — its §3.1 parent is Logic only, so in free text it is content", async () => {
@@ -120,6 +164,25 @@ describe("follow-up 1 — the closed exit set of free text", () => {
   });
   test("twin (behaviour): a lone `^` / `!` / `?` (no `{`) is content", async () => {
     expect(await html(P("<p>a ^ b ! c ? d</p>"))).toBe(W("<p>a ^ b ! c ? d</p>"));
+  });
+  // s444 r2 fix 3: `?` and `!` are in the tag-open class — `<?…` / `<!…` (other
+  // than a `<!-- -->` comment) are markup-open attempts, never content.
+  test("`<?` opens a tag attempt (not content) — reported at the `<`, and no text holds `<?`", () => {
+    const src = P("<p>a <?x b?> c</p>");
+    const r = run(src);
+    expect(r.diags[0].code).toBe("E-PARSE-TAG");
+    expect(r.diags[0].span.start).toBe(src.indexOf("<?"));
+    expect(texts(r).some((t) => t.includes("<?") || t.includes("?x"))).toBe(false);
+  });
+  test("`<!` (not a comment) opens a tag attempt — `<!DOCTYPE html>` in a `<p>` is reported, never text", () => {
+    const src = P("<p>a <!DOCTYPE html> b</p>");
+    const r = run(src);
+    expect(r.diags[0].code).toBe("E-PARSE-TAG");
+    expect(r.diags[0].span.start).toBe(src.indexOf("<!"));
+    expect(texts(r).some((t) => t.includes("DOCTYPE"))).toBe(false);
+  });
+  test("twin (behaviour): `<!-- -->` is a comment and `<` + a space / digit / `=` is content", async () => {
+    expect(await html(P("<p>a <!-- c --> b < c <3 <= d</p>"))).toBe(W("<p>a  b &lt; c &lt;3 &lt;= d</p>"));
   });
   test("`<_` and `<.` open tags (scrml's own tag forms) — the bootstrap has no `<match>`, so the arm is not built", () => {
     expect(run(P("<p>x <_ y</p>")).diags.length).toBeGreaterThan(0);
@@ -155,6 +218,41 @@ describe("follow-up 3 — a display-text literal has no character escapes; `${�
   });
   test("an interpolating display-text literal nested in a larger expression is reported, not rendered raw", () => {
     expect(run(P('<p : @n == 5 ? "a ${@n}" : "b">')).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
+  });
+});
+
+// s444 r2 fix 4 — SPEC §4.18.3: "A display-text literal that reaches end-of-file
+// (or the body's closer) before its closing `"` is an unterminated literal —
+// `E-CTX-001` against the opening `"`, recovered per §4.18.7" (the text from the
+// `"` to the closer is taken as the literal's content, and parsing continues).
+describe("an unterminated display-text literal is E-CTX-001 against its opening `\"`", () => {
+  test("`\"abc` before the state-child body's closer: exactly E-CTX-001, at the `\"` (not E-UNQUOTED-DISPLAY-TEXT, no unclosed cascade)", () => {
+    const src = state('"abc');
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-CTX-001"]);
+    const q = src.indexOf('"abc');
+    expect(r.diags[0].span.start).toBe(q);
+    expect(r.diags[0].span.end).toBe(q + 1);
+    expect(texts(r)).toContain("abc");
+  });
+  test("a closer written inside the literal's text ends it there — `\"x </> y\"` is E-CTX-001 first", () => {
+    const src = state('"x </> y"');
+    const d = run(src).diags;
+    expect(d[0].code).toBe("E-CTX-001");
+    expect(d[0].span.start).toBe(src.indexOf('"x'));
+  });
+  test("a literal running to end of file: E-CTX-001 first, at the `\"`", () => {
+    const src = `<program>\n    type Ph:enum = { A, B }\n    <ph:Ph=.A single>\n        <A rule=.B>"abc`;
+    const d = run(src).diags;
+    expect(d[0].code).toBe("E-CTX-001");
+    expect(d[0].span.start).toBe(src.indexOf('"abc'));
+    expect(d[0].message).toContain("end of the file");
+  });
+  test("twin (behaviour): a `</b>` (not this body's closer) inside the literal is content", async () => {
+    expect(await html(state('"a </b> c"'))).toBe(W("<p>a &lt;/b&gt; c<!--if--></p>"));
+  });
+  test("twin (behaviour): a `</>` inside an interpolation's string is not the closer (the canonical walker skips the `${…}`)", async () => {
+    expect(await html(state('"x ${"</>"} y"'))).toBe(W("<p>x &lt;/&gt; y<!--if--></p>"));
   });
 });
 

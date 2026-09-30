@@ -1273,7 +1273,7 @@ ${
             const en: ANode = { nid: em.nid, span: mkSpan(start, em.pos), k: ANodeK.Text("") }
             return { nodes: [en], mp: mBump(em) }
         }
-        const tp: TP = displayEscapeDiags(regionTP(mAdv(mp, 1), LexStop.Shorthand))
+        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)
         let t: TP = tp
         let e: AExpr = { nid: t.nid, span: mkSpan(start, start + 1), k: AExprK.Recovered }
         if (atEnd(t)) {
@@ -1387,18 +1387,11 @@ ${
         return { nodes: out, mp: m }
     }
 
-    // dpa-045 B(3) (RULED S442: `\"` is deleted from the display-text literal):
-    // the lexer (display mode) ends the literal at that `"` and keeps the
-    // backslash as content; here it is reported, E-PARSE-001 (a backslash
-    // followed by a character that is not an escape, §4.18.3) — once per region.
-    fn displayEscapeDiags(tp: TP) -> TP {
-        for (const t of tp.toks) {
-            if (t.cls == TC.Str && t.text.length >= 3 && t.text.substring(0, 1) == "\"" && t.text.substring(t.text.length - 2) == "\\\"") {
-                return diagAt(tp, "E-PARSE-001", "`\\\"` is not an escape in a display-text literal (dpa-045, ruled S442): the `\"` ENDS the literal here. A display-text literal cannot contain `\"` — split the text, or render the quote from logic", t)
-            }
-        }
-        return tp
-    }
+    // dpa-045 B(3) + B(2) (RULED S442; SPEC §4.18.3): a display-text literal
+    // has NO character escapes and NO malformed-escape error — a `\` is
+    // content, so `"C:\"` is `C:\` then the closing `"`. The lexer (display
+    // mode) does all of it; the parser reports nothing (r2: the E-PARSE-001 the
+    // first cut raised on `\"` is gone — §4.18.3 says it no longer fires).
 
     // r1 F3: after the shorthand's `>`: another `>` later on the same line
     // (before any `<`) means the first one was a comparison operator.
@@ -1456,11 +1449,20 @@ ${
                 const tagNode: RNodeOne = parseMarkupNode(m)
                 out = out.concat([tagNode.n])
                 m = tagNode.mp
+            } else if (chAt(m, 0) == "\"" && unterminatedDisplay(m, tag) >= 0) {
+                // SPEC §4.18.3 / §4.18.7 (recovery): a display-text literal that
+                // reaches the body closer (or end of file) before its closing
+                // `"` is E-CTX-001 against the opening `"`; the text from the
+                // `"` to the closer is taken as its content, and parsing goes on
+                const stop: int = unterminatedDisplay(m, tag)
+                const open: int = m.pos
+                m = mDiag(m, "E-CTX-001", "unterminated display-text literal: the `\"` opened here reaches " + (stop >= m.src.length ? "the end of the file" : "the `<" + tag + ">` body's closer") + " before its closing `\"` (§4.18.3)", open, open + 1)
+                const at: MP = mAt(m, stop)
+                out = out.concat([textNode(at, open + 1, m.src.substring(open + 1, stop))])
+                m = mBump(at)
             } else {
                 const before: int = m.pos
                 const tp0: TP = regionTP(m, LexStop.CodeBody)
-                const escBad: boolean = displayEscapeDiags(tp0).diags.length > tp0.diags.length
-                if (escBad) m = mDiag(m, "E-PARSE-001", "`\\\"` is not an escape in a display-text literal (dpa-045, ruled S442): the `\"` ENDS the literal here. A display-text literal cannot contain `\"` — split the text, or render the quote from logic", m.pos, lastEnd(tp0))
                 const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file }
                 const runEnd: int = lastEnd(tp)
                 const r: RExpr = parseAssign(tp)
@@ -1479,6 +1481,30 @@ ${
         }
         if (mLooking(m, "</")) m = parseCloser(m, tag)
         return { nodes: out, mp: m }
+    }
+
+    // A display-text literal opening at `mp` (a `"`) in a `<tag>` code-default
+    // body: where it runs out — the position of the body closer (`</>` /
+    // `</tag>`) met inside its literal segments, or end of file when it has no
+    // closing `"` — else -1 (a well-formed literal). The literal's extent is
+    // the lexer's (display mode); a `${…}` inside it is skipped by the
+    // canonical walker, so a closer inside an interpolation does not count.
+    fn unterminatedDisplay(mp: MP, tag: string) -> int {
+        const tp: TP = regionTP(mp, LexStop.CodeBody)
+        const t: PTok = tp.toks[0]
+        if (t.cls != TC.Str || t.start != mp.pos) return -1
+        let i: int = mp.pos + 1
+        while (i < t.end) {
+            if (mp.src.substring(i, i + 2) == interpOpen()) {
+                i = lexFrom(mp.src, i + 1, LexStop.Balanced).end
+            } else if (mp.src.substring(i, i + 3) == "</>" || mp.src.substring(i, i + tag.length + 3) == "</" + tag + ">") {
+                return i
+            } else {
+                i = i + 1
+            }
+        }
+        if (t.text.length >= 2 && t.text.substring(t.text.length - 1) == "\"") return -1
+        return t.end
     }
 
     type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], mp: MP }
