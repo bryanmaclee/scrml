@@ -1801,6 +1801,23 @@ export function generateServerJs(
     (ctxForCache as { protectAnalysis?: unknown } | null)?.protectAnalysis ?? protectAnalysisLegacy ?? null;
   const _protectCtx: ProtectContext = buildProtectContext(_protectAnalysis);
   const _protectActive: boolean = _protectCtx.protectedByTable.size > 0;
+  // §14.8.9 × §19.9.5 (S443 round 6, P3) — the CPS error envelope's
+  // `ServerError.message`. It was `String(err.message)` of whatever the body
+  // threw, and a thrown message can carry a protected VALUE: SQLite's
+  // `json_extract('{}', passwordHash)` fails with "bad JSON path: '<the hash>'",
+  // a `JSON.parse(u.passwordHash)` SyntaxError quotes its input — measured, the
+  // hash crossed the wire in an error. The provenance flow cannot see into an
+  // exception a host API constructs, so under `protect=` the message is a fixed
+  // string (fail closed) and the real error is logged SERVER-side. §19.9.5 types
+  // the variant as `ServerError(message: string, fn: string)` and leaves the
+  // message text to the implementation; `fn` is unchanged, and a typed scrml
+  // failure (`__scrml_error`) still passes through — the flow analyses those.
+  const _cpsErrorPrologue = (fnName: string): string[] => _protectActive
+    ? [`    if (!(_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)) console.error(${JSON.stringify(`[scrml] server function \`${fnName}\` failed:`)}, _scrml_cps_err);`]
+    : [];
+  const _cpsErrorMessage: string = _protectActive
+    ? `"the server could not complete this call (details are in the server log)"`
+    : `String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`;
 
   // §14.8.10 — tenant-row isolation floor context. Built from BOTH the §14.8.9
   // `<db>`-derived schema registry AND the app's own `<schema>` declarations —
@@ -4973,9 +4990,10 @@ export function generateServerJs(
       // serialize as a tagged scrml-error variant (per §19.9.1).
       if (_ext4Wrap) {
         lines.push(`  } catch (_scrml_cps_err) {`);
+        for (const l of _cpsErrorPrologue(name)) lines.push(l);
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
-        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} } };`);
+        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
         lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: {`);
@@ -5275,9 +5293,10 @@ export function generateServerJs(
       // shape so the client CPS wrapper observes a consistent §19.9.1 envelope.
       if (_ext4WrapNonCsrf) {
         lines.push(`  } catch (_scrml_cps_err) {`);
+        for (const l of _cpsErrorPrologue(name)) lines.push(l);
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
-        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err), fn: ${JSON.stringify(name)} } };`);
+        lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
         lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: { "Content-Type": "application/json" },`);
