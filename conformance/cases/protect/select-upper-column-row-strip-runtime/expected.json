@@ -1,0 +1,21 @@
+{
+  "id": "protect-select-upper-column-row-strip-runtime",
+  "description": "§14.8.9 S441 round 5 (F2) — the ROW path of a case-variant column. `SELECT … PASSWORDHASH` comes back from the driver keyed by the DECLARED name `passwordHash`; the descriptor records the declared name and the egress redactor compares column names case-insensitively, so the returned row reaches the client as {id, name} with the protected column absent.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-scalar-egress.test.js",
+  "rationale": "MEASURED before the fix (S441 round-4 review, F2): the descriptor recorded the surface spelling `PASSWORDHASH`, the redactor compared exact-case against the row key `passwordHash`, and the route served the hash. The round-4 case select-upper-column-e006 exercised only the scalar path.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" }
+      ]
+    },
+    "input": [{ "click": "#load" }, { "wait": "settle" }],
+    "state": { "user": { "id": 1, "name": "Alice" } }
+  }
+}

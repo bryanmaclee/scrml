@@ -1,0 +1,19 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      import { verifyPassword } from 'scrml:auth'
+      function login(name, pw) {
+        let u = ?{`SELECT id, name, passwordHash FROM users WHERE name = ${name}`}.get()
+        if (u is not) return { ok: false }
+        const ok = verifyPassword(pw, u.passwordHash)
+        if (!ok) return { ok: false }
+        return { ok: true, user: { id: u.id, name: u.name } }
+      }
+    }
+  </db>
+  <result> = not
+  <button id="load" onclick=${ @result = login("Alice", "correct-pw") }>login</button>
+</program>

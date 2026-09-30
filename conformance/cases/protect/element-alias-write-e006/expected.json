@@ -1,0 +1,12 @@
+{
+  "id": "protect-element-alias-write-e006",
+  "description": "§14.8.9 S441 round 5 (F4) — an element a collection method hands back (`find` / `filter` / `at` / `pop` / `sort`, `Map.get`, `Object.values`, an iterator's `.next().value`) IS an element of the collection; a write into it lands in the collection, so returning the collection is E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED before the fix (S441 round-4 review, F4): the write reached no binding (the alias walk stopped at the call) and the route served the hash inside the array.",
+  "expect": {
+    "codes": ["E-PROTECT-006"],
+    "severity": { "E-PROTECT-006": "error" }
+  }
+}

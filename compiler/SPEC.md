@@ -9015,7 +9015,26 @@ prerender payload, a channel `broadcast()` published frame (§38), and a `server
 sinks; a value the compiler serializes to the client passes through one of them, and each reads the
 provenance descriptor and redacts. The strip keys on the column's
 resolved source **`(table, column)` origin, never its surface name** — so `SELECT passwordHash
-AS h` is redacted identically to `SELECT passwordHash`. The redaction is the **load-bearing
+AS h` is redacted identically to `SELECT passwordHash`. Origin matching SHALL follow SQLite identifier
+rules: table and column identifiers are compared CASE-INSENSITIVELY, quoted or not, with a schema
+qualifier (`main.users`) ignored — `SELECT * FROM USERS`, `SELECT PASSWORDHASH` and `u.PasswordHash`
+all resolve to the protected origin. (S441 round 4: the lookup was exact-case, so `FROM USERS`
+emitted no descriptor at all and the whole-row strip vanished — measured, also on main.) Every
+column comparison the floor makes — the descriptor, a `reveal` name, the row key at the sink — SHALL
+be on the case-folded name, and the descriptor SHALL record the name the row actually carries: an
+unaliased column's DECLARED name (the driver returns `SELECT PASSWORDHASH` keyed `passwordHash`), an
+alias exactly as written. (S441 round 5: the descriptor recorded the surface spelling, the strip
+compared exact-case, and `SELECT PASSWORDHASH … return u` served the hash — measured.) A query
+whose origins cannot be resolved still degrades to the wholesale strip, never to "no protected
+column". An output column COMPUTED in SQL — an expression, function call, cast, concatenation, a
+quoted / bracketed / backticked spelling, or a scalar subquery — that references a protected column
+by any spelling (case-folded, quote-stripped, qualified or not), or that contains a nested
+projection `*`, IS that column's value re-encoded by the database; its output key is not
+statically reliable, so the row SHALL be stripped wholesale. This deliberately over-approximates: a
+value derived in SQL (`length(passwordHash)`, `passwordHash = ${x} AS ok`) strips its row too.
+(S441 round 5: such a column carried no descriptor, and `passwordHash || ''`, `lower()`, `hex()`,
+`CAST`, `substr`, `coalesce`, `json_object`, `group_concat`, `pin + 0`, `"passwordHash"` and a
+scalar subquery each served the value — measured, also on main.) The redaction is the **load-bearing
 guarantee**: it is sound *by construction*, not by proving any return clean.
 
 **The provenance map (shared primitive — a reuse).** At `?{}` query-lowering, every output column
@@ -9040,6 +9059,99 @@ cover:
 - **Unresolvable dynamic SQL** — a fully string-built `?{}` whose column origins cannot be
   statically resolved. Per the fail-closed policy below such a row is **stripped wholesale** at
   egress (every column dropped) with an `I-PROTECT-STRIP-001` lint; it is never accept-unknown.
+
+⚑ **S441 amendment — EXTRACTION IS AN EXPLICIT-COLUMN FLOW, AND THE RUNTIME STRIP CANNOT SEE IT.**
+The descriptor lives on the ROW. A value taken OUT of a row — `return u.passwordHash`, a new
+object or array holding it (`{ h: u.passwordHash }`, `[u.passwordHash]`), string concatenation or
+template interpolation, destructuring (`const { passwordHash } = u`), a helper that extracts from a
+row passed to it, `rows.map(r => r.passwordHash)`, `JSON.stringify(u)` — IS the protected column's
+value (it is not a derived flow of independent identity), but it carries no descriptor, so the
+sink has nothing to read. Prior revisions of this section called the floor sound by construction
+without that qualification; MEASURED at S441, `return u.passwordHash` served HTTP 200 with the
+hash in the body while `I-PROTECT-STRIP-001` reported the column stripped
+(`g-protected-column-escapes-redaction-as-scalar`). The guarantee is therefore stated in two
+halves, and a conformant implementation SHALL enforce both:
+1. **Rows** — a value that still is, or contains, a descriptor-bearing row is stripped at the sink
+   at runtime, by construction (the contract above).
+2. **Extracted values** — a value whose provenance includes a `protect=` column and which reaches a
+   client-egress sink OUTSIDE a descriptor-bearing row SHALL be rejected at compile time with
+   **`E-PROTECT-006`**. Rejection, not runtime stripping, is required: a stripped scalar would
+   silently change what the program returns. The obligation is bounded as follows, and these bounds
+   are normative:
+   - **Scope — the whole compile.** The analysis SHALL cover every server module the compile emits,
+     with the imports between them resolved: a helper in another `.scrml` file is analysed, not
+     assumed. (S441 fix round: splitting an extracting helper into a second file was the first
+     bypass of a single-module analysis — it compiled at exit 0 and served the hash.)
+   - **Provenance is preserved by default.** Any step not positively known to produce a value of
+     independent identity preserves it — including binding, member / index / destructuring
+     extraction, re-housing in an object or array literal, spread, writes into a container —
+     including a write through an ALIAS of that container or through a helper that receives it
+     (`const o2 = o; o2.x = h`, `setv(o, h)`, `box.m.set(h, 1)`: every binding that may hold the
+     same object sees the write), a write into an element a collection hands back
+     (`arr.find(…).x = h`, `arr.at(0).x = h`, `m.get(k).x = h`, `Object.values(o)[0].x = h`, an
+     iterator's `.next().value`), and a write into a prototype (`Object.setPrototypeOf(o, p)`,
+     `Object.create(p)`) — string
+     concatenation and template interpolation, conditional and logical operators, `await`, array
+     callbacks, getters and `toJSON` the serializer invokes, `throw` → `catch`, promise resolution,
+     encodings (`Buffer`, `btoa`, `encodeURIComponent`, character codes), and serializing built-ins.
+   - **Unresolvable callees fail closed.** A call into code the compile does not contain — a host,
+     stdlib or npm import, or a platform API — that receives a protected value (a scalar OR a whole
+     row) returns a protected value, unless the callee is on the deriver allowlist.
+   - **The derived-flow exemption is an explicit ALLOWLIST, not "any callee the module does not
+     define".** A value is DERIVED (outside the claim) only when produced by: a comparison, equality,
+     relational, `in` or `instanceof` operator, `!`, `typeof`, `void`, `delete` (never an arithmetic
+     one — see below); `.length` of a value whose length is a count of independent identity — the
+     column's own string, a string or array literal built from it, a `.map` / `.filter` / `.sort`
+     of an array, an array of rows — and of NO other value: `.length` of `({ length: h })`,
+     `new Array(u.pin)`, `"x".repeat(u.pin)` or an unmodelled method's result IS the value and
+     preserves provenance (S441 round 5: `.length` was derived on any receiver, and those shapes
+     served the value — measured); a predicate / position method (`includes`,
+     `startsWith`, `indexOf`, …, but NOT `charCodeAt` / `codePointAt`, which are lossless, and NOT
+     `getTime`, which is the identity on a number) called on a string-like receiver — the same
+     method NAME on an object carrying protected data is an unmodelled method and fails closed; or
+     an allowlisted one-way / boolean function — `scrml:auth` `verifyPassword` / `hashPassword` /
+     `verifyTotp`, `scrml:crypto` `hash` / `hmac` / `verifyHash`, `crypto.subtle.digest`, `Boolean`,
+     `console.*`. `Number(x)` is not on it (on a numeric protected column it is the identity), and
+     neither is any `Bun.*` API (`Bun.hash` is a non-cryptographic hash, brute-forceable on a
+     low-entropy column).
+   - **Arithmetic stays protected** (ruling, S441: "ratify with the changes, arithmetic stays
+     protected"). The result of an arithmetic, bitwise or shift operator (`+ - * / % **`, `& | ^ ~`,
+     `<< >> >>>`), of unary `+` / `-` / `~`, of `++` / `--`, and of a compound assignment on a
+     protected value IS protected, and so is anything derived from it: `u.pin * 1`, `+u.pin`,
+     `u.pin - 0` and `cost_price * qty` are `E-PROTECT-006` at egress. To compute with a protected
+     column, declassify it with `reveal`: `const r = u.reveal("cost_price"); return r.cost_price * qty`
+     is a declassified read followed by arithmetic, and ships.
+   - **Keys are data.** A protected value used as an object KEY (`{ [h]: 1 }`, `o[h] = v`,
+     `m.set(h, v)`) is carried into the container: a key is serialized as surely as a value. A
+     lookup KEYED by a protected value (`labels[h]`, `table[h[i]]`, `m.get(h[i])`) selects by the
+     secret, and its result is protected ALL THE WAY DOWN — a field read off it (`L[c].v`), a method
+     on it (`L[c].test()`), and `Object.keys(L[c])` are all protected. `Object.keys` of a
+     descriptor-bearing row yields column NAMES, not values, and is clean.
+   - **First-party helpers are modelled, not trusted.** `scrml:data` `pick(obj, keys)` /
+     `omit(obj, keys)` with a literal key list are modelled exactly (they copy into a fresh object,
+     so precisely the protected columns that survive the selection are protected — `pick(u, ["id",
+     "name"])` is clean); a non-literal key list fails closed. A `.scrml` re-export
+     (`export { x } from './b.scrml'`) is resolved to the module that defines `x`.
+   - **Sinks.** Every compiler-emitted client-egress serializer, AND every argument of an
+     author-built `Response` — its body AND its `init` (a `Location` or `Set-Cookie` header built
+     from the column is egress even on a null-body response) — `Response.redirect`, `Response.json`,
+     and channel publish / stream enqueue / socket send.
+   - **Out of scope: position oracles and implicit flows.** A position method given a protected
+     ARGUMENT (`ALPHABET.indexOf(h[i])`, `[...ALPHABET].findIndex(c => c == h[i])`) and an implicit /
+     control-dependence flow (`if (h[i] == c) s += c`) can each reconstruct the value character by
+     character; neither is within this version's guarantee.
+   - **Out of scope: a DB round trip.** Writing the value into a non-protected column and reading it
+     back yields a new row whose column origin is not protected; the egress guarantee does not
+     follow a value through the database. (Keeping a protected value out of a non-protected column
+     is a schema / write-path concern, not an egress one.)
+   - **Disclosed imprecision (fails closed, never open).** The analysis is call-site sensitive (each
+     distinct argument signature of a helper is analysed separately) but flow-INsensitive within a
+     function: a variable reassigned from a protected value to a clean one is still treated as
+     protected. An implementation that cannot finish the analysis — an unparseable emitted module,
+     or an exhausted analysis budget — SHALL fail closed with `E-PROTECT-006`.
+
+   `reveal("col")` discharges it for the named column exactly as at the sink; the name is compared
+   case-insensitively, as SQL identifiers are (`reveal("PIN")` declassifies `pin`).
 
 **Declassification — `reveal` (the sole admit path).** A protected-origin column reaches the
 client **iff** it is explicitly declassified via the field-level `reveal` construct at the value:
@@ -9129,7 +9241,16 @@ diagnosable build-time condition into a runtime failure.
 named-codes-land-with-impl precedent — Rule 4):
 - **`I-PROTECT-STRIP-001`** (Info) — names each column the egress sink stripped (the redaction is
   never silent — the dev sees what the floor removed). Also fires on the wholesale strip of an
-  unresolvable-dynamic-SQL row.
+  unresolvable-dynamic-SQL row. ⚑ **S441: it SHALL fire only for a query whose row actually reaches
+  a client-egress sink carrying an unrevealed protected column.** It previously fired for every
+  protected SELECT — including one whose column left as an extracted scalar, which it reported as
+  stripped while it shipped, and one used only server-side (a login that verifies the hash), where
+  nothing is stripped at all. An info that claims a strip that did not happen is a false
+  confidentiality claim, not a lint.
+- **`E-PROTECT-006`** (Error) — a value whose provenance includes a `protect=` column reaches a
+  compiler-emitted client-egress sink outside a descriptor-bearing row (the S441 amendment above).
+  Names the column, the extraction site and the egress. Also raised, fail-closed, when the emitted
+  server module cannot be analysed.
 - **`E-PROTECT-004`** (Error) — a protected-origin column co-occurs, in one function body, with a
   compiler-unanalyzable egress (a `_{}` foreign block or an `asIs` value) where strip-by-origin
   cannot be guaranteed, and it is not `reveal`-declassified for every protected output column of
@@ -9157,7 +9278,10 @@ consuming the stream that is about to be returned — and would replay it under 
 without its headers. Closing it needs a store that can hold status + headers + a buffered body,
 which is a §19.9.6 change.
 
-**The DX layer (deferred — incremental, not load-bearing).** An *early authoring-time* static
+**The DX layer (deferred — incremental, not load-bearing).** ⚑ *S441: this paragraph governs a
+protected-origin ROW. For an EXTRACTED value the compile-time check is not DX — it is the second
+half of the guarantee (`E-PROTECT-006`, above), because no runtime floor can see an extracted
+value.* An *early authoring-time* static
 error reading the **same** provenance map — flagging a protected-origin return at compile time
 before the floor strips it — is a **deferred incremental DX addition**. It would ride the existing
 server-function-return boundary gate at `type-system.ts` (where `E-ROUTE-003` / `E-ROUTE-004`
@@ -20698,7 +20822,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROTECT-004 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` A protected-origin column (a `protect=` field, resolved BY ORIGIN through the SQL FROM/JOIN alias map — so alias-safe; `passwordHash AS h` is still caught) **co-occurs, in one function body,** with a compiler-unanalyzable egress — a `_{}` foreign-code block (§23) or an `asIs`-typed value (§14.1.1) — at a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38), or `server function*` SSE (§37) boundary, and the column is not `reveal`-declassified. Resolution: declassify EVERY protected output column of that query with `value.reveal("col")`, or project them out. The confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction. ⛔ **THIS IS A CONSERVATIVE LINT AND §14.8.9 NOW SAYS SO NORMATIVELY — DO NOT CITE IT AS A CONFIDENTIALITY GUARANTEE.** It is a per-body SOURCE-TEXT co-occurrence test, and ordinary function extraction defeats it: REPRODUCED at `8fa6854d`, the same code with the query in a helper and the raw egress in the caller compiled at exit 0 while the one-body form fired. Recognizing more spellings does not repair that — a completeness fix on this mechanism has no done-condition, which is exactly why the repair sat unscheduled for ~40 sessions. It bounds the §14.8.9 DERIVED-FLOW boundary, which that section already excludes from its soundness claim, so its incompleteness is disclosed rather than new. ⚑ **TWO CHANGES AT S405, BOTH NEWLY-REJECTING.** (a) **The `Response` kind LEFT this row** — an author-constructed `Response` is now `E-PROTECT-005`, raised structurally at emission, because that limb was the one whose text co-occurrence stood in for a REAL compiler-visible fact (the emitted envelope is fail-open on a `Response`). Do not re-add it here. (b) **Suppression is COLUMN-keyed, not existence-keyed** — previously ANY `.reveal(` anywhere in the body disarmed the gate for EVERY protected column in it, so `reveal("email")` silently declassified `passwordHash` (REPRODUCED). A strip-all (unresolvable-SQL) query can never be discharged by named reveals; a `.reveal(<non-literal>)` names no readable column and discharges nothing. ⚑ **AND THE `_{}` LIMB DID NOT FIRE ON THE SYNTAX §23 RECOMMENDS, WHICH IS WHY THIS ROW NOW STATES THE OPENER FAMILY.** §23.2 defines the opener as `_` + **zero or more** `=` + `{`, and `W-FOREIGN-001` steers authors AWAY from the level-0 `_{`; the predicate matched level 0 ONLY until S405, so it recognized exactly the spelling the compiler discourages. REPRODUCED at `8fa6854d`: `let w = _={ JSON.stringify(v) }=` in a `protect=` body compiled at exit 0 with no diagnostic and shipped `passwordHash` in full. Cases: `conformance/cases/protect/raw-egress-e004` (fires, level-1 opener) · `reveal-suppresses-e004` (discharged) · `reveal-wrong-column-e004` (NOT discharged — the column-keyed proof). *(Catalog addition S230 dpa-017; scope corrected + narrowed S405 arc A, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` via `detectProtectedRawEgress`.)* | Error |
 | E-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A server function, `<endpoint>` arm or `server function*` generator in a scope that declares `protect=` columns SERIALIZES ITS OWN RESPONSE BODY.** The compiler owns the §14.8.9 egress envelope and MEDIATES it — `_scrml_protect_redact` walks the value, reads each protected-origin descriptor and strips what was not `reveal`-declassified. It cannot mediate a body the author already serialized: that body is an opaque stream the floor cannot read, and the Symbol-keyed descriptor does not survive the author's own `JSON.stringify`. So the compiler refuses to emit an envelope it cannot mediate. Resolution: return the VALUE (the compiler serializes and redacts it for you); or move the function into a file that declares no `protect=` columns. ⛔ **THERE IS NO ESCAPE HATCH AND `reveal("col")` DELIBERATELY DOES NOT DISCHARGE IT.** `reveal` declassifies a NAMED COLUMN at a value the floor can still WALK; a hand-serialized body is not walkable, so there is no column to admit and nothing for the stamp to mean. ⚑ **THE UNIT IS THE BODY, NOT THE `Response` — AND GETTING THAT WRONG SHIPPED A BUILD BREAK WITH NO WORKAROUND.** The first S405 landing gated the full WHATWG producer set, including `Response.redirect` and `Response.error`, both of which have a NULL BODY. There is no stream to fail to inspect, so the error contradicted its own rationale, and its stated resolution ("return the value") **cannot produce a 302**. Combined with the no-escape-hatch rule that meant a `protect=` app could not redirect from a server fn or an `<endpoint>` arm AT ALL — REPRODUCED base-clean / tip-failing on a fn whose SELECT projected every protected column out. Now gated on BODY-CARRYING constructions only (`new Response(<body>, …)` and `Response.json(…)`); `new Response()` / `new Response(not, …)` are silent, and the two null-body statics raise `W-PROTECT-005` instead. **The adopter-facing contract is one sentence: a `protect=` app keeps full control of STATUS and HEADERS and gives up authoring the BODY.** ⛔ **IT IS FILE-SCOPED, NOT QUERY-SCOPED, AND THAT IS DELIBERATE.** It fires wherever the body is built, even in a function that selects no protected column. Keying it on the query would make it a per-body CO-OCCURRENCE test — the exact mechanism `E-PROTECT-004`'s `Response` limb was deleted for, since moving the query one function away defeats it (measured). Immunity to extraction is bought by keying on the CONSTRUCTION alone, and the message says so. ⚑ **EARLY WARNING, NOT THE GUARANTEE.** Detection is an acorn scan over the ALREADY-LOWERED body slice in CODE POSITION (the name inside a string literal or comment does not fire). A `Response` reached by ALIASING, `await fetch(...)`, `.clone()`, or a callee outside the slice is invisible to ANY syntactic scan; chasing those spellings is the unbounded fix this arc refuses. **Those are caught by §14.8.9 limb 3 — the RUNTIME refusal, where `instanceof Response` is exact.** An unparseable slice does not fire (fail-open FOR THE WARNING ONLY, defensible solely because limb 3 holds). Cases: `conformance/cases/protect/e-protect-005-pos` (fires) · `e-protect-005-neg` (same source, `protect=` removed, compiles) · `null-body-response-clean` (the null-body form is silent). *(Catalog addition S405 arc A, scope corrected in the S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`, scanning via `compiler/src/codegen/protect-egress.ts` `findAuthoredResponseConstruction`.)* | Error |
 | W-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A scope that declares `protect=` columns returns a response the COMPILER can prove payload-free but the RUNTIME sink cannot recognize as such** — on this implementation `Response.redirect(...)` and `Response.error()`. It COMPILES (there is no body for the §14.8.9 floor to fail to inspect, so `E-PROTECT-005` would be wrong), but the runtime guard still refuses it with a 500. Resolution: write the equivalent explicit null-body form, which BOTH limbs accept — `new Response(not, { status: 302, headers: { Location: "/where" } })`, `new Response(not, { status: 204 })`. ⚑ **THIS ROW EXISTS BECAUSE THE TWO LIMBS CAN PROVE DIFFERENT THINGS, AND THE SEAM HAD TO GO SOMEWHERE VISIBLE.** MEASURED on Bun 1.3.14: `new Response()` / `new Response(null, …)` give `.body === null`, but `Response.redirect(...)` and `Response.error()` give a **0-byte ReadableStream**, so the sink's non-destructive test cannot distinguish them from a body-carrying response. And it must not try: `new Response("s3cret", {status:302, headers:{Location:"/h"}})` presents IDENTICALLY — same `location`, no `content-length`, same `.body` shape — so any heuristic short of consuming (and destroying) the stream is unsound. ⛔ **The alternative to this warning is silence, and silence here is a WORSE defect than the build break it replaced**: the shape would compile clean and then 500 on the first request. A diagnosable build-time condition SHALL NOT be converted into a runtime failure. Cases: `conformance/cases/protect/w-protect-005-null-body-static` (fires) · `null-body-response-clean` (the named resolution, compiled — a diagnostic that names a working path owes a proof that it works). *(Catalog addition S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`.)* | Warning |
-| I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands.) | Info |
+| I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. ⚑ **S441: fires ONLY for a query whose row actually reaches a client-egress sink carrying an unrevealed protected column** — decided by the §14.8.9 provenance flow over the emitted server module. It used to fire for every protected SELECT, so a column that left as an extracted scalar was reported "stripped" while it shipped (`g-protected-column-escapes-redaction-as-scalar`), and a row used only server-side (a login that verifies the hash) was reported stripped when nothing was. Cases: `conformance/cases/protect/strip-info-select-star` (fires) · `login-verify-clean` · `nonprotected-field-runtime` · `reveal-client-visible-runtime` (silent — nothing stripped). (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands; S441 truthfulness fix at `compiler/src/codegen/protect-flow.ts` `buildProtectFlowDiagnostics`.) | Info |
+| E-PROTECT-006 | §14.8.9 | `provenance: brief s441-protect-scalar-egress (SECURITY HIGH, g-protected-column-escapes-redaction-as-scalar); PA ratification pending` **A value whose provenance includes a `protect=` column reaches a compiler-emitted client-egress sink OUTSIDE a descriptor-bearing row** — a server-fn / `<endpoint>` response, SSR `/__serverLoad`, `/__mountHydrate`, channel `broadcast()` (§38), or a `server function*` SSE frame (§37, including its `event` / `id`, which are serialized outside the redact). The §14.8.9 runtime floor strips a protected column by the origin descriptor its ROW carries; a value EXTRACTED from the row carries none, so before this code `return u.passwordHash` served HTTP 200 with the hash in the body (MEASURED). The analysis covers EVERY server module of the compile with imports between them resolved (a helper in another file is analysed). Provenance is PRESERVED BY DEFAULT: extraction, re-housing, concatenation / templates / encodings (`Buffer`, `btoa`, character codes), `await`, callbacks, getters / `toJSON`, `throw` → `catch`, and any call into code the compile does not contain (a host / stdlib / npm import or platform API) receiving a protected scalar or row — fail closed. The derived-flow exemption is an explicit ALLOWLIST: comparison / relational operators, `!`, `typeof`, `.length` of a value whose length is a known count (the column's own string, a string / array literal built from it, a mapped array, a row array — NOT `({ length: h })` or `new Array(u.pin)`, S441 round 5), predicate / position methods on a string-like receiver (not `charCodeAt` / `codePointAt` / `getTime`), and the one-way / boolean functions `scrml:auth` `verifyPassword` / `hashPassword` / `verifyTotp`, `scrml:crypto` `hash` / `hmac` / `verifyHash`, `crypto.subtle.digest`, `Boolean`, `console.*` — no `Bun.*` API. A protected value used as an object KEY, or as a lookup key, is protected (keys are data). `scrml:data` `pick` / `omit` with literal key lists and `.scrml` re-exports are modelled. Sinks: every compiler-emitted client-egress serializer plus every argument of an author-built `Response` (body AND `init` headers — `Location` / `Set-Cookie`), `Response.redirect`, `Response.json`, publish / enqueue / send. `reveal("col")` discharges it for the named OUTPUT column. Resolution: return the row itself (the floor strips the column), or only a derived value; to send it deliberately, `row.reveal("col").col`. Also raised, fail-closed, when an emitted server module cannot be parsed or the analysis budget runs out. ⚑ **Arithmetic stays protected** (ruling S441): an arithmetic / bitwise / unary `+ - ~` / `++ --` / compound-assignment result on a protected value is protected (`u.pin * 1`, `+u.pin`, `cost_price * qty`); compute with a protected column by declassifying it with `reveal`. ⚑ **Keys and aliases:** a protected value used as an object key or lookup key is protected all the way down (`L[c].v`, `Object.keys(L[c])`); a write through an alias or a helper parameter lands in every binding that may hold the object. Origin matching is case-insensitive per SQLite identifier rules. ⚑ **Bounds, disclosed:** position methods with a protected ARGUMENT and implicit / control-dependence flows are out of scope; a DB round trip (write into a non-protected column, read back) is out of scope; the analysis is call-site sensitive but flow-INsensitive within a function (a binding reassigned from a protected value to a clean one is still treated as protected — fails closed). Cases: `conformance/cases/protect/scalar-return-e006` · `scalar-in-new-object-e006` · `scalar-concat-e006` · `scalar-map-e006` · `scalar-helper-e006` · `scalar-helper-cross-file-e006` · `response-header-e006` · `scalar-encoding-e006` · `computed-key-e006` · `reduce-index-by-e006` · `lookup-field-e006` · `lookup-method-e006` · `map-get-field-e006` · `lookup-keys-e006` · `alias-write-e006` · `helper-mutates-param-e006` · `nested-container-write-e006` · `select-upper-column-e006` · `from-upper-table-e006` · `arithmetic-e006` (fire) · `upper-table-row-strip` · `reveal-then-arithmetic-clean` (compile) · `login-verify-clean` · `nonprotected-field-runtime` (silent). *(Catalog addition S441; emitted compile-wide at `compiler/src/api.js` `runProtectFlow` via `analyzeCompileProtectFlow` in `compiler/src/codegen/protect-flow.ts`.)* | Error |
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row-redaction floor has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar. In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
@@ -39780,7 +39905,7 @@ Data is **immutable by default**. A write is legal only when the target's **type
 | none (omission) | nothing — the target is FIXED |
 | a lifecycle `(A to B)` | a write along the declared path `A → B` (a lifecycle IS a write contract — §66.11.6) |
 | a transition graph (`rule=` state-children, §66.13) | a write along the graph's edges |
-| sequence edit grants (§66.12) | the granted edits (end / front / anywhere, positions, length) |
+| sequence edit grants (§66.12) | the granted edits (grow and shrink, each granted separately at end / front / anywhere — S442, §66.12.2; positions; length) |
 | `replace` (on a scalar: `let`, §66.9) | replacing the whole value, bounded by the invariants |
 
 #### 66.11.2 Permissions govern the transition, never the spelling
@@ -39790,10 +39915,11 @@ of check:
 
 1. **Invariants** — length bounds and per-position types (§66.12) — are checked on **EVERY** write, however it
    is spelled.
-2. **Edits** — end / front / anywhere / positions-writable — are **classified at compile time**, from mutating
-   method calls AND from **recognized reassignment shapes**:
-   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.push(e)`);
-   - `@x = @x.filter(…)` is a **shrink-anywhere**;
+2. **Edits** — grow / shrink at the end / front / anywhere (each a separate grant, S442 — §66.12.2) and
+   positions-writable — are **classified at compile time**, from mutating method calls AND from **recognized
+   reassignment shapes**:
+   - `@x = [...@x, e]` is an **end-append** (the same edit as `@x.push(e)`; granted by `append`);
+   - `@x = @x.filter(…)` is a **shrink-anywhere** (granted by `remove`);
    - `@x = @x.map(…)` is a **position-write**.
 3. **`replace`** — writing an unrelated whole value, including `reset(@x)` and a server reload of the cell — is
    its **OWN explicit grant**, still **bounded by the invariants**. `replace` is NOT an "any" grant.
@@ -39964,11 +40090,38 @@ using only non-mutating operations). Permissions are therefore **axes**, checkab
 | Axis | Values |
 |---|---|
 | **length** | fixed · bounded (e.g. `1..10`) · free |
-| **where it changes** | end · front · anywhere |
+| **where it changes** | grow and shrink, granted SEPARATELY at each place: end (`append` · `pop`) · front (`prepend` · `shift`) · anywhere (`insert` · `remove`) — `anywhere` covers end and front |
 | **positions** | read-only · writable |
 | **position types** | uniform (an array) · per-position (a tuple) |
 
-`push` + `pop` together are "free length, changes at the end" — a stack. A splice is "changes anywhere".
+> **Amendment S442 — the "where it changes" axis splits grow from shrink; `anywhere` covers end and front.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"*, ratifying the PA's text:
+> *"the 'where it changes' axis needs to separate growing from shrinking. Rec: split `end` into `append` (grow at
+> the end) and `pop` (shrink at the end), and likewise `front`/`anywhere`. An audit log becomes `Entry[free,
+> append]` — genuinely append-only; a stack is `Frame[free, append, pop]`."* and *"Rec: yes — `anywhere`
+> includes `end` and `front` … `anywhere` means grow/shrink at any position."*
+> **Provenance (tokens):** ruling:user-voice-scrml.md S442 — *"spellings are fine"* (the grow/shrink grant tokens,
+> O10 part): `append`/`pop`, `prepend`/`shift`, `insert`/`remove` are the grant spellings for grow/shrink at the
+> end / front / anywhere.
+> **supersedes:** the sentence *"`push` + `pop` together are "free length, changes at the end" — a stack. A splice
+> is "changes anywhere"."*, and the single-token `end` · `front` · `anywhere` values of this axis. It closes the
+> contradiction with §66.19.5, where `[free, end]` granted `pop`, so the "provably append-only" log was poppable.
+
+**Grow and shrink are separate grants at each place** (end / front / anywhere):
+
+| Place | Grow | Shrink |
+|---|---|---|
+| end | `append` | `pop` |
+| front | `prepend` | `shift` |
+| anywhere | `insert` | `remove` |
+
+**`anywhere` covers `end` and `front`:** an anywhere-grow grant (`insert`) admits appends and prepends; an
+anywhere-shrink grant (`remove`) admits pops and shifts.
+
+A stack grants both halves at the end — `Frame[free, append, pop]`. An append-only log grants only the grow half —
+`Entry[free, append]` (§66.19.5). A splice changes anywhere: its removals are a shrink-anywhere (`remove`), its
+insertions a grow-anywhere (`insert`). (The bracket-list form these examples are written in is still ⚑ O10; the six
+tokens are ruled.)
 
 #### 66.12.3 Permissions live on the TYPE
 
@@ -39991,6 +40144,14 @@ an argument whose type grants MORE than the parameter's is ACCEPTED; the callee 
 grants. (`Edit[any]` in that text was later ruled out — there is no `any`, §66.12.4; the direction survives with any
 superset grant.)
 
+> **Amendment S442 — reading the quoted `Edit[end]` under the grow/shrink split (§66.12.2).** The block above is
+> the answered S435 text, kept verbatim. Its single-token `end` is superseded: `end` is now two grants, `append`
+> (grow) and `pop` (shrink). `pushEdit` only grows its parameter, so in current spelling its parameter and return
+> are `Edit[append]`. The call-site direction is unchanged: an argument whose type grants more (e.g.
+> `Edit[append, pop]`) is accepted where the parameter grants only `append`.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 1: *"split `end` into
+> `append` (grow at the end) and `pop` (shrink at the end)"*); tokens: S442 — *"spellings are fine"*.
+
 > ✅ **RULED S435 — O37 = (c)** (bryan: *"c"*): a call's write-back into a cell is an EDIT only when the compiler CERTIFIES the callee — it runs the §66.11.2 edit classifier over the function body once and records the edit kind it performs on its parameter (e.g. `return [...a, e]` → an end-append of `a`) as part of its signature; `@audit = appended(@audit, e)` is then that edit and is checked against the cell's grants. An uncertifiable callee's result is a `replace`. NOT trust-the-return-type (unsound). Direction: a more-permissive argument is accepted where a parameter grants less (answered "type" text). The prior OPEN text follows for the record.
 >
 > *(superseded)* **O37: write-back of a helper's result into a `replace`-less sequence.** The same answered
@@ -40002,7 +40163,16 @@ superset grant.)
 > callee's BODY as an edit kind (the compiler classifies what the function does to its parameter); **(c)** leave
 > it a `replace` (helpers cannot write into `replace`-less sequences). PA lean: (b), certify.
 
-> ⚑ **OPEN (not ruled) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
+> ✅ **RULED S442 — O10, in part: the six grow/shrink grant tokens.** `append` / `pop` (end), `prepend` / `shift`
+> (front), `insert` / `remove` (anywhere) are the grant spellings for grow / shrink at each place (§66.12.2).
+> **O10 stays OPEN for the rest:** the bracket-list-on-the-element-type form itself (`Entry[free, append]`),
+> `free` / `writable` / `replace` as tokens, and the bounded-length token (`1..10`). The single-token `end` /
+> `front` / `anywhere` quoted below are superseded by the S442 split (§66.12.2). The prior OPEN text follows for
+> the record, narrowed as stated here.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"spellings are fine"* (answering *"The token spelling —
+> `append`/`pop`, `prepend`/`shift`, `insert`/`remove` — is still your call under O10."*).
+>
+> ⚑ **OPEN (not ruled, narrowed S442) — O10: the concrete spelling of a grant.** The grant spellings in the PA text bryan
 > answered *"1 yes, 2 yes"* (the one-axis ruling) are a bracket list on the element type — `Entry[free, end]`
 > (append-only), `Todo[free, anywhere, writable, replace]`, and a tuple with `replace`, `[:number, :number,
 > replace]` — and `Edit[end]` in a parameter appears in an earlier sketch explicitly marked "illustrative, not a
@@ -40125,9 +40295,15 @@ applies to enum-typed fields: the graph's coverage of the enum and its edges are
 
 A declaration marked **`single`** is a singleton: singleton-ness is an opt-in MODIFIER, not a separate vehicle
 (ruling:S435 (PA proposal text answered "a") — *"Singleton-ness becomes opt-in"*). Its shared instance (§66.6.4) is
-reached as `<*x/>` in markup and `@x` in logic. That a plain use `<x/>` of a `single` declaration is an ERROR
-(`E-DECL-SINGLE-INSTANTIATED`, §66.20) is the DD §5.a mechanism (*"`single` forbids plain instances"*); the answered
-Q6 text implies it ("singleton") but does not state the error — ⚑ O55.
+reached as `<*x/>` in markup and `@x` in logic. **A plain use `<x/>` of a `single` declaration is an ERROR,
+`E-DECL-SINGLE-INSTANTIATED` (§66.20); `<*x/>` is the only way to render it** (O55, ruled S442 — below).
+
+> **Amendment S442 — O55 ruled: a plain use of a `single` declaration is an error.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*, item 1 ratifying the
+> PA's text: *"a plain `<phase/>` of a `single` declaration is either an error (`E-DECL-SINGLE-INSTANTIATED`) or it
+> renders the one instance. Rec: error. `<*phase/>` already says 'the existing one'."*
+> **supersedes:** the prior sentence here, which named the error only as the DD §5.a mechanism ("`single` forbids
+> plain instances"), implied but not stated by the answered Q6 text — ⚑ O55.
 
 **`<engine>` is re-expressed as a `single` declaration whose value carries a transition graph** — one vehicle for
 "a typed thing with a transition contract". **Spelling: ruling:S435 (PA proposal text answered "a")** — the Q6
@@ -40190,7 +40366,11 @@ form (an ordinary, non-`single` declaration, keyed per row, §66.7.3). **Nominal
 *(Former O6 — the spelling of `single` — is CLOSED: the trailing modifier appears in the PA text bryan answered
 "a", above. Note it differs from `let`'s prefix position; that asymmetry is the ruled text, not an OPEN item.)*
 
-> ⚑ **OPEN (not ruled) — O55: a plain use of a `single` declaration.** Whether `<x/>` of a `single` declaration
+> ✅ **RULED S442 — O55 = error** (ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*): a
+> plain use of a `single` declaration is `E-DECL-SINGLE-INSTANTIATED`; `<*x/>` is the only way to render it. The
+> prior OPEN text follows for the record.
+>
+> *(superseded)* **O55: a plain use of a `single` declaration.** Whether `<x/>` of a `single` declaration
 > is an error (DD §5.a: *"`single` forbids plain instances"*; `E-DECL-SINGLE-INSTANTIATED`), or renders the one
 > instance (engine parity: `<EngineName/>` mounts the singleton, §51.0.D), is not stated in the answered text.
 
@@ -40560,11 +40740,22 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 
 #### 66.19.5 An append-only audit log
 
+> **Amendment S442 — the log grants `append` only, so it is genuinely append-only.** Under the S442 grow/shrink
+> split (§66.12.2) the former `Entry[free, end]` granted `pop` too, so the "provably append-only" log was
+> poppable. The type is now `Entry[free, append]` and `@audit.pop()` is refused.
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 1: *"An audit log
+> becomes `Entry[free, append]` — genuinely append-only"*); tokens: S442 — *"spellings are fine"*. The
+> `@audit[0].action` comment gives the one real reason per ruling:user-voice-scrml.md S440 dpa-052 Q3 — *"a, next
+> Q"* (*"an element-field write is a FIELD edit of that field … fix §66.19.5's two-reason comment to the one real
+> reason"*).
+> **supersedes:** `<audit:Entry[free, end]=[]/>` and its *"changes at the end"* comment; the two-reason
+> `@audit[0].action` comment.
+
 ```scrml
 <program>
     type Entry:struct = { at: number, actor: string, action: string }   // fields carry no contract → fixed
 
-    <audit:Entry[free, end]=[]/>                    // free length, changes at the end, NO replace — ⚑ O10 spelling
+    <audit:Entry[free, append]=[]/>                 // free length, grows at the end only, NO replace — ⚑ O10: bracket form (tokens ruled S442)
     <let actor:string="ops"/>
 
     function record(action: string) {
@@ -40577,9 +40768,10 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
     // reset(@audit)                                 → E-WRITE-NOT-GRANTED (reset is a replace)
     // @audit = appended(@audit, e)                  → legal IF `appended` is certified an end-append (O37 RULED (c)): "fine" in the answered "type" text; a
     //                                                 `replace` under the later one-axis rule — with bryan
-    // @audit.shift()                                → E-WRITE-NOT-GRANTED (changes at the front)
+    // @audit.pop()                                  → E-WRITE-NOT-GRANTED (shrinks at the end; only `append` is granted)
+    // @audit.shift()                                → E-WRITE-NOT-GRANTED (shrinks at the front)
     // @audit = @audit.filter(e => e.actor != "x")   → E-WRITE-NOT-GRANTED (shrink-anywhere)
-    // @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (positions read-only; Entry.action is fixed)
+    // @audit[0].action = "edited"                   → E-WRITE-NOT-GRANTED (a FIELD edit of `action`, and Entry.action is fixed)
     // let snapshot = @audit                         → a SNAPSHOT (§66.10): a later record() does not change it
 
     <main>
@@ -40594,8 +40786,11 @@ ${ import { brand, danger, accent, warn, swatch, toggleMode, useWarnAsAccent } f
 </program>
 ```
 
-Without a `replace` grant the log is provably append-only: no statement in the program can remove or rewrite an
-entry, and the compiler checks that on every write however it is spelled (§66.11.3).
+The log's type grants one edit — grow at the end (`append`) — and no `replace`, so it is provably append-only: no
+shrink (`pop`, `shift`, `remove`) is granted, so no statement in the program can remove an entry; no `prepend` or
+`insert`, so entries arrive only at the end; positions are read-only, so no entry can be replaced; and the element
+type's fields are locked by omission (S440 dpa-052 Q3), so no entry can be rewritten. The compiler checks that on
+every write however it is spelled (§66.11.2, §66.11.3).
 
 #### 66.19.6 An engine re-expressed as a `single` declaration
 
@@ -40649,7 +40844,7 @@ After:
         <button onclick=load()>Load</button>
         <card title="One"/>
         <card title="Two"/>                         // each card has its own `status`
-        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55) -->
+        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55, ruled S442): <*phase/> is the only way to render it -->
     </main>
 </program>
 ```
@@ -40671,7 +40866,7 @@ emitter). Every code below is Nominal on impl#1.
 | **`E-DECL-STAR-REF-ATTR-WRITE`** | Error | An attribute on a `<*x …>` reference would write the referenced instance (§66.6.7). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-DECL-HANDLE-NOT-NARROWED`** | Error | A write OR a read (S437) through an `as=` handle typed `T \| not` (a conditionally-mounted instance) without a preceding narrowing (§66.7.5). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-HANDLE-REDECLARE`** | Error | (i) Two `as=` handles of the same name in one scope; (ii) an `as=` handle named like a cell — including a row-scoped handle in an `<each>` row named like a program-level cell (§66.7.4); (iii) the same `as=` name on mutually exclusive `if=` instances — an error for now, logged as a candidate widening (§66.7.2). **Provenance:** ruling:user-voice-scrml.md S440 (#4 = (c); #2 and #5 = PA recs — item #5). **Named; impl pending — Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
-| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3) — conditional on O55. **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
+| **`E-DECL-SINGLE-INSTANTIATED`** | Error | A plain use `<x …/>` of a `single` declaration (§66.13.3); `<*x/>` is the only way to render it. O55 RULED S442 (formerly conditional on O55). **Provenance:** ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"* (item 1). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-NOT-GRANTED`** | Error | A write whose compile-time-classified old→new transition is not granted by the target's type: a write to a locked (constant) declaration, to a fixed field, a `replace` (incl. `reset(@x)` and unclassifiable reassignment) without a `replace` grant, an un-granted sequence edit, or a write off a lifecycle path — including a transition off a lifecycle path or sequence edit grant on a SUB-FIELD, written via the spread-override shape `@x = { ...@x, f: v }` (§66.11.3, S437; a genuine replace is authoritative, O58 = (b)). The message names the missing grant (for a locked scalar: `let`). A write off a `rule=` graph keeps its existing code, `E-ENGINE-INVALID-TRANSITION` (§66.11, §66.13.2). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`E-WRITE-INVARIANT`** | Error | A write that provably violates a sequence invariant — a length bound or a per-position type (§66.11.2; enforcement of the unprovable case is O36). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
 | **`W-GRANT-REDUNDANT`** | Warning | A type grants `replace` together with edit grants, which `replace` subsumes (§66.11.3). **Nominal / spec-ahead — not yet emitted for the §66 form** (impl#1 does not implement §66; the bootstrap does). |
@@ -40683,6 +40878,23 @@ emitter). Every code below is Nominal on impl#1.
 **Cross-reference (not a §66 code):** a field overridden twice in one spread-override shape
 (`{ ...@g, phase: .Gone, phase: .Live }`, §66.11.3 item 1) is `E-STRUCT-DUPLICATE-KEY` — a language-wide
 struct-literal code whose home is §14.3 and whose row is in §34.
+
+**Typer codes accepted S442 (language-wide — not §66-form codes).**
+
+> **Amendment S442 — four typer codes accepted.** The S440 truthiness and operator rulings (and dpa-054 #3) had
+> no named codes; S442 accepts the four below. Their full SPEC text is the S440 SPEC pass (not yet written); these
+> rows only name them. Each is **Nominal — not yet emitted by impl#1; the bootstrap emits them.**
+> **Provenance:** ruling:user-voice-scrml.md S442 — *"1 yes, 2 yes, 3 all your recs"* (item 3: *"accept
+> `E-COND-NOT-BOOLEAN`, `E-OPERATOR-OPERAND-TYPE`, `E-OPERAND-NOT-NARROWED`, `E-INT-DIVISION`"*). Meanings from
+> ruling:user-voice-scrml.md S440 — *"#4 = (c)"*; *"all recs on 1-3 and dpa-037"* (Truthiness Q1/Q2, Gotcha
+> Q1–Q3); dpa-054 #3 (`/` is float-only).
+
+| Code | Severity | Fires when |
+|---|---|---|
+| **`E-COND-NOT-BOOLEAN`** | Error | A condition — `if=`, an `if` / `while` statement, a ternary test — whose value is provably neither a `bool` nor a `T \| not` presence test: numbers and strings have no truthiness (write `@count > 0`, `@user is some`). Provable-or-silent: an error wherever the violation is provable, silence where the type is unknown; no §63 window (S440 #4 = (c), Truthiness Q2). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-OPERATOR-OPERAND-TYPE`** | Error | An operand of a type its operator does not take: an arithmetic or relational operator on a non-number; `+` on anything but two numbers or two strings (string ordering goes through an explicit compare); `!`, `&&`, `\|\|` (and `and` / `or`) on a non-boolean — defaults use `??` (S440 Gotcha Q1, Q2). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-OPERAND-NOT-NARROWED`** | Error | A `T \| not` operand not narrowed before `+`, arithmetic, comparison, or use in a string template (S440 Gotcha Q3). A markup `${@o.n}` without narrowing stays SILENT (`${not}` renders nothing, S442). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
+| **`E-INT-DIVISION`** | Error | `/` between two `int`s: `/` is float-only (it divides `number`s); integer division is explicit, `div(a, b, .Mode)`, the rounding mode required (S440 dpa-054 #3). **Nominal — not yet emitted by impl#1; the bootstrap emits it.** |
 
 **Retained codes with a restated condition or message**
 
@@ -40735,7 +40947,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | O7 | §66.13 | Whether contract kinds combine on one field (lifecycle + graph; `let` + graph — `replace` subsumes edits, §66.11.3, so `let` would make a graph dead); the fate of §14.12.4's carve-out. |
 | ~~O8~~ RULED wiring | §66.15 | Function-typed attributes vs the passed-vs-stored rule (§15.11.5.1, `E-STRUCT-FUNCTION-FIELD`, `E-EQ-003`). |
 | O9 | §66.15.2 | Named and parametric slots on a declaration. |
-| O10 | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. |
+| O10 (narrowed S442) | §66.12.3 | Whether the grant spellings in the answered one-axis text (`Entry[free, end]`, `Todo[free, anywhere, writable, replace]`) are the final syntax; the bounded-length token. PARTLY RULED S442: the six grow/shrink tokens (`append`/`pop`, `prepend`/`shift`, `insert`/`remove`) are ruled. Still OPEN: the bracket-list-on-the-element-type form itself, `free` / `writable` / `replace` as tokens, the bounded-length token (`1..10`). Provenance: ruling:user-voice-scrml.md S442 — *"spellings are fine"*. |
 | O12 | §66.12.4 | The "hard" severity of the legacy-RHS deprecation within §63 ("clear dep terms" = removal at a MAJOR with `scrml fix`, per the answered L362 text). |
 | O13 | §66.9 | Whether logic-local `const` (and §50.8.5's keywordless-binding-is-`const`) retires. |
 | O14 | §66.11 | Whether field contracts govern non-cell (local) values — reversing §50.9's `const`-property-write sentence (lean: yes — an error; the §50.9 reversal was parked on dpa-052, which has ruled). |
@@ -40765,7 +40977,7 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 | ~~O52~~ RULED | §66.2.2 | How `rule=` state-children fit the declaration/use marker and §66.2.3's "after `:` read a type"; whether the `:`-shorthand body survives there. |
 | O25 | §66.5.5 | Record gap: implicit bind vs explicit `bind:` in `renders`, and whether validators reach the `renders` input (§6.4.2 steps 3–4). |
 | O54 | §66.6.3 | Record gap: whether `@x` inside `x`'s own `renders` names the current instance (DD #8, not in the answered text). |
-| O55 | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. |
+| ~~O55~~ RULED S442 = error | §66.13.3 | Whether a plain use of a `single` declaration is an error (DD §5.a) or renders the one instance. RULED: a plain use is `E-DECL-SINGLE-INSTANTIATED`; `<*x/>` is the only way to render it. Provenance: ruling:user-voice-scrml.md S442 — *"1 your rec, 2 deliberate, 3 your rec"*. |
 | ~~O56~~ RULED narrow (S437: confirmed not re-widened by "identities yes") | §66.7.5 | Scope of the `given` carve-out: instance handles only, or named shared instances / plain `T \| not` cells too; live reads through `c`; `let d = c`; direct `@handle.f = …` inside the block. |
 | O47 | §66.17 | (narrowed) A reactive token in a shape other than match-over-enum (e.g. `<ink:string=(@userColor)/>`). |
 | ~~O57~~ RULED S437 = no | §66.11.3 | Does a contract-free (fixed / locked) sub-field bound a whole-struct `replace`? RULED no — else O3's struct-level `let` is a dead grant. Provenance: ruling:user-voice-scrml.md S437 — *"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*. |
@@ -40776,6 +40988,8 @@ outcome. §66 does not decide them. Labels are stable identifiers, not a count.
 Closed by the PA proposal text bryan answered (the terse-answer rule, §66 preamble): O6 (`single` is a trailing
 modifier — Q6 "a"), O40 (the `given` binding writes the instance — lists "yes"; its scope is O56), O53 (`let` / `export let` on attributes; `export <child>` —
 Q6 "a", "E2, move on", "yes, :struct,"). Ruled S437 (*"O58 b, O57 no, O59 lean, O60 lean, confirms yes"*): O21 (by derivation from L6), O57, O58, O59, O60.
+Ruled S442: O55 (*"1 your rec, 2 deliberate, 3 your rec"* — a plain use of a `single` declaration is an error);
+O10 in part (*"spellings are fine"* — the six grow/shrink tokens; the rest of O10 stays OPEN).
 
 ### 66.23 Cross-references
 
