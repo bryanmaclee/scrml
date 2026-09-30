@@ -6450,8 +6450,9 @@ Browser persistence is a **lifetime** property of a client-owned cell, orthogona
 4. **Write on change.** When the cell's value changes, the compiler-emitted code SHALL encode the new value and write it to storage under `key`, inside the storage guard. (Composed with `debounced=` / `throttled=`, the storage write follows the cell's wrapped write.)
 5. **Cross-tab sync — `"local"` only.** A `persist="local"` cell SHALL subscribe to the Web `storage` event for its key and apply a changed value written by another same-origin document, decoded under rule 3. A `persist="session"` cell has no cross-tab sync (session storage is per tab).
 6. **Write failure is a read-only synthesized status property.** A storage write that fails (quota exceeded, storage unavailable) SHALL NOT throw into user code. It SHALL be reflected in a **read-only, compiler-synthesized status property** on the persisted cell, following the §55 validity-surface precedent (§55.7: read-only; a write to it is `E-SYNTHESIZED-WRITE`). The property's name and shape are OPEN (O-061-1).
-7. **First paint = default-then-restore.** A persisted cell is client-local, so SSR output renders its default (§52.8), and the restored value appears when client code runs.
-8. **Pre-paint restore for a theme mode cell — the one exception.** When a `persist=` cell is the mode cell of a `<theme for=@cell>` (§65.6; §66.17), the compiler SHALL additionally emit a blocking inline pre-paint script that reads and decodes the stored value (rule 3) and sets the §65.6 root attribute `data-scrml-theme-<cell>` before first paint. This is automatic; there is no author surface for it. A pre-paint script can touch only the root (`<html>`) attributes, which is exactly how §65.6 theming switches.
+7. **First paint = default-then-restore.** A persisted cell is client-local, so SSR output renders its default (§52.8), and the restored value appears when client code runs. The pre-paint mechanisms of §6.14.4 (rule 8's theme restore, cell-level `prepaint`, region-level `hold=@cell`) are the exceptions. (⚑ This rule's "renders its default" does not match impl#1's static emit, which carries no value for a client-local read — `g-client-local-static-html-no-initial-value`, §S444e.)
+8. **Pre-paint restore for a theme mode cell — automatic.** When a `persist=` cell is the mode cell of a `<theme for=@cell>` (§65.6; §66.17), the compiler SHALL additionally restore it before first paint: the document's pre-paint script (§6.14.4.1) reads and decodes the stored value (rule 3) and sets the §65.6 root attribute `data-scrml-theme-<cell>` before first paint. This is automatic; there is no author surface for it. The attribute name stays `data-scrml-theme-<cell>` (it is not renamed to the §6.14.4.2 `key=`-derived form). The theme restore is one member of the general pre-paint section §6.14.4, which also governs its placement, per-cell guard, CSP hash and after-boot handling. For cells other than a theme mode cell, the explicit opt-in is §6.14.4 (O-061-2, CLOSED).
+   > **Provenance (amended S444):** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30 — rec 7 verbatim: *"Root attribute name → **derived from `key=`**; §6.14.2 r8's `data-scrml-theme-<cell>` left as is."*
 
 #### 6.14.3 Privacy and ownership — errors
 
@@ -6459,10 +6460,110 @@ Browser persistence is a **lifetime** property of a client-owned cell, orthogona
 2. `persist=` on a `lin` cell (§35) SHALL be `E-PERSIST-LIN`. A stored `lin` value would be replayable on every reload.
 3. `persist=` on a server-authority cell (§52: `<x server>`, a Tier-1 `authority="server"` type instance) SHALL be `E-PERSIST-WITH-SERVER`. (dd A2 item 7: the cell is already durable, and persistence is legal only where authority is local.)
 
-#### 6.14.4 OPEN (dpa-061 — not ruled; not decided by this section)
+#### 6.14.4 Pre-paint — cell-level `prepaint` and region-level `hold=@cell`
+
+> **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30
+>
+> - **Call 1 — RULED (c)** (bryan: *"c"*). The PA's options, verbatim: *"(a) bare `prepaint`, compiler picks REFLECT/HOLD per read · (b) `prepaint="reflect"|"hold"` on the cell · (c) cell-level `prepaint` = REFLECT only (stored value onto `<html>` pre-paint, styling keyed off it) + a region marker `hold=@cell` (hide an author-chosen region until restored, pure-CSS failsafe release) · (d) REFLECT automatic, only `hold=` explicit. RULED (c)."*
+> - **Calls 2–8 — RULED = PA recs** (bryan: *"recs"*). Verbatim:
+>   *"2. A `prepaint` cell also read where REFLECT can't cover (text / `<each>` / `if=`) → an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong).*
+>   *3. REFLECT applier → **CSS-keyed for `show=` / `style:` / theme; STAMP for `class:` and attribute bindings.***
+>   *4. CSP under `headers="strict"` → **inline pre-paint script + the compiler adds a per-build `'sha256-…'` to the CSP it emits.***
+>   *5. HOLD → **3000 ms pure-CSS failsafe; `visibility:hidden` (keeps the layout box); `aria-busy="true"` while held.***
+>   *6. REFLECT domain → **bool, payload-free enum, and `| not` of those**; no string pass-through, no multi-cell product in v1.*
+>   *7. Root attribute name → **derived from `key=`**; §6.14.2 r8's `data-scrml-theme-<cell>` left as is.*
+>   *8. `prepaint` or `hold=` without `persist=` → **both errors in v1**; a general "cloak until rendered" marker is a separate question (route-to-PA R4)."*
+> - **Design detail** (mechanisms REFLECT / HOLD, probes B1–B18, findings F1–F6): `scrml-support/docs/deep-dives/prepaint-opt-in-dpa-062-2026-09-30.md`. Browser claims there were measured on hand-edited copies of real emit, not compiler output.
+> - **Closes** O-061-2 (§6.14.5).
+>
+> **Nominal / spec-ahead.** impl#1 accepts neither `persist=` nor `prepaint` / `hold=` (`g-unknown-decl-attr-silently-undeclares-cell`); every code below lands with the impl.
+
+The problem this section solves: a persisted cell restores in client code (§6.14.2 rule 1). On a slow network the browser paints the parsed body before the client runs (dd F1: first paint ~20–280 ms against client JS at ~2 s), so a restored value that changes styling shows the wrong state first. Two mechanisms fix it, decided in two places:
+
+- **REFLECT** (cell-level `prepaint`) — the stored value goes onto `<html>` before paint and the styling that depends on it is keyed off that root attribute. It never shows a blank, and it covers only attribute-shaped reads.
+- **HOLD** (region-level `hold=@cell`) — an author-chosen region is hidden until the client has rendered it. It covers any read shape, at the cost of a brief blank.
+
+```scrml
+type SidebarMode:enum = { Open, Collapsed }
+
+<sidebar persist="local" key="ui.sidebar" prepaint>: SidebarMode = .Open   // REFLECT
+<recent persist="local" key="myapp.recent">: string[] = []
+
+<aside class:collapsed=(@sidebar == .Collapsed)>…</aside>   // covered (STAMP)
+<div show=(@sidebar == .Open)>panel</div>                   // covered (CSS-keyed)
+<button onclick=toggle()>${@sidebar == .Open ? "Collapse" : "Expand"}</button>   // not covered → Info (rule 6)
+
+<section hold=@recent>                                      // HOLD region
+    <h2>Recent searches</h2>
+    <ul><each in=@recent as s key=__index__><li>${s}</li></each></ul>
+</section>
+```
+
+##### 6.14.4.1 The pre-paint script
+
+> **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30 (§"Recommendation" item 3; must-address 3, 5, 7; B2–B9, B16, B17).
+
+1. **One script per document.** Every pre-paint restore a document needs — §6.14.2 rule 8 theme mode cells, `prepaint` cells (§6.14.4.2), `hold=` cells (§6.14.4.3) — SHALL be emitted as **one** blocking inline `<script>` in `<head>`. A document that needs no pre-paint restore SHALL NOT carry one.
+2. **Placement.** The script SHALL be placed **before** the document's first `<link rel="stylesheet">`. (dd must-address 3: an inline script after a stylesheet waits for the stylesheet to download.)
+3. **Per-cell guards.** Each cell's storage read and pre-paint decode SHALL run inside its own guard. A storage throw, an absent key, unparseable data, or a value outside the cell's pre-paint domain SHALL leave that cell's root state unset — the cell's default paints (theme / REFLECT) or nothing is held (HOLD) — and SHALL NOT affect any other cell. No exception SHALL escape the script (dd B7–B9, B16).
+4. **Storage.** The script reads `localStorage` for `persist="local"` and `sessionStorage` for `persist="session"`, synchronously. A new tab's empty session storage yields the default and no hold.
+5. **What it may touch.** The script SHALL set only attributes of the root `<html>` element, with one exception: the STAMP applier (§6.14.4.2 rule 5) additionally sets the real class / attribute on compiler-marked elements as the parser inserts them, and stops at `DOMContentLoaded`.
+6. **The client's decode is authoritative.** The pre-paint decode is a membership check over a finite domain (REFLECT) or a presence-and-parse check (HOLD); it is not the §6.14.2 rule 3 full-contract decode. The client's construction-time decode (§6.14.2 rules 1 and 3) is **authoritative**: at boot it SHALL overwrite or remove whatever root state the script set. A disagreement between the two decoders therefore produces at most one visible correction, never a lasting mismatch.
+7. **Fail-safe.** If the script does not run (JavaScript disabled, refused by a CSP, blocked), the document SHALL render exactly as it would without pre-paint (§6.14.2 rule 7): no root attribute is set and nothing is held (dd B4).
+8. **CSP.** The script is emitted **inline**. It is a pure function of the build (the cells, keys and domains are compile-time facts; only the stored values are read in the browser), so it has one hash per build. Under `<program headers="strict">` (§39.2.5) the compiler SHALL compute a `'sha256-…'` source over the **exact emitted script bytes** and add it to the `Content-Security-Policy` it emits, as `default-src 'self'; script-src 'self' 'sha256-<base64>'`. The same header value SHALL be emitted for the static file and for the §40.2 compose route (both serve the same document). A document with no pre-paint script leaves the CSP as §39.2.5 states it. No nonce is used. (dd B4–B5: without the hash the script is refused and the page degrades to the flash.)
+
+##### 6.14.4.2 Cell-level `prepaint` — REFLECT only
+
+> **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" (call 1 (c); recs 2, 3, 6, 7, 8) · dd:prepaint-opt-in-dpa-062-2026-09-30 (§"Mechanism REFLECT", coverage rule; B10–B13, B18; F4, F5).
+
+1. **Surface.** `prepaint` is a bare (valueless) attribute on a state-cell declaration, in the §6.13 / §6.14 decl-attribute slot. It means REFLECT and nothing else; there is no `prepaint="hold"`.
+2. **Requires `persist=`.** `prepaint` on a cell without `persist=` SHALL be `E-PREPAINT-WITHOUT-PERSIST` (rec 8).
+3. **Domain.** A `prepaint` cell's type SHALL be `bool`, a payload-free enum, or either of those `| not` (rec 6). v1 has no string pass-through and no multi-cell product. (The diagnostic for a `prepaint` cell outside this domain is OPEN, O-062-5.)
+4. **Root attribute.** Before first paint the script (§6.14.4.1) sets one root attribute per `prepaint` cell whose stored value is present and in the domain. Its name is `data-scrml-p-<k>`, where `<k>` is **derived from the cell's `key=`** (rec 7). The derivation SHALL be deterministic and SHALL map distinct keys to distinct names: `key=` is unique per origin by the §6.14.1 rule 2 author contract, whereas cell names are unique only per chunk, so a cell-name-derived attribute could collide on `<html>`. Its value is the enum variant's tag name, or `true` / `false`. (The exact derivation, and the token for a stored `not`, are OPEN, O-062-1.) §6.14.2 rule 8's `data-scrml-theme-<cell>` is not affected.
+5. **Coverage and appliers.** A read of a `prepaint` cell is **covered** when all three hold (dd coverage rule):
+   - (a) **position** — it is attribute-shaped: `show=`, `style:prop=` (§65, Wave 2), a `<theme>` token (§66.17 rule 3), `class:x=`, or a plain attribute binding (`aria-expanded=@open`);
+   - (b) **inputs** — its only reactive inputs are that one `prepaint` cell and client-local cells whose initializers are compile-time constants (folded at compile time); it reads no server-authority cell (the §52 SSR seed is parsed after the head script) and no second `prepaint` cell (rec 6: no multi-cell product);
+   - (c) **evaluability** — the expression is pure and evaluable at compile time for every value in the cell's domain.
+
+   The compiler precomputes, for each covered read, the domain values at which it applies, and applies them with the applier rec 3 assigns to the position:
+   - **CSS-keyed** — for `show=`, `style:`, and theme. The compiler emits rules keyed on the root attribute, e.g. `:root[data-scrml-p-<k>="Collapsed"] [data-scrml-bind-show="…"] { display: none; }` — §66.17 rule 3's recognition rule generalized beyond theme tokens.
+   - **STAMP** — for `class:` and attribute bindings. The script sets the real class or attribute on the compiler-marked element as the parser inserts it (the dd probe used a `MutationObserver` in `<head>` over the existing `data-scrml-class-*` markers) and stops at `DOMContentLoaded`. STAMP sets the real class, so it works whatever CSS styles that class (scrml-owned `#{}`, Tailwind, external), and a STAMP-applied `aria-*` binding is correct for assistive technology from the first frame.
+6. **Uncovered reads — Info diagnostic.** Every read of a `prepaint` cell that is not covered by rule 5 (text content `${@c}`, `<each>`, `if=`, and any read failing 5(a)–(c)) SHALL produce `W-PREPAINT-UNCOVERED-READ` (**Info**), **one per read site**, naming the site. It is not an error: in impl#1's emit those reads are empty before JavaScript runs, never wrong (rec 2; dd F2). (Its adequacy depends on the static-emit strategy; see O-062-9.)
+7. **After boot.** A root attribute set by the script SHALL NOT keep driving a CSS-keyed rule against a stale value once the client has booted (dd B18: a toggle after load stayed wrong). The client SHALL either keep each `data-scrml-p-<k>` in sync with the cell by an effect (as §65.6 does for `data-scrml-theme-<cell>`) or remove it at boot, after applying the real class / inline style. (Which of the two is OPEN, O-062-2.)
+
+##### 6.14.4.3 Region-level `hold=@cell` — HOLD
+
+> **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" (call 1 (c); recs 5, 8) · dd:prepaint-opt-in-dpa-062-2026-09-30 (§"Mechanism HOLD"; must-address 2, 5, 8; B14–B16; F2).
+
+1. **Surface.** `hold=@cell` is a markup attribute on an element; the element is the **held region**. The author chooses the region (dd F2: the read site itself is empty before JavaScript in impl#1, so holding only the read site hides nothing). HOLD covers any read shape inside the region — text, lists, structs.
+2. **Requires `persist=`.** A `hold=` whose operand is not a `persist=` cell SHALL be `E-HOLD-WITHOUT-PERSIST` (rec 8). A general "cloak until rendered" marker for non-persisted content is a separate question, not this attribute (rec 8; dd route-to-PA R4).
+3. **When a region is held.** The script (§6.14.4.1) adds the cell's hold token to the space-separated `data-scrml-hold` attribute on `<html>` **only when** the cell's key is present and its stored value parses. An absent key, a storage throw or a parse failure SHALL leave the region unheld (dd B16). The hold token is derived from `key=` by the §6.14.4.2 rule 4 derivation (rec 7's collision reasoning applies to every root attribute value).
+4. **How it hides.** While held, the region SHALL have `visibility: hidden` (rec 5). This keeps the region's layout box — the box of the static markup, not of the restored content — so the release can still shift layout when the restored content is larger; reserving further space is author CSS (e.g. `min-height`). The compiler emits the hiding rule keyed on the root token, e.g. `:root[data-scrml-hold~="<t>"] [data-scrml-held~="<t>"] { visibility: hidden; … }`.
+5. **a11y.** While held, the region SHALL carry `aria-busy="true"`; after release it SHALL NOT (rec 5).
+6. **Three releases — a hold never sticks.** A held region SHALL be released by whichever comes first:
+   - (a) **never held** — rule 3's conditions fail;
+   - (b) **client release** — after the client's first render pass of the region, it removes the token from `data-scrml-hold` and clears `aria-busy`;
+   - (c) **pure-CSS failsafe** — the hiding rule carries a CSS animation that makes the region visible **3000 ms** after the rule first applies (e.g. `animation: scrml-unhold 0s 3000ms forwards` with `@keyframes scrml-unhold { to { visibility: visible; } }`). The failsafe SHALL need no JavaScript, so it releases the region even when client JS throws or fails to load (dd B15: a runtime 404 left the token set; the failsafe released at the deadline).
+7. **No JS / refused script.** If the script does not run, nothing is held (§6.14.4.1 rule 7).
+
+##### 6.14.4.4 OPEN (dpa-062 — not decided by the rulings or the deep-dive)
+
+- **O-062-1** — The exact `key=` → `<k>` derivation (sanitized key vs a hash; length bound), and the root-attribute token for a stored `not` of a `bool | not` / `Enum | not` cell.
+- **O-062-2** — After boot (§6.14.4.2 rule 7): keep `data-scrml-p-<k>` in sync by an effect, or remove it at boot — one rule for all, or per applier.
+- **O-062-3** — STAMP timing on a large, streamed document: whether the parse-time applier runs before the first paint when the parser yields between an element and the observer flush (dd B13 covers only a small single-chunk page).
+- **O-062-4** — `prepaint` on a `<theme for=>` mode cell, which §6.14.2 rule 8 already restores automatically: redundant (a warning) or silently accepted.
+- **O-062-5** — The diagnostic for `prepaint` on a cell whose type is outside the rule-3 domain (e.g. `string`, a payload enum, a struct): a dedicated error, or rule 6's Info at each read site.
+- **O-062-6** — Which cells each document's script covers under per-route output: every `prepaint` / `hold=` cell in the app, or only those read by that page and its shell. (Soft navigation (§20.8) does not re-run `<head>` scripts; only the first document load needs pre-paint.)
+- **O-062-7** — A static host where scrml does not emit the CSP header: whether the compiler reports the per-build hash so the author can add it.
+- **O-062-8** — A `hold=` region that contains an SSR-seeded (server-cell) read: whether it is a diagnostic (the hold delays content that was already correct).
+- **O-062-9** — The static-emit strategy for client-local reads (dd F3; `g-client-local-static-html-no-initial-value`). If client-local defaults are emitted into the static HTML (as §52.8 / §6.14.2 rule 7 read), an uncovered text / `<each>` / `if=` read of a `prepaint` cell would paint a *wrong* default before JS, and rule 6's Info (justified by "empty, never wrong") must be revisited.
+- **O-062-10** — `hold=` operand forms other than one bare `@cell` (several cells; an expression), and `hold=` naming a §66 declaration's persisted shared instance.
+- **O-062-11** — How `aria-busy="true"` reaches the region only while held (rule 5) — a static attribute the client clears would stay set with JavaScript disabled and on a never-held region — and whether it has the intended screen-reader effect (dd: not tested).
+
+#### 6.14.5 OPEN (dpa-061 — not ruled; not decided by this section)
 
 - **O-061-1** — The write-failure status property (§6.14.2 rule 6): its **name**, its **shape** (boolean vs a failure-reason enum), and whether a later successful write clears it and re-syncs the whole value.
-- **O-061-2** — **Explicit pre-paint opt-in** for cells other than a theme mode cell — bryan's stated preference for option (ii) generally, via an explicit author opt-in; he does not know what that surface would look like. **Banked as dpa-062.**
+- ~~**O-061-2** — **Explicit pre-paint opt-in** for cells other than a theme mode cell — bryan's stated preference for option (ii) generally, via an explicit author opt-in; he does not know what that surface would look like. **Banked as dpa-062.**~~ **CLOSED S444 → §6.14.4** (dpa-062 RULED: cell-level `prepaint` = REFLECT only + region-level `hold=@cell`). *ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30*
 - **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
 - **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
 - **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab?
@@ -6474,7 +6575,7 @@ Browser persistence is a **lifetime** property of a client-owned cell, orthogona
 - **O-061-11** — A persisted `(not to T)` lifecycle cell (§14.12 / §66.11.6): the static state at reads before discrimination.
 - **O-061-12** — Whether widening §57.1 to a storage sink binds stored values to the §57.5 canonical-only decoder at v1.0.
 
-#### 6.14.5 Error codes (Nominal)
+#### 6.14.6 Error codes (Nominal)
 
 Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands with the impl**.
 
@@ -6485,8 +6586,11 @@ Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands w
 | `E-PERSIST-REVEALED` | `persist=` on a value carrying `reveal`-declassified protected provenance — Nominal / spec-ahead, not yet emitted | Error |
 | `E-PERSIST-LIN` | `persist=` on a `lin` cell — Nominal / spec-ahead, not yet emitted | Error |
 | `E-PERSIST-WITH-SERVER` | `persist=` on a server-authority cell — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PREPAINT-WITHOUT-PERSIST` | `prepaint` on a cell without `persist=` (§6.14.4.2 rule 2) — Nominal / spec-ahead, not yet emitted | Error |
+| `E-HOLD-WITHOUT-PERSIST` | `hold=` whose operand is not a `persist=` cell (§6.14.4.3 rule 2) — Nominal / spec-ahead, not yet emitted | Error |
+| `W-PREPAINT-UNCOVERED-READ` | a read of a `prepaint` cell that REFLECT cannot cover (text, `<each>`, `if=`, or failing §6.14.4.2 rule 5), one per site (§6.14.4.2 rule 6) — Nominal / spec-ahead, not yet emitted | Info |
 
-**Cross-references:** §6.7.4 (the corrected localStorage idiom row) · §6.8 (the default value) · §6.13 (the sibling write-path attributes) · §13.2 (auto-await — the planned IndexedDB stdlib) · §14.8.9 (`reveal`) · §35 (`lin`) · §52 (authority — orthogonal) · §55 (synthesized-property precedent) · §57 / §59.10 (codec) · §65.6 / §66.17 (theme mode cell) · §66.9 (seed) · §66.16 (shared instance only).
+**Cross-references:** §6.7.4 (the corrected localStorage idiom row) · §6.8 (the default value) · §6.13 (the sibling write-path attributes) · §13.2 (auto-await — the planned IndexedDB stdlib) · §14.8.9 (`reveal`) · §35 (`lin`) · §52 (authority — orthogonal) · §55 (synthesized-property precedent) · §57 / §59.10 (codec) · §65.6 / §66.17 (theme mode cell; §66.17 rule 3 is generalized by the §6.14.4.2 CSS-keyed applier) · §66.9 (seed) · §66.16 (shared instance only) · §39.2.5 / §40.2 (the pre-paint script's CSP hash).
 
 ---
 
@@ -21573,6 +21677,9 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PERSIST-REVEALED | §6.14, §14.8.9 | `persist=` on a cell whose value carries `reveal`-declassified protected provenance. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-PERSIST-LIN | §6.14, §35 | `persist=` on a `lin` cell — a stored `lin` value would be replayable on every reload. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-PERSIST-WITH-SERVER | §6.14, §52 | `persist=` on a server-authority cell (`<x server>`, a Tier-1 `authority="server"` type instance). **Provenance:** dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 7 (within ruled pole A2, call 1 — *"the persist= attribute"*). **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PREPAINT-WITHOUT-PERSIST | §6.14.4.2 | `prepaint` (cell-level pre-paint REFLECT) on a state cell that has no `persist=`. Rec 8 verbatim: *"`prepaint` or `hold=` without `persist=` → **both errors in v1**"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-HOLD-WITHOUT-PERSIST | §6.14.4.3 | A `hold=@cell` region marker whose operand is not a `persist=` cell. A general "cloak until rendered" marker is a separate question (dd route-to-PA R4). **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| W-PREPAINT-UNCOVERED-READ | §6.14.4.2 | A read of a `prepaint` cell that REFLECT cannot cover — text content (`${@c}`), `<each>`, `if=`, or any read failing the §6.14.4.2 rule 5 coverage rule (non-attribute position, a server-cell or second-`prepaint`-cell input, not compile-time evaluable). Emitted once per read site, naming the site. Rec 2 verbatim: *"an **Info diagnostic naming each site** (not silent; not an error — those reads are empty before JS, never wrong)"*. **Provenance:** ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Info |
 | E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
 | E-VALIDATOR-INLINE-COLON | §55.10, §41.12 | The inline message override on a validator uses the COLON form (`<name req:"…msg…">`, `<name length(>=2):"…msg…">`) — this is NOT valid scrml. The §55.10-normative Level-1 inline override is the PAREN form: a trailing string-literal ARG inside the validator's parens (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`). The colon-after-validator collides with the decl scanner's `:`-handling (typed-cell annotation / §4.14 colon-shorthand) and silently corrupted state-cell `@`-access registration pre-fix (the cell then mis-reported as undeclared via a misleading E-SCOPE-001). Resolution: move the message inside the validator's parens — `req("…msg…")` not `req:"…msg…"`. The compiler recovers by registering the cell with the message as the paren-form inline override, so this is the only diagnostic on the decl. (Catalog addition S185 — g-validator-inline-msg-colon-form.) | Error |
 | E-CHANNEL-INSIDE-PROGRAM | §38.1 | **Retired 2026-05-12 (v0.3 Wave 1 direction reversal).** Pre-v0.3 fired on a `<channel>` descended from `<program>` — this is now the canonical v0.3 placement (channels live inside `<program>`). The pre-v0.3 trigger shape is no longer a violation. New v0.3 placement-direction code: `E-CHANNEL-OUTSIDE-PROGRAM`. | Error (retired) |
@@ -24615,6 +24722,7 @@ The compiler generates an in-memory sliding window rate limiter keyed by client 
 **Normative statement:**
 
 - `headers="strict"` is intended as a secure-by-default baseline. If the developer's application loads scripts or styles from external origins, the CSP will block them. In that case the developer MUST override the `Content-Security-Policy` via `handle()`.
+- When the document carries a §6.14.4.1 pre-paint script (a persisted `<theme for=>` mode cell, a `prepaint` cell or a `hold=` region), the compiler SHALL add that script's per-build `'sha256-…'` source to the CSP it emits: `default-src 'self'; script-src 'self' 'sha256-<base64>'` (§6.14.4.1 rule 8). The pre-paint script is compiler-emitted content, so the `handle()` override above is not the author's remedy for it. *(Added S444, Nominal / spec-ahead — ruling:user-voice-scrml.md S444 "c" / "recs" · dd:prepaint-opt-in-dpa-062-2026-09-30.)*
 
 #### 39.2.6 `idempotency-store=`
 
