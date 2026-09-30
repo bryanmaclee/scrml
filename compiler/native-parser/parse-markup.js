@@ -2830,6 +2830,44 @@ function nativeFunctionHasNoBody(st, source, nextStart) {
     const texts = toks.filter((t) => t && t.kind !== "EOF").map((t) => String(t.text ?? ""));
     return declExtent("function", texts).nothing === true;
 }
+// S441 round 5d — the native front end's analyzer for escape-hatch TEXT in the
+// ruling-S445-#2 effect check (the live front end's twin is ast-builder.js
+// escapeRawHasEffect): the text is parsed with the native expression grammar
+// and searched for an effect — a call, `new`, a tagged template, an
+// assignment, `++` / `--`, `delete`, `yield`, a `?{}` block. A lambda's body is
+// not searched. Text that does not parse whole is answered "effect".
+const NATIVE_EFFECT_EXPR_KINDS = new Set(["Call", "New", "TaggedTemplate", "Assignment", "Update", "Yield", "Sql"]);
+function nativeRawHasEffect(raw) {
+    let ctx;
+    let expr;
+    try {
+        ctx = makeParseExprContext(lex(String(raw)), String(raw));
+        expr = parseExpression(ctx);
+    } catch {
+        return true;
+    }
+    if (!expr || (Array.isArray(ctx.errors) && ctx.errors.length > 0) || atEnd(ctx.cursor) === false) return true;
+    // A NAMED function standing as the statement is a declaration (it binds
+    // its name), not a discarded value.
+    if (expr.kind === "Function" && typeof expr.name === "string" && expr.name !== "") return true;
+    const walk = (n, d) => {
+        if (n === null || typeof n !== "object" || d > 300) return false;
+        if (Array.isArray(n)) return n.some((x) => walk(x, d + 1));
+        if (typeof n.kind === "string") {
+            if (NATIVE_EFFECT_EXPR_KINDS.has(n.kind)) return true;
+            if (n.kind === "Unary" && n.op === "delete") return true;
+            if (n.kind === "Arrow" || n.kind === "Function") return false;
+        }
+        for (const k of Object.keys(n)) {
+            if (k === "span") continue;
+            const v = n[k];
+            if (v !== null && typeof v === "object" && walk(v, d + 1)) return true;
+        }
+        return false;
+    };
+    return walk(expr, 0);
+}
+
 // nativeStmtNothingReason — why the statement compiles nothing (see the
 // shared liveStmtNothingReason: "literal" / "no-effect" / "nothing"), or null.
 function nativeStmtNothingReason(st, source, nextStart) {
@@ -2838,7 +2876,7 @@ function nativeStmtNothingReason(st, source, nextStart) {
     const live = nativeTranslate(st);
     if (live === null) return null;
     if (labelSurvives(st, live) === false) return "nothing";
-    if (live.length === 1) return liveStmtNothingReason(live[0]);
+    if (live.length === 1) return liveStmtNothingReason(live[0], nativeRawHasEffect);
     return null;
 }
 function nativeStmtCompilesNothing(st, source, nextStart) {
@@ -3075,11 +3113,14 @@ function rejectBodyTopProseNative(block, source, ctx) {
     // Only when that statement IS the whole line (no other statement and no
     // parse diagnostic on it): `Welcome` in `Welcome to the app` is prose.
     const lineOfOff = (off) => (source.slice(0, off).match(/\n/g) || []).length;
-    const fiAlone = fi >= 0 && starts[fi] !== null
-        && !body.some((st, k) => k !== fi && starts[k] !== null && lineOfOff(starts[k]) === lineOfOff(starts[fi]))
+    // (Several statements on the line — `@a; @b` — qualify when EVERY one of
+    // them has no effect, round 5d.)
+    const reasonAt = (k) => nativeStmtNothingReason(body[k], source, k + 1 < body.length && starts[k + 1] !== null ? starts[k + 1] : undefined);
+    const lineIdx = fi >= 0 && starts[fi] !== null
+        ? body.map((st, k) => k).filter((k) => starts[k] !== null && lineOfOff(starts[k]) === lineOfOff(starts[fi])) : [];
+    const fiNoEffect = lineIdx.length > 0
         && !diags.some((d) => lineOfOff(d.span.start) === lineOfOff(starts[fi]))
-        && diagFlagged[fi] !== true && !isSeqStmt(body[fi]);
-    const fiNoEffect = fiAlone && nativeStmtNothingReason(body[fi], source, fi + 1 < body.length && starts[fi + 1] !== null ? starts[fi + 1] : undefined) === "no-effect";
+        && lineIdx.every((k) => diagFlagged[k] !== true && !isSeqStmt(body[k]) && reasonAt(k) === "no-effect");
     let fs = fi >= 0 ? starts[fi] : orphanFs;
     while (fs < blockEnd && /\s/.test(source[fs])) fs = fs + 1;
     if (orphanFs >= 0 && orphanFs < fs) fs = orphanFs;

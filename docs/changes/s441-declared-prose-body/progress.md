@@ -257,3 +257,30 @@ HELD FOR BRYAN (not changed, per PA): the "does nothing" rule's reach over pure 
   only (dpa-063 pending). Prose-free bodies now fail more (25–41 per seed, E-UNQUOTED): the fuzz's own
   code generator writes `outerN: for (…) { … }` with no `break` — an untargeted label, an error by S445 #2.
 - Suites: 27,094 run / 27,012 pass / 0 fail; conformance 1170/1178 + 8 xfail, 0 FAIL.
+
+## ROUND 5d — re-review of 55ac55d2f (LAND-WITH-NITS)
+
+- #1 (introduced in 5c, both): `reset(@a)` at a body top → E-STMT-NO-EFFECT. Cause: the effect table named
+  `reset` but the live node kind is `reset-expr`. Fixed; BEFORE E-STMT-NO-EFFECT → AFTER clean (both).
+- #2 (pre-5c, default): `for (;;) { break }` / `for (; @a != 3; @a++) {}` → E-UNQUOTED. The collector records
+  no cStyleParts when a clause is empty; the C-style check now reads the header TEXT and splits it at its
+  top-level `;` (an empty clause is simply absent). BEFORE E-UNQUOTED → AFTER clean (native was clean).
+- #3 (default) + the default flip, DONE: an escape-hatch (text the structured parser did not model) now
+  has an effect only if the front end's own expression grammar finds one in it — default: acorn over the
+  text (`@` sigils mapped to identifiers) searched for Call / New / TaggedTemplate / Assignment / Update /
+  Await / Yield / Import / Class / `delete`, lambda bodies not searched; native: the native expression
+  parser over the text, same search. Text that does not parse whole → effect (it has its own diagnostic);
+  an empty escape-hatch → effect (a translation drop, the coverage check owns it). `/abc/` alone after
+  markup: BEFORE clean (default) → AFTER E-STMT-NO-EFFECT (native already rejected it, E-UNQUOTED).
+  The flip first false-fired on native `on mount { function inner(x) {…} … }` (the native parser leaves a
+  named `function` in statement position as a FunctionExpression escape-hatch) — a NAMED function
+  standing as the statement is a declaration → effect, both analyzers; test added.
+- Nits: `@a; @b` → one E-STMT-NO-EFFECT (both; every statement on the line must be no-effect and every
+  `;`-piece one valid expression). NOT done: `@a, @b` stays E-UNQUOTED (a comma sequence is not a scrml
+  expression, §4.18.2 — the message is accurate); `@a as number` (the expression parser does not model the
+  `as` cast — lost tail → prose) and `() => @a = 1` (the collector splits the arrow from an `@`-led body)
+  are parser-level limitations, both still errors.
+- MEASURED: corpus both parsers r10 (55ac55d2f) → r12 (this round): 0 files changed — the fail-closed flip
+  moves nothing in examples / samples / conformance / readme / scrml-site / flogence. FUZZ unchanged:
+  0 E-INTERNAL, only the continuation class. Suites 27,106 run / 27,024 pass / 0 fail; conformance
+  1170/1178 + 8 xfail, 0 FAIL.

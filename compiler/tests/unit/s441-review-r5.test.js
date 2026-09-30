@@ -298,3 +298,49 @@ describe("D1 — default: a braced RETURN type is not the function body", () => 
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Round 5d — re-review of 55ac55d2f.
+// ---------------------------------------------------------------------------
+for (const [label, parser] of BOTH) {
+  describe(`5d #1 — \`reset(@a)\` is a cell write (§6.8), an effect (${label})`, () => {
+    test("`reset(@a)` at body top compiles clean", () => {
+      const r = compile("<a> = 1\nreset(@a)\n<p>${@a}</p>", parser);
+      expect(r.codes).toEqual([]);
+    });
+  });
+  describe(`5d #2 — empty clauses in a C-style \`for\` header (${label})`, () => {
+    for (const src of ["for (;;) { break }", "<a> = 1\nfor (; @a != 3; @a++) { }"]) {
+      test(`${JSON.stringify(src)} compiles clean`, () => {
+        const r = compile(src, parser);
+        expect(r.codes).toEqual([]);
+      });
+    }
+  });
+  describe(`5d nit — \`@a; @b\` is two statements with no effect (${label})`, () => {
+    test("→ E-STMT-NO-EFFECT, not E-UNQUOTED", () => {
+      const r = compile("<a> = 0\n<b> = 1\n@a; @b\n<p>${@a}${@b}</p>", parser);
+      expect(r.codes).toEqual(["E-STMT-NO-EFFECT"]);
+    });
+  });
+}
+describe("5d #3 — default: a regex literal alone on a line has no effect", () => {
+  test("`/abc/` after markup → E-STMT-NO-EFFECT (was: counted as an effect, compiled clean)", () => {
+    // (The block splitter also reads the `/` before the next closer as a
+    // legacy bare closer, E-SYNTAX-050 — pre-existing.)
+    const r = compile("<p>x</p>\n/abc/", null);
+    expect(r.codes).toContain("E-STMT-NO-EFFECT");
+  });
+  test("an unmodelled expression WITH an effect still compiles (a block-body lambda call)", () => {
+    const r = compile("(() => { console.log(1) })()", null);
+    expect(r.codes).not.toContain("E-STMT-NO-EFFECT");
+  });
+});
+for (const [label, parser] of BOTH) {
+  describe(`5d — a named function in statement position is a declaration, not a no-effect value (${label})`, () => {
+    test("`on mount { function inner(x) {…} … }` compiles clean", () => {
+      const r = compile("<verdict> = \"unset\"\nserver function isOk(n) { return n > 100 }\non mount {\n  function inner(x) { return isOk(x) }\n  const any = [1, 2, 3].some(x => inner(x))\n  @verdict = any ? \"accepted\" : \"rejected\"\n}\n<p>${@verdict}</p>", parser);
+      expect(r.codes).toEqual([]);
+    });
+  });
+}

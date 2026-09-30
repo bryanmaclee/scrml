@@ -56,6 +56,51 @@ import {
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
 import { segmentBodyTopItems } from "../native-parser/body-top-prose.js";
 import { declExtent, liveStmtNothingReason, liveLabelIsTargeted } from "../native-parser/body-top-coverage.js";
+import * as acornForEffects from "acorn";
+
+// S441 round 5d — the live front end's analyzer for escape-hatch TEXT in the
+// ruling-S445-#2 effect check (body-top-coverage.js liveExprHasEffect): an
+// expression the structured parser left as raw text (`this`, a regex literal,
+// a block-body lambda, an ESTree fallback) is parsed with the same ES grammar
+// that produced the escape-hatch and searched for an effect — a call, `new`,
+// a tagged template, an assignment, `++` / `--`, `delete`, `await` / `yield`,
+// or a `class` (a forbidden construct with its own diagnostic). A lambda's
+// body is not searched. Text that does not parse whole is answered "effect"
+// (unknown — the one answer that does not invent an error).
+const _ESTREE_EFFECT_TYPES = new Set([
+  "CallExpression", "NewExpression", "TaggedTemplateExpression", "AssignmentExpression",
+  "UpdateExpression", "AwaitExpression", "YieldExpression", "ImportExpression",
+  "ClassExpression", "ClassDeclaration",
+]);
+function escapeRawHasEffect(raw) {
+  const src = String(raw).replace(/@(?=[A-Za-z_$])/g, "__scrml_at_");
+  let node;
+  try {
+    node = acornForEffects.parseExpressionAt(src, 0, { ecmaVersion: "latest", allowAwaitOutsideFunction: true });
+  } catch {
+    return true;
+  }
+  if (!node || src.slice(node.end).trim().replace(/;$/, "") !== "") return true;
+  // A NAMED function standing as the statement is a declaration (it binds its
+  // name), not a discarded value.
+  if (node.type === "FunctionExpression" && node.id) return true;
+  const walk = (n) => {
+    if (!n || typeof n !== "object") return false;
+    if (Array.isArray(n)) return n.some(walk);
+    if (typeof n.type === "string") {
+      if (_ESTREE_EFFECT_TYPES.has(n.type)) return true;
+      if (n.type === "UnaryExpression" && n.operator === "delete") return true;
+      if (n.type === "ArrowFunctionExpression" || n.type === "FunctionExpression") return false;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "start" || k === "end" || k === "loc" || k === "range") continue;
+      const v = n[k];
+      if (v && typeof v === "object" && walk(v)) return true;
+    }
+    return false;
+  };
+  return walk(node);
+}
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -1323,13 +1368,40 @@ function stmtHasInvalidOwnExpr(st) {
   // header, skipped by the expression collector and not an expression at all
   // (`let i = 0; …` never parses as one). Judge the clauses the loop compiles
   // — the condition and the update, and an init that is not a declaration.
+  // Round 5d — read from the header TEXT (split at its top-level `;`), so an
+  // EMPTY clause (`for (;;)`, `for (; c; u)`) — for which the collector
+  // records no `cStyleParts` at all — is simply absent, as in the grammar.
   let owner = st;
-  if (st.kind === "for-stmt" && st.cStyleParts && typeof st.cStyleParts === "object") {
-    owner = st.cStyleParts;
-    const init = owner.initExpr;
-    const initIsDecl = init && init.kind === "escape-hatch" && typeof init.raw === "string"
-      && /^\s*(?:let|const|var|lin)\b/.test(init.raw);
-    heads = initIsDecl ? ["condExpr", "updateExpr"] : ["initExpr", "condExpr", "updateExpr"];
+  if (st.kind === "for-stmt" && st.variable == null) {
+    const hdr = typeof st.iterable === "string" ? st.iterable.trim() : "";
+    if (hdr.startsWith("(") && hdr.endsWith(")")) {
+      const inner = hdr.slice(1, -1);
+      const clauses = [];
+      let depth = 0, from = 0, q = null;
+      for (let k = 0; k < inner.length; k++) {
+        const c = inner[k];
+        if (q) { if (c === "\\") k++; else if (c === q) q = null; continue; }
+        if (c === "\"" || c === "'" || c === "`") { q = c; continue; }
+        if (c === "(" || c === "[" || c === "{") depth++;
+        else if (c === ")" || c === "]" || c === "}") depth--;
+        else if (c === ";" && depth === 0) { clauses.push(inner.slice(from, k)); from = k + 1; }
+      }
+      clauses.push(inner.slice(from));
+      if (clauses.length === 3) {
+        for (let ci = 0; ci < 3; ci++) {
+          const text = clauses[ci].trim();
+          if (text === "") continue;
+          if (ci === 0 && /^(?:let|const|var|lin)\b/.test(text)) continue;
+          try {
+            const n = parseExprToNode(text, "", 0);
+            if (!n || hasLostTrailingContent(n) || (n.kind === "escape-hatch" && n.nativeKind === "ParseError")) return true;
+          } catch {
+            return true;
+          }
+        }
+        return false;
+      }
+    }
   }
   for (const key of heads) {
     const v = owner[key];
@@ -1545,28 +1617,43 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
   // (`@count`, `@a == 1`) is reported as that, not as "not valid code".
   // Only when that statement IS the whole line: a no-effect word that is one
   // piece of a prose line (`Welcome` in `Welcome to the app`) is prose.
-  const fiLine = body[fi] && body[fi].span ? body[fi].span.line : -1;
-  const fiAlone = fiLine > 0
-    && !(fi > 0 && body[fi - 1] && body[fi - 1].span && body[fi - 1].span.line === fiLine && body[fi - 1].span.start !== body[fi].span.start)
-    && !(body[fi + 1] && body[fi + 1].span && body[fi + 1].span.line === fiLine)
-    && !stmtLostTail(body[fi]);
-  // …and the line is ONE valid expression (`★`, `!!!`, `Hello, world`,
-  // `not available` are not code at all — prose, E-UNQUOTED-DISPLAY-TEXT).
-  const lineIsOneExpr = (() => {
-    if (!fiAlone || !body[fi].span) return false;
-    const r0 = body[fi].span.start - srcOffset;
+  // Only when the line is nothing but such statements — each piece between
+  // top-level `;` ONE valid expression, and every statement on the line one
+  // with no effect (`@a; @b`). A no-effect word that is one piece of a prose
+  // line (`Welcome` in `Welcome to the app`), or `★`, `!!!`, `Hello, world`,
+  // `not available`, is not code at all — prose, E-UNQUOTED-DISPLAY-TEXT.
+  const fiNoEffect = (() => {
+    const s0 = body[fi];
+    if (!s0 || !s0.span || typeof s0.span.line !== "number") return false;
+    const onLine = body.filter((x) => x && x.span && x.span.line === s0.span.line);
+    if (onLine.length === 0 || onLine.some((x) => !(x._s441Accepted && x._s441Accepted.reason === "no-effect") || stmtLostTail(x))) return false;
+    const r0 = s0.span.start - srcOffset;
     const ls = srcText.lastIndexOf("\n", r0 - 1) + 1;
     const le = srcText.indexOf("\n", r0);
-    const txt = srcText.slice(ls, le === -1 ? srcText.length : le).trim().replace(/;$/, "");
-    try {
-      const n = parseExprToNode(txt, "", 0);
-      return !!n && !hasLostTrailingContent(n) && n._notPrefixNegation !== true
-        && !(n.kind === "escape-hatch" && (n.nativeKind === "ParseError" || n.nativeKind === "SequenceExpression" || n.nativeKind === "SkippedExpr"));
-    } catch {
-      return false;
+    const txt = srcText.slice(ls, le === -1 ? srcText.length : le).trim();
+    const pieces = [];
+    let depth = 0, from = 0, q = null;
+    for (let k = 0; k < txt.length; k++) {
+      const c = txt[k];
+      if (q) { if (c === "\\") k++; else if (c === q) q = null; continue; }
+      if (c === "\"" || c === "'" || c === "`") { q = c; continue; }
+      if (c === "(" || c === "[" || c === "{") depth++;
+      else if (c === ")" || c === "]" || c === "}") depth--;
+      else if (c === ";" && depth === 0) { pieces.push(txt.slice(from, k)); from = k + 1; }
     }
+    pieces.push(txt.slice(from));
+    const exprs = pieces.map((x) => x.trim()).filter((x) => x !== "");
+    if (exprs.length !== onLine.length) return false;
+    return exprs.every((t) => {
+      try {
+        const n = parseExprToNode(t, "", 0);
+        return !!n && !hasLostTrailingContent(n) && n._notPrefixNegation !== true
+          && !(n.kind === "escape-hatch" && (n.nativeKind === "ParseError" || n.nativeKind === "SequenceExpression" || n.nativeKind === "SkippedExpr"));
+      } catch {
+        return false;
+      }
+    });
   })();
-  const fiNoEffect = lineIsOneExpr && !!(body[fi]._s441Accepted && body[fi]._s441Accepted.reason === "no-effect");
   let cut = fi;
   while (cut > 0 && body[cut - 1] && body[cut - 1].span && body[cut - 1].span.start >= start) cut--;
   const nl = srcText.indexOf("\n", rel);
@@ -1721,7 +1808,7 @@ function bodyTopAcceptance(node, consumed) {
   const texts = consumed.map((t) => (t.kind === "STRING" ? "\"" : "") + String(t.text ?? ""));
   // The live-shape judgment both front ends share (the native front end
   // applies it to the bridge's translation of its statement).
-  const _why = liveStmtNothingReason(node);
+  const _why = liveStmtNothingReason(node, escapeRawHasEffect);
   if (_why) return { nothing: true, reason: _why };
   // Ruling S445 item 2 — a label nothing targets compiles nothing: the loop
   // stays, the `label:` tokens are reported (a gap at the head).

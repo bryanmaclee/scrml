@@ -323,35 +323,41 @@ export function liveExprIsInert(node) {
 // expression for one: a call (a `send(…)` and a tagged template are calls; so
 // is `new`), an assignment (compound too, anywhere inside the expression),
 // `++` / `--`, `delete` (it mutates), a `?{ … }` SQL block (it executes), a
-// `reset(…)`. The body of a lambda is not run by evaluating the lambda, so it
-// is not searched. An expression this function cannot see into (an escape-
-// hatch carrying source text the structured parser did not model, markup-as-
-// value, a match) is counted as an effect — fail open is the wrong way here
-// only in that it keeps today's behaviour; the known shapes are all modelled.
+// `reset(…)` (a cell write, SPEC §6.8). The body of a lambda is not run by
+// evaluating the lambda, so it is not searched.
+//
+// FAIL-CLOSED (round 5d): an expression the structured parser did not model —
+// an escape-hatch carrying source text (`this`, a regex literal, a block-body
+// lambda, an ESTree fallback) — has an effect only if its text, parsed by the
+// CALLER's own expression grammar (`rawHasEffect`), contains one of the above.
+// Without an analyzer, or when the text does not parse, it counts as an effect
+// (the one "cannot tell" answer that does not invent an error). An EMPTY
+// escape-hatch is a translation drop, reported by the coverage check — never
+// "no effect". Markup-as-value is counted as an effect (its handlers are not
+// run by the statement, but it never stands as a body-top expression
+// statement — markup there is markup).
 // ---------------------------------------------------------------------------
-const EFFECT_EXPR_KINDS = new Set(["call", "new", "assign", "sql-ref", "reset", "markup-value", "match-expr"]);
+const EFFECT_EXPR_KINDS = new Set(["call", "new", "assign", "sql-ref", "reset-expr", "markup-value"]);
 const EFFECT_UNARY_OPS = new Set(["++", "--", "delete", "await"]);
-export function liveExprHasEffect(node, depth = 0) {
+export function liveExprHasEffect(node, rawHasEffect, depth = 0) {
     if (node === null || typeof node !== "object" || depth > 300) return false;
-    if (Array.isArray(node)) return node.some((x) => liveExprHasEffect(x, depth + 1));
+    if (Array.isArray(node)) return node.some((x) => liveExprHasEffect(x, rawHasEffect, depth + 1));
     if (typeof node.kind === "string") {
         if (EFFECT_EXPR_KINDS.has(node.kind)) return true;
         if (node.kind === "unary" && EFFECT_UNARY_OPS.has(node.op)) return true;
         if (node.kind === "lambda") return false;
-        // An expression the structured parser did not model is an escape-hatch
-        // whose content this walk cannot see: it counts as an effect (the
-        // conservative answer — a `class`, a sequence, a parse failure each
-        // have their own diagnostic), EXCEPT `this`, the one pure atom both
-        // front ends leave unmodeled. An EMPTY escape-hatch is a translation
-        // drop, reported by the coverage check — never "no effect".
         if (node.kind === "escape-hatch") {
-            return !(node.nativeKind === "ThisExpression" || node.nativeKind === "This");
+            const raw = typeof node.raw === "string" ? node.raw : "";
+            if (raw.trim() === "") return true;
+            if (typeof rawHasEffect !== "function") return true;
+            const r = rawHasEffect(raw);
+            return r !== false;
         }
     }
     for (const k of Object.keys(node)) {
         if (k === "span") continue;
         const v = node[k];
-        if (v !== null && typeof v === "object" && liveExprHasEffect(v, depth + 1)) return true;
+        if (v !== null && typeof v === "object" && liveExprHasEffect(v, rawHasEffect, depth + 1)) return true;
     }
     return false;
 }
@@ -364,12 +370,13 @@ export function liveExprHasEffect(node, depth = 0) {
 //                 nothing (`@count`, `@a == 1`, `x => y`), E-STMT-NO-EFFECT
 //                 (ruling S445 item 2);
 //   "nothing"   — a declaration whose grammar is not satisfied.
-export function liveStmtNothingReason(st) {
+// `rawHasEffect` — the caller's analyzer for escape-hatch text (see above).
+export function liveStmtNothingReason(st, rawHasEffect) {
     if (!st || typeof st !== "object") return null;
     if (st.kind === "bare-expr") {
         if (st._onMountEffect === true || !st.exprNode || typeof st.exprNode !== "object") return null;
         if (liveExprIsInert(st.exprNode)) return "literal";
-        return liveExprHasEffect(st.exprNode) ? null : "no-effect";
+        return liveExprHasEffect(st.exprNode, rawHasEffect) ? null : "no-effect";
     }
     return liveStmtCompilesNothing(st) ? "nothing" : null;
 }
