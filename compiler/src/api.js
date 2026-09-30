@@ -24,7 +24,7 @@ import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
 import { SecretRedactor } from "./diagnostic-secrets.ts";
-import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
+import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource, computeBuildRoot } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
@@ -782,6 +782,9 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * @param {object} options
  * @param {string[]} options.inputFiles        — resolved .scrml file paths to compile
  * @param {string}  [options.outputDir]        — directory to write output files; defaults to dist/ next to first input
+ * @param {string}  [options.buildRoot]        — S445: the build root (§40.8) — route files are the files under ITS
+ *   `pages/` / `routes/` (§40.2); directories above it are never consulted. The CLI passes the directory it was
+ *   given. Default: `computeBuildRoot` (route-inference.ts) of the explicit `inputFiles` (before auto-gather).
  * @param {boolean} [options.verbose]          — emit per-stage timing and counts to options.log
  * @param {boolean} [options.convertLegacyCss] — pre-process <style> blocks to #{…}
  * @param {boolean} [options.embedRuntime]     — embed runtime inline instead of writing separate file (browser mode only)
@@ -1158,6 +1161,13 @@ function _compileScrmlImpl(options = {}) {
   // divergence this exists to close — see compareInputPathsCanonical). Values stay
   // native for the `filePath` contract; comparison is POSIX-folded, code-unit.
   let resolvedInputFiles = inputFiles.map(f => resolve(f)).sort(compareInputPathsCanonical);
+  // S445 — the build root route files are classified against (§40.2 / §40.8: a
+  // route file is under the BUILD ROOT's pages/ or routes/, never under a
+  // directory above it). Fixed from the caller's root or the EXPLICIT inputs,
+  // before auto-gather can pull in an import from outside the project.
+  const riBuildRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
+    ? resolve(options.buildRoot)
+    : computeBuildRoot(resolvedInputFiles);
   if (gatherEnabled && resolvedInputFiles.length > 0) {
     // Dedup KEY is separator-canonical (PathKeyedSet folds `\`↔`/`); the
     // compiled VALUE stays uniformly NATIVE — both the explicit entry seed
@@ -2226,7 +2236,8 @@ function _compileScrmlImpl(options = {}) {
 
   // Stage 5: RI (all files)
   const _runRI = seams.pick("RI", runRI);
-  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis }));
+  // S445 — `riBuildRoot` (computed at the compile entry, above).
+  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis, buildRoot: riBuildRoot }));
   collectErrors("RI", riResult.errors);
   if (verbose) {
     const routeCount = riResult.routeMap?.functions?.size ?? 0;

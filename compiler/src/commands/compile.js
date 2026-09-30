@@ -100,6 +100,8 @@ Examples:
  */
 function parseArgs(args) {
   const inputFiles = [];
+  const inputDirs = [];
+  let explicitFileArgs = 0;
   let outputDir = null;
   let verbose = false;
   let convertLegacyCss = false;
@@ -301,6 +303,7 @@ function parseArgs(args) {
       process.exit(1);
     } else if (arg.endsWith(".scrml")) {
       inputFiles.push(resolve(arg));
+      explicitFileArgs++;
     } else {
       // Directory?
       try {
@@ -311,6 +314,7 @@ function parseArgs(args) {
             console.error(c.yellow("warning:") + ` No .scrml files found in ${arg}`);
           }
           inputFiles.push(...dirFiles);
+          inputDirs.push(resolve(arg));
           continue;
         }
       } catch { /* not a directory or file */ }
@@ -319,6 +323,7 @@ function parseArgs(args) {
       try {
         statSync(arg + ".scrml");
         inputFiles.push(resolve(arg + ".scrml"));
+        explicitFileArgs++;
         continue;
       } catch { /* nope */ }
 
@@ -327,7 +332,12 @@ function parseArgs(args) {
     }
   }
 
-  return { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat };
+  // S445 — the build root (§40.8) is the directory the user named: route files are
+  // the files under ITS pages/ / routes/ (§40.2). Set only when the inputs are exactly
+  // one directory; otherwise compileScrml derives it from the explicit inputs.
+  const buildRoot = inputDirs.length === 1 && explicitFileArgs === 0 ? inputDirs[0] : undefined;
+
+  return { inputFiles, buildRoot, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat };
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +499,7 @@ export function formatLintDiagnostic(diag, cwd) {
  * @returns {{ success: boolean }}
  */
 function runOnce(opts, selfHostModules = null) {
-  const { inputFiles, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat } = opts;
+  const { inputFiles, buildRoot, outputDir, verbose, convertLegacyCss, embedRuntime, mode, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat } = opts;
   const cwd = process.cwd();
 
   if (verbose) {
@@ -524,6 +534,7 @@ function runOnce(opts, selfHostModules = null) {
   try {
     result = compileScrml({
       inputFiles,
+      buildRoot,
       outputDir,
       beforeWrite,
       verbose,
