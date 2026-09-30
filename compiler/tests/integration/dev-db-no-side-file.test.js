@@ -23,8 +23,12 @@
  *
  * THE FIX: one resolver (`db-target.ts resolveDbFilePath`) for both halves; the
  * emitted handle names that file relative to the MODULE (`_scrml_sqlite_file`,
- * codegen/sqlite-file-target.ts) and opens it with `create: false`, refusing to load
- * — naming the path — when it is absent.
+ * codegen/sqlite-file-target.ts). Creation follows ownership (SPEC §8.1.1,
+ * ruling:user-voice-scrml.md S445 item 6, `db-ownership.ts`): a program that declares
+ * the database's schema (its own CREATE TABLE or a <schema>) may create it; a program
+ * that only references it opens with `create: false` and refuses to load — naming the
+ * path — when it is absent. At compile time an OWNED database that exists with no
+ * tables is read like an absent one.
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
@@ -60,17 +64,48 @@ const APP = `<program db="./app.db">
 </program>
 `;
 
-// A self-bootstrapping app: it compiles with NO database file (the compile-time
-// schema comes from its own CREATE TABLE), so the database is absent at runtime.
+// A self-bootstrapping app: it declares its own table (CREATE TABLE), so it OWNS
+// boot.db (S445 ruling) — it compiles with no database file and the run creates it.
 const BOOTSTRAP_APP = `<program db="./boot.db">
   \${
     function ensure() {
       ?{\`CREATE TABLE IF NOT EXISTS t (n INTEGER)\`}.run()
-      return 1
+      ?{\`INSERT INTO t (n) VALUES (7)\`}.run()
+      const rows = ?{\`SELECT n FROM t\`}.all()
+      return rows.length
     }
     <n> = 0
   }
   <button onclick=\${@n = ensure()}>go</button>
+</program>
+`;
+
+// A REFERENCING app: it only reads ref.db and declares no schema for it, so it never
+// creates it (S445 ruling). No <db tables=> block, so the compile does not need it.
+const REFERENCE_APP = `<program db="./ref.db">
+  \${
+    function count() {
+      const rows = ?{\`SELECT n FROM t\`}.all()
+      return rows.length
+    }
+    <n> = 0
+  }
+  <button onclick=\${@n = count()}>go</button>
+</program>
+`;
+
+// OWNING + a <db tables=> block, for the compile-time empty-file rule.
+const OWNING_DB_BLOCK_APP = `<program db="./o.db">
+  <db src="./o.db" tables="t">
+    \${
+      function ensure() {
+        ?{\`CREATE TABLE IF NOT EXISTS t (n INTEGER)\`}.run()
+        return 1
+      }
+      <n> = 0
+    }
+    <button onclick=\${@n = ensure()}>go</button>
+  </db>
 </program>
 `;
 
@@ -152,8 +187,12 @@ describe("§1 one resolver: the declaring file's directory, never the CWD", () =
     const base = resolve("/proj/src");
     // pages/ is stripped from the dist layout (api.js pathFor): dist/admin/.
     expect(emittedModuleDir(src, out, base)).toBe(resolve("/proj/dist/admin"));
-    const arg = sqliteFileHandleArg("../../data/app.db", src, out, base);
-    expect(arg).toBe('_scrml_sqlite_file("../../src/data/app.db", "../../data/app.db")');
+    const arg = sqliteFileHandleArg("../../data/app.db", src, out, base, new Set());
+    expect(arg).toBe('_scrml_sqlite_file("../../src/data/app.db", "../../data/app.db", false)');
+    // Owned (the program declares its schema) → the handle may create it.
+    const owned = new Set([resolveDbFilePath(classifyDbTarget("../../data/app.db"), src)]);
+    expect(sqliteFileHandleArg("../../data/app.db", src, out, base, owned))
+      .toBe('_scrml_sqlite_file("../../src/data/app.db", "../../data/app.db", true)');
     const spec = JSON.parse(/\("([^"]*)"/.exec(arg)[0].slice(1));
     const moduleUrl = pathToFileURL(join(emittedModuleDir(src, out, base), "panel.server.js"));
     expect(fileURLToPath(new URL(spec, moduleUrl))).toBe(resolveDbFilePath(classifyDbTarget("../../data/app.db"), src));
@@ -173,7 +212,7 @@ describe("§1 one resolver: the declaring file's directory, never the CWD", () =
 
   test(":memory:, sqlite::memory: and network drivers are not files", () => {
     for (const v of [":memory:", "sqlite::memory:", "postgres://u@h/d", "mysql://u@h/d"]) {
-      expect(sqliteFileHandleArg(v, resolve("/proj/src/app.scrml"), resolve("/proj/dist"), resolve("/proj/src"))).toBeNull();
+      expect(sqliteFileHandleArg(v, resolve("/proj/src/app.scrml"), resolve("/proj/dist"), resolve("/proj/src"), new Set())).toBeNull();
     }
   });
 });
@@ -256,10 +295,10 @@ describe("§3 scrml dev run from the project root", () => {
     expect(again.stdout.toString() + again.stderr.toString()).not.toContain("E-PA-004");
   }, 90_000);
 
-  test("a missing database is a loud error naming the path, and nothing is created", async () => {
+  test("REFERENCING program, missing database: a loud error naming the path, nothing created", async () => {
     const root = join(_tmp.root, "missing");
     mkdirSync(join(root, "src"), { recursive: true });
-    writeFileSync(join(root, "src", "app.scrml"), BOOTSTRAP_APP);
+    writeFileSync(join(root, "src", "app.scrml"), REFERENCE_APP);
     const dev = await startDev(root, "src/app.scrml");
     let log;
     try {
@@ -268,10 +307,96 @@ describe("§3 scrml dev run from the project root", () => {
       await stopDev(dev);
     }
     expect(dbFilesUnder(root)).toEqual([]);
-    expect(log).toContain("database file not found: " + join(root, "src", "boot.db"));
-    expect(log).toContain('declared as "./boot.db"');
+    expect(log).toContain("database file not found: " + join(root, "src", "ref.db"));
+    expect(log).toContain('declared as "./ref.db"');
     // The next compile is unaffected — no stub appeared to poison the schema read.
     const again = Bun.spawnSync(["bun", CLI, "compile", "src/app.scrml"], { cwd: root, stdout: "pipe", stderr: "pipe" });
     expect(again.exitCode).toBe(0);
   }, 90_000);
+
+  test("OWNING program, no database file: the run creates it beside the .scrml file and uses it", async () => {
+    const root = join(_tmp.root, "owning");
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(join(root, "src", "app.scrml"), BOOTSTRAP_APP);
+    expect(dbFilesUnder(root)).toEqual([]);
+    const dev = await startDev(root, "src/app.scrml");
+    let answer;
+    try {
+      expect(dev.log()).not.toContain("database file not found");
+      const route = /POST\s+(\/_scrml\/__ri_route_ensure_\d+)/.exec(dev.log())?.[1];
+      expect(route).toBeDefined();
+      const r = await fetch(`http://localhost:${dev.port}${route}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": "t445", Cookie: "scrml_csrf=t445" },
+        body: "{}",
+      });
+      expect(r.status).toBe(200);
+      answer = await r.json();
+    } finally {
+      await stopDev(dev);
+    }
+    expect(answer).toBe(1);
+    // Created where db="./boot.db" names it — beside src/app.scrml, not at the CWD.
+    expect(dbFilesUnder(root).filter((f) => !/-(wal|shm)$/.test(f))).toEqual(["src/boot.db"]);
+    const db = new Database(join(root, "src", "boot.db"));
+    expect(db.query("SELECT n FROM t").all()).toEqual([{ n: 7 }]);
+    db.close();
+  }, 90_000);
+});
+
+// ---------------------------------------------------------------------------
+// §4 — ownership at compile time
+// ---------------------------------------------------------------------------
+
+describe("§4 ownership at compile time (S445 ruling)", () => {
+  const compileIn = (root, name, src) => {
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, name), src);
+    return compileScrml({ inputFiles: [join(root, name)], write: true, outputDir: join(root, "dist"), log: () => {} });
+  };
+  const errorCodes = (r) => (r.errors ?? []).filter((e) => e.severity !== "warning" && !String(e.code).startsWith("W-") && !String(e.code).startsWith("I-")).map((e) => e.code);
+
+  test("an OWNED database that exists with no tables is read like an absent one (touch → compile passes)", () => {
+    const root = join(_tmp.root, "owned-empty");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "o.db"), ""); // `touch o.db`
+    const r = compileIn(root, "app.scrml", OWNING_DB_BLOCK_APP);
+    expect(errorCodes(r)).toEqual([]);
+    expect(readFileSync(join(root, "dist", "app.server.js"), "utf8")).toContain('_scrml_sqlite_file("../o.db", "./o.db", true)');
+  });
+
+  test("a REFERENCED database that exists with no tables is still E-PA-004 (EMPTY)", () => {
+    const root = join(_tmp.root, "referenced-empty");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "app.db"), "");
+    const r = compileIn(root, "app.scrml", APP); // reads t, declares no schema for app.db
+    expect(errorCodes(r)).toContain("E-PA-004");
+    expect((r.errors ?? []).map((e) => e.message).join("\n")).toContain("EMPTY");
+  });
+
+  test("ownership is program-wide: a file that only reads the db another file declares is an owning handle", () => {
+    const root = join(_tmp.root, "program-wide");
+    mkdirSync(root, { recursive: true });
+    writeFileSync(join(root, "lib.scrml"),
+      `<db src="./shared.db" tables="t" />\n\${\nexport function ensure() {\n  ?{\`CREATE TABLE IF NOT EXISTS t (n INTEGER)\`}.run()\n}\n}\n`);
+    writeFileSync(join(root, "reader.scrml"), REFERENCE_APP.replace("./ref.db", "./shared.db"));
+    const both = compileScrml({
+      inputFiles: [join(root, "reader.scrml"), join(root, "lib.scrml")],
+      write: true, outputDir: join(root, "dist"), log: () => {},
+    });
+    expect(errorCodes(both)).toEqual([]);
+    expect(readFileSync(join(root, "dist", "reader.server.js"), "utf8")).toContain('_scrml_sqlite_file("../shared.db", "./shared.db", true)');
+    // Compiled alone, the reader declares nothing for shared.db: referencing.
+    const alone = compileScrml({ inputFiles: [join(root, "reader.scrml")], write: true, outputDir: join(root, "dist-alone"), log: () => {} });
+    expect(errorCodes(alone)).toEqual([]);
+    expect(readFileSync(join(root, "dist-alone", "reader.server.js"), "utf8")).toContain('_scrml_sqlite_file("../shared.db", "./shared.db", false)');
+  });
+
+  test("a <schema> block makes its program the owner", () => {
+    const root = join(_tmp.root, "schema-owner");
+    const r = compileIn(root, "app.scrml",
+      `<program db="./s.db">\n<schema>\n    notes { id: integer primary key\n            body: text }\n</>\n\${\nfunction add(body) {\n    ?{\`INSERT INTO notes (body) VALUES (\${body})\`}.run()\n}\n}\n<button onclick=add("x")>add</button>\n</program>\n`);
+    expect(errorCodes(r)).toEqual([]);
+    expect(readFileSync(join(root, "dist", "app.server.js"), "utf8")).toContain('_scrml_sqlite_file("../s.db", "./s.db", true)');
+  });
 });

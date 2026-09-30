@@ -25,7 +25,7 @@ import { emitServerParamCheck, parsePredicateAnnotation } from "./emit-predicate
 import { resolveDbDriver } from "./db-driver.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-tool.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
-import { sqliteFileHandleArg, SQLITE_FILE_HELPER_IMPORT, SQLITE_FILE_HELPER_LINES } from "./sqlite-file-target.ts";
+import { sqliteFileHandleArg, ownedDbFilesFor, SQLITE_FILE_HELPER_IMPORT, SQLITE_FILE_HELPER_LINES } from "./sqlite-file-target.ts";
 import { appDeclaresDbAuthoritative, extractDesiredSchema, wrapPrincipalTxn } from "./db-authoritative.ts";
 import { isLibraryShapedFile } from "../tool-program.ts";
 import { returnTypeAllowsAbsence, SERVER_WIRE_ENCODER_HELPER } from "./wire-format.ts";
@@ -6813,7 +6813,7 @@ export function generateServerJs(
   // `mysql://` prefixes (per `db-driver.ts`) and pass through verbatim.
   // A SQLite FILE (e.g. `./contacts.db`) does NOT go through a `sqlite:` literal:
   // it is resolved against the declaring source file's directory — never the
-  // runtime CWD — and opened without `create` (s445; codegen/sqlite-file-target.ts).
+  // runtime CWD — and created only by a program that owns it (§8.1.1; codegen/sqlite-file-target.ts).
   const sqlIdentRe = /\b_scrml_sql(?:_\d+)?\b/g;
   const usedIdents = new Set<string>();
   let _m: RegExpExecArray | null;
@@ -6905,7 +6905,8 @@ export function generateServerJs(
       // s445-dev-db-side-file — a SQLite FILE opens through `_scrml_sqlite_file`
       // (codegen/sqlite-file-target.ts): the path the compile-time schema read
       // resolved (the declaring file's directory — db-target.ts `resolveDbFilePath`),
-      // written relative to THIS module and opened without `create`. It replaces the
+      // written relative to THIS module, created only when the program OWNS it
+      // (§8.1.1 — declares its schema; db-ownership.ts). It replaces the
       // ss19 #9 literal, which was re-relativized to the compile unit's output base
       // and then opened CWD-relative — so `scrml dev` started from any other
       // directory, or an artifact left by an earlier compile with a different base,
@@ -6917,6 +6918,8 @@ export function generateServerJs(
             typeof filePath === "string" ? filePath : "",
             (fileAST as any)._outputDir,
             (fileAST as any)._outputBaseDir,
+            // S445 ruling — create only a database this program declares schema for.
+            ownedDbFilesFor(fileAST, getNodes(fileAST), typeof filePath === "string" ? filePath : ""),
           )
         : null;
       if (fileArg !== null) {

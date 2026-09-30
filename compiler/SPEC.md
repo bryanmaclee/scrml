@@ -7177,6 +7177,37 @@ All scrml `?{}` source-language method semantics (bound parameters, `.all()`, `.
   string prefix; valid prefixes are `sqlite:`, `postgres:`, `postgresql:`, `mysql:`,
   `mongo:`, `mongodb:`).
 - A plain path without prefix (e.g., `db="./app.db"`) SHALL be treated as `sqlite:./app.db`.
+- **Resolution base.** A relative SQLite file path in a `db=` or `<db src=>` value (with or
+  without the `sqlite:` prefix) SHALL resolve against the directory of the `.scrml` file that
+  declares it. The process working directory SHALL NOT affect which file it names. The
+  compile-time schema read (§14.8, E-PA-001..007) and the running program (`scrml dev`,
+  `scrml serve`, a built server, a `kind="tool"` program, a §44.7.1 module-with-db-context)
+  SHALL open the same file. An absolute path names itself.
+- **Ownership.** A program *owns* a SQLite database file when at least one of its `.scrml`
+  files declares schema for that file. A file declares schema for a database when it has a
+  `?{}` block containing a `CREATE TABLE` statement that runs against that database, or a
+  `<schema>` block (in any form, including raw DDL and `schemaFor(T)`) in that database's scope.
+  - *Program* means the set of `.scrml` files compiled together.
+  - *Runs against* and *in scope* mean the innermost enclosing `<program db=>` or `<db src=>`,
+    the same scoping this section and §44.7.1 give `?{}`.
+  - A declaration with no enclosing target belongs to the file's database target when the
+    file has exactly one. When it has more than one, the declaration is ambiguous and owns
+    nothing.
+  - Ownership is decided at compile time, per database file. Every handle a program opens on
+    a file it owns is an owning handle, whichever file declares it.
+- **Creation.** A program SHALL create a SQLite database file at runtime only if it owns that
+  file. A program that only references a database (declares no schema for it) SHALL NOT
+  create the file. When the file is missing, the program SHALL fail when the module that opens
+  it loads, naming the resolved absolute path and the `db=` / `src=` value it came from. An
+  empty stand-in database is never created for a referencing program.
+- **An owned, empty database at compile time.** For an owned database, a file that exists
+  but holds no tables or views (e.g. created by `touch`, or created by a run that has not
+  reached its `CREATE TABLE` yet) SHALL be read at compile time as if it were absent. The
+  schema then comes from the program's own declarations (the shadow schema, as for a missing
+  file). A database with at least one table is read as it is. For a referencing program, an
+  empty file is reported under E-PA-004 as before.
+
+> **Provenance:** ruling:user-voice-scrml.md S445 item 6 — *"A `db=` path resolves against the directory of the `.scrml` file that declares it, and I'd add that sentence to SPEC. A program that declares its own schema (its own `CREATE TABLE`s or a `<schema>`) owns the database, so the runtime may create the file. A program that only references a database never creates it and fails loudly if the file is missing."* · supersedes: the ss19 #9 emission (a `sqlite:` literal re-relativized to the compile unit's output base and opened relative to the process CWD), which had no governing sentence.
 - The bound parameter security rule of §8.1 (E-SQL-001) applies regardless of driver.
   All `${}` interpolations inside `?{}` blocks SHALL be bound parameters, never string
   interpolation, across all drivers.
@@ -24313,6 +24344,9 @@ The compiler cannot automatically distinguish between these two cases when a col
 
 - At compile time, the compiler SHALL validate the `<schema>` block against itself for internal consistency: all `references` targets exist, no duplicate column names within a table, no duplicate table names.
 - The compiler SHALL NOT fail compilation when the database file does not exist. If the database file is absent, the diff is "all tables need to be created" and the compiler SHALL generate a full `CREATE TABLE` migration. This supports the workflow where the schema is written before the database file is created.
+  A `<schema>` block makes its program the database's *owner* (§8.1.1 *Ownership*). The
+  running program may therefore create the file, and a file that exists with no tables yet
+  is read like an absent one (§8.1.1, ruling:user-voice-scrml.md S445 item 6).
 - The compiler SHALL fail compilation if the database file exists but is not a valid SQLite file (E-SCHEMA-009).
 - The compiler SHALL fail compilation if a `<schema>` column type differs from the actual database column affinity in a way that is not auto-migrated (i.e., the diff requires a type change but the database is production-mode-locked). See §38.8 for `--check` mode.
 
@@ -26796,6 +26830,10 @@ A nested `<program db="...">` creates its own database driver scope. `?{}` block
 2. First `<program>` with `db=` determines the driver.
 3. Parse the connection string prefix.
 4. If no `db=` found, emit E-SQL-004.
+5. A SQLite file path resolves against the directory of the declaring `.scrml` file, and is
+   created at runtime only by a program that owns it (declares its schema). A referencing
+   program fails loudly on a missing file. Normative text: §8.1.1 *Resolution base* /
+   *Ownership* / *Creation* (ruling:user-voice-scrml.md S445 item 6).
 
 | `db=` prefix | Driver |
 |---|---|

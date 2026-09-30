@@ -19,7 +19,8 @@
  *
  * s445 (dev-db-side-file) replaced that: every emitted handle names the file the
  * compiler resolved (the declaring file's directory), written RELATIVE TO THE
- * EMITTED MODULE and opened via `_scrml_sqlite_file` without `create`. Both
+ * EMITTED MODULE and opened via `_scrml_sqlite_file` (these programs only reference
+ * the db, so without `create`). Both
  * modules now open <root>/m.db from ANY working directory — asserted below by
  * resolving each module's specifier against that module's own URL, and by
  * running the page's route from an unrelated CWD.
@@ -166,7 +167,7 @@ describe("ss19 #9 — db src= emits a runtime-consistent path across directories
     expect((result.errors ?? []).filter((e) => !e.code?.startsWith("W-"))).toEqual([]);
     const appJs = readFileSync(join(outDir, "app.server.js"), "utf-8");
     // dist/app.server.js -> ../m.db = <root>/m.db (the declaring file's directory).
-    expect(appJs).toContain('new SQL(_scrml_sqlite_file("../m.db", "./m.db"))');
+    expect(appJs).toContain('new SQL(_scrml_sqlite_file("../m.db", "./m.db", false))');
     expect(opensFile(join(outDir, "app.server.js"), appJs)).toBe(join(root, "m.db"));
   });
 });

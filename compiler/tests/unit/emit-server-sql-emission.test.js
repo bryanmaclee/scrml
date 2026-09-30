@@ -355,9 +355,34 @@ describe("§K SQLite path normalization — sqlite: prefix added when missing", 
     });
     const ast = makeFileAST([programNode]);
     const serverJs = generateServerJs(ast, { functions: fnRouteMap }, [], null, null);
-    expect(serverJs).toContain('new SQL(_scrml_sqlite_file("file:///test/testdb.db", "./testdb.db"))');
+    expect(serverJs).toContain('new SQL(_scrml_sqlite_file("file:///test/testdb.db", "./testdb.db", false))');
     expect(serverJs).not.toContain('"sqlite:./testdb.db"');
-    expect(serverJs).toContain('return { adapter: "sqlite", filename, create: false, readwrite: true };');
+    // S445 ruling: `SELECT 1` declares no schema — a REFERENCING program, so the
+    // third argument is `false` (never create; a missing file is a load-time error).
+    expect(serverJs).toContain('return { adapter: "sqlite", filename, create: ownsSchema, readwrite: true };');
+    expect(serverJs).toContain("if (!ownsSchema && !_scrml_db_file_exists(filename)) {");
+  });
+
+  test("a program that declares the table (its own CREATE TABLE) OWNS the db → create allowed", () => {
+    const dbBlock = makeDbStateNode("./testdb.db");
+    const fnNode = makeServerFn("setup", [
+      makeSqlNode("CREATE TABLE IF NOT EXISTS t (n INTEGER)"),
+    ]);
+    const programNode = {
+      kind: "markup",
+      tag: "program",
+      attributes: [],
+      children: [dbBlock, { kind: "logic", body: [fnNode], span: span(35) }],
+      span: span(0),
+    };
+    const fnRouteMap = new Map();
+    fnRouteMap.set(`/test/app.scrml::${fnNode.span.start}`, {
+      boundary: "server",
+      generatedRouteName: "_scrml_route_setup_1",
+      explicitMethod: "POST",
+    });
+    const serverJs = generateServerJs(makeFileAST([programNode]), { functions: fnRouteMap }, [], null, null);
+    expect(serverJs).toContain('new SQL(_scrml_sqlite_file("file:///test/testdb.db", "./testdb.db", true))');
   });
 
   test(":memory: passes through WITHOUT sqlite: prefix (Bun.SQL recognizes it)", () => {

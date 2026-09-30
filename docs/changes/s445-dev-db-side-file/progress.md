@@ -26,3 +26,20 @@
 - Tests: new compiler/tests/integration/dev-db-no-side-file.test.js (8; mutation-proven: 4 red with the
   helper disabled); 28 existing test files migrated (literal pins, CWD-seeded dbs, harness regexes).
 - Suite (unit+integration+conformance): 26690 pass / 0 fail / 70 skip / 12 todo.
+
+## Round 2 — bryan ruling (user-voice-scrml.md S445 item 6)
+- merged origin/main (5f5753e3c; FACTS.md conflict → theirs + regen).
+- SPEC §8.1.1: Resolution base / Ownership / Creation / owned-empty-at-compile-time bullets + Provenance;
+  §44.2 step 5 cross-ref; §39.7 cross-ref.
+- compiler/src/db-ownership.ts (NEW): collectOwnedDbFiles / collectProgramOwnedDbFiles — per resolved db
+  file, program-wide (all files compiled together); innermost <program db=>/<db src=> scope; an unscoped
+  declaration belongs to the file's single target (else owns nothing).
+- codegen: `_scrml_sqlite_file(spec, declared, ownsSchema)` → create: ownsSchema; the existence check only
+  when !ownsSchema. codegen/index.ts stamps `_ownedDbFiles` program-wide (per-file fallback for direct callers).
+- protect-analyzer: an OWNED db whose file exists with zero user tables/views → shadow schema (Note(PA) says
+  "has no tables yet"); referencing → E-PA-004 EMPTY as before.
+- tests: W5b + conf-W5B back to no pre-seed (rm the declared db; W5b (1) asserts it is CREATED beside the
+  source, not in dist); csrf DOC_PROBE no-create seed removed; pins carry the ownership flag; dev-db test
+  13 (referencing-missing loud, owning-fresh creates+uses, owned-empty touch compiles, referenced-empty
+  E-PA-004, program-wide ownership, <schema> owner).
+- suites: unit+integration+conformance 26801/0/70/12; browser-baseline --check PASS (48 asserted).

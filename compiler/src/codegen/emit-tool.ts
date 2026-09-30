@@ -40,7 +40,7 @@ import { SERVER_LOG_HELPER, SERVER_PRINT_HELPER } from "./log-loc.ts";
 // §44 (S433) — the sqlite WAL + busy-timeout defaults, shared with emit-server.ts.
 import { SQLITE_CONFIGURE_HELPER_LINES, sqliteWantsDefaults } from "./sqlite-defaults.ts";
 // s445 — THE SQLite-file handle emission, shared with emit-server.ts.
-import { sqliteFileHandleArg, SQLITE_FILE_HELPER_IMPORT, SQLITE_FILE_HELPER_LINES } from "./sqlite-file-target.ts";
+import { sqliteFileHandleArg, ownedDbFilesFor, SQLITE_FILE_HELPER_IMPORT, SQLITE_FILE_HELPER_LINES } from "./sqlite-file-target.ts";
 import { asyncCombinatorHelperBlock, ASYNC_COMBINATOR_METHOD_ORDER } from "./async-combinators.ts";
 import { emitExprField } from "./emit-expr.ts";
 import { parseExprToNode } from "../expression-parser.ts";
@@ -156,7 +156,7 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
   const sqliteConfiguredIdents: string[] = [];
   // s445-dev-db-side-file — the SAME SQLite-file emission as the server half
   // (codegen/sqlite-file-target.ts): the path the compile-time schema read resolved,
-  // relative to THIS module, opened without `create`. A tool is run from wherever
+  // relative to THIS module, created only if the program owns it (§8.1.1). A tool is run from wherever
   // the user's shell is (`bun src/ports/dist/tick-tool.js` from the repo root), so a
   // CWD-relative literal opened — and created — a different file than the compiler read.
   const sourceFile = typeof fileAST.filePath === "string" ? fileAST.filePath : "";
@@ -174,6 +174,8 @@ function buildDbHandleHeader(fileAST: ASTNode, emittedBody: string, awaitConfigu
           sourceFile,
           (fileAST as any)._outputDir,
           (fileAST as any)._outputBaseDir,
+          // S445 ruling — create only a database this program declares schema for.
+          ownedDbFilesFor(fileAST, getNodes(fileAST as never), sourceFile),
         )
       : null;
     if (fileArg !== null) {

@@ -21,13 +21,16 @@
  *      plays no part and the build output stays relocatable as a unit with its
  *      database (the same anchoring the §20.5 session store uses).
  *
- *   2. NEVER CREATE. The handle is opened with `create: false`, and the module
- *      refuses to load when the file is absent, naming the path it looked for and
- *      the value it came from. A server that invents an empty database answers
- *      every query with "no such table" or nothing at all; a missing database is a
- *      configuration error and is reported as one. SPEC is silent on runtime
- *      creation; this is the fail-closed reading. `:memory:` is unaffected, and
- *      Postgres / MySQL connection strings pass through untouched.
+ *   2. CREATE ONLY WHAT YOU OWN (§44.2, ruling:user-voice-scrml.md S445 item 6). A
+ *      program that declares schema for the database (its own `CREATE TABLE` in a
+ *      `?{}`, or a `<schema>` — `db-ownership.ts`) OWNS it and opens it with
+ *      `create: true`. Any other program only REFERENCES it: `create: false`, and
+ *      the module refuses to load when the file is absent, naming the path it
+ *      looked for and the value it came from — a referencing server that invented
+ *      an empty database would answer every query with "no such table" or nothing
+ *      at all. Ownership is decided at compile time, per database file, across the
+ *      whole program. `:memory:` is unaffected, and Postgres / MySQL connection
+ *      strings pass through untouched.
  *
  * ⛔ THE EMITTED MODULE MUST STAY TOP-LEVEL-AWAIT-FREE and its handle declaration
  * must stay ONE LINE (`const _scrml_sql… = new SQL(…);`): the conformance runtime
@@ -46,6 +49,7 @@ import {
 } from "node:path";
 import { pathToFileURL } from "node:url";
 import { classifyDbTarget, resolveDbFilePath } from "../db-target.ts";
+import { collectOwnedDbFiles } from "../db-ownership.ts";
 import { stripPagesPrefix } from "./utils.ts";
 
 /** The emitted helper's name. Not matched by the `\b_scrml_sql(?:_\d+)?\b` handle scan. */
@@ -57,26 +61,28 @@ export const SQLITE_FILE_HELPER_IMPORT =
 
 /**
  * The emitted helper, as source lines. Emit ONCE per module that opens at least one
- * SQLite FILE, then `new SQL(_scrml_sqlite_file(<specifier>, <declared>))` per handle.
+ * SQLite FILE, then `new SQL(_scrml_sqlite_file(<specifier>, <declared>, <owns>))`
+ * per handle.
  */
 export const SQLITE_FILE_HELPER_LINES: readonly string[] = Object.freeze([
   "// --- §44.2 (s445): SQLite database files (compiler-generated) ---",
   "// A relative `db=` / `<db src=>` path names a file relative to the .scrml file that",
   "// declares it — the file the compiler read the schema from. The path below is that same",
   "// file, written relative to THIS module, so the working directory the server was started",
-  "// in never changes which database opens. The file must already exist: a scrml server",
-  "// never creates its database (an empty stand-in would answer every query wrongly).",
-  "function _scrml_sqlite_file(specifier, declaredAs) {",
+  "// in never changes which database opens. A program that declares the database's schema",
+  "// (its own CREATE TABLE or a <schema>) owns it and may create the file; a program that only",
+  "// references it never does — a missing file is an error, not an empty stand-in.",
+  "function _scrml_sqlite_file(specifier, declaredAs, ownsSchema) {",
   "  const filename = Bun.fileURLToPath(new URL(specifier, import.meta.url));",
-  "  if (!_scrml_db_file_exists(filename)) {",
+  "  if (!ownsSchema && !_scrml_db_file_exists(filename)) {",
   "    throw new Error(",
   "      `scrml: database file not found: ${filename} — declared as \"${declaredAs}\", which is ` +",
-  "      `resolved against the directory of the .scrml file that declares it. scrml does not ` +",
-  "      `create a database at runtime: create it (for a <schema>, \\`scrml db-migrate\\`) or ` +",
-  "      `correct the path.`,",
+  "      `resolved against the directory of the .scrml file that declares it. This program ` +",
+  "      `declares no schema for it (no CREATE TABLE, no <schema>), so it only references the ` +",
+  "      `database and never creates it: create the file or correct the path.`,",
   "    );",
   "  }",
-  '  return { adapter: "sqlite", filename, create: false, readwrite: true };',
+  '  return { adapter: "sqlite", filename, create: ownsSchema, readwrite: true };',
   "}",
 ]);
 
@@ -125,15 +131,27 @@ export function sqliteRuntimeSpecifier(
 }
 
 /**
+ * The database files this module's program owns: the program-wide set codegen/index.ts
+ * stamps on every file AST (`_ownedDbFiles`), or — for a direct single-file emit call
+ * that never ran that pass — the file's own declarations.
+ */
+export function ownedDbFilesFor(fileAST: unknown, nodes: unknown, filePath: string): ReadonlySet<string> {
+  const stamped = (fileAST as { _ownedDbFiles?: unknown } | null)?._ownedDbFiles;
+  if (stamped instanceof Set) return stamped as ReadonlySet<string>;
+  return collectOwnedDbFiles(nodes, filePath);
+}
+
+/**
  * The argument expression for `new SQL(…)` when `connectionString` names a SQLite
  * FILE, or null when it does not (`:memory:`, Postgres, MySQL, anything else —
- * those keep their existing emission).
+ * those keep their existing emission). `ownedDbFiles` decides `create`.
  */
 export function sqliteFileHandleArg(
   connectionString: string,
   declaringSourceFile: string,
   outputDir: string | null | undefined,
   outputBaseDir: string | null | undefined,
+  ownedDbFiles: ReadonlySet<string>,
 ): string | null {
   const cls = classifyDbTarget(connectionString);
   if (cls.kind !== "sqlite-file" || cls.sqlitePath === null || !declaringSourceFile) return null;
@@ -142,5 +160,6 @@ export function sqliteFileHandleArg(
   const absDb = resolveDbFilePath(cls, declaringSourceFile);
   const moduleDir = emittedModuleDir(declaringSourceFile, outputDir, outputBaseDir);
   const spec = sqliteRuntimeSpecifier(absDb, moduleDir, _pathIsAbsolute(cls.sqlitePath));
-  return `${SQLITE_FILE_HELPER_NAME}(${JSON.stringify(spec)}, ${JSON.stringify(cls.trimmed)})`;
+  const owns = ownedDbFiles.has(absDb);
+  return `${SQLITE_FILE_HELPER_NAME}(${JSON.stringify(spec)}, ${JSON.stringify(cls.trimmed)}, ${owns})`;
 }

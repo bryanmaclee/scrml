@@ -79,7 +79,8 @@ import { Database } from "bun:sqlite";
 const outDir = process.argv[2];
 process.chdir(outDir);
 // db="./c.db" names the file beside app.scrml (s445: the declaring file's
-// directory, i.e. outDir/..), and the server never creates it — seed it first.
+// directory, i.e. outDir/..). A <schema> does not create tables at runtime
+// (migration does), so the table is seeded here.
 const db = new Database("../c.db"); db.run("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)"); db.close();
 const store = (globalThis.__scrml_session_store ??= new Map());
 store.set("sid-alice", { userId: 1, role: "user" });
@@ -195,8 +196,6 @@ describe("runtime over HTTP — the default fails closed", () => {
 const DOC_PROBE = `
 const [outDir, devJs] = process.argv.slice(2);
 process.chdir(outDir);
-// The declared db (beside app.scrml — s445) must exist: the server never creates it.
-{ const { Database } = await import("bun:sqlite"); new Database("../c.db").close(); }
 const store = (globalThis.__scrml_session_store ??= new Map());
 store.set("sid-alice", { userId: 1, role: "user" });
 const mod = await import(outDir + "/app.server.js");

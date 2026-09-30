@@ -65,6 +65,7 @@ import type { Span, AttrNode, ASTNode, StateNode } from "./types/ast.ts";
 import { redactDbUri } from "./db-uri-redact.ts";
 import { displayConnectionValue } from "./diagnostic-secrets.ts";
 import { classifyDbTarget, resolveDbFilePath, type DbTargetClass } from "./db-target.ts";
+import { collectProgramOwnedDbFiles } from "./db-ownership.ts";
 // Import-free by construction (it takes an already-open handle, duck-typed on `.run`), so it
 // cannot drag `bun:sqlite`/`node:fs` into a stage that avoids them — and it is NOT a codegen
 // module, which this stage deliberately does not pull (see the schema-differ.js note below).
@@ -344,7 +345,8 @@ export function describeDbSource(
       `database is usually a stub created as a side effect when some other process (for ` +
       `example a server built by an older scrml, or another tool, resolving the same ` +
       `relative path from a different working directory) opened this path before a real ` +
-      `database existed there — a current scrml server never creates its database. If your ` +
+      `database existed there — a current scrml program creates a database only when it ` +
+      `declares its schema (§8.1.1), and this one does not. If your ` +
       `real database lives elsewhere, delete this file and point \`src=\` at the real one. `
     : "";
   return {
@@ -993,6 +995,19 @@ function extractSchemaForCreateTableStatements(nodes: ASTNode[]): Map<string, st
  *    c. If ANY table is missing a CREATE TABLE statement → emit E-PA-002,
  *       return null.
  */
+/** User tables + views in an open database (SQLite's own `sqlite_*` excluded — R2-5). */
+function userTableCount(db: Database): number {
+  try {
+    const row = db.query(
+      "SELECT count(*) AS n FROM sqlite_master " +
+      "WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+    ).get() as { n: number } | null;
+    return row ? row.n : -1;
+  } catch {
+    return -1; // unknown — never treated as empty
+  }
+}
+
 function resolveDb(
   dbPath: string,
   tableNames: string[],
@@ -1003,12 +1018,24 @@ function resolveDb(
   srcIsDriverUri: boolean = false,
   srcIsUnsupported: boolean = false,
   displayPath: string = srcIsDriverUri ? redactDbUri(dbPath) : dbPath,
+  ownsSchema: boolean = false,
 ): Database | null {
   // Driver URI (postgres:// / mysql://) — skip the filesystem check entirely.
   // Schema validation at compile time happens via the shadow-DB path. Real
   // driver introspection is deferred to a later phase.
+  let emptyOwned = false;
   if (!srcIsDriverUri && existsSync(dbPath)) {
-    return cache.openDb(dbPath, blockSpan, errors, displayPath);
+    const real = cache.openDb(dbPath, blockSpan, errors, displayPath);
+    // §44.2 (ruling:user-voice-scrml.md S445 item 6) — a program that OWNS this
+    // database (declares its schema: its own CREATE TABLE or a <schema>,
+    // db-ownership.ts) creates it at runtime. Until its first run the file can
+    // exist with NO tables (`touch app.db`, or a create that has not run its
+    // CREATE TABLE yet); read that like an absent file — the schema comes from the
+    // program's own declarations — rather than reporting every table missing
+    // (E-PA-004) before the program ever had the chance to create them. A database
+    // with ANY table is read as the truth, as before.
+    if (!(ownsSchema && real !== null && userTableCount(real) === 0)) return real;
+    emptyOwned = true;
   }
 
   // File is missing OR src= is a driver URI. Check shadow DB eligibility.
@@ -1045,6 +1072,8 @@ function resolveDb(
         `so it is not a file and cannot be introspected,`
       : srcIsDriverUri
       ? `Driver URI \`${shownTarget}\` cannot be introspected at compile time yet (Phase 2)`
+      : emptyOwned
+      ? `Database file \`${shownTarget}\` has no tables yet`
       : `Database file \`${shownTarget}\` does not exist`;
     errors.push(new PAError(
       "E-PA-002",
@@ -1067,7 +1096,9 @@ function resolveDb(
   // All tables have CREATE TABLE statements. Build shadow DB.
   const what = srcIsUnsupported
     ? `Unsupported database target '${displayPath}' (no \`?{}\` driver accepts its URI scheme — E-SQL-005)`
-    : srcIsDriverUri ? `Driver URI '${displayPath}'` : `Database file '${displayPath}' does not exist`;
+    : srcIsDriverUri ? `Driver URI '${displayPath}'`
+    : emptyOwned ? `Database file '${displayPath}' has no tables yet (this program declares their schema)`
+    : `Database file '${displayPath}' does not exist`;
   cache.note(
     `Note(PA): ${what}. ` +
     `Using in-memory schema from ?{} blocks for compile-time validation.\n`,
@@ -1141,6 +1172,9 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
   const views = new Map<string, DBTypeViews>();
   const errors: PAError[] = [];
   const cache = new SchemaCache(input.onNote);
+  // §44.2 (ruling:user-voice-scrml.md S445 item 6) — the database files this PROGRAM
+  // owns (declares schema for), the same predicate codegen uses to emit `create`.
+  const ownedDbFiles = collectProgramOwnedDbFiles(files as unknown[]);
 
   try {
     for (const fileAST of files) {
@@ -1182,7 +1216,7 @@ export function runPA(input: PAInput): { protectAnalysis: ProtectAnalysis; error
       const dbBlocks = collectDbBlocks(nodes);
 
       for (const block of dbBlocks) {
-        processDbBlock(block, filePath, cache, views, errors, createTableMap);
+        processDbBlock(block, filePath, cache, views, errors, createTableMap, ownedDbFiles);
       }
     }
   } finally {
@@ -1210,6 +1244,7 @@ function processDbBlock(
   views: Map<string, DBTypeViews>,
   errors: PAError[],
   createTableMap: Map<string, string>,
+  ownedDbFiles: ReadonlySet<string> = new Set(),
 ): void {
   const blockSpan = block.span;
 
@@ -1303,7 +1338,9 @@ function processDbBlock(
   //   - driver URI (postgres:// / mysql://) → forced shadow DB; no file check
   // ------------------------------------------------------------------
   const displayPath = displayDbTarget(srcClass, srcKind, sourceDir, dbPath);
-  const db = resolveDb(dbPath, tableNames, createTableMap, cache, blockSpan, errors, isDriverConnectionUri, srcKind === "unsupported", displayPath);
+  // §44.2 (S445 ruling) — does this program own the database (declare its schema)?
+  const ownsSchema = srcKind === "file" && ownedDbFiles.has(resolveDbFilePath(srcClass, filePath));
+  const db = resolveDb(dbPath, tableNames, createTableMap, cache, blockSpan, errors, isDriverConnectionUri, srcKind === "unsupported", displayPath, ownsSchema);
   if (db === null) return;
 
   // ------------------------------------------------------------------

@@ -163,7 +163,7 @@ describe("Bug 3a §1 — basic <db src=> server-fn round-trip with real SQLite",
     }
     // We use a real SQLite file (pre-seeded with CREATE TABLE items) so PA's
     // filesystem-existence check passes. The compiled server.js will declare
-    // `const _scrml_sql = new SQL(_scrml_sqlite_file("../items.db", "./items.db"))`
+    // `const _scrml_sql = new SQL(_scrml_sqlite_file("../items.db", "./items.db", false))`
     // — the seeded file beside the .scrml source, resolved from the module's own
     // location (s445), so the test's CWD plays no part.
     const src = `
@@ -197,11 +197,11 @@ describe("Bug 3a §1 — basic <db src=> server-fn round-trip with real SQLite",
     expect(errors.filter(e => !e.code?.startsWith("W-"))).toEqual([]);
 
     // Verify the file was emitted and contains the declaration: a SQLite file
-    // opens through `_scrml_sqlite_file` (declaring-file-relative, never created).
+    // opens through `_scrml_sqlite_file` (declaring-file-relative; referencing → never created).
     expect(existsSync(serverJsPath)).toBe(true);
     const serverJsText = readFileSync(serverJsPath, "utf-8");
     expect(serverJsText).toContain('import { SQL } from "bun"');
-    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../items.db", "./items.db"))');
+    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../items.db", "./items.db", false))');
     // The body should use the declared handle, not be a dangling reference
     expect(serverJsText).toMatch(/await _scrml_sql`/);
 
@@ -331,7 +331,7 @@ describe("Bug 3a §3 — bundled <db>-using examples emit valid declarations", (
     const serverJsText = readFileSync(serverJsPath, "utf-8");
     expect(serverJsText).toContain('import { SQL } from "bun"');
     // A SQLite file opens through the s445 helper (adapter: "sqlite" — never the postgres default).
-    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../contacts.db", "./contacts.db"))');
+    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../contacts.db", "./contacts.db", false))');
   });
 
   test("<program db='postgres://...'> annotates correctly (driver passthrough)", () => {
@@ -388,6 +388,6 @@ describe("Bug 3a §3 — bundled <db>-using examples emit valid declarations", (
     });
     expect(errors.filter(e => !e.code?.startsWith("W-"))).toEqual([]);
     const serverJsText = readFileSync(serverJsPath, "utf-8");
-    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../things.db", "./things.db"))');
+    expect(serverJsText).toContain('const _scrml_sql = new SQL(_scrml_sqlite_file("../things.db", "./things.db", false))');
   });
 });
