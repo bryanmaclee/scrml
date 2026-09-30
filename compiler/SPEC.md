@@ -9295,6 +9295,17 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
   second was walked once, then handed as-is to the serializer, which read the getter again and
   served the full row. Two losses to runtime-object tricks — `toJSON`, then getters — are why the
   rule is ownership of serialization, not a smarter walk.) The CPS error envelope is such a sink.
+- **`this` never sees a protected column (S443 round 6e).** An author function the sink invokes —
+  a `toJSON`, an accessor — SHALL run with `this` bound to a marker-STRIPPED copy of its object
+  (same prototype, own data copied with every marked column removed, recursively; building it
+  invokes nothing), never the tagged row itself. At compile time, `this` inside a function stored
+  on an object (`o.f = function …`, an object-literal method / getter / setter, a
+  `defineProperty` getter or value, a method copied in by `Object.assign`) carries that object's
+  provenance, so `return this.passwordHash` from it is `E-PROTECT-006`. (Measured at rounds 6c/6d:
+  `u.toJSON = function () { return { pw: this.passwordHash } }` served the hash; and, on base as
+  well, a `defineProperty` getter reading `this.passwordHash` served it through the server-function
+  response, `/__mountHydrate` and the SSR state script.) Disclosed bound: a WRITE through `this`
+  (`this.x = h` inside such a function) is not modelled by the provenance analysis.
 (Measured before round 6: `delete u[Symbol.for("scrml.protect.origin")]`, pushing onto the
 descriptor's reveal list, and deleting a copy's Symbol-keyed properties each served the full row.)
 
