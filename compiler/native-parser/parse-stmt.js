@@ -530,8 +530,14 @@ export function parseStatement(ctx) {
         // Simpler: peek 2 tokens to confirm `<` IDENT, then run the existing
         // structural lead predicate on a synthesised cursor view.
         if (constStructuralStateDeclLeadFollows(ctx.cursor)) {
-            advance(ctx.cursor);   // consume `const`
-            return parseStructuralStateDecl(ctx, true);
+            const constTok = advance(ctx.cursor);   // consume `const`
+            const sd = parseStructuralStateDecl(ctx, true);
+            // The declaration's span starts at `const` (S441 round 4 — the
+            // body-top coverage check reads statement spans).
+            if (sd && sd.span && typeof sd.span.end === "number") {
+                sd.span = makeSpan(constTok.span.start, sd.span.end, constTok.span.line, constTok.span.col);
+            }
+            return sd;
         }
     }
 
@@ -2157,7 +2163,11 @@ export function parseScrmlFunctionDecl(ctx, allowAnonymous) {
     // --- the in-line body --- (parsed in the function's own generator scope).
     const inline = parseFunctionBodyInline(ctx, false, isGenerator);
 
-    const span = makeSpan(fnTok.span.start, inline.endPos, fnTok.span.line, fnTok.span.col);
+    // The declaration's span starts at its FIRST token — a `pure` / `server`
+    // modifier is part of the declaration (S441 round 4: the body-top
+    // coverage check reads statement spans; a span that began at `function`
+    // left `server` outside every statement).
+    const span = makeSpan(leadTok.span.start, inline.endPos, leadTok.span.line, leadTok.span.col);
     return makeFunctionDecl(name, params, inline.body, false, isGenerator, span, {
         fnKind,
         isServer,

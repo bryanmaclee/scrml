@@ -2845,7 +2845,16 @@ function rejectBodyTopProseNative(block, source, ctx) {
         while (sj + 1 < body.length && flagged[sj + 1]) sj = sj + 1;
         const gEnd = sj + 1 < body.length && starts[sj + 1] !== null ? starts[sj + 1] : blockEnd;
         const text = source.slice(starts[si], gEnd);
-        const allExprStmts = body.slice(si, sj + 1).every((st) => st && st.kind === "ExprStmt");
+        // Judged on the group's FIRST LINE — the unit the rejection below
+        // removes (the rest is re-parsed). A parse-error cascade can flag a
+        // declaration on a LATER line (`loading!⏎<c4> = 4`: the `<` after the
+        // `!` is "unexpected"), and that declaration must not exempt the
+        // prose line above it (S441 round 4, found by the fuzz).
+        const nlG = source.indexOf("\n", starts[si]);
+        const firstLineEnd = nlG === -1 || nlG > gEnd ? gEnd : nlG;
+        const allExprStmts = body.slice(si, sj + 1)
+            .filter((st) => st && st.span && typeof st.span.start === "number" && st.span.start < firstLineEnd)
+            .every((st) => st && st.kind === "ExprStmt");
         if (BODY_TOP_CODE_HEAD_RE.test(text) === false && (block._bodyTopCatchAll === true || allExprStmts)) fi = si;
         si = sj;
     }
@@ -3000,6 +3009,97 @@ function coverBodyTopNative(block, source, ctx) {
             "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
             + "\"`, §4.18.3).",
             { start: a, end: b, line, col },
+        ));
+        k = j + 1;
+    }
+}
+
+// S441 round 4 — `assertBodyTopCoverageNative`: the body-top COVERAGE
+// INVARIANT as a CHECK (SPEC §40.8 S441 bullet; the live twin is
+// ast-builder.js `assertBodyTopCoverage`). Runs after the strict check
+// (`rejectBodyTopProseNative`) and the lexer-level cover (`coverBodyTopNative`)
+// have produced their statements and diagnostics. Every non-whitespace,
+// non-comment byte of the run must be (a) inside a lexer token that lies inside
+// a statement of the final `block.body` — the statements the bridge compiles —
+// or (b) on a source line an error diagnostic spans. A byte in neither was
+// dropped by some path no per-shape fix anticipated: it is
+// `E-INTERNAL-BODY-TOP-DROPPED`, an internal compiler error, fail-closed.
+export function assertBodyTopCoverageNative(block, source, ctx) {
+    const span = block.span;
+    if (span === undefined || span === null || typeof span.start !== "number" || typeof span.end !== "number") return;
+    if (ctx === null || ctx === undefined) return;
+    if (Array.isArray(ctx.diagnostics) === false) ctx.diagnostics = [];
+    // The text the body was PARSED from, in the coordinates its statement
+    // spans use: `bodyText` anchored at `bodyStart`. For a plain lifted run
+    // that is the source slice at the span; for a pairing-synthesized block
+    // (`const Name = <markup>`, `export <markup>`) it is the CONSTRUCTED text
+    // the parser actually saw — its spans are anchored there, not in source.
+    const runText = typeof block.bodyText === "string" ? block.bodyText : source.slice(span.start, span.end);
+    const runStart = typeof block.bodyStart === "number" ? block.bodyStart : span.start;
+    const runEnd = runStart + runText.length;
+    const constructed = runText !== source.slice(runStart, runEnd);
+    // A position-faithful view of `runText` for the shared segment scanner.
+    const view = constructed ? " ".repeat(runStart) + runText : source;
+    const len = runText.length;
+    const inTok = new Uint8Array(len);
+    const inStmt = new Uint8Array(len);
+    let toks = [];
+    try { toks = lex(runText); } catch { toks = []; }
+    for (const t of toks) {
+        if (!t || !t.span || t.kind === "EOF" || typeof t.span.start !== "number") continue;
+        let a = t.span.start;
+        if (t.kind === "TemplateChunk" && a > 0 && runText[a - 1] === "`") a = a - 1;
+        for (let k = Math.max(0, a); k < Math.min(len, t.span.end); k++) inTok[k] = 1;
+    }
+    const body = Array.isArray(block.body) ? block.body : [];
+    for (const st of body) {
+        if (!st || !st.span || typeof st.span.start !== "number" || typeof st.span.end !== "number") continue;
+        for (let k = Math.max(0, st.span.start - runStart); k < Math.min(len, st.span.end - runStart); k++) inStmt[k] = 1;
+    }
+    const ranges = [];
+    let a0 = -1;
+    for (let k = 0; k <= len; k++) {
+        const on = k < len && inTok[k] === 1 && inStmt[k] === 1;
+        if (on && a0 < 0) a0 = k;
+        if (!on && a0 >= 0) { ranges.push([runStart + a0, runStart + k]); a0 = -1; }
+    }
+    // An error diagnostic covers the source lines it spans.
+    for (const d of ctx.diagnostics) {
+        if (!d || typeof d.code !== "string" || d.code.startsWith("E-") === false) continue;
+        if (!d.span || typeof d.span.start !== "number") continue;
+        const end = typeof d.span.end === "number" && d.span.end >= d.span.start ? d.span.end : d.span.start;
+        if (end < runStart || d.span.start > runEnd) continue;
+        const ls = Math.max(runStart, view.lastIndexOf("\n", Math.max(d.span.start, runStart) - 1) + 1);
+        const le0 = view.indexOf("\n", Math.min(end, runEnd));
+        ranges.push([ls, le0 === -1 || le0 > runEnd ? runEnd : le0]);
+    }
+    const segs = uncoveredSegments(view, runStart, runEnd, ranges);
+    const anchorLine = constructed ? (typeof span.line === "number" ? span.line : 1) : 1;
+    const lineAt = (off) => constructed
+        ? anchorLine + (runText.slice(0, off - runStart).match(/\n/g) || []).length
+        : (source.slice(0, off).match(/\n/g) || []).length + 1;
+    const colAt = (off) => {
+        const nl = view.lastIndexOf("\n", off - 1);
+        return off - (constructed ? Math.max(runStart, nl + 1) : nl + 1) + 1;
+    };
+    // One diagnostic per run of consecutive uncovered lines.
+    let k = 0;
+    while (k < segs.length) {
+        let j = k;
+        while (j + 1 < segs.length && view.slice(segs[j].end, segs[j + 1].start).split("\n").length === 2
+                && view.slice(segs[j].end, segs[j + 1].start).trim() === "") j = j + 1;
+        const a = segs[k].start;
+        const b = segs[j].end;
+        const lineText = view.slice(a, segs[k].end).trim();
+        const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+        pushDiagnostic(ctx, makeDiagnostic(
+            "E-INTERNAL-BODY-TOP-DROPPED",
+            "internal compiler error — `" + shown + "` at the top of this `<program>` / `<page>` / "
+            + "`<channel>` body was neither compiled nor reported; the compiler would have dropped it "
+            + "silently (SPEC §40.8 S441 coverage invariant). This is a compiler bug — please report it "
+            + "with this source. If the text is meant to be displayed, declare it: `<p>" + shown + "</p>` or `\""
+            + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"`.",
+            { start: a, end: b, line: lineAt(a), col: colAt(a) },
         ));
         k = j + 1;
     }
@@ -3218,6 +3318,7 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter, de
                 b._bodyTop = true;
                 rejectBodyTopProseNative(b, source, ctx);
                 coverBodyTopNative(b, source, ctx);
+                assertBodyTopCoverageNative(b, source, ctx);
             }
         }
     }

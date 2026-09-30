@@ -1472,13 +1472,20 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
       if (typeof s0 === "number" && s0 >= splitAbs && errors[k].code !== "E-UNQUOTED-DISPLAY-TEXT") errors.splice(k, 1);
     }
     truncateStmtAtTail(body[fi], stmtLostTail(body[fi]), filePath);
-    body.splice(fi + 1);
-    for (const st of body) {
-      if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
+    clipBodyTopCover(body[fi], splitAbs);
+    // The kept prefix is judged like any other statement: `careful, world`
+    // that swallowed the next line is, once cut back to its own line, a comma
+    // sequence — prose — not code to keep (found by the round-4 fuzz). An
+    // invalid prefix falls through to the line-granular rejection below.
+    if (!stmtHasInvalidOwnExpr(body[fi])) {
+      body.splice(fi + 1);
+      for (const st of body) {
+        if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
+      }
+      const tail = srcText.slice(splitRel).trim() !== "" ? (reparseTail(splitRel) || []) : [];
+      for (const st of tail) body.push(st);
+      return 1;
     }
-    const tail = srcText.slice(splitRel).trim() !== "" ? (reparseTail(splitRel) || []) : [];
-    for (const st of tail) body.push(st);
-    return 1;
   }
   if (fi < 0) {
     // A lone identifier IS valid code (`Counter`) and is checked as code; mark
@@ -1508,6 +1515,7 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
     if (typeof s0 === "number" && s0 >= start) errors.splice(k, 1);
   }
   body.splice(cut);
+  for (const st of body) clipBodyTopCover(st, start);
   for (const st of body) {
     if (st && st.kind === "bare-expr" && st.exprNode && st.exprNode.kind === "ident") st._bodyTopBareRun = true;
   }
@@ -1575,6 +1583,146 @@ function coverUnknownBodyTopChars(tokens, text, baseOffset, baseLine, baseCol) {
     return x.span.start - y.span.start;
   });
   return merged;
+}
+
+// ---------------------------------------------------------------------------
+// S441 round 4 — the body-top COVERAGE INVARIANT (SPEC §40.8 S441 bullet).
+//
+// Every non-whitespace byte of a `<program>` / `<page>` / `<channel>` body-top
+// run ends up in exactly one of: (a) a statement that is compiled, or (b) a
+// diagnostic. Nothing is dropped silently. The per-shape fixes above make the
+// parser produce the right statement or diagnostic for the shapes found so
+// far; this CHECK is what makes an unforeseen shape loud instead of silent.
+//
+// "Compiled" is measured, not assumed:
+//   - parseLogicBody attributes every token a top-level iteration consumed to
+//     the node(s) that iteration produced (`_s441Cover`, token spans only — a
+//     byte no token covers was dropped by the tokenizer and is never covered);
+//   - a node whose expression parse LOST text (`_s441Trailing` anywhere in
+//     it — acorn kept a valid prefix) counts as compiled only when an error
+//     diagnostic overlaps it (the loss was reported);
+//   - a comment or a `;` is source formatting, not content;
+//   - an error diagnostic (E-*) covers the source lines it spans.
+// A byte in none of these is `E-INTERNAL-BODY-TOP-DROPPED` — an internal
+// compiler error, fail-closed: the build stops instead of shipping without it.
+// ---------------------------------------------------------------------------
+
+// addBodyTopCover — attach (append) token ranges to a node's coverage record.
+// Non-enumerable: invisible to AST snapshots, parity canaries, and every
+// field-walking consumer.
+function addBodyTopCover(node, ranges) {
+  if (!node || typeof node !== "object" || !Array.isArray(ranges) || ranges.length === 0) return;
+  if (!Array.isArray(node._s441Cover)) {
+    Object.defineProperty(node, "_s441Cover", { value: [], enumerable: false, configurable: true, writable: true });
+  }
+  for (const r of ranges) node._s441Cover.push(r);
+}
+
+// clipBodyTopCover — drop the part of a node's coverage at or after `at`
+// (a statement cut at a swallowed line keeps only its own prefix).
+function clipBodyTopCover(node, at) {
+  if (!node || !Array.isArray(node._s441Cover)) return;
+  node._s441Cover = node._s441Cover.filter((r) => r[0] < at).map((r) => [r[0], Math.min(r[1], at)]);
+}
+
+// nodeLostText — true when one of the statement's own HEAD expressions (the
+// fields body-top text lands in — BODY_TOP_TRAIL_FIELDS) was parsed as a
+// valid PREFIX of its text with the rest dropped (the `_s441Trailing` stamp
+// parseExprToNode sets). Only the heads: a nested statement list (a function
+// body, a `!{}` arm's `handlerExpr`) is parsed and emitted by the ordinary
+// statement machinery — the same as inside an explicit `${ … }` — and some of
+// those fields are advisory ExprNodes over a multi-statement string the
+// emitter reads instead (`@s = "x"; return` → handlerExpr keeps `@s = "x"`,
+// the emitted arm still returns).
+function nodeLostText(node) {
+  if (!node || typeof node !== "object") return false;
+  for (const key of BODY_TOP_TRAIL_FIELDS) {
+    const v = node[key];
+    if (v && typeof v === "object" && v._s441Trailing === true) return true;
+  }
+  return false;
+}
+
+export function assertBodyTopCoverage(body, tokens, text, textOffset, errors, filePath, srcLine, srcCol) {
+  if (typeof text !== "string" || text.length === 0) return 0;
+  const len = text.length;
+  const covered = new Uint8Array(len);
+  const mark = (a, b) => {
+    const s = Math.max(0, a - textOffset);
+    const e = Math.min(len, b - textOffset);
+    for (let k = s; k < e; k++) covered[k] = 1;
+  };
+  const lineStartAbs = (abs) => textOffset + text.lastIndexOf("\n", Math.max(0, abs - textOffset) - 1) + 1;
+  const lineEndAbs = (abs) => {
+    const nl = text.indexOf("\n", Math.max(0, abs - textOffset));
+    return nl === -1 ? textOffset + len : textOffset + nl;
+  };
+  // (b) error diagnostics on this run cover the lines they span.
+  const errRanges = [];
+  for (const e of errors) {
+    if (!e || typeof e.code !== "string" || !e.code.startsWith("E-")) continue;
+    const sp = e.tabSpan ?? e.span;
+    if (!sp || typeof sp.start !== "number") continue;
+    const end = typeof sp.end === "number" && sp.end >= sp.start ? sp.end : sp.start;
+    if (end < textOffset || sp.start > textOffset + len) continue;
+    const a = lineStartAbs(Math.max(sp.start, textOffset));
+    const b = lineEndAbs(Math.min(end, textOffset + len));
+    errRanges.push([a, b]);
+    mark(a, b);
+  }
+  // Comments and `;` are source formatting.
+  for (const t of tokens || []) {
+    if (!t || !t.span || typeof t.span.start !== "number") continue;
+    if (t.kind === "COMMENT") mark(t.span.start - 2, t.span.end);
+    else if (t.kind === "PUNCT" && t.text === ";") mark(t.span.start, t.span.end);
+  }
+  // (a) compiled statements.
+  for (const st of body || []) {
+    const cov = st && Array.isArray(st._s441Cover) ? st._s441Cover : null;
+    if (!cov) continue;
+    if (nodeLostText(st)) {
+      const reported = errRanges.some((er) => cov.some((r) => r[0] < er[1] && er[0] < r[1]));
+      if (!reported) continue;
+    }
+    for (const r of cov) mark(r[0], r[1]);
+  }
+  // Uncovered non-whitespace bytes, grouped per run of consecutive lines.
+  const segs = [];
+  let segA = -1;
+  let segB = -1;
+  for (let k = 0; k <= len; k++) {
+    const ch = k < len ? text[k] : "\n";
+    if (k < len && !covered[k] && !/\s/.test(ch)) {
+      if (segA < 0) segA = k;
+      segB = k + 1;
+      continue;
+    }
+    if (ch === "\n" && segA >= 0) {
+      const prev = segs[segs.length - 1];
+      if (prev && text.slice(prev.b, segA).split("\n").length <= 2 && text.slice(prev.b, segA).trim() === "") prev.b = segB;
+      else segs.push({ a: segA, b: segB });
+      segA = -1;
+      segB = -1;
+    }
+  }
+  for (const s of segs) {
+    const firstLine = text.slice(s.a, s.b).split("\n")[0].trim();
+    const shown = firstLine.length > 80 ? firstLine.slice(0, 77) + "..." : firstLine;
+    const before = text.slice(0, s.a);
+    const nl = before.lastIndexOf("\n");
+    const line = srcLine + (before.match(/\n/g) || []).length;
+    const col = nl === -1 ? (srcCol ?? 1) + s.a : s.a - nl;
+    errors.push(new TABError(
+      "E-INTERNAL-BODY-TOP-DROPPED",
+      `E-INTERNAL-BODY-TOP-DROPPED: internal compiler error — \`${shown}\` at the top of this ` +
+      `\`<program>\` / \`<page>\` / \`<channel>\` body was neither compiled nor reported; ` +
+      `the compiler would have dropped it silently (SPEC §40.8 S441 coverage invariant). ` +
+      `This is a compiler bug — please report it with this source. If the text is meant ` +
+      `to be displayed, declare it: \`<p>${shown}</p>\` or \`"${shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"\`.`,
+      { file: filePath, start: textOffset + s.a, end: textOffset + s.b, line, col },
+    ));
+  }
+  return segs.length;
 }
 
 function liftBareDeclarations(blocks, errors, filePath, parentType = null, _p3aSynthCounter = { next: 0 }, isDefaultLogicBody = false) {
@@ -12382,7 +12530,42 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
     return isMatchArrow(peek(la));
   }
 
+  // S441 round 4 — the body-top COVERAGE record (see assertBodyTopCoverage).
+  // For a `<program>` / `<page>` / `<channel>` body-top run, every top-level
+  // iteration's consumed tokens are attributed to the node(s) that iteration
+  // produced (`_s441Cover`, non-enumerable). Tokens an iteration consumed
+  // WITHOUT producing a node carry no attribution — the coverage check then
+  // sees them as neither compiled nor reported.
+  const _covTrack = !!(parentBlock && parentBlock._bodyTop === true);
+  let _covI0 = -1;
+  let _covN0 = 0;
+  let _covLast;
+  const _covFlush = () => {
+    if (_covI0 < 0) return;
+    const ranges = [];
+    for (let k = _covI0; k < i && k < tokens.length; k++) {
+      const t = tokens[k];
+      if (t && t.span && t.kind !== "EOF" && typeof t.span.start === "number") ranges.push([t.span.start, t.span.end]);
+    }
+    let targets = nodes.slice(_covN0);
+    // A node REPLACED in place (the guarded-expr wrap) inherits the cover of
+    // the node it wraps.
+    if (targets.length === 0 && nodes.length > 0 && nodes[nodes.length - 1] !== _covLast) {
+      const n = nodes[nodes.length - 1];
+      addBodyTopCover(n, (_covLast && _covLast._s441Cover) || []);
+      targets = [n];
+    }
+    for (const n of targets) addBodyTopCover(n, ranges);
+    _covI0 = -1;
+  };
+
   while (true) {
+    if (_covTrack) {
+      _covFlush();
+      _covI0 = i;
+      _covN0 = nodes.length;
+      _covLast = nodes[nodes.length - 1];
+    }
     const tok = peek();
     if (tok.kind === "EOF") break;
 
@@ -15510,6 +15693,7 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       }
     }
   }
+  if (_covTrack) _covFlush();
 
   return nodes;
 }
@@ -20426,12 +20610,20 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
             _synthetic: true,
             _bareDeclLift: true,
             _bodyTop: true,
+            // The outer run's coverage check covers the tail too.
+            _bodyTopTail: true,
           };
           const _tailNode = buildBlock(_tailBlock, filePath, parentContextKind, counter, errors, parentStateName);
           return _tailNode && Array.isArray(_tailNode.body) ? _tailNode.body : [];
         };
         const _rejected = rejectBodyTopProse(body, _rawBody, bodyOffset, errors, _errsBefore, filePath, _reparseTail, bodyLine);
         if (_rejected === 0) for (const w of _tw.warnings) console.warn(w);
+        // S441 round 4 — the coverage invariant: every non-whitespace byte of
+        // this run is in a compiled statement or a diagnostic, or the build
+        // fails with E-INTERNAL-BODY-TOP-DROPPED (see assertBodyTopCoverage).
+        if (block._bodyTopTail !== true) {
+          assertBodyTopCoverage(body, tokens, bodyRaw, bodyOffset, errors, filePath, bodyLine, bodyCol);
+        }
       } else {
         body = parseLogicBody(tokens, filePath, _liveChildren, block, counter, errors, "logic");
       }
