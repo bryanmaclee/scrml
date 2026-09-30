@@ -562,10 +562,17 @@ export function asyncFnArgRole(call: ASTNode, index: number): "allowed" | "own-c
 /**
  * s441 (S440 F4) — the E-ASYNC-FN-ESCAPES-AS-VALUE builder. An async-colored
  * function (the compiler emits it `async`: a server function, a Promise-returning
- * stdlib function, or a helper that calls one) used as a VALUE. Whoever calls it
- * through that value gets an unawaited Promise — always truthy, so a check written
- * against it passes for every input. §13.2 awaits the calls the compiler can SEE;
- * a function value's calls it cannot, so the value may not escape.
+ * stdlib function, or a helper that calls one) used as a VALUE. §13.2 awaits the
+ * calls the compiler can SEE; a function value's calls it cannot, so it cannot
+ * prove the receiver awaits them and the value is refused (FAIL-CLOSED). The
+ * rule does NOT claim the receiver fails to await — it may well await (s444:
+ * an adopter's receiver did, and the old wording, which asserted every caller
+ * "gets an unawaited Promise", sent them hunting a compiler bug). The hazard is
+ * therefore stated as a conditional: IF the receiver does not await, it gets a
+ * Promise, which is always truthy, so a check written against it passes for
+ * every input. Remedies: call it directly, hand it to an awaited collection
+ * method, or invert the flow — pass data in / call it directly and hand back
+ * the result.
  */
 export function asyncFnEscapesAsValueError(
   site: { name: string; root: AsyncRoot; local: boolean; position: string },
@@ -582,12 +589,16 @@ export function asyncFnEscapesAsValueError(
   return new CGError(
     "E-ASYNC-FN-ESCAPES-AS-VALUE",
     `E-ASYNC-FN-ESCAPES-AS-VALUE: \`${nm}\` is an async function — ${why} — and here it is ` +
-      `${site.position}. Whoever calls it through that value gets an unawaited Promise, which is ` +
-      `always truthy: a check written against it passes for every input. scrml inserts \`await\` ` +
-      `only at call sites it can see (§13.2), so an async function may not escape as a value. ` +
-      `Call it directly — \`${nm}(…)\` — so the compiler awaits the call, or hand it to an ` +
-      `awaited collection method (\`.some\`, \`.every\`, \`.find\`, \`.findIndex\`, \`.filter\`, ` +
-      `\`.map\`, \`.forEach\`, \`.reduce\`, \`.flatMap\`), which awaits every call it makes.`,
+      `${site.position}. scrml inserts \`await\` only at call sites it can see (§13.2); it cannot ` +
+      `see the calls made through this value, so it cannot prove that whoever receives it awaits ` +
+      `them — even if the receiver does — and the value is refused (fail-closed). The hazard it ` +
+      `guards: if the receiver does not await a call, it gets a Promise, which is always truthy, ` +
+      `so a check written against it passes for every input. Call it directly — \`${nm}(…)\` — ` +
+      `so the compiler awaits the call, or hand it to an awaited collection method (\`.some\`, ` +
+      `\`.every\`, \`.find\`, \`.findIndex\`, \`.filter\`, \`.map\`, \`.forEach\`, \`.reduce\`, ` +
+      `\`.flatMap\`), which awaits every call it makes. Or invert the flow: pass data instead of ` +
+      `the function — call \`${nm}(…)\` directly where the value is available and hand the ` +
+      `receiver the result.`,
     sp,
     "error",
   );

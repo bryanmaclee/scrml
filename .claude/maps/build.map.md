@@ -1,6 +1,21 @@
 # build.map.md
 # project: scrml
-# updated: 2026-09-30T14:50:34Z  commit: 108ca89be
+# updated: 2026-09-30T15:32:25Z  commit: 5b1d0dab0
+# ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
+# write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
+# example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
+# `session.destroy()`, `<program … loginRedirect="/auth/login">`, driver BOL/POD/token reads guarded by `assignedDriverFor`,
+# `dispatch.db` ships pre-seeded (the `on mount { runSeeds() }` is gone); `stdlib/auth/templates/login.scrml` now calls
+# `session.set("userId", row.id)`; trucking smoke baseline drops `I-AUTH-REDIRECT-UNRESOLVED` / `W-AUTH-LOGIN-MISSING` /
+# `W-CG-CHUNK-PREFETCH-UNRESOLVED`, `W-TYPE-031-UNPROVEN` 321 -> 287). #1181 is the S444 map refresh itself.
+# ⛑ **`compiler/src` UNCHANGED over the window** (`git diff --stat 108ca89be..5b1d0dab0 -- compiler/src` empty) -> every S444
+# figure below stands; `bun scripts/facts.ts --check` PASS at `5b1d0dab0`. Known-gaps HIGH open 214 -> 215.
+# ⛑ **S444b ADDS S443 LOCI the reviews found missing** (grep-derived at `5b1d0dab0`; locate by SYMBOL after later commits):
+# route-inference Step 8 table + `appRoot` / `rootCandidates` / `findRoutePrefix` (matches on the ABSOLUTE path) ->
+# auth.map.md; `detectNestedProgramAuth`, E-PROGRAM-002 -> auth / error maps; `protect-flow.ts`, `emit-worker.ts`, worker
+# bundle writes in `api.js`, the §47.13 static-serve allowlist in `build.js` `generateServerEntry` -> structure / build maps.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444 HEADER (stamp `108ca89be`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
 # refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
 # commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
@@ -435,6 +450,25 @@
 # `conformance/` corpus is gated, and it is gated by a BRIDGE rather than by any workflow naming it.
 # See the CI section and invariant 87 in primary.map.md.
 #
+
+## S444b — BUILT-SERVER STATIC SERVING + WORKER OUTPUT (grep at `5b1d0dab0`)
+
+### §47.13 static-serve allowlist in `compiler/src/commands/build.js` `generateServerEntry` (`:361`)
+- Called at `:1072` with `result.clientAssets` (from `compileScrml`; `api.js:3935` `collectClientAssets(outputDir,
+  clientSeeds)` also writes `.scrml-client-assets.json`).
+- `:576` bakes `const _SCRML_CLIENT_ASSETS = new Set([...sorted])` into `_server.js` (not read from disk at startup);
+  `:578` inlines `STATIC_POLICY_EMIT_SOURCE` (text of `static-serve-policy-emitted.js`: `_scrml_static_request_path`,
+  `_scrml_static_denied`, `_scrml_static_servable`).
+- Dispatch `:604-620`: `_scrml_static_request_path(url.pathname)` (false -> 404); `/` -> `/index.html`; candidates are
+  `join(SERVE_DIR, pathname)` and `` `${pathname}.html` `` ONLY — no `x/index.html` for `/x` (gap
+  `g-prod-static-no-directory-index`, open); each candidate passes `_scrml_static_servable(rel, _SCRML_CLIENT_ASSETS)`
+  BEFORE `statSync`; auth-required documents then go through `_SCRML_PROTECTED_DOCS`.
+- Client-asset seeds (`api.js:3523-3526`): `.html`, `*.css`, `.client[.<hash>].js`, `*.worker.js`; plus runtime `:3440`
+  and chunks `:3849`. `scrml dev` uses the same policy: `commands/dev.js:1082` `readClientAssetManifest`, `:1174`.
+
+### Worker bundle output
+`api.js:3746` writes each nested `<program name=…>` worker as `<page>-<name>.worker.js` beside the page
+(`workerBundleSuffix`, `codegen/emit-worker.ts:47`); never content-hashed (URL baked into the client bundle).
 
 ## S444 — CI + SCRIPTS DELTA (`cf62b415..108ca89be`)
 

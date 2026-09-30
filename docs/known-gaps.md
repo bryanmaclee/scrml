@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 218 | 4 |
-| MED | 422 | 0 |
-| LOW | 192 | 0 |
+| HIGH | 222 | 4 |
+| MED | 426 | 0 |
+| LOW | 196 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -17812,6 +17812,7 @@ and would double-count.
 ### g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count — the FOURTH trigger on `scanForeignSliceShape`, and the one that finally makes the "harden it once" call concrete — `NEW S425-bryan (adopter report from flogence PA S48, arrived UNTRACKED in the inbox mid-session; PA-REPRODUCED by execution on `c59367bb` — their 9-case matrix re-run 8-for-8, then the MECHANISM proven by prediction-and-test rather than by reading); MED; open`
 
 <!-- @gap id=g-foreign-slice-shape-scanner-is-regex-literal-blind-so-an-unbalanced-bracket-in-a-regex-desyncs-its-depth-count sev=MED status=open locus=compiler/src/codegen/emit-logic.ts:scanForeignSliceShape(LOCATE BY SYMBOL — the char scan tracks single/double-quoted strings, template literals, line comments and block comments, and has NO regex-literal state and no `\` escape handling outside a string span, so `\[`/`\]` inside a regex literal increment/decrement `depth`) prov=adopter:flogence-S48-2026-09-20-two-codegen-lowering-failures -->
+> **S443 second trigger, same root** (flogence 2026-09-07, `2026-09-07-to-scrml-regex-literal-with-quote-breaks-codegen-in-foreign-block.md`; triage-agent re-measured on 4953ff135): a `'`, `"` or `` ` `` inside a regex literal (`.replace(/[']s/g, "")`) opens the scanner's string/template state, so the following `return`/statement break is never seen and the slice is wrapped `return (const a = …)` → E-CODEGEN-INVALID-LOGIC. No bracket imbalance involved. Workaround: escaped codepoints (`/[’']s/g`). A regex-literal state closes both triggers; fixtures owe a quote-in-class case placed before a top-level statement break.
 
 **PA-REPRODUCED on `c59367bb`.** The reporter's matrix, re-run independently — 8 of their 9 rows
 (the 9th skipped for shell-escaping reasons only), **every one agreeing**:
@@ -20984,6 +20985,154 @@ Reviewer-executed. **#1145 snippet-drift gate:** no floor on the checked-block c
 <!-- @gap id=g-auth-login-redirect-residuals sev=LOW status=open locus=compiler/src/route-inference.ts+compiler/src/auth-graph.ts prov=review:S443-auth-r2-re-review-F4 -->
 Reviewer-executed: a relative `loginRedirect="signin"` is emitted as-is and resolves against the page's own directory; `/signin?next=1` and `/signin/` redirect correctly but false-fire I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-LOGIN-MISSING. Also: a `<page auth="required">`'s client chunk is served anonymously and carries static lift template text (no data; same under program auth); `<endpoint>` routes in an auth-required scope run anonymously per §61.7 (author-in-arm auth) — §40.2 / §52.13 "every request to this scope" need an §61.7 carve-out sentence.
 
+## §S444 — dpa-045 follow-up filings (2026-09-30; every entry re-executed on `108ca89be` with `bun compiler/bin/scrml.js compile <file> --output-dir <dir>`; change `docs/changes/s444-dpa045-spec-followups/`)
+
+### G-LIFT-SEGMENT-TRIM-DELETES-INTERP-ADJACENT-SPACES — markup built from logic (`lift`, markup-as-value) trims every text segment, so the spaces next to `${…}` vanish: `   lifted   ${it}   li` renders `liftedali`
+<!-- @gap id=g-lift-segment-trim-deletes-interp-adjacent-spaces sev=HIGH status=open locus=searched:compiler/src/codegen/emit-lift.js(the text-child createTextNode emission — the content already arrives trimmed),compiler/src/tokenizer.ts,compiler/src/ast-builder.js(text-child construction) — the deciding site was NOT traced prov=spec:SPEC.md-§4.18.5-"Whitespace is kept exactly"+ruling:user-voice-scrml.md-S442-dpa-045-follow-ups-scope-note+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+  <items> = ["a", "b"]
+  <ul>
+    ${ for (let it of @items) { lift <li>   lifted   ${it}   li   </li> } }
+  </ul>
+</program>
+```
+`bun compiler/bin/scrml.js compile lift.scrml --output-dir out` → exit 0, zero diagnostics. The client JS builds
+`createTextNode("lifted")`, the interpolation node, `createTextNode("li")`. Rendered: **`liftedali`**.
+Expected (§4.18.5, *"No stage SHALL collapse runs, strip leading or trailing whitespace, or drop the whitespace
+adjacent to a `${…}` interpolation"*): `   lifted   a   li   `. Markup-as-value does the same:
+`${ const frag = <p>   value   ${@n}   end   </p>  lift frag }` → `createTextNode("value")`, interp,
+`createTextNode("end")` → renders `value1end`.
+
+**Why HIGH:** silent wrong output on the most common `lift` shape (`Hello ${name}!` → `Helloname!`) — words merge in
+the rendered page, exit 0, no diagnostic. The static-HTML path keeps the same text byte for byte (S442 E(a) rows 1-3),
+so the author cannot see it from the markup they wrote.
+
+**Same class as** [[g-ast-markup-text-interp-adjacent-space-dropped]] (MED, open; its "whitespace-model fork belongs
+to bryan" is now RULED — S442: whitespace is kept exactly) and [[g-lift-markup-adjacent-text-leading-space-dropped]]
+(LOW). This entry records the full measured form (trim + collapse per segment, both `lift` and markup-as-value) against
+the ruled rule. ⚑ Disposition per the S442 ruling: *"fixed in impl#1 only if the S435 policy admits them"*; the
+bootstrap builds the rule.
+— `NEW S444 (dpa-045 E(a) measurement row 12/13, re-executed)`; **HIGH**; open
+
+### G-COMPONENT-BODY-WHITESPACE-COLLAPSED — a component-definition body's text is collapsed and de-indented (`comp   body   ${@n}   tail` renders `comp body … tail`), contradicting §4.18.5 "kept exactly"
+<!-- @gap id=g-component-body-whitespace-collapsed sev=LOW status=open locus=searched:compiler/src/component-expander.ts,compiler/src/ast-builder.js — the component-definition RHS markup is rebuilt from token text; the collapsing site was NOT traced prov=spec:SPEC.md-§4.18.5-"Whitespace is kept exactly"+ruling:user-voice-scrml.md-S442-dpa-045-follow-ups-scope-note+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+  <n> = 1
+  const Box = <div class="box">
+      comp   body   ${@n}   tail
+  </>
+  <Box/>
+</program>
+```
+`bun compiler/bin/scrml.js compile comp.scrml --output-dir out` → exit 0. HTML: `comp body <span data-scrml-logic=…></span> tail`
+(indentation stripped, each run collapsed to one space). Expected (§4.18.5): the body's text byte for byte —
+`\n      comp   body   ` … `   tail\n  `. S442 E(a) rows 8-11 also measured tab → space and, for a single-line body, an
+ADDED trailing space (`<section>WSC-single-line  two  spaces</section>` → `WSC-single-line two spaces </section>`).
+
+**Why LOW:** under the browser's default `white-space: normal` the rendering is identical; the difference shows only
+under `white-space: pre*`, in `textContent` reads, and in the added trailing space. No content is lost.
+⚑ Disposition per the S442 ruling: impl#1 fix only if the S435 policy admits it; the bootstrap builds the rule.
+— `NEW S444 (dpa-045 E(a) measurement rows 8-11, re-executed)`; **LOW**; open
+
+### G-FOREIGN-BLOCK-IN-MARKUP-BODY-RENDERED-AS-TEXT — a `_{ … }` / `_={ … }=` block in a markup element body ships as page text with no diagnostic instead of `E-FOREIGN-004`
+<!-- @gap id=g-foreign-block-in-markup-body-rendered-as-text sev=MED status=open locus=compiler/src/block-splitter.js(matchForeignOpener is consulted only inside brace contexts and orphan-brace bodies — :3019 and :3299; the markup-body text scan never tests for a foreign opener) prov=spec:SPEC.md-§23.2.4+SPEC.md-§4.18.1b+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+<p>before _{ console.log(1) } after</p>
+<div>x _={ let y = 1 }= z</div>
+</>
+```
+`bun compiler/bin/scrml.js compile fa.scrml --output-dir out` → exit 0 (a W-LINT-007 lint only). HTML:
+`<p>before _{ console.log(1) } after</p>` and `<div>x _={ let y = 1 }= z</div>`. Also with the block inside a
+`<program name="svc" lang="ts">`. Expected: `E-FOREIGN-004` — §23.2.4: *"A `_{}` block in any OTHER context — … or a
+markup element body — SHALL be a compile error"*; §4.18.1b: *"in a markup body it is an ERROR, `E-FOREIGN-004`"*.
+`my_{` (an identifier character before `_`) is content and must stay so (§23.2 identifier guard, S444).
+
+**Why MED:** silent acceptance of a SHALL-error. An author who writes foreign code in a markup body gets that source
+shipped verbatim in the client HTML — visible, but also a disclosure path for code the author meant to run on the
+server. ⚑ PA to judge whether that makes it security under the S435 policy. The dpa-045 bootstrap branch
+(`feat/s442-dpa045-bootstrap`, 898f5cd06) implements the error; main's bootstrap does not recognize `_{` at all.
+— `NEW S444 (§4.18.1b "as today" was false; PA-directed)`; **MED**; open
+
+### G-SVG-OR-MATH-COMPOUND-CELL-PUSHES-FOREIGN-TAG-ON-ANCESTOR-STACK — a compound-parent cell named `svg`/`math` is a transparent wrapper but pushes its name as an ancestor, so a self-closed non-void child keeps `/>` and swallows its siblings
+<!-- @gap id=g-svg-or-math-compound-cell-pushes-foreign-tag-on-ancestor-stack sev=LOW status=open locus=compiler/src/codegen/emit-html.ts(the compound-parent wrapper branch — `markupParentStack.push(tag)` with no DOM element emitted; locate by `wrapperKind === "compound-parent"`)+compiler/src/codegen/utils.ts(htmlParserHonorsSelfClose reads that stack) prov=review:S442-dpa-058-D1-review-follow-up(#1160 commit message)+empirical:S444-reproduced-on-108ca89be-with-a-one-variable-control -->
+**Reproduced on `108ca89be`, one-variable control.** ⚑ The brief filed this against the bootstrap; it is impl#1 — the
+D1 fix (#1160) is in `emit-html.ts` / `utils.ts`, and main's bootstrap has no svg/math handling.
+
+```scrml
+<svg>
+    <label> = "x"
+</>
+
+<main>
+  <svg>
+    <div/>
+    <p>after</p>
+  </svg>
+</main>
+```
+`bun compiler/bin/scrml.js compile svgcell.scrml --output-dir out` → exit 0; HTML `<main> <div /> <p>after</p> </main>`
+(the wrapper emits no element). The same file with the cell named `box` emits `<div></div>`. A browser parses
+`<div />` in HTML content as an OPEN `<div>`, so `<p>after</p>` becomes its child. Expected: `<div></div>` — the
+ancestor stack should hold only elements that are emitted.
+
+**Why LOW:** needs a compound cell named after a foreign root, which also shadows an HTML element name; corpus use
+not measured. Silent when it hits.
+— `NEW S444 (D1 review follow-up, pre-existing)`; **LOW**; open
+
+### G-HTML-BREAKOUT-TAG-IN-FOREIGN-CONTENT-KEEPS-SELF-CLOSE — `<svg><div/>…</svg>` emits `<div />`; a browser treats `<div>` in SVG as a breakout tag, leaves foreign content and opens a `<div>` that swallows the siblings
+<!-- @gap id=g-html-breakout-tag-in-foreign-content-keeps-self-close sev=LOW status=open locus=compiler/src/codegen/utils.ts(htmlParserHonorsSelfClose — returns true for any tag under an svg/math ancestor; no breakout-tag list) prov=review:S442-dpa-058-D1-review-follow-up(#1160 commit message)+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.** ⚑ The brief filed this against the bootstrap; it is impl#1 (see the entry above).
+
+```scrml
+<program>
+  <svg viewBox="0 0 10 10">
+    <div/>
+    <p>after</p>
+  </svg>
+</program>
+```
+`bun compiler/bin/scrml.js compile breakout.scrml --output-dir out` → exit 0; HTML `<svg viewBox="0 0 10 10"> <div /> <p>after</p> </svg>`.
+HTML Living Standard, "in foreign content": a start tag named `div`, `p`, `b`, `br`, `ul`, … (the breakout list) pops
+out of foreign content and is reprocessed as HTML, where the trailing `/` is ignored. Expected: `<div></div>` for a
+breakout tag under svg/math.
+
+**Why LOW:** the input is malformed (HTML elements inside `<svg>` break out whatever the emitter writes); the
+difference is only whether the stray `<div>` also swallows its siblings.
+— `NEW S444 (D1 review follow-up, pre-existing, malformed input)`; **LOW**; open
+
+### G-UNTERMINATED-DISPLAY-TEXT-LITERAL-NOT-E-CTX-001 — an unterminated display-text literal does not raise `E-CTX-001`: impl#1 accepts it silently, main's bootstrap reports other codes
+<!-- @gap id=g-unterminated-display-text-literal-not-e-ctx-001 sev=LOW status=open locus=searched:compiler/src/engine-statechild-parser.ts,compiler/src/block-splitter.js(impl#1),compiler/self-host-v2/parse.scrml(the state-child body parser — bootstrap) — the deciding sites were NOT traced prov=spec:SPEC.md-§4.18.3+SPEC.md-§4.18.7-"Recovery (unterminated literal)"+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+type Phase:enum = { Idle, Busy }
+<engine for=Phase initial=.Idle>
+    <Idle>"never closed</>
+    <Busy>"plain"</>
+</>
+</>
+```
+impl#1: `bun compiler/bin/scrml.js compile unterm.scrml --output-dir out` → exit 0, zero diagnostics; renders
+`"never closed` (the opening quote as content). Main's bootstrap (`slice-m2` `frontEnd`, same body under
+`<phase:Phase=.Idle single>`): block-form → `E-UNQUOTED-DISPLAY-TEXT` + `E-PARSE-UNCLOSED` ×3; `:`-shorthand
+`<Idle rule=.Busy : "never closed>` → `E-PARSE-TRAILING`, `E-PARSE-SHORTHAND`, `E-PARSE-UNCLOSED` ×2.
+Expected (§4.18.3): *"A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is
+an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7."*
+
+**Why LOW:** the bootstrap is loud (wrong code); impl#1 is silent but the stray `"` shows on the page.
+Related: [[g-no-unterminated-delimiter-diagnostic-exists-anywhere]].
+— `NEW S444 (PA-directed)`; **LOW**; open
+
 ### g-markup-call-interpolation-emitted-as-module-statement — a markup `${fn(@x.field)}` interpolation is ALSO emitted as a bare module-level statement, evaluated once at load; it throws when `@x` is `not` and kills the page script (handlers never wire)
 <!-- @gap id=g-markup-call-interpolation-emitted-as-module-statement sev=HIGH status=open locus=searched:compiler/src/codegen/emit-client.ts,emit-logic.ts(the top-level statement stream receives the interpolation's call expression) prov=empirical:S443-example-23-dogfood -->
 **PA-REPRODUCED on main (b3419e6d8):** `<program>${ <cur> = not; fn lab(s) { return s } }<div><span>${lab(@cur.status)}</span></div></program>` → the client JS contains a top-level `_scrml_lab_N(_scrml_cs_reactive_get("cur").status);`; in happy-dom: `null is not an object (evaluating '_scrml_cs_reactive_get("cur").status')` and the script stops. A plain `${@cur.status}` is NOT duplicated. Holds with or without an enclosing `if=`, same-line or own-line. This is why examples/23's driver/customer home pages crashed and their Logout buttons were dead. Workaround used in ex23: `${@x is some ? fn(@x.f) : ""}`. Also (same family): attribute expressions like `disabled=(@x.f == "A")` compile to eager effects that run while an enclosing `if=` hides the element.
@@ -21025,3 +21174,28 @@ PA-executed: examples/23 with `pages/dispatch/index.scrml` → `GET /dispatch` 4
 ### g-request-unknown-attribute-accepted-silently — an unknown attribute on `<request>` (`cache="30s"`, `zzbogus="1"`) compiles clean with no diagnostic and no effect
 <!-- @gap id=g-request-unknown-attribute-accepted-silently sev=LOW status=open locus=searched:compiler/src/codegen/emit-reactive-wiring.ts(emitRequestNode reads attrMap by name — id/url/api/deps/method/args — and never rejects the rest),compiler/src/ast-builder.js prov=dd:request-caching-dpa-060-2026-09-30-C5.4 -->
 **Reproduced on `5b1d0dab0`.** `<program>${ <page> = 1  <rows> = []  server function load(p: number) -> number[] { return [p] } }<request id="hunt" cache="30s" zzbogus="1">${ @rows = load(@page) }</><p>${@rows.length}</p></program>` → exit 0 with only the unrelated W-PROGRAM-REDUNDANT-LOGIC warning, and neither attribute appears in the output. **Expected:** §6.7.7's grammar is `request-attrs ::= id-attr (deps-attr)?` (plus the §60 `url=`/`api=`/`method=` riders), so an unknown attribute gets a diagnostic. An adopter who guesses TanStack-style `cache=` gets no cache and no warning. (Unquoted `cache=30s` fails as E-SCOPE-001, per dpa-060. Not re-run.)
+
+### g-bare-brace-in-markup-text-swallows-child-elements-and-interpolations-as-literal-text — a bare `{` in free text turns everything up to its matching `}` (or EOF) into literal page text: child tags, `${…}` and cell declarations ship verbatim at exit 0, contradicting §4.18.1b's closed exit set; at a file root it also suppresses W-PROGRAM-001
+<!-- @gap id=g-bare-brace-in-markup-text-swallows-child-elements-and-interpolations-as-literal-text sev=HIGH status=open locus=compiler/src/block-splitter.js(orphanBraceDepth — the bare-`{` counter meant for `type X:enum = { … }`, applied in markup/file-root free text) prov=adopter:2026-08-22-1542-flint-to-scrml-two-silent-wrong-output-cases.md -->
+**PA-REPRODUCED on 4953ff135:** `<program><count> = 0 <div>note { <p>${@count}</p> }</div></program>` → emitted HTML `<div>note { <p>${@count}</p> }</div>` literally (the `<p>` and the interpolation never compile; only W-PROGRAM-SPA-INFERRED). Triage-agent-executed: a file root `component App { ${ <count> = 0 } <div>Hi ${@count}</div> }` makes splitBlocks return ONE text block — the whole file ships as body text, zero diagnostics (no W-PROGRAM-001); remove the leading `component App {` and it compiles with W-PROGRAM-001. Expected per §4.18.1b: `{` is content; `<`+letter and `${` still exit text. flint: 8/11 react-component-keyword mutations silent.
+
+### g-jsx-style-brace-interpolation-in-markup-text-ships-literal-with-no-lint — `<p>{@count}</p>` renders the literal text `{@count}` at exit 0 with no diagnostic; conformant per §4.18.1b (a bare `{` is content), but it is the most likely mistyping of `${@count}` and nothing flags it
+<!-- @gap id=g-jsx-style-brace-interpolation-in-markup-text-ships-literal-with-no-lint sev=MED status=open locus=searched:compiler/src/lint-w-interp-in-raw-content.js,compiler/src/lint-ghost-patterns.js prov=adopter:2026-08-22-1542-flint-to-scrml-two-silent-wrong-output-cases.md -->
+Triage-agent-executed on 4953ff135: `<p>B: {@count}</p>` ships literally beside a reactive `${@count}`. Expected: a W- lint on a bare `{…}` in free text whose body is an `@`-sigil or a known cell name (flint suggested W-BRACE-LOOKS-LIKE-INTERPOLATION). flint's eval: 0/10 jsx-interpolation mutations caught.
+
+### g-app-root-route-prefix-matched-on-absolute-path — a `/pages/` or `/routes/` directory anywhere in the project's ABSOLUTE path turns every file into a "route file", so no application `<program>` is identified and member pages of a required app are served anonymously
+<!-- @gap id=g-app-root-route-prefix-matched-on-absolute-path sev=HIGH status=open locus=compiler/src/route-inference.ts:findRoutePrefix(filePath.indexOf("/pages/") over the absolute path; feeds rootCandidates for Step 8c) prov=review:S443-post-merge-1173b-F1 -->
+Reviewer-executed over HTTP (prod + `scrml dev`) on b3419e6d8; PA-confirmed by source (`findRoutePrefix` = `filePath.indexOf(prefix)` on the absolute path). Project at `…/fx/pages/f2/` with `app.scrml` `<program auth="required">` + `pages/about.scrml` (no auth=) → `/about` 200 with body (expected 302); same under `…/routes/…`; no diagnostic, and W-AUTH-LOGIN-MISSING fires falsely. Fix: match the route prefix relative to the BUILD ROOT. Fail-open introduced-in-effect by #1173's inheritance (not a regression vs base, where member pages were always open).
+
+### g-required-program-with-no-identified-app-root-is-silent — (#1173 by-spec, fail-open) a required `<program>` exists but no application root is identified (entry file itself under `pages/`; or entry under `pages/` + a public `lib/` program becomes the only root) → member pages served anonymously, no warning
+<!-- @gap id=g-required-program-with-no-identified-app-root-is-silent sev=MED status=open locus=compiler/src/route-inference.ts(rootCandidates / Step 8c) prov=review:S443-post-merge-1173b-F2 -->
+Reviewer-executed. Recommendation: warn (or fail closed) when a required `<program>` is present but no application root is identified. Also from the same review (all reviewer-executed): **F3 LOW** a nested `<page auth="none">` inside an unannotated member page opens the whole route under a required app (collectFileAuthDecls counts nested pages; the nested `<page>` compiles without error); **F4 LOW** W-AUTH-FILE-CONFLICT calls a typo'd value (`auth="Optional"`) a "laxer declaration" (`lax` filter = `value !== "required"`); **F5 LOW** W-AUTH-REDIRECT-LOOP false-fires for `pages/login/index.scrml` + `loginRedirect="/login/"` (actually a dead target: served at `/login/index`, `/login/` 404); **B1** an unannotated `pages/login.scrml` under a required app is now 302-to-itself — login unreachable — with only a warning at exit 0 (reviewer recommends an error; corpus has none); **B2** in an ambiguous multi-program build a bare-markup file is gated because of ANOTHER program, silently.
+
+### g-wrapped-program-auth-silently-dropped — a `<program auth="required">` under a non-program element (`<div>`, `<main>`) has its `auth=` silently dropped: its server fns run for anonymous callers; none of E-PROGRAM-NESTED-AUTH / E-PROGRAM-002 / compute-program-config sees it
+<!-- @gap id=g-wrapped-program-auth-silently-dropped sev=HIGH status=open locus=compiler/src/codegen/index.ts(detectNestedProgramAuth counts only <program>/<page> ancestors; the E-PROGRAM-002 count reads direct top-level nodes)+compiler/src/compute-program-config.ts(reads a top-level <program> only) prov=review:S443-post-merge-1177-F1 -->
+Reviewer-executed on base and merge (both parsers): `<program><p>public</p></program><div><program auth="required">${ server function secret() { return "s3cret" } }<button onclick=secret()>go</button></program></div>` → anonymous POST (self-minted double-submit pair) `/_scrml/__ri_route_secret_1` → **200 "s3cret"**; the emitted server.js has zero auth code; 0 errors. Also with `<main>`, and a single `<div>`-wrapped auth program with no top-level program (only W-PROGRAM-001 on default, nothing under native). Pre-existing, not introduced by #1177 — the sibling of the gap #1177 closed. Fix: treat "top-level" as "no `<program>`/`<page>` ancestor" in both detectors, or make a `<program>` under a non-program ancestor an error.
+> **Also from the #1177 review (introduced, LOW):** the E-PROGRAM-002 message + §34 row + §40.8 bullet say a second program's session attributes are ignored ("routes run with the FIRST program's settings") — for SESSION attributes the LAST program wins (`g-two-programs-one-file-session-attr-last-wins`), i.e. a silent cookie downgrade; and the new §20.5.1 note "only the nested case below remains reachable" is false (a `<div>`-wrapped second program still reaches step-2 last-wins: `scrml_sid` / 2592000 with 0 errors). Pre-existing note: `compile`/`build` exit 1 on E-PROGRAM-002 / E-PROGRAM-NESTED-AUTH but still WRITE all artifacts incl. the fail-open server.js.
+
+### g-example-23-residuals-after-1180 — examples/23 after #1180 (post-merge review, reviewer-executed): pre-existing authz/routing/runtime holes newly reachable now that login works
+<!-- @gap id=g-example-23-residuals-after-1180 sev=MED status=open locus=examples/23-trucking-dispatch/pages/driver/load-detail.scrml(fetchLoadDetail/fetchLogServer/logBreakdownServer/logFuelStopServer — no assignment check)+examples/23-trucking-dispatch(all loads/:id links)+compiler/src/commands/build.js(generateServerEntry WS handler merge) prov=review:S443-post-merge-1180 -->
+**MED** any driver reads and writes ANY load: `fetchLoadDetail` / `fetchLogServer` return another driver's load (customer name, contact, phone, rate, log); `logBreakdownServer` / `logFuelStopServer` write to it (customer B saw another driver's "breakdown"); payload JSON is string-built → injectable (`engine fire","injected":"1` stored an extra field; same for BOL/POD `filename`). **MED** every load-detail link/route (`/{driver,customer,dispatch}/loads/:id`, `/driver/loads/:id/log`, `/dispatch/loads/new`) 404s — the pages serve only at `…/load-detail` and read the id from the last path segment → assign / transition / BOL / rate-confirm / booking unusable in a browser. **MED** the customer load-detail page crashes on load (`tractor_unit` — the markup call-interpolation compiler defect; the #1180 guard sweep missed it). **MED (compiler)** the built `_server.js` wires ONE page's `_scrml_ws_handlers` 12× — every `customer-events` sync delivered 12×, other channels' syncs silently dropped; any authenticated user can broadcast forged cell syncs to all customers. **LOW (introduced by #1180, fixed by the follow-up PR)**: `getCurrentUser(userId)` / `assignedDriverFor` helpers were public routes (user enumeration / assignment oracle). **LOW (introduced)**: `/auth/login?logout=1` is a cross-site forced-logout link (login-page on-load `endSessionServer`); action buttons enabled before the load arrives (`@currentLoad is some && …` → false while `not`). **LOW**: literal `${@channelId}` in `<code>` on driver messages / profiles; first server call after login 403s on CSRF then retries; HOS "-6h"; register accepts a case variant of an existing email; ex09 duplicate check is SELECT-then-INSERT (racy); seeded users share one argon2 salt; `runSeeds` route exposed (writes `:memory:`, 500s); no regression test for the BOL/POD guard.
