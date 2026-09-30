@@ -1,0 +1,10 @@
+{
+  "id": "program-nested-worker-not-e-program-002-neg",
+  "description": "§40.8 / §4.12 (S443) — a `<program>` NESTED inside the file's one top-level `<program>` (a worker) is not a second top-level program: no E-PROGRAM-002.",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.12.4",
+  "rationale": "E-PROGRAM-002 (same-file, S443) counts TOP-LEVEL `<program>` elements only; §4.12 nested programs are legal.",
+  "expect": {
+    "codes": []
+  }
+}
