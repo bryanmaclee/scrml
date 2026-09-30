@@ -405,22 +405,82 @@ async function _scrml_handler_other_2(_scrml_req) {
     expect(leakCols(mod("const t = Date.now(); return { id: u.id, t, n: Math.max(1, 2) };"))).toEqual([]);
   });
 
-  test("r6 L4: a row whose properties are rewritten by a possible descriptor Symbol key ships every column", () => {
+  test("r6b L4: a REMOVAL by an unreadable key from a row-bearing value ships every column — whatever the key's source", () => {
     for (const body of [
-      'delete u[Symbol.for("scrml.protect.origin")]; return u;',
-      'u[Symbol.for("scrml.protect.origin")].revealed.push("passwordhash"); return u;',
+      'delete u[Symbol.for("scrml.protect.col:passwordhash")]; return u;',
       "for (const k of Object.getOwnPropertySymbols(u)) delete u[k]; return u;",
       "const c = { ...u }; for (const k of Object.getOwnPropertySymbols(c)) delete c[k]; return c;",
-      'const c = { ...u, [Symbol.for("scrml.protect.origin")]: { cols: [], revealed: [] } }; return c;',
-      'const f = Object.fromEntries([[Symbol.for("scrml.protect.origin"), { cols: [] }]]); return { ...u, ...f };',
-      'const c = { ...u }; Object.defineProperty(c, Symbol.for("scrml.protect.origin"), { value: { cols: [] } }); return c;',
+      'const c = { ...u }; Object.defineProperty(c, Symbol.for("scrml.protect.col:pin"), { enumerable: false }); return { ...c };',
+      // Round-6b review: aliases walked past the round-6 Symbol-source list.
+      'const S = Symbol; const k = S.for("scrml.protect.col:passwordhash"); const c = { ...u }; delete c[k]; return c;',
+      'const k = globalThis.Symbol.for("scrml.protect.col:passwordhash"); const c = { ...u }; delete c[k]; return c;',
+      "const O = Object; const c = { ...u }; for (const k of O.getOwnPropertySymbols(c)) { delete c[k]; } return c;",
+      'const sf = Symbol.for.bind(Symbol); const c = { ...u }; delete c[sf("scrml.protect.col:pin")]; return c;',
+      'const { for: sf } = Symbol; const c = { ...u }; delete c[sf("scrml.protect.col:pin")]; return c;',
+      // any key at all, and every removal form
+      "const c = { ...u }; delete c[someKey()]; return c;",
+      "const c = { ...u }; Reflect.deleteProperty(c, someKey()); return c;",
+      "const O = Object; const c = { ...u }; O.defineProperty(c, someKey(), { enumerable: false }); return { ...c };",
+      "const c = { ...u }; Object.defineProperties(c, someDescs()); return { ...c };",
+      "const { [someKey()]: _drop, ...rest } = u; return rest;",
+      "const c = { ...u }; const d = c; delete d[someKey()]; return c;",
+      "function strip(o, k) { delete o[k]; } const c = { ...u }; strip(c, someKey()); return c;",
     ]) {
-      expect([body, uniq(leakCols(mod(body)))]).toEqual([body, ["passwordHash"]]);
+      expect([body, uniq(leakCols(mod(body, "function someKey() { return 1; }\nfunction someDescs() { return {}; }")))]).toEqual([body, ["passwordHash"]]);
     }
-    // Ordinary dynamic keys (an index, a column name) are not Symbol keys.
-    // (A dynamic READ off a row is already "any column" — pre-existing — so the
-    // negative uses a static index for the read and dynamic keys only to write.)
-    expect(leakCols(mod('const rows = [u]; const i = 0; rows[i] = { ...rows[0], x: 1 }; const k = "name"; delete rows[0][k]; rows[0][k] = "n"; return rows;'))).toEqual([]);
+    // WRITES cannot under-strip (the runtime floor reads marker PRESENCE), and a
+    // removal by a literal key names a column, not a marker.
+    for (const body of [
+      "const S = Symbol; const c = { ...u, [S.for(\"scrml.protect.col:pin\")]: 0 }; return c;",
+      'const rows = [u]; const i = 0; rows[i] = { ...rows[0], x: 1 }; const k = "name"; rows[0][k] = "n"; return rows;',
+      'const c = { ...u }; delete c["passwordHash"]; delete c.pin; return c;',
+      'const { name, ...rest } = u; return rest;',
+    ]) {
+      expect([body, leakCols(mod(body))]).toEqual([body, []]);
+    }
+  });
+
+  test("r6b MUST 1: a Symbol built from a protected value carries it (description, toString, keyFor, a keyed object)", () => {
+    for (const body of [
+      "return Symbol.for(u.passwordHash).description;",
+      "return Symbol.for(u.passwordHash).toString();",
+      "return Symbol.keyFor(Symbol.for(u.passwordHash));",
+      "const o = { [Symbol.for(u.passwordHash)]: 1 }; return Object.getOwnPropertySymbols(o)[0].description;",
+      "const o = { [Symbol(u.passwordHash)]: 1 }; return Object.getOwnPropertySymbols(o).map((s) => s.description);",
+      "return String(Symbol.for(u.passwordHash));",
+      "return Symbol.for(u.passwordHash).description;",
+    ]) {
+      expect([body, leakCols(mod(body)).length > 0]).toEqual([body, true]);
+    }
+  });
+
+  test("r6b SHOULD 5: a function kept in a global is applied only through its own name — no blame on unrelated code", () => {
+    const js = mod("return Math.abs(u.passwordHash) == 3;") + `
+async function _scrml_handler_setup_2(_scrml_req) {
+  const _scrml_result = await (async () => { globalThis.clamp = (v) => Math.max(v, 0); return 1; })();
+  return new Response(JSON.stringify(_scrml_protect_redact(_scrml_result) ?? null), { status: 200, headers: { "X-T": String(Date.now()) } });
+}`;
+    expect(analyzeProtectFlow(js).leaks).toEqual([]);
+    // …but through its name it is still analysed.
+    expect(leakCols(mod("globalThis.clamp = (v) => v; return globalThis.clamp(u.passwordHash);"))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("clamp2 = (v) => v; return clamp2(u.passwordHash);"))).toEqual(["passwordHash"]);
+    // A function stored where no name is readable reaches every global call.
+    expect(leakCols(mod("const g = globalThis; g.f = (v) => v; return Math.abs(u.passwordHash) + globalThis.f(u.passwordHash);"))).toContain("passwordHash");
+  });
+
+  test("r6b SHOULD 6: many global-stored functions stay fast", () => {
+    let extra = "";
+    let body = "let t = 0; ";
+    for (let i = 0; i < 16; i++) {
+      extra += `function g${i}() { globalThis.fn${i} = (a, b) => Math.max(a, b, globalThis.fn${(i + 1) % 16}(a, b)); return 1; }\n`;
+      body += `t = t + Math.min(u.passwordHash + ${i}, t); `;
+    }
+    body += "return t == 3;";
+    const t0 = performance.now();
+    const r = analyzeProtectFlow(mod(body, extra));
+    const ms = performance.now() - t0;
+    expect(r.saturated).toBe(false);
+    expect(ms).toBeLessThan(5000); // base 0.4 s; round 6 took ~20 s at N=16 deep
   });
 
   test("r6 RULING S443 #7: only keyed / password-class hashes derive; a bare digest stays protected", () => {
@@ -433,6 +493,27 @@ async function _scrml_handler_other_2(_scrml_req) {
     expect(leakCols(mod('return await hmac(SERVER_KEY, u.passwordHash);', C))).toEqual([]);
     expect(leakCols(mod('return await hmac(u.passwordHash, "known message");', C))).toEqual(["passwordHash"]);
     expect(leakCols(mod('return verifyHash("sha256", pw, u.passwordHash);', C))).toEqual([]);
+  });
+
+  test("r6b RULING S445 #4: an HMAC keyed by a compile-time CONSTANT is a digest; a runtime key declassifies", () => {
+    const C = 'import { hmac } from "./_scrml/crypto.js";';
+    for (const body of [
+      'return await hmac("public-key", String(u.passwordHash));',
+      'const K = "public-key"; return await hmac(K, String(u.passwordHash));',
+      'const K = `pub-${"key"}`; return await hmac(K, String(u.passwordHash));',
+      'const K = "pub" + "-key"; return await hmac(K, String(u.passwordHash));',
+      'function sign(k, m) { return hmac(k, m); } return await sign("public-key", String(u.passwordHash));',
+      'return await hmac(process.env.K ?? "dev-key", String(u.passwordHash));', // may be the constant
+    ]) {
+      expect([body, leakCols(mod(body, C))]).toEqual([body, ["passwordHash"]]);
+    }
+    for (const body of [
+      "return await hmac(process.env.HMAC_KEY, String(u.passwordHash));",
+      'return await hmac(process.env.HMAC_KEY + "-v2", String(u.passwordHash));',
+      'const s = ?{`SELECT k FROM secrets`}; return await hmac(s[0].k, String(u.passwordHash));'.replace("?{`SELECT k FROM secrets`}", "_scrml_sql`SELECT k FROM secrets`"),
+    ]) {
+      expect([body, leakCols(mod(body, C))]).toEqual([body, []]);
+    }
   });
 });
 

@@ -303,32 +303,54 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
     expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
   });
 
-  // S443 round 6 (L4) — MEASURED before the fix: the descriptor was a plain
-  // mutable object in a plain property, so `u[Symbol.for("scrml.protect.origin")]
-  // .revealed.push("passwordhash")` or `delete u[…]` shipped the hash without
-  // `reveal`. The descriptor + `revealed` are frozen and, on the tagged row, the
-  // property can be neither deleted nor overwritten (strict mode throws).
-  test("S443 r6 L4: the descriptor cannot be mutated, deleted or replaced on the tagged row", () => {
+  // S443 round 6 (L4) + 6b — the floor is one MARKER per protected column. On
+  // the tagged row a marker can be neither deleted nor redefined (strict mode
+  // throws); overwriting its value changes nothing (the sink reads presence).
+  test("S443 r6/6b L4: the markers on the tagged row cannot be removed", () => {
     const { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal } = loadHelper();
-    const K = Symbol.for("scrml.protect.origin");
+    const K = Symbol.for("scrml.protect.col:passwordhash");
     const row = _scrml_protect_tag({ id: 1, passwordHash: "s3cret" }, ["passwordHash"]);
-    expect(() => row[K].revealed.push("passwordhash")).toThrow();
-    expect(() => { row[K].cols.length = 0; }).toThrow();
     expect(() => { delete row[K]; }).toThrow();
-    expect(() => { row[K] = { cols: [], revealed: [] }; }).toThrow();
+    expect(() => Object.defineProperty(row, K, { enumerable: false })).toThrow();
+    row[K] = false; // allowed, and meaningless
     expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
-    // A spread copy still carries the (frozen) descriptor and still strips.
     const copy = { ...row };
-    expect(() => copy[K].revealed.push("passwordhash")).toThrow();
     expect(_scrml_protect_redact(copy)).toEqual({ id: 1 });
-    // reveal still admits the named column, on a NEW (equally locked) row.
+    // A copy whose marker is HIDDEN (non-enumerable) still strips — presence counts.
+    Object.defineProperty(copy, K, { enumerable: false });
+    expect(_scrml_protect_redact(copy)).toEqual({ id: 1 });
+    // reveal admits the named column on a NEW row; the original still strips.
     const r = _scrml_protect_reveal(row, "passwordHash");
     expect(_scrml_protect_redact(r)).toEqual({ id: 1, passwordHash: "s3cret" });
-    expect(() => r[K].revealed.push("x")).toThrow();
     expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
-    // Re-tagging the same object is a no-op when it already strips as much.
+    // Re-tagging the same object is harmless and only ever adds.
     expect(() => _scrml_protect_tag(row, ["passwordHash"])).not.toThrow();
-    expect(() => _scrml_protect_tag(row, ["pin"])).toThrow();
+    _scrml_protect_tag(row, ["id"]);
+    expect(_scrml_protect_redact(row)).toEqual({});
+  });
+
+  // S443 round 6b (MUST 3 / MUST 4) — MEASURED on round 6: `{...a, ...b}` and
+  // `Object.assign({}, a, b)` with a = SELECT *, b = SELECT id, pin let b's
+  // descriptor REPLACE a's (passwordHash shipped); `{...a, ...b.reveal("pin")}`
+  // shipped hash + pin; and `Object.assign(a, b)` on two tagged rows threw
+  // (a 500). Markers union on merge, a reveal on one source never un-strips
+  // another's column, and row-onto-row assignment works.
+  test("S443 r6b: merging tagged rows UNIONS their protected columns; row-onto-row assign works", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal } = loadHelper();
+    const A = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
+    const B = () => _scrml_protect_tag({ id: 1, pin: 4321 }, ["pin"]);
+    expect(_scrml_protect_redact({ ...A(), ...B() })).toEqual({ id: 1, name: "ada" });
+    expect(_scrml_protect_redact(Object.assign({}, A(), B()))).toEqual({ id: 1, name: "ada" });
+    expect(_scrml_protect_redact({ ...A(), ..._scrml_protect_reveal(B(), "pin") })).toEqual({ id: 1, name: "ada" });
+    const a = A();
+    expect(_scrml_protect_redact({ ...a, ..._scrml_protect_reveal(a, "pin") })).toEqual({ id: 1, name: "ada" });
+    // Refresh in place: no throw, still stripped.
+    const t = A();
+    expect(() => Object.assign(t, A())).not.toThrow();
+    expect(() => Object.assign(t, B())).not.toThrow();
+    expect(_scrml_protect_redact(t)).toEqual({ id: 1, name: "ada" });
+    // A plain object merged over a row keeps the row's markers.
+    expect(_scrml_protect_redact({ ...A(), extra: 1 })).toEqual({ id: 1, name: "ada", extra: 1 });
   });
 
   test("strip-all ('*') drops every column (unresolvable dynamic SQL)", () => {
@@ -763,7 +785,7 @@ describe("§14.8.9 every client-egress sink redacts (enumerated over serializers
     const { serverJs } = compileSource(MH_PROGRAM);
     // Lift the shipped helper + the shipped handler and drive them, so this is a
     // wire fact rather than a text assertion.
-    const hStart = serverJs.indexOf("const _SCRML_PROTECT = Symbol.for");
+    const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
     const hEnd = serverJs.indexOf("function _scrml_protect_redact");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
@@ -858,7 +880,7 @@ return { _scrml_mountHydrate_handler };`)();
     expect(serverJs).toContain("E-CONTRACT-001-RT");
     expect(serverJs).toContain("_scrml_protect_mediated(new Response(");
     // Drive the emitted param check + guard over a violating value.
-    const hStart = serverJs.indexOf("const _SCRML_PROTECT = Symbol.for");
+    const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
     const hEnd = serverJs.indexOf("function _scrml_protect_redact");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const { probe } = new Function(`${helper}
@@ -1044,7 +1066,7 @@ type Op:enum = {
     expect(serverJs).toContain("_scrml_mh_cell instanceof Response");
 
     // Drive the SHIPPED handler with a loader that returns a Response.
-    const hStart = serverJs.indexOf("const _SCRML_PROTECT = Symbol.for");
+    const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
     const hEnd = serverJs.indexOf("function _scrml_protect_redact");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
@@ -1081,7 +1103,7 @@ return { h: _scrml_mountHydrate_handler };`)();
 </main>
 </program>`;
     const { serverJs } = compileSource(src);
-    const hStart = serverJs.indexOf("const _SCRML_PROTECT = Symbol.for");
+    const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
     const hEnd = serverJs.indexOf("function _scrml_protect_redact");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");

@@ -55,12 +55,12 @@ function prodErrorHandler() {
   return new Function(`return {${m[0]}};`)().error;
 }
 
-async function serve(auth, errorHandler) {
+async function serve(auth, errorHandler, src = SRC(auth)) {
   const dir = mkdtempSync(join(tmpdir(), "scrml-protect-error-"));
   const outDir = join(dir, "dist");
   mkdirSync(outDir, { recursive: true });
   const file = join(dir, "app.scrml");
-  writeFileSync(file, SRC(auth));
+  writeFileSync(file, src);
   const dbPath = join(dir, "app.db");
   const db = new Database(dbPath, { create: true });
   db.run("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)");
@@ -139,5 +139,52 @@ describe("§14.8.9 P3 — an error never carries a protected value to the client
     const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
     const serverJs = [...result.outputs.values()][0]?.serverJs ?? "";
     expect(serverJs).toContain("message: String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)");
+  });
+});
+
+// S443 round 6b (MUST 4) — round 6 made the descriptor non-writable, and
+// `Object.assign(a, b)` on two tagged rows (a refresh in place) answered HTTP 500
+// where base answered 200 stripped (review, measured). Over real HTTP: it works
+// and still strips; merging rows unions their protected columns.
+describe("§14.8.9 round 6b — row-onto-row assignment and merges over HTTP", () => {
+  const MERGE_SRC = `<program auth="none" db="./app.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+    passwordHash: text
+  }
+</schema>
+<db src="./app.db" tables="users" protect="passwordHash"/>
+function getIt() {
+    const a = ?{\`SELECT * FROM users WHERE id = 1\`}.get()
+    const b = ?{\`SELECT * FROM users WHERE id = 1\`}.get()
+    Object.assign(a, b)
+    return a
+}
+function getCps() {
+    const a = ?{\`SELECT * FROM users WHERE id = 1\`}.get()
+    const b = ?{\`SELECT id, name FROM users WHERE id = 1\`}.get()
+    return { ...a, ...b }
+}
+<resultCell> = ""
+<button onclick=\${ @resultCell = getIt() }>x</button>
+<button onclick=\${ @resultCell = getCps() }>y</button>
+<p>\${@resultCell}</p>
+</program>
+`;
+  test("Object.assign(rowA, rowB) answers 200 stripped; {...a, ...b} keeps a's strip", async () => {
+    const s = await serve(' auth="none"', prodErrorHandler(), MERGE_SRC);
+    try {
+      const r1 = await s.post("getIt");
+      expect(r1.status).toBe(200);
+      expect(JSON.parse(r1.body)).toEqual({ id: 1, name: "ada" });
+      const r2 = await s.post("getCps");
+      expect(r2.status).toBe(200);
+      expect(r2.body).not.toContain(SECRET);
+      expect(JSON.parse(r2.body)).toEqual({ id: 1, name: "ada" });
+    } finally {
+      s.stop();
+    }
   });
 });

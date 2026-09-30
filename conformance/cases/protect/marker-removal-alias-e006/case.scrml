@@ -1,0 +1,18 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT, pin INTEGER)`}
+  </schema>
+  <db src="app.db" protect="passwordHash, pin" tables="users">
+    ${
+      function getUser(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        const S = Symbol
+        let c = { ...u }
+        delete c[S.for("scrml.protect.col:passwordhash")]
+        return c
+      }
+    }
+  </db>
+  <user> = not
+  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+</program>
