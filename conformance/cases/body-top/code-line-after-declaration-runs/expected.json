@@ -1,0 +1,23 @@
+{
+  "id": "body-top-code-line-after-declaration-runs",
+  "description": "A code line after a declaration is parsed as its own statement and runs.",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/tests/unit/s441-review-r4.test.js",
+  "rationale": "§40.8 S441 bullet: a body-top code line is a statement; it is never dropped.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "state": {
+      "count": 7
+    },
+    "domAnchored": [
+      {
+        "selector": "#z",
+        "text": "7"
+      }
+    ]
+  }
+}

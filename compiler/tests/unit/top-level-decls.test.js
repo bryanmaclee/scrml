@@ -248,24 +248,37 @@ describe("plain text is not lifted to logic blocks", () => {
     expect(logicChildren).toHaveLength(0);
   });
 
-  test("'hello world' text content is not lifted", () => {
-    // A text block that doesn't start with a declaration keyword stays as text
+  // S441 (SPEC §40.8 S441 bullet) — a `<program>` body carries no loose prose:
+  // a bare run there is CODE (it is lifted and checked), and displayed text is
+  // declared by a markup element or a `"..."` literal. Pre-S441 these two tests
+  // pinned "non-declaration text stays text"; they now pin the S441 contract.
+  test("S441 — bare 'hello world' in a <program> body is code, and not valid code: E-UNQUOTED-DISPLAY-TEXT", () => {
     const bsResult = splitBlocks("test.scrml", "<program>hello world</program>");
-    const { ast } = buildAST(bsResult);
+    const { ast, errors } = buildAST(bsResult);
     const programNode = ast.nodes.find(n => n.kind === "markup" && n.tag === "program");
-    const textChildren = (programNode?.children || []).filter(n => n.kind === "text");
-    expect(textChildren.length).toBeGreaterThanOrEqual(1);
+    const textChildren = (programNode?.children || []).filter(n => n.kind === "text" && n.value.trim() !== "");
+    expect(textChildren).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-UNQUOTED-DISPLAY-TEXT")).toHaveLength(1);
   });
 
-  test("'typewriter' text (starting with 'type' but not as keyword) — keyword must be followed by word char", () => {
-    // "typewriter" should NOT be lifted — BARE_DECL_RE requires \w after the keyword
-    // The regex is: /^\s*(... |type\s+\w| ...)/ so "type" alone or "typewriter" won't match
-    const source = "<program>typewriter</program>";
-    const bsResult = splitBlocks("test.scrml", source);
-    const { ast } = buildAST(bsResult);
+  test("S441/S445 — 'typewriter' (a lone identifier) in a <program> body is code, not text — and has no effect: E-STMT-NO-EFFECT", () => {
+    // `typewriter` is valid code (an identifier), so it is NOT E-UNQUOTED.
+    // Ruling S445 item 2: an expression statement with no effect is an error
+    // (was: checked downstream, E-SCOPE-001 when undeclared).
+    const bsResult = splitBlocks("test.scrml", "<program>typewriter</program>");
+    const { errors } = buildAST(bsResult);
+    expect(errors.filter(e => e.code === "E-UNQUOTED-DISPLAY-TEXT")).toHaveLength(0);
+    expect(errors.filter(e => e.code === "E-STMT-NO-EFFECT")).toHaveLength(1);
+  });
+
+  test("S441 — text inside a markup element in a <program> body stays free text", () => {
+    const bsResult = splitBlocks("test.scrml", "<program><p>hello world</p></program>");
+    const { ast, errors } = buildAST(bsResult);
     const programNode = ast.nodes.find(n => n.kind === "markup" && n.tag === "program");
-    const logicChildren = (programNode?.children || []).filter(n => n.kind === "logic");
-    expect(logicChildren).toHaveLength(0);
+    const p = (programNode?.children || []).find(n => n.kind === "markup" && n.tag === "p");
+    expect(p.children[0].kind).toBe("text");
+    expect(p.children[0].value).toBe("hello world");
+    expect(errors).toHaveLength(0);
   });
 });
 

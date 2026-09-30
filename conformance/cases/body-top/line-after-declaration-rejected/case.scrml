@@ -1,0 +1,5 @@
+<program>
+<count> = 0
+© 2026 Acme Inc
+<p id="z">end ${@count}</p>
+</program>

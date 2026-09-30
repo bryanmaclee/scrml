@@ -1,0 +1,5 @@
+<program>
+<count> = 3
+console.log(@count)
+<p id="p">done</p>
+</program>

@@ -104,6 +104,10 @@ import {
 import { lex } from "./lex.js";
 import { makeParseExprContext, parseExpression } from "./parse-expr.js";
 import { parseProgram } from "./parse-stmt.js";
+// S441 — the body-top display-text segmenter shared with the live front end.
+import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose, uncoveredSegments } from "./body-top-prose.js";
+import { typeDeclExtent, declExtent, functionHeadGap, liveStmtNothingReason, liveLabelIsTargeted, liveTreeDropsText } from "./body-top-coverage.js";
+import { translateStmtList } from "./translate-stmt.js";
 import { atEnd } from "./token-cursor.js";
 // MK4 — the markup<->JS seam (R1 spike §3). The seam helpers centralize the
 // markup->JS delegate-down direction (the .InLogicEscape body's JS parse) +
@@ -875,6 +879,60 @@ export function dispatchTopLevel(run, cursor, ctx) {
     const orphanActive = !isCodeDefault(currentBodyMode(ctx));
     if (orphanActive && handleOrphanBrace(run, cursor, ctx)) return;
     const inOrphan = orphanActive && markupOrphanBraceDepth(ctx) > 0;
+
+    // S441 (SPEC §40.8 S441 bullet, §4.18.3) — a `<program>` / `<page>` /
+    // `<channel>` body is code-default, so a `"` that starts a statement there
+    // opens a display-text literal whose content is TEXT: a `<`, `//` or
+    // `<!--` inside it is not a tag or a comment. Mirrors the live
+    // block-splitter's `bodyTopLiteralEnd` (both use the shared predicates in
+    // body-top-prose.js). A `${…}` inside still opens a logic escape (§4.18.4)
+    // — that context's own dispatcher runs until its `}`, then the scan
+    // resumes here, still inside the literal.
+    if (orphanActive && inOrphan === false) {
+        const litEnd = typeof ctx.bodyTopLiteralEnd === "number" ? ctx.bodyTopLiteralEnd : 0;
+        // S441 review #8 — a CODE template literal at a body-top is one text
+        // run, `${…}` included (mirrors the live block-splitter).
+        const tplEnd = typeof ctx.bodyTopTemplateEnd === "number" ? ctx.bodyTopTemplateEnd : 0;
+        if (tplEnd > cursor.pos) {
+            beginTextRun(run, cursor);
+            advance(cursor, 1);
+            return;
+        }
+        if (litEnd <= cursor.pos && peekChar(cursor, 0) === "`") {
+            const tf0 = topTagFrame(ctx);
+            if (tf0 !== null && tf0 !== undefined
+                    && isProgramFamilyRoot(typeof tf0.name === "string" ? tf0.name : "")) {
+                const tclose = scanBodyTopTemplateClose(cursor.source, cursor.pos);
+                if (tclose > cursor.pos) {
+                    ctx.bodyTopTemplateEnd = tclose + 1;
+                    beginTextRun(run, cursor);
+                    advance(cursor, 1);
+                    return;
+                }
+            }
+        }
+        if (litEnd > cursor.pos) {
+            if (!(peekChar(cursor, 0) === "$" && peekChar(cursor, 1) === openBrace())) {
+                beginTextRun(run, cursor);
+                advance(cursor, 1);
+                return;
+            }
+        } else if (peekChar(cursor, 0) === doubleQuote()) {
+            const tf = topTagFrame(ctx);
+            const inProgramFamily = tf !== null && tf !== undefined
+                && isProgramFamilyRoot(typeof tf.name === "string" ? tf.name : "");
+            const bound = (run.at !== null && run.at !== undefined) ? run.at.start : cursor.pos;
+            if (inProgramFamily && bodyTopQuoteStartsStatement(cursor.source, cursor.pos, bound)) {
+                const close = scanBodyTopLiteralClose(cursor.source, cursor.pos);
+                if (close > cursor.pos) {
+                    ctx.bodyTopLiteralEnd = close + 1;
+                    beginTextRun(run, cursor);
+                    advance(cursor, 1);
+                    return;
+                }
+            }
+        }
+    }
 
     // Structural comment recognition FIRST — a `//` / `<!-- -->` sequence
     // is a comment in `.TopLevel` (a code-default body per §40.8 / a
@@ -2622,6 +2680,707 @@ function spliceAttrsIntoBodyRootNative(bodyRootRaw, outerAttrSource) {
     return before + sep + outerAttrSource + after;
 }
 
+// S441 — `subSpanNative`: the span of `raw.slice(start, end)` inside a block
+// whose span starts at `span`.
+function subSpanNative(span, raw, start, end) {
+    if (span === undefined || span === null) return span;
+    const before = raw.slice(0, start);
+    const nl = before.lastIndexOf("\n");
+    const newlines = (before.match(/\n/g) || []).length;
+    return {
+        ...span,
+        start: span.start + start,
+        end: span.start + end,
+        line: (span.line ?? 1) + newlines,
+        col: nl === -1 ? (span.col ?? 1) + start : start - nl,
+    };
+}
+
+// S441 — `splitBodyTopDisplayLiteralsNative`: the native half of the body-top
+// display-text split (the live half is ast-builder.js
+// `splitBodyTopDisplayLiterals`; both call `segmentBodyTopItems`). A code piece
+// becomes a Text block marked `_bodyTopSegmented`; a literal piece a Text block
+// marked `_displayLiteral` carrying `valueOverride` (the decoded, HTML-escaped
+// content — native Text blocks otherwise read their value from the source
+// span); a `${...}` inside a literal a LogicEscape marked `_displayInterp`.
+function splitBodyTopDisplayLiteralsNative(blocks, source, ctx) {
+    const items = blocks.map((b) => {
+        if (b === null || b === undefined) return { type: "break" };
+        if (b.kind === "Text") return { type: "text", raw: sliceBlockRaw(source, b.span) };
+        if (b.kind === "LogicEscape" && b._synthetic !== true) return { type: "interp" };
+        if (b.kind === "Comment") return { type: "neutral", raw: sliceBlockRaw(source, b.span) };
+        return { type: "break" };
+    });
+    const seg = segmentBodyTopItems(items);
+    for (const u of seg.unterminated) {
+        const b = blocks[u.itemIndex];
+        const raw = items[u.itemIndex].raw || "";
+        pushDiagnostic(ctx, makeDiagnostic(
+            "E-CTX-001",
+            "unterminated display-text literal — the `\"` that opens it has no " +
+            "closing `\"` before the next element or the end of the body " +
+            "(SPEC §4.18.3). Close the literal with `\"`.",
+            subSpanNative(b.span, raw, u.offset, raw.length),
+        ));
+    }
+    const out = [];
+    for (let i = 0; i < blocks.length; i++) {
+        const b = blocks[i];
+        const segs = seg.segments[i];
+        if (b !== null && b !== undefined && b.kind === "LogicEscape" && seg.interpInLiteral[i]) {
+            out.push({ ...b, _displayInterp: true });
+            continue;
+        }
+        if (segs === null || segs === undefined || b === null || b === undefined
+                || (b.kind !== "Text" && b.kind !== "Comment")) {
+            out.push(b);
+            continue;
+        }
+        const raw = items[i].raw || "";
+        for (const sg of segs) {
+            const span = subSpanNative(b.span, raw, sg.start, sg.end);
+            if (sg.kind === "literal") {
+                out.push({ ...b, kind: "Text", span, _displayLiteral: true, valueOverride: sg.value });
+            } else {
+                // The marker only steers the re-lift of an already-split
+                // piece; it is NON-enumerable so it never leaks into a raw
+                // block that downstream keeps (channelDecls carries raw
+                // native blocks — the within-node parity canary compares them).
+                const piece = { ...b, kind: "Text", span };
+                Object.defineProperty(piece, "_bodyTopSegmented", { value: true, enumerable: false });
+                out.push(piece);
+            }
+        }
+    }
+    return out;
+}
+
+// S441 — `rejectBodyTopProseNative`: the native half of the strict body-top
+// check (the live half is ast-builder.js `rejectBodyTopProse`). The native
+// statement parser is STRICT: a run it cannot parse as a statement sequence
+// yields parse diagnostics (`E-STMT-*` / `E-EXPR-*`) — `Welcome to the
+// dashboard.` is four juxtaposed expression statements with three
+// `E-STMT-MISSING-SEMICOLON`s. A top-level statement holding such a
+// diagnostic (and, for a missing `;`, the statement it is juxtaposed with on
+// the same line) is not valid code; each maximal run of them is ONE
+// `E-UNQUOTED-DISPLAY-TEXT`, the statements are dropped, and their own parse
+// diagnostics are withdrawn from `ctx.diagnostics`. In a block one of the
+// pre-S441 lifts claimed (a declaration head) only a run of bare expression
+// statements counts (see the inline note); a catch-all block is judged whole.
+// A group that opens with the
+// `when` keyword is left alone: the native statement parser does not yet
+// implement `when … changes` (a pre-existing native gap that fails inside an
+// explicit `${ … }` too), and calling that prose would misreport it.
+const BODY_TOP_PARSE_DIAG_RE = /^E-(STMT|EXPR)-/;
+// A group whose text opens with a keyword that only CODE starts with (a
+// declaration / directive head, or a `<name`, `?{` sigil) is never prose; a
+// native parse failure there is a native statement-parser gap (`when … changes`,
+// `use foreign:`, some `fn` / `type` forms fail inside an explicit `${ … }`
+// too), so the native diagnostics are left as they are rather than misreported
+// as E-UNQUOTED-DISPLAY-TEXT. Prose-capable openers (`if`, `for`, `while`,
+// `return`) are deliberately NOT in the list.
+const BODY_TOP_CODE_HEAD_RE = /^\s*(?:(?:export|server|async)\s+)*(?:type|fn|function|import|use|const|let|when|on|match|lift|class)\b|^\s*(?:<[A-Za-z_]|[?^#!_]=*\{)/;
+
+// S441 round 5b — what a native body-top statement COMPILES (SPEC §40.8
+// coverage invariant; ruling S443 item 4), MEASURED on what the bridge hands
+// to codegen: the statement is translated (translateStmtList — the same
+// bridge parse-file.js runs) and the LIVE-shape result is judged by the same
+// function the live front end uses (body-top-coverage.js
+// liveStmtCompilesNothing). No per-kind list on this side:
+//   - nothing: the translation is a statement that compiles nothing (an
+//     inert bare expression `404`, an import with no source, an export the
+//     export grammar does not recognise — `export default …`, a bare
+//     `type Name`); or the source label did not survive translation (`Total: 42`: the live AST has
+//     a label only on a loop); or a function with no `{ … }` body (the shared
+//     function grammar; the native parser reports `fn heading` at the NEXT
+//     token's line);
+//   - dropped (coverage only): an empty escape-hatch ANYWHERE in the
+//     translation (`go((step(), 7))`, a tagged template — the bridge could
+//     not translate it), or a statement the bridge translates to nothing at
+//     all. That is a compiler gap, so it fails closed as
+//     E-INTERNAL-BODY-TOP-DROPPED rather than being called prose. (A comma
+//     sequence standing as the statement, `(step(), 1)`, is judged earlier as
+//     not-scrml — §4.18.2 has no comma operator — like the live front end.)
+function nativeTranslate(st) {
+    try {
+        return translateStmtList([st], { next: 0 });
+    } catch {
+        return null;
+    }
+}
+function labelSurvives(st, live) {
+    if (st === null || st === undefined || st.kind !== "Labeled") return true;
+    const seen = (n, d) => {
+        if (n === null || typeof n !== "object" || d > 60) return false;
+        if (Array.isArray(n)) return n.some((x) => seen(x, d + 1));
+        if (n.label === st.label) return true;
+        return false;
+    };
+    return seen(live, 0);
+}
+function nativeFunctionHasNoBody(st, source, nextStart) {
+    if (st.kind !== "FunctionDecl" || typeof source !== "string" || !st.span || typeof st.span.start !== "number") return false;
+    // The head's own tokens, cut at the next statement (its span can run into
+    // it) and at the end of its line when no body follows there.
+    const le = source.indexOf("\n", st.span.start);
+    const lineEnd = le === -1 ? source.length : le;
+    const end = typeof nextStart === "number" && nextStart > st.span.start ? Math.max(Math.min(nextStart, st.span.end), lineEnd) : Math.max(st.span.end, lineEnd);
+    let toks = [];
+    try { toks = lex(source.slice(st.span.start, end)); } catch { return false; }
+    const texts = toks.filter((t) => t && t.kind !== "EOF").map((t) => String(t.text ?? ""));
+    return declExtent("function", texts).nothing === true;
+}
+// S441 round 5d — the native front end's analyzer for escape-hatch TEXT in the
+// ruling-S445-#2 effect check (the live front end's twin is ast-builder.js
+// escapeRawHasEffect): the text is parsed with the native expression grammar
+// and searched for an effect — a call, `new`, a tagged template, an
+// assignment, `++` / `--`, `delete`, `yield`, a `?{}` block. A lambda's body is
+// not searched. Text that does not parse whole is answered "effect".
+const NATIVE_EFFECT_EXPR_KINDS = new Set(["Call", "New", "TaggedTemplate", "Assignment", "Update", "Yield", "Sql"]);
+function nativeRawHasEffect(raw) {
+    let ctx;
+    let expr;
+    try {
+        ctx = makeParseExprContext(lex(String(raw)), String(raw));
+        expr = parseExpression(ctx);
+    } catch {
+        return true;
+    }
+    if (!expr || (Array.isArray(ctx.errors) && ctx.errors.length > 0) || atEnd(ctx.cursor) === false) return true;
+    // A NAMED function standing as the statement is a declaration (it binds
+    // its name), not a discarded value.
+    if (expr.kind === "Function" && typeof expr.name === "string" && expr.name !== "") return true;
+    const walk = (n, d) => {
+        if (n === null || typeof n !== "object" || d > 300) return false;
+        if (Array.isArray(n)) return n.some((x) => walk(x, d + 1));
+        if (typeof n.kind === "string") {
+            if (NATIVE_EFFECT_EXPR_KINDS.has(n.kind)) return true;
+            if (n.kind === "Unary" && n.op === "delete") return true;
+            if (n.kind === "Arrow" || n.kind === "Function") return false;
+        }
+        for (const k of Object.keys(n)) {
+            if (k === "span") continue;
+            const v = n[k];
+            if (v !== null && typeof v === "object" && walk(v, d + 1)) return true;
+        }
+        return false;
+    };
+    return walk(expr, 0);
+}
+
+// nativeStmtNothingReason — why the statement compiles nothing (see the
+// shared liveStmtNothingReason: "literal" / "no-effect" / "nothing"), or null.
+function nativeStmtNothingReason(st, source, nextStart) {
+    if (st === null || st === undefined || st.kind === "Empty") return null;
+    if (nativeFunctionHasNoBody(st, source, nextStart)) return "nothing";
+    const live = nativeTranslate(st);
+    if (live === null) return null;
+    if (labelSurvives(st, live) === false) return "nothing";
+    if (live.length === 1) return liveStmtNothingReason(live[0], nativeRawHasEffect);
+    return null;
+}
+function nativeStmtCompilesNothing(st, source, nextStart) {
+    return nativeStmtNothingReason(st, source, nextStart) !== null;
+}
+function nativeStmtDropsText(st) {
+    if (st === null || st === undefined || typeof st.kind !== "string" || st.kind === "Empty") return false;
+    const live = nativeTranslate(st);
+    if (live === null) return false;
+    if (live.length === 0) return true;
+    return liveTreeDropsText(live);
+}
+// nativeTypeAliasRest — for a `type Name = <alias>` statement, the source range
+// of the tokens after the type expression ends ({ keepEnd, restStart, restEnd,
+// keptRaw }), or null when the alias is whole.
+// `outer` is the statement whose span is lexed — the TypeDecl itself, or the
+// `export` wrapping it (a nested declaration's span is not in source
+// coordinates, so the export's is used and its `export` token skipped).
+function nativeTypeAliasRest(st, source, outer) {
+    if (st === null || st === undefined || st.kind !== "TypeDecl" || typeof st.raw !== "string" || st.raw === ""
+            || outer === undefined || outer === null
+            || outer.span === undefined || outer.span === null) return null;
+    const base = outer.span.start;
+    const text = source.slice(base, outer.span.end);
+    let toks = [];
+    try { toks = lex(text); } catch { return null; }
+    toks = toks.filter((t) => t && t.kind !== "EOF" && t.kind !== "Semicolon" && t.span);
+    const lead = toks.findIndex((t) => t.text === "type");
+    if (lead < 0) return null;
+    toks = toks.slice(lead);
+    const n = typeDeclExtent(toks.map((t) => String(t.text ?? "")));
+    if (n === 0 || n >= toks.length) return null;
+    const eq = toks.findIndex((t) => t.text === "=");
+    return {
+        keepEnd: base + toks[n - 1].span.end,
+        restStart: base + toks[n].span.start,
+        restEnd: base + toks[toks.length - 1].span.end,
+        keptRaw: eq >= 0 ? toks.slice(eq + 1, n).map((t) => t.text).join(" ") : st.raw,
+    };
+}
+function noEffectNativeMessage(shown) {
+    return "`" + shown + "` has no effect. An expression statement at the top of a `<program>` / `<page>` / " +
+        "`<channel>` body must do something — a call, an assignment, `++` / `--`, or a `send` (SPEC §40.8, " +
+        "S445). To show a value, declare it: `<span>${" + shown + "}</span>` or a display-text literal `\"${" +
+        shown + "}\"` (§4.18.4).";
+}
+function unquotedNativeMessage(shown) {
+    return "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
+        "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
+        "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
+        "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+        + "\"`, §4.18.3).";
+}
+
+function rejectBodyTopProseNative(block, source, ctx) {
+    const body = Array.isArray(block.body) ? block.body : [];
+    if (body.length === 0) return;
+    if (ctx === null || ctx === undefined) return;
+    // `ctx.diagnostics` is created lazily — absent on a clean parse, which is
+    // exactly when a comma-sequence run (no parse diagnostic) must still be
+    // judged.
+    if (Array.isArray(ctx.diagnostics) === false) ctx.diagnostics = [];
+    // S441 round 5 — a `type` alias that ends before its line does: keep the
+    // declaration, report the rest of the line (the live front end does the
+    // same — ast-builder.js rejectBodyTopProse).
+    // S441 round 5c (R2) — a function covers only its head and its body: tokens
+    // between the head's grammar end (the shared functionHeadGap, as on the
+    // live front end) and the body `{` are reported, not silently skipped
+    // (the native return-type skipper swallows everything up to the `{`).
+    for (const st0 of body) {
+        const isFn = st0 && (st0.kind === "FunctionDecl"
+            || (st0.kind === "Export" && st0.declaration && st0.declaration.kind === "FunctionDecl"));
+        if (!isFn || !st0.span || typeof st0.span.start !== "number") continue;
+        let toks = [];
+        try { toks = lex(source.slice(st0.span.start, st0.span.end)); } catch { continue; }
+        toks = toks.filter((t) => t && t.kind !== "EOF" && t.span);
+        const gap = functionHeadGap(toks.map((t) => String(t.text ?? "")));
+        if (gap === null) continue;
+        const a = st0.span.start + toks[gap[0]].span.start;
+        const b = st0.span.start + toks[gap[1] - 1].span.end;
+        const shown0 = source.slice(a, b).trim();
+        const shown = shown0.length > 80 ? shown0.slice(0, 77) + "..." : shown0;
+        const pre = source.slice(0, a);
+        pushDiagnostic(ctx, makeDiagnostic("E-UNQUOTED-DISPLAY-TEXT", unquotedNativeMessage(shown),
+            { start: a, end: b, line: (pre.match(/\n/g) || []).length + 1, col: a - (pre.lastIndexOf("\n") + 1) + 1 }));
+    }
+    // Ruling S445 item 2 — "a label nothing targets is also an error": the
+    // loop stays, the `label:` is reported (the live front end does the same).
+    for (const st0 of body) {
+        if (!st0 || st0.kind !== "Labeled" || !st0.span || typeof st0.span.start !== "number") continue;
+        const live = nativeTranslate(st0);
+        if (live === null || live.length !== 1 || live[0].label !== st0.label || liveLabelIsTargeted(live[0])) continue;
+        const colon = source.indexOf(":", st0.span.start);
+        if (colon < 0 || colon > st0.span.end) continue;
+        const a = st0.span.start;
+        const b = colon + 1;
+        const shown = source.slice(a, b).trim();
+        const pre = source.slice(0, a);
+        pushDiagnostic(ctx, makeDiagnostic("E-UNQUOTED-DISPLAY-TEXT", unquotedNativeMessage(shown),
+            { start: a, end: b, line: (pre.match(/\n/g) || []).length + 1, col: a - (pre.lastIndexOf("\n") + 1) + 1 }));
+    }
+    for (const st0 of body) {
+        // (`export type …` — the declaration inside the export.)
+        const st = st0 && st0.kind === "Export" && st0.declaration && st0.declaration.kind === "TypeDecl" ? st0.declaration : st0;
+        const rest = nativeTypeAliasRest(st, source, st0);
+        if (rest === null) continue;
+        if (st !== st0) st0.span = { ...st0.span, end: rest.keepEnd };
+        else st.span = { ...st.span, end: rest.keepEnd };
+        const shown0 = source.slice(rest.restStart, rest.restEnd).trim();
+        const shown = shown0.length > 80 ? shown0.slice(0, 77) + "..." : shown0;
+        const pre = source.slice(0, rest.restStart);
+        pushDiagnostic(ctx, makeDiagnostic("E-UNQUOTED-DISPLAY-TEXT", unquotedNativeMessage(shown),
+            { start: rest.restStart, end: rest.restEnd, line: (pre.match(/\n/g) || []).length + 1,
+              col: rest.restStart - (pre.lastIndexOf("\n") + 1) + 1 }));
+        st.raw = rest.keptRaw;
+    }
+    const span = block.span;
+    const blockStart = span !== undefined && span !== null && typeof span.start === "number" ? span.start : 0;
+    const blockEnd = span !== undefined && span !== null && typeof span.end === "number" ? span.end : blockStart;
+    const inBlock = (d) => d !== null && d !== undefined && d.span !== undefined && d.span !== null
+        && typeof d.span.start === "number" && d.span.start >= blockStart && d.span.start <= blockEnd;
+    const diags = ctx.diagnostics.filter((d) => inBlock(d) && BODY_TOP_PARSE_DIAG_RE.test(d.code));
+    // S441 review #6 — a comma sequence statement (`Hello, world`) is not a
+    // scrml expression (mirrors ast-builder.js stmtHasInvalidOwnExpr).
+    // (Parenthesised too — `(step(), 1)` is the same comma sequence; round 5b.)
+    const unParen = (e) => { let x = e; while (x && x.kind === "Paren") x = x.expression; return x; };
+    const isSeqStmt = (st) => st && st.kind === "ExprStmt" && st.expression && unParen(st.expression) && unParen(st.expression).kind === "Sequence";
+    // (A statement the parser already REPORTED — `import(…)` / `class` recover
+    // as a `not` placeholder carrying their own E-…-NOT-IN-SCRML — keeps that
+    // diagnostic; it is not reclassified as prose.)
+    const reportedAt = (st) => st && st.kind === "ExprStmt" && st.span && ctx.diagnostics.some((d) => d && d.span
+        && typeof d.span.start === "number" && typeof d.code === "string" && d.code.startsWith("E-")
+        && d.span.start >= st.span.start && d.span.start < st.span.end);
+    const nextStartOf = (k) => (body[k + 1] && body[k + 1].span && typeof body[k + 1].span.start === "number") ? body[k + 1].span.start : undefined;
+    const nothing = body.map((st, k) => nativeStmtCompilesNothing(st, source, nextStartOf(k)) && !reportedAt(st));
+    if (diags.length === 0 && body.some(isSeqStmt) === false && nothing.some((x) => x) === false) return;
+    const starts = body.map((st) => (st && st.span && typeof st.span.start === "number") ? st.span.start : null);
+    const stmtIndexAt = (off) => {
+        let idx = -1;
+        for (let k = 0; k < starts.length; k++) if (starts[k] !== null && starts[k] <= off) idx = k;
+        return idx;
+    };
+    const flagged = body.map((st, k) => isSeqStmt(st) || nothing[k]);
+    // (Statements a parse diagnostic is attributed to — not valid code.)
+    const diagFlagged = body.map(() => false);
+    // A diagnostic past the END of every statement that could own it, on a
+    // later line (`<count> = 0⏎...` — the error-recovery statement for `...`
+    // carries the previous statement's span): its own line is the prose.
+    let orphanFs = -1;
+    for (const d of diags) {
+        const k0 = stmtIndexAt(d.span.start);
+        const owner = k0 >= 0 ? body[k0] : null;
+        const ownerEnd = owner && owner.span && typeof owner.span.end === "number" ? owner.span.end : -1;
+        if (owner !== null && d.span.start >= ownerEnd
+                && source.slice(starts[k0], d.span.start).includes("\n")) {
+            let f0 = d.span.start;
+            while (f0 < blockEnd && /\s/.test(source[f0])) f0 = f0 + 1;
+            const ls = source.lastIndexOf("\n", f0 - 1) + 1;
+            const le = source.indexOf("\n", f0);
+            const lt = source.slice(ls, le === -1 ? blockEnd : Math.min(le, blockEnd));
+            // A diagnostic at the run's END (`import stuff` → "expected
+            // 'from'" reported at end-of-input) has no line of its own: it
+            // belongs to its owner statement, not to an orphan prose line.
+            if (f0 < blockEnd && lt.trim() !== ""
+                    && BODY_TOP_CODE_HEAD_RE.test(lt) === false && (orphanFs < 0 || f0 < orphanFs)) orphanFs = f0;
+        }
+    }
+    for (const d of diags) {
+        let k = stmtIndexAt(d.span.start);
+        // `Welcome.⏎<count> = 0` — "expected a property name after '.'" is
+        // reported AT the next statement's first token; it belongs to the
+        // statement whose trailing `.` is unfinished.
+        if (k > 0 && d.code === "E-EXPR-MEMBER-NAME" && starts[k] === d.span.start) k = k - 1;
+        if (k < 0) continue;
+        flagged[k] = true;
+        diagFlagged[k] = true;
+        if (d.code === "E-STMT-MISSING-SEMICOLON" && k > 0 && starts[k - 1] !== null) {
+            const between = source.slice(starts[k - 1], d.span.start);
+            if (between.includes("\n") === false) { flagged[k - 1] = true; diagFlagged[k - 1] = true; }
+        }
+    }
+    // The FIRST qualifying group (see the header): its first source LINE is
+    // prose; everything after that line is re-parsed as body-top code, so a
+    // declaration below a prose line survives (S441 review #3/#5 — mirrors
+    // ast-builder.js rejectBodyTopProse).
+    let fi = -1;
+    for (let si = 0; si < body.length && fi < 0; si++) {
+        if (flagged[si] === false) continue;
+        let sj = si;
+        while (sj + 1 < body.length && flagged[sj + 1]) sj = sj + 1;
+        const gEnd = sj + 1 < body.length && starts[sj + 1] !== null ? starts[sj + 1] : blockEnd;
+        const text = source.slice(starts[si], gEnd);
+        // Judged on the group's FIRST LINE — the unit the rejection below
+        // removes (the rest is re-parsed). A parse-error cascade can flag a
+        // declaration on a LATER line (`loading!⏎<c4> = 4`: the `<` after the
+        // `!` is "unexpected"), and that declaration must not exempt the
+        // prose line above it (S441 round 4, found by the fuzz).
+        const nlG = source.indexOf("\n", starts[si]);
+        const firstLineEnd = nlG === -1 || nlG > gEnd ? gEnd : nlG;
+        const allExprStmts = body.slice(si, sj + 1)
+            .filter((st) => st && st.span && typeof st.span.start === "number" && st.span.start < firstLineEnd)
+            .every((st) => st && st.kind === "ExprStmt");
+        // A line whose FIRST statement compiles nothing (round 5) is not code
+        // whatever its head keyword (`type here`, `404`, `Total: 42`). Only the
+        // first: a later piece of a line the native parser could not read
+        // (`use foreign:svc { … }` — a native gap — splits into `use` plus a
+        // label) keeps the code-head rule below.
+        const lineStartOff = source.lastIndexOf("\n", starts[si] - 1) + 1;
+        const firstNonWs = lineStartOff + source.slice(lineStartOff).search(/\S/);
+        // (Not when a parse diagnostic sits on that line: a statement the
+        // native parser split out of a line it could not read — `use` in
+        // `use foreign:svc { … }`, a native gap — is not a statement that
+        // "does nothing"; its diagnostics stand.)
+        const lineEndAbs = source.indexOf("\n", firstNonWs);
+        const lineHasDiag = diags.some((d) => d.span.start >= lineStartOff
+            && d.span.start < (lineEndAbs === -1 ? blockEnd : lineEndAbs));
+        const lineCompilesNothing = nothing[si] && starts[si] === firstNonWs && !lineHasDiag;
+        if (lineCompilesNothing
+                || (BODY_TOP_CODE_HEAD_RE.test(text) === false && (block._bodyTopCatchAll === true || allExprStmts))) fi = si;
+        // Round 5 — only the group's FIRST line is decided here; a flagged
+        // statement on a later line is judged as its own group (a code-head
+        // first line — `import … zq` — must not exempt a prose line below it,
+        // `items, Inc`; found by the round-5 fuzz).
+        let last = si;
+        while (last + 1 <= sj && starts[last + 1] !== null && starts[last + 1] < firstLineEnd) last = last + 1;
+        si = last;
+    }
+    if (fi < 0 && orphanFs < 0) return;
+    // Prose is LINE-granular (mirrors ast-builder.js rejectBodyTopProse): the
+    // whole line holding the first flagged statement is rejected, including
+    // statements the parser cut from that line before it (`(optional) fill
+    // this in` → a valid `(optional)` plus an invalid `fill this in`).
+    // Ruling S445 item 2 — valid code with no effect is reported as that.
+    // Only when that statement IS the whole line (no other statement and no
+    // parse diagnostic on it): `Welcome` in `Welcome to the app` is prose.
+    const lineOfOff = (off) => (source.slice(0, off).match(/\n/g) || []).length;
+    // (Several statements on the line — `@a; @b` — qualify when EVERY one of
+    // them has no effect, round 5d.)
+    const reasonAt = (k) => nativeStmtNothingReason(body[k], source, k + 1 < body.length && starts[k + 1] !== null ? starts[k + 1] : undefined);
+    const lineIdx = fi >= 0 && starts[fi] !== null
+        ? body.map((st, k) => k).filter((k) => starts[k] !== null && lineOfOff(starts[k]) === lineOfOff(starts[fi])) : [];
+    const fiNoEffect = lineIdx.length > 0
+        && !diags.some((d) => lineOfOff(d.span.start) === lineOfOff(starts[fi]))
+        && lineIdx.every((k) => diagFlagged[k] !== true && !isSeqStmt(body[k]) && reasonAt(k) === "no-effect");
+    let fs = fi >= 0 ? starts[fi] : orphanFs;
+    while (fs < blockEnd && /\s/.test(source[fs])) fs = fs + 1;
+    if (orphanFs >= 0 && orphanFs < fs) fs = orphanFs;
+    const start = Math.max(blockStart, source.lastIndexOf("\n", fs - 1) + 1);
+    let cut = fi >= 0 && fs !== orphanFs ? fi : body.length;
+    while (cut > 0 && (starts[cut - 1] === null || starts[cut - 1] >= start)) cut = cut - 1;
+    const nlAt = source.indexOf("\n", fs);
+    const lineEnd = (nlAt === -1 || nlAt >= blockEnd) ? blockEnd : nlAt;
+    let end = lineEnd;
+    // Withdraw this parse's diagnostics from the rejected line on; the tail
+    // re-parse below reports for itself.
+    ctx.diagnostics = ctx.diagnostics.filter((d) => !(inBlock(d) && d.span.start >= start));
+    const kept = body.slice(0, cut);
+    // S441 round 4 (#7) — never quote an empty run: when the first flagged
+    // statement starts at a line end, quote the first non-empty line of the
+    // rejected range instead.
+    let lineText = source.slice(start, lineEnd).trim();
+    if (lineText === "") lineText = (source.slice(start, blockEnd).split("\n").find((l) => l.trim() !== "") || "").trim();
+    const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+    const stLine = (source.slice(0, fs).match(/\n/g) || []).length + 1;
+    let tailBody = [];
+    if (lineEnd < blockEnd && source.slice(lineEnd + 1, blockEnd).trim() !== "") {
+        const tailStart = lineEnd + 1;
+        const tailLine = stLine + 1;
+        const mark = ctx.diagnostics.length;
+        const tailBlock = {
+            ...block,
+            span: { ...span, start: tailStart, end: blockEnd, line: tailLine, col: 1 },
+            body: parseLogicBodyBestEffort(source.slice(tailStart, blockEnd), ctx, tailStart, tailLine, 1),
+        };
+        rejectBodyTopProseNative(tailBlock, source, ctx);
+        tailBody = tailBlock.body;
+        const lead = source.slice(tailStart, blockEnd).search(/\S/);
+        const tailFirst = tailStart + (lead < 0 ? 0 : lead);
+        const k = fiNoEffect ? -1 : ctx.diagnostics.findIndex((d, i) => i >= mark && d && d.code === "E-UNQUOTED-DISPLAY-TEXT"
+            && d.span && d.span.start === tailFirst);
+        if (k >= 0) {
+            // The next line is prose too: one diagnostic for the whole run.
+            end = ctx.diagnostics[k].span.end;
+            ctx.diagnostics.splice(k, 1);
+        }
+    }
+    pushDiagnostic(ctx, makeDiagnostic(
+        fiNoEffect ? "E-STMT-NO-EFFECT" : "E-UNQUOTED-DISPLAY-TEXT",
+        fiNoEffect ? noEffectNativeMessage(shown) :
+        "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
+        "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
+        "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
+        "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+        + "\"`, §4.18.3).",
+        (() => {
+            // Report at the first non-whitespace character of the rejected run.
+            let rs = start;
+            while (rs < end && /\s/.test(source[rs])) rs = rs + 1;
+            const pre = source.slice(0, rs);
+            return { start: rs, end, line: (pre.match(/\n/g) || []).length + 1, col: rs - (pre.lastIndexOf("\n") + 1) + 1 };
+        })(),
+    ));
+    block.body = kept.concat(tailBody);
+}
+
+// S441 round 4 — `coverBodyTopNative`: the COVERAGE invariant (mirrors the
+// live front end's unknown-character tokens). Every non-whitespace, non-comment
+// byte of a body-top run must end up inside a parsed statement's span or inside
+// a diagnostic's span; the native lexer drops characters it has no token for
+// (`★ ✓ →`, `©`, `🎉`), so without this they vanished at exit 0. Each uncovered
+// stretch is ONE E-UNQUOTED-DISPLAY-TEXT at its own line/col quoting its own
+// text; consecutive uncovered lines merge.
+function coverBodyTopNative(block, source, ctx) {
+    const span = block.span;
+    if (span === undefined || span === null || typeof span.start !== "number" || typeof span.end !== "number") return;
+    // Coverage is measured against the LEXER's tokens over the run (the
+    // exact analogue of the live front end's check): a character no token
+    // covers was dropped before any statement could see it.
+    const ranges = [];
+    const runText = source.slice(span.start, span.end);
+    let toks = [];
+    try { toks = lex(runText); } catch { toks = []; }
+    for (const t of toks) {
+        if (!t || !t.span || t.kind === "EOF" || typeof t.span.start !== "number") continue;
+        let a = t.span.start;
+        // A template's first chunk span starts after its opening backtick.
+        if (t.kind === "TemplateChunk" && a > 0 && runText[a - 1] === "`") a = a - 1;
+        ranges.push([span.start + a, span.start + t.span.end]);
+    }
+    if (ctx !== null && ctx !== undefined && Array.isArray(ctx.diagnostics)) {
+        for (const d of ctx.diagnostics) {
+            if (d && d.span && typeof d.span.start === "number" && typeof d.span.end === "number"
+                    && d.span.start >= span.start && d.span.start <= span.end) {
+                // A diagnostic covers its span, and a parse diagnostic its line.
+                const le = source.indexOf("\n", d.span.start);
+                ranges.push([d.span.start, Math.max(d.span.end, le === -1 ? span.end : le)]);
+            }
+        }
+    }
+    const segs = uncoveredSegments(source, span.start, span.end, ranges);
+    const lineOf = (off) => (source.slice(0, off).match(/\n/g) || []).length + 1;
+    const unquotedMessage = (shown) => "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
+        "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
+        "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
+        "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+        + "\"`, §4.18.3).";
+    // An uncovered stretch on a line that ALREADY carries an
+    // E-UNQUOTED-DISPLAY-TEXT (`© 2026 Acme Inc`: the lexer dropped `©`, the
+    // statement check rejected `2026 Acme Inc`) widens that one diagnostic to
+    // the whole line instead of adding a second.
+    const pending = [];
+    for (const sg of segs) {
+        const ln = lineOf(sg.start);
+        const existing = Array.isArray(ctx.diagnostics) ? ctx.diagnostics.find((d) => d && d.code === "E-UNQUOTED-DISPLAY-TEXT"
+            && d.span && typeof d.span.start === "number" && lineOf(d.span.start) === ln) : undefined;
+        if (existing) {
+            const a = Math.min(existing.span.start, sg.start);
+            const b = Math.max(existing.span.end, sg.end);
+            const ls = source.lastIndexOf("\n", a - 1) + 1;
+            const le0 = source.indexOf("\n", a);
+            const lineText = source.slice(a, le0 === -1 ? b : Math.min(le0, Math.max(b, a))).trim() || source.slice(a, b).trim();
+            const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+            existing.span = { ...existing.span, start: a, end: b, line: ln, col: a - ls + 1 };
+            existing.message = unquotedMessage(shown);
+        } else {
+            pending.push(sg);
+        }
+    }
+    segs.length = 0;
+    for (const sg of pending) segs.push(sg);
+    let k = 0;
+    while (k < segs.length) {
+        let j = k;
+        // merge segments on consecutive lines
+        while (j + 1 < segs.length && source.slice(segs[j].end, segs[j + 1].start).split("\n").length === 2
+                && source.slice(segs[j].end, segs[j + 1].start).trim() === "") j = j + 1;
+        const a = segs[k].start;
+        const b = segs[j].end;
+        const lineText = source.slice(a, segs[k].end).trim();
+        const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+        const before = source.slice(0, a);
+        const line = (before.match(/\n/g) || []).length + 1;
+        const col = a - (before.lastIndexOf("\n") + 1) + 1;
+        pushDiagnostic(ctx, makeDiagnostic(
+            "E-UNQUOTED-DISPLAY-TEXT",
+            "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
+            "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
+            "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
+            "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+            + "\"`, §4.18.3).",
+            { start: a, end: b, line, col },
+        ));
+        k = j + 1;
+    }
+}
+
+// S441 round 4 — `assertBodyTopCoverageNative`: the body-top COVERAGE
+// INVARIANT as a CHECK (SPEC §40.8 S441 bullet; the live twin is
+// ast-builder.js `assertBodyTopCoverage`). Runs after the strict check
+// (`rejectBodyTopProseNative`) and the lexer-level cover (`coverBodyTopNative`)
+// have produced their statements and diagnostics. Every non-whitespace,
+// non-comment byte of the run must be (a) inside a lexer token that lies inside
+// a statement of the final `block.body` — the statements the bridge compiles —
+// or (b) on a source line an error diagnostic spans. A byte in neither was
+// dropped by some path no per-shape fix anticipated: it is
+// `E-INTERNAL-BODY-TOP-DROPPED`, an internal compiler error, fail-closed.
+export function assertBodyTopCoverageNative(block, source, ctx) {
+    const span = block.span;
+    if (span === undefined || span === null || typeof span.start !== "number" || typeof span.end !== "number") return;
+    if (ctx === null || ctx === undefined) return;
+    if (Array.isArray(ctx.diagnostics) === false) ctx.diagnostics = [];
+    // The text the body was PARSED from, in the coordinates its statement
+    // spans use: `bodyText` anchored at `bodyStart`. For a plain lifted run
+    // that is the source slice at the span; for a pairing-synthesized block
+    // (`const Name = <markup>`, `export <markup>`) it is the CONSTRUCTED text
+    // the parser actually saw — its spans are anchored there, not in source.
+    const runText = typeof block.bodyText === "string" ? block.bodyText : source.slice(span.start, span.end);
+    const runStart = typeof block.bodyStart === "number" ? block.bodyStart : span.start;
+    const runEnd = runStart + runText.length;
+    const constructed = runText !== source.slice(runStart, runEnd);
+    // A position-faithful view of `runText` for the shared segment scanner.
+    const view = constructed ? " ".repeat(runStart) + runText : source;
+    const len = runText.length;
+    const inTok = new Uint8Array(len);
+    const inStmt = new Uint8Array(len);
+    let toks = [];
+    try { toks = lex(runText); } catch { toks = []; }
+    for (const t of toks) {
+        if (!t || !t.span || t.kind === "EOF" || typeof t.span.start !== "number") continue;
+        let a = t.span.start;
+        if (t.kind === "TemplateChunk" && a > 0 && runText[a - 1] === "`") a = a - 1;
+        for (let k = Math.max(0, a); k < Math.min(len, t.span.end); k++) inTok[k] = 1;
+    }
+    const body = Array.isArray(block.body) ? block.body : [];
+    for (const st of body) {
+        if (!st || !st.span || typeof st.span.start !== "number" || typeof st.span.end !== "number") continue;
+        // S441 round 5 — credit a statement only for what it COMPILES: one that
+        // compiles nothing, or whose text the bridge drops (a tagged template →
+        // an empty escape-hatch), is not credited.
+        if (nativeStmtCompilesNothing(st, source) || nativeStmtDropsText(st)) continue;
+        for (let k = Math.max(0, st.span.start - runStart); k < Math.min(len, st.span.end - runStart); k++) inStmt[k] = 1;
+    }
+    // A `;` is source formatting (round 5 — it sits between statement spans,
+    // so crediting only statements made every body-top `;` an internal error).
+    for (const t of toks) {
+        if (!t || !t.span || t.kind !== "Semicolon" || typeof t.span.start !== "number") continue;
+        for (let k = Math.max(0, t.span.start); k < Math.min(len, t.span.end); k++) inStmt[k] = 1;
+    }
+    const ranges = [];
+    let a0 = -1;
+    for (let k = 0; k <= len; k++) {
+        const on = k < len && inTok[k] === 1 && inStmt[k] === 1;
+        if (on && a0 < 0) a0 = k;
+        if (!on && a0 >= 0) { ranges.push([runStart + a0, runStart + k]); a0 = -1; }
+    }
+    // An error diagnostic covers the source lines it spans.
+    for (const d of ctx.diagnostics) {
+        if (!d || typeof d.code !== "string" || d.code.startsWith("E-") === false) continue;
+        if (!d.span || typeof d.span.start !== "number") continue;
+        const end = typeof d.span.end === "number" && d.span.end >= d.span.start ? d.span.end : d.span.start;
+        if (end < runStart || d.span.start > runEnd) continue;
+        const ls = Math.max(runStart, view.lastIndexOf("\n", Math.max(d.span.start, runStart) - 1) + 1);
+        const le0 = view.indexOf("\n", Math.min(end, runEnd));
+        ranges.push([ls, le0 === -1 || le0 > runEnd ? runEnd : le0]);
+    }
+    const segs = uncoveredSegments(view, runStart, runEnd, ranges);
+    // Round 5 — an error diagnostic already reported in this run stops the
+    // build, so nothing can ship silently: the internal error would only add
+    // noise beside the author's real one. (Once that error is fixed, a drop
+    // that is still there fires here.)
+    if (segs.length > 0 && ctx.diagnostics.some((d) => d && typeof d.code === "string" && d.code.startsWith("E-")
+            && d.code !== "E-INTERNAL-BODY-TOP-DROPPED" && d.span && typeof d.span.start === "number"
+            && d.span.start >= runStart && d.span.start <= runEnd)) return;
+    const anchorLine = constructed ? (typeof span.line === "number" ? span.line : 1) : 1;
+    const lineAt = (off) => constructed
+        ? anchorLine + (runText.slice(0, off - runStart).match(/\n/g) || []).length
+        : (source.slice(0, off).match(/\n/g) || []).length + 1;
+    const colAt = (off) => {
+        const nl = view.lastIndexOf("\n", off - 1);
+        return off - (constructed ? Math.max(runStart, nl + 1) : nl + 1) + 1;
+    };
+    // One diagnostic per run of consecutive uncovered lines.
+    let k = 0;
+    while (k < segs.length) {
+        let j = k;
+        while (j + 1 < segs.length && view.slice(segs[j].end, segs[j + 1].start).split("\n").length === 2
+                && view.slice(segs[j].end, segs[j + 1].start).trim() === "") j = j + 1;
+        const a = segs[k].start;
+        const b = segs[j].end;
+        const lineText = view.slice(a, segs[k].end).trim();
+        const shown = lineText.length > 80 ? lineText.slice(0, 77) + "..." : lineText;
+        pushDiagnostic(ctx, makeDiagnostic(
+            "E-INTERNAL-BODY-TOP-DROPPED",
+            "internal compiler error — `" + shown + "` at the top of this `<program>` / `<page>` / "
+            + "`<channel>` body was neither compiled nor reported; the compiler would have dropped it "
+            + "silently (SPEC §40.8 S441 coverage invariant). This is a compiler bug — please report it "
+            + "with this source. If the text is meant to be displayed, declare it: `<p>" + shown + "</p>` or `\""
+            + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"") + "\"`.",
+            { start: a, end: b, line: lineAt(a), col: colAt(a) },
+        ));
+        k = j + 1;
+    }
+}
+
 // liftBareBlocks — calculation (pure; returns a new array, no mutation). The
 // P4-2 post-pass. Walk a native `Block[]` and convert bare-declaration `Text`
 // blocks into synthetic `LogicEscape` blocks, mirroring the live
@@ -2650,15 +3409,30 @@ function spliceAttrsIntoBodyRootNative(bodyRootRaw, outerAttrSource) {
 // when it consumes it. `synthCounter` is a `{ next }` record threaded through
 // the recursion so channel-export helper names are file-unique (mirrors the
 // live `_p3aSynthCounter`). It defaults at the top call.
-export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
+export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter, defaultLogicBody) {
     const result = [];
     if (Array.isArray(blocks) === false) return result;
     const counter = (synthCounter !== undefined && synthCounter !== null)
         ? synthCounter : { next: 0 };
+    const dlb = defaultLogicBody === true;
+    // S441 (SPEC §40.8 S441 bullet) — at a `<program>` / `<page>` / `<channel>`
+    // body split the declared `"..."` display-text literals out of the bare
+    // runs first (the shared segmenter — the live front end uses the same one).
+    // Skipped on the re-lift of an already-split code piece.
+    if (dlb && blocks.some((b) => b !== null && b !== undefined && b.kind === "Text"
+            && b._bodyTopSegmented !== true && b._displayLiteral !== true)) {
+        blocks = splitBodyTopDisplayLiteralsNative(blocks, source, ctx);
+    }
     let i = 0;
     while (i < blocks.length) {
         const block = blocks[i];
         if (block === undefined || block === null) {
+            result.push(block);
+            i = i + 1;
+            continue;
+        }
+        // S441 — a declared display-text literal is display text, never lifted.
+        if (block.kind === "Text" && block._displayLiteral === true) {
             result.push(block);
             i = i + 1;
             continue;
@@ -2684,7 +3458,7 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             const name = typeof block.name === "string" ? block.name : "";
             const isDeclSite = parentType !== "markup" && isProgramFamilyRoot(name);
             const childContext = isDeclSite ? "state" : "markup";
-            const lifted = liftBareBlocks(block.children, source, childContext, ctx, counter);
+            const lifted = liftBareBlocks(block.children, source, childContext, ctx, counter, isDeclSite);
             result.push({ ...block, children: lifted });
             i = i + 1;
             continue;
@@ -2711,7 +3485,7 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             // future `export <Component>` Form-1). Mirrors ast-builder.js
             // L807 / L956 — the channel branch.
             if (hasMarkupNext && BARE_EXPORT_AT_END_RE.test(raw)) {
-                const paired = liftPairedExport(block, next, raw, source, ctx, counter);
+                const paired = liftPairedExport(block, next, raw, source, ctx, counter, dlb);
                 if (paired !== null) {
                     for (const b of paired.blocks) result.push(b);
                     // A successful export-pairing always consumes BOTH the
@@ -2730,7 +3504,7 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
             if (hasMarkupNext) {
                 const m = raw.match(BARE_DECL_NAME_EQ_AT_END_RE);
                 if (m !== null) {
-                    const paired = liftPairedDeclEq(block, next, m, source, ctx, parentType, counter);
+                    const paired = liftPairedDeclEq(block, next, m, source, ctx, parentType, counter, dlb);
                     for (const b of paired) result.push(b);
                     i = i + 2; // the Text block + the consumed markup block
                     continue;
@@ -2796,10 +3570,33 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
                 i = i + 1;
                 continue;
             }
+            // S441 — a `<program>` / `<page>` / `<channel>` body carries NO
+            // loose prose: every bare run the lifts above did not claim is
+            // code. Lift it (the strict check runs in the marking pass below).
+            if (dlb && raw.trim() !== "") {
+                const caught = synthLiftedLogicBlock(block, source, ctx);
+                caught._bodyTopCatchAll = true;
+                result.push(caught);
+                i = i + 1;
+                continue;
+            }
         }
 
         result.push(block);
         i = i + 1;
+    }
+    // S441 — every synthetic lift at a default-logic body is body-top code:
+    // reject what is not valid code (E-UNQUOTED-DISPLAY-TEXT).
+    if (dlb) {
+        for (const b of result) {
+            if (b !== null && b !== undefined && b.kind === "LogicEscape" && b._synthetic === true
+                    && b._bodyTop !== true) {
+                b._bodyTop = true;
+                rejectBodyTopProseNative(b, source, ctx);
+                coverBodyTopNative(b, source, ctx);
+                assertBodyTopCoverageNative(b, source, ctx);
+            }
+        }
     }
     return result;
 }
@@ -2822,7 +3619,7 @@ export function liftBareBlocks(blocks, source, parentType, ctx, synthCounter) {
 // Returns `{ blocks }`, or `null` when the pairing does not apply (the markup
 // is not a recognized export-paired element) so the caller falls through to
 // the other lift rules.
-function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter) {
+function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter, dlb) {
     const markupName = typeof markupBlock.name === "string" ? markupBlock.name : "";
 
     // CHANNEL — `export <channel name="...">...</>` (SPEC §38.12.6).
@@ -2834,7 +3631,7 @@ function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter) {
         // a preceding state-decl) so its own lift rules still fire.
         const prefixBlock = synthPrefixTextBlock(textBlock, prefixRaw);
         if (prefixBlock !== null) {
-            const reLifted = liftBareBlocks([prefixBlock], source, "state", ctx, counter);
+            const reLifted = liftBareBlocks([prefixBlock], source, "state", ctx, counter, dlb);
             for (const b of reLifted) out.push(b);
         }
         // Extract the channel's string-literal `name="..."` attribute. A
@@ -2871,7 +3668,7 @@ function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter) {
         // children are recursed here — `<channel>` is an `isProgramFamilyRoot`
         // declaration site (childContext "state").
         const channelChildren = liftBareBlocks(
-            markupBlock.children, source, "state", ctx, counter);
+            markupBlock.children, source, "state", ctx, counter, true);
         out.push({ ...markupBlock, children: channelChildren, _channelExport: channelName });
         return { blocks: out };
     }
@@ -2910,7 +3707,7 @@ function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter) {
         // them symmetric here).
         const prefixBlock = synthPrefixTextBlock(textBlock, prefixRaw);
         if (prefixBlock !== null) {
-            const reLifted = liftBareBlocks([prefixBlock], source, "state", ctx, counter);
+            const reLifted = liftBareBlocks([prefixBlock], source, "state", ctx, counter, dlb);
             for (const b of reLifted) out.push(b);
         }
         // Step 1: slice the outer markup's full raw (opener through closer).
@@ -3008,7 +3805,7 @@ function liftPairedExport(textBlock, markupBlock, raw, source, ctx, counter) {
 // leading prefix is re-emitted + re-lifted as its own Text block.
 //
 // Returns the block array to splice into the result.
-function liftPairedDeclEq(textBlock, markupBlock, m, source, ctx, parentType, counter) {
+function liftPairedDeclEq(textBlock, markupBlock, m, source, ctx, parentType, counter, dlb) {
     const prefixRaw = m[1];
     const trailerRaw = m[2];
     const out = [];
@@ -3017,7 +3814,7 @@ function liftPairedDeclEq(textBlock, markupBlock, m, source, ctx, parentType, co
     // SAME as this pass's parentType (ast-builder.js L1114).
     const prefixBlock = synthPrefixTextBlock(textBlock, prefixRaw);
     if (prefixBlock !== null) {
-        const reLifted = liftBareBlocks([prefixBlock], source, parentType, ctx, counter);
+        const reLifted = liftBareBlocks([prefixBlock], source, parentType, ctx, counter, dlb);
         for (const b of reLifted) out.push(b);
     }
     // Build the synthetic logic body: the trimmed trailer (`(export )?

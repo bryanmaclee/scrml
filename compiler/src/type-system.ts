@@ -12205,7 +12205,23 @@ function annotateNodes(
           // (parsed as a bare-expr) fails closed with E-WASM-NOMINAL; skip the ident
           // walk (which would mis-flag `extern` / the call char `r` as undeclared).
           if (beExprNode && !tryFireWasmCallCharNominal((n as Record<string, unknown>).expr, beSpan, errors)) {
+            const _errsBeforeBe = errors.length;
             checkLogicExprIdents(beExprNode, beSpan, scopeChain, typeRegistry, errors, undefined, fnAllDeclared);
+            // S441 (SPEC §4.18.7) — a lone identifier as a whole run at a
+            // `<program>` / `<page>` / `<channel>` body-top is valid code, so an
+            // undeclared one is E-SCOPE-001; if it was meant as displayed text
+            // the diagnostic SHOULD name the declared-prose forms.
+            if ((n as Record<string, unknown>)._bodyTopBareRun === true) {
+              const _word = (beExprNode as { name?: string }).name ?? "";
+              for (let _k = _errsBeforeBe; _k < errors.length; _k++) {
+                const _e = errors[_k] as { code?: string; message?: string };
+                if (_e && _e.code === "E-SCOPE-001" && typeof _e.message === "string") {
+                  _e.message += ` A \`<program>\` / \`<page>\` / \`<channel>\` body is code ` +
+                    `(§40.8, S441); if \`${_word}\` was meant as displayed text, declare it: ` +
+                    `\`<p>${_word}</p>\` or \`"${_word}"\`.`;
+                }
+              }
+            }
             // §54.6.3 Phase 4e: transition-call legality check
             checkTransitionCallsInExpr(beExprNode, beSpan, scopeChain, stateTypeRegistry, errors);
             // §54.6.4 Phase 4f: terminal-substate mutation check

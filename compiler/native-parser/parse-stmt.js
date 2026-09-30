@@ -530,8 +530,14 @@ export function parseStatement(ctx) {
         // Simpler: peek 2 tokens to confirm `<` IDENT, then run the existing
         // structural lead predicate on a synthesised cursor view.
         if (constStructuralStateDeclLeadFollows(ctx.cursor)) {
-            advance(ctx.cursor);   // consume `const`
-            return parseStructuralStateDecl(ctx, true);
+            const constTok = advance(ctx.cursor);   // consume `const`
+            const sd = parseStructuralStateDecl(ctx, true);
+            // The declaration's span starts at `const` (S441 round 4 — the
+            // body-top coverage check reads statement spans).
+            if (sd && sd.span && typeof sd.span.end === "number") {
+                sd.span = makeSpan(constTok.span.start, sd.span.end, constTok.span.line, constTok.span.col);
+            }
+            return sd;
         }
     }
 
@@ -1238,7 +1244,12 @@ export function parseDoWhile(ctx) {
             "expected 'while' after the body of a 'do' loop", spanHere(ctx));
     }
     const test = parseParenCondition(ctx, "do-while");
-    endE = nodeEnd(test);
+    // S441 round 5b (N2) — the statement ends at the condition's closing `)`,
+    // not at the condition expression (which left the `)` outside every
+    // statement span).
+    const closeParen = lastTokenBefore(ctx);
+    endE = (closeParen !== undefined && closeParen !== null && closeParen.kind === TokenKind.RParen)
+        ? closeParen.span.end : nodeEnd(test);
 
     // The do-while terminator `;` is optional (ECMAScript's special ASI rule).
     if (currentKind(cursor) === TokenKind.Semicolon) {
@@ -2157,7 +2168,11 @@ export function parseScrmlFunctionDecl(ctx, allowAnonymous) {
     // --- the in-line body --- (parsed in the function's own generator scope).
     const inline = parseFunctionBodyInline(ctx, false, isGenerator);
 
-    const span = makeSpan(fnTok.span.start, inline.endPos, fnTok.span.line, fnTok.span.col);
+    // The declaration's span starts at its FIRST token — a `pure` / `server`
+    // modifier is part of the declaration (S441 round 4: the body-top
+    // coverage check reads statement spans; a span that began at `function`
+    // left `server` outside every statement).
+    const span = makeSpan(leadTok.span.start, inline.endPos, leadTok.span.line, leadTok.span.col);
     return makeFunctionDecl(name, params, inline.body, false, isGenerator, span, {
         fnKind,
         isServer,
@@ -3360,14 +3375,25 @@ function typeAliasText(ctx) {
     const cursor = ctx.cursor;
     const parts = [];
     const startLine = lineOfToken(current(cursor));
+    // S441 round 5b — a braced operand inside the alias (`{ a: T } | { b: U }`)
+    // is balanced: only a `}` at depth 0 closes an enclosing block.
+    let braceDepth = 0;
     while (atEnd(cursor) === false) {
         const tok = current(cursor);
         const k = currentKind(cursor);
-        if (k === TokenKind.Semicolon || k === TokenKind.RBrace) {
+        if (k === TokenKind.Semicolon && braceDepth === 0) {
             break;
         }
-        if (parts.length > 0 && lineOfToken(tok) > startLine) {
+        if (k === TokenKind.RBrace && braceDepth === 0) {
+            break;
+        }
+        if (parts.length > 0 && braceDepth === 0 && lineOfToken(tok) > startLine) {
             break;   // ASI — the alias expression ended at the line boundary
+        }
+        if (k === TokenKind.RBrace) {
+            braceDepth = braceDepth - 1;
+        } else if (k === TokenKind.LBrace) {
+            braceDepth = braceDepth + 1;
         }
         parts.push(advance(cursor).text);
     }
@@ -3456,7 +3482,18 @@ export function parseTypeDecl(ctx) {
     if (currentKind(cursor) === TokenKind.Assign) {
         advance(cursor);   // consume `=`
         if (currentKind(cursor) === TokenKind.LBrace) {
+            const closeTok = current(cursor);
             raw = typeBodyText(ctx);
+            // S441 round 5b (D2) — a braced type continues on its line as any
+            // other type operand does: `{ a: number }[]`, `{ … } | { … }`,
+            // `{ … } & { … }` (mirrors the live ast-builder type handler).
+            const cont = current(cursor);
+            const prevTok = lastTokenBefore(ctx);
+            if (atEnd(cursor) === false && cont && prevTok && closeTok
+                    && lineOfToken(cont) === lineOfToken(prevTok)
+                    && (cont.text === "[" || cont.text === "|" || cont.text === "&" || cont.text === "&&" || cont.text === "?")) {
+                raw = raw + " " + typeAliasText(ctx);
+            }
         } else {
             raw = typeAliasText(ctx);
         }

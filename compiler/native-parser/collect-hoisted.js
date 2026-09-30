@@ -58,6 +58,7 @@
 // fresh local counter is used (test-harness convenience).
 
 import { StmtKind } from "./ast-stmt.js";
+import { isUnrepresentableExport } from "./translate-stmt.js";
 
 // =============================================================================
 // collectHoisted — calculation (pure). One fold over the block-stream,
@@ -715,6 +716,13 @@ function synthExportDecl(stmt, stamp, blockText, blockSpan, bodyStart) {
         if (lo >= 0 && hi <= blockText.length && lo <= hi) {
             raw = blockText.slice(lo, hi);
         }
+    }
+
+    // S441 round 5b — `export default …` / `export * as ns from …` have no
+    // live export-decl form (mirrors translate-stmt.js makeExportDecl).
+    if (isUnrepresentableExport(stmt)) {
+        exportKind = null;
+        exportedName = null;
     }
 
     return {
