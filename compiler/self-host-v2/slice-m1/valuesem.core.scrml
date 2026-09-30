@@ -43,7 +43,7 @@ ${
 
         const fAudit: Field = {
             sym: sAudit,
-            ty: Type.Seq(Type.Str, { length: LengthGrant.Free, at: [SeqAt.End], positionsWritable: false }),
+            ty: Type.Seq(Type.Str, { length: LengthGrant.Free, at: [SeqAt.End], shrink: [], positionsWritable: false }),
             init: Expr.ArrayOf([]),
             mode: FieldMode.Locked, role: FieldRole.Child,
             grants: { replace: false, edits: [EditKind.Append] },

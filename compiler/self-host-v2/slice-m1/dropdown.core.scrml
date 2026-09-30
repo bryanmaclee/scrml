@@ -65,7 +65,7 @@ ${
 
     // A sequence type with no grants is fully constrained (§66.12.1).
     fn fixedSeq(elem: Type) -> Type {
-        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], positionsWritable: false })
+        return Type.Seq(elem, { length: LengthGrant.Fixed, at: [], shrink: [], positionsWritable: false })
     }
 
     fn strList(xs: string[]) -> Expr {

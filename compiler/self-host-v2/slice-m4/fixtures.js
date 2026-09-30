@@ -1,9 +1,10 @@
 // fixtures.js — the slice-M4 fixtures, each DERIVED from a verbatim §66.19
 // source by named textual edits (so a SPEC change reaches it, and an edit whose
-// site moved throws instead of silently doing nothing). A fixture exists only
-// where the verbatim program uses a construct the bootstrap cannot build —
-// Core-blocked (core.scrml is outside this slice) or an OPEN item — and each
-// edit says which.
+// site moved throws instead of silently doing nothing). Each edit says why.
+// s444: §66.19.5 and §66.19.2 RUN FROM SOURCE now (audit.test.js / form.test.js
+// load the verbatim programs); what is left here is determinism for the older
+// review suites (a fixed clock, a button for the actor) and the validators
+// (Phase B).
 
 import { readM4, replaceLine } from "./harness.js";
 
@@ -15,10 +16,11 @@ export function editOnce(s, from, to) {
 }
 
 /**
- * §66.19.5 minus its two Core-blocked constructs: `Date.now()` (Core has no
- * host-call Expr) → `0`; `<input bind:value=@actor/>` (Core has no bind /
- * event-value form) → a button that sets `@actor`. Plus the `let snapshot =
- * @audit` comment line (§66.10) as a probe function.
+ * §66.19.5 made DETERMINISTIC for the s442 review suites (review-r1 / r2 /
+ * typing pin `@0` timestamps and click "As alice"): `Date.now()` → `0` and the
+ * bound input → a button that sets `@actor`. Plus the `let snapshot = @audit`
+ * comment line (§66.10) as a probe function. (s444: neither construct is
+ * Core-blocked any more — the verbatim program runs in audit.test.js.)
  */
 export function auditFixture() {
   let s = readM4("src/audit/audit.scrml");
@@ -46,18 +48,14 @@ export function auditShapesFixture() {
 }
 
 /**
- * §66.19.2 minus its validators (⚑ O25 — their reach into `renders` — and the
- * validity surface, §6.4) and its three binds (Core has no bind form), plus a
- * "Toggle agree" button — a logic write through the shared instance — standing
- * in for the checkbox's bind. `extraMain` is appended after it.
+ * §66.19.2 minus its validators only (s444: the three binds run — Core has
+ * the bind form). The validators land in Phase B (dpa-058, RULED S442).
+ * `extraMain` is appended after the `<*signup/>` line.
  */
 export function formFixture(extraMain = "") {
   let s = readM4("src/form/signup.scrml");
   s = editOnce(s, ` req length(>=5)/>`, `/>`);
   s = editOnce(s, ` req length(>=8)/>`, `/>`);
-  s = editOnce(s, `<input type="email" bind:value=@email/>`, `<input type="email"/>`);
-  s = editOnce(s, `<input type="password" bind:value=@password/>`, `<input type="password"/>`);
-  s = editOnce(s, `<input type="checkbox" bind:checked=@signup.agree/>`, `<input type="checkbox"/>`);
-  s = replaceLine(s, "render the shared signup instance", `<*signup/>\n        <button onclick=(@signup.agree = !@signup.agree)>Toggle agree</button>${extraMain}`);
+  s = replaceLine(s, "render the shared signup instance", `<*signup/>${extraMain}`);
   return s;
 }

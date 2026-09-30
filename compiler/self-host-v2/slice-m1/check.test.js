@@ -37,7 +37,7 @@ function pointCore(ptGrants) {
     { sym: sX, ty: C.Type.Int, grants: C.replaceGrant() },
     { sym: sY, ty: C.Type.Int, grants: C.noGrants() },
     { sym: sZ, ty: C.Type.Int, grants: { replace: false, edits: [C.EditKind.Transition] } },
-    { sym: C.mkSym(110, "w"), ty: C.Type.Seq(C.Type.Str, { length: C.LengthGrant.Free, at: [C.SeqAt.End], positionsWritable: false }),
+    { sym: C.mkSym(110, "w"), ty: C.Type.Seq(C.Type.Str, { length: C.LengthGrant.Free, at: [C.SeqAt.End], shrink: [], positionsWritable: false }),
       grants: { replace: false, edits: [C.EditKind.Append] } },
   ]);
   const fPt = {
