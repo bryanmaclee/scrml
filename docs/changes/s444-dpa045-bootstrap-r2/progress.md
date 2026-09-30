@@ -42,3 +42,17 @@ Branch: feat/s444-dpa045-bootstrap-r2 (from origin/feat/s442-dpa045-bootstrap @ 
 ## Not changed (operator's open question)
 - `//` in free text is a comment exit (§4.18.1b item 2): `http://x` in a `<p>` loses the rest
   of the line. Left exactly as is.
+
+## FINAL (merged tree)
+slice-m1 73/73 · lowered m1 73/73 · slice-m2 443/443 · slice-m3 60/60 · slice-m4 182 + 1 todo ·
+v2-lexer 337/337 · lint 58 files / 0 · mutations 207/207 RED, 0 problems, exit 0 (660 s) ·
+bite CG 32 + CSS 32 + FRONT 12 certified, 0 uncertified, exit 0 · conformance impl#1 1144/1151
++ 7 xfail (compiler/src + conformance/ identical to origin/main) · gate 26679 pass / 0 fail /
+72 skip / 12 todo.
+
+Whitespace check (reviewer's cmp.mjs; base = origin/main 4953ff135, which has no dpa-045
+parser change): every program's Core is JSON-identical modulo whitespace-only Text views —
+counter 4 · dropdown 22 · dropdownReorder 22 · dropdownEarlyRead 23 · valuesem 3 (= 74, as
+the reviewer measured) · M4 (added by the merge's programs): engine 5 · audit fixture 8 ·
+audit shapes fixture 8 · form fixture 16. Theme does not compile clean in the bootstrap on
+either side; its diagnostic list is identical.
