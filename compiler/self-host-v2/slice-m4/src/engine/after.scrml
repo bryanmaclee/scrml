@@ -27,6 +27,6 @@
         <button onclick=load()>Load</button>
         <card title="One"/>
         <card title="Two"/>                         // each card has its own `status`
-        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55) -->
+        <!-- <phase/> → E-DECL-SINGLE-INSTANTIATED (O55, ruled S442): <*phase/> is the only way to render it -->
     </main>
 </program>
