@@ -72,3 +72,10 @@ Consequence (per the ruling): `"abc` followed later in the file by any `"` is a 
 `:`-shorthand: unterminated → E-CTX-001, content to EOF (no body closer).
 Mutation rows for fix 4 rewritten: 6 rows (check dropped ×2, `${…}` not skipped, closed literal
 searched for closers, named closer dropped, `</>` dropped) — all RED.
+
+## FINAL round 3 (e8d92bfd9)
+slice-m1 73/73 · lowered m1 73/73 · slice-m2 443/443 · slice-m3 60/60 · slice-m4 188 + 1 todo ·
+v2-lexer 337/337 · lint 58 / 0 · mutations 209/209 RED, 0 problems, exit 0 · bite CG 32 + CSS 32
++ FRONT 12 certified, 0 uncertified, exit 0 · conformance impl#1 1144/1151 + 7 xfail (untouched) ·
+gate 26679 pass / 0 fail / 72 skip / 12 todo (first run flaked once on a 5 s live-Postgres hook
+timeout; clean re-run) · whitespace check unchanged (74 on the five; M4 5 / 8 / 8 / 16).
