@@ -181,7 +181,7 @@ describe("F7 — `Check.Static` on a transition only when Core proves the edge (
     const core = cores.dropdown();
     const dropdown = decl(core, "dropdown");
     const div = dropdown.renders[0];
-    const button = div.data.kids[0];
+    const button = div.data.kids.find((k) => k.variant === "El" && k.data.tag === "button");
     const onClick = button.data.attrs[1];
     const toggle = onClick.data.body.stmts[0];          // Write(wOpen, Lexical(0), Transition, Match…, RuntimeEdge)
     expect(toggle.data.check).toBe("RuntimeEdge");
