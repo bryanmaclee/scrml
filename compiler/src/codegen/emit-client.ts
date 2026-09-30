@@ -6,7 +6,7 @@ import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTop
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, type RequestBodyCell } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
@@ -3294,6 +3294,7 @@ export function generateClientJs(ctx: CompileContext): string {
     // now throws on a non-`{__scrml_error}` non-2xx (emit-functions.ts), so a
     // transport/host failure routes to `.error` here, never the success cell.
     const requestBodyCells: Map<string, RequestBodyCell> = collectRequestBodyCells(fileAST);
+    const requestDerivedNames: Set<string> = requestBodyCells.size > 0 ? collectDerivedVarNames(fileAST) : new Set<string>();
     // A request-body cell's mount-fetch is emitted ONCE at module-init (before
     // the DOMContentLoaded wiring), so it is the FIRST occurrence in the client.
     // Convert only that first occurrence per request id; any later reassignment
@@ -3344,12 +3345,18 @@ export function generateClientJs(ctx: CompileContext): string {
         // Re-fetch on any declared/inferred `@var` dependency change (§6.7.7).
         // The reads inside the effect establish the reactive subscription; the
         // effect also fires once on registration → the mount fetch.
-        const depsJs = info.depsVars
-          .map((d) => `_scrml_reactive_get(${JSON.stringify(d)})`)
-          .join(", ");
+        //
+        // The fetch itself runs UNTRACKED (S444). Its synchronous prologue — up
+        // to the first `await` — reads `${stateVar}.data` (the stale check) and
+        // evaluates the call's ARGUMENTS. Tracked, the first read subscribed the
+        // effect to its own result (every settle re-fired it: an endless refetch
+        // loop), and the argument reads added the body's `@var`s as deps even
+        // under an explicit `deps=[…]`, which §6.7.7 says "overrides inference".
+        // A DERIVED dep is read through requestDepReadLines' untracked settle so
+        // one upstream write re-fires the fetch once, not 2x (S444 review).
         lines.push(`_scrml_effect(function() {`);
-        lines.push(`  var _scrml_deps = [${depsJs}];`);
-        lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+        lines.push(...requestDepReadLines(info.depsVars, requestDerivedNames, "_scrml_deps"));
+        lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
         lines.push(`});`);
       } else {
         lines.push(`${fetchFn}();`);
@@ -3382,8 +3389,19 @@ export function generateClientJs(ctx: CompileContext): string {
       }
       return depth === 0 ? j : -1;
     };
-    for (const [, mangledName] of fnNameMap) {
-      if (!/^_scrml_(fetch|cps)_/.test(mangledName)) continue;
+    // g-request-body-client-wrapper-unawaited-one-shot (S444) — the callee set is
+    // every ASYNC-COLORED function, not only the server stubs. A client fn that
+    // reaches a server fn (`function wrap(q) { return suggest(q) }`) is emitted
+    // `async` by the same coloring (`clientAsyncFactsOf` — the analysis the
+    // E-ASYNC-FN-ESCAPES-AS-VALUE / sync-callback checks consult), so a
+    // module-init `_scrml_reactive_set("hits", _scrml_wrap_8(…))` stored a
+    // PROMISE in the cell. For a `<request>` body it also skipped the §6.7.7
+    // settle machine below — no fetch fn, no seq, no dep effect, `.loading`
+    // stuck `true`. Keyed by SOURCE name (fnNameMap's key), so a user name that
+    // merely looks like a stub is never swept in.
+    const asyncClientFnNames = clientAsyncFactsOf(ctx).asyncFnNames ?? new Set<string>();
+    for (const [sourceName, mangledName] of fnNameMap) {
+      if (!/^_scrml_(fetch|cps)_/.test(mangledName) && !asyncClientFnNames.has(sourceName)) continue;
       // Match _scrml_reactive_set("NAME", <mangledName>( ... );) at statement level.
       // Body args may themselves contain `(`; count parens to find the matching close.
       const setHead = "_scrml_reactive_set(";

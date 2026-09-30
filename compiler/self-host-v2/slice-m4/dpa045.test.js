@@ -6,9 +6,11 @@
 //   B(1) an interpolation's extent is found by lexing its body and tracking
 //        brace-TOKEN depth (lex.scrml lexFrom, the census's canonical walker) —
 //        never by counting raw `{` / `}` bytes.
-//   B(3) `\"` is DELETED from the code-default display-text literal: the `\` is
-//        content and the `"` ends the literal — no diagnostic (SPEC §4.18.3:
-//        "E-PARSE-001 no longer fires on `\x` here"; s444 r2 fix 1).
+//   B(3) `\"` was DELETED from the code-default display-text literal — SUPERSEDED
+//        S444 ("A for escapes"): `\"` `\\` `\${` are escapes again and any other
+//        `\` + char is E-PARSE-001 (SPEC §4.18.3). The tests below that pinned
+//        the S442 behaviour now pin the S444 behaviour; the full S444 suite is
+//        comment-escapes.test.js.
 // Census: docs/changes/s442-dpa045-bootstrap/census.md.
 
 import { describe, test, expect, beforeAll, afterEach } from "bun:test";
@@ -70,33 +72,28 @@ describe("dpa-045 B(1) — an interpolation's extent is brace-TOKEN depth (behav
   });
 });
 
-describe("dpa-045 B(3) — `\\\"` is not an escape in a display-text literal", () => {
-  // s444 r2 fix 1 — SPEC §4.18.3 (Amendment S442): "A `\` inside a display-text
-  // literal is an ordinary content character; there is no malformed-escape
-  // error (`E-PARSE-001` no longer fires on `\x` here). Consequently `\"` is a
-  // `\` followed by the closing `"`".
-  test("behaviour: a `:`-shorthand `\"C:\\\"` renders `C:\\` — no diagnostic", async () => {
-    expect(await html(P('<p : "C:\\">'))).toBe(W("<p>C:\\</p>"));
+describe("dpa-045 B(3) — SUPERSEDED S444: `\\\"` / `\\\\` / `\\${` are escapes again in a display-text literal", () => {
+  // SPEC §4.18.3 (Amendment S444, ruling:user-voice-scrml.md S444 "A for
+  // escapes" — supersedes S442 B(3) / B(2)). Each test below formerly pinned
+  // the S442 "no escapes" reading; it now pins the restored catalog.
+  test("behaviour: a `:`-shorthand `\"C:\\\\\"` renders `C:\\` (the escaped backslash; S442: `\"C:\\\"` did)", async () => {
+    expect(await html(P('<p : "C:\\\\">'))).toBe(W("<p>C:\\</p>"));
   });
-  test("behaviour: a state-child body `\"C:\\\"` renders `C:\\` — no diagnostic", async () => {
-    expect(await html(state('"C:\\"'))).toBe(W("<p>C:\\<!--if--></p>"));
+  test("behaviour: a state-child body `\"C:\\\\\"` renders `C:\\`", async () => {
+    expect(await html(state('"C:\\\\"'))).toBe(W("<p>C:\\<!--if--></p>"));
   });
-  test("`\"a\\\"b\"`: the `\"` after the `\\` closes the literal, so `b` is what is left over — and never E-PARSE-001", () => {
-    const sh = run(P('<p : "a\\"b">')).diags.map((d) => d.code);
-    expect(sh[0]).toBe("E-PARSE-TRAILING");
-    expect(sh).not.toContain("E-PARSE-001");
-    const st = run(state('"a\\"b"')).diags.map((d) => d.code);
-    expect(st[0]).toBe("E-UNQUOTED-DISPLAY-TEXT");
-    expect(st).not.toContain("E-PARSE-001");
+  test("`\"a\\\"b\"` is ONE literal `a\"b` — no E-PARSE-TRAILING / E-UNQUOTED-DISPLAY-TEXT leftover, no E-PARSE-001", async () => {
+    expect(await html(P('<p : "a\\"b">'))).toBe(W('<p>a"b</p>'));
+    expect(await html(state('"a\\"b"'))).toBe(W('<p>a"b<!--if--></p>'));
   });
-  test("twin (state body): `\\\\` is two backslashes", async () => {
-    expect(await html(state('"a\\\\b"'))).toBe(W("<p>a\\\\b<!--if--></p>"));
+  test("state body: `\\\\` is ONE backslash", async () => {
+    expect(await html(state('"a\\\\b"'))).toBe(W("<p>a\\b<!--if--></p>"));
   });
-  test("twin (state body): `\\${@n}` is a `\\` then a live interpolation", async () => {
-    expect(await html(state('"a \\${@n} b"'))).toBe(W("<p>a \\5 b<!--if--></p>"));
+  test("state body: `\\${@n}` is the literal `${@n}` — not a live interpolation", async () => {
+    expect(await html(state('"a \\${@n} b"'))).toBe(W("<p>a ${@n} b<!--if--></p>"));
   });
-  test("B(2) RULED delete (follow-up): `\\\\` is no longer an escape — both backslashes are content", async () => {
-    expect(await html(P('<p : "a\\\\b">'))).toBe(W("<p>a\\\\b</p>"));
+  test("`:`-shorthand: `\\\\` is ONE backslash (S442 B(2) = delete is superseded)", async () => {
+    expect(await html(P('<p : "a\\\\b">'))).toBe(W("<p>a\\b</p>"));
   });
   test("twin: `\\\"` in a LOGIC string is still an escape (the deletion is the display-text literal's only)", async () => {
     expect(await html(P('<p>${"a\\"b"}</p>'))).toBe(W('<p>a"b</p>'));
@@ -203,7 +200,7 @@ describe("follow-up 2 — cooked: the node handed on has its delimiters removed"
   });
 });
 
-describe("follow-up 3 — a display-text literal has no character escapes; `${…}` inside it interpolates (§4.18.4)", () => {
+describe("follow-up 3 — `${…}` inside a display-text literal interpolates (§4.18.4); the S442 no-escapes half is superseded S444", () => {
   test("behaviour: `:`-shorthand `\"Count ${@n} items\"` renders the interpolation", async () => {
     expect(await html(P('<p : "Count ${@n} items">'))).toBe(W("<p>Count 5 items</p>"));
   });
@@ -213,8 +210,8 @@ describe("follow-up 3 — a display-text literal has no character escapes; `${�
   test("behaviour: a state-child body `\"Loaded ${@n} rows\"`", async () => {
     expect(await html(state('"Loaded ${@n} rows"'))).toBe(W("<p>Loaded 5 rows<!--if--></p>"));
   });
-  test("behaviour: `\\${` is no longer an escape — the backslash is content and `${` still interpolates", async () => {
-    expect(await html(P('<p : "a \\${@n} b">'))).toBe(W("<p>a \\5 b</p>"));
+  test("behaviour (S444 — escape restored): `\\${` is the literal `${` — no interpolation", async () => {
+    expect(await html(P('<p : "a \\${@n} b">'))).toBe(W("<p>a ${@n} b</p>"));
   });
   test("an interpolating display-text literal nested in a larger expression is reported, not rendered raw", () => {
     expect(run(P('<p : @n == 5 ? "a ${@n}" : "b">')).diags.map((d) => d.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);

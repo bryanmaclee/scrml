@@ -553,6 +553,16 @@ scrml defines `//` as the universal single-line comment syntax (§27). The block
 
 **S88 amendment note (2026-05-13):** the prior `SHALL NOT handle <!-- -->` wording (pre-S87) was authored before the BS-layer comment-skip mechanism shipped. Per S86 ratification ("BS-layer over SPEC retreat" — when SPEC and implementation diverge AND SPEC is design-intent, implementation catches up; conversely when implementation is the right answer, SPEC catches up), this amendment softens §4.7 to MAY-permit `<!-- -->` skip at BS-layer, matching the shipped block-splitter behavior. The skip is conservative: it treats the entire comment span as raw content; it does not interpret content inside the comment for delimiter recognition. `/* */` remains forbidden at BS-layer — those genuinely belong to per-context tokenizers (CSS, JS) and crossing the BS layer would create false context-mode transitions inside non-comment code.
 
+**S444 narrowing — `//` inside a free-text body.** Inside a free-text body (§4.18.1 — plain-markup element bodies,
+component bodies, the `<errors>` override template), the two characters `//` open a comment **only** when they are
+immediately preceded by a whitespace byte (space, tab, LF, CR — so a `//` at the start of a line,
+after its indentation, or after a space mid-line). Anywhere else in a free-text body `//` is content and suppresses
+nothing: `http://x`, `a//b` and `</b>// x` are text. When `//` does open a comment, this section applies unchanged — the
+comment runs to end of line and every delimiter in it (including a closer such as `</p>`) is raw comment text. The
+normative rule is §4.18.1b exit (2). In every other context (`<program>` / `<page>` `default-logic` bodies, logic,
+code-default bodies, CSS, the block splitter's own brace-delimited scanning) this section is unchanged.
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (item 1: *"a `//` starts a comment ONLY at the start of a line or after whitespace; the comment runs to end of line and is OPAQUE"*) · supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (an unqualified `//` in free text)
+
 **Rationale:** Without this rule, a commented-out delimiter sequence such as `// <db src="db.sql">` or `// ${` would be scanned by the block splitter and would open a spurious block context, corrupting the block stream and all downstream passes.
 
 **Worked example — valid (commented-out tag):**
@@ -1189,6 +1199,9 @@ This subsection is the **single canonical definition** of the code-default body 
 
 > **Amendment S442 — dpa-045: plain-markup text (AXIOM-LEVEL). The two text-mode productions (§4.18.1 / §4.18.1a /
 > §4.18.1b), whitespace kept exactly (§4.18.5), and the display-text literal's character escapes deleted (§4.18.3).**
+> *(S444: the escape deletion is SUPERSEDED — `\"`, `\\`, `\${` are restored, §4.18.3; and exit (2), `//` comments, is
+> narrowed to a `//` at the start of a line or after whitespace, §4.18.1b. The rest of this banner stands.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (the `//` part)
 > Free text (plain-markup bodies, literal by default) and code-default (engine state-children, match arms,
 > `:`-shorthand; display text inside `"…"`) are specified as a pair of **text-mode productions** — duals, not one model.
 > Neither is a string literal, and neither may be called one.
@@ -1199,7 +1212,8 @@ This subsection is the **single canonical definition** of the code-default body 
 > the propagation fix repeats, in real time and with the debate's own eyes open, exactly the defect class Call 1
 > named."* The propagation fixes are scheduled by the same ruling (B): (1) route the free-text `${` scan through the
 > proper brace scanner; (2) make the §4.18.3 escape table actually work OR delete it from SPEC — not neither
-> (RULED S442 follow-up: **delete** — §4.18.3); (3) delete the `\"` escape (done — §4.18.3). B(1) and the
+> (RULED S442 follow-up: ~~**delete** — §4.18.3~~ *superseded S444: the catalog is restored and made to work,
+> §4.18.3*); (3) ~~delete the `\"` escape (done — §4.18.3)~~ *(superseded S444: `\"` restored, §4.18.3)*. B(1) and the
 > whitespace fixes (§4.18.5) are built in the BOOTSTRAP; impl#1 only if one proves to be security (S435 policy). The loop census (C — every scanner that independently decides where a body
 > ends) runs against the bootstrap's `parse.scrml`, not impl#1.
 >
@@ -1230,6 +1244,13 @@ This subsection is the **single canonical definition** of the code-default body 
 *(Amendment S442 — the round-2 drafted §4.18.1. Three edits to the drafted text, all ruled: the free-text row keeps
 the prior §4.18.1's HTML-element list; its exit column is the follow-up's closed set (§4.18.1b); and the code-default
 escape column is empty — `\"` deleted per B(3), `\\` / `\${` per B(2) = delete. See the banner above.)*
+*(S444, "standalone only": the code-default exit cell is narrowed — only a standalone `"…"` body statement is a
+display-text literal; §4.18.3.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "standalone only, your rec" · narrows: the §4.18.1 code-default cell "`\"` opens a display-text literal (§4.18.3)" and the S111 §4.18.3 scope ("the vehicle for plain display text inside a code-default body") — which since #1190 the bootstrap read as EVERY `"…"` in a code-default body
+*(S444: two table cells amended — the free-text exit column's `//` is narrowed to a `//` at the start of a line or
+after whitespace (§4.18.1b exit (2)), and the code-default escape column is no longer empty: `\"`, `\\`, `\${` are
+restored (§4.18.3).)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (the `//` part)
 
 A markup/state body — the content between a tag opener's `>` and the matching closer (`</>` / `</tagname>`) — is
 scanned by exactly one of two **text-mode productions**. A text-mode production is a region whose extent and internal
@@ -1239,8 +1260,8 @@ name.** The two productions are **duals, not one model wearing two hats**:
 
 | production | governs | default | exit sequence(s) | escape into the default |
 |---|---|---|---|---|
-| **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error, `~{` test — §4.18.1b); `//` comments (§4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
-| **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) | code | `"` opens a display-text literal (§4.18.3) | none — the display-text literal has NO character escapes (S442: `\"`, `\\`, `\${` deleted; ⚑ OPEN residue — §4.18.3) |
+| **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error, `~{` test — §4.18.1b); `//` comments — a `//` at the start of a line or immediately after whitespace only (§4.18.1b exit (2), §4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
+| **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) | code | ~~`"` opens a display-text literal (§4.18.3)~~ S444: a `"…"` standing ALONE as a body statement is a display-text literal (§4.18.3); a `"…"` operand inside an expression is an ordinary string | inside a display-text literal: `\"` (a literal `"`), `\\` (a literal `\`), `\${` (a literal `${`) — §4.18.3 (restored S444; ~~S442: NO character escapes~~) |
 
 - The body mode SHALL be determined by the **enclosing element kind**, never by the lexical content of the body.
   *(Unchanged from the prior §4.18.1.)* An engine state-child body is code-default because it is an engine state-child
@@ -1285,7 +1306,8 @@ banner.)*
 **Free text's closed exit set (RULED, S442 follow-up — the ruling's words):** *"Free text's closed exit set is:
 (1) every context sigil §3.1 already defines (`${`, `#{`, `^{`, `!{`, and so on); (2) `//` comments (§4.7); (3) `<`
 followed by a letter, `!`, `/`, `?`, `*`, `_` or `.` — the three additions are scrml's own tag forms. That list, and no
-others."* So `5 < 7` is just text.
+others."* So `5 < 7` is just text. *(S444: exit (2) is narrowed — a `//` opens a comment only at the start of a line or
+after whitespace; see item 2 below.)*
 
 - **Closed exit set (pin 1).** A free-text body is left by exactly these sequences — **that list, and no others**:
   1. **The context sigils** (a `{`-delimited context opens; content resumes at its matching `}`):
@@ -1305,7 +1327,30 @@ others."* So `5 < 7` is just text.
        > **Provenance:** rationale:§23.2.4 already makes a `_{}` in a markup element body E-FOREIGN-004; the struck "as today" was false for impl#1 (verified by execution at `108ca89b`) (PA reading S444, bryan veto window)
      - NOT exits: `?{` — the §3.1 table's third row, whose parent is Logic only; in a markup body it is text (§4.17
        S108 note, §8.1).
-  2. **`//` comments** — §4.7 suppression; the comment runs to end of line and is not content.
+  2. ~~**`//` comments** — §4.7 suppression; the comment runs to end of line and is not content.~~ *(superseded S444 —
+     the next paragraph narrows which `//` opens a comment)*
+     **`//` comments — at the start of a line or after whitespace only (S444).** A `//` in a free-text body opens a
+     comment **if and only if** the byte immediately before its first `/` is a **whitespace byte** — space (U+0020),
+     tab (U+0009), line feed (U+000A) or carriage return (U+000D); these four, and no others. (A free-text body always
+     follows its opener's `>`, so a byte before the `//` always exists.) "The start of a line" is the case where that byte is a line terminator; a `//` after a line's
+     leading indentation is preceded by whitespace and so opens a comment too. "Immediately before" means the source byte
+     itself, whatever construct it ends: a `//` right after a tag's `>` (`<p>// x`, `</b>// x`), after an
+     interpolation's `}` or after a `-->` is NOT a comment. Every other `//` is **content** — so `http://x`,
+     `https://x.y` and `a//b` are text, while `a // b` and `</label>   // note` are comments.
+     A comment runs from the `//` to (not including) the next line terminator, or to end of file, and it is **opaque**:
+     it is its own delimited region, so nothing inside it is an exit or a closer — `<p> // ends with </p>` followed
+     on the next line by `</p>` is an empty-of-content `<p>` (its whitespace kept, §4.18.5) whose closer is the SECOND
+     `</p>`. (A consequence, not an exception: written on ONE line, `<p> // ends with </p> </p>` puts both `</p>` in
+     the comment, and the `<p>` closes at the next closer after that line.) The comment is not content; the line
+     terminator that ends it is content (§4.18.5). Pin 3 holds: the comment's extent is set by its own delimiters (the
+     whitespace-preceded `//` and the line end), and no byte inside it moves the body's end.
+     > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (item 1, bryan's
+     > counter-example *"<p> // this tag should end with </p> </p>"*: *"a `//` starts a comment ONLY at the start of a
+     > line or after whitespace; the comment runs to end of line and is OPAQUE (a `</p>` inside it is comment text — the
+     > comment is its own delimited region, so pin 3 holds). So `http://x`, `a//b`, `https://x.y` stay text;
+     > `</label>   // note` unchanged; prose `a // b` becomes a comment."*) · the whitespace set, the start-of-line
+     > reading and the "immediately before is the source byte" reading are PA readings S444 (bryan veto window) ·
+     > supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (an unqualified `//`)
   3. **`<` immediately followed by `[a-zA-Z!/?*_.]`** — opens or closes a nested element: a tag opener, `</>`,
      `</tag>`, `<!-- -->` (`!`), and scrml's own tag forms `<*x/>` (the existing instance, §66.6), `<_ …>` (the
      wildcard arm) and `<.Variant …>` (a variant arm, §18.0.1).
@@ -1337,20 +1382,25 @@ others."* So `5 < 7` is just text.
   character inside can move it.
 - **Cooked (pin 4 — RULED).** The node handed to codegen SHALL be **cooked**: delimiters removed and escapes
   decoded. For a display-text literal, the `"` delimiters are removed before any downstream stage receives the content,
-  and no downstream stage SHALL re-scan that content for escapes. (With §4.18.3's catalog deleted there are no escapes
-  left to decode; the rule still binds the delimiters and forbids a downstream re-scan.) For the free-text production,
+  and no downstream stage SHALL re-scan that content for escapes. ~~(With §4.18.3's catalog deleted there are no escapes
+  left to decode; the rule still binds the delimiters and forbids a downstream re-scan.)~~ *(S444: the catalog is
+  restored — `\"` → `"`, `\\` → `\`, `\${` → the two characters `${`, decoded once, by the scan that finds the literal's
+  extent; a decoded `${` is content and is never re-read as an interpolation.)* For the free-text production,
   cooked and raw are the same bytes — the production has no delimiters inside the run and no escapes (pin 5).
   *(Round 2 Call 2 measured two shipped modules disagreeing: `parse-file.js:316` hands codegen the verbatim source
   including quotes; `emit-match.ts:647` strips the delimiters and decodes the escapes. impl#1 divergence.)*
   > **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 2 — *"Cooked — the node handed to codegen
   > has delimiters removed and escapes decoded (dpa-045 pin 4). → RULED."*
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 - **The free-text escape policy DIVERGES from §4.18.3 — deliberately (pin 5).** The free-text production has **no
   escape table**. **A stray `\` in free text is just content** — silent content: not an escape, not an error, not a
-  diagnostic. §4.18.3's former escape set and its `E-PARSE-001` malformed-escape rule for `\x` (both deleted S442)
-  never applied to a free-text body, and no escape rule SHALL be applied to one. (The artifact names the hazard: that rule
+  diagnostic. §4.18.3's escape set and its `E-PARSE-001` malformed-escape rule for `\x` (~~both deleted S442~~ both
+  restored S444) never apply to a free-text body, and no escape rule SHALL be applied to one. (The artifact names the hazard: that rule
   extended to free text would newly-reject every Windows path, every `\n` in prose, every regex in a `<p>` — "one word
   away … the word being 'literal' spanning both productions.") *Informative:* a literal `${` in free text is written
   with a DELIMITER escape — interpolate the text, e.g. `${"$"}{5}` — never a character escape (round 2, Q3).
+  *(S444: unchanged — free text stays escape-free; the restored escapes are the display-text literal's only.)*
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 - **Grammar vs conformance (pin 6).** This subsection specifies a grammar property (bounded-lookahead decidability); it
   does NOT thereby claim the shipping compiler computes this production's extent via a single canonical scan. Where
   more than one component independently computes an extent for the same body, this subsection's guarantee holds only
@@ -1370,9 +1420,11 @@ claim about the rule; the shipping compiler has not moved (Nominal/spec-ahead).
 | whitespace — static-HTML path (plain markup at top level / in `<program>`, `if=` templates, markup nested in match arms and engine state-children, both display-text-literal loci) | verbatim, byte for byte | verbatim | inert |
 | whitespace — component-definition bodies (`const Box = <div>…</>`) | runs collapse to one space, indentation stripped, tab → space; one case ADDS a trailing space | verbatim | emitted-output change (conformance fix; no acceptance change) |
 | whitespace — markup built from logic (`lift <li>…</li>`, markup-as-value `const m = <p>…</p>`) | each text segment trimmed and collapsed; the whitespace next to `${…}` is DELETED (`   lifted   ${it}   li` renders `liftedali`) | verbatim | emitted-output change (bug-fix — today's output drops content) |
-| `\"` in a code-default display-text literal | `:`-shorthand: `E-ENGINE-STATE-CHILD-MISSING` for children present in source (round 2) | not an escape: `\` is content and the `"` closes the literal (§4.18.3) | changes meaning at the SPEC level; corpus uses: **0** |
-| `\\` / `\${` in a code-default display-text literal | `\\` renders `\\` (cooked value discarded); `\${` is a no-op — the interpolation fires (round 2) | not escapes: `\` is content; `${` opens an interpolation | changes meaning at the SPEC level; corpus uses: **0** / **0** |
-| `//` comments, `#{`, `^{`, `!{` blocks in a free-text body | exits (459 / 87 / 29 / 5 corpus blocks) | exits | inert |
+| `\"` in a code-default display-text literal | `:`-shorthand: `E-ENGINE-STATE-CHILD-MISSING` for children present in source (round 2) | ~~not an escape: `\` is content and the `"` closes the literal (§4.18.3)~~ S444: an escape — a literal `"`; the literal does not close (§4.18.3) | ~~changes meaning at the SPEC level~~ S444: the S111 meaning restored; corpus uses: **0** |
+| `\\` / `\${` in a code-default display-text literal | `\\` renders `\\` (cooked value discarded); `\${` is a no-op — the interpolation fires (round 2) | ~~not escapes: `\` is content; `${` opens an interpolation~~ S444: escapes — a literal `\` / a literal `${` (no interpolation) (§4.18.3) | ~~changes meaning at the SPEC level~~ S444: the S111 meaning restored; corpus uses: **0** / **0** |
+| `//` comments, `#{`, `^{`, `!{` blocks in a free-text body | exits (459 / 87 / 29 / 5 corpus blocks) | exits (S444: a `//` only at the start of a line or after whitespace — next row) | inert |
+| S444 (measured at `12aae48a1`) — a free-text `//` NOT preceded by whitespace (`a//b`, `</b>// x`, `<p>// x`, `${x}// y`) | impl#1: a comment (except a `:`-preceded `//`, which its URL carve-out keeps as text) — silently deletes the rest of the line | content (§4.18.1b exit (2)) | changes meaning — was a comment, is now text; corpus (`examples/ samples/ conformance/`): **0** (all 55 `\S//` hits are in attributes, logic strings or comments); bootstrap parse of 2,130 corpus files: **0** changed |
+| S444 — a free-text `//` after whitespace or at a line start (`a // b`, `</label>   // note`, an indented `// note`) | a comment | a comment, opaque to end of line | inert |
 | the spaced opener `< tag>` in a free-text body | an opener + W-WHITESPACE-001 | content | changes meaning — was an opener, is now text; corpus: **1** (`ctrl-004`, conformance) |
 | `<*x/>`, `<_ …>`, `<.Variant …>` in a free-text body | tag forms | tag forms | inert |
 
@@ -1392,24 +1444,67 @@ This is the **explicit text/code boundary** the model establishes: in a code-def
 
 A **display-text literal** is the vehicle for plain display text inside a code-default body.
 
+**Scope — a standalone body statement only (S444).** A `"…"` in a code-default body is a display-text literal **only
+when it stands alone as a body statement** — the whole statement is the one `"…"` (a body may hold several such
+statements; a `:`-shorthand body is one). A `"…"` that is an operand inside an expression — `@n > 5 ? "many\n" :
+"few"`, `f("x")`, `"a" + @b`, `("x")` — is an **ordinary string value** with the ordinary logic-string escapes (`\n` is a
+newline, `\t` a tab; there is no `E-PARSE-001` for them) and none of this section's rules. Everything below in §4.18.3
+/ §4.18.4 (the escape catalog, `E-PARSE-001`, `${…}` segments, cooking) applies to the standalone literal only.
+> **Provenance:** ruling:user-voice-scrml.md S444 "standalone only, your rec" · narrows: the §4.18.1 code-default cell "`\"` opens a display-text literal (§4.18.3)" and the S111 §4.18.3 scope ("the vehicle for plain display text inside a code-default body") — which since #1190 the bootstrap read as EVERY `"…"` in a code-default body
+
 **Formal rule:**
 
 ```
 display-text-literal ::= '"' ( literal-segment | interpolation )* '"'
-literal-segment      ::= (any character except '"' or the '${' sequence)+     -- S442: '\' is ordinary (no escapes)
+literal-segment      ::= ( escape | any character except '"', '\' or the '${' sequence )+
+escape               ::= '\"' | '\\' | '\${'                            -- S444: restored (S442's "no escapes" superseded)
 interpolation        ::= '${' expression '}'
 ```
+
+A `\` followed by anything other than `"`, `\` or `${` is a malformed escape (`E-PARSE-001`, below).
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 
 **Normative statements:**
 
 - A display-text literal is delimited by the double-quote character `"` on both ends. The double-quote is the **only** display-text-literal delimiter. This matches the §5 attribute-string convention (`attr="value"` — §5.1), which is `"`-only; scrml uses one string delimiter language-wide.
 - The apostrophe `'` is an **ordinary interior character** of a display-text literal — it carries no delimiter role and requires no escape. `"Don't worry — it's fine"` is a single well-formed literal. The backtick `` ` `` is likewise an ordinary interior character and is NOT a display-text delimiter.
-- ~~A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)~~ *(superseded S442 — next bullet)*
-- **Amendment S442 — the display-text literal has NO character escapes.** The whole former catalog is deleted: `\"` (B(3)), and `\\` and `\${` (B(2) = delete). A `\` inside a display-text literal is an ordinary content character; there is no malformed-escape error (`E-PARSE-001` no longer fires on `\x` here). Consequently `\"` is a `\` followed by the closing `"`, `\\` is two backslashes, and `\${` is a `\` followed by an interpolation. The free-text production has never had an escape table (§4.18.1b, pin 5), so neither text-mode production has character escapes.
+- ~~A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)~~ *(superseded S442 — next bullet; RESTORED S444 — the "Amendment S444" bullet below)*
+- ~~**Amendment S442 — the display-text literal has NO character escapes.** The whole former catalog is deleted: `\"` (B(3)), and `\\` and `\${` (B(2) = delete). A `\` inside a display-text literal is an ordinary content character; there is no malformed-escape error (`E-PARSE-001` no longer fires on `\x` here). Consequently `\"` is a `\` followed by the closing `"`, `\\` is two backslashes, and `\${` is a `\` followed by an interpolation. The free-text production has never had an escape table (§4.18.1b, pin 5), so neither text-mode production has character escapes.~~ *(superseded S444 — the escape catalog is restored; see the "Amendment S444" bullet below. The S442 provenance and evidence that follow are kept as the record.)*
   > **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" (B(3): *"delete the `\"` escape"*) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 3 — *"B(2) = delete the rest of the §4.18.3 display-text escape catalog (`\\`, `\${`) — measured zero uses in 2,138 files. → RULED. (With B(3), the code-default display-text literal has no character escapes.)"* · dPA artifact `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round2-2026-09-08.md` Q3 (*"Consider DELETING `\"` from §4.18.3 rather than fixing it … a character-escape is Class D machinery"*; *"Resolve root cause A one way or the other, but not neither"*) · supersedes: the struck three-escape sentence above. **Direction of change:** changes meaning at the SPEC level for `\"` / `\\` / `\${` inside a display-text literal. Evidence (S442 E measurement, `docs/changes/s442-dpa045-spec/progress.md`): across 2,138 `.scrml` files the catalog had **zero uses** — `\"` 0, `\\` 0, `\${` 0 — in 40 display-text literals (37 `:`-shorthand, 3 block-form). Shipping state (round 2 + S442): `\"` mis-scans (`E-ENGINE-STATE-CHILD-MISSING` for children present in source); `\\` passes only because the cooked value is discarded; `\${` is a no-op; the block splitter splits `"lit \${5}"` into text + a live `${5}` logic block. impl#1 divergences.
   >
-  > ⚑ **OPEN (residue — the ledger's scope note, verbatim):** *"with the catalog deleted, how an author writes a literal `"` or a literal `${` inside a code-default display-text literal is an OPEN residue (the dPA artifact already flagged the `"` case) — not decided here."* (The artifact: scrml has one string delimiter language-wide, so a `"` inside a display-text literal *"has no delimiter answer"*; it places *"the generalizable raw-content marker"* at that hole.)
+  > ~~⚑ **OPEN (residue — the ledger's scope note, verbatim):** *"with the catalog deleted, how an author writes a literal `"` or a literal `${` inside a code-default display-text literal is an OPEN residue (the dPA artifact already flagged the `"` case) — not decided here."* (The artifact: scrml has one string delimiter language-wide, so a `"` inside a display-text literal *"has no delimiter answer"*; it places *"the generalizable raw-content marker"* at that hole.)~~ *(CLOSED S444 — bryan ruled option A, restore the escapes; option B (doubled `""` / `$${`), option C (raw `#"…"#`) and interpolation (`${'"'}`) were not taken — next bullet.)*
+- **Amendment S444 — the escape catalog is RESTORED.** Inside a display-text literal there are exactly three escape
+  sequences, and no others:
+  - `\"` — a literal double-quote. It does NOT close the literal: `"She said \"hi\""` is `She said "hi"`.
+  - `\\` — a literal backslash. `"C:\\"` is `C:\` — the `"` after the escaped backslash closes the literal.
+  - `\${` — the two characters `${` as content, NOT an interpolation: `"\${x}"` is the four characters `${x}`. (After
+    it, `x}` is ordinary content; no brace matching happens.)
+
+  A backslash followed by any other character — `\q`, `\n`, `\t`, a `\` followed by a `$` that is not followed by
+  `{`, a `\` at a line end — is a **malformed escape: `E-PARSE-001`**, against the backslash and the character after it.
+  This restores the S111 catalog's rule exactly (S111, commit `d0b75a8f7`: *"a backslash followed by any other character
+  is a malformed escape (`E-PARSE-001`)"*); it is not a new design. On recovery the two characters are kept as content
+  and the scan continues after them, so a malformed escape never moves where the literal ends (the `"` after `\q` still
+  closes it). The escapes are decoded once, by the scan that finds the literal's extent (§4.18.1b pin 4 — cooked); the
+  node handed on carries the decoded text, and a decoded `${` is content that no later stage re-reads as an
+  interpolation. A `\` inside an interpolation's `${ … }` belongs to the expression's own grammar (a logic-context
+  string's escapes), not to this catalog. **The free-text production stays escape-free** (§4.18.1b pin 5): a `\` in a
+  plain-markup body is content — unchanged.
+  The unterminated-literal check (next bullet) uses the same scan: an escaped `\"` is not the closing quote, and an
+  escaped `\\` does not escape the character after it.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
+  > **Direction of change (per surface):** `\"` — was (S442) a `\` then the closing `"`; now a literal `"` and the
+  > literal continues (changes meaning; corpus uses **0**, S442 E measurement). `\\` — was two backslashes; now one
+  > (changes meaning; **0**). `\${` — was a `\` then a live interpolation; now a literal `${` (changes meaning; **0**).
+  > `\q` and every other `\` + char — was content; now `E-PARSE-001` (newly-rejecting; **0** — the S442 E cross-check
+  > found all 347 `\` characters in the corpus in logic, none inside a display-text literal).
+  > **Unknown-escape decision (S444):** the PA's lean was "`\` + char kept as content"; the brief's own condition
+  > governs — the pre-S442 catalog had `E-PARSE-001` for a malformed escape, so that behaviour is restored exactly.
 - A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7.
+  *(S444:)* The recovered content is cooked with the same escape table, and each malformed escape in it is
+  `E-PARSE-001` — including a `\` immediately before the recovery point (`"abc\` at end of file: `E-CTX-001`, then
+  `E-PARSE-001` for the trailing `\`). Its `${` is content: the literal never closed, so no interpolation is walked.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (the catalog applies to the literal's content however it ends) · review:S444 S239 review of 5d5ad360b nit 3 (the recovery path was raw and silent)
 
 **Worked example — display-text literals in code-default bodies:**
 
@@ -1433,6 +1528,10 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
 - A display-text literal carrying one or more `${...}` interpolations is a single body child — a template-string-valued display-text node interleaving literal-text segments and interpolated expressions. It is NOT decomposed into sibling text + interpolation children.
 - The `${...}` interpolation token keeps a single meaning across the language: "interpolate an expression here." It is the same token in an attribute-value string (`attr="${@x}"` — §5, already template-string-shaped) and in a body display-text literal. A display-text literal is the body-position analogue of the attribute-value string.
 - ~~A literal `${` sequence intended as display text (not an interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. The escape is rare in practice (the `${` sequence is the interpolation opener inside the literal and is normally used for that purpose).~~ *(superseded S442 — the `\${` escape is deleted, §4.18.3 (B(2) = delete); how to write a literal `${` inside a display-text literal is ⚑ OPEN — the §4.18.3 residue)*
+- **Amendment S444 — the struck bullet above is restored.** A literal `${` sequence intended as display text (not an
+  interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. `"Cost: \${5}"` renders
+  `Cost: ${5}`; `"Cost: ${5}"` renders `Cost: 5`.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 
 **Worked example — interpolation inside the literal:**
 
@@ -20432,6 +20531,10 @@ scrml emits a single fixed `@layer` order once — `@layer reset, thirdparty, ba
 
 `//` is a single-line comment. It is valid in all scrml contexts.
 
+*(S444: inside a free-text body — plain markup — a `//` opens a comment only at the start of a line or immediately
+after whitespace; elsewhere there it is content, so `http://x` in a `<p>` is text. §4.18.1b exit (2), §4.7.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2)
+
 ### 27.2 Per-Context Native Comments
 
 Each context type also accepts its native comment syntax:
@@ -21598,6 +21701,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LIFECYCLE-015 | §28.5 | `animationFrame()` called with zero arguments or a non-function argument. The function expects a single callback. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | E-LIFECYCLE-017 | §28.5 | `animationFrame()` called outside any element scope. The function attaches per-frame work to an enclosing element's lifecycle; without a host element it has nowhere to attach. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | E-LIFECYCLE-018 | §28.3 | `<request>` element has no `id` attribute. The `id` is required so the request can be addressed and cancelled. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
+| E-LIFECYCLE-022 | §6.7.7 | A `<request>` `deps=` entry is not a bare `@identifier` — a member access (`@u.id`), a call, a literal, or a name without the `@` sigil — or the `deps=` value is not a `[ ]` list (`deps=@n`). Grammar: `deps-list ::= ('@' identifier (',' '@' identifier)*)?`. An explicit `deps=` overrides inference, so an unrecognized entry would otherwise leave the request mount-only with no diagnostic. Resolution: list the cell itself (`deps=[@u]` for `@u.id`), or `deps=[]` for fetch-on-mount-only. The "undeclared `@x`" limb of §6.7.7's statement is refused by `E-STATE-UNDECLARED` at the same entry. (Catalog addition S444; emitted at `compiler/src/codegen/emit-html.ts` via `analyzeRequestDepsAttr` in `compiler/src/codegen/reactive-deps.ts`.) | Error |
 | W-LIFECYCLE-002 | §28.1 | `<timer>` has no body (self-closing form). A bodyless timer has no observable effect; the warning surfaces probable dead code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | W-LIFECYCLE-007 | §28.1 | `running=false` literal boolean on `<timer>` or `<poll>`. The literal-false form is useless — the element can never become un-paused without a reactive variable. Use `running=@flag` or remove the attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | E-LIN-005 | §35.5 | `let` / `const` / `lin` declaration shadows an in-scope `lin` variable of the same name. Shadowing a `lin` variable prevents the compiler from determining which binding a consumption refers to. Resolution: rename the new binding, or consume the outer `lin` variable before this declaration. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts` (`checkLinShadowing`). Supersedes the retired pre-2026-04 E-LIN-005 noted in §6.7.12.) | Error |
@@ -21791,6 +21895,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | W-AUTH-FILE-CONFLICT | §40.2, §52.13 | Warning-level: one file declares `auth="required"` at one site (its first top-level `<program>` or a `<page>`) and a laxer `auth=` (`"optional"` / `"none"`) at another. A route is one file and one served document, so the stricter declaration wins — the whole route (its document and every server function in the file) requires authentication and the laxer declaration has no effect. The message names both declarations with their positions. Resolution: move the public content to its own page file, or make the declarations agree. Emitted by route inference (`compiler/src/route-inference.ts` Step 8d). Provenance: S443 review F2 · rationale:one-route-per-file-fail-closed · pending-ruling:bryan-S443. | Warning |
 | W-AUTH-REDIRECT-LOOP | §40.2, §52.13 | Warning-level: an `auth="required"` route's unauthenticated-request redirect target (the application's top-level `<program>`'s `loginRedirect=`, default `/login`) is that route itself — compared CASE-SENSITIVELY (routing is case-sensitive; S443 r3 F5), ignoring a trailing `/`, a `.html` suffix and any query/fragment — so an anonymous request redirects in a loop and never reaches a login form (e.g. a `pages/login.scrml` declaring `<page auth="required">`). Resolution: give the login page `<page auth="optional">` or `<page auth="none">`, or point the `<program>`'s `loginRedirect=` at a page that does. Emitted by route inference (`compiler/src/route-inference.ts` Step 8e). Provenance: S443 review F3. | Warning |
 | W-AUTH-LOGIN-REDIRECT-AMBIGUOUS | §40.2, §52.13 | Warning-level: the build has no single application `<program>` (§40.2 — zero or several web-application files with a top-level `<program>` outside `pages/` / `routes/`) and its `<program>`s declare different `loginRedirect=` values, so a page scope (an explicit `<page auth="required">`, an inherited member page, or a `protect=`-escalated unit) redirects unauthenticated requests to the §52.13 default `/login`. Fires at most once per build, only when some page scope used that fallback; names the conflicting values. Resolution: build one application per output directory, or make the values agree. Emitted by route inference (`compiler/src/route-inference.ts` Step 8f). Provenance: S443 round 3 (review nit). | Warning |
+| W-AUTH-REQUIRED-NOT-INHERITED | §40.2, §40.8 | Warning-level: a `<program auth="required">` is a route file's own `<program>` — its file is under the build root's `pages/` or `routes/` (§40.2: route files are classified by their path RELATIVE TO THE BUILD ROOT, never by a directory above it) — so it gates only its own file, and no required application `<program>` covers the build's member pages: none is identified (§40.2: "When the build has zero such files … nothing below is inherited") or the identified one does not declare `auth="required"`. Fires once per such `<program>`, only when at least one member page (a `<page>` or bare-markup route file, not a `_layout.scrml`, declaring no recognized `auth=`) is therefore served WITHOUT authentication; names those pages, the build root used, the file's path relative to it, and whether the root was given (`compileScrml`'s `buildRoot`) or inferred from the entry file (§40.8 "The build root"); the message says how to make the intended file the entry file. Does NOT change what is gated (the §40.2 outcome stands); it says the outcome out loud. Resolution: declare `<program auth="required">` in the application's entry file at the build root, or write `<page auth="required">` in the route file if only that route requires sign-in. Emitted by route inference (`compiler/src/route-inference.ts` Step 8c-warn). Provenance: spec:§40.2 (fail-closed ambiguous-application rule) · review:S443-post-merge-1173b-F2 (`g-required-program-with-no-identified-app-root-is-silent`). | Warning |
 | W-AUTH-MIDDLEWARE-AUTO-INJECTED | §40.1.1, §12.2 | Warning-level: a compilation unit declares `protect=` fields but carries NO explicit `auth=` attribute on either `<program>` or any `<page>`. The compiler auto-injects auth middleware (`auth="required"`, `csrf="auto"`, `sessionExpiry="1h"`, `sessionSecure=true`) and warns so the adopter knows a gate was chosen FOR them. Does NOT fire when an explicit `auth=` exists at either level — an explicit `auth="optional"`/`"none"` is honoured and never escalated (that override was the `g-protect-overrides-page-auth` defect), and an explicit `auth="required"` registers the gate without the warning because the declaration is already explicit. Fires from Step 8b (`compiler/src/route-inference.ts`). **ALLOCATED S299 — this meaning previously shared `W-AUTH-001`**, which §52.11 defines as the unrelated "`<var server>` has no detectable initial load" guarantee fired from `type-system.ts`. One code, two unrelated meanings, only one documented — the same shape as the `E-IMPORT-007` triple-allocation, and resolved the same way bryan ruled that one (S297): allocate fresh rather than renumber the documented diagnostic, because additive is `inert` for existing source while renumbering is `semantics-changed` on a code adopters may key on. `W-AUTH-001` keeps its §52.11 meaning unchanged. Named rather than numbered — `W-AUTH-003` is free but sits in a gap beneath a used `W-AUTH-004`, and a skipped number is a retired-code hazard; the family already uses semantic names. | Warning |
 | W-AUTH-CONTENT-NOT-GATED | §34, §40.9.5 | Warning-level (security footgun): an `<auth role="X">` element is present in the compilation. `<auth role=>` gates only the JS mount/behaviour of its subtree (and only under `--emit-per-route`, which produces per-(entry-point, role) JS chunks) — it does NOT withhold served HTML content. The gated markup is emitted VERBATIM into the HTML payload by `emit-html.ts` (the `<auth>` element passes through as a literal tag and its children render as static markup) and is therefore visible to ALL viewers, regardless of role, including under `--emit-per-route` — that mode role-splits JS BEHAVIOUR only; the shared HTML still carries the gated subtree. The reachability solver DOES compute per-role visibility (`reachability-solver.ts` `computeAuthGatedBoundariesVisibleTo` / `isVisibleForRole`) but that verdict is consumed only by the route-splitter to scope JS mount sets — HTML emission never consults it. The warning is honest in BOTH modes: it does NOT claim `--emit-per-route` closes the content leak. Fires once per `<auth role=>` site (anchored at the gate span) from the A-3.5b content-lint pass (`compiler/src/auth-graph.ts` `flagContentNotGated`), for any auth-role-block gate that names a `role=` value. A bare `<auth>` or check-only `<auth check=>` (no `role=`) is out of scope (see E-AUTH-GRAPH-004 / W-AUTH-RUNTIME-FALLBACK). Resolution: do NOT rely on `<auth role>` for content secrecy — enforce sensitive gating server-side (e.g. branch in a server-fn / page loader on the authenticated role and omit the sensitive markup from the response body). The gate remains LEGAL — it is a JS-mount optimization, not a content-visibility control. (Catalog addition — GITI-027 part A; full prose at §40.9.5.) | Warning |
 | W-EACH-PROMOTABLE | §17.X (NEW per S130), §56 | Info-level lint: a `${ for (let x of @cell) { lift <markup/> } }` site is the Tier-0 iteration form per HU-1; the Tier-1 structural form `<each in=@cell as x>...</each>` (NEW SPEC §17.X) is more discoverable, composes with the `<empty>` sub-element + inferred `key=`, and is the canonical iteration shape per the S130 HU-1 ratifications. The lint message names the suggested mechanical promotion target (`<each in=@cell as x>...</each>`) and cross-refs the `bun scrml promote --each <file>[:line]` CLI helper (Landing 3 of the 5-landing iteration arc). Tier-0 form continues to compile cleanly; the lint is informational only. Mirrors the `I-MATCH-PROMOTABLE` (§56) pattern — declaration-site promotion lint along the case-analysis / iteration tier ladders. **Fires:** emitted by `compiler/src/lint-w-each-promotable.js` (Stage 6.4c in `api.js`); conservative fire conditions — for-stmt's iterable must contain a reactive `@cell` ref AND body must contain at least one `lift-expr`. (Catalog addition S130 HU-1 iteration Landing 1; cross-ref the §17.X NEW subsection introduced in Landing 2.) | Info |
@@ -24420,6 +24525,8 @@ The following attributes on `<program>` enable automatic middleware generation:
   **One file, conflicting `auth=` values.** A route is a file (§47.9.2) and one served document, so a `<page auth="required">` anywhere in a file makes that file's route the gated scope, and a laxer `auth=` elsewhere in the same file — another `<page>`, or the file's `<program auth="none">` / `auth="optional"` — does not relax it; the same holds for a `<program auth="required">` with a laxer `<page auth=>` in its own file. The compiler SHALL emit `W-AUTH-FILE-CONFLICT` naming both declarations and stating that the stricter one wins.
   > **Provenance:** ruling:user-voice-scrml.md S443 item 2 ("your recs" — one file is one route; the stricter declaration wins, W-AUTH-FILE-CONFLICT names both)
   **The application's top-level `<program>`.** In this section and §52.13 it is the `<program>` of the application's entry file (§40.8): the one web-application file of the build (not a §64 tool) that has a top-level `<program>` and is not a route file under `pages/` or `routes/`. A `<program>` declared inside a route file is that file's own: its `auth=` governs that file only (as a `<program>` scope, above). When the build has zero such files, no application `<program>` is identified and nothing below is inherited. When it has several, the application is ambiguous and the member-page inheritance below SHALL fail closed: it applies if ANY of them declares `auth="required"`. *(S443 PA review of round 3: "several → nothing inherited" let one extra non-route file with its own top-level `<program>` un-gate every unannotated member page of a required application — measured `/about` 302 → 200.)*
+  **A required `<program>` that is not the application's.** Route files are classified by their path relative to the build root (§40.8 "The build root"), never by a directory above it. When a route file's own `<program>` declares `auth="required"` and no application `<program>` declaring `auth="required"` covers the build's member pages — none is identified, or the identified one (or, when several, none of them) declares it — the compiler SHALL emit `W-AUTH-REQUIRED-NOT-INHERITED` for that `<program>` whenever at least one member page (as defined in the member-pages paragraph below) is therefore served without authentication, naming those pages, the build root used and whether it was given or inferred from the entry file (§40.8). The warning changes nothing that is gated: the outcome above stands (a route file's `<program>` governs that file only; zero application `<program>`s means nothing is inherited).
+  > **Provenance:** spec:§40.2 fail-closed-ambiguous rule · review:S443-post-merge-1173b-F2
   **The redirect target of a page scope.** `loginRedirect=` is not a `<page>` attribute (`E-PAGE-INVALID-ATTR`), so a page scope's unauthenticated request SHALL be redirected to the `loginRedirect=` declared on the application's top-level `<program>`, or to the §52.13 default `/login` when it declares none. When no application `<program>` is identified, the single `loginRedirect=` value declared by the build's `<program>`s applies; when they declare different values, `/login` applies and the compiler SHALL emit `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` naming the values. This applies to every page scope: an explicit `<page auth="required">`, an inherited member page (next paragraph), and a `protect=`-escalated unit (§20.5.1). *(Before S443 round 2 every page scope redirected to `/login` whatever the program declared.)* When a gated route's redirect target is that route itself — compared case-sensitively (routing is case-sensitive), ignoring a trailing `/`, a `.html` suffix and any query or fragment — an anonymous request redirects in a loop; the compiler SHALL emit `W-AUTH-REDIRECT-LOOP` for that route.
   **Member pages of a `<program auth="required">` are inside its scope.** When the application's top-level `<program>` declares `auth="required"`, every member route file of that application that declares no recognized `auth=` value of its own — a file with no `<program>` whose top-level markup is a `<page>` (§40.8), or top-level markup with no `<page>` wrapper, other than a `_layout.scrml` wrapper — SHALL be gated exactly as an explicit `<page auth="required">`: its served document, its compose route and every server function its file declares, with `csrf="auto"`. Only one of §52.13's three literals is a declaration: an unrecognized literal (`auth="Required"`, `auth="off"`, …, which emits `W-ATTR-002`) or a non-literal value declares nothing, and the page inherits — fail closed, as an unknown `csrf=` literal resolves to `"auto"`. A member page that declares `auth="optional"` or `auth="none"` is NOT gated by this rule: an explicit page value relaxes the application program's `auth="required"` for that page (a login or registration page must be reachable anonymously). *(Ruled by bryan, S443: "your recs" — ruling:user-voice-scrml.md S443 item 1.)*
   > **Provenance:** spec:§52.13 + §34 W-AUTH-PAGE-INFERRED row ("program-level auth still enforces at the request boundary") · pa-ruled:S443 round 2 conformance restoration (before it, the `<program>`'s entry covered only the entry file, and an unannotated member page served its document at 200 and ran its server functions for anonymous callers). The redirect-target paragraph: pa-directed S443 round 2 (the round-1 text named "the page's `loginRedirect=`", which cannot be declared). The application-`<program>` definition, the unrecognized-literal rule, the ambiguity warning and case-sensitive loop comparison: S443 round 3 (adversarial review of 5390820dd, F1/F2/F5 — before it, any `<program auth="required">` anywhere in the build, including one inside a route file, gated every unannotated page of a public application, and a typo'd page `auth=` served the page publicly under a required application).
@@ -24773,6 +24880,8 @@ The nested `<program>` carries `title="InnerOops"`. The compiler emits `W-PROGRA
 **Normative statements:**
 
 - A scrml **application** SHALL declare its top-level `<program>` element exactly ONCE, in the application's **entry file**. The entry file is the file resolved by the build root (e.g. `app.scrml` in a single-file app, or the source root of the compilation).
+- **The build root, and which files are route files.** A route file (§40.2) is a file whose path RELATIVE TO THE BUILD ROOT has a `pages/` or `routes/` directory component; the directories above the build root SHALL NOT be consulted. When the compilation is given a build root (the `compileScrml` `buildRoot` option), that directory is the build root. When it is not (every command-line form, and a file list), the build root SHALL be read off the entry file: let *E* be the build's web-application files (not §64 tools) with a top-level `<program>`; the entry-file candidates are the members of *E* with no `pages/` or `routes/` directory anywhere in their path, or, when there are none, the members of *E* in the shallowest directory. Exactly one candidate is the entry file and the build root is its directory: route files are the files with a `pages/` or `routes/` component below it, or, when none lies below it and the directory is itself named `pages` or `routes`, the other files directly in it. Once the root is inferred, the application `<program>`s are read against it by §40.2's own definition — the entry file, and every other `<program>` file that is not a route file relative to that root — so a second such file makes the application ambiguous and the member-page inheritance fails closed, exactly as it would were the build not under a `pages`/`routes` directory. Zero or several candidates infer no build root: route files are then the files with a `pages/` or `routes/` component anywhere in their path, and the application `<program>` is as §40.2 states for zero (nothing inherited) or several (fail closed) application files. A build with no `pages`/`routes` directory above its entry file classifies identically under both readings.
+  > **Provenance:** spec:§40.2 ("not a route file under `pages/` or `routes/`") + this section ("The entry file is the file resolved by the build root") · review:S443-post-merge-1173b-F1 (`g-app-root-route-prefix-matched-on-absolute-path` — the prefix had been searched in the absolute path, so a project under any directory named `pages`/`routes` lost its application `<program>` and served its member pages anonymously) · S445 review rounds 1-3 (a directory-shape inference moved the root for flat apps, lone pages and legacy `routes/` sets; the entry-file anchor replaced it) · S445 review round 4 (the shallowest-file pick alone dropped a second non-route `<program>` from the candidates under a `pages` ancestor — `/src/pages/about` 200 there, 302 in the control; the candidates are re-read against the inferred root).
 - The `<program>` declaration SHALL NOT appear in any non-entry file of the same application. A second top-level `<program>` in any other file of the same compilation is `E-PROGRAM-002` (TBD — separate diagnostic; not part of Wave 1).
 - A second (or later) top-level `<program>` in the SAME file SHALL be `E-PROGRAM-002` (compile error). Before S443 it was silently mis-read — its `auth=`, session and middleware attributes were ignored, so a `<program auth="required">` after a plain `<program>` served its routes to anonymous callers. The cross-file case above stays reserved.
   > **Provenance:** ruling:user-voice-scrml.md S443 item 3 ("your recs" — E-PROGRAM-002 covers the same-file case; measured 0 corpus files)

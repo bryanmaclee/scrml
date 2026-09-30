@@ -158,7 +158,7 @@ describe("§A: deps drive a reactive re-fetch effect (§6.7.7 re-execution)", ()
     expect(errors).toEqual([]);
     expect(clientJs).toContain("_scrml_effect(function() {");
     expect(clientJs).toContain('_scrml_cs_reactive_get("userId")');
-    expect(clientJs).toContain("if (_scrml_request_userReq_mounted) _scrml_request_userReq_fetch();");
+    expect(clientJs).toContain("if (_scrml_request_userReq_mounted) _scrml_untracked(_scrml_request_userReq_fetch);");
   });
 
   test("a no-dep request fires the fetch once on mount (bare call, no effect wrap)", () => {
