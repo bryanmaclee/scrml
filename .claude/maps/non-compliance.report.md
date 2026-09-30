@@ -1,6 +1,39 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-29T13:38:25Z  commit: cf62b415
+# generated: 2026-09-30T14:50:34Z  commit: 108ca89be
+# ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
+# refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
+# commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
+# `auto` by default under `auth=`; compose route gated; WebSocket Origin check), #1162 (static serving is a client-asset
+# ALLOWLIST, §47.13), #1163 (async fn escaping as a value / event control after an await, S440 F4/F5), #1171
+# (protected-column egress `E-PROTECT-006`, §14.8.9), #1173 (`<page auth="required">` gates its page;
+# `E-PROGRAM-NESTED-AUTH`), #1177 (two top-level `<program>`s in one file = `E-PROGRAM-002`), #1174 (worker bundles
+# written + served, dpa-056 D1/D2), #1172 (user enum named like a built-in error type), #1150 (E-ERROR-002 handler
+# conformance), #1147 (bare `fail .Variant`), #1158 (`@cell = serverFn()` awaited in place), #1160 (self-closed non-void
+# element gets an end tag), #1153 (W-LINT-007/013 inline block handlers), #1152 (stdlib http/cron doc-comment leak),
+# #1155 (example 23 token guards). BOOTSTRAP: #1149 (CSS + `<theme>` T3 — `css.scrml`, `css-ingest.scrml`, CSS sub-seam),
+# #1151/#1157/#1159/#1167/#1169 (typer rounds), #1164 (the §66.19 worked programs — `slice-m4/`). SPEC-only: #1156
+# (tape grow/shrink, §66.x), #1170 (§4.18 dpa-045). The rest are docs / wrap / dpa-queue / gaps / ledger / @generated.
+# ⛑ **FIGURES RE-EXECUTED AT `108ca89be`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **275,016 lines / 217 files** per FACTS (+6,622 lines, +4 files:
+# `codegen/js-async-analysis.ts`, `codegen/protect-flow.ts`, `static-serve-policy.js`, `static-serve-policy-emitted.js`)
+# · test files **1,535** (+20) · `compiler/SPEC.md` **41,214** lines (+551) · conformance **1151** cases (+97) · §34
+# catalog **849** rows (+10), range `20832..21764`. `bun conformance/run.ts` (impl#1) -> **1144/1151 pass + 7 xfail**.
+# Census: PINNED 370 · IMPL-SITES 314 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **952 -> 960** · W **183 -> 186** · I 10 · H 2 FLAT ·
+# unique codes **807 -> 817**. **ADDED = {`E-ASYNC-CALL-PROMISE-METHOD`, `E-ASYNC-FN-ESCAPES-AS-VALUE`,
+# `E-ASYNC-HANDLER-UNANALYZABLE`, `E-EVENT-CONTROL-AFTER-AWAIT`, `E-PROGRAM-002`, `E-PROGRAM-NESTED-AUTH`,
+# `E-PROTECT-006`, `W-AUTH-FILE-CONFLICT`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS`, `W-AUTH-REDIRECT-LOOP`} — every one has a
+# live emitter in `compiler/src` (grep-verified); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `108ca89be` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# **58** files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **443/443** (7 files)
+# · `slice-m3/` **60/60** (5 files) · `slice-m4/` **130 pass + 1 todo / 131** (11 files; NOT in the CI gate — see
+# build.map.md) · CG footprint (`--swap CG=…/slice-m3/substitute.js --footprint`) -> runtime **18/0**, codes-only 10/0,
+# crashed 0, not-yet 666, front-end 457 · CSS footprint (`--swap CSS=…/slice-m3/css-substitute.js --footprint`) ->
+# runtime 320/0, codes-only 278/0, **CSS half 38/38** (conformance 17 · source 15 · core 6).
+# ⚑ `file:line` citations in S444 sections were grep-derived at `108ca89be`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S440 HEADER (stamp `cf62b415`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
 # refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
 # --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
@@ -214,6 +247,59 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S444 pass (this pass, stamp `108ca89be`)
+
+**Scope: INCREMENTAL, targeted at the window's landings.** In-scope docs changed in-window: `NERDME.md`,
+`compiler/SPEC.md`, `compiler/SPEC-INDEX.md`, `compiler/native-parser/M6.6-CONTRACT-DERIVATION.md`, `conformance/README.md`,
+`docs/FACTS.md`, `docs/articles/llm-kickstarter-v2-2026-05-04.md`, `docs/changelog.md`, `docs/external-js.md`,
+`docs/known-gaps.md`, `docs/lin.md`, `docs/pr-reviews.md`, `docs/tutorial.md`, `examples/23-trucking-dispatch/FRICTION.md`,
+`examples/README.md`, `examples/VERIFIED.md`, `hand-off.md`, `master-list.md`, and 52 NEW `docs/changes/{s440,s441,s442,s443}-*/*.md`
+dispatch artifacts. Out of scope: `handOffs/**`; untracked files in the main checkout (not in any commit).
+
+Total docs checked this pass: 70. Compliant: 68. Non-compliant: 1 new (N-S444-1, a CI coverage gap, not a doc).
+Uncertain: 1 new (U-S444-1). Gates re-run at `108ca89be`: `bun scripts/facts.ts --check` PASS ·
+`bun scripts/regen-spec-index.ts --check` OK (72/72, 0 stale) · `bun scripts/snippet-gate.js` 122/122 (compile + drift) ·
+`bun scripts/state.ts --check` **FAIL on `@generated:recent-sessions` (master-list.md)** + WARN known-gaps heading/marker
+drift **54** (was 52) + WARN maps 37 behind (cleared by this stamp).
+
+### Docs scanned this window — verdicts
+| doc | verdict |
+|---|---|
+| `compiler/SPEC.md` (+551) | compliant — the 10 new §34 rows each have an emitter (grep-verified, see error.map.md); see U-S444-1 for one row's self-label |
+| `compiler/SPEC-INDEX.md` | compliant (regen check OK) |
+| `NERDME.md`, `docs/tutorial.md`, `docs/lin.md`, `docs/external-js.md`, `examples/README.md`, `docs/articles/llm-kickstarter-v2-2026-05-04.md` | compliant as far as the snippet gate reaches (122/122, drift half included); prose claims not independently re-verified this pass |
+| `examples/VERIFIED.md`, `examples/23-trucking-dispatch/FRICTION.md` | compliant (ledgers for the #1155 fix) |
+| `docs/FACTS.md` | compliant (PASS) |
+| `docs/changelog.md` · `docs/pr-reviews.md` · `hand-off.md` · `conformance/README.md` | compliant (ledgers matching landed commits) |
+| `compiler/native-parser/M6.6-CONTRACT-DERIVATION.md` | not re-verified (opt-in parser; small edit) |
+| `docs/known-gaps.md` | compliant for the window's edits (59 S441 audit gaps filed with reproducers under `docs/changes/s441-audit-gap-filing/repro/`); standing heading/marker drift WARN 52 -> 54 |
+| `master-list.md` | see U-S440-2 (carried, still live) |
+| `docs/changes/s440-*` … `s443-*` (52) | compliant — dispatch artifacts, historical by design |
+
+### ⚠ N-S444-1. `compiler/self-host-v2/slice-m4/` has no CI gate (verified)
+**Where:** `.github/workflows/ci.yml` bootstrap step (runs slice-m1, slice-m2, lowered slice-m1, slice-m3, lexer
+oracle); `grep -rn slice-m4 .github/` -> no match. `slice-m4/` (#1164) holds 11 test files / 131 tests (130 pass + 1
+todo at `108ca89be`) — the only proof that §66.19.2 / .4 / .5 / .6 compile from source and run.
+**Suggested disposition:** add `bun test ./compiler/self-host-v2/slice-m4/` to the CI bootstrap step (or record the
+decision to leave it hand-run).
+
+### U-S444-1. `E-PROTECT-006` §34 row self-labels "PA ratification pending"
+**Where:** `compiler/SPEC.md` §34 row `E-PROTECT-006` (`:21030`) opens with `provenance: brief s441-protect-scalar-egress
+(SECURITY HIGH, …); PA ratification pending`.
+**Why uncertain:** the code is emitted (`codegen/protect-flow.ts`, `protect-egress.ts`, `emit-server.ts`) and pinned by
+28 new `conformance/cases/protect/` cases, so the behavior is current truth; the row's own text says the SPEC wording is
+not yet ratified.
+**What to check:** whether the S443 review ratified it (then strip the provenance marker) or whether it is still pending.
+
+### Carried items — re-executed at `108ca89be`
+| item | command | result |
+|---|---|---|
+| U-S440-1 bootstrap `E-BOOTSTRAP-*` names vs SPEC | `grep -c 'E-BOOTSTRAP-CALL-ARITY\|E-BOOTSTRAP-EACH-NOT-SEQUENCE\|E-BOOTSTRAP-DUP-OVERRIDE' compiler/self-host-v2/analyze.scrml` | **CLOSED** — 0; analyze emits the SPEC names |
+| U-S440-2 `master-list.md` `@generated:recent-sessions` | `bun scripts/state.ts --check` | **STILL LIVE** — FAIL, even after the scheduled @generated regen #1179 |
+| N-S437b-2 `g-library-meta-import-async-not-awaited` moot by ruling | `grep -n 'g-library-meta-import-async-not-awaited' docs/known-gaps.md` | **STILL LIVE** — marker `status=open` (now `:12288`) |
+| N-S405-1, N-S422-1/2/3, N-S437b-3 | not re-executed (window does not touch their locus) | carried, not re-confirmed |
+
 
 ## Summary — S440 pass (this pass, stamp `cf62b415`)
 
