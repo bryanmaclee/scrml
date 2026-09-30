@@ -27,16 +27,18 @@
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, assignments, loads">
 
     ${
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
+        // `userId` is the framework session's user (`session.userId`), passed in by
+        // the request-entry server function — `session` is readable only there
+        // (§20.5, E-SESSION-CONTEXT). Login sets it with session.set("userId", …) and
+        // <program auth="required"> gates on it. (The old app-KV token rode a cookie
+        // set from JS with HttpOnly, which browsers refuse, so it never persisted.)
+        function getCurrentUser(userId) {
             if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
 
         function fetchDriversServer(sessionToken) {
-            const user = getCurrentUser(sessionToken)
+            const user = getCurrentUser(session.userId)
             if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
@@ -79,7 +81,7 @@
             const tok = getSessionToken()
             const data = fetchDriversServer(tok)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             @currentUser = data.user
@@ -101,11 +103,11 @@
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
-              <a href="/dispatch" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+              <a href="/dispatch/board" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
               <span class="text-xs uppercase tracking-wider text-slate-400">Drivers</span>
           </div>
           <nav class="flex items-center gap-4 text-sm">
-              <a href="/dispatch" class="hover:text-blue-300">Board</a>
+              <a href="/dispatch/board" class="hover:text-blue-300">Board</a>
               <a href="/dispatch/customers" class="hover:text-blue-300">Customers</a>
               <a href="/dispatch/billing" class="hover:text-blue-300">Billing</a>
           </nav>
