@@ -1,0 +1,497 @@
+/**
+ * §14.8.9 — a `protect=` column must not leave the server OUTSIDE its row.
+ * S441, `g-protected-column-escapes-redaction-as-scalar` (SECURITY, HIGH).
+ *
+ * THE DEFECT, MEASURED: `return u.passwordHash` compiled at exit 0 and the
+ * emitted route served HTTP 200 body `"SECRET-HASH-123"`, while
+ * `I-PROTECT-STRIP-001` reported the column stripped. The floor tags the ROW; a
+ * value pulled out of the row carries no descriptor, and the sink has nothing
+ * to read. The same held for every shape that re-houses the extracted value.
+ *
+ * THE FIX: the §14.8.9 provenance flow (`compiler/src/codegen/protect-flow.ts`)
+ * reads the emitted server module and rejects, as `E-PROTECT-006`, any value
+ * with protected provenance that reaches a client-egress sink outside a
+ * descriptor-bearing row. `I-PROTECT-STRIP-001` now fires only for a query whose
+ * row the sink actually stripped.
+ *
+ * Three layers:
+ *   1. the shape matrix — every laundering shape the brief names, compiled;
+ *   2. the negatives — rows, non-protected fields, derived values, `reveal`,
+ *      and the canonical login (`verifyPassword(pw, u.passwordHash)`) compile;
+ *   3. EXECUTED — the negatives that compile still serve the right bytes.
+ */
+import { describe, test, expect } from "bun:test";
+import { writeFileSync, mkdtempSync, mkdirSync, readFileSync, existsSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
+import { Database } from "bun:sqlite";
+import { compileScrml } from "../../src/api.js";
+
+const HEAD = `<program db="./app.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+    passwordHash: text
+  }
+</schema>
+<db src="./app.db" tables="users" protect="passwordHash"/>
+`;
+const TAIL = `<resultCell> = ""
+<button onclick=\${ @resultCell = getIt() }>x</button>
+<p>\${@resultCell}</p>
+</program>
+`;
+const ONE = "const u = ?{`SELECT * FROM users WHERE id = 1`}.get()";
+const ALL = "const rows = ?{`SELECT * FROM users`}.all()";
+const prog = (body) => HEAD + body + "\n" + TAIL;
+const fnBody = (lines) => `function getIt() {\n    ${lines.join("\n    ")}\n}`;
+
+function compileMem(src) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-protect-scalar-"));
+  const file = join(dir, "app.scrml");
+  writeFileSync(file, src);
+  const result = compileScrml({ inputFiles: [file], write: false, log: () => {} });
+  const diags = [...(result.errors ?? []), ...(result.warnings ?? [])];
+  return { result, diags, codes: diags.map((d) => d.code) };
+}
+
+// ---------------------------------------------------------------------------
+// 1. every laundering shape is rejected at compile time
+// ---------------------------------------------------------------------------
+const LEAKS = {
+  "scalar (the reported shape)": fnBody([ONE, "return u.passwordHash"]),
+  "field of a new object": fnBody([ONE, "return { h: u.passwordHash }"]),
+  "array element": fnBody([ONE, "return [u.passwordHash]"]),
+  "string concatenation": fnBody([ONE, 'return "x" + u.passwordHash']),
+  "template interpolation": fnBody([ONE, "return `h=${u.passwordHash}`"]),
+  "destructure": fnBody([ONE, "const { passwordHash } = u", "return passwordHash"]),
+  "destructure with alias": fnBody([ONE, "const { passwordHash: hv } = u", "return hv"]),
+  "via a local, nested in a container": fnBody([ONE, "const hv = u.passwordHash", "return { data: { deep: hv } }"]),
+  "ternary": fnBody([ONE, 'return u.id > 0 ? u.passwordHash : ""']),
+  "computed key": fnBody([ONE, 'const k = "passwordHash"', "return u[k]"]),
+  "JSON.stringify of the row": fnBody([ONE, "return JSON.stringify(u)"]),
+  "push into an array": fnBody([ONE, "const out = []", "out.push(u.passwordHash)", "return out"]),
+  ".map to the column": fnBody([ALL, "return rows.map(r => r.passwordHash)"]),
+  ".map to a re-keyed object": fnBody([ALL, "return rows.map(r => ({ n: r.name, h: r.passwordHash }))"]),
+  ".map then .join": fnBody([ALL, 'return rows.map(r => r.passwordHash).join(",")']),
+  "index then field": fnBody([ALL, "return rows[0].passwordHash"]),
+  "aliased SELECT (`AS h`) — keyed on origin": fnBody([
+    "const u = ?{`SELECT passwordHash AS h FROM users WHERE id = 1`}.get()", "return u.h",
+  ]),
+  "helper extracts from a row passed in":
+    "function pick(r) {\n    return r.passwordHash\n}\n" + fnBody([ONE, "return pick(u)"]),
+  "helper returns the row, caller extracts":
+    "function load() {\n    return ?{`SELECT * FROM users WHERE id = 1`}.get()\n}\n" +
+    fnBody(["return load().passwordHash"]),
+};
+
+describe("S441 E-PROTECT-006 — a protected value leaving outside its row is a compile error", () => {
+  for (const [name, body] of Object.entries(LEAKS)) {
+    test(name, () => {
+      const { codes, diags } = compileMem(prog(body));
+      expect(codes).toContain("E-PROTECT-006");
+      const e = diags.find((d) => d.code === "E-PROTECT-006");
+      expect(e.severity ?? "error").toBe("error");
+      expect(e.message).toMatch(/outside its row/);
+    });
+  }
+
+  test("the reported shape no longer claims the column was stripped", () => {
+    const { codes } = compileMem(prog(LEAKS["scalar (the reported shape)"]));
+    // Nothing reached a sink as a row, so nothing was stripped — the old info
+    // said it was, and that claim is what made the leak look handled.
+    expect(codes).not.toContain("I-PROTECT-STRIP-001");
+  });
+
+  test("the diagnostic names the column and the extraction site", () => {
+    const { diags } = compileMem(prog(LEAKS["helper extracts from a row passed in"]));
+    const e = diags.find((d) => d.code === "E-PROTECT-006");
+    expect(e.message).toContain("`passwordHash`");
+    expect(e.message).toContain("`r.passwordHash` in `pick`");
+    expect(e.message).toContain('reveal("passwordHash")');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. no false positives — the row, non-protected fields, derived values, reveal
+// ---------------------------------------------------------------------------
+const CLEAN = {
+  "the row itself (the floor strips it)": [fnBody([ONE, "return u"]), true],
+  "a non-protected field of the same row": [fnBody([ONE, "return u.name"]), false],
+  "spread of the row": [fnBody([ONE, "return { ...u, extra: 1 }"]), true],
+  "the row nested in a container": [fnBody([ONE, "return { user: u, n: u.name }"]), true],
+  ".map to a non-protected field": [fnBody([ALL, "return rows.map(r => r.name)"]), false],
+  ".map spreading each row": [fnBody([ALL, 'return rows.map(r => ({ ...r, tag: "t" }))']), true],
+  "a comparison (derived)": [fnBody([ONE, 'return u.passwordHash == "x"']), false],
+  "index then non-protected field": [fnBody([ALL, "return rows[0].name"]), false],
+  "length": [fnBody([ALL, "return rows.length"]), false],
+  "reveal, then read (the declassify path)": [fnBody([ONE, 'return u.reveal("passwordHash").passwordHash']), false],
+};
+
+const LOGIN = `<program db="./app.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+    passwordHash: text
+  }
+</schema>
+<db src="./app.db" tables="users" protect="passwordHash"/>
+\${
+  import { verifyPassword } from 'scrml:auth'
+  function login(name, pw) {
+    const u = ?{\`SELECT id, name, passwordHash FROM users WHERE name = \${name}\`}.get()
+    if (u is not) return { ok: false }
+    const ok = verifyPassword(pw, u.passwordHash)
+    if (!ok) return { ok: false }
+    return { ok: true, user: { id: u.id, name: u.name } }
+  }
+}
+<resultCell> = ""
+<button onclick=\${ @resultCell = login("ada", "pw") }>x</button>
+<p>\${@resultCell}</p>
+</program>
+`;
+
+describe("S441 no false positives", () => {
+  for (const [name, [body, strips]] of Object.entries(CLEAN)) {
+    test(name, () => {
+      const { codes, result } = compileMem(prog(body));
+      expect(codes).not.toContain("E-PROTECT-006");
+      expect((result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""))).toEqual([]);
+      // The info is TRUE now: present iff a row reached the sink carrying an
+      // unrevealed protected column.
+      if (strips) expect(codes).toContain("I-PROTECT-STRIP-001");
+      else expect(codes).not.toContain("I-PROTECT-STRIP-001");
+    });
+  }
+
+  test("the canonical login — verifyPassword(pw, u.passwordHash) returning a bool — compiles clean", () => {
+    const { codes, result } = compileMem(LOGIN);
+    expect(codes).not.toContain("E-PROTECT-006");
+    expect((result.errors ?? []).filter((e) => !/^[WI]-/.test(e.code ?? ""))).toEqual([]);
+    // The row is only VERIFIED, never returned — nothing is stripped, so no info.
+    expect(codes).not.toContain("I-PROTECT-STRIP-001");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2b. every client-egress SINK, not just the server-fn response
+// ---------------------------------------------------------------------------
+const SCHEMA = "<schema>\n  ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}\n</schema>";
+const sseProg = (yieldExpr) => `<program>
+  ${SCHEMA}
+  <db src="app.db" protect="passwordHash" tables="users">
+    \${
+      server function* streamIt() route="/s" {
+        let u = ?{\`SELECT * FROM users WHERE id = 1\`}.get()
+        yield ${yieldExpr}
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>`;
+const channelProg = (arg) => `<program>
+  ${SCHEMA}
+  <db src="app.db" protect="passwordHash" tables="users">
+    \${ function noop() { return 1 } }
+  </db>
+  <channel name="chat" topic="lobby">
+    \${
+      <messages> = []
+      function pushUser(id) {
+        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()
+        broadcast(${arg})
+      }
+    }
+  </>
+  <div><p>hi</p></div>
+</program>`;
+const mountProg = (ret) => `<program db="sqlite:./app.db" auth="none">
+${SCHEMA}
+<db src="app.db" protect="passwordHash" tables="users"></db>
+\${
+  server function loadOne() {
+    let u = ?{\`SELECT * FROM users WHERE id = 1\`}.get()
+    return ${ret}
+  }
+  server function loadUsers() { return ?{\`SELECT * FROM users\`}.all() }
+  <oneCell server> = loadOne()
+  <userCell server> = loadUsers()
+}
+<main><p>\${@oneCell}</p><ul><each in=@userCell key=@.id as x><li>\${x.name}</li></each></ul></main>
+</program>`;
+const endpointProg = (ret) => `<program>
+  ${SCHEMA}
+  <db src="app.db" protect="passwordHash" tables="users">
+    \${
+      function loadOne(id) {
+        let u = ?{\`SELECT * FROM users WHERE id = \${id}\`}.get()
+        return ${ret}
+      }
+    }
+  </db>
+
+type Op:enum = {
+  Fetch(id: int)
+}
+
+<endpoint path="/gate" method="POST" accepts=Op>
+  <Fetch(id) : loadOne(id)>
+</endpoint>
+
+</program>`;
+
+describe("S441 every egress sink", () => {
+  const cases = [
+    ["SSE data frame", sseProg('{ event: "user", id: 1, data: u.passwordHash }'), sseProg('{ event: "user", id: 1, data: u }')],
+    // `event` / `id` are serialized OUTSIDE the redact — the whole frame is the sink.
+    ["SSE event name", sseProg("{ event: u.passwordHash, data: 1 }"), sseProg('{ event: "user", data: u.name }')],
+    ["channel broadcast()", channelProg("u.passwordHash"), channelProg("u")],
+    // §38.4: a channel-cell write lowers to broadcast({ __type: "__sync", __val: … }).
+    [
+      "channel-cell write (@cell = …)",
+      channelProg("u").replace("<messages> = []", '<lastHash> = ""').replace("broadcast(u)", "@lastHash = u.passwordHash"),
+      channelProg("u").replace("<messages> = []", '<lastName> = ""').replace("broadcast(u)", "@lastName = u.name"),
+    ],
+    ["SSR /__serverLoad + /__mountHydrate", mountProg("u.passwordHash"), mountProg("u")],
+    ["<endpoint> arm", endpointProg("u.passwordHash"), endpointProg("u")],
+  ];
+  for (const [name, leak, safe] of cases) {
+    test(`${name}: an extracted scalar is rejected`, () => {
+      expect(compileMem(leak).codes).toContain("E-PROTECT-006");
+    });
+    test(`${name}: the row (or a non-protected field) is not`, () => {
+      expect(compileMem(safe).codes).not.toContain("E-PROTECT-006");
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 2c. S441 fix round — the review's findings, end to end
+// ---------------------------------------------------------------------------
+function compileFiles(files) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-protect-multi-"));
+  for (const [name, src] of Object.entries(files)) writeFileSync(join(dir, name), src);
+  const result = compileScrml({
+    inputFiles: Object.keys(files).map((f) => join(dir, f)), write: false, log: () => {},
+  });
+  const diags = [...(result.errors ?? []), ...(result.warnings ?? [])];
+  return { result, diags, codes: diags.map((d) => d.code) };
+}
+const HELPER = (withProtect) => `<program db="./app.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+    passwordHash: text
+  }
+</schema>
+${withProtect ? '<db src="./app.db" tables="users" protect="passwordHash"/>\n' : ""}\${
+export function pick(r) {
+    return r.passwordHash
+}
+export function pickName(r) {
+    return r.name
+}
+}
+</program>
+`;
+const importing = (name, ret) => prog(`\${\n  import { ${name} } from './helper.scrml'\n}\nfunction getIt() {\n    ${ONE}\n    return ${ret}\n}`);
+
+describe("S441 fix round F1 — a helper in ANOTHER FILE is analysed, not guessed", () => {
+  for (const withProtect of [false, true]) {
+    const label = withProtect ? "helper file declares protect=" : "helper file has no protect=";
+    test(`${label}: imported pick(u) returning the column is rejected`, () => {
+      const { codes } = compileFiles({ "helper.scrml": HELPER(withProtect), "app.scrml": importing("pick", "pick(u)") });
+      expect(codes).toContain("E-PROTECT-006");
+      // …and nothing claims the column was stripped: it never reached a redact as a row.
+      expect(codes).not.toContain("I-PROTECT-STRIP-001");
+    });
+    test(`${label}: imported pickName(u) returning a non-protected field compiles`, () => {
+      const { codes } = compileFiles({ "helper.scrml": HELPER(withProtect), "app.scrml": importing("pickName", "pickName(u)") });
+      expect(codes).not.toContain("E-PROTECT-006");
+    });
+  }
+});
+
+describe("S441 fix round F2/F3 — reversible encodings and response headers", () => {
+  const H = [ONE, "const h = u.passwordHash"];
+  const cases = {
+    "Buffer base64": fnBody([...H, 'return Buffer.from(h).toString("base64")']),
+    "URL search": fnBody([...H, 'return new URL("http://x/?h=" + h).search']),
+    "Error message": fnBody([...H, "return new Error(h).message"]),
+    "charCode round trip": fnBody([...H, "return String.fromCharCode(...Array.from(h, c => c.charCodeAt(0)))"]),
+    "Location header on a null-body Response": fnBody([ONE, 'return new Response(not, { status: 302, headers: { Location: "/x?h=" + u.passwordHash } })']),
+    "Set-Cookie header": fnBody([ONE, 'return new Response(not, { status: 204, headers: { "Set-Cookie": "h=" + u.passwordHash } })']),
+  };
+  for (const [name, body] of Object.entries(cases)) {
+    test(`${name} is rejected`, () => {
+      expect(compileMem(prog(body)).codes).toContain("E-PROTECT-006");
+    });
+  }
+  test("a null-body Response whose headers carry nothing protected compiles", () => {
+    const { codes } = compileMem(prog(fnBody([ONE, 'return new Response(not, { status: 302, headers: { Location: "/u/" + u.id } })'])));
+    expect(codes).not.toContain("E-PROTECT-006");
+  });
+});
+
+describe("S441 fix round — the reviewer's negative list stays clean", () => {
+  const IMP = "${\n  import { verifyPassword, hashPassword } from 'scrml:auth'\n}\n";
+  const clean = {
+    "shared helper at two call sites (F6)": [fnBody([ONE, 'const ok = verifyPassword("pw", norm(u.passwordHash))', "return norm(u.name)"]), IMP + "function norm(s) {\n    return s.trim()\n}\n"],
+    "rest-omit": [fnBody([ONE, "const { passwordHash, ...safe } = u", "return safe"]), ""],
+    "UPDATE … SET passwordHash = hashPassword(…)": [fnBody([ONE, 'const nh = hashPassword("new")', "?{`UPDATE users SET passwordHash = ${nh} WHERE id = ${u.id}`}.run()", "return { ok: true }"]), IMP],
+    "copy the hash to another column": [fnBody([ONE, "?{`UPDATE users SET passwordHash = ${u.passwordHash} WHERE id = 2`}.run()", "return { ok: true }"]), ""],
+    "server-side console.log": [fnBody([ONE, 'console.log("hash", u.passwordHash)', "return u.name"]), ""],
+    "boolean + name": [fnBody([ONE, 'return { hasPw: u.passwordHash != "", n: u.name }']), ""],
+    ".length": [fnBody([ONE, "return u.passwordHash.length"]), ""],
+    "truthy ternary": [fnBody([ONE, 'return u.passwordHash ? "set" : "unset"']), ""],
+    "verifyPassword bool": [fnBody([ONE, 'return verifyPassword("pw", u.passwordHash)']), IMP],
+    "hashPassword of the hash": [fnBody([ONE, "return hashPassword(u.passwordHash)"]), IMP],
+    "filter by hash then map name": [fnBody(["const rows = ?{`SELECT * FROM users`}.all()", 'return rows.filter(r => r.passwordHash != "").map(r => r.name)']), ""],
+  };
+  for (const [name, [body, extra]] of Object.entries(clean)) {
+    test(name, () => {
+      const { codes } = compileMem(prog(extra + body));
+      expect(codes).not.toContain("E-PROTECT-006");
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 3. EXECUTED — what compiles still serves the right bytes
+// ---------------------------------------------------------------------------
+// happy-dom (registered globally by sibling browser tests in a full-suite run)
+// strips the `Cookie` header from a spec-strict Request, so no session reaches a
+// handler. The runtime exchanges need bun's native Request.
+const domPolluted = () => typeof globalThis.document !== "undefined";
+
+async function serveAndCall(src, argsJson, { realHash = false } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "scrml-protect-scalar-run-"));
+  const outDir = join(dir, "dist");
+  mkdirSync(outDir, { recursive: true });
+  const file = join(dir, "app.scrml");
+  writeFileSync(file, src);
+  const dbPath = join(dir, "app.db");
+  const db = new Database(dbPath, { create: true });
+  db.run("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)");
+  db.run("INSERT INTO users VALUES (1, ?, ?)", ["ada", realHash ? await Bun.password.hash("pw") : "SECRET-HASH-123"]);
+  db.close();
+  const result = compileScrml({ inputFiles: [file], write: true, outputDir: outDir, log: () => {} });
+  const serverJsPath = join(outDir, "app.server.js");
+  expect(existsSync(serverJsPath)).toBe(true);
+  writeFileSync(serverJsPath, readFileSync(serverJsPath, "utf8").replace(
+    'new SQL("sqlite:./app.db")', `new SQL(${JSON.stringify("sqlite:" + dbPath)})`));
+  globalThis.__scrml_session_store = new Map([["sid1", { userId: 1, role: "user", csrfToken: "tok1" }]]);
+  const mod = await import(`file://${serverJsPath}?v=${Date.now()}-${Math.random()}`);
+  const route = mod.routes.find((r) => r.path.startsWith("/_scrml/__ri_route_"));
+  const res = await route.handler(new Request("http://localhost" + route.path, {
+    method: "POST",
+    headers: { Cookie: "__Host-scrml_sid=sid1", "X-CSRF-Token": "tok1", "Content-Type": "application/json" },
+    body: argsJson,
+  }));
+  return { result, status: res.status, body: await res.text() };
+}
+
+describe("S441 EXECUTED — the negatives still work on the wire", () => {
+  test("a non-protected field of the protected row flows", async () => {
+    if (domPolluted()) return;
+    const { status, body } = await serveAndCall(prog(CLEAN["a non-protected field of the same row"][0]), "{}");
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toBe("ada");
+  });
+
+  test("the row itself: 200, protected column stripped", async () => {
+    if (domPolluted()) return;
+    const { status, body } = await serveAndCall(prog(CLEAN["the row itself (the floor strips it)"][0]), "{}");
+    expect(status).toBe(200);
+    expect(body).not.toContain("SECRET-HASH-123");
+    expect(JSON.parse(body)).toEqual({ id: 1, name: "ada" });
+  });
+
+  test("reveal is still the deliberate admit path", async () => {
+    if (domPolluted()) return;
+    const { status, body } = await serveAndCall(prog(CLEAN["reveal, then read (the declassify path)"][0]), "{}");
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toBe("SECRET-HASH-123");
+  });
+
+  test("the canonical login verifies against the protected hash and never ships it", async () => {
+    if (domPolluted()) return;
+    const ok = await serveAndCall(LOGIN, JSON.stringify({ name: "ada", pw: "pw" }), { realHash: true });
+    expect(ok.status).toBe(200);
+    expect(JSON.parse(ok.body)).toEqual({ ok: true, user: { id: 1, name: "ada" } });
+    expect(ok.body).not.toContain("$argon2");
+    const bad = await serveAndCall(LOGIN, JSON.stringify({ name: "ada", pw: "wrong" }), { realHash: true });
+    expect(JSON.parse(bad.body)).toEqual({ ok: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. S441 round 5 — the round-4 review's findings, compiled AND executed
+// ---------------------------------------------------------------------------
+const Q = (sql, ...rest) => fnBody([`const u = ?{\`${sql}\`}.get()`, ...rest]);
+
+describe("S441 round 5 — compile-time", () => {
+  const leaks = {
+    "F1 ({ length: h }).length": fnBody([ONE, "return ({ length: u.passwordHash }).length"]),
+    "F1 new Array(h).length": fnBody([ONE, "return new Array(u.passwordHash).length"]),
+    'F1 "x".repeat(h).length': fnBody([ONE, 'return "x".repeat(u.passwordHash).length']),
+    "F2 u.PASSWORDHASH off an upper-case SELECT": Q("SELECT id, PASSWORDHASH FROM users WHERE id = 1", "return u.PASSWORDHASH"),
+    "F2 omit with a case-variant key does not remove the column": "${\n  import { omit } from 'scrml:data'\n}\n" +
+      Q("SELECT id, PASSWORDHASH FROM users WHERE id = 1", 'return omit(u, ["PASSWORDHASH"])'),
+    "F3 an expression column read off the row": Q("SELECT id, lower(passwordHash) AS x FROM users WHERE id = 1", "return u.x"),
+    "F4 arr.find(..).x = h": fnBody([ONE, "const arr = [{ x: 1 }]", "arr.find(e => true).x = u.passwordHash", "return arr"]),
+    "F4 Map.get(..).x = h": fnBody([ONE, "const m = new Map()", "const o = { x: 1 }", 'm.set("k", o)', 'm.get("k").x = u.passwordHash', "return o"]),
+    "F4 Object.values(o)[0].x = h": fnBody([ONE, "const o = { a: { x: 1 } }", "Object.values(o)[0].x = u.passwordHash", "return o"]),
+    "F4 Object.setPrototypeOf": fnBody([ONE, "const o = { x: 1 }", "const p = { }", "Object.setPrototypeOf(o, p)", "p.h = u.passwordHash", "return { v: o.h }"]),
+  };
+  for (const [name, body] of Object.entries(leaks)) {
+    test(`${name} is rejected`, () => {
+      expect(compileMem(prog(body)).codes).toContain("E-PROTECT-006");
+    });
+  }
+  const clean = {
+    "u.passwordHash.length": fnBody([ONE, "return u.passwordHash.length"]),
+    "rows.map(r => r.passwordHash).length": fnBody([ALL, "return rows.map(r => r.passwordHash).length"]),
+    "an expression over a NON-protected column": Q("SELECT id, lower(name) AS x FROM users WHERE id = 1", "return { id: u.id, x: u.x }"),
+    'reveal("PASSWORDHASH") — reveal names are case-insensitive': fnBody([ONE, 'return u.reveal("PASSWORDHASH").passwordHash']),
+  };
+  for (const [name, body] of Object.entries(clean)) {
+    test(`${name} compiles`, () => {
+      expect(compileMem(prog(body)).codes).not.toContain("E-PROTECT-006");
+    });
+  }
+});
+
+describe("S441 round 5 EXECUTED — the row path strips what it used to ship", () => {
+  test("F2: SELECT PASSWORDHASH … return u — the driver keys it `passwordHash`, and it is stripped", async () => {
+    if (domPolluted()) return;
+    const { status, body } = await serveAndCall(prog(Q("SELECT id, PASSWORDHASH FROM users WHERE id = 1", "return u")), "{}");
+    expect(status).toBe(200);
+    expect(body).not.toContain("SECRET-HASH-123");
+    expect(JSON.parse(body)).toEqual({ id: 1 });
+  });
+
+  for (const expr of ["passwordHash || ''", "lower(passwordHash)", "hex(passwordHash)", '"passwordHash"', "users.PASSWORDHASH || ''"]) {
+    test(`F3: SELECT id, ${expr} AS x … return u — stripped wholesale`, async () => {
+      if (domPolluted()) return;
+      const { status, body, result } = await serveAndCall(prog(Q(`SELECT id, ${expr} AS x FROM users WHERE id = 1`, "return u")), "{}");
+      expect(status).toBe(200);
+      expect(body.toLowerCase()).not.toContain("secret-hash-123");
+      expect(body).not.toContain("5345435245542D");
+      expect(JSON.parse(body)).toEqual({});
+      const codes = [...(result.errors ?? []), ...(result.warnings ?? [])].map((d) => d.code);
+      expect(codes).toContain("I-PROTECT-STRIP-001");
+    });
+  }
+
+  test('reveal("PASSWORDHASH") admits the column (case-insensitive declassify)', async () => {
+    if (domPolluted()) return;
+    const { status, body } = await serveAndCall(prog(fnBody([ONE, 'return u.reveal("PASSWORDHASH")'])), "{}");
+    expect(status).toBe(200);
+    expect(JSON.parse(body)).toEqual({ id: 1, name: "ada", passwordHash: "SECRET-HASH-123" });
+  });
+});

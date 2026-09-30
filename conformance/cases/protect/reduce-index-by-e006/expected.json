@@ -1,0 +1,19 @@
+{
+  "id": "protect-reduce-index-by-e006",
+  "description": "§14.8.9 S441 round 3 (N1) — the ordinary index-by idiom `rows.reduce((acc, r) => { acc[r.passwordHash] = r.id; return acc }, {})` puts every protected value into the result as a KEY. `o[k] = v` carries the key's provenance into `o`: E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED by the round-2 review (g-protected-column-escapes-redaction-as-scalar): member assignment dropped the key's provenance, so this compiled and served every hash as a key. Indexing by a non-protected column (acc[r.name]) stays clean.",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

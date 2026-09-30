@@ -1,0 +1,19 @@
+{
+  "id": "protect-scalar-helper-cross-file-e006",
+  "description": "§14.8.9 S441 fix round (F1) — the extracting helper lives in ANOTHER FILE (`helper.scrml` exports `pick(r) { return r.passwordHash }`; the entry imports it and returns `pick(u)`). The provenance flow analyses every server module of the compile with the imports between them resolved, so this is E-PROTECT-006 — and I-PROTECT-STRIP-001 does NOT claim a strip (the row never reached a redact sink).",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-scalar-egress.test.js",
+  "rationale": "MEASURED on the first S441 cut (g-protected-column-escapes-redaction-as-scalar, security review F1): the single-module analysis could not see into helper.server.js, so this compiled at exit 0, served HTTP 200 \"SECRET-HASH-123\", and still printed the false I-PROTECT-STRIP-001 \"stripped\" claim — the original defect's symptom, one file away. §14.8.9 (S441 amendment): \"The analysis SHALL cover every server module the compile emits, with the imports between them resolved.\"",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

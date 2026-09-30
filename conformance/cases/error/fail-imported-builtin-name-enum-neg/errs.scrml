@@ -1,0 +1,8 @@
+${
+    // A user error enum that happens to share its name with a built-in
+    // error type (§14.1.2 lists AuthError among the built-ins).
+    export type AuthError:enum = {
+        Missing
+        Bad(reason: string)
+    }
+}

@@ -970,7 +970,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
     if (typeDecls && typeRegistry) {
       const { BUILTIN_TYPES } = require("../type-system.ts");
       for (const [name, type] of typeRegistry) {
-        if (BUILTIN_TYPES.has(name)) continue;
+        if (type === BUILTIN_TYPES.get(name)) continue; // identity: a user enum named like a built-in still gets its table (S443)
         if (type.kind === "enum" && type.transitionRules && type.transitionRules.length > 0) {
           lines.push("");
           for (const l of emitTransitionTable(`__scrml_transitions_${name}`, type.transitionRules)) {

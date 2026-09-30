@@ -1,0 +1,19 @@
+{
+  "id": "protect-response-header-e006",
+  "description": "§14.8.9 S441 fix round (F3) — a NULL-BODY author Response (so not E-PROTECT-005, and not refused at runtime) whose `Location` header is built from the protected column. Response headers are egress: E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-scalar-egress.test.js",
+  "rationale": "MEASURED on the first S441 cut (g-protected-column-escapes-redaction-as-scalar, security review F3): only the Response BODY was checked, so this compiled and served 302 with the hash in the Location header. §14.8.9 (S441 amendment): sinks include \"every argument of an author-built Response — its body AND its init\".",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "E-PROTECT-005"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

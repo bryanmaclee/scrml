@@ -1,0 +1,18 @@
+{
+  "id": "protect-login-verify-clean",
+  "description": "§14.8.9 — the canonical login: a protected hash is SELECTed and passed to `verifyPassword(pw, u.passwordHash)` server-side; only the boolean outcome and non-protected fields are returned. It compiles clean: no E-PROTECT-006 (the result of verifyPassword is a DERIVED value, the §14.8.9 bound) and no I-PROTECT-STRIP-001 (the row never reaches an egress, so nothing is stripped). CODES-ONLY: the impl1-ts runtime adapter evaluates the server bundle with `new Function`, which cannot load the bundle's `scrml:auth` stdlib import — the runtime proof (verifies against a real argon2id hash, returns `{ ok: true, user: { id, name } }`, never the hash) is EXECUTED in the source-test instead.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-scalar-egress.test.js",
+  "rationale": "The S441 provenance flow (g-protected-column-escapes-redaction-as-scalar) must not false-positive on the canonical authentication shape. A scalar passed to a function the module does not define is a derived flow (§14.8.9 \"a value computed from a protected column but of independent identity\"), so `ok` is clean; `u.id` / `u.name` are non-protected. The row never reaches an egress sink, so I-PROTECT-STRIP-001 does not fire — the pre-S441 info fired here and claimed a strip that never happened.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-PROTECT-006",
+      "I-PROTECT-STRIP-001"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ]
+  }
+}
