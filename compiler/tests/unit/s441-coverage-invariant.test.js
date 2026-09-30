@@ -166,14 +166,19 @@ for (const [label, parser] of BOTH) {
   });
 }
 
-test("§3 native: a parse diagnostic at the run's END belongs to its statement, not to an empty 'prose' line", () => {
-  // Was (round-4 WIP): `import stuff` → E-UNQUOTED-DISPLAY-TEXT quoting ``
-  // on the NEXT line (the markup), hiding the real E-STMT-EXPECT-FROM.
+test("§3 native: a declaration at the run's END that compiles nothing is reported on its OWN line, quoting itself", () => {
+  // Round-4 WIP: `import stuff` → E-UNQUOTED-DISPLAY-TEXT quoting `` on the
+  // NEXT line. Round 4 kept E-STMT-EXPECT-FROM. Round 5 (ruling S443 item 4 —
+  // "a node covers only tokens it compiles"): a declaration that compiles
+  // nothing is E-UNQUOTED-DISPLAY-TEXT on its own line, as on the default
+  // front end (the native "expected 'from'" is reported at the NEXT token).
   const r = compile("<program>\nimport stuff\n<p>x</p>\n</program>\n", "scrml-native");
-  expect(r.codes).not.toContain("E-UNQUOTED-DISPLAY-TEXT");
-  expect(r.codes).toContain("E-STMT-EXPECT-FROM");
+  expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+  expect(r.errors[0].message).toContain("`import stuff`");
+  expect(at(r.errors[0]).line).toBe(2);
   const f = compile("<program>\nfn heading\n<p>x</p>\n</program>\n", "scrml-native");
-  expect(f.codes).toEqual(["E-STMT-FUNCTION-BODY"]);
+  expect(f.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+  expect(f.errors[0].message).toContain("`fn heading`");
 });
 
 // ---------------------------------------------------------------------------

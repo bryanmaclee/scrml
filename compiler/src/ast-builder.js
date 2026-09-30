@@ -55,6 +55,7 @@ import {
 
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
 import { segmentBodyTopItems } from "../native-parser/body-top-prose.js";
+import { declExtent, liveExprIsInert } from "../native-parser/body-top-coverage.js";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -1309,6 +1310,9 @@ const BODY_TOP_PROSE_HEADS = {
 function stmtHasInvalidOwnExpr(st) {
   if (!st || typeof st !== "object") return false;
   if (st.kind === "html-fragment") return true;
+  // S441 round 5 — a statement that compiles nothing (bodyTopAcceptance:
+  // `import stuff`, `type here`, `fn heading`, a bare `404`) is not code.
+  if (st._s441Accepted && st._s441Accepted.nothing === true) return true;
   // An `on mount { … }` / `on dismount { … }` desugars to a bare-expr whose
   // exprNode is the BODY (a statement list), not a head — code by its head.
   if (st._onMountEffect === true) return false;
@@ -1431,6 +1435,25 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
         if (!reported && lastSig !== ";" && lastSig !== "}") { fi = si; break; }
       }
     }
+    // S441 round 5 — the statement's grammar ended before the tokens its parse
+    // consumed (bodyTopAcceptance): the rest of its own line is reported, and
+    // anything it swallowed from later lines is re-parsed as the next
+    // statements. A statement that compiles nothing is invalid (below).
+    const acc = st._s441Accepted;
+    if (acc && acc.nothing !== true) {
+      if (acc.sameStart >= 0) {
+        const tRel = acc.sameStart - srcOffset;
+        const tCol = tRel - (srcText.lastIndexOf("\n", tRel - 1) + 1) + 1;
+        const shownT = acc.sameText.length > 80 ? acc.sameText.slice(0, 77) + "..." : acc.sameText;
+        errors.push(unquotedError(filePath, shownT, acc.sameStart, acc.sameEnd, lineNoAt(tRel), tCol));
+      }
+      if (acc.laterStart >= 0) {
+        const lRel = acc.laterStart - srcOffset;
+        const rel = srcText.lastIndexOf("\n", lRel - 1) + 1;
+        if (rel > 0 && rel < srcText.length) { fi = si; splitRel = rel; break; }
+      }
+      continue;
+    }
     if (tail && tail.line > 0) {
       // SPLIT — keep this statement; re-parse from the line the tail is on.
       let rel = Math.max(0, st.span.start - srcOffset);
@@ -1471,7 +1494,8 @@ function rejectBodyTopProse(body, srcText, srcOffset, errors, errsBefore, filePa
       const s0 = errStart(errors[k]);
       if (typeof s0 === "number" && s0 >= splitAbs && errors[k].code !== "E-UNQUOTED-DISPLAY-TEXT") errors.splice(k, 1);
     }
-    truncateStmtAtTail(body[fi], stmtLostTail(body[fi]), filePath);
+    const lostTail = stmtLostTail(body[fi]);
+    if (lostTail) truncateStmtAtTail(body[fi], lostTail, filePath);
     clipBodyTopCover(body[fi], splitAbs);
     // The kept prefix is judged like any other statement: `careful, world`
     // that swallowed the next line is, once cut back to its own line, a comma
@@ -1618,6 +1642,102 @@ function addBodyTopCover(node, ranges) {
   for (const r of ranges) node._s441Cover.push(r);
 }
 
+// S441 round 5 — bodyTopAcceptance: which prefix of the tokens one top-level
+// iteration consumed does the statement it produced COMPILE? (SPEC §40.8
+// coverage invariant; ruling S443 item 4 — "a node covers only tokens it
+// compiles".) The grammar-side answer lives in native-parser/body-top-
+// coverage.js, shared with the native front end; this maps the live nodes
+// onto it. Returns null (all compiled), { nothing: true }, or { count } —
+// the number of `consumed` tokens compiled (comments excluded).
+//   - import-decl: `import … from "<source>"` ends at the source string; with
+//     no source at all it is not a declaration (`import stuff`). A host
+//     import is judged by its own diagnostics (E-IMPORT-009 / E-STMT-EXPECT-FROM).
+//   - export-decl: by what is exported — a re-export ends at its source
+//     string, a declaration where that declaration ends, an `export` of
+//     nothing it recognised (`export data`) compiles nothing.
+//   - type-decl: `type Name[:kind] = <type-expr>` ends where the type
+//     expression does; `type Name` with neither a kind nor a body is nothing.
+//   - function-decl: a function with no `{ … }` body (`fn heading`) is nothing.
+//   - bare-expr: a statement built only from literals (`404`, `-1`, `"a" + 1`)
+//     computes nothing observable — nothing.
+function bodyTopAcceptance(node, consumed) {
+  if (!node || typeof node !== "object" || !Array.isArray(consumed) || consumed.length === 0) return null;
+  // (A STRING token's text is its content without the quotes; the shared
+  // grammar classifies by the first character, so restore the delimiter.)
+  const texts = consumed.map((t) => (t.kind === "STRING" ? "\"" : "") + String(t.text ?? ""));
+  let res = null;
+  switch (node.kind) {
+    case "import-decl": {
+      if (typeof node.hostTag === "string") return null;
+      if (!node.source) return { nothing: true };
+      res = declExtent("import", texts);
+      break;
+    }
+    case "export-decl": {
+      // Skip `export` and the `pure` / `server` modifiers the handler consumed.
+      let k = 0;
+      if (texts[k] === "export") k++;
+      while (texts[k] === "pure" || texts[k] === "server") k++;
+      const rest = texts.slice(k);
+      const kind = node.exportKind;
+      let sub;
+      if (kind === "re-export" || kind === "re-export-all") sub = declExtent("re-export", ["export", ...rest]);
+      else if (kind === "local" || kind === "rename") sub = null;
+      else if (kind === "type") sub = declExtent("type", rest);
+      else if (kind === "function" || kind === "fn") sub = declExtent("function", rest);
+      else if (kind === "const" || kind === "let") sub = constInitAcceptance(consumed.slice(k));
+      else if (node.exportedName) sub = null;     // `export async function` — the name was harvested
+      else return { nothing: true };
+      if (!sub) return null;
+      if (sub.nothing) return sub;
+      res = { count: kind === "re-export" || kind === "re-export-all" ? k - 1 + sub.count : k + sub.count };
+      break;
+    }
+    case "type-decl":
+      if (node.fromExport) return null;
+      res = declExtent("type", texts);
+      break;
+    case "function-decl":
+      if (node.fromExport) return null;
+      res = declExtent("function", texts);
+      break;
+    case "bare-expr":
+      if (node._onMountEffect === true) return null;
+      return liveExprIsInert(node.exprNode) ? { nothing: true } : null;
+    default:
+      return null;
+  }
+  if (!res || res.nothing) return res;
+  return res.count >= consumed.length ? null : res;
+}
+
+// constInitAcceptance — `const|let NAME = init` (an exported value). The init
+// is an expression; when its parse kept only a valid PREFIX (acorn's longest
+// prefix, `_s441Trailing`), the declaration compiles only up to the end of
+// that prefix — found as the longest token prefix of the init that parses
+// whole.
+function constInitAcceptance(toks) {
+  const eq = toks.findIndex((t, idx) => idx > 0 && t.text === "=" );
+  if (eq < 0 || eq + 1 >= toks.length) return null;
+  const init = toks.slice(eq + 1);
+  if (init.some((t) => t.kind === "BLOCK_REF" || t.text === "<")) return null;
+  const parses = (list) => {
+    try {
+      // (A STRING token's text has no delimiters: re-quote it, or `"a b"`
+      // would read as two juxtaposed names.)
+      const n = parseExprToNode(list.map((t) => (t.kind === "STRING" ? JSON.stringify(String(t.text)) : t.text)).join(" "), "", 0);
+      return !!n && !hasLostTrailingContent(n) && !(n.kind === "escape-hatch" && n.nativeKind === "ParseError");
+    } catch {
+      return false;
+    }
+  };
+  if (parses(init)) return null;
+  for (let m = init.length - 1; m >= 1; m--) {
+    if (parses(init.slice(0, m))) return { count: eq + 1 + m };
+  }
+  return null;
+}
+
 // clipBodyTopCover — drop the part of a node's coverage at or after `at`
 // (a statement cut at a swallowed line keeps only its own prefix).
 function clipBodyTopCover(node, at) {
@@ -1684,7 +1804,11 @@ export function assertBodyTopCoverage(body, tokens, text, textOffset, errors, fi
       const reported = errRanges.some((er) => cov.some((r) => r[0] < er[1] && er[0] < r[1]));
       if (!reported) continue;
     }
-    for (const r of cov) mark(r[0], r[1]);
+    // S441 round 5 — only what the statement compiles (bodyTopAcceptance).
+    const acc = st._s441Accepted;
+    if (acc && acc.nothing === true) continue;
+    const upTo = acc && typeof acc.end === "number" ? acc.end : Infinity;
+    for (const r of cov) if (r[0] < upTo) mark(r[0], Math.min(r[1], upTo));
   }
   // Uncovered non-whitespace bytes, grouped per run of consecutive lines.
   const segs = [];
@@ -1705,6 +1829,10 @@ export function assertBodyTopCoverage(body, tokens, text, textOffset, errors, fi
       segB = -1;
     }
   }
+  // Round 5 — an error diagnostic already reported in this run stops the
+  // build, so nothing can ship silently; the internal error would only add
+  // noise beside the author's real one (mirrors the native check).
+  if (segs.length > 0 && errRanges.length > 0) return 0;
   for (const s of segs) {
     const firstLine = text.slice(s.a, s.b).split("\n")[0].trim();
     const shown = firstLine.length > 80 ? firstLine.slice(0, 77) + "..." : firstLine;
@@ -12556,6 +12684,44 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       targets = [n];
     }
     for (const n of targets) addBodyTopCover(n, ranges);
+    // S441 round 5 — credit only what the statement COMPILES (see
+    // bodyTopAcceptance). The export-decl of an `export <decl>` iteration
+    // speaks for the declaration node synthesized beside it.
+    if (targets.length > 0) {
+      const consumed = [];
+      for (let k = _covI0; k < i && k < tokens.length; k++) {
+        const t = tokens[k];
+        // (Comments and `;` are source formatting, not content.)
+        if (t && t.span && t.kind !== "EOF" && t.kind !== "COMMENT" && !(t.kind === "PUNCT" && t.text === ";")
+            && typeof t.span.start === "number") consumed.push(t);
+      }
+      const primary = targets.find((n) => n && n.kind === "export-decl") || (targets.length === 1 ? targets[0] : null);
+      const acc = primary ? bodyTopAcceptance(primary, consumed) : null;
+      if (acc) {
+        let rec;
+        if (acc.nothing) {
+          rec = { nothing: true };
+        } else {
+          const lastTok = consumed[acc.count - 1];
+          const rest = consumed.slice(acc.count);
+          const same = rest.filter((t) => t.span.line === lastTok.span.line);
+          const later = rest.find((t) => t.span.line > lastTok.span.line);
+          rec = {
+            end: lastTok.span.end,
+            sameStart: same.length ? same[0].span.start : -1,
+            sameEnd: same.length ? same[same.length - 1].span.end : -1,
+            sameText: same.map((t) => t.text).join(" "),
+            laterStart: later ? later.span.start : -1,
+          };
+        }
+        // The primary node reports the rest; a sibling (the declaration an
+        // `export` synthesizes) only has its credit clipped.
+        for (const n of targets) {
+          const v = n === primary || rec.nothing ? rec : { end: rec.end, sameStart: -1, sameEnd: -1, sameText: "", laterStart: -1 };
+          Object.defineProperty(n, "_s441Accepted", { value: v, enumerable: false, configurable: true, writable: true });
+        }
+      }
+    }
     _covI0 = -1;
   };
 

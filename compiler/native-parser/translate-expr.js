@@ -1296,6 +1296,16 @@ function exprSourceText(nativeExpr) {
 // a recoverable shape). emit-expr.ts:emitEscapeHatch recognizes the native
 // kind values directly (it already branches on `kind === "Arrow"` /
 // `"Function"`), so the escape-hatch is the documented dual-mode seam.
+// S441 round 5 — the native expression kinds `translateExpr` ALWAYS turns into
+// an EMPTY escape-hatch (raw ""), i.e. whose source text never reaches the
+// emitted code. The body-top coverage check (parse-markup.js
+// assertBodyTopCoverageNative) reads this so a statement holding one is not
+// credited as compiled. Keep in lockstep with the switch in `translateExpr`.
+// (`Sequence` is rejected at a body top before coverage runs; `Yield` / `Lift`
+// / `Fail` / `Propagate` / `GuardedExpr` are un-wrapped by the statement bridge
+// in their statement position, so they are not always dropped.)
+export const NATIVE_EXPR_KINDS_TRANSLATED_EMPTY = new Set(["TaggedTemplate", "Render"]);
+
 function makeEscapeHatch(nativeKind, raw, span) {
     return {
         kind: "escape-hatch",

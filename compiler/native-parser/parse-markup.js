@@ -106,6 +106,8 @@ import { makeParseExprContext, parseExpression } from "./parse-expr.js";
 import { parseProgram } from "./parse-stmt.js";
 // S441 — the body-top display-text segmenter shared with the live front end.
 import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose, uncoveredSegments } from "./body-top-prose.js";
+import { typeDeclExtent, nativeExprIsInert } from "./body-top-coverage.js";
+import { NATIVE_EXPR_KINDS_TRANSLATED_EMPTY } from "./translate-expr.js";
 import { atEnd } from "./token-cursor.js";
 // MK4 — the markup<->JS seam (R1 spike §3). The seam helpers centralize the
 // markup->JS delegate-down direction (the .InLogicEscape body's JS parse) +
@@ -2778,6 +2780,95 @@ const BODY_TOP_PARSE_DIAG_RE = /^E-(STMT|EXPR)-/;
 // as E-UNQUOTED-DISPLAY-TEXT. Prose-capable openers (`if`, `for`, `while`,
 // `return`) are deliberately NOT in the list.
 const BODY_TOP_CODE_HEAD_RE = /^\s*(?:(?:export|server|async)\s+)*(?:type|fn|function|import|use|const|let|when|on|match|lift|class)\b|^\s*(?:<[A-Za-z_]|[?^#!_]=*\{)/;
+
+// S441 round 5 — what a native body-top statement COMPILES (SPEC §40.8
+// coverage invariant; ruling S443 item 4). The grammar side is shared with the
+// live front end (body-top-coverage.js). The native statement parser is strict
+// about import / export / function grammar (it reports a malformed one), so
+// the cases left for this check are the ones it accepts but that compile
+// nothing:
+//   - an expression statement built only from literals (`404`) — no effect;
+//   - a label on a statement that is not a loop (`Total: 42`) — the bridge
+//     drops the label (the live AST has a label only on a loop);
+//   - `type Name` with neither a kind nor a body (`type here`).
+// And one that compiles a PREFIX: a `type` alias whose type expression ends
+// before the line does (`type N = number zqxone`).
+const NATIVE_LOOP_STMT_KINDS = new Set(["While", "DoWhile", "For", "ForIn", "ForOf"]);
+function nativeStmtCompilesNothing(st, source, nextStart) {
+    if (st === null || st === undefined) return false;
+    // `fn heading` — a function with no `{ … }` body (§48). (Its span can
+    // run into the next statement, so the text is cut at the next start.)
+    // A `{` later on the head's own line means the head did not parse (a
+    // parse error — or a native gap, `function main(a: T): R {`), which its
+    // own diagnostics report; that is not a declaration that compiles nothing.
+    if (st.kind === "FunctionDecl" && typeof source === "string" && st.span && typeof st.span.start === "number") {
+        const end = typeof nextStart === "number" && nextStart > st.span.start ? Math.min(nextStart, st.span.end) : st.span.end;
+        const le = source.indexOf("\n", st.span.start);
+        const restOfLine = source.slice(st.span.start, le === -1 ? source.length : le);
+        return source.slice(st.span.start, end).includes("{") === false && restOfLine.includes("{") === false;
+    }
+    // `import stuff` / `import { a }` — no module source: nothing to import.
+    if (st.kind === "Import" && (st.source === "" || st.source === null || st.source === undefined)) return true;
+    if (st.kind === "ExprStmt") return nativeExprIsInert(st.expression);
+    if (st.kind === "Labeled") return st.body === null || st.body === undefined || NATIVE_LOOP_STMT_KINDS.has(st.body.kind) === false;
+    if (st.kind === "TypeDecl") return (st.raw === "" || st.raw === undefined) && (st.typeKind === "" || st.typeKind === undefined);
+    // `import "<module>"` (no binding): §21.3 admits named and default imports
+    // only, and codegen emits nothing for it.
+    if (st.kind === "Import") return Array.isArray(st.specifiers) && st.specifiers.length === 0;
+    return false;
+}
+// nativeTypeAliasRest — for a `type Name = <alias>` statement, the source range
+// of the tokens after the type expression ends ({ keepEnd, restStart, restEnd,
+// keptRaw }), or null when the alias is whole.
+// `outer` is the statement whose span is lexed — the TypeDecl itself, or the
+// `export` wrapping it (a nested declaration's span is not in source
+// coordinates, so the export's is used and its `export` token skipped).
+function nativeTypeAliasRest(st, source, outer) {
+    if (st === null || st === undefined || st.kind !== "TypeDecl" || typeof st.raw !== "string" || st.raw === ""
+            || st.raw.trimStart().startsWith("{") || outer === undefined || outer === null
+            || outer.span === undefined || outer.span === null) return null;
+    const base = outer.span.start;
+    const text = source.slice(base, outer.span.end);
+    let toks = [];
+    try { toks = lex(text); } catch { return null; }
+    toks = toks.filter((t) => t && t.kind !== "EOF" && t.kind !== "Semicolon" && t.span);
+    const lead = toks.findIndex((t) => t.text === "type");
+    if (lead < 0) return null;
+    toks = toks.slice(lead);
+    const n = typeDeclExtent(toks.map((t) => String(t.text ?? "")));
+    if (n === 0 || n >= toks.length) return null;
+    const eq = toks.findIndex((t) => t.text === "=");
+    return {
+        keepEnd: base + toks[n - 1].span.end,
+        restStart: base + toks[n].span.start,
+        restEnd: base + toks[toks.length - 1].span.end,
+        keptRaw: eq >= 0 ? toks.slice(eq + 1, n).map((t) => t.text).join(" ") : st.raw,
+    };
+}
+// nativeStmtDropsText — true when the statement holds an expression the bridge
+// translates to an EMPTY escape-hatch (its text never reaches the output).
+function nativeStmtDropsText(node, depth = 0) {
+    if (node === null || typeof node !== "object" || depth > 200) return false;
+    if (Array.isArray(node)) return node.some((x) => nativeStmtDropsText(x, depth + 1));
+    if (typeof node.kind === "string" && NATIVE_EXPR_KINDS_TRANSLATED_EMPTY.has(node.kind)) return true;
+    // Markup-as-value carries a markup block-stream that the MARKUP pipeline
+    // compiles (a `${render slot()}` inside it is not a translateExpr drop).
+    if (node.kind === "MarkupValue") return false;
+    for (const k of Object.keys(node)) {
+        if (k === "span") continue;
+        const v = node[k];
+        if (v !== null && typeof v === "object" && nativeStmtDropsText(v, depth + 1)) return true;
+    }
+    return false;
+}
+function unquotedNativeMessage(shown) {
+    return "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
+        "body is code (SPEC §40.8, S441) — loose prose is not allowed there. If this " +
+        "is displayed text, declare it: wrap it in a markup element (`<p>" + shown +
+        "</p>`) or write it as a display-text literal (`\"" + shown.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")
+        + "\"`, §4.18.3).";
+}
+
 function rejectBodyTopProseNative(block, source, ctx) {
     const body = Array.isArray(block.body) ? block.body : [];
     if (body.length === 0) return;
@@ -2786,6 +2877,24 @@ function rejectBodyTopProseNative(block, source, ctx) {
     // exactly when a comma-sequence run (no parse diagnostic) must still be
     // judged.
     if (Array.isArray(ctx.diagnostics) === false) ctx.diagnostics = [];
+    // S441 round 5 — a `type` alias that ends before its line does: keep the
+    // declaration, report the rest of the line (the live front end does the
+    // same — ast-builder.js rejectBodyTopProse).
+    for (const st0 of body) {
+        // (`export type …` — the declaration inside the export.)
+        const st = st0 && st0.kind === "Export" && st0.declaration && st0.declaration.kind === "TypeDecl" ? st0.declaration : st0;
+        const rest = nativeTypeAliasRest(st, source, st0);
+        if (rest === null) continue;
+        if (st !== st0) st0.span = { ...st0.span, end: rest.keepEnd };
+        else st.span = { ...st.span, end: rest.keepEnd };
+        const shown0 = source.slice(rest.restStart, rest.restEnd).trim();
+        const shown = shown0.length > 80 ? shown0.slice(0, 77) + "..." : shown0;
+        const pre = source.slice(0, rest.restStart);
+        pushDiagnostic(ctx, makeDiagnostic("E-UNQUOTED-DISPLAY-TEXT", unquotedNativeMessage(shown),
+            { start: rest.restStart, end: rest.restEnd, line: (pre.match(/\n/g) || []).length + 1,
+              col: rest.restStart - (pre.lastIndexOf("\n") + 1) + 1 }));
+        st.raw = rest.keptRaw;
+    }
     const span = block.span;
     const blockStart = span !== undefined && span !== null && typeof span.start === "number" ? span.start : 0;
     const blockEnd = span !== undefined && span !== null && typeof span.end === "number" ? span.end : blockStart;
@@ -2795,14 +2904,22 @@ function rejectBodyTopProseNative(block, source, ctx) {
     // S441 review #6 — a comma sequence statement (`Hello, world`) is not a
     // scrml expression (mirrors ast-builder.js stmtHasInvalidOwnExpr).
     const isSeqStmt = (st) => st && st.kind === "ExprStmt" && st.expression && st.expression.kind === "Sequence";
-    if (diags.length === 0 && body.some(isSeqStmt) === false) return;
+    // (A statement the parser already REPORTED — `import(…)` / `class` recover
+    // as a `not` placeholder carrying their own E-…-NOT-IN-SCRML — keeps that
+    // diagnostic; it is not reclassified as prose.)
+    const reportedAt = (st) => st && st.kind === "ExprStmt" && st.span && ctx.diagnostics.some((d) => d && d.span
+        && typeof d.span.start === "number" && typeof d.code === "string" && d.code.startsWith("E-")
+        && d.span.start >= st.span.start && d.span.start < st.span.end);
+    const nextStartOf = (k) => (body[k + 1] && body[k + 1].span && typeof body[k + 1].span.start === "number") ? body[k + 1].span.start : undefined;
+    const nothing = body.map((st, k) => nativeStmtCompilesNothing(st, source, nextStartOf(k)) && !reportedAt(st));
+    if (diags.length === 0 && body.some(isSeqStmt) === false && nothing.some((x) => x) === false) return;
     const starts = body.map((st) => (st && st.span && typeof st.span.start === "number") ? st.span.start : null);
     const stmtIndexAt = (off) => {
         let idx = -1;
         for (let k = 0; k < starts.length; k++) if (starts[k] !== null && starts[k] <= off) idx = k;
         return idx;
     };
-    const flagged = body.map((st) => isSeqStmt(st));
+    const flagged = body.map((st, k) => isSeqStmt(st) || nothing[k]);
     // A diagnostic past the END of every statement that could own it, on a
     // later line (`<count> = 0⏎...` — the error-recovery statement for `...`
     // carries the previous statement's span): its own line is the prose.
@@ -2859,8 +2976,23 @@ function rejectBodyTopProseNative(block, source, ctx) {
         const allExprStmts = body.slice(si, sj + 1)
             .filter((st) => st && st.span && typeof st.span.start === "number" && st.span.start < firstLineEnd)
             .every((st) => st && st.kind === "ExprStmt");
-        if (BODY_TOP_CODE_HEAD_RE.test(text) === false && (block._bodyTopCatchAll === true || allExprStmts)) fi = si;
-        si = sj;
+        // A line whose FIRST statement compiles nothing (round 5) is not code
+        // whatever its head keyword (`type here`, `404`, `Total: 42`). Only the
+        // first: a later piece of a line the native parser could not read
+        // (`use foreign:svc { … }` — a native gap — splits into `use` plus a
+        // label) keeps the code-head rule below.
+        const lineStartOff = source.lastIndexOf("\n", starts[si] - 1) + 1;
+        const firstNonWs = lineStartOff + source.slice(lineStartOff).search(/\S/);
+        const lineCompilesNothing = nothing[si] && starts[si] === firstNonWs;
+        if (lineCompilesNothing
+                || (BODY_TOP_CODE_HEAD_RE.test(text) === false && (block._bodyTopCatchAll === true || allExprStmts))) fi = si;
+        // Round 5 — only the group's FIRST line is decided here; a flagged
+        // statement on a later line is judged as its own group (a code-head
+        // first line — `import … zq` — must not exempt a prose line below it,
+        // `items, Inc`; found by the round-5 fuzz).
+        let last = si;
+        while (last + 1 <= sj && starts[last + 1] !== null && starts[last + 1] < firstLineEnd) last = last + 1;
+        si = last;
     }
     if (fi < 0 && orphanFs < 0) return;
     // Prose is LINE-granular (mirrors ast-builder.js rejectBodyTopProse): the
@@ -3058,7 +3190,17 @@ export function assertBodyTopCoverageNative(block, source, ctx) {
     const body = Array.isArray(block.body) ? block.body : [];
     for (const st of body) {
         if (!st || !st.span || typeof st.span.start !== "number" || typeof st.span.end !== "number") continue;
+        // S441 round 5 — credit a statement only for what it COMPILES: one that
+        // compiles nothing, or whose text the bridge drops (a tagged template →
+        // an empty escape-hatch), is not credited.
+        if (nativeStmtCompilesNothing(st) || nativeStmtDropsText(st)) continue;
         for (let k = Math.max(0, st.span.start - runStart); k < Math.min(len, st.span.end - runStart); k++) inStmt[k] = 1;
+    }
+    // A `;` is source formatting (round 5 — it sits between statement spans,
+    // so crediting only statements made every body-top `;` an internal error).
+    for (const t of toks) {
+        if (!t || !t.span || t.kind !== "Semicolon" || typeof t.span.start !== "number") continue;
+        for (let k = Math.max(0, t.span.start); k < Math.min(len, t.span.end); k++) inStmt[k] = 1;
     }
     const ranges = [];
     let a0 = -1;
@@ -3078,6 +3220,13 @@ export function assertBodyTopCoverageNative(block, source, ctx) {
         ranges.push([ls, le0 === -1 || le0 > runEnd ? runEnd : le0]);
     }
     const segs = uncoveredSegments(view, runStart, runEnd, ranges);
+    // Round 5 — an error diagnostic already reported in this run stops the
+    // build, so nothing can ship silently: the internal error would only add
+    // noise beside the author's real one. (Once that error is fixed, a drop
+    // that is still there fires here.)
+    if (segs.length > 0 && ctx.diagnostics.some((d) => d && typeof d.code === "string" && d.code.startsWith("E-")
+            && d.code !== "E-INTERNAL-BODY-TOP-DROPPED" && d.span && typeof d.span.start === "number"
+            && d.span.start >= runStart && d.span.start <= runEnd)) return;
     const anchorLine = constructed ? (typeof span.line === "number" ? span.line : 1) : 1;
     const lineAt = (off) => constructed
         ? anchorLine + (runText.slice(0, off - runStart).match(/\n/g) || []).length

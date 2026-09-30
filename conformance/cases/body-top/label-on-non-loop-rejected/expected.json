@@ -1,0 +1,19 @@
+{
+  "id": "body-top-label-on-non-loop-rejected",
+  "description": "A label line (`Total: 42`) at a body top is a label on a statement that is not a loop: it compiles nothing, so it is E-UNQUOTED-DISPLAY-TEXT (the native front end used to drop it silently).",
+  "language-version": "1.0",
+  "spec": "§40.8, §49",
+  "source-test": "compiler/tests/unit/s441-review-r5.test.js",
+  "rationale": "§40.8 S441 bullet (round 5): body-top code that does nothing is a compile error; a label is meaningful only as a break/continue target of a loop.",
+  "expect": {
+    "codes": [
+      "E-UNQUOTED-DISPLAY-TEXT"
+    ],
+    "notCodes": [
+      "E-INTERNAL-BODY-TOP-DROPPED"
+    ],
+    "codeCounts": {
+      "E-UNQUOTED-DISPLAY-TEXT": 1
+    }
+  }
+}

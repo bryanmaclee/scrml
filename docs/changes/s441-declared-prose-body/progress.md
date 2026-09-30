@@ -127,3 +127,34 @@ OPEN #7 (not decided; measured): default compiles `import stuff` / `export data`
 - fd9a7589c — merge origin/main: SPEC §4.18.1 + §4.18.7 conflicts = main S442 text + S441 program/page/channel
   extension re-applied; allowlist note kept; SPEC-INDEX/FACTS regenerated; known-gaps auto-merged, @gap ids 1442 =
   union(1411 ours, 1442 theirs), 0 missing. Pre-commit 33,338 tests, 0 fail.
+- ROUND 5 unit (one commit, code + tests + SPEC): the coverage invariant credits a statement only for what it
+  COMPILES. Shared grammar: `compiler/native-parser/body-top-coverage.js` (declExtent / typeDeclExtent /
+  typeExprExtent / liveExprIsInert / nativeExprIsInert). Default: `bodyTopAcceptance` in parseLogicBody's
+  cover flush stamps `_s441Accepted` ({nothing} | {end, same-line rest, later-line rest});
+  rejectBodyTopProse reports the same-line rest (E-UNQUOTED), splits + re-parses a swallowed later line,
+  treats `nothing` as invalid; assertBodyTopCoverage credits only up to `end`. Native: nativeStmtCompilesNothing
+  (inert ExprStmt, label on a non-loop, `type Name` bare, Import without source, FunctionDecl without a
+  brace body on its line), nativeTypeAliasRest (alias trailing tokens, incl. `export type`), `;` is
+  formatting, a statement holding a kind translateExpr always empties (TaggedTemplate / Render —
+  `NATIVE_EXPR_KINDS_TRANSLATED_EMPTY`, translate-expr.js) is not credited, a flagged group is decided on
+  its FIRST line only (later lines judged as their own groups). Both: no E-INTERNAL beside an E- error
+  already in the run (the build is stopped by it).
+  - A: import/export/type/function trailing tokens → E-UNQUOTED on their line; swallowed next line compiles;
+    `import stuff` / `type here` / `export data` / `fn heading` / `404` / `-1` / `true` / `[1,2]` /
+    `"a" + 1` / `import "./x.js"` → E-UNQUOTED (both parsers). SPEC §40.8 bullet + ruling S443 #4 sub-bullet
+    (provenance quoted) + §34 E-INTERNAL row.
+  - B: native `;` no longer E-INTERNAL. C: `Total: 42` / `Step1: "…"` / `Docs: https://…` → E-UNQUOTED (native).
+  - D: native tagged template → E-INTERNAL-BODY-TOP-DROPPED (fail-closed); the translation gap itself is NOT
+    fixed (translate-expr empties TaggedTemplate) — reported.
+  - Bug found by the gate (fixed before commit): the shared bracket table was an object literal, so a
+    `toString` token read Object.prototype.toString as an opener → a valid function flagged as nothing.
+  - FUZZ (fuzz5.mjs = round-4 fuzz + the reviewer's shapes; 4 seeds x 300 bodies x 2 parsers = 2,400
+    compiles, 961 prose lines): E-INTERNAL 0 both; oracle violations 11 per parser, all ONE class —
+    a line starting with `-N` / `[N, 2]` continues the previous expression (JS no-ASI rule:
+    `console.log("m")⏎-3102` emits `console.log("m") - 3102`) — compiled code, identical on both
+    parsers, not a coverage drop (surfaced to PA as a design question).
+  - MEASURED (corpus = examples 71, samples 877, conformance 1196, readme-snippets 9, scrml-site 106,
+    flogence 31; vs the round-5 base 54f7764f6): default 0 files changed (only the 4 new body-top cases);
+    native 0 newly failing — 18 flogence `kind="tool"` files already failing on native (native gap:
+    `function main(a: T): R {` does not parse) change their code SET (the first native parse error is now
+    reported instead of masked). No migration needed.
