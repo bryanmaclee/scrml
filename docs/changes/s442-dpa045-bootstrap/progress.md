@@ -54,3 +54,20 @@ PA recs" (AXIOM-LEVEL); artifact scrml-support/docs/debates/plain-markup-text-as
   mutations 179/179 RED (6 dpa-045 rows) · bite CG 32 + CSS 32 + FRONT 12 certified (no new Core / printer construct:
   the dpa-045 changes are parse-level exit decisions whose failure mode is a diagnostic — certified by mutations.js)
   · dumpcore byte-identical.
+
+## Follow-ups (RULED S442 "dpa-045 follow-ups … = your recs") — finishing agent
+- 2026-09-29 — took over at 99fba8a2 (the previous agent's follow-up commits a2b8ae6a / 5d659456 / 99fba8a2 verified:
+  closed `<` class incl. `* _ .`, `//` / `#{` exits, display-text literal with no escapes, `${…}` in it split into
+  segments). Baseline: m1 73 · m2 433 · m3 60 · m4 146+2 todo, all green.
+- 2026-09-29 — (a) exit set reconciled with SPEC §4.18.1b (branch s442-dpa045-spec) + the PA readings: `~{` IS an exit
+  (added); `?{` is NOT (removed — the previous agent had it as an exit; §4.18.1b: its §3.1 parent is Logic only → content
+  in markup); `_{` / `_={…}=` in a markup body is E-FOREIGN-004 (§23.2.4), skipped opaquely to its level-aware closer
+  (level 0: brace depth), unclosed → E-FOREIGN-002; a `_` ending an identifier (`my_{c}`) is not an opener (impl#1's
+  matchForeignOpener guard). Commit 898f5cd0.
+- 2026-09-29 — (b) item 4: L13 retired in lower.scrml (`textViews` keeps every non-empty Text); the hand-built M1
+  oracles (counter / dropdown ×3 / valuesem .core.scrml) gain the exact whitespace Text views so the lowered ≡ oracle
+  proof still holds; three positional pins (`kids[0]`) re-found by kind. dumpcore vs origin/main: all five programs'
+  Core EQUAL modulo whitespace-only Text views (4 / 22 / 22 / 23 / 3 added); behaviour tests green in both modes.
+  Commit 8b45476e.
+- 2026-09-29 — mutations: the B(3) lexer row's site had moved with B(2) (NOT RUN) — re-pointed; 12 new rows
+  (fu1 ×7, fu3 ×2, fu4 ×2 + the re-pointed one).
