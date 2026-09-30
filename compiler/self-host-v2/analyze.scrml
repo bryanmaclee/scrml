@@ -237,6 +237,12 @@ ${
     // bare `@x` of type `T | not` IS a presence test … the compiler emits an
     // absence check, never JS truthiness"). `lower` wraps each in `IsSome`.
     export type Typing:struct = { exprs: ExprType[], at: int[], presence: int[] }
+    // r8 — Rule C for NAMES: a declared type that did not resolve (E-TYPE-UNKNOWN
+    // answers with a placeholder type) is never checked against. `params`: the
+    // parameter nids whose type did not resolve; `fields`: the struct FieldDef
+    // Sym ids whose type did not resolve. (A declaration field records it on
+    // FieldInfo.trusted; a local's annotation and a return type are left unset.)
+    export type Unresolved:struct = { params: int[], fields: int[] }
     // A local's WRITTEN type (`let a: T = …`), by its Sym (the binder's).
     export type LocalAnnot:struct = { sym: Sym, ty: Type }
 
@@ -253,6 +259,7 @@ ${
         elems: ElemTable,
         attrs: AttrTable,
         annots: LocalAnnot[],
+        unresolved: Unresolved,
         typing: Typing,
     }
 
@@ -349,7 +356,8 @@ ${
     // =========================================================================
     type NodeFacts:struct = { names: NameTable, values: ValueTable, effects: EffectTable, binds: BindTable,
                               elems: ElemTable, attrs: AttrTable }
-    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[] }
+    // `bad`: the declared types that did not resolve (r8 — see Unresolved).
+    type AS:struct = { facts: NodeFacts, diags: Diag[], nextSym: int, annots: LocalAnnot[], bad: Unresolved }
     type RSym:struct = { s: Sym, st: AS }
 
     fn noFacts() -> NodeFacts {
@@ -370,11 +378,11 @@ ${
     }
 
     fn mint(st: AS, hint: string) -> RSym {
-        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots } }
+        return { s: mkSym(st.nextSym, hint), st: { facts: st.facts, diags: st.diags, nextSym: st.nextSym + 1, annots: st.annots, bad: st.bad } }
     }
 
     fn withFacts(st: AS, fs: NodeFacts) -> AS {
-        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots }
+        return { facts: fs, diags: st.diags, nextSym: st.nextSym, annots: st.annots, bad: st.bad }
     }
 
     fn addName(st: AS, nid: int, f: NameFact) -> AS {
@@ -414,11 +422,21 @@ ${
     }
     fn addDiag(st: AS, file: string, span: ASpan, code: string, msg: string) -> AS {
         const d: Diag = { code: code, message: msg, file: file, span: span }
-        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots }
+        return { facts: st.facts, diags: st.diags.concat([d]), nextSym: st.nextSym, annots: st.annots, bad: st.bad }
     }
 
     fn addAnnot(st: AS, s: Sym, ty: Type) -> AS {
-        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]) }
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots.concat([{ sym: s, ty: ty }]), bad: st.bad }
+    }
+
+    fn badParam(st: AS, nid: int) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
+                 bad: { params: st.bad.params.concat([nid]), fields: st.bad.fields } }
+    }
+
+    fn badField(st: AS, id: int) -> AS {
+        return { facts: st.facts, diags: st.diags, nextSym: st.nextSym, annots: st.annots,
+                 bad: { params: st.bad.params, fields: st.bad.fields.concat([id]) } }
     }
 
     // =========================================================================
@@ -792,6 +810,7 @@ ${
         let i = 0
         for (const f of fs) {
             const rt: RType = resolveType(te, f.ty, st)
+            const unresolved: boolean = rt.st.diags.length > st.diags.length
             st = rt.st
             let grants: GrantSet = noGrants()
             if (!payload) grants = { replace: f.isLet || seqReplace(f.ty), edits: typeEdits(rt.t) }
@@ -803,6 +822,7 @@ ${
                 fsym = rm.s
                 st = rm.st
             }
+            if (unresolved) st = badField(st, fsym.id)     // r8: never checked against
             out = out.concat([{ sym: fsym, ty: rt.t, grants: grants }])
             i = i + 1
         }
@@ -1123,9 +1143,11 @@ ${
         st = rs.st
         let ty: Type = Type.Str
         let seqRep = false
+        let resolved = true
         if (aty is some) {
             const rt: RType = resolveType(te, aty, st)
             ty = rt.t
+            resolved = rt.st.diags.length == st.diags.length     // r8: an unknown type name → untrusted
             st = rt.st
             seqRep = seqReplace(aty)
         } else {
@@ -1162,7 +1184,7 @@ ${
             st = rw.st
         }
         const f: FieldInfo = {
-            nid: nid, span: span, annotated: aty is some, trusted: true, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
+            nid: nid, span: span, annotated: aty is some, trusted: resolved, typeSpan: typeSpanOf(aty), sym: rs.s, ty: ty, mode: mode, role: role, grants: grants, graph: rg.graph,
             exported: exported, wcap: wcap, init: init, reads: reads, shrink: shrinkOf(aty),
         }
         return { f: f, st: st }
@@ -1536,7 +1558,7 @@ ${
     fn trustFields(fs: FieldInfo[], errs: ASpan[]) -> FieldInfo[] {
         let out: FieldInfo[] = []
         for (const f of fs) {
-            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: typeTrusted(errs, f.typeSpan),
+            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted && typeTrusted(errs, f.typeSpan),
                                 typeSpan: f.typeSpan, sym: f.sym, ty: f.ty, mode: f.mode, role: f.role, grants: f.grants,
                                 graph: f.graph, exported: f.exported, wcap: f.wcap, init: f.init, reads: f.reads, shrink: f.shrink }])
         }
@@ -3469,7 +3491,8 @@ ${
         if (aty is some && !hasErrIn(fileErrs(env.g.files, env.file), aty.span)) {
             const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
             const rt: RType = resolveType(te, aty, st)
-            annot = rt.t
+            // r8: an annotation that did not resolve is not the local's type
+            if (rt.st.diags.length == st.diags.length) annot = rt.t
             st = rt.st
         }
         const ri: RX = resolveExpr(env, init, annot, st)
@@ -4006,7 +4029,9 @@ ${
                     if (!hasErrIn(fileErrs(g.files, fs.info.file), at.span)) {
                         const rt: RType = resolveType(fte, at, st)
                         pty = rt.t
+                        const unresolved: boolean = rt.st.diags.length > st.diags.length
                         st = rt.st
+                        if (unresolved) st = badParam(st, p.nid)     // r8: never checked against
                     }
                 } else {
                     st = addDiag(st, fs.info.file, p.span, "E-BOOTSTRAP-UNSUPPORTED", "an unannotated parameter `" + p.name + "` — bootstrap slice M2 needs `" + p.name + ": Type` (Core parameters are typed)")
@@ -5415,6 +5440,7 @@ ${
         const fs: FieldDef[] | not = structFieldDefs(ti.def)
         if (fs is not) return VType.Unknown
         if (idx < 0 || idx >= fs.length) return VType.Unknown
+        if (t.unresolved.fields.indexOf(fs[idx].sym.id) >= 0) return VType.Unknown     // r8
         return known(fs[idx].ty)
     }
 
@@ -6023,7 +6049,8 @@ ${
         if (pnids.length != args.length) return ts
         let i = 0
         while (i < args.length) {
-            const pt: Type | not = knownOf(paramType(bindFact(env.t.binds, pnids[i])))
+            let pt: Type | not = knownOf(paramType(bindFact(env.t.binds, pnids[i])))
+            if (env.t.unresolved.params.indexOf(pnids[i]) >= 0) pt = not      // r8: an unresolved parameter type
             if (pt is some) {
                 const what: string = "argument " + (i + 1) + " of `" + name + "`"
                 // r7 A: full assignability for EVERY parameter type (§7.5.1 position 3)
@@ -6549,7 +6576,7 @@ ${
         for (const p of ps) {
             if (!p.spread) {
                 for (const fd of fs) {
-                    if (fd.sym.hint == p.name) {
+                    if (fd.sym.hint == p.name && env.t.unresolved.fields.indexOf(fd.sym.id) < 0) {   // r8: not against an unresolved field type
                         ts = checkValue(env, exprType0(ts, p.value.nid), fd.ty, p.value.span, "`" + s.hint + "." + p.name + "`", ts)
                     }
                 }
@@ -6888,7 +6915,7 @@ ${
             const s: Sym | not = bindSym(pf)
             // an untyped parameter, or one whose type failed to parse, is unproven
             let pvt: VType = VType.Unknown
-            if (paramsTrusted(env.errs, [p])) pvt = paramType(pf)
+            if (paramsTrusted(env.errs, [p]) && env.t.unresolved.params.indexOf(p.nid) < 0) pvt = paramType(pf)
             if (s is some) fenv = tWithLocal(fenv, s, pvt)
         }
         return typeBlock(withRet(fenv, fnRet(env.t, af)), af.body, ts)
@@ -6913,7 +6940,7 @@ ${
     // entry (the file with `<program>`) last.
     // =========================================================================
     export fn analyze(files: FileAst[], entry: string) -> TypedProgram {
-        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [] }
+        const st0: AS = { facts: noFacts(), diags: [], nextSym: 0, annots: [], bad: { params: [], fields: [] } }
         const ra: RGlobals = phaseA(files, entry, st0)
         let st: AS = checkImports(files, ra.g, ra.st)
         st = phaseB(ra.g, st)
@@ -6927,12 +6954,12 @@ ${
         const fs: NodeFacts = indexed(st.facts)
         const bound: Tables = { program: ra.g.program, types: ra.g.types, decls: decls, fns: fns, handles: ra.g.handles,
                                 names: fs.names, values: fs.values, effects: fs.effects, binds: fs.binds, elems: fs.elems,
-                                attrs: fs.attrs, annots: st.annots, typing: { exprs: [], at: [], presence: [] } }
+                                attrs: fs.attrs, annots: st.annots, unresolved: st.bad, typing: { exprs: [], at: [], presence: [] } }
         const scopeDiags: Diag[] = checkScopes(files, bound)
         const typed: RTyping = typeProgram(files, bound)
         const t: Tables = { program: bound.program, types: bound.types, decls: bound.decls, fns: bound.fns, handles: bound.handles,
                             names: bound.names, values: bound.values, effects: bound.effects, binds: bound.binds,
-                            elems: bound.elems, attrs: bound.attrs, annots: bound.annots, typing: typed.typing }
+                            elems: bound.elems, attrs: bound.attrs, annots: bound.annots, unresolved: bound.unresolved, typing: typed.typing }
         return { files: files, tables: t, diags: st.diags.concat(scopeDiags).concat(typed.diags) }
     }
 
