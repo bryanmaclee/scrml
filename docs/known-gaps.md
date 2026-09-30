@@ -30,9 +30,9 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 214 | 4 |
-| MED | 420 | 0 |
-| LOW | 190 | 0 |
+| HIGH | 215 | 4 |
+| MED | 421 | 0 |
+| LOW | 194 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
 
@@ -20980,3 +20980,151 @@ Reviewer-executed. **#1145 snippet-drift gate:** no floor on the checked-block c
 ### g-auth-login-redirect-residuals — relative / query-bearing `loginRedirect=` values (LOW)
 <!-- @gap id=g-auth-login-redirect-residuals sev=LOW status=open locus=compiler/src/route-inference.ts+compiler/src/auth-graph.ts prov=review:S443-auth-r2-re-review-F4 -->
 Reviewer-executed: a relative `loginRedirect="signin"` is emitted as-is and resolves against the page's own directory; `/signin?next=1` and `/signin/` redirect correctly but false-fire I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-LOGIN-MISSING. Also: a `<page auth="required">`'s client chunk is served anonymously and carries static lift template text (no data; same under program auth); `<endpoint>` routes in an auth-required scope run anonymously per §61.7 (author-in-arm auth) — §40.2 / §52.13 "every request to this scope" need an §61.7 carve-out sentence.
+
+## §S444 — dpa-045 follow-up filings (2026-09-30; every entry re-executed on `108ca89be` with `bun compiler/bin/scrml.js compile <file> --output-dir <dir>`; change `docs/changes/s444-dpa045-spec-followups/`)
+
+### G-LIFT-SEGMENT-TRIM-DELETES-INTERP-ADJACENT-SPACES — markup built from logic (`lift`, markup-as-value) trims every text segment, so the spaces next to `${…}` vanish: `   lifted   ${it}   li` renders `liftedali`
+<!-- @gap id=g-lift-segment-trim-deletes-interp-adjacent-spaces sev=HIGH status=open locus=searched:compiler/src/codegen/emit-lift.js(the text-child createTextNode emission — the content already arrives trimmed),compiler/src/tokenizer.ts,compiler/src/ast-builder.js(text-child construction) — the deciding site was NOT traced prov=spec:SPEC.md-§4.18.5-"Whitespace is kept exactly"+ruling:user-voice-scrml.md-S442-dpa-045-follow-ups-scope-note+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+  <items> = ["a", "b"]
+  <ul>
+    ${ for (let it of @items) { lift <li>   lifted   ${it}   li   </li> } }
+  </ul>
+</program>
+```
+`bun compiler/bin/scrml.js compile lift.scrml --output-dir out` → exit 0, zero diagnostics. The client JS builds
+`createTextNode("lifted")`, the interpolation node, `createTextNode("li")`. Rendered: **`liftedali`**.
+Expected (§4.18.5, *"No stage SHALL collapse runs, strip leading or trailing whitespace, or drop the whitespace
+adjacent to a `${…}` interpolation"*): `   lifted   a   li   `. Markup-as-value does the same:
+`${ const frag = <p>   value   ${@n}   end   </p>  lift frag }` → `createTextNode("value")`, interp,
+`createTextNode("end")` → renders `value1end`.
+
+**Why HIGH:** silent wrong output on the most common `lift` shape (`Hello ${name}!` → `Helloname!`) — words merge in
+the rendered page, exit 0, no diagnostic. The static-HTML path keeps the same text byte for byte (S442 E(a) rows 1-3),
+so the author cannot see it from the markup they wrote.
+
+**Same class as** [[g-ast-markup-text-interp-adjacent-space-dropped]] (MED, open; its "whitespace-model fork belongs
+to bryan" is now RULED — S442: whitespace is kept exactly) and [[g-lift-markup-adjacent-text-leading-space-dropped]]
+(LOW). This entry records the full measured form (trim + collapse per segment, both `lift` and markup-as-value) against
+the ruled rule. ⚑ Disposition per the S442 ruling: *"fixed in impl#1 only if the S435 policy admits them"*; the
+bootstrap builds the rule.
+— `NEW S444 (dpa-045 E(a) measurement row 12/13, re-executed)`; **HIGH**; open
+
+### G-COMPONENT-BODY-WHITESPACE-COLLAPSED — a component-definition body's text is collapsed and de-indented (`comp   body   ${@n}   tail` renders `comp body … tail`), contradicting §4.18.5 "kept exactly"
+<!-- @gap id=g-component-body-whitespace-collapsed sev=LOW status=open locus=searched:compiler/src/component-expander.ts,compiler/src/ast-builder.js — the component-definition RHS markup is rebuilt from token text; the collapsing site was NOT traced prov=spec:SPEC.md-§4.18.5-"Whitespace is kept exactly"+ruling:user-voice-scrml.md-S442-dpa-045-follow-ups-scope-note+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+  <n> = 1
+  const Box = <div class="box">
+      comp   body   ${@n}   tail
+  </>
+  <Box/>
+</program>
+```
+`bun compiler/bin/scrml.js compile comp.scrml --output-dir out` → exit 0. HTML: `comp body <span data-scrml-logic=…></span> tail`
+(indentation stripped, each run collapsed to one space). Expected (§4.18.5): the body's text byte for byte —
+`\n      comp   body   ` … `   tail\n  `. S442 E(a) rows 8-11 also measured tab → space and, for a single-line body, an
+ADDED trailing space (`<section>WSC-single-line  two  spaces</section>` → `WSC-single-line two spaces </section>`).
+
+**Why LOW:** under the browser's default `white-space: normal` the rendering is identical; the difference shows only
+under `white-space: pre*`, in `textContent` reads, and in the added trailing space. No content is lost.
+⚑ Disposition per the S442 ruling: impl#1 fix only if the S435 policy admits it; the bootstrap builds the rule.
+— `NEW S444 (dpa-045 E(a) measurement rows 8-11, re-executed)`; **LOW**; open
+
+### G-FOREIGN-BLOCK-IN-MARKUP-BODY-RENDERED-AS-TEXT — a `_{ … }` / `_={ … }=` block in a markup element body ships as page text with no diagnostic instead of `E-FOREIGN-004`
+<!-- @gap id=g-foreign-block-in-markup-body-rendered-as-text sev=MED status=open locus=compiler/src/block-splitter.js(matchForeignOpener is consulted only inside brace contexts and orphan-brace bodies — :3019 and :3299; the markup-body text scan never tests for a foreign opener) prov=spec:SPEC.md-§23.2.4+SPEC.md-§4.18.1b+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+<p>before _{ console.log(1) } after</p>
+<div>x _={ let y = 1 }= z</div>
+</>
+```
+`bun compiler/bin/scrml.js compile fa.scrml --output-dir out` → exit 0 (a W-LINT-007 lint only). HTML:
+`<p>before _{ console.log(1) } after</p>` and `<div>x _={ let y = 1 }= z</div>`. Also with the block inside a
+`<program name="svc" lang="ts">`. Expected: `E-FOREIGN-004` — §23.2.4: *"A `_{}` block in any OTHER context — … or a
+markup element body — SHALL be a compile error"*; §4.18.1b: *"in a markup body it is an ERROR, `E-FOREIGN-004`"*.
+`my_{` (an identifier character before `_`) is content and must stay so (§23.2 identifier guard, S444).
+
+**Why MED:** silent acceptance of a SHALL-error. An author who writes foreign code in a markup body gets that source
+shipped verbatim in the client HTML — visible, but also a disclosure path for code the author meant to run on the
+server. ⚑ PA to judge whether that makes it security under the S435 policy. The dpa-045 bootstrap branch
+(`feat/s442-dpa045-bootstrap`, 898f5cd06) implements the error; main's bootstrap does not recognize `_{` at all.
+— `NEW S444 (§4.18.1b "as today" was false; PA-directed)`; **MED**; open
+
+### G-SVG-OR-MATH-COMPOUND-CELL-PUSHES-FOREIGN-TAG-ON-ANCESTOR-STACK — a compound-parent cell named `svg`/`math` is a transparent wrapper but pushes its name as an ancestor, so a self-closed non-void child keeps `/>` and swallows its siblings
+<!-- @gap id=g-svg-or-math-compound-cell-pushes-foreign-tag-on-ancestor-stack sev=LOW status=open locus=compiler/src/codegen/emit-html.ts(the compound-parent wrapper branch — `markupParentStack.push(tag)` with no DOM element emitted; locate by `wrapperKind === "compound-parent"`)+compiler/src/codegen/utils.ts(htmlParserHonorsSelfClose reads that stack) prov=review:S442-dpa-058-D1-review-follow-up(#1160 commit message)+empirical:S444-reproduced-on-108ca89be-with-a-one-variable-control -->
+**Reproduced on `108ca89be`, one-variable control.** ⚑ The brief filed this against the bootstrap; it is impl#1 — the
+D1 fix (#1160) is in `emit-html.ts` / `utils.ts`, and main's bootstrap has no svg/math handling.
+
+```scrml
+<svg>
+    <label> = "x"
+</>
+
+<main>
+  <svg>
+    <div/>
+    <p>after</p>
+  </svg>
+</main>
+```
+`bun compiler/bin/scrml.js compile svgcell.scrml --output-dir out` → exit 0; HTML `<main> <div /> <p>after</p> </main>`
+(the wrapper emits no element). The same file with the cell named `box` emits `<div></div>`. A browser parses
+`<div />` in HTML content as an OPEN `<div>`, so `<p>after</p>` becomes its child. Expected: `<div></div>` — the
+ancestor stack should hold only elements that are emitted.
+
+**Why LOW:** needs a compound cell named after a foreign root, which also shadows an HTML element name; corpus use
+not measured. Silent when it hits.
+— `NEW S444 (D1 review follow-up, pre-existing)`; **LOW**; open
+
+### G-HTML-BREAKOUT-TAG-IN-FOREIGN-CONTENT-KEEPS-SELF-CLOSE — `<svg><div/>…</svg>` emits `<div />`; a browser treats `<div>` in SVG as a breakout tag, leaves foreign content and opens a `<div>` that swallows the siblings
+<!-- @gap id=g-html-breakout-tag-in-foreign-content-keeps-self-close sev=LOW status=open locus=compiler/src/codegen/utils.ts(htmlParserHonorsSelfClose — returns true for any tag under an svg/math ancestor; no breakout-tag list) prov=review:S442-dpa-058-D1-review-follow-up(#1160 commit message)+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.** ⚑ The brief filed this against the bootstrap; it is impl#1 (see the entry above).
+
+```scrml
+<program>
+  <svg viewBox="0 0 10 10">
+    <div/>
+    <p>after</p>
+  </svg>
+</program>
+```
+`bun compiler/bin/scrml.js compile breakout.scrml --output-dir out` → exit 0; HTML `<svg viewBox="0 0 10 10"> <div /> <p>after</p> </svg>`.
+HTML Living Standard, "in foreign content": a start tag named `div`, `p`, `b`, `br`, `ul`, … (the breakout list) pops
+out of foreign content and is reprocessed as HTML, where the trailing `/` is ignored. Expected: `<div></div>` for a
+breakout tag under svg/math.
+
+**Why LOW:** the input is malformed (HTML elements inside `<svg>` break out whatever the emitter writes); the
+difference is only whether the stray `<div>` also swallows its siblings.
+— `NEW S444 (D1 review follow-up, pre-existing, malformed input)`; **LOW**; open
+
+### G-UNTERMINATED-DISPLAY-TEXT-LITERAL-NOT-E-CTX-001 — an unterminated display-text literal does not raise `E-CTX-001`: impl#1 accepts it silently, main's bootstrap reports other codes
+<!-- @gap id=g-unterminated-display-text-literal-not-e-ctx-001 sev=LOW status=open locus=searched:compiler/src/engine-statechild-parser.ts,compiler/src/block-splitter.js(impl#1),compiler/self-host-v2/parse.scrml(the state-child body parser — bootstrap) — the deciding sites were NOT traced prov=spec:SPEC.md-§4.18.3+SPEC.md-§4.18.7-"Recovery (unterminated literal)"+empirical:S444-reproduced-on-108ca89be -->
+**Reproduced on `108ca89be`.**
+
+```scrml
+<program>
+type Phase:enum = { Idle, Busy }
+<engine for=Phase initial=.Idle>
+    <Idle>"never closed</>
+    <Busy>"plain"</>
+</>
+</>
+```
+impl#1: `bun compiler/bin/scrml.js compile unterm.scrml --output-dir out` → exit 0, zero diagnostics; renders
+`"never closed` (the opening quote as content). Main's bootstrap (`slice-m2` `frontEnd`, same body under
+`<phase:Phase=.Idle single>`): block-form → `E-UNQUOTED-DISPLAY-TEXT` + `E-PARSE-UNCLOSED` ×3; `:`-shorthand
+`<Idle rule=.Busy : "never closed>` → `E-PARSE-TRAILING`, `E-PARSE-SHORTHAND`, `E-PARSE-UNCLOSED` ×2.
+Expected (§4.18.3): *"A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is
+an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7."*
+
+**Why LOW:** the bootstrap is loud (wrong code); impl#1 is silent but the stray `"` shows on the page.
+Related: [[g-no-unterminated-delimiter-diagnostic-exists-anywhere]].
+— `NEW S444 (PA-directed)`; **LOW**; open

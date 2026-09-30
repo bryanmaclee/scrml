@@ -50,3 +50,16 @@ classify it). Edit: an S444 note after that `default-logic` note. Deliberately d
 apply inside `<schema>` (§39.2 relies on scrml `//` comment stripping there).
 
 - Regenerated: `bun run scripts/regen-spec-index.ts` (OK), `bun scripts/facts.ts --write` (`--check` PASS).
+
+## Part 2 — gaps filed (docs/known-gaps.md §S444; all reproduced on 108ca89be)
+1. g-lift-segment-trim-deletes-interp-adjacent-spaces — HIGH — reproduced (lift: `createTextNode("lifted")`, interp,
+   `createTextNode("li")`; markup-as-value: `"value"`, interp, `"end"`). Same class as the existing
+   g-ast-markup-text-interp-adjacent-space-dropped (MED; its bryan fork is now RULED by S442) — PA may merge/raise.
+2. g-component-body-whitespace-collapsed — LOW — reproduced (`comp body <span…> tail`, indentation stripped).
+3. g-foreign-block-in-markup-body-rendered-as-text — MED — reproduced (slice shipped as page text, exit 0).
+4. g-svg-or-math-compound-cell-pushes-foreign-tag-on-ancestor-stack — LOW — reproduced with a one-variable control
+   (`svg` → `<div />`, `box` → `<div></div>`). NOT bootstrap: the D1 code is impl#1 emit-html.ts / utils.ts.
+5. g-html-breakout-tag-in-foreign-content-keeps-self-close — LOW — reproduced (`<svg><div/>` → `<div />`). impl#1.
+6. g-unterminated-display-text-literal-not-e-ctx-001 — LOW — reproduced (impl#1 silent; bootstrap other codes). PA-directed.
+- `bun scripts/state.ts --write` + `--check` PASS. The master-list recent-sessions regen is SHA-abbreviation-length
+  only (7 → 9 chars in this clone); committed because `--check` fails without it.
