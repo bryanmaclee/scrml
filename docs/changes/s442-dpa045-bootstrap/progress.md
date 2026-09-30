@@ -71,3 +71,13 @@ PA recs" (AXIOM-LEVEL); artifact scrml-support/docs/debates/plain-markup-text-as
   Commit 8b45476e.
 - 2026-09-29 — mutations: the B(3) lexer row's site had moved with B(2) (NOT RUN) — re-pointed; 12 new rows
   (fu1 ×7, fu3 ×2, fu4 ×2 + the re-pointed one).
+- 2026-09-29 — bite matrix: the FRONT row Parse.ShorthandBody had gone hollow (site moved with fu3) — re-pointed.
+- 2026-09-29 — corpus (bootstrap front end, conformance/cases, 1111): vs origin/main — 0 newly rejected, 0 newly
+  accepted, 11 already-rejected code lists changed, 12 clean outputs changed (auth-graph ×5, i-auth-redirect ×2,
+  w-auth-content-not-gated ×2, w-auth-login-missing ×2, schema-003-neg) — every one's Core EQUAL modulo
+  whitespace-only Text views (item 4). vs the previous agent's tip 99fba8a2: 0 / 0, 36 already-rejected code lists
+  changed (`?{` in a markup body is now content — mostly `<schema>?{…}</schema>` legacy bodies — plus `_{`).
+- 2026-09-29 — merged origin/main (c6fec3c2; clean 3-way, no conflicts). FINAL (post-merge): slice-m1 73/73 ·
+  lowered 73/73 · slice-m2 433/433 · slice-m3 60/60 · slice-m4 161 + 1 todo · lint 58/0 · mutations 190/190 RED,
+  0 problems · bite CG 32 + CSS 32 + FRONT 12 certified, 0 uncertified · conformance impl#1 1104/1111 + 7 xfail
+  (impl#1 untouched) · dumpcore: the five programs' Core EQUAL to origin/main modulo whitespace-only Text views.
