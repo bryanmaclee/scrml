@@ -1666,6 +1666,14 @@ ${
                 }
                 m = skipCss(m)
                 textStart = m.pos
+            } else if (foreignLevel(m) >= 0) {
+                if (text != "") {
+                    out = out.concat([textNode(m, textStart, text)])
+                    m = mBump(m)
+                    text = ""
+                }
+                m = skipForeign(m)
+                textStart = m.pos
             } else if (atOtherSigil(m)) {
                 if (text != "") {
                     out = out.concat([textNode(m, textStart, text)])
@@ -1722,13 +1730,72 @@ ${
         return c == "!" || c == "/" || c == "?" || c == "*" || c == "_" || c == "."
     }
 
-    // RULED S442: every §3.1 context sigil is an exit of free text — `${` (an
-    // interpolation), `#{` (CSS), and `?{` / `^{` / `!{`, which the bootstrap
-    // does not build: skipped whole by the canonical walker and reported.
+    // RULED S442 (dpa-045 follow-up 1): the context sigils are exits of free
+    // text — `${` (an interpolation), `#{` (CSS), and `^{` (meta, §22.2), `!{`
+    // (error context, §19) and `~{` (test context, §19.12 — SPEC §4.18.1b, PA
+    // reading S442), which the bootstrap does not build: skipped whole by the
+    // canonical walker and reported. NOT an exit: `?{` — its §3.1 parent is
+    // Logic only, so in a markup body it is content (§4.18.1b, §8.1).
     fn atOtherSigil(mp: MP) -> boolean {
         if (chAt(mp, 1) != "{") return false
         const c: string = chAt(mp, 0)
-        return c == "?" || c == "^" || c == "!"
+        return c == "^" || c == "!" || c == "~"
+    }
+
+    // `_` + zero or more `=` + `{` (§23.2) whose `_` does not end an
+    // identifier (`my_{x}` is content): the level (count of `=`), else -1.
+    fn foreignLevel(mp: MP) -> int {
+        if (chAt(mp, 0) != "_") return -1
+        if (isIdentTail(chAt(mp, -1))) return -1
+        let k: int = 1
+        while (chAt(mp, k) == "=") { k = k + 1 }
+        if (chAt(mp, k) != "{") return -1
+        return k - 1
+    }
+
+    fn isIdentTail(c: string) -> boolean {
+        if (c == "") return false
+        if (c >= "a" && c <= "z") return true
+        if (c >= "A" && c <= "Z") return true
+        if (c >= "0" && c <= "9") return true
+        return c == "_" || c == "$"
+    }
+
+    // SPEC §4.18.1b (PA reading S442): `_{` in a markup body is NEITHER an exit
+    // NOR content — it stays an ERROR, E-FOREIGN-004 (§23.2.4: a markup element
+    // body is not a valid foreign-code context). Its extent is §23.2's: opaque
+    // up to `}` + the opener's `=` count (level 0: brace depth) — never text.
+    // Unclosed → E-FOREIGN-002 (§23.2).
+    fn skipForeign(mp: MP) -> MP {
+        const start: int = mp.pos
+        const lvl: int = foreignLevel(mp)
+        let m: MP = mAdv(mp, lvl + 2)
+        let depth: int = 0
+        let closed = false
+        while (!closed && !mEof(m)) {
+            const c: string = chAt(m, 0)
+            if (c == "}" && depth == 0 && closesForeign(m, lvl)) {
+                m = mAdv(m, lvl + 1)
+                closed = true
+            } else {
+                if (lvl == 0 && c == "{") depth = depth + 1
+                if (lvl == 0 && c == "}") depth = depth - 1
+                m = mAdv(m, 1)
+            }
+        }
+        if (!closed) {
+            return mDiag(m, "E-FOREIGN-002", "unclosed foreign code block — a `_{` / `_={` opener needs its matching `}` / `}=` closer (§23.2)", start, m.pos)
+        }
+        return mDiag(m, "E-FOREIGN-004", "a `_{…}` foreign code block is not valid in a markup body (§23.2.4) — bind its value with `const x = _={ … }=` in a server `function` body, or use a `use foreign:` sidecar (§23.4)", start, m.pos)
+    }
+
+    fn closesForeign(mp: MP, lvl: int) -> boolean {
+        let k: int = 1
+        while (k <= lvl) {
+            if (chAt(mp, k) != "=") return false
+            k = k + 1
+        }
+        return true
     }
 
     fn skipSigil(mp: MP) -> MP {

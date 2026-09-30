@@ -86,12 +86,34 @@ describe("dpa-045 B(3) — `\\\"` is not an escape in a display-text literal", (
 // display-text escape catalog deleted; whitespace-only text kept.
 // ---------------------------------------------------------------------------
 describe("follow-up 1 — the closed exit set of free text", () => {
-  test("`?{` / `^{` / `!{` are exits (§3.1 context sigils): skipped whole and reported, never text", () => {
-    for (const sig of ["?", "^", "!"]) {
-      const d = run(P(`<p>a ${sig}{ x } b</p>`)).diags;
+  test("`^{` / `!{` / `~{` are exits (context sigils; `~{` per SPEC §4.18.1b): skipped whole and reported, never text", () => {
+    for (const sig of ["^", "!", "~"]) {
+      const d = run(P(`<p>a ${sig}{ x = "</p> }" } b</p>`)).diags;
       expect(d.map((x) => x.code)).toEqual(["E-BOOTSTRAP-UNSUPPORTED"]);
       expect(d[0].message).toContain(sig + "{");
     }
+  });
+  test("twin (behaviour): `?{` is NOT an exit — its §3.1 parent is Logic only, so in free text it is content", async () => {
+    expect(await html(P("<p>a ?{ x } b</p>"))).toBe("<p>a ?{ x } b</p><b>end</b>");
+  });
+  test("`_{` / `_={` in a markup body is neither exit nor content: E-FOREIGN-004 (§23.2.4), opaque to its level closer", () => {
+    expect(run(P("<p>a _={ } </p> }= b</p>")).diags.map((x) => x.code)).toEqual(["E-FOREIGN-004"]);
+    expect(run(P("<p>a _{ { } </p> } b</p>")).diags.map((x) => x.code)).toEqual(["E-FOREIGN-004"]);
+    expect(run(P("<p>a _=={ }= }== b</p>")).diags.map((x) => x.code)).toEqual(["E-FOREIGN-004"]);
+  });
+  test("an unclosed `_={` is E-FOREIGN-002 (§23.2)", () => {
+    expect(run(P("<p>a _={ b</p>")).diags.map((x) => x.code)).toContain("E-FOREIGN-002");
+  });
+  test("twin (behaviour): the E-FOREIGN-004 block renders nothing — the text around it is kept", () => {
+    const r = run(P("<p>a _={ x }= b</p>"));
+    const texts = [];
+    (function walk(x) { if (Array.isArray(x)) { x.forEach(walk); return; } if (!x || typeof x !== "object") return; if (x.k && x.k.variant === "Text") texts.push(x.k.data.text); Object.values(x).forEach(walk); })(r.asts);
+    expect(texts).toContain("a ");
+    expect(texts).toContain(" b");
+    expect(texts.some((t) => t.includes("x"))).toBe(false);
+  });
+  test("twin (behaviour): `_` ending an identifier is not an opener — `my_{c}` is content", async () => {
+    expect(await html(P("<p>my_{c} x</p>"))).toBe("<p>my_{c} x</p><b>end</b>");
   });
   test("twin (behaviour): a lone `^` / `!` / `?` (no `{`) is content", async () => {
     expect(await html(P("<p>a ^ b ! c ? d</p>"))).toBe("<p>a ^ b ! c ? d</p><b>end</b>");
