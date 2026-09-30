@@ -331,7 +331,7 @@ describe("W-AUTH-REQUIRED-NOT-INHERITED names the build root actually used and h
     // required <program> is a route file's own, and pages/about.scrml is public.
     const root = writeProject("w-inferred", { ...ENTRY_IN_PAGES, "lib/x.scrml": `<program>\n<p>lib-marker</p>\n</program>\n` });
     const [d] = diag(compile(root), "W-AUTH-REQUIRED-NOT-INHERITED");
-    expect(d.message).toContain("the build root inferred from the application's entry file");
+    expect(d.message).toContain("the directory of the entry file");
     expect(d.message).toContain("x.scrml");
   });
   test("no root given and the entry placed under pages/: the entry IS the application (fail closed, no warning)", () => {
@@ -340,6 +340,68 @@ describe("W-AUTH-REQUIRED-NOT-INHERITED names the build root actually used and h
     expect(codes(r)).not.toContain("W-AUTH-REQUIRED-NOT-INHERITED");
     expect(isGuarded(r, root, "pages/about.scrml")).toBe(true);
     expect(isGuarded(r, root, "side.scrml")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S445 review round 4: once the root is inferred, the application <program>s are
+// re-read against it (§40.2's definition), so where the project lives cannot
+// change what is gated. `deep`: a public scratch.scrml at the top, the required
+// application in src/app.scrml; `mono2`: a public index.scrml over a/ and b/ apps.
+// Both must gate exactly as their control outside a pages/ ancestor does.
+// ---------------------------------------------------------------------------
+
+const PUB = `<program>\n<p>scratch-marker</p>\n</program>\n`;
+const DEEP = {
+  "scratch.scrml": PUB,
+  "src/app.scrml": APP["app.scrml"],
+  "src/pages/about.scrml": APP["pages/about.scrml"],
+  "src/pages/login.scrml": APP["pages/login.scrml"],
+};
+const MONO2 = {
+  "index.scrml": PUB,
+  "a/app.scrml": APP["app.scrml"],
+  "a/pages/about.scrml": APP["pages/about.scrml"],
+  "a/pages/login.scrml": APP["pages/login.scrml"],
+  "b/app.scrml": APP["app.scrml"],
+  "b/pages/about.scrml": APP["pages/about.scrml"],
+  "b/pages/login.scrml": APP["pages/login.scrml"],
+};
+
+function guardedDocs(dist) {
+  const src = readFileSync(join(dist, "_server.js"), "utf8");
+  return [...src.matchAll(/\["([^"]+\.html)", _scrml_pd_\d+\.guard\]/g)].map((m) => m[1]).sort();
+}
+
+describe("a second non-route <program> gates the same wherever the project lives (scrml build)", () => {
+  for (const [name, files, expected] of [
+    ["deep", DEEP, ["src/app.html", "src/pages/about.html"]],
+    ["mono2", MONO2, ["a/app.html", "a/pages/about.html", "b/app.html", "b/pages/about.html"]],
+  ]) {
+    for (const where of [`r4-anc/pages/${name}`, `r4-ctl/${name}`]) {
+      test(`${name} at ${where}`, () => {
+        const root = writeProject(where, files);
+        const r = cli(root, ["build", ".", "-o", join(root, "dist")]);
+        expect(r.code).toBe(0);
+        expect(guardedDocs(join(root, "dist"))).toEqual(expected);
+      });
+    }
+  }
+});
+
+describe("W-AUTH-REQUIRED-NOT-INHERITED under an inferred root states the inference and a CLI-reachable remedy", () => {
+  test("shallowest-file inference under a pages/ ancestor", () => {
+    const root = writeProject("r4-msg/pages/proj", {
+      "scratch.scrml": PUB,
+      "src/pages/index.scrml": APP["app.scrml"],
+      "src/pages/about.scrml": APP["pages/about.scrml"],
+    });
+    const [d] = diag(compile(root), "W-AUTH-REQUIRED-NOT-INHERITED");
+    expect(d.message).toContain(`the directory of the entry file "${join(root, "scratch.scrml")}"`);
+    expect(d.message).toContain("it is the shallowest <program> file");
+    expect(d.message).toContain(`the route file "src/pages/index.scrml"`);
+    expect(d.message).toContain("move it out of the pages/ or routes/ directory it is in");
+    expect(d.message).not.toContain("buildRoot");
   });
 });
 
