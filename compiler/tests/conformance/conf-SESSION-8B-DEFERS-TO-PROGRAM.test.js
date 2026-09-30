@@ -346,6 +346,15 @@ const PLAIN_30D_NESTED = PLAIN_30D.replace(` auth="optional"`, "");
 const TWO_IN_FILE = {
   "nested": SECURE_15M.replace("\n</program>", `\n<div>${PLAIN_30D_NESTED}</div>\n</program>`),
 };
+// S445 item 3 (§4.12.2) — a session attribute on a NESTED `<program>` is now
+// E-PROGRAM-NESTED-SESSION, so the nested-30d shape above is a refused build. The
+// 2+-program carve-out itself is still reachable with a nested program that declares
+// NO session attribute (a scoped-db / worker program), and it still must keep the
+// stamped secure gate — pinned with this variant.
+const NESTED_NO_SESSION = `<program csrf="off"><p>x</p></program>`;
+const TWO_IN_FILE_NO_SESSION = {
+  "nested": SECURE_15M.replace("\n</program>", `\n<div>${NESTED_NO_SESSION}</div>\n</program>`),
+};
 
 describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep the stamped secure gate (S438 F1)", () => {
   // The reverse in-file order (plain 30d program FIRST): the file's `authConfig` is the
@@ -366,10 +375,17 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep t
     });
   }
 
-  test("emitted: the `<page auth=\"required\">` limb, nested plain 30d program → __Host-scrml_sid / 3600", () => {
-    // Same carve-out, 8b's other limb. On c9d97065: ["scrml_sid"] / ["2592000"].
+  test("S445 #3: the `<page auth=\"required\">` limb with a nested plain 30d program is E-PROGRAM-NESTED-SESSION", () => {
+    // On c9d97065: ["scrml_sid"] / ["2592000"]; S438–S444: __Host-scrml_sid / 3600 via the stamp.
     const src = `<program csrf="off" sessionExpiry="15m">\n<page auth="required">\n${DB}\n</page>\n<div>${PLAIN_30D_NESTED}</div>\n</program>`;
     const r = compileFixture("f1-page-req-nested", { "index.scrml": src });
+    expect(codes(r)).toEqual(["E-PROGRAM-NESTED-SESSION", "E-PROGRAM-NESTED-SESSION"]);
+  });
+
+  test("emitted: the `<page auth=\"required\">` limb, nested program WITHOUT session attrs → __Host-scrml_sid / 3600", () => {
+    // Same carve-out, 8b's other limb.
+    const src = `<program csrf="off" sessionExpiry="15m">\n<page auth="required">\n${DB}\n</page>\n<div>${NESTED_NO_SESSION}</div>\n</program>`;
+    const r = compileFixture("f1-page-req-nested-nosess", { "index.scrml": src });
     expect(codes(r)).toEqual([]);
     const js = serverJsFor(r, "/index.scrml");
     expect(js).toContain("function _scrml_auth_check(req)");
@@ -378,7 +394,14 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep t
   });
 
   for (const [shape, src] of Object.entries(TWO_IN_FILE)) {
-    test(`emitted: ${shape} → __Host-scrml_sid / 3600, never the later program's plain 30d`, () => {
+    test(`S445 #3: ${shape} plain 30d program → E-PROGRAM-NESTED-SESSION (the later program's cookie can never apply)`, () => {
+      const r = compileFixture(`f1-${shape}-nested-session`, { "index.scrml": src });
+      expect(codes(r)).toEqual(["E-PROGRAM-NESTED-SESSION", "E-PROGRAM-NESTED-SESSION"]);
+    });
+  }
+
+  for (const [shape, src] of Object.entries(TWO_IN_FILE_NO_SESSION)) {
+    test(`emitted: ${shape} (no session attrs) → __Host-scrml_sid / 3600`, () => {
       const r = compileFixture(`f1-${shape}`, { "index.scrml": src });
       expect(codes(r)).toEqual([]);
       const js = serverJsFor(r, "/index.scrml");
@@ -394,7 +417,7 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep t
     test(`executed: ${shape} — a planted plain scrml_sid is REFUSED (302); the __Host- one is accepted`, async () => {
       if (typeof globalThis.document !== "undefined") return; // happy-dom-polluted worker
 
-      const { root, inputFiles } = writeFixture(`f1-rt-${shape}`, { "index.scrml": TWO_IN_FILE[shape] }, "fwd");
+      const { root, inputFiles } = writeFixture(`f1-rt-${shape}`, { "index.scrml": TWO_IN_FILE_NO_SESSION[shape] }, "fwd");
       const dist = join(root, "dist");
       const result = compileScrml({ inputFiles, outputDir: dist, write: true, log: () => {} });
       expect(codes(result)).toEqual([]);

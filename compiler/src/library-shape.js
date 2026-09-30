@@ -135,9 +135,11 @@ import { hasTopLevelProgram } from "./program-role.ts";
  *   so bare declarations are already wrapped in synthetic logic blocks).
  * @param {boolean} hasProgramRoot — true iff the file declares a TOP-LEVEL `<program>`: one
  *   with no `<program>` / `<page>` ancestor, whatever markup wraps it (program-role.ts, S445).
+ * @param {{impliedAncestor?: boolean}} [roleOpts] — program-role options (S445 item 1:
+ *   a route file of a build with an application program has no top-level `<program>`).
  * @returns {FileShape}
  */
-export function classifyFileShape(nodes, hasProgramRoot) {
+export function classifyFileShape(nodes, hasProgramRoot, roleOpts = {}) {
   if (hasProgramRoot) return "program";
 
   const topLevel = Array.isArray(nodes) ? nodes : [];
@@ -166,7 +168,7 @@ export function classifyFileShape(nodes, hasProgramRoot) {
   // the early return above already fired. It costs nothing on the happy path and
   // immunizes EVERY fallback call site at once, rather than hardening one
   // caller and leaving the others to carry a documented hazard.
-  if (hasTopLevelProgram(topLevel)) return "program";
+  if (hasTopLevelProgram(topLevel, roleOpts)) return "program";
 
   // §40.8 — a route file of a multi-page app. Checked BEFORE the channel branch
   // so the channel+page overlap resolves the way it always has.

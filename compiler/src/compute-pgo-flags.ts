@@ -1,5 +1,5 @@
 import { classifyFileShape } from "./library-shape.js";
-import { hasTopLevelProgram } from "./program-role.ts";
+import { hasTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
 
 /**
  * compute-pgo-flags — downstream pre-codegen passes: the 4 PGO has* flags, and
@@ -261,9 +261,11 @@ export function computeFileShape(fileAST: any): void {
   // stamped, so both pipelines carry the same fact downstream whatever their
   // parser computed. The live TAB computes it through the same helper; the
   // native parser's own direct-children read is superseded at this seam.
-  fileAST.hasProgramRoot = hasTopLevelProgram(fileAST.nodes ?? []);
+  const roleOpts = programRoleOptionsOf(fileAST);
+  fileAST.hasProgramRoot = hasTopLevelProgram(fileAST.nodes ?? [], roleOpts);
   fileAST.fileShape = classifyFileShape(
     fileAST.nodes ?? [],
     fileAST.hasProgramRoot === true,
+    roleOpts,
   );
 }

@@ -64,7 +64,7 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
-import { forEachProgramWithRole, findTopLevelProgram } from "../program-role.ts";
+import { forEachProgramWithRole, findTopLevelProgram, programRoleOptionsOf, NESTED_SESSION_ATTRS } from "../program-role.ts";
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
@@ -1573,6 +1573,9 @@ export function runCG(input: CgInput): CgOutput {
     // <program> or <page> ancestor, whatever markup sits between.
     // Runs BEFORE extractWorkerPrograms() so worker-program nodes are still in
     // tree and discoverable.
+    // S445 item 1 — a route file of a build with an application program has the
+    // application program as an IMPLIED ancestor: all its programs are nested.
+    const _roleOpts = programRoleOptionsOf(fileAST);
     const DOC_ATTR_NAMES = ["title", "description", "version", "author", "license"];
     forEachProgramWithRole(nodes, (node: any, role) => {
       if (role !== "nested") return;
@@ -1593,7 +1596,7 @@ export function runCG(input: CgInput): CgOutput {
           "warning",
         ));
       }
-    });
+    }, _roleOpts);
 
     // §4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=` is NOT
     // a nested-valid `<program>` attribute: a nested `<program>` is not an auth
@@ -1614,7 +1617,16 @@ export function runCG(input: CgInput): CgOutput {
     // `auth=` dropped, its server functions open to anonymous callers
     // (g-wrapped-program-auth-silently-dropped). Wrapper markup never changes a
     // program's role, and no placement rule is added: a `<program>` may appear
-    // anywhere.
+    // anywhere. S445 item 1: in a route file of a build with an application
+    // program, every `<program>` is nested (the implied ancestor, `_roleOpts`).
+    //
+    // §4.12.2 (S445 item 3) — a SESSION attribute (`sessionExpiry=`,
+    // `session-secure=`) on a nested `<program>` is `E-PROGRAM-NESTED-SESSION`.
+    // The session cookie is application-scope (§20.5.1), and a nested program's
+    // declaration used to reach the resolver's last-wins read: a nested
+    // `session-secure="false"` silently downgraded the application's `__Host-`
+    // cookie to plain `scrml_sid` (g-two-programs-one-file-session-attr-last-wins).
+    // Placeholder until dpa-064 designs nested auth / session scopes.
     {
       const topPrograms: any[] = [];
       forEachProgramWithRole(nodes, (node: any, role) => {
@@ -1637,7 +1649,20 @@ export function runCG(input: CgInput): CgOutput {
             "error",
           ));
         }
-      });
+        for (const sessAttr of attrs.filter((a: any) => a && NESTED_SESSION_ATTRS.has(a.name))) {
+          const span = (sessAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-SESSION",
+            `E-PROGRAM-NESTED-SESSION: \`${sessAttr.name}=\` is not valid on a nested <program> ` +
+            "(one inside another <program> or a <page>, or any <program> in a route file of " +
+            "an application) — the session cookie belongs to the whole application, so a nested " +
+            "program's session setting would silently change the application's cookie. Put it " +
+            "on the top-level <program> and remove it from the nested one. (§4.12.2, §20.5.1)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
+      }, _roleOpts);
       for (const extra of topPrograms.slice(1)) {
         const span = extra.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
         errors.push(new CGError(
@@ -1647,12 +1672,51 @@ export function runCG(input: CgInput): CgOutput {
           "<page> encloses it, whatever markup (a <div>, <main>, …) wraps it, so this one is a " +
           "second application program, not a nested one. The compiler cannot tell which " +
           "program's auth=, session and middleware settings govern this file's routes, so " +
-          "the file does not compile. Merge them into one <program>, move the second into its " +
-          "own file, or place it inside the first (a nested <program> is a worker, sidecar or " +
-          "scoped-db context, §4.12). (§40.8)",
+          "the file does not compile. Merge them into one <program> carrying one set of " +
+          "those settings, or build the second as a separate application. If the second is " +
+          "meant as a worker, sidecar or scoped-db context, place it inside the first WITHOUT " +
+          "auth= or session attributes — a nested <program> takes neither (§4.12.2). (§40.8)",
           { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
           "error",
         ));
+      }
+
+      // F2 (S445 review, fail-open) — the program-config reader runs at PRECG,
+      // BEFORE component expansion; these detectors run after it. A `<program>`
+      // that only becomes top-level through CE (`const Svc = <div><program
+      // auth="required">…</program></div>` + `<Svc/>`) was invisible to PRECG, so
+      // its `auth=` / session / middleware attributes were never read and its
+      // server functions answered anonymous callers. Do not guess a config for it:
+      // the post-CE top-level program MUST be the node PRECG configured (compared by
+      // source span); if it is not, refuse the build. Skipped only when PRECG never
+      // ran on this FileAST (a direct-codegen unit test — the field is undefined).
+      const _precgSpan = (fileAST as any)?.ast?.precgTopLevelProgramSpan !== undefined
+        ? (fileAST as any).ast.precgTopLevelProgramSpan
+        : (fileAST as any)?.precgTopLevelProgramSpan;
+      if (_precgSpan !== undefined) {
+        const cgTop: any = topPrograms[0] ?? null;
+        const same = cgTop === null
+          ? _precgSpan === null
+          : _precgSpan !== null && cgTop.span != null &&
+            (cgTop.span.start ?? null) === _precgSpan.start && (cgTop.span.end ?? null) === _precgSpan.end;
+        if (!same) {
+          const offender: any = cgTop ?? null;
+          const span = offender?.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
+          errors.push(new CGError(
+            "E-PROGRAM-CONFIG-UNREAD",
+            "E-PROGRAM-CONFIG-UNREAD: " + (offender
+              ? "this file's top-level <program> only exists after component expansion (it comes " +
+                "from a component such as `const X = <div><program …>…</program></div>` used as " +
+                "`<X/>`), so its auth=, session and middleware attributes were never read — its " +
+                "routes would run without them. "
+              : "the top-level <program> this file was configured from is gone after component " +
+                "expansion, so its auth=, session and middleware settings cannot be applied. ") +
+            "Write the application's <program> directly in the file (it may be wrapped in " +
+            "markup), not inside a component. (§4.12, §40.8)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
       }
     }
 
@@ -2713,7 +2777,7 @@ export function runCG(input: CgInput): CgOutput {
       // The file's top-level <program> by the shared role definition
       // (program-role.ts, §4.12 / S445) — a <div>-wrapped application program
       // is still the document root whose head metadata this reads.
-      const topLevelProgram: any = findTopLevelProgram(nodes);
+      const topLevelProgram: any = findTopLevelProgram(nodes, programRoleOptionsOf(fileAST));
       function getDocAttr(name: string): string | null {
         if (!topLevelProgram) return null;
         const attrs: any[] = topLevelProgram.attributes ?? topLevelProgram.attrs ?? [];
@@ -3263,7 +3327,7 @@ export function runCG(input: CgInput): CgOutput {
       const stamped = f?.ast?.fileShape ?? f?.fileShape;
       if (stamped) return stamped;
       const nodes = f?.ast?.nodes ?? f?.nodes ?? [];
-      return classifyFileShape(nodes, getHasProgramRoot(f));
+      return classifyFileShape(nodes, getHasProgramRoot(f), programRoleOptionsOf(f));
     }
     let entryFile: any = null;
     for (const f of files) {

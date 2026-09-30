@@ -28,7 +28,7 @@
  * error-emitting check, not extraction, and stays in `ast-builder.js`.
  */
 
-import { findTopLevelProgram } from "./program-role.ts";
+import { findTopLevelProgram, type ProgramRoleOptions } from "./program-role.ts";
 
 export interface AuthConfig {
   auth: string;
@@ -114,7 +114,7 @@ export interface ProgramConfig {
  *
  * @param nodes Top-level AST nodes (live `buildAST` output or native-parser).
  */
-export function computeProgramConfig(nodes: any[]): ProgramConfig {
+export function computeProgramConfig(nodes: any[], roleOpts: ProgramRoleOptions = {}): ProgramConfig {
   // ---------------------------------------------------------------------------
   // Session/auth attribute extraction from <program> (Option C hybrid)
   //
@@ -132,7 +132,9 @@ export function computeProgramConfig(nodes: any[]): ProgramConfig {
   // anonymous callers (g-wrapped-program-auth-silently-dropped). A second
   // top-level `<program>` in the file is E-PROGRAM-002 (codegen/index.ts), read
   // through the same definition.
-  const programNode: any = findTopLevelProgram(nodes) ?? undefined;
+  // S445 item 1: in a route file of a build with an application program, every
+  // `<program>` is nested (`roleOpts.impliedAncestor`) — none is read here.
+  const programNode: any = findTopLevelProgram(nodes, roleOpts) ?? undefined;
   if (programNode) {
     const programAttrs = programNode.attrs ?? [];
 

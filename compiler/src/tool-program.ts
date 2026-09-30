@@ -17,7 +17,7 @@
  */
 
 import { classifyFileShape, isLibraryShape } from "./library-shape.js";
-import { findTopLevelProgram } from "./program-role.ts";
+import { findTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
 
 /** A loosely-typed AST node. */
 type ASTNodeLike = Record<string, unknown>;
@@ -46,7 +46,7 @@ function isProgramMarkup(node: unknown): node is ASTNodeLike {
  * top-level `<program>` (a §21.5 library file).
  */
 export function findTopLevelProgramNode(fileAST: unknown): ASTNodeLike | null {
-  return findTopLevelProgram(getToolNodes(fileAST));
+  return findTopLevelProgram(getToolNodes(fileAST), programRoleOptionsOf(fileAST));
 }
 
 /**
@@ -120,7 +120,7 @@ export function isLibraryShapedFile(fileAST: unknown): boolean {
   const nodes = (Array.isArray(src.nodes) ? src.nodes : []) as ASTNodeLike[];
   const shape =
     (src.fileShape as string | undefined) ??
-    classifyFileShape(nodes, src.hasProgramRoot === true);
+    classifyFileShape(nodes, src.hasProgramRoot === true, programRoleOptionsOf(src));
   return isLibraryShape(shape, (src.exports as unknown[] | undefined) ?? []);
 }
 

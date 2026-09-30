@@ -24,14 +24,15 @@ import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
 import { SecretRedactor } from "./diagnostic-secrets.ts";
-import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
+import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource, isRouteFilePath } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { isLibraryShape, classifyFileShape } from "./library-shape.js";
-import { findTopLevelProgram } from "./program-role.ts";
+import { findTopLevelProgram, programRoleOptionsOf, stampImpliedProgramAncestors } from "./program-role.ts";
+import { isToolProgram } from "./tool-program.ts";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
@@ -1646,6 +1647,16 @@ function _compileScrmlImpl(options = {}) {
   //
   // The pass body lives in `precg.ts` (`runPRECG`) so the stage has a named, substitutable entry
   // (s430-stage-swap); it was moved there verbatim.
+  // S445 item 1 (§4.12) — the implied application ancestor is a BUILD fact:
+  // when an application program exists, every `<program>` in a route file is
+  // nested. Decided ONCE here, over the whole parsed set, before PRECG reads any
+  // program role (program-role.ts). The route-file classifier is route
+  // inference's own (`isRouteFilePath`) — swap it there, not here.
+  stampImpliedProgramAncestors(
+    tabResults.map((r) => r?.ast).filter(Boolean),
+    isRouteFilePath,
+    isToolProgram,
+  );
   const _runPRECG = seams.pick("PRECG", runPRECG);
   for (const tabResult of tabResults) {
     const fileAST = tabResult?.ast;
@@ -1703,7 +1714,7 @@ function _compileScrmlImpl(options = {}) {
       // is exactly the change nobody would think to re-verify here.
       const shape =
         fileAST.fileShape ??
-        classifyFileShape(fileAST.nodes ?? [], fileAST.hasProgramRoot === true);
+        classifyFileShape(fileAST.nodes ?? [], fileAST.hasProgramRoot === true, programRoleOptionsOf(fileAST));
       return isLibraryShape(shape, fileAST.exports ?? []);
     });
     if (allPureFnModules) {
@@ -2348,7 +2359,7 @@ function _compileScrmlImpl(options = {}) {
         // Fallback: parse from raw db= attribute value via the helper.
         // The file's top-level <program> (program-role.ts; §4.12, S445 — whatever
         // markup wraps it), the same node its middlewareConfig was read from.
-        const programNode = findTopLevelProgram(f.nodes ?? f.ast?.nodes ?? []);
+        const programNode = findTopLevelProgram(f.nodes ?? f.ast?.nodes ?? [], programRoleOptionsOf(f));
         const dbAttr = programNode?.attrs?.find(a => a.name === "db");
         const dbVal = dbAttr?.value?.kind === "string-literal" ? dbAttr.value.value : null;
         dbDriver = extractDbDriverFromValue(dbVal);

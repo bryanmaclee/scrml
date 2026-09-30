@@ -62,7 +62,7 @@ import type {
   NodeId,
   ReachabilityEntryPoint,
 } from "../types/reachability.ts";
-import { findTopLevelProgram } from "../program-role.ts";
+import { findTopLevelProgram, programRoleOptionsOf, type ProgramRoleOptions } from "../program-role.ts";
 
 // ---------------------------------------------------------------------------
 // RouteMap boundary (duck-typed)
@@ -123,7 +123,7 @@ export function enumerateEntryPoints(
 
   for (const file of files) {
     const nodes = getTopLevelNodes(file);
-    const programNode = findRootProgram(nodes);
+    const programNode = findRootProgram(nodes, programRoleOptionsOf(file));
 
     if (!programNode) {
       // No `<program>` root. A standalone filesystem-routed page file
@@ -213,9 +213,9 @@ function buildPageUrlIndex(routeMap: RouteMapLike | unknown): Map<string, string
  * role definition (`compiler/src/program-role.ts`; §4.12, S445), the same one
  * `hasProgramRoot` is derived from.
  */
-function findRootProgram(nodes: ASTNode[] | undefined): MarkupNode | null {
+function findRootProgram(nodes: ASTNode[] | undefined, roleOpts: ProgramRoleOptions = {}): MarkupNode | null {
   if (!Array.isArray(nodes)) return null;
-  return findTopLevelProgram(nodes) as MarkupNode | null;
+  return findTopLevelProgram(nodes, roleOpts) as MarkupNode | null;
 }
 
 /**

@@ -113,6 +113,7 @@ import type {
 // F8 / v0.6 — dual-mode meta-block kind test (live `"meta"` / native `"Meta"`).
 import { isMetaKind } from "./types/ast.ts";
 import { classifyFileShape } from "./library-shape.js";
+import { programRoleOptionsOf } from "./program-role.ts";
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -4812,7 +4813,7 @@ export function runCEFile(
     // this field runs after CE and wants the post-CE answer. The one pre-CE
     // reader, `api.js`'s W5a library auto-detect, reads at the PRECG seam and
     // never sees this object.
-    fileShape: classifyFileShape(phase2Nodes, ast.hasProgramRoot === true),
+    fileShape: classifyFileShape(phase2Nodes, ast.hasProgramRoot === true, programRoleOptionsOf(ast)),
   };
 
   // S139 Bug 51 fix — carry non-enumerable annotations forward to the new

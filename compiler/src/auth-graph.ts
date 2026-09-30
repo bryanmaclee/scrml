@@ -72,7 +72,7 @@ import {
   type ConstValue,
   partiallyEvaluateExpr,
 } from "./codegen/constant-folder.js";
-import { findTopLevelProgram } from "./program-role.ts";
+import { findTopLevelProgram, programRoleOptionsOf, type ProgramRoleOptions } from "./program-role.ts";
 
 // ---------------------------------------------------------------------------
 // File-shape normalization (CE-shape vs. post-META wrapper)
@@ -244,7 +244,7 @@ function enumerateFile(
   // -------------------------------------------------------------------
 
   if (fileAST.authConfig != null && fileAST.authConfig.auth !== "none") {
-    const programNode = findProgramNode(fileAST.nodes);
+    const programNode = findProgramNode(fileAST.nodes, programRoleOptionsOf(fileAST));
     if (programNode) {
       const gate = buildProgramGate(programNode, fileAST);
       gates.set(programNode.id, gate);
@@ -688,8 +688,8 @@ function walkMarkupNodes(
  *  / `<page>` ancestor, whatever markup wraps it (the ONE shared role definition,
  *  program-role.ts; §4.12, S445). It is the node whose `auth=` became
  *  `authConfig`, so the program gate is anchored to the program that declared it. */
-function findProgramNode(nodes: ASTNode[]): MarkupNode | null {
-  return findTopLevelProgram(nodes ?? []) as MarkupNode | null;
+function findProgramNode(nodes: ASTNode[], roleOpts: ProgramRoleOptions = {}): MarkupNode | null {
+  return findTopLevelProgram(nodes ?? [], roleOpts) as MarkupNode | null;
 }
 
 /** Lookup an attribute by name on a markup node's attr list. */

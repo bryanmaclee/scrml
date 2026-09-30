@@ -84,7 +84,7 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn, findTopLevelProgramNode } from "./tool-program.ts";
-import { findTopLevelProgram } from "./program-role.ts";
+import { findTopLevelProgram, programRoleOptionsOf } from "./program-role.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
@@ -4403,7 +4403,7 @@ function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page
   // The file's top-level `<program>` by the ONE shared role definition
   // (program-role.ts; §4.12, S445): no `<program>` / `<page>` ancestor, whatever
   // markup wraps it — the same node compute-program-config reads.
-  const topProgram = findTopLevelProgram(nodes);
+  const topProgram = findTopLevelProgram(nodes, programRoleOptionsOf(fileAST));
   const walk = (ns: any[] | undefined): void => {
     if (!Array.isArray(ns)) return;
     for (const node of ns) {
@@ -6862,6 +6862,17 @@ function findRoutePrefix(filePath: string): { idx: number; prefix: string } | nu
     if (idx !== -1) return { idx, prefix };
   }
   return null;
+}
+
+/**
+ * Is this file a ROUTE file (under `pages/` / `routes/`)? The ONE route-file
+ * classifier other stages consume — `api.js` hands it to
+ * `program-role.ts#stampImpliedProgramAncestors` (S445 item 1: a route file's
+ * `<program>`s are nested when an application program exists). Swap the
+ * classification here and every consumer follows.
+ */
+export function isRouteFilePath(filePath: string): boolean {
+  return findRoutePrefix(filePath.replace(/\\/g, "/")) !== null;
 }
 
 /**
