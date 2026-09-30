@@ -172,3 +172,48 @@ OPEN #7 (not decided; measured): default compiles `import stuff` / `export data`
   merge; the default passes); (6) the default `@count⏎<total> = 0` false E-UNQUOTED (pre-existing from
   round 4); (7) the same trailing-token / does-nothing shapes inside an explicit `${ … }` (not a body top)
   still compile silently on the default parser — the ruling's locus is the body top.
+
+## ROUND 5b — S239 review of review/s445-prose-r5 (DO-NOT-LAND, narrow)
+
+Reproduced every finding first (scratchpad s445-prose/r5b/*.scrml, both parsers), then fixed:
+- N1 HIGH (native): coverage is now MEASURED on the bridge's translation. parse-markup.js translates each
+  body-top statement (translateStmtList — the bridge parse-file runs) and judges the LIVE-shape result with
+  the function the live front end uses (body-top-coverage.js `liveStmtCompilesNothing`); a statement whose
+  translation holds an empty escape-hatch ANYWHERE (`liveTreeDropsText`, recursive) or translates to
+  nothing is not credited. The round-5 kind list (NATIVE_EXPR_KINDS_TRANSLATED_EMPTY) is DELETED, and the
+  false translate-expr.js comment about Sequence with it. The bridge was made honest where it lied:
+  makeExportDecl / collect-hoisted synthExportDecl now record `export default …` and `export * as ns from …`
+  with no kind and no name (the live ast-builder's shape) instead of dressing `export default function f`
+  up as a named export (that compiled clean with `f` never defined). A (parenthesised) comma sequence as the
+  statement is not-scrml (§4.18.2) → E-UNQUOTED, as on the live side; one nested in an argument
+  (`go((step(), 7))`) fails closed (E-INTERNAL). `import "./x.js"` (no binding) compiles nothing on both.
+- N2 MED (native): parseDoWhile's span now ends at the condition's `)` (it ended at the condition
+  expression, so the `)` sat outside every statement).
+- D1 MED (default): `functionDeclExtent` reads a `-> T` / `: T` / `!` return part with the TYPE grammar
+  before looking for the `{ … }` body, so `-> { a: number } { … }` is no longer taken as the body.
+- D2 MED (both): the default type handler and the native parseTypeDecl continue a braced type on its line
+  (`{ … }[]`, `{ … } | { … }`, `{ … } & { … }`) — before this the declared type silently lost its `[]` /
+  union arm on BOTH parsers (the `[]` became a no-effect statement); typeDeclExtent reads every right-hand
+  side with typeExprExtent; native typeAliasText balances braces. `type C =⏎ | "red"⏎ | "blue"` (leading
+  pipe) stays rejected: §7.5's `type-expr` has no leading `|` and §14 adds none.
+- D3 LOW (default): collectExprAfterLead treats a next-line state declaration (`<total> = 0`, same
+  scanStructuralDeclLookahead the collector's Step-11.0b boundary uses) as a statement boundary;
+  `@count⏎<total> = 0` and `@o.a⏎<total> = 0` compile clean.
+- Bug found on the way (fixed): a function head's own line has an unclosed `{` when only that line is
+  lexed; the body-extent functions now treat an opened-but-unclosed body as present (it had turned
+  `function main(args: string[]): number {` — a native parse gap — into a false E-UNQUOTED).
+MEASURED (corpus 2,290 files; vs 54f7764f6): default 0 files changed (only the 3 new negative cases).
+  Native (write:true re-check of every changed file on main + base + head): 0 files newly failing; the
+  newly-reported E-INTERNAL-BODY-TOP-DROPPED files ALL already fail on main/base — examples 28 / 29 / 12 /
+  25, 8 conformance components/* cases, readme nerdme/errors-as-states — and name REAL native bridge drops
+  main hid behind E-CODEGEN-INVALID-LOGIC at write time or a downstream E-SCOPE-001: the C-style `for`
+  init (`for (let i = 0; …)` emits `for (; …)` on main native), a `!{}` guard on a const initializer, and
+  `render slot()` inside a component body. 18 flogence tool files: code sets change, all failing before.
+  The one real OUTPUT change on the default parser: samples/…/phase3-template-literal-060.scrml renders
+  `hello, world!` where main rendered an empty `<p></p>` — the round-4 constant-folder change, as intended.
+FUZZ (4 seeds x 300 x 2 parsers): E-INTERNAL 0; oracle hits 11 per parser, all the `-N` / `[..]`
+  line-continuation class (unchanged).
+HELD FOR BRYAN (not changed, per PA): the "does nothing" rule's reach over pure expressions over cells —
+  `@a == 1`, `"Total: " + @count`, `!@x`, a regex literal `/hello world/`, an unreferenced label on a loop
+  (`Instructions:⏎while …`). Today these compile (they name a cell / are a loop); EXPECTED-FAILING if the
+  ruling extends "does nothing" to them — no code or test pins either way.

@@ -106,8 +106,8 @@ import { makeParseExprContext, parseExpression } from "./parse-expr.js";
 import { parseProgram } from "./parse-stmt.js";
 // S441 — the body-top display-text segmenter shared with the live front end.
 import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose, uncoveredSegments } from "./body-top-prose.js";
-import { typeDeclExtent, nativeExprIsInert } from "./body-top-coverage.js";
-import { NATIVE_EXPR_KINDS_TRANSLATED_EMPTY } from "./translate-expr.js";
+import { typeDeclExtent, declExtent, liveStmtCompilesNothing, liveTreeDropsText } from "./body-top-coverage.js";
+import { translateStmtList } from "./translate-stmt.js";
 import { atEnd } from "./token-cursor.js";
 // MK4 — the markup<->JS seam (R1 spike §3). The seam helpers centralize the
 // markup->JS delegate-down direction (the .InLogicEscape body's JS parse) +
@@ -2781,41 +2781,70 @@ const BODY_TOP_PARSE_DIAG_RE = /^E-(STMT|EXPR)-/;
 // `return`) are deliberately NOT in the list.
 const BODY_TOP_CODE_HEAD_RE = /^\s*(?:(?:export|server|async)\s+)*(?:type|fn|function|import|use|const|let|when|on|match|lift|class)\b|^\s*(?:<[A-Za-z_]|[?^#!_]=*\{)/;
 
-// S441 round 5 — what a native body-top statement COMPILES (SPEC §40.8
-// coverage invariant; ruling S443 item 4). The grammar side is shared with the
-// live front end (body-top-coverage.js). The native statement parser is strict
-// about import / export / function grammar (it reports a malformed one), so
-// the cases left for this check are the ones it accepts but that compile
-// nothing:
-//   - an expression statement built only from literals (`404`) — no effect;
-//   - a label on a statement that is not a loop (`Total: 42`) — the bridge
-//     drops the label (the live AST has a label only on a loop);
-//   - `type Name` with neither a kind nor a body (`type here`).
-// And one that compiles a PREFIX: a `type` alias whose type expression ends
-// before the line does (`type N = number zqxone`).
-const NATIVE_LOOP_STMT_KINDS = new Set(["While", "DoWhile", "For", "ForIn", "ForOf"]);
-function nativeStmtCompilesNothing(st, source, nextStart) {
-    if (st === null || st === undefined) return false;
-    // `fn heading` — a function with no `{ … }` body (§48). (Its span can
-    // run into the next statement, so the text is cut at the next start.)
-    // A `{` later on the head's own line means the head did not parse (a
-    // parse error — or a native gap, `function main(a: T): R {`), which its
-    // own diagnostics report; that is not a declaration that compiles nothing.
-    if (st.kind === "FunctionDecl" && typeof source === "string" && st.span && typeof st.span.start === "number") {
-        const end = typeof nextStart === "number" && nextStart > st.span.start ? Math.min(nextStart, st.span.end) : st.span.end;
-        const le = source.indexOf("\n", st.span.start);
-        const restOfLine = source.slice(st.span.start, le === -1 ? source.length : le);
-        return source.slice(st.span.start, end).includes("{") === false && restOfLine.includes("{") === false;
+// S441 round 5b — what a native body-top statement COMPILES (SPEC §40.8
+// coverage invariant; ruling S443 item 4), MEASURED on what the bridge hands
+// to codegen: the statement is translated (translateStmtList — the same
+// bridge parse-file.js runs) and the LIVE-shape result is judged by the same
+// function the live front end uses (body-top-coverage.js
+// liveStmtCompilesNothing). No per-kind list on this side:
+//   - nothing: the translation is a statement that compiles nothing (an
+//     inert bare expression `404`, an import with no source, an export the
+//     export grammar does not recognise — `export default …`, a bare
+//     `type Name`); or the source label did not survive translation (`Total: 42`: the live AST has
+//     a label only on a loop); or a function with no `{ … }` body (the shared
+//     function grammar; the native parser reports `fn heading` at the NEXT
+//     token's line);
+//   - dropped (coverage only): an empty escape-hatch ANYWHERE in the
+//     translation (`go((step(), 7))`, a tagged template — the bridge could
+//     not translate it), or a statement the bridge translates to nothing at
+//     all. That is a compiler gap, so it fails closed as
+//     E-INTERNAL-BODY-TOP-DROPPED rather than being called prose. (A comma
+//     sequence standing as the statement, `(step(), 1)`, is judged earlier as
+//     not-scrml — §4.18.2 has no comma operator — like the live front end.)
+function nativeTranslate(st) {
+    try {
+        return translateStmtList([st], { next: 0 });
+    } catch {
+        return null;
     }
-    // `import stuff` / `import { a }` — no module source: nothing to import.
-    if (st.kind === "Import" && (st.source === "" || st.source === null || st.source === undefined)) return true;
-    if (st.kind === "ExprStmt") return nativeExprIsInert(st.expression);
-    if (st.kind === "Labeled") return st.body === null || st.body === undefined || NATIVE_LOOP_STMT_KINDS.has(st.body.kind) === false;
-    if (st.kind === "TypeDecl") return (st.raw === "" || st.raw === undefined) && (st.typeKind === "" || st.typeKind === undefined);
-    // `import "<module>"` (no binding): §21.3 admits named and default imports
-    // only, and codegen emits nothing for it.
-    if (st.kind === "Import") return Array.isArray(st.specifiers) && st.specifiers.length === 0;
+}
+function labelSurvives(st, live) {
+    if (st === null || st === undefined || st.kind !== "Labeled") return true;
+    const seen = (n, d) => {
+        if (n === null || typeof n !== "object" || d > 60) return false;
+        if (Array.isArray(n)) return n.some((x) => seen(x, d + 1));
+        if (n.label === st.label) return true;
+        return false;
+    };
+    return seen(live, 0);
+}
+function nativeFunctionHasNoBody(st, source, nextStart) {
+    if (st.kind !== "FunctionDecl" || typeof source !== "string" || !st.span || typeof st.span.start !== "number") return false;
+    // The head's own tokens, cut at the next statement (its span can run into
+    // it) and at the end of its line when no body follows there.
+    const le = source.indexOf("\n", st.span.start);
+    const lineEnd = le === -1 ? source.length : le;
+    const end = typeof nextStart === "number" && nextStart > st.span.start ? Math.max(Math.min(nextStart, st.span.end), lineEnd) : Math.max(st.span.end, lineEnd);
+    let toks = [];
+    try { toks = lex(source.slice(st.span.start, end)); } catch { return false; }
+    const texts = toks.filter((t) => t && t.kind !== "EOF").map((t) => String(t.text ?? ""));
+    return declExtent("function", texts).nothing === true;
+}
+function nativeStmtCompilesNothing(st, source, nextStart) {
+    if (st === null || st === undefined || st.kind === "Empty") return false;
+    if (nativeFunctionHasNoBody(st, source, nextStart)) return true;
+    const live = nativeTranslate(st);
+    if (live === null) return false;
+    if (labelSurvives(st, live) === false) return true;
+    if (live.length === 1 && liveStmtCompilesNothing(live[0])) return true;
     return false;
+}
+function nativeStmtDropsText(st) {
+    if (st === null || st === undefined || typeof st.kind !== "string" || st.kind === "Empty") return false;
+    const live = nativeTranslate(st);
+    if (live === null) return false;
+    if (live.length === 0) return true;
+    return liveTreeDropsText(live);
 }
 // nativeTypeAliasRest — for a `type Name = <alias>` statement, the source range
 // of the tokens after the type expression ends ({ keepEnd, restStart, restEnd,
@@ -2825,7 +2854,7 @@ function nativeStmtCompilesNothing(st, source, nextStart) {
 // coordinates, so the export's is used and its `export` token skipped).
 function nativeTypeAliasRest(st, source, outer) {
     if (st === null || st === undefined || st.kind !== "TypeDecl" || typeof st.raw !== "string" || st.raw === ""
-            || st.raw.trimStart().startsWith("{") || outer === undefined || outer === null
+            || outer === undefined || outer === null
             || outer.span === undefined || outer.span === null) return null;
     const base = outer.span.start;
     const text = source.slice(base, outer.span.end);
@@ -2844,22 +2873,6 @@ function nativeTypeAliasRest(st, source, outer) {
         restEnd: base + toks[toks.length - 1].span.end,
         keptRaw: eq >= 0 ? toks.slice(eq + 1, n).map((t) => t.text).join(" ") : st.raw,
     };
-}
-// nativeStmtDropsText — true when the statement holds an expression the bridge
-// translates to an EMPTY escape-hatch (its text never reaches the output).
-function nativeStmtDropsText(node, depth = 0) {
-    if (node === null || typeof node !== "object" || depth > 200) return false;
-    if (Array.isArray(node)) return node.some((x) => nativeStmtDropsText(x, depth + 1));
-    if (typeof node.kind === "string" && NATIVE_EXPR_KINDS_TRANSLATED_EMPTY.has(node.kind)) return true;
-    // Markup-as-value carries a markup block-stream that the MARKUP pipeline
-    // compiles (a `${render slot()}` inside it is not a translateExpr drop).
-    if (node.kind === "MarkupValue") return false;
-    for (const k of Object.keys(node)) {
-        if (k === "span") continue;
-        const v = node[k];
-        if (v !== null && typeof v === "object" && nativeStmtDropsText(v, depth + 1)) return true;
-    }
-    return false;
 }
 function unquotedNativeMessage(shown) {
     return "`" + shown + "` is not valid code. A `<program>` / `<page>` / `<channel>` " +
@@ -2903,7 +2916,9 @@ function rejectBodyTopProseNative(block, source, ctx) {
     const diags = ctx.diagnostics.filter((d) => inBlock(d) && BODY_TOP_PARSE_DIAG_RE.test(d.code));
     // S441 review #6 — a comma sequence statement (`Hello, world`) is not a
     // scrml expression (mirrors ast-builder.js stmtHasInvalidOwnExpr).
-    const isSeqStmt = (st) => st && st.kind === "ExprStmt" && st.expression && st.expression.kind === "Sequence";
+    // (Parenthesised too — `(step(), 1)` is the same comma sequence; round 5b.)
+    const unParen = (e) => { let x = e; while (x && x.kind === "Paren") x = x.expression; return x; };
+    const isSeqStmt = (st) => st && st.kind === "ExprStmt" && st.expression && unParen(st.expression) && unParen(st.expression).kind === "Sequence";
     // (A statement the parser already REPORTED — `import(…)` / `class` recover
     // as a `not` placeholder carrying their own E-…-NOT-IN-SCRML — keeps that
     // diagnostic; it is not reclassified as prose.)
@@ -3193,7 +3208,7 @@ export function assertBodyTopCoverageNative(block, source, ctx) {
         // S441 round 5 — credit a statement only for what it COMPILES: one that
         // compiles nothing, or whose text the bridge drops (a tagged template →
         // an empty escape-hatch), is not credited.
-        if (nativeStmtCompilesNothing(st) || nativeStmtDropsText(st)) continue;
+        if (nativeStmtCompilesNothing(st, source) || nativeStmtDropsText(st)) continue;
         for (let k = Math.max(0, st.span.start - runStart); k < Math.min(len, st.span.end - runStart); k++) inStmt[k] = 1;
     }
     // A `;` is source formatting (round 5 — it sits between statement spans,

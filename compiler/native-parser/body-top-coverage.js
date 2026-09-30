@@ -114,13 +114,16 @@ export function typeExprExtent(texts) {
 }
 
 // braceBodyEnd — index just past the `{ … }` body that is the first `{` at
-// bracket depth 0 at or after `from` (a function's parameter list and return
-// annotation come first and are skipped as balanced groups), or -1.
+// bracket depth 0 at or after `from`, or -1. (The fallback for a function head
+// functionDeclExtent could not read.)
 function braceBodyEnd(texts, from) {
     let i = from;
     while (i < texts.length) {
         const t = texts[i];
-        if (t === "{") return skipBalanced(texts, i);
+        if (t === "{") {
+            const e = skipBalanced(texts, i);
+            return e < 0 ? texts.length : e;
+        }
         if (t === "(" || t === "[") {
             const e = skipBalanced(texts, i);
             if (e < 0) return -1;
@@ -130,6 +133,47 @@ function braceBodyEnd(texts, from) {
         i++;
     }
     return -1;
+}
+
+// functionDeclExtent — `modifier* (function|fn) '*'? name '(' params ')'
+// return-part? modifier-call* '{' body '}'` (§48). The return part — `-> T`,
+// `: T`, `!`, `! -> E` — is a TYPE and is read with the type grammar
+// (typeExprExtent), so a braced return type (`-> { a: number }`) is not taken
+// for the body (S441 round 5b). Returns the accepted token count, or -1 when
+// there is no `{ … }` body at all (`fn heading`).
+function functionDeclExtent(texts) {
+    let i = texts.indexOf("(");
+    if (i < 0) return -1;
+    i = skipBalanced(texts, i);
+    if (i < 0) return -1;
+    for (let guard = 0; guard < 8 && i < texts.length; guard++) {
+        const t = texts[i];
+        if (t === "!") { i++; continue; }
+        let arrow = 0;
+        if (t === "->" || t === ":" || t === "=>") arrow = 1;
+        else if ((t === "-" || t === "=") && texts[i + 1] === ">") arrow = 2;
+        if (arrow > 0) {
+            const ext = typeExprExtent(texts.slice(i + arrow));
+            if (ext === 0) break;
+            i = i + arrow + ext;
+            continue;
+        }
+        // `.idempotent()`-style modifier calls between the head and the body.
+        if (t === "." && isNameText(texts[i + 1]) && texts[i + 2] === "(") {
+            const e = skipBalanced(texts, i + 2);
+            if (e < 0) break;
+            i = e;
+            continue;
+        }
+        break;
+    }
+    // (A body that opens but does not close inside `texts` — the caller passed
+    // only the head's line — still IS a body: the declaration runs to the end.)
+    if (texts[i] === "{") {
+        const e = skipBalanced(texts, i);
+        return e < 0 ? texts.length : e;
+    }
+    return braceBodyEnd(texts, i);
 }
 
 // sourceStringEnd — index just past the module-specifier string that follows
@@ -164,10 +208,9 @@ export function typeDeclExtent(texts) {
     }
     if (texts[i] === "=") {
         i++;
-        if (texts[i] === "{") {
-            const e = skipBalanced(texts, i);
-            return e < 0 ? texts.length : e;
-        }
+        // One type grammar for every right-hand side: a braced struct / enum
+        // body is an operand like any other, so `{ a: number }[]` and
+        // `{ … } | { … }` read whole (S441 round 5b).
         const ext = typeExprExtent(texts.slice(i));
         return ext === 0 ? 0 : i + ext;
     }
@@ -195,7 +238,7 @@ export function declExtent(kind, texts) {
         count = typeDeclExtent(texts);
         if (count === 0) return { nothing: true };
     } else if (kind === "function") {
-        count = braceBodyEnd(texts, 1);
+        count = functionDeclExtent(texts);
         if (count < 0) return { nothing: true };
     } else {
         count = n;
@@ -236,33 +279,46 @@ export function liveExprIsInert(node) {
     }
 }
 
-// nativeExprIsInert — for a native-parser Expr (native-parser/ast-expr.js).
-export function nativeExprIsInert(expr) {
-    if (!expr || typeof expr !== "object") return false;
-    switch (expr.kind) {
-        case "NumberLit":
-        case "StringLit":
-        case "BoolLit":
-        case "NotValue":
-            return true;
-        case "TemplateLit":
-            return Array.isArray(expr.exprs) && expr.exprs.length === 0;
-        case "Paren":
-            return nativeExprIsInert(expr.expression);
-        case "Unary":
-            return expr.prefix !== false && INERT_UNARY_OPS.has(expr.op) && nativeExprIsInert(expr.operand);
-        case "Binary":
-        case "Logical":
-            return nativeExprIsInert(expr.left) && nativeExprIsInert(expr.right);
-        case "Conditional":
-            return nativeExprIsInert(expr.test) && nativeExprIsInert(expr.consequent) && nativeExprIsInert(expr.alternate);
-        case "Array":
-            return Array.isArray(expr.elements) && expr.elements.every((e) =>
-                e && e.kind === "Item" && nativeExprIsInert(e.expression));
-        case "Object":
-            return Array.isArray(expr.properties) && expr.properties.every((p) =>
-                p && p.kind === "KeyValue" && p.computed !== true && nativeExprIsInert(p.value));
+// liveStmtCompilesNothing — a LIVE-shape statement (the ast-builder's output,
+// or the native bridge's translation of a native statement) that compiles
+// nothing: a bare expression that computes nothing observable; an import with
+// no module source; an export of nothing the export grammar recognises (no
+// kind, no name — `export data`, `export default …`); a `type` with neither a
+// kind nor a body. Both front ends judge the statement they will actually hand
+// to codegen with this one function.
+export function liveStmtCompilesNothing(st) {
+    if (!st || typeof st !== "object") return false;
+    switch (st.kind) {
+        case "bare-expr":
+            return st._onMountEffect !== true && liveExprIsInert(st.exprNode);
+        case "import-decl":
+            // No source, or no binding (`import "./x.js"` — §21.3 admits named
+            // and default imports only; codegen emits nothing for it).
+            return typeof st.hostTag !== "string" && (!st.source
+                || ((!Array.isArray(st.names) || st.names.length === 0)
+                    && (!Array.isArray(st.specifiers) || st.specifiers.length === 0)));
+        case "export-decl":
+            return !st.exportKind && !st.exportedName;
+        case "type-decl":
+            return st.fromExport !== true && !st.raw && !st.typeKind;
         default:
             return false;
     }
+}
+
+// liveTreeDropsText — true when a live-shape tree holds an EMPTY escape-hatch
+// anywhere: an expression the native bridge could not translate, whose source
+// text therefore never reaches the emitted code (a tagged template, a comma
+// sequence nested in a call argument, …). Measured on the translated output
+// itself — no list of kinds.
+export function liveTreeDropsText(node, depth = 0) {
+    if (node === null || typeof node !== "object" || depth > 400) return false;
+    if (Array.isArray(node)) return node.some((x) => liveTreeDropsText(x, depth + 1));
+    if (node.kind === "escape-hatch" && (node.raw === "" || node.raw === undefined || node.raw === null)) return true;
+    for (const k of Object.keys(node)) {
+        if (k === "span") continue;
+        const v = node[k];
+        if (v !== null && typeof v === "object" && liveTreeDropsText(v, depth + 1)) return true;
+    }
+    return false;
 }

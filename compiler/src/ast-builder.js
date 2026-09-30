@@ -55,7 +55,7 @@ import {
 
 import { parseExprToNode, forEachResetExprInExprNode, forEachMapLitExprInExprNode, captureTrailingContentWarnings, hasLostTrailingContent } from "./expression-parser.ts";
 import { segmentBodyTopItems } from "../native-parser/body-top-prose.js";
-import { declExtent, liveExprIsInert } from "../native-parser/body-top-coverage.js";
+import { declExtent, liveStmtCompilesNothing } from "../native-parser/body-top-coverage.js";
 import { parseThemeBody } from "./theme-body-parser.ts";
 import { decorateValidatorsWithExprNodes } from "./validator-arg-parser.ts";
 import { isUniversalCorePredicate } from "./validator-catalog.js";
@@ -1665,6 +1665,9 @@ function bodyTopAcceptance(node, consumed) {
   // (A STRING token's text is its content without the quotes; the shared
   // grammar classifies by the first character, so restore the delimiter.)
   const texts = consumed.map((t) => (t.kind === "STRING" ? "\"" : "") + String(t.text ?? ""));
+  // The live-shape judgment both front ends share (the native front end
+  // applies it to the bridge's translation of its statement).
+  if (liveStmtCompilesNothing(node)) return { nothing: true };
   let res = null;
   switch (node.kind) {
     case "import-decl": {
@@ -1701,9 +1704,6 @@ function bodyTopAcceptance(node, consumed) {
       if (node.fromExport) return null;
       res = declExtent("function", texts);
       break;
-    case "bare-expr":
-      if (node._onMountEffect === true) return null;
-      return liveExprIsInert(node.exprNode) ? { nothing: true } : null;
     default:
       return null;
   }
@@ -5354,7 +5354,13 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         && nt.span.line > leadTok.span.line
         && ((nt.kind === "KEYWORD" && _LEAD_STMT_KEYWORDS.has(nt.text))
           || (nt.kind === "IDENT" && nt.text !== "and" && nt.text !== "or")
-          || nt.kind === "AT_IDENT")) {
+          || nt.kind === "AT_IDENT"
+          // S441 round 5b (D3) — a state declaration on the next line
+          // (`@count⏎<total> = 0`): the same `<`-IDENT boundary collectExpr
+          // applies after a value (Step 11.0b), which its `parts.length > 0`
+          // gate never reaches for a lead the caller consumed.
+          || (nt.kind === "PUNCT" && nt.text === "<" && peek(1) && peek(1).kind === "IDENT"
+            && scanStructuralDeclLookahead()))) {
       return { expr: "", span: spanOf(leadTok, leadTok) };
     }
     return collectExpr();
@@ -13555,6 +13561,19 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         consume(); // consume `{`
         const { body, span: bodySpan } = collectBracedBody();
         raw = "{ " + body + " }";
+        // S441 round 5b (D2) — a braced type is an operand of the type
+        // grammar like any other: `= { a: number }[]`, `= { … } | { … }`,
+        // `= { … } & { … }` continue on the same line. Before this the
+        // continuation was cut off into a separate (no-effect) statement and
+        // the declared type silently lost its `[]` / union arm.
+        const _cont = peek();
+        const _braceEnd = tokens[i - 1];
+        if (_cont && _cont.kind !== "EOF" && _braceEnd && _braceEnd.span && _cont.span
+            && _cont.span.line === _braceEnd.span.line
+            && (_cont.text === "[" || _cont.text === "|" || _cont.text === "&" || _cont.text === "&&" || _cont.text === "?")) {
+          const { expr: _more } = collectExpr();
+          raw = raw + " " + _more;
+        }
         nodes.push({
           id: ++counter.next,
           kind: "type-decl",

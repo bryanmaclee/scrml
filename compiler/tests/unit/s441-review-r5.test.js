@@ -135,3 +135,78 @@ describe("D — native: a tagged template the bridge drops is not silent", () =>
     expect(r.codes).toEqual(["E-INTERNAL-BODY-TOP-DROPPED"]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Round 5b — S239 review of review/s445-prose-r5.
+// ---------------------------------------------------------------------------
+writeFileSync(join(DIR, "x.js"), "export const a = 1;\n");
+for (const [label, parser] of BOTH) {
+  describe(`N1 — an export the live AST cannot carry, and a comma sequence, never compile clean (${label})`, () => {
+    for (const src of [
+      "export default function helperZq() { return 1 }\n<p>${helperZq()}</p>",
+      "export default 42",
+      "export default { a: 1 }",
+      "export * as ns from \"./x.js\"",
+      "function step() { console.log(\"s\") }\n(step(), 1)",
+      "function step() { console.log(\"s\") }\n(step(), step())",
+    ]) {
+      test(`${JSON.stringify(src)} → E-UNQUOTED-DISPLAY-TEXT, never a clean compile with the code dropped`, () => {
+        const r = compile(src, parser);
+        expect(r.codes).toContain("E-UNQUOTED-DISPLAY-TEXT");
+        expect(r.codes).not.toContain("E-INTERNAL-BODY-TOP-DROPPED");
+      });
+    }
+  });
+
+  describe(`N2 — a do/while statement covers its closing \`)\` (${label})`, () => {
+    test("`do { … } while (@zq > 3)` compiles clean", () => {
+      const r = compile("<zq> = 0\ndo { @zq = @zq + 1 } while (@zq > 3)\n<p>${@zq}</p>", parser);
+      expect(r.codes).toEqual([]);
+    });
+  });
+
+  describe(`D2 — a braced type is an operand of the type grammar (${label})`, () => {
+    for (const src of ["type L = { a: number }[]", "type U = { a: number } | { b: string }", "type I = { a: number } & { b: string }"]) {
+      test(`\`${src}\` compiles clean`, () => {
+        const r = compile(src, parser);
+        expect(r.codes).toEqual([]);
+      });
+    }
+    test("`type L = { a: number }[] zqx` — the rest of the line is still reported", () => {
+      const r = compile("type L = { a: number }[] zqx", parser);
+      expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+      expect(r.errors[0].message).toContain("zqx");
+    });
+  });
+
+  describe(`D3 — a bare read before a state declaration is two statements (${label})`, () => {
+    for (const src of ["<count> = 0\n@count\n<total> = 0\n<p>${@count} ${@total}</p>", "<o> = { a: 1 }\n@o.a\n<total> = 0\n<p>${@o.a} ${@total}</p>"]) {
+      test(`${JSON.stringify(src)} compiles clean`, () => {
+        const r = compile(src, parser);
+        expect(r.codes).toEqual([]);
+      });
+    }
+  });
+}
+
+describe("N1 — native: a nested expression the bridge cannot translate fails closed", () => {
+  test("`go((step(), 7))` — the argument would be dropped → E-INTERNAL-BODY-TOP-DROPPED, not a clean compile", () => {
+    const r = compile("function step() { return 1 }\nfunction go(x) { console.log(x) }\ngo((step(), 7))", "scrml-native");
+    expect(r.codes).toEqual(["E-INTERNAL-BODY-TOP-DROPPED"]);
+  });
+});
+
+describe("D1 — default: a braced RETURN type is not the function body", () => {
+  // (The native parser does not read a `->` / `:` return type on `function`
+  // at all — a pre-existing native gap, E-STMT-* on main too.)
+  for (const src of [
+    "function f() -> { a: number } { return { a: 1 } }\n<p>${f().a}</p>",
+    "function f(): { a: number } { return { a: 1 } }\n<p>${f().a}</p>",
+    "server function f() -> { ok: boolean } { return { ok: true } }",
+  ]) {
+    test(`${JSON.stringify(src)} compiles clean`, () => {
+      const r = compile(src, null);
+      expect(r.codes).toEqual([]);
+    });
+  }
+});
