@@ -4517,7 +4517,7 @@ and read the derived value inside the body.
 
 **Normative statement:**
 
-- `when @var changes { body }` SHALL execute `body` after the `_scrml_reactive_set` call completes and before the next microtask boundary. This is the canonical pattern for localStorage sync, analytics, and auto-save.
+- `when @var changes { body }` SHALL execute `body` after the `_scrml_reactive_set` call completes and before the next microtask boundary. This is the canonical pattern for localStorage sync, analytics, and auto-save. *(S444: browser persistence of a cell is now §6.14 `persist=`; see the corrected idiom row below.)*
 
 **Canonical use cases:**
 
@@ -4525,8 +4525,11 @@ and read the derived value inside the body.
 |---|---|
 | Derive a value from reactive state | `const <name> = expr` (§6.6) |
 | Run a side effect when state changes | `when @var changes { body }` |
-| Sync to localStorage on change | `when @var changes { localStorage.setItem(key, @var) }` |
+| ~~Sync to localStorage on change~~ | ~~`when @var changes { localStorage.setItem(key, @var) }`~~ |
+| Persist a cell across reloads | `<x persist="local" key="app.x"> = init` (§6.14 — **Nominal**, lands with the bootstrap). Until it lands, a hand-written recipe SHALL encode on write and decode + check on read: see the note below. |
 | Auto-save form fields | `when (@field1, @field2) changes { saveForm(@field1, @field2) }` |
+
+> **Correction S444 (dpa-061 call 8) — the struck row was silently lossy.** Web Storage stores `String(v)`, so the struck recipe stored a `string[]` as `"a,b"`, an object as `"[object Object]"`, and `not` as the present string `"null"`; it covered only the write half. It is correct **only for a `string` cell**. Browser persistence is now the `persist=` lifetime attribute (§6.14), which owns restore, encoding, fail-closed decode, cross-tab sync and write failure. A hand-written recipe for a non-`string` cell, until §6.14 lands, SHALL encode the value (e.g. `JSON.stringify`) in a named function that the `when` body calls, and on load SHALL decode inside a guard and check the decoded value's shape before assigning it (on failure, keep the default). `JSON.stringify` does not round-trip a map (§59.10 — `JSON.stringify(new Map(...))` is `"{}"`). The recipe's `!{}` guard goes in the named function, not in the `when` body (`g-bang-brace-in-when-changes-body-invalid-logic`). **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 calls 5, 7, 8 — *"5, 7, 8 your recs. expound 6"* (8: *"the design-independent fixes land now: the SPEC §6.7.4 lossy localStorage recipe row, the `when`-body `!{}` codegen defect (`g-bang-brace-in-when-changes-body-invalid-logic`), and a PRIMER entry. RULED."*) · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` C4 P1 · **supersedes:** the struck row above. Resolves `g-spec-6-7-4-localstorage-recipe-lossy-for-non-string-cells`.
 
 ---
 
@@ -6319,6 +6322,72 @@ The grammar SHALL reuse the `parseAfterDuration` helper (`compiler/src/codegen/p
 - L17 — Compiler binding-dispatch rule (binding shape is unchanged by `debounced=` / `throttled=`; the timing wrapper sits on the write side of `bind:value` / `bind:checked`).
 - L18 — `reset(@cell)` keyword + `default=` attribute (reset cancels pending timed writes).
 - L20 — Vocabulary smell rule (this section eliminates the pre-v0.next `@debounced(N)` keyword-form, collapsing onto one declarative surface).
+
+### 6.14 Lifetime Attribute — `persist=` (Browser-Persisted Cells)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 1 — *"B for localstorage"* / *"the persist= attribute"* (*"RULED (b) — the deep-dive's pole A2 … A1 (authority value) is eliminated."*) · call 2 — *"i and B2. with one caveat, I have found indexedDB to be really usefull is some cases in the past. so lets just plan on the stdlib addition."* · call 3 — *"(i) and yes"* (`key=` required) · call 4 — *"(ii) and revalidate"* (decode-first) · calls 5 / 7 / 8 — *"5, 7, 8 your recs. expound 6"* · call 6 — *"your rec on 6. though I really like the second option, but it gets complicated. We could have the dev explicate when a cell needs that behaviour, but I don't know what that would look like."* · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` (Approach A2; the cross-cutting table) · **supersedes:** §6.7.4's idiom-table row *"Sync to localStorage on change — `when @var changes { localStorage.setItem(key, @var) }`"* as the canonical persistence recipe (corrected in §6.7.4).
+>
+> **Nominal / spec-ahead.** impl#1 does not accept `persist=` (an unknown decl-attr stops the line being a declaration — `g-unknown-decl-attr-silently-undeclares-cell`). Per S444 impl#1 carries the divergence and the bootstrap builds this section.
+
+Browser persistence is a **lifetime** property of a client-owned cell, orthogonal to authority (§52). It is **not** a §52 authority value: a persisted cell is still client-local for every §52 / E-AUTH rule. The attribute sits in the same slot as `debounced=` / `throttled=` (§6.13).
+
+```scrml
+<recent persist="local" key="myapp.recent">: string[] = []     // survives reload; synced across tabs
+<tabFilter persist="session" key="myapp.filter"> = "all"       // survives reload in this tab only
+```
+
+#### 6.14.1 Surface
+
+1. `persist=` takes exactly one of two values: **`"local"`** (Web `localStorage`) or **`"session"`** (Web `sessionStorage`). Both are synchronous storages. Any other value SHALL be `E-PERSIST-STORAGE-UNKNOWN`.
+2. **`key=` is REQUIRED** on every `persist=` cell. `persist=` without `key=` SHALL be `E-PERSIST-KEY-REQUIRED`. The key is an external storage contract, written by the author; the compiler SHALL NOT derive one. (The ruling's reason: a derived key makes a cell rename silently drop every user's saved value, and explicit keys prevent same-origin cross-app collisions.)
+3. **Where legal.** `persist=` is legal on client-owned state cells. On a §66 declaration it governs the **shared instance only** (the §66.16 analog for `server` / `pinned`); a plain instance of a `persist=` declaration is not persisted.
+4. **`persist="cookie"` is DEFERRED** (not in this revision). **IndexedDB is NOT a `persist=` value**: it is asynchronous and cannot be restored at construction. It is a **PLANNED stdlib addition** — planned work, not gated behind an adopter re-trigger — whose surface (sync-looking, auto-awaited stdlib calls per §13.2) is owed a design pass when scheduled.
+
+#### 6.14.2 Semantics
+
+1. **Restore at construction.** A `persist=` cell's stored value SHALL be read synchronously when the cell is constructed, before the first client render, inside a compiler-emitted host-JS storage guard (the §19 "localStorage availability guard" precedent). Restore is construction, not a transition. On a §66 declaration the restored value is a **§66.9 seed** of the shared instance: seeded once, thereafter independent and writable.
+2. **Codec.** The stored value SHALL be encoded and decoded with the §57 wire format and the §59.10 lossless codec (so maps and a stored `not` round-trip). Browser storage becomes a listed §57.1 sink for `persist=` cells.
+3. **Decode against the current type and full contract first; default on failure; never coerced.** On restore the stored value SHALL be decoded against the cell's **current** declared type and its full declared contract (e.g. §53 refinements, §66.12 sequence bounds). If the key is absent, storage is unavailable, the decode fails, or the decoded value does not satisfy the contract, the cell SHALL take its default (its §6.8 value: `default=` if present, else the initializer). A stored value that does not satisfy the current contract SHALL NOT reach the cell and SHALL NOT be coerced into it. A type edit therefore does not by itself discard stored data: a stored value that still satisfies the edited type is kept.
+4. **Write on change.** When the cell's value changes, the compiler-emitted code SHALL encode the new value and write it to storage under `key`, inside the storage guard. (Composed with `debounced=` / `throttled=`, the storage write follows the cell's wrapped write.)
+5. **Cross-tab sync — `"local"` only.** A `persist="local"` cell SHALL subscribe to the Web `storage` event for its key and apply a changed value written by another same-origin document, decoded under rule 3. A `persist="session"` cell has no cross-tab sync (session storage is per tab).
+6. **Write failure is a read-only synthesized status property.** A storage write that fails (quota exceeded, storage unavailable) SHALL NOT throw into user code. It SHALL be reflected in a **read-only, compiler-synthesized status property** on the persisted cell, following the §55 validity-surface precedent (§55.7: read-only; a write to it is `E-SYNTHESIZED-WRITE`). The property's name and shape are OPEN (O-061-1).
+7. **First paint = default-then-restore.** A persisted cell is client-local, so SSR output renders its default (§52.8), and the restored value appears when client code runs.
+8. **Pre-paint restore for a theme mode cell — the one exception.** When a `persist=` cell is the mode cell of a `<theme for=@cell>` (§65.6; §66.17), the compiler SHALL additionally emit a blocking inline pre-paint script that reads and decodes the stored value (rule 3) and sets the §65.6 root attribute `data-scrml-theme-<cell>` before first paint. This is automatic; there is no author surface for it. A pre-paint script can touch only the root (`<html>`) attributes, which is exactly how §65.6 theming switches.
+
+#### 6.14.3 Privacy and ownership — errors
+
+1. `persist=` on a cell whose value carries `reveal`-declassified protected provenance (§14.8.9) SHALL be `E-PERSIST-REVEALED`.
+2. `persist=` on a `lin` cell (§35) SHALL be `E-PERSIST-LIN`. A stored `lin` value would be replayable on every reload.
+3. `persist=` on a server-authority cell (§52: `<x server>`, a Tier-1 `authority="server"` type instance) SHALL be `E-PERSIST-WITH-SERVER`. (dd A2 item 7: the cell is already durable, and persistence is legal only where authority is local.)
+
+#### 6.14.4 OPEN (dpa-061 — not ruled; not decided by this section)
+
+- **O-061-1** — The write-failure status property (§6.14.2 rule 6): its **name**, its **shape** (boolean vs a failure-reason enum), and whether a later successful write clears it and re-syncs the whole value.
+- **O-061-2** — **Explicit pre-paint opt-in** for cells other than a theme mode cell — bryan's stated preference for option (ii) generally, via an explicit author opt-in; he does not know what that surface would look like. **Banked as dpa-062.**
+- **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
+- **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
+- **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab?
+- **O-061-6** — Whether the restore at construction fires `when @x changes` effects.
+- **O-061-7** — Write timing: per-change or coalesced per microtask (the §6.7.4 timing).
+- **O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.
+- **O-061-9** — The attribute's **position in a §66 opener**, and `persist=` on a §66 declaration's **non-shared** instances with an author per-instance key expression.
+- **O-061-10** — `persist=` on a derived cell, and on a function-typed cell (no codec).
+- **O-061-11** — A persisted `(not to T)` lifecycle cell (§14.12 / §66.11.6): the static state at reads before discrimination.
+- **O-061-12** — Whether widening §57.1 to a storage sink binds stored values to the §57.5 canonical-only decoder at v1.0.
+
+#### 6.14.5 Error codes (Nominal)
+
+Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands with the impl**.
+
+| Code | Trigger | Severity |
+|---|---|---|
+| `E-PERSIST-STORAGE-UNKNOWN` | `persist=` value is not `"local"` or `"session"` (including the deferred `"cookie"`, and IndexedDB) | Error |
+| `E-PERSIST-KEY-REQUIRED` | `persist=` without `key=` | Error |
+| `E-PERSIST-REVEALED` | `persist=` on a value carrying `reveal`-declassified protected provenance | Error |
+| `E-PERSIST-LIN` | `persist=` on a `lin` cell | Error |
+| `E-PERSIST-WITH-SERVER` | `persist=` on a server-authority cell | Error |
+
+**Cross-references:** §6.7.4 (the corrected localStorage idiom row) · §6.8 (the default value) · §6.13 (the sibling write-path attributes) · §13.2 (auto-await — the planned IndexedDB stdlib) · §14.8.9 (`reveal`) · §35 (`lin`) · §52 (authority — orthogonal) · §55 (synthesized-property precedent) · §57 / §59.10 (codec) · §65.6 / §66.17 (theme mode cell) · §66.9 (seed) · §66.16 (shared instance only).
 
 ---
 
@@ -21396,6 +21465,11 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a derived cell (`const <x debounced=300ms> = expr`). Derived cells are read-only; debounce/throttle is a write-side wrapper; combining the two is meaningless. Resolution: debounce the upstream source instead (`<source debounced=300ms> = @raw; const <doubled> = @source * 2`). (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-DEBOUNCED-WITH-SERVER | §6.13, §52 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a `<x server>` server-authoritative cell. Server-authoritative writes go through the §52 server-write path, not the client-side debounce/throttle wrapper; the two surfaces don't compose. Server-side timing semantics are out of scope for this revision. Resolution: remove the reactivity attribute, or restructure so the client-side cell carries the timing and the server-authoritative cell receives the resolved value. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-REACTIVITY-ATTR-CONFLICT | §6.13 | Both `debounced=DURATION` and `throttled=DURATION` appear on the same state-cell declaration. The two attributes describe competing timing rules (debounce coalesces writes; throttle leading+trailing-fires). Pick one. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
+| E-PERSIST-STORAGE-UNKNOWN | §6.14 | A `persist=` value other than `"local"` or `"session"` — including `"cookie"` (deferred) and IndexedDB (a planned stdlib addition, never a `persist=` value). **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 2 — *"i and B2. …"*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-KEY-REQUIRED | §6.14 | A `persist=` cell has no `key=`. The key is an external storage contract; the compiler does not derive one. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 3 — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-REVEALED | §6.14, §14.8.9 | `persist=` on a cell whose value carries `reveal`-declassified protected provenance. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-LIN | §6.14, §35 | `persist=` on a `lin` cell — a stored `lin` value would be replayable on every reload. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-WITH-SERVER | §6.14, §52 | `persist=` on a server-authority cell (`<x server>`, a Tier-1 `authority="server"` type instance). **Provenance:** dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 7 (within ruled pole A2, call 1 — *"the persist= attribute"*). **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
 | E-VALIDATOR-INLINE-COLON | §55.10, §41.12 | The inline message override on a validator uses the COLON form (`<name req:"…msg…">`, `<name length(>=2):"…msg…">`) — this is NOT valid scrml. The §55.10-normative Level-1 inline override is the PAREN form: a trailing string-literal ARG inside the validator's parens (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`). The colon-after-validator collides with the decl scanner's `:`-handling (typed-cell annotation / §4.14 colon-shorthand) and silently corrupted state-cell `@`-access registration pre-fix (the cell then mis-reported as undeclared via a misleading E-SCOPE-001). Resolution: move the message inside the validator's parens — `req("…msg…")` not `req:"…msg…"`. The compiler recovers by registering the cell with the message as the paren-form inline override, so this is the only diagnostic on the decl. (Catalog addition S185 — g-validator-inline-msg-colon-form.) | Error |
 | E-CHANNEL-INSIDE-PROGRAM | §38.1 | **Retired 2026-05-12 (v0.3 Wave 1 direction reversal).** Pre-v0.3 fired on a `<channel>` descended from `<program>` — this is now the canonical v0.3 placement (channels live inside `<program>`). The pre-v0.3 trigger shape is no longer a violation. New v0.3 placement-direction code: `E-CHANNEL-OUTSIDE-PROGRAM`. | Error (retired) |
@@ -37362,6 +37436,7 @@ This section defines the canonical scrml wire format for absence-bearing values 
 - WebSocket channel broadcast messages (§38).
 - Server-sent event payloads (§37).
 - Any JSON payload the compiler emits for a `T | not` field whose value is the scrml-absence sentinel `not`.
+- Values a `persist=` cell writes to and restores from browser storage (`localStorage` / `sessionStorage`, §6.14) — *added S444 (dpa-061); Nominal / spec-ahead*. This is the one non-network sink: the value crosses the page-lifetime boundary, not the network. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 1 — *"the persist= attribute"* (the ruled pole A2 includes *"the §57 lossless codec"*) · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 2 (*"widens §57.1's sink list to include storage"*). Whether this binds stored values to the §57.5 canonical-only decoder is OPEN (§6.14.4 O-061-12).
 
 The wire format does NOT apply to:
 
