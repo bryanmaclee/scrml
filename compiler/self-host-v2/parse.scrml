@@ -35,7 +35,7 @@
 // again, S440.)
 // =============================================================================
 ${
-    import { Token, TokenKind, LexStop, LexRun, lexFrom } from "./lex.scrml"
+    import { Token, TokenKind, LexStop, LexRun, lexFrom, lexFromMode } from "./lex.scrml"
     import { ASpan, BinOp, UnOp, AExpr, AProp, AExprK, AStmt, ABlock, AStmtK, AType, ATypeK,
              ATypeField, AVariant, ATypeBody, ATypeDecl, AParam, AFn, AImportName, AImport,
              AAttrValue, AAttr, AElem, ANode, ANodeK, ADeclAttr, AStateChild, ADeclChild, ADecl,
@@ -1020,6 +1020,26 @@ ${
         return { toks: toPToks(run.tokens), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
     }
 
+    // A CODE-DEFAULT region (a `:`-shorthand body, a state-child body run).
+    // RULED S444 ("standalone only, your rec"; SPEC §4.18.1 / §4.18.3): a `"…"`
+    // is a display-text literal ONLY when it stands alone as the body statement
+    // — the display-mode lex of the region is exactly one `"` string token.
+    // Any other region (`@n == 5 ? "a\n" : "b"`, `f("x")`, `"a" + @b`) is
+    // re-lexed with display off: its strings are ordinary strings with the
+    // ordinary logic-string escapes.
+    fn codeRegionTP(mp: MP, stop: LexStop) -> TP {
+        const d: TP = regionTP(mp, stop)
+        if (isStandaloneDisplay(d)) return d
+        const run: LexRun = lexFromMode(mp.src, mp.pos, stop, false)
+        return { toks: toPToks(run.tokens), i: 0, nid: mp.nid, diags: mp.diags, file: mp.file }
+    }
+
+    fn isStandaloneDisplay(tp: TP) -> boolean {
+        if (tp.toks.length != 2) return false
+        const t: PTok = tp.toks[0]
+        return t.cls == TC.Str && t.text.substring(0, 1) == "\""
+    }
+
     // Back to markup after a region: the position after the region's last
     // consumed token (the Eof sentinel's start = where the lexer stopped).
     fn backToMarkup(mp: MP, tp: TP) -> MP {
@@ -1275,7 +1295,7 @@ ${
             const en: ANode = { nid: em.nid, span: mkSpan(start, em.pos), k: ANodeK.Text("") }
             return { nodes: [en], mp: mBump(em) }
         }
-        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)
+        const tp: TP = codeRegionTP(mAdv(mp, 1), LexStop.Shorthand)
         if (chAt(at, 0) == "\"" && displayCloseAt(mp.src, at.pos) < 0) {
             // SPEC §4.18.3: a display-text literal with no closing `"` before
             // end of file is E-CTX-001 against the opening `"` (recovered per
@@ -1295,7 +1315,8 @@ ${
             e = r.e
             t = expectRegionEnd(r.tp)
         }
-        let m: MP = displayEscapeDiags(skipSpace(backToMarkup(mp, t)), tp.toks)
+        let m: MP = skipSpace(backToMarkup(mp, t))
+        if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
         if (mLooking(m, "/>")) {
             m = mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `/` (`<tag … : expr>`, §4.14)", m.pos, m.pos + 2), 2)
         } else if (chAt(m, 0) == ">") {
@@ -1316,7 +1337,7 @@ ${
     // order. A `${`-carrying display-text literal nested inside a larger
     // expression is not built (reported).
     fn displayNodes(m: MP, e: AExpr, start: int, tp: TP) -> RNodes {
-        if (isDisplayTemplate(m.src, e)) {
+        if (isStandaloneDisplay(tp) && isDisplayTemplate(m.src, e)) {
             const split: RNodes = splitDisplay(m, e.span.start, e.span.end)
             return { nodes: split.nodes, mp: mAt(split.mp, m.pos) }
         }
@@ -1552,10 +1573,10 @@ ${
                 m = mBump(at)
             } else {
                 const before: int = m.pos
-                const tp0: TP = regionTP(m, LexStop.CodeBody)
+                const tp0: TP = codeRegionTP(m, LexStop.CodeBody)
                 const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file }
                 const runEnd: int = lastEnd(tp)
-                m = displayEscapeDiags(m, tp.toks)
+                if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)
                 const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file })
                 if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
                     const back: MP = backToMarkup(m, r.tp)

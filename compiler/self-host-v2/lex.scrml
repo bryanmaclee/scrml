@@ -1241,7 +1241,15 @@ ${
     }
 
     export fn lexFrom(src: string, pos: int, stop: LexStop) -> LexRun {
-        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], [], [], isCodeDefault(stop))
+        return lexFromMode(src, pos, stop, isCodeDefault(stop))
+    }
+
+    // lexFrom with the display flag given explicitly. RULED S444 ("standalone
+    // only"): a code-default region's `"…"` is a display-text literal only when
+    // it stands alone as the body statement — the parser re-lexes any other
+    // code-default region with display = false (ordinary strings, logic escapes).
+    export fn lexFromMode(src: string, pos: int, stop: LexStop, display: boolean) -> LexRun {
+        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], [], [], display)
         let done = false
         while (!done && !isEof(st.cur)) {
             if (stopBefore(st, stop)) {
