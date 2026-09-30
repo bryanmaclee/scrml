@@ -337,9 +337,15 @@ const SECURE_15M = `<program csrf="off" session-secure="true" sessionExpiry="15m
 ${DB}
 </program>`;
 const PLAIN_30D = `<program csrf="off" auth="optional" session-secure="false" sessionExpiry="30d"><p>x</p></program>`;
+// S443 — `auth=` on a NESTED `<program>` is now E-PROGRAM-NESTED-AUTH (§4.12.2), so
+// the nested placements carry the same session attributes WITHOUT `auth=`. The
+// dropped `auth="optional"` was never read there (auth config comes from the file's
+// first top-level `<program>` only), so what these tests pin — the session-attr
+// last-wins read against a later nested program — is unchanged.
+const PLAIN_30D_NESTED = PLAIN_30D.replace(` auth="optional"`, "");
 const TWO_IN_FILE = {
   "sibling-after": `${SECURE_15M}\n${PLAIN_30D}\n`,
-  "nested": SECURE_15M.replace("\n</program>", `\n<div>${PLAIN_30D}</div>\n</program>`),
+  "nested": SECURE_15M.replace("\n</program>", `\n<div>${PLAIN_30D_NESTED}</div>\n</program>`),
 };
 
 describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep the stamped secure gate (S438 F1)", () => {
@@ -358,7 +364,7 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep t
 
   test("emitted: the `<page auth=\"required\">` limb, nested plain 30d program → __Host-scrml_sid / 3600", () => {
     // Same carve-out, 8b's other limb. On c9d97065: ["scrml_sid"] / ["2592000"].
-    const src = `<program csrf="off" sessionExpiry="15m">\n<page auth="required">\n${DB}\n</page>\n<div>${PLAIN_30D}</div>\n</program>`;
+    const src = `<program csrf="off" sessionExpiry="15m">\n<page auth="required">\n${DB}\n</page>\n<div>${PLAIN_30D_NESTED}</div>\n</program>`;
     const r = compileFixture("f1-page-req-nested", { "index.scrml": src });
     expect(codes(r)).toEqual([]);
     const js = serverJsFor(r, "/index.scrml");
