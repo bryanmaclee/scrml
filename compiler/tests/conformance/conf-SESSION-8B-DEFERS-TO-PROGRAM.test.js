@@ -344,7 +344,6 @@ const PLAIN_30D = `<program csrf="off" auth="optional" session-secure="false" se
 // last-wins read against a later nested program — is unchanged.
 const PLAIN_30D_NESTED = PLAIN_30D.replace(` auth="optional"`, "");
 const TWO_IN_FILE = {
-  "sibling-after": `${SECURE_15M}\n${PLAIN_30D}\n`,
   "nested": SECURE_15M.replace("\n</program>", `\n<div>${PLAIN_30D_NESTED}</div>\n</program>`),
 };
 
@@ -354,13 +353,18 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep t
   // entry — identical on the pre-fix base; that is g-two-programs-one-file-session-attr-
   // last-wins territory (E-PROGRAM-002), not this fix's. Pinned so the cookie at least
   // never goes plain: step 2's last-wins lands on the SECURE 15m program here.
-  test("emitted: plain program FIRST → no escalation (as on base), cookie stays __Host-", () => {
-    const r = compileFixture("f1-sibling-before", { "index.scrml": `${PLAIN_30D}\n${SECURE_15M}\n` });
-    expect(codes(r)).toEqual([]);
-    const js = serverJsFor(r, "/index.scrml");
-    expect(cookieNames(js)).toEqual(SECURE);
-    expect(maxAgeSecs(js)).toEqual(["900"]);
-  });
+  // S443 (bryan, user-voice S443 item 3): two top-level `<program>`s in ONE file is now
+  // E-PROGRAM-002 — the shape this block used to pin (the second program's config
+  // silently mis-read) no longer compiles, in either order.
+  for (const [shape, src] of Object.entries({
+    "sibling-before": `${PLAIN_30D}\n${SECURE_15M}\n`,
+    "sibling-after": `${SECURE_15M}\n${PLAIN_30D}\n`,
+  })) {
+    test(`${shape}: two top-level <program>s in one file → E-PROGRAM-002 (S443)`, () => {
+      const r = compileFixture(`f1-${shape}-e002`, { "index.scrml": src });
+      expect(codes(r)).toContain("E-PROGRAM-002");
+    });
+  }
 
   test("emitted: the `<page auth=\"required\">` limb, nested plain 30d program → __Host-scrml_sid / 3600", () => {
     // Same carve-out, 8b's other limb. On c9d97065: ["scrml_sid"] / ["2592000"].
@@ -386,7 +390,7 @@ describe("CONF-SESSION-8B-DEFERS-TO-PROGRAM — 2+ <program>s in one file keep t
     });
   }
 
-  for (const shape of ["sibling-after", "nested"]) {
+  for (const shape of ["nested"]) {
     test(`executed: ${shape} — a planted plain scrml_sid is REFUSED (302); the __Host- one is accepted`, async () => {
       if (typeof globalThis.document !== "undefined") return; // happy-dom-polluted worker
 
