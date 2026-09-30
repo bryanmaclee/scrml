@@ -23,6 +23,10 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+// A live-PG CREATE DATABASE waits for a checkpoint (PG <15 FILE_COPY) and was measured at
+// ~24s on a dev machine; bun's 5s default hook timeout then fails the suite and leaks the
+// scratch DB/role. The hooks get real headroom instead.
+const PG_HOOK_TIMEOUT_MS = 120_000;
 import { existsSync, mkdtempSync, writeFileSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
@@ -139,7 +143,7 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
       await tx`INSERT INTO invoices (id, tenant_id, status, amount, memo)
         VALUES (gen_random_uuid(), ${TENANT_B}, 'open', 999.00, 'b')`;
     });
-  });
+  }, PG_HOOK_TIMEOUT_MS);
 
   afterAll(async () => {
     if (m) await m.close().catch(() => {});
@@ -152,7 +156,7 @@ d("§14.8.11.2 P2 writes-authority — through-CLI acceptance (live Postgres)", 
     // Leave the cluster-global scrml_app role in place (NOLOGIN, harmless; dropping
     // can race a parallel PG test).
     await admin.close().catch(() => {});
-  });
+  }, PG_HOOK_TIMEOUT_MS);
 
   test("the CLI applied the P2 DDL (S3 reshape + scrml_has_cap + the SECDEF) and exited 0", () => {
     if (cliExit !== 0) {

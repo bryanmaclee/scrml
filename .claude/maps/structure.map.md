@@ -1,6 +1,21 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-09-30T14:50:34Z  commit: 108ca89be
+# updated: 2026-09-30T15:32:25Z  commit: 5b1d0dab0
+# ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
+# write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
+# example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
+# `session.destroy()`, `<program … loginRedirect="/auth/login">`, driver BOL/POD/token reads guarded by `assignedDriverFor`,
+# `dispatch.db` ships pre-seeded (the `on mount { runSeeds() }` is gone); `stdlib/auth/templates/login.scrml` now calls
+# `session.set("userId", row.id)`; trucking smoke baseline drops `I-AUTH-REDIRECT-UNRESOLVED` / `W-AUTH-LOGIN-MISSING` /
+# `W-CG-CHUNK-PREFETCH-UNRESOLVED`, `W-TYPE-031-UNPROVEN` 321 -> 287). #1181 is the S444 map refresh itself.
+# ⛑ **`compiler/src` UNCHANGED over the window** (`git diff --stat 108ca89be..5b1d0dab0 -- compiler/src` empty) -> every S444
+# figure below stands; `bun scripts/facts.ts --check` PASS at `5b1d0dab0`. Known-gaps HIGH open 214 -> 215.
+# ⛑ **S444b ADDS S443 LOCI the reviews found missing** (grep-derived at `5b1d0dab0`; locate by SYMBOL after later commits):
+# route-inference Step 8 table + `appRoot` / `rootCandidates` / `findRoutePrefix` (matches on the ABSOLUTE path) ->
+# auth.map.md; `detectNestedProgramAuth`, E-PROGRAM-002 -> auth / error maps; `protect-flow.ts`, `emit-worker.ts`, worker
+# bundle writes in `api.js`, the §47.13 static-serve allowlist in `build.js` `generateServerEntry` -> structure / build maps.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444 HEADER (stamp `108ca89be`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
 # refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
 # commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
@@ -441,6 +456,19 @@
 # The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
 # server-boundary cases — see the map body).
 #
+
+## S444b — LOCI ADDED (grep at `5b1d0dab0`; no new files — `compiler/src` unchanged since `108ca89be`)
+
+| file | L | loci |
+|---|---|---|
+| `compiler/src/route-inference.ts` | 7074 | `runRI` `:4481`; Step 8 auth collection `:6351-6723` (8a / 8a-page / 8b / 8c / 8d / 8e / 8f); `rootCandidates` / `appRoot` `:6393-6398`; `findRoutePrefix` `:6856` (absolute-path match — see auth.map.md S444b); helpers `getExplicitAuthDeclaration` `:4283`, `collectFileAuthDecls` `:4393`, `pageAuthRequiredEntry` `:4439` |
+| `compiler/src/codegen/index.ts` | 4134 | `runCG` `:1147`; `extractWorkerPrograms` `:1506` (called `:1675`) -> `generateWorkerJs` `:1681` -> `workerBundlesPerFile` -> `output.workerBundles` (`:2467`); `detectNestedProgramAuth` `:1621`; `E-PROGRAM-002` `:1647-1672` |
+| `compiler/src/codegen/protect-flow.ts` | 2037 | §14.8.9 provenance analysis over EMITTED server modules. Exports: `ALL_COLUMNS_LABEL` `:99`, `ProtectFlowLeak` `:430`, `ProtectTagSite` `:446`, `ProtectFlowResult` `:455`, `sqlSkeleton` `:471`, `ProtectStripInfo` `:494`, `registerProtectModule` `:510`, `takeProtectRegistry` `:515`, `CompileModule` `:521`, `analyzeCompileProtectFlow` `:546`, `buildProtectFlowDiagnostics` `:654`, `analyzeProtectFlow` `:664`. Allowlists: `DERIVER_CALLS` `:326`, `STDLIB_DERIVERS` (auth/crypto), `DERIVED_OPERATORS`, `DERIVED_METHODS` `:361`. Flow: `emit-server.ts:6982` `registerProtectModule` -> `api.js` `runProtectFlow` `:3205` (`takeProtectRegistry` + `analyzeCompileProtectFlow`, `./X.server.js` imports resolved to their source) -> `E-PROTECT-006`. Registry reset `api.js:2853` |
+| `compiler/src/codegen/protect-egress.ts` | 981 | §14.8.9 runtime floor: `buildProtectContext` `:93`, `resolveProtectedOutputColumns` `:206`, `SERVER_PROTECT_HELPER` `:371`, `wrapWithProtectTag` `:536`, `detectProtectedRawEgress` `:609`, `findAuthoredResponseConstruction` `:914` |
+| `compiler/src/codegen/emit-worker.ts` | 123 | §4.12.4 worker bundles. `workerBundleFilename(sourceFile, name)` `:42` -> `<page>-<name>.worker.js`; `workerBundleSuffix` `:47`; `generateWorkerJs(name, children, whenMessage)` `:59`; `rewriteWorkerSend` `:119` (bare `send(` -> `_scrml_reply(_scrml_reply_to, …)`). Wire: parent->worker `{ id, data }`, worker->parent `{ replyTo, data }` |
+| `compiler/src/codegen/emit-client.ts` | 4627 | parent side of workers `:2424-2459`: `new Worker(workerBundleFilename(...))`, `_scrml_pending` Map, one `addEventListener("message")` reply router, `.send(data)` returns a Promise keyed by id. `when message from <#name>` hooks add their own listener (`emit-logic.ts:4162`) |
+| `compiler/src/api.js` | 4103 | worker bundles: pre-write gate `pushArtifact(…, workerBundleFilename(…))` `:3380`; write `writeOutput(filePath, workerBundleSuffix(name), …)` `:3746` (never content-hashed); `.worker.js` seeds the client-asset manifest `:3523-3526`; `collectClientAssets` -> `.scrml-client-assets.json` `:3935`. `BUILTIN_TYPES` identity rule `:2471-2479` |
+| `compiler/src/commands/build.js` | 1143 | `generateServerEntry` `:361` (called `:1072` with `result.clientAssets`); §47.13 allowlist baked as `_SCRML_CLIENT_ASSETS` `:576` + `STATIC_POLICY_EMIT_SOURCE` `:578`; static dispatch `:604-620` |
 
 ## S444 — STRUCTURE DELTA (`cf62b415..108ca89be`)
 
