@@ -1,6 +1,39 @@
 # structure.map.md
 # project: scrml
-# updated: 2026-09-29T13:38:25Z  commit: cf62b415
+# updated: 2026-09-30T14:50:34Z  commit: 108ca89be
+# ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
+# refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
+# commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
+# `auto` by default under `auth=`; compose route gated; WebSocket Origin check), #1162 (static serving is a client-asset
+# ALLOWLIST, §47.13), #1163 (async fn escaping as a value / event control after an await, S440 F4/F5), #1171
+# (protected-column egress `E-PROTECT-006`, §14.8.9), #1173 (`<page auth="required">` gates its page;
+# `E-PROGRAM-NESTED-AUTH`), #1177 (two top-level `<program>`s in one file = `E-PROGRAM-002`), #1174 (worker bundles
+# written + served, dpa-056 D1/D2), #1172 (user enum named like a built-in error type), #1150 (E-ERROR-002 handler
+# conformance), #1147 (bare `fail .Variant`), #1158 (`@cell = serverFn()` awaited in place), #1160 (self-closed non-void
+# element gets an end tag), #1153 (W-LINT-007/013 inline block handlers), #1152 (stdlib http/cron doc-comment leak),
+# #1155 (example 23 token guards). BOOTSTRAP: #1149 (CSS + `<theme>` T3 — `css.scrml`, `css-ingest.scrml`, CSS sub-seam),
+# #1151/#1157/#1159/#1167/#1169 (typer rounds), #1164 (the §66.19 worked programs — `slice-m4/`). SPEC-only: #1156
+# (tape grow/shrink, §66.x), #1170 (§4.18 dpa-045). The rest are docs / wrap / dpa-queue / gaps / ledger / @generated.
+# ⛑ **FIGURES RE-EXECUTED AT `108ca89be`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **275,016 lines / 217 files** per FACTS (+6,622 lines, +4 files:
+# `codegen/js-async-analysis.ts`, `codegen/protect-flow.ts`, `static-serve-policy.js`, `static-serve-policy-emitted.js`)
+# · test files **1,535** (+20) · `compiler/SPEC.md` **41,214** lines (+551) · conformance **1151** cases (+97) · §34
+# catalog **849** rows (+10), range `20832..21764`. `bun conformance/run.ts` (impl#1) -> **1144/1151 pass + 7 xfail**.
+# Census: PINNED 370 · IMPL-SITES 314 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **952 -> 960** · W **183 -> 186** · I 10 · H 2 FLAT ·
+# unique codes **807 -> 817**. **ADDED = {`E-ASYNC-CALL-PROMISE-METHOD`, `E-ASYNC-FN-ESCAPES-AS-VALUE`,
+# `E-ASYNC-HANDLER-UNANALYZABLE`, `E-EVENT-CONTROL-AFTER-AWAIT`, `E-PROGRAM-002`, `E-PROGRAM-NESTED-AUTH`,
+# `E-PROTECT-006`, `W-AUTH-FILE-CONFLICT`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS`, `W-AUTH-REDIRECT-LOOP`} — every one has a
+# live emitter in `compiler/src` (grep-verified); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `108ca89be` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# **58** files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **443/443** (7 files)
+# · `slice-m3/` **60/60** (5 files) · `slice-m4/` **130 pass + 1 todo / 131** (11 files; NOT in the CI gate — see
+# build.map.md) · CG footprint (`--swap CG=…/slice-m3/substitute.js --footprint`) -> runtime **18/0**, codes-only 10/0,
+# crashed 0, not-yet 666, front-end 457 · CSS footprint (`--swap CSS=…/slice-m3/css-substitute.js --footprint`) ->
+# runtime 320/0, codes-only 278/0, **CSS half 38/38** (conformance 17 · source 15 · core 6).
+# ⚑ `file:line` citations in S444 sections were grep-derived at `108ca89be`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S440 HEADER (stamp `cf62b415`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
 # refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
 # --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
@@ -408,6 +441,32 @@
 # The `conformance/` corpus is **893 cases across 54 category dirs** (+2 this window, both if-chain
 # server-boundary cases — see the map body).
 #
+
+## S444 — STRUCTURE DELTA (`cf62b415..108ca89be`)
+
+`compiler/src` — **+4 files** (217 per FACTS):
+| file | L | purpose |
+|---|---|---|
+| `static-serve-policy.js` | 152 | §47.13 static-serving allowlist for `scrml dev` and the build: `CLIENT_ASSET_MANIFEST` (`.scrml-client-assets.json`), `collectClientAssets`, `readClientAssetManifest`, `relFromRoot`, `STATIC_POLICY_EMIT_SOURCE` (the emitted copy's source text) |
+| `static-serve-policy-emitted.js` | 94 | the runtime half inlined into emitted servers: `_scrml_static_request_path`, `_scrml_static_denied`, `_scrml_static_servable` (one source so dev and built servers cannot drift) |
+| `codegen/js-async-analysis.ts` | 1306 | acorn-based async coloring of raw JS fragments / handler text: `analyzeRawJsFragment`, `colorAsyncStatements`, `colorAsyncFunctionExpr`, `colorActiveHandler`, `unanalyzableHandlerUses`, `schedulerNamesNotProvablyGlobal` (#1163 F4/F5) |
+| `codegen/protect-flow.ts` | 2037 | compile-wide provenance analysis of emitted server modules for `protect=` columns reaching a client-egress sink (`E-PROTECT-006`, #1171): `analyzeCompileProtectFlow`, `analyzeProtectFlow`, `buildProtectFlowDiagnostics`, `registerProtectModule` / `takeProtectRegistry` |
+Heavier edits inside existing modules: `route-inference.ts` (page auth, W-AUTH-*), `type-system.ts` (E-ERROR-002 handler
+forms, bare `fail .Variant`, built-in error-type shadowing), `ast-builder.js`, `codegen/scheduling.ts` +
+`emit-client.ts` (`@cell = serverFn()` awaited in place, #1158), `codegen/emit-server.ts`, `codegen/emit-worker.ts`,
+`codegen/index.ts` (`detectNestedProgramAuth`, E-PROGRAM-002), `commands/dev.js` / `build.js`, `api.js`.
+
+### `compiler/self-host-v2/` — changes to the stage-ownership table below (S440 table otherwise current)
+| module | L at `108ca89be` | change |
+|---|---|---|
+| `css.scrml` | 543 | **NEW (#1149)** — STYLESHEET emitter: `CssUnit` (core.scrml) -> CSS output tree -> text. Entries `lowerCss`, `printCss`, `emitCss`, `cssFootprint`, `resetRules`, `tokenStmts`. Owns the user-stylesheet part of `FileOutput.css` (CG sub-seam `CSS`, `pipeline-seam.ts`) |
+| `css-ingest.scrml` | 920 | **NEW (#1149)** — THROWAWAY shim: impl#1 FileAST -> `CssUnit` (`ingestCss(ast, mode) -> CssIngest { unit, why }`, `parseSelector`, `parseValue`). Deletion condition in its header: delete when the bootstrap front end produces the stylesheet Core from source |
+| `core.scrml` | 436 | + stylesheet Core types (`CssUnit` and selector / decl / rule / theme-token shapes) |
+| `analyze.scrml` | 6985 | typer rounds #1151/#1157/#1159/#1167/#1169 (conditions, operators, int, arity, handles, dup keys, narrowing, full argument/return checks, optional sequences); now emits SPEC names `E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-STRUCT-DUPLICATE-KEY` (the `E-BOOTSTRAP-*` names for these are gone) |
+| `parse.scrml` · `lower.scrml` · `lex.scrml` · `ast.scrml` · `ingest.scrml` | 1955 · 1140 · 1204 · 190 · 1357 | grown for the four §66.19 programs (#1164) and tape grow/shrink grants |
+| `slice-m3/` | — | + `css-substitute.js` (CSS sub-seam substitute), `css-oracle.js` + `css-oracle/{conformance,core,sources}/` (SPEC-derived computed-style oracles, Chromium via puppeteer), `css.core.scrml`, `css-bundle.scrml`, `encode.js`, `css.test.js`, `css-half.test.js`, `bench/{css-identity,css-oracle-both,css-r26,bite-front}.js` |
+| `slice-m4/` | — | **NEW DIR (#1164)** — the four remaining SPEC §66.19 worked programs compiled from SOURCE and RUN: `src/{audit,engine,form,theme}/`, `harness.js` (reuses `slice-m2` `loadM2` / `frontEnd`), `fixtures.js`, 11 `*.test.js` |
+
 
 ## S440 — STRUCTURE DELTA (`fb21983a..cf62b415`)
 

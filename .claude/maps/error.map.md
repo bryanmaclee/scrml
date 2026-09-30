@@ -1,6 +1,39 @@
 # error.map.md
 # project: scrml
-# updated: 2026-09-29T13:38:25Z  commit: cf62b415
+# updated: 2026-09-30T14:50:34Z  commit: 108ca89be
+# ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
+# refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
+# commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
+# `auto` by default under `auth=`; compose route gated; WebSocket Origin check), #1162 (static serving is a client-asset
+# ALLOWLIST, §47.13), #1163 (async fn escaping as a value / event control after an await, S440 F4/F5), #1171
+# (protected-column egress `E-PROTECT-006`, §14.8.9), #1173 (`<page auth="required">` gates its page;
+# `E-PROGRAM-NESTED-AUTH`), #1177 (two top-level `<program>`s in one file = `E-PROGRAM-002`), #1174 (worker bundles
+# written + served, dpa-056 D1/D2), #1172 (user enum named like a built-in error type), #1150 (E-ERROR-002 handler
+# conformance), #1147 (bare `fail .Variant`), #1158 (`@cell = serverFn()` awaited in place), #1160 (self-closed non-void
+# element gets an end tag), #1153 (W-LINT-007/013 inline block handlers), #1152 (stdlib http/cron doc-comment leak),
+# #1155 (example 23 token guards). BOOTSTRAP: #1149 (CSS + `<theme>` T3 — `css.scrml`, `css-ingest.scrml`, CSS sub-seam),
+# #1151/#1157/#1159/#1167/#1169 (typer rounds), #1164 (the §66.19 worked programs — `slice-m4/`). SPEC-only: #1156
+# (tape grow/shrink, §66.x), #1170 (§4.18 dpa-045). The rest are docs / wrap / dpa-queue / gaps / ledger / @generated.
+# ⛑ **FIGURES RE-EXECUTED AT `108ca89be`** (`bun scripts/facts.ts --check` -> PASS; `bun scripts/s34-census.ts`):
+# version **0.8.0** (flat) · `compiler/src` **275,016 lines / 217 files** per FACTS (+6,622 lines, +4 files:
+# `codegen/js-async-analysis.ts`, `codegen/protect-flow.ts`, `static-serve-policy.js`, `static-serve-policy-emitted.js`)
+# · test files **1,535** (+20) · `compiler/SPEC.md` **41,214** lines (+551) · conformance **1151** cases (+97) · §34
+# catalog **849** rows (+10), range `20832..21764`. `bun conformance/run.ts` (impl#1) -> **1144/1151 pass + 7 xfail**.
+# Census: PINNED 370 · IMPL-SITES 314 · DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+# ⛑ **PREFIX SERIES SET-DIFFED AT BOTH ENDS (`^| X-` rows):** E **952 -> 960** · W **183 -> 186** · I 10 · H 2 FLAT ·
+# unique codes **807 -> 817**. **ADDED = {`E-ASYNC-CALL-PROMISE-METHOD`, `E-ASYNC-FN-ESCAPES-AS-VALUE`,
+# `E-ASYNC-HANDLER-UNANALYZABLE`, `E-EVENT-CONTROL-AFTER-AWAIT`, `E-PROGRAM-002`, `E-PROGRAM-NESTED-AUTH`,
+# `E-PROTECT-006`, `W-AUTH-FILE-CONFLICT`, `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS`, `W-AUTH-REDIRECT-LOOP`} — every one has a
+# live emitter in `compiler/src` (grep-verified); REMOVED = EMPTY.**
+# ⛑ **BOOTSTRAP (`compiler/self-host-v2/`) RE-RUN AT `108ca89be` (Linux clone):** `bun scripts/lint-no-default-arm.js` ->
+# **58** files, 0 violations · `slice-m1/` 73/73 · `SLICE_CORE=lowered slice-m1/` 73/73 · `slice-m2/` **443/443** (7 files)
+# · `slice-m3/` **60/60** (5 files) · `slice-m4/` **130 pass + 1 todo / 131** (11 files; NOT in the CI gate — see
+# build.map.md) · CG footprint (`--swap CG=…/slice-m3/substitute.js --footprint`) -> runtime **18/0**, codes-only 10/0,
+# crashed 0, not-yet 666, front-end 457 · CSS footprint (`--swap CSS=…/slice-m3/css-substitute.js --footprint`) ->
+# runtime 320/0, codes-only 278/0, **CSS half 38/38** (conformance 17 · source 15 · core 6).
+# ⚑ `file:line` citations in S444 sections were grep-derived at `108ca89be`; locate by SYMBOL after any later commit.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S440 HEADER (stamp `cf62b415`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S440 STAMP — `fb21983a` -> `cf62b415`. 23 COMMITS (#1117-#1140), SESSIONS S438-tail / S439 / S440 (incremental
 # refresh).** MAP-STAMP RULE at write time: `git log --oneline fb21983a..cf62b415` -> 23 commits; inbound `git merge-base
 # --is-ancestor fb21983a cf62b415` -> 0; outbound `git merge-base --is-ancestor cf62b415 origin/main` -> 0; HEAD `cf62b415`
@@ -484,6 +517,38 @@
 # a spurious `E-ROUTE-001` on a `server fn` declared inside an `if=`/`else` branch of a `<program>`
 # worker body. Both descents landed in the same commit for that reason.
 #
+
+## S444 — DIAGNOSTIC DELTA (`cf62b415..108ca89be`)
+
+### §34 catalog — 10 rows ADDED (839 -> 849), ALL with a live emitter
+| code | § | emitter (grep at `108ca89be`) | trigger (short) |
+|---|---|---|---|
+| `E-ASYNC-CALL-PROMISE-METHOD` | §13.2 | `codegen/emit-library-shared.ts` | `.then` / `.catch` / `.finally` read off a call the compiler auto-awaits |
+| `E-ASYNC-FN-ESCAPES-AS-VALUE` | §13.2 | `codegen/emit-library-shared.ts` | an async-colored fn escapes as a VALUE into a sync slot (alias, object/array, user HOF, scheduler) |
+| `E-ASYNC-HANDLER-UNANALYZABLE` | §13.2 | `codegen/emit-library-shared.ts` | handler references an async fn but its emitted text does not parse — fail-closed |
+| `E-EVENT-CONTROL-AFTER-AWAIT` | §13.2 | `codegen/emit-library-shared.ts` | event param (or a value derived from it) used for control after the handler's first `await` |
+| `E-PROGRAM-002` | §40.8, §20.5.1 | `codegen/index.ts` | two top-level `<program>`s in ONE file (same-file case; cross-file stays reserved) |
+| `E-PROGRAM-NESTED-AUTH` | §4.12.2, §52.13 | `codegen/index.ts` `detectNestedProgramAuth` | `auth=` on a `<program>` with a `<program>` / `<page>` ancestor |
+| `E-PROTECT-006` | §14.8.9 | `codegen/protect-flow.ts`, `protect-egress.ts`, `emit-server.ts` | a value derived from a `protect=` column reaches a client-egress sink outside a descriptor-bearing row |
+| `W-AUTH-FILE-CONFLICT` | §40.2, §52.13 | `route-inference.ts` | one file declares `auth="required"` at one site and a laxer `auth=` at another |
+| `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS` | §40.2, §52.13 | `route-inference.ts` | no single application `<program>` and the `<program>`s disagree on `loginRedirect=` |
+| `W-AUTH-REDIRECT-LOOP` | §40.2, §52.13 | `route-inference.ts` | an `auth="required"` route's login redirect target is the route itself |
+Series: E 952 -> 960 · W 183 -> 186 · unique 807 -> 817 · REMOVED = EMPTY. Census: PINNED 370 · IMPL-SITES 314 ·
+DECLARED-AHEAD 21 · RUNTIME-SURFACED 3 · FALSE-CLAIM 107 · STRUCK 34.
+
+### Existing codes — behavior changes
+- `E-ERROR-002` (§19.4.3, #1150): no handler exemption — an unhandled `!` call fires in every event-handler form;
+  failable handler references are checked (`type-system.ts`).
+- `E-ERROR-009` (#1172): a user enum named like a built-in error type (e.g. imported `AuthError`) is the type the file
+  uses — `api.js` keeps only a dependency's OWN type declarations (entries identical to `BUILTIN_TYPES` are dropped), so a re-exported user enum is not shadowed by the built-in; no false fire.
+- Bare `fail .Variant` (§19.3.3, #1147) resolves against the declared `!` type (`type-system.ts`, `ast-builder.js`).
+- `W-LINT-007` / `W-LINT-013` (#1153): no false fire on inline block handlers `onclick={ a; b }` (`lint-ghost-patterns.js`).
+
+### Bootstrap (`compiler/self-host-v2/analyze.scrml`)
+The S440 drift is CLOSED: analyze now emits `E-CALL-ARITY`, `E-EACH-NOT-SEQUENCE`, `E-STRUCT-DUPLICATE-KEY`; zero
+occurrences of `E-BOOTSTRAP-CALL-ARITY` / `E-BOOTSTRAP-EACH-NOT-SEQUENCE` / `E-BOOTSTRAP-DUP-OVERRIDE` remain.
+`E-TYPE-031` covers an un-narrowed `T | not` into a `T` for every type (#1159). 47 distinct `"E-…"` literals in the file.
+
 
 ## S440 — DIAGNOSTIC DELTA (`fb21983a..cf62b415`)
 
