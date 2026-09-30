@@ -329,6 +329,32 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
     expect(_scrml_protect_redact(row)).toEqual({});
   });
 
+  // S443 round 6c — `JSON.stringify` invokes `toJSON` AFTER the redact walk, so a
+  // toJSON that returns (a copy of) the row shipped it whole (review, measured,
+  // base and tip). The walk now invokes toJSON itself and redacts the result,
+  // and the rebuilt copy keeps no function-valued property.
+  test("S443 r6c: a toJSON anywhere cannot re-introduce a stripped column", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const U = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
+    const ser = (v) => JSON.parse(JSON.stringify(_scrml_protect_redact(v)));
+    const row = { id: 1, name: "ada" };
+    expect(ser({ toJSON: () => U() })).toEqual(row);                        // J1
+    expect(ser({ toJSON() { return { ...U() }; } })).toEqual(row);          // J2
+    const u3 = U(); u3.toJSON = () => ({ ...u3 });
+    expect(ser(u3)).toEqual(row);                                           // J3
+    const u4 = U(); expect(ser({ ...u4, toJSON: () => u4 })).toEqual(row);  // J4
+    expect(ser({ data: { toJSON: () => [U()] } })).toEqual({ data: [row] }); // J5
+    const a = [1]; a.toJSON = () => U();
+    expect(ser({ a })).toEqual({ a: row });                                 // J6
+    class Box { constructor(r) { this.r = r; } toJSON() { return this.r; } }
+    expect(ser({ b: new Box(U()) })).toEqual({ b: row });
+    // A toJSON returning itself does not loop; Dates still serialize.
+    const self = { x: 1, toJSON() { return this; } };
+    expect(ser(self)).toEqual({ x: 1 });
+    const d = new Date(0);
+    expect(ser({ d })).toEqual({ d: d.toISOString() });
+  });
+
   // S443 round 6b (MUST 3 / MUST 4) — MEASURED on round 6: `{...a, ...b}` and
   // `Object.assign({}, a, b)` with a = SELECT *, b = SELECT id, pin let b's
   // descriptor REPLACE a's (passwordHash shipped); `{...a, ...b.reveal("pin")}`
@@ -489,7 +515,7 @@ describe("§14.8.9 end-to-end — the egress floor strips at compile time", () =
     expect(serverJs).toContain("_scrml_protect_redact(");
     expect(serverJs).toContain("_scrml_protect_tag((await _scrml_sql`SELECT * FROM users WHERE id = ${id}`)[0] ?? null, [\"passwordHash\"])");
     // the helper is injected
-    expect(serverJs).toContain("function _scrml_protect_redact(value)");
+    expect(serverJs).toContain("function _scrml_protect_redact(value, _noToJSON)");
     parseClean(serverJs);
     // I-PROTECT-STRIP-001 info fired (cross-stream — warnings OR errors)
     const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
@@ -1546,7 +1572,7 @@ describe("§14.8.9 channel broadcast (§38) egress — strips at the publish sin
     // the broadcast built-in redacts at the publish sink (the wire frame)
     expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", JSON.stringify(_scrml_protect_redact(_scrml_data)));");
     // helper auto-injected via the on-use scan (finalEmitted.includes)
-    expect(serverJs).toContain("function _scrml_protect_redact(value)");
+    expect(serverJs).toContain("function _scrml_protect_redact(value, _noToJSON)");
     parseClean(serverJs);
     // I-PROTECT-STRIP-001 names the stripped column
     const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
@@ -1602,7 +1628,7 @@ describe("§14.8.9 SSE server function* (§37) egress — strips at the data: fr
     // BOTH SSE data: sinks (the {event,data} shape and the bare-value shape) redact
     expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_protect_redact(_scrml_val.data))}\\n\\n`");
     expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_protect_redact(_scrml_val))}\\n\\n`");
-    expect(serverJs).toContain("function _scrml_protect_redact(value)");
+    expect(serverJs).toContain("function _scrml_protect_redact(value, _noToJSON)");
     parseClean(serverJs);
     const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
     const strip = allDiag.find((d) => d.code === "I-PROTECT-STRIP-001");

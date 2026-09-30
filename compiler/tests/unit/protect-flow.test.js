@@ -5,7 +5,7 @@
  * compiler/tests/integration/protect-scalar-egress.test.js.
  */
 import { describe, test, expect } from "bun:test";
-import { analyzeProtectFlow, buildProtectFlowDiagnostics, sqlSkeleton } from "../../src/codegen/protect-flow.ts";
+import { analyzeProtectFlow, analyzeCompileProtectFlow, buildProtectFlowDiagnostics, sqlSkeleton } from "../../src/codegen/protect-flow.ts";
 
 // A minimal module in the emitted shape: a tagged row, a handler whose capture
 // IIFE returns `ret`, and the compiler's redact-then-serialize envelope.
@@ -490,9 +490,40 @@ async function _scrml_handler_setup_2(_scrml_req) {
     expect(leakCols(mod("return hash(alg, u.passwordHash);", C))).toEqual(["passwordHash"]);
     expect(leakCols(mod('return await crypto.subtle.digest("SHA-256", u.passwordHash);'))).toEqual(["passwordHash"]);
     expect(leakCols(mod('return hash("argon2", u.passwordHash);', C))).toEqual([]);
-    expect(leakCols(mod('return await hmac(SERVER_KEY, u.passwordHash);', C))).toEqual([]);
+    expect(leakCols(mod('return await hmac(process.env.SERVER_KEY, u.passwordHash);', C))).toEqual([]);
     expect(leakCols(mod('return await hmac(u.passwordHash, "known message");', C))).toEqual(["passwordHash"]);
     expect(leakCols(mod('return verifyHash("sha256", pw, u.passwordHash);', C))).toEqual([]);
+  });
+
+  test("r6c: a removal keyed by a const-bound literal is literal; otherwise the error names the fix", () => {
+    for (const body of [
+      "const byId = { 1: u }; const gone = 1; delete byId[gone]; return byId;",
+      'const c = { ...u }; const k = "name"; delete c[k]; return c;',
+      'const k = "name"; const { [k]: _n, ...rest } = u; return rest;',
+    ]) {
+      expect([body, leakCols(mod(body))]).toEqual([body, []]);
+    }
+    // `let` can be rebound, and a const shadowed in another block is ambiguous: still flagged.
+    expect(leakCols(mod('const c = { ...u }; let k = "name"; delete c[k]; return c;'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('const c = { ...u }; { const k = "name"; } { const k = someKey(); delete c[k]; } return c;', "function someKey() { return 1; }"))).toEqual(["passwordHash"]);
+    const errs = buildProtectFlowDiagnostics(mod("const byId = { 1: u }; delete byId[u.id]; return byId;"), [], "<m>", () => null);
+    expect(errs.map((e) => e.code)).toContain("E-PROTECT-006");
+    expect(errs.find((e) => e.code === "E-PROTECT-006").message).toContain("LITERAL key");
+    expect(errs.find((e) => e.code === "E-PROTECT-006").message).toContain("filter");
+  });
+
+  test("r6c RULING S445 #4: a constant imported from another server module is still a constant", () => {
+    const keys = { filePath: "/p/keys.server.js", js: 'export const HMAC_KEY = "public-key";\nexport const ENV_KEY = process.env.HMAC_KEY;\n' };
+    const app = (k) => ({
+      filePath: "/p/app.server.js",
+      js: `import { hmac } from "./_scrml/crypto.js";\nimport { ${k} } from "./keys.server.js";\n` + mod(`return await hmac(${k}, String(u.passwordHash));`),
+      infos: [],
+      spanOf: () => null,
+    });
+    const resolve = (from, spec) => (spec === "./keys.server.js" ? "/p/keys.server.js" : null);
+    const codes = (k) => (analyzeCompileProtectFlow([keys, app(k)], resolve).get("/p/app.server.js") ?? []).map((e) => e.code);
+    expect(codes("HMAC_KEY")).toContain("E-PROTECT-006");
+    expect(codes("ENV_KEY")).not.toContain("E-PROTECT-006");
   });
 
   test("r6b RULING S445 #4: an HMAC keyed by a compile-time CONSTANT is a digest; a runtime key declassifies", () => {
@@ -504,15 +535,26 @@ async function _scrml_handler_setup_2(_scrml_req) {
       'const K = "pub" + "-key"; return await hmac(K, String(u.passwordHash));',
       'function sign(k, m) { return hmac(k, m); } return await sign("public-key", String(u.passwordHash));',
       'return await hmac(process.env.K ?? "dev-key", String(u.passwordHash));', // may be the constant
+      // Round 6c: a constant built THROUGH a call is still a constant, and a key
+      // with NO evidence of a runtime source is not a secret.
+      "return await hmac(String.fromCharCode(107, 101, 121), String(u.passwordHash));",
+      "return await hmac(JSON.parse('\"key\"'), String(u.passwordHash));",
+      "return await hmac(String(Math.PI), String(u.passwordHash));",
+      "return await hmac(SERVER_KEY, String(u.passwordHash));",
+      // A concatenation with a constant part: `"k" + undefined` when unset.
+      'return await hmac("k" + process.env.K, String(u.passwordHash));',
+      'return await hmac(process.env.HMAC_KEY + "-v2", String(u.passwordHash));',
     ]) {
       expect([body, leakCols(mod(body, C))]).toEqual([body, ["passwordHash"]]);
     }
+    const CS = C + '\nimport { getSecret } from "secret-store";';
     for (const body of [
       "return await hmac(process.env.HMAC_KEY, String(u.passwordHash));",
-      'return await hmac(process.env.HMAC_KEY + "-v2", String(u.passwordHash));',
+      "return await hmac(Bun.env.HMAC_KEY, String(u.passwordHash));",
+      "return await hmac(await getSecret(), String(u.passwordHash));", // a host (config / secret-store) read
       'const s = ?{`SELECT k FROM secrets`}; return await hmac(s[0].k, String(u.passwordHash));'.replace("?{`SELECT k FROM secrets`}", "_scrml_sql`SELECT k FROM secrets`"),
     ]) {
-      expect([body, leakCols(mod(body, C))]).toEqual([body, []]);
+      expect([body, leakCols(mod(body, CS))]).toEqual([body, []]);
     }
   });
 });

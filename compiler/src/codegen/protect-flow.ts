@@ -198,21 +198,32 @@ interface Taint {
   len?: Map<string, string>;
   /**
    * RULING S445 #4 — where the value's bits come from, for the `hmac` KEY rule:
-   * bit 1 = a compile-time constant (a literal) may be it, bit 2 = a runtime
-   * value (env / config / DB / a host call / a global) may be it. A CHOICE
-   * (`a ?? b`, a join of call sites) unions the bits; a CONCATENATION or other
-   * operator is runtime if any operand is (the runtime part carries the
-   * entropy). Only a key that is exactly runtime (2) makes `hmac` a declassifier.
+   * bit 1 = a compile-time constant (a literal) is part of it; bit 2 = POSITIVE
+   * evidence of a runtime secret source is part of it — a read under
+   * `process.env` / `Bun.env` / `import.meta.env`, a database value, or the
+   * result of a host (stdlib / npm) call such as a config or secret-store read.
+   * Every combination UNIONS the bits — a choice (`a ?? b`), a join of call
+   * sites, and a concatenation alike. `hmac` declassifies only for a key that
+   * is EXACTLY runtime (2): a key with no evidence (0 — `String(Math.PI)`, a
+   * parameter no caller shows, a platform call) or with any constant part
+   * (`"k" + process.env.K` is `"kundefined"` when the variable is unset) stays
+   * protected. S443 round 6c: 6b treated every unmodelled call and every global
+   * read as runtime, so `String.fromCharCode(107,101,121)`, `JSON.parse('"key"')`
+   * and `String(Math.PI)` keys declassified (review, measured).
    */
   k?: number;
 }
 
-/** Constness of an operator's result: runtime if any operand is runtime (S445 #4). */
+/** Constness bits of a combined value: the union of its parts' (S445 #4). */
 function opK(...ts: Taint[]): number | undefined {
   let bits = 0;
   for (const t of ts) bits |= t?.k ?? 0;
-  if (bits & 2) return 2;
-  return bits & 1 ? 1 : undefined;
+  return bits === 0 ? undefined : bits;
+}
+
+/** A global path that reads the process environment (positive runtime evidence). */
+function isEnvPath(path: string | null): boolean {
+  return path !== null && /^(?:(?:globalThis|self|global)\.)?(?:process\.env|Bun\.env)(?:\.|$)/.test(path);
 }
 
 /** What `.length` of the value reveals (see `Taint.len`). */
@@ -351,7 +362,7 @@ function tainted(args: Taint[], site: string): Taint {
   const r = clean();
   for (const a of args) mergeMap(r.scalar, everything(a, site));
   r.deep = new Map(r.scalar);
-  r.k = 2; // an opaque call's result is a runtime value
+  r.k = opK(...args); // an opaque call carries its arguments' constness (no evidence of its own)
   // NOT aliased to the arguments: the result is already fail-closed (every
   // protected label comes out naked), and aliasing it back into an argument's
   // cell would poison that argument with the result's naked labels (measured:
@@ -702,7 +713,12 @@ export function analyzeCompileProtectFlow(
       ? "a column of a row whose SQL column origins cannot be resolved statically (the floor treats every column " +
         "of such a row as protected and strips the row wholesale)"
       : `the protected (\`protect=\`) column \`${leak.column}\``;
-    const resolution = leak.global
+    const resolution = leak.site.includes("§14.8.9 column marker")
+      ? "remove the property with a LITERAL key — `delete o.name`, `delete o[\"name\"]`, or a `const` bound to a " +
+        "string / number literal — or rebuild the collection without the entry (`rows.filter((r) => r.id != id)`, a " +
+        "`Map` and `.delete(id)`); a computed key the compiler cannot read might be one of the row's §14.8.9 column " +
+        "markers, and removing one would ship every protected column of the row"
+      : leak.global
       ? "keep the value in a local binding, or store the ROW itself (it keeps its descriptor and is stripped " +
         "wherever it later leaves the server) — never a value taken out of it"
       : leak.column === ALL_COLUMNS_LABEL
@@ -955,7 +971,22 @@ class FlowAnalysis {
     }
     switch (node.type) {
       case "VariableDeclaration":
-        for (const d of node.declarations) this.patternNames(d.id, names);
+        for (const d of node.declarations) {
+          // A `const` bound to a string / number literal IS that literal (it can
+          // never be rebound) — a removal keyed by it names a column, not a marker.
+          // Only when that name is declared ONCE in this function scope (block
+          // scopes share the set here, so any second declaration disqualifies it).
+          const declared = new Set<string>();
+          this.patternNames(d.id, declared);
+          let m = this.constLiterals.get(names);
+          if (!m) { m = new Map(); this.constLiterals.set(names, m); }
+          for (const n of declared) {
+            if (names.has(n) || m.has(n)) m.set(n, "\u0000ambiguous");
+            else if (node.kind === "const" && d.id?.type === "Identifier" && staticKey(d.init) !== null) m.set(n, staticKey(d.init)!);
+            else m.set(n, "\u0000ambiguous");
+          }
+          this.patternNames(d.id, names);
+        }
         break;
       case "ClassDeclaration":
         if (node.id) names.add(node.id.name);
@@ -964,7 +995,14 @@ class FlowAnalysis {
         for (const s of node.specifiers) if (s.local) names.add(s.local.name);
         return;
       case "CatchClause":
-        if (node.param) this.patternNames(node.param, names);
+        if (node.param) {
+          const declared = new Set<string>();
+          this.patternNames(node.param, declared);
+          const m = this.constLiterals.get(names);
+          if (m) for (const n of declared) m.set(n, "\u0000ambiguous");
+          else if (declared.size) this.constLiterals.set(names, new Map([...declared].map((n) => [n, "\u0000ambiguous"])));
+          this.patternNames(node.param, names);
+        }
         break;
     }
     for (const k in node) {
@@ -1173,7 +1211,7 @@ class FlowAnalysis {
     const own = this.bindings.get(GLOBAL_CELL) ?? clean();
     const writes = this.classWrites.get(this.find(GLOBAL_CELL));
     const t = writes ? join(own, writes) : own;
-    return { ...t, refs: new Set([GLOBAL_CELL]), k: 2 };
+    return { ...t, refs: new Set([GLOBAL_CELL]) };
   }
 
   /**
@@ -1544,7 +1582,7 @@ class FlowAnalysis {
             // column markers survive, exactly as for `{...row}` — EXCEPT a key
             // the pattern names: excluding a computed key the compiler cannot
             // read (`const { [k]: _, ...rest } = row`) may drop a marker (L4).
-            const dynExcluded = p.properties.some((q: any) => q.type !== "RestElement" && q.computed && staticKey(q.key) === null);
+            const dynExcluded = p.properties.some((q: any) => q.type !== "RestElement" && q.computed && this.literalKey(q.key, scope) === null);
             if (dynExcluded) {
               const lost = { ...t, scalar: new Map(t.scalar), deep: new Map(t.deep) };
               lost.deep.set(MARKER_REMOVED_LABEL, `${this.site(p, fn)} — excludes a key the compiler cannot read from an object rest (it may be a §14.8.9 column marker)`);
@@ -1790,7 +1828,7 @@ class FlowAnalysis {
           if (target?.type === "MemberExpression" && target.computed) {
             const objT = this.evalExpr(target.object, scope, fn);
             this.evalExpr(target.property, scope, fn);
-            if (staticKey(target.property) === null) this.markerRemoved(target.object, objT, node, fn, scope);
+            if (this.literalKey(target.property, scope) === null) this.markerRemoved(target.object, objT, node, fn, scope);
             return clean();
           }
         }
@@ -1886,6 +1924,9 @@ class FlowAnalysis {
         const sel = naked(keyTaint);
         mergeMap(read.scalar, sel);
         mergeMap(read.deep, sel);
+        // S445 #4: a read of the process environment is positive evidence of a
+        // runtime (secret) source — `process.env.X`, `Bun.env.X`, `import.meta.env.X`.
+        if (isEnvPath(this.globalPath(node, scope)) || this.isImportMetaEnv(node)) read.k = 2;
         return read;
       }
       case "CallExpression":
@@ -1955,8 +1996,10 @@ class FlowAnalysis {
     if (isStdlibDeriver(host.source, host.imported, node, args)) return clean();
     const pm = this.pickOmit(host, args, node, fn);
     if (pm) return join(pm, cb);
-    if (args.every((a) => everything(a, "").size === 0)) return cb;
-    return join(cb, tainted(args, `${this.site(node, fn)} — \`${host.imported}\` from \`${host.source}\`, code the compiler cannot see into`));
+    // S445 #4: a host call's result comes from code outside the compile at
+    // runtime (a config / secret-store read) — positive runtime evidence.
+    if (args.every((a) => everything(a, "").size === 0)) return { ...cb, k: 2 };
+    return { ...join(cb, tainted(args, `${this.site(node, fn)} — \`${host.imported}\` from \`${host.source}\`, code the compiler cannot see into`)), k: 2 };
   }
 
   /**
@@ -2084,7 +2127,7 @@ class FlowAnalysis {
         const got = this.hasCallable(desc) ? this.applyFns(desc.fns, [], undefined, node, fn) : clean();
         const written = containerOf(join(desc, got, keyOnly(args[1] ?? clean())));
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
-        if (staticKey(node.arguments[1]) === null) this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
+        if (this.literalKey(node.arguments[1], scope) === null) this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
         return join(args[0] ?? clean(), written);
       }
       if (path === "Object.defineProperties" || path === "Reflect.set" || path === "Reflect.deleteProperty") {
@@ -2095,7 +2138,7 @@ class FlowAnalysis {
           ? containerOf(join(args[1] ?? clean(), ...(this.hasCallable(args[1] ?? clean()) ? [this.applyFns(args[1].fns, [], undefined, node, fn)] : [])))
           : containerOf(join(keyOnly(args[1] ?? clean()), args[2] ?? clean()));
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
-        if (path === "Object.defineProperties" || (path === "Reflect.deleteProperty" && staticKey(node.arguments[1]) === null)) {
+        if (path === "Object.defineProperties" || (path === "Reflect.deleteProperty" && this.literalKey(node.arguments[1], scope) === null)) {
           this.markerRemoved(node.arguments[0], args[0] ?? clean(), node, fn, scope);
         }
         return path === "Object.defineProperties" ? join(args[0] ?? clean(), written) : clean();
@@ -2212,7 +2255,7 @@ class FlowAnalysis {
       if (aliases.size > 0) out.refs = aliases;
       for (const a of args) mergeMap(out.scalar, everything(a, this.site(node, fn)));
       if (out.scalar.size > 0) mergeMap(out.deep, out.scalar);
-      out.k = recvGlobal ? 2 : opK(recv, ...args);
+      out.k = opK(recv, ...args);
       return recvGlobal ? join(r, out, this.globalFnRetFor(gParts)) : join(r, out);
     }
 
@@ -2288,6 +2331,31 @@ class FlowAnalysis {
       refs: new Set(refsOf(all)),
     };
     return this.applyFns(fns, [], param, node, fn);
+  }
+
+  /** `const` names bound to a string / number literal, per declaring scope's name set. */
+  private constLiterals = new WeakMap<Set<string>, Map<string, string>>();
+
+  /**
+   * The literal string a property key denotes, or null: a string / number
+   * literal, or an identifier bound by `const` to one (S443 round 6c — `const
+   * gone = 1; delete byId[gone]` is a literal key, not a possible marker).
+   */
+  private literalKey(node: any, scope: Scope): string | null {
+    const k = staticKey(node);
+    if (k !== null) return k;
+    if (node?.type === "Identifier") {
+      const s = this.resolve(node.name, scope);
+      const v = s ? this.constLiterals.get(s.names)?.get(node.name) : undefined;
+      if (v !== undefined && v !== "\u0000ambiguous") return v;
+    }
+    return null;
+  }
+
+  /** `import.meta.env.X` (or `import.meta.env[…]`). */
+  private isImportMetaEnv(node: any): boolean {
+    const o = node?.object;
+    return o?.type === "MemberExpression" && !o.computed && o.property?.name === "env" && o.object?.type === "MetaProperty";
   }
 
   /** A callee identifier that a local binding shadows is not the runtime helper. */

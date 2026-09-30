@@ -188,3 +188,42 @@ function getCps() {
     }
   });
 });
+
+// S443 round 6c — `JSON.stringify` invokes `toJSON` after the redact walk; these
+// four served the full row (passwordHash included) over HTTP, base AND 6b tip
+// (J2, a toJSON METHOD returning a spread, is already rejected at compile time).
+describe("§14.8.9 round 6c — toJSON cannot re-introduce a stripped column, over HTTP", () => {
+  const J = [
+    ["j1", "return { toJSON: () => u }"],
+    ["j3", "u.toJSON = () => ({ ...u })\n    return u"],
+    ["j4", "const c = { ...u, toJSON: () => u }\n    return c"],
+    ["j5", "return { data: { toJSON: () => [u] } }"],
+  ];
+  const SRC_J = `<program auth="none" db="./app.db">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+    passwordHash: text
+  }
+</schema>
+<db src="./app.db" tables="users" protect="passwordHash"/>
+${J.map(([n, b]) => `function ${n}() {\n    const u = ?{\`SELECT * FROM users WHERE id = 1\`}.get()\n    ${b}\n}`).join("\n")}
+<resultCell> = ""
+${J.map(([n]) => `<button onclick=\${ @resultCell = ${n}() }>${n}</button>`).join("\n")}
+<p>\${@resultCell}</p>
+</program>
+`;
+  test("J1, J3, J4, J5 answer 200 without the protected column", async () => {
+    const s = await serve(' auth="none"', prodErrorHandler(), SRC_J);
+    try {
+      for (const [n] of J) {
+        const r = await s.post(n);
+        expect([n, r.status, r.body.includes(SECRET)]).toEqual([n, 200, false]);
+        expect(r.body).toContain('"name":"ada"');
+      }
+    } finally {
+      s.stop();
+    }
+  });
+});
