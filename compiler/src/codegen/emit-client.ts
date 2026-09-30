@@ -17,6 +17,7 @@ import { setActiveClientAsync } from "./js-async-analysis.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { getNodes, isServerOnlyNode } from "./collect.ts";
 import { emitLogicNode, beginEmitLogicFile, endEmitLogicFile } from "./emit-logic.ts";
+import { workerBundleFilename } from "./emit-worker.ts";
 import { emitBindings } from "./emit-bindings.ts";
 import { emitReactiveWiring, fileHasOutlet } from "./emit-reactive-wiring.ts";
 import { filterChannelImportSpecifiers } from "./emit-channel.ts";
@@ -2421,14 +2422,38 @@ export function generateClientJs(ctx: CompileContext): string {
   }
 
   // §4.12.4: Worker instantiation — new Worker() + Promise-based .send()
+  //
+  // Wire format (see emit-worker.ts): the parent posts `{ id, data }`, the worker
+  // replies `{ replyTo, data }`. `.send(data)` resolves with the `data` of the
+  // FIRST reply naming its id, so concurrent sends each get their own reply.
+  //
+  // Nothing here assigns `worker.onmessage`: the reply router is one
+  // `addEventListener("message")`, and each `when message from <#name>` /
+  // `when error from <#name>` hook (emit-logic.ts) adds its own listener. A
+  // send therefore never displaces a declared hook (§46.6: `when message from`
+  // SHALL fire on every `send(data)` of the nested program, a reply included),
+  // and several hooks on one worker all run, in source order (§46.2).
   if (workerNames && workerNames.length > 0) {
     lines.push("// --- worker instantiation (compiler-generated, §4.12.4) ---");
+    lines.push("// To the worker: { id, data }. From the worker: { replyTo, data }; a reply resolves");
+    lines.push("// the .send() whose id it names. `when message from` hooks see every message.");
     for (const name of workerNames) {
-      lines.push(`const _scrml_worker_${name} = new Worker("${name}.worker.js");`);
-      lines.push(`_scrml_worker_${name}.send = function(data) {`);
+      const w = `_scrml_worker_${name}`;
+      lines.push(`const ${w} = new Worker(${JSON.stringify(workerBundleFilename(ctx.filePath, name))});`);
+      lines.push(`${w}._scrml_next_id = 0;`);
+      lines.push(`${w}._scrml_pending = new Map(); // id -> resolve of an unanswered .send()`);
+      lines.push(`${w}.addEventListener("message", function(event) {`);
+      lines.push(`  const resolve = ${w}._scrml_pending.get(event.data.replyTo);`);
+      lines.push(`  if (resolve) {`);
+      lines.push(`    ${w}._scrml_pending.delete(event.data.replyTo);`);
+      lines.push(`    resolve(event.data.data);`);
+      lines.push(`  }`);
+      lines.push(`});`);
+      lines.push(`${w}.send = function(data) {`);
+      lines.push(`  const id = ++${w}._scrml_next_id;`);
       lines.push(`  return new Promise(function(resolve) {`);
-      lines.push(`    _scrml_worker_${name}.onmessage = function(e) { resolve(e.data); };`);
-      lines.push(`    _scrml_worker_${name}.postMessage(data);`);
+      lines.push(`    ${w}._scrml_pending.set(id, resolve);`);
+      lines.push(`    ${w}.postMessage({ id: id, data: data });`);
       lines.push(`  });`);
       lines.push(`};`);
     }
