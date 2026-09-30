@@ -22,7 +22,7 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join, resolve, dirname, relative } from "path";
 import { fileURLToPath } from "url";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
@@ -248,6 +248,90 @@ describe("W-AUTH-REQUIRED-NOT-INHERITED", () => {
       "pages/about.scrml": `<page auth="optional">\n<p>about-marker</p>\n</page>\n`,
     });
     expect(codes(compile(root, { buildRoot: root }))).not.toContain("W-AUTH-REQUIRED-NOT-INHERITED");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S445 review F1: a FLAT multi-page app living in a directory named `pages`
+// (app.scrml + about.scrml + login.scrml side by side, no pages/ below). Before the
+// fix every entry form but `compile <dir>` / `build <dir>` inferred the root one
+// level up, made app.scrml a route file, and served /about anonymously.
+// ---------------------------------------------------------------------------
+
+const FLAT = {
+  "app.scrml": APP["app.scrml"],
+  "about.scrml": APP["pages/about.scrml"],
+  "login.scrml": APP["pages/login.scrml"],
+};
+
+function cli(cwd, args) {
+  const r = Bun.spawnSync(["bun", CLI, ...args], { cwd, stdout: "pipe", stderr: "pipe" });
+  return { code: r.exitCode, out: r.stdout.toString() + r.stderr.toString() };
+}
+
+describe("a flat multi-page app in a directory named pages (every entry form)", () => {
+  test("compileScrml with a file list and no buildRoot", () => {
+    const root = writeProject("flat-api/x/pages", FLAT);
+    const r = compileScrml({ inputFiles: Object.keys(FLAT).map((f) => join(root, f)), write: false, log: () => {} });
+    expect(isGuarded(r, root, "about.scrml")).toBe(true);
+    expect(isGuarded(r, root, "login.scrml")).toBe(false);
+    expect(codes(r)).not.toContain("W-AUTH-REQUIRED-NOT-INHERITED");
+  });
+
+  const FORMS = [
+    ["files", ["compile", "app.scrml", "about.scrml", "login.scrml"]],
+    ["file-and-dir", ["compile", "./app.scrml", "."]],
+    ["dir", ["compile", "."]],
+    ["build", ["build", "."]],
+  ];
+  for (const [label, args] of FORMS) {
+    test(`scrml ${args.join(" ")}`, () => {
+      const root = writeProject(`flat-cli-${label}/x/pages`, FLAT);
+      const out = join(root, "out");
+      const r = cli(root, [...args, "-o", out]);
+      expect(r.code).toBe(0);
+      expect(readFileSync(join(out, "about.server.js"), "utf8")).toContain("export const _scrml_protected_document");
+      expect(r.out).not.toContain("W-AUTH-REQUIRED-NOT-INHERITED");
+    });
+  }
+
+  test("the <page> files of a pages/ directory compiled on their own still root one level up", () => {
+    const root = writeProject("flat-pages-only", {
+      "app.scrml": APP["app.scrml"],
+      "pages/about.scrml": APP["pages/about.scrml"],
+      "pages/login.scrml": APP["pages/login.scrml"],
+    });
+    // Only the two pages — no application entry among them — so their root is the
+    // project, pages/login.scrml is the route /login, and /login resolves.
+    const r = compileScrml({
+      inputFiles: [join(root, "pages/about.scrml"), join(root, "pages/login.scrml")],
+      write: false,
+      log: () => {},
+    });
+    expect(codes(r)).not.toContain("W-AUTH-LOGIN-MISSING");
+  });
+});
+
+describe("W-AUTH-REQUIRED-NOT-INHERITED names the build root actually used and how it was chosen", () => {
+  const ENTRY_IN_PAGES = {
+    "pages/index.scrml": APP["app.scrml"],
+    "pages/about.scrml": APP["pages/about.scrml"],
+  };
+  test("a given root", () => {
+    const root = writeProject("w-given", ENTRY_IN_PAGES);
+    const [d] = diag(compile(root, { buildRoot: root }), "W-AUTH-REQUIRED-NOT-INHERITED");
+    expect(d.message).toContain("the build root the compiler was given");
+    expect(d.message).toContain(`"${root.replace(/\\/g, "/")}"`);
+    expect(d.message).toContain(`the route file "pages/index.scrml"`);
+    expect(d.message).toContain("compile the project directory");
+  });
+  test("an inferred root", () => {
+    // side.scrml (bare markup at the top) keeps the inferred root at the project
+    // directory; with only the pages/ files the inferred root would be pages/ itself
+    // and index.scrml — an entry file directly in it — would be the application's.
+    const root = writeProject("w-inferred", { ...ENTRY_IN_PAGES, "side.scrml": `<p>side-marker</p>\n` });
+    const [d] = diag(compile(root), "W-AUTH-REQUIRED-NOT-INHERITED");
+    expect(d.message).toContain("the build root inferred from the input files");
   });
 });
 

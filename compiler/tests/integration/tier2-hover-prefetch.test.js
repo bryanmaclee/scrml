@@ -176,6 +176,10 @@ function writeAndCompileMultiPage(options = {}) {
   writeFileSync(dashPath, MULTI_PAGE_DASHBOARD_SOURCE);
   return compileScrml({
     inputFiles: [indexPath, loadsPath, dashPath],
+    // S445: the fixture is a project whose route files live in routes/ — name its
+    // build root (§40.8). Every file here has its own top-level <program>, so an
+    // inferred root would stop at routes/ itself (an entry file is never a route file).
+    buildRoot: dir,
     outputDir: options.outDir ?? join(dir, "dist"),
     write: options.write ?? false,
     emitPerRoute: options.emitPerRoute ?? true,

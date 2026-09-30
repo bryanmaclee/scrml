@@ -16,7 +16,7 @@
  *   SCRML_PORT  — port to listen on (default: 3100)
  */
 
-import { compileScrml, scanDirectory } from "../api.js";
+import { compileScrml, scanDirectory, buildRootFromArgs } from "../api.js";
 import { resetVarCounter } from "../codegen/var-counter.js";
 import { resolve } from "path";
 
@@ -144,6 +144,8 @@ export async function runServe(args) {
 
         // Resolve file paths and expand directories
         const resolvedFiles = [];
+        const dirArgs = [];
+        const fileArgs = [];
         for (const f of body.inputFiles) {
           const resolved = resolve(f);
           try {
@@ -153,11 +155,14 @@ export async function runServe(args) {
             const { statSync } = await import("fs");
             if (statSync(resolved).isDirectory()) {
               resolvedFiles.push(...scanDirectory(resolved));
+              dirArgs.push(resolved);
             } else {
               resolvedFiles.push(resolved);
+              fileArgs.push(resolved);
             }
           } catch {
             resolvedFiles.push(resolved);
+            fileArgs.push(resolved);
           }
         }
 
@@ -166,6 +171,11 @@ export async function runServe(args) {
 
         const compileOpts = {
           inputFiles: resolvedFiles,
+          // S445 — the build root (§40.8): the request's `buildRoot`, else the
+          // directory it named (as the CLI), else inferred from the files.
+          buildRoot: typeof body.buildRoot === "string" && body.buildRoot !== ""
+            ? resolve(body.buildRoot)
+            : buildRootFromArgs(dirArgs, fileArgs),
           outputDir: body.outputDir ? resolve(body.outputDir) : undefined,
           verbose: body.options?.verbose ?? opts.verbose,
           convertLegacyCss: body.options?.convertLegacyCss ?? false,
@@ -243,6 +253,8 @@ export async function runServe(args) {
 
           const compileOpts = {
             inputFiles,
+            // S445 — the temp dir holding the posted sources IS the project root (§40.8).
+            buildRoot: tempDir,
             outputDir: body.outputDir ? resolve(body.outputDir) : join(tempDir, "dist"),
             verbose: body.options?.verbose ?? opts.verbose,
             convertLegacyCss: body.options?.convertLegacyCss ?? false,

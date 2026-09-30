@@ -107,6 +107,16 @@ describe("computeBuildRoot", () => {
     expect(computeBuildRoot(["/p/pages/about.scrml", "/p/pages/users/[id].scrml"])).toBe("/p");
   });
 
+  test("an application entry file directly in a pages/-named common dir keeps the root there (S445 review F1)", () => {
+    const flat = ["/x/pages/app.scrml", "/x/pages/about.scrml", "/x/pages/login.scrml"];
+    const isEntry = (p) => p.endsWith("/app.scrml");
+    expect(computeBuildRoot(flat, isEntry)).toBe("/x/pages");
+    // No entry among them: the route-set rule applies.
+    expect(computeBuildRoot(flat)).toBe("/x");
+    // An entry BELOW the common dir does not block the rule (it is under the route dir).
+    expect(computeBuildRoot(["/p/pages/a.scrml", "/p/pages/sub/app.scrml"], (p) => p.endsWith("app.scrml"))).toBe("/p");
+  });
+
   test("only the root's OWN last segment is inspected — never a farther ancestor", () => {
     expect(computeBuildRoot(["/x/pages/f2/app.scrml", "/x/pages/f2/side.scrml"])).toBe("/x/pages/f2");
   });

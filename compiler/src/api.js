@@ -24,7 +24,7 @@ import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
 import { SecretRedactor } from "./diagnostic-secrets.ts";
-import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource, computeBuildRoot } from "./route-inference.ts";
+import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
@@ -240,6 +240,32 @@ export function scanDirectory(dirPath) {
  * @param {string[]} inputFiles
  * @returns {string|null}
  */
+/**
+ * S445 — the build root (§40.8) a command line names. When any argument is a
+ * directory, the build root is the segment-aligned common directory of the
+ * arguments (a directory counts as itself, a file as its directory): the
+ * directory the user pointed at, or the one enclosing everything they named
+ * (`scrml compile ./app.scrml .` → `.`). With only file arguments nothing is
+ * named, and `undefined` lets route inference infer the root from the files
+ * (`computeBuildRoot`, which can tell an application entry file from a page).
+ *
+ * @param {string[]} dirArgs  — directory arguments (any form; resolved here)
+ * @param {string[]} fileArgs — file arguments (any form; resolved here)
+ * @returns {string|undefined}
+ */
+export function buildRootFromArgs(dirArgs, fileArgs) {
+  if (!Array.isArray(dirArgs) || dirArgs.length === 0) return undefined;
+  const dirs = [...dirArgs.map((d) => resolve(d)), ...(fileArgs ?? []).map((f) => dirname(resolve(f)))];
+  const segs = dirs.map((d) => d.split(/[\\/]/).filter((s, i) => s !== "" || i === 0));
+  const minLen = Math.min(...segs.map((s) => s.length));
+  let common = 0;
+  for (; common < minLen; common++) {
+    const seg = segs[0][common];
+    if (!segs.every((s) => s[common] === seg)) break;
+  }
+  return segs[0].slice(0, common).join("/") || "/";
+}
+
 export function computeOutputBaseDir(inputFiles) {
   if (!Array.isArray(inputFiles) || inputFiles.length === 0) return null;
   if (inputFiles.length === 1) return dirname(resolve(inputFiles[0]));
@@ -784,7 +810,7 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * @param {string}  [options.outputDir]        — directory to write output files; defaults to dist/ next to first input
  * @param {string}  [options.buildRoot]        — S445: the build root (§40.8) — route files are the files under ITS
  *   `pages/` / `routes/` (§40.2); directories above it are never consulted. The CLI passes the directory it was
- *   given. Default: `computeBuildRoot` (route-inference.ts) of the explicit `inputFiles` (before auto-gather).
+ *   given. Default: inferred by route inference (`computeBuildRoot`) from the explicit `inputFiles` (before auto-gather).
  * @param {boolean} [options.verbose]          — emit per-stage timing and counts to options.log
  * @param {boolean} [options.convertLegacyCss] — pre-process <style> blocks to #{…}
  * @param {boolean} [options.embedRuntime]     — embed runtime inline instead of writing separate file (browser mode only)
@@ -1163,11 +1189,14 @@ function _compileScrmlImpl(options = {}) {
   let resolvedInputFiles = inputFiles.map(f => resolve(f)).sort(compareInputPathsCanonical);
   // S445 — the build root route files are classified against (§40.2 / §40.8: a
   // route file is under the BUILD ROOT's pages/ or routes/, never under a
-  // directory above it). Fixed from the caller's root or the EXPLICIT inputs,
-  // before auto-gather can pull in an import from outside the project.
+  // directory above it). The caller's root when given; otherwise RI infers it
+  // (computeBuildRoot — it needs the parsed files to tell an application entry
+  // file from a page) from the EXPLICIT inputs, captured here before auto-gather
+  // can pull in an import from outside the project.
   const riBuildRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
     ? resolve(options.buildRoot)
-    : computeBuildRoot(resolvedInputFiles);
+    : undefined;
+  const riBuildRootInputs = resolvedInputFiles.slice();
   if (gatherEnabled && resolvedInputFiles.length > 0) {
     // Dedup KEY is separator-canonical (PathKeyedSet folds `\`↔`/`); the
     // compiled VALUE stays uniformly NATIVE — both the explicit entry seed
@@ -2237,7 +2266,7 @@ function _compileScrmlImpl(options = {}) {
   // Stage 5: RI (all files)
   const _runRI = seams.pick("RI", runRI);
   // S445 — `riBuildRoot` (computed at the compile entry, above).
-  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis, buildRoot: riBuildRoot }));
+  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis, buildRoot: riBuildRoot, buildRootInputs: riBuildRootInputs }));
   collectErrors("RI", riResult.errors);
   if (verbose) {
     const routeCount = riResult.routeMap?.functions?.size ?? 0;

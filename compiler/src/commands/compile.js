@@ -10,7 +10,7 @@
 import { statSync, watch, readFileSync, existsSync, writeFileSync } from "fs";
 import { resolve, dirname, join, relative, basename } from "path";
 import { fileURLToPath } from "url";
-import { compileScrml, scanDirectory } from "../api.js";
+import { compileScrml, buildRootFromArgs, scanDirectory } from "../api.js";
 import { moduleFormatNotices } from "./module-format-notice.js";
 import { hasApplicationScopeRefusal, noFilesWrittenLine } from "./refusal-gate.js";
 import { stripRedundantCode, resolveDiagLocation, stripRedundantLocation } from "./diagnostic-format.js";
@@ -101,7 +101,7 @@ Examples:
 function parseArgs(args) {
   const inputFiles = [];
   const inputDirs = [];
-  let explicitFileArgs = 0;
+  const fileArgs = [];
   let outputDir = null;
   let verbose = false;
   let convertLegacyCss = false;
@@ -303,7 +303,7 @@ function parseArgs(args) {
       process.exit(1);
     } else if (arg.endsWith(".scrml")) {
       inputFiles.push(resolve(arg));
-      explicitFileArgs++;
+      fileArgs.push(arg);
     } else {
       // Directory?
       try {
@@ -323,7 +323,7 @@ function parseArgs(args) {
       try {
         statSync(arg + ".scrml");
         inputFiles.push(resolve(arg + ".scrml"));
-        explicitFileArgs++;
+        fileArgs.push(arg + ".scrml");
         continue;
       } catch { /* nope */ }
 
@@ -333,9 +333,10 @@ function parseArgs(args) {
   }
 
   // S445 — the build root (§40.8) is the directory the user named: route files are
-  // the files under ITS pages/ / routes/ (§40.2). Set only when the inputs are exactly
-  // one directory; otherwise compileScrml derives it from the explicit inputs.
-  const buildRoot = inputDirs.length === 1 && explicitFileArgs === 0 ? inputDirs[0] : undefined;
+  // the files under ITS pages/ / routes/ (§40.2). With a directory argument it is the
+  // common directory of the arguments; with file arguments only, route inference
+  // infers it from the files (buildRootFromArgs → undefined).
+  const buildRoot = buildRootFromArgs(inputDirs, fileArgs);
 
   return { inputFiles, buildRoot, outputDir, verbose, convertLegacyCss, embedRuntime, watchMode, mode, selfHost, emitBatchPlan, emitReachability, emitTokenSet, emitEngineGraph, emitBlockAnalysis, emitPerRoute, chunkSizeBudgetBytes, emitMachineTests, gather, debugPerf, parser, validateEmit, production, moduleFormat };
 }

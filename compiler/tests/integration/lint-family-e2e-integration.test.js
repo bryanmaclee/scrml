@@ -365,6 +365,10 @@ describe("§4 — W-CG-CHUNK-NO-PREFETCH end-to-end (FX-8a) — Q-OPEN-6 case 1"
         join(FX1_DIR, "loads.scrml"),
         join(FX1_DIR, "admin.scrml"),
       ],
+      // S445: the fixture is a project whose route files live in routes/ — name its
+      // build root (§40.8). Every file here has its own top-level <program>, so an
+      // inferred root would stop at routes/ itself (an entry file is never a route file).
+      buildRoot: join(FX1_DIR, ".."),
       outputDir: join(TMP, "dist-fx1-baseline"),
       write: false,
       emitPerRoute: true,
