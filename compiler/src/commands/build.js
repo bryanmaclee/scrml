@@ -686,6 +686,17 @@ export function generateServerEntry(serverModules, mcpOpts = null, idleTimeout =
   // truncated by Bun's default idleTimeout. ss33 item 3: the baked value is the build's
   // `--idle-timeout` (default 120, so this line is byte-unchanged when the flag is unset).
   lines.push(`  idleTimeout: ${idleTimeout},`);
+  // §14.8.9 (S443 round 6, P3) — an exception a route handler does not catch
+  // must never reach the client as text. With no `error:` handler, Bun answers
+  // it with its development error page (message + source excerpt) unless
+  // NODE_ENV=production — measured: a failing `json_extract('{}', passwordHash)`
+  // put the protected value on the wire. This handler answers every uncaught
+  // error with a fixed 500 and logs the error server-side, regardless of
+  // NODE_ENV.
+  lines.push("  error(err) {");
+  lines.push('    console.error("[scrml] unhandled server error:", err);');
+  lines.push('    return new Response("Internal Server Error", { status: 500, headers: { "Content-Type": "text/plain; charset=utf-8" } });');
+  lines.push("  },");
   lines.push("  async fetch(req, server) {");
   if (hasOnion) {
     if (hasWs) {
