@@ -292,15 +292,18 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
       let out = "";
       let port = null;
       const deadline = Date.now() + 10000;
-      let pending = null;
       try {
-        // ONE outstanding read at a time. Racing a FRESH `reader.read()` against
-        // the tick on every iteration abandoned the previous read when the tick
-        // won; the chunk then resolved the abandoned promise and was lost, so
-        // whether the port line was ever seen depended on whether the child
-        // printed within the first 200ms (order/load-dependent flake, S443).
-        pending = reader.read();
+        // ONE pending read, carried across ticks. Re-calling `reader.read()` on
+        // every 200 ms tick queued a SECOND read while the first was still
+        // pending; the chunk then resolved the abandoned first promise and was
+        // lost, so a tool slower than 200 ms to print (a loaded machine) failed
+        // with stdout="" although it had printed its port (measured S443).
+        let pending = null;
         while (Date.now() < deadline && proc.exitCode === null) {
+          if (pending === null) {
+            pending = reader.read();
+            pending.catch(() => {}); // releaseLock() below rejects a still-pending read
+          }
           const chunk = await Promise.race([
             pending,
             Bun.sleep(200).then(() => "TICK"),
@@ -311,11 +314,8 @@ describe("§64 tool target — R26 (compile → parse → RUN)", () => {
           out += dec.decode(chunk.value, { stream: true });
           const m = out.match(/SCRML_TOOL_PORT=(\d+)/);
           if (m) { port = Number(m[1]); break; }
-          pending = reader.read();
         }
       } finally {
-        // A read still outstanding at the deadline rejects on release; swallow it.
-        if (pending) pending.catch(() => {});
         reader.releaseLock();
       }
       if (port === null) {

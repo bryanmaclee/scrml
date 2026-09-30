@@ -39,6 +39,7 @@ import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-pa
 import { isSingleJsExpression } from "./validate-emit.ts";
 // §14.8.9 — protected-column egress redaction (server→client confidentiality).
 import { buildProtectContext, resolveProtectedOutputColumns, detectProtectedRawEgress, findAuthoredResponseConstruction, SERVER_PROTECT_HELPER, type ProtectContext, type ScanSliceKind } from "./protect-egress.ts";
+import { registerProtectModule } from "./protect-flow.ts";
 import {
   buildTenantContext,
   resolveTenantScoping,
@@ -6970,26 +6971,19 @@ export function generateServerJs(
     }
   }
 
-  // §14.8.9 — drain the protected-column strip records the SQL-lowering pass
-  // collected, and surface one deduped `I-PROTECT-STRIP-001` (Info) per query so
-  // the redaction is never silent: the dev sees exactly which protected columns
-  // the egress floor removed. A `"*"` record is the wholesale strip of an
-  // unresolvable dynamic-SQL row. Routed into the `errors` stream with severity
-  // "info" — api.js partitions W-/I- info into result.warnings (non-fatal).
+  // §14.8.9 — the protected-column PROVENANCE FLOW (S441, `protect-flow.ts`)
+  // runs ONCE per compile, over EVERY emitted server module with the imports
+  // between them resolved (api.js, after codegen) — a per-file run cannot see a
+  // helper in another file. Here this file only REGISTERS its per-query strip
+  // records and its span lookup. That pass raises `E-PROTECT-006` (a protected
+  // value reaching a client egress outside its row) and `I-PROTECT-STRIP-001`
+  // (only for a query whose row a redact sink actually stripped).
   if (_protectActive) {
-    for (const info of drainProtectInfosFromRewriter()) {
-      const _what = info.cols === "*"
-        ? "ALL columns (the query's column origins are not statically resolvable — fail-closed wholesale strip)"
-        : `protected column(s) ${info.cols.map((c) => `\`${c}\``).join(", ")}`;
-      errors.push(new CGError(
-        "I-PROTECT-STRIP-001",
-        `I-PROTECT-STRIP-001: the egress floor strips ${_what} from the client response of \`${info.sql}\` ` +
-        `(§14.8.9 — a \`protect=\` column never crosses the wire unredacted). To send a protected column ` +
-        `deliberately, declassify it at the value with \`reveal("col")\`; to silence this, project the column out of the SELECT.`,
-        { file: filePath, start: 0, end: 0 } as any,
-        "info",
-      ));
-    }
+    registerProtectModule(
+      filePath,
+      drainProtectInfosFromRewriter(),
+      (name) => (fnNodes.find((f: any) => f?.name === name)?.span as any) ?? null,
+    );
   }
   // §14.8.9 — release the protect context (mirrors the variant-fields release).
   setProtectContextForRewriter(null);

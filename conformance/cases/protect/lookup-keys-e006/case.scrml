@@ -1,0 +1,19 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUser(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let h = u.passwordHash
+        const A = "0123456789abcdefABCDEF-_$./ghijklmnopqrstuvwxyzGHIJKLMNOPQRSTUVWXYZ"
+        const L = {}
+        for (const c of A) { L[c] = { [c]: 1 } }
+        return [...h].map(c => Object.keys(L[c])[0]).join("")
+      }
+    }
+  </db>
+  <user> = not
+  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+</program>
