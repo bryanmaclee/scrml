@@ -318,6 +318,28 @@ describe("r3 F2 — only the APPLICATION's top-level <program> is inherited", ()
     expect(res["/login"]).toEqual({ status: 200, location: null, marker: "login-marker" });
     expect(res["/admin"].status).toBe(302);
   }, 60_000);
+
+  test("an extra non-route file with its own top-level <program> does not un-gate a required app's pages (fail closed)", () => {
+    // S443 PA review of r3: with two root candidates the application was
+    // "unidentified" and nothing was inherited — /about served anonymously.
+    const fx = buildWithDiagnostics("ambiguous-root", {
+      "app.scrml": `<program auth="required"><p>home-marker</p></program>\n`,
+      "aaa.scrml": `<program><p>extra-marker</p></program>\n`,
+      "pages/about.scrml": `<page>\n<p>about-marker</p>\n</page>\n`,
+    });
+    const res = getProbe(fx, ["/app", "/about"]);
+    expect(res["/app"].status).toBe(302);
+    expect(res["/about"]).toEqual({ status: 302, location: "/login", marker: null });
+  }, 60_000);
+
+  test("several root candidates, none required: member pages stay public", () => {
+    const fx = buildWithDiagnostics("ambiguous-root-public", {
+      "app.scrml": `<program><p>home-marker</p></program>\n`,
+      "aaa.scrml": `<program><p>extra-marker</p></program>\n`,
+      "pages/about.scrml": `<page>\n<p>about-marker</p>\n</page>\n`,
+    });
+    expect(getProbe(fx, ["/about"])["/about"]).toEqual({ status: 200, location: null, marker: "about-marker" });
+  }, 60_000);
 });
 
 describe("r3 nit — an unresolvable redirect target is said out loud", () => {

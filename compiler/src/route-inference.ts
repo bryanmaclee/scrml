@@ -6587,9 +6587,18 @@ export function runRI(input: RIInput): RIOutput {
   // `<program>` (appRoot, above). A `<program auth="required">` inside a route file
   // gates its own file (8a) and nothing else — before r3 any required `<program>`
   // anywhere gated every unannotated page of a public application.
+  // S443 round-3 PA fix (review): "zero or several → nothing inherited" was fail-OPEN —
+  // adding one innocuous non-route file with its own top-level `<program>` made the
+  // root ambiguous and every unannotated member page of a required application
+  // served anonymously (measured: /about 302 → 200). With several candidates the
+  // application is ambiguous, so fail closed: inherit if ANY candidate declares
+  // `auth="required"`. Route files are already excluded from the candidates, so a
+  // `<program auth="required">` in a page file still gates only its own file (F2).
+  const cfgOf = (f: FileAST): any =>
+    f.authConfig ?? ((f as any).ast ? (f as any).ast.authConfig : null);
   const rootCfg = appRoot
-    ? (appRoot.authConfig ?? ((appRoot as any).ast ? (appRoot as any).ast.authConfig : null))
-    : null;
+    ? cfgOf(appRoot)
+    : (rootCandidates.map(cfgOf).find((c: any) => c && c.auth === "required") ?? null);
   // S443 round 3 (review F1): only a RECOGNIZED literal (§52.13's three values) is an
   // auth declaration. `auth="Required"`, `"requird"`, `" required"`, `"off"`,
   // `auth=${…}` / `auth=@x` declare nothing (W-ATTR-002 says so) and the page
