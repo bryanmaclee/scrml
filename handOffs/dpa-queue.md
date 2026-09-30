@@ -3809,7 +3809,7 @@ existing localStorage availability guard), privacy (never persist `protect=` val
 localStorage) had no scrml form at all. Axiom-adjacent (§52 authority model) — R2 minimum, one at a time.
 
 ## [dpa-062] deep-dive — an explicit `prepaint` opt-in so a persisted cell never flashes on first paint
-`status:    queued`
+`status:    ruled S444`  # → scrml-support/docs/deep-dives/prepaint-opt-in-dpa-062-2026-09-30.md · RULED (c) split surface: cell-level `prepaint` = REFLECT only (bool / payload-free enum / `| not`; `key=`-derived root attr; CSS-keyed for show=/style:/theme, STAMP for class:/attrs; uncoverable reads → Info per site) + region `hold=@cell` (visibility:hidden, aria-busy, 3000 ms pure-CSS failsafe); inline script + per-build sha256 under headers="strict"; without persist= → error; calls 2–8 = PA recs → SPEC §6.14.4 (user-voice S444)
 banked:     S444 2026-09-30 (bryan: "yes, bank it as dpa-062"; origin: dpa-061 call 6 — "I really like the second option, but it gets complicated. We could have the dev explicate when a cell needs that behaviour, but I don't know what that would look like.")
 
 The question: dpa-061 call 6 RULED default-then-restore for `persist=` cells, with an automatic pre-paint restore only for a
