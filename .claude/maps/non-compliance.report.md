@@ -1,6 +1,21 @@
 # non-compliance.report.md
 # project: scrml
-# generated: 2026-09-30T14:50:34Z  commit: 108ca89be
+# generated: 2026-09-30T15:32:25Z  commit: 5b1d0dab0
+# ⛑ **S444b STAMP — `108ca89be` -> `5b1d0dab0`. 2 COMMITS (#1180, #1181), incremental refresh.** MAP-STAMP RULE at
+# write time: `git log --oneline 108ca89be..5b1d0dab0` -> 2; HEAD `5b1d0dab0` == `origin/main`. Source-relevant: #1180 (S443
+# example 23 end-to-end — login/register call `session.set("userId", …)`, pages read `session.userId`, logout calls
+# `session.destroy()`, `<program … loginRedirect="/auth/login">`, driver BOL/POD/token reads guarded by `assignedDriverFor`,
+# `dispatch.db` ships pre-seeded (the `on mount { runSeeds() }` is gone); `stdlib/auth/templates/login.scrml` now calls
+# `session.set("userId", row.id)`; trucking smoke baseline drops `I-AUTH-REDIRECT-UNRESOLVED` / `W-AUTH-LOGIN-MISSING` /
+# `W-CG-CHUNK-PREFETCH-UNRESOLVED`, `W-TYPE-031-UNPROVEN` 321 -> 287). #1181 is the S444 map refresh itself.
+# ⛑ **`compiler/src` UNCHANGED over the window** (`git diff --stat 108ca89be..5b1d0dab0 -- compiler/src` empty) -> every S444
+# figure below stands; `bun scripts/facts.ts --check` PASS at `5b1d0dab0`. Known-gaps HIGH open 214 -> 215.
+# ⛑ **S444b ADDS S443 LOCI the reviews found missing** (grep-derived at `5b1d0dab0`; locate by SYMBOL after later commits):
+# route-inference Step 8 table + `appRoot` / `rootCandidates` / `findRoutePrefix` (matches on the ABSOLUTE path) ->
+# auth.map.md; `detectNestedProgramAuth`, E-PROGRAM-002 -> auth / error maps; `protect-flow.ts`, `emit-worker.ts`, worker
+# bundle writes in `api.js`, the §47.13 static-serve allowlist in `build.js` `generateServerEntry` -> structure / build maps.
+#
+# ━━━━━━━ BELOW (TO THE FIRST `##` SECTION) IS THE SUPERSEDED S444 HEADER (stamp `108ca89be`), CARRIED FOR PROVENANCE. ━━━━━━━
 # ⛑ **S444 STAMP — `cf62b415` -> `108ca89be`. 37 COMMITS (#1141-#1179), SESSIONS S441 / S442 / S443 (incremental
 # refresh, branch `maps/s444-refresh`).** MAP-STAMP RULE at write time: `git log --oneline cf62b415..108ca89be` -> 37
 # commits; `git merge-base HEAD origin/main` == `origin/main` == `108ca89be` (no fork). Source-relevant: #1161 (CSRF
@@ -247,6 +262,45 @@
 # WRONG AT ITS OWN WATERMARK, under its own stated definition, and CONTRADICTED THE NEXT ROW OF ITS
 # OWN TABLE.** See **M-S405-5**. Invariant 71 again, in the file that exists to catch invariant-71
 # failures.
+
+## Summary — S444b pass (this pass, stamp `5b1d0dab0`)
+
+**Scope: INCREMENTAL** over `108ca89be..5b1d0dab0` (#1180, #1181) + the loci the S443 reviews named. Docs changed in-window:
+`examples/23-trucking-dispatch/README.md`, `docs/changes/s443-example-23/progress.md`, `docs/known-gaps.md`, `master-list.md`
+(+ the maps). Checked: 4. Compliant: 4. New items: 3 uncertain (all in SOURCE comments/messages or the gap ledger).
+Gates at `5b1d0dab0`: `bun scripts/facts.ts --check` PASS · `bun scripts/state.ts --check` PASS on all @generated sections
+(U-S440-2 `@generated:recent-sessions` now PASSES — CLOSED) + WARN known-gaps heading/marker drift (48 listed).
+
+| doc | verdict |
+|---|---|
+| `examples/23-trucking-dispatch/README.md` | compliant — `/auth/login`, `session.set`, pre-seeded DB, `runSeeds()` as re-seed only all match `app.scrml` |
+| `docs/changes/s443-example-23/progress.md` | compliant — dispatch artifact |
+| `docs/known-gaps.md` | compliant for the window's edits (2 gaps resolved, 3 filed) — but see U-S444b-2 |
+| `master-list.md` | compliant (state check PASS) |
+
+### U-S444b-1. Diagnostic text says `E-PROGRAM-002` is reserved-not-implemented
+**Where:** `compiler/src/codegen/index.ts:3158` (user-facing message) and comments `:1964`, `:2005`, `:2026`, `:2084`, `:3241`.
+**Why uncertain:** since S443 the same-file case IS emitted (`:1663`); only the cross-file §40.8 case is reserved. The
+message is about the cross-file case, so it may be intended, but read literally it is false.
+**What to check:** reword to "the cross-file case of E-PROGRAM-002 is reserved", or confirm as intended.
+
+### U-S444b-2. PA-named gap ID absent from the ledger
+**Where:** `g-app-root-route-prefix-matched-on-absolute-path` — `grep` over `docs/known-gaps.md` at `5b1d0dab0` finds nothing.
+The defect it names is in source: `route-inference.ts` `findRoutePrefix` (`:6856`) does `indexOf("/pages/"|"/routes/")` on
+absolute paths (`api.js:1160`), used for `rootCandidates` (`:6395`).
+**What to check:** file the gap (the maps cite the ID).
+
+### U-S444b-3. `protect-flow.ts` header comment lists derivers the code does not have
+**Where:** `compiler/src/codegen/protect-flow.ts` header (lines ~53-56) names `Bun.password.*`, `Bun.hash`, a hasher's
+`.digest()` as allowlisted. `DERIVER_CALLS` (`:326`) contains none of them; SPEC §34 `E-PROTECT-006` (`SPEC.md:21030`) says
+"no `Bun.*` API". Code and SPEC agree; the comment is stale. Also: `DERIVER_CALLS` has `crypto.timingSafeEqual`, `isFinite`,
+`Number.isFinite`, `Number.isInteger` that the SPEC row does not list.
+**What to check:** fix the comment; decide whether the SPEC list is meant to be exhaustive.
+
+### Carried
+- U-S444-1 (`E-PROTECT-006` row "PA ratification pending") — **STILL LIVE** at `SPEC.md:21030`.
+- `.claude/maps/*.generated.md` are dated 2026-09-08 (`flogence/scripts/mapgen.ts`) — `structure.generated.md` still shows
+  `emit-worker.ts` as 75L with `rewriteSendToPostMessage`; it is 123L with `rewriteWorkerSend`. Regenerate; do not hand-edit.
 
 ## Summary — S444 pass (this pass, stamp `108ca89be`)
 
