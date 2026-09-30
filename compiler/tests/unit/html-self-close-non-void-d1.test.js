@@ -128,7 +128,14 @@ describe("S442 D1 — self-closed non-void HTML elements get an explicit end tag
       "parsed.scrml",
       `<program>\n\${ @x = "" }\n<main><form><textarea bind:value=@x/><select><option value="a">a</option></select><input name="i1"/><input name="i2"/></form><div/><p id="after">after</p></main>\n</program>\n`,
     );
-    const doc = new Window().document;
+    const win = new Window();
+    // A non-global happy-dom Window can come up WITHOUT `SyntaxError` (GlobalWindow
+    // and the VM path copy it in; seen locally on bun 1.3.14, S443). Inserting a
+    // <select> runs querySelectorAll("option"), which builds `new window.SyntaxError`
+    // eagerly, so the parse dies with "undefined is not a constructor" before any
+    // assertion. The assertions are about parse structure, not happy-dom's errors.
+    if (win.SyntaxError === undefined) win.SyntaxError = SyntaxError;
+    const doc = win.document;
     doc.body.innerHTML = mainOf(html);
     expect(doc.querySelectorAll("select").length).toBe(1);
     expect(doc.querySelectorAll("input").length).toBe(2);

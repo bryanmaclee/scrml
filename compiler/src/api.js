@@ -41,6 +41,7 @@ import { serializeChunksManifest } from "./codegen/route-splitter.ts";
 import { buildMcpDescriptors } from "./codegen/mcp-descriptors.ts";
 import { runCG } from "./code-generator.js";
 import { generateValueOnlyServerJs, distRelativeLocalSpecifier } from "./codegen/emit-server.ts";
+import { workerBundleFilename, workerBundleSuffix } from "./codegen/emit-worker.ts";
 import { validateEmittedArtifacts } from "./codegen/validate-emit.ts";
 import { detectSqlInConciseArrowBody } from "./codegen/detect-sql-in-arrow.ts";
 import { fnv1aHash } from "./codegen/fnv1a-hash.ts";
@@ -3373,6 +3374,12 @@ function _compileScrmlImpl(options = {}) {
           let c = rewriteRelativeImportPaths(output.clientJs, filePath, gateDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
           c = rewriteStdlibImports(c, gateDir, outputDir, bundledStdlib);
           pushArtifact(filePath, `${base}.client.js`, c);
+          // §4.12.4 — the page's nested-program worker bundles are browser JS too.
+          if (output.workerBundles) {
+            for (const [name, workerJs] of output.workerBundles) {
+              pushArtifact(filePath, workerBundleFilename(filePath, name), workerJs);
+            }
+          }
         }
       }
       if (mode !== "library" && cgResult.runtimeJs && cgResult.runtimeFilename) {
@@ -3508,11 +3515,13 @@ function _compileScrmlImpl(options = {}) {
         mkdirSync(targetDir, { recursive: true });
         writeFileSync(fullPath, contents);
         writtenPaths.set(fullPath, filePath);
-        // §47.13 — a browser artifact (document, stylesheet, client bundle; hashed
-        // or not) seeds the client-asset manifest. `.server.js`, library/tool
-        // `.js`, source maps and test files do not: a library `.js` a client
-        // bundle imports is admitted by the import closure, never by its suffix.
-        if (suffix === ".html" || suffix.endsWith(".css") || /^\.client(\.[a-z0-9]+)?\.js$/.test(suffix)) {
+        // §47.13 — a browser artifact (document, stylesheet, client bundle, hashed
+        // or not, and a §4.12.4 worker bundle) seeds the client-asset manifest.
+        // `.server.js`, library/tool `.js`, source maps and test files do not: a
+        // library `.js` a client bundle imports is admitted by the import closure,
+        // never by its suffix.
+        if (suffix === ".html" || suffix.endsWith(".css") || /^\.client(\.[a-z0-9]+)?\.js$/.test(suffix)
+          || suffix.endsWith(".worker.js")) {
           clientSeeds.add(relFromRoot(outputDir, fullPath));
         }
         return true;
@@ -3725,6 +3734,17 @@ function _compileScrmlImpl(options = {}) {
             let c = rewriteRelativeImportPaths(output.clientJs, filePath, targetDir, emittedScrmlSources, cgOutputBaseDir, clientDistSpaceTargets);
             c = rewriteStdlibImports(c, targetDir, outputDir, bundledStdlib);
             if (writeOutput(filePath, ".client.js", c)) fileCount++;
+          }
+          // §4.12.4 — each nested `<program name=…>` worker is a separate bundle,
+          // written beside the page so the page's `new Worker("<page>-<name>.worker.js")`
+          // resolves (dpa-056 D1: the bundles were built in memory and never
+          // written, so every worker 404'd). Only a browser page instantiates
+          // workers, so only an output carrying client JS writes them. Never
+          // content-hashed: the URL is baked into the client bundle's bytes.
+          if (output.workerBundles) {
+            for (const [name, workerJs] of output.workerBundles) {
+              if (writeOutput(filePath, workerBundleSuffix(name), workerJs)) fileCount++;
+            }
           }
         }
         if (output.html) {
