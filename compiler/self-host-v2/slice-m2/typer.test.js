@@ -329,7 +329,7 @@ describe("the §66.19 programs and the M2 fixtures — no typer / scope code; ev
 // Fix round 1 (adversarial review of the first cut).
 // ---------------------------------------------------------------------------
 describe("A — a local's type: its annotation, else the join of everything it is given", () => {
-  test("legal — `let a = not; a = \"x\"` then `@s = a` (§42.3.1: infer `T | not`; a `T | not` into `T` is unproven, silent)", () => {
+  test("legal — `let a = not; a = \"x\"` then `@s = a` (§42.3.1: infer `T | not`; the write of `\"x\"` narrows `a` — s442 r2 F3 — so the read is a `string`)", () => {
     expect(inApp("    <let s:string=\"\"/>\n    function f() { let a = not\n a = \"x\"\n @s = a }")).toEqual([]);
   });
   // FLIPPED (s442 r6) — provenance: ruling:user-voice-scrml.md S442 "`T | not` into `T` is an error for all types" ("A `T | not` isn't a `T`"; bryan: "if the lifecycle says T | not then it can only end as not"). Was: legal (S439 "unproven").
