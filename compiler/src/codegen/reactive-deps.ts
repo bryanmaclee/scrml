@@ -1049,6 +1049,72 @@ export function collectRequestIds(fileAST: Record<string, unknown>): Set<string>
 }
 
 /**
+ * §6.7.7 — read a `<request>`'s explicit `deps=[@a, @b]` attribute.
+ *
+ * Returns `null` when the attribute is ABSENT (the caller infers deps from the
+ * body), and an array — possibly EMPTY — when it is present. The distinction is
+ * normative: "When present, `deps` overrides inference." — so `deps=[]` is the
+ * fetch-on-mount-only form (§6.7.7 Example 2) and must NOT fall back to
+ * inference.
+ *
+ * The single reader for BOTH request forms (the `url=` fetch in
+ * `emitRequestNode` and the body form in `collectRequestBodyCells`).
+ * g-request-deps-attr-ignored-both-forms (S444): both readers used to accept
+ * only a `kind:"array"` value or a string `.value`, but the attribute parser
+ * delivers `deps=[@q, @ver]` as
+ *   `{kind:"expr", raw:"[@q, @ver]", refs:["q","ver"],
+ *     exprNode:{kind:"array", elements:[{kind:"ident", name:"@q"}, …]}}`
+ * so both returned `[]` — the `url=` form went one-shot and the body form
+ * silently replaced the author's deps with the inferred ones.
+ *
+ * Non-`@` entries are skipped here (they are E-LIFECYCLE-022 territory, a
+ * diagnostic this reader does not own). Duplicates collapse, order is kept.
+ */
+export function readRequestDepsAttr(node: unknown): string[] | null {
+  const n = node as any;
+  const attrs: any[] = n?.attrs ?? n?.attributes ?? [];
+  const depsAttr = attrs.find((a: any) => a?.name === "deps");
+  if (!depsAttr) return null;
+  const v = depsAttr.value;
+  const found: string[] = [];
+  const push = (name: unknown): void => {
+    if (typeof name !== "string") return;
+    if (!name.startsWith("@")) return;
+    const bare = name.slice(1);
+    if (bare.length > 0 && !found.includes(bare)) found.push(bare);
+  };
+  const fromElements = (elements: any[]): void => {
+    for (const el of elements) {
+      if (el?.kind === "variable-ref") {
+        const nm = typeof el.name === "string" ? el.name : "";
+        push(nm.startsWith("@") ? nm : `@${nm}`);
+      } else if (el?.kind === "ident") {
+        push(el.name);
+      }
+    }
+  };
+  const fromText = (text: string): void => {
+    for (const m of text.matchAll(/@([A-Za-z_$][A-Za-z0-9_$]*)/g)) push(`@${m[1]}`);
+  };
+  if (v?.kind === "expr") {
+    if (v.exprNode?.kind === "array" && Array.isArray(v.exprNode.elements)) {
+      fromElements(v.exprNode.elements);
+    } else if (typeof v.raw === "string") {
+      fromText(v.raw);
+    }
+  } else if (v?.kind === "array" && Array.isArray(v.elements)) {
+    fromElements(v.elements);
+  } else if (typeof v === "string") {
+    fromText(v);
+  } else if (typeof v?.value === "string") {
+    fromText(v.value);
+  } else if (typeof v?.raw === "string") {
+    fromText(v.raw);
+  }
+  return found;
+}
+
+/**
  * §6.7.7 — the reactive-assign settle info for each body-form `<request>`.
  * `<request id="R">${ @cell = serverFn(...) }</>` — the "body form" that has NO
  * `url=` and NO `api=` attr (those two drive their own fetch machinery in
@@ -1098,23 +1164,6 @@ export function collectRequestBodyCells(
     return attrs.some((a) => a?.name === name);
   }
 
-  // Explicit `deps=[@a, @b]` → the @-var names (mirrors emitRequestNode).
-  function explicitDeps(node: any): string[] {
-    const attrs: any[] = node.attrs ?? node.attributes ?? [];
-    const depsAttr = attrs.find((a) => a?.name === "deps");
-    if (!depsAttr) return [];
-    const v = depsAttr.value;
-    const found: string[] = [];
-    if (v?.kind === "array" && Array.isArray(v.elements)) {
-      for (const el of v.elements) {
-        if (el?.kind === "variable-ref") found.push((el.name ?? "").replace(/^@/, ""));
-      }
-    } else if (typeof v?.value === "string") {
-      for (const m of v.value.matchAll(/@([A-Za-z_$][A-Za-z0-9_$]*)/g)) found.push(m[1]);
-    }
-    return found;
-  }
-
   function visit(nodeList: unknown[]): void {
     if (!Array.isArray(nodeList)) return;
     for (const node of nodeList) {
@@ -1142,9 +1191,12 @@ export function collectRequestBodyCells(
           if (cell) break;
         }
         if (requestId && cell) {
-          // deps=[...] wins; else infer @var reads from the body expr (§6.7.7).
-          let depsVars = explicitDeps(n);
-          if (depsVars.length === 0 && initSrc) {
+          // §6.7.7 "When present, `deps` overrides inference." — an explicit
+          // `deps=[...]` wins, INCLUDING `deps=[]` (mount-only); only an ABSENT
+          // attribute infers @var reads from the body expr.
+          const explicit = readRequestDepsAttr(n);
+          let depsVars: string[] = explicit ?? [];
+          if (explicit === null && initSrc) {
             depsVars = [...extractReactiveDeps(initSrc, null)];
           }
           out.set(cell, { requestId, depsVars });

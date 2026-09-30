@@ -3344,12 +3344,19 @@ export function generateClientJs(ctx: CompileContext): string {
         // Re-fetch on any declared/inferred `@var` dependency change (§6.7.7).
         // The reads inside the effect establish the reactive subscription; the
         // effect also fires once on registration → the mount fetch.
+        //
+        // The fetch itself runs UNTRACKED (S444). Its synchronous prologue — up
+        // to the first `await` — reads `${stateVar}.data` (the stale check) and
+        // evaluates the call's ARGUMENTS. Tracked, the first read subscribed the
+        // effect to its own result (every settle re-fired it: an endless refetch
+        // loop), and the argument reads added the body's `@var`s as deps even
+        // under an explicit `deps=[…]`, which §6.7.7 says "overrides inference".
         const depsJs = info.depsVars
           .map((d) => `_scrml_reactive_get(${JSON.stringify(d)})`)
           .join(", ");
         lines.push(`_scrml_effect(function() {`);
         lines.push(`  var _scrml_deps = [${depsJs}];`);
-        lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+        lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
         lines.push(`});`);
       } else {
         lines.push(`${fetchFn}();`);
