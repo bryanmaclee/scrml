@@ -1006,6 +1006,24 @@ return { probe };`)();
   // walked once and then handed as-is to JSON.stringify, which read the getter
   // again and served the full row. The sink now returns a snapshot: every
   // property read once, and the serializer sees only plain data.
+  // S443 round 6e — measured on 6c/6d: the snapshot invoked a `toJSON` (and a
+  // getter) with `this` = the ORIGINAL tagged row, so `this.passwordHash` read the
+  // column. Author functions now run with `this` = a marker-stripped copy.
+  test("S443 r6e: toJSON and getters run with `this` = a stripped copy of their object", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const U = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
+    const ser = (v) => JSON.stringify(_scrml_protect_redact(v));
+    const u1 = U(); u1.toJSON = function () { return { pw: this.passwordHash, n: this.name }; };
+    expect(ser(u1)).toBe('{"n":"ada"}');                                          // T1
+    const rs = [U(), U()]; for (const r of rs) r.toJSON = function () { return [this.passwordHash]; };
+    expect(ser(rs)).toBe("[[null],[null]]");                                      // T5 (base shape)
+    const u6 = U(); Object.defineProperty(u6, "pw3", { get: function () { return this.passwordHash; }, enumerable: true });
+    expect(ser(u6)).toBe('{"id":1,"name":"ada"}');                                // T6
+    // Nested: `this.data` is stripped too, and methods still resolve via the prototype.
+    class Card { constructor(r) { this.data = r; } label() { return this.data.name; } toJSON() { return { l: this.label(), pw: this.data.passwordHash }; } }
+    expect(ser(new Card(U()))).toBe('{"l":"ada"}');
+  });
+
   test("S443 r6d: the sink hands the serializer a snapshot — stateful getters / proxies read once", () => {
     const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const U = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
@@ -1017,7 +1035,11 @@ return { probe };`)();
     // A Proxy whose trap answers differently on each read.
     let reads = 0;
     const px = new Proxy({ a: 1 }, { get: (t, k) => (k === "a" ? (++reads > 1 ? U() : "ok") : t[k]) });
-    expect(ser({ p: px })).toBe('{"p":{"a":"ok"}}');
+    // Round 6e: own properties are read through their DESCRIPTORS (a data value
+    // as stored; a getter once, with a stripped `this`), so a Proxy's `get` trap
+    // is not what decides the value — and nothing is read twice.
+    expect(ser({ p: px })).toBe('{"p":{"a":1}}');
+    expect(reads).toBe(0);
     // Nothing author-reachable survives into the snapshot.
     const snap = _scrml_protect_redact({ f: () => 1, s: Symbol("x"), a: [() => 1, undefined], d: new Date(0) });
     expect(snap).toEqual({ a: [null, null], d: "1970-01-01T00:00:00.000Z" });

@@ -1638,12 +1638,45 @@ class FlowAnalysis {
         const k = p.computed ? keyOnly(this.evalExpr(p.property, scope, fn)) : clean();
         // A function stored straight into a global object is recorded under the
         // property name it is stored as (see `globalFnsByName`).
-        let root = p.object;
-        while (root && (root.type === "MemberExpression" || root.type === "ChainExpression")) root = root.type === "ChainExpression" ? root.expression : root.object;
+        // (Walks through `(g.x ??= {})[k]` / parentheses to the root, and names a
+        // computed-key store after the nearest STATIC name on its path —
+        // `(globalThis.__scrml_session_stores ??= {})[path] = store` is
+        // "__scrml_session_stores" — so the compiler's own session store's methods
+        // are applied only at calls that name that path, not at every global call.)
+        const rootOf = (e: any): any => {
+          while (e) {
+            if (e.type === "MemberExpression") e = e.object;
+            else if (e.type === "ChainExpression" || e.type === "ParenthesizedExpression") e = e.expression;
+            else if (e.type === "AssignmentExpression") e = e.left;
+            else return e;
+          }
+          return e;
+        };
+        const staticNameOf = (e: any): string | null => {
+          while (e) {
+            if (e.type === "MemberExpression") {
+              const n = e.computed ? staticKey(e.property) : (e.property?.name ?? null);
+              if (n !== null) return n;
+              e = e.object;
+            } else if (e.type === "ChainExpression" || e.type === "ParenthesizedExpression") e = e.expression;
+            else if (e.type === "AssignmentExpression") e = e.left;
+            else return null;
+          }
+          return null;
+        };
+        const root = rootOf(p.object);
         const freeRoot = !!root && ((root.type === "Identifier" && !this.resolve(root.name, scope)) || root.type === "MetaProperty");
         const propName = p.computed ? staticKey(p.property) : (p.property?.name ?? null);
-        if (freeRoot && propName !== null && t.fns.size > 0) {
-          this.recordGlobalFns(propName, t.fns);
+        const globalName = propName ?? staticNameOf(p.object);
+        if (t.fns.size > 0) {
+          // `o.f = function …` runs with `this` = o (round 6e) — and a `toJSON`
+          // (or a key the compiler cannot read, which may be `toJSON`) is INVOKED
+          // by the serializer: what it returns is part of o.
+          this.recordThis(t.fns, objT);
+          if (propName === "toJSON" || propName === null) t = join(t, containerOf(this.applyFns(t.fns, [], undefined, p, fn)));
+        }
+        if (freeRoot && globalName !== null && t.fns.size > 0) {
+          this.recordGlobalFns(globalName, t.fns);
           this.namedGlobalWrite = true;
           try { this.writeThrough(p.object, objT, containerOf(join(t, k)), scope); } finally { this.namedGlobalWrite = false; }
           return;
@@ -1763,6 +1796,7 @@ class FlowAnalysis {
       case "Literal":
         return { ...clean(), k: 1 };
       case "ThisExpression":
+        return this.thisTaint(fn);
       case "Super":
       case "PrivateIdentifier":
         return clean();
@@ -1809,6 +1843,7 @@ class FlowAnalysis {
       }
       case "ObjectExpression": {
         let r = clean();
+        const methods: Array<{ fns: Set<Closure>; invoked: boolean }> = [];
         for (const pr of node.properties) {
           if (pr.type === "SpreadElement") {
             // `{...row}` copies the enumerable Symbol descriptor: still a row.
@@ -1820,14 +1855,17 @@ class FlowAnalysis {
           if (pr.computed) r = join(r, containerOf(keyOnly(this.evalExpr(pr.key, scope, fn))));
           const v = this.evalExpr(pr.value, scope, fn);
           r = join(r, containerOf(v));
-          // A getter, or a `toJSON` method, is INVOKED by `JSON.stringify` at the
-          // sink — what it returns is what ships.
           const keyName = pr.key?.type === "Identifier" ? pr.key.name : staticKey(pr.key);
-          if (v.fns.size > 0 && (pr.kind === "get" || keyName === "toJSON")) {
-            r = join(r, containerOf(this.applyFns(v.fns, [], undefined, node, fn)));
-          }
+          if (v.fns.size > 0) methods.push({ fns: v.fns, invoked: pr.kind === "get" || pr.kind === "set" || keyName === "toJSON" });
         }
-        return r;
+        // S443 round 6e — a function stored on this object runs with `this` =
+        // the object: `{ ...u, toJSON() { return { pw: this.passwordHash } } }`.
+        for (const m of methods) this.recordThis(m.fns, r);
+        // A getter, or a `toJSON` method, is INVOKED by `JSON.stringify` at the
+        // sink — what it returns is what ships.
+        let invokedRet = clean();
+        for (const m of methods) if (m.invoked) invokedRet = join(invokedRet, this.applyFns(m.fns, [], undefined, node, fn));
+        return methods.some((m) => m.invoked) ? join(r, containerOf(invokedRet)) : r;
       }
       case "FunctionExpression":
       case "ArrowFunctionExpression":
@@ -2148,6 +2186,7 @@ class FlowAnalysis {
         // redefinition by an unreadable key may HIDE a column marker (a
         // non-enumerable marker is dropped by the next spread) — L4.
         const desc = args[2] ?? clean();
+        this.recordThis(desc.fns, args[0] ?? clean()); // a getter / value function runs with `this` = the target (6e)
         const got = this.hasCallable(desc) ? this.applyFns(desc.fns, [], undefined, node, fn) : clean();
         const written = containerOf(join(desc, got, keyOnly(args[1] ?? clean())));
         this.writeThrough(node.arguments[0], args[0] ?? clean(), written, scope);
@@ -2157,7 +2196,8 @@ class FlowAnalysis {
       if (path === "Object.defineProperties" || path === "Reflect.set" || path === "Reflect.deleteProperty") {
         // Keys and values of the second argument (or the key + value) are written
         // into the target; a redefinition / removal by an unreadable key may
-        // drop a column marker (L4).
+        // drop a column marker (L4). A function among them runs with `this` = the target (6e).
+        this.recordThis(path === "Reflect.set" ? (args[2] ?? clean()).fns : (args[1] ?? clean()).fns, args[0] ?? clean());
         const written = path === "Object.defineProperties"
           ? containerOf(join(args[1] ?? clean(), ...(this.hasCallable(args[1] ?? clean()) ? [this.applyFns(args[1].fns, [], undefined, node, fn)] : [])))
           : containerOf(join(keyOnly(args[1] ?? clean()), args[2] ?? clean()));
@@ -2357,6 +2397,41 @@ class FlowAnalysis {
     return this.applyFns(fns, [], param, node, fn);
   }
 
+  /**
+   * S443 round 6e — `this`. A function stored ON an object (`o.f = function …`,
+   * a method / getter / setter in an object literal, a `defineProperty` getter or
+   * value, `Object.assign(o, { f() … })`) runs with `this` = that object, so a
+   * `this.passwordHash` inside it IS the column. `this` used to read as clean:
+   * `u.toJSON = function () { return { pw: this.passwordHash } }` and a
+   * `defineProperty(u, "pw3", { get: function () { return this.passwordHash } })`
+   * served the hash through the response, `/__mountHydrate` and the SSR state
+   * script (review, measured; no `_{}` needed). Keyed by the function NODE: every
+   * object a function was ever stored on joins into its `this` (fail closed).
+   */
+  private thisOf = new Map<any, Taint>();
+  private recordThis(fns: Set<Closure>, obj: Taint): void {
+    const data = dataOnly(obj);
+    // Data only — no alias cells: a READ through `this` sees what the object
+    // carries; a WRITE through `this` is not modelled (it lands nowhere, as it did
+    // before round 6e). Aliasing `this` to its object made the compiler's own
+    // session object (whose methods run on every opaque-call over-approximation)
+    // collect every protected value in the compile — a false E-PROTECT-006 on
+    // examples/23's login. Disclosed in g-protect-egress-round-7-residuals.
+    for (const c of fns) {
+      if (!c.node) continue;
+      const prev = this.thisOf.get(c.node) ?? clean();
+      const next = join(prev, data);
+      if (taintKey(next) !== taintKey(prev)) { this.thisOf.set(c.node, next); this.changed = true; }
+    }
+  }
+  /** `this` inside the walked function (an arrow's is its enclosing function's). */
+  private thisTaint(fn: Instance | null): Taint {
+    let node = fn?.stat.node ?? null;
+    while (node && node.type === "ArrowFunctionExpression") node = this.fnParent.get(node) ?? null;
+    const t = node ? this.thisOf.get(node) : undefined;
+    return t ? { ...t, refs: t.refs ? new Set(t.refs) : undefined } : clean();
+  }
+
   /** `const` names bound to a string / number literal, per declaring scope's name set. */
   private constLiterals = new WeakMap<Set<string>, Map<string, string>>();
 
@@ -2433,7 +2508,9 @@ class FlowAnalysis {
       return r;
     }
     if (path === "Object.assign" && node?.arguments?.[0]) {
-      // Writes every source into the TARGET object (round 4, F2).
+      // Writes every source into the TARGET object (round 4, F2) — methods
+      // included, which then run with `this` = the target (round 6e).
+      this.recordThis(join(...args.slice(1)).fns, args[0] ?? clean());
       this.writeThrough(node.arguments[0], args[0] ?? clean(), containerOf(join(...args.slice(1))), fn?.scope ?? this.curMod!.scope);
     }
     if (path === "Object.keys") {

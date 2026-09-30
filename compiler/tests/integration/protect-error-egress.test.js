@@ -232,3 +232,77 @@ ${J.map(([n]) => `<button onclick=\${ @resultCell = ${n}() }>${n}</button>`).joi
     }
   });
 });
+
+// S443 round 6e — a function stored on a row runs with `this` = the row. MEASURED
+// (review, base AND 6d): `Object.defineProperty(u, "pw3", { get: function () {
+// return this.passwordHash } })` shipped pw3 through the server-fn response,
+// `/__mountHydrate` and the SSR state script; `u.toJSON = function () { return {
+// pw: this.passwordHash } }` shipped it on 6c/6d. Both layers now hold: the
+// compile rejects it (E-PROTECT-006), AND — driven here with the emitted module
+// anyway — the runtime sink invokes every author function with `this` = a
+// marker-stripped copy, so all three sinks serve no protected value.
+describe("§14.8.9 round 6e — `this` in a function stored on a row, all three sinks", () => {
+  const SRC_T = `<program db="./app.db" auth="none">
+<schema>
+  users {
+    id: integer primary key
+    name: text
+    passwordHash: text
+    pin: integer
+  }
+</schema>
+<db src="./app.db" tables="users" protect="passwordHash, pin"/>
+\${
+  server function loadUsers() { return ?{\`SELECT * FROM users\`}.all() }
+  server function loadOne() {
+    const u = ?{\`SELECT * FROM users WHERE id = 1\`}.get()
+    Object.defineProperty(u, "pw3", { get: function () { return this.passwordHash }, enumerable: true })
+    return u
+  }
+  server function loadTo() {
+    const rs = ?{\`SELECT * FROM users\`}.all()
+    for (const r of rs) { r.toJSON = function () { return [this.passwordHash, this.name] } }
+    return rs
+  }
+  <userCell server> = loadUsers()
+  <oneCell server> = loadOne()
+  <toCell server> = loadTo()
+}
+<main>
+  <ul><each in=@userCell key=@.id as u><li class="u">\${u.name}</li></each></ul>
+  <p>ok</p>
+</main>
+</program>
+`;
+  test("compile-time: E-PROTECT-006; run-time: fn response, /__mountHydrate and SSR state serve no protected value", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scrml-protect-this-"));
+    const out = join(dir, "dist");
+    mkdirSync(out);
+    writeFileSync(join(dir, "app.scrml"), SRC_T);
+    const dbPath = join(dir, "app.db");
+    const db = new Database(dbPath, { create: true });
+    db.run("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT, pin INTEGER)");
+    db.run(`INSERT INTO users VALUES (1, 'ada', '${SECRET}', 4321)`);
+    db.close();
+    const r = compileScrml({ inputFiles: [join(dir, "app.scrml")], write: true, outputDir: out, log: () => {} });
+    expect((r.errors ?? []).map((e) => e.code)).toContain("E-PROTECT-006");
+    const sp = join(out, "app.server.js");
+    writeFileSync(sp, readFileSync(sp, "utf8").replace(/new SQL\("sqlite:[^"]*"\)/g, `new SQL(${JSON.stringify("sqlite:" + dbPath)})`));
+    const mod = await import(`file://${sp}?v=${Date.now()}`);
+    const bodies = [];
+    for (const rt of mod.routes) {
+      const res = await rt.handler(new Request("http://x" + rt.path, {
+        method: rt.method, headers: { "Content-Type": "application/json", "X-CSRF-Token": "t", Cookie: "scrml_csrf=t" },
+        body: rt.method === "POST" ? "{}" : undefined,
+      }));
+      bodies.push([rt.path, res.status, await res.text()]);
+    }
+    const hit = (p) => bodies.find(([path]) => path.includes(p));
+    for (const p of ["loadOne", "loadTo", "__mountHydrate", "/app"]) {
+      const b = hit(p);
+      expect([p, !!b]).toEqual([p, true]);
+      expect([p, b[1], b[2].includes(SECRET) || b[2].includes("4321")]).toEqual([p, 200, false]);
+    }
+    expect(hit("loadTo")[2]).toContain('"ada"'); // the toJSON ran, on a stripped `this`
+  });
+});

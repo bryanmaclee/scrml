@@ -495,6 +495,28 @@ async function _scrml_handler_setup_2(_scrml_req) {
     expect(leakCols(mod('return verifyHash("sha256", pw, u.passwordHash);', C))).toEqual([]);
   });
 
+  test("r6e: `this` in a function stored on an object carries the object's provenance", () => {
+    for (const body of [
+      "u.toJSON = function () { return { pw: this.passwordHash }; }; return u;",
+      "const c = { ...u, toJSON() { return { pw: this.passwordHash }; } }; return c;",
+      "const c = { ...u, get pw2() { return this.passwordHash; } }; return c;",
+      "const rs = [u]; for (const r of rs) { r.toJSON = function () { return [this.passwordHash]; }; } return rs;",
+      'Object.defineProperty(u, "pw3", { get: function () { return this.passwordHash; }, enumerable: true }); return u;',
+      "Object.assign(u, { toJSON() { return { pw: this.passwordHash }; } }); return u;",
+      // an arrow inside the method reads the method's `this`
+      "u.toJSON = function () { const f = () => this.passwordHash; return { pw: f() }; }; return u;",
+    ]) {
+      expect([body, leakCols(mod(body))]).toEqual([body, ["passwordHash"]]);
+    }
+    // A method on a row that reads only clean columns is fine.
+    expect(leakCols(mod("u.toJSON = function () { return { n: this.name }; }; return u;"))).toEqual([]);
+  });
+
+  test("r6e: `import.meta.env.X` is positive runtime evidence for an hmac key", () => {
+    const C = 'import { hmac } from "./_scrml/crypto.js";';
+    expect(leakCols(mod("return await hmac(import.meta.env.HMAC_KEY, String(u.passwordHash));", C))).toEqual([]);
+  });
+
   test("r6c: a removal keyed by a const-bound literal is literal; otherwise the error names the fix", () => {
     for (const body of [
       "const byId = { 1: u }; const gone = 1; delete byId[gone]; return byId;",
