@@ -3389,8 +3389,19 @@ export function generateClientJs(ctx: CompileContext): string {
       }
       return depth === 0 ? j : -1;
     };
-    for (const [, mangledName] of fnNameMap) {
-      if (!/^_scrml_(fetch|cps)_/.test(mangledName)) continue;
+    // g-request-body-client-wrapper-unawaited-one-shot (S444) — the callee set is
+    // every ASYNC-COLORED function, not only the server stubs. A client fn that
+    // reaches a server fn (`function wrap(q) { return suggest(q) }`) is emitted
+    // `async` by the same coloring (`clientAsyncFactsOf` — the analysis the
+    // E-ASYNC-FN-ESCAPES-AS-VALUE / sync-callback checks consult), so a
+    // module-init `_scrml_reactive_set("hits", _scrml_wrap_8(…))` stored a
+    // PROMISE in the cell. For a `<request>` body it also skipped the §6.7.7
+    // settle machine below — no fetch fn, no seq, no dep effect, `.loading`
+    // stuck `true`. Keyed by SOURCE name (fnNameMap's key), so a user name that
+    // merely looks like a stub is never swept in.
+    const asyncClientFnNames = clientAsyncFactsOf(ctx).asyncFnNames ?? new Set<string>();
+    for (const [sourceName, mangledName] of fnNameMap) {
+      if (!/^_scrml_(fetch|cps)_/.test(mangledName) && !asyncClientFnNames.has(sourceName)) continue;
       // Match _scrml_reactive_set("NAME", <mangledName>( ... );) at statement level.
       // Body args may themselves contain `(`; count parens to find the matching close.
       const setHead = "_scrml_reactive_set(";
