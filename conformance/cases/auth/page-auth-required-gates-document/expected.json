@@ -1,0 +1,17 @@
+{
+  "id": "page-auth-required-gates-document",
+  "description": "§52.13 (S443, g-page-auth-required-protects-nothing) — a `<page auth=\"required\">` with NO `protect=` columns is an auth scope on its own: the ANONYMOUS document request is redirected to /login (the default loginRedirect) and never composes the page, while an AUTHENTICATED viewer's first paint carries the page body. Before S443 the page was not registered as an auth scope at all — an anonymous GET served the page body at 200 (and there was no compose route, since csrf=\"auto\" was not in force).",
+  "language-version": "1.0",
+  "spec": "§52.13, §40.2",
+  "rationale": "§52.13: 'The `auth=` attribute on `<page>`, `<program>`, and `<channel>` accepts exactly three literal values: … `auth=\"required\"` — every request to this scope SHALL be authenticated; unauthenticated requests are redirected to `loginRedirect=` (default `/login`).' §40.2 compose-route bullet: under `auth=\"required\"` the request-time compose route SHALL run the same gate before composing anything. The page is the scope; the file carries no protect= fields, so nothing but the page's own auth= can gate it.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": ["E-"],
+    "serverDb": {},
+    "firstPaint": {
+      "viewer": "authenticated",
+      "anonymousRedirect": "/login",
+      "contains": ["page-secret-marker"]
+    }
+  }
+}

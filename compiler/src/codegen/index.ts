@@ -1608,6 +1608,42 @@ export function runCG(input: CgInput): CgOutput {
     }
     detectNestedDocAttrs(nodes, 0);
 
+    // §4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=` is NOT
+    // a nested-valid `<program>` attribute. Auth config is read from the file's
+    // FIRST top-level `<program>` only (compute-program-config.ts), so a nested
+    // `<program auth="required">` compiled with no auth at all: its server
+    // functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote
+    // a row). "Nested" here is any `<program>` with a `<program>` OR `<page>`
+    // ancestor — a `<page>` is a per-route container inside the application's one
+    // `<program>` (§40.8), so a `<program>` under it is nested too, and its `auth=`
+    // was dropped the same way (MEASURED S443: 200 for an anonymous GET). Fail
+    // closed: any `auth=` there, whatever its value, is an error, never a no-op.
+    function detectNestedProgramAuth(parentChildren: any[], nested: boolean): void {
+      for (const node of parentChildren) {
+        if (!node || typeof node !== "object" || node.kind !== "markup") continue;
+        if (node.tag === "program" && nested) {
+          const attrs: any[] = node.attributes ?? node.attrs ?? [];
+          const authAttr = attrs.find((a: any) => a && a.name === "auth");
+          if (authAttr) {
+            const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+            errors.push(new CGError(
+              "E-PROGRAM-NESTED-AUTH",
+              "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> — a nested " +
+              "<program> is not an auth scope, so its server functions would run unauthenticated. " +
+              "Put `auth=` on the top-level <program> (the whole application) or on the " +
+              "<page> that needs it, and remove it from the nested <program>. (§4.12.2, §52.13)",
+              { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+              "error",
+            ));
+          }
+        }
+        if (Array.isArray(node.children) && node.children.length > 0) {
+          detectNestedProgramAuth(node.children, nested || node.tag === "program" || node.tag === "page");
+        }
+      }
+    }
+    detectNestedProgramAuth(nodes, false);
+
     extractWorkerPrograms(nodes);
 
     if (workerDefs.size > 0) {
