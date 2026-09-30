@@ -15,3 +15,9 @@ slice-m1 73/73 · lowered m1 73/73 · slice-m2 448/448 · slice-m3 60/60 · slic
 lint 58 files / 0 · mutations 236/236 RED, 0 problems, exit 0 (710 s) · bite CG 32 + CSS 32 + FRONT 12 certified,
 0 uncertified, exit 0 · conformance impl#1 1151 cases, 7 xfail (compiler/src + conformance/ untouched) ·
 gate 26680 pass / 0 fail / 72 skip / 12 todo. Pushed feat/s444-comment-and-escapes.
+
+## Fix round (standalone-only ruling + S239 review nits of 5d5ad360b)
+- RULED S444 "standalone only, your rec": parse.scrml codeRegionTP — a code-default region is display-lexed; unless it is exactly one `"` string token it is re-lexed with display off (lex.scrml lexFromMode). displayEscapeDiags / splitDisplay only for a standalone literal. SPEC §4.18.1 code-default cell + §4.18.3 scope bullet (provenance "standalone only, your rec").
+- Nit 1: CR-only `a\r// c\r` test + row. Nit 2: freeTextCommentAt = explicit 4-byte set; unreachable pos==0 branch and the SPEC "first byte of the source" clause dropped (a free-text body always follows its opener's `>`). Nit 3: unterminated recovery content cooked + malformed escapes E-PARSE-001 (incl. a trailing lone `\`); SPEC §4.18.3 unterminated bullet amended.
+- Moved mutation sites re-sited (5); the lexer-`\${` row went GREEN once nested strings left display mode — now pinned by a standalone extent test (`"a \${ b"` is one literal).
+- FINAL: slice-m1 73 · lowered 73 · m2 448 · m3 60 · m4 238 · v2-lexer 337 · lint 58/0 · mutations 243/243 RED, 0 problems · bite 32+32+12, 0 uncertified · parser-conformance-*.test.js 4284 pass / 0 fail · corpus 2,130 files: 0 changed.
