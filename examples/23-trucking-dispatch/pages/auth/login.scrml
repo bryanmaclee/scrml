@@ -52,6 +52,13 @@
 
             ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run()
 
+            // The FRAMEWORK session (§20.5.1): this is what `<program auth="required">`
+            // checks. Credentials were verified above — session.set mints an
+            // authenticated session and does no check of its own.
+            session.set("userId", row.id)
+            session.set("role", row.role)
+
+            // The app's own page-level token (each page's getCurrentUser reads it).
             const token = generateToken(32)
             const store = createSessionStore(SESSION_DB_PATH)
             store.set(token, row.id, SESSION_TTL_SECONDS)
@@ -61,6 +68,12 @@
                 user: { id: row.id, email: row.email, role: row.role },
                 redirectTo: rolePath(row.role)
             }
+        }
+
+        // Logout lands here as /auth/login?logout=1 — end the framework session.
+        function endSessionServer() {
+            session.destroy()
+            return true
         }
 
         function submit() {
@@ -83,6 +96,15 @@
 
             // Redirect by role.
             window.location.href = result.redirectTo
+        }
+    }
+
+    ${
+        on mount {
+            if (window.location.search.indexOf("logout=1") >= 0) {
+                endSessionServer()
+                document.cookie = "scrml_session=; Path=/; Max-Age=0"
+            }
         }
     }
 
@@ -119,7 +141,7 @@
 
         <p class="text-sm text-slate-600 text-center mt-6">
           New customer?
-          <a href="/register" class="text-blue-600 hover:underline">Create an account</a>.
+          <a href="/auth/register" class="text-blue-600 hover:underline">Create an account</a>.
         </p>
 
         <div class="mt-6 pt-6 border-t border-slate-200 text-xs text-slate-500">
