@@ -1,0 +1,12 @@
+{
+  "id": "error-fail-imported-builtin-name-enum-neg",
+  "description": "§19.3.3 E-ERROR-009 (S443) — the qualified `fail AuthError.Nope` names a variant that is not in the IMPORTED user enum `AuthError` (Missing / Bad). Before S443 the built-in `AuthError` shadowed the import in the type registry, the variant set was never checked, and this compiled silently.",
+  "language-version": "1.0",
+  "spec": "§19.3.3",
+  "rationale": "§19.3.3: the variant specified in a `fail` statement SHALL be a valid variant of the declared error enum type (E-ERROR-009); an error enum imported from another scrml file resolves exactly as a local one, so the imported enum's variant set governs even when its name is also a built-in error type's.",
+  "expect": {
+    "codes": ["E-ERROR-009"],
+    "notCodes": ["E-ERROR-001"],
+    "severity": { "E-ERROR-009": "error" }
+  }
+}

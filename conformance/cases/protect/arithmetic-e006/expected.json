@@ -1,0 +1,19 @@
+{
+  "id": "protect-arithmetic-e006",
+  "description": "§14.8.9 — arithmetic on a protected column stays protected: `u.pin * 1`, `+u.pin`, `u.pin - 0` and `u.pin * qty` all carry the column's provenance and are E-PROTECT-006 at egress. To compute with a protected column and ship the result, declassify it with `reveal` (see reveal-then-arithmetic-clean).",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "RULING (bryan, S441, verbatim): \"ratify with the changes, arithmetic stays protected\". Until this ruling the result of an arithmetic or unary operator was treated as derived, and `u.pin * 1` / `+u.pin` / `u.pin - 0` served the pin verbatim (measured, S441 review round 2 A12/A13/A22).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

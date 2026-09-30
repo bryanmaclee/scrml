@@ -1,0 +1,19 @@
+{
+  "id": "protect-nested-container-write-e006",
+  "description": "§14.8.9 S441 round 4 (F2) — a write through an object held inside another container (`const box = { m }; box.m.set(h, 1)`) lands in `m`. Putting an object into a container shares its taint cell: E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED before the fix: the write updated only `box`, so returning `m`'s keys served the hash (g-protected-column-escapes-redaction-as-scalar, S441 round 4 review).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

@@ -27,7 +27,7 @@ import { SecretRedactor } from "./diagnostic-secrets.ts";
 import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
-import { runTS, buildTypeRegistry } from "./type-system.ts";
+import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { isLibraryShape, classifyFileShape } from "./library-shape.js";
@@ -76,6 +76,7 @@ import { runTryCatchLint } from "./validators/lint-try-catch.ts";
 import { runAsyncAwaitReject } from "./validators/lint-async-user-source.ts";
 import { runDeferChecks } from "./validators/lint-defer.ts";
 import { runRedeclareChecks } from "./validators/lint-redeclare.ts";
+import { takeProtectRegistry, analyzeCompileProtectFlow } from "./codegen/protect-flow.ts";
 import { forbiddenJsDiagnosticsForDefault, nativeForbiddenJsAttrDiagnostics } from "./native-walker/forbidden-js-native.ts";
 
 // ---------------------------------------------------------------------------
@@ -2466,6 +2467,16 @@ function _compileScrmlImpl(options = {}) {
       return depRegistryCache.get(absSource);
     }
     const reg = buildTypeRegistry(depTypeDecls, [], { file: absSource, start: 0, end: 0, line: 1, col: 1 });
+    // S443 — keep ONLY the dep's own declarations. buildTypeRegistry seeds the
+    // BUILTIN_TYPES (a local `type X` overwrites its entry), so an entry still
+    // identical to the built-in object is not declared by this dep. Left in, a
+    // re-exporting file that also declares a type of its own would "resolve"
+    // `export { AuthError } from './errs.scrml'` to the BUILT-IN AuthError and
+    // shadow the user enum it forwards (resolveTypeThroughReExport stops at the
+    // first registry hit).
+    for (const [name, t] of reg) {
+      if (t === BUILTIN_TYPES.get(name)) reg.delete(name);
+    }
     depRegistryCache.set(absSource, reg);
     return reg;
   }
@@ -2837,6 +2848,9 @@ function _compileScrmlImpl(options = {}) {
 
   // When selfHostModules.runCG is provided (or stageOverrides names the stage), the validated stage seam (pipeline-seam.ts) substitutes it.
   const _runCG = seams.pick("CG", runCG);
+  // §14.8.9 — start this compile with an empty protect-flow registry (a prior
+  // compile that threw mid-CG must not leak its per-file records into this one).
+  takeProtectRegistry();
   const cgResult = stage("CG", () => _runCG({
     files: metaFiles,
     // s440-bootstrap-css-theme-t3 — the CSS sub-seam of CG (pipeline-seam.ts `CSS`): `generateCss`
@@ -3177,6 +3191,36 @@ function _compileScrmlImpl(options = {}) {
   }
   emitValueOnlyServerJsForDanglingImports();
   checkServerImportInvariant();
+  runProtectFlow();
+
+  // ---------------------------------------------------------------------------
+  // §14.8.9 protected-column PROVENANCE FLOW (S441) — compile-wide. Each
+  // protect-active file registered its strip records during CG; the flow runs
+  // here over EVERY emitted server module of the compile, with `./X.server.js`
+  // imports resolved to the module that emits it (the same reversal
+  // `checkServerImportInvariant` uses), so a helper in another file is analysed
+  // rather than guessed. Anything it cannot resolve is a host import and fails
+  // closed. Raises E-PROTECT-006 + the (now truthful) I-PROTECT-STRIP-001.
+  // ---------------------------------------------------------------------------
+  function runProtectFlow() {
+    const reg = takeProtectRegistry();
+    if (reg.size === 0 || !cgResult.outputs) return;
+    const regAbs = new Map();
+    for (const [fp, v] of reg) regAbs.set(resolve(fp), v);
+    const modules = [];
+    const pathOfAbs = new Map();
+    for (const [fp, out] of cgResult.outputs) {
+      if (!out.serverJs) continue;
+      const r = regAbs.get(resolve(fp));
+      modules.push({ filePath: fp, js: out.serverJs, infos: r?.infos, spanOf: r?.spanOf });
+      pathOfAbs.set(resolve(fp), fp);
+    }
+    const byFile = analyzeCompileProtectFlow(modules, (from, spec) => {
+      if (!/^\.\.?\//.test(spec) || !spec.endsWith(".server.js")) return null;
+      return pathOfAbs.get(resolve(serverImportTargetSource(from, spec))) ?? null;
+    });
+    for (const [fp, errs] of byFile) collectErrors("CG", errs, fp);
+  }
 
   // Pre-write commit decision — see the `beforeWrite` option. The planned
   // `.server.js` set is read off `distServerKeyToSource` (the forward index built

@@ -9006,7 +9006,26 @@ prerender payload, a channel `broadcast()` published frame (§38), and a `server
 sinks; a value the compiler serializes to the client passes through one of them, and each reads the
 provenance descriptor and redacts. The strip keys on the column's
 resolved source **`(table, column)` origin, never its surface name** — so `SELECT passwordHash
-AS h` is redacted identically to `SELECT passwordHash`. The redaction is the **load-bearing
+AS h` is redacted identically to `SELECT passwordHash`. Origin matching SHALL follow SQLite identifier
+rules: table and column identifiers are compared CASE-INSENSITIVELY, quoted or not, with a schema
+qualifier (`main.users`) ignored — `SELECT * FROM USERS`, `SELECT PASSWORDHASH` and `u.PasswordHash`
+all resolve to the protected origin. (S441 round 4: the lookup was exact-case, so `FROM USERS`
+emitted no descriptor at all and the whole-row strip vanished — measured, also on main.) Every
+column comparison the floor makes — the descriptor, a `reveal` name, the row key at the sink — SHALL
+be on the case-folded name, and the descriptor SHALL record the name the row actually carries: an
+unaliased column's DECLARED name (the driver returns `SELECT PASSWORDHASH` keyed `passwordHash`), an
+alias exactly as written. (S441 round 5: the descriptor recorded the surface spelling, the strip
+compared exact-case, and `SELECT PASSWORDHASH … return u` served the hash — measured.) A query
+whose origins cannot be resolved still degrades to the wholesale strip, never to "no protected
+column". An output column COMPUTED in SQL — an expression, function call, cast, concatenation, a
+quoted / bracketed / backticked spelling, or a scalar subquery — that references a protected column
+by any spelling (case-folded, quote-stripped, qualified or not), or that contains a nested
+projection `*`, IS that column's value re-encoded by the database; its output key is not
+statically reliable, so the row SHALL be stripped wholesale. This deliberately over-approximates: a
+value derived in SQL (`length(passwordHash)`, `passwordHash = ${x} AS ok`) strips its row too.
+(S441 round 5: such a column carried no descriptor, and `passwordHash || ''`, `lower()`, `hex()`,
+`CAST`, `substr`, `coalesce`, `json_object`, `group_concat`, `pin + 0`, `"passwordHash"` and a
+scalar subquery each served the value — measured, also on main.) The redaction is the **load-bearing
 guarantee**: it is sound *by construction*, not by proving any return clean.
 
 **The provenance map (shared primitive — a reuse).** At `?{}` query-lowering, every output column
@@ -9031,6 +9050,99 @@ cover:
 - **Unresolvable dynamic SQL** — a fully string-built `?{}` whose column origins cannot be
   statically resolved. Per the fail-closed policy below such a row is **stripped wholesale** at
   egress (every column dropped) with an `I-PROTECT-STRIP-001` lint; it is never accept-unknown.
+
+⚑ **S441 amendment — EXTRACTION IS AN EXPLICIT-COLUMN FLOW, AND THE RUNTIME STRIP CANNOT SEE IT.**
+The descriptor lives on the ROW. A value taken OUT of a row — `return u.passwordHash`, a new
+object or array holding it (`{ h: u.passwordHash }`, `[u.passwordHash]`), string concatenation or
+template interpolation, destructuring (`const { passwordHash } = u`), a helper that extracts from a
+row passed to it, `rows.map(r => r.passwordHash)`, `JSON.stringify(u)` — IS the protected column's
+value (it is not a derived flow of independent identity), but it carries no descriptor, so the
+sink has nothing to read. Prior revisions of this section called the floor sound by construction
+without that qualification; MEASURED at S441, `return u.passwordHash` served HTTP 200 with the
+hash in the body while `I-PROTECT-STRIP-001` reported the column stripped
+(`g-protected-column-escapes-redaction-as-scalar`). The guarantee is therefore stated in two
+halves, and a conformant implementation SHALL enforce both:
+1. **Rows** — a value that still is, or contains, a descriptor-bearing row is stripped at the sink
+   at runtime, by construction (the contract above).
+2. **Extracted values** — a value whose provenance includes a `protect=` column and which reaches a
+   client-egress sink OUTSIDE a descriptor-bearing row SHALL be rejected at compile time with
+   **`E-PROTECT-006`**. Rejection, not runtime stripping, is required: a stripped scalar would
+   silently change what the program returns. The obligation is bounded as follows, and these bounds
+   are normative:
+   - **Scope — the whole compile.** The analysis SHALL cover every server module the compile emits,
+     with the imports between them resolved: a helper in another `.scrml` file is analysed, not
+     assumed. (S441 fix round: splitting an extracting helper into a second file was the first
+     bypass of a single-module analysis — it compiled at exit 0 and served the hash.)
+   - **Provenance is preserved by default.** Any step not positively known to produce a value of
+     independent identity preserves it — including binding, member / index / destructuring
+     extraction, re-housing in an object or array literal, spread, writes into a container —
+     including a write through an ALIAS of that container or through a helper that receives it
+     (`const o2 = o; o2.x = h`, `setv(o, h)`, `box.m.set(h, 1)`: every binding that may hold the
+     same object sees the write), a write into an element a collection hands back
+     (`arr.find(…).x = h`, `arr.at(0).x = h`, `m.get(k).x = h`, `Object.values(o)[0].x = h`, an
+     iterator's `.next().value`), and a write into a prototype (`Object.setPrototypeOf(o, p)`,
+     `Object.create(p)`) — string
+     concatenation and template interpolation, conditional and logical operators, `await`, array
+     callbacks, getters and `toJSON` the serializer invokes, `throw` → `catch`, promise resolution,
+     encodings (`Buffer`, `btoa`, `encodeURIComponent`, character codes), and serializing built-ins.
+   - **Unresolvable callees fail closed.** A call into code the compile does not contain — a host,
+     stdlib or npm import, or a platform API — that receives a protected value (a scalar OR a whole
+     row) returns a protected value, unless the callee is on the deriver allowlist.
+   - **The derived-flow exemption is an explicit ALLOWLIST, not "any callee the module does not
+     define".** A value is DERIVED (outside the claim) only when produced by: a comparison, equality,
+     relational, `in` or `instanceof` operator, `!`, `typeof`, `void`, `delete` (never an arithmetic
+     one — see below); `.length` of a value whose length is a count of independent identity — the
+     column's own string, a string or array literal built from it, a `.map` / `.filter` / `.sort`
+     of an array, an array of rows — and of NO other value: `.length` of `({ length: h })`,
+     `new Array(u.pin)`, `"x".repeat(u.pin)` or an unmodelled method's result IS the value and
+     preserves provenance (S441 round 5: `.length` was derived on any receiver, and those shapes
+     served the value — measured); a predicate / position method (`includes`,
+     `startsWith`, `indexOf`, …, but NOT `charCodeAt` / `codePointAt`, which are lossless, and NOT
+     `getTime`, which is the identity on a number) called on a string-like receiver — the same
+     method NAME on an object carrying protected data is an unmodelled method and fails closed; or
+     an allowlisted one-way / boolean function — `scrml:auth` `verifyPassword` / `hashPassword` /
+     `verifyTotp`, `scrml:crypto` `hash` / `hmac` / `verifyHash`, `crypto.subtle.digest`, `Boolean`,
+     `console.*`. `Number(x)` is not on it (on a numeric protected column it is the identity), and
+     neither is any `Bun.*` API (`Bun.hash` is a non-cryptographic hash, brute-forceable on a
+     low-entropy column).
+   - **Arithmetic stays protected** (ruling, S441: "ratify with the changes, arithmetic stays
+     protected"). The result of an arithmetic, bitwise or shift operator (`+ - * / % **`, `& | ^ ~`,
+     `<< >> >>>`), of unary `+` / `-` / `~`, of `++` / `--`, and of a compound assignment on a
+     protected value IS protected, and so is anything derived from it: `u.pin * 1`, `+u.pin`,
+     `u.pin - 0` and `cost_price * qty` are `E-PROTECT-006` at egress. To compute with a protected
+     column, declassify it with `reveal`: `const r = u.reveal("cost_price"); return r.cost_price * qty`
+     is a declassified read followed by arithmetic, and ships.
+   - **Keys are data.** A protected value used as an object KEY (`{ [h]: 1 }`, `o[h] = v`,
+     `m.set(h, v)`) is carried into the container: a key is serialized as surely as a value. A
+     lookup KEYED by a protected value (`labels[h]`, `table[h[i]]`, `m.get(h[i])`) selects by the
+     secret, and its result is protected ALL THE WAY DOWN — a field read off it (`L[c].v`), a method
+     on it (`L[c].test()`), and `Object.keys(L[c])` are all protected. `Object.keys` of a
+     descriptor-bearing row yields column NAMES, not values, and is clean.
+   - **First-party helpers are modelled, not trusted.** `scrml:data` `pick(obj, keys)` /
+     `omit(obj, keys)` with a literal key list are modelled exactly (they copy into a fresh object,
+     so precisely the protected columns that survive the selection are protected — `pick(u, ["id",
+     "name"])` is clean); a non-literal key list fails closed. A `.scrml` re-export
+     (`export { x } from './b.scrml'`) is resolved to the module that defines `x`.
+   - **Sinks.** Every compiler-emitted client-egress serializer, AND every argument of an
+     author-built `Response` — its body AND its `init` (a `Location` or `Set-Cookie` header built
+     from the column is egress even on a null-body response) — `Response.redirect`, `Response.json`,
+     and channel publish / stream enqueue / socket send.
+   - **Out of scope: position oracles and implicit flows.** A position method given a protected
+     ARGUMENT (`ALPHABET.indexOf(h[i])`, `[...ALPHABET].findIndex(c => c == h[i])`) and an implicit /
+     control-dependence flow (`if (h[i] == c) s += c`) can each reconstruct the value character by
+     character; neither is within this version's guarantee.
+   - **Out of scope: a DB round trip.** Writing the value into a non-protected column and reading it
+     back yields a new row whose column origin is not protected; the egress guarantee does not
+     follow a value through the database. (Keeping a protected value out of a non-protected column
+     is a schema / write-path concern, not an egress one.)
+   - **Disclosed imprecision (fails closed, never open).** The analysis is call-site sensitive (each
+     distinct argument signature of a helper is analysed separately) but flow-INsensitive within a
+     function: a variable reassigned from a protected value to a clean one is still treated as
+     protected. An implementation that cannot finish the analysis — an unparseable emitted module,
+     or an exhausted analysis budget — SHALL fail closed with `E-PROTECT-006`.
+
+   `reveal("col")` discharges it for the named column exactly as at the sink; the name is compared
+   case-insensitively, as SQL identifiers are (`reveal("PIN")` declassifies `pin`).
 
 **Declassification — `reveal` (the sole admit path).** A protected-origin column reaches the
 client **iff** it is explicitly declassified via the field-level `reveal` construct at the value:
@@ -9120,7 +9232,16 @@ diagnosable build-time condition into a runtime failure.
 named-codes-land-with-impl precedent — Rule 4):
 - **`I-PROTECT-STRIP-001`** (Info) — names each column the egress sink stripped (the redaction is
   never silent — the dev sees what the floor removed). Also fires on the wholesale strip of an
-  unresolvable-dynamic-SQL row.
+  unresolvable-dynamic-SQL row. ⚑ **S441: it SHALL fire only for a query whose row actually reaches
+  a client-egress sink carrying an unrevealed protected column.** It previously fired for every
+  protected SELECT — including one whose column left as an extracted scalar, which it reported as
+  stripped while it shipped, and one used only server-side (a login that verifies the hash), where
+  nothing is stripped at all. An info that claims a strip that did not happen is a false
+  confidentiality claim, not a lint.
+- **`E-PROTECT-006`** (Error) — a value whose provenance includes a `protect=` column reaches a
+  compiler-emitted client-egress sink outside a descriptor-bearing row (the S441 amendment above).
+  Names the column, the extraction site and the egress. Also raised, fail-closed, when the emitted
+  server module cannot be analysed.
 - **`E-PROTECT-004`** (Error) — a protected-origin column co-occurs, in one function body, with a
   compiler-unanalyzable egress (a `_{}` foreign block or an `asIs` value) where strip-by-origin
   cannot be guaranteed, and it is not `reveal`-declassified for every protected output column of
@@ -9148,7 +9269,10 @@ consuming the stream that is about to be returned — and would replay it under 
 without its headers. Closing it needs a store that can hold status + headers + a buffered body,
 which is a §19.9.6 change.
 
-**The DX layer (deferred — incremental, not load-bearing).** An *early authoring-time* static
+**The DX layer (deferred — incremental, not load-bearing).** ⚑ *S441: this paragraph governs a
+protected-origin ROW. For an EXTRACTED value the compile-time check is not DX — it is the second
+half of the guarantee (`E-PROTECT-006`, above), because no runtime floor can see an extracted
+value.* An *early authoring-time* static
 error reading the **same** provenance map — flagging a protected-origin return at compile time
 before the floor strips it — is a **deferred incremental DX addition**. It would ride the existing
 server-function-return boundary gate at `type-system.ts` (where `E-ROUTE-003` / `E-ROUTE-004`
@@ -20685,7 +20809,8 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-PROTECT-004 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` A protected-origin column (a `protect=` field, resolved BY ORIGIN through the SQL FROM/JOIN alias map — so alias-safe; `passwordHash AS h` is still caught) **co-occurs, in one function body,** with a compiler-unanalyzable egress — a `_{}` foreign-code block (§23) or an `asIs`-typed value (§14.1.1) — at a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38), or `server function*` SSE (§37) boundary, and the column is not `reveal`-declassified. Resolution: declassify EVERY protected output column of that query with `value.reveal("col")`, or project them out. The confidentiality sibling of `E-PROTECT-001` (read-site) in the return-boundary direction. ⛔ **THIS IS A CONSERVATIVE LINT AND §14.8.9 NOW SAYS SO NORMATIVELY — DO NOT CITE IT AS A CONFIDENTIALITY GUARANTEE.** It is a per-body SOURCE-TEXT co-occurrence test, and ordinary function extraction defeats it: REPRODUCED at `8fa6854d`, the same code with the query in a helper and the raw egress in the caller compiled at exit 0 while the one-body form fired. Recognizing more spellings does not repair that — a completeness fix on this mechanism has no done-condition, which is exactly why the repair sat unscheduled for ~40 sessions. It bounds the §14.8.9 DERIVED-FLOW boundary, which that section already excludes from its soundness claim, so its incompleteness is disclosed rather than new. ⚑ **TWO CHANGES AT S405, BOTH NEWLY-REJECTING.** (a) **The `Response` kind LEFT this row** — an author-constructed `Response` is now `E-PROTECT-005`, raised structurally at emission, because that limb was the one whose text co-occurrence stood in for a REAL compiler-visible fact (the emitted envelope is fail-open on a `Response`). Do not re-add it here. (b) **Suppression is COLUMN-keyed, not existence-keyed** — previously ANY `.reveal(` anywhere in the body disarmed the gate for EVERY protected column in it, so `reveal("email")` silently declassified `passwordHash` (REPRODUCED). A strip-all (unresolvable-SQL) query can never be discharged by named reveals; a `.reveal(<non-literal>)` names no readable column and discharges nothing. ⚑ **AND THE `_{}` LIMB DID NOT FIRE ON THE SYNTAX §23 RECOMMENDS, WHICH IS WHY THIS ROW NOW STATES THE OPENER FAMILY.** §23.2 defines the opener as `_` + **zero or more** `=` + `{`, and `W-FOREIGN-001` steers authors AWAY from the level-0 `_{`; the predicate matched level 0 ONLY until S405, so it recognized exactly the spelling the compiler discourages. REPRODUCED at `8fa6854d`: `let w = _={ JSON.stringify(v) }=` in a `protect=` body compiled at exit 0 with no diagnostic and shipped `passwordHash` in full. Cases: `conformance/cases/protect/raw-egress-e004` (fires, level-1 opener) · `reveal-suppresses-e004` (discharged) · `reveal-wrong-column-e004` (NOT discharged — the column-keyed proof). *(Catalog addition S230 dpa-017; scope corrected + narrowed S405 arc A, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` via `detectProtectedRawEgress`.)* | Error |
 | E-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A server function, `<endpoint>` arm or `server function*` generator in a scope that declares `protect=` columns SERIALIZES ITS OWN RESPONSE BODY.** The compiler owns the §14.8.9 egress envelope and MEDIATES it — `_scrml_protect_redact` walks the value, reads each protected-origin descriptor and strips what was not `reveal`-declassified. It cannot mediate a body the author already serialized: that body is an opaque stream the floor cannot read, and the Symbol-keyed descriptor does not survive the author's own `JSON.stringify`. So the compiler refuses to emit an envelope it cannot mediate. Resolution: return the VALUE (the compiler serializes and redacts it for you); or move the function into a file that declares no `protect=` columns. ⛔ **THERE IS NO ESCAPE HATCH AND `reveal("col")` DELIBERATELY DOES NOT DISCHARGE IT.** `reveal` declassifies a NAMED COLUMN at a value the floor can still WALK; a hand-serialized body is not walkable, so there is no column to admit and nothing for the stamp to mean. ⚑ **THE UNIT IS THE BODY, NOT THE `Response` — AND GETTING THAT WRONG SHIPPED A BUILD BREAK WITH NO WORKAROUND.** The first S405 landing gated the full WHATWG producer set, including `Response.redirect` and `Response.error`, both of which have a NULL BODY. There is no stream to fail to inspect, so the error contradicted its own rationale, and its stated resolution ("return the value") **cannot produce a 302**. Combined with the no-escape-hatch rule that meant a `protect=` app could not redirect from a server fn or an `<endpoint>` arm AT ALL — REPRODUCED base-clean / tip-failing on a fn whose SELECT projected every protected column out. Now gated on BODY-CARRYING constructions only (`new Response(<body>, …)` and `Response.json(…)`); `new Response()` / `new Response(not, …)` are silent, and the two null-body statics raise `W-PROTECT-005` instead. **The adopter-facing contract is one sentence: a `protect=` app keeps full control of STATUS and HEADERS and gives up authoring the BODY.** ⛔ **IT IS FILE-SCOPED, NOT QUERY-SCOPED, AND THAT IS DELIBERATE.** It fires wherever the body is built, even in a function that selects no protected column. Keying it on the query would make it a per-body CO-OCCURRENCE test — the exact mechanism `E-PROTECT-004`'s `Response` limb was deleted for, since moving the query one function away defeats it (measured). Immunity to extraction is bought by keying on the CONSTRUCTION alone, and the message says so. ⚑ **EARLY WARNING, NOT THE GUARANTEE.** Detection is an acorn scan over the ALREADY-LOWERED body slice in CODE POSITION (the name inside a string literal or comment does not fire). A `Response` reached by ALIASING, `await fetch(...)`, `.clone()`, or a callee outside the slice is invisible to ANY syntactic scan; chasing those spellings is the unbounded fix this arc refuses. **Those are caught by §14.8.9 limb 3 — the RUNTIME refusal, where `instanceof Response` is exact.** An unparseable slice does not fire (fail-open FOR THE WARNING ONLY, defensible solely because limb 3 holds). Cases: `conformance/cases/protect/e-protect-005-pos` (fires) · `e-protect-005-neg` (same source, `protect=` removed, compiles) · `null-body-response-clean` (the null-body form is silent). *(Catalog addition S405 arc A, scope corrected in the S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`, scanning via `compiler/src/codegen/protect-egress.ts` `findAuthoredResponseConstruction`.)* | Error |
 | W-PROTECT-005 | §14.8.9 | `provenance: ruling:user-voice-scrml.md S405 "fire the defect set"` **A scope that declares `protect=` columns returns a response the COMPILER can prove payload-free but the RUNTIME sink cannot recognize as such** — on this implementation `Response.redirect(...)` and `Response.error()`. It COMPILES (there is no body for the §14.8.9 floor to fail to inspect, so `E-PROTECT-005` would be wrong), but the runtime guard still refuses it with a 500. Resolution: write the equivalent explicit null-body form, which BOTH limbs accept — `new Response(not, { status: 302, headers: { Location: "/where" } })`, `new Response(not, { status: 204 })`. ⚑ **THIS ROW EXISTS BECAUSE THE TWO LIMBS CAN PROVE DIFFERENT THINGS, AND THE SEAM HAD TO GO SOMEWHERE VISIBLE.** MEASURED on Bun 1.3.14: `new Response()` / `new Response(null, …)` give `.body === null`, but `Response.redirect(...)` and `Response.error()` give a **0-byte ReadableStream**, so the sink's non-destructive test cannot distinguish them from a body-carrying response. And it must not try: `new Response("s3cret", {status:302, headers:{Location:"/h"}})` presents IDENTICALLY — same `location`, no `content-length`, same `.body` shape — so any heuristic short of consuming (and destroying) the stream is unsound. ⛔ **The alternative to this warning is silence, and silence here is a WORSE defect than the build break it replaced**: the shape would compile clean and then 500 on the first request. A diagnosable build-time condition SHALL NOT be converted into a runtime failure. Cases: `conformance/cases/protect/w-protect-005-null-body-static` (fires) · `null-body-response-clean` (the named resolution, compiled — a diagnostic that names a working path owes a proof that it works). *(Catalog addition S405 fix round, `docs/changes/dpa-039-defect-set-2026-09-07/`; emitted at `compiler/src/codegen/emit-server.ts` `_protectResponseGate`.)* | Warning |
-| I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands.) | Info |
+| I-PROTECT-STRIP-001 | §14.8.9 | The compiler-emitted egress serializer stripped one or more protected-origin columns from a client-egress payload — a server-function return, SSR `/__serverLoad`, channel `broadcast()` (§38) frame, or `server function*` SSE (§37) `data:` chunk — before it crossed to the client (the §14.8.9 structural-redaction floor). Names each stripped column so the redaction is never silent. Also fires on the wholesale strip of a row whose dynamic SQL could not be statically origin-resolved (fail-closed strip-all). Info-level — never fatal. ⚑ **S441: fires ONLY for a query whose row actually reaches a client-egress sink carrying an unrevealed protected column** — decided by the §14.8.9 provenance flow over the emitted server module. It used to fire for every protected SELECT, so a column that left as an extracted scalar was reported "stripped" while it shipped (`g-protected-column-escapes-redaction-as-scalar`), and a row used only server-side (a login that verifies the hash) was reported stripped when nothing was. Cases: `conformance/cases/protect/strip-info-select-star` (fires) · `login-verify-clean` · `nonprotected-field-runtime` · `reveal-client-visible-runtime` (silent — nothing stripped). (Catalog addition S230 dpa-017; emitted when the §14.8.9 floor build lands; S441 truthfulness fix at `compiler/src/codegen/protect-flow.ts` `buildProtectFlowDiagnostics`.) | Info |
+| E-PROTECT-006 | §14.8.9 | `provenance: brief s441-protect-scalar-egress (SECURITY HIGH, g-protected-column-escapes-redaction-as-scalar); PA ratification pending` **A value whose provenance includes a `protect=` column reaches a compiler-emitted client-egress sink OUTSIDE a descriptor-bearing row** — a server-fn / `<endpoint>` response, SSR `/__serverLoad`, `/__mountHydrate`, channel `broadcast()` (§38), or a `server function*` SSE frame (§37, including its `event` / `id`, which are serialized outside the redact). The §14.8.9 runtime floor strips a protected column by the origin descriptor its ROW carries; a value EXTRACTED from the row carries none, so before this code `return u.passwordHash` served HTTP 200 with the hash in the body (MEASURED). The analysis covers EVERY server module of the compile with imports between them resolved (a helper in another file is analysed). Provenance is PRESERVED BY DEFAULT: extraction, re-housing, concatenation / templates / encodings (`Buffer`, `btoa`, character codes), `await`, callbacks, getters / `toJSON`, `throw` → `catch`, and any call into code the compile does not contain (a host / stdlib / npm import or platform API) receiving a protected scalar or row — fail closed. The derived-flow exemption is an explicit ALLOWLIST: comparison / relational operators, `!`, `typeof`, `.length` of a value whose length is a known count (the column's own string, a string / array literal built from it, a mapped array, a row array — NOT `({ length: h })` or `new Array(u.pin)`, S441 round 5), predicate / position methods on a string-like receiver (not `charCodeAt` / `codePointAt` / `getTime`), and the one-way / boolean functions `scrml:auth` `verifyPassword` / `hashPassword` / `verifyTotp`, `scrml:crypto` `hash` / `hmac` / `verifyHash`, `crypto.subtle.digest`, `Boolean`, `console.*` — no `Bun.*` API. A protected value used as an object KEY, or as a lookup key, is protected (keys are data). `scrml:data` `pick` / `omit` with literal key lists and `.scrml` re-exports are modelled. Sinks: every compiler-emitted client-egress serializer plus every argument of an author-built `Response` (body AND `init` headers — `Location` / `Set-Cookie`), `Response.redirect`, `Response.json`, publish / enqueue / send. `reveal("col")` discharges it for the named OUTPUT column. Resolution: return the row itself (the floor strips the column), or only a derived value; to send it deliberately, `row.reveal("col").col`. Also raised, fail-closed, when an emitted server module cannot be parsed or the analysis budget runs out. ⚑ **Arithmetic stays protected** (ruling S441): an arithmetic / bitwise / unary `+ - ~` / `++ --` / compound-assignment result on a protected value is protected (`u.pin * 1`, `+u.pin`, `cost_price * qty`); compute with a protected column by declassifying it with `reveal`. ⚑ **Keys and aliases:** a protected value used as an object key or lookup key is protected all the way down (`L[c].v`, `Object.keys(L[c])`); a write through an alias or a helper parameter lands in every binding that may hold the object. Origin matching is case-insensitive per SQLite identifier rules. ⚑ **Bounds, disclosed:** position methods with a protected ARGUMENT and implicit / control-dependence flows are out of scope; a DB round trip (write into a non-protected column, read back) is out of scope; the analysis is call-site sensitive but flow-INsensitive within a function (a binding reassigned from a protected value to a clean one is still treated as protected — fails closed). Cases: `conformance/cases/protect/scalar-return-e006` · `scalar-in-new-object-e006` · `scalar-concat-e006` · `scalar-map-e006` · `scalar-helper-e006` · `scalar-helper-cross-file-e006` · `response-header-e006` · `scalar-encoding-e006` · `computed-key-e006` · `reduce-index-by-e006` · `lookup-field-e006` · `lookup-method-e006` · `map-get-field-e006` · `lookup-keys-e006` · `alias-write-e006` · `helper-mutates-param-e006` · `nested-container-write-e006` · `select-upper-column-e006` · `from-upper-table-e006` · `arithmetic-e006` (fire) · `upper-table-row-strip` · `reveal-then-arithmetic-clean` (compile) · `login-verify-clean` · `nonprotected-field-runtime` (silent). *(Catalog addition S441; emitted compile-wide at `compiler/src/api.js` `runProtectFlow` via `analyzeCompileProtectFlow` in `compiler/src/codegen/protect-flow.ts`.)* | Error |
 | E-TENANT-AGG | §14.8.10 | An aggregate/scalar read (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`/…) over a tenant-scoped table (a `<schema>` table carrying a `tenant_id` column) has NO output tenant discriminator (`GROUP BY tenant_id` yielding a per-tenant keyable row), so the §14.8.10 row-redaction floor has no row to key on — a bare `COUNT(*)` folds every tenant into one scalar. In V1-minimal (no SQL-WHERE-injection) such a read cannot be soundly tenant-scoped → fail-closed at compile. Resolution: add a per-tenant `GROUP BY tenant_id` (and project it) so each output row carries its tenant, or mark the query `.acrossTenants()` for a deliberate cross-tenant aggregate. The aggregate sibling of the redact floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `resolveTenantScoping` (kind `agg`).) | Error |
 | E-TENANT-WRITE | §14.8.10 | A write (INSERT / UPDATE / DELETE) against a tenant-scoped table cannot be tenant-constrained by the V1-minimal floor: there is no egress sink for a write, and a committed cross-tenant write is durable before any redaction could run — so it must fail closed at compile. An INSERT that OMITS `tenant_id` and is the parseable single-row `INSERT INTO t (cols) VALUES (...)` shape is auto-injected `tenant_id = @currentUser.tenantId` (no error); an UPDATE/DELETE (which needs a WHERE constraint the V1 floor does not parse), or an un-injectable INSERT (already sets `tenant_id`, is multi-row, or is `INSERT ... SELECT`), fires this error. Resolution: for a per-tenant INSERT omit `tenant_id`; for a deliberate cross-tenant write mark the query `.acrossTenants()`. The row-isolation write sibling of the read floor. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `classifyTenantWrite`.) | Error |
 | E-TENANT-RAW-EGRESS | §14.8.10 | A tenant-scoped table's rows reach a compiler-unanalyzable egress path — a `_{}` foreign-code block (§23), a manual `Response` / `handle()` body (§40), or an `asIs`-typed value (§14.1.1) — where the compiler cannot tag/redact the rows, so a cross-tenant row cannot be proven stripped at this boundary. Fail-closed: the compiler will not silently ship a tenant-scoped row through a path it cannot redact. The row-isolation sibling of `E-PROTECT-004` (the column direction). Resolution: return the rows through the normal compiler-emitted response, or, for a deliberate cross-tenant read, mark the query `.acrossTenants()`. (Catalog addition: tenant-floor V1-minimal impl wave, S273; emitted at `compiler/src/codegen/emit-server.ts` via `detectTenantRawEgress`.) | Error |
