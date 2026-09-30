@@ -3315,6 +3315,48 @@ export function parseDefer(ctx) {
 // consumes the balanced `{ ... }` at the cursor and joins the inner tokens'
 // `.text` with single spaces. `raw` is "{ ... }" for the body form. A missing
 // closing `}` records a diagnostic and the partial body is still returned.
+// rendersMarkupSlice — consume ONE markup element at the cursor (`<tag …>` …
+// `</tag>` / `</>`, or self-closing `<tag …/>`, nested elements counted) and
+// return its verbatim source text + first line, or null (cursor untouched)
+// when the tokens do not form one.
+function rendersMarkupSlice(ctx) {
+    const cursor = ctx.cursor;
+    const toks = [];
+    let o = 0;
+    let depth = 0;
+    let end = -1;
+    for (;;) {
+        const t = peek(cursor, o);
+        if (t === undefined || t === null || t.kind === TokenKind.EOF) return null;
+        if (t.kind === TokenKind.LessThan) {
+            const nx = peek(cursor, o + 1);
+            const closing = nx !== undefined && nx !== null && nx.kind === TokenKind.Slash;
+            let m = o + 1;
+            for (;;) {
+                const tm = peek(cursor, m);
+                if (tm === undefined || tm === null || tm.kind === TokenKind.EOF) return null;
+                if (tm.kind === TokenKind.GreaterThan) break;
+                m = m + 1;
+            }
+            const before = peek(cursor, m - 1);
+            const selfClosing = !closing && before !== undefined && before !== null && before.kind === TokenKind.Slash;
+            if (closing) depth = depth - 1;
+            else if (!selfClosing) depth = depth + 1;
+            o = m + 1;
+            if (depth <= 0) { end = o; break; }
+            continue;
+        }
+        if (depth === 0) return null;
+        o = o + 1;
+    }
+    const first = current(cursor);
+    const last = peek(cursor, end - 1);
+    if (!first || !last || !first.span || !last.span) return null;
+    const text = ctx.source.slice(first.span.start, last.span.end);
+    for (let k = 0; k < end; k = k + 1) advance(cursor);
+    return { text, line: lineOfToken(first) };
+}
+
 function typeBodyText(ctx) {
     const cursor = ctx.cursor;
     const open = advance(cursor);   // consume `{`
@@ -3335,6 +3377,20 @@ function typeBodyText(ctx) {
         const tok = advance(cursor);
         parts.push(tok.text);
         partLines.push(lineOfToken(tok));
+        // S441 round 5e — a `renders <markup>` clause is MARKUP: its text is
+        // content kept exactly (dpa-045), taken verbatim from the source (from
+        // the `<` to the `>` closing that element) instead of re-joined tokens,
+        // which inserted spaces, split `${id}` into `$ { id }` and lost the
+        // characters the lexer has no token for (`#`). Mirrors the live
+        // ast-builder collectBracedBody.
+        if (tok.kind === TokenKind.Ident && tok.text === "renders" && currentKind(cursor) === TokenKind.LessThan
+                && typeof ctx.source === "string") {
+            const slice = rendersMarkupSlice(ctx);
+            if (slice !== null) {
+                parts.push(slice.text);
+                partLines.push(slice.line);
+            }
+        }
     }
     if (depth > 0) {
         recordError(ctx, "E-STMT-TYPE-UNCLOSED-BODY",

@@ -284,3 +284,35 @@ HELD FOR BRYAN (not changed, per PA): the "does nothing" rule's reach over pure 
   moves nothing in examples / samples / conformance / readme / scrml-site / flogence. FUZZ unchanged:
   0 E-INTERNAL, only the continuation class. Suites 27,106 run / 27,024 pass / 0 fail; conformance
   1170/1178 + 8 xfail, 0 FAIL.
+
+## ROUND 5e — the landing PR #1196 browser NAME-SET gate (one new failure)
+
+- browser-lift-target-mount-template.test.js "<render of=@cell/> renders the held variant": source text
+  `renders <p class="rend">No #${id}</p>`. main rendered "No 42" (the `#` DROPPED — content loss the test's
+  expectation encoded); round 5 rendered "No # 42" (a space INSERTED). Neither was right.
+- ROOT: an enum variant's `renders <markup>` clause was rebuilt from LOGIC tokens joined with spaces
+  (ast-builder collectBracedBody / native parse-stmt typeBodyText). The logic tokenizer has no token for
+  `#`, so main lost it; round 5's body-top unknown-character cover (round 4) re-inserted it as its own
+  token, and the join put a space before it. Every run of spaces in a renders body was also collapsed,
+  and on the NATIVE parser `${id}` came out as the literal text `$ { id }` (no interpolation at all). It is
+  not the §4.18.1b `#{` exit check: plain free text (`<p>h#${@x}</p>`) was already verbatim on both.
+- FIX: the renders markup is taken VERBATIM from the source text — from the `<` after `renders` to the `>`
+  closing that element (nested elements counted) — in both front ends (live: `tokens._s441Src` stamped by
+  the logic-block tokenize site; native: `ctx.source`). dpa-045: "Whitespace is kept exactly".
+- Test expectation corrected "No 42" → "No #42" (it encoded the content-loss bug; comment cites dpa-045).
+- Sibling shapes, emitted renders string (main → this round), both parsers:
+    `No #${id}`    default ` No ` + id | native ` No # $ { id } `   →  both `No #` + id
+    `c^${id}`      default ` c ^ ` + id | native ` c ^ $ { id } `   →  both ` c^` + id
+    `b!${id}`      default ` b ! ` + id | native ` b ! $ { id } `   →  both ` b!` + id
+    `t~${id}`      default ` t ~ ` + id | native ` t ~ $ { id } `   →  both ` t~` + id
+    `  two  spaces ${n}  `  default ` two spaces ` | native ` two spaces $ { n } ` → both kept exactly
+  Plain free text (`<p>h#${@x} c^${@x} b!${@x} t~${@x}</p>`) was already verbatim on main and stays so.
+- Side effect (improvement): native conformance error/renders-undefined-var now reports its expected
+  E-ERROR-006 (main native compiled it clean — `$ { badVar }` was literal text, never checked).
+- scripts/browser-baseline.ts --check: PASS (48 asserted). Suites 27,108 / 27,026 pass / 0 fail;
+  conformance 1170/1178 + 8 xfail. Corpus codes vs round 5d: default 0 changed; native 1 (the
+  renders-undefined-var fix above).
+- NOTE for landing: origin/main has moved to 29eb80c31 (#1195 "display-text escapes restored; display
+  literal = standalone statement only") — a trial `git merge-tree` shows conflicts in SPEC.md,
+  SPEC-INDEX.md, FACTS.md only (code auto-merges), but #1195 changes the display-literal rule this branch's
+  segmenter implements; the merged tree needs its suites re-run.

@@ -344,3 +344,21 @@ for (const [label, parser] of BOTH) {
     });
   });
 }
+
+// ---------------------------------------------------------------------------
+// Round 5e — a `renders <markup>` clause is markup: its text is kept exactly.
+// ---------------------------------------------------------------------------
+for (const [label, parser] of BOTH) {
+  describe(`5e — \`renders\` markup is taken verbatim (dpa-045) (${label})`, () => {
+    test("`No #${id}` keeps its `#`, inserts no space; sibling sigils `^` `!` `~` before `${` are content; runs of spaces are kept", () => {
+      const r = compile("type LE:enum = { Alpha(id: string) renders <p class=\"r\">No #${id} c^${id} b!${id} t~${id} end</p>, Beta(n: string) renders <span class=\"s\">  two  spaces ${n}  </span> }\n<a>: LE = .Alpha(\"42\")\n<b>: LE = .Beta(\"7\")\n<div><render of=@a/><render of=@b/></div>", parser);
+      expect(r.codes).toEqual([]);
+      expect(r.client).toContain("<p class=\\\"r\\\">No #\" + ");
+      expect(r.client).toContain("\" c^\" + ");
+      expect(r.client).toContain("\" b!\" + ");
+      expect(r.client).toContain("\" t~\" + ");
+      expect(r.client).toContain("<span class=\\\"s\\\">  two  spaces \" + ");
+      expect(r.client).not.toContain("$ { ");
+    });
+  });
+}
