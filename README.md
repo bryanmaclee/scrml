@@ -395,7 +395,7 @@ A short brief on each feature that works today. Each links to the full mechanics
 
 **Type-derived apps:** `formFor(T)` / `schemaFor(T)` / `tableFor(T, rows)` generate a form, the SQL DDL and a table from one struct. → [deep dive](./NERDME.md#type-derived-apps--formfor--schemafor--tablefor)
 
-**Realtime:** state declared inside `<channel>` syncs across every connected client over a WebSocket the compiler sets up. (A nested `<program>` as a Web Worker is specified, but broken at runtime today: the worker file is never written. [Example 13](examples/13-worker.scrml) shows the syntax.) → [deep dive](./NERDME.md#realtime-and-workers)
+**Realtime & workers:** state declared inside `<channel>` syncs across every connected client over a WebSocket the compiler sets up. A nested `<program>` is a Web Worker: `when message from` handlers receive its messages and `.send()` returns its reply ([example 13](examples/13-worker.scrml)). Supervision (`restart=`, `when terminate from`) is specified but not built yet. → [deep dive](./NERDME.md#realtime-and-workers)
 
 **Client navigation:** `navigate(path)` moves between `<page>`s, rendered into the `<program>` shell's `<outlet>`. → [example 21](examples/21-navigation.scrml)
 
@@ -457,7 +457,7 @@ The [`examples/`](examples/) directory holds one app per file. Every one of them
 | [10-inline-tests](examples/10-inline-tests.scrml) | `~{}` inline tests |
 | [11-meta-programming](examples/11-meta-programming.scrml) | `^{}` meta blocks, `emit()`, `reflect()` |
 | [12-snippets-slots](examples/12-snippets-slots.scrml) | Named content slots in components |
-| [13-worker](examples/13-worker.scrml) | A nested `<program>` as a Web Worker. Compiles, but **broken at runtime**: the worker file is never written |
+| [13-worker](examples/13-worker.scrml) | A nested `<program>` as a Web Worker with typed messages |
 | [14-mario-state-machine](examples/14-mario-state-machine.scrml) | Enum states and `<engine>` transition enforcement |
 | [15-channel-chat](examples/15-channel-chat.scrml) | `<channel>` realtime, auto-synced channel state |
 | [16-remote-data](examples/16-remote-data.scrml) | Loading as a `Phase` enum, failure routed into `.Failed` |
