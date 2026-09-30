@@ -1,0 +1,38 @@
+{
+  "id": "protect-reveal-then-arithmetic-clean",
+  "description": "§14.8.9 — the legitimate path to compute with a protected column: declassify it with `reveal(\"pin\")`, then do arithmetic. No E-PROTECT-006; RUNTIME: the computed value reaches the client (@total = 3 × pin).",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "RULING (bryan, S441, verbatim): \"ratify with the changes, arithmetic stays protected\". `reveal(\"col\")` is the sole declassification path (§14.8.9); reading a revealed column off the revealed value is a declassified read, and arithmetic on it ships. Arithmetic on an UNrevealed column is arithmetic-e006.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-PROTECT-006"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice",
+          "passwordHash": "SECRET_HASH_ALICE",
+          "pin": 1234
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "total": 3702
+    }
+  }
+}

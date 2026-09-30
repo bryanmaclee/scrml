@@ -127,6 +127,63 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
     expect(r && "cols" in r && r.cols).toEqual(["h"]);
   });
 
+  test("S441 round 4 F3: origin matching is CASE-INSENSITIVE, as SQLite identifiers are", () => {
+    const cols = (sql) => { const r = resolveProtectedOutputColumns(sql, usersProtect()); return r && "cols" in r ? r.cols : r; };
+    // Output names are the key the row carries. An UNALIASED column comes back
+    // keyed by its DECLARED name (round 5, F2 — measured: `SELECT PASSWORDHASH`
+    // returned `{ passwordHash }`; recording the surface spelling shipped it);
+    // an alias comes back exactly as written.
+    expect(cols("SELECT PASSWORDHASH FROM users")).toEqual(["passwordHash"]);
+    expect(cols("SELECT passwordhash AS x FROM users")).toEqual(["x"]);
+    expect(cols("SELECT u.PasswordHash FROM users u")).toEqual(["passwordHash"]);
+    expect(cols("SELECT PASSWORDHASH AS PH FROM users")).toEqual(["PH"]);
+    // A `*` over an upper-case table expands to the DECLARED name.
+    expect(cols("SELECT * FROM USERS")).toEqual(["passwordHash"]);
+    // A quoted table the projection extractor cannot resolve degrades to the
+    // fail-closed WHOLESALE strip — never to "no protected column".
+    expect(cols('SELECT * FROM "Users"')).toEqual({ all: true });
+    expect(cols("SELECT * FROM main.USERS")).toEqual({ all: true });
+    expect(cols("SELECT ID, NAME FROM USERS")).toBeNull();
+  });
+
+  test("S441 round 5 F3: an EXPRESSION column over a protected column strips the row wholesale", () => {
+    const cols = (sql) => { const r = resolveProtectedOutputColumns(sql, usersProtect()); return r && "cols" in r ? r.cols : r; };
+    for (const sql of [
+      "SELECT id, passwordHash || '' AS x FROM users",
+      "SELECT id, lower(passwordHash) AS x FROM users",
+      "SELECT id, hex(passwordHash) FROM users",
+      "SELECT id, CAST(passwordHash AS TEXT) AS x FROM users",
+      "SELECT id, substr(passwordHash, 1) AS x FROM users",
+      "SELECT id, coalesce(passwordHash, '') AS x FROM users",
+      "SELECT id, json_object('h', passwordHash) AS x FROM users",
+      "SELECT group_concat(passwordHash) AS x FROM users",
+      'SELECT id, "passwordHash" FROM users',
+      'SELECT id, "PASSWORDHASH" || \'\' AS x FROM users',
+      "SELECT id, [passwordHash] AS x FROM users",
+      "SELECT id, `passwordHash` AS x FROM users",
+      "SELECT id, users.PASSWORDHASH || '' AS x FROM users",
+      "SELECT id, (SELECT passwordHash FROM users LIMIT 1) AS x FROM products",
+      "SELECT id, (SELECT * FROM users LIMIT 1) AS x FROM products",
+      "SELECT id, LOWER(PASSWORDHASH) AS x FROM users",
+      // A derived-in-SQL value strips too — the disclosed over-approximation.
+      "SELECT id, length(passwordHash) AS n FROM users",
+    ]) {
+      expect([sql, cols(sql)]).toEqual([sql, { all: true }]);
+    }
+    // Expressions that reference NO protected column carry no descriptor; a
+    // string literal spelling a protected name is data, not a reference.
+    expect(cols("SELECT id, lower(name) AS x FROM users")).toBeNull();
+    expect(cols("SELECT count(*) AS n FROM users")).toBeNull();
+    // A `*` that is not a projection (COUNT(*), multiplication) inside a
+    // subquery is not a hidden column list (trucking-dispatch customers.scrml).
+    expect(cols("SELECT c.id, (SELECT COUNT(*) FROM invoices i WHERE i.customer_id = c.id) AS n FROM users c")).toBeNull();
+    expect(cols("SELECT id, (SELECT id * 2 FROM products LIMIT 1) AS n FROM users")).toBeNull();
+    // …but a nested projection star is.
+    expect(cols("SELECT id, (SELECT DISTINCT * FROM products LIMIT 1) AS x FROM users")).toEqual({ all: true });
+    expect(cols("SELECT id, (SELECT p.* FROM products p LIMIT 1) AS x FROM users")).toEqual({ all: true });
+    expect(cols("SELECT id, 'passwordHash' AS label FROM users")).toBeNull();
+  });
+
   test("explicit safe projection (no protected column) -> null (no tag)", () => {
     const r = resolveProtectedOutputColumns("SELECT id, name FROM users", usersProtect());
     expect(r).toBeNull();
@@ -433,12 +490,14 @@ describe("§14.8.9 A4 — derived/implicit flows are out of scope (honest bound)
     expect(_scrml_protect_redact(derived)).toEqual({ hasPw: true });
   });
 
-  test("member-extraction into a re-keyed literal `{ secret: row.pw }` is the same boundary", () => {
+  test("member-extraction into a re-keyed literal `{ secret: row.pw }` passes the RUNTIME floor", () => {
     const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
     const row = _scrml_protect_tag({ id: 1, passwordHash: "secret" }, ["passwordHash"]);
-    // A fresh literal that re-keys the column value loses the descriptor — the
-    // derived-flow boundary. The floor catches WHOLE-ROW-IDENTITY flows, not
-    // per-value member extraction (documented; the deferred A-layer / IFC).
+    // A fresh literal that re-keys the column value loses the descriptor, so the
+    // RUNTIME redactor cannot strip it — this pins that the helper alone does
+    // not. ⚑ S441: this is NOT the derived-flow boundary (the value IS the
+    // column) and it no longer ships: the compile-time provenance flow rejects
+    // it as E-PROTECT-006 (protect-flow.ts; protect-scalar-egress.test.js).
     const rekeyed = { secret: row.passwordHash };
     expect(_scrml_protect_redact(rekeyed)).toEqual({ secret: "secret" });
   });

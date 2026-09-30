@@ -281,7 +281,11 @@ describe("§E: `given x :>` and `given x =>` emit byte-identical JS", () => {
     const co = c.outputs.get(join(TMP, "e/colon-client.scrml"));
     expect(ao).toBeTruthy();
     expect(co).toBeTruthy();
-    expect(ao.clientJs).toBe(co.clientJs);
+    // PROGRAM carries `name="P"`, which the worker pre-pass treats as a worker; its
+    // bundle URL is `<page>-P.worker.js` (S443), so it names the two different
+    // source files. Only the file name differs — the given-guard emit is compared.
+    const sameWorkerUrl = (js) => js.replace(/new Worker\("[\w-]+-P\.worker\.js"\)/g, 'new Worker("<page>-P.worker.js")');
+    expect(sameWorkerUrl(ao.clientJs)).toBe(sameWorkerUrl(co.clientJs));
   });
 
   test("serverJs is byte-identical for `=>` and `:>`", () => {

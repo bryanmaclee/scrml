@@ -1,0 +1,24 @@
+change-id: s443-imported-enum-shadowed-by-builtin-error
+
+REGRESSION fix (MED) — introduced on main by #1147's fix-round commit 3332713c5; plus a pre-existing sibling. Base: origin/main (6dccbd6cf or later).
+
+CRITICAL — STARTUP VERIFICATION + PATH DISCIPLINE (incident counter: 0 this session)
+1. `pwd` MUST start with `/home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-`; `git rev-parse --show-toplevel` == pwd; tree clean; `git merge-base HEAD origin/main` == `git rev-parse origin/main`. Else STOP and report.
+2. `bun install`; `bun run pretest` plainly from the worktree CWD.
+3. Every Edit/Write: absolute path UNDER your worktree. Never `cd` into main. NEVER `git stash`. NEVER `pkill -f`/`killall` on a shared string. Scratch: /tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/d50df1ca-2c06-4400-933e-9f464e169732/scratchpad/s443-builtin-shadow/.
+4. First commit: this brief verbatim → `docs/changes/s443-imported-enum-shadowed-by-builtin-error/BRIEF.md` + `progress.md`; `WIP(s443-imported-enum-shadowed-by-builtin-error): start at $(pwd)`. Code + test in ONE commit. Foreground commits, timeout ≥300s. Never `--no-verify`.
+5. Parallel siblings live (auth gating, protected-column egress, body prose). Keep edits to the type registry / fail-resolution path in type-system.ts.
+
+MAPS — REQUIRED FIRST READ: `.claude/maps/primary.map.md` (stamp cf62b415 — verify). Report whether load-bearing.
+
+THE DEFECT (PA-reproduced by execution on 6dccbd6cf; reproducer files at /tmp/claude-1000/-home-bryan-maclee-scrmlMaster-scrml/d50df1ca-2c06-4400-933e-9f464e169732/scratchpad/aerr/ — errs.scrml + app.scrml fail, errs2/app2 with the enum renamed AppAuthError pass):
+`errs.scrml`: `${ export type AuthError:enum = { Missing, Bad(reason: string) } }`; importer: `import { AuthError } from "./errs.scrml"` then `function check(n: string) ! AuthError { if (n == "") fail .Missing … }` → FALSE `E-ERROR-009 … 'AuthError' is not a declared enum type`. Accepted before 3332713c5. Affects user enums named like any BUILTIN error type: AuthError, ValidationError, NetworkError, TimeoutError, NotFoundError, ConflictError, SQLError (reviewer-verified all 7 — re-verify).
+ROOT CAUSE (reviewer-located — HYPOTHESIS, verify): the type registry is seeded from `BUILTIN_TYPES` (these names as `tError`, kind "error"); the imported-types seeder (compiler/src/type-system.ts ~24981) overrides only absent/`unknown` entries, so the imported user enum is SHADOWED by the built-in. 3332713c5 turned that silent shadow into a false error.
+PRE-EXISTING SIBLING (same root, reviewer-executed — re-verify): the qualified `fail AuthError.Nope` (invalid variant) against that imported enum is ACCEPTED silently on base and merge — the variant set is never checked because the registry holds the built-in, not the user enum. Also: an imported enum named `ParseError` (a built-in enum) is rejected on both sides — include it.
+FIX DIRECTION (preferred — closes both): a user declaration (local OR imported) of a name overrides a built-in registry entry, exactly as a local declaration already does (confirm how the local path wins, and make the imported path use the same rule). Do NOT instead widen 3332713c5's exemption to treat kind "error" like unknown — that would leave the qualified hole open.
+GOVERNING (read in full, quote in your report): SPEC §19.3.3 (validity of a `fail` target's variant), §19.4.4.1 (E-ERROR-009 / E-ERROR-011), §21 (imported type names), and whatever SPEC says about built-in error types vs user types of the same name — if SPEC is silent on shadowing a built-in, say so explicitly (outcome 2) and implement only "user declaration wins" as restoration of the pre-3332713c5 acceptance.
+DIRECTION-OF-CHANGE: (a) restores acceptance that existed on main before 3332713c5 (regression revert, not a widening); (b) the qualified invalid-variant case becomes newly-REJECTING — measure it.
+MEASURED MIGRATION: compile examples/, samples/, conformance/cases/, stdlib/, docs/readme-snippets/ before/after; report files whose diagnostics or artifacts change (count + list). Use `bun scripts/corpus-emit-differential.ts` if it fits.
+TESTS: multi-file unit/integration tests: all 7 names × {bare valid, bare invalid, qualified valid, qualified invalid}, ParseError, local-declared twin, aliased import, re-export; plus a conformance case for the imported-built-in-name shape.
+PHASE 3: rerun the scratch reproducer (both files) on your tree: app.scrml now compiles, app2 still compiles, `fail AuthError.Nope` now errors. Then `bun test compiler/tests/unit compiler/tests/integration compiler/tests/conformance --bail` (0 fail) + `bun conformance/run.ts`.
+`git push -u origin HEAD`. REPORT: worktree, branch, FINAL SHA, files, locus hypothesis held/refined/wrong, governing sentences quoted (or the recorded search), migration list, suite numbers. `git status` clean before DONE.
