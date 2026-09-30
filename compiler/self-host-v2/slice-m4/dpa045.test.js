@@ -223,11 +223,21 @@ describe("follow-up 3 — a display-text literal has no character escapes; `${�
 
 // s444 r2 fix 4 — SPEC §4.18.3: "A display-text literal that reaches end-of-file
 // (or the body's closer) before its closing `"` is an unterminated literal —
-// `E-CTX-001` against the opening `"`, recovered per §4.18.7" (the text from the
-// `"` to the closer is taken as the literal's content, and parsing continues).
+// `E-CTX-001` against the opening `"`, recovered per §4.18.7".
+// PA ruling (s444 r3; §4.18.1b pin 3 — "no character inside can move" the
+// body's end): a literal is UNTERMINATED only when the scan from its `"`
+// (a `${…}` skipped whole, by token depth) reaches end of file with no closing
+// `"`. A CLOSED literal's content is content — never searched for closers.
+// Only an unterminated literal is recovered: its content ends at the first body
+// closer (`</>` / `</tag>`) after the `"` (or end of file), parsing goes on.
+// `stateLast` puts the tested state-child LAST, so no later `"` closes it.
+const stateLast = (idle, closer = "</>") => P(`<p><*ph/></p>`, `    <ph:Ph=.A single>\n        <B rule=.A : "B">\n        <A rule=.B>${idle}${closer}\n    </>`);
 describe("an unterminated display-text literal is E-CTX-001 against its opening `\"`", () => {
-  test("`\"abc` before the state-child body's closer: exactly E-CTX-001, at the `\"` (not E-UNQUOTED-DISPLAY-TEXT, no unclosed cascade)", () => {
-    const src = state('"abc');
+  test("twin (behaviour): the `stateLast` shape renders", async () => {
+    expect(await html(stateLast('"Ready"'))).toBe(W("<p>Ready<!--if--></p>"));
+  });
+  test("`\"abc` then the state-child body's `</>` (no closing `\"` in the file): exactly E-CTX-001, at the `\"`; content `abc`", () => {
+    const src = stateLast('"abc');
     const r = run(src);
     expect(r.diags.map((d) => d.code)).toEqual(["E-CTX-001"]);
     const q = src.indexOf('"abc');
@@ -235,11 +245,39 @@ describe("an unterminated display-text literal is E-CTX-001 against its opening 
     expect(r.diags[0].span.end).toBe(q + 1);
     expect(texts(r)).toContain("abc");
   });
-  test("a closer written inside the literal's text ends it there — `\"x </> y\"` is E-CTX-001 first", () => {
-    const src = state('"x </> y"');
-    const d = run(src).diags;
-    expect(d[0].code).toBe("E-CTX-001");
-    expect(d[0].span.start).toBe(src.indexOf('"x'));
+  test("the NAMED closer `</A>` is a recovery point too — exactly E-CTX-001; content `abc`, the `</A>` is not content", () => {
+    const r = run(stateLast('"abc', "</A>"));
+    expect(r.diags.map((d) => d.code)).toEqual(["E-CTX-001"]);
+    expect(texts(r)).toContain("abc");
+    expect(texts(r).some((t) => t.includes("</A>"))).toBe(false);
+  });
+  test("a runaway `${` does not eat the closer — `\"x ${ @n ` then `</>`: exactly E-CTX-001, recovered at the closer", () => {
+    const src = stateLast('"x ${ @n ');
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-CTX-001"]);
+    expect(r.diags[0].span.start).toBe(src.indexOf('"x'));
+    expect(texts(r)).toContain("x ${ @n ");
+  });
+  test("a `\"` inside an interpolation's string does not close the literal — `\"x ${\"a\"` at end of file is E-CTX-001 (state body and `:`-shorthand)", () => {
+    const st = `<program>\n    type Ph:enum = { A, B }\n    <ph:Ph=.A single>\n        <A rule=.B>"x \${"a"`;
+    const d1 = run(st).diags;
+    expect(d1[0].code).toBe("E-CTX-001");
+    expect(d1[0].span.start).toBe(st.indexOf('"x'));
+    const sh = `<program>\n    <main>\n        <p : "x \${"a"`;
+    const d2 = run(sh).diags;
+    expect(d2[0].code).toBe("E-CTX-001");
+    expect(d2[0].span.start).toBe(sh.indexOf('"x'));
+  });
+  test("behaviour: a CLOSED literal containing `</>` is content — never cut at it (the r2 regression)", async () => {
+    expect(await html(state('"see </> here"'))).toBe(W("<p>see &lt;/&gt; here<!--if--></p>"));
+    expect(await html(stateLast('"see </> here"'))).toBe(W("<p>see &lt;/&gt; here<!--if--></p>"));
+  });
+  test("behaviour: a CLOSED literal containing the named closer `</A>` is content", async () => {
+    expect(await html(state('"see </A> here"'))).toBe(W("<p>see &lt;/A&gt; here<!--if--></p>"));
+    expect(await html(stateLast('"see </A> here"', "</A>"))).toBe(W("<p>see &lt;/A&gt; here<!--if--></p>"));
+  });
+  test("twin (behaviour): a leading `(` does not move the body's end — `(\"see </> here\")` renders the same", async () => {
+    expect(await html(state('("see </> here")'))).toBe(W("<p>see &lt;/&gt; here<!--if--></p>"));
   });
   test("a literal running to end of file: E-CTX-001 first, at the `\"`", () => {
     const src = `<program>\n    type Ph:enum = { A, B }\n    <ph:Ph=.A single>\n        <A rule=.B>"abc`;

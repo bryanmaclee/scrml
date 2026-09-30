@@ -56,3 +56,19 @@ counter 4 · dropdown 22 · dropdownReorder 22 · dropdownEarlyRead 23 · values
 the reviewer measured) · M4 (added by the merge's programs): engine 5 · audit fixture 8 ·
 audit shapes fixture 8 · form fixture 16. Theme does not compile clean in the bootstrap on
 either side; its diagnostic list is identical.
+
+## Round 3 (re-review of 5b21080b3: fixes 1,2,3,5 + merge clean; fix 4 regressed)
+Reproduced first (reviewer's cases1/2 under review-dpa045b/): F1 `"see </> here"` →
+E-CTX-001 + E-PARSE-DECL-BODY, while `("see </> here")` rendered clean (a leading `(` moved the
+body's end — §4.18.1b pin 3); F2 `"x ${ @n </> y` → rest of file Text + unclosed cascade;
+F3 `"x ${"a"` at EOF → no E-CTX-001; F4 named-closer branch unbitten.
+PA ruling R1 applied: UNTERMINATED iff the scan from the `"` (a `${…}` skipped by lexFrom
+Balanced — token depth) reaches EOF with no closing `"` (`displayCloseAt`). Only then:
+E-CTX-001 at the `"`, content ends at the first `</>` / `</tag>` after it (raw, `firstBodyCloser`)
+or EOF; parsing goes on. A closed literal is never searched for closers. The r2 tests pinning
+`"x </> y"` → E-CTX-001 flipped to content. `unterminatedDisplay` / `runsToEof` removed.
+Consequence (per the ruling): `"abc` followed later in the file by any `"` is a CLOSED literal
+(it closes there) — the tests use `stateLast` (tested state-child last) for the E-CTX-001 cases.
+`:`-shorthand: unterminated → E-CTX-001, content to EOF (no body closer).
+Mutation rows for fix 4 rewritten: 6 rows (check dropped ×2, `${…}` not skipped, closed literal
+searched for closers, named closer dropped, `</>` dropped) — all RED.

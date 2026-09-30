@@ -1274,15 +1274,13 @@ ${
             return { nodes: [en], mp: mBump(em) }
         }
         const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)
-        const lit: PTok = tp.toks[0]
-        if (chAt(at, 0) == "\"" && lit.cls == TC.Str && lit.start == at.pos && runsToEof(lit, mp.src)) {
-            // SPEC §4.18.3: a display-text literal that reaches end of file
-            // before its closing `"` is E-CTX-001 against the opening `"`
-            // (recovered per §4.18.7: the text to EOF is its content). (A
-            // shorthand's other "closer" is the opener's `>`, which is also
-            // legal display text — `<p : "a > b">` — so only EOF is decidable.)
-            const em: MP = mDiag(mAt(mp, mp.src.length), "E-CTX-001", "unterminated display-text literal: the `\"` opened here reaches the end of the file before its closing `\"` (§4.18.3)", lit.start, lit.start + 1)
-            const en: ANode = textNode(em, lit.start + 1, mp.src.substring(lit.start + 1))
+        if (chAt(at, 0) == "\"" && displayCloseAt(mp.src, at.pos) < 0) {
+            // SPEC §4.18.3: a display-text literal with no closing `"` before
+            // end of file is E-CTX-001 against the opening `"` (recovered per
+            // §4.18.7: a `:`-shorthand has no body closer, so its content is
+            // the text to end of file).
+            const em: MP = mDiag(mAt(mp, mp.src.length), "E-CTX-001", "unterminated display-text literal: the `\"` opened here has no closing `\"` before the end of the file (§4.18.3)", at.pos, at.pos + 1)
+            const en: ANode = textNode(em, at.pos + 1, mp.src.substring(at.pos + 1))
             return { nodes: [en], mp: mBump(em) }
         }
         let t: TP = tp
@@ -1460,14 +1458,17 @@ ${
                 const tagNode: RNodeOne = parseMarkupNode(m)
                 out = out.concat([tagNode.n])
                 m = tagNode.mp
-            } else if (chAt(m, 0) == "\"" && unterminatedDisplay(m, tag) >= 0) {
-                // SPEC §4.18.3 / §4.18.7 (recovery): a display-text literal that
-                // reaches the body closer (or end of file) before its closing
-                // `"` is E-CTX-001 against the opening `"`; the text from the
-                // `"` to the closer is taken as its content, and parsing goes on
-                const stop: int = unterminatedDisplay(m, tag)
+            } else if (chAt(m, 0) == "\"" && displayCloseAt(m.src, m.pos) < 0) {
+                // SPEC §4.18.3 / §4.18.7 (PA ruling, s444 r3): a display-text
+                // literal is UNTERMINATED only when the scan from its `"`
+                // reaches end of file with no closing `"` — a closed literal's
+                // content is content, never searched for closers (§4.18.1b pin
+                // 3). Then: E-CTX-001 against the opening `"`, the literal's
+                // content ends at the first body closer after it (or end of
+                // file), and parsing goes on from that closer.
+                const stop: int = firstBodyCloser(m.src, m.pos + 1, tag)
                 const open: int = m.pos
-                m = mDiag(m, "E-CTX-001", "unterminated display-text literal: the `\"` opened here reaches " + (stop >= m.src.length ? "the end of the file" : "the `<" + tag + ">` body's closer") + " before its closing `\"` (§4.18.3)", open, open + 1)
+                m = mDiag(m, "E-CTX-001", "unterminated display-text literal: the `\"` opened here has no closing `\"` before the end of the file (§4.18.3) — read up to " + (stop >= m.src.length ? "the end of the file" : "the `<" + tag + ">` body's closer"), open, open + 1)
                 const at: MP = mAt(m, stop)
                 out = out.concat([textNode(at, open + 1, m.src.substring(open + 1, stop))])
                 m = mBump(at)
@@ -1494,35 +1495,37 @@ ${
         return { nodes: out, mp: m }
     }
 
-    // A display-text literal opening at `mp` (a `"`) in a `<tag>` code-default
-    // body: where it runs out — the position of the body closer (`</>` /
-    // `</tag>`) met inside its literal segments, or end of file when it has no
-    // closing `"` — else -1 (a well-formed literal). The literal's extent is
-    // the lexer's (display mode); a `${…}` inside it is skipped by the
-    // canonical walker, so a closer inside an interpolation does not count.
-    fn unterminatedDisplay(mp: MP, tag: string) -> int {
-        const tp: TP = regionTP(mp, LexStop.CodeBody)
-        const t: PTok = tp.toks[0]
-        if (t.cls != TC.Str || t.start != mp.pos) return -1
-        let i: int = mp.pos + 1
-        while (i < t.end) {
-            if (mp.src.substring(i, i + 2) == interpOpen()) {
-                i = lexFrom(mp.src, i + 1, LexStop.Balanced).end
-            } else if (mp.src.substring(i, i + 3) == "</>" || mp.src.substring(i, i + tag.length + 3) == "</" + tag + ">") {
-                return i
+    // The position of the closing `"` of the display-text literal whose
+    // opening `"` is at `pos`, or -1 when it has none (it runs to end of
+    // file). The scan is the lexer's display mode: no escapes, and a `${…}`
+    // is skipped whole by the canonical walker (token depth — a `"` or `}`
+    // inside it, e.g. in a nested string, does not close the literal).
+    fn displayCloseAt(src: string, pos: int) -> int {
+        let i: int = pos + 1
+        while (i < src.length) {
+            const c: string = src.substring(i, i + 1)
+            if (c == "\"") return i
+            if (src.substring(i, i + 2) == interpOpen()) {
+                const e: int = lexFrom(src, i + 1, LexStop.Balanced).end
+                i = e > i + 1 ? e : i + 2
             } else {
                 i = i + 1
             }
         }
-        if (!runsToEof(t, mp.src)) return -1
-        return t.end
+        return -1
     }
 
-    // A `"` string token with no closing `"`: it ran to end of file (display
-    // mode: no escapes, so a final `"` always closes it).
-    fn runsToEof(t: PTok, src: string) -> boolean {
-        if (t.end < src.length) return false
-        return !(t.text.length >= 2 && t.text.substring(t.text.length - 1) == "\"")
+    // Recovery point for an unterminated literal in a `<tag>` body: the first
+    // `</>` or `</tag>` at or after `from` (raw bytes — the literal never
+    // closed, so there is no structure left to respect), else end of file.
+    fn firstBodyCloser(src: string, from: int, tag: string) -> int {
+        let i: int = from
+        while (i < src.length) {
+            if (src.substring(i, i + 3) == "</>") return i
+            if (src.substring(i, i + tag.length + 3) == "</" + tag + ">") return i
+            i = i + 1
+        }
+        return src.length
     }
 
     type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], mp: MP }
