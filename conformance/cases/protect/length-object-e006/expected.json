@@ -1,0 +1,12 @@
+{
+  "id": "protect-length-object-e006",
+  "description": "§14.8.9 S441 round 5 (F1) — `.length` is a DERIVED count only on a value whose length is a count of independent identity (the column's own string, a string built from it, an array literal, a mapped / filtered array, a row array). `new Array(u.pin).length` IS the pin, so it is E-PROTECT-006 at egress.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED before the fix (S441 round-4 review, F1): `.length` was treated as derived on ANY receiver, so `({ length: h }).length` and `new Array(u.pin).length` served the protected value with HTTP 200.",
+  "expect": {
+    "codes": ["E-PROTECT-006"],
+    "severity": { "E-PROTECT-006": "error" }
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "id": "protect-lookup-field-e006",
+  "description": "§14.8.9 S441 round 4 (F1) — a lookup keyed by a protected value selects BY the secret, and that selection is protected all the way down: `[...h].map(c => L[c].v).join(\"\")` rebuilds the hash from a character table. E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED after round 3: the key taint reached only the selected value's scalar part, and a static field read (`.v`) off it was treated as a primitive property, so this served the hash (g-protected-column-escapes-redaction-as-scalar, S441 round 4 review).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

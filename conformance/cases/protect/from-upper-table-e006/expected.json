@@ -1,0 +1,19 @@
+{
+  "id": "protect-from-upper-table-e006",
+  "description": "§14.8.9 S441 round 4 (F3) — `FROM USERS` names the protected `users` table (SQLite table names are case-insensitive). The row is tagged and extracting the protected column is E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED before the fix, ALSO ON MAIN: `SELECT * FROM USERS` emitted no _scrml_protect_tag at all, so even the whole-row runtime strip vanished and the route served {\"passwordHash\":\"SECRET-HASH-123\"} (g-protected-column-escapes-redaction-as-scalar, S441 round 4 review).",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}
