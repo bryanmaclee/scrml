@@ -3605,7 +3605,12 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (method === "all") {
             return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${tagged}`, rawQuery, false), rawQuery)) + ";";
           }
-          return `await ${tagged};`;
+          // ⚑ S443 round 6: `.run()` / any other terminator / a bare `?{}` is the
+          // driver's result array when used as a value (`let r = ?{`SELECT *…`}.run()`,
+          // `UPDATE … RETURNING *`) — measured serving `passwordHash` untagged. Every
+          // terminator below is tagged; a statement with no protected output emits
+          // unchanged (protectTagSqlResult is a no-op for it).
+          return protectTagSqlResult(`await ${tagged}`, rawQuery) + ";";
         }
 
         // Branch B: SQL uses bare ? placeholders + explicit call.args.
@@ -3618,7 +3623,7 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
           if (method === "all") {
             return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery, false), rawQuery)) + ";";
           }
-          return `await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}]);`;
+          return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(sql)}, [${argList}])`, rawQuery) + ";";
         }
 
         // Branch C: no params, no call.args. Bare tagged template.
@@ -3629,16 +3634,16 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
         if (method === "all") {
           return _tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${taggedNoParams}`, rawQuery, false), rawQuery)) + ";";
         }
-        return `await ${taggedNoParams};`;
+        return protectTagSqlResult(`await ${taggedNoParams}`, rawQuery) + ";";
       }
 
       // No chained call.
       if (params.length > 0) {
         // Defaults to .run() semantics — value dropped.
-        return `await ${taggedFromParams()};`;
+        return protectTagSqlResult(`await ${taggedFromParams()}`, rawQuery) + ";";
       }
       // Static DDL — route through unsafe() so the runtime accepts no-param SQL.
-      return `await ${db}.unsafe(${JSON.stringify(rawQuery)});`;
+      return protectTagSqlResult(`await ${db}.unsafe(${JSON.stringify(rawQuery)})`, rawQuery) + ";";
     }
 
     case "fail-expr": {

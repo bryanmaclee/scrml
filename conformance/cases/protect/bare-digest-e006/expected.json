@@ -1,0 +1,12 @@
+{
+  "id": "protect-bare-digest-e006",
+  "description": "§14.8.9 RULING S443 #7 — a bare digest (`scrml:crypto` `hash` with md5 / sha1 / sha256 / …) of a protected column stays PROTECTED: returning it is E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "§14.8.9 deriver allowlist, amended by RULING S443 #7 (user-voice-scrml.md §S443): only keyed or password-class derivers (verifyPassword, verifyHash, keyed hmac, argon2) produce a value of independent identity. An unkeyed digest of a low-entropy column is reversible by enumeration — `hash(\"md5\", u.pin)` of a 4-digit pin falls in 10^4 tries — for the same reason `Bun.hash` was never on the list.",
+  "expect": {
+    "codes": ["E-PROTECT-006"],
+    "severity": { "E-PROTECT-006": "error" }
+  }
+}

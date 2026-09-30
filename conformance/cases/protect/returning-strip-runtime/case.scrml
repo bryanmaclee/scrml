@@ -1,0 +1,14 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function renameUser(id) {
+        return ?{`UPDATE users SET name = 'Alicia' WHERE id = ${id} RETURNING *`}.get()
+      }
+    }
+  </db>
+  <user> = not
+  <button id="rename" onclick=${ @user = renameUser(1) }>rename</button>
+</program>

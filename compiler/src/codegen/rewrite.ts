@@ -599,8 +599,13 @@ export function rewriteSqlRefs(
       return tenantTag(protectTagSqlResult(boolCoerceSqlResult(`await ${tagged}`, sqlContent, false), sqlContent));
     }
 
-    // .run() and any other terminator — bare await form, no row egress to tag.
-    return `await ${tagged}`;
+    // .run() and any other terminator. ⚑ S443 round 6: this path used to be left
+    // untagged on the premise that `.run()` discards its result — but the value
+    // is the driver's result ARRAY, and `const r = ?{`SELECT * …`}.run(); return r`
+    // or `UPDATE … RETURNING *` via `.run()` served `passwordHash` (measured). Every
+    // terminator's result is tagged; a statement with no protected output
+    // (plain INSERT/UPDATE/DELETE, DDL) resolves to no tag and emits unchanged.
+    return protectTagSqlResult(`await ${tagged}`, sqlContent);
   });
 
   // Bare `?{`...`}` form — typically static DDL (`CREATE TABLE ...`) or a
@@ -612,10 +617,12 @@ export function rewriteSqlRefs(
     // injected (no row egress to tag; the hard-fail codes fire from emit-server).
     const { effectiveSql } = _lowerTenantForQuery(sqlContent, _acrossSqls.has(sqlContent), false);
     const { sql, params } = extractSqlParams(effectiveSql);
+    // ⚑ S443 round 6: a bare `?{`SELECT * …`}` used as a VALUE is the driver's row
+    // array — tag it like every other lowering (measured: it served `passwordHash`).
     if (params.length === 0) {
-      return `await ${dbVar}.unsafe(${JSON.stringify(sql)})`;
+      return protectTagSqlResult(`await ${dbVar}.unsafe(${JSON.stringify(sql)})`, sqlContent);
     }
-    return `await ${dbVar}.unsafe(${JSON.stringify(sql)}, [${params.join(", ")}])`;
+    return protectTagSqlResult(`await ${dbVar}.unsafe(${JSON.stringify(sql)}, [${params.join(", ")}])`, sqlContent);
   });
 
   return result;

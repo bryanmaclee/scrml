@@ -1,0 +1,16 @@
+{
+  "id": "protect-marker-removal-alias-e006",
+  "description": "§14.8.9 S443 round 6b (L4) — removing a property by a key the compiler cannot read from a row copy may remove a column marker, whatever produced the key (here an ALIAS of Symbol): E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "§14.8.9: the runtime floor is one marker per protected column, read by presence; only a REMOVAL can under-strip. Round 6 recognized three Symbol sources and aliases walked past it (`const S = Symbol; S.for(…)`, `globalThis.Symbol.for`, `const O = Object`, `.bind`, destructuring) — review measured the full row served. The rule now looks at the removal (delete / Reflect.deleteProperty / defineProperty / defineProperties / object-rest exclusion by a non-literal key), not at the key's source.",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}
