@@ -166,6 +166,16 @@ for (const [label, parser] of BOTH) {
   });
 }
 
+test("§3 native: a parse diagnostic at the run's END belongs to its statement, not to an empty 'prose' line", () => {
+  // Was (round-4 WIP): `import stuff` → E-UNQUOTED-DISPLAY-TEXT quoting ``
+  // on the NEXT line (the markup), hiding the real E-STMT-EXPECT-FROM.
+  const r = compile("<program>\nimport stuff\n<p>x</p>\n</program>\n", "scrml-native");
+  expect(r.codes).not.toContain("E-UNQUOTED-DISPLAY-TEXT");
+  expect(r.codes).toContain("E-STMT-EXPECT-FROM");
+  const f = compile("<program>\nfn heading\n<p>x</p>\n</program>\n", "scrml-native");
+  expect(f.codes).toEqual(["E-STMT-FUNCTION-BODY"]);
+});
+
 // ---------------------------------------------------------------------------
 // §4 — seeded fuzz, independent oracle
 // ---------------------------------------------------------------------------

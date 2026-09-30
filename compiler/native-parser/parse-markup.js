@@ -2818,7 +2818,11 @@ function rejectBodyTopProseNative(block, source, ctx) {
             const ls = source.lastIndexOf("\n", f0 - 1) + 1;
             const le = source.indexOf("\n", f0);
             const lt = source.slice(ls, le === -1 ? blockEnd : Math.min(le, blockEnd));
-            if (BODY_TOP_CODE_HEAD_RE.test(lt) === false && (orphanFs < 0 || f0 < orphanFs)) orphanFs = f0;
+            // A diagnostic at the run's END (`import stuff` → "expected
+            // 'from'" reported at end-of-input) has no line of its own: it
+            // belongs to its owner statement, not to an orphan prose line.
+            if (f0 < blockEnd && lt.trim() !== ""
+                    && BODY_TOP_CODE_HEAD_RE.test(lt) === false && (orphanFs < 0 || f0 < orphanFs)) orphanFs = f0;
         }
     }
     for (const d of diags) {
