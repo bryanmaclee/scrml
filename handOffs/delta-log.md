@@ -4094,3 +4094,17 @@ flagged `(deputy)`, observation-only, recording an agent that landed while the P
 [3593] find · spotlight audit → security: static server served the DB + session store + server source (on main, fixed #1162); CSRF absent under auth (#1161); WS hijack (#1161); example-23 tokens replayable (#1155); `<page auth="required">` and nested `<program auth>` gate nothing (OPEN, HIGH); protect= bypassed by SQL case + SQL expressions (OPEN, HIGH)
 
 [3594] friction · text-scan fixes lost to adversarial review three rounds running (F4/F5, declared prose); structural rules (scope resolution, binding poisoning, coverage invariant) ended it. A red test passed the full hook because runtime tests skip under happy-dom in the one-process hook (gap filed). Sub-agent pushes classifier-denied repeatedly (ruled covered)
+
+[3595] state · S442 (bryan/XPS) successor to S441 (ASUS); took S441's FREE lanes: bootstrap typer + §66.19 programs + maps; Bun 1.3.6→1.4.2 on XPS
+
+[3596] rule · S442 bryan: tape grow/shrink split (append/pop, prepend/shift, insert/remove — tokens ruled) + anywhere covers end/front; O55 = error; six typer recs (bool|not bare condition error, handle presence narrows, int everywhere, 4 codes); T|not into T error for all types; sequence spreads one snapshot → user-voice S442
+
+[3597] rule · S442 bryan: dpa-058 all recs (bind always written; validators follow the bind; novalidate; O54=(a); dead validators error; D1 fixed) + dpa-045 AXIOM ruled (a′: two text-mode productions; closed exit set = context sigils + // + <[a-zA-Z!/?*_.]; cooked; no display-text escapes; whitespace kept)
+
+[3598] land · S442: #1144 maps · #1148 bank dpa-058 · #1151 #1157 #1159 bootstrap typer · #1154 #1168 dpa drain/ruled · #1156 SPEC §66.12/O55 · #1160 impl#1 self-close · #1164 §66.19 programs; queued #1167 #1169 #1170
+
+[3599] find · dpa-045's ratified closed exit set omitted //, #{, ^{, !{ and the <* <_ <. tag forms (~580 corpus uses) — found independently by both build agents; bryan ruled the full list
+
+[3600] friction · S442 PA dropped 10 S441 gap entries (4 HIGH) resolving known-gaps.md with a keep-one-side regex; caught by id diff pre-push; + toggled auto-merge on S441's #1153 by a guessed PR number (reverted)
+
+[3601] state · S442 HELD for Oct 2 (agent weekly limit): feat/s442-dpa045-bootstrap @1fe0b22a UNREVIEWED; typer r8 on feat/s442-typer-r8-wip; dpa-058 bootstrap build; SPEC follow-up (4 PA readings); impl#1 gaps to file (liftedali content loss; _{ as text)
