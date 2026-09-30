@@ -9270,12 +9270,20 @@ every column a marker is PRESENT for. Consequences a conformant implementation S
   row-bearing value — `delete o[k]`, `Reflect.deleteProperty`, `Object.defineProperty` /
   `defineProperties` (a hidden marker is dropped by the next copy), an object-rest pattern that
   excludes a computed key, a reflection-capable global callee handed the row — as making that row
-  ship every protected column it holds, WHATEVER produced the key. ~~a value which may be the
+  ship every protected column it holds, WHATEVER produced the key. (A key that is a string / number
+  literal, or a `const` bound to one, names a column, not a marker — S443 round 6c. The diagnostic
+  for this rule SHALL name the fix: a literal key, or rebuilding the collection without the entry.)
+  ~~a value which may be the
   descriptor's key — `Symbol.for(…)`, `Object.getOwnPropertySymbols`, `Reflect.ownKeys`, or anything
   built from them~~ *(round-6 wording, SUPERSEDED: a list of Symbol sources is a recognizer, and
   aliases — `const S = Symbol; S.for(…)`, `globalThis.Symbol.for`, `const O = Object`, `.bind`,
   destructuring — each walked past it and served the full row, review-measured; JS offers no sound
   way to know which values can be Symbols.)*
+- **`toJSON` cannot re-introduce a column (S443 round 6c).** The serializer invokes a value's
+  `toJSON` AFTER the sink's walk, so the sink SHALL do it first: invoke `toJSON` (once) and redact
+  what it returns, and leave no function-valued property in what it hands the serializer, at any
+  depth. (Measured on base and round 6b: `{ toJSON: () => u }`, `u.toJSON = () => ({ ...u })`,
+  `{ ...u, toJSON: () => u }` and `{ data: { toJSON: () => [u] } }` each served the full row.)
 (Measured before round 6: `delete u[Symbol.for("scrml.protect.origin")]`, pushing onto the
 descriptor's reveal list, and deleting a copy's Symbol-keyed properties each served the full row.)
 
@@ -9393,9 +9401,19 @@ halves, and a conformant implementation SHALL enforce both:
      constants, or a CHOICE that may be one (`process.env.K ?? "dev-key"`, a helper called with a
      literal on some call site) — is public, so `hmac("public-key", String(u.pin))` is reversible by
      enumeration exactly like a bare digest: the result stays PROTECTED (`E-PROTECT-006` at egress).
-     A key from the environment, configuration, a secret store or another runtime value (a
-     concatenation with a runtime part included) remains a declassifier, provided the key is not
-     itself protected.
+     A key from the environment, configuration, a secret store or another runtime value remains a
+     declassifier, provided the key is not itself protected.
+     ⚑ **S443 round 6c — the decision needs POSITIVE evidence, and fails closed without it.** A key
+     declassifies only when its provenance is entirely a runtime secret source — a read under
+     `process.env` / `Bun.env` / `import.meta.env`, a database value, or the result of a host
+     (stdlib / npm) call such as a configuration or secret-store read — and has NO constant part: a
+     constant computed through a call (`String.fromCharCode(107, 101, 121)`, `JSON.parse('"key"')`,
+     `String(Math.PI)`), a key with no evidence at all (a free name, a parameter no caller shows), and
+     a concatenation with a constant part (`"k" + process.env.K` is `"kundefined"` when the variable
+     is unset) all stay PROTECTED. A constant imported from another server module is a constant.
+     ~~(a concatenation with a runtime part included)~~ *(round-6b wording, SUPERSEDED: 6b treated any
+     unmodelled call or global read as runtime and those constant keys declassified — review,
+     measured.)*
      > **Provenance:** ruling:user-voice-scrml.md S445 item 4 (refines S443 item 7)
    - **Arithmetic stays protected** (ruling, S441: "ratify with the changes, arithmetic stays
      protected"). The result of an arithmetic, bitwise or shift operator (`+ - * / % **`, `& | ^ ~`,
