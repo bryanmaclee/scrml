@@ -28,6 +28,7 @@ import { mkdirSync, writeFileSync, readFileSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { perRunTmp } from "../helpers/per-run-tmp.js";
+import { compileScrml } from "../../src/api.js";
 
 const testDir = dirname(fileURLToPath(import.meta.url));
 const CLI = resolve(testDir, "../../src/cli.js");
@@ -225,4 +226,120 @@ describe("no required program → nothing is inherited", () => {
     // The explicit <page auth="required"> is still its own scope.
     expect(res.anon["/secret"]).toEqual({ status: 302, location: "/login", marker: null });
   });
+});
+
+// ---------------------------------------------------------------------------
+// S443 round 3 (adversarial review of 5390820dd)
+// ---------------------------------------------------------------------------
+
+// GET-only child probe over the shipped _server.js: { path: {status, location, marker} }.
+const GET_PROBE = `
+const dist = process.argv[2];
+const paths = JSON.parse(process.argv[3]);
+process.chdir(dist);
+const s0 = Bun.serve({ port: 0, fetch: () => new Response("") });
+const port = s0.port; s0.stop(true);
+process.env.PORT = String(port);
+await import(dist + "/_server.js");
+const out = {};
+for (const p of paths) {
+  const r = await fetch("http://localhost:" + port + p, { redirect: "manual" });
+  const t = await r.text();
+  const m = t.match(/([a-z]+-marker)/);
+  out[p] = { status: r.status, location: r.headers.get("location"), marker: m ? m[1] : null };
+}
+console.log(JSON.stringify(out));
+process.exit(0);
+`;
+function getProbe(fx, paths) {
+  writeFileSync(join(fx.root, "get-probe.mjs"), GET_PROBE);
+  const p = Bun.spawnSync(["bun", join(fx.root, "get-probe.mjs"), fx.dist, JSON.stringify(paths)], { stdout: "pipe", stderr: "pipe" });
+  if (p.exitCode !== 0) throw new Error(`probe failed:\n${p.stdout}\n${p.stderr}`);
+  const lines = p.stdout.toString().trim().split("\n");
+  return JSON.parse(lines[lines.length - 1]);
+}
+function buildWithDiagnostics(label, files) {
+  const root = join(_tmp.root, label);
+  for (const [rel, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, "src", rel)), { recursive: true });
+    writeFileSync(join(root, "src", rel), body);
+  }
+  const dist = join(root, "dist");
+  const r = Bun.spawnSync(["bun", CLI, "build", join(root, "src"), "-o", dist], { stdout: "pipe", stderr: "pipe" });
+  return { root, dist, exitCode: r.exitCode, out: `${r.stdout}${r.stderr}` };
+}
+
+const TYPOS = { upper: "Required", misspelt: "requird", spaced: " required", off: "off", falsy: "false" };
+const typoFiles = (programAttrs) => {
+  const files = { "app.scrml": `<program${programAttrs}><p>home-marker</p></program>\n` };
+  for (const [k, v] of Object.entries(TYPOS)) files[`pages/t${k}.scrml`] = `<page auth="${v}">\n<p>typo-marker</p>\n</page>\n`;
+  return files;
+};
+
+describe("r3 F1 — an unrecognized auth= literal on a member page is not a declaration (fail closed)", () => {
+  test("under a required application program, every typo inherits the gate", () => {
+    const fx = buildWithDiagnostics("typo-required", typoFiles(` auth="required"`));
+    expect(fx.exitCode).toBe(0);
+    const res = getProbe(fx, Object.keys(TYPOS).map((k) => `/t${k}`));
+    for (const k of Object.keys(TYPOS)) {
+      const r = res[`/t${k}`];
+      expect(`${k} ${r.status} ${r.location} ${r.marker}`).toBe(`${k} 302 /login null`);
+    }
+    // The W-ATTR-002 text states the real effect on a <page> (read via the API —
+    // the CLI truncates messages).
+    const r = compileScrml({ inputFiles: [join(fx.root, "src", "pages", "tupper.scrml")], write: false, outputDir: join(fx.root, "api-out"), log: () => {} });
+    const w = [...(r.errors ?? []), ...(r.warnings ?? [])].find((d) => d.code === "W-ATTR-002");
+    expect(w).toBeDefined();
+    expect(w.message).toContain("is not an auth declaration");
+    expect(w.message).toContain("inherits");
+  }, 60_000);
+
+  test("with no required application program, a typo gates nothing (unchanged)", () => {
+    const fx = buildWithDiagnostics("typo-public", typoFiles(""));
+    const res = getProbe(fx, ["/tupper", "/toff"]);
+    expect(res["/tupper"]).toEqual({ status: 200, location: null, marker: "typo-marker" });
+    expect(res["/toff"]).toEqual({ status: 200, location: null, marker: "typo-marker" });
+  }, 60_000);
+});
+
+describe("r3 F2 — only the APPLICATION's top-level <program> is inherited", () => {
+  test("a required <program> inside a route file gates its own file only, not the public app's pages", () => {
+    const fx = buildWithDiagnostics("overgate", {
+      "app.scrml": `<program><p>home-marker</p></program>\n`,
+      "pages/admin.scrml": `<program auth="required"><p>admin-marker</p></program>\n`,
+      "pages/about.scrml": `<page>\n<p>about-marker</p>\n</page>\n`,
+      "pages/login.scrml": `<page>\n<p>login-marker</p>\n</page>\n`,
+    });
+    expect(fx.exitCode).toBe(0);
+    expect(fx.out).not.toContain("W-AUTH-REDIRECT-LOOP");
+    const res = getProbe(fx, ["/app", "/about", "/login", "/admin"]);
+    expect(res["/app"]).toEqual({ status: 200, location: null, marker: "home-marker" });
+    expect(res["/about"]).toEqual({ status: 200, location: null, marker: "about-marker" });
+    expect(res["/login"]).toEqual({ status: 200, location: null, marker: "login-marker" });
+    expect(res["/admin"].status).toBe(302);
+  }, 60_000);
+});
+
+describe("r3 nit — an unresolvable redirect target is said out loud", () => {
+  test("no single application program + disagreeing loginRedirect= → W-AUTH-LOGIN-REDIRECT-AMBIGUOUS, /login", () => {
+    const fx = buildWithDiagnostics("ambiguous", {
+      "a.scrml": `<program auth="none" loginRedirect="/a"><p>a-marker</p></program>\n`,
+      "b.scrml": `<program loginRedirect="/b"><p>b-marker</p></program>\n`,
+      "pages/s.scrml": `<page auth="required">\n<p>s-marker</p>\n</page>\n`,
+    });
+    expect(fx.out).toContain("W-AUTH-LOGIN-REDIRECT-AMBIGUOUS");
+    expect(getProbe(fx, ["/s"])["/s"]).toEqual({ status: 302, location: "/login", marker: null });
+  }, 60_000);
+
+  test("an identified application program answers; a route file's own loginRedirect= does not make it ambiguous", () => {
+    const fx = buildWithDiagnostics("root-answers", {
+      "app.scrml": `<program><p>home-marker</p></program>\n`,
+      "pages/admin.scrml": `<program auth="required" loginRedirect="/admin-login"><p>admin-marker</p></program>\n`,
+      "pages/s.scrml": `<page auth="required">\n<p>s-marker</p>\n</page>\n`,
+    });
+    expect(fx.out).not.toContain("W-AUTH-LOGIN-REDIRECT-AMBIGUOUS");
+    const res = getProbe(fx, ["/s", "/admin"]);
+    expect(res["/s"]).toEqual({ status: 302, location: "/login", marker: null });
+    expect(res["/admin"].location).toBe("/admin-login");
+  }, 60_000);
 });

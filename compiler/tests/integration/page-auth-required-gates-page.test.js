@@ -272,6 +272,9 @@ describe("§52.13 — emission for a `<page auth=\"required\">` unit", () => {
     expect(codesOf(fine.r).map((d) => d.code)).not.toContain("W-AUTH-REDIRECT-LOOP");
     const open = compileOne("login-open", `<page auth="none">\n<p>x</p>\n</page>\n`, "pages/login.scrml");
     expect(codesOf(open.r).map((d) => d.code)).not.toContain("W-AUTH-REDIRECT-LOOP");
+    // S443 r3 F5 — routing is case-sensitive: /Login is not /login, so no loop.
+    const cased = compileOne("login-cased", `<page auth="required">\n<p>x</p>\n</page>\n`, "pages/Login.scrml");
+    expect(codesOf(cased.r).map((d) => d.code)).not.toContain("W-AUTH-REDIRECT-LOOP");
   });
 
   test("a stricter page in the entry file is not shadowed by the program's auth=\"none\"", () => {

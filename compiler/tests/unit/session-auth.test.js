@@ -469,9 +469,13 @@ describe("S8c: RI auth precedence — explicit auth= wins over protect= escalati
   // The page's own csrf= still applies.
   test("<page auth=\"required\"> + protect= — redirect target comes from the program, csrf= from the page", () => {
     const page = makeFileAST(FP, [pageNode([authAttr("required"), strAttr("loginRedirect", "/ignored"), strAttr("csrf", "off")])]);
-    const program = makeFileAST("/test/app.scrml", [], {
-      authConfig: { auth: "required", loginRedirect: "/signin", csrf: "auto", sessionExpiry: "1h" },
-    });
+    // The application's top-level <program> (S443 r3: the redirect target is read
+    // from its declared loginRedirect= attribute).
+    const program = makeFileAST(
+      "/test/app.scrml",
+      [makeMarkupNode("program", [authAttr("required"), strAttr("loginRedirect", "/signin")], [])],
+      { authConfig: { auth: "required", loginRedirect: "/signin", csrf: "auto", sessionExpiry: "1h" } },
+    );
     const result = runRI({ files: [program, page], protectAnalysis: pa() });
     const mw = result.routeMap.authMiddleware.get(FP);
     expect(mw).toBeDefined();

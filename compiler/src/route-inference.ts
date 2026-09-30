@@ -83,7 +83,7 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 // Ext 1 M1.2 + M1.3 — statement-grain body-DG + multi-batch CPS planner.
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
-import { isToolProgram, findToolMainFn } from "./tool-program.ts";
+import { isToolProgram, findToolMainFn, findTopLevelProgramNode } from "./tool-program.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
@@ -6383,18 +6383,43 @@ export function runRI(input: RIInput): RIOutput {
   // `<program auth="required">` gets (emit-server consumes the one entry).
   // A `<program auth="required">` in the same file already registered in 8a.
   //
-  // The redirect target of a page scope (S443 round 2): `loginRedirect=` is not a
+  // The APPLICATION's top-level `<program>` (S443 round 3). §40.8: an application
+  // declares its `<program>` exactly once, in its entry file. The entry file is
+  // the web-application file (not a §64 tool) whose FIRST top-level node set
+  // holds a `<program>` and which is NOT a route file under `pages/` / `routes/` —
+  // a `<program>` inside a route file is that file's own (8a gates that file only).
+  // Exactly one such file identifies the application; zero or several identify
+  // none, and nothing is inherited from a guess.
+  const rootCandidates = files.filter((f) => {
+    if (isToolProgram(f)) return false;
+    if (findRoutePrefix(f.filePath.replace(/\\/g, "/"))) return false;
+    return findTopLevelProgramNode(f) !== null;
+  });
+  const appRoot: FileAST | null = rootCandidates.length === 1 ? rootCandidates[0] : null;
+
+  // The redirect target of a page scope (S443 rounds 2-3): `loginRedirect=` is not a
   // `<page>` attribute (E-PAGE-INVALID-ATTR), so it comes from the application's
-  // `<program>` — the `loginRedirect=` of the web-application `<program>`(s) that
-  // declare `auth=` (their authConfig; "/login" when a program declares none).
-  // Two such programs that disagree answer nothing and the §52.13 default
-  // `/login` applies. Shared by 8a-page and 8c.
-  const programRedirects = new Set<string>();
-  for (const f of files) {
-    const cfg = f.authConfig ?? ((f as any).ast ? (f as any).ast.authConfig : null);
-    if (cfg && cfg.auth && !isToolProgram(f)) programRedirects.add(cfg.loginRedirect ?? "/login");
+  // top-level `<program>`'s declared `loginRedirect=`, else the §52.13 default
+  // `/login`. With no identifiable application program, a single value declared by
+  // the build's `<program>`s answers; several different values answer nothing, the
+  // default applies, and W-AUTH-LOGIN-REDIRECT-AMBIGUOUS says so (emitted below,
+  // only when some page scope actually used the fallback). Shared by 8a-page, 8b, 8c.
+  const declaredRedirectOf = (f: FileAST): string | null =>
+    readStringAttrOf((findTopLevelProgramNode(f) as any)?.attrs, "loginRedirect");
+  let programLoginRedirect = "/login";
+  let ambiguousRedirects: string[] = [];
+  if (appRoot) {
+    programLoginRedirect = declaredRedirectOf(appRoot) ?? "/login";
+  } else {
+    const declared = new Set<string>();
+    for (const f of files) {
+      if (isToolProgram(f)) continue;
+      const v = declaredRedirectOf(f);
+      if (v) declared.add(v);
+    }
+    if (declared.size === 1) programLoginRedirect = [...declared][0];
+    else if (declared.size > 1) ambiguousRedirects = [...declared].sort();
   }
-  const programLoginRedirect: string = programRedirects.size === 1 ? [...programRedirects][0] : "/login";
   for (const fileAST of files) {
     if (authMiddleware.has(fileAST.filePath)) continue;
     const pageDecl = findPageAuthRequired(fileAST);
@@ -6558,11 +6583,19 @@ export function runRI(input: RIInput): RIOutput {
   // The entry is the `<page auth="required">` entry: csrf="auto" (the §40.2
   // default under auth=), no session fields of its own (the shared resolver
   // answers from the program, as for every page entry since S438).
-  const requiredProgramFiles = files.filter((f) => {
-    const cfg = f.authConfig ?? ((f as any).ast ? (f as any).ast.authConfig : null);
-    return cfg && cfg.auth === "required" && !isToolProgram(f);
-  });
-  if (requiredProgramFiles.length > 0) {
+  // S443 round 3 (review F2): inherit ONLY from the application's top-level
+  // `<program>` (appRoot, above). A `<program auth="required">` inside a route file
+  // gates its own file (8a) and nothing else — before r3 any required `<program>`
+  // anywhere gated every unannotated page of a public application.
+  const rootCfg = appRoot
+    ? (appRoot.authConfig ?? ((appRoot as any).ast ? (appRoot as any).ast.authConfig : null))
+    : null;
+  // S443 round 3 (review F1): only a RECOGNIZED literal (§52.13's three values) is an
+  // auth declaration. `auth="Required"`, `"requird"`, `" required"`, `"off"`,
+  // `auth=${…}` / `auth=@x` declare nothing (W-ATTR-002 says so) and the page
+  // inherits — fail closed, like §40.2's unknown csrf= literal resolving to "auto".
+  const RECOGNIZED_AUTH = new Set(["required", "optional", "none"]);
+  if (rootCfg && rootCfg.auth === "required") {
     // The redirect target: the program's loginRedirect (see 8a-page).
     const inheritedLoginRedirect = programLoginRedirect;
     for (const fileAST of files) {
@@ -6575,7 +6608,7 @@ export function runRI(input: RIInput): RIOutput {
       // document and is not gated.
       if (shape !== "non-entry-page" && shape !== "bare-markup") continue;
       if (filePath.replace(/\\/g, "/").split("/").pop() === "_layout.scrml") continue;
-      if (getExplicitAuthDeclaration(fileAST)) continue;
+      if (collectFileAuthDecls(fileAST).some((d) => RECOGNIZED_AUTH.has(d.value))) continue;
       authMiddleware.set(
         filePath,
         pageAuthRequiredEntry(
@@ -6621,11 +6654,13 @@ export function runRI(input: RIInput): RIOutput {
   // 8e (S443 review F3): a gated route whose redirect target is itself 302s to
   // itself forever. Compare the entry's loginRedirect with the route's own URL
   // (the page-route pattern for a `pages/`/`routes/` file, else `/<basename>`),
-  // ignoring a trailing `/`, a `.html` suffix and any query/fragment.
+  // ignoring a trailing `/`, a `.html` suffix and any query/fragment. Compared
+  // CASE-SENSITIVELY (S443 r3 review F5): routing is case-sensitive (`/SECRET` 404s
+  // where `/secret` is served), so `/Login` is not `/login` and does not loop.
   const normPath = (p: string): string => {
-    let s = p.split(/[?#]/)[0].replace(/\.html$/i, "");
+    let s = p.split(/[?#]/)[0].replace(/\.html$/, "");
     if (s.length > 1) s = s.replace(/\/+$/, "");
-    return s.toLowerCase();
+    return s;
   };
   for (const [filePath, entry] of authMiddleware) {
     if (entry.auth !== "required" || !entry.loginRedirect) continue;
@@ -6651,6 +6686,30 @@ export function runRI(input: RIInput): RIOutput {
       0,
       0,
     );
+  }
+
+  // 8f (S443 r3 review nit): the redirect-target fallback is said out loud. When no
+  // application `<program>` is identifiable and the build's `<program>`s declare
+  // different `loginRedirect=` values, a page scope (8a-page / 8b / 8c — every
+  // entry that is not a `<program auth="required">`'s own) redirects to `/login`.
+  if (ambiguousRedirects.length > 0) {
+    const pageScope = [...authMiddleware.keys()].find((fp) => {
+      const f = files.find((x) => x.filePath === fp);
+      const cfg = f ? (f.authConfig ?? ((f as any).ast ? (f as any).ast.authConfig : null)) : null;
+      return !(cfg && cfg.auth === "required");
+    });
+    if (pageScope) {
+      warn(
+        "W-AUTH-LOGIN-REDIRECT-AMBIGUOUS",
+        `W-AUTH-LOGIN-REDIRECT-AMBIGUOUS: this build has no single application <program> and its ` +
+          `<program>s declare different loginRedirect= values (${ambiguousRedirects.map((v) => `"${v}"`).join(", ")}), ` +
+          `so page scopes redirect unauthenticated requests to the default "/login". Build one ` +
+          `application per output directory, or make the loginRedirect= values agree. (§40.2, §52.13)`,
+        pageScope,
+        0,
+        0,
+      );
+    }
   }
 
   // ------------------------------------------------------------------
