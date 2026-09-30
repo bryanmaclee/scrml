@@ -451,8 +451,9 @@ const MUTATIONS = [
     from: "        if ((hasOwnValue(d.own) || hasOwnType(d)) && d.attrs.length > 0) {", to: "        if (false) {", tests: [T4("review-r1.test.js")] },
   { id: "s442 r1 G3: `<*x/>` of a declaration with a default-less attribute accepted (O33 → a runtime throw)", file: `${SH}/analyze.scrml`,
     from: "            if (isAttributeRole(f.role) && !hasOwnValue(f.init)) {", to: "            if (false) {", tests: [T4("review-r1.test.js")] },
-  { id: "s442: validator flags accepted silently (the O25 refusal dropped)", file: `${SH}/parse.scrml`,
-    from: "            if (isValidatorWord(a.name)) {", to: "            if (false) {", tests: [T4("form.test.js")] },
+  // (s444 Phase B: the s442 "validator flags accepted silently (the O25 refusal dropped)" row is RETIRED — O25 is
+  //  RULED (dpa-058) and validators are parsed and honored; its bite is the "s444 B: a bare validator word … read as
+  //  an opener modifier again" row)
   { id: "s442: an ungranted recognized sequence shape accepted as a grant", file: `${SH}/analyze.scrml`,
     from: "        let isGranted: boolean = f.grants.replace || hasEditKind(f.grants.edits, edit)\n",
     to: "        let isGranted: boolean = true\n", tests: [T4("audit.test.js"), T4("grants.test.js")] },
@@ -469,8 +470,9 @@ const MUTATIONS = [
     from: "                for (const sc of stateChildOf(c)) { ts = typeNodes(env, sc.body, ts) }",
     to: "                for (const sc of stateChildOf(c)) { ts = ts }", tests: [T4("typing.test.js")] },
   { id: "s442: the typer skips a child field's own renders (Typing coverage)", file: `${SH}/analyze.scrml`,
-    from: "            if (r is some) ts = typeElem(env, r, ts)\n        }\n        return ts\n    }",
-    to: "            if (false) ts = typeElem(env, r, ts)\n        }\n        return ts\n    }", tests: [T4("typing.test.js")] },
+    // (s444: re-sited — the validator arguments are typed right after it)
+    from: "            if (r is some) ts = typeElem(env, r, ts)\n            ts = typeValidatorArgs(",
+    to: "            if (false) ts = typeElem(env, r, ts)\n            ts = typeValidatorArgs(", tests: [T4("typing.test.js")] },
   { id: "s442: a spread-append's elements not checked against the element type", file: `${SH}/analyze.scrml`,
     from: "            ts = checkWrite(env, ed.w, exprType0(ts, x.nid), x, \"an element of this sequence\", ts)",
     to: "            ts = ts", tests: [T4("typing.test.js"), T4("audit.test.js")] },

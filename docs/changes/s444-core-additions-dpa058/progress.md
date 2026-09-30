@@ -159,3 +159,31 @@
   impl#1 DOGFOOD: F-s444-2 recurred outside a match arm — a struct-literal string in a `for` body containing
   `(RULED S442 (5)). Bind it` → E-CODEGEN-INVALID-LOGIC; `(a whole-value replace). Declare` elsewhere compiles — the
   trigger involves `(…)). ` + a capital; reworded (". " → " — ").
+- 2026-09-30 PHASE B commit dbf773d09 (gate 26785 pass / 0 fail) + follow-up (mutation re-sites, bite rows).
+  Tests: slice-m4/validators.test.js (25: the verbatim §66.19.2 behaviour, (1)–(5), vocabulary / applicability /
+  shape errors, own-opener + depth-2 refusals); parse.test "validators in an opener" re-pinned (parsed, no diagnostic);
+  form.test runs the VERBATIM §66.19.2 (fixture = verbatim + a probe line); typer.test BASE_66_19 §66.19.2 → [].
+  CORPUS (front end over every conformance case dir + slice-m4 sources, vs the post-PA instrument): 100 dirs changed,
+  0 newly diagnosed, 2 newly CLEAN (slice-m4 audit.scrml + signup.scrml); changes are refusal re-wordings
+  (`name(…)` in a tag → E-PARSE-ATTR instead of the O25 refusal; `bind:label` → E-ATTR-011) and receivers resolved
+  before a refused call (E-SCOPE-001 for an undeclared `xs.filter`).
+- PHASE B VERIFICATION:
+  - lint 58 / 0 · slices m1+m2+m3+m4 930 pass + 1 todo / 0 fail · lowered m1 73/73 · v2-lexer 337/0
+  - mutations.js FULL: 301 rows → 299 RED + 2 NOT RUN (sites moved by Phase B) → the s442 "validator flags accepted
+    silently (O25 refusal dropped)" row RETIRED (O25 RULED; covered by "s444 B: a bare validator word … read as an opener
+    modifier again"), the s442 typer child-renders row RE-SITED (RED). ⇒ 300 rows, all RED; unmutated mirror clean.
+  - bite matrix: CG 32 / CSS 32 certified (0 uncertified); FRONT 20 certified / 0 (+ Parse.Validators,
+    Analyze.ValidatorLowering, Lower.ValidatorAttrs, Lower.NoValidate; Analyze.Bind judged on audit only — with no
+    bind the form's validators are dead, so the form is rejected and cannot judge it).
+  - conformance (impl#1 untouched) 1152/1159 + 7 xfail · top-level compiler/tests/*.test.js 6384 / 15 skip / 0 fail
+  - s34-census --check-new PASS (2 rows) · facts --check PASS · regen-spec-index --check OK
+  §66.19 STATUS (final):
+  | § | program | status |
+  |---|---|---|
+  | 66.19.1 | counter | DONE (M2) |
+  | 66.19.3 | dropdown ×3 | DONE (M2) |
+  | 66.19.6 | engine as `single` | DONE (s442) |
+  | 66.19.5 | audit log | DONE — verbatim source compiles clean and runs (s444 Phase A) |
+  | 66.19.2 | validated form | DONE — verbatim source compiles clean and runs; `required`/`minlength` on the bound inputs, `novalidate` on the form (s444 Phase B). The §55.5 surface is not read by the program and is not built (B1) |
+  | 66.19.4 | theme library | BLOCKED (unchanged) |
+- PHASE-B-DONE 2026-09-30 — pushed.

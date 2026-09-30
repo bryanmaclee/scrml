@@ -282,3 +282,8 @@ use-site value) compiled clean — `s` dropped / `[object Object]`; `@r.xs.pop()
   refused exactly as `.push` on a sub-field already is). All removal messages name the place (`placeKey`).
 - Tests: slice-m4/review-r3.test.js (6). Mutation rows: 3 new, 2 re-sited. Mutations 173/173 RED; bite CG 32 + CSS 32
   + FRONT 12; five pre-existing programs byte-identical; slice suites green.
+
+## s444 UPDATE (docs/changes/s444-core-additions-dpa058/progress.md)
+Core gained Attr.Bind, Expr.Host (`Date.now()`), Expr.Lambda / SeqCall, View.Star, removal edits and ElemAt; the
+dpa-058 ruling was built. §66.19.5 and §66.19.2 now compile clean from their VERBATIM sources and run — see the s444
+status table (66.19.1 / .3 / .6 / .5 / .2 DONE; .4 BLOCKED).

@@ -162,7 +162,7 @@ const FRONT_MUTATIONS = [
   { c: "Analyze.Host", id: "`Date.now()` records no host fact (lowered as a missing value)", file: ANALYZE,
     from: "            .HostOk :> plain(Type.Num, addValue(st, e.nid, ValueFact.VHost(HostCall.DateNow)))", to: "            .HostOk :> plain(Type.Num, st)", tests: ["audit.test.js"] },
   { c: "Analyze.Bind", id: "a bind records no attribute fact (the element is not bound)", file: ANALYZE,
-    from: "        return addAttr(m.st, a.nid, AttrKind.ABind(kind, w, p.decl.sym, p.idx, m.s, vattrs))", to: "        return m.st", tests: ["audit.test.js", "form.test.js"] },
+    from: "        return addAttr(m.st, a.nid, AttrKind.ABind(kind, w, p.decl.sym, p.idx, m.s, vattrs))", to: "        return m.st", tests: ["audit.test.js"] },   // s444 Phase B: with no bind, §66.19.2's validators are dead (E-VALIDATOR-DEAD) — the form is rejected, so it cannot judge this
   { c: "Lower.Bind", id: "lower drops the bind", file: LOWER,
     from: ":> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))", to: ":> [].concat(validatorAttrs(vs))", tests: ["audit.test.js", "form.test.js"] },
   // §66.19.2 — a validated form (s444: the verbatim program minus its validators — Phase B)
@@ -172,6 +172,15 @@ const FRONT_MUTATIONS = [
     from: "            .MStar(decl: d, inst: i) :> [View.Star(d, instOf(c, i))]", to: "            .MStar(decl: d, inst: i) :> []", tests: ["form.test.js"] },
   { c: "Analyze.O54Own", id: "`@f` inside f's own renders names the NEXT field (email binds password)", file: ANALYZE,
     from: "        return fieldIndex(d.info, name)\n    }", to: "        return fieldIndex(d.info, name) + 1\n    }", tests: ["form.test.js"] },
+  // s444 Phase B — the dpa-058 build (§66.19.2's validators land on its bound inputs; its form takes `novalidate`)
+  { c: "Parse.Validators", id: "a declaration's validators are never recorded (they vanish)", file: PARSE,
+    from: "            validators: bySource(bare.concat(o.vals)),", to: "            validators: [],", tests: ["validators.test.js"] },
+  { c: "Analyze.ValidatorLowering", id: "`req` lowers to nothing (no `required`)", file: ANALYZE,
+    from: "        if (isStrLike(ty)) return valOk(v, [pair(\"required\", \"\")], st)", to: "        if (isStrLike(ty)) return valOk(v, [], st)", tests: ["validators.test.js"] },
+  { c: "Lower.ValidatorAttrs", id: "lower drops the lowered validator attributes", file: LOWER,
+    from: ":> [bindAttr(c, bk, w, d, x, sk)].concat(validatorAttrs(vs))", to: ":> [bindAttr(c, bk, w, d, x, sk)]", tests: ["validators.test.js"] },
+  { c: "Lower.NoValidate", id: "lower drops `novalidate`", file: LOWER,
+    from: "        if (c.t.novalidate.indexOf(e.nid) >= 0) return [Attr.Static(\"novalidate\", \"\")]", to: "        if (false) return [Attr.Static(\"novalidate\", \"\")]", tests: ["validators.test.js"] },
   { c: "Analyze.ChildRenders", id: "`<*f/>` of a child field with renders inlines nothing", file: ANALYZE,
     from: "MInline({ nodes: own, subst: not })", to: "MInline({ nodes: [], subst: not })", tests: ["form.test.js"] },
   { c: "Analyze.ChildRenders", id: "a child field's renders is never resolved", file: ANALYZE,
