@@ -158,3 +158,17 @@ OPEN #7 (not decided; measured): default compiles `import stuff` / `export data`
     native 0 newly failing — 18 flogence `kind="tool"` files already failing on native (native gap:
     `function main(a: T): R {` does not parse) change their code SET (the first native parse error is now
     reported instead of masked). No migration needed.
+- e1280218a — the round-5 unit above (pre-commit gate green). Fuzz + corpus RE-RUN on e1280218a (after the
+  bracket-table fix): identical to the numbers above. Suites: unit+integration+conformance 26,998 run / 0 fail
+  (70 skip, 12 todo); `bun conformance/run.ts` 1169/1177 + 8 xfail, 0 FAIL. Pushed to
+  origin/worktree-agent-a2f3ca098c5412926 (fast-forward from 94cd0ae58).
+  OPEN / not fixed here: (1) native tagged-template translation (translate-expr empties it — now loud, not
+  fixed); (2) default emits `log\`x\`` with the tag name un-mangled (`log`, not `_scrml_log_1`) — compiled,
+  wrong at runtime, pre-existing, not a coverage drop; (3) leading `-` / `[` / `(` line continuation at a
+  body top (`f()⏎-1` = `f() - 1`) — JS semantics, both parsers, design question for PA; (4) a labelled
+  `break` fails codegen (E-CODEGEN-INVALID-LOGIC) inside `${}` too, and the label is dropped from the emitted
+  loop — pre-existing; (5) native: `when message(d) {…}` in a nested worker `<program>` does not parse
+  (conformance auth/program-nested-worker-not-e-program-002-neg fails on native since round 4 + the main
+  merge; the default passes); (6) the default `@count⏎<total> = 0` false E-UNQUOTED (pre-existing from
+  round 4); (7) the same trailing-token / does-nothing shapes inside an explicit `${ … }` (not a body top)
+  still compile silently on the default parser — the ruling's locus is the body top.
