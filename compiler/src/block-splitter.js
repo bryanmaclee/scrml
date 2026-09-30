@@ -3428,6 +3428,17 @@ export function splitBlocks(filePath, source) {
         // lift gate and shipped into <body> as page text. One run keeps the
         // statement inside its function. In markup prose the two blocks were
         // adjacent text, so joining them changes nothing there.
+        //
+        // NARROWED to the REFERENCE form only — `<#ident>` immediately followed
+        // by `.` (`<#hunt>.refetch()`, `<#r>.loading`). Every other `<#…` (the
+        // `<#name when … />` element form, a bare `<#name>`) keeps the original
+        // flush, so its AST is unchanged (S444: continuing the run for the
+        // element form moved the live AST away from the native parser —
+        // parser-conformance-within-node, phase3-is-in-when-guard-093).
+        let look = pos + 2;
+        while (look < len && /[A-Za-z0-9_\-]/.test(source[look])) look++;
+        const isRefMember = look > pos + 2 && source[look] === ">" && source[look + 1] === ".";
+        if (!isRefMember) flushText();
         const refStart = curPos;
         const refStartLine = curLine;
         const refStartCol = curCol;
@@ -3436,8 +3447,9 @@ export function splitBlocks(filePath, source) {
         // Scan to closing '>'
         while (pos < len && source[pos] !== ">" && source[pos] !== "\n") step();
         if (pos < len && source[pos] === ">") step();
-        // Keep <#name> as text — open a run at the ref only when none is open.
-        if (textStart === -1) {
+        // Keep <#name> as text. The reference form continues an open run; any
+        // other form starts a new run at the ref (the pre-S444 behaviour).
+        if (!isRefMember || textStart === -1) {
           textStart = refStart;
           textStartLine = refStartLine;
           textStartCol = refStartCol;
