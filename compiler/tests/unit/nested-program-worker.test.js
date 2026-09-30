@@ -12,7 +12,7 @@
 
 import { describe, test, expect } from "bun:test";
 import { runCG } from "../../src/code-generator.js";
-import { generateWorkerJs, rewriteSendToPostMessage } from "../../src/codegen/emit-worker.ts";
+import { generateWorkerJs, rewriteWorkerSend, workerBundleFilename } from "../../src/codegen/emit-worker.ts";
 import { foldChunkNamespacing } from "../helpers/chunk-scope.js";
 
 // ---------------------------------------------------------------------------
@@ -126,7 +126,9 @@ describe("Worker JS generation", () => {
 
     expect(js).toContain("// Generated worker: calc");
     expect(js).toContain("self.onmessage = function(event)");
-    expect(js).toContain("var data = event.data;");
+    // Parent -> worker messages are `{ id, data }` (dpa-056 D2 wire format).
+    expect(js).toContain("const _scrml_reply_to = event.data.id;");
+    expect(js).toContain("var data = event.data.data;");
     expect(js).toContain("console.log(data)");
   });
 
@@ -141,32 +143,50 @@ describe("Worker JS generation", () => {
 // §3 send() → self.postMessage() rewrite
 // ---------------------------------------------------------------------------
 
-describe("send() → self.postMessage() rewrite", () => {
-  test("send(result) becomes self.postMessage(result)", () => {
-    const result = rewriteSendToPostMessage("send(result)");
-    expect(result).toBe("self.postMessage(result)");
+describe("send() → _scrml_reply(_scrml_reply_to, …) rewrite", () => {
+  test("send(result) replies to the message being handled", () => {
+    expect(rewriteWorkerSend("send(result)")).toBe("_scrml_reply(_scrml_reply_to, result)");
   });
 
-  test("send (result) with space becomes self.postMessage(result)", () => {
-    const result = rewriteSendToPostMessage("send (result)");
-    expect(result).toBe("self.postMessage(result)");
+  test("send ( result ) with spaces", () => {
+    expect(rewriteWorkerSend("send ( result )")).toBe("_scrml_reply(_scrml_reply_to, result )");
+  });
+
+  test("send() with no argument has no dangling comma", () => {
+    expect(rewriteWorkerSend("send()")).toBe("_scrml_reply(_scrml_reply_to)");
   });
 
   test("resend(x) is NOT rewritten", () => {
-    const result = rewriteSendToPostMessage("resend(x)");
-    expect(result).toBe("resend(x)");
+    expect(rewriteWorkerSend("resend(x)")).toBe("resend(x)");
+  });
+
+  test("a method call socket.send(x) is NOT rewritten", () => {
+    expect(rewriteWorkerSend("socket.send(x)")).toBe("socket.send(x)");
   });
 
   test("multiple send calls are all rewritten", () => {
-    const result = rewriteSendToPostMessage("send(a); send(b)");
-    expect(result).toBe("self.postMessage(a); self.postMessage(b)");
+    expect(rewriteWorkerSend("send(a); send(b)"))
+      .toBe("_scrml_reply(_scrml_reply_to, a); _scrml_reply(_scrml_reply_to, b)");
   });
 
-  test("in generateWorkerJs body, send() is rewritten", () => {
+  test("in generateWorkerJs body, send() is rewritten and _scrml_reply is defined", () => {
     const whenMsg = makeWhenMessageNode("n", "let r = n * 2\nsend(r)");
     const js = generateWorkerJs("doubler", [], whenMsg);
-    expect(js).toContain("self.postMessage(r)");
-    expect(js).not.toMatch(/[^.]send\(/);
+    expect(js).toContain("_scrml_reply(_scrml_reply_to, r)");
+    expect(js).toContain("function _scrml_reply(replyTo, data) {");
+    expect(js).toContain("self.postMessage({ replyTo: replyTo, data: data });");
+    expect(js).not.toMatch(/(?<![\w$.])send\s*\(/);
+  });
+});
+
+describe("worker bundle filename", () => {
+  test("is <page>-<name>.worker.js", () => {
+    expect(workerBundleFilename("/app/pages/tools/calc.scrml", "dbl")).toBe("calc-dbl.worker.js");
+  });
+
+  test("a worker named `server` / `sqlite` stays out of the §47.13 denied classes", () => {
+    expect(workerBundleFilename("app.scrml", "server")).not.toContain(".server.");
+    expect(workerBundleFilename("app.scrml", "sqlite")).not.toContain(".sqlite");
   });
 });
 
@@ -232,8 +252,8 @@ describe("workerBundles in CG output", () => {
 
     const workerJs = output.workerBundles.get("uppercaser");
     expect(workerJs).toContain("self.onmessage");
-    expect(workerJs).toContain("var payload = event.data");
-    expect(workerJs).toContain("self.postMessage(payload.toUpperCase())");
+    expect(workerJs).toContain("var payload = event.data.data");
+    expect(workerJs).toContain("_scrml_reply(_scrml_reply_to, payload.toUpperCase())");
   });
 
   test("worker HTML is not emitted into parent output", () => {

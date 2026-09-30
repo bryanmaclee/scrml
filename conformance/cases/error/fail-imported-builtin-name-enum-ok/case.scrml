@@ -1,0 +1,32 @@
+${
+    import { AuthError } from './errs.scrml'
+
+    type Phase:enum = {
+        Idle
+        Missing
+        Bad(reason: string)
+    }
+
+    // Bare `fail .Variant` against an IMPORTED enum whose name is also a
+    // built-in error type: it resolves against the user's enum, exactly as a
+    // local one would (§19.3.3).
+    function check(n: string)! AuthError {
+        if (n == "") fail .Missing
+        if (n == "x") fail AuthError.Bad("no")
+        return n
+    }
+}
+
+<phase> = Phase.Idle
+
+${
+    function handleEmpty() {
+        let r = check("") !{
+            | .Missing :> @phase = Phase.Missing
+            | .Bad(why) :> @phase = Phase.Bad(why)
+        }
+    }
+}
+
+<button id="btn-empty" onclick=handleEmpty()>empty</>
+<div id="out">${@phase}</>
