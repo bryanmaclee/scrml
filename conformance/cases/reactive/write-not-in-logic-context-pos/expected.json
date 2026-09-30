@@ -1,12 +1,20 @@
 {
   "id": "write-not-in-logic-context-pos",
-  "description": "A bare `@count = 5` WRITE at the immediate body-top of the §40.8 default-logic body fires E-WRITE-NOT-IN-LOGIC-CONTEXT. The cell IS declared (`<count> = 0` above it) — the wrong is the write's SHAPE at that locus, not name resolution.",
+  "description": "RETIRED S441: a bare `@count = 5` write at the §40.8 body-top is ordinary logic — no E-WRITE-NOT-IN-LOGIC-CONTEXT, and the write runs (the display reads 5).",
   "language-version": "1.0",
   "spec": "§40.8",
   "source-test": "compiler/src/symbol-table.ts",
-  "rationale": "§40.8 S123 amendment (the S122 user-voice Option-2 ratification): \"default-logic mode auto-lifts DECLARATIONS only — the structural state-decl form `<name> = expr` … The bare V5-strict reactive WRITE form `@name = expr` is NOT a declaration — it is a write to a pre-declared cell, and writes ARE logic; logic goes in `${...}`. Bare `@name = expr` at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-body surface) SHALL fire `E-WRITE-NOT-IN-LOGIC-CONTEXT`.\" The §34 row confirms the diagnostic is a SHAPE error, deliberately independent of whether the target cell resolves — so this case declares `<count>` first (V5-strict structural form) to isolate the shape rule from E-STATE-UNDECLARED. §34 also fixes the two legal repairs: (a) wrap in `${ @count = 5 }` (see the NEG mirror), or (b) convert to a structural declaration.",
+  "rationale": "⛑ S441 RE-AUTHORED — a `<program>` / `<page>` / `<channel>` body carries no loose prose (§40.8 S441 bullet; ruling user-voice-scrml.md S441 \"prose should be declared as such\" + \"declared-prose implementation: yes to all four\"). Ruled item 4: \"E-WRITE-NOT-IN-LOGIC-CONTEXT is RETIRED for <program>/<page>/<channel> bodies (the body is logic now)\". The case id is kept so the history of the S123 rule stays findable. Pre-S441 rationale: §40.8 S123 amendment (the S122 user-voice Option-2 ratification): \"default-logic mode auto-lifts DECLARATIONS only — the structural state-decl form `<name> = expr` … The bare V5-strict reactive WRITE form `@name = expr` is NOT a declaration — it is a write to a pre-declared cell, and writes ARE logic; logic goes in `${...}`. Bare `@name = expr` at the IMMEDIATE body-top of `<program>` / `<page>` / `<channel>` (the §40.8 default-logic-body surface) SHALL fire `E-WRITE-NOT-IN-LOGIC-CONTEXT`.\" The §34 row confirms the diagnostic is a SHAPE error, deliberately independent of whether the target cell resolves — so this case declares `<count>` first (V5-strict structural form) to isolate the shape rule from E-STATE-UNDECLARED. §34 also fixes the two legal repairs: (a) wrap in `${ @count = 5 }` (see the NEG mirror), or (b) convert to a structural declaration.",
   "expect": {
-    "codes": ["E-WRITE-NOT-IN-LOGIC-CONTEXT"],
-    "notCodes": []
+    "codes": [],
+    "notCodes": [
+      "E-WRITE-NOT-IN-LOGIC-CONTEXT"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "state": {
+      "count": 5
+    }
   }
 }

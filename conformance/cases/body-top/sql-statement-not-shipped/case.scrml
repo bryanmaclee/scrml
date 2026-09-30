@@ -1,0 +1,4 @@
+<program>
+?{`CREATE TABLE t (id INTEGER)`}
+<p id="p">x</p>
+</program>

@@ -1,0 +1,17 @@
+{
+  "id": "body-top-lone-identifier-is-code",
+  "description": "A lone identifier IS valid code, so it is checked as code — and as a statement it has no effect: E-STMT-NO-EFFECT (ruling S445 item 2; was E-SCOPE-001 under S441 (3)), not E-UNQUOTED-DISPLAY-TEXT.",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.18.1, §4.18.7",
+  "source-test": "compiler/tests/unit/s441-declared-prose-body.test.js",
+  "rationale": "§40.8: a `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code. Ruling user-voice-scrml.md S445 item 2: \"Any expression statement with no effect is an error.\" A lone name is valid code with no effect, reported as that.",
+  "expect": {
+    "codes": [
+      "E-STMT-NO-EFFECT"
+    ],
+    "notCodes": [
+      "E-UNQUOTED-DISPLAY-TEXT",
+      "E-INTERNAL-BODY-TOP-DROPPED"
+    ]
+  }
+}

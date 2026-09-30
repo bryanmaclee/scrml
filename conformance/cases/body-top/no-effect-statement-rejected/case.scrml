@@ -1,0 +1,7 @@
+<program>
+<count> = 3
+@count
+<total> = 0
+@count == 1
+<p id="p">${@count} ${@total}</p>
+</program>

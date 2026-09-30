@@ -1,10 +1,12 @@
-// `is` in a `when` guard — spec says valid (§18.17.2)
+// `is` in a guard — spec says valid (§18.17.2)
+// S441: the pre-S441 body carried a malformed `<#tick when @s is .Active />`
+// fragment (a `<#name>` input-state ref, not an element) plus a stray `</>`;
+// both shipped as page text. A `<program>` body is code now, so the guard is
+// written as the attribute it was reaching for.
 ${
     type Status:enum = { Active, Banned }
     <s>:Status = .Active
 }
 <program>
-    <#tick when @s is .Active />
-        <p>ticking</>
-    </>
+    <p if=(@s is .Active)>ticking</p>
 </>
