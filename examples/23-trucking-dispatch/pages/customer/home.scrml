@@ -26,7 +26,7 @@
 
   import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
   import { statusBadgeClasses, statusLabel } from '../../components/load-status-badge.scrml'
-  import { accountStatusLabel, accountStatusClasses } from '../../components/customer-card.scrml'
+  import { accountStatusLabel, accountStatusClasses, accountStatusClassesOf } from '../../components/customer-card.scrml'
   import { invoiceStatus, invoiceStatusClasses, invoiceStatusLabel, formatIsoDate } from '../../components/invoice-card.scrml'
   import { createSessionStore } from 'scrml:store'
   import { SESSION_DB_PATH } from '../../models/auth.scrml'
@@ -37,10 +37,12 @@
 
     ${
         // F-AUTH-002 inline: cookie -> user.
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
+        // `userId` is the framework session's user (`session.userId`), passed in by
+        // the request-entry server function — `session` is readable only there
+        // (§20.5, E-SESSION-CONTEXT). Login sets it with session.set("userId", …) and
+        // <program auth="required"> gates on it. (The old app-KV token rode a cookie
+        // set from JS with HttpOnly, which browsers refuse, so it never persisted.)
+        function getCurrentUser(userId) {
             if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
@@ -48,7 +50,7 @@
         // F-AUTH-001 fallback: role gate. Returns user + their customers row +
         // 5 most recent active loads + 5 most recent invoices.
         function fetchHomeData(sessionToken) {
-            const user = getCurrentUser(sessionToken)
+            const user = getCurrentUser(session.userId)
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -123,7 +125,7 @@
             const tok = getSessionToken()
             const data = fetchHomeData(tok)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (data.error) {
@@ -140,7 +142,7 @@
 
         function logout() {
             document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/login"
+            window.location.href = "/auth/login?logout=1"
         }
 
         on mount {
@@ -156,15 +158,15 @@
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
-              <a href="/customer" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+              <a href="/customer/home" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
               <span class="text-xs uppercase tracking-wider text-slate-400">Customer</span>
           </div>
           <nav class="flex items-center gap-4 text-sm">
-              <a href="/customer" class="hover:text-blue-300">Home</a>
+              <a href="/customer/home" class="hover:text-blue-300">Home</a>
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">
                   Invoices
-                  <span if=(@currentCustomerEvents.length > 0) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
+                  <span if=(@currentCustomerEvents is some && (@currentCustomerEvents.length > 0)) class="ml-1 inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-bold bg-amber-500 text-slate-900 rounded-full">
                       ${@currentCustomerEvents.length}
                   </span>
               </a>
@@ -199,8 +201,8 @@
                           </div>
                       </div>
                       <div class="text-right">
-                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClasses(@currentCustomer.account_status)}">
-                              ${accountStatusLabel(@currentCustomer.account_status)}
+                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClassesOf(@currentCustomer)}">
+                              ${@currentCustomer is some ? accountStatusLabel(@currentCustomer.account_status) : ""}
                           </span>
                       </div>
                   </div>

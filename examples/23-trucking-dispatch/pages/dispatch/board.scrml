@@ -40,10 +40,12 @@
     ${
         // F-AUTH-002 inlined: getCurrentUser walks the session store +
         // users table. Cross-file SQL access fails E-SQL-004.
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
+        // `userId` is the framework session's user (`session.userId`), passed in by
+        // the request-entry server function — `session` is readable only there
+        // (§20.5, E-SESSION-CONTEXT). Login sets it with session.set("userId", …) and
+        // <program auth="required"> gates on it. (The old app-KV token rode a cookie
+        // set from JS with HttpOnly, which browsers refuse, so it never persisted.)
+        function getCurrentUser(userId) {
             if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
@@ -51,7 +53,7 @@
         // F-AUTH-001 fallback: dispatch the role gate ourselves. The
         // `auth="role:dispatcher"` attribute is documentation only.
         function loadBoardData(sessionToken) {
-            const user = getCurrentUser(sessionToken)
+            const user = getCurrentUser(session.userId)
             if (user is not || user.role != "dispatcher") {
                 return { unauthorized: true }
             }
@@ -80,7 +82,7 @@
             const tok = sessionToken ? sessionToken.split(";")[0] : ""
             const data = loadBoardData(tok)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             @currentUser = data.user
@@ -90,7 +92,7 @@
 
         function logout() {
             document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/login"
+            window.location.href = "/auth/login?logout=1"
         }
 
         // Pure helper — which kanban column a load belongs in. One exhaustive
@@ -143,7 +145,7 @@
       <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
         <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <a href="/dispatch" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+                <a href="/dispatch/board" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
                 <span class="text-xs uppercase tracking-wider text-slate-400">Dispatcher</span>
             </div>
             <nav class="flex items-center gap-4 text-sm">

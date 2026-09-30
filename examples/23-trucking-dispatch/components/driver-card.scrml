@@ -26,6 +26,14 @@ ${
     // new variant to the enum is a compile-time forcing function here (every
     // arm must exist — E-TYPE-020 otherwise). The stored DB string flows into
     // the DriverStatus param directly; the match dispatches on the variant name.
+    // Takes the whole record (or `not`, before the page's data loads). A class
+    // attribute's `${…}` is evaluated even while an enclosing `if=` hides the
+    // element, so reading `.field` off an absent record there throws (S443).
+    export fn driverStatusClassesOf(d) -> string {
+        if (d is not) return ""
+        return driverStatusClasses(d.current_status)
+    }
+
     export fn driverStatusClasses(status: DriverStatus) -> string {
         return match status {
             .OffDuty      :> "bg-slate-100 text-slate-700 border-slate-200"

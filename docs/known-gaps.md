@@ -30,7 +30,7 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 214 | 4 |
+| HIGH | 215 | 4 |
 | MED | 420 | 0 |
 | LOW | 190 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
@@ -20946,11 +20946,13 @@ Reviewer-executed (main and the S443 auth branch). §40.8 "declare its top-level
 Every page module exports its compose route as `_scrml_route___ssr` (different paths). No leak (the static branch is guarded), but those pages lose the csrf meta-token fill and the §52.8 SSR seed; the client recovers via 403-then-retry. Hits every page of examples/23 but one.
 
 ### g-example-23-login-creates-no-session — examples/23-trucking-dispatch cannot be used end-to-end: login never creates a framework session, so every gated route still redirects after a real login
-<!-- @gap id=g-example-23-login-creates-no-session sev=MED status=open locus=examples/23-trucking-dispatch/pages/auth/login.scrml(loginServer writes createSessionStore KV only; never session.set("userId",…)) prov=review:S443-post-merge-1155-P1 -->
+> **RESOLVED S443** — fix/s443-example-23: login/register call `session.set`; 18 pages read `session.userId`; logout → `session.destroy()`; loginRedirect=/auth/login; dispatch.db pre-seeded; the `scrml generate auth` template also fixed. PA-verified in Chromium for all three roles (docs/changes/s443-example-23/progress.md).
+<!-- @gap id=g-example-23-login-creates-no-session sev=MED status=resolved locus=examples/23-trucking-dispatch/pages/auth/login.scrml(loginServer writes createSessionStore KV only; never session.set("userId",…)) prov=review:S443-post-merge-1155-P1 -->
 Reviewer-executed; PA-corroborated by source; served in Chromium by the README agent (login → client moves to /customer 404; only cookie set is `scrml_csrf`; gated pages still 302 → `/login`, which 404s — the page is `/auth/login`). Also: the seeded `dispatch.db` has zero `users` rows, so the README-documented credentials cannot log in. The framework API is `session.set("userId", id)` (§20.5.1; `emit-server.ts` `_scrml_session_begin`/`_commit`). **Same defect in `stdlib/auth/templates/login.scrml`** (the `scrml generate auth` scaffold §52.13 recommends) — agent-reported, not yet PA-verified.
 
 ### g-example-23-any-driver-reads-any-bol-token — examples/23: any driver can read any load's BOL token and submit a BOL for a load they are not assigned to
-<!-- @gap id=g-example-23-any-driver-reads-any-bol-token sev=MED status=open locus=examples/23-trucking-dispatch(getActiveBolTokenServer checks role only; uploadBolServer has no assignment check — transitionLoadServer does) prov=review:S443-post-merge-1155-P2 -->
+> **RESOLVED S443** — fix/s443-example-23: `assignedDriverFor` guards token read + BOL + POD. PA-verified over HTTP (unassigned driver refused on all three; assigned driver ok; replay refused). README:233 guard text + ex09 SubmitFailed also fixed; stale-token-after-remint (LOW) NOT addressed.
+<!-- @gap id=g-example-23-any-driver-reads-any-bol-token sev=MED status=resolved locus=examples/23-trucking-dispatch(getActiveBolTokenServer checks role only; uploadBolServer has no assignment check — transitionLoadServer does) prov=review:S443-post-merge-1155-P2 -->
 Reviewer-executed on base and merge of #1155: driver B, not assigned to load 12, read its token and submitted → ok; consumes the real driver's single-use token and writes a `bol_received` row under B. Also (LOW): older unconsumed tokens stay valid after a re-mint; `examples/23-trucking-dispatch/README.md:233` still teaches the broken `changes == 0` guard; examples/09's `SubmitFailed` can never fire (INSERT…RETURNING returns a row or throws — uncaught SQLiteError on a CHECK reject) and its new comment says otherwise.
 
 ### g-imported-types-invisible-to-lsp — the LSP runs the typer without `importedTypesByFile`, so the editor never sees imported types (shows the false E-ERROR-009 the CLI no longer does)
@@ -20980,3 +20982,15 @@ Reviewer-executed. **#1145 snippet-drift gate:** no floor on the checked-block c
 ### g-auth-login-redirect-residuals — relative / query-bearing `loginRedirect=` values (LOW)
 <!-- @gap id=g-auth-login-redirect-residuals sev=LOW status=open locus=compiler/src/route-inference.ts+compiler/src/auth-graph.ts prov=review:S443-auth-r2-re-review-F4 -->
 Reviewer-executed: a relative `loginRedirect="signin"` is emitted as-is and resolves against the page's own directory; `/signin?next=1` and `/signin/` redirect correctly but false-fire I-AUTH-REDIRECT-UNRESOLVED + W-AUTH-LOGIN-MISSING. Also: a `<page auth="required">`'s client chunk is served anonymously and carries static lift template text (no data; same under program auth); `<endpoint>` routes in an auth-required scope run anonymously per §61.7 (author-in-arm auth) — §40.2 / §52.13 "every request to this scope" need an §61.7 carve-out sentence.
+
+### g-markup-call-interpolation-emitted-as-module-statement — a markup `${fn(@x.field)}` interpolation is ALSO emitted as a bare module-level statement, evaluated once at load; it throws when `@x` is `not` and kills the page script (handlers never wire)
+<!-- @gap id=g-markup-call-interpolation-emitted-as-module-statement sev=HIGH status=open locus=searched:compiler/src/codegen/emit-client.ts,emit-logic.ts(the top-level statement stream receives the interpolation's call expression) prov=empirical:S443-example-23-dogfood -->
+**PA-REPRODUCED on main (b3419e6d8):** `<program>${ <cur> = not; fn lab(s) { return s } }<div><span>${lab(@cur.status)}</span></div></program>` → the client JS contains a top-level `_scrml_lab_N(_scrml_cs_reactive_get("cur").status);`; in happy-dom: `null is not an object (evaluating '_scrml_cs_reactive_get("cur").status')` and the script stops. A plain `${@cur.status}` is NOT duplicated. Holds with or without an enclosing `if=`, same-line or own-line. This is why examples/23's driver/customer home pages crashed and their Logout buttons were dead. Workaround used in ex23: `${@x is some ? fn(@x.f) : ""}`. Also (same family): attribute expressions like `disabled=(@x.f == "A")` compile to eager effects that run while an enclosing `if=` hides the element.
+
+### g-class-attr-template-does-not-lower-scrml-exprs — inside a `class="…${…}"` template interpolation, scrml expressions are not lowered (`is some`, `?.` emitted raw) → invalid client JS → E-CG-001
+<!-- @gap id=g-class-attr-template-does-not-lower-scrml-exprs sev=MED status=open locus=searched:compiler/src/codegen/emit-html.ts,emit-event-wiring.ts(template-attr class path emits the raw expression into a JS template literal) prov=empirical:S443-example-23-dogfood -->
+**PA-REPRODUCED on main:** `<span class="a ${f(@x is some ? @x.k : "")}">` → emitted `` `a ${_scrml_f_2(_scrml_reactive_get("x") is some ? …)}` `` (raw `is some`) → the protect-egress verifier fails to parse the bundle → E-CG-001 ("compiler defect (malformed client emit)"). `?.` in the same position also fails. Workaround used in ex23: a helper taking the whole record (`accountStatusClassesOf(@currentCustomer)`).
+
+### g-prod-static-no-directory-index — prod `_server.js` static serving tries `path` and `path.html` only; `/x` does not serve `x/index.html` (a `pages/x/index.scrml` route 404s at `/x` in a build)
+<!-- @gap id=g-prod-static-no-directory-index sev=MED status=open locus=compiler/src/commands/build.js(generateServerEntry static candidates: join(SERVE_DIR, pathname) + `${pathname}.html`) prov=empirical:S443-example-23-dogfood -->
+PA-executed: examples/23 with `pages/dispatch/index.scrml` → `GET /dispatch` 404 (the file is `dispatch/index.html`). The compose-route path may cover it where mounted (see g-compose-route-export-name-collision-mounts-one-page). Workaround used: link to the real page paths.
