@@ -59,7 +59,7 @@ describe("F3 — a `:`-shorthand body and `>`", () => {
     const r = run(P("", `        <p : @n >= 3>\n        <b>end</b>`));
     expect(r.diags).toEqual([]);
     await loadProgram(r.core, "r1-ge");
-    expect(document.querySelector("main").innerHTML).toBe("<p>true</p><b>end</b>");
+    expect(document.querySelector("main").innerHTML).toBe("\n        <p>true</p>\n        <b>end</b>\n    ");   // dpa-045 fu4: whitespace kept exactly
   });
   test("a bare `>` comparison → E-PARSE-SHORTHAND-GT (parenthesize); the tail is never page text", () => {
     for (const body of ["@n > 3", "@n>3", "@n > 3 ? \"big\" : \"small\""]) {
@@ -78,7 +78,7 @@ describe("F3 — a `:`-shorthand body and `>`", () => {
     const r = run(P("", `        <div : <p : "x">>\n        <b>end</b>`));
     expect(r.diags).toEqual([]);
     await loadProgram(r.core, "r1-mav");
-    expect(document.querySelector("main").innerHTML).toBe("<div><p>x</p></div><b>end</b>");
+    expect(document.querySelector("main").innerHTML).toBe("\n        <div><p>x</p></div>\n        <b>end</b>\n    ");   // dpa-045 fu4: whitespace kept exactly
   });
 });
 

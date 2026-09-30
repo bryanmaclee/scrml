@@ -1,0 +1,14 @@
+# s444-typer-r8-land progress
+
+- 2026-09-30 start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-aefcc5537264c9d9c; branch feat/s444-typer-r8 from origin/main 108ca89be; bun install + pretest OK.
+- 2026-09-30 gate baseline (origin/main): 26679 pass / 72 skip / 12 todo / 0 fail.
+- 2026-09-30 cherry-picked 063eb3b37 → 5b03f9bd2. One conflict (analyze.scrml declField FieldInfo literal): main added `shrink: shrinkOf(aty)`, r8 made `trusted: resolved`; kept both. No other AS/Tables literal on main lacked the new fields. slice-m2 446/0. Gate 26679/0.
+- 2026-09-30 F1 re-verified by scratch/r8probe.js (uncommitted): origin/main — all 7 shapes E-TYPE-UNKNOWN + E-TYPE-031 (decl field / local: two 031s); branch — only E-TYPE-UNKNOWN; resolved twins unchanged (E-TYPE-031); mixed struct twin loses only the cascade 031.
+- 2026-09-30 mutation run 1: 189/190 RED, 1 NOT RUN (FR2-5 site rewritten by r8) → re-pointed (same corruption). Run 2: 190/190 RED, mirror clean, exit 0. Proofs absent/harmless exit 1.
+- 2026-09-30 full verification recorded in docs/changes/s442-bootstrap-typer-rules/progress.md ("r8 VERIFICATION"). Corpus vs origin/main: 0 changed. vs cf62b415: 2 newly rejected, pre-existing on main (#1164), not r8.
+- 2026-09-30 pre-commit gate: live-PG hook timeouts (db-authoritative*-pg beforeAll, 5s default) under sibling-gate contention; passes standalone; not bypassed — retried.
+- 2026-09-30 S239 review fix round (LAND-WITH-NITS). Both findings re-reproduced by execution (scratch/r8probe.js) before fixing:
+  - R1: `<let x:Nope=1/>` + `let n: int = @x` → r8 E-TYPE-UNKNOWN + E-TYPE-031 (base: + two 031s). Cause: fieldTypeOf (NField read) ignored FieldInfo.trusted. Fix: Unknown when !trusted.
+  - R2: the "unresolved" predicate was "resolveType added ANY diagnostic"; E-GRANT-UNKNOWN (resolveSeqType) hid an independent E-TYPE-031 at params / decl fields / locals / struct fields AND at r7 guard (i) return types (`-> int[bogus]` + `return ["s"]` already hid it on origin/main). Fix: RType.unresolved — set only by an unknown type NAME, propagated through `T | not` and `T[…]`; all five sites read it. Fail-closed: restores the 031s.
+  - Pins: typer-s440 "S444 R1" (+twin), "S444 R2" (5 shapes + Nope[bogus] twin). Mutation rows: 3 re-pointed (r7 guard (i), r8 decl field, r8 local), 5 new (R1; R2 coarse predicate; name not marked; Maybe / Seq propagation dropped). slice-m2 448/0.
+- 2026-09-30 fix-round VERIFICATION (77e351672): lint 0 (58 files) · slice-m1 73 · slice-m2 448 · lowered slice-m1 73 · slice-m3 60 · slice-m4 130/131 (same as base) · v2-lexer 337 · conformance 1144/1151 + 7 xfail, per-case IDENTICAL to base · footprint CG 18/18 + CSS 38/38, reports identical to base · bite runtime 32/0, CSS 32/0, front 12/0, exit 0 · mutations 195/195 RED, mirror clean, exit 0; proofs absent/harmless exit 1 · corpus vs origin/main 0 changed; vs cf62b415 the same 2 pre-existing `<theme>` rejections (#1164) · gate 26679/0.

@@ -12,8 +12,8 @@
 //     (`Str.v`, `Num.raw`, `Text.text`, `Quoted.v`, `Import.from`),
 //     identifiers (names, tags, attribute names, grant words) and spans. No
 //     expression, statement, handler, arm or markup body is ever text.
-//   - Comments are trivia: the parser drops them (and the whitespace-only text
-//     they leave behind is normalized by `lower`, L13).
+//   - Comments are trivia: the parser drops them (the whitespace around them
+//     stays content — L13 retired, dpa-045 follow-up 4, RULED S442).
 //   - The FileAst is SYNTAX. Whether `@x` names a field, a handle or a shared
 //     instance, whether `open` in a renders is a bare projection, what `.Closed`
 //     is a variant of — all of that is analyze's (side-tables by nid).
@@ -128,7 +128,7 @@ ${
     export type ANode:struct = { nid: int, span: ASpan, k: ANodeK }
     export type ANodeK:enum = {
         Elem(e: AElem),
-        Text(text: string),        // verbatim (comments removed); normalized by lower (L13)
+        Text(text: string),        // verbatim (comments removed; whitespace-only runs kept — L13 retired, dpa-045 fu4)
         Interp(e: AExpr),          // ${ expr }
         DeclNode(d: ADecl),        // a declaration where markup may stand (a program body)
     }

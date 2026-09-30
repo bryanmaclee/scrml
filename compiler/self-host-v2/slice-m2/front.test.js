@@ -776,7 +776,7 @@ describe("O60 — a live use-site value to a LOCKED field that carries a grant S
   test("no E-DERIVED-WRITE: the library's own toggle stays a legal write", () => {
     const r = run([LIB(), app]);
     expect(codes(r)).toEqual([]);
-    const inst = r.core.decls[1].renders[0].data.kids[0];
+    const inst = r.core.decls[1].renders[0].data.kids.find((k) => k.variant !== "Text");   // dpa-045 fu4: whitespace Text kept
     expect(inst.variant).toBe("Instance");
     expect(inst.data.attrs.map((a) => a.field)).toEqual([0, 1, 3]);
   });

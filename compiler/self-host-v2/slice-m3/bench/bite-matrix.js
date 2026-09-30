@@ -134,8 +134,9 @@ const MUTATIONS = [
 const FRONT_MUTATIONS = [
   // §66.19.6 — an engine as a `single` declaration
   { c: "Parse.ShorthandBody", id: "a `:`-shorthand body's expression is dropped (an empty text)", file: PARSE,
-    from: "const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Interp(e) }",
-    to: 'const n: ANode = { nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }', tests: ["engine.test.js"] },
+    // (site moved with dpa-045 follow-up 3: parseShorthand now hands its expression to displayNodes)
+    from: "        return displayNodes(m, e, start, tp)",
+    to: '        return { nodes: [{ nid: m.nid, span: mkSpan(start, m.pos), k: ANodeK.Text("") }], mp: mBump(m) }', tests: ["engine.test.js"] },
   { c: "Analyze.StateBodies", id: "state-child bodies are never resolved (no facts for their expressions)", file: ANALYZE,
     from: "st = resolveNodes(renv, stateBodies(ds), st)", to: "st = resolveNodes(renv, [], st)", tests: ["engine.test.js"] },
   { c: "Analyze.StateView", id: "every state-view arm is keyed to the enum's first variant", file: ANALYZE,

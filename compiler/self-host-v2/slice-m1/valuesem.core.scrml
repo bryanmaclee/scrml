@@ -64,13 +64,18 @@ ${
             ]),
         }
 
+        // dpa-045 follow-up 4 (RULED S442, SPEC §4.18.5): whitespace-only text
+        // between elements is kept exactly (L13, which dropped it, is retired).
         const main: View = el("main", [], [
+            textView("\n        "),
             el("button", [onEvent("click", [Stmt.Eval(call0(sLog))])], [textView("log")]),
+            textView("\n        "),
             el("p", [], [
                 dyn(readField(sProgram, here, SEEN)),
                 textView(" / "),
                 dyn(prim1(PrimOp.Length, readField(sProgram, here, AUDIT))),
             ]),
+            textView("\n    "),
         ])
 
         const program: Decl = {
