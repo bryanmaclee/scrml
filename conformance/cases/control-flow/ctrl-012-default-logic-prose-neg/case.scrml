@@ -1,10 +1,7 @@
 <program>
-Welcome to the dashboard.
-
-if you want the archive, ask an admin.
-
-Items for sale (all of them) ship on Friday.
-
+<p>Welcome to the dashboard.</p>
+"if you want the archive, ask an admin."
+"Items for sale (all of them) ship on Friday."
 <page>
   <h1>Hi</h1>
 </page>

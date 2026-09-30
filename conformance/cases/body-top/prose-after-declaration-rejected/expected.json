@@ -1,0 +1,21 @@
+{
+  "id": "body-top-prose-after-declaration-rejected",
+  "description": "Prose sharing a text run with a declaration is still loose prose: E-UNQUOTED-DISPLAY-TEXT once, the declaration still lifts (no E-STATE-UNDECLARED on @count).",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.18.1, §4.18.7",
+  "source-test": "compiler/tests/unit/s441-declared-prose-body.test.js",
+  "rationale": "§40.8 S441 bullet (ruling: user-voice-scrml.md S441 \"prose should be declared as such\" + \"declared-prose implementation: yes to all four\"): a `<program>` / `<page>` / `<channel>` body is a code-default body — a bare run there is code, checked exactly as inside `${ … }`, never page text; displayed text is declared by a markup element or a `\"...\"` display-text literal; a bare run that is not valid code is E-UNQUOTED-DISPLAY-TEXT.",
+  "expect": {
+    "codes": [
+      "E-UNQUOTED-DISPLAY-TEXT"
+    ],
+    "notCodes": [
+      "E-SCOPE-001",
+      "E-EQ-005",
+      "E-STATE-UNDECLARED"
+    ],
+    "codeCounts": {
+      "E-UNQUOTED-DISPLAY-TEXT": 1
+    }
+  }
+}

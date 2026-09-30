@@ -3909,7 +3909,10 @@ export function generateHtml(
       // render slot; a logic node that contains a lift-expr keeps its placeholder
       // + lift wiring and falls through to the normal path below.
       const bodyHasLift = (node.body ?? []).some((child: any) => stmtContainsLiftExpr(child));
-      if (inDefaultLogicMode && !bodyHasLift) return;
+      // S441 — a `${...}` INSIDE a body-top `"..."` display-text literal
+      // (§4.18.4) is an interpolation of declared display text: it renders.
+      const isDisplayInterp = (node as any)._displayInterp === true;
+      if (inDefaultLogicMode && !bodyHasLift && !isDisplayInterp) return;
 
       // inline-value-form-interp (§18.0 / §17.6) — VALUE-FORM CONTROL-FLOW AS
       // THE SOLE INTERP CONTENT. A `${ match @x { .A :> v … } }` /
@@ -4113,7 +4116,7 @@ export function generateHtml(
           // `on mount { boot() }` as the tail statement of the big program-body
           // `${...}` block that the `<db>` context wraps.)
           if (child && child.kind === "bare-expr" && (child as any)._onMountEffect) continue;
-          if (inDefaultLogicMode && child && child.kind === "bare-expr") continue;
+          if (inDefaultLogicMode && !isDisplayInterp && child && child.kind === "bare-expr") continue;
           // Phase 4d Step 8: ExprNode-first; runtime-only string fallback (bare-expr.expr TS field deleted)
           if (child && child.kind === "bare-expr" && (child.exprNode || child.expr)) {
             const exprStr = child.exprNode ? emitStringFromTree(child.exprNode) : child.expr;

@@ -3373,13 +3373,17 @@ function parseSnippetBodyNodes(
   // (S375 review #1). Rendering it as literal text is the safe default — a body
   // that genuinely means a variable read is written `${var}` or returns markup.
   // (Span note: buildAST numbers the reparsed nodes against the synthetic
-  // `<program>` wrapper; any diagnostic on malformed snippet content folds into
+  // wrapper; any diagnostic on malformed snippet content folds into
   // ceErrors with the render-site `child.span` — an accurate author position.)
   const asExpr = parseExprToNode(trimmed, filePath, span?.start ?? 0);
   const interpolate = asExpr && asExpr.kind !== "escape-hatch" && asExpr.kind !== "ident";
+  // The body is RENDERED content, so it is reparsed inside a plain-markup
+  // wrapper whose body is free text (§4.18.1). ⛑ S441: this used to be a
+  // synthetic `<program>` wrapper, which is now a code-default body (§40.8
+  // S441 bullet) — a bare-word body there would be read as code.
   const wrapped = interpolate
-    ? `<program>\n\${${trimmed}}\n</program>\n`
-    : `<program>\n${trimmed}\n</program>\n`;
+    ? `<div>\n\${${trimmed}}\n</div>\n`
+    : `<div>\n${trimmed}\n</div>\n`;
   const bsOut = splitBlocks(filePath, wrapped);
   const tabOut = buildAST(bsOut) as { ast: FileAST; errors: TABErrorInfo[] };
   if (ceErrors) {
@@ -3390,7 +3394,7 @@ function parseSnippetBodyNodes(
     }
   }
   const prog = (tabOut.ast?.nodes ?? []).find(
-    (n: unknown) => (n as MarkupNode)?.kind === "markup" && (n as MarkupNode)?.tag === "program",
+    (n: unknown) => (n as MarkupNode)?.kind === "markup" && (n as MarkupNode)?.tag === "div",
   ) as MarkupNode | undefined;
   const kids = prog?.children ?? [];
   return _deepCloneAst(kids, counter) as ASTNode[];

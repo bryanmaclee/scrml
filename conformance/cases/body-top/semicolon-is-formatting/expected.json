@@ -1,0 +1,23 @@
+{
+  "id": "body-top-semicolon-is-formatting",
+  "description": "A `;` at a body top is source formatting: statements separated or ended by `;`, and a lone `;`, compile clean (the native front end used to fire E-INTERNAL-BODY-TOP-DROPPED on every body-top `;`).",
+  "language-version": "1.0",
+  "spec": "§40.8",
+  "source-test": "compiler/tests/unit/s441-review-r5.test.js",
+  "rationale": "§40.8 S441 coverage bullet: comments and `;` are not content.",
+  "expect": {
+    "codes": [],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "state": {
+      "count": 3
+    },
+    "domAnchored": [
+      {
+        "selector": "#z",
+        "text": "3"
+      }
+    ]
+  }
+}
