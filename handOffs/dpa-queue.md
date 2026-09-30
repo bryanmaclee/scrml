@@ -84,6 +84,8 @@ Item format + drain protocol: `scrml-support/dpa-scrml.md` + the design DD
 | dpa-056 | **FULLY RULED S440** R1-R7 (no shared mutable memory in the core; share grant-less tapes; `send(lin x)` = transfer; `<program isolation=>`; `pool=N`; R6 diagnostic now + client foreign placement BANKED; SPEC hygiene). D1/D2 worker fixes queued. (Row rewritten S441.) | user-voice S440 dpa-056 R1-R7 |
 | dpa-058 | **RULED S442 — "your recs"** (ruling: `scrml-support/user-voice-scrml.md` S442 "dpa-058 (O25) = all PA recs…"). (a) bind always written; (b) the HTML-native validator subset follows the bind; compiler adds `novalidate` (R1 (i)); O54 = (a) this instance; dead validators are errors; D1 fixed in impl#1 (#1160); D2-D9 filed in known-gaps §S442. Bootstrap build owed (needs `bind:` in Core). Artifact `scrml-support/docs/deep-dives/renders-bind-and-validator-landing-o25-dpa-058-2026-09-29.md`. | **bryan** — ruled S442 |
 | dpa-057 | **COMPLETE (ADVISORY) dPA 2026-09-29 — awaiting bryan (B floor, Q1–Q3) + PA (D conformance fix, 4 HIGH defects).** Witnessed leak reproduced BY EXECUTION (outside curl → 200 `{"apiKey":"sk_live_TOPSECRET"}`); OAuth + kv shapes executed too. ★ **Pole D is ALREADY SPEC §13.4 — app mode is non-conformant** (library-mode-only gate) → fix, no ruling. B floor = egress value registry (bryan: what counts as a secret env, how to declassify). A = relay pull-up (tiny). C rejected. ⚑ Dead fns still ship live routes (`examples/07` `deleteUser`); `examples/23` logout never revokes; `examples/19` body-split broken end-to-end. Artifact: `scrml-support/docs/deep-dives/server-helper-return-leak-placement-dpa-057-2026-09-29.md` | dPA — advisory |
+| dpa-063 | **QUEUED S445** — statement termination (newline vs `;`), language-wide, no body-top-only carve-out (bryan: "a ; really clarifies things … not a fan of specific silent carve-outs"). Axiom-adjacent, R2 min. | — |
+| dpa-064 | **QUEUED S445** — a nested `<program>` as an auth scope (gate a sidecar's endpoints); relaxes the `E-PROGRAM-NESTED-AUTH` placeholder when designed. | — |
 
 **⚠ DRAIN-PATH RULE (S319).** The dPA drains **THIS file**. A deliberation banked anywhere else does not exist to it. Witnessed S316→S319: seven conclusions were rung-assigned into `scrml-support/docs/deep-dives/S316-DELIBERATION-QUEUE.md` and the hand-off recorded *"the dPA is RUNNING on Q1/Q2/Q3"* — it was not and never had been; the dPA drained the dpa-018 Pole-D conditional (which IS in this file) instead, and the three deliberations sat unrun across two sessions while every build that depended on them stayed held. **Same shape as the review-floor and `gh issue list` misses: an obligation named in one place, a probe reading another.** Bank deliberations HERE; a separate rung-assignment doc is a companion, never the carrier.
 
@@ -3828,3 +3830,53 @@ unavailable / decode failure at pre-paint (must fall back to the default and UNH
 (next-themes / theme-flash scripts, Remix/Next cookie-based color-mode, `color-scheme` meta, CSS `@media` + `:root` attr
 patterns, content-visibility). Deliver worked programs per mechanism and a rec on the surface (bare `prepaint` vs explicit
 modes vs per-region markers).
+
+## [dpa-063] deep-dive — statement termination: does a newline end a statement, or does `;`? (no silent carve-outs)
+`status:    queued`
+banked:     S445 2026-09-30 (bryan: "your solution seems reasonable. but a ; really clarifies things. That is huge though. And I am not a fan of specific silent carve-outs like this. lets dpa it")
+
+The question: at a `<program>`/`<page>`/`<channel>` body top (default-logic mode, §40.8 — where loose prose is now an
+error and a statement that does nothing is an error, rulings S441 + S443 #4), both parsers still apply JavaScript's
+automatic-semicolon-insertion continuation rules: a line starting with `-`, `+`, `[`, `(`, `/` or a template literal
+CONTINUES the previous line's expression. Executed S445 (prose r5 fuzz, both parsers): `console.log("m")⏎-3102` compiles
+as `console.log("m") - 3102`. Nothing is dropped — it is compiled — but the author almost certainly meant two lines.
+PA rec presented (S445): a newline ends a statement at the body top. bryan: reasonable, BUT "a `;` really clarifies
+things" and he is "not a fan of specific silent carve-outs like this" — i.e. a body-top-only newline rule is itself a
+carve-out (different termination rules in different body modes).
+The poles to develop (language-wide, NOT body-top-only — the carve-out objection is the load-bearing constraint):
+(A) `;` is the statement terminator everywhere in scrml logic (required; a newline never terminates) — maximal clarity,
+    largest migration (measure it: corpus statement count vs `;`-terminated count, both parsers);
+(B) newline terminates everywhere, with explicit continuation (a trailing operator / open bracket continues; a LEADING
+    operator on a new line is an error, not a continuation) — Go/Swift/Kotlin-style, no ASI hazard, no carve-out;
+(C) JS ASI everywhere (today) + a loud diagnostic on every ASI-hazard continuation (a line starting `-`/`+`/`[`/`(`/`/`/`` ` ``
+    that continued the previous expression) — keeps JS muscle memory, makes the hazard loud not silent;
+(D) `;` OPTIONAL but where present authoritative, newline terminates only when unambiguous — likely the carve-out shape
+    bryan rejects; include to reject it on the record or not.
+Must address: consistency across ALL logic loci (`${}` blocks, function bodies, handler inline blocks `onclick={ … }`,
+engine/match code-default bodies §4.18, `:`-shorthand single-expression bodies, `^{}` meta, `?{}` SQL is exempt?);
+interaction with `;` currently being "formatting" at the native body top (prose r5, B); multi-line expressions authors
+actually write (method chains `.map(...)` on the next line, ternaries, binary operators, long argument lists — the
+leading-`.` chain is the biggest ergonomic stake for (B)); the self-host bootstrap parser (implement the ruled grammar by
+construction); `scrml fix` migration feasibility; prior art (Go's lexer semicolon rule, Swift, Kotlin, Scala 3, Python,
+JS ASI hazards + StandardJS vs semicolons, Rust `;` as expression-vs-statement marker — note Rust's `;` carries MEANING,
+a possible scrml angle given `~` / last-expression-value §32.2). Deliver worked programs per pole, the measured migration,
+and a rec. Axiom-adjacent (touches every scrml program's surface) — R2 minimum, one call at a time.
+
+## [dpa-064] deep-dive — a nested `<program>` as an auth scope (gate a sidecar's endpoints)
+`status:    queued`
+banked:     S445 2026-09-30 (bryan confirmed the PA's reading as what he meant: "you picked up on something i meant but did not explicate 'auth inside <div> to gate sidecars endpoints'"; ruling context user-voice S445 "top-level `<program>` = no `<program>`/`<page>` ANCESTOR")
+
+The question: `<program>` may sit anywhere (bryan's locality-of-behaviour rule — "what if a <div> wants to call a
+sidecar"). Today `auth=` on a nested `<program>` (any `<program>`/`<page>` ancestor) is `E-PROGRAM-NESTED-AUTH` — a
+fail-closed PLACEHOLDER (S443 pa-ruled; before it, the attribute was silently dropped and the nested program's server fns
+ran anonymously). bryan's stated intent: a nested `<program auth=…>` should SCOPE auth to that nested context — e.g. gate
+a sidecar's endpoints. When designed, the error is RELAXED (newly-accepting — this deliberation is what licenses it).
+Must address: what a nested program's "endpoints" are per execution-context type (§4.12.3 — inline worker, foreign
+sidecar, db-scoped context, `route=` server endpoint, WASM) — which of them even have a request/caller to authenticate;
+composition with the application program's `auth=` and `<page auth=>` (stricter-wins? nearest-wins? §52.13 member-page
+inheritance); role-gated auth (`<auth role>`, §40.1) at nested scope; sessions (§20.5.1 — one application-scope cookie;
+does a nested scope reuse it?); CSRF (`csrf="auto"` default under auth, §40.2); the loginRedirect of a nested scope; how
+the compiler proves every nested endpoint is gated (fail-closed by construction, not a per-endpoint check); the S441/S443
+history of silent auth drops (wrapped program, nested program, page auth) as the adversarial checklist. Worked programs:
+a sidecar under a `<div>` in an auth=optional page with `<program lang=… auth="required">`; a db-scoped nested program
+with a stricter role; a worker (likely: auth meaningless → error stays?). Rec on the surface + which cases stay errors.
