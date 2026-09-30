@@ -4148,14 +4148,18 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       // `@cell` write inside a worker handler is not routed through the transition
       // guard (a narrow shared limitation, not specific to this path).
       // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`worker.onmessage` / `worker.onerror`), so no `await`
+      // (a worker `message` / `error` listener), so no `await`
       // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
       // so a server-fn / async-peer call cannot strand an `await` in the sync
       // wrapper (S374 review #1 — latent: top-level when-sites carry no async
       // colour today, but this makes the sync-wrapper invariant explicit and
       // future-proof; matches the pre-#693 string path, which never awaited).
       const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
-      return `${workerVar}.onmessage = function(event) { const ${binding} = event.data; ${body}; };`;
+      // D2 (S443): a LISTENER, never an `onmessage` assignment — `.send()`'s reply
+      // router and every other `when message from` hook on this worker coexist
+      // with it (§46.2 source order, §46.6). Messages arrive as `{ replyTo, data }`
+      // (emit-worker.ts wire format); the hook sees only `data`.
+      return `${workerVar}.addEventListener("message", function(event) { const ${binding} = event.data.data; ${body}; });`;
     }
 
     case "when-worker-error": {
@@ -4165,14 +4169,15 @@ export function emitLogicNode(node: any, opts: EmitLogicOpts = { boundary: "clie
       const workerVar = `_scrml_worker_${node.workerName}`;
       const binding = node.binding ?? "e";
       // The when-handler body is wrapped in a plain, NON-async `function(){}`
-      // (`worker.onmessage` / `worker.onerror`), so no `await`
+      // (a worker `message` / `error` listener), so no `await`
       // may be emitted into it. Force `clientAsyncBody:false` in the lowering ctx
       // so a server-fn / async-peer call cannot strand an `await` in the sync
       // wrapper (S374 review #1 — latent: top-level when-sites carry no async
       // colour today, but this makes the sync-wrapper invariant explicit and
       // future-proof; matches the pre-#693 string path, which never awaited).
       const body = rewriteBlockBody(node.bodyRaw ?? "", null, null, opts.boundary === "server" ? "server" : "client", { ..._makeExprCtx(opts), clientAsyncBody: false });
-      return `${workerVar}.onerror = function(${binding}) { ${body}; };`;
+      // A listener, not an `onerror` assignment, so several hooks all run (§46.2).
+      return `${workerVar}.addEventListener("error", function(${binding}) { ${body}; });`;
     }
 
     case "upload-call": {
