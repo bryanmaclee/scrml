@@ -1,0 +1,22 @@
+{
+  "id": "protect-returning-strip-runtime",
+  "description": "§14.8.9 S443 round 6 (P1) — an UPDATE … RETURNING * is a row-producing query: its rows are tagged like a SELECT's and the egress sink strips the protected column. Real Bun.SQL engine; the client cell receives {id, name} only.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/g-sql-row-protect-leak.test.js",
+  "rationale": "§14.8.9: every compiler-emitted client-egress serializer SHALL strip every column whose provenance origin is a `protect=` field. A RETURNING clause hands back the written rows; before S443 round 6 only SELECT/WITH were tagged and `UPDATE users SET … RETURNING *` served passwordHash over HTTP (measured, reviewer + agent). The RETURNING list is resolved as `SELECT <list> FROM <target>`.",
+  "expect": {
+    "codes": ["I-PROTECT-STRIP-001"],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "severity": { "I-PROTECT-STRIP-001": "info" },
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "Alice", "passwordHash": "SECRET_HASH_ALICE" }
+      ]
+    },
+    "input": [{ "click": "#rename" }, { "wait": "settle" }],
+    "state": { "user": { "id": 1, "name": "Alicia" } }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "id": "protect-keyed-hash-clean",
+  "description": "§14.8.9 RULING S443 #7 — a password-class derivation (`scrml:crypto` `hash(\"argon2\", …)`) of a protected column is a value of independent identity and may be returned: no E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "RULING S443 #7 keeps keyed and password-class derivers (verifyPassword, verifyHash, keyed hmac, argon2) on the §14.8.9 deriver allowlist; only a bare digest was removed. The negative twin of protect-bare-digest-e006.",
+  "expect": {
+    "codes": [],
+    "notCodes": ["E-PROTECT-006"]
+  }
+}
