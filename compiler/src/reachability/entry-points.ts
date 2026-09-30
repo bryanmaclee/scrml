@@ -62,6 +62,7 @@ import type {
   NodeId,
   ReachabilityEntryPoint,
 } from "../types/reachability.ts";
+import { findTopLevelProgram } from "../program-role.ts";
 
 // ---------------------------------------------------------------------------
 // RouteMap boundary (duck-typed)
@@ -207,20 +208,14 @@ function buildPageUrlIndex(routeMap: RouteMapLike | unknown): Map<string, string
 }
 
 /**
- * Find the first top-level `<program>` markup node in a file's node list.
- *
- * Mirrors the ast-builder convention (`compiler/src/ast-builder.js`
- * lines 10479-10492) — the canonical home of `hasProgramRoot`.
+ * Find the file's top-level `<program>` markup node — the first with no
+ * `<program>` / `<page>` ancestor, whatever markup wraps it. Reads the ONE shared
+ * role definition (`compiler/src/program-role.ts`; §4.12, S445), the same one
+ * `hasProgramRoot` is derived from.
  */
 function findRootProgram(nodes: ASTNode[] | undefined): MarkupNode | null {
   if (!Array.isArray(nodes)) return null;
-  for (const n of nodes) {
-    if (!n || typeof n !== "object") continue;
-    if (n.kind === "markup" && (n as MarkupNode).tag === "program") {
-      return n as MarkupNode;
-    }
-  }
-  return null;
+  return findTopLevelProgram(nodes) as MarkupNode | null;
 }
 
 /**

@@ -16,12 +16,30 @@
  * rebuild. No staging directory is involved, so no extra filesystem permission is
  * needed and nothing can be left behind by an interrupted build.
  *
- * NARROW SCOPE: only these two codes refuse the write. Every other hard error keeps
+ * E-PROGRAM-002 (§40.8, two top-level `<program>`s in one file) and
+ * E-PROGRAM-NESTED-AUTH (§4.12.2, `auth=` on a nested `<program>`) refuse the write
+ * for the same reason (S445, s445-program-role-by-ancestor): both are raised
+ * exactly where the compiler cannot honour a declared `auth=` / session / middleware
+ * setting, so the units it would write are the FAIL-OPEN ones — measured before
+ * S445: `compile` / `build` exited 1 on either code yet wrote a `.server.js` whose
+ * server functions answered anonymous callers, runnable by any `_server.js` left
+ * from a previous build.
+ *
+ * NARROW SCOPE: only these four codes refuse the write. Every other hard error keeps
  * the pre-existing posture (artifacts land, exit 1); widening it is an open ruling.
  */
 
-/** The hard errors that refuse the build as "two applications in one compiled server". */
-export const APPLICATION_SCOPE_REFUSALS = new Set(["E-MW-007", "E-MW-008"]);
+/**
+ * The hard errors that refuse the build before any write: "two applications in one
+ * compiled server" (E-MW-007 / E-MW-008) and an application / auth scope the
+ * compiler cannot honour (E-PROGRAM-002 / E-PROGRAM-NESTED-AUTH).
+ */
+export const APPLICATION_SCOPE_REFUSALS = new Set([
+  "E-MW-007",
+  "E-MW-008",
+  "E-PROGRAM-002",
+  "E-PROGRAM-NESTED-AUTH",
+]);
 
 /** True when any diagnostic in `errors` is an application-scope refusal. */
 export function hasApplicationScopeRefusal(errors) {

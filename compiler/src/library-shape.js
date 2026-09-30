@@ -119,6 +119,7 @@ export function isForeignLangLibDecl(node) {
 // JSDoc cannot annotate an `export … from` specifier, so one here reads as a
 // type contract and enforces nothing. The real type travels with the export.
 export { FILE_SHAPES } from "./types/ast.ts";
+import { hasTopLevelProgram } from "./program-role.ts";
 
 /**
  * Classify a file by the shape of its TOP-LEVEL nodes.
@@ -132,7 +133,8 @@ export { FILE_SHAPES } from "./types/ast.ts";
  *
  * @param {any[]} nodes — the FileAST's TOP-LEVEL nodes (post-`liftBareDeclarations`,
  *   so bare declarations are already wrapped in synthetic logic blocks).
- * @param {boolean} hasProgramRoot — true iff a top-level node is `<program>`.
+ * @param {boolean} hasProgramRoot — true iff the file declares a TOP-LEVEL `<program>`: one
+ *   with no `<program>` / `<page>` ancestor, whatever markup wraps it (program-role.ts, S445).
  * @returns {FileShape}
  */
 export function classifyFileShape(nodes, hasProgramRoot) {
@@ -159,12 +161,12 @@ export function classifyFileShape(nodes, hasProgramRoot) {
   // unrepresentable.
   //
   // On every CORRECTLY-paired call this branch is dead by construction — the
-  // TAB derives `hasProgramRoot` as exactly `nodes.some(n => n.kind ===
-  // "markup" && n.tag === "program")`, so a program node implies the early
-  // return above already fired. It costs nothing on the happy path and
+  // TAB (and the PRECG re-stamp) derive `hasProgramRoot` through the SAME
+  // `hasTopLevelProgram` (program-role.ts, S445), so a top-level program implies
+  // the early return above already fired. It costs nothing on the happy path and
   // immunizes EVERY fallback call site at once, rather than hardening one
   // caller and leaving the others to carry a documented hazard.
-  if (markup.some((n) => n.tag === "program")) return "program";
+  if (hasTopLevelProgram(topLevel)) return "program";
 
   // §40.8 — a route file of a multi-page app. Checked BEFORE the channel branch
   // so the channel+page overlap resolves the way it always has.

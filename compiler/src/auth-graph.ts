@@ -72,6 +72,7 @@ import {
   type ConstValue,
   partiallyEvaluateExpr,
 } from "./codegen/constant-folder.js";
+import { findTopLevelProgram } from "./program-role.ts";
 
 // ---------------------------------------------------------------------------
 // File-shape normalization (CE-shape vs. post-META wrapper)
@@ -683,15 +684,12 @@ function walkMarkupNodes(
   }
 }
 
-/** Find the `<program>` markup root, if any. Top-level only — `<program>`
- *  never nests in scrml. */
+/** Find the file's top-level `<program>`, if any — the first with no `<program>`
+ *  / `<page>` ancestor, whatever markup wraps it (the ONE shared role definition,
+ *  program-role.ts; §4.12, S445). It is the node whose `auth=` became
+ *  `authConfig`, so the program gate is anchored to the program that declared it. */
 function findProgramNode(nodes: ASTNode[]): MarkupNode | null {
-  for (const node of nodes ?? []) {
-    if (node && node.kind === "markup" && node.tag === "program") {
-      return node;
-    }
-  }
-  return null;
+  return findTopLevelProgram(nodes ?? []) as MarkupNode | null;
 }
 
 /** Lookup an attribute by name on a markup node's attr list. */

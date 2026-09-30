@@ -31,6 +31,7 @@ import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { isLibraryShape, classifyFileShape } from "./library-shape.js";
+import { findTopLevelProgram } from "./program-role.ts";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
@@ -2345,7 +2346,9 @@ function _compileScrmlImpl(options = {}) {
           : null;
       } else {
         // Fallback: parse from raw db= attribute value via the helper.
-        const programNode = (f.nodes ?? f.ast?.nodes ?? []).find(n => n?.kind === "markup" && (n.tag ?? "") === "program");
+        // The file's top-level <program> (program-role.ts; §4.12, S445 — whatever
+        // markup wraps it), the same node its middlewareConfig was read from.
+        const programNode = findTopLevelProgram(f.nodes ?? f.ast?.nodes ?? []);
         const dbAttr = programNode?.attrs?.find(a => a.name === "db");
         const dbVal = dbAttr?.value?.kind === "string-literal" ? dbAttr.value.value : null;
         dbDriver = extractDbDriverFromValue(dbVal);

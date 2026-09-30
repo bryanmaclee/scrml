@@ -64,6 +64,7 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
+import { forEachProgramWithRole, findTopLevelProgram } from "../program-role.ts";
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
@@ -1564,108 +1565,91 @@ export function runCG(input: CgInput): CgOutput {
     }
 
     // §40.7 documentary-attrs-on-nested-program detection (Phase A1a, 2026-05-05).
-    // Walk all <program> nodes; the FIRST top-level <program> is the document
-    // root (its documentary attrs emit head metadata in the head-emission pass
-    // below). Any deeper <program> with one of the five documentary attrs
-    // (title, description, version, author, license) emits W-PROGRAM-TITLE-NESTED.
+    // The file's top-level <program> is the document root (its documentary attrs
+    // emit head metadata in the head-emission pass below). Any NESTED <program>
+    // with one of the five documentary attrs (title, description, version,
+    // author, license) emits W-PROGRAM-TITLE-NESTED. Top-level vs nested is the
+    // ONE shared definition (program-role.ts, §4.12 / S445): nested = has a
+    // <program> or <page> ancestor, whatever markup sits between.
     // Runs BEFORE extractWorkerPrograms() so worker-program nodes are still in
     // tree and discoverable.
     const DOC_ATTR_NAMES = ["title", "description", "version", "author", "license"];
-    function detectNestedDocAttrs(parentChildren: any[], depth: number): void {
-      for (const node of parentChildren) {
-        if (!node || typeof node !== "object") continue;
-        if (node.kind === "markup" && node.tag === "program") {
-          if (depth >= 1) {
-            // Nested <program> — check for documentary attrs
-            const attrs: any[] = node.attributes ?? node.attrs ?? [];
-            const offending = attrs.filter((a: any) =>
-              DOC_ATTR_NAMES.includes(a.name) &&
-              a.value && a.value.kind === "string-literal" &&
-              typeof a.value.value === "string" && a.value.value !== ""
-            );
-            for (const a of offending) {
-              const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
-              errors.push(new CGError(
-                "W-PROGRAM-TITLE-NESTED",
-                `W-PROGRAM-TITLE-NESTED: Documentary attribute \`${a.name}=\` on a nested ` +
-                `<program> has no effect — workers have no DOM <head>. Move \`${a.name}=\` to ` +
-                `the top-level <program> or remove it. (§40.7)`,
-                { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
-                "warning",
-              ));
-            }
-          }
-          // Recurse into nested program children at the next depth
-          if (Array.isArray(node.children)) {
-            detectNestedDocAttrs(node.children, depth + 1);
-          }
-          continue;
-        }
-        if (node.kind === "markup" && Array.isArray(node.children) && node.children.length > 0) {
-          detectNestedDocAttrs(node.children, depth);
-        }
+    forEachProgramWithRole(nodes, (node: any, role) => {
+      if (role !== "nested") return;
+      const attrs: any[] = node.attributes ?? node.attrs ?? [];
+      const offending = attrs.filter((a: any) =>
+        DOC_ATTR_NAMES.includes(a.name) &&
+        a.value && a.value.kind === "string-literal" &&
+        typeof a.value.value === "string" && a.value.value !== ""
+      );
+      for (const a of offending) {
+        const span = (a.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+        errors.push(new CGError(
+          "W-PROGRAM-TITLE-NESTED",
+          `W-PROGRAM-TITLE-NESTED: Documentary attribute \`${a.name}=\` on a nested ` +
+          `<program> has no effect — workers have no DOM <head>. Move \`${a.name}=\` to ` +
+          `the top-level <program> or remove it. (§40.7)`,
+          { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+          "warning",
+        ));
       }
-    }
-    detectNestedDocAttrs(nodes, 0);
+    });
 
     // §4.12.2 (S443, g-nested-program-auth-attr-silently-ignored) — `auth=` is NOT
-    // a nested-valid `<program>` attribute. Auth config is read from the file's
-    // FIRST top-level `<program>` only (compute-program-config.ts), so a nested
-    // `<program auth="required">` compiled with no auth at all: its server
-    // functions ran for anonymous callers (MEASURED S441: an anonymous POST wrote
-    // a row). "Nested" here is any `<program>` with a `<program>` OR `<page>`
-    // ancestor — a `<page>` is a per-route container inside the application's one
-    // `<program>` (§40.8), so a `<program>` under it is nested too, and its `auth=`
-    // was dropped the same way (MEASURED S443: 200 for an anonymous GET). Fail
-    // closed: any `auth=` there, whatever its value, is an error, never a no-op.
-    function detectNestedProgramAuth(parentChildren: any[], nested: boolean): void {
-      for (const node of parentChildren) {
-        if (!node || typeof node !== "object" || node.kind !== "markup") continue;
-        if (node.tag === "program" && nested) {
-          const attrs: any[] = node.attributes ?? node.attrs ?? [];
-          const authAttr = attrs.find((a: any) => a && a.name === "auth");
-          if (authAttr) {
-            const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
-            errors.push(new CGError(
-              "E-PROGRAM-NESTED-AUTH",
-              "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> — a nested " +
-              "<program> is not an auth scope, so its server functions would run unauthenticated. " +
-              "Put `auth=` on the top-level <program> (the whole application) or on the " +
-              "<page> that needs it, and remove it from the nested <program>. (§4.12.2, §52.13)",
-              { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
-              "error",
-            ));
-          }
-        }
-        if (Array.isArray(node.children) && node.children.length > 0) {
-          detectNestedProgramAuth(node.children, nested || node.tag === "program" || node.tag === "page");
-        }
-      }
-    }
-    detectNestedProgramAuth(nodes, false);
-
-    // §40.8 / §20.5.1 (S443, ruled by bryan — user-voice S443 item 3): a file declares
-    // its top-level `<program>` exactly once. Two or more top-level `<program>`
-    // elements in ONE file is `E-PROGRAM-002`. Before S443 the second one was
-    // silently mis-read: compute-program-config reads auth= from the FIRST
-    // top-level `<program>` only, so `<program>…</program><program auth="required">`
-    // served the second program's routes to anonymous callers
-    // (g-two-top-level-programs-one-file-second-auth-dropped). NARROW: same-file
-    // only — the §40.8 cross-file case stays reserved (library-shape.js,
-    // type-system.ts and the session-config comments above depend on it).
+    // a nested-valid `<program>` attribute: a nested `<program>` is not an auth
+    // scope, and its `auth=` was silently dropped (MEASURED S441: an anonymous POST
+    // wrote a row; S443: 200 for an anonymous GET under a `<page>`). Fail closed:
+    // any `auth=` there, whatever its value, is an error, never a no-op.
+    //
+    // §40.8 / §20.5.1 (S443 item 3) — a file declares its top-level `<program>`
+    // exactly once; two or more is `E-PROGRAM-002`. NARROW: same-file only — the
+    // §40.8 cross-file case stays reserved.
+    //
+    // BOTH detectors read ONE definition of a program's role (program-role.ts;
+    // §4.12, ruling S445 option b): a `<program>` is TOP-LEVEL when it has no
+    // `<program>` or `<page>` ancestor, whatever markup wraps it, and NESTED when
+    // it has one. Before S445 the E-PROGRAM-002 count read only the file's DIRECT
+    // top-level nodes while the nested-auth detector tracked ancestors, so a
+    // `<div>`-wrapped `<program auth="required">` was neither — no error, its
+    // `auth=` dropped, its server functions open to anonymous callers
+    // (g-wrapped-program-auth-silently-dropped). Wrapper markup never changes a
+    // program's role, and no placement rule is added: a `<program>` may appear
+    // anywhere.
     {
-      const topPrograms = (Array.isArray(nodes) ? nodes : []).filter(
-        (n: any) => n && typeof n === "object" && n.kind === "markup" && n.tag === "program",
-      );
+      const topPrograms: any[] = [];
+      forEachProgramWithRole(nodes, (node: any, role) => {
+        if (role === "top-level") {
+          topPrograms.push(node);
+          return;
+        }
+        const attrs: any[] = node.attributes ?? node.attrs ?? [];
+        const authAttr = attrs.find((a: any) => a && a.name === "auth");
+        if (authAttr) {
+          const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
+          errors.push(new CGError(
+            "E-PROGRAM-NESTED-AUTH",
+            "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> (one inside " +
+            "another <program> or a <page>) — a nested <program> is not an auth scope, so its " +
+            "server functions would run unauthenticated. Put `auth=` on the top-level <program> " +
+            "(the whole application) or on the <page> that needs it, and remove it from the " +
+            "nested <program>. (§4.12.2, §52.13)",
+            { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
+            "error",
+          ));
+        }
+      });
       for (const extra of topPrograms.slice(1)) {
         const span = extra.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 };
         errors.push(new CGError(
           "E-PROGRAM-002",
           "E-PROGRAM-002: a file declares its top-level <program> exactly once, but this file " +
-          `has ${topPrograms.length}. Everything after the first is mis-read — its auth=, ` +
-          "session and middleware attributes are ignored, so its routes run with the FIRST " +
-          "program's settings. Merge them into one <program>, or move the second into its own " +
-          "file (a nested <program> inside the first is a worker or scoped-db context, §4.12). (§40.8)",
+          `has ${topPrograms.length}. A <program> is top-level when no other <program> or ` +
+          "<page> encloses it, whatever markup (a <div>, <main>, …) wraps it, so this one is a " +
+          "second application program, not a nested one. The compiler cannot tell which " +
+          "program's auth=, session and middleware settings govern this file's routes, so " +
+          "the file does not compile. Merge them into one <program>, move the second into its " +
+          "own file, or place it inside the first (a nested <program> is a worker, sidecar or " +
+          "scoped-db context, §4.12). (§40.8)",
           { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },
           "error",
         ));
@@ -2721,9 +2705,10 @@ export function runCG(input: CgInput): CgOutput {
       // version, author, license) emit standard HTML head tags. Empty-string
       // values are treated as absent. Non-string-literal values are silently
       // ignored — head metadata is static, not reactive.
-      const topLevelProgram = (nodes as any[]).find(
-        (n: any) => n && n.kind === "markup" && n.tag === "program",
-      );
+      // The file's top-level <program> by the shared role definition
+      // (program-role.ts, §4.12 / S445) — a <div>-wrapped application program
+      // is still the document root whose head metadata this reads.
+      const topLevelProgram: any = findTopLevelProgram(nodes);
       function getDocAttr(name: string): string | null {
         if (!topLevelProgram) return null;
         const attrs: any[] = topLevelProgram.attributes ?? topLevelProgram.attrs ?? [];

@@ -84,6 +84,7 @@ import { collectChannelFunctionMap, collectChannelCellMap, collectChannelAttrHan
 import { buildBodyDG } from "./body-dg-builder.ts";
 import { planMultiBatchCPS } from "./cps-batch-planner.ts";
 import { isToolProgram, findToolMainFn, findTopLevelProgramNode } from "./tool-program.ts";
+import { findTopLevelProgram } from "./program-role.ts";
 import { filePrintBuiltinsShadowed } from "./codegen/log-loc.ts";
 import { countUnitProgramNodes } from "./codegen/session-config-resolve.ts";
 import { effectiveCsrfUnderAuth } from "./compute-program-config.ts";
@@ -4386,8 +4387,8 @@ function readStringAttrOf(attrs: any[] | undefined, name: string): string | null
 
 /**
  * Every literal `auth=` declaration that governs this file's route, in document
- * order: the FIRST top-level `<program>` (the only one compute-program-config
- * reads) and every `<page auth=>`. Nested `<program>`s are skipped — their `auth=`
+ * order: the file's top-level `<program>` (program-role.ts — the only one
+ * compute-program-config reads) and every `<page auth=>`. Nested `<program>`s are skipped — their `auth=`
  * is E-PROGRAM-NESTED-AUTH, not a declaration of this route.
  */
 function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page"; value: string; node: any; line: number; col: number }> {
@@ -4399,31 +4400,33 @@ function collectFileAuthDecls(fileAST: FileAST): Array<{ site: "program" | "page
     const sp = (a && a.span) || node.span || {};
     return { line: sp.line ?? 0, col: sp.col ?? 0 };
   };
-  let firstProgramSeen = false;
-  const walk = (ns: any[] | undefined, topLevel: boolean): void => {
+  // The file's top-level `<program>` by the ONE shared role definition
+  // (program-role.ts; §4.12, S445): no `<program>` / `<page>` ancestor, whatever
+  // markup wraps it — the same node compute-program-config reads.
+  const topProgram = findTopLevelProgram(nodes);
+  const walk = (ns: any[] | undefined): void => {
     if (!Array.isArray(ns)) return;
     for (const node of ns) {
       if (!node || node.kind !== "markup") continue;
       if (node.tag === "program") {
-        // Only the first top-level `<program>`'s auth= is this route's program
+        // Only the top-level `<program>`'s auth= is this route's program
         // declaration; a nested / second top-level one is not recorded (its
         // children are still walked so a `<page auth=>` inside is never missed).
-        if (topLevel && !firstProgramSeen) {
-          firstProgramSeen = true;
+        if (node === topProgram) {
           const v = readStringAttrOf(node.attrs, "auth");
           if (v) out.push({ site: "program", value: v, node, ...at(node) });
         }
-        walk(node.children, false);
+        walk(node.children);
         continue;
       }
       if (node.tag === "page") {
         const v = readStringAttrOf(node.attrs, "auth");
         if (v) out.push({ site: "page", value: v, node, ...at(node) });
       }
-      walk(node.children, false);
+      walk(node.children);
     }
   };
-  walk(nodes, true);
+  walk(nodes);
   return out;
 }
 
