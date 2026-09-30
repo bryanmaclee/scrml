@@ -4517,7 +4517,7 @@ and read the derived value inside the body.
 
 **Normative statement:**
 
-- `when @var changes { body }` SHALL execute `body` after the `_scrml_reactive_set` call completes and before the next microtask boundary. This is the canonical pattern for localStorage sync, analytics, and auto-save.
+- `when @var changes { body }` SHALL execute `body` after the `_scrml_reactive_set` call completes and before the next microtask boundary. This is the canonical pattern for localStorage sync, analytics, and auto-save. *(S444: browser persistence of a cell is now §6.14 `persist=`; see the corrected idiom row below.)*
 
 **Canonical use cases:**
 
@@ -4525,8 +4525,11 @@ and read the derived value inside the body.
 |---|---|
 | Derive a value from reactive state | `const <name> = expr` (§6.6) |
 | Run a side effect when state changes | `when @var changes { body }` |
-| Sync to localStorage on change | `when @var changes { localStorage.setItem(key, @var) }` |
+| ~~Sync to localStorage on change~~ | ~~`when @var changes { localStorage.setItem(key, @var) }`~~ |
+| Persist a cell across reloads | `<x persist="local" key="app.x"> = init` (§6.14 — **Nominal**, lands with the bootstrap). Until it lands, a hand-written recipe SHALL encode on write and decode + check on read: see the note below. |
 | Auto-save form fields | `when (@field1, @field2) changes { saveForm(@field1, @field2) }` |
+
+> **Correction S444 (dpa-061 call 8) — the struck row was silently lossy.** Web Storage stores `String(v)`, so the struck recipe stored a `string[]` as `"a,b"`, an object as `"[object Object]"`, and `not` as the present string `"null"`; it covered only the write half. It is correct **only for a `string` cell**. Browser persistence is now the `persist=` lifetime attribute (§6.14), which owns restore, encoding, fail-closed decode, cross-tab sync and write failure. A hand-written recipe for a non-`string` cell, until §6.14 lands, SHALL encode the value (e.g. `JSON.stringify`) in a named function that the `when` body calls, and on load SHALL decode inside a guard and check the decoded value's shape before assigning it (on failure, keep the default). `JSON.stringify` does not round-trip a map (§59.10 — `JSON.stringify(new Map(...))` is `"{}"`). The recipe's `!{}` guard goes in the named function, not in the `when` body (`g-bang-brace-in-when-changes-body-invalid-logic`). **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 calls 5, 7, 8 — *"5, 7, 8 your recs. expound 6"* (8: *"the design-independent fixes land now: the SPEC §6.7.4 lossy localStorage recipe row, the `when`-body `!{}` codegen defect (`g-bang-brace-in-when-changes-body-invalid-logic`), and a PRIMER entry. RULED."*) · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` C4 P1 · **supersedes:** the struck row above. Resolves `g-spec-6-7-4-localstorage-recipe-lossy-for-non-string-cells`.
 
 ---
 
@@ -4808,10 +4811,11 @@ If a future revision determines that `<request>` cannot justify all three distin
 request-decl  ::= '<request' request-attrs '>' request-body '/'
                | '<request' request-attrs '/>'
 
-request-attrs ::= id-attr (deps-attr)?
+request-attrs ::= id-attr (deps-attr)? (cache-attr)?
 id-attr       ::= 'id=' string-literal
 deps-attr     ::= 'deps=' '[' deps-list ']'
 deps-list     ::= ('@' identifier (',' '@' identifier)*)?
+cache-attr    ::= 'cache'                          (S444 dpa-060 — bare; takes no value, see §6.7.7.2)
 
 request-body  ::= '$' '{' assignment-expression '}'
 ```
@@ -4819,6 +4823,8 @@ request-body  ::= '$' '{' assignment-expression '}'
 The `id` attribute is required (E-LIFECYCLE-018). The body SHALL contain exactly one assignment expression of the form `@variable = expr`.
 
 The `deps` attribute is optional. When absent, the compiler infers reactive dependencies from `@variable` reads within the fetch expression. When present, `deps` overrides inference.
+
+The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-ahead**). Its semantics are §6.7.7.2.
 
 ```scrml
 // Minimal — fetches on mount, re-fetches when @userId changes (inferred)
@@ -4869,7 +4875,7 @@ The `deps` attribute is optional. When absent, the compiler infers reactive depe
 
 On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch if prior data exists.
 
-**Destroy behavior:** On scope destroy, in-flight results are discarded. The compiler SHALL generate a cancellation guard.
+**Destroy behavior:** On scope destroy, in-flight results are discarded. The compiler SHALL generate a cancellation guard. **Amended S444 (dpa-059):** on scope destroy an in-flight fetch's result is never applied, and a request the compiler classifies **READ** additionally has its transport **aborted**; a **WRITE** request is **discarded** — its result is not applied and its transport runs to completion (§6.7.7.1).
 
 **`<request>` is not a loop.** Unlike `<timer>` and `<poll>`, the body executes once on mount, then only on dependency change or `refetch()`.
 
@@ -4883,7 +4889,9 @@ On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch 
 | `<#id>.stale` | `boolean` | `true` when data exists AND a new fetch is in flight |
 | `<#id>.refetch()` | `() -> void` | Imperatively re-execute the fetch body |
 
-**`stale` does not imply cache TTL.** Staleness is point-in-time: data exists and a fetch is in flight. No cache expiration, no max-age, no background revalidation. Cache semantics are a stdlib concern.
+**`stale` does not imply cache TTL.** Staleness is point-in-time: data exists and a fetch is in flight. No cache expiration, no max-age~~, no background revalidation. Cache semantics are a stdlib concern~~.
+
+> **Amendment S444 (dpa-060) — the stdlib deferral is struck.** A `<request>` MAY opt into result caching with the bare `cache` attribute (§6.7.7.2). A cache hit revalidates in the background, and during that fetch `stale` is `true` — which is exactly this paragraph's point-in-time definition (data exists and a fetch is in flight). There is still no cache expiration and no max-age: no author TTL exists anywhere on `<request>`. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 1 — *"i and B2"* (the entry: *"Supersedes §6.7.7's unprovenanced "Cache semantics are a stdlib concern" (scrml8 `1ce4ff6`, agent-authored one-shot patch — rationale-grade, per the dd)."*) · ruling:user-voice-scrml.md S444 dpa-060 call 3 — *"(ii) and revalidate"* · dd:`scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md` C1 (the sentence arrived verbatim in scrml8 `1ce4ff6`'s one-shot `apply_patch.py` L118; no deliberation found — `rationale:`-grade under Rule 4b) · **supersedes:** *"no background revalidation. Cache semantics are a stdlib concern."* (struck above).
 
 #### Integration with E-RI-002
 
@@ -4893,11 +4901,11 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
 **EC-1: Error then refetch.** A dependency change or `refetch()` clears `<#id>.error` to `not` and begins a new loading cycle. `<#id>.data` retains its value.
 
-**EC-2: Rapid dependency changes.** Each change starts a new fetch. Previously in-flight fetches are superseded — only the most recently initiated fetch's result is applied. The compiler SHALL generate a sequence number per `<request>` instance.
+**EC-2: Rapid dependency changes.** Each change starts a new fetch. Previously in-flight fetches are superseded — only the most recently initiated fetch's result is applied. The compiler SHALL generate a sequence number per `<request>` instance. **Amended S444 (dpa-059):** a superseded fetch of a **READ** request (§6.7.7.1) SHALL have its transport **aborted**; a superseded fetch of a **WRITE** request SHALL be **discarded** — its result is not applied and its transport runs to completion. In both cases only the most recently initiated fetch's result is applied, and the sequence number remains the guard.
 
-**EC-3: Scope destroyed during in-flight fetch.** The resolution is discarded. The compiler SHALL generate a mounted-guard check.
+**EC-3: Scope destroyed during in-flight fetch.** The resolution is discarded. The compiler SHALL generate a mounted-guard check. **Amended S444 (dpa-059):** teardown follows the same rule as supersede — a **READ** request's in-flight transport SHALL be **aborted**; a **WRITE** request's SHALL be **discarded** (result not applied, transport completes). This is the same rule as §20.8.8 step 2.3 (route-leave), and the two sentences now agree (§6.7.7.1).
 
-**EC-4: `refetch()` while loading.** Starts a new fetch immediately, superseding the in-flight one (same as EC-2).
+**EC-4: `refetch()` while loading.** Starts a new fetch immediately, superseding the in-flight one (same as EC-2, including the S444 abort-reads / discard-writes rule).
 
 **EC-5: No reactive deps, no `refetch()`.** Fetch executes once on mount. Valid. The compiler SHALL emit W-LIFECYCLE-013 when a body references no reactive `@variables` and `deps=` is absent or empty (suppressed by explicit `deps=[]`).
 
@@ -4911,6 +4919,9 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - A `<request>` SHALL discard in-flight results on scope destroy.
 - The compiler SHALL generate a mounted-guard check in every `<request>` resolution.
 - The compiler SHALL generate a sequence number for every `<request>` instance (EC-2, EC-4).
+- *(S444, dpa-059 — Nominal / spec-ahead.)* On supersede (EC-2, EC-4) and on teardown (EC-3, §20.8.8 step 2.3), a `<request>` classified **READ** (§6.7.7.1) SHALL have its in-flight transport aborted; a `<request>` classified **WRITE** SHALL have its in-flight result discarded while its transport runs to completion.
+- *(S444, dpa-059.)* An abort SHALL NOT set `<#id>.error`, and SHALL NOT be treated as, or imply, a rollback (§6.7.7.1).
+- *(S444, dpa-060 — Nominal / spec-ahead.)* `cache` on a `<request>` that has no compiler-derivable read-set (a `url=` or `api=` request) SHALL be `E-REQUEST-CACHE-NO-READSET` (§6.7.7.2).
 - `<#id>.data` SHALL NOT be cleared on re-fetch. It SHALL retain its previous value until the new fetch settles.
 - `<#id>.error` SHALL be reset to `not` at the start of each new fetch.
 - `<#id>.stale` SHALL be `true` iff `<#id>.data` is not `not` and a fetch is in flight.
@@ -4991,6 +5002,58 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 | W-LIFECYCLE-012 | `refetch()` called inside `<timer>`/`<poll>` body | Warning |
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
 | W-LIFECYCLE-014 | `<request>` inside `for/lift` loop | Warning |
+| E-REQUEST-CACHE-NO-READSET | `cache` on a `<request>` with no compiler-derivable read-set (`url=` / `api=`) — §6.7.7.2. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+
+#### 6.7.7.1 Supersede and teardown — abort READS, discard WRITES (S444, dpa-059)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-059 — *"C for abort."* (options: A discard-everywhere (today) · B abort-everything · C abort reads, discard writes (compiler-classified, unclassifiable = write) · D author-declared; **RULED C**) · dd:`scrml-support/docs/deep-dives/request-supersede-abort-dpa-059-2026-09-30.md` (Approach C; C2 edge table; C3(e) guard analysis) · **supersedes:** the discard-only reading of §6.7.7 EC-2 / EC-3 / EC-4 and the destroy-behaviour paragraph, and the unconditional *"in-flight `<request>`s issued by the region are **aborted**"* of §20.8.8 step 2.3.
+>
+> **⚑ Ruled vs entailed.** bryan's line answers the dd's call 1. The user-voice entry's PA scope note: *"The PA's recs on calls 2–5 were presented alongside but not separately answered: (2) route-leave teardown follows the same rule (reads aborted, writes discarded; §20.8.8 step 2.3 and §6.7.7 EC-3 both rewritten); (3) a SPEC clause: abort is transport-only — not a rollback, the server may have committed, never sets `.error`; (4) the read-only test = no non-SELECT SQL anywhere in the call, a single batch, GET/HEAD for `url=`/`api=`, surfaced in `scrml explain` not a lint; (5) CPS-batch threading dissolves under C (reads are single-batch). The PA treats (2)(4)(5) as entailed by C and (3) as owed under any abort pole — flag for correction."* Rules 1, 3, 4 and 5 below therefore carry the status **PA reading of S444, bryan veto window**; rule 2 is the ruling itself.
+>
+> **Nominal / spec-ahead.** impl#1 discards on every edge today — the sequence-number and mounted guards, with no `AbortController` on any `<request>` transport (`g-region-request-discard-not-abort`). Per S444 (*"impl#1 divergence is filed as gaps, not fixed"*) impl#1 carries the divergence and the bootstrap builds this section.
+
+1. **Classification.** The compiler SHALL classify every `<request>` at compile time as **READ** or **WRITE**:
+   - **Body form** (`${ @x = call }`): **READ** iff (a) no non-`SELECT` SQL (`?{}`) is reachable anywhere in the call graph of the body's call expression — transitively, through every server function the call reaches — **and** (b) the call lowers to a single server batch (not a §19.9.9 multi-batch CPS body).
+   - **`url=` / `api=` form** (§60): **READ** iff the HTTP method is `GET` or `HEAD`.
+   - **Every other request is WRITE — including any request the compiler cannot classify.** Unclassifiable = write: the classification fails closed to discard.
+2. **Supersede** (EC-2, EC-4). When an in-flight fetch is superseded, a **READ** request's superseded transport SHALL be **aborted**. A **WRITE** request's superseded fetch SHALL be **discarded**: its result SHALL NOT be applied, and its transport SHALL NOT be aborted — it runs to completion.
+3. **Teardown** (EC-3 scope destroy; §20.8.8 step 2.3 route-leave). The same rule applies: a **READ** request's in-flight transport SHALL be aborted; a **WRITE** request's in-flight fetch SHALL be discarded (result not applied, transport completes).
+4. **Abort is transport-only.** An abort closes the client's side of the in-flight HTTP request and discards any response. It is **not a rollback**: an abort SHALL NOT imply that the server did not execute, commit, or partially commit the call — **the server may have committed**. (§8.9.2 / §19.10.5's only ROLLBACK trigger remains an exception inside the handler.) An aborted fetch SHALL NOT set `<#id>.error`, and SHALL NOT be treated as a failure settle.
+5. **Explain surface, not a lint.** The READ / WRITE classification of each `<request>` SHALL be surfaced by `scrml explain`. It SHALL NOT be reported as a lint or warning.
+6. **Multi-batch CPS.** A multi-batch body is WRITE by rule 1(b), so an abort never lands between two committed batches. Abort therefore introduces no partial-commit state that discard does not already have.
+
+**OPEN (dpa-059 — not ruled; not decided by this section):**
+
+- **O-059-1** — `scrml explain` is not yet a specified command. Its surface and the output form of the classification are OPEN.
+- **O-059-2** — Transport coverage inside a READ request. A single-batch READ body can still reach more than one transport (two server calls in one expression; the CSRF 403 retry). Whether every such transport SHALL be aborted, or first-hop-only with a stated coverage seam, is not ruled (the dd's call 5; the PA note reads only the CPS-batch half as dissolved).
+- **O-059-3** — Non-SQL side effects. The READ test names only SQL. Whether a call graph with no non-`SELECT` SQL but with a side-effecting non-SQL call (a host / `_{}` call, a stdlib write such as `scrml:store`'s `set`, an outbound HTTP call) is READ or WRITE is not ruled.
+- **O-059-4** — Whether a READ server handler SHALL observe the request's abort signal on the server (return early, skip serialization), or abort is purely client-side (dd Open Questions).
+- **O-059-5** — `<poll>` / `<timer>`: an in-flight tick on route-leave (§20.8.8 step 2.2 "stopped" vs §6.7.5 EC-3 "SHALL complete") is outside dpa-059 and not ruled.
+
+#### 6.7.7.2 `cache` — compiler-derived result caching (S444, dpa-060)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 1 — *"i and B2"* (*"B2 bare `cache` attribute, invalidation derived by the compiler from the request's read-set + the visible write `invalidates` edges (consistent with the §20.8.4 ruling "Invalidation SHALL be compiler-derived, not an author TTL") … RULED B2."*) · ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"* (*"`cache` is legal only where the compiler can derive staleness (a read-set); `cache` on a `url=`/`api=` request (no read-set) is a compile ERROR, not a silent TTL; fail-closed, relaxable later. RULED yes."*) · ruling:user-voice-scrml.md S444 dpa-060 call 3 — *"(ii) and revalidate"* (*"show cached immediately + background re-fetch (`stale` = true during it, the existing §6.7.7 flag) … RULED revalidate."*) · spec:§20.8.4 — *"Invalidation SHALL be compiler-derived, not an author TTL."* · dd:`scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md` (Approach B2; C4 read/write-set facts) · **supersedes:** §6.7.7's *"Cache semantics are a stdlib concern"* (struck in the Properties paragraph above, with its note).
+>
+> **Nominal / spec-ahead.** impl#1 silently accepts an unknown `<request>` attribute today, so `<request cache>` compiles with no effect. impl#1 carries the divergence; the bootstrap builds this section.
+
+1. **Surface.** `cache` is a **bare** attribute on `<request>`. It takes no value. There is **no author TTL**, no max-age and no expiry attribute on `<request>`.
+2. **Legality — a read-set is required.** `cache` is legal only where the compiler can derive staleness, i.e. where the request has a read-set. A `url=` or `api=` request has no read-set, and `cache` on one SHALL be **`E-REQUEST-CACHE-NO-READSET`** (compile error). There is no TTL fallback. (Fail-closed; relaxable later.)
+3. **Read-set.** A body-form request's read-set is the set of tables read by `SELECT` SQL (`?{}`) reachable in the call graph of the body's call expression (the §19.9.9 body-DG's read facts — over-approximate, never under).
+4. **Invalidation is compiler-derived, never author-specified.** A server function whose SQL write-set intersects a cached request's read-set is **invalidating** for that request (the body-DG's `invalidates` edge: a non-`SELECT` write against a table the request `SELECT`s). When a call to an invalidating function visible to the compiler completes on the client, that request's cached result SHALL be treated as invalid. Invalidation SHALL NOT be expressed as an author TTL (the §20.8.4 rule, applied to `<request>`).
+5. **A hit is stale-while-revalidate.** When a `cache` request is triggered (mount, dependency change, `refetch()`) and a valid cached result exists for it, the assigned `@variable` and `<#id>.data` SHALL be set to the cached value immediately, **and the fetch SHALL still run** as an ordinary fetch under this section's mount and settle rules, so `<#id>.stale` is `true` while it is in flight. A hit SHALL NOT skip the fetch. (The ruling's reason: the compiler cannot see out-of-band writes — other users, other clients — so a skipping cache can serve wrong data indefinitely; the cache buys latency, not request volume. Server-side memoization is the load lever.)
+6. **Supersede and abort.** The background revalidation is an ordinary fetch: §6.7.7.1 applies to it unchanged.
+
+**OPEN (dpa-060 — not ruled; not decided by this section):**
+
+- **O-060-1** — **Cache key.** Whether the key is the request's dependency tuple (the emitted deps list), how it is canonicalised (§59.5 value-canonical?), and whether it adds a `sessionScope` component when the callee reads the session (the §20.8.4 / §52.15 precedent).
+- **O-060-2** — **Memory bound / entry lifetime.** Whether entries live and die with the `<request>` instance (scope destroy, §20.8.8 teardown, navigation), are program-wide, and whether a compiler-default cap (LRU N) applies.
+- **O-060-3** — **SSR.** Whether an SSR pre-render seeds the cache.
+- **O-060-4** — **Invalidation granularity and follow-up.** Whether invalidation drops all of the request's entries (table-level, the §20.8.4 precedent) or only entries whose key intersects the written rows; and whether invalidation also re-fetches the live key immediately.
+- **O-060-5** — **Out-of-band and other-client writes.** Whether the §38.13 Postgres-trigger invalidation push (the §20.8.4 route) applies to `<request>` caches, or revalidate-on-hit alone covers them.
+- **O-060-6** — **Unresolvable read-set on the body form** (dynamic SQL, `extractSelectProjection` not `resolvable`). Whether this is `E-REQUEST-CACHE-NO-READSET` under the ruled *"legal only where the compiler can derive staleness"*, or cache-disabled plus a warning (the `W-KEEPALIVE-UNRESOLVABLE-READSET` precedent).
+- **O-060-7** — **`cache` on a WRITE-classified request** (§6.7.7.1). Whether it is legal (revalidate-on-hit still runs the write) or an error.
+- **O-060-8** — Whether the result of a superseded, aborted or discarded fetch is ever stored in the cache.
+- **O-060-9** — The diagnostic for a valued `cache=…` (for example `cache=30s`, an author TTL): which code fires.
 
 ### 6.7.8 `<timeout>` — Single-Shot Timer State Type
 
@@ -6259,6 +6322,72 @@ The grammar SHALL reuse the `parseAfterDuration` helper (`compiler/src/codegen/p
 - L17 — Compiler binding-dispatch rule (binding shape is unchanged by `debounced=` / `throttled=`; the timing wrapper sits on the write side of `bind:value` / `bind:checked`).
 - L18 — `reset(@cell)` keyword + `default=` attribute (reset cancels pending timed writes).
 - L20 — Vocabulary smell rule (this section eliminates the pre-v0.next `@debounced(N)` keyword-form, collapsing onto one declarative surface).
+
+### 6.14 Lifetime Attribute — `persist=` (Browser-Persisted Cells)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 1 — *"B for localstorage"* / *"the persist= attribute"* (*"RULED (b) — the deep-dive's pole A2 … A1 (authority value) is eliminated."*) · call 2 — *"i and B2. with one caveat, I have found indexedDB to be really usefull is some cases in the past. so lets just plan on the stdlib addition."* · call 3 — *"(i) and yes"* (`key=` required) · call 4 — *"(ii) and revalidate"* (decode-first) · calls 5 / 7 / 8 — *"5, 7, 8 your recs. expound 6"* · call 6 — *"your rec on 6. though I really like the second option, but it gets complicated. We could have the dev explicate when a cell needs that behaviour, but I don't know what that would look like."* · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` (Approach A2; the cross-cutting table) · **supersedes:** §6.7.4's idiom-table row *"Sync to localStorage on change — `when @var changes { localStorage.setItem(key, @var) }`"* as the canonical persistence recipe (corrected in §6.7.4).
+>
+> **Nominal / spec-ahead.** impl#1 does not accept `persist=` (an unknown decl-attr stops the line being a declaration — `g-unknown-decl-attr-silently-undeclares-cell`). Per S444 impl#1 carries the divergence and the bootstrap builds this section.
+
+Browser persistence is a **lifetime** property of a client-owned cell, orthogonal to authority (§52). It is **not** a §52 authority value: a persisted cell is still client-local for every §52 / E-AUTH rule. The attribute sits in the same slot as `debounced=` / `throttled=` (§6.13).
+
+```scrml
+<recent persist="local" key="myapp.recent">: string[] = []     // survives reload; synced across tabs
+<tabFilter persist="session" key="myapp.filter"> = "all"       // survives reload in this tab only
+```
+
+#### 6.14.1 Surface
+
+1. `persist=` takes exactly one of two values: **`"local"`** (Web `localStorage`) or **`"session"`** (Web `sessionStorage`). Both are synchronous storages. Any other value SHALL be `E-PERSIST-STORAGE-UNKNOWN`.
+2. **`key=` is REQUIRED** on every `persist=` cell. `persist=` without `key=` SHALL be `E-PERSIST-KEY-REQUIRED`. The key is an external storage contract, written by the author; the compiler SHALL NOT derive one. (The ruling's reason: a derived key makes a cell rename silently drop every user's saved value, and explicit keys prevent same-origin cross-app collisions.)
+3. **Where legal.** `persist=` is legal on client-owned state cells. On a §66 declaration it governs the **shared instance only** (the §66.16 analog for `server` / `pinned`); a plain instance of a `persist=` declaration is not persisted.
+4. **`persist="cookie"` is DEFERRED** (not in this revision). **IndexedDB is NOT a `persist=` value**: it is asynchronous and cannot be restored at construction. It is a **PLANNED stdlib addition** — planned work, not gated behind an adopter re-trigger — whose surface (sync-looking, auto-awaited stdlib calls per §13.2) is owed a design pass when scheduled.
+
+#### 6.14.2 Semantics
+
+1. **Restore at construction.** A `persist=` cell's stored value SHALL be read synchronously when the cell is constructed, before the first client render, inside a compiler-emitted host-JS storage guard (the §19 "localStorage availability guard" precedent). Restore is construction, not a transition. On a §66 declaration the restored value is a **§66.9 seed** of the shared instance: seeded once, thereafter independent and writable.
+2. **Codec.** The stored value SHALL be encoded and decoded with the §57 wire format and the §59.10 lossless codec (so maps and a stored `not` round-trip). Browser storage becomes a listed §57.1 sink for `persist=` cells.
+3. **Decode against the current type and full contract first; default on failure; never coerced.** On restore the stored value SHALL be decoded against the cell's **current** declared type and its full declared contract (e.g. §53 refinements, §66.12 sequence bounds). If the key is absent, storage is unavailable, the decode fails, or the decoded value does not satisfy the contract, the cell SHALL take its default (its §6.8 value: `default=` if present, else the initializer). A stored value that does not satisfy the current contract SHALL NOT reach the cell and SHALL NOT be coerced into it. A type edit therefore does not by itself discard stored data: a stored value that still satisfies the edited type is kept.
+4. **Write on change.** When the cell's value changes, the compiler-emitted code SHALL encode the new value and write it to storage under `key`, inside the storage guard. (Composed with `debounced=` / `throttled=`, the storage write follows the cell's wrapped write.)
+5. **Cross-tab sync — `"local"` only.** A `persist="local"` cell SHALL subscribe to the Web `storage` event for its key and apply a changed value written by another same-origin document, decoded under rule 3. A `persist="session"` cell has no cross-tab sync (session storage is per tab).
+6. **Write failure is a read-only synthesized status property.** A storage write that fails (quota exceeded, storage unavailable) SHALL NOT throw into user code. It SHALL be reflected in a **read-only, compiler-synthesized status property** on the persisted cell, following the §55 validity-surface precedent (§55.7: read-only; a write to it is `E-SYNTHESIZED-WRITE`). The property's name and shape are OPEN (O-061-1).
+7. **First paint = default-then-restore.** A persisted cell is client-local, so SSR output renders its default (§52.8), and the restored value appears when client code runs.
+8. **Pre-paint restore for a theme mode cell — the one exception.** When a `persist=` cell is the mode cell of a `<theme for=@cell>` (§65.6; §66.17), the compiler SHALL additionally emit a blocking inline pre-paint script that reads and decodes the stored value (rule 3) and sets the §65.6 root attribute `data-scrml-theme-<cell>` before first paint. This is automatic; there is no author surface for it. A pre-paint script can touch only the root (`<html>`) attributes, which is exactly how §65.6 theming switches.
+
+#### 6.14.3 Privacy and ownership — errors
+
+1. `persist=` on a cell whose value carries `reveal`-declassified protected provenance (§14.8.9) SHALL be `E-PERSIST-REVEALED`.
+2. `persist=` on a `lin` cell (§35) SHALL be `E-PERSIST-LIN`. A stored `lin` value would be replayable on every reload.
+3. `persist=` on a server-authority cell (§52: `<x server>`, a Tier-1 `authority="server"` type instance) SHALL be `E-PERSIST-WITH-SERVER`. (dd A2 item 7: the cell is already durable, and persistence is legal only where authority is local.)
+
+#### 6.14.4 OPEN (dpa-061 — not ruled; not decided by this section)
+
+- **O-061-1** — The write-failure status property (§6.14.2 rule 6): its **name**, its **shape** (boolean vs a failure-reason enum), and whether a later successful write clears it and re-syncs the whole value.
+- **O-061-2** — **Explicit pre-paint opt-in** for cells other than a theme mode cell — bryan's stated preference for option (ii) generally, via an explicit author opt-in; he does not know what that surface would look like. **Banked as dpa-062.**
+- **O-061-3** — The stored **envelope** (e.g. a version marker or a §47.1.4 type-fingerprint field). Under the call-4 ruling a fingerprint mismatch is not by itself a discard trigger, so what, if anything, the envelope carries is open.
+- **O-061-4** — Whether the §55 validators are part of the "full declared contract" a restored value is decoded against, or only type-level contracts (refinements, sequence bounds, lifecycles).
+- **O-061-5** — A cross-tab `storage`-event value: is it judged as a write under the §66.11 write contract (e.g. `rule=` guards) or applied as construction-like hydration? What happens when it fails to decode (keep the current value, or take the default) and when the key is removed in the other tab?
+- **O-061-6** — Whether the restore at construction fires `when @x changes` effects.
+- **O-061-7** — Write timing: per-change or coalesced per microtask (the §6.7.4 timing).
+- **O-061-8** — Whether `reset(@x)` also **removes** the storage key, or only writes the default.
+- **O-061-9** — The attribute's **position in a §66 opener**, and `persist=` on a §66 declaration's **non-shared** instances with an author per-instance key expression.
+- **O-061-10** — `persist=` on a derived cell, and on a function-typed cell (no codec).
+- **O-061-11** — A persisted `(not to T)` lifecycle cell (§14.12 / §66.11.6): the static state at reads before discrimination.
+- **O-061-12** — Whether widening §57.1 to a storage sink binds stored values to the §57.5 canonical-only decoder at v1.0.
+
+#### 6.14.5 Error codes (Nominal)
+
+Named here; each §34 row is **Nominal / spec-ahead — not yet emitted; lands with the impl**.
+
+| Code | Trigger | Severity |
+|---|---|---|
+| `E-PERSIST-STORAGE-UNKNOWN` | `persist=` value is not `"local"` or `"session"` (including the deferred `"cookie"`, and IndexedDB) — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-KEY-REQUIRED` | `persist=` without `key=` — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-REVEALED` | `persist=` on a value carrying `reveal`-declassified protected provenance — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-LIN` | `persist=` on a `lin` cell — Nominal / spec-ahead, not yet emitted | Error |
+| `E-PERSIST-WITH-SERVER` | `persist=` on a server-authority cell — Nominal / spec-ahead, not yet emitted | Error |
+
+**Cross-references:** §6.7.4 (the corrected localStorage idiom row) · §6.8 (the default value) · §6.13 (the sibling write-path attributes) · §13.2 (auto-await — the planned IndexedDB stdlib) · §14.8.9 (`reveal`) · §35 (`lin`) · §52 (authority — orthogonal) · §55 (synthesized-property precedent) · §57 / §59.10 (codec) · §65.6 / §66.17 (theme mode cell) · §66.9 (seed) · §66.16 (shared instance only).
 
 ---
 
@@ -17563,7 +17692,15 @@ The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (du
    the outgoing route's DOM is still attached. Order within the edge:
    1. region-scoped reactive display effects and subscriptions are disposed;
    2. `<timer>` and `<poll>` instances declared in the region are **stopped**;
-   3. in-flight `<request>`s issued by the region are **aborted**;
+   3. in-flight `<request>`s issued by the region are **aborted**; **amended S444 (dpa-059):** a region
+      `<request>` classified **READ** has its in-flight transport **aborted**; one classified **WRITE** is
+      **discarded** — its result is not applied and its transport runs to completion. The classification,
+      the transport-only meaning of abort (not a rollback; the server may have committed; never sets
+      `.error`) and the Nominal status are §6.7.7.1, and this step now agrees with §6.7.7 EC-3.
+      **Provenance:** ruling:user-voice-scrml.md S444 dpa-059 — *"C for abort."* (teardown follows the
+      same rule: the PA's call-2 rec, read as entailed by C — *"flag for correction"*) ·
+      dd:`scrml-support/docs/deep-dives/request-supersede-abort-dpa-059-2026-09-30.md` C2 · **supersedes:**
+      the unconditional "aborted" for WRITE requests;
    4. `if=` scopes inside the region destroy **depth-first** under §6.7.2's four steps;
    5. author `cleanup()` registrations in the region run **LIFO**;
    6. pending `animationFrame()` callbacks in the region are cancelled.
@@ -21328,6 +21465,11 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-DEBOUNCED-WITH-DERIVED | §6.13 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a derived cell (`const <x debounced=300ms> = expr`). Derived cells are read-only; debounce/throttle is a write-side wrapper; combining the two is meaningless. Resolution: debounce the upstream source instead (`<source debounced=300ms> = @raw; const <doubled> = @source * 2`). (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-DEBOUNCED-WITH-SERVER | §6.13, §52 | A `debounced=` (or `throttled=`) reactivity attribute is applied to a `<x server>` server-authoritative cell. Server-authoritative writes go through the §52 server-write path, not the client-side debounce/throttle wrapper; the two surfaces don't compose. Server-side timing semantics are out of scope for this revision. Resolution: remove the reactivity attribute, or restructure so the client-side cell carries the timing and the server-authoritative cell receives the resolved value. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
 | E-REACTIVITY-ATTR-CONFLICT | §6.13 | Both `debounced=DURATION` and `throttled=DURATION` appear on the same state-cell declaration. The two attributes describe competing timing rules (debounce coalesces writes; throttle leading+trailing-fires). Pick one. (Catalog addition S79 — debounce/throttle Approach B clean-cut.) | Error |
+| E-PERSIST-STORAGE-UNKNOWN | §6.14 | A `persist=` value other than `"local"` or `"session"` — including `"cookie"` (deferred) and IndexedDB (a planned stdlib addition, never a `persist=` value). **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 2 — *"i and B2. …"*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-KEY-REQUIRED | §6.14 | A `persist=` cell has no `key=`. The key is an external storage contract; the compiler does not derive one. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 3 — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-REVEALED | §6.14, §14.8.9 | `persist=` on a cell whose value carries `reveal`-declassified protected provenance. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-LIN | §6.14, §35 | `persist=` on a `lin` cell — a stored `lin` value would be replayable on every reload. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 7 — *"5, 7, 8 your recs."*. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+| E-PERSIST-WITH-SERVER | §6.14, §52 | `persist=` on a server-authority cell (`<x server>`, a Tier-1 `authority="server"` type instance). **Provenance:** dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 7 (within ruled pole A2, call 1 — *"the persist= attribute"*). **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
 | E-VALIDATOR-INLINE-DYNAMIC | §55.10 | The Level-1 inline message override on a validator (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`) must be a static string literal. Per L12 Edge F, dynamic expressions / interpolations defeat i18n tooling extraction (messages must be statically discoverable). Use a static literal here, OR define a project-registered message via `data.registerMessages` (Level 2), OR use the `<match for=ValidationError>` escape hatch (Level 4). (Catalog addition S68 — A1b B13.) | Error |
 | E-VALIDATOR-INLINE-COLON | §55.10, §41.12 | The inline message override on a validator uses the COLON form (`<name req:"…msg…">`, `<name length(>=2):"…msg…">`) — this is NOT valid scrml. The §55.10-normative Level-1 inline override is the PAREN form: a trailing string-literal ARG inside the validator's parens (`<name req("…msg…")>`, `<name length(>=2, "…msg…")>`). The colon-after-validator collides with the decl scanner's `:`-handling (typed-cell annotation / §4.14 colon-shorthand) and silently corrupted state-cell `@`-access registration pre-fix (the cell then mis-reported as undeclared via a misleading E-SCOPE-001). Resolution: move the message inside the validator's parens — `req("…msg…")` not `req:"…msg…"`. The compiler recovers by registering the cell with the message as the paren-form inline override, so this is the only diagnostic on the decl. (Catalog addition S185 — g-validator-inline-msg-colon-form.) | Error |
 | E-CHANNEL-INSIDE-PROGRAM | §38.1 | **Retired 2026-05-12 (v0.3 Wave 1 direction reversal).** Pre-v0.3 fired on a `<channel>` descended from `<program>` — this is now the canonical v0.3 placement (channels live inside `<program>`). The pre-v0.3 trigger shape is no longer a violation. New v0.3 placement-direction code: `E-CHANNEL-OUTSIDE-PROGRAM`. | Error (retired) |
@@ -21539,6 +21681,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) | Error |
 | E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) | Error |
 | E-LIFECYCLE-022 | §28.4 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3883.) | Error |
+| E-REQUEST-CACHE-NO-READSET | §6.7.7.2 | The bare `cache` attribute is placed on a `<request>` that has no compiler-derivable read-set — a `url=` or `api=` request. `cache` is legal only where the compiler can derive staleness; there is no author-TTL fallback. Resolution: remove `cache`, or fetch through a server function whose SQL the compiler can see. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl** (impl#1 carries the divergence; the bootstrap builds it). | Error |
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
 | W-LIFECYCLE-004 | §28.1 | A `<poll>` body contains no function call. A poll with a body that mutates only local variables has no observable effect; the warning surfaces probable dead code. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4324.) | Warning |
 | W-LIFECYCLE-005 | §28.1 | A `<timer>` or `<poll>` body calls a server function and the `interval` is shorter than 500 ms. High-frequency server polling is almost always a footgun (latency variance, retry storms, cost). Resolution: relax the interval, switch to `<channel>` for server-push, or annotate the long-polling pattern explicitly. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4325.) | Warning |
@@ -37294,6 +37437,7 @@ This section defines the canonical scrml wire format for absence-bearing values 
 - WebSocket channel broadcast messages (§38).
 - Server-sent event payloads (§37).
 - Any JSON payload the compiler emits for a `T | not` field whose value is the scrml-absence sentinel `not`.
+- Values a `persist=` cell writes to and restores from browser storage (`localStorage` / `sessionStorage`, §6.14) — *added S444 (dpa-061); Nominal / spec-ahead*. This is the one non-network sink: the value crosses the page-lifetime boundary, not the network. **Provenance:** ruling:user-voice-scrml.md S444 dpa-061 call 1 — *"the persist= attribute"* (the ruled pole A2 includes *"the §57 lossless codec"*) · dd:`scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md` A2 item 2 (*"widens §57.1's sink list to include storage"*). Whether this binds stored values to the §57.5 canonical-only decoder is OPEN (§6.14.4 O-061-12).
 
 The wire format does NOT apply to:
 
