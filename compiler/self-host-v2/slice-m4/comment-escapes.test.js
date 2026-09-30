@@ -231,3 +231,36 @@ describe("standalone only — a `\"…\"` inside an expression is an ordinary st
     expect(await html(P('<p : @n == 5 ? "a \\${x}" : "b">'))).toBe(W("<p>a ${x}</p>"));
   });
 });
+
+// S239 review of 5d5ad360b — nit 1 (CR before `//`) and nit 3 (an unterminated
+// literal's recovered content is cooked and its malformed escapes reported).
+describe("review nits — CR-only line ends; an unterminated literal's recovery cooks + reports", () => {
+  test("a CR-only file: `a\\r// c\\r` — the CR before `//` is whitespace, so it is a comment; both CRs are content", () => {
+    const src = "<program>\r    <main>\r        <p>a\r// c\r</p>\r    </main>\r</program>\r";
+    const r = run(src);
+    expect(r.diags).toEqual([]);
+    expect(texts(r)).toContain("a\r\r");
+    expect(texts(r).some((t) => t.includes("//") || t.includes(" c"))).toBe(false);
+  });
+  test("`\"abc\\` at end of file (`:`-shorthand): E-CTX-001 at the `\"`, then E-PARSE-001 for the lone trailing `\\`", () => {
+    const src = `<program>\n    <main>\n        <p : "abc\\`;
+    const r = run(src);
+    expect(r.diags.map((d) => d.code).slice(0, 2)).toEqual(["E-CTX-001", "E-PARSE-001"]);
+    expect(r.diags[0].span.start).toBe(src.indexOf('"abc'));
+    expect(r.diags[1].span.start).toBe(src.length - 1);
+    expect(r.diags[1].span.end).toBe(src.length);
+    expect(texts(r)).toContain("abc\\");
+  });
+  test("an unterminated state-body literal's recovered content is COOKED — `\"a\\\"b\\\\c` then `</>`: exactly E-CTX-001, content `a\"b\\c`", () => {
+    const r = run(stateLast('"a\\"b\\\\c'));
+    expect(r.diags.map((d) => d.code)).toEqual(["E-CTX-001"]);
+    expect(texts(r)).toContain('a"b\\c');
+  });
+  test("a malformed escape in the recovered content is reported — `\"a\\qb` then `</>`: E-CTX-001 + E-PARSE-001, content keeps `\\q`", () => {
+    const src = stateLast('"a\\qb');
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-CTX-001", "E-PARSE-001"]);
+    expect(r.diags[1].span.start).toBe(src.indexOf("\\q"));
+    expect(texts(r)).toContain("a\\qb");
+  });
+});

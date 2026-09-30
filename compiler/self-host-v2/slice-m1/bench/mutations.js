@@ -534,11 +534,11 @@ const MUTATIONS = [
   // ---- S444 (ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes") ----
   // R1 — a free-text `//` is a comment only at line start / after whitespace; opaque to end of line
   { id: "S444 ce-R1: every free-text `//` is a comment again (the S442 reading — `http://x` loses `//x`)", file: `${SH}/parse.scrml`,
-    from: "        if (mp.pos == 0) return true\n        return isSpaceCh(chAt(mp, -1))\n", to: "        return true\n", tests: [T4("comment-escapes.test.js")] },
+    from: "        return before == \" \" || before == \"\\t\" || before == \"\\n\" || before == \"\\r\"\n", to: "        return true\n", tests: [T4("comment-escapes.test.js")] },
   { id: "S444 ce-R1: no `//` in free text is a comment (prose `a // b` rendered)", file: `${SH}/parse.scrml`,
     from: "            } else if (mLooking(m, \"//\") && freeTextCommentAt(m)) {", to: "            } else if (false) {", tests: [T4("comment-escapes.test.js"), T4("dpa045.test.js")] },
   { id: "S444 ce-R1: only a SPACE counts as whitespace (tab / newline-start `//` rendered)", file: `${SH}/parse.scrml`,
-    from: "        return isSpaceCh(chAt(mp, -1))\n", to: "        return chAt(mp, -1) == \" \"\n", tests: [T4("comment-escapes.test.js")] },
+    from: "        return before == \" \" || before == \"\\t\" || before == \"\\n\" || before == \"\\r\"\n", to: "        return before == \" \"\n", tests: [T4("comment-escapes.test.js")] },
   { id: "S444 ce-R1: the comment is NOT opaque — it ends at a `</` (bryan's `<p> // … </p>` closes at the first `</p>`)", file: `${SH}/parse.scrml`,
     from: "            } else if (mLooking(m, \"//\") && freeTextCommentAt(m)) {\n                m = skipLineComment(m)\n",
     to: "            } else if (mLooking(m, \"//\") && freeTextCommentAt(m)) {\n                const nl: int = m.src.indexOf(\"\\n\", m.pos)\n                const cl: int = m.src.indexOf(\"</\", m.pos)\n                m = mAt(m, cl >= 0 && (nl < 0 || cl < nl) ? cl : (nl < 0 ? m.src.length : nl))\n",
@@ -565,6 +565,13 @@ const MUTATIONS = [
     from: "        let m: MP = displayEscapeDiags(skipSpace(backToMarkup(mp, t)), tp.toks)\n", to: "        let m: MP = skipSpace(backToMarkup(mp, t))\n", tests: [T4("comment-escapes.test.js")] },
   { id: "S444 ce-R2: no E-PARSE-001 for a malformed escape in a state-child body literal", file: `${SH}/parse.scrml`,
     from: "                m = displayEscapeDiags(m, tp.toks)\n", to: "", tests: [T4("comment-escapes.test.js")] },
+  // S239 review of 5d5ad360b (nits 1 + 3)
+  { id: "S444 ce-R1: a CR before `//` is not whitespace (a CR-only file's `\\r// c` rendered)", file: `${SH}/parse.scrml`,
+    from: "        return before == \" \" || before == \"\\t\" || before == \"\\n\" || before == \"\\r\"\n", to: "        return before == \" \" || before == \"\\t\" || before == \"\\n\"\n", tests: [T4("comment-escapes.test.js")] },
+  { id: "S444 ce-R2: an unterminated literal's recovered content is not cooked (`\\\"` kept raw)", file: `${SH}/parse.scrml`,
+    from: "            if (esc > 0 && i + esc <= to) {\n", to: "            if (false) {\n", tests: [T4("comment-escapes.test.js")] },
+  { id: "S444 ce-R2: a malformed escape in an unterminated literal's recovered content not reported (`\"abc\\` at EOF)", file: `${SH}/parse.scrml`,
+    from: "            } else if (c == \"\\\\\") {\n                const e: int = i + 2 <= to ? i + 2 : to\n", to: "            } else if (false) {\n                const e: int = i + 2 <= to ? i + 2 : to\n", tests: [T4("comment-escapes.test.js")] },
   // RULED S444 "standalone only": a code-default `"…"` is display text ONLY as a standalone body statement
   { id: "S444 ce-SA: every code-default region stays display-lexed (a nested `\"many\\n\"` gets E-PARSE-001)", file: `${SH}/parse.scrml`,
     from: "        if (isStandaloneDisplay(d)) return d\n", to: "        return d\n", tests: [T4("comment-escapes.test.js")] },
