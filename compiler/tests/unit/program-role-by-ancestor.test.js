@@ -24,6 +24,7 @@ import {
 import { findTopLevelProgramNode, isToolProgram } from "../../src/tool-program.ts";
 import { computeProgramConfig } from "../../src/compute-program-config.ts";
 import { classifyFileShape } from "../../src/library-shape.js";
+import { programRoleBuildFacts } from "../../src/route-inference.ts";
 
 function parse(src) {
   return buildAST(splitBlocks("/virtual/app.scrml", src)).ast;
@@ -136,14 +137,14 @@ describe("every consumer reads the same definition", () => {
 });
 
 describe("S445 item 1 — stampImpliedProgramAncestors (the implied application ancestor)", () => {
-  const isRoute = (p) => /\/(pages|routes)\//.test(p);
-  const notTool = () => false;
+  // The build facts come from route inference's build-root rule (programRoleBuildFacts).
   const file = (filePath, src) => ({ ...buildAST(splitBlocks(filePath, src)).ast, filePath });
+  const stamp = (files, root) => stampImpliedProgramAncestors(files, programRoleBuildFacts(files, root));
 
   test("an application program exists → every route file's programs are nested", () => {
     const app = file("/p/app.scrml", `<program>\n<p>a</p>\n</program>\n`);
     const member = file("/p/pages/m.scrml", `<div>\n<program name="w">\n<p>w</p>\n</program>\n</div>\n`);
-    stampImpliedProgramAncestors([app, member], isRoute, notTool);
+    stamp([app, member]);
     expect(programRoleOptionsOf(app)).toEqual({});
     expect(programRoleOptionsOf(member)).toEqual({ impliedAncestor: true });
     expect(hasTopLevelProgram(member.nodes, programRoleOptionsOf(member))).toBe(false);
@@ -151,18 +152,28 @@ describe("S445 item 1 — stampImpliedProgramAncestors (the implied application 
     expect(classifyFileShape(member.nodes, false, programRoleOptionsOf(member))).toBe("bare-markup");
   });
 
+  test("the application entry itself under a pages/ ancestor directory is never stamped (build-root relative)", () => {
+    const app = file("/home/u/pages/proj/app.scrml", `<program>\n<p>a</p>\n</program>\n`);
+    const member = file("/home/u/pages/proj/pages/m.scrml", `<program>\n<p>m</p>\n</program>\n`);
+    stamp([app, member]);
+    expect(programRoleOptionsOf(app)).toEqual({});
+    expect(programRoleOptionsOf(member)).toEqual({ impliedAncestor: true });
+  });
+
   test("NO application program (legacy all-<program> routes/ set) → nothing stamped", () => {
     const a = file("/p/routes/a.scrml", `<program>\n<p>a</p>\n</program>\n`);
     const b = file("/p/routes/b.scrml", `<program>\n<p>b</p>\n</program>\n`);
-    stampImpliedProgramAncestors([a, b], isRoute, notTool);
+    const c = file("/p/routes/sub/c.scrml", `<program>\n<p>c</p>\n</program>\n`);
+    stamp([a, b, c]);
     expect(programRoleOptionsOf(a)).toEqual({});
+    expect(programRoleOptionsOf(c)).toEqual({});
     expect(findTopLevelProgramNode(b)).not.toBe(null);
   });
 
   test("a §64 tool file is not an application program", () => {
     const tool = file("/p/tool.scrml", `<program kind="tool">\n\${ function main() { log("x") } }\n</program>\n`);
     const r = file("/p/routes/a.scrml", `<program>\n<p>a</p>\n</program>\n`);
-    stampImpliedProgramAncestors([tool, r], isRoute, isToolProgram);
+    stamp([tool, r]);
     expect(programRoleOptionsOf(r)).toEqual({});
   });
 });

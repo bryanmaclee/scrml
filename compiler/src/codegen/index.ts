@@ -64,7 +64,7 @@ import { generateClientJs, collectClientReferencedIdentsForAST } from "./emit-cl
 import { generateLibraryJs } from "./emit-library.ts";
 import { generateToolJs, generateToolLibraryJs, collectAsyncFnNamesFromFile } from "./emit-tool.ts";
 import { isToolProgram, isLibraryShapedFile } from "../tool-program.ts";
-import { forEachProgramWithRole, findTopLevelProgram, programRoleOptionsOf, NESTED_SESSION_ATTRS } from "../program-role.ts";
+import { forEachProgramWithRole, findTopLevelProgram, findTopLevelPrograms, programRoleOptionsOf, NESTED_SESSION_ATTRS } from "../program-role.ts";
 import { classifyFileShape } from "../library-shape.js";
 import { resolveModulePath, isPromiseReturningStdlibFn } from "../module-resolver.js";
 import { BindingRegistry } from "./binding-registry.ts";
@@ -1629,6 +1629,14 @@ export function runCG(input: CgInput): CgOutput {
     // Placeholder until dpa-064 designs nested auth / session scopes.
     {
       const topPrograms: any[] = [];
+      // Programs that are top-level STRUCTURALLY but nested only by the implied
+      // application ancestor (a route file's <program>, S445 item 1) — the
+      // diagnostics say which, since nothing in the file itself encloses them.
+      const _impliedOnly = new Set<any>(_roleOpts.impliedAncestor ? findTopLevelPrograms(nodes) : []);
+      const _whyNested = (node: any): string => _impliedOnly.has(node)
+        ? "(this file is a route file under pages/ or routes/ of an application, so its " +
+          "<program>s are nested under the application's <program>, §4.12)"
+        : "(one inside another <program> or a <page>)";
       forEachProgramWithRole(nodes, (node: any, role) => {
         if (role === "top-level") {
           topPrograms.push(node);
@@ -1640,8 +1648,8 @@ export function runCG(input: CgInput): CgOutput {
           const span = (authAttr.span ?? node.span ?? { file: filePath, start: 0, end: 0, line: 0, col: 0 });
           errors.push(new CGError(
             "E-PROGRAM-NESTED-AUTH",
-            "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> (one inside " +
-            "another <program> or a <page>) — a nested <program> is not an auth scope, so its " +
+            "E-PROGRAM-NESTED-AUTH: `auth=` is not valid on a nested <program> " + _whyNested(node) +
+            " — a nested <program> is not an auth scope, so its " +
             "server functions would run unauthenticated. Put `auth=` on the top-level <program> " +
             "(the whole application) or on the <page> that needs it, and remove it from the " +
             "nested <program>. (§4.12.2, §52.13)",
@@ -1654,8 +1662,7 @@ export function runCG(input: CgInput): CgOutput {
           errors.push(new CGError(
             "E-PROGRAM-NESTED-SESSION",
             `E-PROGRAM-NESTED-SESSION: \`${sessAttr.name}=\` is not valid on a nested <program> ` +
-            "(one inside another <program> or a <page>, or any <program> in a route file of " +
-            "an application) — the session cookie belongs to the whole application, so a nested " +
+            _whyNested(node) + " — the session cookie belongs to the whole application, so a nested " +
             "program's session setting would silently change the application's cookie. Put it " +
             "on the top-level <program> and remove it from the nested one. (§4.12.2, §20.5.1)",
             { file: filePath, start: span.start ?? 0, end: span.end ?? 0, line: span.line ?? 0, col: span.col ?? 0 },

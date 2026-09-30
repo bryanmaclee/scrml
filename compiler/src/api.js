@@ -24,7 +24,7 @@ import { runAttributeAllowlist } from "./validators/attribute-allowlist.ts";
 
 import { runPA } from "./protect-analyzer.ts";
 import { SecretRedactor } from "./diagnostic-secrets.ts";
-import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource, isRouteFilePath } from "./route-inference.ts";
+import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource, programRoleBuildFacts } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
 import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
@@ -32,7 +32,6 @@ import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { isLibraryShape, classifyFileShape } from "./library-shape.js";
 import { findTopLevelProgram, programRoleOptionsOf, stampImpliedProgramAncestors } from "./program-role.ts";
-import { isToolProgram } from "./tool-program.ts";
 import { runBatchPlanner, serializeBatchPlan } from "./batch-planner.ts";
 import { runReachabilitySolver, serializeReachabilityRecord } from "./reachability-solver.ts";
 import { buildEngineGraphJson } from "./engine-graph.ts";
@@ -784,6 +783,9 @@ export function rewriteStdlibImports(jsCode, bundleDir, outputDir, bundled) {
  * @param {object} options
  * @param {string[]} options.inputFiles        — resolved .scrml file paths to compile
  * @param {string}  [options.outputDir]        — directory to write output files; defaults to dist/ next to first input
+ * @param {string}  [options.buildRoot]        — S445: the build root (§40.8). Route files are the files under ITS
+ *   `pages/` / `routes/` (§40.2); directories above it are never consulted. Default: inferred from the
+ *   application's entry file (route-inference.ts `resolveBuildRoot`; SPEC §40.8 "The build root").
  * @param {boolean} [options.verbose]          — emit per-stage timing and counts to options.log
  * @param {boolean} [options.convertLegacyCss] — pre-process <style> blocks to #{…}
  * @param {boolean} [options.embedRuntime]     — embed runtime inline instead of writing separate file (browser mode only)
@@ -1651,12 +1653,14 @@ function _compileScrmlImpl(options = {}) {
   // when an application program exists, every `<program>` in a route file is
   // nested. Decided ONCE here, over the whole parsed set, before PRECG reads any
   // program role (program-role.ts). The route-file classifier is route
-  // inference's own (`isRouteFilePath`) — swap it there, not here.
-  stampImpliedProgramAncestors(
-    tabResults.map((r) => r?.ast).filter(Boolean),
-    isRouteFilePath,
-    isToolProgram,
-  );
+  // inference's own build-root rule (`programRoleBuildFacts`) — swap it there, not here.
+  {
+    const _asts = tabResults.map((r) => r?.ast).filter(Boolean);
+    const _givenRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
+      ? resolve(options.buildRoot)
+      : undefined;
+    stampImpliedProgramAncestors(_asts, programRoleBuildFacts(_asts, _givenRoot));
+  }
   const _runPRECG = seams.pick("PRECG", runPRECG);
   for (const tabResult of tabResults) {
     const fileAST = tabResult?.ast;
@@ -2238,7 +2242,11 @@ function _compileScrmlImpl(options = {}) {
 
   // Stage 5: RI (all files)
   const _runRI = seams.pick("RI", runRI);
-  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis }));
+  // S445 — a caller-given build root (§40.8); absent, RI infers it from the entry file.
+  const riBuildRoot = typeof options.buildRoot === "string" && options.buildRoot !== ""
+    ? resolve(options.buildRoot)
+    : undefined;
+  const riResult = stage("RI", () => _runRI({ files: ceResults, protectAnalysis: paResult.protectAnalysis, buildRoot: riBuildRoot }));
   collectErrors("RI", riResult.errors);
   if (verbose) {
     const routeCount = riResult.routeMap?.functions?.size ?? 0;

@@ -144,35 +144,30 @@ export function hasTopLevelProgram(nodes: unknown, opts: ProgramRoleOptions = {}
 }
 
 /**
- * S445 item 1 — decide the implied application ancestor ONCE per build and record
- * it on every FileAST (`IMPLIED_ANCESTOR_FIELD`). Runs after parsing, before PRECG.
- *
- * An application program EXISTS when at least one file of the build is not a route
- * file, is not a §64 tool, and declares a top-level `<program>` (structurally). Then
- * every route file's `<program>`s are nested. "At least one", not "exactly one":
- * with several candidates the application is ambiguous (§40.2), and the route files'
- * programs are still not application programs — fail closed. With NO such file
- * (a legacy all-`<program>` `routes/` set without an application entry) nothing is
- * stamped and every file keeps its structural roles.
- *
- * `isRouteFile` is the build's route-file classifier, passed in by the caller so the
- * classification has one owner (route inference) and can be swapped there.
- * `isToolFile` is the §64 tool predicate (tool-program.ts), passed in to avoid an
- * import cycle.
+ * The two BUILD facts the implied ancestor needs (S445 item 1), decided by the
+ * build's route/entry owner (route inference: `programRoleBuildFacts`) so the
+ * classification has ONE owner.
  */
-export function stampImpliedProgramAncestors(
-  fileASTs: unknown[],
-  isRouteFile: (filePath: string) => boolean,
-  isToolFile: (fileAST: unknown) => boolean,
-): void {
+export interface ProgramRoleBuildFacts {
+  /** An application program exists in this build (§40.2). */
+  applicationExists: boolean;
+  /** Is this FileAST a route file of the application (not the application entry)? */
+  isRouteFile: (fileAST: unknown) => boolean;
+}
+
+/**
+ * S445 item 1 — record the implied application ancestor ONCE per build on every
+ * FileAST (`IMPLIED_ANCESTOR_FIELD`). Runs after parsing, before PRECG.
+ *
+ * When an application program exists, every route file's `<program>`s are nested.
+ * With NO application program (a legacy all-`<program>` `routes/` set without an
+ * application entry) nothing is stamped and every file keeps its structural roles.
+ */
+export function stampImpliedProgramAncestors(fileASTs: unknown[], facts: ProgramRoleBuildFacts): void {
   const files = (fileASTs ?? []).filter((f): f is NodeLike => !!f && typeof f === "object");
-  const pathOf = (f: NodeLike): string => String(f.filePath ?? "").replace(/\\/g, "/");
   for (const f of files) delete f[IMPLIED_ANCESTOR_FIELD];
-  const appExists = files.some(
-    (f) => !isRouteFile(pathOf(f)) && !isToolFile(f) && hasTopLevelProgram(f.nodes),
-  );
-  if (!appExists) return;
+  if (!facts.applicationExists) return;
   for (const f of files) {
-    if (isRouteFile(pathOf(f))) f[IMPLIED_ANCESTOR_FIELD] = true;
+    if (facts.isRouteFile(f)) f[IMPLIED_ANCESTOR_FIELD] = true;
   }
 }

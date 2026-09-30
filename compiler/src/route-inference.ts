@@ -4470,6 +4470,14 @@ function pageAuthRequiredEntry(
 export interface RIInput {
   files: FileAST[];
   protectAnalysis: ProtectAnalysis;
+  /**
+   * The build root (S445): the directory the compile set's route files are
+   * classified against — a file is a route file when its path RELATIVE TO THIS
+   * ROOT has a `pages/` or `routes/` component (§40.2 / §40.8). `compileScrml`
+   * passes its caller's `buildRoot` option; absent, it is inferred from the
+   * application's entry file (`resolveBuildRoot`, SPEC §40.8 "The build root").
+   */
+  buildRoot?: string;
 }
 
 /** Output of the RI stage. */
@@ -4483,6 +4491,11 @@ export interface RIOutput {
  */
 export function runRI(input: RIInput): RIOutput {
   const { files, protectAnalysis } = input;
+  // S445 — the build root and the route-file classifier (§40.2 / §40.8; one rule,
+  // resolveBuildRoot). The resolution's origin feeds W-AUTH-REQUIRED-NOT-INHERITED.
+  const buildRootRes = resolveBuildRoot(files, input.buildRoot);
+  const buildRoot = buildRootRes.root;
+  const findRoutePrefix = makeRouteClassifier(buildRootRes);
 
   // Reset the route counter for deterministic output within a single runRI call.
   _routeCounter = 0;
@@ -6348,7 +6361,7 @@ export function runRI(input: RIInput): RIOutput {
   // Step 7: Build page route tree from file paths (file-based routing).
   // ------------------------------------------------------------------
 
-  const pages = buildPageRouteTree(files);
+  const pages = buildPageRouteTree(files, buildRootRes);
 
   // ------------------------------------------------------------------
   // Step 8: Collect auth middleware from <program auth="required"> across
@@ -6393,11 +6406,10 @@ export function runRI(input: RIInput): RIOutput {
   // a `<program>` inside a route file is that file's own (8a gates that file only).
   // Exactly one such file identifies the application; zero or several identify
   // none, and nothing is inherited from a guess.
-  const rootCandidates = files.filter((f) => {
-    if (isToolProgram(f)) return false;
-    if (findRoutePrefix(f.filePath.replace(/\\/g, "/"))) return false;
-    return findTopLevelProgramNode(f) !== null;
-  });
+  // S445: the candidates come from the build-root rule (resolveBuildRoot) — with a
+  // given root exactly the definition above; with an inferred one, the entry file
+  // it was inferred from (never a route file of its own project).
+  const rootCandidates = buildRootRes.candidates;
   const appRoot: FileAST | null = rootCandidates.length === 1 ? rootCandidates[0] : null;
 
   // The redirect target of a page scope (S443 rounds 2-3): `loginRedirect=` is not a
@@ -6607,20 +6619,28 @@ export function runRI(input: RIInput): RIOutput {
   // `auth=${…}` / `auth=@x` declare nothing (W-ATTR-002 says so) and the page
   // inherits — fail closed, like §40.2's unknown csrf= literal resolving to "auto".
   const RECOGNIZED_AUTH = new Set(["required", "optional", "none"]);
+  // An unregistered member page of the application that declares no recognized
+  // `auth=` of its own — the unit 8c gates (and, when nothing is inherited, the
+  // unit W-AUTH-REQUIRED-NOT-INHERITED names).
+  const isUnannotatedMember = (fileAST: FileAST): boolean => {
+    const filePath = fileAST.filePath;
+    if (authMiddleware.has(filePath)) return false;
+    const shape = (fileAST as any).fileShape ?? ((fileAST as any).ast ? (fileAST as any).ast.fileShape : undefined);
+    // `bare-markup` (top-level markup, no `<page>` wrapper — W-PROGRAM-001) also
+    // renders a served document of this application (MEASURED: `/side` 200), so
+    // it is in the scope too. A component/library file (`pure-module`) emits no
+    // document and is not gated.
+    if (shape !== "non-entry-page" && shape !== "bare-markup") return false;
+    if (filePath.replace(/\\/g, "/").split("/").pop() === "_layout.scrml") return false;
+    if (collectFileAuthDecls(fileAST).some((d) => RECOGNIZED_AUTH.has(d.value))) return false;
+    return true;
+  };
   if (rootCfg && rootCfg.auth === "required") {
     // The redirect target: the program's loginRedirect (see 8a-page).
     const inheritedLoginRedirect = programLoginRedirect;
     for (const fileAST of files) {
       const filePath = fileAST.filePath;
-      if (authMiddleware.has(filePath)) continue;
-      const shape = (fileAST as any).fileShape ?? ((fileAST as any).ast ? (fileAST as any).ast.fileShape : undefined);
-      // `bare-markup` (top-level markup, no `<page>` wrapper — W-PROGRAM-001) also
-      // renders a served document of this application (MEASURED: `/side` 200), so
-      // it is in the scope too. A component/library file (`pure-module`) emits no
-      // document and is not gated.
-      if (shape !== "non-entry-page" && shape !== "bare-markup") continue;
-      if (filePath.replace(/\\/g, "/").split("/").pop() === "_layout.scrml") continue;
-      if (collectFileAuthDecls(fileAST).some((d) => RECOGNIZED_AUTH.has(d.value))) continue;
+      if (!isUnannotatedMember(fileAST)) continue;
       authMiddleware.set(
         filePath,
         pageAuthRequiredEntry(
@@ -6661,6 +6681,85 @@ export function runRI(input: RIInput): RIOutput {
       lax[0].line,
       lax[0].col,
     );
+  }
+
+  // 8c-warn (S445, g-required-program-with-no-identified-app-root-is-silent): a
+  // `<program auth="required">` that is NOT the application's program — a route
+  // file's own `<program>` (under the build root's `pages/` / `routes/`) — gates
+  // only its own file (§40.2), so when the application program (if one is
+  // identified) is not itself required, the unannotated member pages are public.
+  // §40.2 fixes that outcome ("When the build has zero such files, no application
+  // `<program>` is identified and nothing below is inherited"; "A `<program>`
+  // declared inside a route file is that file's own: its `auth=` governs that file
+  // only"), and §40.8 already makes a `<program>` outside the entry file off-shape.
+  // What was wrong is that it was SILENT: an author who wrote the required
+  // `<program>` in the wrong file (the entry placed under `pages/`, or the build
+  // root pointed one directory too deep) shipped every member page anonymously
+  // with no diagnostic. Said out loud, naming the pages and the build root.
+  const inheritanceInEffect = !!(rootCfg && rootCfg.auth === "required");
+  if (!inheritanceInEffect) {
+    const routeRequiredPrograms = files.filter((f) => {
+      if (isToolProgram(f)) return false;
+      if (rootCandidates.includes(f)) return false;
+      const cfg = cfgOf(f);
+      return !!(cfg && cfg.auth === "required") && findTopLevelProgramNode(f) !== null;
+    });
+    if (routeRequiredPrograms.length > 0) {
+      const ungated = files.filter((f) => isUnannotatedMember(f)).map((f) => f.filePath);
+      if (ungated.length > 0) {
+        const shown = ungated.slice(0, 8).map((p) => `"${p}"`).join(", ") +
+          (ungated.length > 8 ? `, and ${ungated.length - 8} more` : "");
+        const rootShown = `"${buildRoot || "/"}"`;
+        const entryWhy = buildRootRes.entryBasis === "shallowest"
+          ? `it is the shallowest <program> file (every <program> file of the build lies under a directory named pages or routes)`
+          : `it is the one <program> file with no pages/ or routes/ directory in its path`;
+        const rootHow = buildRootRes.origin === "given"
+          ? `relative to the build root the compiler was given (compileScrml's buildRoot), ${rootShown}`
+          : buildRootRes.origin === "inferred"
+            ? `relative to the build root ${rootShown}, the directory of the entry file ` +
+              `"${buildRootRes.entry?.filePath ?? ""}" — inferred as the entry because ${entryWhy}`
+            : `with no single build root inferable (several application <program>s), by the pages/ and routes/ ` +
+              `directories in its path`;
+        const appSentence = appRoot
+          ? `The application's <program> ("${appRoot.filePath}") does not declare auth="required"`
+          : rootCandidates.length === 0
+            ? `No application <program> is identified in this build: no file with a top-level <program> ` +
+              `sits outside the build root's pages/ and routes/`
+            : `None of the application <program>s (${rootCandidates.map((f) => `"${f.filePath}"`).join(", ")}) declares auth="required"`;
+        const one = ungated.length === 1;
+        for (const f of routeRequiredPrograms) {
+          const norm = f.filePath.replace(/\\/g, "/");
+          const rel = buildRoot && norm.startsWith(buildRoot + "/") ? norm.slice(buildRoot.length + 1) : norm;
+          const isRoute = findRoutePrefix(norm) !== null;
+          const where = isRoute
+            ? `the file is the route file "${rel}", and a route file's own <program> is not the application's`
+            : `the file ("${rel}") lies outside that root, so its <program> is not the application's`;
+          const cliRemedy = buildRootRes.origin === "given"
+            ? `If this file is meant to be the application's entry file, give the project directory as ` +
+              `compileScrml's buildRoot.`
+            : buildRootRes.origin === "inferred"
+              ? `If this file is meant to be the application's entry file, move it out of the pages/ or routes/ ` +
+                `directory it is in — the compiler infers the build root from where the <program> files are ` +
+                `(§40.8 "The build root"), and a <program> file that is not under the root's pages/ or routes/ is ` +
+                `an application program.`
+              : `If this file is meant to be the application's entry file, move it out of the pages/ or routes/ ` +
+                `directory it is in (§40.8 "The build root").`;
+          warn(
+            "W-AUTH-REQUIRED-NOT-INHERITED",
+            `W-AUTH-REQUIRED-NOT-INHERITED: this file's <program auth="required"> gates only this file: ` +
+              `classified ${rootHow}, ${where} (§40.2). ` +
+              `${appSentence}, so ${one ? "this page, which declares" : `these ${ungated.length} pages, which declare`} ` +
+              `no auth= of ${one ? "its" : "their"} own, ${one ? "is" : "are"} served WITHOUT ` +
+              `authentication: ${shown}. ${cliRemedy} Otherwise: if the whole application requires sign-in, declare ` +
+              `<program auth="required"> in the application's entry file; if only this ` +
+              `route does, write <page auth="required"> here instead. (§40.2, §40.8)`,
+            f.filePath,
+            0,
+            0,
+          );
+        }
+      }
+    }
   }
 
   // 8e (S443 review F3): a gated route whose redirect target is itself 302s to
@@ -6848,31 +6947,185 @@ export function runRI(input: RIInput): RIOutput {
 const ROUTE_PREFIXES: readonly string[] = ["/routes/", "/pages/"];
 
 /**
- * Find the first matching route-directory prefix in a file path.
+ * How the route files of a build are told apart from its application entry file
+ * (S445 — SPEC §40.8 "The build root"). ONE rule, `resolveBuildRoot`:
  *
- * Returns the matched prefix string and the index where it appears, or `null`
- * if the file is not under any recognized route directory (i.e. a single-page
- * application file at the project root). The matched prefix is returned so
- * callers can compute `routesIdx + prefix.length` without re-hardcoding either
- * prefix literal.
+ *   - GIVEN (`compileScrml({ buildRoot })`): the build root is that directory. A
+ *     route file is one whose path BELOW it has a `pages/` or `routes/` component;
+ *     the application `<program>` candidates are the web-application files with a
+ *     top-level `<program>` that are not route files (§40.2, verbatim).
+ *   - INFERRED (no root given — every CLI form, and a file list). The build root is
+ *     not known, so it is read off the application's entry file (§40.8: "The entry
+ *     file is the file resolved by the build root" — read in reverse). Let E be the
+ *     web-application files with a top-level `<program>`. The candidates are the
+ *     members of E with no `pages/` or `routes/` directory ANYWHERE in their path
+ *     (these cannot be route files whatever the root is); when there are none —
+ *     every `<program>` lies under some directory so named, which is exactly the
+ *     case where a directory ABOVE the project could be one — the candidates are
+ *     the members of E in the shallowest directory. Exactly one candidate is the
+ *     entry file, and the build root is ITS directory: route files are then the
+ *     files with a `pages/` or `routes/` component below it, or — when none lies
+ *     below — the files directly in it when it is itself named `pages` or
+ *     `routes` (a flat route directory whose entry file sits beside its pages).
+ *     The application-`<program>` candidates are then RE-READ against that root by
+ *     the given-root definition (the entry, plus every `<program>` file that is not
+ *     a route file relative to it), so a second non-route `<program>` makes the
+ *     application ambiguous (§40.2 fail-closed) wherever the project lives.
+ *   - NO SINGLE ENTRY (zero candidates, or several): no build root is inferred.
+ *     Route files keep the pre-S445 classification (a `pages/` / `routes/`
+ *     component anywhere in the path). Security does not depend on it: with zero
+ *     `<program>`s nothing can be inherited, and with several §40.2's ambiguity
+ *     rule fails closed.
+ *
+ * Why the entry file decides, not a directory: the only way the absolute-path
+ * reading could open a page (g-app-root-route-prefix-matched-on-absolute-path) is
+ * by mistaking the application's `<program>` for a route file's; anchoring on that
+ * `<program>` removes the mistake, and every build with no `pages`/`routes`
+ * directory above its entry file classifies exactly as before.
  */
-function findRoutePrefix(filePath: string): { idx: number; prefix: string } | null {
+export interface BuildRootResolution {
+  /** "given" / "inferred" — a root is known; "none" — no single entry, legacy classification. */
+  origin: "given" | "inferred" | "none";
+  /** Separator-normalized, no trailing "/" ("" when origin is "none"). */
+  root: string;
+  /** The application-`<program>` candidates for Step 8 (§40.2). */
+  candidates: FileAST[];
+  /** Inferred roots only: the entry file the root was read off, and why it was chosen. */
+  entry?: FileAST;
+  entryBasis?: "outside-route-dirs" | "shallowest";
+}
+
+/** A web-application file (not a §64 tool) with a top-level `<program>`. */
+function isApplicationProgramFile(f: FileAST): boolean {
+  try {
+    return !isToolProgram(f) && findTopLevelProgramNode(f) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** `\` → `/`, trailing `/` dropped (so the filesystem root `/` becomes `""`). */
+function normalizeBuildRoot(root: string): string {
+  return root.replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/** The pre-S445 reading: a `pages/` / `routes/` component anywhere in the path. */
+function legacyRoutePrefix(norm: string): { idx: number; prefix: string } | null {
   for (const prefix of ROUTE_PREFIXES) {
-    const idx = filePath.indexOf(prefix);
+    const idx = norm.indexOf(prefix);
     if (idx !== -1) return { idx, prefix };
   }
   return null;
 }
 
+/** A `pages/` / `routes/` component BELOW `root` (norm must lie under it). */
+function belowRootPrefix(norm: string, root: string): { idx: number; prefix: string } | null {
+  const view = norm.slice(root.length); // begins with the "/" after the root
+  for (const prefix of ROUTE_PREFIXES) {
+    const i = view.indexOf(prefix);
+    if (i !== -1) return { idx: i + root.length, prefix };
+  }
+  return null;
+}
+
+export function resolveBuildRoot(files: readonly FileAST[], givenRoot?: string): BuildRootResolution {
+  const programs = files.filter(isApplicationProgramFile);
+  if (typeof givenRoot === "string" && givenRoot !== "") {
+    const res: BuildRootResolution = { origin: "given", root: normalizeBuildRoot(givenRoot), candidates: [] };
+    const classify = makeRouteClassifier(res);
+    res.candidates = programs.filter((f) => classify(f.filePath) === null);
+    return res;
+  }
+  const norm = (f: FileAST): string => f.filePath.replace(/\\/g, "/");
+  let candidates = programs.filter((f) => legacyRoutePrefix(norm(f)) === null);
+  if (candidates.length === 0 && programs.length > 0) {
+    const depth = (f: FileAST): number => norm(f).split("/").length;
+    const min = Math.min(...programs.map(depth));
+    candidates = programs.filter((f) => depth(f) === min);
+  }
+  const basis: "outside-route-dirs" | "shallowest" =
+    programs.some((f) => legacyRoutePrefix(norm(f)) === null) ? "outside-route-dirs" : "shallowest";
+  if (candidates.length === 1) {
+    const entry = candidates[0];
+    const n = norm(entry);
+    const res: BuildRootResolution = {
+      origin: "inferred",
+      root: n.slice(0, n.lastIndexOf("/")),
+      candidates: [],
+      entry,
+      entryBasis: basis,
+    };
+    // The root is now known: the candidates are recomputed by the given-root
+    // definition (§40.2 — the `<program>` files that are not route files relative
+    // to it), plus the entry itself. A second `<program>` that is not a route file
+    // of the inferred root (S445 review round 4: `…/pages/deep/{scratch.scrml,
+    // src/app.scrml}`) makes the application ambiguous — §40.2 fails closed —
+    // exactly as it would outside a `pages` ancestor; the pick of the shallowest
+    // file must not make it location-dependent.
+    const classify = makeRouteClassifier(res);
+    res.candidates = programs.filter((f) => f === entry || classify(f.filePath) === null);
+    return res;
+  }
+  return { origin: "none", root: "", candidates };
+}
+
 /**
- * Is this file a ROUTE file (under `pages/` / `routes/`)? The ONE route-file
- * classifier other stages consume — `api.js` hands it to
- * `program-role.ts#stampImpliedProgramAncestors` (S445 item 1: a route file's
- * `<program>`s are nested when an application program exists). Swap the
- * classification here and every consumer follows.
+ * The route-file classifier for a resolution — the ONE test every route decision
+ * in this file uses (Step 8's candidates, the 8e redirect-loop URL, the page tree).
+ * Returns the matched prefix and its index in the separator-normalized path
+ * (callers slice `normalized.slice(idx + prefix.length)`), or `null`.
+ * `routes/` is looked up before `pages/` (the legacy tiebreak, above).
  */
-export function isRouteFilePath(filePath: string): boolean {
-  return findRoutePrefix(filePath.replace(/\\/g, "/")) !== null;
+function makeRouteClassifier(res: BuildRootResolution): (filePath: string) => { idx: number; prefix: string } | null {
+  const root = res.root;
+  const rootName = root.slice(root.lastIndexOf("/") + 1);
+  return (filePath: string) => {
+    const norm = filePath.replace(/\\/g, "/");
+    if (res.origin === "none") return legacyRoutePrefix(norm);
+    const under = root === "" ? norm.startsWith("/") : norm.startsWith(root + "/");
+    if (!under) return res.origin === "given" ? null : legacyRoutePrefix(norm);
+    const below = belowRootPrefix(norm, root);
+    if (below || res.origin === "given") return below;
+    // Inferred root itself named pages/routes, nothing below it: a flat route directory.
+    if (rootName === "pages" || rootName === "routes") {
+      return { idx: root.length - rootName.length - 1, prefix: "/" + rootName + "/" };
+    }
+    return null;
+  };
+}
+
+/**
+ * S445 item 1 — the build facts `program-role.ts#stampImpliedProgramAncestors`
+ * needs: does an application program exist, and which files are its route files.
+ * Decided by THIS file's build-root resolution (`resolveBuildRoot` +
+ * `makeRouteClassifier`), the same rule Step 8 uses, so the implied ancestor and
+ * the app-root identification cannot disagree. `api.js` calls it once, after
+ * parsing and before PRECG, over the parsed FileASTs (no file is stamped yet, so
+ * every `<program>` has its structural role here).
+ *
+ * An application program exists when a candidate is a real application file —
+ * the inferred/given entry, or a candidate that is not itself a route file.
+ * `origin: "none"` with only route-file candidates (the legacy all-`<program>`
+ * `routes/` set, where the shallowest route files are the fallback candidates)
+ * has NO application program, so nothing becomes nested there.
+ */
+export function programRoleBuildFacts(
+  files: readonly FileAST[],
+  givenRoot?: string,
+): { applicationExists: boolean; isRouteFile: (fileAST: unknown) => boolean } {
+  const res = resolveBuildRoot(files, givenRoot);
+  const classify = makeRouteClassifier(res);
+  const appFiles = new Set<FileAST>(
+    res.candidates.filter((f) => f === res.entry || classify(f.filePath) === null),
+  );
+  return {
+    applicationExists: appFiles.size > 0,
+    isRouteFile: (fileAST: unknown) => {
+      const f = fileAST as FileAST;
+      if (!f || typeof f.filePath !== "string" || appFiles.has(f)) return false;
+      return classify(f.filePath) !== null;
+    },
+  };
 }
 
 /**
@@ -6907,8 +7160,16 @@ export function isRouteFilePath(filePath: string): boolean {
  * loginRedirect targets to pages under `pages/...`, closing the Batch A.1 loop
  * on `scrml generate auth` scaffold output.
  */
-export function buildPageRouteTree(files: FileAST[]): Map<string, PageRoute> {
+export function buildPageRouteTree(
+  files: FileAST[],
+  buildRoot?: string | BuildRootResolution,
+): Map<string, PageRoute> {
   const pages = new Map<string, PageRoute>();
+  // Route files are classified by the build-root rule (S445, resolveBuildRoot):
+  // a given root, else one inferred from the application's entry file.
+  const findRoutePrefix = makeRouteClassifier(
+    typeof buildRoot === "object" && buildRoot !== null ? buildRoot : resolveBuildRoot(files, buildRoot),
+  );
 
   for (const fileAST of files) {
     const filePath = fileAST.filePath;
