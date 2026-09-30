@@ -31,7 +31,7 @@
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
 | HIGH | 222 | 4 |
-| MED | 426 | 0 |
+| MED | 428 | 0 |
 | LOW | 196 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -21199,3 +21199,52 @@ Reviewer-executed on base and merge (both parsers): `<program><p>public</p></pro
 ### g-example-23-residuals-after-1180 — examples/23 after #1180 (post-merge review, reviewer-executed): pre-existing authz/routing/runtime holes newly reachable now that login works
 <!-- @gap id=g-example-23-residuals-after-1180 sev=MED status=open locus=examples/23-trucking-dispatch/pages/driver/load-detail.scrml(fetchLoadDetail/fetchLogServer/logBreakdownServer/logFuelStopServer — no assignment check)+examples/23-trucking-dispatch(all loads/:id links)+compiler/src/commands/build.js(generateServerEntry WS handler merge) prov=review:S443-post-merge-1180 -->
 **MED** any driver reads and writes ANY load: `fetchLoadDetail` / `fetchLogServer` return another driver's load (customer name, contact, phone, rate, log); `logBreakdownServer` / `logFuelStopServer` write to it (customer B saw another driver's "breakdown"); payload JSON is string-built → injectable (`engine fire","injected":"1` stored an extra field; same for BOL/POD `filename`). **MED** every load-detail link/route (`/{driver,customer,dispatch}/loads/:id`, `/driver/loads/:id/log`, `/dispatch/loads/new`) 404s — the pages serve only at `…/load-detail` and read the id from the last path segment → assign / transition / BOL / rate-confirm / booking unusable in a browser. **MED** the customer load-detail page crashes on load (`tractor_unit` — the markup call-interpolation compiler defect; the #1180 guard sweep missed it). **MED (compiler)** the built `_server.js` wires ONE page's `_scrml_ws_handlers` 12× — every `customer-events` sync delivered 12×, other channels' syncs silently dropped; any authenticated user can broadcast forged cell syncs to all customers. **LOW (introduced by #1180, fixed by the follow-up PR)**: `getCurrentUser(userId)` / `assignedDriverFor` helpers were public routes (user enumeration / assignment oracle). **LOW (introduced)**: `/auth/login?logout=1` is a cross-site forced-logout link (login-page on-load `endSessionServer`); action buttons enabled before the load arrives (`@currentLoad is some && …` → false while `not`). **LOW**: literal `${@channelId}` in `<code>` on driver messages / profiles; first server call after login 403s on CSRF then retries; HOS "-6h"; register accepts a case variant of an existing email; ex09 duplicate check is SELECT-then-INSERT (racy); seeded users share one argon2 salt; `runSeeds` route exposed (writes `:memory:`, 500s); no regression test for the BOL/POD guard.
+
+## §S444c — impl#1 divergences from the S444 dpa-045 residue rulings (2026-09-30; ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes"; every entry executed on `12aae48a1` with `bun compiler/bin/scrml.js compile <f> -o <dir>`, the output loaded in happy-dom; change `docs/changes/s444-comment-and-escapes/`). impl#1 is NOT changed for these (S435 policy: the TS compiler serves the bootstrap + security only); the bootstrap implements both rules.
+
+### g-impl1-free-text-slash-slash-is-a-comment-without-a-preceding-space — impl#1 treats a free-text `//` as a comment even when no whitespace precedes it (`a//b`, `</b>// x`), silently deleting the rest of the line
+<!-- @gap id=g-impl1-free-text-slash-slash-comment-without-preceding-whitespace sev=MED status=open locus=compiler/src/block-splitter.js(the markup-text `//` branch — locate by `_urlExemptCtx && urlSlashesAt(source, curPos)`; urlSlashesAt exempts only a `:`-preceded `//` or one inside `url(`) prov=ruling:user-voice-scrml.md-S444-"yes on // revised"+spec:SPEC.md-§4.18.1b-exit-(2)+empirical:S444-executed-on-12aae48a1 -->
+**Executed on `12aae48a1`.** SPEC §4.18.1b exit (2) (S444): in free text a `//` opens a comment ONLY at the start of a
+line or immediately after whitespace; `http://x`, `https://x.y`, `a//b`, `</b>// x` are text.
+
+```scrml
+<program>
+    <main>
+        <p id="u">see http://x ok
+        </p>
+        <p id="w">a//b ok
+        </p>
+        <p id="t"><b>y</b>// x
+        </p>
+    </main>
+</program>
+```
+→ exit 0, HTML `<p id="u">see http://x ok …</p>` (agrees — impl#1's `urlSlashesAt` exempts a `:`-preceded `//`),
+**`<p id="w">a        </p>`** (`//b ok` deleted) and **`<p id="t"><b>y</b>        </p>`** (`// x` deleted). With the
+closer on the SAME line (`<p>a//b ok</p>`) the comment also swallows the `</p>`: `E-CTX-001` + `E-CTX-003` cascade.
+Expected (bootstrap): `a//b ok` and `<b>y</b>// x` rendered as text.
+
+**Corpus:** 0 affected — a grep of `examples/ samples/ conformance/` for `\S//` finds 55 hits, every one in an
+attribute value, a logic string or a comment; none in a free-text body. The bootstrap front end over the same corpus
+(2,130 files) produces an identical parse (diagnostics + every Text node) on base and branch.
+**Why MED:** silent content loss at exit 0 in a shape (`a//b`, a path with doubled slashes) that SPEC now says is
+text. Not security. — `NEW S444 (s444-comment-and-escapes)`; **MED**; open
+
+### g-impl1-display-text-literal-escapes-diverge-from-the-restored-catalog — impl#1 does not implement the §4.18.3 escapes as restored S444: `\${` still interpolates, `\q` is silent, and an engine state-child literal renders its raw source with the quotes
+<!-- @gap id=g-impl1-display-text-literal-escapes-diverge-from-restored-catalog sev=MED status=open locus=compiler/src/block-splitter.js(splits `"lit \${x}"` into text + a live `${x}` logic block — no display-literal escape awareness)+compiler/src/engine-statechild-parser.ts(the state-child display literal is handed on raw, quotes included)+searched:compiler/src/ast-builder.js(no E-PARSE-001 on a malformed display-text escape) prov=ruling:user-voice-scrml.md-S444-"A for escapes"+spec:SPEC.md-§4.18.3-Amendment-S444+empirical:S444-executed-on-12aae48a1 -->
+**Executed on `12aae48a1`** (happy-dom, rendered `textContent`). SPEC §4.18.3 (S444): `\"` → `"`, `\\` → `\`,
+`\${` → literal `${` (no interpolation); any other `\` + char → `E-PARSE-001`.
+
+| source | impl#1 renders | expected |
+|---|---|---|
+| `<p : "She said \"hi\" ok">` | `She said "hi" ok` | same ✓ |
+| `<p : "C:\\">` | `C:\` | same ✓ |
+| `<p : "bad \q ok">` | `bad \q ok`, **no diagnostic** | `E-PARSE-001` |
+| `<p : "lit \${@x} ok">` (`<x> = 7`) | **`lit 7 ok`** — the `\` dropped, the interpolation LIVE | `lit ${@x} ok` |
+| engine state-child `<A>"She said \"hi\" C:\\ lit \${@x} bad \q ok"</>` | **`"She said \"hi\" C:\\ lit \7 bad \q ok"`** — the raw source, quotes and backslashes included; `\${` = `\` + a live interpolation; no diagnostic | `She said "hi" C:\ lit ${@x} bad \q ok` + `E-PARSE-001` for `\q` |
+
+The engine row's quote-rendering is the pin-4 "cooked" divergence SPEC §4.18.1b already records (`parse-file.js`
+hands codegen the verbatim source); the escapes make it visible. **Corpus:** 0 uses of `\"` / `\\` / `\${` in a
+display-text literal (S442 E measurement). **Why MED:** silent wrong output at exit 0 for a SPEC-normative escape;
+`\${` renders live data where the author asked for literal text. Not security. — `NEW S444 (s444-comment-and-escapes)`;
+**MED**; open
