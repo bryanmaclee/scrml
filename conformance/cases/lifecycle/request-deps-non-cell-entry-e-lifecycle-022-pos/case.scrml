@@ -1,0 +1,11 @@
+<program>
+${
+  <u> = { id: 1 }
+  <hits> = []
+  server function suggest(x: number) { return [x] }
+}
+<request id="hunt" deps=[@u.id]>
+  ${ @hits = suggest(@u.id) }
+</>
+<p>${@hits}</p>
+</program>

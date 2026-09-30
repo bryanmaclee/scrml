@@ -1,0 +1,31 @@
+{
+  "id": "request-refetch-inline-multi-stmt-rt",
+  "description": "§6.7.7 `<#id>.refetch()` as the LATER statement of an inline multi-statement handler re-executes the fetch (RUNTIME, sqlEngine:\"real\"). Mount-only request (deps=[]); `onclick=${ @userId = 2; <#userReq>.refetch() }`. After the click @userData is user 2 (\"b\"). Pre-S444 the handler's statement parse did not lower `<#userReq>`, so the refetch became an html-fragment and emitted nothing (only the write survived).",
+  "language-version": "1.0",
+  "spec": "§6.7.7, §5.2.3",
+  "rationale": "§6.7.7 Properties: \"`<#id>.refetch()` | `() -> void` | Imperatively re-execute the fetch body\"; EC-7 write-then-refetch. g-request-refetch-statement-dropped (S444).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "a" },
+        { "id": 2, "name": "b" }
+      ]
+    },
+    "input": [
+      { "wait": "settle" },
+      { "click": "#again" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "userId": 2,
+      "userData": { "id": 2, "name": "b" }
+    },
+    "domAnchored": [
+      { "selector": "#who", "text": "b" }
+    ]
+  }
+}

@@ -7,7 +7,7 @@ import { nsId } from "./chunk-namespace.ts";
 import { isUserComponentMarkup } from "../component-expander.ts";
 import { validateEmittedArtifact } from "./validate-emit.ts";
 import { emitExprField, reparseRequestRefEscapeHatch, rawReferencesRegisteredRequest } from "./emit-expr.ts";
-import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds } from "./reactive-deps.ts";
+import { extractReactiveDeps, collectReactiveVarNames, extractReactiveDepsTransitive, buildFunctionBodyRegistry, collectRequestIds, analyzeRequestDepsAttr } from "./reactive-deps.ts";
 import { hasTemplateInterpolation } from "./rewrite.js";
 import { isRcdataElement, isHtmlElement, isStandardHtmlRenderElement } from "../html-elements.js";
 import { isAuthorMainTag } from "../landmark-tag.ts";
@@ -2666,6 +2666,45 @@ export function generateHtml(
               `E-LIFECYCLE-018: \`<request>\` requires an \`id\` attribute. Without an id, ` +
               `the fetch state cannot be referenced via \`<#id>.loading\`, \`<#id>.data\`, etc. ` +
               `Add \`id="yourName"\` to the element.`,
+              span,
+            ));
+          }
+        }
+
+        // §6.7.7 — `deps-list ::= ('@' identifier (',' '@' identifier)*)?` and
+        // "The compiler SHALL emit E-LIFECYCLE-022 if a `deps=` entry names an
+        // undeclared or non-`@` variable." Every entry that is not a bare
+        // `@identifier` is refused: an explicit list overrides inference, so a
+        // silently-dropped entry would turn the request MOUNT-ONLY. (An
+        // undeclared `@x` entry is already refused by E-STATE-UNDECLARED.)
+        const deps = analyzeRequestDepsAttr(node);
+        if (errors && deps.invalid.length > 0) {
+          const idVal = attrMap.get("id")?.value;
+          const reqLabel = typeof idVal?.value === "string" ? `<request id="${idVal.value}">` : "<request>";
+          if (deps.notList) {
+            const shown = deps.invalid[0];
+            const one = /^@[A-Za-z_$][A-Za-z0-9_$]*$/.test(shown) ? `\`deps=[${shown}]\`` : "`deps=[@page, @filter]`";
+            errors.push(new CGError(
+              "E-LIFECYCLE-022",
+              `E-LIFECYCLE-022: ${reqLabel} \`deps=\` value \`${shown}\` is not a list of reactive cells. ` +
+              `\`deps=\` takes a bracketed list of \`@cell\` names (§6.7.7); the fetch re-executes when a listed cell changes. ` +
+              `Fix: write ${one}, or \`deps=[]\` to fetch on mount only.`,
+              span,
+            ));
+          }
+          for (const entry of deps.notList ? [] : deps.invalid) {
+            const memberBase = /^@([A-Za-z_$][A-Za-z0-9_$]*)[.\[]/.exec(entry);
+            const bareIdent = /^([A-Za-z_$][A-Za-z0-9_$]*)$/.exec(entry);
+            const fix = memberBase
+              ? `list the cell itself — \`deps=[@${memberBase[1]}]\` — the fetch re-runs when \`@${memberBase[1]}\` changes and reads \`${entry}\` from it`
+              : bareIdent
+                ? `write the cell with its sigil — \`@${bareIdent[1]}\``
+                : "list the cells the fetch depends on, each as a bare `@name` inside `[ ]` (e.g. `deps=[@page, @filter]`), or `deps=[]` to fetch on mount only";
+            errors.push(new CGError(
+              "E-LIFECYCLE-022",
+              `E-LIFECYCLE-022: ${reqLabel} \`deps=\` entry \`${entry}\` is not a reactive cell. ` +
+              `\`deps=\` lists \`@cell\` names only (§6.7.7); the fetch re-executes when a listed cell changes. ` +
+              `Fix: ${fix}.`,
               span,
             ));
           }
