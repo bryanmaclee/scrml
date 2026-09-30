@@ -16,7 +16,7 @@ import {
   collectServerAuthorityTypes,
   serverVarDeclLoadKind,
 } from "./collect.ts";
-import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNames, collectStructuralDeclNames, readRequestDepsAttr, type FunctionBodyRegistry } from "./reactive-deps.ts";
+import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNames, collectStructuralDeclNames, readRequestDepsAttr, requestDepReadLines, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
 import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emitDeclRhsSqlLoad } from "./emit-sync.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1692,7 +1692,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       }
       const emitted = kind === "lifecycle"
         ? emitLifecycleNode(node, errors, fileAST.filePath ?? "")
-        : emitRequestNode(node, errors, fileAST.filePath ?? "", apiEndpoints);
+        : emitRequestNode(node, errors, fileAST.filePath ?? "", apiEndpoints, collectDerivedVarNames(fileAST));
       for (const l of emitted) lines.push(l);
     }
   };
@@ -2378,7 +2378,7 @@ function extractRequestId(node: any): string | null {
   return null;
 }
 
-function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>): string[] {
+function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>, derivedNames: ReadonlySet<string> = new Set()): string[] {
   const lines: string[] = [];
   const attrs: any[] = node.attrs ?? node.attributes ?? [];
 
@@ -2573,9 +2573,8 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     // `${stateVar}.data` (the stale check) — tracked, that read subscribed this
     // effect to its own result, so every settle (`.data = …`) re-fired it: an
     // endless refetch loop (S444, measured in a happy-dom mount).
-    const depsJs = depsVars.map(d => `_scrml_reactive_get(${JSON.stringify(d)})`).join(", ");
     lines.push(`_scrml_effect(function() {`);
-    lines.push(`  var _d = [${depsJs}];`);
+    lines.push(...requestDepReadLines(depsVars, derivedNames, "_d"));
     lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
     lines.push(`});`);
   } else {

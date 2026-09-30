@@ -34,7 +34,7 @@ import { tmpdir } from "os";
 import { compileScrml } from "../../src/api.js";
 import { splitBlocks } from "../../src/block-splitter.js";
 import { buildAST } from "../../src/ast-builder.js";
-import { readRequestDepsAttr } from "../../src/codegen/reactive-deps.ts";
+import { readRequestDepsAttr, analyzeRequestDepsAttr } from "../../src/codegen/reactive-deps.ts";
 import { GlobalRegistrator } from "@happy-dom/global-registrator";
 import { captureInsideChunkScope } from "../helpers/chunk-scope.js";
 
@@ -279,4 +279,114 @@ describe("§C: runtime re-execution", () => {
     await settle();
     expect(calls.length).toBe(1);
   });
+});
+
+// ---------------------------------------------------------------------------
+// §D — E-LIFECYCLE-022 (S444 review fix round). An explicit deps= overrides
+// inference, so an entry the reader cannot use must be REFUSED, never skipped —
+// skipping turned `deps=[@u.id]` into a silent mount-only request.
+// ---------------------------------------------------------------------------
+
+function lifecycle022(src, name) {
+  const { errors } = compile(src, name);
+  return errors.filter((e) => e.code === "E-LIFECYCLE-022");
+}
+
+const cellsDecl = `<n> = 1\n<u> = { id: 1 }\n`;
+
+describe("§D: E-LIFECYCLE-022 on a deps= entry that is not a bare @identifier", () => {
+  test("member access @u.id (url= form) → 022 naming the entry and the cell fix", () => {
+    const errs = lifecycle022(`<program>\n${cellsDecl}<request id="r" url="/x" deps=[@u.id]></>\n<p>\${<#r>.loading}\${@u.id}</p>\n</program>\n`, "e22-member");
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("`@u.id`");
+    expect(errs[0].message).toContain("deps=[@u]");
+  });
+
+  test("member access in the BODY form → 022 (was: silent mount-only)", () => {
+    const errs = lifecycle022(bodySrc(" deps=[@userData.id]"), "e22-body-member");
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("deps=[@userData]");
+  });
+
+  test("a name without the sigil and a literal → one 022 each", () => {
+    const src = `<program>\n${cellsDecl}<request id="a" url="/x" deps=[n]></>\n<request id="b" url="/x" deps=[@n, 3]></>\n<p>\${<#a>.loading}\${<#b>.loading}\${@n}\${@u.id}</p>\n</program>\n`;
+    const errs = lifecycle022(src, "e22-shapes");
+    expect(errs.map((e) => e.message.match(/entry `([^`]*)`/)?.[1])).toEqual(["n", "3"]);
+    expect(errs[0].message).toContain("`@n`");
+  });
+
+  test("a value that is not a [ ] list (deps=@n) → 022 suggesting deps=[@n]", () => {
+    const errs = lifecycle022(`<program>\n${cellsDecl}<request id="r" url="/x" deps=@n></>\n<p>\${<#r>.loading}\${@n}\${@u.id}</p>\n</program>\n`, "e22-notlist");
+    expect(errs.length).toBe(1);
+    expect(errs[0].message).toContain("deps=[@n]");
+  });
+
+  test("valid lists fire nothing: deps=[@n, @u], deps=[]", () => {
+    expect(lifecycle022(`<program>\n${cellsDecl}<request id="r" url="/x" deps=[@n, @u]></>\n<p>\${<#r>.loading}\${@n}\${@u.id}</p>\n</program>\n`, "e22-ok")).toEqual([]);
+    expect(lifecycle022(bodySrc(" deps=[]"), "e22-ok-empty")).toEqual([]);
+  });
+
+  test("the analyzer never lists an invalid entry as a dep", () => {
+    const n = requestNode(`<program>\${ <u> = { id: 1 } <n> = 1 }<request id="h" url="/x" deps=[@n, @u.id]></></program>`);
+    const a = analyzeRequestDepsAttr(n);
+    expect(a.names).toEqual(["n"]);
+    expect(a.invalid).toEqual(["@u.id"]);
+    expect(a.notList).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §E — a DERIVED dep re-fires once per upstream change (S444 review fix round).
+// ---------------------------------------------------------------------------
+
+const DERIVED_URL_SRC = `<program>
+<q> = "a"
+const <qq> = @q + "!"
+<request id="rows" url="/api/rows" deps=[@qq]></>
+<p id="l">\${<#rows>.loading} \${@qq}</p>
+</program>
+`;
+
+const DERIVED_BODY_SRC = `<program db="./app.db">
+\${
+    type User:struct = { id: number, name: string }
+    <q> = 1
+    const <qq> = @q + 1
+    <userData> : User | not = not
+    function loadUser(id: number) : User | not {
+        rows = ?{\`SELECT id, name FROM users WHERE id = \${id}\`}
+        return rows[0]
+    }
+}
+<page>
+    <request id="userReq">
+        \${ @userData = loadUser(@qq) }
+    </>
+    <p>\${<#userReq>.loading}</>
+</page>
+</program>
+`;
+
+describe("§E: derived deps", () => {
+  test("emission: a derived dep settles untracked, then reads through the derived getter", () => {
+    const { clientJs } = compile(DERIVED_URL_SRC, "derived-emit");
+    expect(clientJs).toContain('_scrml_untracked(function() { _scrml_cs_derived_get("qq"); });');
+    expect(clientJs).toContain('var _d = [_scrml_cs_derived_get("qq")];');
+  });
+
+  for (const [label, src, stateVar] of [
+    ["url= deps=[@qq]", DERIVED_URL_SRC, "_scrml_request_rows"],
+    ["body form, inferred @qq", DERIVED_BODY_SRC, "_scrml_request_userReq"],
+  ]) {
+    test(`runtime (${label}): three upstream writes → exactly three re-fetches (was +2/+1/+2)`, async () => {
+      const { set, get, calls } = mount(src, "rt-derived", stateVar);
+      await settle();
+      expect(calls.length).toBe(1);
+      for (let i = 1; i <= 3; i++) {
+        set("q", typeof get("q") === "number" ? get("q") + 1 : get("q") + "b");
+        await settle();
+        expect(calls.length).toBe(1 + i);
+      }
+    });
+  }
 });

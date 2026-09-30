@@ -6,7 +6,7 @@ import { exprNodeContainsCall, parseExprToNode, forEachIdentInExprNode, splitTop
 import { isMetaKind } from "../types/ast.ts";
 import { assembleRuntime, RUNTIME_CHUNK_ORDER, applyChunkDependencies, hasStdlibClientChunk } from "./runtime-chunks.ts";
 import { asyncCombinatorHelperBlock } from "./async-combinators.ts";
-import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, type RequestBodyCell } from "./reactive-deps.ts";
+import { buildFunctionBodyRegistry, iterableHasReactiveRefs, forBodyLiftsMarkup, collectMapVarNames, fileHasMapUsage, collectRequestBodyCells, collectRequestIds, collectStructuralDeclNames, collectDerivedVarNames, requestDepReadLines, type RequestBodyCell } from "./reactive-deps.ts";
 import { setCurrentFileRequestIds } from "./emit-expr.ts";
 import { CGError } from "./errors.ts";
 import { escapeRegex, maskStringLiteralSpans } from "./utils.ts";
@@ -3294,6 +3294,7 @@ export function generateClientJs(ctx: CompileContext): string {
     // now throws on a non-`{__scrml_error}` non-2xx (emit-functions.ts), so a
     // transport/host failure routes to `.error` here, never the success cell.
     const requestBodyCells: Map<string, RequestBodyCell> = collectRequestBodyCells(fileAST);
+    const requestDerivedNames: Set<string> = requestBodyCells.size > 0 ? collectDerivedVarNames(fileAST) : new Set<string>();
     // A request-body cell's mount-fetch is emitted ONCE at module-init (before
     // the DOMContentLoaded wiring), so it is the FIRST occurrence in the client.
     // Convert only that first occurrence per request id; any later reassignment
@@ -3351,11 +3352,10 @@ export function generateClientJs(ctx: CompileContext): string {
         // effect to its own result (every settle re-fired it: an endless refetch
         // loop), and the argument reads added the body's `@var`s as deps even
         // under an explicit `deps=[…]`, which §6.7.7 says "overrides inference".
-        const depsJs = info.depsVars
-          .map((d) => `_scrml_reactive_get(${JSON.stringify(d)})`)
-          .join(", ");
+        // A DERIVED dep is read through requestDepReadLines' untracked settle so
+        // one upstream write re-fires the fetch once, not 2x (S444 review).
         lines.push(`_scrml_effect(function() {`);
-        lines.push(`  var _scrml_deps = [${depsJs}];`);
+        lines.push(...requestDepReadLines(info.depsVars, requestDerivedNames, "_scrml_deps"));
         lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
         lines.push(`});`);
       } else {
