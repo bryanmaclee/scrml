@@ -130,6 +130,10 @@ describe("R2 — `\\\"` `\\\\` `\\${` are escapes in a display-text literal", ()
     expect(await html(P('<p : "a \\${x} ${@n}">'))).toBe(W("<p>a ${x} 5</p>"));
     expect(await html(state('"a \\${x} ${@n}"'))).toBe(W("<p>a ${x} 5<!--if--></p>"));
   });
+  test("`\\${` ends no extent: a standalone `\"a \\${ b\"` is ONE literal `a ${ b` (the escaped `${` opens no interpolation walk)", async () => {
+    expect(await html(P('<p : "a \\${ b">'))).toBe(W("<p>a ${ b</p>"));
+    expect(await html(state('"a \\${ b"'))).toBe(W("<p>a ${ b<!--if--></p>"));
+  });
   test("twin: an unescaped `${` still interpolates", async () => {
     expect(await html(P('<p : "a ${@n} b">'))).toBe(W("<p>a 5 b</p>"));
   });

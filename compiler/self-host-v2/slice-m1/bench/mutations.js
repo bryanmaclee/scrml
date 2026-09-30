@@ -524,12 +524,12 @@ const MUTATIONS = [
   // s444 r2 fix 1, re-read under S444 "A for escapes": `\\"` is a VALID escape
   // again, so E-PARSE-001 must still never fire on it — these rows put it on.
   { id: "S444 ce-R2: E-PARSE-001 raised on the valid escape `\\\"` in a `:`-shorthand display-text literal", file: `${SH}/parse.scrml`,
-    from: "        const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)\n",
-    to: "        const tp0s: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)\n        const tp: TP = mp.src.substring(mp.pos, lastEnd(tp0s) + 1).indexOf(\"\\\\\\\"\") >= 0 ? diagAt(tp0s, \"E-PARSE-001\", \"x\", cur(tp0s)) : tp0s\n",
+    from: "        const tp: TP = codeRegionTP(mAdv(mp, 1), LexStop.Shorthand)\n",
+    to: "        const tp0s: TP = codeRegionTP(mAdv(mp, 1), LexStop.Shorthand)\n        const tp: TP = mp.src.substring(mp.pos, lastEnd(tp0s) + 1).indexOf(\"\\\\\\\"\") >= 0 ? diagAt(tp0s, \"E-PARSE-001\", \"x\", cur(tp0s)) : tp0s\n",
     tests: [T4("dpa045.test.js"), T4("comment-escapes.test.js")] },
   { id: "S444 ce-R2: E-PARSE-001 raised on the valid escape `\\\"` in a code-default body's display-text literal", file: `${SH}/parse.scrml`,
-    from: "                const tp0: TP = regionTP(m, LexStop.CodeBody)\n",
-    to: "                const tp0: TP = regionTP(m, LexStop.CodeBody)\n                if (m.src.substring(m.pos, lastEnd(tp0)).indexOf(\"\\\\\\\"\") >= 0) m = mDiag(m, \"E-PARSE-001\", \"x\", m.pos, lastEnd(tp0))\n",
+    from: "                const tp0: TP = codeRegionTP(m, LexStop.CodeBody)\n",
+    to: "                const tp0: TP = codeRegionTP(m, LexStop.CodeBody)\n                if (m.src.substring(m.pos, lastEnd(tp0)).indexOf(\"\\\\\\\"\") >= 0) m = mDiag(m, \"E-PARSE-001\", \"x\", m.pos, lastEnd(tp0))\n",
     tests: [T4("dpa045.test.js"), T4("comment-escapes.test.js")] },
   // ---- S444 (ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes") ----
   // R1 — a free-text `//` is a comment only at line start / after whitespace; opaque to end of line
@@ -546,7 +546,7 @@ const MUTATIONS = [
   { id: "S444 ce-R1: a CR is not a line terminator (the comment swallows the `\\r` of `\\r\\n`)", file: `${SH}/parse.scrml`,
     from: "        while (!mEof(m) && chAt(m, 0) != \"\\n\" && chAt(m, 0) != \"\\r\") { m = mAdv(m, 1) }", to: "        while (!mEof(m) && chAt(m, 0) != \"\\n\") { m = mAdv(m, 1) }", tests: [T4("comment-escapes.test.js")] },
   // R2 — `\"` `\\` `\${` restored in a display-text literal; any other `\` + char is E-PARSE-001
-  { id: "S444 ce-R2: the lexer does not decode `\\${` (a nested `\"a \\${x}\"` keeps its backslash)", file: `${SH}/lex.scrml`,
+  { id: "S444 ce-R2: the lexer does not decode `\\${` (a standalone `\"a \\${ b\"` walks a runaway interpolation)", file: `${SH}/lex.scrml`,
     from: "                } else if (n1 == 36 && peekCode(c, 2) == 123) {", to: "                } else if (false) {", tests: [T4("comment-escapes.test.js")] },
   { id: "S444 ce-R2: the lexer decodes only `\\\"` (`\\\\` stays two backslashes)", file: `${SH}/lex.scrml`,
     from: "                if (n1 == 34 || n1 == 92) {", to: "                if (n1 == 34) {", tests: [T4("comment-escapes.test.js")] },
@@ -562,9 +562,9 @@ const MUTATIONS = [
   { id: "S444 ce-R2: hasLiveInterp is the raw `${` search (a nested `\\${` literal reported E-BOOTSTRAP-UNSUPPORTED)", file: `${SH}/parse.scrml`,
     from: "hasLiveInterp(m.src, t.start, t.end)) {", to: "t.text.indexOf(interpOpen()) >= 0) {", tests: [T4("comment-escapes.test.js")] },
   { id: "S444 ce-R2: no E-PARSE-001 for a malformed escape in a `:`-shorthand literal", file: `${SH}/parse.scrml`,
-    from: "        let m: MP = displayEscapeDiags(skipSpace(backToMarkup(mp, t)), tp.toks)\n", to: "        let m: MP = skipSpace(backToMarkup(mp, t))\n", tests: [T4("comment-escapes.test.js")] },
+    from: "        let m: MP = skipSpace(backToMarkup(mp, t))\n        if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)\n", to: "        let m: MP = skipSpace(backToMarkup(mp, t))\n", tests: [T4("comment-escapes.test.js")] },
   { id: "S444 ce-R2: no E-PARSE-001 for a malformed escape in a state-child body literal", file: `${SH}/parse.scrml`,
-    from: "                m = displayEscapeDiags(m, tp.toks)\n", to: "", tests: [T4("comment-escapes.test.js")] },
+    from: "                if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)\n", to: "", tests: [T4("comment-escapes.test.js")] },
   // S239 review of 5d5ad360b (nits 1 + 3)
   { id: "S444 ce-R1: a CR before `//` is not whitespace (a CR-only file's `\\r// c` rendered)", file: `${SH}/parse.scrml`,
     from: "        return before == \" \" || before == \"\\t\" || before == \"\\n\" || before == \"\\r\"\n", to: "        return before == \" \" || before == \"\\t\" || before == \"\\n\"\n", tests: [T4("comment-escapes.test.js")] },
@@ -623,7 +623,7 @@ const MUTATIONS = [
   { id: "dpa-045 fu1: `<_` / `<.` are content (scrml's own tag forms dropped from the class)", file: `${SH}/parse.scrml`,
     from: "        return c == \"!\" || c == \"/\" || c == \"?\" || c == \"*\" || c == \"_\" || c == \".\"", to: "        return c == \"!\" || c == \"/\" || c == \"?\" || c == \"*\"", tests: [T4("dpa045.test.js")] },
   { id: "dpa-045 fu3: a `${`-carrying display-text literal not split into its segments (§4.18.4)", file: `${SH}/parse.scrml`,
-    from: "        if (isDisplayTemplate(m.src, e)) {", to: "        if (false) {", tests: [T4("dpa045.test.js")] },
+    from: "        if (isStandaloneDisplay(tp) && isDisplayTemplate(m.src, e)) {", to: "        if (false) {", tests: [T4("dpa045.test.js")] },
   { id: "dpa-045 fu4: L13 restored — whitespace-only text containing a newline dropped", file: `${SH}/lower.scrml`,
     from: "        if (t == \"\") return []\n        return [View.Text(t)]", to: "        if (t.trim() == \"\" && t.indexOf(\"\\n\") >= 0) return []\n        return [View.Text(t)]",
     tests: [T4("dpa045.test.js"), T2("lower.test.js")] },
