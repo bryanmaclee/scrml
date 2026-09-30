@@ -196,6 +196,56 @@ describe("N1 — native: a nested expression the bridge cannot translate fails c
   });
 });
 
+// ---------------------------------------------------------------------------
+// Round 5c — re-review of 53161db07.
+// ---------------------------------------------------------------------------
+describe("R1 — a C-style `for` header is three clauses, not prose (default)", () => {
+  for (const head of ["let i = 0; i != 3; i++", "let i = 0; i <3; i++", "let i = 3; i > 0; i--"]) {
+    test(`\`for (${head}) { … }\` compiles clean and emits the loop`, () => {
+      const r = compile(`<zc> = 0\nfor (${head}) { @zc = @zc + i }\n<p>\${@zc}</p>`, null);
+      expect(r.codes).toEqual([]);
+      expect(r.client).toContain("for (let i =");
+    });
+  }
+  test("prose inside the header is still not code", () => {
+    const r = compile("for (let i = 0; the loop; runs) { log(i) }", null);
+    expect(r.codes).toContain("E-UNQUOTED-DISPLAY-TEXT");
+  });
+  test("native: the bridge drops the init (`for (; …)`) — that fails closed, never compiles clean", () => {
+    // Pre-existing native bridge gap (main native emits `for (; i != 3; i++)`).
+    const r = compile("<zc> = 0\nfor (let i = 0; i != 3; i++) { @zc = @zc + i }\n<p>${@zc}</p>", "scrml-native");
+    expect(r.codes).toContain("E-INTERNAL-BODY-TOP-DROPPED");
+  });
+});
+
+for (const [label, parser] of BOTH) {
+  describe(`R2 — tokens between a function's head and its body are reported (${label})`, () => {
+    for (const [src, rest] of [
+      ["function f() -> number oops junk { return 1 }\n<p>${f()}</p>", "oops junk"],
+      ["export function g() -> number bad { return 1 }", "bad"],
+    ]) {
+      test(`${JSON.stringify(src)} → E-UNQUOTED-DISPLAY-TEXT quoting \`${rest}\``, () => {
+        const r = compile(src, parser);
+        expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+        expect(r.errors[0].message).toContain("`" + rest + "`");
+        expect(at(r.errors[0]).line).toBe(3);
+      });
+    }
+  });
+}
+describe("R2 — default: `: T junk {` multi-line", () => {
+  test("`function f(): number junk {⏎…⏎}` → `junk` reported; the body still compiles", () => {
+    // (native does not parse a `:` return type on `function` — pre-existing gap)
+    const r = compile("function f(): number junk {\n  return 1\n}\n<p>${f()}</p>", null);
+    expect(r.codes).toEqual(["E-UNQUOTED-DISPLAY-TEXT"]);
+    expect(r.errors[0].message).toContain("`junk`");
+  });
+  test("a well-formed failable / braced-return head has no gap", () => {
+    const r = compile("type E:enum = { A, B }\nserver fn h() ! -> E {\n  return 1\n}\nserver function h2() ! E {\n  fail E::A\n}\nfn k(a) -> { ok: boolean } { return { ok: true } }", null);
+    expect(r.codes).toEqual([]);
+  });
+});
+
 describe("D1 — default: a braced RETURN type is not the function body", () => {
   // (The native parser does not read a `->` / `:` return type on `function`
   // at all — a pre-existing native gap, E-STMT-* on main too.)

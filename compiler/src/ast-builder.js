@@ -1316,10 +1316,23 @@ function stmtHasInvalidOwnExpr(st) {
   // An `on mount { … }` / `on dismount { … }` desugars to a bare-expr whose
   // exprNode is the BODY (a statement list), not a head — code by its head.
   if (st._onMountEffect === true) return false;
-  const heads = BODY_TOP_PROSE_HEADS[st.kind];
+  let heads = BODY_TOP_PROSE_HEADS[st.kind];
   if (!heads) return false;
+  // S441 round 5c (R1) — a C-style `for (init; cond; update)` head is THREE
+  // clauses, not one expression: its `iterExpr` is the whole parenthesised
+  // header, skipped by the expression collector and not an expression at all
+  // (`let i = 0; …` never parses as one). Judge the clauses the loop compiles
+  // — the condition and the update, and an init that is not a declaration.
+  let owner = st;
+  if (st.kind === "for-stmt" && st.cStyleParts && typeof st.cStyleParts === "object") {
+    owner = st.cStyleParts;
+    const init = owner.initExpr;
+    const initIsDecl = init && init.kind === "escape-hatch" && typeof init.raw === "string"
+      && /^\s*(?:let|const|var|lin)\b/.test(init.raw);
+    heads = initIsDecl ? ["condExpr", "updateExpr"] : ["initExpr", "condExpr", "updateExpr"];
+  }
   for (const key of heads) {
-    const v = st[key];
+    const v = owner[key];
     if (!v || typeof v !== "object" || typeof v.kind !== "string") continue;
     if (hasLostTrailingContent(v)) return true;
     if (v.kind === "escape-hatch" && v.nativeKind === "ParseError") return true;
@@ -1693,7 +1706,8 @@ function bodyTopAcceptance(node, consumed) {
       else return { nothing: true };
       if (!sub) return null;
       if (sub.nothing) return sub;
-      res = { count: kind === "re-export" || kind === "re-export-all" ? k - 1 + sub.count : k + sub.count };
+      const off = kind === "re-export" || kind === "re-export-all" ? k - 1 : k;
+      res = { count: off + sub.count, ...(sub.gap ? { gap: [off + sub.gap[0], off + sub.gap[1]] } : {}) };
       break;
     }
     case "type-decl":
@@ -1708,6 +1722,9 @@ function bodyTopAcceptance(node, consumed) {
       return null;
   }
   if (!res || res.nothing) return res;
+  // (Round 5c — a function whose head is followed by stray tokens before its
+  // body keeps the body; `gap` names the tokens it does not compile.)
+  if (res.gap) return res;
   return res.count >= consumed.length ? null : res;
 }
 
@@ -12710,7 +12727,9 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
         } else {
           const lastTok = consumed[acc.count - 1];
           const rest = consumed.slice(acc.count);
-          const same = rest.filter((t) => t.span.line === lastTok.span.line);
+          // A head GAP (round 5c) is reported in place of a same-line rest:
+          // the tokens between a function's head and its body.
+          const same = acc.gap ? consumed.slice(acc.gap[0], acc.gap[1]) : rest.filter((t) => t.span.line === lastTok.span.line);
           const later = rest.find((t) => t.span.line > lastTok.span.line);
           rec = {
             end: lastTok.span.end,

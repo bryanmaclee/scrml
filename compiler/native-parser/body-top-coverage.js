@@ -135,20 +135,25 @@ function braceBodyEnd(texts, from) {
     return -1;
 }
 
-// functionDeclExtent — `modifier* (function|fn) '*'? name '(' params ')'
-// return-part? modifier-call* '{' body '}'` (§48). The return part — `-> T`,
-// `: T`, `!`, `! -> E` — is a TYPE and is read with the type grammar
+// functionHeadEnd — index just past a function HEAD: `modifier* (function|fn)
+// '*'? name '(' params ')' return-part? modifier-call*` (§48). The return
+// part — `-> T`, `: T`, `!`, `! -> E` — is a TYPE, read with the type grammar
 // (typeExprExtent), so a braced return type (`-> { a: number }`) is not taken
-// for the body (S441 round 5b). Returns the accepted token count, or -1 when
-// there is no `{ … }` body at all (`fn heading`).
-function functionDeclExtent(texts) {
+// for the body (S441 round 5b). -1 when there is no parameter list.
+function functionHeadEnd(texts) {
     let i = texts.indexOf("(");
     if (i < 0) return -1;
     i = skipBalanced(texts, i);
     if (i < 0) return -1;
     for (let guard = 0; guard < 8 && i < texts.length; guard++) {
         const t = texts[i];
-        if (t === "!") { i++; continue; }
+        if (t === "!") {
+            i++;
+            // The failable marker's error type: `! -> E` (arrow, below) or the
+            // arrow-less `! E` (§19.3).
+            if (isNameText(texts[i])) i += typeExprExtent(texts.slice(i));
+            continue;
+        }
         let arrow = 0;
         if (t === "->" || t === ":" || t === "=>") arrow = 1;
         else if ((t === "-" || t === "=") && texts[i + 1] === ">") arrow = 2;
@@ -167,13 +172,36 @@ function functionDeclExtent(texts) {
         }
         break;
     }
-    // (A body that opens but does not close inside `texts` — the caller passed
-    // only the head's line — still IS a body: the declaration runs to the end.)
-    if (texts[i] === "{") {
-        const e = skipBalanced(texts, i);
+    return i;
+}
+
+// functionDeclExtent — a function head then its `{ … }` body. Returns the
+// accepted token count, or -1 when there is no `{ … }` body at all
+// (`fn heading`). (A body that opens but does not close inside `texts` — the
+// caller passed only the head's line — still IS a body.) Tokens between the
+// head's end and the body are NOT part of the function; functionHeadGap
+// reports them (round 5c).
+function functionDeclExtent(texts) {
+    const h = functionHeadEnd(texts);
+    if (h < 0) return -1;
+    if (texts[h] === "{") {
+        const e = skipBalanced(texts, h);
         return e < 0 ? texts.length : e;
     }
-    return braceBodyEnd(texts, i);
+    return braceBodyEnd(texts, h);
+}
+
+// functionHeadGap — [from, to) token indices between the end of a function
+// head and its body's `{` — tokens that belong to no production of the
+// function (`-> number oops junk {`) — or null when the body follows the head
+// directly, or there is no body.
+export function functionHeadGap(texts) {
+    const h = functionHeadEnd(texts);
+    if (h < 0 || h >= texts.length || texts[h] === "{") return null;
+    let j = h;
+    while (j < texts.length && texts[j] !== "{") j++;
+    if (j >= texts.length) return null;
+    return [h, j];
 }
 
 // sourceStringEnd — index just past the module-specifier string that follows
@@ -240,6 +268,8 @@ export function declExtent(kind, texts) {
     } else if (kind === "function") {
         count = functionDeclExtent(texts);
         if (count < 0) return { nothing: true };
+        const gap = functionHeadGap(texts);
+        if (gap) return { count: Math.min(count, n), gap };
     } else {
         count = n;
     }

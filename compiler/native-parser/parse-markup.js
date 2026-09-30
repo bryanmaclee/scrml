@@ -106,7 +106,7 @@ import { makeParseExprContext, parseExpression } from "./parse-expr.js";
 import { parseProgram } from "./parse-stmt.js";
 // S441 — the body-top display-text segmenter shared with the live front end.
 import { segmentBodyTopItems, bodyTopQuoteStartsStatement, scanBodyTopLiteralClose, scanBodyTopTemplateClose, uncoveredSegments } from "./body-top-prose.js";
-import { typeDeclExtent, declExtent, liveStmtCompilesNothing, liveTreeDropsText } from "./body-top-coverage.js";
+import { typeDeclExtent, declExtent, functionHeadGap, liveStmtCompilesNothing, liveTreeDropsText } from "./body-top-coverage.js";
 import { translateStmtList } from "./translate-stmt.js";
 import { atEnd } from "./token-cursor.js";
 // MK4 — the markup<->JS seam (R1 spike §3). The seam helpers centralize the
@@ -2893,6 +2893,27 @@ function rejectBodyTopProseNative(block, source, ctx) {
     // S441 round 5 — a `type` alias that ends before its line does: keep the
     // declaration, report the rest of the line (the live front end does the
     // same — ast-builder.js rejectBodyTopProse).
+    // S441 round 5c (R2) — a function covers only its head and its body: tokens
+    // between the head's grammar end (the shared functionHeadGap, as on the
+    // live front end) and the body `{` are reported, not silently skipped
+    // (the native return-type skipper swallows everything up to the `{`).
+    for (const st0 of body) {
+        const isFn = st0 && (st0.kind === "FunctionDecl"
+            || (st0.kind === "Export" && st0.declaration && st0.declaration.kind === "FunctionDecl"));
+        if (!isFn || !st0.span || typeof st0.span.start !== "number") continue;
+        let toks = [];
+        try { toks = lex(source.slice(st0.span.start, st0.span.end)); } catch { continue; }
+        toks = toks.filter((t) => t && t.kind !== "EOF" && t.span);
+        const gap = functionHeadGap(toks.map((t) => String(t.text ?? "")));
+        if (gap === null) continue;
+        const a = st0.span.start + toks[gap[0]].span.start;
+        const b = st0.span.start + toks[gap[1] - 1].span.end;
+        const shown0 = source.slice(a, b).trim();
+        const shown = shown0.length > 80 ? shown0.slice(0, 77) + "..." : shown0;
+        const pre = source.slice(0, a);
+        pushDiagnostic(ctx, makeDiagnostic("E-UNQUOTED-DISPLAY-TEXT", unquotedNativeMessage(shown),
+            { start: a, end: b, line: (pre.match(/\n/g) || []).length + 1, col: a - (pre.lastIndexOf("\n") + 1) + 1 }));
+    }
     for (const st0 of body) {
         // (`export type …` — the declaration inside the export.)
         const st = st0 && st0.kind === "Export" && st0.declaration && st0.declaration.kind === "TypeDecl" ? st0.declaration : st0;
