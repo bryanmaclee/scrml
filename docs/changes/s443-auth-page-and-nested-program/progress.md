@@ -5,3 +5,4 @@
 - 2026-09-29T17:42:12-06:00 DONE: gate 26434 pass/0 fail; conformance 1108/1115 + 7 xfail (0 failed); pushing
 - 2026-09-29T17:54:02-06:00 R2: Step 8c member-page inheritance (non-entry-page + bare-markup, not _layout, no auth=); program loginRedirect reaches all page scopes (8a-page/8b/8c); SPEC §40.2 two paragraphs; migration 0 pages; new test 9 (6 red on r1)
 - 2026-09-29T18:14:02-06:00 R2 review items: F1 (already fixed in b92f3459a), F2 W-AUTH-FILE-CONFLICT, F3 W-AUTH-REDIRECT-LOOP, nits (§20.5.1 kinds, dead page reads); F4 NOT emitted (E-PROGRAM-002 reserved-not-defined for same-file; corpus 0); corpus: +1 W-AUTH-REDIRECT-LOOP on already-erroring samples/login.scrml
+- 2026-09-29T18:50:56-06:00 R2 done: conformance 1112/1119 + 7 xfail; served table re-run; pushing
