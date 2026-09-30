@@ -35,7 +35,7 @@
  * "entry". `"program"` means only *this file declares a top-level `<program>`*,
  * which is strong evidence for entry-ness (§40.8 requires the entry to declare
  * it) but is not the same claim: the compiler does not yet enforce uniqueness
- * (`E-PROGRAM-002` is reserved-not-implemented), so more than one file in a
+ * (`E-PROGRAM-002`'s cross-file case is reserved-not-implemented), so more than one file in a
  * compile unit can carry the shape. Consumers picking "the entry" from a file
  * SET are making a build-level decision and own it explicitly.
  */

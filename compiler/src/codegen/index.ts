@@ -1945,9 +1945,11 @@ export function runCG(input: CgInput): CgOutput {
   // There is no reliable unit → owning-`<program>` relation to key this on. The
   // compiler says so itself at the shell-composition post-pass below: per SPEC §40.8
   // the entry file is "the file resolved by the build root" — a BUILD fact — this
-  // pipeline infers it from file CONTENT and takes the first match, `E-PROGRAM-002`
-  // is reserved-not-implemented, so a second top-level `<program>` in a compile unit
-  // is silently tolerated. Inventing a membership notion here (by directory, by
+  // pipeline infers it from file CONTENT and takes the first match, and the
+  // CROSS-FILE case of `E-PROGRAM-002` is reserved-not-implemented, so a second
+  // program-bearing FILE in a compile unit is silently tolerated. (The same-file
+  // case fires since S443, counting markup-wrapped programs since S445 — see the
+  // `forEachProgramWithRole` block above.) Inventing a membership notion here (by directory, by
   // import graph) would be guessing at the language.
   //
   // So FAIL CLOSED ON THE COUNT, which needs no membership notion to be sound:
@@ -1986,7 +1988,7 @@ export function runCG(input: CgInput): CgOutput {
   // it extends a settled rule rather than setting one — SPEC §40 (`:23763`) already
   // makes "two applications in one compiled server" an Error via `E-MW-007`, with
   // the same remedy, and explicitly frames `E-MW-007` as the emitted-server
-  // consequence of the reserved `E-PROGRAM-002` shape. Contested session config is
+  // consequence of the reserved (cross-file) `E-PROGRAM-002` shape. Contested session config is
   // the same class of application-scope conflict.
   //
   // ⚑ THE INVARIANT THIS BUYS, and it is why the suppression below is now
@@ -2007,9 +2009,11 @@ export function runCG(input: CgInput): CgOutput {
   // declaring `session-secure="false"`) plus a plain minting `pages/other.scrml` →
   // `other` emitted `scrml_sid`/604800, identical to the unfixed compiler, while the
   // same page compiled alone emitted `__Host-`/3600. Note the irony recorded above:
-  // `E-PROGRAM-002` being reserved-not-implemented is exactly WHY a second top-level
-  // `<program>` can sit in one file, so the file-granular count was blind to the very
-  // shape its own rationale cited.
+  // `E-PROGRAM-002` being reserved-not-implemented was exactly WHY a second top-level
+  // `<program>` could sit in one file, so the file-granular count was blind to the very
+  // shape its own rationale cited. (Since S443 that same-file shape IS `E-PROGRAM-002`,
+  // and since S445 it counts a markup-wrapped program too and the build is refused
+  // before any write; nested `<program>`s are still counted here.)
   //
   // RECURSIVE (S436 fix-round, F3). A top-level-only scan cannot see a `<program>`
   // nested inside other markup, but `_readRawProgramAttr` in emit-server — the reader
@@ -2065,9 +2069,10 @@ export function runCG(input: CgInput): CgOutput {
   // session attribute, some `<program>` declares it AND some compilation unit cannot
   // resolve it for itself — i.e. exactly when the compiler would otherwise have to
   // GUESS that unit's owner. Scoped EXACTLY there, and deliberately NOT to the
-  // general second-`<program>` shape: that is `E-PROGRAM-002`, still reserved, and
-  // implementing it would reject a MEASURED 75 of 1137 corpus compile sets — a
-  // separate and much larger arc.
+  // general second-`<program>` shape: that is `E-PROGRAM-002` — its SAME-FILE case
+  // fires since S443 (S445: whatever markup wraps either program), its CROSS-FILE case
+  // is still reserved, and implementing that would reject a MEASURED 75 of 1137 corpus
+  // compile sets — a separate and much larger arc.
   //
   // ⛔ THE DRIVER NO LONGER COMPUTES THIS PREDICATE (S436 round 4). It ASKS.
   //
@@ -3140,7 +3145,8 @@ export function runCG(input: CgInput): CgOutput {
           `${_plural(_blocked.length, "itself", "themselves")}: ${_blocked.join(", ")}. ` +
           `The compiler cannot attribute ${_plural(_blocked.length, "it", "them")} to an owning ` +
           `<program> — §40.8 makes entry identity a BUILD fact, not a file fact, and ` +
-          `E-PROGRAM-002 is reserved-not-implemented. Applying one program's declaration ` +
+          `a second <program> in another file is not yet an error (E-PROGRAM-002's cross-file ` +
+          `case is reserved). Applying one program's declaration ` +
           `build-wide silently strips __Host- and Secure from the other's cookie; ` +
           `withholding it splits one program's own units across two disjoint readers, ` +
           `so a login on one route leaves that program's other routes logged out.\n` +
@@ -3223,9 +3229,10 @@ export function runCG(input: CgInput): CgOutput {
     // are the same test; the gap is the QUESTION. Per SPEC §40.8 the entry file
     // is *"the file resolved by the build root"* — a BUILD fact. This site
     // infers it from file CONTENT and takes the first match, and the compiler
-    // does not enforce uniqueness (`E-PROGRAM-002` is reserved-not-implemented,
-    // §40.8: "TBD — separate diagnostic; not part of Wave 1"), so a second
-    // top-level `<program>` in the compile unit is silently ignored here.
+    // does not enforce uniqueness ACROSS FILES (`E-PROGRAM-002`'s cross-file case
+    // is reserved-not-implemented, §40.8: "TBD — separate diagnostic; not part of
+    // Wave 1"; the same-file case fires since S443/S445), so a second
+    // program-bearing file in the compile unit is silently ignored here.
     // Closing this needs a build-root entry resolver over the file SET, which
     // is a separate arc.
     // `hasProgramRoot` lives on the FileAST. In the CG pipeline,

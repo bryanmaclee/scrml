@@ -7,3 +7,4 @@
 - refusal-gate: E-PROGRAM-002 + E-PROGRAM-NESTED-AUTH refuse the write (build + compile).
 - tests: unit program-role-by-ancestor (20), integration program-role-by-ancestor (20; 16 RED on base), 4 conformance cases (3 RED on base).
 - SPEC: §4.12 one definition (+Provenance S445 b), §4.12.2/§4.12.9/§34 rows, §40.2 app-program, §40.8 definition bullet + E-PROGRAM-002 bullet corrected (first/last-wins history, no-write), §20.5.1 carve-out note rewritten (nested residual MEASURED). SPEC-INDEX + FACTS regenerated.
+- stale 'E-PROGRAM-002 reserved-not-implemented' comments/E-MW-008 message scoped to the CROSS-FILE case (codegen/index.ts x6, library-shape.js, session-config-resolve.ts).
