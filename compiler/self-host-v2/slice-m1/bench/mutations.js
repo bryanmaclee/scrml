@@ -438,8 +438,8 @@ const MUTATIONS = [
     from: "            if (seqElem(pty) is not) {", to: "            if (false) {", tests: [T4("review-r1.test.js")] },
   { id: "s442 r1 nit: `<*f/>` of another declaration's field called a predefined element", file: `${SH}/analyze.scrml`,
     from: "            if (owner != \"\") {", to: "            if (false) {", tests: [T4("review-r1.test.js")] },
-  { id: "s442 r1 G1: `<*x/>` inlines markup that constructs instances", file: `${SH}/analyze.scrml`,
-    from: "        if (!constructsNothing(env.g, nodes)) {", to: "        if (false) {", tests: [T4("review-r1.test.js")] },
+  // (s444: the r1 G1 "constructs-nothing" row is RETIRED — `<*x/>` is a Core View.Star now and renders
+  //  markup that constructs instances; its bite is the "s444 A3 … inlined again" row below)
   { id: "s442 r1 G1: `<*x/>` of a declaration inlined inside another declaration's renders", file: `${SH}/analyze.scrml`,
     from: "        if (!inProgramCtx(env)) {", to: "        if (false) {", tests: [T4("review-r1.test.js")] },
   { id: "s442 r1 G1: `<*x/>` of a declaration with no renders accepted (O51)", file: `${SH}/analyze.scrml`,
@@ -460,8 +460,9 @@ const MUTATIONS = [
     from: "        let place: SeqAt = SeqAt.Front\n",
     to: "        let place: SeqAt = SeqAt.End\n", tests: [T4("audit.test.js"), T4("grants.test.js")] },
   { id: "s442: an element-field write judged by the TAPE's grants instead of the field's (dpa-052 Q3)", file: `${SH}/analyze.scrml`,
-    from: "        const fieldGranted: boolean = target.grants.replace || target.grants.edits.length > 0",
-    to: "        const fieldGranted: boolean = f.grants.replace || f.grants.edits.length > 0", tests: [T4("audit.test.js")] },
+    // (s444: re-sited — the element-field check now reads the target's contract twice: any contract, then `replace`)
+    from: "        if (!target.grants.replace && target.grants.edits.length == 0) {",
+    to: "        if (!f.grants.replace && f.grants.edits.length == 0) {", tests: [T4("audit.test.js")] },
   { id: "s442: a lambda parsed as its body alone (the `.filter(…)` shape never recognized)", file: `${SH}/parse.scrml`,
     from: "        return mkE(body.tp, start, AExprK.Lambda(params, body.e))", to: "        return body", tests: [T4("parse.test.js"), T4("audit.test.js")] },
   { id: "s442: the typer skips state-child bodies (Typing coverage)", file: `${SH}/analyze.scrml`,

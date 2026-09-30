@@ -80,3 +80,26 @@
   input, stubbed clock); form.test.js runs §66.19.2 minus validators only (binds, O54, Star, two Stars = one instance);
   tables.test EVERY_FACT reaches every new fact variant; grants / review-r1 / review-r2 pins moved from "granted, not
   lowered" to "granted and lowered"; typer.test BASE_66_19: §66.19.5 → [], §66.19.2 → 4 validator codes.
+- 2026-09-30 PHASE A VERIFICATION (tree = 7a86f18c2 + this commit's bite / mutation re-sites):
+  - lint-no-default-arm: 58 files / 0 violations · slice-m1+m2+m3+m4: 906 pass + 1 todo / 0 fail (baseline 819 + 1 todo)
+    · SLICE_CORE=lowered slice-m1: 73/73 · v2-lexer (compiler/tests/integration/self-host-v2-lexer-slice*): 337/0
+  - mutations.js FULL: 281 rows, 279 RED + 2 NOT RUN (sites moved by Phase A) → fixed here: the r1 G1
+    "constructs-nothing" row RETIRED (Star renders instance-constructing markup now; covered by "s444 A3 … inlined
+    again"), the dpa-052 Q3 "TAPE's grants" row RE-SITED (RED, 7.3 s). ⇒ 280 rows, all RED; unmutated mirror clean.
+  - bite matrix (cg + css + front): CG 32 certified / 0 uncertified · CSS 32 / 0 · FRONT 16 / 0 (was 12: + Analyze.Host,
+    Analyze.Bind, Lower.Bind, Analyze.Star, Lower.Star, Analyze.O54Own; − Analyze.StarShared / Lower.Inline retired —
+    the shared-instance inline path is gone; Analyze.ChildRenders re-sited). exit 0, 369 s.
+  - conformance (impl#1, untouched): 1152/1159 pass + 7 xfail.
+  - ALL top-level compiler/tests/*.test.js (14 files): 6384 pass / 15 skip / 0 fail.
+  - gate (pre-commit: unit + integration + conformance --bail) at 7a86f18c2: 26785 pass / 0 fail.
+  - facts.ts --check PASS · regen-spec-index --check OK.
+  §66.19 STATUS after Phase A:
+  | § | program | status |
+  |---|---|---|
+  | 66.19.1 | counter | DONE (M2) |
+  | 66.19.3 | dropdown ×3 | DONE (M2) |
+  | 66.19.6 | engine as `single` | DONE (s442) |
+  | 66.19.5 | audit log | **DONE — the VERBATIM source compiles clean and RUNS** (Date.now() host call, bind:value round trip, stubbed clock) |
+  | 66.19.2 | validated form | **everything but the validators RUNS from source** (binds, O54, `<*signup/>` Star); validators → Phase B |
+  | 66.19.4 | theme library | BLOCKED (unchanged: `<theme>` CSS, named shared instances, `match` in an opener, ⚑ O39) |
+- PHASE-A-DONE 2026-09-30 — Phase A committed + verified; pushed as feat/s444-core-additions-dpa058.
