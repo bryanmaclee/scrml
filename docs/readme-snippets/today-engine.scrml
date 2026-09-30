@@ -1,0 +1,17 @@
+// today-engine.scrml — the "today" half of a README "Where the language is going"
+// pair: the `<engine>` element, as SPEC §66.19.6 shows it in its "Before" program.
+<program>
+
+type Phase:enum = { Idle, Loading, Done, Failed }
+
+<engine for=Phase initial=.Idle>
+    <Idle    rule=.Loading : "Ready">
+    <Loading rule=(.Done | .Failed) : "Loading…">
+    <Done    rule=.Idle : "Done">
+    <Failed  rule=(.Loading | .Idle) : "Failed — retry?">
+</>
+
+function load() { @phase = .Loading }
+<button onclick=load()>Load</button>
+
+</program>

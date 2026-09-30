@@ -1,0 +1,27 @@
+// today-log.scrml — the "today" half of a README "Where the language is going"
+// pair. Today an array cell takes any write, so nothing stops `@audit = []`.
+// SPEC §66.19.5 + the S442 grow/shrink ruling make the same log append-only.
+<program>
+
+type Entry:struct = { at: number, actor: string, action: string }
+
+<audit>: Entry[] = []
+<actor> = "ops"
+
+function record(action: string) {
+    @audit = [...@audit, { at: Date.now(), actor: @actor, action: action }]
+}
+function wipe() { @audit = [] }
+
+<main>
+    <input bind:value=@actor/>
+    <button onclick=record("login")>Log in</button>
+    <button onclick=wipe()>Wipe the log</button>
+    <ul>
+        <each in=@audit key=@.at as e>
+            <li>${e.actor}: ${e.action}</li>
+        </each>
+    </ul>
+</main>
+
+</program>
