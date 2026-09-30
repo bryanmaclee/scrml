@@ -1,0 +1,38 @@
+{
+  "id": "protect-nonprotected-field-runtime",
+  "description": "§14.8.9 — no false positive: a NON-protected field read off the same protected row (`return u.name`) compiles (no E-PROTECT-006) and crosses the wire. RUNTIME: the E-ADAPTER server-eval runs the real emitted route and the client cell holds \"Alice\".",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/integration/protect-scalar-egress.test.js",
+  "rationale": "The S441 provenance flow (g-protected-column-escapes-redaction-as-scalar) rejects a value whose provenance is a protected column; `name` is not one, so extracting it is the ordinary, correct shape and must not fire. Twin of `scalar-return-e006` (same row, the protected column instead). Nothing reaches the sink as a row, so I-PROTECT-STRIP-001 does not fire either — the floor stripped nothing.",
+  "expect": {
+    "codes": [],
+    "notCodes": [
+      "E-PROTECT-006",
+      "I-PROTECT-STRIP-001"
+    ],
+    "notCodePrefixes": [
+      "E-"
+    ],
+    "serverDb": {
+      "users": [
+        {
+          "id": 1,
+          "name": "Alice",
+          "passwordHash": "SECRET_HASH_ALICE"
+        }
+      ]
+    },
+    "input": [
+      {
+        "click": "#load"
+      },
+      {
+        "wait": "settle"
+      }
+    ],
+    "state": {
+      "name": "Alice"
+    }
+  }
+}

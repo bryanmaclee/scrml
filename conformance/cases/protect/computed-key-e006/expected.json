@@ -1,0 +1,19 @@
+{
+  "id": "protect-computed-key-e006",
+  "description": "§14.8.9 S441 round 3 (N1) — the protected column used as an object KEY (`{ [u.passwordHash]: 1 }`) serializes verbatim as `{\"SECRET-HASH-123\":1}`. The key's provenance is carried into the container: E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "MEASURED by the round-2 review (g-protected-column-escapes-redaction-as-scalar): the object literal dropped the computed key's provenance, so this compiled and served 200 {\"SECRET-HASH-123\":1}. A key is data the serializer ships.",
+  "expect": {
+    "codes": [
+      "E-PROTECT-006"
+    ],
+    "notCodes": [
+      "I-PROTECT-STRIP-001"
+    ],
+    "severity": {
+      "E-PROTECT-006": "error"
+    }
+  }
+}

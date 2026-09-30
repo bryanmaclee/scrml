@@ -14,6 +14,7 @@ import {
   type ProtectContext,
   type ProtectedColumns,
 } from "./protect-egress.ts";
+import { sqlSkeleton } from "./protect-flow.ts";
 // §39.4 boolean-column decode coercion — a `boolean`-declared column crosses the
 // `?{}` SELECT boundary as SQLite INTEGER 1/0; resolve the boolean OUTPUT columns
 // and coerce them back to true/false at query-lowering time (server only).
@@ -171,7 +172,12 @@ export function getVariantFieldSchemaFromRewriter(variantName: string): string[]
 // info diagnostic per query (never a silent strip).
 interface RewriterProtectState {
   ctx: ProtectContext;
-  infos: Array<{ cols: string[] | "*"; sql: string }>;
+  // `skeleton` is the query's static SQL skeleton (`sqlSkeleton`) — how
+  // generateServerJs matches this record to the emitted `_scrml_protect_tag`
+  // site the §14.8.9 provenance flow (`protect-flow.ts`) proved STRIPPED. The
+  // info fires only for a query whose row actually reached an egress sink
+  // carrying an unrevealed protected column (S441).
+  infos: Array<{ cols: string[] | "*"; sql: string; skeleton: string }>;
   seen: Set<string>;
 }
 let _rewriterProtectState: RewriterProtectState | null = null;
@@ -183,7 +189,7 @@ export function setProtectContextForRewriter(ctx: ProtectContext | null): void {
 }
 
 /** Drain the protected-column strip records collected during this server emit. */
-export function drainProtectInfosFromRewriter(): Array<{ cols: string[] | "*"; sql: string }> {
+export function drainProtectInfosFromRewriter(): Array<{ cols: string[] | "*"; sql: string; skeleton: string }> {
   const infos = _rewriterProtectState ? _rewriterProtectState.infos : [];
   return infos;
 }
@@ -206,6 +212,7 @@ export function protectTagSqlResult(inner: string, sqlContent: string): string {
     _rewriterProtectState.infos.push({
       cols: "all" in resolved ? "*" : resolved.cols,
       sql: sqlContent.trim().replace(/\s+/g, " ").slice(0, 80),
+      skeleton: sqlSkeleton(sqlContent),
     });
   }
   return wrapWithProtectTag(inner, resolved);
