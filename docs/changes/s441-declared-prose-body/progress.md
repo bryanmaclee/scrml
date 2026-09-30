@@ -121,3 +121,9 @@ OPEN #7 (not decided; measured): default compiles `import stuff` / `export data`
   / bare `404` silently (base too); native reports the malformed decls (E-STMT-*, E-UNQUOTED for
   `export data`) but also compiles bare `404` and `type here`. The invariant counts all of these as compiled
   statements (their tokens are consumed by a declaration / expression node) — it does not classify them.
+
+## ROUND 5 — BRIEF-round5.md
+
+- fd9a7589c — merge origin/main: SPEC §4.18.1 + §4.18.7 conflicts = main S442 text + S441 program/page/channel
+  extension re-applied; allowlist note kept; SPEC-INDEX/FACTS regenerated; known-gaps auto-merged, @gap ids 1442 =
+  union(1411 ours, 1442 theirs), 0 missing. Pre-commit 33,338 tests, 0 fail.
