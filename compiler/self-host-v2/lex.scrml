@@ -642,6 +642,10 @@ ${
         return { text: decodeSingleEscape(esc), cur: advance(c, 1) }
     }
 
+    // F9: a literal `$`+`{` in a scrml string is interpolation under impl#1 —
+    // the two characters are joined at run time.
+    fn interpOpenText() -> string { return "$" + "{" }
+
     // Scan a quoted string from the opening quote to its close (or EOF). The
     // cursor is threaded; `cooked` accumulates the decoded value.
     fn scanString(cur: Cursor, q: QuoteKind, display: boolean) -> Scan {
@@ -653,12 +657,23 @@ ${
             const code: int = peekCode(c, 0)
             const dq: boolean = display && closeCode == 34
             if (dq && code == 92) {
-                // dpa-045 B(2)+B(3) (RULED S442): a display-text literal has NO
-                // character escapes — a backslash is content, and a `"` after it
-                // ENDS the literal — `"C:\"` is `C:\` (no diagnostic: SPEC
-                // §4.18.3, "E-PARSE-001 no longer fires on `\x` here")
-                cooked = cooked + charAt(c)
-                c = advance(c, 1)
+                // SPEC §4.18.3 (RULED S444, restoring the S111 catalog): a
+                // display-text literal has exactly three escapes — `\"` (a
+                // literal `"`; it does not close the literal), `\\` (a literal
+                // `\`) and `\${` (a literal `${`, not an interpolation). Any
+                // other `\` + char is malformed (E-PARSE-001 — reported by the
+                // parser, displayEscapeDiags); both characters are kept.
+                const n1: int = peekCode(c, 1)
+                if (n1 == 34 || n1 == 92) {
+                    cooked = cooked + String.fromCharCode(n1)
+                    c = advance(c, 2)
+                } else if (n1 == 36 && peekCode(c, 2) == 123) {
+                    cooked = cooked + interpOpenText()
+                    c = advance(c, 3)
+                } else {
+                    cooked = cooked + charAt(c)
+                    c = advance(c, 1)
+                }
             } else if (dq && code == 36 && peekCode(c, 1) == 123) {
                 // §4.18.4: `${ … }` inside a display-text literal is an
                 // interpolation — its extent is the canonical walker's (a `"` or

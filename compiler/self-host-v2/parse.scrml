@@ -984,9 +984,11 @@ ${
         return m
     }
 
+    // `//` to (not including) the line terminator — LF or CR (§4.7: "the next
+    // `\n` or `\r\n`"; S444: in free text the terminator is content, §4.18.5).
     fn skipLineComment(mp: MP) -> MP {
         let m: MP = mp
-        while (!mEof(m) && chAt(m, 0) != "\n") { m = mAdv(m, 1) }
+        while (!mEof(m) && chAt(m, 0) != "\n" && chAt(m, 0) != "\r") { m = mAdv(m, 1) }
         return m
     }
 
@@ -1293,7 +1295,7 @@ ${
             e = r.e
             t = expectRegionEnd(r.tp)
         }
-        let m: MP = skipSpace(backToMarkup(mp, t))
+        let m: MP = displayEscapeDiags(skipSpace(backToMarkup(mp, t)), tp.toks)
         if (mLooking(m, "/>")) {
             m = mAdv(mDiag(m, "E-CLOSER-001", "a `:`-shorthand body has no closer — drop the `/` (`<tag … : expr>`, §4.14)", m.pos, m.pos + 2), 2)
         } else if (chAt(m, 0) == ">") {
@@ -1320,7 +1322,7 @@ ${
         }
         let mm: MP = m
         for (const t of tp.toks) {
-            if (t.cls == TC.Str && t.text.substring(0, 1) == "\"" && t.text.indexOf(interpOpen()) >= 0) {
+            if (t.cls == TC.Str && t.text.substring(0, 1) == "\"" && hasLiveInterp(m.src, t.start, t.end)) {
                 mm = mDiag(mm, "E-BOOTSTRAP-UNSUPPORTED", "a display-text literal carrying an interpolation (§4.18.4) inside a larger expression is not in the bootstrap — make it the whole body", t.start, t.end)
             }
         }
@@ -1365,15 +1367,22 @@ ${
     }
 
     // A display-text literal's source span (quotes included) → Text segments +
-    // Interp nodes. No escapes (RULED S442: the literal has none); each `${`'s
-    // extent is the canonical walker's (parseInterp → lexFrom Balanced).
+    // Interp nodes. The three escapes (SPEC §4.18.3, restored S444) decode
+    // here — a `\${` is literal `${` text, never an interpolation; a malformed
+    // `\x` keeps both characters (E-PARSE-001 is displayEscapeDiags'). Each
+    // `${`'s extent is the canonical walker's (parseInterp → lexFrom Balanced).
     fn splitDisplay(mp: MP, start: int, end: int) -> RNodes {
         let m: MP = mAt(mp, start + 1)
         let out: ANode[] = []
         let text: string = ""
         let textStart: int = m.pos
         while (m.pos < end - 1) {
-            if (atInterp(m)) {
+            const esc: int = displayEscLen(m.src, m.pos)
+            if (esc > 0) {
+                if (text == "") textStart = m.pos
+                text = text + displayEscText(m.src, m.pos)
+                m = mAdv(m, esc)
+            } else if (atInterp(m)) {
                 if (text != "") {
                     out = out.concat([textNode(m, textStart, text)])
                     m = mBump(m)
@@ -1396,11 +1405,80 @@ ${
         return { nodes: out, mp: m }
     }
 
-    // dpa-045 B(3) + B(2) (RULED S442; SPEC §4.18.3): a display-text literal
-    // has NO character escapes and NO malformed-escape error — a `\` is
-    // content, so `"C:\"` is `C:\` then the closing `"`. The lexer (display
-    // mode) does all of it; the parser reports nothing (r2: the E-PARSE-001 the
-    // first cut raised on `\"` is gone — §4.18.3 says it no longer fires).
+    // SPEC §4.18.3 (RULED S444 — "A for escapes", superseding S442 B(3) /
+    // B(2)): a display-text literal has exactly three escapes — `\"` (a
+    // literal `"`), `\\` (a literal `\`), `\${` (a literal `${`, not an
+    // interpolation) — and a `\` + any other character is malformed:
+    // E-PARSE-001, the S111 catalog's rule restored exactly. The lexer (display
+    // mode) decodes; these helpers are the one escape table the parser's own
+    // scans (displayCloseAt, splitDisplay, displayEscapeDiags) share.
+
+    // The length of the escape at `i` (a `\`): 2 for `\"` / `\\`, 3 for
+    // `\${`, 0 when `i` is not a well-formed escape.
+    fn displayEscLen(src: string, i: int) -> int {
+        if (src.substring(i, i + 1) != "\\") return 0
+        const n: string = src.substring(i + 1, i + 2)
+        if (n == "\"" || n == "\\") return 2
+        if (src.substring(i + 1, i + 3) == interpOpen()) return 3
+        return 0
+    }
+
+    // The decoded text of the well-formed escape at `i`.
+    fn displayEscText(src: string, i: int) -> string {
+        const n: string = src.substring(i + 1, i + 2)
+        if (n == "$") return interpOpen()
+        return n
+    }
+
+    // E-PARSE-001 for every malformed escape in the display-text literals of a
+    // code-default region's tokens (every `"` string the display-mode lexer
+    // made). A `${ … }` inside the literal is the expression's own (skipped
+    // whole by the canonical walker — its strings have logic escapes).
+    fn displayEscapeDiags(mp: MP, toks: PTok[]) -> MP {
+        let m: MP = mp
+        for (const t of toks) {
+            if (t.cls == TC.Str && t.text.substring(0, 1) == "\"") {
+                let i: int = t.start + 1
+                while (i < t.end) {
+                    const c: string = m.src.substring(i, i + 1)
+                    if (c == "\\") {
+                        const esc: int = displayEscLen(m.src, i)
+                        if (esc > 0) {
+                            i = i + esc
+                        } else {
+                            if (i + 1 < t.end) {
+                                m = mDiag(m, "E-PARSE-001", "malformed escape `" + m.src.substring(i, i + 2) + "` in a display-text literal: the escapes are `\\\"`, `\\\\` and `\\" + interpOpen() + "` — write `\\\\` for a literal backslash (§4.18.3)", i, i + 2)
+                            }
+                            i = i + 2
+                        }
+                    } else if (m.src.substring(i, i + 2) == interpOpen()) {
+                        const e: int = lexFrom(m.src, i + 1, LexStop.Balanced).end
+                        i = e > i + 1 ? e : i + 2
+                    } else {
+                        i = i + 1
+                    }
+                }
+            }
+        }
+        return m
+    }
+
+    // Whether the display-text literal spanning [start, end) carries a LIVE
+    // interpolation — a `${` that is not the `\${` escape.
+    fn hasLiveInterp(src: string, start: int, end: int) -> boolean {
+        let i: int = start + 1
+        while (i < end) {
+            const esc: int = displayEscLen(src, i)
+            if (esc > 0) {
+                i = i + esc
+            } else if (src.substring(i, i + 2) == interpOpen()) {
+                return true
+            } else {
+                i = i + 1
+            }
+        }
+        return false
+    }
 
     // r1 F3: after the shorthand's `>`: another `>` later on the same line
     // (before any `<`) means the first one was a comparison operator.
@@ -1477,7 +1555,8 @@ ${
                 const tp0: TP = regionTP(m, LexStop.CodeBody)
                 const tp: TP = { toks: tp0.toks, i: tp0.i, nid: tp0.nid, diags: m.diags, file: tp0.file }
                 const runEnd: int = lastEnd(tp)
-                const r: RExpr = parseAssign(tp)
+                m = displayEscapeDiags(m, tp.toks)
+                const r: RExpr = parseAssign({ toks: tp.toks, i: tp.i, nid: tp.nid, diags: m.diags, file: tp.file })
                 if (atEnd(r.tp) && r.tp.diags.length == m.diags.length) {
                     const back: MP = backToMarkup(m, r.tp)
                     // §4.18.4: a `${`-carrying display-text literal renders as its segments
@@ -1497,15 +1576,21 @@ ${
 
     // The position of the closing `"` of the display-text literal whose
     // opening `"` is at `pos`, or -1 when it has none (it runs to end of
-    // file). The scan is the lexer's display mode: no escapes, and a `${…}`
-    // is skipped whole by the canonical walker (token depth — a `"` or `}`
-    // inside it, e.g. in a nested string, does not close the literal).
+    // file). The scan is the lexer's display mode: an escape (§4.18.3,
+    // restored S444) is stepped over whole — `\"` does not close, `\\` does
+    // not escape what follows it (so `"C:\\"` closes) — and a `${…}` is skipped
+    // whole by the canonical walker (token depth — a `"` or `}` inside it, e.g.
+    // in a nested string, does not close the literal).
     fn displayCloseAt(src: string, pos: int) -> int {
         let i: int = pos + 1
         while (i < src.length) {
             const c: string = src.substring(i, i + 1)
-            if (c == "\"") return i
-            if (src.substring(i, i + 2) == interpOpen()) {
+            const esc: int = displayEscLen(src, i)
+            if (esc > 0) {
+                i = i + esc
+            } else if (c == "\"") {
+                return i
+            } else if (src.substring(i, i + 2) == interpOpen()) {
                 const e: int = lexFrom(src, i + 1, LexStop.Balanced).end
                 i = e > i + 1 ? e : i + 2
             } else {
@@ -1703,7 +1788,7 @@ ${
                 going = false
             } else if (mLooking(m, "<!--")) {
                 m = skipMarkupComment(m)
-            } else if (mLooking(m, "//")) {
+            } else if (mLooking(m, "//") && freeTextCommentAt(m)) {
                 m = skipLineComment(m)
             } else if (atCss(m)) {
                 if (text != "") {
@@ -1761,6 +1846,17 @@ ${
         }
         if (mLooking(m, "</")) m = parseCloser(m, tag)
         return { nodes: out, mp: m }
+    }
+
+    // SPEC §4.18.1b exit (2) (RULED S444 — "yes on // revised"): in free text
+    // a `//` opens a comment ONLY at the start of the source or when the byte
+    // right before it is whitespace (space, tab, LF, CR — isSpaceCh; a line
+    // start and a line's indentation are both that). Any other `//` is content:
+    // `http://x`, `a//b`, `</b>// x`. The comment itself is opaque to end of
+    // line (skipLineComment — a `</p>` in it is comment text).
+    fn freeTextCommentAt(mp: MP) -> boolean {
+        if (mp.pos == 0) return true
+        return isSpaceCh(chAt(mp, -1))
     }
 
     // dpa-045 D (RULED S442): free text has exactly two ways out — `${` opens
