@@ -124,6 +124,7 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 > `bun scripts/state.ts --write` regenerates it; `--check` gates it.
 
 <!-- @generated:recent-sessions START (do not edit — `bun scripts/state.ts --write`) -->
+- `b8dc1cbf1` — wrap(s442): bootstrap typer + §66.19 programs landed, three rulings (tape grants, dpa-058, dpa-045 axiom) — and every landing needed a round to fix its own round — **LOCAL-ONLY**
 - `7b77eecd6` — wrap(s441): the spotlight audit found the security holes — four closed, two HIGHs filed for S442 (#1165) — **pushed**
 - `cf62b4154` — wrap(s440): a JS gotcha gauntlet and four deep-dives turned into ~100 rulings (#1140) — **pushed**
 - `d79d461d4` — wrap(s439): the bootstrap got a typer and its first corpus grade, and a grade is only evidence if breaking the thing breaks it (#1124) — **pushed**
@@ -131,7 +132,6 @@ All 20 sub-steps (rev 6 decomposition: 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 11.0a-
 - `88a75073c` — wrap(s437): the bootstrap's first slice held its design claim, dpa-051 ruled, §66 rulings written after two PA restatements were caught widening them (#1110) — **pushed**
 - `d02738767` — wrap(s435): dpa-050 and dpa-052 ruled through and written into SPEC §66; L19 reversed; the TS compiler now serves the bootstrap and security only, with v0.8.0 as the adopter safety net (#1101) — **pushed**
 - `90130f5a3` — wrap(s436): the floor drain was the best instrument in the session, and four rounds of one fix each re-derived what the emitter already knew (#1095) — **pushed**
-- `e2e991fe6` — wrap(s433): every fix that self-reported clean came back with a finding, and five measurement failures shared one shape (#1073) — **pushed**
 <!-- @generated:recent-sessions END -->
 
 ## A. Compiler core

@@ -81,7 +81,16 @@ and generated SPEC-INDEX/FACTS recur on every update.
 5. ★ Bun on XPS was 1.3.6 (< engines 1.3.13) — upgraded to 1.4.2 at boot after the pre-commit hook failed.
 
 ## Gate at close
-(see the wrap PR body for the final numbers — CI `gate` state, merge-queue outcome, review-floor markers)
+- Merged S442: #1144 #1148 #1151 #1154 #1156 #1157 #1159 #1160 #1164 #1167 #1168 #1169 #1170 (all merged). #1166 closed
+  (superseded by #1169). #1170 lost three races to other landings (generated SPEC-INDEX/FACTS conflicts each time).
+- #1167 needed a post-review fix on current main: r7's new `arrayElems` match lacked the Spread/Index/Lambda arms #1164
+  added → the merged bootstrap failed E-TYPE-020 (caught by construction); arms added, slices green.
+- Cloud `gate` green on every merged PR; `tracking` fails as on main.
+- Review floor: markers added for all S442 PRs; 7 OWED are S441's/others' (#1145 #1147 #1152 #1155 #1165 #1171 #1172).
+- Maps NOT refreshed at wrap (agents blocked by the weekly limit); stamp cf62b415 predates #1151-#1170.
+- Worktrees retained (unlanded): `agent-aec260c4bbe312dc6` (dpa-045 bootstrap), `agent-afd35910b42aa6cc5` (typer r8
+  wip), `review-s442-dpa045` (frozen for the owed review), (the dpa-045 SPEC worktree removed — #1170 merged).
+- Board: S442 WRAPPED (scrml-support).
 
 ---
 
