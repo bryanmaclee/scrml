@@ -4808,10 +4808,11 @@ If a future revision determines that `<request>` cannot justify all three distin
 request-decl  ::= '<request' request-attrs '>' request-body '/'
                | '<request' request-attrs '/>'
 
-request-attrs ::= id-attr (deps-attr)?
+request-attrs ::= id-attr (deps-attr)? (cache-attr)?
 id-attr       ::= 'id=' string-literal
 deps-attr     ::= 'deps=' '[' deps-list ']'
 deps-list     ::= ('@' identifier (',' '@' identifier)*)?
+cache-attr    ::= 'cache'                          (S444 dpa-060 — bare; takes no value, see §6.7.7.2)
 
 request-body  ::= '$' '{' assignment-expression '}'
 ```
@@ -4819,6 +4820,8 @@ request-body  ::= '$' '{' assignment-expression '}'
 The `id` attribute is required (E-LIFECYCLE-018). The body SHALL contain exactly one assignment expression of the form `@variable = expr`.
 
 The `deps` attribute is optional. When absent, the compiler infers reactive dependencies from `@variable` reads within the fetch expression. When present, `deps` overrides inference.
+
+The `cache` attribute is optional and bare (S444, dpa-060 — **Nominal / spec-ahead**). Its semantics are §6.7.7.2.
 
 ```scrml
 // Minimal — fetches on mount, re-fetches when @userId changes (inferred)
@@ -4869,7 +4872,7 @@ The `deps` attribute is optional. When absent, the compiler infers reactive depe
 
 On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch if prior data exists.
 
-**Destroy behavior:** On scope destroy, in-flight results are discarded. The compiler SHALL generate a cancellation guard.
+**Destroy behavior:** On scope destroy, in-flight results are discarded. The compiler SHALL generate a cancellation guard. **Amended S444 (dpa-059):** on scope destroy an in-flight fetch's result is never applied, and a request the compiler classifies **READ** additionally has its transport **aborted**; a **WRITE** request is **discarded** — its result is not applied and its transport runs to completion (§6.7.7.1).
 
 **`<request>` is not a loop.** Unlike `<timer>` and `<poll>`, the body executes once on mount, then only on dependency change or `refetch()`.
 
@@ -4883,7 +4886,9 @@ On re-execution, `<#id>.data` is NOT cleared. `stale` is `true` during re-fetch 
 | `<#id>.stale` | `boolean` | `true` when data exists AND a new fetch is in flight |
 | `<#id>.refetch()` | `() -> void` | Imperatively re-execute the fetch body |
 
-**`stale` does not imply cache TTL.** Staleness is point-in-time: data exists and a fetch is in flight. No cache expiration, no max-age, no background revalidation. Cache semantics are a stdlib concern.
+**`stale` does not imply cache TTL.** Staleness is point-in-time: data exists and a fetch is in flight. No cache expiration, no max-age~~, no background revalidation. Cache semantics are a stdlib concern~~.
+
+> **Amendment S444 (dpa-060) — the stdlib deferral is struck.** A `<request>` MAY opt into result caching with the bare `cache` attribute (§6.7.7.2). A cache hit revalidates in the background, and during that fetch `stale` is `true` — which is exactly this paragraph's point-in-time definition (data exists and a fetch is in flight). There is still no cache expiration and no max-age: no author TTL exists anywhere on `<request>`. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 1 — *"i and B2"* (the entry: *"Supersedes §6.7.7's unprovenanced "Cache semantics are a stdlib concern" (scrml8 `1ce4ff6`, agent-authored one-shot patch — rationale-grade, per the dd)."*) · ruling:user-voice-scrml.md S444 dpa-060 call 3 — *"(ii) and revalidate"* · dd:`scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md` C1 (the sentence arrived verbatim in scrml8 `1ce4ff6`'s one-shot `apply_patch.py` L118; no deliberation found — `rationale:`-grade under Rule 4b) · **supersedes:** *"no background revalidation. Cache semantics are a stdlib concern."* (struck above).
 
 #### Integration with E-RI-002
 
@@ -4893,11 +4898,11 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 
 **EC-1: Error then refetch.** A dependency change or `refetch()` clears `<#id>.error` to `not` and begins a new loading cycle. `<#id>.data` retains its value.
 
-**EC-2: Rapid dependency changes.** Each change starts a new fetch. Previously in-flight fetches are superseded — only the most recently initiated fetch's result is applied. The compiler SHALL generate a sequence number per `<request>` instance.
+**EC-2: Rapid dependency changes.** Each change starts a new fetch. Previously in-flight fetches are superseded — only the most recently initiated fetch's result is applied. The compiler SHALL generate a sequence number per `<request>` instance. **Amended S444 (dpa-059):** a superseded fetch of a **READ** request (§6.7.7.1) SHALL have its transport **aborted**; a superseded fetch of a **WRITE** request SHALL be **discarded** — its result is not applied and its transport runs to completion. In both cases only the most recently initiated fetch's result is applied, and the sequence number remains the guard.
 
-**EC-3: Scope destroyed during in-flight fetch.** The resolution is discarded. The compiler SHALL generate a mounted-guard check.
+**EC-3: Scope destroyed during in-flight fetch.** The resolution is discarded. The compiler SHALL generate a mounted-guard check. **Amended S444 (dpa-059):** teardown follows the same rule as supersede — a **READ** request's in-flight transport SHALL be **aborted**; a **WRITE** request's SHALL be **discarded** (result not applied, transport completes). This is the same rule as §20.8.8 step 2.3 (route-leave), and the two sentences now agree (§6.7.7.1).
 
-**EC-4: `refetch()` while loading.** Starts a new fetch immediately, superseding the in-flight one (same as EC-2).
+**EC-4: `refetch()` while loading.** Starts a new fetch immediately, superseding the in-flight one (same as EC-2, including the S444 abort-reads / discard-writes rule).
 
 **EC-5: No reactive deps, no `refetch()`.** Fetch executes once on mount. Valid. The compiler SHALL emit W-LIFECYCLE-013 when a body references no reactive `@variables` and `deps=` is absent or empty (suppressed by explicit `deps=[]`).
 
@@ -4911,6 +4916,9 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 - A `<request>` SHALL discard in-flight results on scope destroy.
 - The compiler SHALL generate a mounted-guard check in every `<request>` resolution.
 - The compiler SHALL generate a sequence number for every `<request>` instance (EC-2, EC-4).
+- *(S444, dpa-059 — Nominal / spec-ahead.)* On supersede (EC-2, EC-4) and on teardown (EC-3, §20.8.8 step 2.3), a `<request>` classified **READ** (§6.7.7.1) SHALL have its in-flight transport aborted; a `<request>` classified **WRITE** SHALL have its in-flight result discarded while its transport runs to completion.
+- *(S444, dpa-059.)* An abort SHALL NOT set `<#id>.error`, and SHALL NOT be treated as, or imply, a rollback (§6.7.7.1).
+- *(S444, dpa-060 — Nominal / spec-ahead.)* `cache` on a `<request>` that has no compiler-derivable read-set (a `url=` or `api=` request) SHALL be `E-REQUEST-CACHE-NO-READSET` (§6.7.7.2).
 - `<#id>.data` SHALL NOT be cleared on re-fetch. It SHALL retain its previous value until the new fetch settles.
 - `<#id>.error` SHALL be reset to `not` at the start of each new fetch.
 - `<#id>.stale` SHALL be `true` iff `<#id>.data` is not `not` and a fetch is in flight.
@@ -4991,6 +4999,58 @@ The `<request>` body calls a server function. E-RI-002 does NOT apply to the sin
 | W-LIFECYCLE-012 | `refetch()` called inside `<timer>`/`<poll>` body | Warning |
 | W-LIFECYCLE-013 | No reactive deps, no explicit `deps=[]` | Warning |
 | W-LIFECYCLE-014 | `<request>` inside `for/lift` loop | Warning |
+| E-REQUEST-CACHE-NO-READSET | `cache` on a `<request>` with no compiler-derivable read-set (`url=` / `api=`) — §6.7.7.2. **Nominal / spec-ahead — not yet emitted; lands with the impl.** | Error |
+
+#### 6.7.7.1 Supersede and teardown — abort READS, discard WRITES (S444, dpa-059)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-059 — *"C for abort."* (options: A discard-everywhere (today) · B abort-everything · C abort reads, discard writes (compiler-classified, unclassifiable = write) · D author-declared; **RULED C**) · dd:`scrml-support/docs/deep-dives/request-supersede-abort-dpa-059-2026-09-30.md` (Approach C; C2 edge table; C3(e) guard analysis) · **supersedes:** the discard-only reading of §6.7.7 EC-2 / EC-3 / EC-4 and the destroy-behaviour paragraph, and the unconditional *"in-flight `<request>`s issued by the region are **aborted**"* of §20.8.8 step 2.3.
+>
+> **⚑ Ruled vs entailed.** bryan's line answers the dd's call 1. The user-voice entry's PA scope note: *"The PA's recs on calls 2–5 were presented alongside but not separately answered: (2) route-leave teardown follows the same rule (reads aborted, writes discarded; §20.8.8 step 2.3 and §6.7.7 EC-3 both rewritten); (3) a SPEC clause: abort is transport-only — not a rollback, the server may have committed, never sets `.error`; (4) the read-only test = no non-SELECT SQL anywhere in the call, a single batch, GET/HEAD for `url=`/`api=`, surfaced in `scrml explain` not a lint; (5) CPS-batch threading dissolves under C (reads are single-batch). The PA treats (2)(4)(5) as entailed by C and (3) as owed under any abort pole — flag for correction."* Rules 1, 3, 4 and 5 below therefore carry the status **PA reading of S444, bryan veto window**; rule 2 is the ruling itself.
+>
+> **Nominal / spec-ahead.** impl#1 discards on every edge today — the sequence-number and mounted guards, with no `AbortController` on any `<request>` transport (`g-region-request-discard-not-abort`). Per S444 (*"impl#1 divergence is filed as gaps, not fixed"*) impl#1 carries the divergence and the bootstrap builds this section.
+
+1. **Classification.** The compiler SHALL classify every `<request>` at compile time as **READ** or **WRITE**:
+   - **Body form** (`${ @x = call }`): **READ** iff (a) no non-`SELECT` SQL (`?{}`) is reachable anywhere in the call graph of the body's call expression — transitively, through every server function the call reaches — **and** (b) the call lowers to a single server batch (not a §19.9.9 multi-batch CPS body).
+   - **`url=` / `api=` form** (§60): **READ** iff the HTTP method is `GET` or `HEAD`.
+   - **Every other request is WRITE — including any request the compiler cannot classify.** Unclassifiable = write: the classification fails closed to discard.
+2. **Supersede** (EC-2, EC-4). When an in-flight fetch is superseded, a **READ** request's superseded transport SHALL be **aborted**. A **WRITE** request's superseded fetch SHALL be **discarded**: its result SHALL NOT be applied, and its transport SHALL NOT be aborted — it runs to completion.
+3. **Teardown** (EC-3 scope destroy; §20.8.8 step 2.3 route-leave). The same rule applies: a **READ** request's in-flight transport SHALL be aborted; a **WRITE** request's in-flight fetch SHALL be discarded (result not applied, transport completes).
+4. **Abort is transport-only.** An abort closes the client's side of the in-flight HTTP request and discards any response. It is **not a rollback**: an abort SHALL NOT imply that the server did not execute, commit, or partially commit the call — **the server may have committed**. (§8.9.2 / §19.10.5's only ROLLBACK trigger remains an exception inside the handler.) An aborted fetch SHALL NOT set `<#id>.error`, and SHALL NOT be treated as a failure settle.
+5. **Explain surface, not a lint.** The READ / WRITE classification of each `<request>` SHALL be surfaced by `scrml explain`. It SHALL NOT be reported as a lint or warning.
+6. **Multi-batch CPS.** A multi-batch body is WRITE by rule 1(b), so an abort never lands between two committed batches. Abort therefore introduces no partial-commit state that discard does not already have.
+
+**OPEN (dpa-059 — not ruled; not decided by this section):**
+
+- **O-059-1** — `scrml explain` is not yet a specified command. Its surface and the output form of the classification are OPEN.
+- **O-059-2** — Transport coverage inside a READ request. A single-batch READ body can still reach more than one transport (two server calls in one expression; the CSRF 403 retry). Whether every such transport SHALL be aborted, or first-hop-only with a stated coverage seam, is not ruled (the dd's call 5; the PA note reads only the CPS-batch half as dissolved).
+- **O-059-3** — Non-SQL side effects. The READ test names only SQL. Whether a call graph with no non-`SELECT` SQL but with a side-effecting non-SQL call (a host / `_{}` call, a stdlib write such as `scrml:store`'s `set`, an outbound HTTP call) is READ or WRITE is not ruled.
+- **O-059-4** — Whether a READ server handler SHALL observe the request's abort signal on the server (return early, skip serialization), or abort is purely client-side (dd Open Questions).
+- **O-059-5** — `<poll>` / `<timer>`: an in-flight tick on route-leave (§20.8.8 step 2.2 "stopped" vs §6.7.5 EC-3 "SHALL complete") is outside dpa-059 and not ruled.
+
+#### 6.7.7.2 `cache` — compiler-derived result caching (S444, dpa-060)
+
+> **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 1 — *"i and B2"* (*"B2 bare `cache` attribute, invalidation derived by the compiler from the request's read-set + the visible write `invalidates` edges (consistent with the §20.8.4 ruling "Invalidation SHALL be compiler-derived, not an author TTL") … RULED B2."*) · ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"* (*"`cache` is legal only where the compiler can derive staleness (a read-set); `cache` on a `url=`/`api=` request (no read-set) is a compile ERROR, not a silent TTL; fail-closed, relaxable later. RULED yes."*) · ruling:user-voice-scrml.md S444 dpa-060 call 3 — *"(ii) and revalidate"* (*"show cached immediately + background re-fetch (`stale` = true during it, the existing §6.7.7 flag) … RULED revalidate."*) · spec:§20.8.4 — *"Invalidation SHALL be compiler-derived, not an author TTL."* · dd:`scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md` (Approach B2; C4 read/write-set facts) · **supersedes:** §6.7.7's *"Cache semantics are a stdlib concern"* (struck in the Properties paragraph above, with its note).
+>
+> **Nominal / spec-ahead.** impl#1 silently accepts an unknown `<request>` attribute today, so `<request cache>` compiles with no effect. impl#1 carries the divergence; the bootstrap builds this section.
+
+1. **Surface.** `cache` is a **bare** attribute on `<request>`. It takes no value. There is **no author TTL**, no max-age and no expiry attribute on `<request>`.
+2. **Legality — a read-set is required.** `cache` is legal only where the compiler can derive staleness, i.e. where the request has a read-set. A `url=` or `api=` request has no read-set, and `cache` on one SHALL be **`E-REQUEST-CACHE-NO-READSET`** (compile error). There is no TTL fallback. (Fail-closed; relaxable later.)
+3. **Read-set.** A body-form request's read-set is the set of tables read by `SELECT` SQL (`?{}`) reachable in the call graph of the body's call expression (the §19.9.9 body-DG's read facts — over-approximate, never under).
+4. **Invalidation is compiler-derived, never author-specified.** A server function whose SQL write-set intersects a cached request's read-set is **invalidating** for that request (the body-DG's `invalidates` edge: a non-`SELECT` write against a table the request `SELECT`s). When a call to an invalidating function visible to the compiler completes on the client, that request's cached result SHALL be treated as invalid. Invalidation SHALL NOT be expressed as an author TTL (the §20.8.4 rule, applied to `<request>`).
+5. **A hit is stale-while-revalidate.** When a `cache` request is triggered (mount, dependency change, `refetch()`) and a valid cached result exists for it, the assigned `@variable` and `<#id>.data` SHALL be set to the cached value immediately, **and the fetch SHALL still run** as an ordinary fetch under this section's mount and settle rules, so `<#id>.stale` is `true` while it is in flight. A hit SHALL NOT skip the fetch. (The ruling's reason: the compiler cannot see out-of-band writes — other users, other clients — so a skipping cache can serve wrong data indefinitely; the cache buys latency, not request volume. Server-side memoization is the load lever.)
+6. **Supersede and abort.** The background revalidation is an ordinary fetch: §6.7.7.1 applies to it unchanged.
+
+**OPEN (dpa-060 — not ruled; not decided by this section):**
+
+- **O-060-1** — **Cache key.** Whether the key is the request's dependency tuple (the emitted deps list), how it is canonicalised (§59.5 value-canonical?), and whether it adds a `sessionScope` component when the callee reads the session (the §20.8.4 / §52.15 precedent).
+- **O-060-2** — **Memory bound / entry lifetime.** Whether entries live and die with the `<request>` instance (scope destroy, §20.8.8 teardown, navigation), are program-wide, and whether a compiler-default cap (LRU N) applies.
+- **O-060-3** — **SSR.** Whether an SSR pre-render seeds the cache.
+- **O-060-4** — **Invalidation granularity and follow-up.** Whether invalidation drops all of the request's entries (table-level, the §20.8.4 precedent) or only entries whose key intersects the written rows; and whether invalidation also re-fetches the live key immediately.
+- **O-060-5** — **Out-of-band and other-client writes.** Whether the §38.13 Postgres-trigger invalidation push (the §20.8.4 route) applies to `<request>` caches, or revalidate-on-hit alone covers them.
+- **O-060-6** — **Unresolvable read-set on the body form** (dynamic SQL, `extractSelectProjection` not `resolvable`). Whether this is `E-REQUEST-CACHE-NO-READSET` under the ruled *"legal only where the compiler can derive staleness"*, or cache-disabled plus a warning (the `W-KEEPALIVE-UNRESOLVABLE-READSET` precedent).
+- **O-060-7** — **`cache` on a WRITE-classified request** (§6.7.7.1). Whether it is legal (revalidate-on-hit still runs the write) or an error.
+- **O-060-8** — Whether the result of a superseded, aborted or discarded fetch is ever stored in the cache.
+- **O-060-9** — The diagnostic for a valued `cache=…` (for example `cache=30s`, an author TTL): which code fires.
 
 ### 6.7.8 `<timeout>` — Single-Shot Timer State Type
 
@@ -17563,7 +17623,15 @@ The shell runtime SHALL NOT be re-booted. Client-side rendering of the route (du
    the outgoing route's DOM is still attached. Order within the edge:
    1. region-scoped reactive display effects and subscriptions are disposed;
    2. `<timer>` and `<poll>` instances declared in the region are **stopped**;
-   3. in-flight `<request>`s issued by the region are **aborted**;
+   3. in-flight `<request>`s issued by the region are **aborted**; **amended S444 (dpa-059):** a region
+      `<request>` classified **READ** has its in-flight transport **aborted**; one classified **WRITE** is
+      **discarded** — its result is not applied and its transport runs to completion. The classification,
+      the transport-only meaning of abort (not a rollback; the server may have committed; never sets
+      `.error`) and the Nominal status are §6.7.7.1, and this step now agrees with §6.7.7 EC-3.
+      **Provenance:** ruling:user-voice-scrml.md S444 dpa-059 — *"C for abort."* (teardown follows the
+      same rule: the PA's call-2 rec, read as entailed by C — *"flag for correction"*) ·
+      dd:`scrml-support/docs/deep-dives/request-supersede-abort-dpa-059-2026-09-30.md` C2 · **supersedes:**
+      the unconditional "aborted" for WRITE requests;
    4. `if=` scopes inside the region destroy **depth-first** under §6.7.2's four steps;
    5. author `cleanup()` registrations in the region run **LIFO**;
    6. pending `animationFrame()` callbacks in the region are cancelled.
@@ -21538,6 +21606,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LIFECYCLE-020 | §28.4 | A `<request>` body contains more than one assignment. `<request>` is single-assignment-by-design: the lone `@var = expr` form captures the fetch result; multiple assignments would race. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3881.) | Error |
 | E-LIFECYCLE-021 | §28.4 | A `<request>` body contains logic but no `@var = expr` capture. The fetch result is silently discarded. Resolution: add the assignment (`@var = fetchResult(...)`) or remove the logic. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3882.) | Error |
 | E-LIFECYCLE-022 | §28.4 | A `<request>` `deps=` entry names an undeclared variable or a non-`@` variable. The `deps=` list participates in re-fetch invalidation; entries must resolve to declared reactive variables. (Catalog addition S84 Wave 2 #5; full prose at §28.4 line 3883.) | Error |
+| E-REQUEST-CACHE-NO-READSET | §6.7.7.2 | The bare `cache` attribute is placed on a `<request>` that has no compiler-derivable read-set — a `url=` or `api=` request. `cache` is legal only where the compiler can derive staleness; there is no author-TTL fallback. Resolution: remove `cache`, or fetch through a server function whose SQL the compiler can see. **Provenance:** ruling:user-voice-scrml.md S444 dpa-060 call 2 (+4) — *"(i) and yes"*. **Nominal / spec-ahead — not yet emitted; lands with the impl** (impl#1 carries the divergence; the bootstrap builds it). | Error |
 | W-LIFECYCLE-003 | §6.7.10, §28.1 | A `<timer>` or `<poll>` is declared inside a `for`/`lift` loop body. N loop iterations produce N independent ticking instances; the resulting count and lifetime are usually unintended. Resolution: hoist the element to outside the loop, or confirm via a comment that N instances is intentional. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4323.) | Warning |
 | W-LIFECYCLE-004 | §28.1 | A `<poll>` body contains no function call. A poll with a body that mutates only local variables has no observable effect; the warning surfaces probable dead code. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4324.) | Warning |
 | W-LIFECYCLE-005 | §28.1 | A `<timer>` or `<poll>` body calls a server function and the `interval` is shorter than 500 ms. High-frequency server polling is almost always a footgun (latency variance, retry storms, cost). Resolution: relax the interval, switch to `<channel>` for server-push, or annotate the long-polling pattern explicitly. (Catalog addition S84 Wave 2 #5; full prose at §6.7.10 line 4325.) | Warning |
