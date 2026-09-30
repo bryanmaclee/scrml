@@ -16603,7 +16603,17 @@ function parseHandlerStatementListCore(value, filePath, idCounter, parentBlock, 
     // WRITE (`_isReactiveAssign`, write-checked by SYM like any function-body
     // write — round-4 #3), not a top-level declaration. The frame tokens borrow
     // the first real token's span; the statements keep their own file spans.
-    tokens = tokenizeLogic(value.raw, baseOffset, baseLine, baseCol, []);
+    // g-request-refetch-statement-dropped (S444) — lower `<#id>` refs FIRST,
+    // exactly as a `${…}` logic body does (preprocessWorkerAndStateRefs). The
+    // tokenizer drops `#`, so without this a `<#hunt>.refetch()` statement in a
+    // multi-statement handler tokenized as markup (`html-fragment "< hunt>…"`,
+    // which emits NOTHING — `${ @x = 1; <#hunt>.refetch() }` lost the refetch
+    // at exit 0), and a leading one broke the parse outright (the value fell to
+    // the raw string path with its `@x` unrewritten → E-CODEGEN-INVALID-LOGIC).
+    // The lowered `_scrml_input_<id>_` placeholder routes to
+    // `_scrml_request_<id>` / the §36 registry at emit, as in a function body.
+    // Like the logic-body path, the replacement shifts the spans of later tokens.
+    tokens = tokenizeLogic(preprocessWorkerAndStateRefs(value.raw), baseOffset, baseLine, baseCol, []);
     const inner = tokens.slice();
     const last = inner[inner.length - 1];
     const eof = last && last.kind === "EOF" ? inner.pop() : null;

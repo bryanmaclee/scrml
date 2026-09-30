@@ -3418,7 +3418,16 @@ export function splitBlocks(filePath, source) {
       // A `reference` block type cannot be used here because TAB has no handler
       // for it and would emit E-PARSE-001 on any `<#name>` in markup context.
       if (next === "#") {
-        flushText();
+        // g-request-refetch-statement-dropped (S444): the ref CONTINUES the
+        // current text run — it does not start a new one. This used to
+        // `flushText()` first, splitting `function again() {\n  <#hunt>.refetch()\n}`
+        // at the `<#` into two sibling text blocks. At a <program>/<page>/<channel>
+        // default-logic body the §40.8 lift gates on each block's LEADING content,
+        // so the first half lifted as a function with an EMPTY body and the second
+        // half (`<#hunt>.refetch()\n}` plus every declaration after it) matched no
+        // lift gate and shipped into <body> as page text. One run keeps the
+        // statement inside its function. In markup prose the two blocks were
+        // adjacent text, so joining them changes nothing there.
         const refStart = curPos;
         const refStartLine = curLine;
         const refStartCol = curCol;
@@ -3427,10 +3436,12 @@ export function splitBlocks(filePath, source) {
         // Scan to closing '>'
         while (pos < len && source[pos] !== ">" && source[pos] !== "\n") step();
         if (pos < len && source[pos] === ">") step();
-        // Keep <#name> as text — reset textStart so next flushText() includes it.
-        textStart = refStart;
-        textStartLine = refStartLine;
-        textStartCol = refStartCol;
+        // Keep <#name> as text — open a run at the ref only when none is open.
+        if (textStart === -1) {
+          textStart = refStart;
+          textStartLine = refStartLine;
+          textStartCol = refStartCol;
+        }
         continue;
       }
 
