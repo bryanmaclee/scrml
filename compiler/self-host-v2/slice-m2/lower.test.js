@@ -69,7 +69,7 @@ describe("the lowered Core is CANONICAL (review INFO)", () => {
     const a = frontEnd(mods, [lib, mk(`value="1" options=(["x"]) label="L"`)]);
     const b = frontEnd(mods, [lib, mk(`label="L" options=(["x"]) value="1"`)]);
     expect(a.diags).toEqual([]);
-    const inst = (r) => r.core.decls.find((d) => d.sym.hint === "program").renders[0].data.kids[0];
+    const inst = (r) => r.core.decls.find((d) => d.sym.hint === "program").renders[0].data.kids.find((k) => k.variant !== "Text");   // dpa-045 fu4: whitespace Text kept
     expect(inst(a).data.attrs.map((x) => x.field)).toEqual([0, 1, 2]);
     expect(compareCore(a.core, b.core)).toBeNull();
   });
