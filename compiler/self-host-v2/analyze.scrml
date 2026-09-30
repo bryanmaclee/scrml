@@ -6113,6 +6113,9 @@ ${
             .Ternary(test: x) :> []
             .Assign(target: x) :> []
             .ObjectLit(props: ps) :> []
+            .Spread(e: sx) :> []
+            .Index(obj: ix) :> []
+            .Lambda(params: lp) :> []
         }
     }
 
