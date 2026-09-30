@@ -1,0 +1,12 @@
+{
+  "id": "protect-global-store-e006",
+  "description": "§14.8.9 S443 round 6 (L3) — writing a protected column into a global store (`process.env`, `globalThis`, …) is an egress, and a later read of the store (here in another server function) carries the column: E-PROTECT-006.",
+  "language-version": "1.0",
+  "spec": "§14.8.9",
+  "source-test": "compiler/tests/unit/protect-flow.test.js",
+  "rationale": "§14.8.9 (S441 amendment): provenance is preserved through \"writes into a container\", and a value reaching an egress outside a row is E-PROTECT-006. Global names read as clean and their writes landed nowhere, so `stash` + `peek` served the hash across two requests over HTTP (measured, S443 round 6). A global store is now one compile-wide cell: a write of a value outside a row into it is an egress, and every read of it carries what was written.",
+  "expect": {
+    "codes": ["E-PROTECT-006"],
+    "severity": { "E-PROTECT-006": "error" }
+  }
+}

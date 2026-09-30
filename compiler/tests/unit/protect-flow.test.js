@@ -342,6 +342,98 @@ async function _scrml_handler_s_1(req) {
     }
     expect(leakCols(mod("const arr = [{ x: 1 }]; arr.find((e) => true).x = u.name; return arr;"))).toEqual([]);
   });
+
+  // ---- S443 round 6 — every shape below was served over HTTP on main --------
+  const uniq = (xs) => [...new Set(xs)].sort();
+
+  test("r6 L1: a callback handed to an UNMODELLED call receives everything the call can reach", () => {
+    for (const body of [
+      'let s = ""; u.passwordHash.replace(/.+/, (m) => { s = m; }); return s;',
+      'let s = ""; JSON.stringify(u, (k, v) => { if (k === "passwordHash") s = v; return v; }); return s;',
+      'let s = ""; String(u.passwordHash).replaceAll(/./g, (m) => { s += m; return m; }); return s;',
+      // the callback's RETURN is part of the result
+      'return "x".replace("x", () => u.passwordHash);',
+      // host / npm callees, and a callback held inside an argument object
+      'let s = ""; each(u, (v) => { s = v; }); return s;',
+      'let s = ""; each([u.passwordHash], { cb: (v) => { s = v; } }); return s;',
+      'let s = ""; queueMicrotask(() => { s = u.passwordHash; }); return s;',
+    ]) {
+      expect([body, leakCols(mod(body, 'import { each } from "some-npm-pkg";')).includes("passwordHash")]).toEqual([body, true]);
+    }
+    // A callback that touches nothing protected stays clean, and a MODELLED
+    // callback method keeps its precise element model.
+    expect(leakCols(mod('let s = ""; "abc".replace(/b/, (m) => { s = m; }); return s;'))).toEqual([]);
+    expect(leakCols(mod("return [u].map((r) => r.name);"))).toEqual([]);
+  });
+
+  test("r6 L2: `arguments` carries every argument", () => {
+    const H = "function pass() { return arguments[0]; }\nfunction all() { return arguments; }\nfunction n() { return arguments.length; }";
+    expect(leakCols(mod("return pass(u.passwordHash);", H))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return all(1, u.passwordHash);", H))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return pass(u);", H))).toEqual([]); // the row itself — stripped at the sink
+    expect(leakCols(mod("return n(u.passwordHash);", H))).toEqual([]); // the argument COUNT
+    // An arrow reads its enclosing function's `arguments`.
+    expect(leakCols(mod("return outer(u.passwordHash);", "function outer() { const f = () => arguments[0]; return f(); }"))).toEqual(["passwordHash"]);
+  });
+
+  test("r6 L3: a global store is one compile-wide cell, and writing a value into it is an egress", () => {
+    for (const body of [
+      "globalThis.x = u.passwordHash; return 1;",
+      'globalThis["k"] = u.passwordHash; return 1;',
+      "process.env.LEAK = u.passwordHash; return 1;",
+      "const e = process.env; e.LEAK = u.passwordHash; return 1;",
+      "Object.assign(globalThis, { x: u.passwordHash }); return 1;",
+    ]) {
+      const r = analyzeProtectFlow(mod(body));
+      expect([body, r.leaks.some((l) => l.global && l.column === "passwordHash")]).toEqual([body, true]);
+    }
+    // Provenance on read, across functions (and modules): a reader elsewhere ships it.
+    const js = mod("globalThis.cache = { h: u.passwordHash }; return 1;") + `
+async function _scrml_handler_other_2(_scrml_req) {
+  const _scrml_result = await (async () => { return globalThis.cache.h; })();
+  return new Response(JSON.stringify(_scrml_protect_redact(_scrml_result) ?? null), { status: 200 });
+}`;
+    const leaks = analyzeProtectFlow(js).leaks;
+    expect(leaks.some((l) => l.sinkFn === "other" && l.column === "passwordHash")).toBe(true);
+    // A function kept in a global: what it returns is what a global call returns.
+    expect(leakCols(mod("globalThis.peek = () => u.passwordHash; return globalThis.peek();"))).toEqual(["passwordHash"]);
+    // … and one handed protected data through a global path is analysed with it.
+    expect(leakCols(mod("let s = ''; globalThis.put = (v) => { s = v; }; globalThis.put(u.passwordHash); return s;"))).toEqual(["passwordHash"]);
+    // A ROW kept in a global keeps its descriptor — not an egress on its own.
+    expect(analyzeProtectFlow(mod("globalThis.last = u; return 1;")).leaks).toEqual([]);
+    // Clean global use is untouched.
+    expect(leakCols(mod("const t = Date.now(); return { id: u.id, t, n: Math.max(1, 2) };"))).toEqual([]);
+  });
+
+  test("r6 L4: a row whose properties are rewritten by a possible descriptor Symbol key ships every column", () => {
+    for (const body of [
+      'delete u[Symbol.for("scrml.protect.origin")]; return u;',
+      'u[Symbol.for("scrml.protect.origin")].revealed.push("passwordhash"); return u;',
+      "for (const k of Object.getOwnPropertySymbols(u)) delete u[k]; return u;",
+      "const c = { ...u }; for (const k of Object.getOwnPropertySymbols(c)) delete c[k]; return c;",
+      'const c = { ...u, [Symbol.for("scrml.protect.origin")]: { cols: [], revealed: [] } }; return c;',
+      'const f = Object.fromEntries([[Symbol.for("scrml.protect.origin"), { cols: [] }]]); return { ...u, ...f };',
+      'const c = { ...u }; Object.defineProperty(c, Symbol.for("scrml.protect.origin"), { value: { cols: [] } }); return c;',
+    ]) {
+      expect([body, uniq(leakCols(mod(body)))]).toEqual([body, ["passwordHash"]]);
+    }
+    // Ordinary dynamic keys (an index, a column name) are not Symbol keys.
+    // (A dynamic READ off a row is already "any column" — pre-existing — so the
+    // negative uses a static index for the read and dynamic keys only to write.)
+    expect(leakCols(mod('const rows = [u]; const i = 0; rows[i] = { ...rows[0], x: 1 }; const k = "name"; delete rows[0][k]; rows[0][k] = "n"; return rows;'))).toEqual([]);
+  });
+
+  test("r6 RULING S443 #7: only keyed / password-class hashes derive; a bare digest stays protected", () => {
+    const C = 'import { hash, hmac, verifyHash } from "./_scrml/crypto.js";';
+    expect(leakCols(mod('return hash("md5", u.passwordHash);', C))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return hash("sha256", u.passwordHash);', C))).toEqual(["passwordHash"]);
+    expect(leakCols(mod("return hash(alg, u.passwordHash);", C))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return await crypto.subtle.digest("SHA-256", u.passwordHash);'))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return hash("argon2", u.passwordHash);', C))).toEqual([]);
+    expect(leakCols(mod('return await hmac(SERVER_KEY, u.passwordHash);', C))).toEqual([]);
+    expect(leakCols(mod('return await hmac(u.passwordHash, "known message");', C))).toEqual(["passwordHash"]);
+    expect(leakCols(mod('return verifyHash("sha256", pw, u.passwordHash);', C))).toEqual([]);
+  });
 });
 
 describe("buildProtectFlowDiagnostics", () => {

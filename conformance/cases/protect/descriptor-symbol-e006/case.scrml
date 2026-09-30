@@ -1,0 +1,19 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      function getUser(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        let c = { ...u }
+        for (const k of Object.getOwnPropertySymbols(c)) {
+          delete c[k]
+        }
+        return c
+      }
+    }
+  </db>
+  <user> = not
+  <button id="load" onclick=${ @user = getUser(1) }>load</button>
+</program>

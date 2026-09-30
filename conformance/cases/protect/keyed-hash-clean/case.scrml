@@ -1,0 +1,16 @@
+<program auth="none" db="app.db">
+  <schema>
+    ?{`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    ${
+      import { hash } from "scrml:crypto"
+      function rehash(id) {
+        let u = ?{`SELECT * FROM users WHERE id = ${id}`}.get()
+        return hash("argon2", u.passwordHash)
+      }
+    }
+  </db>
+  <h> = not
+  <button id="load" onclick=${ @h = rehash(1) }>load</button>
+</program>
