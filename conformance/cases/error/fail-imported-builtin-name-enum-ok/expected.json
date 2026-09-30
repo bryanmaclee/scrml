@@ -1,0 +1,12 @@
+{
+  "id": "error-fail-imported-builtin-name-enum-ok",
+  "description": "§19.3.3 + §21.3 (S443) — a user error enum named `AuthError` (also the name of a built-in error type, §14.1.2) is exported from errs.scrml and imported here. The bare `fail .Missing` and the qualified `fail AuthError.Bad(...)` resolve against the IMPORTED enum, not the built-in, and the exhaustive `!{}` handler over its variants is accepted. Regression pin: before S443 the built-in shadowed the imported enum in the type registry and the bare form false-fired E-ERROR-009. Compile-only: the impl1-ts runtime adapter evaluates a single client.js and does not load a relative `.scrml` import's module.",
+  "language-version": "1.0",
+  "spec": "§19.3.3",
+  "rationale": "§19.3.3: 'An error enum imported from another scrml file resolves exactly as a local one.' §21.3: 'Type imports are first-class.' A local `type AuthError:enum` already replaces the built-in entry; the imported declaration must too. The E-ERROR-* family stays silent.",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-ERROR-"]
+  }
+}

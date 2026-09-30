@@ -27,7 +27,7 @@ import { SecretRedactor } from "./diagnostic-secrets.ts";
 import { runRI, buildFunctionIndex, isServerOnlyScrmlModuleSource } from "./route-inference.ts";
 import { analyzeMonotonicity } from "./monotonicity-analyzer.ts";
 import { resolveIdempotencyStore, extractDbDriverFromValue } from "./idempotency-store-resolver.ts";
-import { runTS, buildTypeRegistry } from "./type-system.ts";
+import { runTS, buildTypeRegistry, BUILTIN_TYPES } from "./type-system.ts";
 import { runMetaChecker } from "./meta-checker.ts";
 import { runDG } from "./dependency-graph.ts";
 import { isLibraryShape, classifyFileShape } from "./library-shape.js";
@@ -2466,6 +2466,16 @@ function _compileScrmlImpl(options = {}) {
       return depRegistryCache.get(absSource);
     }
     const reg = buildTypeRegistry(depTypeDecls, [], { file: absSource, start: 0, end: 0, line: 1, col: 1 });
+    // S443 — keep ONLY the dep's own declarations. buildTypeRegistry seeds the
+    // BUILTIN_TYPES (a local `type X` overwrites its entry), so an entry still
+    // identical to the built-in object is not declared by this dep. Left in, a
+    // re-exporting file that also declares a type of its own would "resolve"
+    // `export { AuthError } from './errs.scrml'` to the BUILT-IN AuthError and
+    // shadow the user enum it forwards (resolveTypeThroughReExport stops at the
+    // first registry hit).
+    for (const [name, t] of reg) {
+      if (t === BUILTIN_TYPES.get(name)) reg.delete(name);
+    }
     depRegistryCache.set(absSource, reg);
     return reg;
   }
