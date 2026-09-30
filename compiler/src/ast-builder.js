@@ -6536,6 +6536,37 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
    * Collect a braced block body as raw text.  Returns { body: string, span }
    * Caller should have already seen the opening `{`.
    */
+  // scanRendersMarkupEnd — token index just past ONE markup element starting at
+  // the cursor (`<tag …>` … `</tag>` / `</>`, or a self-closing `<tag …/>`),
+  // nested elements counted; -1 when the tokens do not form one.
+  function scanRendersMarkupEnd() {
+    let k = i;
+    let depth = 0;
+    while (k < tokens.length) {
+      const t = tokens[k];
+      if (!t || t.kind === "EOF") return -1;
+      if (t.kind === "PUNCT" && t.text === "<") {
+        const closing = tokens[k + 1] && tokens[k + 1].kind === "PUNCT" && tokens[k + 1].text === "/";
+        // to the tag's `>`
+        let m = k + 1;
+        while (m < tokens.length && !(tokens[m].kind === "PUNCT" && tokens[m].text === ">")) {
+          if (tokens[m].kind === "EOF") return -1;
+          m++;
+        }
+        if (m >= tokens.length) return -1;
+        const selfClosing = !closing && tokens[m - 1] && tokens[m - 1].kind === "PUNCT" && tokens[m - 1].text === "/";
+        if (closing) depth--;
+        else if (!selfClosing) depth++;
+        k = m + 1;
+        if (depth <= 0) return k;
+        continue;
+      }
+      if (depth === 0) return -1;
+      k++;
+    }
+    return -1;
+  }
+
   function collectBracedBody() {
     const startTok = peek();
     let depth = 1;
@@ -6565,6 +6596,30 @@ export function parseLogicBody(tokens, filePath, childBlocks, parentBlock, count
       // token-walk helpers skip COMMENT tokens (tokenizer.ts ~995).
       lastTok = consume();
       if (lastTok.kind === "COMMENT") continue;
+      // S441 round 5e — a `renders <markup>` clause (§14.4 enum variant) is
+      // MARKUP, whose text is content kept exactly (dpa-045: "Whitespace is
+      // kept exactly"). Rebuilding it from logic tokens joined with spaces
+      // inserted spaces (`No #${id}` → `No # ${id}`) and lost every character
+      // the logic tokenizer has no token for (the `#` — main rendered `No 42`).
+      // When the source text is known, the markup is taken verbatim from it:
+      // from the `<` after `renders` to the `>` that closes that element.
+      if (lastTok.kind === "IDENT" && lastTok.text === "renders" && peek().kind === "PUNCT" && peek().text === "<"
+          && tokens._s441Src && typeof tokens._s441Src.text === "string") {
+        const markupEnd = scanRendersMarkupEnd();
+        if (markupEnd > i) {
+          parts.push(lastTok.text);
+          partLines.push(lastTok.span?.line ?? 0);
+          const first = tokens[i];
+          const last = tokens[markupEnd - 1];
+          const off = tokens._s441Src.offset;
+          const slice = tokens._s441Src.text.slice(first.span.start - off, last.span.end - off);
+          i = markupEnd;
+          lastTok = last;
+          parts.push(slice);
+          partLines.push(first.span?.line ?? 0);
+          continue;
+        }
+      }
       // g-literal-arg-expr-serializer-wrong-span (string half): re-quote STRING
       // tokens so their delimiters are preserved when the braced body is
       // reassembled. The tokenizer stores a STRING token's `.text` as the
@@ -20932,6 +20987,10 @@ function buildBlock(block, filePath, parentContextKind, counter, errors, parentS
       // its own line/col; an identifier-shaped one on a new line after a
       // value also ends the previous statement).
       if (block._bodyTop === true) tokens = coverUnknownBodyTopChars(tokens, bodyRaw, bodyOffset, bodyLine, bodyCol);
+      // S441 round 5e — the text the token spans index (non-enumerable), so a
+      // collector can take MARKUP verbatim instead of re-joining tokens (the
+      // `renders <markup>` clause of an enum variant — see collectBracedBody).
+      Object.defineProperty(tokens, "_s441Src", { value: { text: bodyRaw, offset: bodyOffset }, enumerable: false, configurable: true });
       let body;
       if (block._bodyTop === true) {
         // S441 — body-top code: parse, then reject what is not valid code.
