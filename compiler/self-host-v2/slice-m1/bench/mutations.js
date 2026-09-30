@@ -520,7 +520,7 @@ const MUTATIONS = [
   { id: "dpa-045 fu3: a `${…}` inside a display-text literal is not walked (a `\"` inside it ends the literal)", file: `${SH}/lex.scrml`,
     from: "            } else if (dq && code == 36 && peekCode(c, 1) == 123) {", to: "            } else if (false) {", tests: [T4("dpa045.test.js")] },
   { id: "dpa-045 B(3): display mode on in every region (a LOGIC string loses its JS escapes — `\\t`)", file: `${SH}/lex.scrml`,
-    from: "LexMode.InCode, [], [], [], isCodeDefault(stop))", to: "LexMode.InCode, [], [], [], true)", tests: [T4("dpa045.test.js"), T4("comment-escapes.test.js")] },
+    from: "        return lexFromMode(src, pos, stop, isCodeDefault(stop))", to: "        return lexFromMode(src, pos, stop, true)", tests: [T4("dpa045.test.js"), T4("comment-escapes.test.js")] },
   // s444 r2 fix 1, re-read under S444 "A for escapes": `\\"` is a VALID escape
   // again, so E-PARSE-001 must still never fire on it — these rows put it on.
   { id: "S444 ce-R2: E-PARSE-001 raised on the valid escape `\\\"` in a `:`-shorthand display-text literal", file: `${SH}/parse.scrml`,
@@ -565,6 +565,15 @@ const MUTATIONS = [
     from: "        let m: MP = displayEscapeDiags(skipSpace(backToMarkup(mp, t)), tp.toks)\n", to: "        let m: MP = skipSpace(backToMarkup(mp, t))\n", tests: [T4("comment-escapes.test.js")] },
   { id: "S444 ce-R2: no E-PARSE-001 for a malformed escape in a state-child body literal", file: `${SH}/parse.scrml`,
     from: "                m = displayEscapeDiags(m, tp.toks)\n", to: "", tests: [T4("comment-escapes.test.js")] },
+  // RULED S444 "standalone only": a code-default `"…"` is display text ONLY as a standalone body statement
+  { id: "S444 ce-SA: every code-default region stays display-lexed (a nested `\"many\\n\"` gets E-PARSE-001)", file: `${SH}/parse.scrml`,
+    from: "        if (isStandaloneDisplay(d)) return d\n", to: "        return d\n", tests: [T4("comment-escapes.test.js")] },
+  { id: "S444 ce-SA: nothing is standalone (a lone `\"x\\n\"` is re-lexed as a logic string — no E-PARSE-001)", file: `${SH}/parse.scrml`,
+    from: "        if (tp.toks.length != 2) return false\n", to: "        return false\n", tests: [T4("comment-escapes.test.js")] },
+  { id: "S444 ce-SA: the E-PARSE-001 pass runs on a non-standalone state-body region", file: `${SH}/parse.scrml`,
+    from: "                if (isStandaloneDisplay(tp)) m = displayEscapeDiags(m, tp.toks)\n", to: "                m = displayEscapeDiags(m, tp.toks)\n", tests: [T4("comment-escapes.test.js")] },
+  { id: "S444 ce-SA: the lexer's explicit display flag ignored (lexFromMode always display)", file: `${SH}/lex.scrml`,
+    from: "        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], [], [], display)", to: "        let st: LexState = mkState(cursorAt(src, pos), LexMode.InCode, [], [], [], true)", tests: [T4("comment-escapes.test.js"), T4("dpa045.test.js")] },
   { id: "S444 ce-R2: the escape check reads INTO an interpolation (a logic `\\t` in `${\"…\"}` reported)", file: `${SH}/parse.scrml`,
     from: "                        const e: int = lexFrom(m.src, i + 1, LexStop.Balanced).end\n                        i = e > i + 1 ? e : i + 2\n", to: "                        i = i + 2\n", tests: [T4("comment-escapes.test.js")] },
   // ---- dpa-045 follow-ups (RULED S442): the closed exit set, display interpolation, whitespace kept ----
