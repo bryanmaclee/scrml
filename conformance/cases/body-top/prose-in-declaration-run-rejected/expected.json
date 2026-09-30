@@ -1,0 +1,21 @@
+{
+  "id": "body-top-prose-in-declaration-run-rejected",
+  "description": "Two prose lines inside a run that also holds declarations: each is E-UNQUOTED-DISPLAY-TEXT at its own line; the declarations around them survive. (The native front end used to leave the first as a raw parse-error cascade and the second unreported, because a declaration flagged by the cascade exempted the group.)",
+  "language-version": "1.0",
+  "spec": "§40.8, §4.18.7",
+  "source-test": "compiler/tests/unit/s441-coverage-invariant.test.js",
+  "rationale": "§40.8 S441 bullet: one E-UNQUOTED-DISPLAY-TEXT per maximal run of statements that are not valid code, which raise no other diagnostic. Found by the S441 round-4 fuzz.",
+  "expect": {
+    "codes": [
+      "E-UNQUOTED-DISPLAY-TEXT"
+    ],
+    "notCodes": [
+      "E-INTERNAL-BODY-TOP-DROPPED",
+      "E-STATE-UNDECLARED",
+      "E-SCOPE-001"
+    ],
+    "codeCounts": {
+      "E-UNQUOTED-DISPLAY-TEXT": 2
+    }
+  }
+}

@@ -86,3 +86,38 @@ LAST COMPARISONS (re-run before landing — none were re-run after the round-3 f
 - 0c573401e — merge origin/main (SPEC-INDEX ours+regen, FACTS theirs+regen, known-gaps count hunk).
   Merge interaction: main's new s441-async-escape F5 `on mount { const … }` at body top was judged as
   a prose head → `_onMountEffect` nodes are code by head (not judged).
+- 492b7b96a — THE ROOT: the coverage invariant is a CHECK in both front ends (E-INTERNAL-BODY-TOP-DROPPED,
+  fail-closed; SPEC §40.8 sub-bullet + §34 row).
+  - default: parseLogicBody attributes each top-level iteration's consumed tokens to the node(s) it produced
+    (`_s441Cover`); `assertBodyTopCoverage` (ast-builder.js) runs once per body-top run after
+    rejectBodyTopProse + tail re-parses: covered = attributed token spans (a node whose HEAD expr lost text
+    counts only if an error reports it) + comments/`;` + error-diagnostic lines.
+  - native: `assertBodyTopCoverageNative` (parse-markup.js): covered = lexer tokens INSIDE a final statement
+    span + comments + error lines, in the coordinates the body was parsed from (bodyText/bodyStart).
+  - span fixes the check exposed (native): `server function` / `const <x>` spans start at the modifier.
+  - fuzz finds fixed: default kept `careful, world` as code after a statement split (compiled clean,
+    ReferenceError at boot) -> the split prefix is re-judged; native exempted a prose line when a parse
+    cascade flagged a declaration on a later line -> groups are judged on their first line.
+- 676c2a22d — native: a diagnostic at a run's END (`import stuff`, `fn heading`) is not an orphan prose line
+  (the WIP had turned it into E-UNQUOTED quoting `` and hidden E-STMT-EXPECT-FROM).
+- conformance: body-top/prose-before-code-line-rejected, body-top/prose-in-declaration-run-rejected.
+
+MEASURED (origin/main 6dccbd6cf compiler vs this branch, 2,291 files incl. scrml-site + flogence/src copies):
+- newly failing, default: 12 — all `conformance/cases/body-top/*` + ctrl-012 prose-neg (cases that pin the
+  S441 rejection). native: 12 — the same set minus `line-after-declaration-rejected` (already failing on
+  main native, codes changed) plus `capability/undeclared-with-foreign` (native has no `use foreign:`; main
+  native shipped the line silently, now loud). examples/ samples/ readme-snippets/
+  scrml-site/ flogence: 0 newly failing on either parser. No in-repo migration needed this round.
+- E-INTERNAL-BODY-TOP-DROPPED fires: default 0; native 2 (flogence ports/capture-tool + route-tool, both
+  already failing ~15-19 codes on native from `_={ }=` foreign-block gaps; the check fires on an
+  unbalanced-recovery `}`).
+- stdlib rows differ only because the branch compiler treats its own stdlib/ as stdlib (async exemption) —
+  a measurement artifact, not a change.
+FUZZ (scratchpad s443-prose/fuzz.mjs; independent oracle): 4 seeds x 300 bodies x 2 parsers = 2,400 compiles,
+  1,109 prose lines; 0 oracle violations, 0 E-INTERNAL fires. Prose-free failures are pre-existing:
+  E-SYNTAX-050 on a body-top `/* */` block comment (both parsers, main too) and native
+  E-CODEGEN-INVALID-LOGIC on a template with `${}` in logic (native gap, main too).
+OPEN #7 (not decided; measured): default compiles `import stuff` / `export data` / `type here` / `fn heading`
+  / bare `404` silently (base too); native reports the malformed decls (E-STMT-*, E-UNQUOTED for
+  `export data`) but also compiles bare `404` and `type here`. The invariant counts all of these as compiled
+  statements (their tokens are consumed by a declaration / expression node) — it does not classify them.
