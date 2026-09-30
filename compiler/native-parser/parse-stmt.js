@@ -530,8 +530,14 @@ export function parseStatement(ctx) {
         // Simpler: peek 2 tokens to confirm `<` IDENT, then run the existing
         // structural lead predicate on a synthesised cursor view.
         if (constStructuralStateDeclLeadFollows(ctx.cursor)) {
-            advance(ctx.cursor);   // consume `const`
-            return parseStructuralStateDecl(ctx, true);
+            const constTok = advance(ctx.cursor);   // consume `const`
+            const sd = parseStructuralStateDecl(ctx, true);
+            // The declaration's span starts at `const` (S441 round 4 — the
+            // body-top coverage check reads statement spans).
+            if (sd && sd.span && typeof sd.span.end === "number") {
+                sd.span = makeSpan(constTok.span.start, sd.span.end, constTok.span.line, constTok.span.col);
+            }
+            return sd;
         }
     }
 
@@ -1238,7 +1244,12 @@ export function parseDoWhile(ctx) {
             "expected 'while' after the body of a 'do' loop", spanHere(ctx));
     }
     const test = parseParenCondition(ctx, "do-while");
-    endE = nodeEnd(test);
+    // S441 round 5b (N2) — the statement ends at the condition's closing `)`,
+    // not at the condition expression (which left the `)` outside every
+    // statement span).
+    const closeParen = lastTokenBefore(ctx);
+    endE = (closeParen !== undefined && closeParen !== null && closeParen.kind === TokenKind.RParen)
+        ? closeParen.span.end : nodeEnd(test);
 
     // The do-while terminator `;` is optional (ECMAScript's special ASI rule).
     if (currentKind(cursor) === TokenKind.Semicolon) {
@@ -2157,7 +2168,11 @@ export function parseScrmlFunctionDecl(ctx, allowAnonymous) {
     // --- the in-line body --- (parsed in the function's own generator scope).
     const inline = parseFunctionBodyInline(ctx, false, isGenerator);
 
-    const span = makeSpan(fnTok.span.start, inline.endPos, fnTok.span.line, fnTok.span.col);
+    // The declaration's span starts at its FIRST token — a `pure` / `server`
+    // modifier is part of the declaration (S441 round 4: the body-top
+    // coverage check reads statement spans; a span that began at `function`
+    // left `server` outside every statement).
+    const span = makeSpan(leadTok.span.start, inline.endPos, leadTok.span.line, leadTok.span.col);
     return makeFunctionDecl(name, params, inline.body, false, isGenerator, span, {
         fnKind,
         isServer,
@@ -3300,6 +3315,48 @@ export function parseDefer(ctx) {
 // consumes the balanced `{ ... }` at the cursor and joins the inner tokens'
 // `.text` with single spaces. `raw` is "{ ... }" for the body form. A missing
 // closing `}` records a diagnostic and the partial body is still returned.
+// rendersMarkupSlice — consume ONE markup element at the cursor (`<tag …>` …
+// `</tag>` / `</>`, or self-closing `<tag …/>`, nested elements counted) and
+// return its verbatim source text + first line, or null (cursor untouched)
+// when the tokens do not form one.
+function rendersMarkupSlice(ctx) {
+    const cursor = ctx.cursor;
+    const toks = [];
+    let o = 0;
+    let depth = 0;
+    let end = -1;
+    for (;;) {
+        const t = peek(cursor, o);
+        if (t === undefined || t === null || t.kind === TokenKind.EOF) return null;
+        if (t.kind === TokenKind.LessThan) {
+            const nx = peek(cursor, o + 1);
+            const closing = nx !== undefined && nx !== null && nx.kind === TokenKind.Slash;
+            let m = o + 1;
+            for (;;) {
+                const tm = peek(cursor, m);
+                if (tm === undefined || tm === null || tm.kind === TokenKind.EOF) return null;
+                if (tm.kind === TokenKind.GreaterThan) break;
+                m = m + 1;
+            }
+            const before = peek(cursor, m - 1);
+            const selfClosing = !closing && before !== undefined && before !== null && before.kind === TokenKind.Slash;
+            if (closing) depth = depth - 1;
+            else if (!selfClosing) depth = depth + 1;
+            o = m + 1;
+            if (depth <= 0) { end = o; break; }
+            continue;
+        }
+        if (depth === 0) return null;
+        o = o + 1;
+    }
+    const first = current(cursor);
+    const last = peek(cursor, end - 1);
+    if (!first || !last || !first.span || !last.span) return null;
+    const text = ctx.source.slice(first.span.start, last.span.end);
+    for (let k = 0; k < end; k = k + 1) advance(cursor);
+    return { text, line: lineOfToken(first) };
+}
+
 function typeBodyText(ctx) {
     const cursor = ctx.cursor;
     const open = advance(cursor);   // consume `{`
@@ -3320,6 +3377,20 @@ function typeBodyText(ctx) {
         const tok = advance(cursor);
         parts.push(tok.text);
         partLines.push(lineOfToken(tok));
+        // S441 round 5e — a `renders <markup>` clause is MARKUP: its text is
+        // content kept exactly (dpa-045), taken verbatim from the source (from
+        // the `<` to the `>` closing that element) instead of re-joined tokens,
+        // which inserted spaces, split `${id}` into `$ { id }` and lost the
+        // characters the lexer has no token for (`#`). Mirrors the live
+        // ast-builder collectBracedBody.
+        if (tok.kind === TokenKind.Ident && tok.text === "renders" && currentKind(cursor) === TokenKind.LessThan
+                && typeof ctx.source === "string") {
+            const slice = rendersMarkupSlice(ctx);
+            if (slice !== null) {
+                parts.push(slice.text);
+                partLines.push(slice.line);
+            }
+        }
     }
     if (depth > 0) {
         recordError(ctx, "E-STMT-TYPE-UNCLOSED-BODY",
@@ -3360,14 +3431,25 @@ function typeAliasText(ctx) {
     const cursor = ctx.cursor;
     const parts = [];
     const startLine = lineOfToken(current(cursor));
+    // S441 round 5b — a braced operand inside the alias (`{ a: T } | { b: U }`)
+    // is balanced: only a `}` at depth 0 closes an enclosing block.
+    let braceDepth = 0;
     while (atEnd(cursor) === false) {
         const tok = current(cursor);
         const k = currentKind(cursor);
-        if (k === TokenKind.Semicolon || k === TokenKind.RBrace) {
+        if (k === TokenKind.Semicolon && braceDepth === 0) {
             break;
         }
-        if (parts.length > 0 && lineOfToken(tok) > startLine) {
+        if (k === TokenKind.RBrace && braceDepth === 0) {
+            break;
+        }
+        if (parts.length > 0 && braceDepth === 0 && lineOfToken(tok) > startLine) {
             break;   // ASI — the alias expression ended at the line boundary
+        }
+        if (k === TokenKind.RBrace) {
+            braceDepth = braceDepth - 1;
+        } else if (k === TokenKind.LBrace) {
+            braceDepth = braceDepth + 1;
         }
         parts.push(advance(cursor).text);
     }
@@ -3456,7 +3538,18 @@ export function parseTypeDecl(ctx) {
     if (currentKind(cursor) === TokenKind.Assign) {
         advance(cursor);   // consume `=`
         if (currentKind(cursor) === TokenKind.LBrace) {
+            const closeTok = current(cursor);
             raw = typeBodyText(ctx);
+            // S441 round 5b (D2) — a braced type continues on its line as any
+            // other type operand does: `{ a: number }[]`, `{ … } | { … }`,
+            // `{ … } & { … }` (mirrors the live ast-builder type handler).
+            const cont = current(cursor);
+            const prevTok = lastTokenBefore(ctx);
+            if (atEnd(cursor) === false && cont && prevTok && closeTok
+                    && lineOfToken(cont) === lineOfToken(prevTok)
+                    && (cont.text === "[" || cont.text === "|" || cont.text === "&" || cont.text === "&&" || cont.text === "?")) {
+                raw = raw + " " + typeAliasText(ctx);
+            }
         } else {
             raw = typeAliasText(ctx);
         }
