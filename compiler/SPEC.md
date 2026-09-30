@@ -554,8 +554,8 @@ scrml defines `//` as the universal single-line comment syntax (§27). The block
 **S88 amendment note (2026-05-13):** the prior `SHALL NOT handle <!-- -->` wording (pre-S87) was authored before the BS-layer comment-skip mechanism shipped. Per S86 ratification ("BS-layer over SPEC retreat" — when SPEC and implementation diverge AND SPEC is design-intent, implementation catches up; conversely when implementation is the right answer, SPEC catches up), this amendment softens §4.7 to MAY-permit `<!-- -->` skip at BS-layer, matching the shipped block-splitter behavior. The skip is conservative: it treats the entire comment span as raw content; it does not interpret content inside the comment for delimiter recognition. `/* */` remains forbidden at BS-layer — those genuinely belong to per-context tokenizers (CSS, JS) and crossing the BS layer would create false context-mode transitions inside non-comment code.
 
 **S444 narrowing — `//` inside a free-text body.** Inside a free-text body (§4.18.1 — plain-markup element bodies,
-component bodies, the `<errors>` override template), the two characters `//` open a comment **only** when they start
-the source or are immediately preceded by a whitespace byte (space, tab, LF, CR — so a `//` at the start of a line,
+component bodies, the `<errors>` override template), the two characters `//` open a comment **only** when they are
+immediately preceded by a whitespace byte (space, tab, LF, CR — so a `//` at the start of a line,
 after its indentation, or after a space mid-line). Anywhere else in a free-text body `//` is content and suppresses
 nothing: `http://x`, `a//b` and `</b>// x` are text. When `//` does open a comment, this section applies unchanged — the
 comment runs to end of line and every delimiter in it (including a closer such as `</p>`) is raw comment text. The
@@ -1244,6 +1244,9 @@ This subsection is the **single canonical definition** of the code-default body 
 *(Amendment S442 — the round-2 drafted §4.18.1. Three edits to the drafted text, all ruled: the free-text row keeps
 the prior §4.18.1's HTML-element list; its exit column is the follow-up's closed set (§4.18.1b); and the code-default
 escape column is empty — `\"` deleted per B(3), `\\` / `\${` per B(2) = delete. See the banner above.)*
+*(S444, "standalone only": the code-default exit cell is narrowed — only a standalone `"…"` body statement is a
+display-text literal; §4.18.3.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "standalone only, your rec" · narrows: the §4.18.1 code-default cell "`\"` opens a display-text literal (§4.18.3)" and the S111 §4.18.3 scope ("the vehicle for plain display text inside a code-default body") — which since #1190 the bootstrap read as EVERY `"…"` in a code-default body
 *(S444: two table cells amended — the free-text exit column's `//` is narrowed to a `//` at the start of a line or
 after whitespace (§4.18.1b exit (2)), and the code-default escape column is no longer empty: `\"`, `\\`, `\${` are
 restored (§4.18.3).)*
@@ -1258,7 +1261,7 @@ name.** The two productions are **duals, not one model wearing two hats**:
 | production | governs | default | exit sequence(s) | escape into the default |
 |---|---|---|---|---|
 | **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error, `~{` test — §4.18.1b); `//` comments — a `//` at the start of a line or immediately after whitespace only (§4.18.1b exit (2), §4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
-| **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) | code | `"` opens a display-text literal (§4.18.3) | inside a display-text literal: `\"` (a literal `"`), `\\` (a literal `\`), `\${` (a literal `${`) — §4.18.3 (restored S444; ~~S442: NO character escapes~~) |
+| **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) | code | ~~`"` opens a display-text literal (§4.18.3)~~ S444: a `"…"` standing ALONE as a body statement is a display-text literal (§4.18.3); a `"…"` operand inside an expression is an ordinary string | inside a display-text literal: `\"` (a literal `"`), `\\` (a literal `\`), `\${` (a literal `${`) — §4.18.3 (restored S444; ~~S442: NO character escapes~~) |
 
 - The body mode SHALL be determined by the **enclosing element kind**, never by the lexical content of the body.
   *(Unchanged from the prior §4.18.1.)* An engine state-child body is code-default because it is an engine state-child
@@ -1328,8 +1331,8 @@ after whitespace; see item 2 below.)*
      the next paragraph narrows which `//` opens a comment)*
      **`//` comments — at the start of a line or after whitespace only (S444).** A `//` in a free-text body opens a
      comment **if and only if** the byte immediately before its first `/` is a **whitespace byte** — space (U+0020),
-     tab (U+0009), line feed (U+000A) or carriage return (U+000D); these four, and no others — or the `//` is the first
-     byte of the source. "The start of a line" is the case where that byte is a line terminator; a `//` after a line's
+     tab (U+0009), line feed (U+000A) or carriage return (U+000D); these four, and no others. (A free-text body always
+     follows its opener's `>`, so a byte before the `//` always exists.) "The start of a line" is the case where that byte is a line terminator; a `//` after a line's
      leading indentation is preceded by whitespace and so opens a comment too. "Immediately before" means the source byte
      itself, whatever construct it ends: a `//` right after a tag's `>` (`<p>// x`, `</b>// x`), after an
      interpolation's `}` or after a `-->` is NOT a comment. Every other `//` is **content** — so `http://x`,
@@ -1441,6 +1444,14 @@ This is the **explicit text/code boundary** the model establishes: in a code-def
 
 A **display-text literal** is the vehicle for plain display text inside a code-default body.
 
+**Scope — a standalone body statement only (S444).** A `"…"` in a code-default body is a display-text literal **only
+when it stands alone as a body statement** — the whole statement is the one `"…"` (a body may hold several such
+statements; a `:`-shorthand body is one). A `"…"` that is an operand inside an expression — `@n > 5 ? "many\n" :
+"few"`, `f("x")`, `"a" + @b`, `("x")` — is an **ordinary string value** with the ordinary logic-string escapes (`\n` is a
+newline, `\t` a tab; there is no `E-PARSE-001` for them) and none of this section's rules. Everything below in §4.18.3
+/ §4.18.4 (the escape catalog, `E-PARSE-001`, `${…}` segments, cooking) applies to the standalone literal only.
+> **Provenance:** ruling:user-voice-scrml.md S444 "standalone only, your rec" · narrows: the §4.18.1 code-default cell "`\"` opens a display-text literal (§4.18.3)" and the S111 §4.18.3 scope ("the vehicle for plain display text inside a code-default body") — which since #1190 the bootstrap read as EVERY `"…"` in a code-default body
+
 **Formal rule:**
 
 ```
@@ -1490,6 +1501,10 @@ A `\` followed by anything other than `"`, `\` or `${` is a malformed escape (`E
   > **Unknown-escape decision (S444):** the PA's lean was "`\` + char kept as content"; the brief's own condition
   > governs — the pre-S442 catalog had `E-PARSE-001` for a malformed escape, so that behaviour is restored exactly.
 - A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7.
+  *(S444:)* The recovered content is cooked with the same escape table, and each malformed escape in it is
+  `E-PARSE-001` — including a `\` immediately before the recovery point (`"abc\` at end of file: `E-CTX-001`, then
+  `E-PARSE-001` for the trailing `\`). Its `${` is content: the literal never closed, so no interpolation is walked.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (the catalog applies to the literal's content however it ends) · review:S444 S239 review of 5d5ad360b nit 3 (the recovery path was raw and silent)
 
 **Worked example — display-text literals in code-default bodies:**
 
