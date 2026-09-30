@@ -1,3 +1,118 @@
+# scrml — Session 443 (bryan · ASUS-Vivobook) — WRAP
+
+> ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. Concurrent: S442-bryan-xps
+> (bootstrap lane; wrapped mid-S443) and **S444-bryan-xps (LIVE on XPS at this wrap — successor; it deferred its wrap
+> to S443, which is now done)**. **Rulings authority:** `scrml-support/user-voice-scrml.md` §S443. **Live-state
+> authority:** board `scrml-support/handOffs/active-sessions/S443-bryan.md` (LIVE CHECKPOINT lines).
+
+## ⏭ NEXT-SESSION PICKUP (ordered)
+
+### 1. Two HIGH auth fail-opens found by the post-merge reviews (fix first — both reviewer-executed; #1 PA-confirmed by source)
+- **`g-app-root-route-prefix-matched-on-absolute-path`** — `route-inference.ts:findRoutePrefix` runs `indexOf("/pages/")`
+  on the ABSOLUTE path: a project living under any `…/pages/…` or `…/routes/…` directory has NO identified app root →
+  member pages of a `<program auth="required">` app serve anonymously (#1173's inheritance). Fix: match relative to the
+  build root. Same review: `g-required-program-with-no-identified-app-root-is-silent` (MED — warn or fail closed), and
+  B1: an unannotated login page under a required app now 302s to itself (warning only; reviewer recommends an error).
+- **`g-wrapped-program-auth-silently-dropped`** — `<program auth="required">` under a `<div>`/`<main>` → its server fns
+  run anonymously (200 "s3cret"); neither E-PROGRAM-NESTED-AUTH nor E-PROGRAM-002 sees it. Pre-existing. Fix: "top-level"
+  = no `<program>`/`<page>` ancestor in both detectors, or error on a `<program>` under a non-program ancestor. Same
+  review (#1177, LOW, introduced): the E-PROGRAM-002 message/§34/§40.8 text says the FIRST program's session settings win
+  — the LAST does (a cookie downgrade); the §20.5.1 note "only the nested case remains reachable" is false.
+
+### 2. Queued dispatch briefs — `scrml-support/handOffs/s443-briefs/` (quota is back — fire them)
+- **prose-r5.md** — declared prose round 5 on `worktree-agent-a2f3ca098c5412926` @94cd0ae58 (round 4 DO-NOT-LAND:
+  import/type/export nodes "cover" tokens they never emit; native `;` → E-INTERNAL; native label lines vanish). Folds in
+  ruling S443 #4 (body-top no-op code is an error).
+- **protect-r6.md** — §14.8.9 residuals (`g-protect-egress-round-6-residuals`: callback params of unmodelled calls,
+  `arguments`, globalThis/process.env stores, Symbol.for descriptor tampering, RETURNING rows, `users . *`, error-message
+  egress, runtime views) + ruling S443 #7 (a bare digest of a protected value stays protected).
+- ~~ex23.md~~ DONE (#1180 + #1183). ~~e-program-002-same-file.md~~ DONE (#1177).
+
+### 3. examples/23 residuals (`g-example-23-residuals-after-1180`, MED) — the flagship after #1180/#1183
+Any driver reads/writes ANY load (fetchLoadDetail / fetchLogServer / logBreakdownServer / logFuelStopServer lack the
+assignment check; payload JSON string-built → injectable); every `/…/loads/:id` link 404s (pages serve at
+`…/load-detail`) → assign/transition/BOL/rate-confirm/booking unusable in a browser; customer load-detail crashes on load
+(`tractor_unit` — the markup call-interpolation defect); the built `_server.js` wires ONE page's WS handlers 12×.
+Cross-site forced-logout via `/auth/login?logout=1` (LOW). **Do not demo ex23 load-detail flows in the spotlight until
+these land.**
+
+### 4. Compiler defects filed this session (known-gaps §S443) — not fixed (S435 policy: impl#1 carries unless security/bootstrap/ruled)
+HIGH: `g-markup-call-interpolation-emitted-as-module-statement` (a markup `${fn(@x.f)}` is ALSO a load-time statement →
+throws when `@x` is `not`, kills the page script) · `g-engine-write-in-error-arm-bypasses-engine-setter` ·
+`g-bare-brace-in-markup-text-swallows-child-elements-and-interpolations-as-literal-text` (flint; any prose `{` disables
+every child tag/interpolation to the matching `}`) · `g-layout-and-library-server-fns-reachable-anonymously` ·
+`g-worker-supervision-and-program-shape-gaps`. MED: class-attr template doesn't lower scrml exprs (E-CG-001);
+prod static has no directory index; compose-route export-name collision; LSP ignores imported types; jsx-style `{@x}`
+lint. Full list: `docs/known-gaps.md` §S443.
+
+### 5. bryan's queue
+- **README #1176 — HELD for bryan's read** (user-voice S443 item 5). Since the draft: ex13 + ex23 rows flipped to working
+  (verified). Merge on bryan's word (re-sync first).
+- `| err :>` bare-identifier arm (S441 held branch `worktree-agent-a04c8bb9665851ec9`) — ex09's Failed state renders a
+  BLANK message on main because of it (verified in Chromium). Ruled at S441; finish + review.
+
+## 🔭 DURABLE
+**The record can be wrong in the same way the code can.** S441's hand-off said four reviews "ran before a compaction and
+only the verdicts were lost." A transcript reconstruction showed three never ran, and S441 had told bryan the flagship's
+security fix was reviewed. A claim about process state is a claim like any other: verify it against the artifact
+(review tags, PR bodies, the transcript), not against the narrative. Every "reviewed" in a hand-off should point at a
+marker, a tag, or a report.
+
+**An un-re-reviewed fix round is where the regression hides.** #1147's review was real; its fix-round commit (waived as
+"reject-only") carried a false E-ERROR-009 for imported `AuthError` enums. The rule already said a fix round invalidates
+the review; the waiver reasoning ("it can only reject more") was true and still wrong — a false rejection of valid code
+IS a regression.
+
+**A helper that touches `?{}` is a public route.** Moving an auth lookup into a helper that takes a user id turned a
+safe lookup into an account-enumeration endpoint (#1180 → fixed #1183). In scrml, "server function" and "HTTP route"
+are the same thing; a helper's parameters are attacker-controlled. Found only by the post-merge review.
+
+**Dog-fooding the examples found more compiler bugs than any other instrument this session.** Making ex23 and ex13
+actually run in a browser surfaced four compiler defects and two security holes that the suites, the conformance corpus
+and three rounds of review had all passed. "Compiles" is not "works"; drive it.
+
+**Quota exhaustion is a CANNOT, not a CONFIGURED-NOT-TO.** When sub-agents died on the weekly limit, work continued
+PA-direct with every self-reviewed landing labelled as such, and agent reviews ran post-merge the moment the quota
+returned — they found real defects in all three.
+
+## ⚑ MISSES (mine)
+1. ★★ **Shipped #1180 with a user-enumeration route** (`getCurrentUser(userId)` as a public route) — caught only by the
+   post-merge review; fixed #1183. I knew helpers-with-SQL become routes (I hit E-SESSION-CONTEXT on exactly that path)
+   and did not follow the consequence to the attacker.
+2. ★★ **ee3af947b's appRoot fix left a fail-open** (absolute-path `/pages/`) — I tested layouts, not install locations.
+3. ★ #1180 claimed "works end-to-end" while every load-detail route 404s — my e2e covered login/landing/logout only.
+4. ★ Truncated my own probe script (a python splice) and read a 2-line result as the whole probe; re-ran.
+5. ★ Blanket `?.` / ternary rewrites across ex23 (213 sites) before measuring which construct miscompiles — reverted twice.
+
+## Landed S443
+#1171 protect §14.8.9 r1-r5 · #1172 builtin-name enum shadow · #1173 page auth / E-PROGRAM-NESTED-AUTH / member-page
+inheritance · #1174 workers D1/D2 · #1175 review ledger · #1177 E-PROGRAM-002 same-file · #1180 ex23 end-to-end ·
+#1183 ex23 no helper routes (auto-merge; shepherded) · wrap PR. HELD: #1176 README.
+
+## Review ledger
+Markers: #1145 #1147 #1152 #1155 (post-merge, S441 correction) · #1165 carve-out · #1171 #1172 · #1173 #1177 #1180
+(post-merge agent reviews, this wrap) · #1174 (PA-direct). #1183: PA-verified by execution (the defect itself was the
+#1180 review's finding). Review-debt probe at wrap: see Gate.
+
+## Worktrees
+Retained (unlanded, on ASUS): `agent-a2f3ca098c5412926` (prose r4), `agent-ab276a0b05f6a84cf` (S441 prose, superseded by
+r4 — remove once r5 lands), `agent-a04c8bb9665851ec9` (err-arm), `agent-a8fca83a59f6533ba` (README #1176),
+`pa-ex23b` (until #1183 merges). All S443 landed worktrees removed.
+
+## Gate at close
+- main CI `gate` green at the last run before the wrap PR (`gh run list --branch main --limit 1` → success).
+- Local pre-commit gate green on every S443 commit (unit+integration+conformance, ~33,060 pass / 0 fail); the
+  post-commit full run's 181 failures are this machine's environment set (browser/commands/lsp), unchanged all session.
+- Review floor: `bun scripts/review-debt.ts` → **0 OWED** (752 in scope) after this wrap's markers.
+- `bun scripts/state.ts --check` PASS · `bun scripts/facts.ts --check` PASS · SPEC-INDEX --check OK.
+- Maps: refreshed 108ca89be → 5b1d0dab0 (project-mapper S444b pass; U-S444b-1: `codegen/index.ts` still says
+  "E-PROGRAM-002 is reserved-not-implemented" at ~:3158 + comments — fix with the §S443 E-PROGRAM-002 text nits).
+- Inbox: 4 stale reports triaged + moved to read/; return legs sent to flint + flogence; the flogence S51 toEnum note
+  fixed in this wrap (SPEC §14.4.1); the 3 to-peter notes left for Peter.
+- #1183 on auto-merge at wrap time (shepherded); if it did not land, re-sync + merge first thing.
+
+---
+
 # scrml — Session 442 (bryan · XPS-8950) — WRAP
 
 > ⚑ **ADDITIVE, NOT A REWRITE.** Everything below the first `---` is prior sessions'. **Concurrent with S441-bryan
