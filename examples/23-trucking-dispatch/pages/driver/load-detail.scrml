@@ -53,22 +53,16 @@
   <db src="../../dispatch.db" protect="password_hash" tables="users, drivers, loads, customers, assignments, log_entries, lin_tokens">
 
     ${
-        // `userId` is the framework session's user (`session.userId`), passed in by
-        // the request-entry server function — `session` is readable only there
-        // (§20.5, E-SESSION-CONTEXT). Login sets it with session.set("userId", …) and
-        // <program auth="required"> gates on it. (The old app-KV token rode a cookie
-        // set from JS with HttpOnly, which browsers refuse, so it never persisted.)
-        function getCurrentUser(userId) {
-            if (userId is not) return not
-            return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
-        }
 
         // Fetch the load + assignment + recent entries scoped to THIS driver.
         // Returns unauthorized if the driver isn't currently assigned to the
         // load (loose guard — the driver should never be looking at a load
         // they aren't assigned to).
         function fetchLoadDetail(sessionToken, loadId) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
@@ -118,7 +112,10 @@
         // Validates the driver is assigned and the source state allows the
         // target. Returns ok or error.
         function transitionLoadServer(sessionToken, loadId, newStatus) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
@@ -174,33 +171,25 @@
             return { ok: true, mintedBolToken: mintedBolToken }
         }
 
-        // The calling driver's record IF they are currently assigned to the load,
-        // else `not`. Every per-load driver action goes through this — the same
-        // check transitionLoadServer makes (S443: the BOL/POD fns checked the
-        // role only, so any driver could read another load's BOL token and
-        // submit it — consuming the assigned driver's single-use token).
-        function assignedDriverFor(user, loadId) {
-            const driver = ?{`SELECT id FROM drivers WHERE user_id = ${user.id}`}.get()
-            if (driver is not) return not
-            const assignmentRow = ?{`
-                SELECT id FROM assignments
-                WHERE load_id = ${loadId}
-                  AND driver_id = ${driver.id}
-                  AND unassigned_at IS NULL
-                LIMIT 1
-            `}.get()
-            if (assignmentRow is not) return not
-            return driver
-        }
-
         // M6: query the most recent unconsumed BOL token for this load
         // (used by driver page to display BOL upload eligibility).
         function getActiveBolTokenServer(sessionToken, loadId) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
-            if (assignedDriverFor(user, loadId) is not) {
+            // The caller must be the driver ASSIGNED to this load (S443). Inlined, not a helper:
+            // a `?{}` helper compiles to its own public route (an assignment oracle).
+            const assigned = ?{`
+                SELECT d.id FROM drivers d
+                JOIN assignments a ON a.driver_id = d.id
+                WHERE d.user_id = ${user.id} AND a.load_id = ${loadId} AND a.unassigned_at IS NULL
+                LIMIT 1
+            `}.get()
+            if (assigned is not) {
                 return { error: "You are not assigned to this load." }
             }
             const row = ?{`
@@ -221,11 +210,20 @@
         // does NOT count as `lin` consume per §35.3 rule 1, so the workaround
         // is to copy the lin var into a template literal first.
         function uploadBolServer(sessionToken, loadId, filename, lin token: string) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
-            const driver = assignedDriverFor(user, loadId)
+            // The caller must be the driver ASSIGNED to this load (S443; inlined — see above).
+            const driver = ?{`
+                SELECT d.id FROM drivers d
+                JOIN assignments a ON a.driver_id = d.id
+                WHERE d.user_id = ${user.id} AND a.load_id = ${loadId} AND a.unassigned_at IS NULL
+                LIMIT 1
+            `}.get()
             if (driver is not) return { error: "You are not assigned to this load." }
 
             const consumeMarker = `consume:${token}`
@@ -256,11 +254,20 @@
 
         // POD upload (mocked) — stores filename in log_entries.payload.
         function uploadPodServer(sessionToken, loadId, filename) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
-            const driver = assignedDriverFor(user, loadId)
+            // The caller must be the driver ASSIGNED to this load (S443; inlined — see above).
+            const driver = ?{`
+                SELECT d.id FROM drivers d
+                JOIN assignments a ON a.driver_id = d.id
+                WHERE d.user_id = ${user.id} AND a.load_id = ${loadId} AND a.unassigned_at IS NULL
+                LIMIT 1
+            `}.get()
             if (driver is not) return { error: "You are not assigned to this load." }
 
             const payload = `{"filename":"${filename}"}`
@@ -272,7 +279,10 @@
         }
 
         function logFuelStopServer(sessionToken, loadId, amount, odometer) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
@@ -288,7 +298,10 @@
         }
 
         function logBreakdownServer(sessionToken, loadId, description) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "driver") {
                 return { unauthorized: true }
             }
