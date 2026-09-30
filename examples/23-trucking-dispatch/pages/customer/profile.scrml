@@ -11,23 +11,25 @@
 
 <page db="../../dispatch.db" auth="required">
 
-  import { accountStatusLabel, accountStatusClasses, paymentTermsLabel } from '../../components/customer-card.scrml'
+  import { accountStatusLabel, accountStatusClasses, accountStatusClassesOf, paymentTermsLabel } from '../../components/customer-card.scrml'
   import { createSessionStore } from 'scrml:store'
   import { SESSION_DB_PATH } from '../../models/auth.scrml'
 
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers">
 
     ${
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
+        // `userId` is the framework session's user (`session.userId`), passed in by
+        // the request-entry server function — `session` is readable only there
+        // (§20.5, E-SESSION-CONTEXT). Login sets it with session.set("userId", …) and
+        // <program auth="required"> gates on it. (The old app-KV token rode a cookie
+        // set from JS with HttpOnly, which browsers refuse, so it never persisted.)
+        function getCurrentUser(userId) {
             if (userId is not) return not
             return ?{`SELECT id, email, role, created_at, last_login_at FROM users WHERE id = ${userId}`}.get()
         }
 
         function fetchProfile(sessionToken) {
-            const user = getCurrentUser(sessionToken)
+            const user = getCurrentUser(session.userId)
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -60,7 +62,7 @@
             const tok = getSessionToken()
             const data = fetchProfile(tok)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (data.error) {
@@ -75,7 +77,7 @@
 
         function logout() {
             document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/login"
+            window.location.href = "/auth/login?logout=1"
         }
 
         on mount {
@@ -86,11 +88,11 @@
       <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
         <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
             <div class="flex items-center gap-3">
-                <a href="/customer" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+                <a href="/customer/home" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
                 <span class="text-xs uppercase tracking-wider text-slate-400">Profile</span>
             </div>
             <nav class="flex items-center gap-4 text-sm">
-                <a href="/customer" class="hover:text-blue-300">Home</a>
+                <a href="/customer/home" class="hover:text-blue-300">Home</a>
                 <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
                 <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
                 <span class="text-slate-400 text-xs" if=(@currentUser is some)>${@currentUser.email}</span>
@@ -115,8 +117,8 @@
                                 Account: <code class="bg-slate-100 px-1 rounded">${@currentUser.email}</code>
                             </p>
                         </div>
-                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClasses(@currentCustomer.account_status)}">
-                            ${accountStatusLabel(@currentCustomer.account_status)}
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${accountStatusClassesOf(@currentCustomer)}">
+                            ${@currentCustomer is some ? accountStatusLabel(@currentCustomer.account_status) : ""}
                         </span>
                     </div>
                 </header>
@@ -131,21 +133,21 @@
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Contact name</div>
                             <div class="text-slate-900">
                                 <span if=(@currentCustomer.contact_name is some && @currentCustomer.contact_name != "")>${@currentCustomer.contact_name}</>
-                                <span if=(@currentCustomer.contact_name is not || @currentCustomer.contact_name == "") class="text-slate-400">—</>
+                                <span if=(@currentCustomer is some && (@currentCustomer.contact_name is not || @currentCustomer.contact_name == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Email</div>
                             <div class="text-slate-900">
                                 <span if=(@currentCustomer.contact_email is some && @currentCustomer.contact_email != "")>${@currentCustomer.contact_email}</>
-                                <span if=(@currentCustomer.contact_email is not || @currentCustomer.contact_email == "") class="text-slate-400">—</>
+                                <span if=(@currentCustomer is some && (@currentCustomer.contact_email is not || @currentCustomer.contact_email == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Phone</div>
                             <div class="text-slate-900">
                                 <span if=(@currentCustomer.contact_phone is some && @currentCustomer.contact_phone != "")>${@currentCustomer.contact_phone}</>
-                                <span if=(@currentCustomer.contact_phone is not || @currentCustomer.contact_phone == "") class="text-slate-400">—</>
+                                <span if=(@currentCustomer is some && (@currentCustomer.contact_phone is not || @currentCustomer.contact_phone == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                     </div>
@@ -161,19 +163,19 @@
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Billing address</div>
                             <div class="text-slate-900">
                                 <span if=(@currentCustomer.billing_address is some && @currentCustomer.billing_address != "")>${@currentCustomer.billing_address}</>
-                                <span if=(@currentCustomer.billing_address is not || @currentCustomer.billing_address == "") class="text-slate-400">—</>
+                                <span if=(@currentCustomer is some && (@currentCustomer.billing_address is not || @currentCustomer.billing_address == "")) class="text-slate-400">—</>
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Payment terms</div>
                             <div class="text-slate-900">
-                                ${paymentTermsLabel(@currentCustomer.payment_terms)}
+                                ${@currentCustomer is some ? paymentTermsLabel(@currentCustomer.payment_terms) : ""}
                             </div>
                         </div>
                         <div>
                             <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Customer since</div>
                             <div class="text-slate-900">
-                                ${@currentCustomer.created_at is not ? "—" : @currentCustomer.created_at.substring(0, 10)}
+                                ${@currentCustomer is some ? @currentCustomer.created_at is not ? "—" : @currentCustomer.created_at.substring(0, 10) : ""}
                             </div>
                         </div>
                     </div>

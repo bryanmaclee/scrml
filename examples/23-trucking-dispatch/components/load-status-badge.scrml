@@ -23,6 +23,14 @@ ${
     // new variant to the enum is a compile-time forcing function here (every
     // arm must exist — E-TYPE-020 otherwise). The stored DB string flows into
     // the LoadStatus param directly; the match dispatches on the variant name.
+    // Takes the whole record (or `not`, before the page's data loads). A class
+    // attribute's `${…}` is evaluated even while an enclosing `if=` hides the
+    // element, so reading `.field` off an absent record there throws (S443).
+    export fn statusBadgeClassesOf(l) -> string {
+        if (l is not) return ""
+        return statusBadgeClasses(l.status)
+    }
+
     export fn statusBadgeClasses(status: LoadStatus) -> string {
         return match status {
             .Tendered   :> "bg-blue-100 text-blue-800 border-blue-200"

@@ -19,7 +19,7 @@
 <page db="../../dispatch.db" auth="required">
 
   import { formatRate, formatPickupAt } from '../../components/load-card.scrml'
-  import { statusBadgeClasses, statusLabel } from '../../components/load-status-badge.scrml'
+  import { statusBadgeClasses, statusBadgeClassesOf, statusLabel } from '../../components/load-status-badge.scrml'
   import { LoadStatus } from '../../schema.scrml'
   import { createSessionStore } from 'scrml:store'
   import { SESSION_DB_PATH } from '../../models/auth.scrml'
@@ -29,10 +29,12 @@
   <db src="../../dispatch.db" protect="password_hash" tables="users, customers, loads, assignments, drivers, tractors, trailers, log_entries, invoices, lin_tokens">
 
     ${
-        function getCurrentUser(sessionToken) {
-            if (sessionToken is not) return not
-            const store = createSessionStore(SESSION_DB_PATH)
-            const userId = store.get(sessionToken)
+        // `userId` is the framework session's user (`session.userId`), passed in by
+        // the request-entry server function — `session` is readable only there
+        // (§20.5, E-SESSION-CONTEXT). Login sets it with session.set("userId", …) and
+        // <program auth="required"> gates on it. (The old app-KV token rode a cookie
+        // set from JS with HttpOnly, which browsers refuse, so it never persisted.)
+        function getCurrentUser(userId) {
             if (userId is not) return not
             return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
         }
@@ -40,7 +42,7 @@
         // F-AUTH-001 fallback: role gate. Verifies the customer owns this load
         // (load.customer_id == customer.id where customer = user's customers row).
         function fetchLoadDetail(sessionToken, loadId) {
-            const user = getCurrentUser(sessionToken)
+            const user = getCurrentUser(session.userId)
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -133,7 +135,7 @@
         // (counts as a consume per §35.3 rule 1). The DB-side single-use
         // guard is the durable backstop.
         function signRateConfirmationServer(sessionToken, loadId, lin token: string) {
-            const user = getCurrentUser(sessionToken)
+            const user = getCurrentUser(session.userId)
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -212,7 +214,7 @@
             const loadId = getLoadId()
             const data = fetchLoadDetail(tok, loadId)
             if (data.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (data.notFound) {
@@ -248,7 +250,7 @@
             }
             const result = signRateConfirmationServer(tok, @currentLoad.id, acceptance)
             if (result.unauthorized) {
-                window.location.href = "/login?reason=unauthorized"
+                window.location.href = "/auth/login?reason=unauthorized"
                 return
             }
             if (result.error) {
@@ -265,7 +267,7 @@
 
         function logout() {
             document.cookie = "scrml_session=; Path=/; Max-Age=0"
-            window.location.href = "/login"
+            window.location.href = "/auth/login?logout=1"
         }
 
         // Pretty label for log entry types.
@@ -334,11 +336,11 @@
     <div class="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <header class="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
           <div class="flex items-center gap-3">
-              <a href="/customer" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
+              <a href="/customer/home" class="text-xl font-bold hover:text-blue-300">Trucking Dispatch</a>
               <span class="text-xs uppercase tracking-wider text-slate-400">Load tracking</span>
           </div>
           <nav class="flex items-center gap-4 text-sm">
-              <a href="/customer" class="hover:text-blue-300">Home</a>
+              <a href="/customer/home" class="hover:text-blue-300">Home</a>
               <a href="/customer/loads" class="hover:text-blue-300">Loads</a>
               <a href="/customer/invoices" class="hover:text-blue-300">Invoices</a>
               <a href="/customer/profile" class="hover:text-blue-300">Profile</a>
@@ -392,26 +394,26 @@
                           </div>
                       </div>
                       <div class="text-right">
-                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${statusBadgeClasses(@currentLoad.status)}">
-                              ${statusLabel(@currentLoad.status)}
+                          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border ${statusBadgeClassesOf(@currentLoad)}">
+                              ${@currentLoad is some ? statusLabel(@currentLoad.status) : ""}
                           </span>
-                          <div class="text-lg font-bold text-slate-900 mt-2">${formatRate(@currentLoad.rate_dollars)}</div>
+                          <div class="text-lg font-bold text-slate-900 mt-2">${@currentLoad is some ? formatRate(@currentLoad.rate_dollars) : ""}</div>
                       </div>
                   </div>
 
                   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6 text-sm">
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Pickup</div>
-                          <div class="text-slate-900 font-semibold">${formatPickupAt(@currentLoad.pickup_at)}</div>
+                          <div class="text-slate-900 font-semibold">${@currentLoad is some ? formatPickupAt(@currentLoad.pickup_at) : ""}</div>
                           <div class="text-xs text-slate-500 mt-0.5">
-                              ${@currentLoad.origin_address is not ? "" : @currentLoad.origin_address}
+                              ${@currentLoad is some ? @currentLoad.origin_address is not ? "" : @currentLoad.origin_address : ""}
                           </div>
                       </div>
                       <div>
                           <div class="text-xs text-slate-500 font-medium uppercase tracking-wider mb-1">Estimated delivery</div>
-                          <div class="text-slate-900 font-semibold">${formatPickupAt(@currentLoad.deliver_by)}</div>
+                          <div class="text-slate-900 font-semibold">${@currentLoad is some ? formatPickupAt(@currentLoad.deliver_by) : ""}</div>
                           <div class="text-xs text-slate-500 mt-0.5">
-                              ${@currentLoad.destination_address is not ? "" : @currentLoad.destination_address}
+                              ${@currentLoad is some ? @currentLoad.destination_address is not ? "" : @currentLoad.destination_address : ""}
                           </div>
                       </div>
                   </div>
@@ -458,7 +460,7 @@
               </section>
 
               <!-- No-driver-yet card for pre-dispatched states -->
-              <section if=(@assignment is not && @currentLoad.status != "Tendered" && @currentLoad.status != "Cancelled") class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
+              <section if=(@currentLoad is some && (@assignment is not && @currentLoad.status != "Tendered" && @currentLoad.status != "Cancelled")) class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
                   Carrier not yet assigned. Your dispatcher is matching equipment now.
               </section>
 
@@ -468,15 +470,15 @@
                    (single-use guard at the DB) + advances load to dispatched.
                    Replay protection: the second click hits a row with
                    consumed_at != NULL → server returns "already used". -->
-              <section if=(@currentLoad.status == "Booked" && @acceptanceToken != "") class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+              <section if=(@currentLoad is some && (@currentLoad.status == "Booked" && @acceptanceToken != "")) class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                   <div class="flex items-start justify-between gap-4">
                       <div class="text-sm text-blue-900">
                           <strong>Rate confirmation pending.</strong> Your dispatcher has
                           booked this load. Sign the rate confirmation to release it
                           for driver dispatch.
                           <div class="text-xs text-blue-700 mt-1">
-                              Total rate: <strong>${formatRate(@currentLoad.rate_dollars)}</strong>
-                              · Pickup: ${formatPickupAt(@currentLoad.pickup_at)}
+                              Total rate: <strong>${@currentLoad is some ? formatRate(@currentLoad.rate_dollars) : ""}</strong>
+                              · Pickup: ${@currentLoad is some ? formatPickupAt(@currentLoad.pickup_at) : ""}
                           </div>
                       </div>
                       <button
@@ -491,13 +493,13 @@
               </div>
 
               <!-- Tendered: awaiting rate -->
-              <section if=(@currentLoad.status == "Tendered") class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
+              <section if=(@currentLoad is some && (@currentLoad.status == "Tendered")) class="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-900">
                   <strong>Quote pending.</strong> The dispatcher is preparing a rate for this load.
                   You'll see it here once it's ready.
               </section>
 
               <!-- Cancelled -->
-              <section if=(@currentLoad.status == "Cancelled") class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-900">
+              <section if=(@currentLoad is some && (@currentLoad.status == "Cancelled")) class="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-900">
                   This load has been cancelled.
               </section>
 
@@ -532,7 +534,7 @@
 
                   <ul if=(@loadEvents.length > 0) class="space-y-2">
                       <each in=@loadEvents as ev key=__index__>
-                          <li if=(isForThisLoad(ev.loadId, @currentLoad.id)) class="flex items-start gap-3 text-sm">
+                          <li if=(@currentLoad is some && (isForThisLoad(ev.loadId, @currentLoad.id))) class="flex items-start gap-3 text-sm">
                               <span class="text-xs text-slate-500 font-mono w-32 flex-shrink-0 pt-0.5">
                                   ${ev.at == "" ? "" : ev.at.substring(11, 16)}
                               </span>

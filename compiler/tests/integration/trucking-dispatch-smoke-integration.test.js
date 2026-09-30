@@ -350,8 +350,12 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
   // count: 4 publishers × cross-file consumer re-analysis under emitPerRoute) to
   // 0. The code is REMOVED from the baseline (a 0-count entry would also trip the
   // "no UNEXPECTED codes" inverse). The aggregate total falls 92 -> 73.
+  // S443: the app's gated routes redirect to its real login page
+  // (loginRedirect="/auth/login"), so W-AUTH-LOGIN-MISSING and
+  // I-AUTH-REDIRECT-UNRESOLVED no longer fire; role links point at real pages
+  // (W-CG-CHUNK-PREFETCH-UNRESOLVED 3 → 0); getCurrentUser reads session.userId
+  // instead of an untyped KV store (W-TYPE-031-UNPROVEN 321 → 287).
   const EXPECTED_BASELINE = {
-    "I-AUTH-REDIRECT-UNRESOLVED": 1,
     // §14.8.9 protect-egress floor (g-sql-row-protect-leak, 2026-06-28): the
     // structural-redaction floor strips a `protect=` column from any server
     // function's CLIENT response by construction. The trucking corpus's auth
@@ -386,7 +390,6 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // of `W-AUTH-001` — see §34) fires ONLY when no declaration exists anywhere. None remain in
     // this corpus, so the code is REMOVED from the baseline (a 0-count entry
     // would trip the "no UNEXPECTED codes" inverse). Aggregate 59 -> 39.
-    "W-AUTH-LOGIN-MISSING": 1,
     // W2 (rs-entrypoint-routemap, §40.9.2 S221 ruling): the Reachability
     // Solver now enumerates the 20 filesystem-routed `pages/**` files as
     // entry points (previously ONLY app.scrml#program was enumerated), and
@@ -404,7 +407,6 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     //     points whose tier-1/2 prefetch targets are not yet resolved at the
     //     splitter (A-4 codegen splitter is a later wave).
     // Aggregate 39 -> 40.
-    "W-CG-CHUNK-PREFETCH-UNRESOLVED": 3,
     "W-DEAD-FUNCTION": 1,
     // S199 — the HOS `<engine for=DriverStatus server=@currentDriver.current_status>`
     // showcase (pages/driver/hos.scrml, the E-leg dog-food): @currentDriver is a
@@ -528,7 +530,7 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // because the arm still exists for the `not` literal — it simply has no
     // site in this app.
     // Aggregate 74 -> 80 (#409 W-IF-IN-EACH) -> 418.
-    "W-TYPE-031-UNPROVEN": 321,
+    "W-TYPE-031-UNPROVEN": 287,
   };
 
   test("aggregate diagnostic count matches baseline", () => {
@@ -559,18 +561,16 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     expect(unexpected).toEqual([]);
   }, COMPILE_TIMEOUT);
 
-  test("W-AUTH-LOGIN-MISSING fires exactly once (canonical missing-login site)", () => {
-    // S91 A-3.5 ratified W-AUTH-LOGIN-MISSING + the `scrml generate
-    // auth` CLI subcommand + the `stdlib/auth/templates/login.scrml`
-    // template — together those close the 03-contact-book latent bug.
-    // trucking-dispatch's pages/auth/login.scrml carries a login form
-    // but does NOT declare a login intent the AuthGraph recognizes;
-    // the lint correctly fires once for this app.
+  test("W-AUTH-LOGIN-MISSING no longer fires — the app declares its real login page (S443)", () => {
+    // Before S443 the app's gated routes redirected to the default /login,
+    // which does not exist (the page is pages/auth/login.scrml → /auth/login),
+    // and the lint correctly fired once. The root <program> now declares
+    // loginRedirect="/auth/login", so the redirect target resolves.
     const result = compileTd();
     const fires = allDiags(result).filter(
       (d) => d.code === "W-AUTH-LOGIN-MISSING",
     );
-    expect(fires.length).toBe(1);
+    expect(fires.length).toBe(0);
   }, COMPILE_TIMEOUT);
 });
 
