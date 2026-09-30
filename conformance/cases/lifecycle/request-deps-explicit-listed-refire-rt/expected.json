@@ -1,0 +1,35 @@
+{
+  "id": "request-deps-explicit-listed-refire-rt",
+  "description": "§6.7.7 a change to a `deps=` variable RE-EXECUTES the fetch (RUNTIME, sqlEngine:\"real\"). deps=[@ver]; @userId is set to 2 (unlisted, no re-fire), then @ver is bumped: the fetch re-runs and reads the CURRENT @userId, so @userData becomes user 2 (\"b\") and .loading settles false. This is the manual invalidate-after-write idiom (bump a version cell). Twin of request-deps-explicit-unlisted-no-refire-rt.",
+  "language-version": "1.0",
+  "spec": "§6.7.7",
+  "rationale": "§6.7.7 Re-execution: \"The fetch re-executes when: … Any `@variable` in `deps=` changes\". Pre-S444 the parsed deps attribute read as [] so the explicit list was dropped (g-request-deps-attr-ignored-both-forms).",
+  "expect": {
+    "codes": [],
+    "notCodes": [],
+    "notCodePrefixes": ["E-"],
+    "sqlEngine": "real",
+    "serverDb": {
+      "users": [
+        { "id": 1, "name": "a" },
+        { "id": 2, "name": "b" }
+      ]
+    },
+    "input": [
+      { "wait": "settle" },
+      { "click": "#setid" },
+      { "wait": "settle" },
+      { "click": "#bump" },
+      { "wait": "settle" }
+    ],
+    "state": {
+      "userId": 2,
+      "ver": 1,
+      "userData": { "id": 2, "name": "b" }
+    },
+    "domAnchored": [
+      { "selector": "#who", "text": "b" },
+      { "selector": "#loading", "text": "false" }
+    ]
+  }
+}

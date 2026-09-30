@@ -553,6 +553,16 @@ scrml defines `//` as the universal single-line comment syntax (§27). The block
 
 **S88 amendment note (2026-05-13):** the prior `SHALL NOT handle <!-- -->` wording (pre-S87) was authored before the BS-layer comment-skip mechanism shipped. Per S86 ratification ("BS-layer over SPEC retreat" — when SPEC and implementation diverge AND SPEC is design-intent, implementation catches up; conversely when implementation is the right answer, SPEC catches up), this amendment softens §4.7 to MAY-permit `<!-- -->` skip at BS-layer, matching the shipped block-splitter behavior. The skip is conservative: it treats the entire comment span as raw content; it does not interpret content inside the comment for delimiter recognition. `/* */` remains forbidden at BS-layer — those genuinely belong to per-context tokenizers (CSS, JS) and crossing the BS layer would create false context-mode transitions inside non-comment code.
 
+**S444 narrowing — `//` inside a free-text body.** Inside a free-text body (§4.18.1 — plain-markup element bodies,
+component bodies, the `<errors>` override template), the two characters `//` open a comment **only** when they are
+immediately preceded by a whitespace byte (space, tab, LF, CR — so a `//` at the start of a line,
+after its indentation, or after a space mid-line). Anywhere else in a free-text body `//` is content and suppresses
+nothing: `http://x`, `a//b` and `</b>// x` are text. When `//` does open a comment, this section applies unchanged — the
+comment runs to end of line and every delimiter in it (including a closer such as `</p>`) is raw comment text. The
+normative rule is §4.18.1b exit (2). In every other context (`<program>` / `<page>` `default-logic` bodies, logic,
+code-default bodies, CSS, the block splitter's own brace-delimited scanning) this section is unchanged.
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (item 1: *"a `//` starts a comment ONLY at the start of a line or after whitespace; the comment runs to end of line and is OPAQUE"*) · supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (an unqualified `//` in free text)
+
 **Rationale:** Without this rule, a commented-out delimiter sequence such as `// <db src="db.sql">` or `// ${` would be scanned by the block splitter and would open a spurious block context, corrupting the block stream and all downstream passes.
 
 **Worked example — valid (commented-out tag):**
@@ -1239,6 +1249,9 @@ This subsection is the **single canonical definition** of the code-default body 
 
 > **Amendment S442 — dpa-045: plain-markup text (AXIOM-LEVEL). The two text-mode productions (§4.18.1 / §4.18.1a /
 > §4.18.1b), whitespace kept exactly (§4.18.5), and the display-text literal's character escapes deleted (§4.18.3).**
+> *(S444: the escape deletion is SUPERSEDED — `\"`, `\\`, `\${` are restored, §4.18.3; and exit (2), `//` comments, is
+> narrowed to a `//` at the start of a line or after whitespace, §4.18.1b. The rest of this banner stands.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (the `//` part)
 > Free text (plain-markup bodies, literal by default) and code-default (engine state-children, match arms,
 > `:`-shorthand; display text inside `"…"`) are specified as a pair of **text-mode productions** — duals, not one model.
 > Neither is a string literal, and neither may be called one.
@@ -1249,7 +1262,8 @@ This subsection is the **single canonical definition** of the code-default body 
 > the propagation fix repeats, in real time and with the debate's own eyes open, exactly the defect class Call 1
 > named."* The propagation fixes are scheduled by the same ruling (B): (1) route the free-text `${` scan through the
 > proper brace scanner; (2) make the §4.18.3 escape table actually work OR delete it from SPEC — not neither
-> (RULED S442 follow-up: **delete** — §4.18.3); (3) delete the `\"` escape (done — §4.18.3). B(1) and the
+> (RULED S442 follow-up: ~~**delete** — §4.18.3~~ *superseded S444: the catalog is restored and made to work,
+> §4.18.3*); (3) ~~delete the `\"` escape (done — §4.18.3)~~ *(superseded S444: `\"` restored, §4.18.3)*. B(1) and the
 > whitespace fixes (§4.18.5) are built in the BOOTSTRAP; impl#1 only if one proves to be security (S435 policy). The loop census (C — every scanner that independently decides where a body
 > ends) runs against the bootstrap's `parse.scrml`, not impl#1.
 >
@@ -1280,6 +1294,13 @@ This subsection is the **single canonical definition** of the code-default body 
 *(Amendment S442 — the round-2 drafted §4.18.1. Three edits to the drafted text, all ruled: the free-text row keeps
 the prior §4.18.1's HTML-element list; its exit column is the follow-up's closed set (§4.18.1b); and the code-default
 escape column is empty — `\"` deleted per B(3), `\\` / `\${` per B(2) = delete. See the banner above.)*
+*(S444, "standalone only": the code-default exit cell is narrowed — only a standalone `"…"` body statement is a
+display-text literal; §4.18.3.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "standalone only, your rec" · narrows: the §4.18.1 code-default cell "`\"` opens a display-text literal (§4.18.3)" and the S111 §4.18.3 scope ("the vehicle for plain display text inside a code-default body") — which since #1190 the bootstrap read as EVERY `"…"` in a code-default body
+*(S444: two table cells amended — the free-text exit column's `//` is narrowed to a `//` at the start of a line or
+after whitespace (§4.18.1b exit (2)), and the code-default escape column is no longer empty: `\"`, `\\`, `\${` are
+restored (§4.18.3).)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (the `//` part)
 
 A markup/state body — the content between a tag opener's `>` and the matching closer (`</>` / `</tagname>`) — is
 scanned by exactly one of two **text-mode productions**. A text-mode production is a region whose extent and internal
@@ -1289,8 +1310,8 @@ name.** The two productions are **duals, not one model wearing two hats**:
 
 | production | governs | default | exit sequence(s) | escape into the default |
 |---|---|---|---|---|
-| **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error, `~{` test — §4.18.1b); `//` comments (§4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
-| **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) | code | `"` opens a display-text literal (§4.18.3) | none — the display-text literal has NO character escapes (S442: `\"`, `\\`, `\${` deleted; ⚑ OPEN residue — §4.18.3) |
+| **free-text** | plain-markup element bodies (HTML elements — `<p>`, `<h1>`, `<li>`, `<button>`, `<div>`, `<span>`, …), component bodies, the `<errors>` override template | literal | the context sigils (`${` logic, `#{` CSS, `^{` meta, `!{` error, `~{` test — §4.18.1b); `//` comments — a `//` at the start of a line or immediately after whitespace only (§4.18.1b exit (2), §4.7); `<`+[a-zA-Z!/?*_.] opens/closes a nested element | none needed |
+| **code-default** | engine state-children (§51.0), match arms (§18.0.1), `:`-shorthand (§4.14) | code | ~~`"` opens a display-text literal (§4.18.3)~~ S444: a `"…"` standing ALONE as a body statement is a display-text literal (§4.18.3); a `"…"` operand inside an expression is an ordinary string | inside a display-text literal: `\"` (a literal `"`), `\\` (a literal `\`), `\${` (a literal `${`) — §4.18.3 (restored S444; ~~S442: NO character escapes~~) |
 
 - The body mode SHALL be determined by the **enclosing element kind**, never by the lexical content of the body.
   *(Unchanged from the prior §4.18.1.)* An engine state-child body is code-default because it is an engine state-child
@@ -1335,7 +1356,8 @@ banner.)*
 **Free text's closed exit set (RULED, S442 follow-up — the ruling's words):** *"Free text's closed exit set is:
 (1) every context sigil §3.1 already defines (`${`, `#{`, `^{`, `!{`, and so on); (2) `//` comments (§4.7); (3) `<`
 followed by a letter, `!`, `/`, `?`, `*`, `_` or `.` — the three additions are scrml's own tag forms. That list, and no
-others."* So `5 < 7` is just text.
+others."* So `5 < 7` is just text. *(S444: exit (2) is narrowed — a `//` opens a comment only at the start of a line or
+after whitespace; see item 2 below.)*
 
 - **Closed exit set (pin 1).** A free-text body is left by exactly these sequences — **that list, and no others**:
   1. **The context sigils** (a `{`-delimited context opens; content resumes at its matching `}`):
@@ -1355,7 +1377,30 @@ others."* So `5 < 7` is just text.
        > **Provenance:** rationale:§23.2.4 already makes a `_{}` in a markup element body E-FOREIGN-004; the struck "as today" was false for impl#1 (verified by execution at `108ca89b`) (PA reading S444, bryan veto window)
      - NOT exits: `?{` — the §3.1 table's third row, whose parent is Logic only; in a markup body it is text (§4.17
        S108 note, §8.1).
-  2. **`//` comments** — §4.7 suppression; the comment runs to end of line and is not content.
+  2. ~~**`//` comments** — §4.7 suppression; the comment runs to end of line and is not content.~~ *(superseded S444 —
+     the next paragraph narrows which `//` opens a comment)*
+     **`//` comments — at the start of a line or after whitespace only (S444).** A `//` in a free-text body opens a
+     comment **if and only if** the byte immediately before its first `/` is a **whitespace byte** — space (U+0020),
+     tab (U+0009), line feed (U+000A) or carriage return (U+000D); these four, and no others. (A free-text body always
+     follows its opener's `>`, so a byte before the `//` always exists.) "The start of a line" is the case where that byte is a line terminator; a `//` after a line's
+     leading indentation is preceded by whitespace and so opens a comment too. "Immediately before" means the source byte
+     itself, whatever construct it ends: a `//` right after a tag's `>` (`<p>// x`, `</b>// x`), after an
+     interpolation's `}` or after a `-->` is NOT a comment. Every other `//` is **content** — so `http://x`,
+     `https://x.y` and `a//b` are text, while `a // b` and `</label>   // note` are comments.
+     A comment runs from the `//` to (not including) the next line terminator, or to end of file, and it is **opaque**:
+     it is its own delimited region, so nothing inside it is an exit or a closer — `<p> // ends with </p>` followed
+     on the next line by `</p>` is an empty-of-content `<p>` (its whitespace kept, §4.18.5) whose closer is the SECOND
+     `</p>`. (A consequence, not an exception: written on ONE line, `<p> // ends with </p> </p>` puts both `</p>` in
+     the comment, and the `<p>` closes at the next closer after that line.) The comment is not content; the line
+     terminator that ends it is content (§4.18.5). Pin 3 holds: the comment's extent is set by its own delimiters (the
+     whitespace-preceded `//` and the line end), and no byte inside it moves the body's end.
+     > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (item 1, bryan's
+     > counter-example *"<p> // this tag should end with </p> </p>"*: *"a `//` starts a comment ONLY at the start of a
+     > line or after whitespace; the comment runs to end of line and is OPAQUE (a `</p>` inside it is comment text — the
+     > comment is its own delimited region, so pin 3 holds). So `http://x`, `a//b`, `https://x.y` stay text;
+     > `</label>   // note` unchanged; prose `a // b` becomes a comment."*) · the whitespace set, the start-of-line
+     > reading and the "immediately before is the source byte" reading are PA readings S444 (bryan veto window) ·
+     > supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2) (an unqualified `//`)
   3. **`<` immediately followed by `[a-zA-Z!/?*_.]`** — opens or closes a nested element: a tag opener, `</>`,
      `</tag>`, `<!-- -->` (`!`), and scrml's own tag forms `<*x/>` (the existing instance, §66.6), `<_ …>` (the
      wildcard arm) and `<.Variant …>` (a variant arm, §18.0.1).
@@ -1387,20 +1432,25 @@ others."* So `5 < 7` is just text.
   character inside can move it.
 - **Cooked (pin 4 — RULED).** The node handed to codegen SHALL be **cooked**: delimiters removed and escapes
   decoded. For a display-text literal, the `"` delimiters are removed before any downstream stage receives the content,
-  and no downstream stage SHALL re-scan that content for escapes. (With §4.18.3's catalog deleted there are no escapes
-  left to decode; the rule still binds the delimiters and forbids a downstream re-scan.) For the free-text production,
+  and no downstream stage SHALL re-scan that content for escapes. ~~(With §4.18.3's catalog deleted there are no escapes
+  left to decode; the rule still binds the delimiters and forbids a downstream re-scan.)~~ *(S444: the catalog is
+  restored — `\"` → `"`, `\\` → `\`, `\${` → the two characters `${`, decoded once, by the scan that finds the literal's
+  extent; a decoded `${` is content and is never re-read as an interpolation.)* For the free-text production,
   cooked and raw are the same bytes — the production has no delimiters inside the run and no escapes (pin 5).
   *(Round 2 Call 2 measured two shipped modules disagreeing: `parse-file.js:316` hands codegen the verbatim source
   including quotes; `emit-match.ts:647` strips the delimiters and decodes the escapes. impl#1 divergence.)*
   > **Provenance:** ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 2 — *"Cooked — the node handed to codegen
   > has delimiters removed and escapes decoded (dpa-045 pin 4). → RULED."*
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 - **The free-text escape policy DIVERGES from §4.18.3 — deliberately (pin 5).** The free-text production has **no
   escape table**. **A stray `\` in free text is just content** — silent content: not an escape, not an error, not a
-  diagnostic. §4.18.3's former escape set and its `E-PARSE-001` malformed-escape rule for `\x` (both deleted S442)
-  never applied to a free-text body, and no escape rule SHALL be applied to one. (The artifact names the hazard: that rule
+  diagnostic. §4.18.3's escape set and its `E-PARSE-001` malformed-escape rule for `\x` (~~both deleted S442~~ both
+  restored S444) never apply to a free-text body, and no escape rule SHALL be applied to one. (The artifact names the hazard: that rule
   extended to free text would newly-reject every Windows path, every `\n` in prose, every regex in a `<p>` — "one word
   away … the word being 'literal' spanning both productions.") *Informative:* a literal `${` in free text is written
   with a DELIMITER escape — interpolate the text, e.g. `${"$"}{5}` — never a character escape (round 2, Q3).
+  *(S444: unchanged — free text stays escape-free; the restored escapes are the display-text literal's only.)*
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 - **Grammar vs conformance (pin 6).** This subsection specifies a grammar property (bounded-lookahead decidability); it
   does NOT thereby claim the shipping compiler computes this production's extent via a single canonical scan. Where
   more than one component independently computes an extent for the same body, this subsection's guarantee holds only
@@ -1420,9 +1470,11 @@ claim about the rule; the shipping compiler has not moved (Nominal/spec-ahead).
 | whitespace — static-HTML path (plain markup at top level / in `<program>`, `if=` templates, markup nested in match arms and engine state-children, both display-text-literal loci) | verbatim, byte for byte | verbatim | inert |
 | whitespace — component-definition bodies (`const Box = <div>…</>`) | runs collapse to one space, indentation stripped, tab → space; one case ADDS a trailing space | verbatim | emitted-output change (conformance fix; no acceptance change) |
 | whitespace — markup built from logic (`lift <li>…</li>`, markup-as-value `const m = <p>…</p>`) | each text segment trimmed and collapsed; the whitespace next to `${…}` is DELETED (`   lifted   ${it}   li` renders `liftedali`) | verbatim | emitted-output change (bug-fix — today's output drops content) |
-| `\"` in a code-default display-text literal | `:`-shorthand: `E-ENGINE-STATE-CHILD-MISSING` for children present in source (round 2) | not an escape: `\` is content and the `"` closes the literal (§4.18.3) | changes meaning at the SPEC level; corpus uses: **0** |
-| `\\` / `\${` in a code-default display-text literal | `\\` renders `\\` (cooked value discarded); `\${` is a no-op — the interpolation fires (round 2) | not escapes: `\` is content; `${` opens an interpolation | changes meaning at the SPEC level; corpus uses: **0** / **0** |
-| `//` comments, `#{`, `^{`, `!{` blocks in a free-text body | exits (459 / 87 / 29 / 5 corpus blocks) | exits | inert |
+| `\"` in a code-default display-text literal | `:`-shorthand: `E-ENGINE-STATE-CHILD-MISSING` for children present in source (round 2) | ~~not an escape: `\` is content and the `"` closes the literal (§4.18.3)~~ S444: an escape — a literal `"`; the literal does not close (§4.18.3) | ~~changes meaning at the SPEC level~~ S444: the S111 meaning restored; corpus uses: **0** |
+| `\\` / `\${` in a code-default display-text literal | `\\` renders `\\` (cooked value discarded); `\${` is a no-op — the interpolation fires (round 2) | ~~not escapes: `\` is content; `${` opens an interpolation~~ S444: escapes — a literal `\` / a literal `${` (no interpolation) (§4.18.3) | ~~changes meaning at the SPEC level~~ S444: the S111 meaning restored; corpus uses: **0** / **0** |
+| `//` comments, `#{`, `^{`, `!{` blocks in a free-text body | exits (459 / 87 / 29 / 5 corpus blocks) | exits (S444: a `//` only at the start of a line or after whitespace — next row) | inert |
+| S444 (measured at `12aae48a1`) — a free-text `//` NOT preceded by whitespace (`a//b`, `</b>// x`, `<p>// x`, `${x}// y`) | impl#1: a comment (except a `:`-preceded `//`, which its URL carve-out keeps as text) — silently deletes the rest of the line | content (§4.18.1b exit (2)) | changes meaning — was a comment, is now text; corpus (`examples/ samples/ conformance/`): **0** (all 55 `\S//` hits are in attributes, logic strings or comments); bootstrap parse of 2,130 corpus files: **0** changed |
+| S444 — a free-text `//` after whitespace or at a line start (`a // b`, `</label>   // note`, an indented `// note`) | a comment | a comment, opaque to end of line | inert |
 | the spaced opener `< tag>` in a free-text body | an opener + W-WHITESPACE-001 | content | changes meaning — was an opener, is now text; corpus: **1** (`ctrl-004`, conformance) |
 | `<*x/>`, `<_ …>`, `<.Variant …>` in a free-text body | tag forms | tag forms | inert |
 
@@ -1442,24 +1494,67 @@ This is the **explicit text/code boundary** the model establishes: in a code-def
 
 A **display-text literal** is the vehicle for plain display text inside a code-default body.
 
+**Scope — a standalone body statement only (S444).** A `"…"` in a code-default body is a display-text literal **only
+when it stands alone as a body statement** — the whole statement is the one `"…"` (a body may hold several such
+statements; a `:`-shorthand body is one). A `"…"` that is an operand inside an expression — `@n > 5 ? "many\n" :
+"few"`, `f("x")`, `"a" + @b`, `("x")` — is an **ordinary string value** with the ordinary logic-string escapes (`\n` is a
+newline, `\t` a tab; there is no `E-PARSE-001` for them) and none of this section's rules. Everything below in §4.18.3
+/ §4.18.4 (the escape catalog, `E-PARSE-001`, `${…}` segments, cooking) applies to the standalone literal only.
+> **Provenance:** ruling:user-voice-scrml.md S444 "standalone only, your rec" · narrows: the §4.18.1 code-default cell "`\"` opens a display-text literal (§4.18.3)" and the S111 §4.18.3 scope ("the vehicle for plain display text inside a code-default body") — which since #1190 the bootstrap read as EVERY `"…"` in a code-default body
+
 **Formal rule:**
 
 ```
 display-text-literal ::= '"' ( literal-segment | interpolation )* '"'
-literal-segment      ::= (any character except '"' or the '${' sequence)+     -- S442: '\' is ordinary (no escapes)
+literal-segment      ::= ( escape | any character except '"', '\' or the '${' sequence )+
+escape               ::= '\"' | '\\' | '\${'                            -- S444: restored (S442's "no escapes" superseded)
 interpolation        ::= '${' expression '}'
 ```
+
+A `\` followed by anything other than `"`, `\` or `${` is a malformed escape (`E-PARSE-001`, below).
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 
 **Normative statements:**
 
 - A display-text literal is delimited by the double-quote character `"` on both ends. The double-quote is the **only** display-text-literal delimiter. This matches the §5 attribute-string convention (`attr="value"` — §5.1), which is `"`-only; scrml uses one string delimiter language-wide.
 - The apostrophe `'` is an **ordinary interior character** of a display-text literal — it carries no delimiter role and requires no escape. `"Don't worry — it's fine"` is a single well-formed literal. The backtick `` ` `` is likewise an ordinary interior character and is NOT a display-text delimiter.
-- ~~A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)~~ *(superseded S442 — next bullet)*
-- **Amendment S442 — the display-text literal has NO character escapes.** The whole former catalog is deleted: `\"` (B(3)), and `\\` and `\${` (B(2) = delete). A `\` inside a display-text literal is an ordinary content character; there is no malformed-escape error (`E-PARSE-001` no longer fires on `\x` here). Consequently `\"` is a `\` followed by the closing `"`, `\\` is two backslashes, and `\${` is a `\` followed by an interpolation. The free-text production has never had an escape table (§4.18.1b, pin 5), so neither text-mode production has character escapes.
+- ~~A literal double-quote `"` SHALL be written as `\"`; a literal backslash as `\\`; a literal `${` sequence as `\${` (the interpolation opener — see §4.18.4). These are the three escape sequences inside a display-text literal; a backslash followed by any other character is a malformed escape (`E-PARSE-001`). (This mirrors the minimal escape set scrml uses for `"`-delimited strings elsewhere; `'` needs no escape precisely because it is not a delimiter. The `\${` form was previously documented only in §4.18.4; the S114 editorial amendment lifted it here so §4.18.3 carries the full escape catalog without a forward reference.)~~ *(superseded S442 — next bullet; RESTORED S444 — the "Amendment S444" bullet below)*
+- ~~**Amendment S442 — the display-text literal has NO character escapes.** The whole former catalog is deleted: `\"` (B(3)), and `\\` and `\${` (B(2) = delete). A `\` inside a display-text literal is an ordinary content character; there is no malformed-escape error (`E-PARSE-001` no longer fires on `\x` here). Consequently `\"` is a `\` followed by the closing `"`, `\\` is two backslashes, and `\${` is a `\` followed by an interpolation. The free-text production has never had an escape table (§4.18.1b, pin 5), so neither text-mode production has character escapes.~~ *(superseded S444 — the escape catalog is restored; see the "Amendment S444" bullet below. The S442 provenance and evidence that follow are kept as the record.)*
   > **Provenance:** ruling:user-voice-scrml.md S442 — "all recs" (B(3): *"delete the `\"` escape"*) · ruling:user-voice-scrml.md S442 dpa-045 follow-ups, item 3 — *"B(2) = delete the rest of the §4.18.3 display-text escape catalog (`\\`, `\${`) — measured zero uses in 2,138 files. → RULED. (With B(3), the code-default display-text literal has no character escapes.)"* · dPA artifact `scrml-support/docs/debates/plain-markup-text-as-string-dpa-045-round2-2026-09-08.md` Q3 (*"Consider DELETING `\"` from §4.18.3 rather than fixing it … a character-escape is Class D machinery"*; *"Resolve root cause A one way or the other, but not neither"*) · supersedes: the struck three-escape sentence above. **Direction of change:** changes meaning at the SPEC level for `\"` / `\\` / `\${` inside a display-text literal. Evidence (S442 E measurement, `docs/changes/s442-dpa045-spec/progress.md`): across 2,138 `.scrml` files the catalog had **zero uses** — `\"` 0, `\\` 0, `\${` 0 — in 40 display-text literals (37 `:`-shorthand, 3 block-form). Shipping state (round 2 + S442): `\"` mis-scans (`E-ENGINE-STATE-CHILD-MISSING` for children present in source); `\\` passes only because the cooked value is discarded; `\${` is a no-op; the block splitter splits `"lit \${5}"` into text + a live `${5}` logic block. impl#1 divergences.
   >
-  > ⚑ **OPEN (residue — the ledger's scope note, verbatim):** *"with the catalog deleted, how an author writes a literal `"` or a literal `${` inside a code-default display-text literal is an OPEN residue (the dPA artifact already flagged the `"` case) — not decided here."* (The artifact: scrml has one string delimiter language-wide, so a `"` inside a display-text literal *"has no delimiter answer"*; it places *"the generalizable raw-content marker"* at that hole.)
+  > ~~⚑ **OPEN (residue — the ledger's scope note, verbatim):** *"with the catalog deleted, how an author writes a literal `"` or a literal `${` inside a code-default display-text literal is an OPEN residue (the dPA artifact already flagged the `"` case) — not decided here."* (The artifact: scrml has one string delimiter language-wide, so a `"` inside a display-text literal *"has no delimiter answer"*; it places *"the generalizable raw-content marker"* at that hole.)~~ *(CLOSED S444 — bryan ruled option A, restore the escapes; option B (doubled `""` / `$${`), option C (raw `#"…"#`) and interpolation (`${'"'}`) were not taken — next bullet.)*
+- **Amendment S444 — the escape catalog is RESTORED.** Inside a display-text literal there are exactly three escape
+  sequences, and no others:
+  - `\"` — a literal double-quote. It does NOT close the literal: `"She said \"hi\""` is `She said "hi"`.
+  - `\\` — a literal backslash. `"C:\\"` is `C:\` — the `"` after the escaped backslash closes the literal.
+  - `\${` — the two characters `${` as content, NOT an interpolation: `"\${x}"` is the four characters `${x}`. (After
+    it, `x}` is ordinary content; no brace matching happens.)
+
+  A backslash followed by any other character — `\q`, `\n`, `\t`, a `\` followed by a `$` that is not followed by
+  `{`, a `\` at a line end — is a **malformed escape: `E-PARSE-001`**, against the backslash and the character after it.
+  This restores the S111 catalog's rule exactly (S111, commit `d0b75a8f7`: *"a backslash followed by any other character
+  is a malformed escape (`E-PARSE-001`)"*); it is not a new design. On recovery the two characters are kept as content
+  and the scan continues after them, so a malformed escape never moves where the literal ends (the `"` after `\q` still
+  closes it). The escapes are decoded once, by the scan that finds the literal's extent (§4.18.1b pin 4 — cooked); the
+  node handed on carries the decoded text, and a decoded `${` is content that no later stage re-reads as an
+  interpolation. A `\` inside an interpolation's `${ … }` belongs to the expression's own grammar (a logic-context
+  string's escapes), not to this catalog. **The free-text production stays escape-free** (§4.18.1b pin 5): a `\` in a
+  plain-markup body is content — unchanged.
+  The unterminated-literal check (next bullet) uses the same scan: an escaped `\"` is not the closing quote, and an
+  escaped `\\` does not escape the character after it.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
+  > **Direction of change (per surface):** `\"` — was (S442) a `\` then the closing `"`; now a literal `"` and the
+  > literal continues (changes meaning; corpus uses **0**, S442 E measurement). `\\` — was two backslashes; now one
+  > (changes meaning; **0**). `\${` — was a `\` then a live interpolation; now a literal `${` (changes meaning; **0**).
+  > `\q` and every other `\` + char — was content; now `E-PARSE-001` (newly-rejecting; **0** — the S442 E cross-check
+  > found all 347 `\` characters in the corpus in logic, none inside a display-text literal).
+  > **Unknown-escape decision (S444):** the PA's lean was "`\` + char kept as content"; the brief's own condition
+  > governs — the pre-S442 catalog had `E-PARSE-001` for a malformed escape, so that behaviour is restored exactly.
 - A display-text literal that reaches end-of-file (or the body's closer) before its closing `"` is an unterminated literal — `E-CTX-001` against the opening `"`, recovered per §4.18.7.
+  *(S444:)* The recovered content is cooked with the same escape table, and each malformed escape in it is
+  `E-PARSE-001` — including a `\` immediately before the recovery point (`"abc\` at end of file: `E-CTX-001`, then
+  `E-PARSE-001` for the trailing `\`). Its `${` is content: the literal never closed, so no interpolation is walked.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" (the catalog applies to the literal's content however it ends) · review:S444 S239 review of 5d5ad360b nit 3 (the recovery path was raw and silent)
 
 **Worked example — display-text literals in code-default bodies:**
 
@@ -1483,6 +1578,10 @@ A display-text literal is a **sequence of literal-text segments and `${expr}` in
 - A display-text literal carrying one or more `${...}` interpolations is a single body child — a template-string-valued display-text node interleaving literal-text segments and interpolated expressions. It is NOT decomposed into sibling text + interpolation children.
 - The `${...}` interpolation token keeps a single meaning across the language: "interpolate an expression here." It is the same token in an attribute-value string (`attr="${@x}"` — §5, already template-string-shaped) and in a body display-text literal. A display-text literal is the body-position analogue of the attribute-value string.
 - ~~A literal `${` sequence intended as display text (not an interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. The escape is rare in practice (the `${` sequence is the interpolation opener inside the literal and is normally used for that purpose).~~ *(superseded S442 — the `\${` escape is deleted, §4.18.3 (B(2) = delete); how to write a literal `${` inside a display-text literal is ⚑ OPEN — the §4.18.3 residue)*
+- **Amendment S444 — the struck bullet above is restored.** A literal `${` sequence intended as display text (not an
+  interpolation) is written with the `\${` escape — see §4.18.3 for the full escape catalog. `"Cost: \${5}"` renders
+  `Cost: ${5}`; `"Cost: ${5}"` renders `Cost: 5`.
+  > **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 B(3)/B(2)
 
 **Worked example — interpolation inside the literal:**
 
@@ -20484,6 +20583,10 @@ scrml emits a single fixed `@layer` order once — `@layer reset, thirdparty, ba
 
 `//` is a single-line comment. It is valid in all scrml contexts.
 
+*(S444: inside a free-text body — plain markup — a `//` opens a comment only at the start of a line or immediately
+after whitespace; elsewhere there it is content, so `http://x` in a `<p>` is text. §4.18.1b exit (2), §4.7.)*
+> **Provenance:** ruling:user-voice-scrml.md S444 "yes on // revised, A for escapes" · supersedes: ruling:user-voice-scrml.md S442 dpa-045 follow-ups item 1, exit (2)
+
 ### 27.2 Per-Context Native Comments
 
 Each context type also accepts its native comment syntax:
@@ -21652,6 +21755,7 @@ the bootstrap/native compiler or to fix security). This is stated once, here; it
 | E-LIFECYCLE-015 | §28.5 | `animationFrame()` called with zero arguments or a non-function argument. The function expects a single callback. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | E-LIFECYCLE-017 | §28.5 | `animationFrame()` called outside any element scope. The function attaches per-frame work to an enclosing element's lifecycle; without a host element it has nowhere to attach. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts`.) | Error |
 | E-LIFECYCLE-018 | §28.3 | `<request>` element has no `id` attribute. The `id` is required so the request can be addressed and cancelled. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Error |
+| E-LIFECYCLE-022 | §6.7.7 | A `<request>` `deps=` entry is not a bare `@identifier` — a member access (`@u.id`), a call, a literal, or a name without the `@` sigil — or the `deps=` value is not a `[ ]` list (`deps=@n`). Grammar: `deps-list ::= ('@' identifier (',' '@' identifier)*)?`. An explicit `deps=` overrides inference, so an unrecognized entry would otherwise leave the request mount-only with no diagnostic. Resolution: list the cell itself (`deps=[@u]` for `@u.id`), or `deps=[]` for fetch-on-mount-only. The "undeclared `@x`" limb of §6.7.7's statement is refused by `E-STATE-UNDECLARED` at the same entry. (Catalog addition S444; emitted at `compiler/src/codegen/emit-html.ts` via `analyzeRequestDepsAttr` in `compiler/src/codegen/reactive-deps.ts`.) | Error |
 | W-LIFECYCLE-002 | §28.1 | `<timer>` has no body (self-closing form). A bodyless timer has no observable effect; the warning surfaces probable dead code. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | W-LIFECYCLE-007 | §28.1 | `running=false` literal boolean on `<timer>` or `<poll>`. The literal-false form is useless — the element can never become un-paused without a reactive variable. Use `running=@flag` or remove the attribute. (Catalog addition S78 audit; emitted at `compiler/src/codegen/emit-html.ts`.) | Warning |
 | E-LIN-005 | §35.5 | `let` / `const` / `lin` declaration shadows an in-scope `lin` variable of the same name. Shadowing a `lin` variable prevents the compiler from determining which binding a consumption refers to. Resolution: rename the new binding, or consume the outer `lin` variable before this declaration. (Catalog addition S78 audit; emitted at `compiler/src/type-system.ts` (`checkLinShadowing`). Supersedes the retired pre-2026-04 E-LIN-005 noted in §6.7.12.) | Error |

@@ -16,7 +16,7 @@ import {
   collectServerAuthorityTypes,
   serverVarDeclLoadKind,
 } from "./collect.ts";
-import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNames, collectStructuralDeclNames, type FunctionBodyRegistry } from "./reactive-deps.ts";
+import { collectDerivedVarNames, buildFunctionBodyRegistry, collectReactiveVarNames, collectStructuralDeclNames, readRequestDepsAttr, requestDepReadLines, type FunctionBodyRegistry } from "./reactive-deps.ts";
 import { collectChannelNodes, emitChannelClientJs, parseChannelReconnect } from "./emit-channel.ts";
 import { emitInitialLoad, emitUnifiedMountHydrate, emitServerAuthorityLoad, emitDeclRhsSqlLoad } from "./emit-sync.ts";
 import { emitParseVariantDecodeIIFE, type ParseVariantEnumLike } from "./emit-parse-variant.ts";
@@ -1692,7 +1692,7 @@ export function emitReactiveWiring(ctx: CompileContext): string[] {
       }
       const emitted = kind === "lifecycle"
         ? emitLifecycleNode(node, errors, fileAST.filePath ?? "")
-        : emitRequestNode(node, errors, fileAST.filePath ?? "", apiEndpoints);
+        : emitRequestNode(node, errors, fileAST.filePath ?? "", apiEndpoints, collectDerivedVarNames(fileAST));
       for (const l of emitted) lines.push(l);
     }
   };
@@ -2378,7 +2378,7 @@ function extractRequestId(node: any): string | null {
   return null;
 }
 
-function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>): string[] {
+function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndpoints: Map<string, ApiEndpointForEmit>, derivedNames: ReadonlySet<string> = new Set()): string[] {
   const lines: string[] = [];
   const attrs: any[] = node.attrs ?? node.attributes ?? [];
 
@@ -2492,10 +2492,11 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
     lines.push(`_scrml_register_cleanup(function() { ${mountedVar} = false; });`);
     // Re-fetch when the args cell changes (the request's reactive dependency,
     // §6.7.7 — mirrors the url-mode deps= effect, but the dep is the args cell).
+    // The fetch runs UNTRACKED: see the url-mode effect below.
     if (argsVarName !== null) {
       lines.push(`_scrml_effect(function() {`);
       lines.push(`  var _d = _scrml_reactive_get(${JSON.stringify(argsVarName)});`);
-      lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+      lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
       lines.push(`});`);
     } else {
       lines.push(`${fetchFn}();`);
@@ -2522,19 +2523,10 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   // when url= is absent.
   if (!hasUrl) return lines;
 
-  const depsAttr = attrMap.get("deps");
-  const depsVars: string[] = [];
-  if (depsAttr) {
-    const v = depsAttr.value;
-    if (v?.kind === "array" && Array.isArray(v.elements)) {
-      for (const el of v.elements) {
-        if (el?.kind === "variable-ref") depsVars.push((el.name ?? "").replace(/^@/, ""));
-      }
-    } else if (typeof v?.value === "string") {
-      const matches = v.value.matchAll(/@([A-Za-z_$][A-Za-z0-9_$]*)/g);
-      for (const m of matches) depsVars.push(m[1]);
-    }
-  }
+  // §6.7.7 — "Any `@variable` in `deps=` changes" re-executes the fetch. The
+  // shared reader (g-request-deps-attr-ignored-both-forms) understands the
+  // parsed `kind:"expr"` attribute shape; absent or `deps=[]` → mount-only.
+  const depsVars: string[] = readRequestDepsAttr(node) ?? [];
 
   const methodAttr = attrMap.get("method");
   let method = "GET";
@@ -2576,10 +2568,14 @@ function emitRequestNode(node: any, errors: CGError[], filePath: string, apiEndp
   lines.push(`_scrml_register_cleanup(function() { ${mountedVar} = false; });`);
 
   if (depsVars.length > 0) {
-    const depsJs = depsVars.map(d => `_scrml_reactive_get(${JSON.stringify(d)})`).join(", ");
+    // The effect SUBSCRIBES only to the listed deps (the `_d` reads) and runs the
+    // fetch UNTRACKED. The fetch fn's synchronous prologue reads
+    // `${stateVar}.data` (the stale check) — tracked, that read subscribed this
+    // effect to its own result, so every settle (`.data = …`) re-fired it: an
+    // endless refetch loop (S444, measured in a happy-dom mount).
     lines.push(`_scrml_effect(function() {`);
-    lines.push(`  var _d = [${depsJs}];`);
-    lines.push(`  if (${mountedVar}) ${fetchFn}();`);
+    lines.push(...requestDepReadLines(depsVars, derivedNames, "_d"));
+    lines.push(`  if (${mountedVar}) _scrml_untracked(${fetchFn});`);
     lines.push(`});`);
   } else {
     lines.push(`${fetchFn}();`);
