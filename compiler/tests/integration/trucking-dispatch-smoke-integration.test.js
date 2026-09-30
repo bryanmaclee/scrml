@@ -354,7 +354,7 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
   // (loginRedirect="/auth/login"), so W-AUTH-LOGIN-MISSING and
   // I-AUTH-REDIRECT-UNRESOLVED no longer fire; role links point at real pages
   // (W-CG-CHUNK-PREFETCH-UNRESOLVED 3 → 0); getCurrentUser reads session.userId
-  // instead of an untyped KV store (W-TYPE-031-UNPROVEN 321 → 287).
+  // instead of an untyped KV store (W-TYPE-031-UNPROVEN 321 → 287), and the per-page getCurrentUser helpers are inlined (287 → 239).
   const EXPECTED_BASELINE = {
     // §14.8.9 protect-egress floor (g-sql-row-protect-leak, 2026-06-28): the
     // structural-redaction floor strips a `protect=` column from any server
@@ -530,7 +530,7 @@ describe("trucking-dispatch — v0.2-shape diagnostic baseline", () => {
     // because the arm still exists for the `not` literal — it simply has no
     // site in this app.
     // Aggregate 74 -> 80 (#409 W-IF-IN-EACH) -> 418.
-    "W-TYPE-031-UNPROVEN": 287,
+    "W-TYPE-031-UNPROVEN": 239,
   };
 
   test("aggregate diagnostic count matches baseline", () => {

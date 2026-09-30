@@ -32,15 +32,6 @@
         // window so the demo isn't anchored to a moving target.
         const TODAY_ISO = "2026-04-29"
 
-        // `userId` is the framework session's user (`session.userId`), passed in by
-        // the request-entry server function — `session` is readable only there
-        // (§20.5, E-SESSION-CONTEXT). Login sets it with session.set("userId", …) and
-        // <program auth="required"> gates on it. (The old app-KV token rode a cookie
-        // set from JS with HttpOnly, which browsers refuse, so it never persisted.)
-        function getCurrentUser(userId) {
-            if (userId is not) return not
-            return ?{`SELECT id, email, role FROM users WHERE id = ${userId}`}.get()
-        }
 
         // F-AUTH-001 fallback: role gate. Returns user + customer + invoices
         // scoped to this customer.
@@ -49,7 +40,10 @@
         // 'payment' kind row in lin_tokens). The customer page uses this to
         // pass the lin token through markPaid().
         function fetchInvoicesServer(sessionToken) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
@@ -89,7 +83,10 @@
         // and double-clicks return error. The lin keyword on the parameter
         // gives a compile-time exactly-once-consume guarantee per §35.2.1.
         function markPaidServer(sessionToken, invoiceId, lin token: string) {
-            const user = getCurrentUser(session.userId)
+            // The framework session's user (§20.5). Inlined, not a helper: a helper with `?{}`
+            // compiles to its own public route, and one taking a userId would let any caller
+            // look up any user (S443 post-merge review of #1180).
+            const user = ?{`SELECT id, email, role FROM users WHERE id = ${session.userId}`}.get()
             if (user is not || user.role != "customer") {
                 return { unauthorized: true }
             }
