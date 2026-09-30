@@ -539,7 +539,11 @@ ${
 
     // ---- resolving a type expression ------------------------------------------
     type TypeEnv:struct = { stubs: TypeStub[], declNames: string[], declSyms: Sym[], file: string }
-    type RType:struct = { t: Type, st: AS }
+    // `unresolved`: the TYPE itself did not resolve — a name in it is unknown
+    // (E-TYPE-UNKNOWN; `t` then holds a placeholder). A diagnostic about the
+    // type's GRANTS (E-GRANT-UNKNOWN) leaves the type resolved: the element type
+    // is real and is checked against (S444 review, fail-closed).
+    type RType:struct = { t: Type, st: AS, unresolved: boolean }
 
     fn stubNamed(te: TypeEnv, name: string) -> TypeStub | not {
         for (const s of te.stubs) {
@@ -559,22 +563,22 @@ ${
 
     fn resolveMaybe(te: TypeEnv, inner: AType, st: AS) -> RType {
         const r: RType = resolveType(te, inner, st)
-        return { t: Type.Maybe(r.t), st: r.st }
+        return { t: Type.Maybe(r.t), st: r.st, unresolved: r.unresolved }
     }
 
     fn resolveTypeName(te: TypeEnv, at: AType, n: string, st: AS) -> RType {
-        if (n == "int") return { t: Type.Int, st: st }
-        if (n == "number") return { t: Type.Num, st: st }
-        if (n == "string") return { t: Type.Str, st: st }
-        if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st }
+        if (n == "int") return { t: Type.Int, st: st, unresolved: false }
+        if (n == "number") return { t: Type.Num, st: st, unresolved: false }
+        if (n == "string") return { t: Type.Str, st: st, unresolved: false }
+        if (n == "bool" || n == "boolean") return { t: Type.Bool, st: st, unresolved: false }
         const s: TypeStub | not = stubNamed(te, n)
-        if (s is some) return { t: Type.Named(s.sym), st: st }
+        if (s is some) return { t: Type.Named(s.sym), st: st, unresolved: false }
         let i = 0
         while (i < te.declNames.length) {
-            if (te.declNames[i] == n) return { t: Type.Named(te.declSyms[i]), st: st }
+            if (te.declNames[i] == n) return { t: Type.Named(te.declSyms[i]), st: st, unresolved: false }
             i = i + 1
         }
-        return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`") }
+        return { t: Type.Str, st: addDiag(st, te.file, at.span, "E-TYPE-UNKNOWN", "unknown type `" + n + "`"), unresolved: true }
     }
 
     // ---- the grant words (the ONE place a grant SPELLING is read) -------------
@@ -644,7 +648,7 @@ ${
                 }
             }
         }
-        return { t: Type.Seq(re.t, { length: length, at: where, positionsWritable: writable }), st: st }
+        return { t: Type.Seq(re.t, { length: length, at: where, positionsWritable: writable }), st: st, unresolved: re.unresolved }
     }
 
     fn growAt(ax: GrantAxis) -> SeqAt | not {
@@ -810,7 +814,7 @@ ${
         let i = 0
         for (const f of fs) {
             const rt: RType = resolveType(te, f.ty, st)
-            const unresolved: boolean = rt.st.diags.length > st.diags.length
+            const unresolved: boolean = rt.unresolved
             st = rt.st
             let grants: GrantSet = noGrants()
             if (!payload) grants = { replace: f.isLet || seqReplace(f.ty), edits: typeEdits(rt.t) }
@@ -1147,7 +1151,7 @@ ${
         if (aty is some) {
             const rt: RType = resolveType(te, aty, st)
             ty = rt.t
-            resolved = rt.st.diags.length == st.diags.length     // r8: an unknown type name → untrusted
+            resolved = !rt.unresolved     // r8: an unknown type name → untrusted
             st = rt.st
             seqRep = seqReplace(aty)
         } else {
@@ -1522,7 +1526,7 @@ ${
                         // guard (i), r7 A: a return type that did not resolve
                         // (E-TYPE-UNKNOWN answers with a placeholder type) is
                         // left unresolved — never checked against, never trusted
-                        if (rt.st.diags.length == st.diags.length) ret = rt.t
+                        if (!rt.unresolved) ret = rt.t
                         st = rt.st
                     }
                 }
@@ -3492,7 +3496,7 @@ ${
             const te: TypeEnv = { stubs: env.g.te.stubs, declNames: env.g.te.declNames, declSyms: env.g.te.declSyms, file: env.file }
             const rt: RType = resolveType(te, aty, st)
             // r8: an annotation that did not resolve is not the local's type
-            if (rt.st.diags.length == st.diags.length) annot = rt.t
+            if (!rt.unresolved) annot = rt.t
             st = rt.st
         }
         const ri: RX = resolveExpr(env, init, annot, st)
@@ -4029,7 +4033,7 @@ ${
                     if (!hasErrIn(fileErrs(g.files, fs.info.file), at.span)) {
                         const rt: RType = resolveType(fte, at, st)
                         pty = rt.t
-                        const unresolved: boolean = rt.st.diags.length > st.diags.length
+                        const unresolved: boolean = rt.unresolved
                         st = rt.st
                         if (unresolved) st = badParam(st, p.nid)     // r8: never checked against
                     }
@@ -5431,6 +5435,9 @@ ${
         const di: DeclInfo | not = declInfo(t, d)
         if (di is not) return VType.Unknown
         if (idx < 0 || idx >= di.fields.length) return VType.Unknown
+        // S444 review: a field whose type is untrusted (did not resolve, or failed
+        // to parse) is never checked against — a read of it is unknown (r8)
+        if (!di.fields[idx].trusted) return VType.Unknown
         return known(di.fields[idx].ty)
     }
 
