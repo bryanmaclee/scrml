@@ -54,7 +54,7 @@ const RUNTIME_FILENAME_PLACEHOLDER = "__SCRML_RUNTIME_FILENAME_PLACEHOLDER__";
 import { resetVarCounter } from "./var-counter.ts";
 import { enableSrcmapProvenance, disableSrcmapProvenance } from "./srcmap-provenance.ts";
 import { escapeHtmlAttr } from "./utils.ts";
-import { generateHtml, augmentHtmlForChunks } from "./emit-html.ts";
+import { generateHtml, augmentHtmlForChunks, buildChunksBootJs } from "./emit-html.ts";
 import { generateCss } from "./emit-css.ts";
 import { collectUsedTransitions, renderTransitionCss } from "./emit-transition-css.ts";
 import { generateServerJs, astUsesSessionWrite } from "./emit-server.ts";
@@ -331,7 +331,21 @@ export interface CgOutput {
    * Absent (undefined) when the splitter is not invoked.
    */
   chunksManifest?: ChunksManifest;
+  /**
+   * s444-csp-inline-chunks — the build's chunk-activation script
+   * (`window._SCRML_CHUNKS` manifest + role-detection bootstrap), referenced by
+   * every augmented page as `<script src="/<chunksBootFilename>">`. The caller
+   * writes it to `<outputDir>/<chunksBootFilename>`.
+   *
+   * Absent when no page was augmented (splitter not invoked / no chunks).
+   */
+  chunksBootJs?: string;
+  /** Content-addressed dist-root filename: `scrml-chunks.<hash>.js`. */
+  chunksBootFilename?: string;
 }
+
+/** Basename of the build's chunk-activation script (`<base>.<hash>.js`). */
+export const CHUNKS_BOOT_BASENAME = "scrml-chunks";
 
 /**
  * Source path → the POSIX path the artifact ACTUALLY occupies relative to the
@@ -3893,6 +3907,10 @@ export function runCG(input: CgInput): CgOutput {
   // -------------------------------------------------------------------------
   let chunks: Map<ChunkKey, ChunkOutput> | undefined;
   let chunksManifest: ChunksManifest | undefined;
+  // s444-csp-inline-chunks — the build's chunk-activation script + its
+  // content-addressed dist-root filename (set by the A-4.7 augmentation pass).
+  let chunksBootJs: string | undefined;
+  let chunksBootFilename: string | undefined;
   if (emitPerRoute && reachabilityRecordInput) {
     const splitterResult = emitPerRouteChunks({
       reachabilityRecord: reachabilityRecordInput,
@@ -3950,12 +3968,14 @@ export function runCG(input: CgInput): CgOutput {
     // with the chunk-activation scaffolding emitted by
     // `emit-html.ts:augmentHtmlForChunks`:
     //
-    //   - Inline `<script>window._SCRML_CHUNKS = { ... }</script>` (route-
-    //     keyed manifest for runtime `_scrml_prefetch_tier2` lookup +
-    //     bootstrap dispatch).
     //   - `<link rel="modulepreload">` for non-empty tier-1 chunks.
-    //   - Role-detection bootstrap `<script>` (localStorage > cookie >
-    //     <meta name="scrml-role"> > "_anonymous").
+    //   - `<script src="/scrml-chunks.<hash>.js" data-scrml-route="…">` — the
+    //     build's same-origin chunk-activation script (`buildChunksBootJs`):
+    //     the route-keyed `_SCRML_CHUNKS` manifest (runtime
+    //     `_scrml_prefetch_tier2` lookup + bootstrap dispatch) and the
+    //     role-detection bootstrap (localStorage > cookie >
+    //     <meta name="scrml-role"> > "_anonymous"). NOT inline — see
+    //     s444-csp-inline-chunks in `buildChunksBootJs`.
     //
     // Per OQ-A4-E ratification (S91): ONE HTML per route + role-detection
     // bootstrap loads the per-role initial chunk. No per-(route, role)
@@ -4040,6 +4060,15 @@ export function runCG(input: CgInput): CgOutput {
         if (!list.includes(epId)) list.push(epId);
       }
 
+      // s444-csp-inline-chunks — the manifest + role-detection bootstrap ship
+      // as ONE same-origin, content-addressed file at the dist root (never an
+      // inline `<script>`: `headers="strict"` pins `default-src 'self'`, which
+      // refuses inline script). Every page references it by root-absolute URL
+      // — the manifest's own chunk URLs are root-absolute already.
+      chunksBootJs = buildChunksBootJs({ chunks, epIdToRoutePath, moduleFormat });
+      chunksBootFilename = `${CHUNKS_BOOT_BASENAME}.${fnv1aHash(chunksBootJs)}.js`;
+      const chunksBootSrc = `/${chunksBootFilename}`;
+
       // Augment each file's HTML in place. Files without HTML
       // (library mode, worker bundles, fixture files with no markup)
       // are skipped — the augmenter would have nothing to inject into.
@@ -4052,7 +4081,7 @@ export function runCG(input: CgInput): CgOutput {
           chunks,
           fileEntryPointIds: fileEpIds,
           epIdToRoutePath,
-          moduleFormat,
+          chunksBootSrc,
         });
         // Avoid mutating the existing output object reference; replace
         // the HTML field on a fresh shallow copy. (`output` is the
@@ -4128,6 +4157,7 @@ export function runCG(input: CgInput): CgOutput {
     runtimeFilename,
     ...(chunks !== undefined && { chunks }),
     ...(chunksManifest !== undefined && { chunksManifest }),
+    ...(chunksBootJs !== undefined && { chunksBootJs, chunksBootFilename }),
   };
 }
 

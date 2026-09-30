@@ -3397,6 +3397,9 @@ function _compileScrmlImpl(options = {}) {
           pushArtifact(chunk.filename, chunk.filename, chunk.payloadJs);
         }
       }
+      if (emitPerRoute && cgResult.chunksBootJs && cgResult.chunksBootFilename) {
+        pushArtifact(cgResult.chunksBootFilename, cgResult.chunksBootFilename, cgResult.chunksBootJs);
+      }
       const gateErrors = validateEmittedArtifacts(gateArtifacts);
       if (gateErrors.length > 0) {
         for (const ge of gateErrors) {
@@ -3439,6 +3442,9 @@ function _compileScrmlImpl(options = {}) {
       for (const chunk of cgResult.chunks.values()) {
         if (chunk && chunk.filename) hashedAssets.add(chunk.filename);
       }
+    }
+    if (emitPerRoute && cgResult.chunksBootFilename) {
+      hashedAssets.add(cgResult.chunksBootFilename);
     }
 
     // In browser mode, write the shared runtime file (not needed in library mode)
@@ -3869,6 +3875,17 @@ function _compileScrmlImpl(options = {}) {
           log(`  [CG] Wrote chunk: ${chunk.filename} (${byteLen} B)`);
         }
       }
+      // s444-csp-inline-chunks — the build's chunk-activation script
+      // (`_SCRML_CHUNKS` manifest + role bootstrap), referenced by every
+      // augmented page as a same-origin `<script src>` (never inline, so it
+      // runs under `headers="strict"`'s `default-src 'self'`).
+      if (cgResult.chunksBootJs && cgResult.chunksBootFilename) {
+        writeFileSync(join(outputDir, cgResult.chunksBootFilename), cgResult.chunksBootJs);
+        clientSeeds.add(cgResult.chunksBootFilename);
+        fileCount++;
+        if (verbose) log(`  [CG] Wrote chunk activation script: ${cgResult.chunksBootFilename}`);
+      }
+
       const manifestPath = join(outputDir, "chunks.json");
       // A-4.6 — pass `cgResult.chunks` so the on-disk JSON resolves
       // ChunkKey → URL-style content-addressed filename per the
@@ -4025,6 +4042,11 @@ function _compileScrmlImpl(options = {}) {
     // exercised (e.g. fatal upstream errors); callers fall back to the
     // legacy literal `RUNTIME_FILENAME` when needed.
     runtimeFilename: cgResult.runtimeFilename,
+    // s444-csp-inline-chunks — under `emitPerRoute`, the build's same-origin
+    // chunk-activation script (manifest + role bootstrap) and its dist-root
+    // filename. Undefined when no chunks were emitted.
+    chunksBootJs: cgResult.chunksBootJs,
+    chunksBootFilename: cgResult.chunksBootFilename,
     // adopter-#82 FIX 1 — dist-relative POSIX paths of every content-addressed
     // (immutable-safe) artifact written this build (runtime + per-route chunks +,
     // on the build path, page bundles + CSS). The generated `_server.js` serves
