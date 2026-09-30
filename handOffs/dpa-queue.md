@@ -3752,7 +3752,7 @@ explicit bind + validators live ONLY in the validity surface (no HTML attributes
 
 
 ## [dpa-059] deep-dive — a superseded `<request>`: discard the result, or also cancel the fetch?
-`status:    queued`
+`status:    ruled S444`  # dPA-equivalent run S444 → scrml-support/docs/deep-dives/request-supersede-abort-dpa-059-2026-09-30.md · RULED C (abort reads, discard writes; compiler-classified, unclassifiable = write); calls 2-5 entailed (user-voice S444)
 banked:     S444 2026-09-30 (bryan, on the coderlegion "billion records" port: "those first 3 are things we should look at")
 
 The question: SPEC §6.7.7 EC-2 says a superseded `<request>` fetch is *"superseded — only the most recently initiated
@@ -3772,7 +3772,7 @@ superseded is not failure)? (4) interaction with body-split CPS server calls and
 alignment of §6.7.7 to §20.8 with transport-only semantics stated explicitly — the dPA should confirm or break that.
 
 ## [dpa-060] deep-dive — caching `<request>` results: language surface or stdlib?
-`status:    queued`
+`status:    ruled S444`  # → scrml-support/docs/deep-dives/request-caching-dpa-060-2026-09-30.md · RULED B2 bare compiler-derived `cache`; no author TTL anywhere (cache illegal without a read-set, url=/api=); hit = stale-while-revalidate (user-voice S444)
 banked:     S444 2026-09-30 (bryan: "those first 3 are things we should look at")
 
 The question: SPEC §6.7.7 says *"`stale` does not imply cache TTL … No cache expiration, no max-age, no background
@@ -3788,7 +3788,7 @@ fetch option. Deliver worked programs per pole on the S444 search example; cover
 half), cache key = deps, memory bound, and interaction with `stale`/`refetch()`.
 
 ## [dpa-061] deep-dive — browser-persisted state (localStorage / sessionStorage / IndexedDB) as a declared authority
-`status:    queued`
+`status:    ruled S444`  # → scrml-support/docs/deep-dives/browser-persisted-state-dpa-061-2026-09-30.md · RULED: `persist="local|session"` lifetime attribute (A2, not an authority value); key= required; decode-first against the full contract; write-failure = synthesized status property; reveal/lin → error; IndexedDB = PLANNED stdlib addition; first paint = default-then-restore + auto pre-paint for a `<theme for=>` mode cell (→ dpa-062 for the general opt-in); recipe fixes land now (user-voice S444)
 banked:     S444 2026-09-30 (bryan: "those first 3 are things we should look at")
 
 The question: scrml owns server persistence (`?{}`, §52 `authority="server"`), but browser persistence is hand-written
@@ -3805,3 +3805,26 @@ the server: first paint uses the default?), multi-tab consistency (`storage` eve
 existing localStorage availability guard), privacy (never persist `protect=` values — §14.8.9 egress), and `lin` /
 `(not to T)` lifecycle interaction. Evidence: the coderlegion port's "recent searches" (a 5-item MRU list in
 localStorage) had no scrml form at all. Axiom-adjacent (§52 authority model) — R2 minimum, one at a time.
+
+## [dpa-062] deep-dive — an explicit `prepaint` opt-in so a persisted cell never flashes on first paint
+`status:    queued`
+banked:     S444 2026-09-30 (bryan: "yes, bank it as dpa-062"; origin: dpa-061 call 6 — "I really like the second option, but it gets complicated. We could have the dev explicate when a cell needs that behaviour, but I don't know what that would look like.")
+
+The question: dpa-061 call 6 RULED default-then-restore for `persist=` cells, with an automatic pre-paint restore only for a
+`<theme for=@cell>` mode cell (§65.6 already reduces theming to one `:root`/`<html>` attribute). bryan wants the pre-paint
+behaviour available generally, by explicit author opt-in. PA sketch (S444, to be tested, not ratified): a bare `prepaint`
+attribute on a `persist=` cell (`<sidebar persist="local" key="ui.sidebar" prepaint>: SidebarMode = .Open`); the compiler
+chooses the mechanism from the cell's type and read sites, using the dependency graph it already builds:
+(1) REFLECT — a scalar cell (enum/bool/short string) is written by a blocking pre-paint script onto `<html>` as
+`data-scrml-<cell>="…"`, and styling that reads the cell (`class:x=@sidebar == .Collapsed`, `style:` bindings) is emitted
+as CSS keyed on that root attribute, so first paint is already correct; (2) HOLD — anything else (lists, structs, text
+content) — the regions that read the cell are marked and hidden (visibility) by the pre-paint script until the client has
+restored and rendered them (a brief blank instead of wrong→right). `prepaint="hold"` override; `prepaint` without
+`persist=` is an error. Must address: which read shapes REFLECT can honestly cover (text content cannot) and the exact
+fallback rule; layout shift under HOLD (visibility vs display; reserved space); the blocking-script cost + the S441 CSP
+nonce/hash; interaction with SSR-seeded server cells on the same page and with §52.8 compose-route first paint; storage
+unavailable / decode failure at pre-paint (must fall back to the default and UNHIDE — a hold must never stick);
+`persist="session"`; multiple prepaint cells (one script); a11y (hidden regions and screen readers); prior art
+(next-themes / theme-flash scripts, Remix/Next cookie-based color-mode, `color-scheme` meta, CSS `@media` + `:root` attr
+patterns, content-visibility). Deliver worked programs per mechanism and a rec on the surface (bare `prepaint` vs explicit
+modes vs per-region markers).
