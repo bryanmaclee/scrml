@@ -102,9 +102,9 @@ ${
      * CHECK-constrained column in the schema).
      */
     export function rolePath(role) {
-        if (role == "dispatcher") return "/dispatch"
-        if (role == "driver")     return "/driver"
-        if (role == "customer")   return "/customer"
+        if (role == "dispatcher") return "/dispatch/board"
+        if (role == "driver")     return "/driver/home"
+        if (role == "customer")   return "/customer/home"
         return "/"
     }
 }

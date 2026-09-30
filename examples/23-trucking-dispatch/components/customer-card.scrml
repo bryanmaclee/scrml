@@ -4,6 +4,14 @@
 // load-detail page header.
 
 ${
+    // Takes the whole record (or `not`, before the page's data loads). A class
+    // attribute's `${…}` is evaluated even while an enclosing `if=` hides the
+    // element, so reading `.field` off an absent record there throws (S443).
+    export fn accountStatusClassesOf(c) -> string {
+        if (c is not) return ""
+        return accountStatusClasses(c.account_status)
+    }
+
     export fn accountStatusClasses(status: string) -> string {
         if (status == "active")  return "bg-emerald-100 text-emerald-800 border-emerald-200"
         if (status == "on_hold") return "bg-amber-100 text-amber-800 border-amber-200"

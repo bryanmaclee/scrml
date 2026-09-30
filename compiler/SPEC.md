@@ -8690,7 +8690,7 @@ is backwards-compatible.
 
 #### 14.4.1 String-to-Enum Coercion — `toEnum()`
 
-The `toEnum()` function accepts a string value and returns the corresponding enum variant, or throws if no variant matches. Codegen emits a lookup table for O(1) conversion. See implementation: rewrite.ts `rewriteEnumToEnum()`.
+The `toEnum()` function accepts a string value and returns the corresponding enum variant, or `not` if no variant matches (it does not throw — scrml has no try/catch; see the return type below; S443, reported by flogence S51). Codegen emits a lookup table for O(1) conversion. See implementation: rewrite.ts `rewriteEnumToEnum()`.
 
 **Syntax:** `let role = UserRole.toEnum(roleString)`
 

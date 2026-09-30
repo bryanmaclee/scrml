@@ -50,6 +50,12 @@
 
         ?{`UPDATE users SET last_login_at = CURRENT_TIMESTAMP WHERE id = ${row.id}`}.run()
 
+        // Establish the session (SPEC §20.5.1). This is what a
+        // <program auth="required"> gate checks: without it the user is
+        // "logged in" nowhere and every gated page redirects back here.
+        // session.set does NO credential check — call it only after verifying.
+        session.set("userId", row.id)
+
         return {
           user: { id: row.id, email: row.email },
           redirectTo: "/"
@@ -70,11 +76,10 @@
           return
         }
 
-        // Successful login — navigate. Production deployments will typically
-        // set an HttpOnly Set-Cookie on the server response and rely on the
-        // browser to carry it forward. The generator template uses a simple
-        // navigation as the minimum-viable path; replace with your session
-        // strategy.
+        // Successful login — navigate. loginServer's session.set already put
+        // the compiler-managed HttpOnly session cookie on the response, so the
+        // browser carries it to the gated page. (Logout: call a server fn that
+        // does session.destroy().)
         window.location.href = result.redirectTo
       }
     }
