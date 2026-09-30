@@ -349,6 +349,23 @@ function go() { @v = decide() }
     });
   }
 
+  // s444 — the message states the fail-closed rule honestly: the compiler cannot
+  // PROVE the receiver awaits (it may well await), so the hazard is a CONDITIONAL,
+  // never an assertion that the receiver "gets an unawaited Promise".
+  test("message: fail-closed framing, conditional hazard, remedies + data-inversion migration", () => {
+    const o = serverNested(`function drive(f) { return f(hash) }\n  return drive(m) ? "a" : "r"`);
+    const msg = o.errors.find((x) => x.code === ESCAPE).message;
+    expect(msg).toContain("cannot prove that whoever receives it awaits");
+    expect(msg).toContain("the value is refused (fail-closed)");
+    expect(msg).toContain("if the receiver does not await a call, it gets a Promise, which is always truthy");
+    expect(msg).toContain("(§13.2)");
+    expect(msg).toContain("Call it directly — `m(…)`");
+    expect(msg).toContain("`.flatMap`");
+    expect(msg).toContain("pass data instead of the function");
+    expect(msg).toContain("hand the receiver the result");
+    expect(msg).not.toContain("Whoever calls it through that value gets an unawaited Promise");
+  });
+
   test("a server fn referenced as a value on the SERVER (escalated caller) → escape", () => {
     const o = compileFile(`<program>
 <v> = "unset"
