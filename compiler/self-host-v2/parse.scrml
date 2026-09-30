@@ -1274,6 +1274,17 @@ ${
             return { nodes: [en], mp: mBump(em) }
         }
         const tp: TP = regionTP(mAdv(mp, 1), LexStop.Shorthand)
+        const lit: PTok = tp.toks[0]
+        if (chAt(at, 0) == "\"" && lit.cls == TC.Str && lit.start == at.pos && runsToEof(lit, mp.src)) {
+            // SPEC §4.18.3: a display-text literal that reaches end of file
+            // before its closing `"` is E-CTX-001 against the opening `"`
+            // (recovered per §4.18.7: the text to EOF is its content). (A
+            // shorthand's other "closer" is the opener's `>`, which is also
+            // legal display text — `<p : "a > b">` — so only EOF is decidable.)
+            const em: MP = mDiag(mAt(mp, mp.src.length), "E-CTX-001", "unterminated display-text literal: the `\"` opened here reaches the end of the file before its closing `\"` (§4.18.3)", lit.start, lit.start + 1)
+            const en: ANode = textNode(em, lit.start + 1, mp.src.substring(lit.start + 1))
+            return { nodes: [en], mp: mBump(em) }
+        }
         let t: TP = tp
         let e: AExpr = { nid: t.nid, span: mkSpan(start, start + 1), k: AExprK.Recovered }
         if (atEnd(t)) {
@@ -1503,8 +1514,15 @@ ${
                 i = i + 1
             }
         }
-        if (t.text.length >= 2 && t.text.substring(t.text.length - 1) == "\"") return -1
+        if (!runsToEof(t, mp.src)) return -1
         return t.end
+    }
+
+    // A `"` string token with no closing `"`: it ran to end of file (display
+    // mode: no escapes, so a final `"` always closes it).
+    fn runsToEof(t: PTok, src: string) -> boolean {
+        if (t.end < src.length) return false
+        return !(t.text.length >= 2 && t.text.substring(t.text.length - 1) == "\"")
     }
 
     type RAttrScan:struct = { typed: ADeclAttr[], attrs: AAttr[], mp: MP }

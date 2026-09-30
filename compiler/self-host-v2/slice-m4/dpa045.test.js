@@ -248,6 +248,17 @@ describe("an unterminated display-text literal is E-CTX-001 against its opening 
     expect(d[0].span.start).toBe(src.indexOf('"abc'));
     expect(d[0].message).toContain("end of the file");
   });
+  test("a `:`-shorthand literal running to end of file: E-CTX-001 at the `\"` (the rest of the file is its content), then only the enclosing elements' unclosed reports", () => {
+    const src = `<program>\n    <main>\n        <p : "abc`;
+    const r = run(src);
+    expect(r.diags.map((d) => d.code)).toEqual(["E-CTX-001", "E-PARSE-UNCLOSED", "E-PARSE-UNCLOSED"]);
+    expect(r.diags[0].span.start).toBe(src.indexOf('"abc'));
+    expect(texts(r)).toContain("abc");
+  });
+  test("twin: a terminated `:`-shorthand literal at end of file is not E-CTX-001", () => {
+    const codes = run(`<program>\n    <main>\n        <p : "abc"`).diags.map((d) => d.code);
+    expect(codes).not.toContain("E-CTX-001");
+  });
   test("twin (behaviour): a `</b>` (not this body's closer) inside the literal is content", async () => {
     expect(await html(state('"a </b> c"'))).toBe(W("<p>a &lt;/b&gt; c<!--if--></p>"));
   });
