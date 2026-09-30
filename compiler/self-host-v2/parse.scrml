@@ -1302,8 +1302,9 @@ ${
             // §4.18.7: a `:`-shorthand has no body closer, so its content is
             // the text to end of file).
             const em: MP = mDiag(mAt(mp, mp.src.length), "E-CTX-001", "unterminated display-text literal: the `\"` opened here has no closing `\"` before the end of the file (§4.18.3)", at.pos, at.pos + 1)
-            const en: ANode = textNode(em, at.pos + 1, mp.src.substring(at.pos + 1))
-            return { nodes: [en], mp: mBump(em) }
+            const ck: RCook = cookRecovered(em, at.pos + 1, mp.src.length)
+            const en: ANode = textNode(ck.mp, at.pos + 1, ck.text)
+            return { nodes: [en], mp: mBump(ck.mp) }
         }
         let t: TP = tp
         let e: AExpr = { nid: t.nid, span: mkSpan(start, start + 1), k: AExprK.Recovered }
@@ -1468,7 +1469,7 @@ ${
                             i = i + esc
                         } else {
                             if (i + 1 < t.end) {
-                                m = mDiag(m, "E-PARSE-001", "malformed escape `" + m.src.substring(i, i + 2) + "` in a display-text literal: the escapes are `\\\"`, `\\\\` and `\\" + interpOpen() + "` — write `\\\\` for a literal backslash (§4.18.3)", i, i + 2)
+                                m = mDiag(m, "E-PARSE-001", malformedEscMsg(m.src.substring(i, i + 2)), i, i + 2)
                             }
                             i = i + 2
                         }
@@ -1482,6 +1483,41 @@ ${
             }
         }
         return m
+    }
+
+    fn malformedEscMsg(esc: string) -> string {
+        return "malformed escape `" + esc + "` in a display-text literal: the escapes are `\\\"`, `\\\\` and `\\" + interpOpen() + "` — write `\\\\` for a literal backslash (§4.18.3)"
+    }
+
+    type RCook:struct = { text: string, mp: MP }
+
+    // An UNTERMINATED literal's recovered content [from, to) (SPEC §4.18.3):
+    // cooked with the same escape table, and every malformed escape in it
+    // reported E-PARSE-001 — including a lone `\` right at the recovery point
+    // (end of file or the body's closer). A `${` here is text: the literal
+    // never closed, so its interpolations are not walked (a runaway `${` must
+    // not eat the closer).
+    fn cookRecovered(mp: MP, from: int, to: int) -> RCook {
+        let m: MP = mp
+        let out: string = ""
+        let i: int = from
+        while (i < to) {
+            const c: string = m.src.substring(i, i + 1)
+            const esc: int = displayEscLen(m.src, i)
+            if (esc > 0 && i + esc <= to) {
+                out = out + displayEscText(m.src, i)
+                i = i + esc
+            } else if (c == "\\") {
+                const e: int = i + 2 <= to ? i + 2 : to
+                m = mDiag(m, "E-PARSE-001", malformedEscMsg(m.src.substring(i, e)), i, e)
+                out = out + m.src.substring(i, e)
+                i = e
+            } else {
+                out = out + c
+                i = i + 1
+            }
+        }
+        return { text: out, mp: m }
     }
 
     // Whether the display-text literal spanning [start, end) carries a LIVE
@@ -1568,9 +1604,9 @@ ${
                 const stop: int = firstBodyCloser(m.src, m.pos + 1, tag)
                 const open: int = m.pos
                 m = mDiag(m, "E-CTX-001", "unterminated display-text literal: the `\"` opened here has no closing `\"` before the end of the file (§4.18.3) — read up to " + (stop >= m.src.length ? "the end of the file" : "the `<" + tag + ">` body's closer"), open, open + 1)
-                const at: MP = mAt(m, stop)
-                out = out.concat([textNode(at, open + 1, m.src.substring(open + 1, stop))])
-                m = mBump(at)
+                const ck: RCook = cookRecovered(mAt(m, stop), open + 1, stop)
+                out = out.concat([textNode(ck.mp, open + 1, ck.text)])
+                m = mBump(ck.mp)
             } else {
                 const before: int = m.pos
                 const tp0: TP = codeRegionTP(m, LexStop.CodeBody)
@@ -1870,14 +1906,15 @@ ${
     }
 
     // SPEC §4.18.1b exit (2) (RULED S444 — "yes on // revised"): in free text
-    // a `//` opens a comment ONLY at the start of the source or when the byte
-    // right before it is whitespace (space, tab, LF, CR — isSpaceCh; a line
-    // start and a line's indentation are both that). Any other `//` is content:
-    // `http://x`, `a//b`, `</b>// x`. The comment itself is opaque to end of
-    // line (skipLineComment — a `</p>` in it is comment text).
+    // a `//` opens a comment ONLY when the byte right before it is whitespace —
+    // space, tab, LF, CR; these four and no others (a line start and a line's
+    // indentation are both that). Any other `//` is content: `http://x`,
+    // `a//b`, `</b>// x`. (A free-text body always follows its opener's `>`,
+    // so there is always a byte before the `//`.) The comment itself is opaque
+    // to end of line (skipLineComment — a `</p>` in it is comment text).
     fn freeTextCommentAt(mp: MP) -> boolean {
-        if (mp.pos == 0) return true
-        return isSpaceCh(chAt(mp, -1))
+        const before: string = chAt(mp, -1)
+        return before == " " || before == "\t" || before == "\n" || before == "\r"
     }
 
     // dpa-045 D (RULED S442): free text has exactly two ways out — `${` opens
