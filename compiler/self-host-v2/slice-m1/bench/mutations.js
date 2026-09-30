@@ -221,8 +221,9 @@ const MUTATIONS = [
     ["FR2-4: a write to an annotated local not checked",
      "                    ts1 = checkLitFields(env, value, checkValue(env, r.vt, la, value.span, placeLabel(target), ts1))", "                    ts1 = ts1"],
     ["FR2-5: a field's trust judged by an error ANYWHERE in its declaration (coarse Rule C)",
-     "            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: typeTrusted(errs, f.typeSpan),",
-     "            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: !hasErrIn(errs, f.span),"],
+     // s444: re-pointed after r8 (trustFields now ANDs the binder's `f.trusted`); same corruption, r8's AND kept
+     "            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted && typeTrusted(errs, f.typeSpan),",
+     "            out = out.concat([{ nid: f.nid, span: f.span, annotated: f.annotated, trusted: f.trusted && !hasErrIn(errs, f.span),"],
     ["FR2-5: an opener type's span stops before its unreadable continuation (`int|not` trusted as `int`)",
      "        if (end > m.pos) ty = { nid: ty.nid, span: mkSpan(start, end), k: ty.k }\n", "", "parse.scrml"],
     ["FR2-7: the fixpoint bound fixed at 6 passes (a chain of 6 locals goes Unknown)",

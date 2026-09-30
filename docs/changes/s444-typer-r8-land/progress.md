@@ -1,3 +1,9 @@
 # s444-typer-r8-land progress
 
 - 2026-09-30 start at /home/bryan/scrmlMaster/scrml/.claude/worktrees/agent-aefcc5537264c9d9c; branch feat/s444-typer-r8 from origin/main 108ca89be; bun install + pretest OK.
+- 2026-09-30 gate baseline (origin/main): 26679 pass / 72 skip / 12 todo / 0 fail.
+- 2026-09-30 cherry-picked 063eb3b37 → 5b03f9bd2. One conflict (analyze.scrml declField FieldInfo literal): main added `shrink: shrinkOf(aty)`, r8 made `trusted: resolved`; kept both. No other AS/Tables literal on main lacked the new fields. slice-m2 446/0. Gate 26679/0.
+- 2026-09-30 F1 re-verified by scratch/r8probe.js (uncommitted): origin/main — all 7 shapes E-TYPE-UNKNOWN + E-TYPE-031 (decl field / local: two 031s); branch — only E-TYPE-UNKNOWN; resolved twins unchanged (E-TYPE-031); mixed struct twin loses only the cascade 031.
+- 2026-09-30 mutation run 1: 189/190 RED, 1 NOT RUN (FR2-5 site rewritten by r8) → re-pointed (same corruption). Run 2: 190/190 RED, mirror clean, exit 0. Proofs absent/harmless exit 1.
+- 2026-09-30 full verification recorded in docs/changes/s442-bootstrap-typer-rules/progress.md ("r8 VERIFICATION"). Corpus vs origin/main: 0 changed. vs cf62b415: 2 newly rejected, pre-existing on main (#1164), not r8.
+- 2026-09-30 pre-commit gate: live-PG hook timeouts (db-authoritative*-pg beforeAll, 5s default) under sibling-gate contention; passes standalone; not bypassed — retried.
