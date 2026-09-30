@@ -909,7 +909,7 @@ mechanism depends on the execution context type:
 | E-PROGRAM-001 | Circular `<program>` nesting (a `<program>` is a descendant of itself) **(Reserved / spec-ahead, S263 — no fire site: circular `<program>` nesting is unconstructable-by-construction — a lexical tree cannot contain itself and there is no include/inline mechanism; defensive guard, condition unreachable. Excluded from the freeze fireable set.)** | Error |
 | W-PROGRAM-001 | Nested `<program>` has no `name=` attribute | Warning |
 | W-PROGRAM-TITLE-NESTED | Documentary attribute (`title=`, `description=`, `version=`, `author=`, `license=`) appears on a nested `<program>` (see §40.7) | Warning |
-| E-PROGRAM-NESTED-AUTH | `auth=` appears on a nested `<program>` (one with a `<program>` or `<page>` ancestor); see §4.12.2 | Error |
+| E-PROGRAM-NESTED-AUTH | `auth=` appears on a nested `<program>` (one with a `<program>` or `<page>` ancestor); see §4.12.2. Emitted at `compiler/src/codegen/index.ts` (`detectNestedProgramAuth`). | Error |
 | E-STORY-UNKNOWN | `story="<name>"` references a build story not declared in the `scrml.toml` `[story]` table (see §58) | Error |
 | W-STORY-ON-TOP-LEVEL | `story=` appears on the top-level `<program>`; ignored — the top-level build story is owned by `[story] default` (see §58) | Warning |
 
