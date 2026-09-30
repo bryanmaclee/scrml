@@ -422,7 +422,9 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
   test("a NULL-body Response nested in the payload is NOT refused (nothing to inspect)", () => {
     const { _scrml_protect_redact } = loadHelper();
     const r = new Response(null, { status: 204 });
-    expect(_scrml_protect_redact({ receipt: r, ok: true }).receipt).toBe(r);
+    // Round 6d: the sink returns a data SNAPSHOT — the Response is serialized as
+    // the serializer would (no own data), never handed on as the live object.
+    expect(_scrml_protect_redact({ receipt: r, ok: true })).toEqual({ receipt: {}, ok: true });
   });
 
   // ⚑ MEDIUM 3 — the refusal must be RECOGNIZABLE, not just thrown. The §37 SSE
@@ -515,7 +517,7 @@ describe("§14.8.9 end-to-end — the egress floor strips at compile time", () =
     expect(serverJs).toContain("_scrml_protect_redact(");
     expect(serverJs).toContain("_scrml_protect_tag((await _scrml_sql`SELECT * FROM users WHERE id = ${id}`)[0] ?? null, [\"passwordHash\"])");
     // the helper is injected
-    expect(serverJs).toContain("function _scrml_protect_redact(value, _noToJSON)");
+    expect(serverJs).toContain("function _scrml_protect_redact(value)");
     parseClean(serverJs);
     // I-PROTECT-STRIP-001 info fired (cross-stream — warnings OR errors)
     const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
@@ -812,7 +814,7 @@ describe("§14.8.9 every client-egress sink redacts (enumerated over serializers
     // Lift the shipped helper + the shipped handler and drive them, so this is a
     // wire fact rather than a text assertion.
     const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
-    const hEnd = serverJs.indexOf("function _scrml_protect_redact");
+    const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
@@ -907,7 +909,7 @@ return { _scrml_mountHydrate_handler };`)();
     expect(serverJs).toContain("_scrml_protect_mediated(new Response(");
     // Drive the emitted param check + guard over a violating value.
     const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
-    const hEnd = serverJs.indexOf("function _scrml_protect_redact");
+    const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const { probe } = new Function(`${helper}
 function probe(id) {
@@ -964,8 +966,8 @@ return { probe };`)();
     const shallow = _scrml_protect_redact(new Wrap(row()));
     expect(JSON.stringify(shallow)).not.toContain("s3cret");
     expect(JSON.parse(JSON.stringify(shallow))).toEqual({ u: { id: 1, name: "a" } });
-    // the prototype survives the rebuild, so this is preservation AND stripping
-    expect(typeof shallow.greet).toBe("function");
+    // Round 6d: the sink returns a plain-data SNAPSHOT (no prototype, no methods).
+    expect(Object.getPrototypeOf(shallow)).toBe(Object.prototype);
     // class > plain > class > row
     const deep = _scrml_protect_redact(new Wrap({ inner: new Wrap(row()) }));
     expect(JSON.stringify(deep)).not.toContain("s3cret");
@@ -997,6 +999,35 @@ return { probe };`)();
     expect(out).toContain("12.5");
     expect(out).toContain("2020-01-01T00:00:00.000Z");
     expect(out).not.toContain("s3cret");
+  });
+
+  // S443 round 6d — MEASURED on round 6c: an object with a getter returning "ok"
+  // on the first read and the ROW on the second, on a non-plain prototype, was
+  // walked once and then handed as-is to JSON.stringify, which read the getter
+  // again and served the full row. The sink now returns a snapshot: every
+  // property read once, and the serializer sees only plain data.
+  test("S443 r6d: the sink hands the serializer a snapshot — stateful getters / proxies read once", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact } = loadHelper();
+    const U = () => _scrml_protect_tag({ id: 1, name: "ada", passwordHash: "H", pin: 4321 }, ["passwordHash", "pin"]);
+    const flip = (o) => { let n = 0; Object.defineProperty(o, "x", { get: () => { n = n + 1; return n > 1 ? U() : "ok"; }, enumerable: true }); return o; };
+    const ser = (v) => JSON.stringify(_scrml_protect_redact(v));
+    expect(ser(flip(Object.create({ z: 1 })))).toBe('{"x":"ok"}');          // J9
+    expect(ser({ wrap: flip(Object.create({ z: 1 })) })).toBe('{"wrap":{"x":"ok"}}'); // J10
+    expect(ser(flip({}))).toBe('{"x":"ok"}');                              // plain-object getter
+    // A Proxy whose trap answers differently on each read.
+    let reads = 0;
+    const px = new Proxy({ a: 1 }, { get: (t, k) => (k === "a" ? (++reads > 1 ? U() : "ok") : t[k]) });
+    expect(ser({ p: px })).toBe('{"p":{"a":"ok"}}');
+    // Nothing author-reachable survives into the snapshot.
+    const snap = _scrml_protect_redact({ f: () => 1, s: Symbol("x"), a: [() => 1, undefined], d: new Date(0) });
+    expect(snap).toEqual({ a: [null, null], d: "1970-01-01T00:00:00.000Z" });
+    // A Date whose toJSON was replaced by the author is invoked once and redacted.
+    const d = new Date(0); d.toJSON = () => U();
+    expect(ser({ d })).toBe('{"d":{"id":1,"name":"ada"}}');
+    // JSON's own rules for plain data are kept.
+    expect(ser({ n: new Number(3), s: new String("x"), b: new Boolean(false), m: new Map([[1, 2]]) })).toBe('{"n":3,"s":"x","b":false,"m":{}}');
+    const cyc = { a: 1 }; cyc.self = cyc;
+    expect(() => _scrml_protect_redact(cyc)).toThrow();
   });
 
   test("MEDIUM: a TAGGED non-plain row is STILL redacted (the preservation is fail-closed)", () => {
@@ -1093,7 +1124,7 @@ type Op:enum = {
 
     // Drive the SHIPPED handler with a loader that returns a Response.
     const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
-    const hEnd = serverJs.indexOf("function _scrml_protect_redact");
+    const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
@@ -1130,7 +1161,7 @@ return { h: _scrml_mountHydrate_handler };`)();
 </program>`;
     const { serverJs } = compileSource(src);
     const hStart = serverJs.indexOf("const _SCRML_PROTECT_PREFIX");
-    const hEnd = serverJs.indexOf("function _scrml_protect_redact");
+    const hEnd = serverJs.indexOf("function _scrml_protect_snap");
     const helper = serverJs.slice(hStart, serverJs.indexOf("\n}\n", hEnd) + 3);
     const mhStart = serverJs.indexOf("async function _scrml_mountHydrate_handler");
     const handler = serverJs.slice(mhStart, serverJs.indexOf("\n}\n", mhStart) + 3);
@@ -1572,7 +1603,7 @@ describe("§14.8.9 channel broadcast (§38) egress — strips at the publish sin
     // the broadcast built-in redacts at the publish sink (the wire frame)
     expect(serverJs).toContain("_scrml_srv.publish(\"lobby\", JSON.stringify(_scrml_protect_redact(_scrml_data)));");
     // helper auto-injected via the on-use scan (finalEmitted.includes)
-    expect(serverJs).toContain("function _scrml_protect_redact(value, _noToJSON)");
+    expect(serverJs).toContain("function _scrml_protect_redact(value)");
     parseClean(serverJs);
     // I-PROTECT-STRIP-001 names the stripped column
     const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
@@ -1628,7 +1659,7 @@ describe("§14.8.9 SSE server function* (§37) egress — strips at the data: fr
     // BOTH SSE data: sinks (the {event,data} shape and the bare-value shape) redact
     expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_protect_redact(_scrml_val.data))}\\n\\n`");
     expect(serverJs).toContain("`data: ${JSON.stringify(_scrml_protect_redact(_scrml_val))}\\n\\n`");
-    expect(serverJs).toContain("function _scrml_protect_redact(value, _noToJSON)");
+    expect(serverJs).toContain("function _scrml_protect_redact(value)");
     parseClean(serverJs);
     const allDiag = [...(result.warnings ?? []), ...(result.errors ?? [])];
     const strip = allDiag.find((d) => d.code === "I-PROTECT-STRIP-001");

@@ -1815,6 +1815,12 @@ export function generateServerJs(
   const _cpsErrorPrologue = (fnName: string): string[] => _protectActive
     ? [`    if (!(_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)) console.error(${JSON.stringify(`[scrml] server function \`${fnName}\` failed:`)}, _scrml_cps_err);`]
     : [];
+  // …and the envelope itself is a client egress: a typed scrml failure thrown
+  // with a row in its payload goes through the same snapshot + strip as a
+  // return value (S443 round 6d — the sink owns serialization everywhere).
+  const _cpsErrorPayloadExpr: string = _protectActive
+    ? "_scrml_protect_redact(_scrml_error_payload)"
+    : "_scrml_error_payload";
   const _cpsErrorMessage: string = _protectActive
     ? `"the server could not complete this call (details are in the server log)"`
     : `String(_scrml_cps_err && _scrml_cps_err.message || _scrml_cps_err)`;
@@ -4994,7 +5000,7 @@ export function generateServerJs(
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
         lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
-        lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
+        lines.push(`    return new Response(JSON.stringify(${_cpsErrorPayloadExpr}), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: {`);
         lines.push(`        "Content-Type": "application/json",`);
@@ -5297,7 +5303,7 @@ export function generateServerJs(
         lines.push(`    const _scrml_error_payload = (_scrml_cps_err && typeof _scrml_cps_err === 'object' && _scrml_cps_err.__scrml_error)`);
         lines.push(`      ? _scrml_cps_err`);
         lines.push(`      : { __scrml_error: true, type: "CpsError", variant: "ServerError", data: { message: ${_cpsErrorMessage}, fn: ${JSON.stringify(name)} } };`);
-        lines.push(`    return new Response(JSON.stringify(_scrml_error_payload), {`);
+        lines.push(`    return new Response(JSON.stringify(${_cpsErrorPayloadExpr}), {`);
         lines.push(`      status: 500,`);
         lines.push(`      headers: { "Content-Type": "application/json" },`);
         lines.push(`    });`);

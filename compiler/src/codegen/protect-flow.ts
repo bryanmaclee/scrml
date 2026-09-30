@@ -416,6 +416,21 @@ const STDLIB_DERIVERS: Record<string, Set<string>> = {
   auth: new Set(["verifyPassword", "hashPassword", "verifyTotp"]),
   crypto: new Set(["verifyHash"]),
 };
+/**
+ * RULING S445 #4 — the stdlib calls whose RESULT is a runtime source (I/O, a
+ * secret / configuration read, the environment, entropy): an `hmac` key built
+ * only from these declassifies. `scrml:process` `env("HMAC_KEY")` is THE
+ * configuration read; there is no separate config module. Everything else in
+ * the stdlib is a pure function of its arguments.
+ */
+const RUNTIME_SOURCE_CALLS: Record<string, Set<string>> = {
+  process: new Set(["env", "argv"]),
+  fs: new Set(["readFileSync", "readdirSync"]),
+  http: new Set(["get", "post", "put", "del", "patch"]),
+  redis: new Set(["get", "getBuffer", "smembers"]),
+  random: new Set(["random", "randomInt"]),
+  crypto: new Set(["generateToken", "generateUUID"]),
+};
 function stdlibModuleOf(source: string): string | null {
   const m = /(?:^scrml:|(?:^|\/)_scrml\/)([a-z]+)(?:\.js)?$/.exec(source);
   return m ? m[1] : null;
@@ -1996,10 +2011,19 @@ class FlowAnalysis {
     if (isStdlibDeriver(host.source, host.imported, node, args)) return clean();
     const pm = this.pickOmit(host, args, node, fn);
     if (pm) return join(pm, cb);
-    // S445 #4: a host call's result comes from code outside the compile at
-    // runtime (a config / secret-store read) — positive runtime evidence.
-    if (args.every((a) => everything(a, "").size === 0)) return { ...cb, k: 2 };
-    return { ...join(cb, tainted(args, `${this.site(node, fn)} — \`${host.imported}\` from \`${host.source}\`, code the compiler cannot see into`)), k: 2 };
+    // S445 #4 (round 6d): a host call is positive runtime evidence ONLY when it
+    // is a recognized I/O / secret / entropy source (`RUNTIME_SOURCE_CALLS`) —
+    // its argument is a selector (a variable name, a path, a URL), not key
+    // material, so the result is runtime whatever the argument. Any other host
+    // function — a pure stdlib helper (`scrml:path` `normalize`, `scrml:format`
+    // `capitalize`, `scrml:crypto` `hash`) or an npm import the compiler has no
+    // model for — carries its arguments' constness: a function of constants is
+    // a constant (fail closed). Round 6c counted every host call as runtime and
+    // `normalize("public-key")` laundered a constant key (review, measured).
+    const src = stdlibModuleOf(host.source);
+    const k = src !== null && RUNTIME_SOURCE_CALLS[src]?.has(host.imported) ? 2 : opK(...args);
+    if (args.every((a) => everything(a, "").size === 0)) return { ...cb, k };
+    return { ...join(cb, tainted(args, `${this.site(node, fn)} — \`${host.imported}\` from \`${host.source}\`, code the compiler cannot see into`)), k };
   }
 
   /**

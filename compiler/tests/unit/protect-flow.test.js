@@ -528,6 +528,7 @@ async function _scrml_handler_setup_2(_scrml_req) {
 
   test("r6b RULING S445 #4: an HMAC keyed by a compile-time CONSTANT is a digest; a runtime key declassifies", () => {
     const C = 'import { hmac } from "./_scrml/crypto.js";';
+    const CH = 'import { hmac, hash } from "./_scrml/crypto.js";\nimport { normalize, basename } from "./_scrml/path.js";\nimport { capitalize, truncate, padLeft } from "./_scrml/format.js";\nimport { getSecret } from "secret-store";';
     for (const body of [
       'return await hmac("public-key", String(u.passwordHash));',
       'const K = "public-key"; return await hmac(K, String(u.passwordHash));',
@@ -544,14 +545,26 @@ async function _scrml_handler_setup_2(_scrml_req) {
       // A concatenation with a constant part: `"k" + undefined` when unset.
       'return await hmac("k" + process.env.K, String(u.passwordHash));',
       'return await hmac(process.env.HMAC_KEY + "-v2", String(u.passwordHash));',
+      // Round 6d: a PURE stdlib helper of constants is a constant, and an npm
+      // function the compiler has no model for is not evidence of a secret.
+      'return await hmac(normalize("public-key"), String(u.passwordHash));',
+      'return await hmac(basename("/x/public-key"), String(u.passwordHash));',
+      'return await hmac(capitalize("public-key"), String(u.passwordHash));',
+      'return await hmac(truncate("public-key", 99), String(u.passwordHash));',
+      'return await hmac(padLeft("k", 3, "x"), String(u.passwordHash));',
+      'return await hmac(hash("sha256", "public"), String(u.passwordHash));',
+      'return await hmac(process.env.K ?? normalize("dev"), String(u.passwordHash));',
+      "return await hmac(await getSecret(), String(u.passwordHash));",
     ]) {
-      expect([body, leakCols(mod(body, C))]).toEqual([body, ["passwordHash"]]);
+      expect([body, leakCols(mod(body, CH))]).toEqual([body, ["passwordHash"]]);
     }
-    const CS = C + '\nimport { getSecret } from "secret-store";';
+    const CS = C + '\nimport { env } from "./_scrml/process.js";\nimport { get } from "./_scrml/http.js";\nimport { normalize } from "./_scrml/path.js";';
     for (const body of [
       "return await hmac(process.env.HMAC_KEY, String(u.passwordHash));",
       "return await hmac(Bun.env.HMAC_KEY, String(u.passwordHash));",
-      "return await hmac(await getSecret(), String(u.passwordHash));", // a host (config / secret-store) read
+      'return await hmac(env("HMAC_KEY"), String(u.passwordHash));', // the configuration read (scrml:process)
+      'return await hmac((await get("https://vault/key")).body, String(u.passwordHash));', // a network read
+      'return await hmac(normalize(env("HMAC_KEY")), String(u.passwordHash));', // pure helper of a runtime source
       'const s = ?{`SELECT k FROM secrets`}; return await hmac(s[0].k, String(u.passwordHash));'.replace("?{`SELECT k FROM secrets`}", "_scrml_sql`SELECT k FROM secrets`"),
     ]) {
       expect([body, leakCols(mod(body, CS))]).toEqual([body, []]);

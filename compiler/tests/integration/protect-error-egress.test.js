@@ -198,6 +198,11 @@ describe("§14.8.9 round 6c — toJSON cannot re-introduce a stripped column, ov
     ["j3", "u.toJSON = () => ({ ...u })\n    return u"],
     ["j4", "const c = { ...u, toJSON: () => u }\n    return c"],
     ["j5", "return { data: { toJSON: () => [u] } }"],
+    // Round 6d — a getter answering "ok" on the first read and the row on the
+    // second: round 6c walked it once, then JSON.stringify read it again (full row).
+    ["j9", 'let n = 0\n    const o = Object.create({ z: 1 })\n    Object.defineProperty(o, "x", { get: () => { n = n + 1; return n > 1 ? u : "ok" }, enumerable: true })\n    return o'],
+    ["j10", 'let n = 0\n    const o = Object.create({ z: 1 })\n    Object.defineProperty(o, "x", { get: () => { n = n + 1; return n > 1 ? u : "ok" }, enumerable: true })\n    return { wrap: o }'],
+    ["j17", 'let n = 0\n    const o = {}\n    Object.defineProperty(o, "x", { get: () => { n = n + 1; return n > 1 ? u : "ok" }, enumerable: true })\n    return o'],
   ];
   const SRC_J = `<program auth="none" db="./app.db">
 <schema>
@@ -214,13 +219,13 @@ ${J.map(([n]) => `<button onclick=\${ @resultCell = ${n}() }>${n}</button>`).joi
 <p>\${@resultCell}</p>
 </program>
 `;
-  test("J1, J3, J4, J5 answer 200 without the protected column", async () => {
+  test("J1, J3, J4, J5, J9, J10, J17 answer 200 without the protected column", async () => {
     const s = await serve(' auth="none"', prodErrorHandler(), SRC_J);
     try {
       for (const [n] of J) {
         const r = await s.post(n);
         expect([n, r.status, r.body.includes(SECRET)]).toEqual([n, 200, false]);
-        expect(r.body).toContain('"name":"ada"');
+        if (["j9", "j10", "j17"].includes(n)) expect(r.body).toContain('"x":"ok"'); else expect(r.body).toContain('"name":"ada"');
       }
     } finally {
       s.stop();
