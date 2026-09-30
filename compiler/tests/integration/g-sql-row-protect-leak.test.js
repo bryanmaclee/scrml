@@ -189,9 +189,57 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
     expect(r).toBeNull();
   });
 
-  test("non-protected table -> null", () => {
-    const r = resolveProtectedOutputColumns("SELECT * FROM products", usersProtect());
+  test("non-protected (but KNOWN) table -> null", () => {
+    const ctx = ctxOf(new Map([["users", new Set(["passwordHash"])]]), new Map([["products", ["id", "name"]]]));
+    const r = resolveProtectedOutputColumns("SELECT * FROM products", ctx);
     expect(r).toBeNull();
+  });
+
+  // S443 round 6 (P4) — a table the compile does not know the columns of (a view
+  // created at runtime over `users`, a table no `<db tables=>` names) may carry a
+  // protected column under any name. MEASURED before the fix: `CREATE VIEW v AS
+  // SELECT * FROM users` then `SELECT * FROM v` served passwordHash over HTTP.
+  test("S443 r6 P4: an UNKNOWN table resolves to strip-all, never 'no protected columns'", () => {
+    const r = resolveProtectedOutputColumns("SELECT * FROM v WHERE id = 1", usersProtect());
+    expect(r && "all" in r && r.all).toBe(true);
+    const j = resolveProtectedOutputColumns("SELECT u.id FROM users u JOIN v ON v.id = u.id", usersProtect());
+    expect(j && "all" in j && j.all).toBe(true);
+    // Case-folded, like every other table comparison.
+    expect(resolveProtectedOutputColumns("SELECT id FROM USERS", usersProtect())).toBeNull();
+  });
+
+  // S443 round 6 (P1) — a write with RETURNING hands back rows. MEASURED before
+  // the fix: UPDATE/INSERT/DELETE … RETURNING * served passwordHash.
+  test("S443 r6 P1: INSERT / UPDATE / DELETE … RETURNING resolve like SELECT <list> FROM <target>", () => {
+    const cols = (sql) => { const r = resolveProtectedOutputColumns(sql, usersProtect()); return r && ("all" in r ? "*" : r.cols); };
+    expect(cols("UPDATE users SET name = ${n} WHERE id = ${id} RETURNING *")).toEqual(["passwordHash"]);
+    expect(cols("UPDATE users SET name = 'b' WHERE id = 1 RETURNING id, passwordHash")).toEqual(["passwordHash"]);
+    expect(cols("UPDATE users SET name = 'b' RETURNING passwordHash AS h")).toEqual(["h"]);
+    expect(cols("INSERT INTO users (name, passwordHash) VALUES (${n}, ${h}) RETURNING *")).toEqual(["passwordHash"]);
+    expect(cols("INSERT OR REPLACE INTO users (name) VALUES ('x') RETURNING id, passwordHash")).toEqual(["passwordHash"]);
+    expect(cols("DELETE FROM users WHERE id = 1 RETURNING *")).toEqual(["passwordHash"]);
+    // A RETURNING list that names no protected column needs no tag.
+    expect(cols("INSERT INTO users (name) VALUES (${n}) RETURNING id")).toBeNull();
+    // An expression over the protected column strips the row wholesale.
+    expect(cols("UPDATE users SET name = 'b' RETURNING lower(passwordHash) AS x")).toBe("*");
+    // The keyword inside a string literal is data, not a clause.
+    expect(cols("UPDATE users SET name = 'RETURNING *' WHERE id = 1")).toBeNull();
+    // UPDATE … FROM joins another table in: fail closed.
+    expect(cols("UPDATE users SET name = o.n FROM other o WHERE o.id = users.id RETURNING *")).toBe("*");
+    // A target the resolver cannot read fails closed.
+    expect(cols('UPDATE "users" SET name = 1 RETURNING *')).toBe("*");
+  });
+
+  // S443 round 6 (P2) — `users . *` (whitespace around the dot) fell to an opaque
+  // entry with no protected identifier. MEASURED: it served the whole row.
+  test("S443 r6 P2: a spaced qualified star is a star, and fails closed", () => {
+    for (const sql of ["SELECT users . * FROM users", "SELECT users .* FROM users", "SELECT x . * FROM users x", "SELECT main.users.* FROM users"]) {
+      const r = resolveProtectedOutputColumns(sql, usersProtect());
+      expect(r && "all" in r && r.all).toBe(true);
+    }
+    // COUNT(*) and multiplication are not projection stars.
+    expect(resolveProtectedOutputColumns("SELECT COUNT(*) AS n FROM users", usersProtect())).toBeNull();
+    expect(resolveProtectedOutputColumns("SELECT id * 2 AS d FROM users", usersProtect())).toBeNull();
   });
 
   test("unresolvable dynamic SELECT -> strip-all (fail-closed)", () => {
@@ -210,7 +258,7 @@ describe("§14.8.9 resolveProtectedOutputColumns — alias-safe origin resolutio
   });
 
   test("aliased JOIN keeps each output column's own origin", () => {
-    const ctx = ctxOf(new Map([["users", new Set(["passwordHash"])]]));
+    const ctx = ctxOf(new Map([["users", new Set(["passwordHash"])]]), new Map([["orders", ["uid", "total"]]]));
     const r = resolveProtectedOutputColumns(
       "SELECT u.id, u.passwordHash AS secret, o.total FROM users u JOIN orders o ON o.uid = u.id",
       ctx,
@@ -253,6 +301,34 @@ describe("§14.8.9 runtime helper — tag/redact/reveal (the shipped block)", ()
     expect(_scrml_protect_redact(revealed)).toEqual({ id: 1, passwordHash: "secret" });
     // the ORIGINAL row (server-retained) is unmutated — still redacts
     expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
+  });
+
+  // S443 round 6 (L4) — MEASURED before the fix: the descriptor was a plain
+  // mutable object in a plain property, so `u[Symbol.for("scrml.protect.origin")]
+  // .revealed.push("passwordhash")` or `delete u[…]` shipped the hash without
+  // `reveal`. The descriptor + `revealed` are frozen and, on the tagged row, the
+  // property can be neither deleted nor overwritten (strict mode throws).
+  test("S443 r6 L4: the descriptor cannot be mutated, deleted or replaced on the tagged row", () => {
+    const { _scrml_protect_tag, _scrml_protect_redact, _scrml_protect_reveal } = loadHelper();
+    const K = Symbol.for("scrml.protect.origin");
+    const row = _scrml_protect_tag({ id: 1, passwordHash: "s3cret" }, ["passwordHash"]);
+    expect(() => row[K].revealed.push("passwordhash")).toThrow();
+    expect(() => { row[K].cols.length = 0; }).toThrow();
+    expect(() => { delete row[K]; }).toThrow();
+    expect(() => { row[K] = { cols: [], revealed: [] }; }).toThrow();
+    expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
+    // A spread copy still carries the (frozen) descriptor and still strips.
+    const copy = { ...row };
+    expect(() => copy[K].revealed.push("passwordhash")).toThrow();
+    expect(_scrml_protect_redact(copy)).toEqual({ id: 1 });
+    // reveal still admits the named column, on a NEW (equally locked) row.
+    const r = _scrml_protect_reveal(row, "passwordHash");
+    expect(_scrml_protect_redact(r)).toEqual({ id: 1, passwordHash: "s3cret" });
+    expect(() => r[K].revealed.push("x")).toThrow();
+    expect(_scrml_protect_redact(row)).toEqual({ id: 1 });
+    // Re-tagging the same object is a no-op when it already strips as much.
+    expect(() => _scrml_protect_tag(row, ["passwordHash"])).not.toThrow();
+    expect(() => _scrml_protect_tag(row, ["pin"])).toThrow();
   });
 
   test("strip-all ('*') drops every column (unresolvable dynamic SQL)", () => {
@@ -425,6 +501,56 @@ describe("§14.8.9 end-to-end — the egress floor strips at compile time", () =
     ));
     expect(serverJs).toContain('_scrml_protect_reveal(');
     expect(serverJs).toContain('"passwordHash"');
+    parseClean(serverJs);
+  });
+
+  // S443 round 6 — `.run()`, any other terminator and a bare `?{}` used as a
+  // value are the driver's row array. MEASURED before the fix: `const u =
+  // ?{`SELECT * FROM users`}.run(); return u` (and the bare form, and
+  // `UPDATE … RETURNING *`.run()) served passwordHash — only get/all were tagged.
+  test("S443 r6: .run() / bare ?{} / RETURNING results are tagged like get/all", () => {
+    const cases = [
+      ["let u = ?{`SELECT * FROM users WHERE id = ${id}`}.run()\n        return u", "SELECT * FROM users WHERE id = ${id}`, [\"passwordHash\"])"],
+      ["let u = ?{`SELECT * FROM users WHERE id = ${id}`}\n        return u", "[\"passwordHash\"])"],
+      ["let u = ?{`UPDATE users SET name = 'x' WHERE id = ${id} RETURNING *`}.run()\n        return u", "RETURNING *`, [\"passwordHash\"])"],
+      ["return ?{`DELETE FROM users WHERE id = ${id} RETURNING id, passwordHash`}.get()", "[\"passwordHash\"])"],
+    ];
+    for (const [body, needle] of cases) {
+      const { serverJs } = compileSource(protectProgram(`      function getUser(id) {\n        ${body}\n      }`));
+      expect(serverJs).toContain(needle);
+      parseClean(serverJs);
+    }
+    // A write with no RETURNING stays untagged (no rows come back).
+    const { serverJs } = compileSource(protectProgram(
+      "      function setName(id) {\n        ?{`UPDATE users SET name = 'x' WHERE id = ${id}`}.run()\n        return 1\n      }",
+    ));
+    expect(serverJs).not.toContain("_scrml_protect_tag(await _scrml_sql`UPDATE");
+  });
+
+  // S443 round 6 (P4): a table the compile DECLARES (CREATE TABLE in <schema> /
+  // ?{}) is known even when no `<db tables=>` names it; a table it never saw is
+  // not, and strips wholesale.
+  test("S443 r6 P4: a declared table stays precise; an undeclared one (a view) strips wholesale", () => {
+    const src = `<program>
+  <schema>
+    ?{\`CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, passwordHash TEXT)\`}
+    ?{\`CREATE TABLE tasks (id INTEGER PRIMARY KEY, text TEXT)\`}
+  </schema>
+  <db src="app.db" protect="passwordHash" tables="users">
+    \${
+      function getTasks() {
+        return ?{\`SELECT * FROM tasks\`}.all()
+      }
+      function getView() {
+        return ?{\`SELECT * FROM users_view\`}.all()
+      }
+    }
+  </db>
+  <div><p>hi</p></div>
+</program>`;
+    const { serverJs } = compileSource(src);
+    expect(serverJs).not.toContain("_scrml_protect_tag(await _scrml_sql`SELECT * FROM tasks`");
+    expect(serverJs).toContain("_scrml_protect_tag(await _scrml_sql`SELECT * FROM users_view`, \"*\")");
     parseClean(serverJs);
   });
 

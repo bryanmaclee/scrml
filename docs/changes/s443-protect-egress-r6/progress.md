@@ -1,3 +1,6 @@
 # progress — s443-protect-egress-r6 (append-only)
 
 - start: worktree /home/bryan-maclee/scrmlMaster/scrml/.claude/worktrees/agent-aa30df52e51e75190, base c53b297a7 (== origin/main). bun install + pretest OK.
+- probes (served, scratch s445-protect/probe.mjs, before = git archive of base c53b297a7): L1a/L1b/L1e/L2a/L2b/L3a/L3b/L3c/L3e/L4a/L4b/L4c/P1a-d/P2a-c/P3a/P4a ALL REPRODUCED (<<LEAK>> over HTTP). L1c/L1d/L1f already rejected. H1 md5/sha256 ship the digest (by the S441 allowlist).
+- NEW shapes found (same classes): N1 bare `?{SELECT}` as value, N2 `.run()` SELECT, N3 `.run()` UPDATE RETURNING — untagged terminators (P1 class); N7 `"x".replace("x", () => u.passwordHash)` (L1 class, callback RETURN); N10 `{...u}` then delete symbol keys on the copy (L4 class).
+- unit 1 (egress): RETURNING resolved as SELECT <list> FROM <target>; every terminator tagged; spaced star fails closed; unknown table (PA declaredTables = CREATE TABLEs + sqlite_master base tables) strips wholesale; descriptor frozen + non-configurable. Key stays Symbol.for (cross-module rows). Served: P1a-d, P2a-c, P4a, N1-N4 now stripped; L4a-c now 500 (TypeError), no leak. Sweep: 0 new E-PROTECT-006, 0 new strip-all tags.
