@@ -2,11 +2,11 @@
   "__NOTE__": "S286 baseline-regen (chunk-ns finish): 17 fixtures' native-vs-reference residuals were regenerated to the current merged-tree counts. This canary classifies PARSED FileASTs (splitBlocks+buildAST vs nativeParseFile) BEFORE codegen, so the BUG-6 chunk-namespacing rename cannot affect it — verified byte-identical to fe1ad047 (parser, native-parser, allowlist, and all fixtures unchanged on the rename branch). The drift is main's pre-existing #162-class ast-builder change (E-STMT-MISSING-SEMICOLON) accumulating against the base-era allowlist; the native (self-host) parser has not tracked it (B4 self-host is deferred post-v1.0.0 per pa.md). This key is metadata; the per-fixture gate keys off the corpus relpaths and ignores it (allowlist hygiene tolerates it as one non-corpus entry).",
   "compiler/self-host/ast.scrml": {
     "COUNT-LENGTH": 35,
-    "EXTRA-FIELD": 407,
-    "FIELD-SHAPE": 305,
-    "KIND-NAME": 125,
-    "MISSING-FIELD": 523,
-    "SPAN-COORD": 309
+    "EXTRA-FIELD": 409,
+    "FIELD-SHAPE": 306,
+    "KIND-NAME": 126,
+    "MISSING-FIELD": 525,
+    "SPAN-COORD": 310
   },
   "compiler/self-host/bpp.scrml": {
     "COUNT-LENGTH": 2,
@@ -80,12 +80,12 @@
     "SPAN-COORD": 231
   },
   "compiler/self-host/ts.scrml": {
-    "COUNT-LENGTH": 10,
-    "EXTRA-FIELD": 249,
-    "FIELD-SHAPE": 287,
+    "COUNT-LENGTH": 8,
+    "EXTRA-FIELD": 247,
+    "FIELD-SHAPE": 289,
     "KIND-NAME": 56,
     "MISSING-FIELD": 499,
-    "SPAN-COORD": 1120
+    "SPAN-COORD": 1128
   },
   "examples/01-hello.scrml": {
     "EXTRA-FIELD": 2,

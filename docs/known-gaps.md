@@ -30,8 +30,8 @@
 | Severity | Open (owed by impl#1, the TS compiler) | Carried (owed by the bootstrap; xfail on impl#1) |
 |---|---|---|
 <!-- @generated:gap-counts START (do not edit — `bun scripts/state.ts --write`) -->
-| HIGH | 223 | 4 |
-| MED | 438 | 0 |
+| HIGH | 221 | 4 |
+| MED | 440 | 0 |
 | LOW | 213 | 0 |
 | Nominal (spec-ahead-of-impl) | 7 | 0 |
 <!-- @generated:gap-counts END -->
@@ -462,7 +462,9 @@ cancel each other on exactly this seam (#900 round 3). **Decide the identity mod
 
 ### g-schema-create-temp-table-silently-not-a-declaration — `CREATE TEMP TABLE assets (…, tenant_id)` in a `<schema>` declares nothing; beside a second table the tenant floor is inert with NO diagnostic
 
-<!-- @gap id=g-schema-create-temp-table-silently-not-a-declaration sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(schemaCreateTables — the modifier filter; the head reader already READS TEMP/TEMPORARY/UNLOGGED/GLOBAL/LOCAL)+compiler/src/gauntlet-phase1-checks.js(the <schema> body checks) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+<!-- @gap id=g-schema-create-temp-table-silently-not-a-declaration sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(schemaCreateTables — the modifier filter; the head reader already READS TEMP/TEMPORARY/UNLOGGED/GLOBAL/LOCAL)+compiler/src/gauntlet-phase1-checks.js(the <schema> body checks) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — bryan RULED S440 #15 "fix in TS, fail closed": REJECT.** A modified head (`TEMP`, `TEMPORARY`, `GLOBAL`/`LOCAL TEMPORARY`, `UNLOGGED`, `VIRTUAL`, any word between `CREATE` and `TABLE`) in a `<schema>` is now **E-SCHEMA-014** (new; §34 + §39.2 + §39.12 rows; newly-rejecting). Both rows of the table below now report E-SCHEMA-014 (and the lone-table row no longer also warns `W-SCHEMA-NO-TABLES-DECLARED`). The harvest is unchanged (still never reads a modified head). Narrow exemption for this code only: a head inside the `"""` body of a parser-accepted, live SECURITY-DEFINER `fn` (runtime plpgsql). Corpus: 202-file `<schema>` differential identical. Exemption is TEMP/TEMPORARY-only (S446 fix round; `LOCAL TEMP`, `GLOBAL TEMPORARY`, `UNLOGGED` in a fn body are reported). **Residual LOW (base-equal, not changed):** a head later on the SAME LINE as a `"""` is masked by the one-line `"…"` exemption (`"""` reads as `""` + a `"`-to-end-of-line literal), so a top-level `""" CREATE TEMP TABLE … """` or a one-line fn body `{ """ CREATE UNLOGGED TABLE … """ }` is silent; making `"""` live was tried and reverted (it let `"""a"` / `""""` quoted identifiers hide a following head — a HIGH silent pass). See SPEC §39.2 "Comments and literals".
 
 **Sibling of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the S438
 bite-test of that fix; NOT changed by it, deliberately.** Same class — a `<schema>` table head the
@@ -489,6 +491,20 @@ parent gap). — `NEW S438-peter`; **HIGH**; open
 
 <!-- @gap id=g-schema-commented-out-declaration-shadows-live-table sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(the pre-S438 read inside schemaCreateTables — comment-agnostic, first-wins per key)+compiler/src/schema-differ.js(parseSchemaBlock — reads DSL inside /* */) prov=empirical:S438-peter-fix-round-reproduced-by-compilation-on-98d94e96-and-the-fix-branch-identical -->
 
+**⚑ S446 — NOT closed by #1209; ROUTED TO BRYAN.** A union fix was built on #1209 and REMOVED before landing
+(PA decision): `extractDesiredSchema` returned every same-name declaration (`tenantDecls`) and the tenant
+floor scoped a table when ANY of them carried `tenant_id`. That closes the shadow below, but **on its own it
+introduces a silent data loss in the reverse direction** — the S239 review of #1209 (reproduced by the PA by
+compilation and at runtime): a stale commented copy WITH `tenant_id` placed AFTER a live table WITHOUT it
+(`CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT)` / `-- old: CREATE TABLE assets (…, tenant_id TEXT)`)
+makes the live table tenant-scoped, so `SELECT * FROM assets` is tagged and `_scrml_tenant_redact` drops every
+row (no `tenant_id` value) → **`[]`, silently** (in-memory SQLite: 2 rows → `[]`); `SELECT id, name` gets
+`tenant_id` added to its projection → runtime `no such column: tenant_id`; `UPDATE assets …` becomes
+E-TENANT-WRITE. **Recommended route (a new code → bryan's ruling):** the union over declarations PLUS a loud
+diagnostic when same-name `<schema>` declarations DISAGREE on `tenant_id` (one carries it, another does not),
+naming both — so neither this shadow nor the over-scope is silent. The table below is still current on #1209
+(pinned by `compiler/tests/unit/schema-holes-fail-closed.test.js` "gap 3 — NOT closed").
+
 **Pre-existing on `98d94e96`, identical on the S438 branch (which deliberately preserves base's
 harvest per key — see the S438 fix-round note above).** The `<schema>` recognizers read declarations
 inside comments, and the harvest is first-wins per table name. So:
@@ -508,6 +524,29 @@ false positive `g-secdef-fn-body-ddl-false-positive`.) **PA recommendation:** fo
 floor) rather than change which statement feeds the shadow DB — a fix that preserves the harvest ⊇
 base invariant. Not done in S438: it changes base's per-key record, which the fix round held fixed on
 purpose. — `NEW S438-peter`; **HIGH**; open
+
+### g-schema-create-table-like-template-columns-not-declared — `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` copies `tenant_id` in Postgres, but the floor reads no columns from it
+
+<!-- @gap id=g-schema-create-table-like-template-columns-not-declared sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(isTableLevelConstraint — `LIKE x` is skipped as a constraint; columnsFromDdlBody) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-by-compilation-on-the-fix-round-branch -->
+
+Same class as the RESOLVED `g-schema-no-column-list-heads-declare-nothing` (columns that live
+elsewhere), one level down — inside the column list. Repro: `CREATE TABLE tmpl (id INTEGER PRIMARY
+KEY, name TEXT, tenant_id TEXT)` then `CREATE TABLE assets (LIKE tmpl INCLUDING ALL)` (also
+`(extra TEXT, LIKE tmpl)`), query on `assets` → no diagnostic, tag=0, on SQLite and Postgres `db=`.
+**Not fixed in #1209:** `LIKE <word>` is indistinguishable from a column named `like` with an
+unquoted type (`like TEXT` — legal in SQLite, where LIKE falls back to an identifier), so rejecting
+it fail-closed needs a ruling: reject an unquoted `like` column-list item (quote the column to keep
+it), or resolve `LIKE tmpl` to `tmpl`'s declared columns. — `NEW S446-peter (S239 review of #1209)`; **MED**; open
+
+### g-schema-alter-table-add-tenant-id-ignored — `ALTER TABLE assets ADD COLUMN tenant_id …` in a `<schema>` is not read, so the table stays un-scoped
+
+<!-- @gap id=g-schema-alter-table-add-tenant-id-ignored sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads CREATE TABLE column lists only) prov=review:S446-S239-review-of-#1209+empirical:PA-reproduced-by-compilation-on-the-fix-round-branch -->
+
+Base-equal (unchanged by #1209). Repro: `CREATE TABLE assets (id INTEGER PRIMARY KEY, name TEXT);`
+then `ALTER TABLE assets ADD COLUMN tenant_id TEXT;` in the same `<schema>`, query on `assets` →
+no diagnostic, tag=0, tenant floor inactive. Direction is bryan's: reject `ALTER TABLE` in a
+`<schema>` (schema-as-code declares end state, §39.1 "the developer never writes `ALTER TABLE` by
+hand") or fold its `ADD COLUMN` into the declaration. — `NEW S446-peter (S239 review of #1209)`; **MED**; open
 
 ### g-secdef-fn-body-ddl-false-positive — a qualified or unreadable `CREATE TABLE` inside a SECURITY-DEFINER `fn` `"""` body raises E-SCHEMA-012/013 although it is runtime plpgsql, not a declaration
 
@@ -531,7 +570,9 @@ on a SQLite program on base. — `NEW S438-peter`; **MED**; open
 
 ### g-schema-no-column-list-heads-declare-nothing — `CREATE TABLE t OF type` / `PARTITION OF parent` / `AS query` in a `<schema>` compile clean and declare no columns, so a `tenant_id` table reached that way is not tenant-scoped
 
-<!-- @gap id=g-schema-no-column-list-heads-declare-nothing sev=MED status=open owner=bryan locus=compiler/src/schema-differ.js(the harvest reads a column list only; readCreateTableHead's CREATE_TABLE_NAME_FOLLOWERS accepts OF / PARTITION OF / AS / WITH / ON / TABLESPACE / INHERITS heads without one) prov=review:S438-round-4-F3+empirical:reviewer-compiled-on-38ec0e14-and-base-identical -->
+<!-- @gap id=g-schema-no-column-list-heads-declare-nothing sev=MED status=resolved owner=bryan locus=compiler/src/schema-differ.js(the harvest reads a column list only; readCreateTableHead's CREATE_TABLE_NAME_FOLLOWERS accepts OF / PARTITION OF / AS / WITH / ON / TABLESPACE / INHERITS heads without one) prov=review:S438-round-4-F3+empirical:reviewer-compiled-on-38ec0e14-and-base-identical -->
+
+**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — bryan RULED S440 #15: REJECT (fail closed), not resolve.** A readable unqualified head followed by a clause instead of a column list (`AS`, `OF`, `PARTITION OF`, `USING`, `WITH`, `ON COMMIT`, `TABLESPACE`, `INHERITS`), an unclosed column list, or a column list followed by `INHERITS (parent)` is now **E-SCHEMA-014**. Trailing clauses after a column list (`WITHOUT ROWID`, `STRICT`, `PARTITION BY`, `WITH (…)`) are unaffected.
 
 **Pre-existing on base, unchanged by S438 (whose round 4 kept these heads ACCEPTED rather than
 rejecting them).** A raw head with no column list — a typed table `CREATE TABLE assets OF
@@ -546,7 +587,9 @@ the latter is a real schema-resolution feature. — `NEW S438-peter`; **MED**; o
 
 ### g-schema-dsl-qualified-table-head-silently-stripped — the DECLARATIVE `mydb.public.assets { … }` is accepted as `assets`, so `a.assets` + `b.assets` collapse and the second (with `tenant_id`) is silently dropped
 
-<!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=open owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+<!-- @gap id=g-schema-dsl-qualified-table-head-silently-stripped sev=HIGH status=resolved owner=bryan locus=compiler/src/schema-differ.js(parseSchemaBlock — the "advance one char and resume" recovery slides past `mydb.public.` to match `assets {`) prov=empirical:S438-peter-reproduced-by-compilation-on-072741ca-AND-on-the-fix-branch-unchanged -->
+
+**⚑ RESOLVED S446 (branch `fix/schema-holes-fail-closed`) — NOT closed by E-SCHEMA-012 as of `8b87ce2e` (re-reproduced: `mydb.public.assets { … }` accepted as `assets`; `a.assets` + `b.assets` → tag=0, exit 0, no diagnostic).** `parseSchemaBlock` now records a head it read as the TAIL of a longer token; GCP1 reports a `.`-qualified one as **E-SCHEMA-012** and any other glued prefix (`données {` → `es`, `my-assets {`, `app$x {`) as **E-SCHEMA-013**, outside comments/literals. The table is still declared (no cascade). Both rows of the table below are now E-SCHEMA-012.
 
 **The DSL twin of the RESOLVED `g-tenant-floor-inert-for-a-two-qualifier-create-table`, found by the
 S438 bite-test; NOT changed by that fix (the S435 ruling names `CREATE TABLE`).** SPEC §39.2's grammar
