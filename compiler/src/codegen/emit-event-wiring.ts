@@ -20,7 +20,8 @@ import type { ExprNode } from "../types/ast.ts";
 import type { EncodingContext } from "./type-encoding.ts";
 import type { CompileContext } from "./context.ts";
 import type { AsyncNameFacts } from "./async-combinators.ts";
-import { colorAsyncFunctionExpr, unanalyzableHandlerUses } from "./js-async-analysis.ts";
+import { colorAsyncFunctionExpr, unanalyzableHandlerUses, handlerStatementListColor, type ColorOpts } from "./js-async-analysis.ts";
+import { _clientSseFnNames } from "./scheduling.ts";
 import { freeAsyncResolverFromFacts, jsAsyncUsesErrors } from "./emit-library-shared.ts";
 import { clientAsyncFactsOf } from "./emit-functions.ts";
 
@@ -475,11 +476,11 @@ function exprUsesServerFn(expr: string, serverFnNames: Set<string>): boolean {
  * is lifted to `_scrml_<m>Async`; everything the compiler cannot await, and every
  * async function used as a value, is reported. Unparseable text is left unchanged.
  */
-function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileContext): string {
+function colorHandlerAsync(handlerExpr: string, span: unknown, ctx: CompileContext, opts: ColorOpts = {}): string {
   if (!handlerExpr) return handlerExpr;
   const facts = clientAsyncFactsOf(ctx);
   const resolveFree = freeAsyncResolverFromFacts(facts);
-  const colored = colorAsyncFunctionExpr(handlerExpr, resolveFree);
+  const colored = colorAsyncFunctionExpr(handlerExpr, resolveFree, opts);
   if (!colored) {
     // s441 fix round — fail CLOSED on handler text the analysis cannot read.
     const u = unanalyzableHandlerUses(handlerExpr, resolveFree);
@@ -510,6 +511,8 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
   //     event is non-delegable. Delegable events (click, submit) survive
   //     innerHTML replace via document-level delegation, so they stay in
   //     the global delegation registry regardless of arm tag.
+  // S446 — §36 SSE generator fns keep the arg1 skip in a statement-list handler.
+  const sseFnNames = ctx.routeMap ? _clientSseFnNames(ctx.routeMap, ctx.filePath ?? "") : null;
   const eventBindings = allEventBindings.filter((b) => {
     if (!b.engineArm) return true;
     const domEvent = (b.eventName || "").replace(/^on/, "");
@@ -1332,7 +1335,12 @@ export function emitEventWiring(ctx: CompileContext, fnNameMap: Map<string, stri
     // becomes `async`), an async callback of a clean-family method is lifted to
     // its awaited combinator, and an async call that cannot be awaited — or an
     // async function used as a value (S440 F4) — fails closed.
-    handlerExpr = colorHandlerAsync(handlerExpr, binding.span, ctx);
+    // S446 (S439 #4) — a statement-list handler awaits a server-call cell write
+    // in place, so the next statement sees the resolved value (see ColorOpts).
+    handlerExpr = colorHandlerAsync(
+      handlerExpr, binding.span, ctx,
+      handlerStatementListColor(binding.handlerBlock?.stmts, sseFnNames),
+    );
 
     if (!byEventType.has(eventName)) {
       byEventType.set(eventName, []);

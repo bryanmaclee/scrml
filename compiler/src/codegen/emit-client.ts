@@ -27,7 +27,7 @@ import { isEscalationServerOnlyModule } from "../route-inference.ts";
 import { exportIsUserComponent } from "../component-expander.ts";
 import { emitEventWiring } from "./emit-event-wiring.ts";
 import { emitEngineSubstrate, emitDerivedEngineSubstrateForFile, emitCrossFileEngineMountsForFile, emitEngineHookFiringFunctionsForFile, emitEngineInitialArmsForFile, emitEngineCellHydrationInitsForFile, emitEngineServerSourceHydrationsForFile, emitEngineOpenerEffectsForFile, emitEngineBodyRenderForFile, emitDerivedEngineBodyRenderForFile } from "./emit-engine.ts";
-import { _clientServerFnNames } from "./scheduling.ts";
+import { _clientServerFnNames, _clientSseFnNames } from "./scheduling.ts";
 import { setVariantFieldsForFile, setShadowedVariantNames } from "./emit-control-flow.ts";
 import { setVariantFieldsForRewriter } from "./rewrite.js";
 import { EncodingContext, emitDecodeTable, emitRuntimeReflect } from "./type-encoding.ts";
@@ -2345,6 +2345,7 @@ export function generateClientJs(ctx: CompileContext): string {
       report: (uses, span) => {
         for (const err of jsAsyncUsesErrors(uses, span, ctx.filePath)) errors.push(err);
       },
+      sseFnNames: ctx.routeMap ? _clientSseFnNames(ctx.routeMap, ctx.filePath ?? "") : null,
     });
   }
   const c12BodyRender = clientStage(ctx, "emit-engine-body-render", () => emitEngineBodyRenderForFile(fileAST, ctx));
